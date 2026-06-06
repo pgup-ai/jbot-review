@@ -18,32 +18,32 @@ runner. The source code is private; users only see the public [`jingbof/jbot-rev
 
 1. The user drops a workflow file into `.github/workflows/` and adds an API key
    as a repo secret.
-2. On `pull_request` events, GitHub Actions checks out their repo and runs the
-   `jbot-review` composite action.
-3. The action installs `opencode`, starts `opencode serve`, and drives a
-   read-only `plan` agent over the SDK. The agent discovers repo guidelines
-   (`AGENTS.md`, `REVIEW.md`, `.pr-governance/`) and explores the full repo
-   with its own tools.
+2. On `pull_request` events, GitHub Actions checks out their repo and runs
+   the `jbot-review` Docker container action.
+3. The action pulls the pre-built image from `ghcr.io/jingbof/jbot-review`,
+   starts `opencode serve` inside the container, and drives a read-only `plan`
+   agent over the SDK. The agent discovers repo guidelines (`AGENTS.md`,
+   `REVIEW.md`, `.pr-governance/`) and explores the full repo with its own
+   tools.
 4. The agent returns structured findings as JSON; the wrapper validates,
    gates, and posts one review with inline comments + a deterministic verdict.
 
 ### For the action developer (you)
 
-You own the `jbot-review` repo. To make it usable as an action:
+This private repo builds the Docker image. The public
+[`jingbof/jbot-review-action`](https://github.com/jingbof/jbot-review-action)
+repo is what users reference — it contains just the thin `action.yml` that
+pulls the image.
 
 ```bash
-# 1. Commit package-lock.json (the action uses npm ci)
-git add package-lock.json
-git commit -m "Add package-lock.json"
-
-# 2. Tag a release
-git tag v1 -m "Initial release"
-git push origin v1
+# CI auto-builds and pushes the image on every push to main.
+# To release a new version of the public action, tag the public repo:
+cd ../jbot-review-action    # or wherever it's checked out
+git tag v2
+git push origin v2
 ```
 
-Users reference the public action as `jingbof/jbot-review-action@v1`. The public
-repo contains only the `action.yml` — the compiled code is baked into the Docker
-image at `ghcr.io/jingbof/jbot-review`.
+The Dockerfile uses `node:20-slim` and runs the bundled JS from `dist/`.
 
 ### For the user (repo owner who wants reviews)
 

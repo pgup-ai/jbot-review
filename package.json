@@ -17,12 +17,12 @@
     "@octokit/plugin-paginate-rest": "^14.0.0",
     "@octokit/plugin-rest-endpoint-methods": "^17.0.0",
     "@octokit/webhooks": "^14.2.0",
-    "@opencode-ai/sdk": "^0.4.0",
-    "tsx": "^4.19.2"
+    "@opencode-ai/sdk": "^0.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "esbuild": "^0.28.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
 }

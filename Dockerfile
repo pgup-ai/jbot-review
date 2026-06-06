@@ -2,7 +2,8 @@ FROM node:20-slim
 
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g opencode-ai@latest
+# Pin opencode-ai version for reproducible builds.
+RUN npm install -g opencode-ai@0.4.0
 
 WORKDIR /app
 

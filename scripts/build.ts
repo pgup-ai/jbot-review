@@ -1,23 +1,31 @@
 import * as esbuild from "esbuild";
 
-await esbuild.build({
-  entryPoints: ["src/workflow/index.ts"],
+const shared = {
   bundle: true,
   platform: "node",
   target: "node20",
   format: "esm",
+  external: [
+    "@actions/core",
+    "@actions/github",
+    "@opencode-ai/sdk",
+    "@octokit/auth-app",
+    "@octokit/plugin-paginate-rest",
+    "@octokit/plugin-rest-endpoint-methods",
+    "@octokit/webhooks",
+  ],
+} as const;
+
+await esbuild.build({
+  ...shared,
+  entryPoints: ["src/workflow/index.ts"],
   outfile: "dist/workflow/index.js",
-  external: ["@actions/core", "@actions/github"],
 });
 
 await esbuild.build({
+  ...shared,
   entryPoints: ["src/app/server.ts"],
-  bundle: true,
-  platform: "node",
-  target: "node20",
-  format: "esm",
   outfile: "dist/app/server.js",
-  external: [],
 });
 
 console.log("Build complete.");
