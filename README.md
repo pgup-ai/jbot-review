@@ -75,9 +75,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: your-org/jbot-review@v1
+      - uses: jingbof/jbot-review@v1
         with:
-          provider: opencode
           api-key: ${{ secrets.OPENCODE_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -105,10 +104,9 @@ new commit or close and reopen the PR.
 To test the action in the same repo before tagging a release:
 
 ```yaml
-# Use the relative path instead of your-org/jbot-review@v1:
+# Use the relative path instead of jingbof/jbot-review@v1:
 - uses: ./
   with:
-    provider: opencode
     api-key: ${{ secrets.OPENCODE_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -129,7 +127,7 @@ Set the `model` input to override the default. The `api-key` input is always
 required; OpenCode handles routing to the right provider at runtime:
 
 ```yaml
-- uses: your-org/jbot-review@v1
+- uses: jingbof/jbot-review@v1
   with:
     provider: deepseek
     api-key: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -171,7 +169,7 @@ Go to [Settings → Developer settings → GitHub Apps → New GitHub App](https
 | Setting | Value |
 |---|---|
 | GitHub App name | `jbot-review` (or anything) |
-| Homepage URL | `https://github.com/your-org/jbot-review` |
+| Homepage URL | `https://github.com/jingbof/jbot-review` |
 | Webhook URL | `https://<your-deployed-url>/webhooks` |
 | Webhook secret | Generate a long random string (e.g. `openssl rand -hex 32`) |
 
