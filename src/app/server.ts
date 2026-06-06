@@ -28,6 +28,8 @@ const appCfg: AppConfig = {
 const webhooks = new Webhooks({ secret: mustEnv("GITHUB_WEBHOOK_SECRET") });
 
 webhooks.on("pull_request.opened", (event) => handlePrEvent(event, appCfg));
+webhooks.on("pull_request.reopened", (event) => handlePrEvent(event, appCfg));
+webhooks.on("pull_request.ready_for_review", (event) => handlePrEvent(event, appCfg));
 webhooks.on("pull_request.synchronize", (event) => handlePrEvent(event, appCfg));
 
 webhooks.onError((error) => {
