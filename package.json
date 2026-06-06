@@ -1,0 +1,26 @@
+{
+  "name": "jbot-review",
+  "version": "0.1.0",
+  "description": "Agentic PR reviewer: opencode serve + SDK, with a gated inline-posting step.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx src/app/server.ts",
+    "start": "npx tsx src/app/server.ts"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/github": "^6.0.0",
+    "@octokit/auth-app": "^8.2.0",
+    "@octokit/plugin-paginate-rest": "^14.0.0",
+    "@octokit/plugin-rest-endpoint-methods": "^17.0.0",
+    "@octokit/webhooks": "^14.2.0",
+    "@opencode-ai/sdk": "^0.4.0",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

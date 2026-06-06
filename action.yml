@@ -1,0 +1,41 @@
+name: "jbot-review"
+description: "Agentic PR review via opencode serve + SDK, with gated inline posting."
+
+inputs:
+  provider:
+    description: "LLM provider (defaults to opencode)."
+    default: "opencode"
+  model:
+    description: "Model as provider/model. Uses provider default if unset."
+    required: false
+    default: ""
+  api-key:
+    description: "API key for the selected provider."
+    required: false
+  github-token:
+    description: "Token to read the PR and post the review."
+    required: true
+    default: ${{ github.token }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+    - name: Install opencode
+      shell: bash
+      run: npm install -g opencode-ai@latest
+    - name: Install wrapper deps
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm ci --omit=dev
+    - name: Run review
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npx tsx src/workflow/index.ts
+      env:
+        INPUT_PROVIDER: ${{ inputs.provider }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_API-KEY: ${{ inputs.api-key }}
+        INPUT_GITHUB-TOKEN: ${{ inputs.github-token }}
