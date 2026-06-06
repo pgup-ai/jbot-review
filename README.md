@@ -11,9 +11,8 @@ The review core (`runner.ts` + `opencode.ts` + `github.ts`) is shared between bo
 
 ## In-repo workflow
 
-The review runs as a GitHub Actions workflow inside the user's repository. The
-user provides an API key; GitHub provides the free compute (unlimited on public
-repos, 2000 min/month free on private repos).
+The review runs as a Docker container action inside the user's GitHub Actions
+runner. The source code is private; users only see the public [`jingbof/jbot-review-action`](https://github.com/jingbof/jbot-review-action) repo with the thin `action.yml`.
 
 ### How it works
 
@@ -42,12 +41,9 @@ git tag v1 -m "Initial release"
 git push origin v1
 ```
 
-Users reference the action as `jingbof/jbot-review@v1`. If you vendor it
-directly in their repo (for testing), they use `./` relative path instead.
-
-The action is a composite action defined in `action.yml` at the repo root.
-It runs `src/workflow/index.ts` which reads inputs, resolves the provider,
-and calls the shared `runPrReview()` in `src/shared/runner.ts`.
+Users reference the public action as `jingbof/jbot-review-action@v1`. The public
+repo contains only the `action.yml` — the compiled code is baked into the Docker
+image at `ghcr.io/jingbof/jbot-review`.
 
 ### For the user (repo owner who wants reviews)
 
@@ -75,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: jingbof/jbot-review@v1
+      - uses: jingbof/jbot-review-action@v1
         with:
           api-key: ${{ secrets.OPENCODE_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -104,7 +100,7 @@ new commit or close and reopen the PR.
 To test the action in the same repo before tagging a release:
 
 ```yaml
-# Use the relative path instead of jingbof/jbot-review@v1:
+# Use the relative path instead of jingbof/jbot-review-action@v1:
 - uses: ./
   with:
     api-key: ${{ secrets.OPENCODE_API_KEY }}
@@ -127,7 +123,7 @@ Set the `model` input to override the default. The `api-key` input is always
 required; OpenCode handles routing to the right provider at runtime:
 
 ```yaml
-- uses: jingbof/jbot-review@v1
+- uses: jingbof/jbot-review-action@v1
   with:
     provider: deepseek
     api-key: ${{ secrets.DEEPSEEK_API_KEY }}

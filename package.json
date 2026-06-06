@@ -6,6 +6,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "build": "npx tsx scripts/build.ts",
     "dev": "tsx src/app/server.ts",
     "start": "npx tsx src/app/server.ts"
   },
@@ -21,6 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "esbuild": "^0.28.0",
     "typescript": "^5.7.2"
   }
 }

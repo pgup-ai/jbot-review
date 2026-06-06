@@ -7,11 +7,10 @@ RUN npm install -g opencode-ai@latest
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
-COPY src/ ./src/
-COPY tsconfig.json ./
+COPY dist/ ./dist/
 
 EXPOSE 3000
 
-CMD ["npx", "tsx", "src/app/server.ts"]
+ENTRYPOINT ["node", "/app/dist/app/server.js"]
