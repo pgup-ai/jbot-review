@@ -103,10 +103,9 @@ export async function runReview(
   const message = await client.session.message({
     path: { id: session.id, messageID: assistant.id },
   });
-  const parts = message.data?.parts ?? [];
-  const textPart = [...parts].reverse().find((p) => p.type === "text") as
-    | { text?: string }
-    | undefined;
+  const parts = (message.data?.parts ?? []) as ReadonlyArray<{ type: string; text?: string }>;
+  // Find the last text part (after any tool calls) — that's the final response.
+  const textPart = [...parts].reverse().find((p) => p.type === "text");
   return parseReview(textPart?.text ?? "{}");
 }
 

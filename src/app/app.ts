@@ -1,3 +1,6 @@
+import type { EmitterWebhookEvent } from "@octokit/webhooks";
+import type { InstallationAccessTokenAuthentication } from "@octokit/auth-app";
+
 import { createAppOctokit } from "./auth.ts";
 import { clonePr } from "./clone.ts";
 import { runPrReview } from "../shared/runner.ts";
@@ -11,28 +14,30 @@ export interface AppConfig {
   model: string;
 }
 
-export function handlePrEvent(
-  event: { payload: any },
-  cfg: AppConfig,
-): void {
+// The pull_request webhook event is a union of action-specific payload types.
+// Only some actions (like "opened") include an installation. We narrow with
+// an "in" check before accessing the installation field.
+type PullRequestEvent = EmitterWebhookEvent<"pull_request">;
+
+export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
   const { payload } = event;
-  if (!payload.pull_request || !payload.installation) return;
+  if (!payload.pull_request) return;
+  if (!("installation" in payload) || !payload.installation) return;
+  if (!payload.repository) return;
 
   const pr = payload.pull_request;
   const repoInfo = payload.repository;
-  if (!repoInfo) return;
-
   const owner = repoInfo.owner.login ?? repoInfo.owner.name;
-  const repoName = repoInfo.name as string;
-  const installationId = payload.installation.id as number;
+  const repoName = repoInfo.name;
+  const installationId = payload.installation.id;
 
   enqueue(async () => {
     const octokit = createAppOctokit(cfg.appId, cfg.privateKey, installationId);
-    const authRes = await octokit.auth() as unknown as { token: string };
+    const authRes = (await octokit.auth()) as InstallationAccessTokenAuthentication;
     const { dir, cleanup } = clonePr(
-      repoInfo.clone_url as string,
-      pr.head.ref as string,
-      pr.base.ref as string,
+      repoInfo.clone_url,
+      pr.head.ref,
+      pr.base.ref,
       authRes.token,
     );
 
@@ -41,9 +46,9 @@ export function handlePrEvent(
         octokit,
         owner,
         repo: repoName,
-        pullNumber: pr.number as number,
-        pullTitle: pr.title as string,
-        pullBody: (pr.body ?? "") as string,
+        pullNumber: pr.number,
+        pullTitle: pr.title,
+        pullBody: pr.body ?? "",
         workspace: dir,
         model: cfg.model,
         keyEnv: cfg.keyEnv,

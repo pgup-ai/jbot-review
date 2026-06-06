@@ -3,6 +3,7 @@ import * as github from "@actions/github";
 
 import { PROVIDERS } from "../shared/config.ts";
 import { runPrReview } from "../shared/runner.ts";
+import type { Octokit } from "../shared/github.ts";
 
 async function main(): Promise<void> {
   const token = core.getInput("github-token", { required: true });
@@ -29,8 +30,12 @@ async function main(): Promise<void> {
     return;
   }
 
+  // @actions/github's getOctokit and our shared Octokit have the same plugin stack
+  // (paginateRest + restEndpointMethods). TypeScript can't unify them across
+  // packages, but they are structurally compatible — the methods used by
+  // runPrReview are present on both.
   await runPrReview({
-    octokit: github.getOctokit(token) as any,
+    octokit: github.getOctokit(token) as unknown as Octokit,
     owner: github.context.repo.owner,
     repo: github.context.repo.repo,
     pullNumber: pull.number,
