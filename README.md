@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: jingbof/jbot-review-action@v1
+      - uses: jingbof/jbot-review-action@v0.1.0
         with:
           api-key: ${{ secrets.OPENCODE_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -100,7 +100,7 @@ new commit or close and reopen the PR.
 To test the action in the same repo before tagging a release:
 
 ```yaml
-# Use the relative path instead of jingbof/jbot-review-action@v1:
+# Use the relative path instead of jingbof/jbot-review-action@v0.1.0:
 - uses: ./
   with:
     api-key: ${{ secrets.OPENCODE_API_KEY }}
@@ -123,7 +123,7 @@ Set the `model` input to override the default. The `api-key` input is always
 required; OpenCode handles routing to the right provider at runtime:
 
 ```yaml
-- uses: jingbof/jbot-review-action@v1
+- uses: jingbof/jbot-review-action@v0.1.0
   with:
     provider: deepseek
     api-key: ${{ secrets.DEEPSEEK_API_KEY }}
