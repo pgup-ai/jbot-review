@@ -514,6 +514,85 @@ docker run -d --name jbot-review -p 3000:3000 --restart always --env-file .env j
 # Open port 3000 in Hetzner firewall. Webhook: http://YOUR_VM_IP:3000/webhooks
 ```
 
+### Railway
+
+Pay-per-use, scales to zero on the $5 starter plan. Builds from Docker Hub or
+directly from a GitHub repo.
+
+```bash
+# 1. Prerequisites
+brew install railway    # or: npm i -g @railway/cli
+railway login
+
+# 2. Push to Docker Hub, then deploy
+docker build --platform linux/amd64 -t your-dockerhub/jbot-review .
+docker push your-dockerhub/jbot-review
+
+railway init
+railway service add --image docker.io/your-dockerhub/jbot-review
+railway variables set \
+  GITHUB_APP_ID=123456 \
+  "GITHUB_APP_PRIVATE_KEY=$(cat your-app.pem)" \
+  GITHUB_WEBHOOK_SECRET=your-secret \
+  OPENCODE_API_KEY=oc-... \
+  PORT=3000
+
+railway up
+# Webhook URL: https://jbot-review.up.railway.app/webhooks
+```
+
+### Koyeb
+
+Free tier with scale-to-zero. Deploys from Docker Hub or GitHub container
+registry. No cold-start penalty on the nano instance.
+
+```bash
+# 1. Push to Docker Hub
+docker build --platform linux/amd64 -t your-dockerhub/jbot-review .
+docker push your-dockerhub/jbot-review
+
+# 2. Create a Service in the Koyeb dashboard:
+#    - Image: docker.io/your-dockerhub/jbot-review
+#    - Port: 3000 → exposed as HTTP
+#    - Instance type: nano (free)
+#    - Scaling: min 0, max 1
+#    - Add env vars from .env.example
+
+# Or via CLI:
+koyeb service create jbot-review \
+  --docker docker.io/your-dockerhub/jbot-review:latest \
+  --port 3000 \
+  --instance-type nano \
+  --scaling-min 0 --scaling-max 1 \
+  --env GITHUB_APP_ID=123456 \
+  --env "GITHUB_APP_PRIVATE_KEY=$(cat your-app.pem)" \
+  --env GITHUB_WEBHOOK_SECRET=your-secret \
+  --env OPENCODE_API_KEY=oc-...
+
+# Webhook URL: https://jbot-review-<org>.koyeb.app/webhooks
+```
+
+### AWS App Runner
+
+Pay-per-request, scales to zero. Minimum 1 instance-warm config available for
+faster starts. Deploys from ECR or Docker Hub.
+
+```bash
+# 1. Push to ECR (or Docker Hub)
+aws ecr create-repository --repository-name jbot-review
+aws ecr get-login-password | docker login --username AWS --password-stdin $AWS_ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+docker build --platform linux/amd64 -t $AWS_ACCOUNT.dkr.ecr.$REGION.amazonaws.com/jbot-review .
+docker push $AWS_ACCOUNT.dkr.ecr.$REGION.amazonaws.com/jbot-review
+
+# 2. Create App Runner service (Console or CloudFormation):
+#    - Source: ECR → select the image
+#    - Port: 3000
+#    - Add env vars from .env.example
+#    - Auto-scaling: min 0, max 1
+
+# Webhook URL: https://xxxxx.$REGION.awsapprunner.com/webhooks
+```
+
 ## Provider cost comparison
 
 | Provider | Idle cost | Per review (est.) | Auto scale-to-zero |
@@ -521,6 +600,9 @@ docker run -d --name jbot-review -p 3000:3000 --restart always --env-file .env j
 | Cloud Run (free tier) | $0 | ~$0.01 | Yes |
 | Fly.io (hobby) | ~$0 | ~$0.01 | Yes |
 | Render (free tier) | $0 | ~$0 | Sleeps after 15 min |
+| Railway (starter) | ~$0 | ~$0.01 | Yes |
+| Koyeb (free tier) | $0 | ~$0 | Yes |
+| AWS App Runner | ~$0 | ~$0.02 | Yes |
 | Hetzner CX22 | $4/mo | $0 | No |
 | Vultr (1 vCPU) | $6/mo | $0 | No |
 | DigitalOcean App Platform | $5/mo | $0 | No |
