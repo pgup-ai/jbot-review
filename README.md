@@ -42,7 +42,7 @@ git tag v1 -m "Initial release"
 git push origin v1
 ```
 
-Users reference the action as `your-org/jbot-review@v1`. If you vendor it
+Users reference the action as `jingbof/jbot-review@v1`. If you vendor it
 directly in their repo (for testing), they use `./` relative path instead.
 
 The action is a composite action defined in `action.yml` at the repo root.
