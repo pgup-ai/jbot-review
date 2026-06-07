@@ -205,7 +205,7 @@ export async function runReview(
   log(`Prompt assembled: ${prompt.length} chars, guidelines=${!!guidelines}`);
 
   const raw = await promptPlanAgent(client, model, prompt, 'review', log);
-  return parseReview(raw);
+  return parseReview(raw, 'review', log);
 }
 
 export async function runAddressedPriorCommentsCheck(
@@ -216,7 +216,7 @@ export async function runAddressedPriorCommentsCheck(
 ): Promise<AddressedPriorComment[]> {
   const prompt = [ADDRESSED_PRIOR_COMMENTS_PROMPT, prContext].join('\n\n');
   const raw = await promptPlanAgent(client, model, prompt, 'addressed-prior-comments', log);
-  return parseReview(raw).addressedPriorComments;
+  return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
 }
 
 async function promptPlanAgent(
@@ -269,14 +269,17 @@ async function promptPlanAgent(
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 
 /** Defensively parse the agent's JSON; malformed output degrades to empty. */
-function parseReview(raw: string): ReviewResult {
+function parseReview(raw: string, label: string, log: (msg: string) => void): ReviewResult {
   let parsed: unknown;
   try {
-    const start = raw.indexOf('{');
-    const end = raw.lastIndexOf('}');
-    const slice = start >= 0 && end > start ? raw.slice(start, end + 1) : raw;
-    parsed = JSON.parse(slice);
-  } catch {
+    parsed = parseJsonObject(raw);
+  } catch (error) {
+    log(
+      `${label} response was not valid JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    log(`${label} response preview:\n${truncateForLog(raw, 2000)}`);
     return {
       summary: 'The reviewer returned an unparseable response.',
       findings: [],
@@ -325,4 +328,84 @@ function parseReview(raw: string): ReviewResult {
   }
 
   return { summary, findings, addressedPriorComments };
+}
+
+function parseJsonObject(raw: string): unknown {
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error('empty response');
+
+  const candidates = [
+    trimmed,
+    ...extractFencedCodeBlocks(trimmed),
+    ...extractBalancedJsonObjects(trimmed),
+  ];
+  const seen = new Set<string>();
+  let lastError: unknown;
+
+  for (const candidate of candidates) {
+    const normalized = candidate.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    try {
+      return JSON.parse(normalized);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('no parseable JSON object found');
+}
+
+function extractFencedCodeBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  const fencePattern = /```(?:json)?\s*([\s\S]*?)```/gi;
+  let match: RegExpExecArray | null;
+  while ((match = fencePattern.exec(text)) !== null) {
+    blocks.push(match[1]);
+  }
+  return blocks;
+}
+
+function extractBalancedJsonObjects(text: string): string[] {
+  const objects: string[] = [];
+  for (let start = text.indexOf('{'); start >= 0; start = text.indexOf('{', start + 1)) {
+    const end = findBalancedObjectEnd(text, start);
+    if (end !== -1) objects.push(text.slice(start, end + 1));
+  }
+  return objects;
+}
+
+function findBalancedObjectEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+
+  return -1;
+}
+
+function truncateForLog(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength).trimEnd()}\n...[truncated]`;
 }

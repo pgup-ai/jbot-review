@@ -97,9 +97,7 @@ export async function runPrReview(params: {
   const priorJbotThreads = options.includePriorComments
     ? await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log)
     : [];
-  if (priorJbotThreads.length > 0) {
-    log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
-  }
+  log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
 
   let prContext: string;
