@@ -109,7 +109,7 @@ export async function runReview(
   return parseReview(textPart?.text ?? '{}');
 }
 
-const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['critical', 'warning', 'suggestion']);
+const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 
 /** Defensively parse the agent's JSON; malformed output degrades to empty. */
 function parseReview(raw: string): ReviewResult {

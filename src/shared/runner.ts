@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { isNoiseFile } from './filter.ts';
 import { parseAddedLines } from './patch.ts';
 import { startOpencode, waitReady, runReview } from './opencode.ts';
-import { listPrFiles, postReview, decideVerdict } from './github.ts';
+import { listPrFiles, listPrComments, postReview, decideVerdict } from './github.ts';
 import type { Octokit } from './github.ts';
 import type { Finding } from './types.ts';
 
@@ -56,21 +56,30 @@ export async function runPrReview(params: {
   const guidelines = await discoverGuidelines(workspace);
   if (guidelines) log(`Guidelines loaded (${guidelines.length} bytes).`);
 
-  // 4. Run the agentic review against the checked-out repo.
+  // 4. Fetch existing review comments so the agent can reference prior feedback.
+  const priorComments = await listPrComments(octokit, owner, repo, pullNumber);
+  const commentsBlock =
+    priorComments.length > 0
+      ? '## Prior review comments\n' + priorComments.map((c) => `- ${c}`).join('\n')
+      : '';
+
+  // 5. Build the full PR context for the agent.
   const prContext = [
     pullTitle && `Title: ${pullTitle}`,
     pullBody && `Description: ${pullBody}`,
     `Changed files: ${changedFiles.join(', ')}`,
+    commentsBlock,
   ]
     .filter(Boolean)
     .join('\n');
 
+  // 6. Run the agentic review against the checked-out repo.
   const { proc, client } = startOpencode(workspace, keyEnv, apiKey);
   try {
     await waitReady(client);
     const { summary, findings } = await runReview(client, model, prContext, guidelines);
 
-    // 5. Gate: split into inline-anchorable vs orphaned, decide the verdict.
+    // 7. Gate: split into inline-anchorable vs orphaned, decide the verdict.
     const inline: Finding[] = [];
     const orphaned: Finding[] = [];
     for (const f of findings) {
@@ -78,9 +87,9 @@ export async function runPrReview(params: {
       else orphaned.push(f);
     }
     const verdict = decideVerdict(findings);
-    const body = buildBody(summary, findings.length, orphaned);
+    const body = buildBody(summary, findings, orphaned);
 
-    // 6. Post one review, fully under our control.
+    // 8. Post one review, fully under our control.
     await postReview(octokit, owner, repo, pullNumber, verdict, body, inline);
     log(`Posted ${verdict}: ${findings.length} finding(s), ${inline.length} inline.`);
   } finally {
@@ -118,14 +127,32 @@ async function discoverGuidelines(cwd: string): Promise<string> {
   return sections.join('\n\n');
 }
 
-function buildBody(summary: string, total: number, orphaned: Finding[]): string {
-  const lines = ['### AI code review', '', summary || 'No summary provided.', ''];
-  lines.push(total === 0 ? 'No issues found.' : `Found ${total} item(s).`);
+function buildBody(summary: string, all: Finding[], orphaned: Finding[]): string {
+  const total = all.length;
+  const lines = ['## AI code review', '', summary || 'No summary provided.', ''];
+  if (total === 0) {
+    lines.push('_No issues found._');
+  } else {
+    const counts = countBySeverity(all);
+    lines.push(`**${total} finding(s)** | ${counts}`, '');
+  }
   if (orphaned.length > 0) {
-    lines.push('', '#### Findings outside the diff');
+    lines.push('### Findings (outside the diff)');
     for (const f of orphaned) {
-      lines.push(`- **${f.title}** (${f.path}:${f.line}) — ${f.body}`);
+      lines.push(`- **${f.severity}** ${f.title} — \`${f.path}:${f.line}\``);
+      lines.push(`  ${f.body}`);
     }
   }
   return lines.join('\n');
+}
+
+function countBySeverity(findings: Pick<Finding, 'severity'>[]): string {
+  const tags = ['P0', 'P1', 'P2', 'P3', 'nit'] as const;
+  return tags
+    .map((t) => {
+      const n = findings.filter((f) => f.severity === t).length;
+      return n > 0 ? `${n}× ${t}` : null;
+    })
+    .filter(Boolean)
+    .join(' · ');
 }

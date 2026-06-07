@@ -1,4 +1,4 @@
-export type Severity = 'critical' | 'warning' | 'suggestion';
+export type Severity = 'P0' | 'P1' | 'P2' | 'P3' | 'nit';
 
 export interface Finding {
   path: string;

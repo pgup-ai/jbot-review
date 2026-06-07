@@ -31,15 +31,37 @@ export async function listPrFiles(
 }
 
 /**
- * Decision rubric (biased toward approval), computed in code rather than left
- * to the model:
- *   - any critical            -> REQUEST_CHANGES (blocks merge)
- *   - one or more warnings    -> COMMENT (does not block)
- *   - suggestions only / none -> APPROVE
+ * Fetches existing review comments (from bots and human reviewers) to
+ * give the agent context about what has already been discussed.
+ */
+export async function listPrComments(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+): Promise<string[]> {
+  const reviews = await octokit.paginate(octokit.rest.pulls.listReviews, {
+    owner,
+    repo,
+    pull_number: pullNumber,
+    per_page: 100,
+  });
+  return reviews.map((r) => {
+    const user = r.user?.login ?? 'unknown';
+    const state = r.state?.replace('_', ' ').toUpperCase() ?? 'COMMENT';
+    return `${user} (${state}): ${r.body ?? '(no body)'}`;
+  });
+}
+
+/**
+ * Decision rubric: P0/P1 block merges, P2 warns, P3/nit are advisory.
+ *   - any P0 or P1          -> REQUEST_CHANGES (blocks merge)
+ *   - one or more P2        -> COMMENT (does not block)
+ *   - P3 / nit only / none  -> APPROVE
  */
 export function decideVerdict(findings: Finding[]): Verdict {
-  if (findings.some((f) => f.severity === 'critical')) return 'REQUEST_CHANGES';
-  if (findings.some((f) => f.severity === 'warning')) return 'COMMENT';
+  if (findings.some((f) => f.severity === 'P0' || f.severity === 'P1')) return 'REQUEST_CHANGES';
+  if (findings.some((f) => f.severity === 'P2')) return 'COMMENT';
   return 'APPROVE';
 }
 
@@ -57,7 +79,7 @@ export async function postReview(
     path: f.path,
     line: f.line,
     side: 'RIGHT' as const,
-    body: `**${label(f.severity)} — ${f.title}**\n\n${f.body}`,
+    body: `**${f.severity}** — ${f.title}\n\n${f.body}`,
   }));
 
   try {
@@ -79,12 +101,7 @@ export async function postReview(
         body: `${body}\n\n_(inline comments omitted — failed to anchor to diff lines)_`,
       });
     } catch {
-      // Both attempts failed; the caller handles logging.
       throw new Error('Failed to post review to GitHub');
     }
   }
-}
-
-function label(severity: Finding['severity']): string {
-  return severity[0].toUpperCase() + severity.slice(1);
 }
