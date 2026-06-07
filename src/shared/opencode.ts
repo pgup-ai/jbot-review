@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from 'node:timers/promises';
 import { createOpencode, type OpencodeClient, type ServerOptions } from '@opencode-ai/sdk';
 
 import { REVIEW_PROMPT } from './prompt.ts';
@@ -23,40 +22,60 @@ function buildConfig(providerID: string, apiKey: string): ServerOptions['config'
 
 /**
  * Starts an opencode server with the given provider API key embedded in its
- * config, and returns an SDK client pointed at it. The server is started with
- * the read-only "plan" agent by default — it cannot edit files, which keeps
- * the review safe and avoids non-interactive permission prompts that would
- * hang a CI run.
+ * config, and returns an SDK client pointed at it. The server's child process
+ * inherits the current working directory, so we set cwd to the workspace
+ * before spawning and restore it on stop. The read-only "plan" agent is used
+ * by default — it cannot edit files, which keeps the review safe and avoids
+ * non-interactive permission prompts that would hang a CI run.
  */
 export async function startOpencode(
+  workspace: string,
   providerID: string,
   modelID: string,
   apiKey: string,
   log: (msg: string) => void,
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
-  const config = buildConfig(providerID, apiKey);
-  const { client, server } = await createOpencode({
-    hostname: '127.0.0.1',
-    port: 4096,
-    timeout: READY_TIMEOUT_MS,
-    config,
-  });
+  const previousCwd = process.cwd();
+  process.chdir(workspace);
+  log(`opencode cwd: ${process.cwd()}`);
 
-  log(`opencode server listening at ${server.url} (provider=${providerID} model=${modelID})`);
+  let stop: () => void = () => {
+    /* replaced below after server is created */
+  };
+  try {
+    const config = buildConfig(providerID, apiKey);
+    const { client, server } = await createOpencode({
+      hostname: '127.0.0.1',
+      port: 4096,
+      timeout: READY_TIMEOUT_MS,
+      config,
+    });
 
-  return { client, stop: () => server.close() };
-}
+    log(`opencode server listening at ${server.url} (provider=${providerID} model=${modelID})`);
 
-/**
- * Polls the server until it accepts requests, or fails after ~12 seconds.
- * Kept for compatibility; the new server factory already waits for readiness
- * internally, so this is a no-op when the server is up.
- */
-export async function waitReady(_client: OpencodeClient): Promise<void> {
-  // The new `createOpencode` factory waits for the server to be ready before
-  // returning, so this function is effectively a no-op. Kept for API stability
-  // with existing callers.
-  await sleep(1);
+    const restoreCwd = () => {
+      try {
+        process.chdir(previousCwd);
+      } catch {
+        /* best effort */
+      }
+    };
+
+    stop = () => {
+      server.close();
+      restoreCwd();
+    };
+
+    return { client, stop };
+  } catch (err) {
+    // Restore cwd if server creation failed.
+    try {
+      process.chdir(previousCwd);
+    } catch {
+      /* best effort */
+    }
+    throw err;
+  }
 }
 
 /**
@@ -111,11 +130,12 @@ export async function runReview(
     log(`Prompt response error: ${detail}`);
     throw new Error(`opencode prompt returned no message (${detail})`);
   }
-  log(
-    `Prompt complete: parts=${data.parts.length} (types: ${data.parts.map((p) => p.type).join(', ')})`,
-  );
 
-  const parts = data.parts as ReadonlyArray<{ type: string; text?: string }>;
+  // Defensive: parts can be missing/empty on edge cases (errors, empty
+  // responses). Default to [] to avoid a TypeError.
+  const parts = (data.parts ?? []) as ReadonlyArray<{ type: string; text?: string }>;
+  log(`Prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`);
+
   const textPart = [...parts].reverse().find((p) => p.type === 'text');
   const raw = textPart?.text ?? '{}';
   log(`Extracted text: ${raw.length} chars`);
