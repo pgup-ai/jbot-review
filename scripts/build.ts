@@ -1,6 +1,6 @@
 import * as esbuild from 'esbuild';
 
-const shared = {
+const shared: esbuild.BuildOptions = {
   bundle: true,
   platform: 'node',
   target: 'node20',
@@ -14,7 +14,7 @@ const shared = {
     '@octokit/plugin-rest-endpoint-methods',
     '@octokit/webhooks',
   ],
-} as const;
+};
 
 await esbuild.build({
   ...shared,

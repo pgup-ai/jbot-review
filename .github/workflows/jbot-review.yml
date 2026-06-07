@@ -2,25 +2,68 @@ name: jbot-review
 on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: Pull request number to review
+        required: true
+      provider:
+        description: LLM provider
+        required: false
+        default: opencode
+      model:
+        description: 'Model as provider/model. Uses provider default if unset.'
+        required: false
+        default: ''
+      dry-run:
+        description: Log review output without posting to GitHub
+        required: false
+        default: 'false'
+      max-findings:
+        description: Maximum number of findings to post or log. Use 0 for no limit.
+        required: false
+        default: '0'
+      min-severity:
+        description: 'Minimum severity to include: P0, P1, P2, P3, or nit'
+        required: false
+        default: nit
+      include-prior-comments:
+        description: Include prior PR review comments in context
+        required: false
+        default: 'true'
+      fail-on-error:
+        description: Fail the workflow when review cannot complete
+        required: false
+        default: 'true'
 
 concurrency:
-  group: jbot-review-${{ github.event.pull_request.number }}
+  group: jbot-review-${{ github.event.pull_request.number || inputs['pr-number'] || github.run_id }}
   cancel-in-progress: true
 
 permissions:
   contents: read
   packages: read
   pull-requests: write
+  checks: read
 
 jobs:
   review:
-    if: github.event.pull_request.draft == false
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # full tree so the agent can explore context
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/merge', inputs['pr-number']) }}
       - uses: pgup-ai/jbot-review-action@v0
         with:
+          provider: ${{ inputs.provider || 'opencode' }}
+          model: ${{ inputs.model || '' }}
+          pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] }}
+          dry-run: ${{ inputs['dry-run'] || 'false' }}
+          max-findings: ${{ inputs['max-findings'] || '0' }}
+          min-severity: ${{ inputs['min-severity'] || 'nit' }}
+          include-prior-comments: ${{ inputs['include-prior-comments'] || 'true' }}
+          fail-on-error: ${{ inputs['fail-on-error'] || 'true' }}
           api-key: ${{ secrets.OPENCODE_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}

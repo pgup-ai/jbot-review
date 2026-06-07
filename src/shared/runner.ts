@@ -1,16 +1,39 @@
 import { exec } from 'node:child_process';
-import { readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { isNoiseFile } from './filter.ts';
+import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import { startOpencode, runReview } from './opencode.ts';
-import { listPrFiles, listPrComments, postReview, decideVerdict } from './github.ts';
+import { buildReviewContext, discoverGuidelines } from './review-context.ts';
+import {
+  listPrFiles,
+  listPrComments,
+  listPrCommits,
+  getCheckStatusSummary,
+  postReview,
+  decideVerdict,
+} from './github.ts';
 import type { Octokit } from './github.ts';
-import type { Finding } from './types.ts';
+import type { Finding, Severity } from './types.ts';
 
 const execAsync = promisify(exec);
+
+const SEVERITY_RANK: Record<Severity, number> = {
+  P0: 0,
+  P1: 1,
+  P2: 2,
+  P3: 3,
+  nit: 4,
+};
+
+export interface ReviewRunOptions {
+  enhancedContext?: boolean;
+  dryRun?: boolean;
+  maxFindings?: number;
+  minSeverity?: Severity;
+  includePriorComments?: boolean;
+}
 
 export async function runPrReview(params: {
   octokit: Octokit;
@@ -22,18 +45,27 @@ export async function runPrReview(params: {
   workspace: string;
   model: string;
   apiKey: string;
+  headSha?: string;
+  options?: ReviewRunOptions;
   log: (msg: string) => void;
 }): Promise<void> {
-  const { octokit, owner, repo, pullNumber, pullTitle, pullBody, workspace, model, apiKey, log } =
-    params;
+  const {
+    octokit,
+    owner,
+    repo,
+    pullNumber,
+    pullTitle,
+    pullBody,
+    workspace,
+    model,
+    apiKey,
+    headSha,
+    log,
+  } = params;
+  const options = normalizeOptions(params.options);
 
-  const [providerID, ...rest] = model.split('/');
-  const modelID = rest.join('/');
-  if (!providerID || !modelID) {
-    throw new Error(`Invalid model "${model}"; expected "provider/model".`);
-  }
+  const { providerID, modelID } = parseModelName(model);
 
-  // 1. Changed files + patches, minus noise.
   log(`Listing PR files for ${owner}/${repo}#${pullNumber}`);
   const rawFiles = await listPrFiles(octokit, owner, repo, pullNumber);
   log(`Files in PR: ${rawFiles.length} total`);
@@ -44,7 +76,6 @@ export async function runPrReview(params: {
   }
   log(`Reviewable files: ${files.length} (noise filtered: ${rawFiles.length - files.length})`);
 
-  // 2. Build the per-file commentable line sets for inline-comment validation.
   const addable = new Map<string, Set<number>>();
   const changedFiles: string[] = [];
   for (const f of files) {
@@ -52,28 +83,46 @@ export async function runPrReview(params: {
     changedFiles.push(f.filename);
   }
 
-  // 3. Discover repo-level review guidelines.
   const guidelines = await discoverGuidelines(workspace);
   if (guidelines) log(`Guidelines loaded (${guidelines.length} bytes).`);
 
-  // 4. Fetch existing review comments so the agent can reference prior feedback.
-  const priorComments = await listPrComments(octokit, owner, repo, pullNumber);
-  const commentsBlock =
-    priorComments.length > 0
-      ? '## Prior review comments\n' + priorComments.map((c) => `- ${c}`).join('\n')
-      : '';
+  const priorComments = options.includePriorComments
+    ? await listPrComments(octokit, owner, repo, pullNumber)
+    : [];
+  if (!options.includePriorComments) log('Prior review comments excluded by configuration.');
 
-  // 5. Build the full PR context for the agent.
-  const prContext = [
-    pullTitle && `Title: ${pullTitle}`,
-    pullBody && `Description: ${pullBody}`,
-    `Changed files: ${changedFiles.join(', ')}`,
-    commentsBlock,
-  ]
-    .filter(Boolean)
-    .join('\n');
+  let prContext: string;
+  let guidelinesForPrompt = guidelines;
+  if (options.enhancedContext) {
+    const commits = await listPrCommits(octokit, owner, repo, pullNumber);
+    const checkSummary = headSha
+      ? await getCheckStatusSummary(octokit, owner, repo, headSha)
+      : 'Check status unavailable: PR head SHA was not provided.';
+    prContext = buildReviewContext({
+      pullTitle,
+      pullBody,
+      changedFiles,
+      priorComments,
+      commits,
+      checkSummary,
+      guidelines,
+    });
+    guidelinesForPrompt = '';
+  } else {
+    const commentsBlock =
+      priorComments.length > 0
+        ? '## Prior review comments\n' + priorComments.map((c) => `- ${c}`).join('\n')
+        : '';
+    prContext = [
+      pullTitle && `Title: ${pullTitle}`,
+      pullBody && `Description: ${pullBody}`,
+      `Changed files: ${changedFiles.join(', ')}`,
+      commentsBlock,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
 
-  // 6. Start the opencode server (waits for readiness internally).
   log('Starting opencode server');
   const { client, stop } = await startOpencode(workspace, providerID, modelID, apiKey, log);
   try {
@@ -85,20 +134,36 @@ export async function runPrReview(params: {
     }
 
     log('Running review');
-    const { summary, findings } = await runReview(client, model, prContext, guidelines, log);
-    log(`Review complete: ${findings.length} finding(s)`);
+    const { summary, findings } = await runReview(
+      client,
+      model,
+      prContext,
+      guidelinesForPrompt,
+      log,
+    );
+    const filteredFindings = filterFindings(findings, options);
+    log(`Review complete: ${findings.length} finding(s), ${filteredFindings.length} after filters`);
 
-    // 7. Gate: split into inline-anchorable vs orphaned, decide the verdict.
     const inline: Finding[] = [];
     const orphaned: Finding[] = [];
-    for (const f of findings) {
+    for (const f of filteredFindings) {
       if (addable.get(f.path)?.has(f.line)) inline.push(f);
       else orphaned.push(f);
     }
-    const verdict = decideVerdict(findings);
-    const body = buildBody(summary, findings, orphaned);
+    const verdict = decideVerdict(filteredFindings);
+    const body = buildBody(summary, filteredFindings, orphaned);
 
-    // 8. Post one review, fully under our control.
+    if (options.dryRun) {
+      log(
+        `Dry run enabled; would post verdict=${verdict} inline=${inline.length} orphaned=${orphaned.length}`,
+      );
+      log(`Dry run review body:\n${body}`);
+      if (inline.length > 0) {
+        log(`Dry run inline comments:\n${inline.map(formatInlineFinding).join('\n\n')}`);
+      }
+      return;
+    }
+
     log(`Posting review: verdict=${verdict} inline=${inline.length} orphaned=${orphaned.length}`);
     await postReview(octokit, owner, repo, pullNumber, verdict, body, inline);
     log('Review posted.');
@@ -107,34 +172,28 @@ export async function runPrReview(params: {
   }
 }
 
-async function discoverGuidelines(cwd: string): Promise<string> {
-  const sections: string[] = [];
+function normalizeOptions(options: ReviewRunOptions | undefined): Required<ReviewRunOptions> {
+  return {
+    enhancedContext: options?.enhancedContext ?? false,
+    dryRun: options?.dryRun ?? false,
+    maxFindings: options?.maxFindings ?? 0,
+    minSeverity: options?.minSeverity ?? 'nit',
+    includePriorComments: options?.includePriorComments ?? true,
+  };
+}
 
-  for (const name of ['AGENTS.md', 'REVIEW.md']) {
-    try {
-      const text = await readFile(join(cwd, name), 'utf8');
-      if (text.trim()) sections.push(`### ${name}\n${text.trim()}`);
-    } catch {
-      /* optional */
-    }
-  }
+function filterFindings(findings: Finding[], options: Required<ReviewRunOptions>): Finding[] {
+  const maxRank = SEVERITY_RANK[options.minSeverity];
+  const filtered = findings.filter((finding) => SEVERITY_RANK[finding.severity] <= maxRank);
+  if (options.maxFindings <= 0) return filtered;
+  return [...filtered]
+    .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+    .slice(0, options.maxFindings);
+}
 
-  try {
-    const entries = await readdir(join(cwd, '.pr-governance'), { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      try {
-        const text = await readFile(join(cwd, '.pr-governance', entry.name), 'utf8');
-        if (text.trim()) sections.push(`### .pr-governance/${entry.name}\n${text.trim()}`);
-      } catch {
-        /* skip unreadable files */
-      }
-    }
-  } catch {
-    /* directory absent */
-  }
-
-  return sections.join('\n\n');
+function formatInlineFinding(finding: Finding): string {
+  const indentedBody = finding.body.replace(/\n/g, '\n  ');
+  return `- ${finding.path}:${finding.line} ${finding.severity} ${finding.title}\n  ${indentedBody}`;
 }
 
 function buildBody(summary: string, all: Finding[], orphaned: Finding[]): string {
