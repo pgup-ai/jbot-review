@@ -55,7 +55,13 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/merge', inputs['pr-number']) }}
-      - uses: pgup-ai/jbot-review-action@v0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build
+      - run: docker build -t ghcr.io/pgup-ai/jbot-review:latest .
+      - uses: ./
         with:
           provider: ${{ inputs.provider || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
           model: ${{ inputs.model || vars.JBOT_REVIEW_MODEL || '' }}

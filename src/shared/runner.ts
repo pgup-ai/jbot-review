@@ -1,10 +1,7 @@
-import { exec } from 'node:child_process';
-import { promisify } from 'node:util';
-
 import { isNoiseFile } from './filter.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
-import { startOpencode, runReview } from './opencode.ts';
+import { startOpencode, runReview, listProviderModels } from './opencode.ts';
 import { buildReviewContext, discoverGuidelines } from './review-context.ts';
 import {
   listPrFiles,
@@ -20,8 +17,6 @@ import {
 } from './github.ts';
 import type { Octokit, PriorJbotThread } from './github.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
-
-const execAsync = promisify(exec);
 
 const SEVERITY_RANK: Record<Severity, number> = {
   P0: 0,
@@ -140,10 +135,14 @@ export async function runPrReview(params: {
   const { client, stop } = await startOpencode(workspace, providerID, modelID, apiKey, log);
   try {
     try {
-      const { stdout } = await execAsync('opencode models', { timeout: 5000 });
-      log(`Available models:\n${stdout.trim()}`);
+      const models = await listProviderModels(client, providerID);
+      log(
+        models.length > 0
+          ? `Available models for ${providerID} using supplied API key/config:\n${models.join('\n')}`
+          : `Available models for ${providerID} using supplied API key/config: none returned`,
+      );
     } catch (e) {
-      log(`(skipped opencode models: ${(e as Error).message})`);
+      log(`(skipped provider model listing: ${(e as Error).message})`);
     }
 
     log('Running review');

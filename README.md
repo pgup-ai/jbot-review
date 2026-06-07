@@ -37,13 +37,18 @@ pulls the image.
 
 ```bash
 # CI auto-builds and pushes the image on every push to main.
-# To release a new version of the public action, tag the public repo:
+# To release a new v0 version of the public action:
+# 1. Make sure ghcr.io/pgup-ai/jbot-review:latest exists and is public.
+# 2. Make sure the public action.yml matches this repo's action.yml.
+# 3. Move the v0 tag:
 cd ../jbot-review-action    # or wherever it's checked out
-git tag v2
-git push origin v2
+git tag -f v0
+git push origin v0 --force
 ```
 
 The Dockerfile uses `node:20-slim` and runs the bundled JS from `dist/`.
+The `v0` action reference is a moving major-version tag; pin to an immutable
+release tag if you need fully stable action behavior.
 
 ### For the user (repo owner who wants reviews)
 
@@ -71,7 +76,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: pgup-ai/jbot-review-action@v0 # latest v0.x.y
+      - uses: pgup-ai/jbot-review-action@v0 # moving v0 tag; pin a release tag for stability
         with:
           provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
           model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
@@ -80,15 +85,8 @@ jobs:
 ```
 
 **Step 2 — Add the API key as a secret.** In the repo: Settings → Secrets and
-variables → Actions → New repository secret. Name it to match the provider:
-
-| Provider   | Secret name          |
-| ---------- | -------------------- |
-| opencode   | `OPENCODE_API_KEY`   |
-| deepseek   | `DEEPSEEK_API_KEY`   |
-| openai     | `OPENAI_API_KEY`     |
-| anthropic  | `ANTHROPIC_API_KEY`  |
-| openrouter | `OPENROUTER_API_KEY` |
+variables → Actions → New repository secret. For the default `opencode`
+provider, create `OPENCODE_API_KEY` with your OpenCode key.
 
 **Step 3 — (Optional) Add review guidelines.** Drop an `AGENTS.md`, `REVIEW.md`,
 or files in `.pr-governance/` at the repo root. The agent reads these during
@@ -102,7 +100,15 @@ new commit or close and reopen the PR.
 To test the action in the same repo before tagging a release:
 
 ```yaml
-# Use the relative path instead of pgup-ai/jbot-review-action@v0.1.0:
+# Build the branch image locally so the local action does not pull GHCR.
+- uses: actions/setup-node@v4
+  with:
+    node-version: '20'
+- run: npm ci
+- run: npm run build
+- run: docker build -t ghcr.io/pgup-ai/jbot-review:latest .
+
+# Use the relative path instead of pgup-ai/jbot-review-action@v0:
 - uses: ./
   with:
     api-key: ${{ secrets.OPENCODE_API_KEY }}
@@ -121,7 +127,7 @@ npm run replay -- fixtures/replay
 
 See [models.dev](https://models.dev/) for the full list of models and providers.
 
-| `provider`   | Default model                     | Key env var          |
+| `provider`   | Default model                     | Direct key env       |
 | ------------ | --------------------------------- | -------------------- |
 | `opencode`   | `opencode/deepseek-v4-flash-free` | `OPENCODE_API_KEY`   |
 | `deepseek`   | `deepseek/deepseek-v4-flash`      | `DEEPSEEK_API_KEY`   |
@@ -137,7 +143,7 @@ through the workflow. Leave `JBOT_REVIEW_PROVIDER` unset to use `opencode`, and
 leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
 
 ```yaml
-- uses: pgup-ai/jbot-review-action@v0.1.0
+- uses: pgup-ai/jbot-review-action@v0
   with:
     provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
     api-key: ${{ secrets.OPENCODE_API_KEY }}
@@ -145,10 +151,9 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-For this simple gateway pattern, keep one `api-key` input and make sure the
-configured secret works for the selected provider. If you switch
-`JBOT_REVIEW_PROVIDER` away from `opencode`, update the `api-key` expression or
-use a gateway key that can route to that provider.
+Keep the `api-key` input matched to the selected provider. The examples above use
+`OPENCODE_API_KEY` because `opencode` is the default provider; if you switch
+providers, pass the matching secret from the direct key env table.
 
 For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
@@ -229,15 +234,15 @@ pick your account, and choose **All repositories** or select specific repos.
 cp .env.example .env
 ```
 
-| Variable                 | Source                                                      |
-| ------------------------ | ----------------------------------------------------------- |
-| `GITHUB_APP_ID`          | App ID from step 1 (e.g. `123456`)                          |
-| `GITHUB_APP_PRIVATE_KEY` | Full contents of the `.pem` file from step 1                |
-| `GITHUB_WEBHOOK_SECRET`  | The random string you set in step 1                         |
-| `PROVIDER`               | Provider key (defaults to `opencode`)                       |
-| `OPENCODE_API_KEY`       | Your OpenCode API key (or the key for your chosen provider) |
-| `MODEL`                  | Optional override (defaults to provider default)            |
-| `PORT`                   | Optional (defaults to `3000`)                               |
+| Variable                 | Source                                           |
+| ------------------------ | ------------------------------------------------ |
+| `GITHUB_APP_ID`          | App ID from step 1 (e.g. `123456`)               |
+| `GITHUB_APP_PRIVATE_KEY` | Full contents of the `.pem` file from step 1     |
+| `GITHUB_WEBHOOK_SECRET`  | The random string you set in step 1              |
+| `PROVIDER`               | Provider key (defaults to `opencode`)            |
+| `<PROVIDER>_API_KEY`     | API key env var matching the selected provider   |
+| `MODEL`                  | Optional override (defaults to provider default) |
+| `PORT`                   | Optional (defaults to `3000`)                    |
 
 **4. Deploy.** Pick any provider from the [deployment guides](#deploying-the-hosted-app)
 below. All follow the same pattern: build the Docker image, inject env vars,
@@ -579,7 +584,7 @@ railway up
 ### Koyeb
 
 Free tier with scale-to-zero. Deploys from Docker Hub or GitHub container
-registry. No cold-start penalty on the nano instance.
+registry.
 
 ```bash
 # 1. Push to Docker Hub
@@ -609,8 +614,10 @@ koyeb service create jbot-review \
 
 ### AWS App Runner
 
-Pay-per-request, scales to zero. Minimum 1 instance-warm config available for
-faster starts. Deploys from ECR or Docker Hub.
+Managed container service with automatic scaling, but not scale-to-zero for a
+running web service. App Runner keeps provisioned memory for the minimum
+container instance and charges for it while the service is running. Deploys from
+ECR or Docker Hub.
 
 ```bash
 # 1. Push to ECR (or Docker Hub)
@@ -623,7 +630,7 @@ docker push $AWS_ACCOUNT.dkr.ecr.$REGION.amazonaws.com/jbot-review
 #    - Source: ECR → select the image
 #    - Port: 3000
 #    - Add env vars from .env.example
-#    - Auto-scaling: min 0, max 1
+#    - Auto-scaling: min 1, max 1
 
 # Webhook URL: https://xxxxx.$REGION.awsapprunner.com/webhooks
 ```
@@ -633,15 +640,28 @@ docker push $AWS_ACCOUNT.dkr.ecr.$REGION.amazonaws.com/jbot-review
 | Provider                  | Idle cost | Per review (est.) | Auto scale-to-zero  |
 | ------------------------- | --------- | ----------------- | ------------------- |
 | Cloud Run (free tier)     | $0        | ~$0.01            | Yes                 |
+| Cloudflare Containers     | $5/mo     | Usage-based       | Yes                 |
 | Fly.io (hobby)            | ~$0       | ~$0.01            | Yes                 |
 | Render (free tier)        | $0        | ~$0               | Sleeps after 15 min |
 | Railway (starter)         | ~$0       | ~$0.01            | Yes                 |
 | Koyeb (free tier)         | $0        | ~$0               | Yes                 |
-| AWS App Runner            | ~$0       | ~$0.02            | Yes                 |
+| AWS App Runner            | ~$5/mo    | Usage-based       | No                  |
+| Azure Container Apps      | $0        | Usage-based       | Yes                 |
+| Northflank Sandbox        | $0        | $0                | No                  |
+| CloudCone VPS             | ~$1/mo    | $0                | No                  |
 | Hetzner CX22              | $4/mo     | $0                | No                  |
 | Vultr (1 vCPU)            | $6/mo     | $0                | No                  |
 | DigitalOcean App Platform | $5/mo     | $0                | No                  |
 | Oracle Free Tier          | $0        | $0                | No                  |
+
+Prices are approximate and tier-dependent; check each provider's current limits
+before choosing a host.
+
+Cloudflare is a good fit if the app is split into a Worker/Queue control plane
+with containerized review workers, unlike the simple Docker web service model of
+Cloud Run, Fly.io, or Render. CloudCone is the cheapest VPS-style option here,
+but it means self-managing the VM, deploys, process supervisor, TLS/reverse
+proxy, and security updates.
 
 ## Project guidelines
 
@@ -667,14 +687,14 @@ src/
     filter.ts       # noise filter
     types.ts        # shared types
   workflow/
-    index.ts        # in-repo workflow entry point
+    index.ts        # in-repo GitHub Action entry point
   app/
     server.ts       # HTTP server for hosted App
     app.ts          # webhook handler + triggers
     auth.ts         # GitHub App JWT → installation token
     clone.ts        # git clone for the hosted runner
     queue.ts        # in-memory job queue (MVP)
-action.yml          # composite action for in-repo workflow
+action.yml          # Docker action metadata for in-repo workflow
 Dockerfile          # container image for hosted App
 .env.example        # env vars for the App
 .github/workflows/jbot-review.yml
@@ -684,12 +704,13 @@ Dockerfile          # container image for hosted App
 
 `plan` is OpenCode's built-in read-only agent: it can read, grep, and glob but
 cannot edit files. Using it keeps the review safe and avoids non-interactive
-permission prompts that hang a CI job. Override with the `AGENT` env var.
+permission prompts that hang a CI job. Agent selection is intentionally fixed for
+CI reviews; there is no supported `AGENT` env override.
 
 ## Notes
 
 - **Fork PRs** won't have the secret (GitHub withholds secrets from fork-triggered
   runs in Actions). The hosted App avoids this since secrets live on your infra.
-- **SDK pinned at `@opencode-ai/sdk` 0.4.x**: `session.chat` returns the assistant
-  message; parts are fetched via `session.message`. If you bump the SDK, re-check
-  that shape in `opencode.ts`.
+- **OpenCode SDK**: this repo uses `@opencode-ai/sdk` 1.x and
+  `client.session.prompt()`. If you bump the SDK, re-check the response shape in
+  `opencode.ts`.

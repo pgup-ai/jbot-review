@@ -5,6 +5,7 @@ import { REVIEW_PROMPT } from './prompt.ts';
 import type { AddressedPriorComment, Finding, ReviewResult, Severity } from './types.ts';
 
 const READY_TIMEOUT_MS = 15_000;
+const MODEL_LIST_TIMEOUT_MS = 5_000;
 
 /**
  * Builds the opencode config object that embeds the API key for the selected
@@ -104,6 +105,57 @@ export async function startOpencode(
     restoreCwd();
     release();
     throw err;
+  }
+}
+
+export async function listProviderModels(
+  client: OpencodeClient,
+  providerID: string,
+  timeoutMs = MODEL_LIST_TIMEOUT_MS,
+): Promise<string[]> {
+  const result = await withTimeout(
+    client.provider.list(),
+    timeoutMs,
+    `provider model listing timed out after ${timeoutMs}ms`,
+  );
+  const data = result.data;
+  if (!isProviderListData(data)) return [];
+
+  const provider = data.all.find((item) => item.id === providerID);
+  if (!provider) return [];
+
+  return Object.keys(provider.models)
+    .map((modelID) => `${providerID}/${modelID}`)
+    .sort();
+}
+
+function isProviderListData(value: unknown): value is {
+  all: Array<{ id: string; models: Record<string, unknown> }>;
+} {
+  if (!isRecord(value) || !Array.isArray(value.all)) return false;
+  return value.all.every(
+    (item) => isRecord(item) && typeof item.id === 'string' && isRecord(item.models),
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  // If the timeout wins, keep any later rejection from the original operation
+  // from surfacing as an unhandled rejection.
+  void promise.catch(() => undefined);
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
