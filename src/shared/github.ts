@@ -271,7 +271,13 @@ export async function listPriorJbotThreads(
       });
     }
 
-    after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null;
+    if (!page.pageInfo.hasNextPage) {
+      after = null;
+    } else if (page.pageInfo.endCursor) {
+      after = page.pageInfo.endCursor;
+    } else {
+      break;
+    }
   } while (after);
 
   return threads;
@@ -468,7 +474,7 @@ function isJbotFinding(
 }
 
 function isJbotReviewBody(body: string): boolean {
-  return body.includes(REVIEW_MARKER) || /^## jbot code review\b/m.test(body);
+  return body.includes(REVIEW_MARKER) || /^## jbot code review\b/.test(body);
 }
 
 function appendReviewMarker(body: string): string {
