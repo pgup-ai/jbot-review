@@ -147,14 +147,14 @@ interface ReviewThreadsResponse {
           path: string;
           line?: number | null;
           comments: {
-            nodes: Array<{
+            nodes?: Array<{
               databaseId?: number | null;
               body: string;
               url: string;
               author?: {
                 login: string;
               } | null;
-            } | null>;
+            } | null> | null;
           };
         } | null>;
       };
@@ -216,12 +216,17 @@ export async function listPriorJbotThreads(
   let commentState: JbotReviewCommentState | undefined;
   let after: string | null = null;
   do {
-    const response = (await octokit.graphql(query, {
-      owner,
-      repo,
-      number: pullNumber,
-      after,
-    })) as ReviewThreadsResponse;
+    let response: ReviewThreadsResponse;
+    try {
+      response = (await octokit.graphql(query, {
+        owner,
+        repo,
+        number: pullNumber,
+        after,
+      })) as ReviewThreadsResponse;
+    } catch {
+      return threads;
+    }
     const viewerLogin = response.viewer.login;
     const page = response.repository?.pullRequest?.reviewThreads;
     if (!page) return threads;
@@ -235,7 +240,8 @@ export async function listPriorJbotThreads(
 
     for (const thread of page.nodes) {
       if (!thread) continue;
-      const topLevel = thread.comments.nodes[0];
+      const comments = thread.comments.nodes ?? [];
+      const topLevel = comments[0];
       if (!topLevel?.databaseId) continue;
       if (
         !isJbotFinding(
@@ -247,7 +253,7 @@ export async function listPriorJbotThreads(
         )
       )
         continue;
-      const alreadyAcknowledged = thread.comments.nodes.some(
+      const alreadyAcknowledged = comments.some(
         (comment) =>
           comment?.author?.login === viewerLogin && comment.body.includes(ADDRESSED_MARKER),
       );
