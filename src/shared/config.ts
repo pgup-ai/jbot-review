@@ -31,6 +31,11 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyEnv: 'OPENROUTER_API_KEY',
     keyInput: 'openrouter-api-key',
   },
+  nvidia: {
+    defaultModel: 'nvidia/nemotron-3-ultra-550b-a55b',
+    keyEnv: 'NVIDIA_API_KEY',
+    keyInput: 'nvidia-api-key',
+  },
   xai: {
     defaultModel: 'xai/grok-4.3',
     keyEnv: 'XAI_API_KEY',
