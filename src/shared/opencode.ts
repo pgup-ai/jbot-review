@@ -213,14 +213,15 @@ function parseReview(raw: string): ReviewResult {
   const addressedPriorComments: AddressedPriorComment[] = [];
   for (const item of rawAddressed) {
     const addressed = item as Record<string, unknown>;
-    if (typeof addressed.id !== 'string' || addressed.id.trim() === '') continue;
+    const id = typeof addressed.id === 'string' ? addressed.id.trim() : '';
+    if (!id) continue;
     addressedPriorComments.push({
-      id: addressed.id,
+      id,
       addressedByCommit:
         typeof addressed.addressed_by_commit === 'string'
-          ? addressed.addressed_by_commit
+          ? addressed.addressed_by_commit.trim()
           : undefined,
-      note: typeof addressed.note === 'string' ? addressed.note : undefined,
+      note: typeof addressed.note === 'string' ? addressed.note.trim() : undefined,
     });
   }
 

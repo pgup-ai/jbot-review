@@ -195,7 +195,7 @@ export async function listPriorJbotThreads(
               isResolved
               path
               line
-              comments(first: 50) {
+              comments(first: 100) {
                 nodes {
                   databaseId
                   body
@@ -484,5 +484,6 @@ function stripJbotMarkers(body: string): string {
 
 function truncateForPrompt(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength - 15).trimEnd()}\n...[truncated]`;
+  const previewLength = Math.max(0, maxLength - 15);
+  return `${text.slice(0, previewLength).trimEnd()}\n...[truncated]`;
 }
