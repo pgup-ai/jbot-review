@@ -80,13 +80,21 @@ jobs:
         with:
           provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
           model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
-          api-key: ${{ secrets.OPENCODE_API_KEY }}
+          opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
+          deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          xai-api-key: ${{ secrets.XAI_API_KEY }}
+          kilo-api-key: ${{ secrets.KILO_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-**Step 2 — Add the API key as a secret.** In the repo: Settings → Secrets and
-variables → Actions → New repository secret. For the default `opencode`
-provider, create `OPENCODE_API_KEY` with your OpenCode key.
+**Step 2 — Add provider API keys as secrets.** In the repo: Settings → Secrets
+and variables → Actions → New repository secret. Add the keys for the providers
+you want to use, such as `OPENCODE_API_KEY`, `OPENROUTER_API_KEY`, `XAI_API_KEY`,
+or `KILO_API_KEY`. Empty provider key inputs are ignored unless that provider is
+selected.
 
 **Step 3 — (Optional) Add review guidelines.** Drop an `AGENTS.md`, `REVIEW.md`,
 or files in `.pr-governance/` at the repo root. The agent reads these during
@@ -111,7 +119,7 @@ To test the action in the same repo before tagging a release:
 # Use the relative path instead of pgup-ai/jbot-review-action@v0:
 - uses: ./
   with:
-    api-key: ${{ secrets.OPENCODE_API_KEY }}
+    opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
     dry-run: true
 ```
@@ -127,13 +135,15 @@ npm run replay -- fixtures/replay
 
 See [models.dev](https://models.dev/) for the full list of models and providers.
 
-| `provider`   | Default model                     | Direct key env       |
-| ------------ | --------------------------------- | -------------------- |
-| `opencode`   | `opencode/deepseek-v4-flash-free` | `OPENCODE_API_KEY`   |
-| `deepseek`   | `deepseek/deepseek-v4-flash`      | `DEEPSEEK_API_KEY`   |
-| `openai`     | `openai/gpt-5.4-nano`             | `OPENAI_API_KEY`     |
-| `anthropic`  | `anthropic/claude-sonnet-4-6`     | `ANTHROPIC_API_KEY`  |
-| `openrouter` | `openrouter/openai/gpt-4o-mini`   | `OPENROUTER_API_KEY` |
+| `provider`   | Default model                     | Action key input     | Secret/env var       |
+| ------------ | --------------------------------- | -------------------- | -------------------- |
+| `opencode`   | `opencode/deepseek-v4-flash-free` | `opencode-api-key`   | `OPENCODE_API_KEY`   |
+| `deepseek`   | `deepseek/deepseek-v4-flash`      | `deepseek-api-key`   | `DEEPSEEK_API_KEY`   |
+| `openai`     | `openai/gpt-5.4-nano`             | `openai-api-key`     | `OPENAI_API_KEY`     |
+| `anthropic`  | `anthropic/claude-sonnet-4-6`     | `anthropic-api-key`  | `ANTHROPIC_API_KEY`  |
+| `openrouter` | `openrouter/openai/gpt-4o-mini`   | `openrouter-api-key` | `OPENROUTER_API_KEY` |
+| `xai`        | `xai/grok-4.3`                    | `xai-api-key`        | `XAI_API_KEY`        |
+| `kilo`       | `kilo/kilo-auto/balanced`         | `kilo-api-key`       | `KILO_API_KEY`       |
 
 Set the `provider` and `model` inputs to override the defaults. For automatic
 PR reviews without editing workflow YAML on every provider or model change,
@@ -146,14 +156,23 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
 - uses: pgup-ai/jbot-review-action@v0
   with:
     provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
-    api-key: ${{ secrets.OPENCODE_API_KEY }}
     model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
+    opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
+    deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+    openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+    xai-api-key: ${{ secrets.XAI_API_KEY }}
+    kilo-api-key: ${{ secrets.KILO_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-Keep the `api-key` input matched to the selected provider. The examples above use
-`OPENCODE_API_KEY` because `opencode` is the default provider; if you switch
-providers, pass the matching secret from the direct key env table.
+The action reads only the key input matching the selected `provider`, so future
+provider changes can be made through `JBOT_REVIEW_PROVIDER` without editing the
+workflow YAML. If `model` is set, its `provider/model` prefix must match the
+selected `provider`; otherwise the run fails before sending a request.
+For Kilo Gateway, use `provider: kilo` with a Kilo model ID, for example
+`kilo/kilo-auto/balanced`.
 
 For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
@@ -165,7 +184,13 @@ precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
 | ------------------------ | -------- | --------------------- | --------------------------------------------------------------- |
 | `provider`               | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`          |
 | `model`                  | No       | Provider default      | Override as `provider/model`; can come from `JBOT_REVIEW_MODEL` |
-| `api-key`                | Yes      | —                     | API key for the selected provider                               |
+| `opencode-api-key`       | No       | —                     | Required when `provider=opencode`                               |
+| `deepseek-api-key`       | No       | —                     | Required when `provider=deepseek`                               |
+| `openai-api-key`         | No       | —                     | Required when `provider=openai`                                 |
+| `anthropic-api-key`      | No       | —                     | Required when `provider=anthropic`                              |
+| `openrouter-api-key`     | No       | —                     | Required when `provider=openrouter`                             |
+| `xai-api-key`            | No       | —                     | Required when `provider=xai`                                    |
+| `kilo-api-key`           | No       | —                     | Required when `provider=kilo`                                   |
 | `github-token`           | Yes      | `${{ github.token }}` | Token to read PR and post review                                |
 | `pr-number`              | No       | —                     | PR number for manual `workflow_dispatch` reviews                |
 | `dry-run`                | No       | `false`               | Log review output without posting to GitHub                     |
@@ -288,6 +313,8 @@ are discovered during checkout.
 | `OPENAI_API_KEY`         | Conditional | —                | Required when PROVIDER=openai     |
 | `ANTHROPIC_API_KEY`      | Conditional | —                | Required when PROVIDER=anthropic  |
 | `OPENROUTER_API_KEY`     | Conditional | —                | Required when PROVIDER=openrouter |
+| `XAI_API_KEY`            | Conditional | —                | Required when PROVIDER=xai        |
+| `KILO_API_KEY`           | Conditional | —                | Required when PROVIDER=kilo       |
 | `MODEL`                  | No          | Provider default | Override as `provider/model`      |
 | `PORT`                   | No          | `3000`           | HTTP listen port                  |
 
