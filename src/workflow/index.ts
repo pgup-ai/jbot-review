@@ -20,13 +20,20 @@ async function main(): Promise<void> {
     );
   }
 
-  const apiKey = core.getInput('api-key');
+  const apiKey = core.getInput(cfg.keyInput);
   if (!apiKey) {
-    throw new Error(`Missing API key for provider "${provider}". Pass it via the "api-key" input.`);
+    throw new Error(
+      `Missing API key for provider "${provider}". Pass it via the "${cfg.keyInput}" input.`,
+    );
   }
 
   const model = core.getInput('model') || cfg.defaultModel;
-  parseModelName(model);
+  const parsedModel = parseModelName(model);
+  if (parsedModel.providerID !== provider) {
+    throw new Error(
+      `Provider "${provider}" does not match model "${model}". Set provider="${parsedModel.providerID}" or choose a ${provider}/... model.`,
+    );
+  }
   const options = {
     enhancedContext: true,
     dryRun: parseBooleanInput('dry-run', false),
