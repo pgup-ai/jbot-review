@@ -154,6 +154,15 @@ required; OpenCode handles routing to the right provider at runtime:
 | `include-prior-comments` | No       | `true`                | Include existing PR review comments in context   |
 | `fail-on-error`          | No       | `true`                | Fail the workflow if the review cannot complete  |
 
+### Review output
+
+`jbot-review` always posts a GitHub `COMMENT` review, not an automatic approval
+or request-changes review. The review body includes advisory merge guidance:
+
+- `Needs changes before approval` when any `P0`, `P1`, or `P2` finding is present.
+- `Mergeable with non-blocking comments` when only `P3` or `nit` findings are present.
+- `Good to go from jbot-review` when no new findings are found.
+
 ## Hosted GitHub App
 
 The review runs on infrastructure you control. Users install the App once and

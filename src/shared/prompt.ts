@@ -36,6 +36,9 @@ Use these severity levels. Prefer lower severity when uncertain.
 | P3   | Minor improvement (cleaner approach, DRY, clarity)  |
 | nit  | Trivial suggestion (naming, comment, formatting)    |
 
+P0, P1, and P2 are blocking findings. P3 and nit are advisory only; include
+them only when they are clearly useful and low-noise.
+
 ## What to flag
 
 - Logic errors, off-by-one mistakes, incorrect control flow.
@@ -53,6 +56,17 @@ Use these severity levels. Prefer lower severity when uncertain.
 - "Consider using library X" suggestions.
 - Missing tests or docs, unless their absence creates a correctness risk.
 - Notes that boil down to "this could be done differently" without a concrete reason.
+- P3/nit feedback that would not materially improve readability, safety, or maintainability.
+
+## Completeness
+
+- Make one thorough pass over the full PR and return the complete set of
+  actionable findings you can support from the current code.
+- Do not hold back valid findings for later review rounds. Later runs should
+  only add comments when new commits introduce or reveal new issues.
+- Avoid re-posting the same issue when an existing prior comment already covers
+  it. Prefer reporting it in "addressedPriorComments" when the current branch
+  has fixed it.
 
 ## Tone
 
