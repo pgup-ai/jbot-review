@@ -488,6 +488,8 @@ function stripJbotMarkers(body: string): string {
 
 function truncateForPrompt(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
+  if (maxLength <= 0) return '';
+  if (maxLength <= 15) return text.slice(0, maxLength);
   const previewLength = Math.max(0, maxLength - 15);
   return `${text.slice(0, previewLength).trimEnd()}\n...[truncated]`;
 }
