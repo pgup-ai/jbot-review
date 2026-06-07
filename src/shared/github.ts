@@ -45,7 +45,7 @@ export async function listPrCommits(
   });
   return commits.map((commit) => ({
     sha: commit.sha,
-    message: commit.commit.message.split('\n')[0] ?? '',
+    message: commit.commit.message.split('\n')[0],
     author: commit.author?.login ?? commit.commit.author?.name ?? undefined,
   }));
 }

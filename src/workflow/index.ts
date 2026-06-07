@@ -9,46 +9,46 @@ import type { Severity } from '../shared/types.ts';
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 
 async function main(): Promise<void> {
-  const token = core.getInput('github-token', { required: true });
   const failOnError = parseBooleanInput('fail-on-error', true);
 
-  const provider = core.getInput('provider') || 'opencode';
-  const cfg = PROVIDERS[provider];
-  if (!cfg) {
-    core.setFailed(
-      `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-    );
-    return;
-  }
-
-  const apiKey = core.getInput('api-key');
-  if (!apiKey) {
-    core.setFailed(`Missing API key for provider "${provider}". Pass it via the "api-key" input.`);
-    return;
-  }
-
-  const model = core.getInput('model') || cfg.defaultModel;
-  const options = {
-    enhancedContext: true,
-    dryRun: parseBooleanInput('dry-run', false),
-    maxFindings: parseNumberInput('max-findings', 0),
-    minSeverity: parseSeverityInput('min-severity', 'nit'),
-    includePriorComments: parseBooleanInput('include-prior-comments', true),
-  };
-  core.info(`Provider: ${provider}  Model: ${model}`);
-  core.info(
-    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments}`,
-  );
-
-  const octokit = github.getOctokit(token) as unknown as Octokit;
-  const owner = github.context.repo.owner;
-  const repo = github.context.repo.repo;
-  const pull = await resolvePullRequest(octokit, owner, repo);
-  core.info(
-    `Event: ${github.context.eventName}  PR: #${pull.number}  Action: ${github.context.payload.action ?? 'manual'}`,
-  );
-
   try {
+    const token = core.getInput('github-token', { required: true });
+    const provider = core.getInput('provider') || 'opencode';
+    const cfg = PROVIDERS[provider];
+    if (!cfg) {
+      throw new Error(
+        `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
+      );
+    }
+
+    const apiKey = core.getInput('api-key');
+    if (!apiKey) {
+      throw new Error(
+        `Missing API key for provider "${provider}". Pass it via the "api-key" input.`,
+      );
+    }
+
+    const model = core.getInput('model') || cfg.defaultModel;
+    const options = {
+      enhancedContext: true,
+      dryRun: parseBooleanInput('dry-run', false),
+      maxFindings: parseNumberInput('max-findings', 0),
+      minSeverity: parseSeverityInput('min-severity', 'nit'),
+      includePriorComments: parseBooleanInput('include-prior-comments', true),
+    };
+    core.info(`Provider: ${provider}  Model: ${model}`);
+    core.info(
+      `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments}`,
+    );
+
+    const octokit = github.getOctokit(token) as unknown as Octokit;
+    const owner = github.context.repo.owner;
+    const repo = github.context.repo.repo;
+    const pull = await resolvePullRequest(octokit, owner, repo);
+    core.info(
+      `Event: ${github.context.eventName}  PR: #${pull.number}  Action: ${github.context.payload.action ?? 'manual'}`,
+    );
+
     await runPrReview({
       octokit,
       owner,

@@ -188,11 +188,15 @@ function normalizeOptions(options: ReviewRunOptions | undefined): Required<Revie
 function filterFindings(findings: Finding[], options: Required<ReviewRunOptions>): Finding[] {
   const maxRank = SEVERITY_RANK[options.minSeverity];
   const filtered = findings.filter((finding) => SEVERITY_RANK[finding.severity] <= maxRank);
-  return options.maxFindings > 0 ? filtered.slice(0, options.maxFindings) : filtered;
+  if (options.maxFindings <= 0) return filtered;
+  return [...filtered]
+    .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+    .slice(0, options.maxFindings);
 }
 
 function formatInlineFinding(finding: Finding): string {
-  return `- ${finding.path}:${finding.line} ${finding.severity} ${finding.title}\n  ${finding.body}`;
+  const indentedBody = finding.body.replace(/\n/g, '\n  ');
+  return `- ${finding.path}:${finding.line} ${finding.severity} ${finding.title}\n  ${indentedBody}`;
 }
 
 function buildBody(summary: string, all: Finding[], orphaned: Finding[]): string {
