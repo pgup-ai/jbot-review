@@ -36,9 +36,4 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyEnv: 'XAI_API_KEY',
     keyInput: 'xai-api-key',
   },
-  kilo: {
-    defaultModel: 'kilo/kilo-auto/balanced',
-    keyEnv: 'KILO_API_KEY',
-    keyInput: 'kilo-api-key',
-  },
 };

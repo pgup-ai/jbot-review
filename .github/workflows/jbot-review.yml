@@ -77,5 +77,4 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
-          kilo-api-key: ${{ secrets.KILO_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
