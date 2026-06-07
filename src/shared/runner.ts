@@ -1,6 +1,7 @@
-import { execSync } from 'node:child_process';
+import { exec } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import { isNoiseFile } from './filter.ts';
 import { parseAddedLines } from './patch.ts';
@@ -8,6 +9,8 @@ import { startOpencode, runReview } from './opencode.ts';
 import { listPrFiles, listPrComments, postReview, decideVerdict } from './github.ts';
 import type { Octokit } from './github.ts';
 import type { Finding } from './types.ts';
+
+const execAsync = promisify(exec);
 
 export async function runPrReview(params: {
   octokit: Octokit;
@@ -72,11 +75,11 @@ export async function runPrReview(params: {
 
   // 6. Start the opencode server (waits for readiness internally).
   log('Starting opencode server');
-  const { client, stop } = await startOpencode(providerID, modelID, apiKey, log);
+  const { client, stop } = await startOpencode(workspace, providerID, modelID, apiKey, log);
   try {
     try {
-      const models = execSync('opencode models', { encoding: 'utf8', timeout: 5000 });
-      log(`Available models:\n${models.trim()}`);
+      const { stdout } = await execAsync('opencode models', { timeout: 5000 });
+      log(`Available models:\n${stdout.trim()}`);
     } catch (e) {
       log(`(skipped opencode models: ${(e as Error).message})`);
     }
@@ -136,7 +139,7 @@ async function discoverGuidelines(cwd: string): Promise<string> {
 
 function buildBody(summary: string, all: Finding[], orphaned: Finding[]): string {
   const total = all.length;
-  const lines = ['## AI code review', '', summary || 'No summary provided.', ''];
+  const lines = ['## jbot code review', '', summary || 'No summary provided.', ''];
   if (total === 0) {
     lines.push('_No issues found._');
   } else {

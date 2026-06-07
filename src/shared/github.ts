@@ -54,15 +54,13 @@ export async function listPrComments(
 }
 
 /**
- * Decision rubric: P0/P1 block merges, P2 warns, P3/nit are advisory.
- *   - any P0 or P1          -> REQUEST_CHANGES (blocks merge)
- *   - one or more P2        -> COMMENT (does not block)
- *   - P3 / nit only / none  -> APPROVE
+ * Decision rubric for posting a review: we only ever post COMMENT reviews
+ * (inline comments only). We never auto-approve or request-changes because
+ * that requires elevated permissions that may fail on forks. The verdict
+ * logic is kept for the summary body only.
  */
-export function decideVerdict(findings: Finding[]): Verdict {
-  if (findings.some((f) => f.severity === 'P0' || f.severity === 'P1')) return 'REQUEST_CHANGES';
-  if (findings.some((f) => f.severity === 'P2')) return 'COMMENT';
-  return 'APPROVE';
+export function decideVerdict(_findings: Finding[]): Verdict {
+  return 'COMMENT';
 }
 
 /** Posts one review; inline-anchorable findings become inline comments. */
