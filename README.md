@@ -73,6 +73,8 @@ jobs:
           fetch-depth: 0
       - uses: pgup-ai/jbot-review-action@v0 # latest v0.x.y
         with:
+          provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
+          model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
           api-key: ${{ secrets.OPENCODE_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -119,40 +121,53 @@ npm run replay -- fixtures/replay
 
 See [models.dev](https://models.dev/) for the full list of models and providers.
 
-| `provider`   | Default model                        | Key env var          |
-| ------------ | ------------------------------------ | -------------------- |
-| `opencode`   | `opencode/deepseek-v4-flash-free`    | `OPENCODE_API_KEY`   |
-| `deepseek`   | `deepseek/deepseek-v4-flash`         | `DEEPSEEK_API_KEY`   |
-| `openai`     | `openai/gpt-4o-mini`                 | `OPENAI_API_KEY`     |
-| `anthropic`  | `anthropic/claude-sonnet-4-20250514` | `ANTHROPIC_API_KEY`  |
-| `openrouter` | `openrouter/openai/gpt-4o-mini`      | `OPENROUTER_API_KEY` |
+| `provider`   | Default model                     | Key env var          |
+| ------------ | --------------------------------- | -------------------- |
+| `opencode`   | `opencode/deepseek-v4-flash-free` | `OPENCODE_API_KEY`   |
+| `deepseek`   | `deepseek/deepseek-v4-flash`      | `DEEPSEEK_API_KEY`   |
+| `openai`     | `openai/gpt-5.4-nano`             | `OPENAI_API_KEY`     |
+| `anthropic`  | `anthropic/claude-sonnet-4-6`     | `ANTHROPIC_API_KEY`  |
+| `openrouter` | `openrouter/openai/gpt-4o-mini`   | `OPENROUTER_API_KEY` |
 
-Set the `model` input to override the default. The `api-key` input is always
-required; OpenCode handles routing to the right provider at runtime:
+Set the `provider` and `model` inputs to override the defaults. For automatic
+PR reviews without editing workflow YAML on every provider or model change,
+define Actions configuration variables named `JBOT_REVIEW_PROVIDER` and
+`JBOT_REVIEW_MODEL` at the repository or organization level and pass them
+through the workflow. Leave `JBOT_REVIEW_PROVIDER` unset to use `opencode`, and
+leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
 
 ```yaml
 - uses: pgup-ai/jbot-review-action@v0.1.0
   with:
-    provider: deepseek
-    api-key: ${{ secrets.DEEPSEEK_API_KEY }}
-    model: deepseek/deepseek-v4-flash # optional override
+    provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
+    api-key: ${{ secrets.OPENCODE_API_KEY }}
+    model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
+For this simple gateway pattern, keep one `api-key` input and make sure the
+configured secret works for the selected provider. If you switch
+`JBOT_REVIEW_PROVIDER` away from `opencode`, update the `api-key` expression or
+use a gateway key that can route to that provider.
+
+For manual reruns, `workflow_dispatch` provider and model inputs can take
+precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
+`pull_request` runs use the variable values.
+
 ### Input reference
 
-| Input                    | Required | Default               | Description                                      |
-| ------------------------ | -------- | --------------------- | ------------------------------------------------ |
-| `provider`               | No       | `opencode`            | LLM provider key (see table above)               |
-| `model`                  | No       | Provider default      | Override as `provider/model`                     |
-| `api-key`                | Yes      | —                     | API key for the selected provider                |
-| `github-token`           | Yes      | `${{ github.token }}` | Token to read PR and post review                 |
-| `pr-number`              | No       | —                     | PR number for manual `workflow_dispatch` reviews |
-| `dry-run`                | No       | `false`               | Log review output without posting to GitHub      |
-| `max-findings`           | No       | `0`                   | Cap findings; `0` means no limit                 |
-| `min-severity`           | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`+        |
-| `include-prior-comments` | No       | `true`                | Include existing PR review comments in context   |
-| `fail-on-error`          | No       | `true`                | Fail the workflow if the review cannot complete  |
+| Input                    | Required | Default               | Description                                                     |
+| ------------------------ | -------- | --------------------- | --------------------------------------------------------------- |
+| `provider`               | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`          |
+| `model`                  | No       | Provider default      | Override as `provider/model`; can come from `JBOT_REVIEW_MODEL` |
+| `api-key`                | Yes      | —                     | API key for the selected provider                               |
+| `github-token`           | Yes      | `${{ github.token }}` | Token to read PR and post review                                |
+| `pr-number`              | No       | —                     | PR number for manual `workflow_dispatch` reviews                |
+| `dry-run`                | No       | `false`               | Log review output without posting to GitHub                     |
+| `max-findings`           | No       | `0`                   | Cap findings; `0` means no limit                                |
+| `min-severity`           | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`+                       |
+| `include-prior-comments` | No       | `true`                | Include existing PR review comments in context                  |
+| `fail-on-error`          | No       | `true`                | Fail the workflow if the review cannot complete                 |
 
 ### Review output
 

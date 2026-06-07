@@ -166,7 +166,7 @@ export async function runPrReview(params: {
       else orphaned.push(f);
     }
     const verdict = decideVerdict(filteredFindings);
-    const body = buildBody(summary, filteredFindings, orphaned, headSha);
+    const body = buildBody(summary, filteredFindings, orphaned, model, headSha);
 
     if (options.dryRun) {
       log(
@@ -312,7 +312,13 @@ async function acknowledgeAddressedPriorComments(params: {
   }
 }
 
-function buildBody(summary: string, all: Finding[], orphaned: Finding[], headSha?: string): string {
+function buildBody(
+  summary: string,
+  all: Finding[],
+  orphaned: Finding[],
+  model: string,
+  headSha?: string,
+): string {
   const total = all.length;
   const lines = ['## jbot code review', '', summary || 'No summary provided.', ''];
   const guidance = getMergeGuidance(all);
@@ -333,6 +339,7 @@ function buildBody(summary: string, all: Finding[], orphaned: Finding[], headSha
       lines.push(`  ${f.body}`);
     }
   }
+  lines.push('', `<sup>Reviewed with \`${model}\`.</sup>`);
   return lines.join('\n');
 }
 

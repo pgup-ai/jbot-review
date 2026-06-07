@@ -8,9 +8,9 @@ on:
         description: Pull request number to review
         required: true
       provider:
-        description: LLM provider
+        description: 'LLM provider. Uses JBOT_REVIEW_PROVIDER or opencode if unset.'
         required: false
-        default: opencode
+        default: ''
       model:
         description: 'Model as provider/model. Uses provider default if unset.'
         required: false
@@ -57,8 +57,8 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/merge', inputs['pr-number']) }}
       - uses: pgup-ai/jbot-review-action@v0
         with:
-          provider: ${{ inputs.provider || 'opencode' }}
-          model: ${{ inputs.model || '' }}
+          provider: ${{ inputs.provider || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
+          model: ${{ inputs.model || vars.JBOT_REVIEW_MODEL || '' }}
           pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] }}
           dry-run: ${{ inputs['dry-run'] || 'false' }}
           max-findings: ${{ inputs['max-findings'] || '0' }}
