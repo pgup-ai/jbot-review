@@ -144,6 +144,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
+  // If the timeout wins, keep any later rejection from the original operation
+  // from surfacing as an unhandled rejection.
+  void promise.catch(() => undefined);
   try {
     return await Promise.race([
       promise,
