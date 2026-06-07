@@ -1,8 +1,8 @@
-import type { Finding } from "./types.ts";
+import type { Finding } from './types.ts';
 
-import { Octokit as CoreOctokit } from "@octokit/core";
-import { paginateRest } from "@octokit/plugin-paginate-rest";
-import { restEndpointMethods } from "@octokit/plugin-rest-endpoint-methods";
+import { Octokit as CoreOctokit } from '@octokit/core';
+import { paginateRest } from '@octokit/plugin-paginate-rest';
+import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 
 const Review = CoreOctokit.plugin(paginateRest, restEndpointMethods);
 export type Octokit = InstanceType<typeof Review>;
@@ -12,7 +12,7 @@ export interface PrFile {
   patch?: string;
 }
 
-export type Verdict = "APPROVE" | "COMMENT" | "REQUEST_CHANGES";
+export type Verdict = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
 
 /** Lists changed files (with their patches) in the pull request. */
 export async function listPrFiles(
@@ -38,9 +38,9 @@ export async function listPrFiles(
  *   - suggestions only / none -> APPROVE
  */
 export function decideVerdict(findings: Finding[]): Verdict {
-  if (findings.some((f) => f.severity === "critical")) return "REQUEST_CHANGES";
-  if (findings.some((f) => f.severity === "warning")) return "COMMENT";
-  return "APPROVE";
+  if (findings.some((f) => f.severity === 'critical')) return 'REQUEST_CHANGES';
+  if (findings.some((f) => f.severity === 'warning')) return 'COMMENT';
+  return 'APPROVE';
 }
 
 /** Posts one review; inline-anchorable findings become inline comments. */
@@ -56,7 +56,7 @@ export async function postReview(
   const comments = inlineFindings.map((f) => ({
     path: f.path,
     line: f.line,
-    side: "RIGHT" as const,
+    side: 'RIGHT' as const,
     body: `**${label(f.severity)} — ${f.title}**\n\n${f.body}`,
   }));
 
@@ -80,11 +80,11 @@ export async function postReview(
       });
     } catch {
       // Both attempts failed; the caller handles logging.
-      throw new Error("Failed to post review to GitHub");
+      throw new Error('Failed to post review to GitHub');
     }
   }
 }
 
-function label(severity: Finding["severity"]): string {
+function label(severity: Finding['severity']): string {
   return severity[0].toUpperCase() + severity.slice(1);
 }

@@ -2,9 +2,9 @@
 
 An agentic PR reviewer built on OpenCode. Two deployment modes, one review engine:
 
-| Mode | Trigger | Runs on | Repo config needed |
-|---|---|---|---|
-| **In-repo workflow** | PR opened/synced | User's GitHub Actions runner | One YAML file + one secret |
+| Mode                  | Trigger             | Runs on                                    | Repo config needed             |
+| --------------------- | ------------------- | ------------------------------------------ | ------------------------------ |
+| **In-repo workflow**  | PR opened/synced    | User's GitHub Actions runner               | One YAML file + one secret     |
 | **Hosted GitHub App** | Webhook from GitHub | Your infrastructure (Cloud Run, VPS, etc.) | Install once, zero repo config |
 
 The review core (`runner.ts` + `opencode.ts` + `github.ts`) is shared between both.
@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: jingbof/jbot-review-action@v0   # latest v0.x.y
+      - uses: jingbof/jbot-review-action@v0 # latest v0.x.y
         with:
           api-key: ${{ secrets.OPENCODE_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -80,12 +80,12 @@ jobs:
 **Step 2 — Add the API key as a secret.** In the repo: Settings → Secrets and
 variables → Actions → New repository secret. Name it to match the provider:
 
-| Provider | Secret name |
-|---|---|
-| opencode | `OPENCODE_API_KEY` |
-| deepseek | `DEEPSEEK_API_KEY` |
-| openai | `OPENAI_API_KEY` |
-| anthropic | `ANTHROPIC_API_KEY` |
+| Provider   | Secret name          |
+| ---------- | -------------------- |
+| opencode   | `OPENCODE_API_KEY`   |
+| deepseek   | `DEEPSEEK_API_KEY`   |
+| openai     | `OPENAI_API_KEY`     |
+| anthropic  | `ANTHROPIC_API_KEY`  |
 | openrouter | `OPENROUTER_API_KEY` |
 
 **Step 3 — (Optional) Add review guidelines.** Drop an `AGENTS.md`, `REVIEW.md`,
@@ -111,13 +111,13 @@ To test the action in the same repo before tagging a release:
 
 See [models.dev](https://models.dev/) for the full list of models and providers.
 
-| `provider` | Default model | Key env var |
-|---|---|---|
-| `opencode` | `opencode/deepseek-v4-flash-free` | `OPENCODE_API_KEY` |
-| `deepseek` | `deepseek/deepseek-v4-flash` | `DEEPSEEK_API_KEY` |
-| `openai` | `openai/gpt-4o-mini` | `OPENAI_API_KEY` |
-| `anthropic` | `anthropic/claude-sonnet-4-20250514` | `ANTHROPIC_API_KEY` |
-| `openrouter` | `openrouter/openai/gpt-4o-mini` | `OPENROUTER_API_KEY` |
+| `provider`   | Default model                        | Key env var          |
+| ------------ | ------------------------------------ | -------------------- |
+| `opencode`   | `opencode/deepseek-v4-flash-free`    | `OPENCODE_API_KEY`   |
+| `deepseek`   | `deepseek/deepseek-v4-flash`         | `DEEPSEEK_API_KEY`   |
+| `openai`     | `openai/gpt-4o-mini`                 | `OPENAI_API_KEY`     |
+| `anthropic`  | `anthropic/claude-sonnet-4-20250514` | `ANTHROPIC_API_KEY`  |
+| `openrouter` | `openrouter/openai/gpt-4o-mini`      | `OPENROUTER_API_KEY` |
 
 Set the `model` input to override the default. The `api-key` input is always
 required; OpenCode handles routing to the right provider at runtime:
@@ -127,18 +127,18 @@ required; OpenCode handles routing to the right provider at runtime:
   with:
     provider: deepseek
     api-key: ${{ secrets.DEEPSEEK_API_KEY }}
-    model: deepseek/deepseek-v4-flash      # optional override
+    model: deepseek/deepseek-v4-flash # optional override
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ### Input reference
 
-| Input | Required | Default | Description |
-|---|---|---|---|
-| `provider` | No | `opencode` | LLM provider key (see table above) |
-| `model` | No | Provider default | Override as `provider/model` |
-| `api-key` | Yes | — | API key for the selected provider |
-| `github-token` | Yes | `${{ github.token }}` | Token to read PR and post review |
+| Input          | Required | Default               | Description                        |
+| -------------- | -------- | --------------------- | ---------------------------------- |
+| `provider`     | No       | `opencode`            | LLM provider key (see table above) |
+| `model`        | No       | Provider default      | Override as `provider/model`       |
+| `api-key`      | Yes      | —                     | API key for the selected provider  |
+| `github-token` | Yes      | `${{ github.token }}` | Token to read PR and post review   |
 
 ## Hosted GitHub App
 
@@ -162,14 +162,15 @@ get reviews on every repo automatically — no YAML, no secrets, no setup.
 
 Go to [Settings → Developer settings → GitHub Apps → New GitHub App](https://github.com/settings/apps/new):
 
-| Setting | Value |
-|---|---|
-| GitHub App name | `jbot-review` (or anything) |
-| Homepage URL | `https://github.com/jingbof/jbot-review` |
-| Webhook URL | `https://<your-deployed-url>/webhooks` |
-| Webhook secret | Generate a long random string (e.g. `openssl rand -hex 32`) |
+| Setting         | Value                                                       |
+| --------------- | ----------------------------------------------------------- |
+| GitHub App name | `jbot-review` (or anything)                                 |
+| Homepage URL    | `https://github.com/jingbof/jbot-review`                    |
+| Webhook URL     | `https://<your-deployed-url>/webhooks`                      |
+| Webhook secret  | Generate a long random string (e.g. `openssl rand -hex 32`) |
 
 Under **Repository permissions**:
+
 - Pull requests: **Read & write**
 - Contents: **Read-only**
 
@@ -190,15 +191,15 @@ pick your account, and choose **All repositories** or select specific repos.
 cp .env.example .env
 ```
 
-| Variable | Source |
-|---|---|
-| `GITHUB_APP_ID` | App ID from step 1 (e.g. `123456`) |
-| `GITHUB_APP_PRIVATE_KEY` | Full contents of the `.pem` file from step 1 |
-| `GITHUB_WEBHOOK_SECRET` | The random string you set in step 1 |
-| `PROVIDER` | Provider key (defaults to `opencode`) |
-| `OPENCODE_API_KEY` | Your OpenCode API key (or the key for your chosen provider) |
-| `MODEL` | Optional override (defaults to provider default) |
-| `PORT` | Optional (defaults to `3000`) |
+| Variable                 | Source                                                      |
+| ------------------------ | ----------------------------------------------------------- |
+| `GITHUB_APP_ID`          | App ID from step 1 (e.g. `123456`)                          |
+| `GITHUB_APP_PRIVATE_KEY` | Full contents of the `.pem` file from step 1                |
+| `GITHUB_WEBHOOK_SECRET`  | The random string you set in step 1                         |
+| `PROVIDER`               | Provider key (defaults to `opencode`)                       |
+| `OPENCODE_API_KEY`       | Your OpenCode API key (or the key for your chosen provider) |
+| `MODEL`                  | Optional override (defaults to provider default)            |
+| `PORT`                   | Optional (defaults to `3000`)                               |
 
 **4. Deploy.** Pick any provider from the [deployment guides](#deploying-the-hosted-app)
 below. All follow the same pattern: build the Docker image, inject env vars,
@@ -233,19 +234,19 @@ are discovered during checkout.
 
 ### Env var reference (hosted App)
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `GITHUB_APP_ID` | Yes | — | Numeric App ID from GitHub |
-| `GITHUB_APP_PRIVATE_KEY` | Yes | — | Contents of the `.pem` file |
-| `GITHUB_WEBHOOK_SECRET` | Yes | — | Random string for signing |
-| `PROVIDER` | No | `opencode` | Provider key (see table below) |
-| `OPENCODE_API_KEY` | Conditional | — | Required when PROVIDER=opencode |
-| `DEEPSEEK_API_KEY` | Conditional | — | Required when PROVIDER=deepseek |
-| `OPENAI_API_KEY` | Conditional | — | Required when PROVIDER=openai |
-| `ANTHROPIC_API_KEY` | Conditional | — | Required when PROVIDER=anthropic |
-| `OPENROUTER_API_KEY` | Conditional | — | Required when PROVIDER=openrouter |
-| `MODEL` | No | Provider default | Override as `provider/model` |
-| `PORT` | No | `3000` | HTTP listen port |
+| Variable                 | Required    | Default          | Description                       |
+| ------------------------ | ----------- | ---------------- | --------------------------------- |
+| `GITHUB_APP_ID`          | Yes         | —                | Numeric App ID from GitHub        |
+| `GITHUB_APP_PRIVATE_KEY` | Yes         | —                | Contents of the `.pem` file       |
+| `GITHUB_WEBHOOK_SECRET`  | Yes         | —                | Random string for signing         |
+| `PROVIDER`               | No          | `opencode`       | Provider key (see table below)    |
+| `OPENCODE_API_KEY`       | Conditional | —                | Required when PROVIDER=opencode   |
+| `DEEPSEEK_API_KEY`       | Conditional | —                | Required when PROVIDER=deepseek   |
+| `OPENAI_API_KEY`         | Conditional | —                | Required when PROVIDER=openai     |
+| `ANTHROPIC_API_KEY`      | Conditional | —                | Required when PROVIDER=anthropic  |
+| `OPENROUTER_API_KEY`     | Conditional | —                | Required when PROVIDER=openrouter |
+| `MODEL`                  | No          | Provider default | Override as `provider/model`      |
+| `PORT`                   | No          | `3000`           | HTTP listen port                  |
 
 ### Provider configuration (hosted App)
 
@@ -375,10 +376,10 @@ services:
   - name: server
     dockerfile_path: Dockerfile
     http_port: 3000
-    instance_size_slug: basic-xxs    # 1 vCPU, 512 MB
+    instance_size_slug: basic-xxs # 1 vCPU, 512 MB
     envs:
       - key: GITHUB_APP_ID
-        value: "123456"
+        value: '123456'
       - key: GITHUB_APP_PRIVATE_KEY
         value: "-----BEGIN RSA PRIVATE KEY-----\n..."
       - key: GITHUB_WEBHOOK_SECRET
@@ -430,11 +431,11 @@ services:
     runtime: image
     image:
       url: docker.io/your-dockerhub/jbot-review:latest
-    plan: free            # or starter ($7/mo)
+    plan: free # or starter ($7/mo)
     port: 3000
     envVars:
       - key: GITHUB_APP_ID
-        value: "123456"
+        value: '123456'
       - key: GITHUB_APP_PRIVATE_KEY
         value: |
           -----BEGIN RSA PRIVATE KEY-----
@@ -591,18 +592,18 @@ docker push $AWS_ACCOUNT.dkr.ecr.$REGION.amazonaws.com/jbot-review
 
 ## Provider cost comparison
 
-| Provider | Idle cost | Per review (est.) | Auto scale-to-zero |
-|---|---|---|---|
-| Cloud Run (free tier) | $0 | ~$0.01 | Yes |
-| Fly.io (hobby) | ~$0 | ~$0.01 | Yes |
-| Render (free tier) | $0 | ~$0 | Sleeps after 15 min |
-| Railway (starter) | ~$0 | ~$0.01 | Yes |
-| Koyeb (free tier) | $0 | ~$0 | Yes |
-| AWS App Runner | ~$0 | ~$0.02 | Yes |
-| Hetzner CX22 | $4/mo | $0 | No |
-| Vultr (1 vCPU) | $6/mo | $0 | No |
-| DigitalOcean App Platform | $5/mo | $0 | No |
-| Oracle Free Tier | $0 | $0 | No |
+| Provider                  | Idle cost | Per review (est.) | Auto scale-to-zero  |
+| ------------------------- | --------- | ----------------- | ------------------- |
+| Cloud Run (free tier)     | $0        | ~$0.01            | Yes                 |
+| Fly.io (hobby)            | ~$0       | ~$0.01            | Yes                 |
+| Render (free tier)        | $0        | ~$0               | Sleeps after 15 min |
+| Railway (starter)         | ~$0       | ~$0.01            | Yes                 |
+| Koyeb (free tier)         | $0        | ~$0               | Yes                 |
+| AWS App Runner            | ~$0       | ~$0.02            | Yes                 |
+| Hetzner CX22              | $4/mo     | $0                | No                  |
+| Vultr (1 vCPU)            | $6/mo     | $0                | No                  |
+| DigitalOcean App Platform | $5/mo     | $0                | No                  |
+| Oracle Free Tier          | $0        | $0                | No                  |
 
 ## Project guidelines
 

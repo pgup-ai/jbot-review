@@ -11,7 +11,7 @@ export function parseAddedLines(patch: string | undefined): Set<number> {
   if (!patch) return added;
   let newLine = 0;
   let insideHunk = false;
-  for (const raw of patch.split("\n")) {
+  for (const raw of patch.split('\n')) {
     const header = raw.match(HUNK_HEADER);
     if (header) {
       newLine = Number(header[1]);
@@ -20,10 +20,10 @@ export function parseAddedLines(patch: string | undefined): Set<number> {
     }
     if (!insideHunk) continue;
     const marker = raw[0];
-    if (marker === "+") {
+    if (marker === '+') {
       added.add(newLine);
       newLine += 1;
-    } else if (marker === "-") {
+    } else if (marker === '-') {
       // Removed line: present only on the old side.
     } else {
       newLine += 1;

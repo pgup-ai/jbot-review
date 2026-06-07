@@ -1,27 +1,27 @@
-name: "jbot-review"
-description: "Agentic PR review via opencode serve + SDK, with gated inline posting."
+name: 'jbot-review'
+description: 'Agentic PR review via opencode serve + SDK, with gated inline posting.'
 
 inputs:
   provider:
-    description: "LLM provider (defaults to opencode)."
-    default: "opencode"
+    description: 'LLM provider (defaults to opencode).'
+    default: 'opencode'
   model:
-    description: "Model as provider/model. Uses provider default if unset."
+    description: 'Model as provider/model. Uses provider default if unset.'
     required: false
-    default: ""
+    default: ''
   api-key:
-    description: "API key for the selected provider."
+    description: 'API key for the selected provider.'
     required: true
   github-token:
-    description: "Token to read the PR and post the review."
+    description: 'Token to read the PR and post the review.'
     required: true
     default: ${{ github.token }}
 
 runs:
-  using: "docker"
-  image: "docker://ghcr.io/jingbof/jbot-review:latest"
-  entrypoint: "node"
-  args: ["/app/dist/workflow/index.js"]
+  using: 'docker'
+  image: 'docker://ghcr.io/jingbof/jbot-review:latest'
+  entrypoint: 'node'
+  args: ['/app/dist/workflow/index.js']
   env:
     INPUT_PROVIDER: ${{ inputs.provider }}
     INPUT_MODEL: ${{ inputs.model }}

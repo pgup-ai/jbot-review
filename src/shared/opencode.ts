@@ -1,11 +1,11 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { setTimeout as sleep } from "node:timers/promises";
-import { createOpencodeClient } from "@opencode-ai/sdk";
+import { spawn, type ChildProcess } from 'node:child_process';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { createOpencodeClient } from '@opencode-ai/sdk';
 
-import { REVIEW_PROMPT } from "./prompt.ts";
-import type { Finding, ReviewResult, Severity } from "./types.ts";
+import { REVIEW_PROMPT } from './prompt.ts';
+import type { Finding, ReviewResult, Severity } from './types.ts';
 
-const HOST = "127.0.0.1";
+const HOST = '127.0.0.1';
 const PORT = 4096;
 
 type Client = ReturnType<typeof createOpencodeClient>;
@@ -25,9 +25,9 @@ export function startOpencode(
   apiKey: string,
 ): { proc: ChildProcess; client: Client } {
   const env = { ...process.env, [keyEnv]: apiKey };
-  const proc = spawn("opencode", ["serve", `--hostname=${HOST}`, `--port=${PORT}`], {
+  const proc = spawn('opencode', ['serve', `--hostname=${HOST}`, `--port=${PORT}`], {
     cwd,
-    stdio: "inherit",
+    stdio: 'inherit',
     env,
   });
   const client = createOpencodeClient({ baseUrl: `http://${HOST}:${PORT}` });
@@ -39,14 +39,14 @@ export async function waitReady(client: Client): Promise<void> {
   for (let attempt = 0; attempt < 40; attempt++) {
     try {
       await client.app.log({
-        body: { service: "ai-review", level: "info", message: "ready check" },
+        body: { service: 'ai-review', level: 'info', message: 'ready check' },
       });
       return;
     } catch {
       await sleep(300);
     }
   }
-  throw new Error("opencode server did not become ready in time");
+  throw new Error('opencode server did not become ready in time');
 }
 
 /**
@@ -69,22 +69,22 @@ export async function runReview(
   prContext: string,
   guidelines: string,
 ): Promise<ReviewResult> {
-  const [providerID, ...rest] = model.split("/");
-  const modelID = rest.join("/");
+  const [providerID, ...rest] = model.split('/');
+  const modelID = rest.join('/');
   if (!providerID || !modelID) {
     throw new Error(`Invalid model "${model}"; expected "provider/model".`);
   }
 
   const created = await client.session.create();
   const session = created.data;
-  if (!session) throw new Error("Failed to create opencode session");
+  if (!session) throw new Error('Failed to create opencode session');
 
   const promptParts = [REVIEW_PROMPT];
   if (guidelines) {
-    promptParts.push("## Repository review guidelines\n", guidelines);
+    promptParts.push('## Repository review guidelines\n', guidelines);
   }
   promptParts.push(prContext);
-  const prompt = promptParts.join("\n\n");
+  const prompt = promptParts.join('\n\n');
 
   // chat() resolves when the turn completes and returns the assistant message
   // metadata. The text/tool parts are then fetched by message id.
@@ -93,54 +93,50 @@ export async function runReview(
     body: {
       providerID,
       modelID,
-      agent: process.env.AGENT || "plan",
-      parts: [{ type: "text", text: prompt }],
+      agent: process.env.AGENT || 'plan',
+      parts: [{ type: 'text', text: prompt }],
     },
   });
   const assistant = chatRes.data;
-  if (!assistant) throw new Error("opencode chat returned no message");
+  if (!assistant) throw new Error('opencode chat returned no message');
 
   const message = await client.session.message({
     path: { id: session.id, messageID: assistant.id },
   });
   const parts = (message.data?.parts ?? []) as ReadonlyArray<{ type: string; text?: string }>;
   // Find the last text part (after any tool calls) — that's the final response.
-  const textPart = [...parts].reverse().find((p) => p.type === "text");
-  return parseReview(textPart?.text ?? "{}");
+  const textPart = [...parts].reverse().find((p) => p.type === 'text');
+  return parseReview(textPart?.text ?? '{}');
 }
 
-const VALID_SEVERITIES: ReadonlySet<Severity> = new Set([
-  "critical",
-  "warning",
-  "suggestion",
-]);
+const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['critical', 'warning', 'suggestion']);
 
 /** Defensively parse the agent's JSON; malformed output degrades to empty. */
 function parseReview(raw: string): ReviewResult {
   let parsed: unknown;
   try {
     // Tolerate stray prose by extracting the outermost JSON object.
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
     const slice = start >= 0 && end > start ? raw.slice(start, end + 1) : raw;
     parsed = JSON.parse(slice);
   } catch {
-    return { summary: "The reviewer returned an unparseable response.", findings: [] };
+    return { summary: 'The reviewer returned an unparseable response.', findings: [] };
   }
 
   const obj = parsed as Record<string, unknown>;
-  const summary = typeof obj.summary === "string" ? obj.summary : "";
+  const summary = typeof obj.summary === 'string' ? obj.summary : '';
   const rawFindings = Array.isArray(obj.findings) ? obj.findings : [];
 
   const findings: Finding[] = [];
   for (const item of rawFindings) {
     const f = item as Record<string, unknown>;
     if (
-      typeof f.path === "string" &&
-      typeof f.line === "number" &&
-      typeof f.title === "string" &&
-      typeof f.body === "string" &&
-      typeof f.severity === "string" &&
+      typeof f.path === 'string' &&
+      typeof f.line === 'number' &&
+      typeof f.title === 'string' &&
+      typeof f.body === 'string' &&
+      typeof f.severity === 'string' &&
       VALID_SEVERITIES.has(f.severity as Severity)
     ) {
       findings.push({

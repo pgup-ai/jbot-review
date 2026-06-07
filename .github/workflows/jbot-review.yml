@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0          # full tree so the agent can explore context
+          fetch-depth: 0 # full tree so the agent can explore context
       - uses: jingbof/jbot-review-action@v0
         with:
           api-key: ${{ secrets.OPENCODE_API_KEY }}

@@ -1,9 +1,9 @@
-import { createAppAuth } from "@octokit/auth-app";
-import { Octokit as CoreOctokit } from "@octokit/core";
-import { paginateRest } from "@octokit/plugin-paginate-rest";
-import { restEndpointMethods } from "@octokit/plugin-rest-endpoint-methods";
+import { createAppAuth } from '@octokit/auth-app';
+import { Octokit as CoreOctokit } from '@octokit/core';
+import { paginateRest } from '@octokit/plugin-paginate-rest';
+import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 
-import type { Octokit } from "../shared/github.ts";
+import type { Octokit } from '../shared/github.ts';
 
 const AppOctokit = CoreOctokit.plugin(paginateRest, restEndpointMethods);
 

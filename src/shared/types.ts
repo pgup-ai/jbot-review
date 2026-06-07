@@ -1,4 +1,4 @@
-export type Severity = "critical" | "warning" | "suggestion";
+export type Severity = 'critical' | 'warning' | 'suggestion';
 
 export interface Finding {
   path: string;
