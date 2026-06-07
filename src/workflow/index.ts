@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 
 import { PROVIDERS } from '../shared/config.ts';
+import { parseModelName } from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { Octokit } from '../shared/github.ts';
 import type { Severity } from '../shared/types.ts';
@@ -25,7 +26,7 @@ async function main(): Promise<void> {
   }
 
   const model = core.getInput('model') || cfg.defaultModel;
-  validateModelInput(model);
+  parseModelName(model);
   const options = {
     enhancedContext: true,
     dryRun: parseBooleanInput('dry-run', false),
@@ -82,14 +83,6 @@ function getPullRequestTarget(): NonNullable<typeof github.context.payload.pull_
   }
 
   return pullNumber;
-}
-
-function validateModelInput(model: string): void {
-  const [providerID, ...rest] = model.split('/');
-  const modelID = rest.join('/');
-  if (!providerID || !modelID) {
-    throw new Error(`Invalid model "${model}"; expected "provider/model".`);
-  }
 }
 
 async function resolvePullRequest(

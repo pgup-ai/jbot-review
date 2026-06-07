@@ -1,5 +1,6 @@
 import { createOpencode, type OpencodeClient, type ServerOptions } from '@opencode-ai/sdk';
 
+import { parseModelName } from './model.ts';
 import { REVIEW_PROMPT } from './prompt.ts';
 import type { Finding, ReviewResult, Severity } from './types.ts';
 
@@ -120,11 +121,7 @@ export async function runReview(
   guidelines: string,
   log: (msg: string) => void,
 ): Promise<ReviewResult> {
-  const [providerID, ...rest] = model.split('/');
-  const modelID = rest.join('/');
-  if (!providerID || !modelID) {
-    throw new Error(`Invalid model "${model}"; expected "provider/model".`);
-  }
+  const { providerID, modelID } = parseModelName(model);
 
   log(`Creating opencode session (provider=${providerID} model=${modelID})`);
   const created = await client.session.create();

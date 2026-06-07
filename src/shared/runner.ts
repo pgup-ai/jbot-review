@@ -2,6 +2,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import { isNoiseFile } from './filter.ts';
+import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import { startOpencode, runReview } from './opencode.ts';
 import { buildReviewContext, discoverGuidelines } from './review-context.ts';
@@ -63,11 +64,7 @@ export async function runPrReview(params: {
   } = params;
   const options = normalizeOptions(params.options);
 
-  const [providerID, ...rest] = model.split('/');
-  const modelID = rest.join('/');
-  if (!providerID || !modelID) {
-    throw new Error(`Invalid model "${model}"; expected "provider/model".`);
-  }
+  const { providerID, modelID } = parseModelName(model);
 
   log(`Listing PR files for ${owner}/${repo}#${pullNumber}`);
   const rawFiles = await listPrFiles(octokit, owner, repo, pullNumber);

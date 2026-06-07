@@ -74,12 +74,13 @@ export async function getCheckStatusSummary(
     ).length;
     const skipped = runs.filter((run) => run.conclusion === 'skipped').length;
     const pending = runs.filter((run) => run.status !== 'completed').length;
+    const other = runs.length - passed - failed - skipped - pending;
     const details = runs
       .slice(0, 10)
       .map((run) => `- ${run.name}: ${run.status}${run.conclusion ? `/${run.conclusion}` : ''}`);
 
     return [
-      `${runs.length} check run(s): ${passed} passed, ${pending} pending, ${failed} failed, ${skipped} skipped.`,
+      `${runs.length} check run(s): ${passed} passed, ${pending} pending, ${failed} failed, ${skipped} skipped, ${other} other.`,
       ...details,
     ].join('\n');
   } catch (error) {
