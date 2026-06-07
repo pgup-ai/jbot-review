@@ -2,7 +2,7 @@ import { createOpencode, type OpencodeClient, type ServerOptions } from '@openco
 
 import { parseModelName } from './model.ts';
 import { REVIEW_PROMPT } from './prompt.ts';
-import type { Finding, ReviewResult, Severity } from './types.ts';
+import type { AddressedPriorComment, Finding, ReviewResult, Severity } from './types.ts';
 
 const READY_TIMEOUT_MS = 15_000;
 
@@ -178,12 +178,17 @@ function parseReview(raw: string): ReviewResult {
     const slice = start >= 0 && end > start ? raw.slice(start, end + 1) : raw;
     parsed = JSON.parse(slice);
   } catch {
-    return { summary: 'The reviewer returned an unparseable response.', findings: [] };
+    return {
+      summary: 'The reviewer returned an unparseable response.',
+      findings: [],
+      addressedPriorComments: [],
+    };
   }
 
   const obj = parsed as Record<string, unknown>;
   const summary = typeof obj.summary === 'string' ? obj.summary : '';
   const rawFindings = Array.isArray(obj.findings) ? obj.findings : [];
+  const rawAddressed = Array.isArray(obj.addressedPriorComments) ? obj.addressedPriorComments : [];
 
   const findings: Finding[] = [];
   for (const item of rawFindings) {
@@ -205,5 +210,20 @@ function parseReview(raw: string): ReviewResult {
       });
     }
   }
-  return { summary, findings };
+  const addressedPriorComments: AddressedPriorComment[] = [];
+  for (const item of rawAddressed) {
+    const addressed = item as Record<string, unknown>;
+    const id = typeof addressed.id === 'string' ? addressed.id.trim() : '';
+    if (!id) continue;
+    addressedPriorComments.push({
+      id,
+      addressedByCommit:
+        typeof addressed.addressed_by_commit === 'string'
+          ? addressed.addressed_by_commit.trim()
+          : undefined,
+      note: typeof addressed.note === 'string' ? addressed.note.trim() : undefined,
+    });
+  }
+
+  return { summary, findings, addressedPriorComments };
 }

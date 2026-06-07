@@ -13,9 +13,13 @@ import {
   getCheckStatusSummary,
   postReview,
   decideVerdict,
+  listPriorJbotThreads,
+  formatPriorJbotThreadsForPrompt,
+  postAddressedThreadReply,
+  resolveReviewThread,
 } from './github.ts';
-import type { Octokit } from './github.ts';
-import type { Finding, Severity } from './types.ts';
+import type { Octokit, PriorJbotThread } from './github.ts';
+import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
 const execAsync = promisify(exec);
 
@@ -90,6 +94,13 @@ export async function runPrReview(params: {
     ? await listPrComments(octokit, owner, repo, pullNumber)
     : [];
   if (!options.includePriorComments) log('Prior review comments excluded by configuration.');
+  const priorJbotThreads = options.includePriorComments
+    ? await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log)
+    : [];
+  if (priorJbotThreads.length > 0) {
+    log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
+  }
+  const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
 
   let prContext: string;
   let guidelinesForPrompt = guidelines;
@@ -107,6 +118,7 @@ export async function runPrReview(params: {
       checkSummary,
       guidelines,
     });
+    if (priorJbotThreadBlock) prContext = `${prContext}\n\n${priorJbotThreadBlock}`;
     guidelinesForPrompt = '';
   } else {
     const commentsBlock =
@@ -118,6 +130,7 @@ export async function runPrReview(params: {
       pullBody && `Description: ${pullBody}`,
       `Changed files: ${changedFiles.join(', ')}`,
       commentsBlock,
+      priorJbotThreadBlock,
     ]
       .filter(Boolean)
       .join('\n');
@@ -134,7 +147,7 @@ export async function runPrReview(params: {
     }
 
     log('Running review');
-    const { summary, findings } = await runReview(
+    const { summary, findings, addressedPriorComments } = await runReview(
       client,
       model,
       prContext,
@@ -142,7 +155,9 @@ export async function runPrReview(params: {
       log,
     );
     const filteredFindings = filterFindings(findings, options);
-    log(`Review complete: ${findings.length} finding(s), ${filteredFindings.length} after filters`);
+    log(
+      `Review complete: ${findings.length} finding(s), ${filteredFindings.length} after filters, ${addressedPriorComments.length} addressed prior comment(s)`,
+    );
 
     const inline: Finding[] = [];
     const orphaned: Finding[] = [];
@@ -161,12 +176,29 @@ export async function runPrReview(params: {
       if (inline.length > 0) {
         log(`Dry run inline comments:\n${inline.map(formatInlineFinding).join('\n\n')}`);
       }
+      if (addressedPriorComments.length > 0) {
+        log(
+          `Dry run addressed prior comments:\n${addressedPriorComments
+            .map(formatAddressedPriorComment)
+            .join('\n')}`,
+        );
+      }
       return;
     }
 
     log(`Posting review: verdict=${verdict} inline=${inline.length} orphaned=${orphaned.length}`);
     await postReview(octokit, owner, repo, pullNumber, verdict, body, inline);
     log('Review posted.');
+    await acknowledgeAddressedPriorComments({
+      octokit,
+      owner,
+      repo,
+      pullNumber,
+      headSha,
+      priorJbotThreads,
+      addressedPriorComments,
+      log,
+    });
   } finally {
     stop();
   }
@@ -194,6 +226,90 @@ function filterFindings(findings: Finding[], options: Required<ReviewRunOptions>
 function formatInlineFinding(finding: Finding): string {
   const indentedBody = finding.body.replace(/\n/g, '\n  ');
   return `- ${finding.path}:${finding.line} ${finding.severity} ${finding.title}\n  ${indentedBody}`;
+}
+
+function formatAddressedPriorComment(comment: AddressedPriorComment): string {
+  const commit = comment.addressedByCommit ? ` (${comment.addressedByCommit})` : '';
+  const note = comment.note ? `: ${comment.note}` : '';
+  return `- ${comment.id}${commit}${note}`;
+}
+
+async function safeListPriorJbotThreads(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  log: (msg: string) => void,
+): Promise<PriorJbotThread[]> {
+  try {
+    return await listPriorJbotThreads(octokit, owner, repo, pullNumber);
+  } catch (error) {
+    log(
+      `Prior jbot-review thread lookup skipped: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return [];
+  }
+}
+
+async function acknowledgeAddressedPriorComments(params: {
+  octokit: Octokit;
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  headSha?: string;
+  priorJbotThreads: PriorJbotThread[];
+  addressedPriorComments: AddressedPriorComment[];
+  log: (msg: string) => void;
+}): Promise<void> {
+  if (params.addressedPriorComments.length === 0 || params.priorJbotThreads.length === 0) return;
+
+  const threadsById = new Map(params.priorJbotThreads.map((thread) => [thread.id, thread]));
+  const seen = new Set<string>();
+  for (const addressed of params.addressedPriorComments) {
+    if (seen.has(addressed.id)) continue;
+    seen.add(addressed.id);
+
+    const thread = threadsById.get(addressed.id);
+    if (!thread) {
+      params.log(`Skipping addressed prior comment with unknown thread id: ${addressed.id}`);
+      continue;
+    }
+
+    const addressedByCommit = addressed.addressedByCommit || params.headSha || 'the latest commit';
+    try {
+      await postAddressedThreadReply({
+        octokit: params.octokit,
+        owner: params.owner,
+        repo: params.repo,
+        pullNumber: params.pullNumber,
+        thread,
+        addressedByCommit,
+        note: addressed.note,
+      });
+      params.log(`Posted addressed reply for prior thread ${thread.id}`);
+    } catch (error) {
+      params.log(
+        `Failed to reply to addressed prior thread ${thread.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      continue;
+    }
+
+    if (thread.isResolved) continue;
+    try {
+      await resolveReviewThread(params.octokit, thread.id);
+      params.log(`Resolved prior jbot-review thread ${thread.id}`);
+    } catch (error) {
+      params.log(
+        `Failed to resolve prior jbot-review thread ${thread.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
 }
 
 function buildBody(summary: string, all: Finding[], orphaned: Finding[]): string {
