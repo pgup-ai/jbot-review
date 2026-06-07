@@ -65,10 +65,13 @@ export async function getCheckStatusSummary(
     });
     if (runs.length === 0) return 'No check runs reported for the PR head commit.';
 
-    const passed = runs.filter((run) => run.conclusion === 'success').length;
+    const passed = runs.filter(
+      (run) => run.conclusion === 'success' || run.conclusion === 'neutral',
+    ).length;
     const failed = runs.filter(
       (run) =>
         run.conclusion === 'failure' ||
+        run.conclusion === 'action_required' ||
         run.conclusion === 'timed_out' ||
         run.conclusion === 'cancelled',
     ).length;
