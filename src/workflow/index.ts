@@ -10,41 +10,41 @@ const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3',
 
 async function main(): Promise<void> {
   const failOnError = parseBooleanInput('fail-on-error', true);
+  const token = core.getInput('github-token', { required: true });
+  const provider = core.getInput('provider') || 'opencode';
+  const cfg = PROVIDERS[provider];
+  if (!cfg) {
+    throw new Error(
+      `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
+    );
+  }
+
+  const apiKey = core.getInput('api-key');
+  if (!apiKey) {
+    throw new Error(`Missing API key for provider "${provider}". Pass it via the "api-key" input.`);
+  }
+
+  const model = core.getInput('model') || cfg.defaultModel;
+  validateModelInput(model);
+  const options = {
+    enhancedContext: true,
+    dryRun: parseBooleanInput('dry-run', false),
+    maxFindings: parseNumberInput('max-findings', 0),
+    minSeverity: parseSeverityInput('min-severity', 'nit'),
+    includePriorComments: parseBooleanInput('include-prior-comments', true),
+  };
+  const pullTarget = getPullRequestTarget();
+  core.info(`Provider: ${provider}  Model: ${model}`);
+  core.info(
+    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments}`,
+  );
+
+  const octokit = github.getOctokit(token) as unknown as Octokit;
+  const owner = github.context.repo.owner;
+  const repo = github.context.repo.repo;
 
   try {
-    const token = core.getInput('github-token', { required: true });
-    const provider = core.getInput('provider') || 'opencode';
-    const cfg = PROVIDERS[provider];
-    if (!cfg) {
-      throw new Error(
-        `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-      );
-    }
-
-    const apiKey = core.getInput('api-key');
-    if (!apiKey) {
-      throw new Error(
-        `Missing API key for provider "${provider}". Pass it via the "api-key" input.`,
-      );
-    }
-
-    const model = core.getInput('model') || cfg.defaultModel;
-    const options = {
-      enhancedContext: true,
-      dryRun: parseBooleanInput('dry-run', false),
-      maxFindings: parseNumberInput('max-findings', 0),
-      minSeverity: parseSeverityInput('min-severity', 'nit'),
-      includePriorComments: parseBooleanInput('include-prior-comments', true),
-    };
-    core.info(`Provider: ${provider}  Model: ${model}`);
-    core.info(
-      `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments}`,
-    );
-
-    const octokit = github.getOctokit(token) as unknown as Octokit;
-    const owner = github.context.repo.owner;
-    const repo = github.context.repo.repo;
-    const pull = await resolvePullRequest(octokit, owner, repo);
+    const pull = await resolvePullRequest(octokit, owner, repo, pullTarget);
     core.info(
       `Event: ${github.context.eventName}  PR: #${pull.number}  Action: ${github.context.payload.action ?? 'manual'}`,
     );
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   }
 }
 
-async function resolvePullRequest(octokit: Octokit, owner: string, repo: string) {
+function getPullRequestTarget(): NonNullable<typeof github.context.payload.pull_request> | number {
   const pull = github.context.payload.pull_request;
   if (pull) return pull;
 
@@ -81,10 +81,29 @@ async function resolvePullRequest(octokit: Octokit, owner: string, repo: string)
     );
   }
 
+  return pullNumber;
+}
+
+function validateModelInput(model: string): void {
+  const [providerID, ...rest] = model.split('/');
+  const modelID = rest.join('/');
+  if (!providerID || !modelID) {
+    throw new Error(`Invalid model "${model}"; expected "provider/model".`);
+  }
+}
+
+async function resolvePullRequest(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullTarget: NonNullable<typeof github.context.payload.pull_request> | number,
+) {
+  if (typeof pullTarget !== 'number') return pullTarget;
+
   const response = await octokit.rest.pulls.get({
     owner,
     repo,
-    pull_number: pullNumber,
+    pull_number: pullTarget,
   });
   return response.data;
 }
