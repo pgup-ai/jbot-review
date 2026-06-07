@@ -9,7 +9,6 @@ import { enqueue } from './queue.ts';
 export interface AppConfig {
   appId: string;
   privateKey: string;
-  keyEnv: string;
   apiKey: string;
   model: string;
 }
@@ -46,7 +45,6 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         pullBody: pr.body ?? '',
         workspace: dir,
         model: cfg.model,
-        keyEnv: cfg.keyEnv,
         apiKey: cfg.apiKey,
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });

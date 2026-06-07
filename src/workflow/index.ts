@@ -48,7 +48,6 @@ async function main(): Promise<void> {
     pullBody: pull.body ?? '',
     workspace: process.env.GITHUB_WORKSPACE ?? process.cwd(),
     model,
-    keyEnv: cfg.keyEnv,
     apiKey,
     log: (msg) => core.info(msg),
   });

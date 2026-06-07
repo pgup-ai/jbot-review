@@ -1,70 +1,73 @@
-import { spawn, type ChildProcess } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { createOpencodeClient } from '@opencode-ai/sdk';
+import { createOpencode, type OpencodeClient, type ServerOptions } from '@opencode-ai/sdk';
 
 import { REVIEW_PROMPT } from './prompt.ts';
 import type { Finding, ReviewResult, Severity } from './types.ts';
 
-const HOST = '127.0.0.1';
-const PORT = 4096;
-
-type Client = ReturnType<typeof createOpencodeClient>;
+const READY_TIMEOUT_MS = 15_000;
 
 /**
- * Spawns `opencode serve` as a local child process and returns an SDK client
- * pointed at it. The server runs with cwd set to the checked-out repository so
- * the agent's file tools operate on the user's code, not the action's directory.
- *
- * @param keyEnv - The env var name opencode expects for this provider's key
- *   (e.g. OPENCODE_API_KEY, DEEPSEEK_API_KEY, OPENAI_API_KEY).
- * @param apiKey - The actual key value.
+ * Builds the opencode config object that embeds the API key for the selected
+ * provider. This is the official way to authenticate opencode (replaces the
+ * old "set env var" pattern).
  */
-export function startOpencode(
-  cwd: string,
-  keyEnv: string,
-  apiKey: string,
-): { proc: ChildProcess; client: Client } {
-  const env = { ...process.env, [keyEnv]: apiKey };
-  const proc = spawn('opencode', ['serve', `--hostname=${HOST}`, `--port=${PORT}`], {
-    cwd,
-    stdio: 'inherit',
-    env,
-  });
-  const client = createOpencodeClient({ baseUrl: `http://${HOST}:${PORT}` });
-  return { proc, client };
+function buildConfig(providerID: string, apiKey: string): ServerOptions['config'] {
+  return {
+    provider: {
+      [providerID]: {
+        options: { apiKey },
+      },
+    },
+  };
 }
 
-/** Polls the server until it accepts requests, or fails after ~12 seconds. */
-export async function waitReady(client: Client): Promise<void> {
-  for (let attempt = 0; attempt < 40; attempt++) {
-    try {
-      await client.app.log({
-        body: { service: 'ai-review', level: 'info', message: 'ready check' },
-      });
-      return;
-    } catch {
-      await sleep(300);
-    }
-  }
-  throw new Error('opencode server did not become ready in time');
+/**
+ * Starts an opencode server with the given provider API key embedded in its
+ * config, and returns an SDK client pointed at it. The server is started with
+ * the read-only "plan" agent by default — it cannot edit files, which keeps
+ * the review safe and avoids non-interactive permission prompts that would
+ * hang a CI run.
+ */
+export async function startOpencode(
+  providerID: string,
+  modelID: string,
+  apiKey: string,
+  log: (msg: string) => void,
+): Promise<{ client: OpencodeClient; stop: () => void }> {
+  const config = buildConfig(providerID, apiKey);
+  const { client, server } = await createOpencode({
+    hostname: '127.0.0.1',
+    port: 4096,
+    timeout: READY_TIMEOUT_MS,
+    config,
+  });
+
+  log(`opencode server listening at ${server.url} (provider=${providerID} model=${modelID})`);
+
+  return { client, stop: () => server.close() };
+}
+
+/**
+ * Polls the server until it accepts requests, or fails after ~12 seconds.
+ * Kept for compatibility; the new server factory already waits for readiness
+ * internally, so this is a no-op when the server is up.
+ */
+export async function waitReady(_client: OpencodeClient): Promise<void> {
+  // The new `createOpencode` factory waits for the server to be ready before
+  // returning, so this function is effectively a no-op. Kept for API stability
+  // with existing callers.
+  await sleep(1);
 }
 
 /**
  * Runs one review session and returns structured findings.
  *
- * The agent runs as the read-only "plan" agent by default, which cannot edit
- * files — this is what keeps the review safe and prevents the non-interactive
- * permission prompts that otherwise hang a CI run.
- *
- * The full repository is checked out and the agent uses its own tools (read,
- * grep, glob, git diff) to explore changes — we only provide the PR context
- * (title, description, changed filenames), not the raw diff.
- *
- * @param guidelines - Repo-level review guidelines discovered from AGENTS.md,
- *   REVIEW.md, and .pr-governance/ (may be empty).
+ * Uses the current SDK API: `client.session.prompt()` (replaces the legacy
+ * `chat()` from 0.4.x). The agent runs as the read-only "plan" agent by
+ * default.
  */
 export async function runReview(
-  client: Client,
+  client: OpencodeClient,
   model: string,
   prContext: string,
   guidelines: string,
@@ -90,32 +93,29 @@ export async function runReview(
   const prompt = promptParts.join('\n\n');
   log(`Prompt assembled: ${prompt.length} chars, guidelines=${!!guidelines}`);
 
-  log(`Calling chat (agent=${process.env.AGENT || 'plan'})`);
-  const chatRes = await client.session.chat({
+  log(`Calling prompt (agent=plan)`);
+  const promptRes = await client.session.prompt({
     path: { id: session.id },
     body: {
-      providerID,
-      modelID,
-      agent: process.env.AGENT || 'plan',
+      model: { providerID, modelID },
+      agent: 'plan',
       parts: [{ type: 'text', text: prompt }],
     },
   });
-  const assistant = chatRes.data;
-  if (!assistant) {
-    const detail = 'error' in chatRes
-      ? JSON.stringify((chatRes as Record<string, unknown>).error)
-      : 'empty response';
-    log(`Chat response error: ${detail}`);
-    throw new Error(`opencode chat returned no message (${detail})`);
+  const data = promptRes.data;
+  if (!data) {
+    const detail =
+      'error' in promptRes
+        ? JSON.stringify((promptRes as Record<string, unknown>).error)
+        : 'empty response';
+    log(`Prompt response error: ${detail}`);
+    throw new Error(`opencode prompt returned no message (${detail})`);
   }
-  log(`Chat complete: message=${assistant.id}`);
+  log(
+    `Prompt complete: parts=${data.parts.length} (types: ${data.parts.map((p) => p.type).join(', ')})`,
+  );
 
-  const message = await client.session.message({
-    path: { id: session.id, messageID: assistant.id },
-  });
-  const parts = (message.data?.parts ?? []) as ReadonlyArray<{ type: string; text?: string }>;
-  log(`Response parts: ${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`);
-
+  const parts = data.parts as ReadonlyArray<{ type: string; text?: string }>;
   const textPart = [...parts].reverse().find((p) => p.type === 'text');
   const raw = textPart?.text ?? '{}';
   log(`Extracted text: ${raw.length} chars`);
@@ -128,7 +128,6 @@ const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3',
 function parseReview(raw: string): ReviewResult {
   let parsed: unknown;
   try {
-    // Tolerate stray prose by extracting the outermost JSON object.
     const start = raw.indexOf('{');
     const end = raw.lastIndexOf('}');
     const slice = start >= 0 && end > start ? raw.slice(start, end + 1) : raw;
