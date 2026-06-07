@@ -36,13 +36,15 @@ export async function runPrReview(params: {
   } = params;
 
   // 1. Changed files + patches, minus noise.
-  const files = (await listPrFiles(octokit, owner, repo, pullNumber)).filter(
-    (f) => f.patch && !isNoiseFile(f.filename),
-  );
+  log(`Listing PR files for ${owner}/${repo}#${pullNumber}`);
+  const rawFiles = await listPrFiles(octokit, owner, repo, pullNumber);
+  log(`Files in PR: ${rawFiles.length} total`);
+  const files = rawFiles.filter((f) => f.patch && !isNoiseFile(f.filename));
   if (files.length === 0) {
     log('No reviewable files after filtering.');
     return;
   }
+  log(`Reviewable files: ${files.length} (noise filtered: ${rawFiles.length - files.length})`);
 
   // 2. Build the per-file commentable line sets for inline-comment validation.
   const addable = new Map<string, Set<number>>();
@@ -74,10 +76,15 @@ export async function runPrReview(params: {
     .join('\n');
 
   // 6. Run the agentic review against the checked-out repo.
+  log('Starting opencode server');
   const { proc, client } = startOpencode(workspace, keyEnv, apiKey);
   try {
+    log('Waiting for opencode server readiness');
     await waitReady(client);
-    const { summary, findings } = await runReview(client, model, prContext, guidelines);
+    log('Running review');
+    const { summary, findings } = await runReview(client, model, prContext, guidelines, log);
+
+    log(`Review complete: ${findings.length} finding(s)`);
 
     // 7. Gate: split into inline-anchorable vs orphaned, decide the verdict.
     const inline: Finding[] = [];
@@ -90,8 +97,9 @@ export async function runPrReview(params: {
     const body = buildBody(summary, findings, orphaned);
 
     // 8. Post one review, fully under our control.
+    log(`Posting review: verdict=${verdict} inline=${inline.length} orphaned=${orphaned.length}`);
     await postReview(octokit, owner, repo, pullNumber, verdict, body, inline);
-    log(`Posted ${verdict}: ${findings.length} finding(s), ${inline.length} inline.`);
+    log(`Review posted.`);
   } finally {
     proc.kill();
   }

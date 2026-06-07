@@ -31,6 +31,9 @@ async function main(): Promise<void> {
     core.setFailed('This action must run on a pull_request event.');
     return;
   }
+  core.info(
+    `Event: ${github.context.eventName}  PR: #${pull.number}  Action: ${pull.action ?? 'unknown'}`,
+  );
 
   // @actions/github's getOctokit and our shared Octokit have the same plugin stack
   // (paginateRest + restEndpointMethods). TypeScript can't unify them across
