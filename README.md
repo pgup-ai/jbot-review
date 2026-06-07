@@ -102,6 +102,10 @@ review.
 **Step 4 — Open a PR.** The review runs automatically. To re-trigger, push a
 new commit or close and reopen the PR.
 
+**Migrating from `api-key`:** replace the old unified `api-key` input with the
+matching provider-specific input, such as `opencode-api-key` for
+`provider: opencode`. The unified input is not read by current `v0` builds.
+
 ### Testing locally before publishing
 
 To test the action in the same repo before tagging a release:
@@ -189,7 +193,7 @@ precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
 | `pr-number`              | No       | —                     | PR number for manual `workflow_dispatch` reviews                |
 | `dry-run`                | No       | `false`               | Log review output without posting to GitHub                     |
 | `max-findings`           | No       | `0`                   | Cap findings; `0` means no limit                                |
-| `min-severity`           | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`+                       |
+| `min-severity`           | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                        |
 | `include-prior-comments` | No       | `true`                | Include existing PR review comments in context                  |
 | `fail-on-error`          | No       | `true`                | Fail the workflow if the review cannot complete                 |
 
