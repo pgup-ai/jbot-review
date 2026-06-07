@@ -55,10 +55,8 @@ export async function startOpencode(
   await previous;
 
   const previousCwd = process.cwd();
-  process.chdir(workspace);
-  log(`opencode cwd: ${process.cwd()}`);
-
-  const restoreCwd = () => {
+  let restoreCwd = () => {
+    /* no-op before assignment */
     try {
       process.chdir(previousCwd);
     } catch {
@@ -67,6 +65,17 @@ export async function startOpencode(
   };
 
   try {
+    // Move chdir inside try so the mutex is released on any error.
+    process.chdir(workspace);
+    log(`opencode cwd: ${process.cwd()}`);
+
+    restoreCwd = () => {
+      try {
+        process.chdir(previousCwd);
+      } catch {
+        /* best effort */
+      }
+    };
     const config = buildConfig(providerID, apiKey);
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',
