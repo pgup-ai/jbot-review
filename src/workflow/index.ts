@@ -12,7 +12,7 @@ const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3',
 async function main(): Promise<void> {
   const failOnError = parseBooleanInput('fail-on-error', true);
   const token = core.getInput('github-token', { required: true });
-  const provider = getInputOrEnv('provider', 'JBOT_REVIEW_PROVIDER', 'PROVIDER') || 'opencode';
+  const provider = getInputOrEnv('provider', 'JBOT_REVIEW_PROVIDER') || 'opencode';
   const cfg = PROVIDERS[provider];
   if (!cfg) {
     throw new Error(
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     );
   }
 
-  const model = getInputOrEnv('model', 'JBOT_REVIEW_MODEL', 'MODEL') || cfg.defaultModel;
+  const model = getInputOrEnv('model', 'JBOT_REVIEW_MODEL') || cfg.defaultModel;
   const parsedModel = parseModelName(model);
   if (parsedModel.providerID !== provider) {
     throw new Error(

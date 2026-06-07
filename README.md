@@ -186,14 +186,14 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
 The action reads only the key matching the selected `provider`, so future
 provider changes can be made through `JBOT_REVIEW_PROVIDER` without editing the
 workflow YAML. It accepts provider and model from either action inputs or
-environment variables: `provider`, `JBOT_REVIEW_PROVIDER`, or `PROVIDER` for the
-provider, and `model`, `JBOT_REVIEW_MODEL`, or `MODEL` for the model. Provider
-API keys can also be supplied through their standard env vars, such as
-`OPENROUTER_API_KEY` or `NVIDIA_API_KEY`. This convenience pattern exposes every
-configured provider key to the action runtime. For the smallest secret surface
-area, pass only the key for the provider used by that workflow. If `model` is
-set, its `provider/model` prefix must match the selected `provider`; otherwise
-the run fails before sending a request.
+environment variables: `provider` or `JBOT_REVIEW_PROVIDER` for the provider,
+and `model` or `JBOT_REVIEW_MODEL` for the model. Provider API keys can also be
+supplied through their standard env vars, such as `OPENROUTER_API_KEY` or
+`NVIDIA_API_KEY`. This convenience pattern exposes every configured provider key
+to the action runtime. For the smallest secret surface area, pass only the key
+for the provider used by that workflow. If `model` is set, its `provider/model`
+prefix must match the selected `provider`; otherwise the run fails before
+sending a request.
 
 For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
