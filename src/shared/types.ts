@@ -9,7 +9,14 @@ export interface Finding {
   body: string;
 }
 
+export interface AddressedPriorComment {
+  id: string;
+  addressedByCommit?: string;
+  note?: string;
+}
+
 export interface ReviewResult {
   summary: string;
   findings: Finding[];
+  addressedPriorComments: AddressedPriorComment[];
 }

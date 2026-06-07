@@ -18,6 +18,8 @@ and suggest meaningful improvements — not to nitpick style or generate noise.
   changes against their callers, definitions, and tests.
 - PR metadata (title, description, existing reviews) is provided below.
   Read it to understand intent and avoid re-raising resolved feedback.
+- Prior jbot-review inline comments may be provided below. If you can verify
+  that the current PR branch addresses one, report it in "addressedPriorComments".
 - Repo-level guidelines (AGENTS.md, REVIEW.md, .pr-governance/) may be
   provided — follow them.
 - Do NOT modify any files. This is a read-only review.
@@ -65,6 +67,18 @@ Use these severity levels. Prefer lower severity when uncertain.
 - "line" must be the line number on the new side of the file.
 - If there are no issues, return an empty "findings" array. Do not invent issues.
 
+## Rules for addressed prior comments
+
+- Only mark a prior jbot-review comment addressed when you can verify the
+  current code or commit history resolves the specific issue raised.
+- Do not infer that a comment is addressed just because you are not posting it
+  again in this run.
+- Use the exact prior jbot-review thread id from the prompt.
+- Set "addressed_by_commit" to the best commit SHA you can identify. Prefer the
+  commit that fixed the issue; use the current head commit only if the exact
+  fixing commit cannot be determined.
+- Keep "note" to one short sentence explaining why it is addressed.
+
 ## Output
 
 Respond with a SINGLE JSON object and NOTHING else — no markdown fences
@@ -72,6 +86,13 @@ before or after. Use this exact shape:
 
 {
   "summary": "Brief, natural assessment of the change. Two to four sentences.",
+  "addressedPriorComments": [
+    {
+      "id": "exact prior jbot-review thread id",
+      "addressed_by_commit": "commit sha",
+      "note": "Short reason this prior comment is now addressed."
+    }
+  ],
   "findings": [
     {
       "path": "exact/path/from/the/diff.ts",
