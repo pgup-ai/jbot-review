@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # full tree so the agent can explore context
-      - uses: jingbof/jbot-review-action@v0
+      - uses: pgup-ai/jbot-review-action@v0
         with:
           api-key: ${{ secrets.OPENCODE_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}

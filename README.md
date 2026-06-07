@@ -12,7 +12,7 @@ The review core (`runner.ts` + `opencode.ts` + `github.ts`) is shared between bo
 ## In-repo workflow
 
 The review runs as a Docker container action inside the user's GitHub Actions
-runner. The source code is private; users only see the public [`jingbof/jbot-review-action`](https://github.com/jingbof/jbot-review-action) repo with the thin `action.yml`.
+runner. The source code is private; users only see the public [`pgup-ai/jbot-review-action`](https://github.com/pgup-ai/jbot-review-action) repo with the thin `action.yml`.
 
 ### How it works
 
@@ -20,7 +20,7 @@ runner. The source code is private; users only see the public [`jingbof/jbot-rev
    as a repo secret.
 2. On `pull_request` events, GitHub Actions checks out their repo and runs
    the `jbot-review` Docker container action.
-3. The action pulls the pre-built image from `ghcr.io/jingbof/jbot-review`,
+3. The action pulls the pre-built image from `ghcr.io/pgup-ai/jbot-review`,
    starts `opencode serve` inside the container, and drives a read-only `plan`
    agent over the SDK. The agent discovers repo guidelines (`AGENTS.md`,
    `REVIEW.md`, `.pr-governance/`) and explores the full repo with its own
@@ -31,7 +31,7 @@ runner. The source code is private; users only see the public [`jingbof/jbot-rev
 ### For the action developer (you)
 
 This private repo builds the Docker image. The public
-[`jingbof/jbot-review-action`](https://github.com/jingbof/jbot-review-action)
+[`pgup-ai/jbot-review-action`](https://github.com/pgup-ai/jbot-review-action)
 repo is what users reference — it contains just the thin `action.yml` that
 pulls the image.
 
@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: jingbof/jbot-review-action@v0 # latest v0.x.y
+      - uses: pgup-ai/jbot-review-action@v0 # latest v0.x.y
         with:
           api-key: ${{ secrets.OPENCODE_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -100,7 +100,7 @@ new commit or close and reopen the PR.
 To test the action in the same repo before tagging a release:
 
 ```yaml
-# Use the relative path instead of jingbof/jbot-review-action@v0.1.0:
+# Use the relative path instead of pgup-ai/jbot-review-action@v0.1.0:
 - uses: ./
   with:
     api-key: ${{ secrets.OPENCODE_API_KEY }}
@@ -123,7 +123,7 @@ Set the `model` input to override the default. The `api-key` input is always
 required; OpenCode handles routing to the right provider at runtime:
 
 ```yaml
-- uses: jingbof/jbot-review-action@v0.1.0
+- uses: pgup-ai/jbot-review-action@v0.1.0
   with:
     provider: deepseek
     api-key: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -165,7 +165,7 @@ Go to [Settings → Developer settings → GitHub Apps → New GitHub App](https
 | Setting         | Value                                                       |
 | --------------- | ----------------------------------------------------------- |
 | GitHub App name | `jbot-review` (or anything)                                 |
-| Homepage URL    | `https://github.com/jingbof/jbot-review`                    |
+| Homepage URL    | `https://github.com/pgup-ai/jbot-review`                    |
 | Webhook URL     | `https://<your-deployed-url>/webhooks`                      |
 | Webhook secret  | Generate a long random string (e.g. `openssl rand -hex 32`) |
 
