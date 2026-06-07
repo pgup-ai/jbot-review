@@ -107,6 +107,19 @@ export async function startOpencode(
   }
 }
 
+export async function listProviderModels(
+  client: OpencodeClient,
+  providerID: string,
+): Promise<string[]> {
+  const result = await client.provider.list();
+  const provider = result.data?.all.find((item) => item.id === providerID);
+  if (!provider) return [];
+
+  return Object.keys(provider.models)
+    .map((modelID) => `${providerID}/${modelID}`)
+    .sort();
+}
+
 /**
  * Runs one review session and returns structured findings.
  *

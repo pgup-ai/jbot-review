@@ -44,6 +44,8 @@ git push origin v0 --force
 ```
 
 The Dockerfile uses `node:20-slim` and runs the bundled JS from `dist/`.
+The `v0` action reference is a moving major-version tag; pin to an immutable
+release tag if you need fully stable action behavior.
 
 ### For the user (repo owner who wants reviews)
 
@@ -116,13 +118,13 @@ npm run replay -- fixtures/replay
 
 See [models.dev](https://models.dev/) for the full list of models and providers.
 
-| `provider`   | Default model                     | Hosted/direct key env |
-| ------------ | --------------------------------- | --------------------- |
-| `opencode`   | `opencode/deepseek-v4-flash-free` | `OPENCODE_API_KEY`    |
-| `deepseek`   | `deepseek/deepseek-v4-flash`      | `DEEPSEEK_API_KEY`    |
-| `openai`     | `openai/gpt-5.4-nano`             | `OPENAI_API_KEY`      |
-| `anthropic`  | `anthropic/claude-sonnet-4-6`     | `ANTHROPIC_API_KEY`   |
-| `openrouter` | `openrouter/openai/gpt-4o-mini`   | `OPENROUTER_API_KEY`  |
+| `provider`   | Default model                     | Direct key env       |
+| ------------ | --------------------------------- | -------------------- |
+| `opencode`   | `opencode/deepseek-v4-flash-free` | `OPENCODE_API_KEY`   |
+| `deepseek`   | `deepseek/deepseek-v4-flash`      | `DEEPSEEK_API_KEY`   |
+| `openai`     | `openai/gpt-5.4-nano`             | `OPENAI_API_KEY`     |
+| `anthropic`  | `anthropic/claude-sonnet-4-6`     | `ANTHROPIC_API_KEY`  |
+| `openrouter` | `openrouter/openai/gpt-4o-mini`   | `OPENROUTER_API_KEY` |
 
 Set the `provider` and `model` inputs to override the defaults. For automatic
 PR reviews without editing workflow YAML on every provider or model change,
@@ -141,7 +143,8 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
 ```
 
 For this simple gateway pattern, keep one `api-key` input and make sure the
-configured `JBOT_REVIEW_API_KEY` secret works for the selected provider.
+configured `JBOT_REVIEW_API_KEY` secret works for the selected provider. The
+direct key env names above are for hosted App and local direct-config usage.
 
 For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
@@ -643,10 +646,10 @@ docker push $AWS_ACCOUNT.dkr.ecr.$REGION.amazonaws.com/jbot-review
 | Oracle Free Tier          | $0        | $0                | No                  |
 
 Cloudflare is a good fit if the app is split into a Worker/Queue control plane
-and a containerized review worker; it is not the same simple always-on Docker web
-service path as Cloud Run, Fly.io, or Render. CloudCone is the cheapest VPS-style
-option here, but it means self-managing the VM, deploys, process supervisor,
-TLS/reverse proxy, and security updates.
+with containerized review workers, unlike the simple Docker web service model of
+Cloud Run, Fly.io, or Render. CloudCone is the cheapest VPS-style option here,
+but it means self-managing the VM, deploys, process supervisor, TLS/reverse
+proxy, and security updates.
 
 ## Project guidelines
 
@@ -689,7 +692,8 @@ Dockerfile          # container image for hosted App
 
 `plan` is OpenCode's built-in read-only agent: it can read, grep, and glob but
 cannot edit files. Using it keeps the review safe and avoids non-interactive
-permission prompts that hang a CI job.
+permission prompts that hang a CI job. Agent selection is intentionally fixed for
+CI reviews.
 
 ## Notes
 
