@@ -166,7 +166,7 @@ export async function runPrReview(params: {
       else orphaned.push(f);
     }
     const verdict = decideVerdict(filteredFindings);
-    const body = buildBody(summary, filteredFindings, orphaned);
+    const body = buildBody(summary, filteredFindings, orphaned, headSha);
 
     if (options.dryRun) {
       log(
@@ -312,11 +312,16 @@ async function acknowledgeAddressedPriorComments(params: {
   }
 }
 
-function buildBody(summary: string, all: Finding[], orphaned: Finding[]): string {
+function buildBody(summary: string, all: Finding[], orphaned: Finding[], headSha?: string): string {
   const total = all.length;
   const lines = ['## jbot code review', '', summary || 'No summary provided.', ''];
+  const guidance = getMergeGuidance(all);
+  lines.push(`**Review state:** ${guidance.state}`);
+  lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`);
+  if (headSha) lines.push(`**Reviewed head:** \`${headSha.slice(0, 12)}\``);
+  lines.push('');
   if (total === 0) {
-    lines.push('_No issues found._');
+    lines.push('_No new findings._');
   } else {
     const counts = countBySeverity(all);
     lines.push(`**${total} finding(s)** | ${counts}`, '');
@@ -329,6 +334,33 @@ function buildBody(summary: string, all: Finding[], orphaned: Finding[]): string
     }
   }
   return lines.join('\n');
+}
+
+function getMergeGuidance(findings: Pick<Finding, 'severity'>[]): {
+  state: string;
+  mergeGuidance: string;
+} {
+  if (findings.length === 0) {
+    return {
+      state: 'Good to go from jbot-review',
+      mergeGuidance: 'No new findings were found in this review run.',
+    };
+  }
+
+  const hasBlockingFinding = findings.some(
+    (finding) => SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2,
+  );
+  if (hasBlockingFinding) {
+    return {
+      state: 'Needs changes before approval',
+      mergeGuidance: 'Address the P0/P1/P2 findings before treating this PR as ready to approve.',
+    };
+  }
+
+  return {
+    state: 'Mergeable with non-blocking comments',
+    mergeGuidance: 'Only P3/nit findings were found; jbot-review does not consider these blocking.',
+  };
 }
 
 function countBySeverity(findings: Pick<Finding, 'severity'>[]): string {
