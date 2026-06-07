@@ -37,7 +37,8 @@ pulls the image.
 
 ```bash
 # CI auto-builds and pushes the image on every push to main.
-# To release a new v0 version of the public action, move the v0 tag:
+# To release a new v0 version of the public action, make sure the public
+# action.yml matches this repo's action.yml, then move the v0 tag:
 cd ../jbot-review-action    # or wherever it's checked out
 git tag -f v0
 git push origin v0 --force
@@ -73,7 +74,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: pgup-ai/jbot-review-action@v0 # latest v0.x.y
+      - uses: pgup-ai/jbot-review-action@v0 # moving v0 tag; pin a release tag for stability
         with:
           provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
           model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
@@ -643,6 +644,9 @@ docker push $AWS_ACCOUNT.dkr.ecr.$REGION.amazonaws.com/jbot-review
 | DigitalOcean App Platform | $5/mo     | $0                | No                  |
 | Oracle Free Tier          | $0        | $0                | No                  |
 
+Prices are approximate and tier-dependent; check each provider's current limits
+before choosing a host.
+
 Cloudflare is a good fit if the app is split into a Worker/Queue control plane
 with containerized review workers, unlike the simple Docker web service model of
 Cloud Run, Fly.io, or Render. CloudCone is the cheapest VPS-style option here,
@@ -691,7 +695,7 @@ Dockerfile          # container image for hosted App
 `plan` is OpenCode's built-in read-only agent: it can read, grep, and glob but
 cannot edit files. Using it keeps the review safe and avoids non-interactive
 permission prompts that hang a CI job. Agent selection is intentionally fixed for
-CI reviews.
+CI reviews; there is no supported `AGENT` env override.
 
 ## Notes
 
