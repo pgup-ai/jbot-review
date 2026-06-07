@@ -16,7 +16,8 @@ interface ReplayFile {
 async function readJson<T>(path: string, fallback: T): Promise<T> {
   try {
     return JSON.parse(await readFile(path, 'utf8')) as T;
-  } catch {
+  } catch (error) {
+    warnUnlessMissing(path, error);
     return fallback;
   }
 }
@@ -24,9 +25,18 @@ async function readJson<T>(path: string, fallback: T): Promise<T> {
 async function readText(path: string, fallback: string): Promise<string> {
   try {
     return await readFile(path, 'utf8');
-  } catch {
+  } catch (error) {
+    warnUnlessMissing(path, error);
     return fallback;
   }
+}
+
+function warnUnlessMissing(path: string, error: unknown): void {
+  if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+    return;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  console.warn(`Warning: ${path}: ${message}`);
 }
 
 const fixtureDir = process.argv[2] ?? 'fixtures/replay';

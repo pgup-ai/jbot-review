@@ -65,19 +65,20 @@ export async function getCheckStatusSummary(
     });
     if (runs.length === 0) return 'No check runs reported for the PR head commit.';
 
-    const passed = runs.filter(
+    const completed = runs.filter((run) => run.status === 'completed');
+    const passed = completed.filter(
       (run) => run.conclusion === 'success' || run.conclusion === 'neutral',
     ).length;
-    const failed = runs.filter(
+    const failed = completed.filter(
       (run) =>
         run.conclusion === 'failure' ||
         run.conclusion === 'action_required' ||
         run.conclusion === 'timed_out' ||
         run.conclusion === 'cancelled',
     ).length;
-    const skipped = runs.filter((run) => run.conclusion === 'skipped').length;
-    const pending = runs.filter((run) => run.status !== 'completed').length;
-    const other = runs.length - passed - failed - skipped - pending;
+    const skipped = completed.filter((run) => run.conclusion === 'skipped').length;
+    const pending = runs.length - completed.length;
+    const other = completed.length - passed - failed - skipped;
     const details = runs
       .slice(0, 10)
       .map((run) => `- ${run.name}: ${run.status}${run.conclusion ? `/${run.conclusion}` : ''}`);
