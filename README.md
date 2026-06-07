@@ -37,8 +37,10 @@ pulls the image.
 
 ```bash
 # CI auto-builds and pushes the image on every push to main.
-# To release a new v0 version of the public action, make sure the public
-# action.yml matches this repo's action.yml, then move the v0 tag:
+# To release a new v0 version of the public action:
+# 1. Make sure ghcr.io/pgup-ai/jbot-review:latest exists and is public.
+# 2. Make sure the public action.yml matches this repo's action.yml.
+# 3. Move the v0 tag:
 cd ../jbot-review-action    # or wherever it's checked out
 git tag -f v0
 git push origin v0 --force
@@ -98,6 +100,13 @@ new commit or close and reopen the PR.
 To test the action in the same repo before tagging a release:
 
 ```yaml
+# Authenticate before pulling a private GHCR package during self-tests.
+- uses: docker/login-action@v3
+  with:
+    registry: ghcr.io
+    username: ${{ github.actor }}
+    password: ${{ secrets.GITHUB_TOKEN }}
+
 # Use the relative path instead of pgup-ai/jbot-review-action@v0:
 - uses: ./
   with:
