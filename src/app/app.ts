@@ -48,7 +48,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         model: cfg.model,
         keyEnv: cfg.keyEnv,
         apiKey: cfg.apiKey,
-        log: (msg) => console.log(`[jbot-review] ${msg}`),
+        log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });
     } catch (error) {
       console.error(

@@ -68,6 +68,7 @@ export async function runReview(
   model: string,
   prContext: string,
   guidelines: string,
+  log: (msg: string) => void,
 ): Promise<ReviewResult> {
   const [providerID, ...rest] = model.split('/');
   const modelID = rest.join('/');
@@ -75,9 +76,11 @@ export async function runReview(
     throw new Error(`Invalid model "${model}"; expected "provider/model".`);
   }
 
+  log(`Creating opencode session (provider=${providerID} model=${modelID})`);
   const created = await client.session.create();
   const session = created.data;
   if (!session) throw new Error('Failed to create opencode session');
+  log(`Session created: ${session.id}`);
 
   const promptParts = [REVIEW_PROMPT];
   if (guidelines) {
@@ -85,9 +88,9 @@ export async function runReview(
   }
   promptParts.push(prContext);
   const prompt = promptParts.join('\n\n');
+  log(`Prompt assembled: ${prompt.length} chars, guidelines=${!!guidelines}`);
 
-  // chat() resolves when the turn completes and returns the assistant message
-  // metadata. The text/tool parts are then fetched by message id.
+  log(`Calling chat (agent=${process.env.AGENT || 'plan'})`);
   const chatRes = await client.session.chat({
     path: { id: session.id },
     body: {
@@ -99,17 +102,24 @@ export async function runReview(
   });
   const assistant = chatRes.data;
   if (!assistant) {
-    const detail = 'error' in chatRes ? JSON.stringify((chatRes as Record<string, unknown>).error) : 'empty response';
+    const detail = 'error' in chatRes
+      ? JSON.stringify((chatRes as Record<string, unknown>).error)
+      : 'empty response';
+    log(`Chat response error: ${detail}`);
     throw new Error(`opencode chat returned no message (${detail})`);
   }
+  log(`Chat complete: message=${assistant.id}`);
 
   const message = await client.session.message({
     path: { id: session.id, messageID: assistant.id },
   });
   const parts = (message.data?.parts ?? []) as ReadonlyArray<{ type: string; text?: string }>;
-  // Find the last text part (after any tool calls) — that's the final response.
+  log(`Response parts: ${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`);
+
   const textPart = [...parts].reverse().find((p) => p.type === 'text');
-  return parseReview(textPart?.text ?? '{}');
+  const raw = textPart?.text ?? '{}';
+  log(`Extracted text: ${raw.length} chars`);
+  return parseReview(raw);
 }
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
