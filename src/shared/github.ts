@@ -288,9 +288,6 @@ async function listJbotReviewCommentState(
       .filter((review) => review.user?.login === viewerLogin && isJbotReviewBody(review.body ?? ''))
       .map((review) => review.id),
   );
-  if (jbotReviewIds.size === 0) {
-    return { ownedTopLevelIds: new Set(), addressedTopLevelIds: new Set() };
-  }
 
   const comments = await octokit.paginate(octokit.rest.pulls.listReviewComments, {
     owner,
