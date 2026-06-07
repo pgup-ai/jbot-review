@@ -154,9 +154,9 @@ interface ReviewThreadsResponse {
               author?: {
                 login: string;
               } | null;
-            }>;
+            } | null>;
           };
-        }>;
+        } | null>;
       };
     } | null;
   } | null;
@@ -234,6 +234,7 @@ export async function listPriorJbotThreads(
     );
 
     for (const thread of page.nodes) {
+      if (!thread) continue;
       const topLevel = thread.comments.nodes[0];
       if (!topLevel?.databaseId) continue;
       if (
@@ -248,7 +249,7 @@ export async function listPriorJbotThreads(
         continue;
       const alreadyAcknowledged = thread.comments.nodes.some(
         (comment) =>
-          comment.author?.login === viewerLogin && comment.body.includes(ADDRESSED_MARKER),
+          comment?.author?.login === viewerLogin && comment.body.includes(ADDRESSED_MARKER),
       );
       if (alreadyAcknowledged || commentState.addressedTopLevelIds.has(topLevel.databaseId))
         continue;
