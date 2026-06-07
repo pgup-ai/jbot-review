@@ -77,15 +77,13 @@ jobs:
         with:
           provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
           model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
-          api-key: ${{ secrets.JBOT_REVIEW_API_KEY }}
+          api-key: ${{ secrets.OPENCODE_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 **Step 2 — Add the API key as a secret.** In the repo: Settings → Secrets and
-variables → Actions → New repository secret. The simple gateway pattern is to
-use one stable secret, `JBOT_REVIEW_API_KEY`, and make sure its value works for
-the selected provider. If `JBOT_REVIEW_PROVIDER=opencode`, store an OpenCode key;
-if it points at another provider, store a key for that provider.
+variables → Actions → New repository secret. For the default `opencode`
+provider, create `OPENCODE_API_KEY` with your OpenCode key.
 
 **Step 3 — (Optional) Add review guidelines.** Drop an `AGENTS.md`, `REVIEW.md`,
 or files in `.pr-governance/` at the repo root. The agent reads these during
@@ -102,7 +100,7 @@ To test the action in the same repo before tagging a release:
 # Use the relative path instead of pgup-ai/jbot-review-action@v0:
 - uses: ./
   with:
-    api-key: ${{ secrets.JBOT_REVIEW_API_KEY }}
+    api-key: ${{ secrets.OPENCODE_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
     dry-run: true
 ```
@@ -137,14 +135,14 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
 - uses: pgup-ai/jbot-review-action@v0
   with:
     provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
-    api-key: ${{ secrets.JBOT_REVIEW_API_KEY }}
+    api-key: ${{ secrets.OPENCODE_API_KEY }}
     model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-For this simple gateway pattern, keep one `api-key` input and make sure the
-configured `JBOT_REVIEW_API_KEY` secret works for the selected provider. The
-direct key env names above are for hosted App and local direct-config usage.
+Keep the `api-key` input matched to the selected provider. The examples above use
+`OPENCODE_API_KEY` because `opencode` is the default provider; if you switch
+providers, pass the matching secret from the direct key env table.
 
 For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic

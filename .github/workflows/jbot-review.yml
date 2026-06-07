@@ -65,5 +65,5 @@ jobs:
           min-severity: ${{ inputs['min-severity'] || 'nit' }}
           include-prior-comments: ${{ inputs['include-prior-comments'] || 'true' }}
           fail-on-error: ${{ inputs['fail-on-error'] || 'true' }}
-          api-key: ${{ secrets.JBOT_REVIEW_API_KEY || secrets.OPENCODE_API_KEY }}
+          api-key: ${{ secrets.OPENCODE_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
