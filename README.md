@@ -105,6 +105,14 @@ To test the action in the same repo before tagging a release:
   with:
     api-key: ${{ secrets.OPENCODE_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
+    dry-run: true
+```
+
+To replay the prompt context locally from fixtures without posting to GitHub:
+
+```bash
+npm run replay
+npm run replay -- fixtures/replay
 ```
 
 ### Provider configuration (in-repo)
@@ -133,12 +141,18 @@ required; OpenCode handles routing to the right provider at runtime:
 
 ### Input reference
 
-| Input          | Required | Default               | Description                        |
-| -------------- | -------- | --------------------- | ---------------------------------- |
-| `provider`     | No       | `opencode`            | LLM provider key (see table above) |
-| `model`        | No       | Provider default      | Override as `provider/model`       |
-| `api-key`      | Yes      | —                     | API key for the selected provider  |
-| `github-token` | Yes      | `${{ github.token }}` | Token to read PR and post review   |
+| Input                    | Required | Default               | Description                                      |
+| ------------------------ | -------- | --------------------- | ------------------------------------------------ |
+| `provider`               | No       | `opencode`            | LLM provider key (see table above)               |
+| `model`                  | No       | Provider default      | Override as `provider/model`                     |
+| `api-key`                | Yes      | —                     | API key for the selected provider                |
+| `github-token`           | Yes      | `${{ github.token }}` | Token to read PR and post review                 |
+| `pr-number`              | No       | —                     | PR number for manual `workflow_dispatch` reviews |
+| `dry-run`                | No       | `false`               | Log review output without posting to GitHub      |
+| `max-findings`           | No       | `0`                   | Cap findings; `0` means no limit                 |
+| `min-severity`           | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`+        |
+| `include-prior-comments` | No       | `true`                | Include existing PR review comments in context   |
+| `fail-on-error`          | No       | `true`                | Fail the workflow if the review cannot complete  |
 
 ## Hosted GitHub App
 

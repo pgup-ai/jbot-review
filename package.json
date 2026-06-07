@@ -11,7 +11,8 @@
     "format:check": "prettier --check .",
     "lint": "oxlint --deny-warnings",
     "dev": "tsx src/app/server.ts",
-    "start": "npx tsx src/app/server.ts"
+    "start": "npx tsx src/app/server.ts",
+    "replay": "tsx scripts/replay-review.ts"
   },
   "dependencies": {
     "@actions/core": "^1.11.1",

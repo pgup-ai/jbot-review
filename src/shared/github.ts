@@ -1,8 +1,9 @@
-import type { Finding } from './types.ts';
-
 import { Octokit as CoreOctokit } from '@octokit/core';
 import { paginateRest } from '@octokit/plugin-paginate-rest';
 import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
+
+import type { Finding } from './types.ts';
+import type { ReviewCommit } from './review-context.ts';
 
 const Review = CoreOctokit.plugin(paginateRest, restEndpointMethods);
 export type Octokit = InstanceType<typeof Review>;
@@ -28,6 +29,62 @@ export async function listPrFiles(
     per_page: 100,
   });
   return files.map((f) => ({ filename: f.filename, patch: f.patch }));
+}
+
+export async function listPrCommits(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+): Promise<ReviewCommit[]> {
+  const commits = await octokit.paginate(octokit.rest.pulls.listCommits, {
+    owner,
+    repo,
+    pull_number: pullNumber,
+    per_page: 100,
+  });
+  return commits.map((commit) => ({
+    sha: commit.sha,
+    message: commit.commit.message.split('\n')[0] ?? '',
+    author: commit.author?.login ?? commit.commit.author?.name ?? undefined,
+  }));
+}
+
+export async function getCheckStatusSummary(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  ref: string,
+): Promise<string> {
+  try {
+    const runs = await octokit.paginate(octokit.rest.checks.listForRef, {
+      owner,
+      repo,
+      ref,
+      per_page: 100,
+    });
+    if (runs.length === 0) return 'No check runs reported for the PR head commit.';
+
+    const passed = runs.filter((run) => run.conclusion === 'success').length;
+    const failed = runs.filter(
+      (run) =>
+        run.conclusion === 'failure' ||
+        run.conclusion === 'timed_out' ||
+        run.conclusion === 'cancelled',
+    ).length;
+    const skipped = runs.filter((run) => run.conclusion === 'skipped').length;
+    const pending = runs.filter((run) => run.status !== 'completed').length;
+    const details = runs
+      .slice(0, 10)
+      .map((run) => `- ${run.name}: ${run.status}${run.conclusion ? `/${run.conclusion}` : ''}`);
+
+    return [
+      `${runs.length} check run(s): ${passed} passed, ${pending} pending, ${failed} failed, ${skipped} skipped.`,
+      ...details,
+    ].join('\n');
+  } catch (error) {
+    return `Check status unavailable: ${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 /**
