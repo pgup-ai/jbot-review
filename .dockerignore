@@ -1,10 +1,13 @@
 node_modules/
-dist/
 .git/
 .github/
+src/
+scripts/
 *.log
 .env
 .DS_Store
 .idea/
-README.md
 *.md
+tsconfig.json
+dockerignore
+
