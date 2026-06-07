@@ -14,11 +14,11 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyEnv: 'DEEPSEEK_API_KEY',
   },
   openai: {
-    defaultModel: 'openai/gpt-4o-mini',
+    defaultModel: 'openai/gpt-5.4-nano',
     keyEnv: 'OPENAI_API_KEY',
   },
   anthropic: {
-    defaultModel: 'anthropic/claude-sonnet-4-20250514',
+    defaultModel: 'anthropic/claude-sonnet-4-6',
     keyEnv: 'ANTHROPIC_API_KEY',
   },
   openrouter: {

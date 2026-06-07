@@ -98,7 +98,10 @@ export async function runReview(
     },
   });
   const assistant = chatRes.data;
-  if (!assistant) throw new Error('opencode chat returned no message');
+  if (!assistant) {
+    const detail = 'error' in chatRes ? JSON.stringify((chatRes as Record<string, unknown>).error) : 'empty response';
+    throw new Error(`opencode chat returned no message (${detail})`);
+  }
 
   const message = await client.session.message({
     path: { id: session.id, messageID: assistant.id },
