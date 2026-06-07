@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -81,6 +82,8 @@ export async function runPrReview(params: {
   try {
     log('Waiting for opencode server readiness');
     await waitReady(client);
+    const models = execSync('opencode models', { encoding: 'utf8', timeout: 5000 });
+    log(`Available models:\n${models.trim()}`);
     log('Running review');
     const { summary, findings } = await runReview(client, model, prContext, guidelines, log);
 
