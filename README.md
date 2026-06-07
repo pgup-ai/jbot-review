@@ -95,6 +95,18 @@ you want to use, such as `OPENCODE_API_KEY`, `OPENROUTER_API_KEY`, `XAI_API_KEY`
 or `ANTHROPIC_API_KEY`. Empty provider key inputs are ignored unless that
 provider is selected.
 
+**Secret exposure:** the example above passes multiple provider secrets so
+`JBOT_REVIEW_PROVIDER` can switch providers without another YAML edit. For a
+least-privilege setup, pass only the selected provider's key:
+
+```yaml
+with:
+  provider: opencode
+  model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
+  opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
+  github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
 **Step 3 — (Optional) Add review guidelines.** Drop an `AGENTS.md`, `REVIEW.md`,
 or files in `.pr-governance/` at the repo root. The agent reads these during
 review.
@@ -170,8 +182,11 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
 
 The action reads only the key input matching the selected `provider`, so future
 provider changes can be made through `JBOT_REVIEW_PROVIDER` without editing the
-workflow YAML. If `model` is set, its `provider/model` prefix must match the
-selected `provider`; otherwise the run fails before sending a request.
+workflow YAML. This convenience pattern exposes every configured provider key to
+the action runtime. For the smallest secret surface area, pass only the key for
+the provider used by that workflow. If `model` is set, its `provider/model`
+prefix must match the selected `provider`; otherwise the run fails before
+sending a request.
 
 For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
