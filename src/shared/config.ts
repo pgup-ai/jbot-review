@@ -6,7 +6,7 @@ export interface ProviderConfig {
 // See https://models.dev/ for the full list of available models and providers.
 export const PROVIDERS: Record<string, ProviderConfig> = {
   opencode: {
-    defaultModel: 'opencode/deepseek-v4-flash-free',
+    defaultModel: 'opencode/deepseek-v4-flash',
     keyEnv: 'OPENCODE_API_KEY',
   },
   deepseek: {
