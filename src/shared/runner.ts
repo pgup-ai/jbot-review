@@ -178,16 +178,7 @@ export async function runPrReview(params: {
       else orphaned.push(f);
     }
     const verdict = decideVerdict(filteredFindings);
-    const body = buildBody(
-      summary,
-      filteredFindings,
-      orphaned,
-      model,
-      owner,
-      repo,
-      pullNumber,
-      headSha,
-    );
+    const body = buildBody(summary, filteredFindings, orphaned, model, owner, repo, headSha);
 
     if (options.dryRun) {
       log(
@@ -385,7 +376,6 @@ function buildBody(
   model: string,
   owner: string,
   repo: string,
-  pullNumber: number,
   headSha?: string,
 ): string {
   const total = all.length;
@@ -395,7 +385,7 @@ function buildBody(
   lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`);
   if (headSha) {
     lines.push(
-      `**Reviewed head:** [\`${headSha.slice(0, 12)}\`](https://github.com/${owner}/${repo}/pull/${pullNumber}/changes/${headSha})`,
+      `**Reviewed head:** [\`${headSha.slice(0, 12)}\`](https://github.com/${owner}/${repo}/commit/${headSha})`,
     );
   }
   lines.push('');
