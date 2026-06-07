@@ -55,11 +55,12 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/merge', inputs['pr-number']) }}
-      - uses: docker/login-action@v3
+      - uses: actions/setup-node@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          node-version: '20'
+      - run: npm ci
+      - run: npm run build
+      - run: docker build -t ghcr.io/pgup-ai/jbot-review:latest .
       - uses: ./
         with:
           provider: ${{ inputs.provider || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}

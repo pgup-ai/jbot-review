@@ -100,12 +100,13 @@ new commit or close and reopen the PR.
 To test the action in the same repo before tagging a release:
 
 ```yaml
-# Authenticate before pulling a private GHCR package during self-tests.
-- uses: docker/login-action@v3
+# Build the branch image locally so the local action does not pull GHCR.
+- uses: actions/setup-node@v4
   with:
-    registry: ghcr.io
-    username: ${{ github.actor }}
-    password: ${{ secrets.GITHUB_TOKEN }}
+    node-version: '20'
+- run: npm ci
+- run: npm run build
+- run: docker build -t ghcr.io/pgup-ai/jbot-review:latest .
 
 # Use the relative path instead of pgup-ai/jbot-review-action@v0:
 - uses: ./
