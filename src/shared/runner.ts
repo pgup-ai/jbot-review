@@ -139,7 +139,7 @@ async function discoverGuidelines(cwd: string): Promise<string> {
 
 function buildBody(summary: string, all: Finding[], orphaned: Finding[]): string {
   const total = all.length;
-  const lines = ['## AI code review', '', summary || 'No summary provided.', ''];
+  const lines = ['## jbot code review', '', summary || 'No summary provided.', ''];
   if (total === 0) {
     lines.push('_No issues found._');
   } else {

@@ -21,6 +21,13 @@ function buildConfig(providerID: string, apiKey: string): ServerOptions['config'
 }
 
 /**
+ * Serializes the `process.chdir(workspace) → createOpencode → restoreCwd`
+ * critical section so concurrent startOpencode calls don't race on the
+ * process-global cwd. Each call awaits the previous one before mutating.
+ */
+let cwdChain: Promise<void> = Promise.resolve();
+
+/**
  * Starts an opencode server with the given provider API key embedded in its
  * config, and returns an SDK client pointed at it. The server's child process
  * inherits the current working directory, so we set cwd to the workspace
@@ -35,13 +42,30 @@ export async function startOpencode(
   apiKey: string,
   log: (msg: string) => void,
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
+  // Serialize against other startOpencode calls so the chdir → spawn → restore
+  // sequence runs atomically. This is the only safe way to scope cwd to the
+  // child process while using the SDK's `createOpencode` factory, which
+  // doesn't accept a cwd option directly.
+  const previous = cwdChain;
+  let release: () => void = () => undefined;
+  cwdChain = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await previous;
+
   const previousCwd = process.cwd();
   process.chdir(workspace);
   log(`opencode cwd: ${process.cwd()}`);
 
-  let stop: () => void = () => {
-    /* replaced below after server is created */
+  const restoreCwd = () => {
+    try {
+      process.chdir(previousCwd);
+    } catch {
+      /* best effort */
+    }
   };
+
   try {
     const config = buildConfig(providerID, apiKey);
     const { client, server } = await createOpencode({
@@ -53,27 +77,22 @@ export async function startOpencode(
 
     log(`opencode server listening at ${server.url} (provider=${providerID} model=${modelID})`);
 
-    const restoreCwd = () => {
+    const stop = () => {
+      // Wrap server.close() in try/finally so cwd is always restored, even
+      // if close() throws (e.g., double-close).
       try {
-        process.chdir(previousCwd);
-      } catch {
-        /* best effort */
+        server.close();
+      } finally {
+        restoreCwd();
+        release();
       }
-    };
-
-    stop = () => {
-      server.close();
-      restoreCwd();
     };
 
     return { client, stop };
   } catch (err) {
-    // Restore cwd if server creation failed.
-    try {
-      process.chdir(previousCwd);
-    } catch {
-      /* best effort */
-    }
+    // Restore cwd on failure and release the lock so the next caller can proceed.
+    restoreCwd();
+    release();
     throw err;
   }
 }
