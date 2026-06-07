@@ -22,7 +22,6 @@ if (!cfg) {
 const appCfg: AppConfig = {
   appId: mustEnv('GITHUB_APP_ID'),
   privateKey: mustEnv('GITHUB_APP_PRIVATE_KEY').replace(/\\n/g, '\n'),
-  keyEnv: cfg.keyEnv,
   apiKey: mustEnv(cfg.keyEnv),
   model: process.env.MODEL || cfg.defaultModel,
 };

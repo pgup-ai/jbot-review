@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { isNoiseFile } from './filter.ts';
 import { parseAddedLines } from './patch.ts';
-import { startOpencode, waitReady, runReview } from './opencode.ts';
+import { startOpencode, runReview } from './opencode.ts';
 import { listPrFiles, listPrComments, postReview, decideVerdict } from './github.ts';
 import type { Octokit } from './github.ts';
 import type { Finding } from './types.ts';
@@ -18,23 +18,17 @@ export async function runPrReview(params: {
   pullBody: string;
   workspace: string;
   model: string;
-  keyEnv: string;
   apiKey: string;
   log: (msg: string) => void;
 }): Promise<void> {
-  const {
-    octokit,
-    owner,
-    repo,
-    pullNumber,
-    pullTitle,
-    pullBody,
-    workspace,
-    model,
-    keyEnv,
-    apiKey,
-    log,
-  } = params;
+  const { octokit, owner, repo, pullNumber, pullTitle, pullBody, workspace, model, apiKey, log } =
+    params;
+
+  const [providerID, ...rest] = model.split('/');
+  const modelID = rest.join('/');
+  if (!providerID || !modelID) {
+    throw new Error(`Invalid model "${model}"; expected "provider/model".`);
+  }
 
   // 1. Changed files + patches, minus noise.
   log(`Listing PR files for ${owner}/${repo}#${pullNumber}`);
@@ -76,17 +70,19 @@ export async function runPrReview(params: {
     .filter(Boolean)
     .join('\n');
 
-  // 6. Run the agentic review against the checked-out repo.
+  // 6. Start the opencode server (waits for readiness internally).
   log('Starting opencode server');
-  const { proc, client } = startOpencode(workspace, keyEnv, apiKey);
+  const { client, stop } = await startOpencode(providerID, modelID, apiKey, log);
   try {
-    log('Waiting for opencode server readiness');
-    await waitReady(client);
-    const models = execSync('opencode models', { encoding: 'utf8', timeout: 5000 });
-    log(`Available models:\n${models.trim()}`);
+    try {
+      const models = execSync('opencode models', { encoding: 'utf8', timeout: 5000 });
+      log(`Available models:\n${models.trim()}`);
+    } catch (e) {
+      log(`(skipped opencode models: ${(e as Error).message})`);
+    }
+
     log('Running review');
     const { summary, findings } = await runReview(client, model, prContext, guidelines, log);
-
     log(`Review complete: ${findings.length} finding(s)`);
 
     // 7. Gate: split into inline-anchorable vs orphaned, decide the verdict.
@@ -102,9 +98,9 @@ export async function runPrReview(params: {
     // 8. Post one review, fully under our control.
     log(`Posting review: verdict=${verdict} inline=${inline.length} orphaned=${orphaned.length}`);
     await postReview(octokit, owner, repo, pullNumber, verdict, body, inline);
-    log(`Review posted.`);
+    log('Review posted.');
   } finally {
-    proc.kill();
+    stop();
   }
 }
 
