@@ -205,7 +205,7 @@ export async function runReview(
   log(`Prompt assembled: ${prompt.length} chars, guidelines=${!!guidelines}`);
 
   const raw = await promptPlanAgent(client, model, prompt, 'review', log);
-  return parseReview(raw, 'review', log);
+  return parseReview(raw, 'review', log, { strict: true });
 }
 
 export async function runAddressedPriorCommentsCheck(
@@ -268,18 +268,25 @@ async function promptPlanAgent(
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 
-/** Defensively parse the agent's JSON; malformed output degrades to empty. */
-function parseReview(raw: string, label: string, log: (msg: string) => void): ReviewResult {
+/**
+ * Defensively parses the agent's JSON. Main review output is strict so we
+ * don't post a misleading "good to go" review when the reviewer response is
+ * malformed; auxiliary checks stay best-effort.
+ */
+function parseReview(
+  raw: string,
+  label: string,
+  log: (msg: string) => void,
+  options: { strict?: boolean } = {},
+): ReviewResult {
   let parsed: unknown;
   try {
     parsed = parseJsonObject(raw);
   } catch (error) {
-    log(
-      `${label} response was not valid JSON: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    log(`${label} response was not valid JSON: ${message}`);
     log(`${label} response preview:\n${truncateForLog(raw, 2000)}`);
+    if (options.strict) throw new Error(`opencode ${label} returned unparseable JSON: ${message}`);
     return {
       summary: 'The reviewer returned an unparseable response.',
       findings: [],
