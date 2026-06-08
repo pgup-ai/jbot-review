@@ -68,6 +68,7 @@ concurrency:
 
 permissions:
   contents: read
+  packages: read
   pull-requests: write
   checks: read
 
@@ -133,23 +134,42 @@ matching provider-specific input, such as `opencode-api-key` for
 
 ### Testing locally before publishing
 
-To test the action in the same repo before tagging a release:
+This repo's own `.github/workflows/jbot-review.yml` dogfoods branch-local action
+changes before they are published to `pgup-ai/jbot-review-action@v0`. It builds
+the branch image, uses the relative `./` action, and passes every provider key
+input so `JBOT_REVIEW_PROVIDER` / `JBOT_REVIEW_MODEL` can switch providers
+without editing the workflow.
 
 ```yaml
-# Build the branch image locally so the local action does not pull GHCR.
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+    ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs['pr-number']) }}
 - uses: actions/setup-node@v4
   with:
     node-version: '20'
 - run: npm ci
 - run: npm run build
 - run: docker build -t ghcr.io/pgup-ai/jbot-review:latest .
-
-# Use the relative path instead of pgup-ai/jbot-review-action@v0:
 - uses: ./
   with:
+    provider: ${{ inputs.provider || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
+    model: ${{ inputs.model || vars.JBOT_REVIEW_MODEL || '' }}
+    pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] }}
+    dry-run: ${{ inputs['dry-run'] || 'false' }}
+    max-findings: ${{ inputs['max-findings'] || '0' }}
+    min-severity: ${{ inputs['min-severity'] || 'nit' }}
+    include-prior-comments: ${{ inputs['include-prior-comments'] || 'true' }}
+    fail-on-error: ${{ inputs['fail-on-error'] || 'true' }}
     opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
+    deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
+    openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+    nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
+    xai-api-key: ${{ secrets.XAI_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
-    dry-run: true
+    thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
 ```
 
 To replay the prompt context locally from fixtures without posting to GitHub:
@@ -294,15 +314,22 @@ pick your account, and choose **All repositories** or select specific repos.
 cp .env.example .env
 ```
 
-| Variable                 | Source                                           |
-| ------------------------ | ------------------------------------------------ |
-| `GITHUB_APP_ID`          | App ID from step 1 (e.g. `123456`)               |
-| `GITHUB_APP_PRIVATE_KEY` | Full contents of the `.pem` file from step 1     |
-| `GITHUB_WEBHOOK_SECRET`  | The random string you set in step 1              |
-| `PROVIDER`               | Provider key (defaults to `opencode`)            |
-| `<PROVIDER>_API_KEY`     | API key env var matching the selected provider   |
-| `MODEL`                  | Optional override (defaults to provider default) |
-| `PORT`                   | Optional (defaults to `3000`)                    |
+| Variable                 | Source                                            |
+| ------------------------ | ------------------------------------------------- |
+| `GITHUB_APP_ID`          | App ID from step 1 (e.g. `123456`)                |
+| `GITHUB_APP_PRIVATE_KEY` | Full contents of the `.pem` file from step 1      |
+| `GITHUB_WEBHOOK_SECRET`  | The random string you set in step 1               |
+| `PROVIDER`               | Provider key (defaults to `opencode`)             |
+| Provider API keys        | Operator-managed API keys for supported providers |
+| `MODEL`                  | Optional override (defaults to provider default)  |
+| `PORT`                   | Optional (defaults to `3000`)                     |
+
+The hosted App currently uses operator-managed provider keys from environment
+variables. These are not per-user BYOK keys. For a multi-provider deployment,
+set every provider key you want the operator account to support, then choose the
+active provider with `PROVIDER` and optional `MODEL`. Future dashboard BYOK
+should store encrypted per-user/per-installation keys in the dashboard database
+and resolve them per review job, not through Fly/Cloud Run app secrets.
 
 **4. Deploy.** Pick any provider from the [deployment guides](#deploying-the-hosted-app)
 below. All follow the same pattern: build the Docker image, inject env vars,
@@ -337,34 +364,43 @@ are discovered during checkout.
 
 ### Env var reference (hosted App)
 
-| Variable                 | Required    | Default          | Description                       |
-| ------------------------ | ----------- | ---------------- | --------------------------------- |
-| `GITHUB_APP_ID`          | Yes         | —                | Numeric App ID from GitHub        |
-| `GITHUB_APP_PRIVATE_KEY` | Yes         | —                | Contents of the `.pem` file       |
-| `GITHUB_WEBHOOK_SECRET`  | Yes         | —                | Random string for signing         |
-| `PROVIDER`               | No          | `opencode`       | Provider key (see table below)    |
-| `OPENCODE_API_KEY`       | Conditional | —                | Required when PROVIDER=opencode   |
-| `DEEPSEEK_API_KEY`       | Conditional | —                | Required when PROVIDER=deepseek   |
-| `OPENAI_API_KEY`         | Conditional | —                | Required when PROVIDER=openai     |
-| `ANTHROPIC_API_KEY`      | Conditional | —                | Required when PROVIDER=anthropic  |
-| `OPENROUTER_API_KEY`     | Conditional | —                | Required when PROVIDER=openrouter |
-| `NVIDIA_API_KEY`         | Conditional | —                | Required when PROVIDER=nvidia     |
-| `XAI_API_KEY`            | Conditional | —                | Required when PROVIDER=xai        |
-| `MODEL`                  | No          | Provider default | Override as `provider/model`      |
-| `PORT`                   | No          | `3000`           | HTTP listen port                  |
+| Variable                 | Required    | Default          | Description                                |
+| ------------------------ | ----------- | ---------------- | ------------------------------------------ |
+| `GITHUB_APP_ID`          | Yes         | —                | Numeric App ID from GitHub                 |
+| `GITHUB_APP_PRIVATE_KEY` | Yes         | —                | Contents of the `.pem` file                |
+| `GITHUB_WEBHOOK_SECRET`  | Yes         | —                | Random string for signing                  |
+| `PROVIDER`               | No          | `opencode`       | Provider key (see table below)             |
+| `OPENCODE_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=opencode   |
+| `DEEPSEEK_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=deepseek   |
+| `OPENAI_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=openai     |
+| `ANTHROPIC_API_KEY`      | Conditional | —                | Operator key used when PROVIDER=anthropic  |
+| `OPENROUTER_API_KEY`     | Conditional | —                | Operator key used when PROVIDER=openrouter |
+| `NVIDIA_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=nvidia     |
+| `XAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=xai        |
+| `MODEL`                  | No          | Provider default | Override as `provider/model`               |
+| `PORT`                   | No          | `3000`           | HTTP listen port                           |
 
 ### Provider configuration (hosted App)
 
-Set `PROVIDER` and the matching API key in `.env`. The `MODEL` env var overrides
-the provider default:
+Set `PROVIDER` and the matching operator API key in `.env`. You can set all
+provider keys up front, but the current hosted server reads only the key matching
+the selected `PROVIDER` at boot. The `MODEL` env var overrides the provider
+default:
 
 ```bash
 PROVIDER=deepseek
+OPENCODE_API_KEY=oc-...
 DEEPSEEK_API_KEY=sk-...
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+OPENROUTER_API_KEY=sk-or-...
+NVIDIA_API_KEY=nvapi-...
+XAI_API_KEY=xai-...
 MODEL=deepseek/deepseek-v4-flash
 ```
 
-The server validates at boot that both the provider and its key are configured.
+The server validates at boot that the selected provider and its key are
+configured.
 
 ## Deploying the hosted App
 
@@ -372,7 +408,8 @@ The Dockerfile is vendor-agnostic — `FROM node:20-slim`, installs git + openco
 exposes port 3000. Pick any provider below. All follow the same three steps:
 
 1. Build + push the image (or build on the host)
-2. Deploy with env vars from `.env.example`
+2. Deploy with GitHub App secrets and the provider API keys the operator wants
+   to support
 3. Point your GitHub App's webhook URL at `https://<your-url>/webhooks`
 
 ### GCP Cloud Run
@@ -401,6 +438,12 @@ gcloud run deploy jbot-review \
   --set-env-vars "GITHUB_APP_PRIVATE_KEY=$(cat your-app.pem)" \
   --set-env-vars GITHUB_WEBHOOK_SECRET=your-secret \
   --set-env-vars OPENCODE_API_KEY=oc-... \
+  --set-env-vars DEEPSEEK_API_KEY=sk-... \
+  --set-env-vars OPENAI_API_KEY=sk-... \
+  --set-env-vars ANTHROPIC_API_KEY=sk-ant-... \
+  --set-env-vars OPENROUTER_API_KEY=sk-or-... \
+  --set-env-vars NVIDIA_API_KEY=nvapi-... \
+  --set-env-vars XAI_API_KEY=xai-... \
   --allow-unauthenticated
 
 # 4. The output gives you a https:// URL — use it as the webhook URL.
@@ -438,11 +481,17 @@ fly secrets set \
   GITHUB_APP_ID=123456 \
   GITHUB_APP_PRIVATE_KEY="$(cat your-app.pem)" \
   GITHUB_WEBHOOK_SECRET=your-secret \
-  OPENCODE_API_KEY=oc-...
+  OPENCODE_API_KEY=oc-... \
+  DEEPSEEK_API_KEY=sk-... \
+  OPENAI_API_KEY=sk-... \
+  ANTHROPIC_API_KEY=sk-ant-... \
+  OPENROUTER_API_KEY=sk-or-... \
+  NVIDIA_API_KEY=nvapi-... \
+  XAI_API_KEY=xai-...
 
 # 4. Scale and deploy
-fly scale cpu performance --cpu-kind performance --cpus 2
-fly scale memory 4096
+fly scale vm shared-cpu-1x
+fly scale memory 1024
 fly deploy
 
 # 5. Webhook URL: https://jbot-review.fly.dev/webhooks
@@ -491,6 +540,18 @@ services:
         value: your-secret
       - key: OPENCODE_API_KEY
         value: oc-...
+      - key: DEEPSEEK_API_KEY
+        value: sk-...
+      - key: OPENAI_API_KEY
+        value: sk-...
+      - key: ANTHROPIC_API_KEY
+        value: sk-ant-...
+      - key: OPENROUTER_API_KEY
+        value: sk-or-...
+      - key: NVIDIA_API_KEY
+        value: nvapi-...
+      - key: XAI_API_KEY
+        value: xai-...
 ```
 
 Then point the webhook at `https://jbot-review-xxxxx.ondigitalocean.app/webhooks`.
@@ -549,6 +610,18 @@ services:
         value: your-secret
       - key: OPENCODE_API_KEY
         value: oc-...
+      - key: DEEPSEEK_API_KEY
+        value: sk-...
+      - key: OPENAI_API_KEY
+        value: sk-...
+      - key: ANTHROPIC_API_KEY
+        value: sk-ant-...
+      - key: OPENROUTER_API_KEY
+        value: sk-or-...
+      - key: NVIDIA_API_KEY
+        value: nvapi-...
+      - key: XAI_API_KEY
+        value: xai-...
 ```
 
 Webhook URL: `https://jbot-review.onrender.com/webhooks`.
@@ -618,8 +691,11 @@ docker run -d --name jbot-review -p 3000:3000 --restart always --env-file .env j
 
 ### Railway
 
-Pay-per-use, scales to zero on the $5 starter plan. Builds from Docker Hub or
-directly from a GitHub repo.
+Pay-per-use. Railway's Free plan currently starts with a 30-day trial and a
+one-time credit grant, then provides a small monthly free credit for small apps.
+The default Free plan resource shape is 1 vCPU / 0.5 GB RAM per service, which
+is enough for a low-volume hosted App trial but may be tight for concurrent or
+large-repo reviews. Builds from Docker Hub or directly from a GitHub repo.
 
 ```bash
 # 1. Prerequisites
@@ -637,6 +713,12 @@ railway variables set \
   "GITHUB_APP_PRIVATE_KEY=$(cat your-app.pem)" \
   GITHUB_WEBHOOK_SECRET=your-secret \
   OPENCODE_API_KEY=oc-... \
+  DEEPSEEK_API_KEY=sk-... \
+  OPENAI_API_KEY=sk-... \
+  ANTHROPIC_API_KEY=sk-ant-... \
+  OPENROUTER_API_KEY=sk-or-... \
+  NVIDIA_API_KEY=nvapi-... \
+  XAI_API_KEY=xai-... \
   PORT=3000
 
 railway up
@@ -669,7 +751,13 @@ koyeb service create jbot-review \
   --env GITHUB_APP_ID=123456 \
   --env "GITHUB_APP_PRIVATE_KEY=$(cat your-app.pem)" \
   --env GITHUB_WEBHOOK_SECRET=your-secret \
-  --env OPENCODE_API_KEY=oc-...
+  --env OPENCODE_API_KEY=oc-... \
+  --env DEEPSEEK_API_KEY=sk-... \
+  --env OPENAI_API_KEY=sk-... \
+  --env ANTHROPIC_API_KEY=sk-ant-... \
+  --env OPENROUTER_API_KEY=sk-or-... \
+  --env NVIDIA_API_KEY=nvapi-... \
+  --env XAI_API_KEY=xai-...
 
 # Webhook URL: https://jbot-review-<org>.koyeb.app/webhooks
 ```
@@ -699,22 +787,22 @@ docker push $AWS_ACCOUNT.dkr.ecr.$REGION.amazonaws.com/jbot-review
 
 ## Provider cost comparison
 
-| Provider                  | Idle cost | Per review (est.) | Auto scale-to-zero  |
-| ------------------------- | --------- | ----------------- | ------------------- |
-| Cloud Run (free tier)     | $0        | ~$0.01            | Yes                 |
-| Cloudflare Containers     | $5/mo     | Usage-based       | Yes                 |
-| Fly.io (hobby)            | ~$0       | ~$0.01            | Yes                 |
-| Render (free tier)        | $0        | ~$0               | Sleeps after 15 min |
-| Railway (starter)         | ~$0       | ~$0.01            | Yes                 |
-| Koyeb (free tier)         | $0        | ~$0               | Yes                 |
-| AWS App Runner            | ~$5/mo    | Usage-based       | No                  |
-| Azure Container Apps      | $0        | Usage-based       | Yes                 |
-| Northflank Sandbox        | $0        | $0                | No                  |
-| CloudCone VPS             | ~$1/mo    | $0                | No                  |
-| Hetzner CX22              | $4/mo     | $0                | No                  |
-| Vultr (1 vCPU)            | $6/mo     | $0                | No                  |
-| DigitalOcean App Platform | $5/mo     | $0                | No                  |
-| Oracle Free Tier          | $0        | $0                | No                  |
+| Provider                  | Idle cost                       | Per review (est.)         | Auto scale-to-zero  |
+| ------------------------- | ------------------------------- | ------------------------- | ------------------- |
+| Cloud Run (free tier)     | $0                              | ~$0.01                    | Yes                 |
+| Cloudflare Containers     | $5/mo                           | Usage-based               | Yes                 |
+| Fly.io (hobby)            | ~$0                             | ~$0.01                    | Yes                 |
+| Render (free tier)        | $0                              | ~$0                       | Sleeps after 15 min |
+| Railway (Free)            | $0 trial + small monthly credit | Usage-based beyond credit | Yes                 |
+| Koyeb (free tier)         | $0                              | ~$0                       | Yes                 |
+| AWS App Runner            | ~$5/mo                          | Usage-based               | No                  |
+| Azure Container Apps      | $0                              | Usage-based               | Yes                 |
+| Northflank Sandbox        | $0                              | $0                        | No                  |
+| CloudCone VPS             | ~$1/mo                          | $0                        | No                  |
+| Hetzner CX22              | $4/mo                           | $0                        | No                  |
+| Vultr (1 vCPU)            | $6/mo                           | $0                        | No                  |
+| DigitalOcean App Platform | $5/mo                           | $0                        | No                  |
+| Oracle Free Tier          | $0                              | $0                        | No                  |
 
 Prices are approximate and tier-dependent; check each provider's current limits
 before choosing a host.
