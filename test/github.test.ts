@@ -1,0 +1,66 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import { formatPriorJbotThreadsForPrompt, type PriorJbotThread } from '../src/shared/github.ts';
+
+describe('formatPriorJbotThreadsForPrompt', () => {
+  it('includes human thread replies so declined suggestions are not re-raised', () => {
+    const thread: PriorJbotThread = {
+      id: 'PRRT_example',
+      isResolved: false,
+      replyToCommentId: 3376207111,
+      path: 'src/components/agreements/new-agreement/utils.ts',
+      line: 207,
+      body: [
+        '**P3** - Safe access pattern on chartAccount',
+        '',
+        'Consider using `line.chartAccount?.id ?? ""`.',
+        '',
+        '<!-- jbot-review:finding -->',
+      ].join('\n'),
+      url: 'https://github.com/integral-xyz/fms-frontend/pull/1748#discussion_r3376207111',
+      replies: [
+        {
+          author: 'jingbof',
+          body: [
+            'Not applied: `chartAccount` is required on `OrderLineDto`, and the backend contract test covers it.',
+          ].join('\n'),
+          url: 'https://github.com/integral-xyz/fms-frontend/pull/1748#discussion_r3376239403',
+        },
+      ],
+    };
+
+    const prompt = formatPriorJbotThreadsForPrompt([thread]);
+
+    assert.match(prompt, /Thread replies:/);
+    assert.match(prompt, /jingbof:/);
+    assert.match(prompt, /Not applied: `chartAccount` is required/);
+    assert.match(prompt, /do not re-post it and do not mark it addressed/);
+    assert.doesNotMatch(prompt, /jbot-review:finding/);
+  });
+
+  it('keeps only the latest thread replies in prompt context', () => {
+    const thread: PriorJbotThread = {
+      id: 'PRRT_example',
+      isResolved: false,
+      replyToCommentId: 3376207111,
+      path: 'src/example.ts',
+      line: 42,
+      body: 'Original finding',
+      url: 'https://github.com/example/repo/pull/1#discussion_r1',
+      replies: Array.from({ length: 7 }, (_, index) => ({
+        author: `reviewer-${index + 1}`,
+        body: `reply ${index + 1}`,
+        url: `https://github.com/example/repo/pull/1#discussion_r${index + 2}`,
+      })),
+    };
+
+    const prompt = formatPriorJbotThreadsForPrompt([thread]);
+
+    assert.match(prompt, /Thread replies: latest 5 of 7/);
+    assert.doesNotMatch(prompt, /reply 1/);
+    assert.doesNotMatch(prompt, /reply 2/);
+    assert.match(prompt, /reply 3/);
+    assert.match(prompt, /reply 7/);
+  });
+});

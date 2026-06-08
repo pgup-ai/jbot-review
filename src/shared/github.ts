@@ -12,6 +12,8 @@ const FINDING_MARKER = '<!-- jbot-review:finding -->';
 const ADDRESSED_MARKER = '<!-- jbot-review:addressed -->';
 const MAX_PRIOR_JBOT_THREADS_FOR_PROMPT = 25;
 const MAX_PRIOR_JBOT_COMMENT_CHARS = 1000;
+const MAX_PRIOR_JBOT_REPLIES_FOR_PROMPT = 5;
+const MAX_PRIOR_JBOT_REPLY_CHARS = 800;
 
 export interface PrFile {
   filename: string;
@@ -24,6 +26,13 @@ export interface PriorJbotThread {
   replyToCommentId: number;
   path: string;
   line?: number;
+  body: string;
+  url: string;
+  replies: PriorJbotThreadReply[];
+}
+
+export interface PriorJbotThreadReply {
+  author: string;
   body: string;
   url: string;
 }
@@ -254,6 +263,15 @@ export async function listPriorJbotThreads(
       if (alreadyAcknowledged || commentState.addressedTopLevelIds.has(topLevel.databaseId))
         continue;
 
+      const replies = comments
+        .slice(1)
+        .filter((comment): comment is NonNullable<typeof comment> => Boolean(comment?.body))
+        .map((comment) => ({
+          author: comment.author?.login ?? 'unknown',
+          body: comment.body,
+          url: comment.url,
+        }));
+
       threads.push({
         id: thread.id,
         isResolved: thread.isResolved,
@@ -262,6 +280,7 @@ export async function listPriorJbotThreads(
         line: thread.line ?? undefined,
         body: topLevel.body,
         url: topLevel.url,
+        replies,
       });
     }
 
@@ -432,6 +451,7 @@ export function formatPriorJbotThreadsForPrompt(threads: PriorJbotThread[]): str
   const lines = [
     '## Prior jbot-review inline comments',
     'If a prior jbot-review comment is now definitively addressed by the current PR branch, include its id in "addressedPriorComments". Do not mark a comment addressed merely because you are not re-raising it.',
+    'If later thread replies say the finding was not applied, intentionally declined, accepted as-is, or not worth fixing, treat the issue as already discussed: do not re-post it and do not mark it addressed.',
   ];
   if (threads.length > promptThreads.length) {
     lines.push(
@@ -448,10 +468,28 @@ export function formatPriorJbotThreadsForPrompt(threads: PriorJbotThread[]): str
         `URL: ${thread.url}`,
         'Comment:',
         truncateForPrompt(stripJbotMarkers(thread.body), MAX_PRIOR_JBOT_COMMENT_CHARS),
+        formatPriorThreadRepliesForPrompt(thread.replies),
       ].join('\n'),
     );
   }
   return lines.join('\n\n');
+}
+
+function formatPriorThreadRepliesForPrompt(replies: PriorJbotThreadReply[]): string {
+  if (replies.length === 0) return 'Thread replies: none';
+  const promptReplies = replies.slice(-MAX_PRIOR_JBOT_REPLIES_FOR_PROMPT);
+  return [
+    replies.length > promptReplies.length
+      ? `Thread replies: latest ${promptReplies.length} of ${replies.length}`
+      : 'Thread replies:',
+    ...promptReplies.map((reply) =>
+      [
+        `- ${reply.author}:`,
+        truncateForPrompt(stripJbotMarkers(reply.body), MAX_PRIOR_JBOT_REPLY_CHARS),
+        `  URL: ${reply.url}`,
+      ].join('\n  '),
+    ),
+  ].join('\n');
 }
 
 function isJbotFinding(
