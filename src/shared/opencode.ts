@@ -1,4 +1,11 @@
-import { createOpencode, type OpencodeClient, type ServerOptions } from '@opencode-ai/sdk';
+import {
+  createOpencode,
+  type AssistantMessage,
+  type OpencodeClient,
+  type Part,
+  type ServerOptions,
+  type SessionStatus,
+} from '@opencode-ai/sdk';
 
 import { parseModelName } from './model.ts';
 import { REVIEW_PROMPT } from './prompt.ts';
@@ -6,6 +13,10 @@ import type { AddressedPriorComment, Finding, ReviewResult, Severity } from './t
 
 const READY_TIMEOUT_MS = 15_000;
 const MODEL_LIST_TIMEOUT_MS = 5_000;
+const PROMPT_TIMEOUT_MS = 15 * 60_000;
+const PROMPT_POLL_INTERVAL_MS = 2_000;
+const PROMPT_POLL_REQUEST_TIMEOUT_MS = 10_000;
+const PROMPT_PROGRESS_LOG_MS = 60_000;
 
 const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
 
@@ -235,7 +246,7 @@ async function promptPlanAgent(
   log(`${label} session created: ${session.id}`);
 
   log(`Calling ${label} prompt (agent=plan)`);
-  const promptRes = await client.session.prompt({
+  const promptRes = await client.session.promptAsync({
     path: { id: session.id },
     body: {
       model: { providerID, modelID },
@@ -243,19 +254,12 @@ async function promptPlanAgent(
       parts: [{ type: 'text', text: prompt }],
     },
   });
-  const data = promptRes.data;
-  if (!data) {
-    const detail =
-      'error' in promptRes
-        ? JSON.stringify((promptRes as Record<string, unknown>).error)
-        : 'empty response';
-    log(`${label} response error: ${detail}`);
-    throw new Error(`opencode ${label} prompt returned no message (${detail})`);
-  }
+  const promptError = getResultError(promptRes);
+  if (promptError) throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
 
-  // Defensive: parts can be missing/empty on edge cases (errors, empty
-  // responses). Default to [] to avoid a TypeError.
-  const parts = (data.parts ?? []) as ReadonlyArray<{ type: string; text?: string }>;
+  const data = await waitForAssistantMessage(client, session.id, label, log);
+
+  const parts = data.parts;
   log(
     `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
   );
@@ -264,6 +268,119 @@ async function promptPlanAgent(
   const raw = textPart?.text ?? '{}';
   log(`Extracted ${label} text: ${raw.length} chars`);
   return raw;
+}
+
+async function waitForAssistantMessage(
+  client: OpencodeClient,
+  sessionID: string,
+  label: string,
+  log: (msg: string) => void,
+): Promise<{ info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> }> {
+  const startedAt = Date.now();
+  let lastStatus = 'unknown';
+  let lastProgressLogAt = startedAt;
+
+  while (Date.now() - startedAt < PROMPT_TIMEOUT_MS) {
+    const message = await getLatestAssistantMessage(client, sessionID, label);
+    if (message?.info.error) {
+      throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(message.info.error)}`);
+    }
+
+    const status = await getSessionStatus(client, sessionID, label);
+    if (status) lastStatus = describeSessionStatus(status);
+    if (message && (status?.type === 'idle' || message.info.time.completed)) {
+      return {
+        info: message.info,
+        parts: message.parts,
+      };
+    }
+
+    const now = Date.now();
+    if (now - lastProgressLogAt >= PROMPT_PROGRESS_LOG_MS) {
+      log(
+        `${label} prompt still running (${Math.round((now - startedAt) / 1000)}s, ${lastStatus})`,
+      );
+      lastProgressLogAt = now;
+    }
+
+    await sleep(PROMPT_POLL_INTERVAL_MS);
+  }
+
+  throw new Error(
+    `opencode ${label} prompt did not finish within ${Math.round(
+      PROMPT_TIMEOUT_MS / 1000,
+    )}s (last status: ${lastStatus})`,
+  );
+}
+
+async function getLatestAssistantMessage(
+  client: OpencodeClient,
+  sessionID: string,
+  label: string,
+): Promise<
+  { info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> } | undefined
+> {
+  const result = await withTimeout(
+    client.session.messages({ path: { id: sessionID } }),
+    PROMPT_POLL_REQUEST_TIMEOUT_MS,
+    `opencode ${label} message polling timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID})`,
+  );
+  const error = getResultError(result);
+  if (error) throw new Error(`opencode ${label} message polling failed: ${error}`);
+
+  const messages = result.data ?? [];
+  for (const message of [...messages].reverse()) {
+    if (message.info.role !== 'assistant') continue;
+    return {
+      info: message.info,
+      parts: (message.parts ?? []).map(toTextReadablePart),
+    };
+  }
+  return undefined;
+}
+
+async function getSessionStatus(
+  client: OpencodeClient,
+  sessionID: string,
+  label: string,
+): Promise<SessionStatus | undefined> {
+  const result = await withTimeout(
+    client.session.status(),
+    PROMPT_POLL_REQUEST_TIMEOUT_MS,
+    `opencode ${label} status polling timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID})`,
+  );
+  const error = getResultError(result);
+  if (error) throw new Error(`opencode ${label} status polling failed: ${error}`);
+  const statuses = result.data;
+  return statuses?.[sessionID];
+}
+
+function toTextReadablePart(part: Part): { type: string; text?: string } {
+  return part.type === 'text' ? { type: part.type, text: part.text } : { type: part.type };
+}
+
+function describeSessionStatus(status: SessionStatus): string {
+  if (status.type === 'retry') return `retry attempt ${status.attempt}: ${status.message}`;
+  return status.type;
+}
+
+function getResultError(result: unknown): string | undefined {
+  if (!isRecord(result) || !('error' in result) || result.error == null) return undefined;
+  return formatUnknownError(result.error);
+}
+
+function formatUnknownError(value: unknown): string {
+  if (value instanceof Error) return value.message;
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);

@@ -1,4 +1,4 @@
-name: 'jbot-review'
+name: 'J-Bot Code Review'
 description: 'Agentic PR review via opencode serve + SDK, with gated inline posting.'
 
 branding:

@@ -57,7 +57,7 @@ release tag if you need fully stable action behavior.
 `.github/workflows/jbot-review.yml`, or use this minimal version:
 
 ```yaml
-name: jbot-review
+name: J-Bot Code Review
 on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
@@ -77,7 +77,7 @@ jobs:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - uses: pgup-ai/jbot-review-action@v0 # moving v0 tag; pin a release tag for stability
@@ -142,11 +142,11 @@ input so `JBOT_REVIEW_PROVIDER` / `JBOT_REVIEW_MODEL` can switch providers
 without editing the workflow.
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v6
   with:
     fetch-depth: 0
     ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs['pr-number']) }}
-- uses: actions/setup-node@v4
+- uses: actions/setup-node@v6
   with:
     node-version: '20'
 - run: npm ci

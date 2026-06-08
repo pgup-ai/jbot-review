@@ -19,6 +19,7 @@ import {
   formatPriorJbotThreadsForPrompt,
   postAddressedThreadReply,
   resolveReviewThread,
+  isJbotReviewBody,
 } from './github.ts';
 import type { Octokit, PriorJbotThread } from './github.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
@@ -100,6 +101,7 @@ export async function runPrReview(params: {
     : [];
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
+  const summaryScopeBlock = buildSummaryScopeBlock(priorComments, headSha);
 
   let prContext: string;
   let guidelinesForPrompt = guidelines;
@@ -117,6 +119,7 @@ export async function runPrReview(params: {
       checkSummary,
       guidelines,
     });
+    prContext = `${prContext}\n\n${summaryScopeBlock}`;
     if (priorJbotThreadBlock) prContext = `${prContext}\n\n${priorJbotThreadBlock}`;
     guidelinesForPrompt = '';
   } else {
@@ -128,6 +131,7 @@ export async function runPrReview(params: {
       pullTitle && `Title: ${pullTitle}`,
       pullBody && `Description: ${pullBody}`,
       `Changed files: ${changedFiles.join(', ')}`,
+      summaryScopeBlock,
       commentsBlock,
       priorJbotThreadBlock,
     ]
@@ -244,6 +248,46 @@ function formatAddressedPriorComment(comment: AddressedPriorComment): string {
   const commit = comment.addressedByCommit ? ` (${comment.addressedByCommit})` : '';
   const note = comment.note ? `: ${comment.note}` : '';
   return `- ${comment.id}${commit}${note}`;
+}
+
+function buildSummaryScopeBlock(priorComments: string[], headSha?: string): string {
+  const priorJbotReviews = priorComments.filter(isJbotReviewBody);
+  const lines = [
+    '## Summary instructions',
+    '- Prefer concise Markdown bullet points in the "summary" field when they make the review easier to scan.',
+  ];
+
+  if (priorJbotReviews.length === 0) {
+    lines.push(
+      '- This is the first visible jbot-review run for this PR, so summarize the overall PR change.',
+    );
+    return lines.join('\n');
+  }
+
+  const latestReviewedHead = findLatestReviewedHead(priorJbotReviews);
+  lines.push(
+    '- This PR already has prior jbot-review runs, so summarize only what changed since the latest prior reviewed head. Do not restate the full PR summary unless it is necessary for context.',
+  );
+  if (latestReviewedHead && headSha && latestReviewedHead !== headSha) {
+    lines.push(`- Latest prior reviewed head: ${latestReviewedHead}. Current head: ${headSha}.`);
+    lines.push(`- Use git log/diff for ${latestReviewedHead}..${headSha} to identify the delta.`);
+  } else if (latestReviewedHead) {
+    lines.push(`- Latest prior reviewed head: ${latestReviewedHead}.`);
+  }
+
+  return lines.join('\n');
+}
+
+function findLatestReviewedHead(priorJbotReviews: string[]): string | undefined {
+  for (const review of [...priorJbotReviews].reverse()) {
+    const reviewedHeadLine = review.match(/\*\*Reviewed head:\*\*([^\n]+)/i);
+    const reviewedHeadText = reviewedHeadLine?.[1] ?? '';
+    const match =
+      reviewedHeadText.match(/\/commit\/([0-9a-f]{40})\b/i) ??
+      reviewedHeadText.match(/`([0-9a-f]{7,40})`/i);
+    if (match) return match[1];
+  }
+  return undefined;
 }
 
 async function safeListPriorJbotThreads(
@@ -385,21 +429,20 @@ function buildBody(
   headSha?: string,
 ): string {
   const total = all.length;
-  const lines = ['## jbot code review', '', summary || 'No summary provided.', ''];
+  const lines = ['## J-Bot Code Review', '', summary || 'No summary provided.', ''];
   const guidance = getMergeGuidance(all);
-  lines.push(`**Review state:** ${guidance.state}`);
-  lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`);
+  lines.push(`**Review state:** ${guidance.state}`, '');
+  lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`, '');
   if (headSha) {
     lines.push(
       `**Reviewed head:** [\`${headSha.slice(0, 12)}\`](https://github.com/${owner}/${repo}/commit/${headSha})`,
+      '',
     );
   }
-  lines.push('');
   if (total === 0) {
-    lines.push('_No new findings._');
+    lines.push('✅ _No new findings._');
   } else {
-    const counts = countBySeverity(all);
-    lines.push(`**${total} finding(s)** | ${counts}`, '');
+    lines.push('### Findings Summary', '', ...buildSeverityTable(all), '');
   }
   if (orphaned.length > 0) {
     lines.push('### Findings (outside the diff)');
@@ -439,13 +482,19 @@ function getMergeGuidance(findings: Pick<Finding, 'severity'>[]): {
   };
 }
 
-function countBySeverity(findings: Pick<Finding, 'severity'>[]): string {
-  const tags = ['P0', 'P1', 'P2', 'P3', 'nit'] as const;
-  return tags
-    .map((t) => {
-      const n = findings.filter((f) => f.severity === t).length;
-      return n > 0 ? `${n}× ${t}` : null;
-    })
-    .filter(Boolean)
-    .join(' · ');
+function buildSeverityTable(findings: Pick<Finding, 'severity'>[]): string[] {
+  const counts = countBySeverity(findings);
+  return [
+    '| Total | P0 | P1 | P2 | P3 | nit |',
+    '| ---: | ---: | ---: | ---: | ---: | ---: |',
+    `| ${findings.length} | ${counts.P0} | ${counts.P1} | ${counts.P2} | ${counts.P3} | ${counts.nit} |`,
+  ];
+}
+
+function countBySeverity(findings: Pick<Finding, 'severity'>[]): Record<Severity, number> {
+  const counts: Record<Severity, number> = { P0: 0, P1: 0, P2: 0, P3: 0, nit: 0 };
+  for (const finding of findings) {
+    counts[finding.severity] += 1;
+  }
+  return counts;
 }
