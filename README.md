@@ -70,7 +70,6 @@ permissions:
   contents: read
   pull-requests: write
   checks: read
-  packages: read
 
 jobs:
   review:
