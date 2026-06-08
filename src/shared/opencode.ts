@@ -356,7 +356,7 @@ function describeSessionStatus(status: SessionStatus): string {
 }
 
 function getResultError(result: unknown): string | undefined {
-  if (!isRecord(result) || !('error' in result) || result.error === undefined) return undefined;
+  if (!isRecord(result) || !('error' in result) || result.error == null) return undefined;
   return formatUnknownError(result.error);
 }
 
