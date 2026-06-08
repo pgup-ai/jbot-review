@@ -385,21 +385,20 @@ function buildBody(
   headSha?: string,
 ): string {
   const total = all.length;
-  const lines = ['## jbot code review', '', summary || 'No summary provided.', ''];
+  const lines = ['## J-Bot Code Review', '', summary || 'No summary provided.', ''];
   const guidance = getMergeGuidance(all);
-  lines.push(`**Review state:** ${guidance.state}`);
-  lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`);
+  lines.push(`**Review state:** ${guidance.state}`, '');
+  lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`, '');
   if (headSha) {
     lines.push(
       `**Reviewed head:** [\`${headSha.slice(0, 12)}\`](https://github.com/${owner}/${repo}/commit/${headSha})`,
+      '',
     );
   }
-  lines.push('');
   if (total === 0) {
     lines.push('_No new findings._');
   } else {
-    const counts = countBySeverity(all);
-    lines.push(`**${total} finding(s)** | ${counts}`, '');
+    lines.push('### Findings Summary', '', ...buildSeverityTable(all), '');
   }
   if (orphaned.length > 0) {
     lines.push('### Findings (outside the diff)');
@@ -439,13 +438,19 @@ function getMergeGuidance(findings: Pick<Finding, 'severity'>[]): {
   };
 }
 
-function countBySeverity(findings: Pick<Finding, 'severity'>[]): string {
-  const tags = ['P0', 'P1', 'P2', 'P3', 'nit'] as const;
-  return tags
-    .map((t) => {
-      const n = findings.filter((f) => f.severity === t).length;
-      return n > 0 ? `${n}× ${t}` : null;
-    })
-    .filter(Boolean)
-    .join(' · ');
+function buildSeverityTable(findings: Pick<Finding, 'severity'>[]): string[] {
+  const counts = countBySeverity(findings);
+  return [
+    '| Total | P0 | P1 | P2 | P3 | nit |',
+    '| ---: | ---: | ---: | ---: | ---: | ---: |',
+    `| ${findings.length} | ${counts.P0} | ${counts.P1} | ${counts.P2} | ${counts.P3} | ${counts.nit} |`,
+  ];
+}
+
+function countBySeverity(findings: Pick<Finding, 'severity'>[]): Record<Severity, number> {
+  const counts: Record<Severity, number> = { P0: 0, P1: 0, P2: 0, P3: 0, nit: 0 };
+  for (const finding of findings) {
+    counts[finding.severity] += 1;
+  }
+  return counts;
 }

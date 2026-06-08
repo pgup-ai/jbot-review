@@ -478,7 +478,7 @@ function isGithubActionsAlias(authorLogin: string | undefined, viewerLogin: stri
 }
 
 function isJbotReviewBody(body: string): boolean {
-  return body.includes(REVIEW_MARKER) || /^## jbot code review\b/.test(body);
+  return body.includes(REVIEW_MARKER) || /^## j-?bot code review\b/i.test(body);
 }
 
 function appendReviewMarker(body: string): string {
