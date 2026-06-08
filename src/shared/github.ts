@@ -216,17 +216,12 @@ export async function listPriorJbotThreads(
   let commentState: JbotReviewCommentState | undefined;
   let after: string | null = null;
   do {
-    let response: ReviewThreadsResponse;
-    try {
-      response = (await octokit.graphql(query, {
-        owner,
-        repo,
-        number: pullNumber,
-        after,
-      })) as ReviewThreadsResponse;
-    } catch {
-      return threads;
-    }
+    const response = (await octokit.graphql(query, {
+      owner,
+      repo,
+      number: pullNumber,
+      after,
+    })) as ReviewThreadsResponse;
     const viewerLogin = response.viewer.login;
     const page = response.repository?.pullRequest?.reviewThreads;
     if (!page) return threads;
@@ -253,9 +248,8 @@ export async function listPriorJbotThreads(
         )
       )
         continue;
-      const alreadyAcknowledged = comments.some(
-        (comment) =>
-          comment?.author?.login === viewerLogin && comment.body.includes(ADDRESSED_MARKER),
+      const alreadyAcknowledged = comments.some((comment) =>
+        hasInternalMarker(comment?.body, ADDRESSED_MARKER),
       );
       if (alreadyAcknowledged || commentState.addressedTopLevelIds.has(topLevel.databaseId))
         continue;
@@ -327,7 +321,6 @@ async function listJbotReviewCommentState(
     comments
       .filter(
         (comment) =>
-          comment.user?.login === viewerLogin &&
           comment.body.includes(ADDRESSED_MARKER) &&
           comment.in_reply_to_id !== null &&
           comment.in_reply_to_id !== undefined,
@@ -468,9 +461,20 @@ function isJbotFinding(
   jbotCommentIds: ReadonlySet<number>,
   commentId?: number,
 ): boolean {
-  if (authorLogin !== viewerLogin) return false;
-  if (body.includes(FINDING_MARKER)) return true;
+  if (hasInternalMarker(body, FINDING_MARKER)) return true;
+  if (authorLogin !== viewerLogin && !isGithubActionsAlias(authorLogin, viewerLogin)) return false;
   return commentId !== undefined && jbotCommentIds.has(commentId);
+}
+
+function hasInternalMarker(body: string | undefined, marker: string): boolean {
+  return body?.includes(marker) ?? false;
+}
+
+function isGithubActionsAlias(authorLogin: string | undefined, viewerLogin: string): boolean {
+  return (
+    authorLogin === 'github-actions[bot]' &&
+    (viewerLogin === 'github-actions' || viewerLogin === 'github-actions[bot]')
+  );
 }
 
 function isJbotReviewBody(body: string): boolean {

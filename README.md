@@ -85,15 +85,16 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 **Step 2 — Add provider API keys as secrets.** In the repo: Settings → Secrets
 and variables → Actions → New repository secret. Add the keys for the providers
-you want to use, such as `OPENCODE_API_KEY`, `OPENROUTER_API_KEY`, `XAI_API_KEY`,
-or `ANTHROPIC_API_KEY`. Empty provider key inputs are ignored unless that
-provider is selected.
+you want to use, such as `OPENCODE_API_KEY`, `OPENROUTER_API_KEY`,
+`NVIDIA_API_KEY`, `XAI_API_KEY`, or `ANTHROPIC_API_KEY`. Empty provider key
+inputs are ignored unless that provider is selected.
 
 **Secret exposure:** the example above passes multiple provider secrets so
 `JBOT_REVIEW_PROVIDER` can switch providers without another YAML edit. For a
@@ -150,14 +151,15 @@ npm run replay -- fixtures/replay
 
 See [models.dev](https://models.dev/) for the full list of models and providers.
 
-| `provider`   | Default model                     | Action key input     | Secret/env var       |
-| ------------ | --------------------------------- | -------------------- | -------------------- |
-| `opencode`   | `opencode/deepseek-v4-flash-free` | `opencode-api-key`   | `OPENCODE_API_KEY`   |
-| `deepseek`   | `deepseek/deepseek-v4-flash`      | `deepseek-api-key`   | `DEEPSEEK_API_KEY`   |
-| `openai`     | `openai/gpt-5.4-nano`             | `openai-api-key`     | `OPENAI_API_KEY`     |
-| `anthropic`  | `anthropic/claude-sonnet-4-6`     | `anthropic-api-key`  | `ANTHROPIC_API_KEY`  |
-| `openrouter` | `openrouter/openai/gpt-4o-mini`   | `openrouter-api-key` | `OPENROUTER_API_KEY` |
-| `xai`        | `xai/grok-4.3`                    | `xai-api-key`        | `XAI_API_KEY`        |
+| `provider`   | Default model                       | Action key input     | Secret/env var       |
+| ------------ | ----------------------------------- | -------------------- | -------------------- |
+| `opencode`   | `opencode/deepseek-v4-flash-free`   | `opencode-api-key`   | `OPENCODE_API_KEY`   |
+| `deepseek`   | `deepseek/deepseek-v4-flash`        | `deepseek-api-key`   | `DEEPSEEK_API_KEY`   |
+| `openai`     | `openai/gpt-5.4-nano`               | `openai-api-key`     | `OPENAI_API_KEY`     |
+| `anthropic`  | `anthropic/claude-sonnet-4-6`       | `anthropic-api-key`  | `ANTHROPIC_API_KEY`  |
+| `openrouter` | `openrouter/openai/gpt-4o-mini`     | `openrouter-api-key` | `OPENROUTER_API_KEY` |
+| `nvidia`     | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia-api-key`     | `NVIDIA_API_KEY`     |
+| `xai`        | `xai/grok-4.3`                      | `xai-api-key`        | `XAI_API_KEY`        |
 
 Set the `provider` and `model` inputs to override the defaults. For automatic
 PR reviews without editing workflow YAML on every provider or model change,
@@ -176,15 +178,20 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     openai-api-key: ${{ secrets.OPENAI_API_KEY }}
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+    nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-The action reads only the key input matching the selected `provider`, so future
+The action reads only the key matching the selected `provider`, so future
 provider changes can be made through `JBOT_REVIEW_PROVIDER` without editing the
-workflow YAML. This convenience pattern exposes every configured provider key to
-the action runtime. For the smallest secret surface area, pass only the key for
-the provider used by that workflow. If `model` is set, its `provider/model`
+workflow YAML. It accepts provider and model from either action inputs or
+environment variables: `provider` or `JBOT_REVIEW_PROVIDER` for the provider,
+and `model` or `JBOT_REVIEW_MODEL` for the model. Provider API keys can also be
+supplied through their standard env vars, such as `OPENROUTER_API_KEY` or
+`NVIDIA_API_KEY`. This convenience pattern exposes every configured provider key
+to the action runtime. For the smallest secret surface area, pass only the key
+for the provider used by that workflow. If `model` is set, its `provider/model`
 prefix must match the selected `provider`; otherwise the run fails before
 sending a request.
 
@@ -203,6 +210,7 @@ precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
 | `openai-api-key`         | No       | —                     | Required when `provider=openai`                                 |
 | `anthropic-api-key`      | No       | —                     | Required when `provider=anthropic`                              |
 | `openrouter-api-key`     | No       | —                     | Required when `provider=openrouter`                             |
+| `nvidia-api-key`         | No       | —                     | Required when `provider=nvidia`                                 |
 | `xai-api-key`            | No       | —                     | Required when `provider=xai`                                    |
 | `github-token`           | Yes      | `${{ github.token }}` | Token to read PR and post review                                |
 | `pr-number`              | No       | —                     | PR number for manual `workflow_dispatch` reviews                |
@@ -326,6 +334,7 @@ are discovered during checkout.
 | `OPENAI_API_KEY`         | Conditional | —                | Required when PROVIDER=openai     |
 | `ANTHROPIC_API_KEY`      | Conditional | —                | Required when PROVIDER=anthropic  |
 | `OPENROUTER_API_KEY`     | Conditional | —                | Required when PROVIDER=openrouter |
+| `NVIDIA_API_KEY`         | Conditional | —                | Required when PROVIDER=nvidia     |
 | `XAI_API_KEY`            | Conditional | —                | Required when PROVIDER=xai        |
 | `MODEL`                  | No          | Provider default | Override as `provider/model`      |
 | `PORT`                   | No          | `3000`           | HTTP listen port                  |

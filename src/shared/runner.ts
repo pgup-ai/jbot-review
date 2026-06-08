@@ -1,7 +1,12 @@
 import { isNoiseFile } from './filter.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
-import { startOpencode, runReview, listProviderModels } from './opencode.ts';
+import {
+  startOpencode,
+  runReview,
+  runAddressedPriorCommentsCheck,
+  listProviderModels,
+} from './opencode.ts';
 import { buildReviewContext, discoverGuidelines } from './review-context.ts';
 import {
   listPrFiles,
@@ -92,9 +97,7 @@ export async function runPrReview(params: {
   const priorJbotThreads = options.includePriorComments
     ? await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log)
     : [];
-  if (priorJbotThreads.length > 0) {
-    log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
-  }
+  log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
 
   let prContext: string;
@@ -153,9 +156,17 @@ export async function runPrReview(params: {
       guidelinesForPrompt,
       log,
     );
+    const verifiedAddressedPriorComments = await verifyAddressedPriorComments({
+      client,
+      model,
+      prContext,
+      priorJbotThreads,
+      addressedPriorComments,
+      log,
+    });
     const filteredFindings = filterFindings(findings, options);
     log(
-      `Review complete: ${findings.length} finding(s), ${filteredFindings.length} after filters, ${addressedPriorComments.length} addressed prior comment(s)`,
+      `Review complete: ${findings.length} finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
     const inline: Finding[] = [];
@@ -165,7 +176,7 @@ export async function runPrReview(params: {
       else orphaned.push(f);
     }
     const verdict = decideVerdict(filteredFindings);
-    const body = buildBody(summary, filteredFindings, orphaned, model, headSha);
+    const body = buildBody(summary, filteredFindings, orphaned, model, owner, repo, headSha);
 
     if (options.dryRun) {
       log(
@@ -175,9 +186,9 @@ export async function runPrReview(params: {
       if (inline.length > 0) {
         log(`Dry run inline comments:\n${inline.map(formatInlineFinding).join('\n\n')}`);
       }
-      if (addressedPriorComments.length > 0) {
+      if (verifiedAddressedPriorComments.length > 0) {
         log(
-          `Dry run addressed prior comments:\n${addressedPriorComments
+          `Dry run addressed prior comments:\n${verifiedAddressedPriorComments
             .map(formatAddressedPriorComment)
             .join('\n')}`,
         );
@@ -195,7 +206,7 @@ export async function runPrReview(params: {
       pullNumber,
       headSha,
       priorJbotThreads,
-      addressedPriorComments,
+      addressedPriorComments: verifiedAddressedPriorComments,
       log,
     });
   } finally {
@@ -250,6 +261,51 @@ async function safeListPriorJbotThreads(
     );
     return [];
   }
+}
+
+async function verifyAddressedPriorComments(params: {
+  client: Awaited<ReturnType<typeof startOpencode>>['client'];
+  model: string;
+  prContext: string;
+  priorJbotThreads: PriorJbotThread[];
+  addressedPriorComments: AddressedPriorComment[];
+  log: (msg: string) => void;
+}): Promise<AddressedPriorComment[]> {
+  if (params.priorJbotThreads.length === 0) return params.addressedPriorComments;
+
+  try {
+    const independentlyAddressed = await runAddressedPriorCommentsCheck(
+      params.client,
+      params.model,
+      params.prContext,
+      params.log,
+    );
+    params.log(
+      `Addressed-prior-comments check complete: ${independentlyAddressed.length} addressed prior comment(s)`,
+    );
+    return mergeAddressedPriorComments(params.addressedPriorComments, independentlyAddressed);
+  } catch (error) {
+    params.log(
+      `(skipped addressed-prior-comments check: ${
+        error instanceof Error ? error.message : String(error)
+      })`,
+    );
+    return params.addressedPriorComments;
+  }
+}
+
+function mergeAddressedPriorComments(
+  primary: AddressedPriorComment[],
+  secondary: AddressedPriorComment[],
+): AddressedPriorComment[] {
+  const merged: AddressedPriorComment[] = [];
+  const seen = new Set<string>();
+  for (const addressed of [...primary, ...secondary]) {
+    if (seen.has(addressed.id)) continue;
+    seen.add(addressed.id);
+    merged.push(addressed);
+  }
+  return merged;
 }
 
 async function acknowledgeAddressedPriorComments(params: {
@@ -316,6 +372,8 @@ function buildBody(
   all: Finding[],
   orphaned: Finding[],
   model: string,
+  owner: string,
+  repo: string,
   headSha?: string,
 ): string {
   const total = all.length;
@@ -323,7 +381,11 @@ function buildBody(
   const guidance = getMergeGuidance(all);
   lines.push(`**Review state:** ${guidance.state}`);
   lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`);
-  if (headSha) lines.push(`**Reviewed head:** \`${headSha.slice(0, 12)}\``);
+  if (headSha) {
+    lines.push(
+      `**Reviewed head:** [\`${headSha.slice(0, 12)}\`](https://github.com/${owner}/${repo}/commit/${headSha})`,
+    );
+  }
   lines.push('');
   if (total === 0) {
     lines.push('_No new findings._');

@@ -12,7 +12,7 @@ const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3',
 async function main(): Promise<void> {
   const failOnError = parseBooleanInput('fail-on-error', true);
   const token = core.getInput('github-token', { required: true });
-  const provider = core.getInput('provider') || 'opencode';
+  const provider = getInputOrEnv('provider', 'JBOT_REVIEW_PROVIDER') || 'opencode';
   const cfg = PROVIDERS[provider];
   if (!cfg) {
     throw new Error(
@@ -20,14 +20,14 @@ async function main(): Promise<void> {
     );
   }
 
-  const apiKey = core.getInput(cfg.keyInput);
+  const apiKey = getInputOrEnv(cfg.keyInput, cfg.keyEnv);
   if (!apiKey) {
     throw new Error(
-      `Missing API key for provider "${provider}". Pass it via the "${cfg.keyInput}" input.`,
+      `Missing API key for provider "${provider}". Pass it via the "${cfg.keyInput}" input or ${cfg.keyEnv} env var.`,
     );
   }
 
-  const model = core.getInput('model') || cfg.defaultModel;
+  const model = getInputOrEnv('model', 'JBOT_REVIEW_MODEL') || cfg.defaultModel;
   const parsedModel = parseModelName(model);
   if (parsedModel.providerID !== provider) {
     throw new Error(
@@ -76,6 +76,18 @@ async function main(): Promise<void> {
     if (failOnError) core.setFailed(message);
     else core.warning(`Review failed but fail-on-error=false: ${message}`);
   }
+}
+
+function getInputOrEnv(inputName: string, ...envNames: string[]): string {
+  const input = core.getInput(inputName).trim();
+  if (input) return input;
+
+  for (const envName of envNames) {
+    const value = process.env[envName]?.trim();
+    if (value) return value;
+  }
+
+  return '';
 }
 
 function getPullRequestTarget(): NonNullable<typeof github.context.payload.pull_request> | number {

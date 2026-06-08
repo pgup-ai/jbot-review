@@ -7,6 +7,29 @@ import type { AddressedPriorComment, Finding, ReviewResult, Severity } from './t
 const READY_TIMEOUT_MS = 15_000;
 const MODEL_LIST_TIMEOUT_MS = 5_000;
 
+const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
+
+Use the checked-out repo, git diff, git log, and the PR context below to verify each prior jbot-review thread.
+
+Rules:
+- Only mark a prior thread addressed when the current branch clearly fixes the specific issue raised.
+- Do not mark a thread addressed just because the latest review has no new findings.
+- Use the exact prior jbot-review thread id from the prompt.
+- Prefer the commit SHA that fixed the issue for "addressed_by_commit"; use the current head only if the exact fixing commit cannot be determined.
+- Keep "note" to one short sentence explaining why it is addressed.
+
+Respond with a SINGLE JSON object and NOTHING else:
+
+{
+  "addressedPriorComments": [
+    {
+      "id": "exact prior jbot-review thread id",
+      "addressed_by_commit": "commit sha",
+      "note": "Short reason this prior comment is now addressed."
+    }
+  ]
+}`;
+
 /**
  * Builds the opencode config object that embeds the API key for the selected
  * provider. This is the official way to authenticate opencode (replaces the
@@ -173,14 +196,6 @@ export async function runReview(
   guidelines: string,
   log: (msg: string) => void,
 ): Promise<ReviewResult> {
-  const { providerID, modelID } = parseModelName(model);
-
-  log(`Creating opencode session (provider=${providerID} model=${modelID})`);
-  const created = await client.session.create();
-  const session = created.data;
-  if (!session) throw new Error('Failed to create opencode session');
-  log(`Session created: ${session.id}`);
-
   const promptParts = [REVIEW_PROMPT];
   if (guidelines) {
     promptParts.push('## Repository review guidelines\n', guidelines);
@@ -189,7 +204,37 @@ export async function runReview(
   const prompt = promptParts.join('\n\n');
   log(`Prompt assembled: ${prompt.length} chars, guidelines=${!!guidelines}`);
 
-  log(`Calling prompt (agent=plan)`);
+  const raw = await promptPlanAgent(client, model, prompt, 'review', log);
+  return parseReview(raw, 'review', log, { strict: true });
+}
+
+export async function runAddressedPriorCommentsCheck(
+  client: OpencodeClient,
+  model: string,
+  prContext: string,
+  log: (msg: string) => void,
+): Promise<AddressedPriorComment[]> {
+  const prompt = [ADDRESSED_PRIOR_COMMENTS_PROMPT, prContext].join('\n\n');
+  const raw = await promptPlanAgent(client, model, prompt, 'addressed-prior-comments', log);
+  return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
+}
+
+async function promptPlanAgent(
+  client: OpencodeClient,
+  model: string,
+  prompt: string,
+  label: string,
+  log: (msg: string) => void,
+): Promise<string> {
+  const { providerID, modelID } = parseModelName(model);
+
+  log(`Creating ${label} session (provider=${providerID} model=${modelID})`);
+  const created = await client.session.create();
+  const session = created.data;
+  if (!session) throw new Error(`Failed to create ${label} session`);
+  log(`${label} session created: ${session.id}`);
+
+  log(`Calling ${label} prompt (agent=plan)`);
   const promptRes = await client.session.prompt({
     path: { id: session.id },
     body: {
@@ -204,32 +249,44 @@ export async function runReview(
       'error' in promptRes
         ? JSON.stringify((promptRes as Record<string, unknown>).error)
         : 'empty response';
-    log(`Prompt response error: ${detail}`);
-    throw new Error(`opencode prompt returned no message (${detail})`);
+    log(`${label} response error: ${detail}`);
+    throw new Error(`opencode ${label} prompt returned no message (${detail})`);
   }
 
   // Defensive: parts can be missing/empty on edge cases (errors, empty
   // responses). Default to [] to avoid a TypeError.
   const parts = (data.parts ?? []) as ReadonlyArray<{ type: string; text?: string }>;
-  log(`Prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`);
+  log(
+    `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
+  );
 
   const textPart = [...parts].reverse().find((p) => p.type === 'text');
   const raw = textPart?.text ?? '{}';
-  log(`Extracted text: ${raw.length} chars`);
-  return parseReview(raw);
+  log(`Extracted ${label} text: ${raw.length} chars`);
+  return raw;
 }
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 
-/** Defensively parse the agent's JSON; malformed output degrades to empty. */
-function parseReview(raw: string): ReviewResult {
+/**
+ * Defensively parses the agent's JSON. Main review output is strict so we
+ * don't post a misleading "good to go" review when the reviewer response is
+ * malformed; auxiliary checks stay best-effort.
+ */
+function parseReview(
+  raw: string,
+  label: string,
+  log: (msg: string) => void,
+  options: { strict?: boolean } = {},
+): ReviewResult {
   let parsed: unknown;
   try {
-    const start = raw.indexOf('{');
-    const end = raw.lastIndexOf('}');
-    const slice = start >= 0 && end > start ? raw.slice(start, end + 1) : raw;
-    parsed = JSON.parse(slice);
-  } catch {
+    parsed = parseJsonObject(raw);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(`${label} response was not valid JSON: ${message}`);
+    log(`${label} response preview:\n${truncateForLog(raw, 2000)}`);
+    if (options.strict) throw new Error(`opencode ${label} returned unparseable JSON: ${message}`);
     return {
       summary: 'The reviewer returned an unparseable response.',
       findings: [],
@@ -278,4 +335,84 @@ function parseReview(raw: string): ReviewResult {
   }
 
   return { summary, findings, addressedPriorComments };
+}
+
+function parseJsonObject(raw: string): unknown {
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error('empty response');
+
+  const candidates = [
+    trimmed,
+    ...extractFencedCodeBlocks(trimmed),
+    ...extractBalancedJsonObjects(trimmed),
+  ];
+  const seen = new Set<string>();
+  let lastError: unknown;
+
+  for (const candidate of candidates) {
+    const normalized = candidate.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    try {
+      return JSON.parse(normalized);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('no parseable JSON object found');
+}
+
+function extractFencedCodeBlocks(text: string): string[] {
+  const blocks: string[] = [];
+  const fencePattern = /```(?:json)?\s*([\s\S]*?)```/gi;
+  let match: RegExpExecArray | null;
+  while ((match = fencePattern.exec(text)) !== null) {
+    blocks.push(match[1]);
+  }
+  return blocks;
+}
+
+function extractBalancedJsonObjects(text: string): string[] {
+  const objects: string[] = [];
+  for (let start = text.indexOf('{'); start >= 0; start = text.indexOf('{', start + 1)) {
+    const end = findBalancedObjectEnd(text, start);
+    if (end !== -1) objects.push(text.slice(start, end + 1));
+  }
+  return objects;
+}
+
+function findBalancedObjectEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+
+  return -1;
+}
+
+function truncateForLog(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength).trimEnd()}\n...[truncated]`;
 }
