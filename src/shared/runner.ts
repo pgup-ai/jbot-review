@@ -41,6 +41,7 @@ export interface ReviewRunOptions {
 
 export async function runPrReview(params: {
   octokit: Octokit;
+  threadResolutionOctokit?: Octokit;
   owner: string;
   repo: string;
   pullNumber: number;
@@ -201,6 +202,7 @@ export async function runPrReview(params: {
     log('Review posted.');
     await acknowledgeAddressedPriorComments({
       octokit,
+      threadResolutionOctokit: params.threadResolutionOctokit,
       owner,
       repo,
       pullNumber,
@@ -310,6 +312,7 @@ function mergeAddressedPriorComments(
 
 async function acknowledgeAddressedPriorComments(params: {
   octokit: Octokit;
+  threadResolutionOctokit?: Octokit;
   owner: string;
   repo: string;
   pullNumber: number;
@@ -355,16 +358,21 @@ async function acknowledgeAddressedPriorComments(params: {
 
     if (thread.isResolved) continue;
     try {
-      await resolveReviewThread(params.octokit, thread.id);
+      await resolveReviewThread(params.threadResolutionOctokit ?? params.octokit, thread.id);
       params.log(`Resolved prior jbot-review thread ${thread.id}`);
     } catch (error) {
-      params.log(
-        `Failed to resolve prior jbot-review thread ${thread.id}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      const hint =
+        !params.threadResolutionOctokit && isResourceNotAccessibleByIntegration(message)
+          ? ' Set the thread-resolution-token input to a token that can resolve review threads.'
+          : '';
+      params.log(`Failed to resolve prior jbot-review thread ${thread.id}: ${message}${hint}`);
     }
   }
+}
+
+function isResourceNotAccessibleByIntegration(message: string): boolean {
+  return message.toLowerCase().includes('resource not accessible by integration');
 }
 
 function buildBody(

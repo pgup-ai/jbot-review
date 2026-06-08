@@ -91,6 +91,7 @@ jobs:
           nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
 ```
 
 **Step 2 — Add provider API keys as secrets.** In the repo: Settings → Secrets
@@ -110,6 +111,14 @@ with:
   opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
   github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
+
+**Thread resolution token:** when jbot verifies a prior finding is fixed, it
+posts an addressed reply and then attempts to resolve the GitHub review thread.
+Some `GITHUB_TOKEN` integrations can post review comments but cannot run
+GitHub's `resolveReviewThread` mutation. If you see `Resource not accessible by
+integration` in the logs, add a secret such as
+`JBOT_REVIEW_THREAD_RESOLUTION_TOKEN` with a PAT or GitHub App token that can
+resolve PR review threads, then pass it through `thread-resolution-token`.
 
 **Step 3 — (Optional) Add review guidelines.** Drop an `AGENTS.md`, `REVIEW.md`,
 or files in `.pr-governance/` at the repo root. The agent reads these during
@@ -184,6 +193,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
+    thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
 ```
 
 The action reads only the key matching the selected `provider`, so future
@@ -204,24 +214,25 @@ precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
 
 ### Input reference
 
-| Input                    | Required | Default               | Description                                                     |
-| ------------------------ | -------- | --------------------- | --------------------------------------------------------------- |
-| `provider`               | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`          |
-| `model`                  | No       | Provider default      | Override as `provider/model`; can come from `JBOT_REVIEW_MODEL` |
-| `opencode-api-key`       | No       | —                     | Required when `provider=opencode`                               |
-| `deepseek-api-key`       | No       | —                     | Required when `provider=deepseek`                               |
-| `openai-api-key`         | No       | —                     | Required when `provider=openai`                                 |
-| `anthropic-api-key`      | No       | —                     | Required when `provider=anthropic`                              |
-| `openrouter-api-key`     | No       | —                     | Required when `provider=openrouter`                             |
-| `nvidia-api-key`         | No       | —                     | Required when `provider=nvidia`                                 |
-| `xai-api-key`            | No       | —                     | Required when `provider=xai`                                    |
-| `github-token`           | Yes      | `${{ github.token }}` | Token to read PR and post review                                |
-| `pr-number`              | No       | —                     | PR number for manual `workflow_dispatch` reviews                |
-| `dry-run`                | No       | `false`               | Log review output without posting to GitHub                     |
-| `max-findings`           | No       | `0`                   | Cap findings; `0` means no limit                                |
-| `min-severity`           | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                        |
-| `include-prior-comments` | No       | `true`                | Include existing PR review comments in context                  |
-| `fail-on-error`          | No       | `true`                | Fail the workflow if the review cannot complete                 |
+| Input                     | Required | Default               | Description                                                     |
+| ------------------------- | -------- | --------------------- | --------------------------------------------------------------- |
+| `provider`                | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`          |
+| `model`                   | No       | Provider default      | Override as `provider/model`; can come from `JBOT_REVIEW_MODEL` |
+| `opencode-api-key`        | No       | —                     | Required when `provider=opencode`                               |
+| `deepseek-api-key`        | No       | —                     | Required when `provider=deepseek`                               |
+| `openai-api-key`          | No       | —                     | Required when `provider=openai`                                 |
+| `anthropic-api-key`       | No       | —                     | Required when `provider=anthropic`                              |
+| `openrouter-api-key`      | No       | —                     | Required when `provider=openrouter`                             |
+| `nvidia-api-key`          | No       | —                     | Required when `provider=nvidia`                                 |
+| `xai-api-key`             | No       | —                     | Required when `provider=xai`                                    |
+| `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                                |
+| `thread-resolution-token` | No       | —                     | Optional token used only to resolve addressed review threads    |
+| `pr-number`               | No       | —                     | PR number for manual `workflow_dispatch` reviews                |
+| `dry-run`                 | No       | `false`               | Log review output without posting to GitHub                     |
+| `max-findings`            | No       | `0`                   | Cap findings; `0` means no limit                                |
+| `min-severity`            | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                        |
+| `include-prior-comments`  | No       | `true`                | Include existing PR review comments in context                  |
+| `fail-on-error`           | No       | `true`                | Fail the workflow if the review cannot complete                 |
 
 ### Review output
 
