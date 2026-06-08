@@ -25,6 +25,7 @@ Use the checked-out repo, git diff, git log, and the PR context below to verify 
 Rules:
 - Only mark a prior thread addressed when the current branch clearly fixes the specific issue raised.
 - Do not mark a thread addressed just because the latest review has no new findings.
+- Do not mark a thread addressed because a human reply declined the suggestion, such as "Not applied", "accepted as-is", or "not worth fixing".
 - Use the exact prior jbot-review thread id from the prompt.
 - Prefer the commit SHA that fixed the issue for "addressed_by_commit"; use the current head only if the exact fixing commit cannot be determined.
 - Keep "note" to one short sentence explaining why it is addressed.
