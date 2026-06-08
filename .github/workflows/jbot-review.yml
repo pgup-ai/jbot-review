@@ -1,4 +1,4 @@
-name: jbot-review
+name: J-Bot Code Review
 on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]

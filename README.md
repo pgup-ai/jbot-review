@@ -57,7 +57,7 @@ release tag if you need fully stable action behavior.
 `.github/workflows/jbot-review.yml`, or use this minimal version:
 
 ```yaml
-name: jbot-review
+name: J-Bot Code Review
 on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
