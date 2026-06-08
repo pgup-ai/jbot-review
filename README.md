@@ -85,6 +85,7 @@ jobs:
           provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
           model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
           opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
+          opencode-go-api-key: ${{ secrets.OPENCODE_GO_API_KEY }}
           deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -97,9 +98,10 @@ jobs:
 
 **Step 2 — Add provider API keys as secrets.** In the repo: Settings → Secrets
 and variables → Actions → New repository secret. Add the keys for the providers
-you want to use, such as `OPENCODE_API_KEY`, `OPENROUTER_API_KEY`,
-`NVIDIA_API_KEY`, `XAI_API_KEY`, or `ANTHROPIC_API_KEY`. Empty provider key
-inputs are ignored unless that provider is selected.
+you want to use, such as `OPENCODE_API_KEY`, `OPENCODE_GO_API_KEY`,
+`OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `XAI_API_KEY`, or
+`ANTHROPIC_API_KEY`. Empty provider key inputs are ignored unless that provider
+is selected.
 
 **Secret exposure:** the example above passes multiple provider secrets so
 `JBOT_REVIEW_PROVIDER` can switch providers without another YAML edit. For a
@@ -162,6 +164,7 @@ without editing the workflow.
     include-prior-comments: ${{ inputs['include-prior-comments'] || 'true' }}
     fail-on-error: ${{ inputs['fail-on-error'] || 'true' }}
     opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
+    opencode-go-api-key: ${{ secrets.OPENCODE_GO_API_KEY }}
     deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
     openai-api-key: ${{ secrets.OPENAI_API_KEY }}
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -183,15 +186,16 @@ npm run replay -- fixtures/replay
 
 See [models.dev](https://models.dev/) for the full list of models and providers.
 
-| `provider`   | Default model                       | Action key input     | Secret/env var       |
-| ------------ | ----------------------------------- | -------------------- | -------------------- |
-| `opencode`   | `opencode/deepseek-v4-flash-free`   | `opencode-api-key`   | `OPENCODE_API_KEY`   |
-| `deepseek`   | `deepseek/deepseek-v4-flash`        | `deepseek-api-key`   | `DEEPSEEK_API_KEY`   |
-| `openai`     | `openai/gpt-5.4-nano`               | `openai-api-key`     | `OPENAI_API_KEY`     |
-| `anthropic`  | `anthropic/claude-sonnet-4-6`       | `anthropic-api-key`  | `ANTHROPIC_API_KEY`  |
-| `openrouter` | `openrouter/openai/gpt-4o-mini`     | `openrouter-api-key` | `OPENROUTER_API_KEY` |
-| `nvidia`     | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia-api-key`     | `NVIDIA_API_KEY`     |
-| `xai`        | `xai/grok-4.3`                      | `xai-api-key`        | `XAI_API_KEY`        |
+| `provider`    | Default model                       | Action key input      | Secret/env var        |
+| ------------- | ----------------------------------- | --------------------- | --------------------- |
+| `opencode`    | `opencode/deepseek-v4-flash-free`   | `opencode-api-key`    | `OPENCODE_API_KEY`    |
+| `opencode-go` | `opencode-go/deepseek-v4-flash`     | `opencode-go-api-key` | `OPENCODE_GO_API_KEY` |
+| `deepseek`    | `deepseek/deepseek-v4-flash`        | `deepseek-api-key`    | `DEEPSEEK_API_KEY`    |
+| `openai`      | `openai/gpt-5.4-nano`               | `openai-api-key`      | `OPENAI_API_KEY`      |
+| `anthropic`   | `anthropic/claude-sonnet-4-6`       | `anthropic-api-key`   | `ANTHROPIC_API_KEY`   |
+| `openrouter`  | `openrouter/openai/gpt-4o-mini`     | `openrouter-api-key`  | `OPENROUTER_API_KEY`  |
+| `nvidia`      | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia-api-key`      | `NVIDIA_API_KEY`      |
+| `xai`         | `xai/grok-4.3`                      | `xai-api-key`         | `XAI_API_KEY`         |
 
 Set the `provider` and `model` inputs to override the defaults. For automatic
 PR reviews without editing workflow YAML on every provider or model change,
@@ -206,6 +210,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
     model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
     opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
+    opencode-go-api-key: ${{ secrets.OPENCODE_GO_API_KEY }}
     deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
     openai-api-key: ${{ secrets.OPENAI_API_KEY }}
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -239,6 +244,7 @@ precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
 | `provider`                | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`          |
 | `model`                   | No       | Provider default      | Override as `provider/model`; can come from `JBOT_REVIEW_MODEL` |
 | `opencode-api-key`        | No       | —                     | Required when `provider=opencode`                               |
+| `opencode-go-api-key`     | No       | —                     | Required when `provider=opencode-go`                            |
 | `deepseek-api-key`        | No       | —                     | Required when `provider=deepseek`                               |
 | `openai-api-key`          | No       | —                     | Required when `provider=openai`                                 |
 | `anthropic-api-key`       | No       | —                     | Required when `provider=anthropic`                              |
@@ -364,21 +370,22 @@ are discovered during checkout.
 
 ### Env var reference (hosted App)
 
-| Variable                 | Required    | Default          | Description                                |
-| ------------------------ | ----------- | ---------------- | ------------------------------------------ |
-| `GITHUB_APP_ID`          | Yes         | —                | Numeric App ID from GitHub                 |
-| `GITHUB_APP_PRIVATE_KEY` | Yes         | —                | Contents of the `.pem` file                |
-| `GITHUB_WEBHOOK_SECRET`  | Yes         | —                | Random string for signing                  |
-| `PROVIDER`               | No          | `opencode`       | Provider key (see table below)             |
-| `OPENCODE_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=opencode   |
-| `DEEPSEEK_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=deepseek   |
-| `OPENAI_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=openai     |
-| `ANTHROPIC_API_KEY`      | Conditional | —                | Operator key used when PROVIDER=anthropic  |
-| `OPENROUTER_API_KEY`     | Conditional | —                | Operator key used when PROVIDER=openrouter |
-| `NVIDIA_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=nvidia     |
-| `XAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=xai        |
-| `MODEL`                  | No          | Provider default | Override as `provider/model`               |
-| `PORT`                   | No          | `3000`           | HTTP listen port                           |
+| Variable                 | Required    | Default          | Description                                 |
+| ------------------------ | ----------- | ---------------- | ------------------------------------------- |
+| `GITHUB_APP_ID`          | Yes         | —                | Numeric App ID from GitHub                  |
+| `GITHUB_APP_PRIVATE_KEY` | Yes         | —                | Contents of the `.pem` file                 |
+| `GITHUB_WEBHOOK_SECRET`  | Yes         | —                | Random string for signing                   |
+| `PROVIDER`               | No          | `opencode`       | Provider key (see table below)              |
+| `OPENCODE_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=opencode    |
+| `OPENCODE_GO_API_KEY`    | Conditional | —                | Operator key used when PROVIDER=opencode-go |
+| `DEEPSEEK_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=deepseek    |
+| `OPENAI_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=openai      |
+| `ANTHROPIC_API_KEY`      | Conditional | —                | Operator key used when PROVIDER=anthropic   |
+| `OPENROUTER_API_KEY`     | Conditional | —                | Operator key used when PROVIDER=openrouter  |
+| `NVIDIA_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=nvidia      |
+| `XAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=xai         |
+| `MODEL`                  | No          | Provider default | Override as `provider/model`                |
+| `PORT`                   | No          | `3000`           | HTTP listen port                            |
 
 ### Provider configuration (hosted App)
 
@@ -390,6 +397,7 @@ default:
 ```bash
 PROVIDER=deepseek
 OPENCODE_API_KEY=oc-...
+OPENCODE_GO_API_KEY=ocg-...
 DEEPSEEK_API_KEY=sk-...
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
@@ -438,6 +446,7 @@ gcloud run deploy jbot-review \
   --set-env-vars "GITHUB_APP_PRIVATE_KEY=$(cat your-app.pem)" \
   --set-env-vars GITHUB_WEBHOOK_SECRET=your-secret \
   --set-env-vars OPENCODE_API_KEY=oc-... \
+  --set-env-vars OPENCODE_GO_API_KEY=ocg-... \
   --set-env-vars DEEPSEEK_API_KEY=sk-... \
   --set-env-vars OPENAI_API_KEY=sk-... \
   --set-env-vars ANTHROPIC_API_KEY=sk-ant-... \
@@ -482,6 +491,7 @@ fly secrets set \
   GITHUB_APP_PRIVATE_KEY="$(cat your-app.pem)" \
   GITHUB_WEBHOOK_SECRET=your-secret \
   OPENCODE_API_KEY=oc-... \
+  OPENCODE_GO_API_KEY=ocg-... \
   DEEPSEEK_API_KEY=sk-... \
   OPENAI_API_KEY=sk-... \
   ANTHROPIC_API_KEY=sk-ant-... \
@@ -540,6 +550,8 @@ services:
         value: your-secret
       - key: OPENCODE_API_KEY
         value: oc-...
+      - key: OPENCODE_GO_API_KEY
+        value: ocg-...
       - key: DEEPSEEK_API_KEY
         value: sk-...
       - key: OPENAI_API_KEY
@@ -610,6 +622,8 @@ services:
         value: your-secret
       - key: OPENCODE_API_KEY
         value: oc-...
+      - key: OPENCODE_GO_API_KEY
+        value: ocg-...
       - key: DEEPSEEK_API_KEY
         value: sk-...
       - key: OPENAI_API_KEY
@@ -713,6 +727,7 @@ railway variables set \
   "GITHUB_APP_PRIVATE_KEY=$(cat your-app.pem)" \
   GITHUB_WEBHOOK_SECRET=your-secret \
   OPENCODE_API_KEY=oc-... \
+  OPENCODE_GO_API_KEY=ocg-... \
   DEEPSEEK_API_KEY=sk-... \
   OPENAI_API_KEY=sk-... \
   ANTHROPIC_API_KEY=sk-ant-... \
@@ -752,6 +767,7 @@ koyeb service create jbot-review \
   --env "GITHUB_APP_PRIVATE_KEY=$(cat your-app.pem)" \
   --env GITHUB_WEBHOOK_SECRET=your-secret \
   --env OPENCODE_API_KEY=oc-... \
+  --env OPENCODE_GO_API_KEY=ocg-... \
   --env DEEPSEEK_API_KEY=sk-... \
   --env OPENAI_API_KEY=sk-... \
   --env ANTHROPIC_API_KEY=sk-ant-... \
