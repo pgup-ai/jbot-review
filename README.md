@@ -52,7 +52,9 @@ release tag if you need fully stable action behavior.
 
 ### For the user (repo owner who wants reviews)
 
-**Step 1 — Add the workflow file.** Copy this into `.github/workflows/jbot-review.yml`:
+**Step 1 — Add the workflow file.** Copy
+[`examples/jbot-review.yml`](examples/jbot-review.yml) into
+`.github/workflows/jbot-review.yml`, or use this minimal version:
 
 ```yaml
 name: jbot-review
@@ -67,6 +69,8 @@ concurrency:
 permissions:
   contents: read
   pull-requests: write
+  checks: read
+  packages: read
 
 jobs:
   review:
