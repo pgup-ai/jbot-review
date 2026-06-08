@@ -13,8 +13,8 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
   },
   'opencode-go': {
     defaultModel: 'opencode-go/deepseek-v4-flash',
-    keyEnv: 'OPENCODE_GO_API_KEY',
-    keyInput: 'opencode-go-api-key',
+    keyEnv: 'OPENCODE_API_KEY',
+    keyInput: 'opencode-api-key',
   },
   deepseek: {
     defaultModel: 'deepseek/deepseek-v4-flash',
