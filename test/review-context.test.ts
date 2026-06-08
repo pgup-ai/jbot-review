@@ -54,6 +54,30 @@ describe('discoverGuidelines', () => {
     });
   });
 
+  it('loads markdown references from root guidelines once when they overlap with governance docs', async () => {
+    await withTempRepo(async (repo) => {
+      await mkdir(join(repo, '.pr-governance'), { recursive: true });
+      await mkdir(join(repo, 'docs'), { recursive: true });
+      await writeFile(
+        join(repo, 'AGENTS.md'),
+        ['# Agents', '', 'Read `docs/SHARED.md` and [extra](docs/EXTRA.md).'].join('\n'),
+      );
+      await writeFile(join(repo, 'REVIEW.md'), '# Review\nAlso read `docs/SHARED.md`.');
+      await writeFile(
+        join(repo, '.pr-governance', 'README.md'),
+        '# Governance\nRequired: `../docs/SHARED.md`',
+      );
+      await writeFile(join(repo, 'docs', 'SHARED.md'), '# Shared\nLoad this once');
+      await writeFile(join(repo, 'docs', 'EXTRA.md'), '# Extra\nLoad this too');
+
+      const guidelines = await discoverGuidelines(repo);
+
+      assert.match(guidelines, /### docs\/SHARED\.md\n# Shared/);
+      assert.match(guidelines, /### docs\/EXTRA\.md\n# Extra/);
+      assert.equal(guidelines.match(/### docs\/SHARED\.md/g)?.length, 1);
+    });
+  });
+
   it('falls back to immediate governance files when no governance README exists', async () => {
     await withTempRepo(async (repo) => {
       await mkdir(join(repo, '.pr-governance'), { recursive: true });

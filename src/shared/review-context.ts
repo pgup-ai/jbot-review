@@ -88,7 +88,14 @@ export async function discoverGuidelines(cwd: string): Promise<string> {
   }
 
   for (const name of ['AGENTS.md', 'REVIEW.md']) {
-    await addGuidelineFile(name, resolve(cwd, name));
+    const path = resolve(cwd, name);
+    const text = await addGuidelineFile(name, path);
+    if (!text) continue;
+    for (const reference of extractMarkdownDocumentReferences(text)) {
+      const referencedPath = resolveMarkdownReference(cwd, cwd, reference);
+      if (!referencedPath) continue;
+      await addGuidelineFile(formatGuidelineLabel(cwd, referencedPath), referencedPath);
+    }
   }
 
   const governanceDir = resolve(cwd, '.pr-governance');
@@ -99,7 +106,7 @@ export async function discoverGuidelines(cwd: string): Promise<string> {
 
   if (readme) {
     for (const reference of extractMarkdownDocumentReferences(readme)) {
-      const path = resolveGovernanceReference(cwd, governanceDir, reference);
+      const path = resolveMarkdownReference(cwd, governanceDir, reference);
       if (!path) continue;
       await addGuidelineFile(formatGuidelineLabel(cwd, path), path);
     }
@@ -133,16 +140,16 @@ function extractMarkdownDocumentReferences(markdown: string): string[] {
   return [...new Set(references)];
 }
 
-function resolveGovernanceReference(
+function resolveMarkdownReference(
   cwd: string,
-  governanceDir: string,
+  baseDir: string,
   reference: string,
 ): string | undefined {
   const pathWithoutAnchor = reference.split('#')[0];
   if (!pathWithoutAnchor || /^[a-z][a-z0-9+.-]*:/i.test(pathWithoutAnchor)) return undefined;
 
-  const baseDir = pathWithoutAnchor.startsWith('.pr-governance') ? cwd : governanceDir;
-  const resolvedPath = resolve(baseDir, pathWithoutAnchor);
+  const referenceBaseDir = pathWithoutAnchor.startsWith('.pr-governance') ? cwd : baseDir;
+  const resolvedPath = resolve(referenceBaseDir, pathWithoutAnchor);
   return isInsideDirectory(cwd, resolvedPath) ? resolvedPath : undefined;
 }
 

@@ -1,0 +1,112 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import { decideContext7Mode, parseContext7Mode } from '../src/shared/context7.ts';
+import { enableContext7Mcp, formatContext7Error } from '../src/shared/opencode.ts';
+
+describe('parseContext7Mode', () => {
+  it('accepts auto, enabled, and disabled values', () => {
+    assert.equal(parseContext7Mode(''), 'auto');
+    assert.equal(parseContext7Mode('auto'), 'auto');
+    assert.equal(parseContext7Mode('true'), 'always');
+    assert.equal(parseContext7Mode('on'), 'always');
+    assert.equal(parseContext7Mode('false'), 'off');
+    assert.equal(parseContext7Mode('off'), 'off');
+  });
+
+  it('rejects unknown values', () => {
+    assert.throws(() => parseContext7Mode('sometimes'), /Invalid context7 value/);
+  });
+});
+
+describe('decideContext7Mode', () => {
+  const apiKey = 'ctx7sk-test';
+
+  it('skips when disabled even if an external API change is present', () => {
+    const decision = decideContext7Mode({
+      mode: 'off',
+      apiKey,
+      files: [{ filename: 'src/openai.ts', patch: '+await openai.responses.create({})' }],
+    });
+
+    assert.equal(decision.enabled, false);
+    assert.match(decision.reason, /disabled/);
+  });
+
+  it('skips when no API key is configured', () => {
+    const decision = decideContext7Mode({
+      mode: 'auto',
+      apiKey: '',
+      files: [{ filename: 'src/openai.ts', patch: '+await openai.responses.create({})' }],
+    });
+
+    assert.equal(decision.enabled, false);
+    assert.match(decision.reason, /no Context7 API key/);
+  });
+
+  it('enables for workflow changes in auto mode', () => {
+    const decision = decideContext7Mode({
+      mode: 'auto',
+      apiKey,
+      files: [{ filename: '.github/workflows/pr.yml', patch: '+permissions:\n+  checks: read' }],
+    });
+
+    assert.equal(decision.enabled, true);
+    assert.match(decision.reason, /\.github\/workflows\/pr\.yml/);
+  });
+
+  it('enables for external SDK usage in auto mode', () => {
+    const decision = decideContext7Mode({
+      mode: 'auto',
+      apiKey,
+      files: [
+        {
+          filename: 'src/review.ts',
+          patch: '+const result = await anthropic.messages.create({ model, messages });',
+        },
+      ],
+    });
+
+    assert.equal(decision.enabled, true);
+    assert.match(decision.reason, /src\/review\.ts/);
+  });
+
+  it('skips ordinary business logic in auto mode', () => {
+    const decision = decideContext7Mode({
+      mode: 'auto',
+      apiKey,
+      files: [{ filename: 'src/totals.ts', patch: '+return subtotal + tax;' }],
+    });
+
+    assert.equal(decision.enabled, false);
+    assert.match(decision.reason, /no external API/);
+  });
+});
+
+describe('enableContext7Mcp', () => {
+  it('formats Context7 errors without a secret argument', () => {
+    assert.equal(formatContext7Error(new Error('Disconnected')), 'Disconnected');
+    assert.equal(formatContext7Error(new Error('Bad ctx7sk-test')), 'Bad [redacted]');
+  });
+
+  it('returns false and redacts the key when Context7 setup fails', async () => {
+    const logs: string[] = [];
+    const client = {
+      mcp: {
+        add: async () => {
+          throw new Error('Rejected ctx7sk-test');
+        },
+        connect: async () => true,
+      },
+    };
+
+    const enabled = await enableContext7Mcp(client as never, 'ctx7sk-test', (msg) =>
+      logs.push(msg),
+    );
+
+    assert.equal(enabled, false);
+    assert.match(logs.join('\n'), /continuing without it/);
+    assert.doesNotMatch(logs.join('\n'), /ctx7sk-test/);
+    assert.match(logs.join('\n'), /\[redacted\]/);
+  });
+});

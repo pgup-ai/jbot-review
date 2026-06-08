@@ -6,8 +6,12 @@ import {
   runReview,
   runAddressedPriorCommentsCheck,
   listProviderModels,
+  enableContext7Mcp,
+  disableContext7Mcp,
+  formatContext7Error,
 } from './opencode.ts';
 import { buildReviewContext, discoverGuidelines } from './review-context.ts';
+import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
   listPrFiles,
   listPrComments,
@@ -38,6 +42,8 @@ export interface ReviewRunOptions {
   maxFindings?: number;
   minSeverity?: Severity;
   includePriorComments?: boolean;
+  context7Mode?: Context7Mode;
+  context7ApiKey?: string;
 }
 
 export async function runPrReview(params: {
@@ -153,13 +159,33 @@ export async function runPrReview(params: {
       log(`(skipped provider model listing: ${(e as Error).message})`);
     }
 
+    const context7 = decideContext7Mode({
+      mode: options.context7Mode,
+      files,
+      apiKey: options.context7ApiKey,
+    });
+    let context7Active = false;
+    const basePrContext = prContext;
+    if (context7.enabled) {
+      log(`Context7 MCP requested: ${context7.reason}`);
+      context7Active = await enableContext7Mcp(client, options.context7ApiKey, log);
+      if (context7Active) {
+        prContext = `${prContext}\n\n${buildContext7PromptBlock(context7.reason)}`;
+      }
+    } else {
+      log(`Context7 MCP skipped: ${context7.reason}.`);
+    }
+
     log('Running review');
-    const { summary, findings, addressedPriorComments } = await runReview(
+    const { summary, findings, addressedPriorComments } = await runReviewWithContext7Fallback(
       client,
       model,
       prContext,
+      basePrContext,
       guidelinesForPrompt,
       log,
+      context7Active,
+      options.context7ApiKey,
     );
     const verifiedAddressedPriorComments = await verifyAddressedPriorComments({
       client,
@@ -227,6 +253,8 @@ function normalizeOptions(options: ReviewRunOptions | undefined): Required<Revie
     maxFindings: options?.maxFindings ?? 0,
     minSeverity: options?.minSeverity ?? 'nit',
     includePriorComments: options?.includePriorComments ?? true,
+    context7Mode: options?.context7Mode ?? 'auto',
+    context7ApiKey: options?.context7ApiKey ?? '',
   };
 }
 
@@ -248,6 +276,31 @@ function formatAddressedPriorComment(comment: AddressedPriorComment): string {
   const commit = comment.addressedByCommit ? ` (${comment.addressedByCommit})` : '';
   const note = comment.note ? `: ${comment.note}` : '';
   return `- ${comment.id}${commit}${note}`;
+}
+
+async function runReviewWithContext7Fallback(
+  client: Awaited<ReturnType<typeof startOpencode>>['client'],
+  model: string,
+  prContext: string,
+  basePrContext: string,
+  guidelinesForPrompt: string,
+  log: (msg: string) => void,
+  context7Active: boolean,
+  context7ApiKey: string,
+) {
+  try {
+    return await runReview(client, model, prContext, guidelinesForPrompt, log);
+  } catch (error) {
+    if (!context7Active) throw error;
+    log(
+      `Review failed while Context7 MCP was enabled; retrying without Context7: ${formatContext7Error(
+        error,
+        context7ApiKey,
+      )}`,
+    );
+    await disableContext7Mcp(client, log);
+    return await runReview(client, model, basePrContext, guidelinesForPrompt, log);
+  }
 }
 
 function buildSummaryScopeBlock(priorComments: string[], headSha?: string): string {
@@ -276,6 +329,15 @@ function buildSummaryScopeBlock(priorComments: string[], headSha?: string): stri
   }
 
   return lines.join('\n');
+}
+
+function buildContext7PromptBlock(reason: string): string {
+  return [
+    '## Context7 documentation lookup',
+    `Context7 MCP is available for this run because ${reason}.`,
+    'Use Context7 only to verify changed external API, SDK, framework, CLI, cloud-service, or GitHub Actions usage. Do not use it for ordinary business-logic review.',
+    'If Context7 is unavailable or does not return relevant documentation, continue the review from the repository diff and local evidence.',
+  ].join('\n');
 }
 
 function findLatestReviewedHead(priorJbotReviews: string[]): string | undefined {
