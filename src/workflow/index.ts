@@ -12,6 +12,7 @@ const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3',
 async function main(): Promise<void> {
   const failOnError = parseBooleanInput('fail-on-error', true);
   const token = core.getInput('github-token', { required: true });
+  const threadResolutionToken = core.getInput('thread-resolution-token').trim();
   const provider = getInputOrEnv('provider', 'JBOT_REVIEW_PROVIDER') || 'opencode';
   const cfg = PROVIDERS[provider];
   if (!cfg) {
@@ -48,6 +49,9 @@ async function main(): Promise<void> {
   );
 
   const octokit = github.getOctokit(token) as unknown as Octokit;
+  const threadResolutionOctokit = threadResolutionToken
+    ? (github.getOctokit(threadResolutionToken) as unknown as Octokit)
+    : undefined;
   const owner = github.context.repo.owner;
   const repo = github.context.repo.repo;
 
@@ -68,6 +72,7 @@ async function main(): Promise<void> {
       model,
       apiKey,
       headSha: pull.head.sha,
+      threadResolutionOctokit,
       options,
       log: (msg) => core.info(msg),
     });

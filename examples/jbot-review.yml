@@ -1,4 +1,5 @@
 name: jbot-review
+
 on:
   pull_request:
     types: [opened, reopened, ready_for_review, synchronize]
@@ -19,22 +20,6 @@ on:
         description: Log review output without posting to GitHub
         required: false
         default: 'false'
-      max-findings:
-        description: Maximum number of findings to post or log. Use 0 for no limit.
-        required: false
-        default: '0'
-      min-severity:
-        description: 'Minimum severity to include: P0, P1, P2, P3, or nit'
-        required: false
-        default: nit
-      include-prior-comments:
-        description: Include prior PR review comments in context
-        required: false
-        default: 'true'
-      fail-on-error:
-        description: Fail the workflow when review cannot complete
-        required: false
-        default: 'true'
 
 concurrency:
   group: jbot-review-${{ github.event.pull_request.number || inputs['pr-number'] || github.run_id }}
@@ -42,7 +27,6 @@ concurrency:
 
 permissions:
   contents: read
-  packages: read
   pull-requests: write
   checks: read
 
@@ -55,22 +39,13 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs['pr-number']) }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - run: npm ci
-      - run: npm run build
-      - run: docker build -t ghcr.io/pgup-ai/jbot-review:latest .
-      - uses: ./
+
+      - uses: pgup-ai/jbot-review-action@v0
         with:
           provider: ${{ inputs.provider || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
           model: ${{ inputs.model || vars.JBOT_REVIEW_MODEL || '' }}
           pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] }}
           dry-run: ${{ inputs['dry-run'] || 'false' }}
-          max-findings: ${{ inputs['max-findings'] || '0' }}
-          min-severity: ${{ inputs['min-severity'] || 'nit' }}
-          include-prior-comments: ${{ inputs['include-prior-comments'] || 'true' }}
-          fail-on-error: ${{ inputs['fail-on-error'] || 'true' }}
           opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
           deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
