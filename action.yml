@@ -11,7 +11,7 @@ inputs:
     required: false
     default: ''
   model:
-    description: 'Model as provider/model. Uses provider default if unset.'
+    description: 'Provider model id, optionally prefixed as provider/model. Uses provider default if unset.'
     required: false
     default: ''
   opencode-api-key:

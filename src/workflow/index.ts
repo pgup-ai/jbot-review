@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 
 import { PROVIDERS } from '../shared/config.ts';
-import { parseModelName } from '../shared/model.ts';
+import { formatModelName, resolveModelName } from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { Octokit } from '../shared/github.ts';
 import type { Severity } from '../shared/types.ts';
@@ -28,13 +28,8 @@ async function main(): Promise<void> {
     );
   }
 
-  const model = getInputOrEnv('model', 'JBOT_REVIEW_MODEL') || cfg.defaultModel;
-  const parsedModel = parseModelName(model);
-  if (parsedModel.providerID !== provider) {
-    throw new Error(
-      `Provider "${provider}" does not match model "${model}". Set provider="${parsedModel.providerID}" or choose a ${provider}/... model.`,
-    );
-  }
+  const modelInput = getInputOrEnv('model', 'JBOT_REVIEW_MODEL') || cfg.defaultModel;
+  const model = formatModelName(resolveModelName(provider, modelInput));
   const options = {
     enhancedContext: true,
     dryRun: parseBooleanInput('dry-run', false),
