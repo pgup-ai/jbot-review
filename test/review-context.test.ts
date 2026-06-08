@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { discoverGuidelines } from '../src/shared/review-context.ts';
@@ -63,5 +63,40 @@ describe('discoverGuidelines', () => {
 
       assert.match(guidelines, /### \.pr-governance\/PARADIGM_SNAPSHOT\.md\n# Snapshot/);
     });
+  });
+
+  it('ignores governance references outside the repository root', async () => {
+    const outsideFile = join(tmpdir(), `jbot-review-outside-${Date.now()}.md`);
+    await writeFile(outsideFile, '# Outside\nDo not load this');
+    try {
+      await withTempRepo(async (repo) => {
+        const traversalFile = resolve(repo, '..', 'outside.md');
+        await mkdir(join(repo, '.pr-governance'), { recursive: true });
+        try {
+          await writeFile(
+            join(repo, '.pr-governance', 'README.md'),
+            [
+              '# Governance',
+              '',
+              `- [absolute outside](${outsideFile})`,
+              '- `../../outside.md`',
+              '- `INSIDE.md`',
+            ].join('\n'),
+          );
+          await writeFile(join(repo, '.pr-governance', 'INSIDE.md'), '# Inside\nLoad this');
+          await writeFile(traversalFile, '# Traversal\nDo not load this either');
+
+          const guidelines = await discoverGuidelines(repo);
+
+          assert.match(guidelines, /### \.pr-governance\/INSIDE\.md\n# Inside/);
+          assert.doesNotMatch(guidelines, /Do not load this/);
+          assert.doesNotMatch(guidelines, /Do not load this either/);
+        } finally {
+          await rm(traversalFile, { force: true });
+        }
+      });
+    } finally {
+      await rm(outsideFile, { force: true });
+    }
   });
 });

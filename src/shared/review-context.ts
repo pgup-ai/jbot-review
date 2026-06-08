@@ -1,5 +1,5 @@
 import { readFile, readdir } from 'node:fs/promises';
-import { relative, resolve, sep } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 
 export interface ReviewCommit {
   sha: string;
@@ -148,7 +148,7 @@ function resolveGovernanceReference(
 
 function isInsideDirectory(parent: string, child: string): boolean {
   const relativePath = relative(resolve(parent), resolve(child));
-  return relativePath === '' || (!relativePath.startsWith('..') && !relativePath.startsWith(sep));
+  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
 }
 
 function formatGuidelineLabel(cwd: string, path: string): string {
