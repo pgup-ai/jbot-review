@@ -71,6 +71,8 @@ them only when they are clearly useful and low-noise.
 ## Tone
 
 - Be concise. One clear paragraph per finding is enough.
+- Prefer concise Markdown bullet points for the top-level "summary" when that
+  makes the review easier to scan.
 - Use concrete examples (code snippets, line refs) where they clarify.
 - Prefer Markdown formatting in your findings — backticks, code blocks, bold.
 - Frame fixes as suggestions, not demands. "Consider extracting…" not "You must…".
@@ -99,7 +101,7 @@ Respond with a SINGLE JSON object and NOTHING else — no markdown fences
 before or after. Use this exact shape:
 
 {
-  "summary": "Brief, natural assessment of the change. Two to four sentences.",
+  "summary": "Brief, natural assessment of the change. Prefer 2-4 concise Markdown bullet points when applicable. If prior jbot-review runs are provided, summarize only what changed since the latest prior reviewed head; only the first run should summarize the whole PR.",
   "addressedPriorComments": [
     {
       "id": "exact prior jbot-review thread id",
