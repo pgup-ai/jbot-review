@@ -258,8 +258,6 @@ async function promptPlanAgent(
 
   const data = await waitForAssistantMessage(client, session.id, label, log);
 
-  // Defensive: parts can be missing/empty on edge cases (errors, empty
-  // responses). Default to [] to avoid a TypeError.
   const parts = data.parts;
   log(
     `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
@@ -330,7 +328,7 @@ async function getLatestAssistantMessage(
     if (message.info.role !== 'assistant') continue;
     return {
       info: message.info,
-      parts: message.parts.map(toTextReadablePart),
+      parts: (message.parts ?? []).map(toTextReadablePart),
     };
   }
   return undefined;
