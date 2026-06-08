@@ -15,6 +15,7 @@ const READY_TIMEOUT_MS = 15_000;
 const MODEL_LIST_TIMEOUT_MS = 5_000;
 const PROMPT_TIMEOUT_MS = 15 * 60_000;
 const PROMPT_POLL_INTERVAL_MS = 2_000;
+const PROMPT_POLL_REQUEST_TIMEOUT_MS = 10_000;
 const PROMPT_PROGRESS_LOG_MS = 60_000;
 
 const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
@@ -319,7 +320,11 @@ async function getLatestAssistantMessage(
 ): Promise<
   { info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> } | undefined
 > {
-  const result = await client.session.messages({ path: { id: sessionID } });
+  const result = await withTimeout(
+    client.session.messages({ path: { id: sessionID } }),
+    PROMPT_POLL_REQUEST_TIMEOUT_MS,
+    `opencode ${label} message polling timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID})`,
+  );
   const error = getResultError(result);
   if (error) throw new Error(`opencode ${label} message polling failed: ${error}`);
 
@@ -339,7 +344,11 @@ async function getSessionStatus(
   sessionID: string,
   label: string,
 ): Promise<SessionStatus | undefined> {
-  const result = await client.session.status();
+  const result = await withTimeout(
+    client.session.status(),
+    PROMPT_POLL_REQUEST_TIMEOUT_MS,
+    `opencode ${label} status polling timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID})`,
+  );
   const error = getResultError(result);
   if (error) throw new Error(`opencode ${label} status polling failed: ${error}`);
   const statuses = result.data;
