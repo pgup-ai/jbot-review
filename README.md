@@ -226,9 +226,12 @@ and `model` or `JBOT_REVIEW_MODEL` for the model. Provider API keys can also be
 supplied through their standard env vars, such as `OPENROUTER_API_KEY` or
 `NVIDIA_API_KEY`. This convenience pattern exposes every configured provider key
 to the action runtime. For the smallest secret surface area, pass only the key
-for the provider used by that workflow. If `model` is set, its `provider/model`
-prefix must match the selected `provider`; otherwise the run fails before
-sending a request.
+for the provider used by that workflow. If `model` is set, it is interpreted as
+a model id for the selected `provider`. A matching `provider/model` prefix is
+accepted and normalized, so `deepseek-v4-flash-free` and
+`opencode/deepseek-v4-flash-free` are equivalent when `provider` is `opencode`.
+Slash-containing provider catalog ids such as `moonshotai/kimi-k2.6` are passed
+through as the model id for the selected provider.
 
 For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
@@ -236,25 +239,25 @@ precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
 
 ### Input reference
 
-| Input                     | Required | Default               | Description                                                     |
-| ------------------------- | -------- | --------------------- | --------------------------------------------------------------- |
-| `provider`                | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`          |
-| `model`                   | No       | Provider default      | Override as `provider/model`; can come from `JBOT_REVIEW_MODEL` |
-| `opencode-api-key`        | No       | —                     | Required when `provider=opencode` or `provider=opencode-go`     |
-| `deepseek-api-key`        | No       | —                     | Required when `provider=deepseek`                               |
-| `openai-api-key`          | No       | —                     | Required when `provider=openai`                                 |
-| `anthropic-api-key`       | No       | —                     | Required when `provider=anthropic`                              |
-| `openrouter-api-key`      | No       | —                     | Required when `provider=openrouter`                             |
-| `nvidia-api-key`          | No       | —                     | Required when `provider=nvidia`                                 |
-| `xai-api-key`             | No       | —                     | Required when `provider=xai`                                    |
-| `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                                |
-| `thread-resolution-token` | No       | —                     | Optional token used only to resolve addressed review threads    |
-| `pr-number`               | No       | —                     | PR number for manual `workflow_dispatch` reviews                |
-| `dry-run`                 | No       | `false`               | Log review output without posting to GitHub                     |
-| `max-findings`            | No       | `0`                   | Cap findings; `0` means no limit                                |
-| `min-severity`            | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                        |
-| `include-prior-comments`  | No       | `true`                | Include existing PR review comments in context                  |
-| `fail-on-error`           | No       | `true`                | Fail the workflow if the review cannot complete                 |
+| Input                     | Required | Default               | Description                                                  |
+| ------------------------- | -------- | --------------------- | ------------------------------------------------------------ |
+| `provider`                | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`       |
+| `model`                   | No       | Provider default      | Provider model id; can come from `JBOT_REVIEW_MODEL`         |
+| `opencode-api-key`        | No       | —                     | Required when `provider=opencode` or `provider=opencode-go`  |
+| `deepseek-api-key`        | No       | —                     | Required when `provider=deepseek`                            |
+| `openai-api-key`          | No       | —                     | Required when `provider=openai`                              |
+| `anthropic-api-key`       | No       | —                     | Required when `provider=anthropic`                           |
+| `openrouter-api-key`      | No       | —                     | Required when `provider=openrouter`                          |
+| `nvidia-api-key`          | No       | —                     | Required when `provider=nvidia`                              |
+| `xai-api-key`             | No       | —                     | Required when `provider=xai`                                 |
+| `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                             |
+| `thread-resolution-token` | No       | —                     | Optional token used only to resolve addressed review threads |
+| `pr-number`               | No       | —                     | PR number for manual `workflow_dispatch` reviews             |
+| `dry-run`                 | No       | `false`               | Log review output without posting to GitHub                  |
+| `max-findings`            | No       | `0`                   | Cap findings; `0` means no limit                             |
+| `min-severity`            | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                     |
+| `include-prior-comments`  | No       | `true`                | Include existing PR review comments in context               |
+| `fail-on-error`           | No       | `true`                | Fail the workflow if the review cannot complete              |
 
 ### Review output
 
@@ -379,7 +382,7 @@ are discovered during checkout.
 | `OPENROUTER_API_KEY`     | Conditional | —                | Operator key used when PROVIDER=openrouter |
 | `NVIDIA_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=nvidia     |
 | `XAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=xai        |
-| `MODEL`                  | No          | Provider default | Override as `provider/model`               |
+| `MODEL`                  | No          | Provider default | Provider model id, optionally prefixed     |
 | `PORT`                   | No          | `3000`           | HTTP listen port                           |
 
 ### Provider configuration (hosted App)
@@ -387,7 +390,8 @@ are discovered during checkout.
 Set `PROVIDER` and the matching operator API key in `.env`. You can set all
 provider keys up front, but the current hosted server reads only the key matching
 the selected `PROVIDER` at boot. The `MODEL` env var overrides the provider
-default:
+default and may be either the raw provider model id or a matching
+`provider/model` string:
 
 ```bash
 PROVIDER=deepseek

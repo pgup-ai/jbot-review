@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { Webhooks, createNodeMiddleware } from '@octokit/webhooks';
 
 import { PROVIDERS } from '../shared/config.ts';
-import { parseModelName } from '../shared/model.ts';
+import { formatModelName, resolveModelName } from '../shared/model.ts';
 import { handlePrEvent } from './app.ts';
 import type { AppConfig } from './app.ts';
 
@@ -24,14 +24,8 @@ const appCfg: AppConfig = {
   appId: mustEnv('GITHUB_APP_ID'),
   privateKey: mustEnv('GITHUB_APP_PRIVATE_KEY').replace(/\\n/g, '\n'),
   apiKey: mustEnv(cfg.keyEnv),
-  model: process.env.MODEL || cfg.defaultModel,
+  model: formatModelName(resolveModelName(provider, process.env.MODEL || cfg.defaultModel)),
 };
-const parsedModel = parseModelName(appCfg.model);
-if (parsedModel.providerID !== provider) {
-  throw new Error(
-    `PROVIDER "${provider}" does not match MODEL "${appCfg.model}". Set PROVIDER="${parsedModel.providerID}" or choose a ${provider}/... model.`,
-  );
-}
 
 const webhooks = new Webhooks({ secret: mustEnv('GITHUB_WEBHOOK_SECRET') });
 
