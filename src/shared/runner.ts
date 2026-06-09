@@ -176,6 +176,14 @@ export async function runPrReview(params: {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }
 
+    const addressedPriorCheck = startAddressedPriorCommentsCheck({
+      client,
+      model,
+      prContext: basePrContext,
+      priorJbotThreads,
+      log,
+    });
+
     log('Running review');
     const { summary, findings, addressedPriorComments } = await runReviewWithContext7Fallback(
       client,
@@ -187,14 +195,10 @@ export async function runPrReview(params: {
       context7Active,
       options.context7ApiKey,
     );
-    const verifiedAddressedPriorComments = await verifyAddressedPriorComments({
-      client,
-      model,
-      prContext,
-      priorJbotThreads,
+    const verifiedAddressedPriorComments = mergeAddressedPriorComments(
       addressedPriorComments,
-      log,
-    });
+      await addressedPriorCheck,
+    );
     const filteredFindings = filterFindings(findings, options);
     log(
       `Review complete: ${findings.length} finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
@@ -371,35 +375,31 @@ async function safeListPriorJbotThreads(
   }
 }
 
-async function verifyAddressedPriorComments(params: {
+function startAddressedPriorCommentsCheck(params: {
   client: Awaited<ReturnType<typeof startOpencode>>['client'];
   model: string;
   prContext: string;
   priorJbotThreads: PriorJbotThread[];
-  addressedPriorComments: AddressedPriorComment[];
   log: (msg: string) => void;
 }): Promise<AddressedPriorComment[]> {
-  if (params.priorJbotThreads.length === 0) return params.addressedPriorComments;
+  if (params.priorJbotThreads.length === 0) return Promise.resolve([]);
 
-  try {
-    const independentlyAddressed = await runAddressedPriorCommentsCheck(
-      params.client,
-      params.model,
-      params.prContext,
-      params.log,
-    );
-    params.log(
-      `Addressed-prior-comments check complete: ${independentlyAddressed.length} addressed prior comment(s)`,
-    );
-    return mergeAddressedPriorComments(params.addressedPriorComments, independentlyAddressed);
-  } catch (error) {
-    params.log(
-      `(skipped addressed-prior-comments check: ${
-        error instanceof Error ? error.message : String(error)
-      })`,
-    );
-    return params.addressedPriorComments;
-  }
+  params.log('Starting addressed-prior-comments check in parallel.');
+  return runAddressedPriorCommentsCheck(params.client, params.model, params.prContext, params.log)
+    .then((independentlyAddressed) => {
+      params.log(
+        `Addressed-prior-comments check complete: ${independentlyAddressed.length} addressed prior comment(s)`,
+      );
+      return independentlyAddressed;
+    })
+    .catch((error) => {
+      params.log(
+        `(skipped addressed-prior-comments check: ${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      );
+      return [];
+    });
 }
 
 function mergeAddressedPriorComments(
