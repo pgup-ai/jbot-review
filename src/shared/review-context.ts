@@ -153,14 +153,17 @@ export async function discoverGuidelines(
       const { bytesRead } = await handle.read(buffer, 0, byteLimit, 0);
       if (bytesRead <= 0) return undefined;
 
-      remainingGuidelineBytes -= bytesRead;
-      const text = buffer.toString('utf8', 0, bytesRead);
-      if (size <= bytesRead) return text;
+      const includedBytes = findUtf8Boundary(buffer, bytesRead);
+      if (includedBytes <= 0) return undefined;
+
+      remainingGuidelineBytes -= includedBytes;
+      const text = buffer.toString('utf8', 0, includedBytes);
+      if (size <= includedBytes) return text;
 
       return [
         text,
         '',
-        `[Guidance truncated after ${bytesRead} bytes to keep the review prompt bounded.]`,
+        `[Guidance truncated after ${includedBytes} bytes to keep the review prompt bounded.]`,
       ].join('\n');
     } finally {
       await handle.close();
@@ -340,6 +343,30 @@ function resolveMarkdownReference(
 function isInsideDirectory(parent: string, child: string): boolean {
   const relativePath = relative(resolve(parent), resolve(child));
   return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
+}
+
+function findUtf8Boundary(buffer: Buffer, length: number): number {
+  let start = length;
+  while (start > 0 && (buffer[start - 1] & 0xc0) === 0x80) {
+    start -= 1;
+  }
+
+  if (start === length) {
+    const lastByte = buffer[length - 1];
+    return utf8SequenceLength(lastByte) > 1 ? length - 1 : length;
+  }
+
+  const leadIndex = start - 1;
+  const sequenceLength = utf8SequenceLength(buffer[leadIndex]);
+  return length - leadIndex < sequenceLength ? leadIndex : length;
+}
+
+function utf8SequenceLength(byte: number): number {
+  if (byte <= 0x7f) return 1;
+  if (byte >= 0xc2 && byte <= 0xdf) return 2;
+  if (byte >= 0xe0 && byte <= 0xef) return 3;
+  if (byte >= 0xf0 && byte <= 0xf4) return 4;
+  return 1;
 }
 
 function formatGuidelineLabel(cwd: string, path: string): string {

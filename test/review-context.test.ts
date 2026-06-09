@@ -203,7 +203,7 @@ describe('discoverGuidelines', () => {
     await withTempRepo(async (repo) => {
       await writeFile(
         join(repo, 'AGENTS.md'),
-        ['# Agents', 'A'.repeat(20 * 1024), 'END_SHOULD_NOT_APPEAR'].join('\n'),
+        ['# Agents', '世界'.repeat(6000), 'END_SHOULD_NOT_APPEAR'].join('\n'),
       );
 
       const guidelines = await discoverGuidelines(repo);
@@ -211,6 +211,7 @@ describe('discoverGuidelines', () => {
       assert.match(guidelines, /### AGENTS\.md\n# Agents/);
       assert.match(guidelines, /Guidance truncated after \d+ bytes/);
       assert.doesNotMatch(guidelines, /END_SHOULD_NOT_APPEAR/);
+      assert.doesNotMatch(guidelines, /\uFFFD/);
     });
   });
 });
