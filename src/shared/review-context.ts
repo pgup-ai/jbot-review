@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { access, readFile, readdir } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 
 export interface ReviewCommit {
@@ -72,6 +72,7 @@ export function buildReviewContext(params: BuildReviewContextParams): string {
 export async function discoverGuidelines(cwd: string): Promise<string> {
   const sections: string[] = [];
   const seen = new Set<string>();
+  const referencedDocs = new Map<string, string>();
 
   async function addGuidelineFile(label: string, path: string): Promise<string | undefined> {
     const absolutePath = resolve(path);
@@ -87,14 +88,23 @@ export async function discoverGuidelines(cwd: string): Promise<string> {
     }
   }
 
+  async function addReferencedDoc(baseDir: string, reference: string): Promise<void> {
+    const referencedPath = resolveMarkdownReference(cwd, baseDir, reference);
+    if (!referencedPath || seen.has(referencedPath)) return;
+    try {
+      await access(referencedPath);
+    } catch {
+      return;
+    }
+    referencedDocs.set(referencedPath, formatGuidelineLabel(cwd, referencedPath));
+  }
+
   for (const name of ['AGENTS.md', 'REVIEW.md']) {
     const path = resolve(cwd, name);
     const text = await addGuidelineFile(name, path);
     if (!text) continue;
     for (const reference of extractMarkdownDocumentReferences(text)) {
-      const referencedPath = resolveMarkdownReference(cwd, cwd, reference);
-      if (!referencedPath) continue;
-      await addGuidelineFile(formatGuidelineLabel(cwd, referencedPath), referencedPath);
+      await addReferencedDoc(cwd, reference);
     }
   }
 
@@ -106,11 +116,9 @@ export async function discoverGuidelines(cwd: string): Promise<string> {
 
   if (readme) {
     for (const reference of extractMarkdownDocumentReferences(readme)) {
-      const path = resolveMarkdownReference(cwd, governanceDir, reference);
-      if (!path) continue;
-      await addGuidelineFile(formatGuidelineLabel(cwd, path), path);
+      await addReferencedDoc(governanceDir, reference);
     }
-    return sections.join('\n\n');
+    return formatGuidelineSections(sections, seen, referencedDocs);
   }
 
   try {
@@ -121,6 +129,29 @@ export async function discoverGuidelines(cwd: string): Promise<string> {
     }
   } catch {
     /* directory absent */
+  }
+
+  return formatGuidelineSections(sections, seen, referencedDocs);
+}
+
+function formatGuidelineSections(
+  sections: string[],
+  loadedPaths: Set<string>,
+  referencedDocs: Map<string, string>,
+): string {
+  const availableDocs = [...referencedDocs]
+    .filter(([path]) => !loadedPaths.has(path))
+    .map(([, label]) => label)
+    .sort();
+
+  if (availableDocs.length > 0) {
+    sections.push(
+      [
+        '### Referenced Markdown documents',
+        'These docs were mentioned by AGENTS.md, REVIEW.md, or .pr-governance/README.md but were not preloaded. Read them only when relevant to the changed files or review question.',
+        availableDocs.map((label) => `- ${label}`).join('\n'),
+      ].join('\n'),
+    );
   }
 
   return sections.join('\n\n');

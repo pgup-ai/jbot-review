@@ -24,7 +24,8 @@ and suggest meaningful improvements — not to nitpick style or generate noise.
   marked a finding "Not applied", treat it as already discussed rather than
   re-raising it.
 - Repo-level guidelines (AGENTS.md, REVIEW.md, .pr-governance/) may be
-  provided — follow them.
+  provided. Follow loaded guidance, and read any listed referenced Markdown
+  docs only when they are relevant to the changed files or review question.
 - Do NOT modify any files. This is a read-only review.
 
 ## Severity tags
