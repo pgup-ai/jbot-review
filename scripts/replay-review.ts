@@ -51,12 +51,13 @@ const checkSummary = await readText(
   join(fixtureDir, 'checks.txt'),
   'No check summary fixture provided.',
 );
-const guidelines = await discoverGuidelines(fixtureDir);
+const changedFiles = files.map((file) => file.filename);
+const guidelines = await discoverGuidelines(fixtureDir, changedFiles);
 
 const context = buildReviewContext({
   pullTitle: pr.title,
   pullBody: pr.body,
-  changedFiles: files.map((file) => file.filename),
+  changedFiles,
   priorComments,
   commits,
   checkSummary: checkSummary.trim(),

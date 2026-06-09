@@ -374,7 +374,7 @@ export async function postReview(
     path: f.path,
     line: f.line,
     side: 'RIGHT' as const,
-    body: `**${f.severity}** — ${f.title}\n\n${f.body}\n\n${FINDING_MARKER}`,
+    body: `**${f.severity}${formatFindingMetadata(f)}** — ${f.title}\n\n${f.body}\n\n${FINDING_MARKER}`,
   }));
 
   try {
@@ -401,6 +401,11 @@ export async function postReview(
       throw new Error('Failed to post review to GitHub');
     }
   }
+}
+
+function formatFindingMetadata(finding: Pick<Finding, 'kind' | 'confidence'>): string {
+  const parts = [finding.kind, finding.confidence].filter(Boolean);
+  return parts.length > 0 ? ` (${parts.join(', ')})` : '';
 }
 
 export async function postAddressedThreadReply(params: {

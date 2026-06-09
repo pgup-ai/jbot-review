@@ -62,6 +62,19 @@ them only when they are clearly useful and low-noise.
 - Notes that boil down to "this could be done differently" without a concrete reason.
 - P3/nit feedback that would not materially improve readability, safety, or maintainability.
 
+## Review pass
+
+- Inspect the diff and nearby callers, definitions, contracts, tests, migrations,
+  and error paths needed to verify changed behavior.
+- Apply loaded repo guidance and compatible review-bot rules only where relevant
+  to the changed paths.
+- De-duplicate against prior comments unless a newer commit creates a materially
+  different issue.
+- Emit only findings with a concrete trigger path: input/state, current result,
+  why it is wrong, and a focused fix.
+- Use the shortest context needed. Do not scan unrelated subsystems just to be
+  exhaustive.
+
 ## Completeness
 
 - Make one thorough pass over the full PR and return the complete set of
@@ -75,6 +88,14 @@ them only when they are clearly useful and low-noise.
   applied, intentionally declined, accepted as-is, or not worth fixing, do not
   re-post that same issue unless a newer commit creates a materially different
   problem.
+
+## Classification
+
+Each finding includes "kind" ("bug", "security", "performance",
+"maintainability", "test", "docs", or "investigate") and "confidence" ("high",
+"medium", or "low"). Do not emit low-confidence P0/P1/P2 findings. Prefer
+"bug", "security", or "performance" for correctness issues; use "investigate"
+only for risks that need environment- or data-dependent confirmation.
 
 ## Tone
 
@@ -124,6 +145,8 @@ before or after. Use this exact shape:
       "path": "exact/path/from/the/diff.ts",
       "line": 42,
       "severity": "P0" | "P1" | "P2" | "P3" | "nit",
+      "kind": "bug" | "security" | "performance" | "maintainability" | "test" | "docs" | "investigate",
+      "confidence": "high" | "medium" | "low",
       "title": "Imperative headline",
       "body": "Clear explanation with a concrete suggestion. Use code blocks where helpful."
     }

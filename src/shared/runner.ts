@@ -95,7 +95,7 @@ export async function runPrReview(params: {
     changedFiles.push(f.filename);
   }
 
-  const guidelines = await discoverGuidelines(workspace);
+  const guidelines = await discoverGuidelines(workspace, changedFiles);
   if (guidelines) log(`Guidelines loaded (${guidelines.length} bytes).`);
 
   const priorComments = options.includePriorComments
@@ -108,6 +108,7 @@ export async function runPrReview(params: {
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
   const summaryScopeBlock = buildSummaryScopeBlock(priorComments, headSha);
+  const reviewFocusBlock = buildReviewFocusBlock(changedFiles);
 
   let prContext: string;
   let guidelinesForPrompt = guidelines;
@@ -126,6 +127,7 @@ export async function runPrReview(params: {
       guidelines,
     });
     prContext = `${prContext}\n\n${summaryScopeBlock}`;
+    prContext = `${prContext}\n\n${reviewFocusBlock}`;
     if (priorJbotThreadBlock) prContext = `${prContext}\n\n${priorJbotThreadBlock}`;
     guidelinesForPrompt = '';
   } else {
@@ -138,6 +140,7 @@ export async function runPrReview(params: {
       pullBody && `Description: ${pullBody}`,
       `Changed files: ${changedFiles.join(', ')}`,
       summaryScopeBlock,
+      reviewFocusBlock,
       commentsBlock,
       priorJbotThreadBlock,
     ]
@@ -273,7 +276,8 @@ function filterFindings(findings: Finding[], options: Required<ReviewRunOptions>
 
 function formatInlineFinding(finding: Finding): string {
   const indentedBody = finding.body.replace(/\n/g, '\n  ');
-  return `- ${finding.path}:${finding.line} ${finding.severity} ${finding.title}\n  ${indentedBody}`;
+  const metadata = formatFindingMetadata(finding);
+  return `- ${finding.path}:${finding.line} ${finding.severity}${metadata} ${finding.title}\n  ${indentedBody}`;
 }
 
 function formatAddressedPriorComment(comment: AddressedPriorComment): string {
@@ -342,6 +346,56 @@ function buildContext7PromptBlock(reason: string): string {
     'Use Context7 only to verify changed external API, SDK, framework, CLI, cloud-service, or GitHub Actions usage. Do not use it for ordinary business-logic review.',
     'If Context7 is unavailable or does not return relevant documentation, continue the review from the repository diff and local evidence.',
   ].join('\n');
+}
+
+function buildReviewFocusBlock(changedFiles: string[]): string {
+  const focusItems = new Set<string>();
+
+  for (const file of changedFiles) {
+    if (/(^|\/)(package\.json|action\.ya?ml)$|^\.github\/workflows\/.+\.ya?ml$/i.test(file)) {
+      focusItems.add('External/tooling: inputs, permissions, auth, versions, failure modes.');
+    }
+    if (/(^|\/)(api|routes?|controllers?|server|webhooks?)\//i.test(file)) {
+      focusItems.add('API/server: validation, auth/authz, idempotency, response contracts.');
+    }
+    if (/(^|\/)(db|database|migrations?|prisma|drizzle|schema)\//i.test(file)) {
+      focusItems.add('Data: compatibility, migration order, defaults, nullability, indexes.');
+    }
+    if (/(^|\/)(auth|security|permissions?|policies)\//i.test(file)) {
+      focusItems.add('Security: privilege, tokens, tenant isolation, unsafe input boundaries.');
+    }
+    if (
+      /\.(tsx|jsx|vue|svelte)$/i.test(file) ||
+      /(^|\/)(components?|pages?|app|frontend|ui)\//i.test(file)
+    ) {
+      focusItems.add(
+        'Frontend: loading/error states, stale async state, accessibility, API assumptions.',
+      );
+    }
+    if (
+      /(^|\/)(test|tests|__tests__|spec)\//i.test(file) ||
+      /\.(test|spec)\.[cm]?[jt]sx?$/i.test(file)
+    ) {
+      focusItems.add('Tests: assertions cover changed behavior and do not mask failures.');
+    }
+  }
+
+  if (focusItems.size === 0) {
+    focusItems.add(
+      'General correctness: trace behavior through callers, error paths, contracts, and tests.',
+    );
+  }
+
+  return [
+    '## Relevant review focus',
+    'Use only as relevant checklists; do not invent findings.',
+    ...[...focusItems].map((item) => `- ${item}`),
+  ].join('\n');
+}
+
+function formatFindingMetadata(finding: Pick<Finding, 'kind' | 'confidence'>): string {
+  const parts = [finding.kind, finding.confidence].filter(Boolean);
+  return parts.length > 0 ? ` (${parts.join(', ')})` : '';
 }
 
 function findLatestReviewedHead(priorJbotReviews: string[]): string | undefined {
@@ -509,7 +563,9 @@ function buildBody(
   if (orphaned.length > 0) {
     lines.push('### Findings (outside the diff)');
     for (const f of orphaned) {
-      lines.push(`- **${f.severity}** ${f.title} — \`${f.path}:${f.line}\``);
+      lines.push(
+        `- **${f.severity}${formatFindingMetadata(f)}** ${f.title} — \`${f.path}:${f.line}\``,
+      );
       lines.push(`  ${f.body}`);
     }
   }
