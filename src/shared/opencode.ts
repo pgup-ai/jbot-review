@@ -17,6 +17,9 @@ const PROMPT_TIMEOUT_MS = 15 * 60_000;
 const PROMPT_POLL_INTERVAL_MS = 2_000;
 const PROMPT_POLL_REQUEST_TIMEOUT_MS = 10_000;
 const PROMPT_PROGRESS_LOG_MS = 60_000;
+const CONTEXT7_MCP_NAME = 'context7';
+const CONTEXT7_MCP_URL = 'https://mcp.context7.com/mcp';
+const CONTEXT7_MCP_TIMEOUT_MS = 15_000;
 
 const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
 
@@ -164,6 +167,55 @@ export async function listProviderModels(
     .sort();
 }
 
+export async function enableContext7Mcp(
+  client: OpencodeClient,
+  apiKey: string,
+  log: (msg: string) => void,
+): Promise<boolean> {
+  const trimmedKey = apiKey.trim();
+  if (!trimmedKey) return false;
+  let added = false;
+
+  try {
+    await client.mcp.add({
+      body: {
+        name: CONTEXT7_MCP_NAME,
+        config: {
+          type: 'remote',
+          url: CONTEXT7_MCP_URL,
+          enabled: true,
+          headers: {
+            CONTEXT7_API_KEY: trimmedKey,
+            Accept: 'application/json, text/event-stream',
+          },
+          timeout: CONTEXT7_MCP_TIMEOUT_MS,
+        },
+      },
+    });
+    added = true;
+    await client.mcp.connect({ path: { name: CONTEXT7_MCP_NAME } });
+    log('Context7 MCP enabled for external API/SDK documentation checks.');
+    return true;
+  } catch (error) {
+    if (added) await disableContext7Mcp(client, log);
+    log(
+      `Context7 MCP unavailable; continuing without it: ${formatContext7Error(error, trimmedKey)}`,
+    );
+    return false;
+  }
+}
+
+export async function disableContext7Mcp(
+  client: OpencodeClient,
+  log: (msg: string) => void,
+): Promise<void> {
+  try {
+    await client.mcp.disconnect({ path: { name: CONTEXT7_MCP_NAME } });
+  } catch (error) {
+    log(`Context7 MCP disconnect skipped: ${formatContext7Error(error)}`);
+  }
+}
+
 function isProviderListData(value: unknown): value is {
   all: Array<{ id: string; models: Record<string, unknown> }>;
 } {
@@ -175,6 +227,18 @@ function isProviderListData(value: unknown): value is {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+export function formatContext7Error(error: unknown, secret = ''): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const redacted = secret
+    ? message.replace(new RegExp(escapeRegExp(secret), 'gi'), '[redacted]')
+    : message;
+  return redacted.replace(/ctx7sk-[A-Za-z0-9_-]+/gi, '[redacted]');
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {

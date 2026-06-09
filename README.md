@@ -91,6 +91,8 @@ jobs:
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
           nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
+          enable-context7: auto
+          context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
 ```
@@ -101,6 +103,8 @@ you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `XAI_API_KEY`, or `ANTHROPIC_API_KEY`.
 Empty provider key inputs are ignored unless that provider is selected.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
+Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
+framework, CLI, cloud-service, or workflow changes.
 
 **Secret exposure:** the example above passes multiple provider secrets so
 `JBOT_REVIEW_PROVIDER` can switch providers without another YAML edit. For a
@@ -169,6 +173,8 @@ without editing the workflow.
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
+    enable-context7: auto
+    context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
     thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
 ```
@@ -214,6 +220,8 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
+    enable-context7: auto
+    context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
     thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
 ```
@@ -237,27 +245,40 @@ For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
 `pull_request` runs use the variable values.
 
+### Context7 documentation lookup
+
+Set `enable-context7: auto` and pass `context7-api-key` from
+`secrets.CONTEXT7_API_KEY` to let the review agent verify current docs when the
+PR changes external API, SDK, framework, CLI, cloud-service, or GitHub Actions
+usage. In `auto` mode, Context7 is skipped for ordinary business-logic changes.
+
+Context7 failures are non-blocking: if the MCP server cannot connect, rejects
+auth, or rate-limits, the action logs a warning and continues the review without
+documentation lookup.
+
 ### Input reference
 
-| Input                     | Required | Default               | Description                                                  |
-| ------------------------- | -------- | --------------------- | ------------------------------------------------------------ |
-| `provider`                | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`       |
-| `model`                   | No       | Provider default      | Provider model id; can come from `JBOT_REVIEW_MODEL`         |
-| `opencode-api-key`        | No       | —                     | Required when `provider=opencode` or `provider=opencode-go`  |
-| `deepseek-api-key`        | No       | —                     | Required when `provider=deepseek`                            |
-| `openai-api-key`          | No       | —                     | Required when `provider=openai`                              |
-| `anthropic-api-key`       | No       | —                     | Required when `provider=anthropic`                           |
-| `openrouter-api-key`      | No       | —                     | Required when `provider=openrouter`                          |
-| `nvidia-api-key`          | No       | —                     | Required when `provider=nvidia`                              |
-| `xai-api-key`             | No       | —                     | Required when `provider=xai`                                 |
-| `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                             |
-| `thread-resolution-token` | No       | —                     | Optional token used only to resolve addressed review threads |
-| `pr-number`               | No       | —                     | PR number for manual `workflow_dispatch` reviews             |
-| `dry-run`                 | No       | `false`               | Log review output without posting to GitHub                  |
-| `max-findings`            | No       | `0`                   | Cap findings; `0` means no limit                             |
-| `min-severity`            | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                     |
-| `include-prior-comments`  | No       | `true`                | Include existing PR review comments in context               |
-| `fail-on-error`           | No       | `true`                | Fail the workflow if the review cannot complete              |
+| Input                     | Required | Default               | Description                                                                |
+| ------------------------- | -------- | --------------------- | -------------------------------------------------------------------------- |
+| `provider`                | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`                     |
+| `model`                   | No       | Provider default      | Provider model id; can come from `JBOT_REVIEW_MODEL`                       |
+| `opencode-api-key`        | No       | —                     | Required when `provider=opencode` or `provider=opencode-go`                |
+| `deepseek-api-key`        | No       | —                     | Required when `provider=deepseek`                                          |
+| `openai-api-key`          | No       | —                     | Required when `provider=openai`                                            |
+| `anthropic-api-key`       | No       | —                     | Required when `provider=anthropic`                                         |
+| `openrouter-api-key`      | No       | —                     | Required when `provider=openrouter`                                        |
+| `nvidia-api-key`          | No       | —                     | Required when `provider=nvidia`                                            |
+| `xai-api-key`             | No       | —                     | Required when `provider=xai`                                               |
+| `enable-context7`         | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false` |
+| `context7-api-key`        | No       | —                     | Optional Context7 key for reliable CI docs lookup                          |
+| `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                                           |
+| `thread-resolution-token` | No       | —                     | Optional token used only to resolve addressed review threads               |
+| `pr-number`               | No       | —                     | PR number for manual `workflow_dispatch` reviews                           |
+| `dry-run`                 | No       | `false`               | Log review output without posting to GitHub                                |
+| `max-findings`            | No       | `0`                   | Cap findings; `0` means no limit                                           |
+| `min-severity`            | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                                   |
+| `include-prior-comments`  | No       | `true`                | Include existing PR review comments in context                             |
+| `fail-on-error`           | No       | `true`                | Fail the workflow if the review cannot complete                            |
 
 ### Review output
 

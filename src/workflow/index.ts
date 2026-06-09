@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 
 import { PROVIDERS } from '../shared/config.ts';
+import { parseContext7Mode } from '../shared/context7.ts';
 import { formatModelName, resolveModelName } from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { Octokit } from '../shared/github.ts';
@@ -36,11 +37,13 @@ async function main(): Promise<void> {
     maxFindings: parseNumberInput('max-findings', 0),
     minSeverity: parseSeverityInput('min-severity', 'nit'),
     includePriorComments: parseBooleanInput('include-prior-comments', true),
+    context7Mode: parseContext7Mode(core.getInput('enable-context7')),
+    context7ApiKey: getInputOrEnv('context7-api-key', 'CONTEXT7_API_KEY'),
   };
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${model}`);
   core.info(
-    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments}`,
+    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode}`,
   );
 
   const octokit = github.getOctokit(token) as unknown as Octokit;
