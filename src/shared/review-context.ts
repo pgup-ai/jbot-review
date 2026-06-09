@@ -1,4 +1,4 @@
-import { access, readFile, readdir, realpath } from 'node:fs/promises';
+import { access, open, readdir, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 export interface ReviewCommit {
@@ -97,6 +97,8 @@ const SCOPED_GUIDELINE_FILES = [
 ];
 
 const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
+const MAX_GUIDELINE_FILE_BYTES = 16 * 1024;
+const MAX_GUIDELINE_TOTAL_BYTES = 48 * 1024;
 
 export async function discoverGuidelines(
   cwd: string,
@@ -107,6 +109,19 @@ export async function discoverGuidelines(
   const seenRealPaths = new Set<string>();
   const referencedDocs = new Map<string, string>();
   const workspaceRoot = await realpath(cwd);
+  let remainingGuidelineBytes = MAX_GUIDELINE_TOTAL_BYTES;
+  let budgetNoticeAdded = false;
+
+  function addBudgetNotice(): void {
+    if (budgetNoticeAdded) return;
+    budgetNoticeAdded = true;
+    sections.push(
+      [
+        '### Review guidance budget',
+        `Additional guidance was skipped after the ${MAX_GUIDELINE_TOTAL_BYTES} byte review guidance budget was reached.`,
+      ].join('\n'),
+    );
+  }
 
   async function resolveExistingInsideWorkspace(
     path: string,
@@ -119,6 +134,36 @@ export async function discoverGuidelines(
       return { absolutePath, realPath };
     } catch {
       return undefined;
+    }
+  }
+
+  async function readBoundedGuidelineFile(realPath: string): Promise<string | undefined> {
+    if (remainingGuidelineBytes <= 0) {
+      addBudgetNotice();
+      return undefined;
+    }
+
+    const handle = await open(realPath, 'r');
+    try {
+      const { size } = await handle.stat();
+      if (size <= 0) return undefined;
+
+      const byteLimit = Math.min(size, MAX_GUIDELINE_FILE_BYTES, remainingGuidelineBytes);
+      const buffer = Buffer.alloc(byteLimit);
+      const { bytesRead } = await handle.read(buffer, 0, byteLimit, 0);
+      if (bytesRead <= 0) return undefined;
+
+      remainingGuidelineBytes -= bytesRead;
+      const text = buffer.toString('utf8', 0, bytesRead);
+      if (size <= bytesRead) return text;
+
+      return [
+        text,
+        '',
+        `[Guidance truncated after ${bytesRead} bytes to keep the review prompt bounded.]`,
+      ].join('\n');
+    } finally {
+      await handle.close();
     }
   }
 
@@ -136,7 +181,8 @@ export async function discoverGuidelines(
     if (!resolved) return undefined;
     if (seen.has(resolved.absolutePath) || seenRealPaths.has(resolved.realPath)) return undefined;
     try {
-      const text = await readFile(resolved.realPath, 'utf8');
+      const text = await readBoundedGuidelineFile(resolved.realPath);
+      if (!text) return undefined;
       if (!text.trim()) return undefined;
       seen.add(resolved.absolutePath);
       seenRealPaths.add(resolved.realPath);
@@ -176,7 +222,7 @@ export async function discoverGuidelines(
     if (!resolvedDir) return;
     try {
       const entries = await readdir(resolvedDir.realPath, { withFileTypes: true });
-      for (const entry of entries) {
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
         if (!entry.isFile()) continue;
         const ext = entry.name.match(/\.[^.]+$/)?.[0] ?? '';
         if (!RULE_DIRECTORY_FILES.has(ext)) continue;
@@ -216,7 +262,7 @@ export async function discoverGuidelines(
     const resolvedGovernanceDir = await resolveExistingInsideWorkspace(governanceDir);
     if (!resolvedGovernanceDir) return formatGuidelineSections(sections, seen, referencedDocs);
     const entries = await readdir(resolvedGovernanceDir.realPath, { withFileTypes: true });
-    for (const entry of entries) {
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       if (!entry.isFile()) continue;
       await addGuidelineFile(`.pr-governance/${entry.name}`, resolve(governanceDir, entry.name));
     }

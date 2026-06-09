@@ -100,6 +100,8 @@ describe('discoverGuidelines', () => {
       await mkdir(join(repo, 'frontend', '.cursor'), { recursive: true });
       await mkdir(join(repo, '.jbot-review'), { recursive: true });
       await writeFile(join(repo, '.cursor', 'BUGBOT.md'), '# Root Bugbot\nAlways load this');
+      await writeFile(join(repo, '.cursor', 'rules', 'a.mdc'), '# A Cursor Rule\nRoot rule A');
+      await writeFile(join(repo, '.cursor', 'rules', 'b.mdc'), '# B Cursor Rule\nRoot rule B');
       await writeFile(join(repo, '.cursor', 'rules', 'review.mdc'), '# Cursor Rule\nRoot rule');
       await writeFile(join(repo, '.coderabbit.yaml'), 'reviews:\n  high_level_summary: true\n');
       await writeFile(
@@ -115,7 +117,17 @@ describe('discoverGuidelines', () => {
       const guidelines = await discoverGuidelines(repo, ['backend/api/routes/user.ts']);
 
       assert.match(guidelines, /### \.cursor\/BUGBOT\.md\n# Root Bugbot/);
+      assert.match(guidelines, /### \.cursor\/rules\/a\.mdc\n# A Cursor Rule/);
+      assert.match(guidelines, /### \.cursor\/rules\/b\.mdc\n# B Cursor Rule/);
       assert.match(guidelines, /### \.cursor\/rules\/review\.mdc\n# Cursor Rule/);
+      assert.ok(
+        guidelines.indexOf('### .cursor/rules/a.mdc') <
+          guidelines.indexOf('### .cursor/rules/b.mdc'),
+      );
+      assert.ok(
+        guidelines.indexOf('### .cursor/rules/b.mdc') <
+          guidelines.indexOf('### .cursor/rules/review.mdc'),
+      );
       assert.match(guidelines, /### \.coderabbit\.yaml\nreviews:/);
       assert.match(guidelines, /### backend\/api\/\.cursor\/BUGBOT\.md\n# API Bugbot/);
       assert.doesNotMatch(guidelines, /Frontend Bugbot/);
@@ -185,5 +197,20 @@ describe('discoverGuidelines', () => {
     } finally {
       await rm(outsideDir, { recursive: true, force: true });
     }
+  });
+
+  it('truncates large guideline files instead of inlining them fully', async () => {
+    await withTempRepo(async (repo) => {
+      await writeFile(
+        join(repo, 'AGENTS.md'),
+        ['# Agents', 'A'.repeat(20 * 1024), 'END_SHOULD_NOT_APPEAR'].join('\n'),
+      );
+
+      const guidelines = await discoverGuidelines(repo);
+
+      assert.match(guidelines, /### AGENTS\.md\n# Agents/);
+      assert.match(guidelines, /Guidance truncated after \d+ bytes/);
+      assert.doesNotMatch(guidelines, /END_SHOULD_NOT_APPEAR/);
+    });
   });
 });
