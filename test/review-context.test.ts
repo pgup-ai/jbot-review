@@ -16,7 +16,7 @@ async function withTempRepo(run: (repo: string) => Promise<void>): Promise<void>
 }
 
 describe('discoverGuidelines', () => {
-  it('loads the governance README and its required-reading markdown references', async () => {
+  it('lists referenced markdown docs without preloading their content', async () => {
     await withTempRepo(async (repo) => {
       await mkdir(join(repo, '.pr-governance', 'design'), { recursive: true });
       await mkdir(join(repo, '.pr-governance', 'review'), { recursive: true });
@@ -47,14 +47,16 @@ describe('discoverGuidelines', () => {
       assert.match(guidelines, /### AGENTS\.md\n# Agents/);
       assert.match(guidelines, /### REVIEW\.md\n# Review/);
       assert.match(guidelines, /### \.pr-governance\/README\.md\n# Governance/);
-      assert.match(guidelines, /### \.pr-governance\/design\/NORTH_STAR\.md\n# North Star/);
-      assert.match(guidelines, /### \.pr-governance\/review\/PR_REVIEW_RUBRIC\.md\n# Rubric/);
-      assert.match(guidelines, /Nested design instructions/);
-      assert.match(guidelines, /Nested review instructions/);
+      assert.match(guidelines, /### Referenced Markdown documents/);
+      assert.match(guidelines, /- \.pr-governance\/design\/NORTH_STAR\.md/);
+      assert.match(guidelines, /- \.pr-governance\/review\/PR_REVIEW_RUBRIC\.md/);
+      assert.doesNotMatch(guidelines, /### \.pr-governance\/design\/NORTH_STAR\.md\n# North Star/);
+      assert.doesNotMatch(guidelines, /Nested design instructions/);
+      assert.doesNotMatch(guidelines, /Nested review instructions/);
     });
   });
 
-  it('loads markdown references from root guidelines once when they overlap with governance docs', async () => {
+  it('lists markdown references from root guidelines once when they overlap with governance docs', async () => {
     await withTempRepo(async (repo) => {
       await mkdir(join(repo, '.pr-governance'), { recursive: true });
       await mkdir(join(repo, 'docs'), { recursive: true });
@@ -72,9 +74,11 @@ describe('discoverGuidelines', () => {
 
       const guidelines = await discoverGuidelines(repo);
 
-      assert.match(guidelines, /### docs\/SHARED\.md\n# Shared/);
-      assert.match(guidelines, /### docs\/EXTRA\.md\n# Extra/);
-      assert.equal(guidelines.match(/### docs\/SHARED\.md/g)?.length, 1);
+      assert.match(guidelines, /- docs\/SHARED\.md/);
+      assert.match(guidelines, /- docs\/EXTRA\.md/);
+      assert.doesNotMatch(guidelines, /Load this once/);
+      assert.doesNotMatch(guidelines, /Load this too/);
+      assert.equal(guidelines.match(/^- docs\/SHARED\.md$/gm)?.length, 1);
     });
   });
 
@@ -107,12 +111,13 @@ describe('discoverGuidelines', () => {
               '- `INSIDE.md`',
             ].join('\n'),
           );
-          await writeFile(join(repo, '.pr-governance', 'INSIDE.md'), '# Inside\nLoad this');
+          await writeFile(join(repo, '.pr-governance', 'INSIDE.md'), '# Inside\nAvailable only');
           await writeFile(traversalFile, '# Traversal\nDo not load this either');
 
           const guidelines = await discoverGuidelines(repo);
 
-          assert.match(guidelines, /### \.pr-governance\/INSIDE\.md\n# Inside/);
+          assert.match(guidelines, /- \.pr-governance\/INSIDE\.md/);
+          assert.doesNotMatch(guidelines, /Available only/);
           assert.doesNotMatch(guidelines, /Do not load this/);
           assert.doesNotMatch(guidelines, /Do not load this either/);
         } finally {

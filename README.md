@@ -127,8 +127,9 @@ integration` in the logs, add a secret such as
 resolve PR review threads, then pass it through `thread-resolution-token`.
 
 **Step 3 — (Optional) Add review guidelines.** Drop an `AGENTS.md`, `REVIEW.md`,
-or files in `.pr-governance/` at the repo root. The agent reads these during
-review.
+or `.pr-governance/README.md` at the repo root. The agent reads these during
+review. Markdown docs referenced from those files are listed as available paths
+and read only when relevant.
 
 **Step 4 — Open a PR.** The review runs automatically. To re-trigger, push a
 new commit or close and reopen the PR.
@@ -846,10 +847,12 @@ Both modes automatically discover repo-level guidance from the checked-out works
 
 - `AGENTS.md` — conventions and rules
 - `REVIEW.md` — review-specific instructions
-- `.pr-governance/` — any files in this directory
+- `.pr-governance/README.md` — governance index and rules
 
 These are injected into the prompt after the base instructions but before the
 diff context, so the agent applies your rules when reviewing each change.
+Markdown docs referenced from those files are deduplicated and listed as
+available paths instead of being preloaded into every review.
 
 ## Project structure
 
