@@ -353,52 +353,42 @@ function buildReviewFocusBlock(changedFiles: string[]): string {
 
   for (const file of changedFiles) {
     if (/(^|\/)(package\.json|action\.ya?ml)$|^\.github\/workflows\/.+\.ya?ml$/i.test(file)) {
-      focusItems.add(
-        'External/tooling contracts: verify action inputs, permissions, auth, version compatibility, and failure modes.',
-      );
+      focusItems.add('External/tooling: inputs, permissions, auth, versions, failure modes.');
     }
     if (/(^|\/)(api|routes?|controllers?|server|webhooks?)\//i.test(file)) {
-      focusItems.add(
-        'API/server behavior: verify request validation, auth/authz, pagination, idempotency, and response contract compatibility.',
-      );
+      focusItems.add('API/server: validation, auth/authz, idempotency, response contracts.');
     }
     if (/(^|\/)(db|database|migrations?|prisma|drizzle|schema)\//i.test(file)) {
-      focusItems.add(
-        'Data changes: verify backward compatibility, migration ordering, defaults, nullability, indexes, and rollback risk.',
-      );
+      focusItems.add('Data: compatibility, migration order, defaults, nullability, indexes.');
     }
     if (/(^|\/)(auth|security|permissions?|policies)\//i.test(file)) {
-      focusItems.add(
-        'Security-sensitive code: verify privilege boundaries, token handling, tenant isolation, and unsafe input handling.',
-      );
+      focusItems.add('Security: privilege, tokens, tenant isolation, unsafe input boundaries.');
     }
     if (
       /\.(tsx|jsx|vue|svelte)$/i.test(file) ||
       /(^|\/)(components?|pages?|app|frontend|ui)\//i.test(file)
     ) {
       focusItems.add(
-        'Frontend behavior: verify loading/error states, stale async state, accessibility-affecting changes, and backend contract assumptions.',
+        'Frontend: loading/error states, stale async state, accessibility, API assumptions.',
       );
     }
     if (
       /(^|\/)(test|tests|__tests__|spec)\//i.test(file) ||
       /\.(test|spec)\.[cm]?[jt]sx?$/i.test(file)
     ) {
-      focusItems.add(
-        'Tests: verify assertions cover the changed behavior and do not mask failures with broad mocks, snapshots, or weak expectations.',
-      );
+      focusItems.add('Tests: assertions cover changed behavior and do not mask failures.');
     }
   }
 
   if (focusItems.size === 0) {
     focusItems.add(
-      'General correctness: trace changed behavior through callers, error paths, public contracts, and tests before posting findings.',
+      'General correctness: trace behavior through callers, error paths, contracts, and tests.',
     );
   }
 
   return [
     '## Relevant review focus',
-    'Use these as targeted checklists for this PR. They are not reasons to invent findings.',
+    'Use only as relevant checklists; do not invent findings.',
     ...[...focusItems].map((item) => `- ${item}`),
   ].join('\n');
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
@@ -156,6 +156,34 @@ describe('discoverGuidelines', () => {
       });
     } finally {
       await rm(outsideFile, { force: true });
+    }
+  });
+
+  it('ignores symlinked guideline files and rule directories that resolve outside the repository', async () => {
+    const outsideDir = await mkdtemp(join(tmpdir(), 'jbot-review-outside-guidelines-'));
+    try {
+      await writeFile(join(outsideDir, 'SECRET.md'), '# Secret\nDo not inject this');
+      await mkdir(join(outsideDir, 'rules'), { recursive: true });
+      await writeFile(
+        join(outsideDir, 'rules', 'outside.mdc'),
+        '# Outside Rule\nDo not inject this either',
+      );
+
+      await withTempRepo(async (repo) => {
+        await mkdir(join(repo, '.cursor'), { recursive: true });
+        await symlink(join(outsideDir, 'SECRET.md'), join(repo, 'AGENTS.md'));
+        await symlink(join(outsideDir, 'rules'), join(repo, '.cursor', 'rules'));
+        await writeFile(join(repo, 'REVIEW.md'), '# Review\nValid in-repo guidance');
+
+        const guidelines = await discoverGuidelines(repo);
+
+        assert.match(guidelines, /### REVIEW\.md\n# Review/);
+        assert.doesNotMatch(guidelines, /Secret/);
+        assert.doesNotMatch(guidelines, /Outside Rule/);
+        assert.doesNotMatch(guidelines, /Do not inject this/);
+      });
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
     }
   });
 });

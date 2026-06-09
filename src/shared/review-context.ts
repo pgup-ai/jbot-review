@@ -1,4 +1,4 @@
-import { access, readFile, readdir } from 'node:fs/promises';
+import { access, readFile, readdir, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 export interface ReviewCommit {
@@ -104,7 +104,23 @@ export async function discoverGuidelines(
 ): Promise<string> {
   const sections: string[] = [];
   const seen = new Set<string>();
+  const seenRealPaths = new Set<string>();
   const referencedDocs = new Map<string, string>();
+  const workspaceRoot = await realpath(cwd);
+
+  async function resolveExistingInsideWorkspace(
+    path: string,
+  ): Promise<{ absolutePath: string; realPath: string } | undefined> {
+    const absolutePath = resolve(path);
+    if (!isInsideDirectory(cwd, absolutePath)) return undefined;
+    try {
+      const realPath = await realpath(absolutePath);
+      if (!isInsideDirectory(workspaceRoot, realPath)) return undefined;
+      return { absolutePath, realPath };
+    } catch {
+      return undefined;
+    }
+  }
 
   async function addGuidelineFile(
     label: string,
@@ -116,15 +132,16 @@ export async function discoverGuidelines(
       }
     | undefined
   > {
-    const absolutePath = resolve(path);
-    if (!isInsideDirectory(cwd, absolutePath)) return undefined;
-    if (seen.has(absolutePath)) return undefined;
+    const resolved = await resolveExistingInsideWorkspace(path);
+    if (!resolved) return undefined;
+    if (seen.has(resolved.absolutePath) || seenRealPaths.has(resolved.realPath)) return undefined;
     try {
-      const text = await readFile(absolutePath, 'utf8');
+      const text = await readFile(resolved.realPath, 'utf8');
       if (!text.trim()) return undefined;
-      seen.add(absolutePath);
+      seen.add(resolved.absolutePath);
+      seenRealPaths.add(resolved.realPath);
       sections.push(`### ${label}\n${text.trim()}`);
-      return { text, absolutePath };
+      return { text, absolutePath: resolved.absolutePath };
     } catch {
       return undefined;
     }
@@ -133,8 +150,10 @@ export async function discoverGuidelines(
   async function addReferencedDoc(baseDir: string, reference: string): Promise<void> {
     const referencedPath = resolveMarkdownReference(cwd, baseDir, reference);
     if (!referencedPath || seen.has(referencedPath)) return;
+    const resolved = await resolveExistingInsideWorkspace(referencedPath);
+    if (!resolved || seenRealPaths.has(resolved.realPath)) return;
     try {
-      await access(referencedPath);
+      await access(resolved.realPath);
     } catch {
       return;
     }
@@ -153,10 +172,10 @@ export async function discoverGuidelines(
   }
 
   async function addRuleDirectory(relativeDir: string): Promise<void> {
-    const absoluteDir = resolve(cwd, relativeDir);
-    if (!isInsideDirectory(cwd, absoluteDir)) return;
+    const resolvedDir = await resolveExistingInsideWorkspace(resolve(cwd, relativeDir));
+    if (!resolvedDir) return;
     try {
-      const entries = await readdir(absoluteDir, { withFileTypes: true });
+      const entries = await readdir(resolvedDir.realPath, { withFileTypes: true });
       for (const entry of entries) {
         if (!entry.isFile()) continue;
         const ext = entry.name.match(/\.[^.]+$/)?.[0] ?? '';
@@ -194,7 +213,9 @@ export async function discoverGuidelines(
   }
 
   try {
-    const entries = await readdir(governanceDir, { withFileTypes: true });
+    const resolvedGovernanceDir = await resolveExistingInsideWorkspace(governanceDir);
+    if (!resolvedGovernanceDir) return formatGuidelineSections(sections, seen, referencedDocs);
+    const entries = await readdir(resolvedGovernanceDir.realPath, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isFile()) continue;
       await addGuidelineFile(`.pr-governance/${entry.name}`, resolve(governanceDir, entry.name));
