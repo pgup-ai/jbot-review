@@ -148,6 +148,8 @@ function resolveMarkdownReference(
   const pathWithoutAnchor = reference.split('#')[0];
   if (!pathWithoutAnchor || /^[a-z][a-z0-9+.-]*:/i.test(pathWithoutAnchor)) return undefined;
 
+  // AGENTS.md/REVIEW.md refs resolve from repo root; governance README refs
+  // resolve from .pr-governance unless they explicitly start at .pr-governance.
   const referenceBaseDir = pathWithoutAnchor.startsWith('.pr-governance') ? cwd : baseDir;
   const resolvedPath = resolve(referenceBaseDir, pathWithoutAnchor);
   return isInsideDirectory(cwd, resolvedPath) ? resolvedPath : undefined;

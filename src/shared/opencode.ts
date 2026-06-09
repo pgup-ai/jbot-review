@@ -19,7 +19,7 @@ const PROMPT_POLL_REQUEST_TIMEOUT_MS = 10_000;
 const PROMPT_PROGRESS_LOG_MS = 60_000;
 const CONTEXT7_MCP_NAME = 'context7';
 const CONTEXT7_MCP_URL = 'https://mcp.context7.com/mcp';
-const CONTEXT7_MCP_TIMEOUT_MS = 8_000;
+const CONTEXT7_MCP_TIMEOUT_MS = 15_000;
 
 const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
 
@@ -174,6 +174,7 @@ export async function enableContext7Mcp(
 ): Promise<boolean> {
   const trimmedKey = apiKey.trim();
   if (!trimmedKey) return false;
+  let added = false;
 
   try {
     await client.mcp.add({
@@ -191,10 +192,12 @@ export async function enableContext7Mcp(
         },
       },
     });
+    added = true;
     await client.mcp.connect({ path: { name: CONTEXT7_MCP_NAME } });
     log('Context7 MCP enabled for external API/SDK documentation checks.');
     return true;
   } catch (error) {
+    if (added) await disableContext7Mcp(client, log);
     log(
       `Context7 MCP unavailable; continuing without it: ${formatContext7Error(error, trimmedKey)}`,
     );
@@ -228,8 +231,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function formatContext7Error(error: unknown, secret = ''): string {
   const message = error instanceof Error ? error.message : String(error);
-  const redacted = secret ? message.replaceAll(secret, '[redacted]') : message;
-  return redacted.replace(/ctx7sk-[A-Za-z0-9-]+/g, '[redacted]');
+  const redacted = secret
+    ? message.replace(new RegExp(escapeRegExp(secret), 'gi'), '[redacted]')
+    : message;
+  return redacted.replace(/ctx7sk-[A-Za-z0-9_-]+/gi, '[redacted]');
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {

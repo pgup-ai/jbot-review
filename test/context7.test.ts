@@ -44,6 +44,17 @@ describe('decideContext7Mode', () => {
     assert.match(decision.reason, /no Context7 API key/);
   });
 
+  it('uses an explicit reason when Context7 is forced without a key', () => {
+    const decision = decideContext7Mode({
+      mode: 'always',
+      apiKey: '',
+      files: [{ filename: 'src/openai.ts', patch: '+await openai.responses.create({})' }],
+    });
+
+    assert.equal(decision.enabled, false);
+    assert.match(decision.reason, /explicitly enabled/);
+  });
+
   it('enables for workflow changes in auto mode', () => {
     const decision = decideContext7Mode({
       mode: 'auto',
@@ -87,6 +98,7 @@ describe('enableContext7Mcp', () => {
   it('formats Context7 errors without a secret argument', () => {
     assert.equal(formatContext7Error(new Error('Disconnected')), 'Disconnected');
     assert.equal(formatContext7Error(new Error('Bad ctx7sk-test')), 'Bad [redacted]');
+    assert.equal(formatContext7Error(new Error('Bad CTX7SK-TEST')), 'Bad [redacted]');
   });
 
   it('returns false and redacts the key when Context7 setup fails', async () => {
@@ -108,5 +120,26 @@ describe('enableContext7Mcp', () => {
     assert.match(logs.join('\n'), /continuing without it/);
     assert.doesNotMatch(logs.join('\n'), /ctx7sk-test/);
     assert.match(logs.join('\n'), /\[redacted\]/);
+  });
+
+  it('disconnects after a partial MCP setup failure', async () => {
+    let disconnected = false;
+    const client = {
+      mcp: {
+        add: async () => true,
+        connect: async () => {
+          throw new Error('connect failed');
+        },
+        disconnect: async () => {
+          disconnected = true;
+          return true;
+        },
+      },
+    };
+
+    const enabled = await enableContext7Mcp(client as never, 'ctx7sk-test', () => undefined);
+
+    assert.equal(enabled, false);
+    assert.equal(disconnected, true);
   });
 });

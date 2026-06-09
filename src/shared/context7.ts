@@ -25,7 +25,7 @@ export function parseContext7Mode(value: string): Context7Mode {
   if (!normalized || normalized === 'auto') return 'auto';
   if (['true', 'always', 'on', 'yes', '1'].includes(normalized)) return 'always';
   if (['false', 'off', 'no', '0'].includes(normalized)) return 'off';
-  throw new Error('Invalid context7 value: expected auto, true, or false.');
+  throw new Error(`Invalid context7 value "${value}": expected auto, true, or false.`);
 }
 
 export function decideContext7Mode(params: {
@@ -38,7 +38,13 @@ export function decideContext7Mode(params: {
   }
 
   if (!params.apiKey.trim()) {
-    return { enabled: false, reason: 'no Context7 API key configured' };
+    return {
+      enabled: false,
+      reason:
+        params.mode === 'always'
+          ? 'Context7 was explicitly enabled but no Context7 API key is configured'
+          : 'no Context7 API key configured',
+    };
   }
 
   if (params.mode === 'always') {
