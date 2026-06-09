@@ -93,6 +93,36 @@ describe('discoverGuidelines', () => {
     });
   });
 
+  it('loads compatible review-bot rules and scopes nested Bugbot files to changed paths', async () => {
+    await withTempRepo(async (repo) => {
+      await mkdir(join(repo, '.cursor', 'rules'), { recursive: true });
+      await mkdir(join(repo, 'backend', 'api', '.cursor'), { recursive: true });
+      await mkdir(join(repo, 'frontend', '.cursor'), { recursive: true });
+      await mkdir(join(repo, '.jbot-review'), { recursive: true });
+      await writeFile(join(repo, '.cursor', 'BUGBOT.md'), '# Root Bugbot\nAlways load this');
+      await writeFile(join(repo, '.cursor', 'rules', 'review.mdc'), '# Cursor Rule\nRoot rule');
+      await writeFile(join(repo, '.coderabbit.yaml'), 'reviews:\n  high_level_summary: true\n');
+      await writeFile(
+        join(repo, 'backend', 'api', '.cursor', 'BUGBOT.md'),
+        '# API Bugbot\nScoped API rule',
+      );
+      await writeFile(
+        join(repo, 'frontend', '.cursor', 'BUGBOT.md'),
+        '# Frontend Bugbot\nShould not load',
+      );
+      await writeFile(join(repo, '.jbot-review', 'rules.md'), '# Private J-Bot\nShould not load');
+
+      const guidelines = await discoverGuidelines(repo, ['backend/api/routes/user.ts']);
+
+      assert.match(guidelines, /### \.cursor\/BUGBOT\.md\n# Root Bugbot/);
+      assert.match(guidelines, /### \.cursor\/rules\/review\.mdc\n# Cursor Rule/);
+      assert.match(guidelines, /### \.coderabbit\.yaml\nreviews:/);
+      assert.match(guidelines, /### backend\/api\/\.cursor\/BUGBOT\.md\n# API Bugbot/);
+      assert.doesNotMatch(guidelines, /Frontend Bugbot/);
+      assert.doesNotMatch(guidelines, /Private J-Bot/);
+    });
+  });
+
   it('ignores governance references outside the repository root', async () => {
     const outsideFile = join(tmpdir(), `jbot-review-outside-${Date.now()}.md`);
     await writeFile(outsideFile, '# Outside\nDo not load this');
@@ -114,7 +144,7 @@ describe('discoverGuidelines', () => {
           await writeFile(join(repo, '.pr-governance', 'INSIDE.md'), '# Inside\nAvailable only');
           await writeFile(traversalFile, '# Traversal\nDo not load this either');
 
-          const guidelines = await discoverGuidelines(repo);
+          const guidelines = await discoverGuidelines(repo, ['../outside.ts']);
 
           assert.match(guidelines, /- \.pr-governance\/INSIDE\.md/);
           assert.doesNotMatch(guidelines, /Available only/);

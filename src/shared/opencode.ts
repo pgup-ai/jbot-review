@@ -9,7 +9,14 @@ import {
 
 import { parseModelName } from './model.ts';
 import { REVIEW_PROMPT } from './prompt.ts';
-import type { AddressedPriorComment, Finding, ReviewResult, Severity } from './types.ts';
+import type {
+  AddressedPriorComment,
+  Finding,
+  FindingConfidence,
+  FindingKind,
+  ReviewResult,
+  Severity,
+} from './types.ts';
 
 const READY_TIMEOUT_MS = 15_000;
 const MODEL_LIST_TIMEOUT_MS = 5_000;
@@ -20,6 +27,16 @@ const PROMPT_PROGRESS_LOG_MS = 60_000;
 const CONTEXT7_MCP_NAME = 'context7';
 const CONTEXT7_MCP_URL = 'https://mcp.context7.com/mcp';
 const CONTEXT7_MCP_TIMEOUT_MS = 15_000;
+const VALID_FINDING_KINDS = new Set<FindingKind>([
+  'bug',
+  'security',
+  'performance',
+  'maintainability',
+  'test',
+  'docs',
+  'investigate',
+]);
+const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
 
 const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
 
@@ -496,6 +513,15 @@ function parseReview(
         path: f.path,
         line: f.line,
         severity: f.severity as Severity,
+        kind:
+          typeof f.kind === 'string' && VALID_FINDING_KINDS.has(f.kind as FindingKind)
+            ? (f.kind as FindingKind)
+            : undefined,
+        confidence:
+          typeof f.confidence === 'string' &&
+          VALID_CONFIDENCES.has(f.confidence as FindingConfidence)
+            ? (f.confidence as FindingConfidence)
+            : undefined,
         title: f.title,
         body: f.body,
       });

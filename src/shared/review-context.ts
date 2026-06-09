@@ -1,5 +1,5 @@
 import { access, readFile, readdir } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 export interface ReviewCommit {
   sha: string;
@@ -69,20 +69,62 @@ export function buildReviewContext(params: BuildReviewContextParams): string {
   return sections.join('\n\n');
 }
 
-export async function discoverGuidelines(cwd: string): Promise<string> {
+const ROOT_GUIDELINE_FILES = [
+  'AGENTS.md',
+  'REVIEW.md',
+  'CLAUDE.md',
+  'CONTRIBUTING.md',
+  '.cursor/BUGBOT.md',
+  '.github/copilot-instructions.md',
+  '.cursorrules',
+  '.windsurfrules',
+  '.coderabbit.yaml',
+  '.coderabbit.yml',
+  'greptile.json',
+];
+
+const SCOPED_GUIDELINE_FILES = [
+  'AGENTS.md',
+  'REVIEW.md',
+  'CLAUDE.md',
+  'CONTRIBUTING.md',
+  '.cursor/BUGBOT.md',
+  '.agents/REVIEW.md',
+  '.devin/REVIEW.md',
+  '.cursor/REVIEW.md',
+  '.cursorrules',
+  '.windsurfrules',
+];
+
+const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
+
+export async function discoverGuidelines(
+  cwd: string,
+  changedFiles: string[] = [],
+): Promise<string> {
   const sections: string[] = [];
   const seen = new Set<string>();
   const referencedDocs = new Map<string, string>();
 
-  async function addGuidelineFile(label: string, path: string): Promise<string | undefined> {
+  async function addGuidelineFile(
+    label: string,
+    path: string,
+  ): Promise<
+    | {
+        text: string;
+        absolutePath: string;
+      }
+    | undefined
+  > {
     const absolutePath = resolve(path);
+    if (!isInsideDirectory(cwd, absolutePath)) return undefined;
     if (seen.has(absolutePath)) return undefined;
     try {
       const text = await readFile(absolutePath, 'utf8');
       if (!text.trim()) return undefined;
       seen.add(absolutePath);
       sections.push(`### ${label}\n${text.trim()}`);
-      return text;
+      return { text, absolutePath };
     } catch {
       return undefined;
     }
@@ -99,13 +141,43 @@ export async function discoverGuidelines(cwd: string): Promise<string> {
     referencedDocs.set(referencedPath, formatGuidelineLabel(cwd, referencedPath));
   }
 
-  for (const name of ['AGENTS.md', 'REVIEW.md']) {
-    const path = resolve(cwd, name);
-    const text = await addGuidelineFile(name, path);
-    if (!text) continue;
-    for (const reference of extractMarkdownDocumentReferences(text)) {
-      await addReferencedDoc(cwd, reference);
+  async function addGuidelineWithReferences(relativePath: string): Promise<void> {
+    const result = await addGuidelineFile(relativePath, resolve(cwd, relativePath));
+    if (!result) return;
+    const baseDir = ['AGENTS.md', 'REVIEW.md'].includes(relativePath)
+      ? cwd
+      : dirname(result.absolutePath);
+    for (const reference of extractMarkdownDocumentReferences(result.text)) {
+      await addReferencedDoc(baseDir, reference);
     }
+  }
+
+  async function addRuleDirectory(relativeDir: string): Promise<void> {
+    const absoluteDir = resolve(cwd, relativeDir);
+    if (!isInsideDirectory(cwd, absoluteDir)) return;
+    try {
+      const entries = await readdir(absoluteDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        const ext = entry.name.match(/\.[^.]+$/)?.[0] ?? '';
+        if (!RULE_DIRECTORY_FILES.has(ext)) continue;
+        await addGuidelineWithReferences(`${relativeDir}/${entry.name}`);
+      }
+    } catch {
+      /* directory absent */
+    }
+  }
+
+  for (const relativePath of ROOT_GUIDELINE_FILES) {
+    await addGuidelineWithReferences(relativePath);
+  }
+  await addRuleDirectory('.cursor/rules');
+
+  for (const dir of getChangedFileAncestorDirs(changedFiles)) {
+    for (const name of SCOPED_GUIDELINE_FILES) {
+      await addGuidelineWithReferences(`${dir}/${name}`);
+    }
+    await addRuleDirectory(`${dir}/.cursor/rules`);
   }
 
   const governanceDir = resolve(cwd, '.pr-governance');
@@ -115,7 +187,7 @@ export async function discoverGuidelines(cwd: string): Promise<string> {
   );
 
   if (readme) {
-    for (const reference of extractMarkdownDocumentReferences(readme)) {
+    for (const reference of extractMarkdownDocumentReferences(readme.text)) {
       await addReferencedDoc(governanceDir, reference);
     }
     return formatGuidelineSections(sections, seen, referencedDocs);
@@ -134,6 +206,18 @@ export async function discoverGuidelines(cwd: string): Promise<string> {
   return formatGuidelineSections(sections, seen, referencedDocs);
 }
 
+function getChangedFileAncestorDirs(changedFiles: string[]): string[] {
+  const dirs = new Set<string>();
+  for (const file of changedFiles) {
+    const parts = file.split('/').filter(Boolean);
+    parts.pop();
+    for (let index = 1; index <= parts.length; index += 1) {
+      dirs.add(parts.slice(0, index).join('/'));
+    }
+  }
+  return [...dirs].sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b));
+}
+
 function formatGuidelineSections(
   sections: string[],
   loadedPaths: Set<string>,
@@ -148,7 +232,7 @@ function formatGuidelineSections(
     sections.push(
       [
         '### Referenced Markdown documents',
-        'These docs were mentioned by AGENTS.md, REVIEW.md, or .pr-governance/README.md but were not preloaded. Read them only when relevant to the changed files or review question.',
+        'These docs were mentioned by loaded review guidance but were not preloaded. Read them only when relevant to the changed files or review question.',
         availableDocs.map((label) => `- ${label}`).join('\n'),
       ].join('\n'),
     );
@@ -179,8 +263,8 @@ function resolveMarkdownReference(
   const pathWithoutAnchor = reference.split('#')[0];
   if (!pathWithoutAnchor || /^[a-z][a-z0-9+.-]*:/i.test(pathWithoutAnchor)) return undefined;
 
-  // AGENTS.md/REVIEW.md refs resolve from repo root; governance README refs
-  // resolve from .pr-governance unless they explicitly start at .pr-governance.
+  // Governance README refs resolve from .pr-governance unless they
+  // explicitly start at .pr-governance.
   const referenceBaseDir = pathWithoutAnchor.startsWith('.pr-governance') ? cwd : baseDir;
   const resolvedPath = resolve(referenceBaseDir, pathWithoutAnchor);
   return isInsideDirectory(cwd, resolvedPath) ? resolvedPath : undefined;

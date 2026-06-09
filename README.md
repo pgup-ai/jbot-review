@@ -23,8 +23,8 @@ runner. The source code is private; users only see the public [`pgup-ai/jbot-rev
 3. The action pulls the pre-built image from `ghcr.io/pgup-ai/jbot-review`,
    starts `opencode serve` inside the container, and drives a read-only `plan`
    agent over the SDK. The agent discovers repo guidelines (`AGENTS.md`,
-   `REVIEW.md`, `.pr-governance/`) and explores the full repo with its own
-   tools.
+   `REVIEW.md`, `.pr-governance/`, and compatible review-bot rule files) and
+   explores the full repo with its own tools.
 4. The agent returns structured findings as JSON; the wrapper validates,
    gates, and posts one review with inline comments + a deterministic verdict.
 
@@ -127,9 +127,10 @@ integration` in the logs, add a secret such as
 resolve PR review threads, then pass it through `thread-resolution-token`.
 
 **Step 3 — (Optional) Add review guidelines.** Drop an `AGENTS.md`, `REVIEW.md`,
-or `.pr-governance/README.md` at the repo root. The agent reads these during
-review. Markdown docs referenced from those files are listed as available paths
-and read only when relevant.
+`.cursor/BUGBOT.md`, `.coderabbit.yaml`, `greptile.json`, or
+`.pr-governance/README.md` at the repo root. The agent reads these during review.
+Markdown docs referenced from those files are listed as available paths and read
+only when relevant.
 
 **Step 4 — Open a PR.** The review runs automatically. To re-trigger, push a
 new commit or close and reopen the PR.
@@ -385,9 +386,10 @@ ngrok http 3000
 ```
 
 That's it. No YAML, no secrets, no workflow file. The review runs on the App
-operator's infrastructure. The user can still add `AGENTS.md`, `REVIEW.md`, or
-`.pr-governance/` files to their repo for project-specific review rules — those
-are discovered during checkout.
+operator's infrastructure. The user can still add `AGENTS.md`, `REVIEW.md`,
+`.cursor/BUGBOT.md`, `.coderabbit.yaml`, `greptile.json`, or `.pr-governance/`
+files to their repo for project-specific review rules — those are discovered
+during checkout.
 
 ### Env var reference (hosted App)
 
@@ -847,12 +849,17 @@ Both modes automatically discover repo-level guidance from the checked-out works
 
 - `AGENTS.md` — conventions and rules
 - `REVIEW.md` — review-specific instructions
+- `CLAUDE.md`, `CONTRIBUTING.md`, `.cursorrules`, `.windsurfrules`
+- `.cursor/BUGBOT.md` and `.cursor/rules/*.{md,mdc}` — Cursor/Bugbot rules
+- `.coderabbit.yaml`, `.coderabbit.yml`, `greptile.json`
 - `.pr-governance/README.md` — governance index and rules
 
 These are injected into the prompt after the base instructions but before the
 diff context, so the agent applies your rules when reviewing each change.
 Markdown docs referenced from those files are deduplicated and listed as
 available paths instead of being preloaded into every review.
+For changed files, J-Bot also checks ancestor directories for scoped review files
+such as `REVIEW.md`, `AGENTS.md`, `.cursor/BUGBOT.md`, and `.cursor/rules/`.
 
 ## Project structure
 

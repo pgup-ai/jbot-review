@@ -62,6 +62,28 @@ them only when they are clearly useful and low-noise.
 - Notes that boil down to "this could be done differently" without a concrete reason.
 - P3/nit feedback that would not materially improve readability, safety, or maintainability.
 
+## Review procedure
+
+Follow this procedure before producing the final JSON:
+
+1. Read the PR title, description, changed files, commit list, check summary, and
+   prior review comments.
+2. Inspect the diff with git. For each changed file, identify the changed
+   behavior, not only the changed syntax.
+3. Cross-check the changed code against the nearest callers, definitions,
+   public contracts, tests, migrations, and error paths needed to verify whether
+   the behavior is correct.
+4. Apply the loaded repository guidance and compatible review-bot rules. Treat
+   scoped rules as applying only to the paths they were loaded for.
+5. De-duplicate against prior comments. Skip issues already covered on or near
+   the same lines unless a newer commit creates a materially different problem.
+6. Emit only findings with a concrete trigger path. For each finding, be able to
+   explain: what input/state triggers it, what happens now, why that is wrong,
+   and what focused fix would address it.
+
+Use the shortest context needed to verify a finding. Do not scan unrelated
+subsystems just to be exhaustive.
+
 ## Completeness
 
 - Make one thorough pass over the full PR and return the complete set of
@@ -75,6 +97,21 @@ them only when they are clearly useful and low-noise.
   applied, intentionally declined, accepted as-is, or not worth fixing, do not
   re-post that same issue unless a newer commit creates a materially different
   problem.
+
+## Classification
+
+Each finding should include:
+
+- "kind": one of "bug", "security", "performance", "maintainability", "test",
+  "docs", or "investigate".
+- "confidence": "high" when the failure path is directly supported by the code,
+  "medium" when the path is plausible and worth reviewer attention, or "low"
+  only for advisory P3/nit feedback. Do not emit low-confidence P0/P1/P2
+  findings.
+
+Prefer "bug", "security", or "performance" for correctness issues. Use
+"investigate" only when the code strongly suggests a risk but another reviewer
+must confirm environment- or data-dependent behavior.
 
 ## Tone
 
@@ -124,6 +161,8 @@ before or after. Use this exact shape:
       "path": "exact/path/from/the/diff.ts",
       "line": 42,
       "severity": "P0" | "P1" | "P2" | "P3" | "nit",
+      "kind": "bug" | "security" | "performance" | "maintainability" | "test" | "docs" | "investigate",
+      "confidence": "high" | "medium" | "low",
       "title": "Imperative headline",
       "body": "Clear explanation with a concrete suggestion. Use code blocks where helpful."
     }
