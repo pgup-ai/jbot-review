@@ -171,3 +171,59 @@ Field constraints:
 - "body": clear explanation with a concrete suggestion.
 - If there are no issues, "findings" must be an empty array. Do not invent
   issues.`;
+
+export const REVIEW_OUTPUT_REMINDER = `## Final output reminder
+
+Respond now with one raw JSON object with exactly two top-level keys,
+"summary" and "findings", matching the Output section above. Do not write any
+text before or after the JSON. Do not wrap it in markdown fences. Markdown is
+allowed only inside JSON string values; escape newlines inside string values
+as \\n.`;
+
+/**
+ * Assembles the full review prompt. The output reminder is deliberately LAST:
+ * small models weight recent instructions most heavily, and tens of KB of PR
+ * context would otherwise bury the output contract.
+ */
+export function assembleReviewPrompt(prContext: string, guidelines: string): string {
+  const parts = [REVIEW_PROMPT];
+  if (guidelines) {
+    parts.push('## Repository review guidelines\n', guidelines);
+  }
+  parts.push(prContext, REVIEW_OUTPUT_REMINDER);
+  return parts.join('\n\n');
+}
+
+export const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
+
+Use the checked-out repo, git diff, git log, and the PR context below to verify each prior jbot-review thread.
+
+Rules:
+- Only mark a prior thread addressed when the current branch clearly fixes the specific issue raised.
+- Do not mark a thread addressed just because the latest review has no new findings.
+- Do not mark a thread addressed because a human reply declined the suggestion, such as "Not applied", "accepted as-is", or "not worth fixing".
+- Use the exact prior jbot-review thread id from the prompt.
+- Prefer the commit SHA that fixed the issue for "addressedByCommit"; use the current head only if the exact fixing commit cannot be determined.
+- Keep "note" to one short sentence explaining why it is addressed.
+
+Respond with a SINGLE raw JSON object and NOTHING else:
+
+{
+  "addressedPriorComments": [
+    {
+      "id": "exact prior jbot-review thread id",
+      "addressedByCommit": "commit sha",
+      "note": "Short reason this prior comment is now addressed."
+    }
+  ]
+}`;
+
+export const ADDRESSED_OUTPUT_REMINDER = `## Final output reminder
+
+Respond now with one raw JSON object with the single top-level key
+"addressedPriorComments", matching the schema above. Do not write any text
+before or after the JSON. Do not wrap it in markdown fences.`;
+
+export function assembleAddressedPriorCommentsPrompt(prContext: string): string {
+  return [ADDRESSED_PRIOR_COMMENTS_PROMPT, prContext, ADDRESSED_OUTPUT_REMINDER].join('\n\n');
+}

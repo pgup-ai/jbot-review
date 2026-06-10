@@ -8,7 +8,7 @@ import {
 } from '@opencode-ai/sdk';
 
 import { parseModelName } from './model.ts';
-import { REVIEW_PROMPT } from './prompt.ts';
+import { assembleAddressedPriorCommentsPrompt, assembleReviewPrompt } from './prompt.ts';
 import type {
   AddressedPriorComment,
   Finding,
@@ -38,30 +38,6 @@ const VALID_FINDING_KINDS = new Set<FindingKind>([
   'investigate',
 ]);
 const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
-
-const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
-
-Use the checked-out repo, git diff, git log, and the PR context below to verify each prior jbot-review thread.
-
-Rules:
-- Only mark a prior thread addressed when the current branch clearly fixes the specific issue raised.
-- Do not mark a thread addressed just because the latest review has no new findings.
-- Do not mark a thread addressed because a human reply declined the suggestion, such as "Not applied", "accepted as-is", or "not worth fixing".
-- Use the exact prior jbot-review thread id from the prompt.
-- Prefer the commit SHA that fixed the issue for "addressed_by_commit"; use the current head only if the exact fixing commit cannot be determined.
-- Keep "note" to one short sentence explaining why it is addressed.
-
-Respond with a SINGLE JSON object and NOTHING else:
-
-{
-  "addressedPriorComments": [
-    {
-      "id": "exact prior jbot-review thread id",
-      "addressed_by_commit": "commit sha",
-      "note": "Short reason this prior comment is now addressed."
-    }
-  ]
-}`;
 
 /**
  * Builds the opencode config object that embeds the API key for the selected
@@ -290,12 +266,7 @@ export async function runReview(
   guidelines: string,
   log: (msg: string) => void,
 ): Promise<ReviewResult> {
-  const promptParts = [REVIEW_PROMPT];
-  if (guidelines) {
-    promptParts.push('## Repository review guidelines\n', guidelines);
-  }
-  promptParts.push(prContext);
-  const prompt = promptParts.join('\n\n');
+  const prompt = assembleReviewPrompt(prContext, guidelines);
   log(`Prompt assembled: ${prompt.length} chars, guidelines=${!!guidelines}`);
 
   const raw = await promptPlanAgent(client, model, prompt, 'review', log);
@@ -308,7 +279,7 @@ export async function runAddressedPriorCommentsCheck(
   prContext: string,
   log: (msg: string) => void,
 ): Promise<AddressedPriorComment[]> {
-  const prompt = [ADDRESSED_PRIOR_COMMENTS_PROMPT, prContext].join('\n\n');
+  const prompt = assembleAddressedPriorCommentsPrompt(prContext);
   const raw = await promptPlanAgent(client, model, prompt, 'addressed-prior-comments', log);
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
 }
