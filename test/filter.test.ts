@@ -96,4 +96,47 @@ describe('dedupeFindings', () => {
 
     assert.equal(merged.length, 2);
   });
+
+  it('keeps the more severe finding on a collision regardless of input order', () => {
+    const main = [finding({ line: 5, severity: 'P3', title: 'weaker main' })];
+    const compliance = [finding({ line: 5, severity: 'P2', title: 'stronger compliance' })];
+
+    const merged = dedupeFindings(main, compliance);
+
+    assert.deepEqual(
+      merged.map((f) => f.title),
+      ['stronger compliance'],
+    );
+  });
+
+  it('breaks severity ties by confidence', () => {
+    const main = [finding({ line: 5, severity: 'P2', confidence: 'low', title: 'low main' })];
+    const compliance = [
+      finding({ line: 5, severity: 'P2', confidence: 'high', title: 'high compliance' }),
+    ];
+
+    const merged = dedupeFindings(main, compliance);
+
+    assert.deepEqual(
+      merged.map((f) => f.title),
+      ['high compliance'],
+    );
+  });
+
+  it('keeps the earlier list on a full tie and preserves first-seen position', () => {
+    const main = [
+      finding({ line: 5, severity: 'P2', confidence: 'high', title: 'main wins' }),
+      finding({ line: 9, severity: 'P3', title: 'main only' }),
+    ];
+    const compliance = [
+      finding({ line: 5, severity: 'P2', confidence: 'high', title: 'compliance tie' }),
+    ];
+
+    const merged = dedupeFindings(main, compliance);
+
+    assert.deepEqual(
+      merged.map((f) => f.title),
+      ['main wins', 'main only'],
+    );
+  });
 });

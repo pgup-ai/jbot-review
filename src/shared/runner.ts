@@ -1,4 +1,9 @@
-import { dedupeFindings, demoteLowConfidenceBlockingFindings, isNoiseFile } from './filter.ts';
+import {
+  SEVERITY_RANK,
+  dedupeFindings,
+  demoteLowConfidenceBlockingFindings,
+  isNoiseFile,
+} from './filter.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -28,14 +33,6 @@ import {
 } from './github.ts';
 import type { Octokit, PriorJbotThread } from './github.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
-
-const SEVERITY_RANK: Record<Severity, number> = {
-  P0: 0,
-  P1: 1,
-  P2: 2,
-  P3: 3,
-  nit: 4,
-};
 
 export interface ReviewRunOptions {
   enhancedContext?: boolean;
@@ -223,16 +220,23 @@ export async function runPrReview(params: {
     // verification; the main review no longer reports them.
     const verifiedAddressedPriorComments = await addressedPriorCheck;
     const complianceFindings = await guidelineComplianceCheck;
-    const combinedFindings = dedupeFindings(findings, complianceFindings);
-    const dedupeDropped = findings.length + complianceFindings.length - combinedFindings.length;
+    // Gate confidence BEFORE deduping so each finding carries its effective
+    // severity into collision resolution; otherwise a low-confidence main
+    // finding could win a path:line collision and then be demoted to P3,
+    // dropping a stronger compliance finding at the same location.
+    const gatedMain = demoteLowConfidenceBlockingFindings(findings);
+    const gatedCompliance = demoteLowConfidenceBlockingFindings(complianceFindings);
+    const demotedCount = gatedMain.demotedCount + gatedCompliance.demotedCount;
+    if (demotedCount > 0) {
+      log(`Demoted ${demotedCount} low-confidence blocking finding(s) to P3.`);
+    }
+    const combinedFindings = dedupeFindings(gatedMain.findings, gatedCompliance.findings);
+    const dedupeDropped =
+      gatedMain.findings.length + gatedCompliance.findings.length - combinedFindings.length;
     if (dedupeDropped > 0) {
       log(`Deduped ${dedupeDropped} finding(s) that collided on path:line across sessions.`);
     }
-    const confidenceGate = demoteLowConfidenceBlockingFindings(combinedFindings);
-    if (confidenceGate.demotedCount > 0) {
-      log(`Demoted ${confidenceGate.demotedCount} low-confidence blocking finding(s) to P3.`);
-    }
-    const filteredFindings = filterFindings(confidenceGate.findings, options);
+    const filteredFindings = filterFindings(combinedFindings, options);
     log(
       `Review complete: ${findings.length} main + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );

@@ -18,6 +18,12 @@ export interface DiffScope {
  * should run. Three-dot (merge-base) diff is required: GitHub's patch — which
  * inline-comment anchors are validated against — is merge-base-relative.
  * Returns '' when nothing about the scope is known.
+ *
+ * Prefers the base SHA, which is unambiguous in any checkout. Only when the
+ * SHA is absent does it fall back to `origin/<baseRef>`, which assumes the
+ * conventional `origin` remote name; both entry points pass the base SHA, so
+ * the agent can also locate the base from the surrounding context if that
+ * assumption does not hold.
  */
 export function formatDiffScope(scope: DiffScope): string {
   const lines: string[] = [];
