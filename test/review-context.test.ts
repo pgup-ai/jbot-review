@@ -75,6 +75,35 @@ describe('discoverGuidelines', () => {
     });
   });
 
+  it('lists governance references that exceed the guidance budget instead of dropping them', async () => {
+    await withTempRepo(async (repo) => {
+      await mkdir(join(repo, '.pr-governance'), { recursive: true });
+      // 5 x 24KB files exhaust the 96KB total budget before the last reference.
+      const bigBody = 'x'.repeat(25 * 1024);
+      const references: string[] = [];
+      for (let index = 1; index <= 5; index += 1) {
+        await writeFile(
+          join(repo, '.pr-governance', `BIG_${index}.md`),
+          `# Big ${index}\n${bigBody}`,
+        );
+        references.push(`- \`BIG_${index}.md\``);
+      }
+      await writeFile(join(repo, '.pr-governance', 'LAST.md'), '# Last\nBudget exhausted by now');
+      references.push('- `LAST.md`');
+      await writeFile(
+        join(repo, '.pr-governance', 'README.md'),
+        ['# Governance', '', ...references].join('\n'),
+      );
+
+      const guidelines = await discoverGuidelines(repo);
+
+      assert.match(guidelines, /### Review guidance budget/);
+      assert.doesNotMatch(guidelines, /Budget exhausted by now/);
+      assert.match(guidelines, /### Referenced Markdown documents/);
+      assert.match(guidelines, /- \.pr-governance\/LAST\.md/);
+    });
+  });
+
   it('lists markdown references from root guidelines once when they overlap with governance docs', async () => {
     await withTempRepo(async (repo) => {
       await mkdir(join(repo, '.pr-governance'), { recursive: true });

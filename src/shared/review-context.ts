@@ -297,8 +297,15 @@ export async function discoverGuidelines(
       if (!referencedPath) continue;
       // Governance README references are review rules by definition: preload
       // them (budget permitting) instead of merely listing them. Path-escape
-      // and symlink checks happen inside addGuidelineFile.
-      await addGuidelineFile(formatGuidelineLabel(cwd, referencedPath), referencedPath);
+      // and symlink checks happen inside addGuidelineFile. Nested references
+      // inside preloaded docs are intentionally not followed.
+      const loaded = await addGuidelineFile(
+        formatGuidelineLabel(cwd, referencedPath),
+        referencedPath,
+      );
+      // Budget exhausted (or unreadable): fall back to listing the doc so the
+      // agent can still read it on demand instead of never seeing it.
+      if (!loaded) await addReferencedDoc(governanceDir, reference);
     }
     return formatGuidelineSections(sections, seen, referencedDocs);
   }
