@@ -7,6 +7,38 @@ export interface ReviewCommit {
   author?: string;
 }
 
+export interface DiffScope {
+  baseRef?: string;
+  baseSha?: string;
+  headSha?: string;
+}
+
+/**
+ * Renders the PR base/head and the exact three-dot diff command the agent
+ * should run. Three-dot (merge-base) diff is required: GitHub's patch — which
+ * inline-comment anchors are validated against — is merge-base-relative.
+ * Returns '' when nothing about the scope is known.
+ */
+export function formatDiffScope(scope: DiffScope): string {
+  const lines: string[] = [];
+  if (scope.baseRef || scope.baseSha) {
+    const sha = scope.baseSha ? ` (${scope.baseSha})` : '';
+    lines.push(`Base: ${scope.baseRef ?? '(unknown ref)'}${sha}`);
+  }
+  if (scope.headSha) lines.push(`Head: ${scope.headSha}`);
+
+  const base = scope.baseSha ?? (scope.baseRef ? `origin/${scope.baseRef}` : undefined);
+  if (base) {
+    const head = scope.headSha ?? 'HEAD';
+    lines.push(
+      'To see exactly what this PR changes, run:',
+      `    git diff ${base}...${head}`,
+      'Only review changes within this diff.',
+    );
+  }
+  return lines.join('\n');
+}
+
 export interface BuildReviewContextParams {
   pullTitle: string;
   pullBody: string;
@@ -15,18 +47,20 @@ export interface BuildReviewContextParams {
   commits: ReviewCommit[];
   checkSummary: string;
   guidelines: string;
+  diffScope?: DiffScope;
 }
 
 export function buildReviewContext(params: BuildReviewContextParams): string {
   const sections: string[] = [];
 
-  sections.push(
-    [
-      '## Pull request',
-      `Title: ${params.pullTitle || '(untitled)'}`,
-      params.pullBody ? `Description:\n${params.pullBody}` : 'Description: (none)',
-    ].join('\n'),
-  );
+  const pullRequestLines = [
+    '## Pull request',
+    `Title: ${params.pullTitle || '(untitled)'}`,
+    params.pullBody ? `Description:\n${params.pullBody}` : 'Description: (none)',
+  ];
+  const diffScopeText = params.diffScope ? formatDiffScope(params.diffScope) : '';
+  if (diffScopeText) pullRequestLines.push(diffScopeText);
+  sections.push(pullRequestLines.join('\n'));
 
   sections.push(
     [

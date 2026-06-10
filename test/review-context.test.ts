@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { discoverGuidelines } from '../src/shared/review-context.ts';
+import {
+  buildReviewContext,
+  discoverGuidelines,
+  formatDiffScope,
+} from '../src/shared/review-context.ts';
 
 async function withTempRepo(run: (repo: string) => Promise<void>): Promise<void> {
   const repo = await mkdtemp(join(tmpdir(), 'jbot-review-guidelines-'));
@@ -213,5 +217,67 @@ describe('discoverGuidelines', () => {
       assert.doesNotMatch(guidelines, /END_SHOULD_NOT_APPEAR/);
       assert.doesNotMatch(guidelines, /\uFFFD/);
     });
+  });
+});
+
+describe('formatDiffScope', () => {
+  it('prefers SHAs and emits a three-dot diff command', () => {
+    const baseSha = 'a'.repeat(40);
+    const headSha = 'b'.repeat(40);
+    const text = formatDiffScope({ baseRef: 'develop', baseSha, headSha });
+
+    assert.match(text, /Base: develop \(a{40}\)/);
+    assert.match(text, /Head: b{40}/);
+    assert.match(text, new RegExp(`git diff ${baseSha}\\.\\.\\.${headSha}`));
+    assert.match(text, /Only review changes within this diff\./);
+  });
+
+  it('falls back to origin/<baseRef>...HEAD when SHAs are missing', () => {
+    const text = formatDiffScope({ baseRef: 'main' });
+
+    assert.match(text, /Base: main/);
+    assert.match(text, /git diff origin\/main\.\.\.HEAD/);
+  });
+
+  it('uses HEAD when only the base SHA is known', () => {
+    const baseSha = 'c'.repeat(40);
+    const text = formatDiffScope({ baseSha });
+
+    assert.match(text, new RegExp(`git diff ${baseSha}\\.\\.\\.HEAD`));
+  });
+
+  it('returns an empty string when no scope data is available', () => {
+    assert.equal(formatDiffScope({}), '');
+  });
+});
+
+describe('buildReviewContext', () => {
+  const baseParams = {
+    pullTitle: 'Add retry logic',
+    pullBody: '',
+    changedFiles: ['src/a.ts'],
+    priorComments: [],
+    commits: [],
+    checkSummary: 'All checks passed',
+    guidelines: '',
+  };
+
+  it('embeds the diff scope inside the Pull request section', () => {
+    const context = buildReviewContext({
+      ...baseParams,
+      diffScope: { baseRef: 'main', baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40) },
+    });
+
+    const sections = context.split('\n\n');
+    const prSection = sections.find((section) => section.startsWith('## Pull request')) ?? '';
+    assert.match(prSection, /Base: main/);
+    assert.match(prSection, /git diff a{40}\.\.\.b{40}/);
+  });
+
+  it('omits the diff scope lines when no scope is provided', () => {
+    const context = buildReviewContext(baseParams);
+
+    assert.doesNotMatch(context, /git diff/);
+    assert.doesNotMatch(context, /Base:/);
   });
 });
