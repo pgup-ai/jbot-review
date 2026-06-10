@@ -1,4 +1,4 @@
-import { isNoiseFile } from './filter.ts';
+import { demoteLowConfidenceBlockingFindings, isNoiseFile } from './filter.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -210,7 +210,11 @@ export async function runPrReview(params: {
       addressedPriorComments,
       await addressedPriorCheck,
     );
-    const filteredFindings = filterFindings(findings, options);
+    const confidenceGate = demoteLowConfidenceBlockingFindings(findings);
+    if (confidenceGate.demotedCount > 0) {
+      log(`Demoted ${confidenceGate.demotedCount} low-confidence blocking finding(s) to P3.`);
+    }
+    const filteredFindings = filterFindings(confidenceGate.findings, options);
     log(
       `Review complete: ${findings.length} finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
