@@ -196,7 +196,7 @@ export async function runPrReview(params: {
     });
 
     log('Running review');
-    const { summary, findings, addressedPriorComments } = await runReviewWithContext7Fallback(
+    const { summary, findings } = await runReviewWithContext7Fallback(
       client,
       model,
       prContext,
@@ -206,10 +206,9 @@ export async function runPrReview(params: {
       context7Active,
       options.context7ApiKey,
     );
-    const verifiedAddressedPriorComments = mergeAddressedPriorComments(
-      addressedPriorComments,
-      await addressedPriorCheck,
-    );
+    // The dedicated parallel session is the single owner of addressed-thread
+    // verification; the main review no longer reports them.
+    const verifiedAddressedPriorComments = await addressedPriorCheck;
     const confidenceGate = demoteLowConfidenceBlockingFindings(findings);
     if (confidenceGate.demotedCount > 0) {
       log(`Demoted ${confidenceGate.demotedCount} low-confidence blocking finding(s) to P3.`);
@@ -466,20 +465,6 @@ function startAddressedPriorCommentsCheck(params: {
       );
       return [];
     });
-}
-
-function mergeAddressedPriorComments(
-  primary: AddressedPriorComment[],
-  secondary: AddressedPriorComment[],
-): AddressedPriorComment[] {
-  const merged: AddressedPriorComment[] = [];
-  const seen = new Set<string>();
-  for (const addressed of [...primary, ...secondary]) {
-    if (seen.has(addressed.id)) continue;
-    seen.add(addressed.id);
-    merged.push(addressed);
-  }
-  return merged;
 }
 
 async function acknowledgeAddressedPriorComments(params: {
