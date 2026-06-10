@@ -24,6 +24,22 @@ describe('parseReview', () => {
     ]);
   });
 
+  it('prefers camelCase when both casings are present and trims the value', () => {
+    const raw = JSON.stringify({
+      summary: 'ok',
+      findings: [],
+      addressedPriorComments: [
+        { id: 'PRRT_3', addressedByCommit: '  camel-wins  ', addressed_by_commit: 'snake-loses' },
+      ],
+    });
+
+    const result = parseReview(raw, 'test', noLog);
+
+    assert.deepEqual(result.addressedPriorComments, [
+      { id: 'PRRT_3', addressedByCommit: 'camel-wins', note: undefined },
+    ]);
+  });
+
   it('parses a valid review object', () => {
     const raw = JSON.stringify({
       summary: 'One issue found.',
