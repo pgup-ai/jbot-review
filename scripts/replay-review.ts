@@ -7,6 +7,9 @@ import type { ReviewCommit } from '../src/shared/review-context.ts';
 interface ReplayPullRequest {
   title: string;
   body: string;
+  baseRef?: string;
+  baseSha?: string;
+  headSha?: string;
 }
 
 interface ReplayFile {
@@ -62,6 +65,7 @@ const context = buildReviewContext({
   commits,
   checkSummary: checkSummary.trim(),
   guidelines,
+  diffScope: { baseRef: pr.baseRef, baseSha: pr.baseSha, headSha: pr.headSha },
 });
 
 console.log(context);

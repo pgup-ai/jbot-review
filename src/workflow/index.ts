@@ -70,6 +70,8 @@ async function main(): Promise<void> {
       model,
       apiKey,
       headSha: pull.head.sha,
+      baseRef: pull.base.ref,
+      baseSha: pull.base.sha,
       threadResolutionOctokit,
       options,
       log: (msg) => core.info(msg),

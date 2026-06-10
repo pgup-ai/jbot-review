@@ -46,6 +46,9 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         workspace: dir,
         model: cfg.model,
         apiKey: cfg.apiKey,
+        headSha: pr.head.sha,
+        baseRef: pr.base.ref,
+        baseSha: pr.base.sha,
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });
     } catch (error) {

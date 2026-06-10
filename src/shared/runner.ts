@@ -10,7 +10,7 @@ import {
   disableContext7Mcp,
   formatContext7Error,
 } from './opencode.ts';
-import { buildReviewContext, discoverGuidelines } from './review-context.ts';
+import { buildReviewContext, discoverGuidelines, formatDiffScope } from './review-context.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
   listPrFiles,
@@ -58,6 +58,8 @@ export async function runPrReview(params: {
   model: string;
   apiKey: string;
   headSha?: string;
+  baseRef?: string;
+  baseSha?: string;
   options?: ReviewRunOptions;
   log: (msg: string) => void;
 }): Promise<void> {
@@ -72,6 +74,8 @@ export async function runPrReview(params: {
     model,
     apiKey,
     headSha,
+    baseRef,
+    baseSha,
     log,
   } = params;
   const options = normalizeOptions(params.options);
@@ -110,6 +114,8 @@ export async function runPrReview(params: {
   const summaryScopeBlock = buildSummaryScopeBlock(priorComments, headSha);
   const reviewFocusBlock = buildReviewFocusBlock(changedFiles);
 
+  const diffScope = { baseRef, baseSha, headSha };
+
   let prContext: string;
   let guidelinesForPrompt = guidelines;
   if (options.enhancedContext) {
@@ -125,6 +131,7 @@ export async function runPrReview(params: {
       commits,
       checkSummary,
       guidelines,
+      diffScope,
     });
     prContext = `${prContext}\n\n${summaryScopeBlock}`;
     prContext = `${prContext}\n\n${reviewFocusBlock}`;
@@ -138,6 +145,7 @@ export async function runPrReview(params: {
     prContext = [
       pullTitle && `Title: ${pullTitle}`,
       pullBody && `Description: ${pullBody}`,
+      formatDiffScope(diffScope),
       `Changed files: ${changedFiles.join(', ')}`,
       summaryScopeBlock,
       reviewFocusBlock,
