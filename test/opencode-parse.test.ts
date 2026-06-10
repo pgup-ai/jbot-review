@@ -112,4 +112,25 @@ describe('parseReview', () => {
     assert.equal(result.summary, 'The reviewer returned an unparseable response.');
     assert.deepEqual(result.findings, []);
   });
+
+  it('accepts the architecture finding kind', () => {
+    const raw = JSON.stringify({
+      summary: 's',
+      findings: [
+        {
+          path: 'src/a.ts',
+          line: 3,
+          severity: 'P3',
+          kind: 'architecture',
+          confidence: 'medium',
+          title: 'Duplicates existing helper',
+          body: 'See src/shared/util.ts for the existing implementation.',
+        },
+      ],
+    });
+
+    const result = parseReview(raw, 'test', noLog);
+
+    assert.equal(result.findings[0].kind, 'architecture');
+  });
 });

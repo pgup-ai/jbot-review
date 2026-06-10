@@ -32,6 +32,7 @@ const VALID_FINDING_KINDS = new Set<FindingKind>([
   'security',
   'performance',
   'maintainability',
+  'architecture',
   'test',
   'docs',
   'investigate',

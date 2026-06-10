@@ -4,6 +4,7 @@ export type FindingKind =
   | 'security'
   | 'performance'
   | 'maintainability'
+  | 'architecture'
   | 'test'
   | 'docs'
   | 'investigate';
