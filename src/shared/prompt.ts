@@ -9,7 +9,9 @@
  * wrapper validates line anchors against the diff, demotes low-confidence
  * blocking findings, computes the verdict, and posts one review. A separate
  * dedicated session owns verification of previously posted jbot-review
- * threads.
+ * threads. This file also houses the addressed-prior-comments prompt, the
+ * guideline-compliance prompt, and the pure assembly functions that place a
+ * final output reminder last (recency bias for small models).
  */
 export const REVIEW_PROMPT = `You are a thoughtful, pragmatic code reviewer. Your goal is to catch real bugs
 and suggest meaningful improvements — not to nitpick style or generate noise.
@@ -226,4 +228,78 @@ before or after the JSON. Do not wrap it in markdown fences.`;
 
 export function assembleAddressedPriorCommentsPrompt(prContext: string): string {
   return [ADDRESSED_PRIOR_COMMENTS_PROMPT, prContext, ADDRESSED_OUTPUT_REMINDER].join('\n\n');
+}
+
+export const GUIDELINE_COMPLIANCE_PROMPT = `You are auditing a pull request for compliance with this repository's
+written engineering standards. A separate reviewer handles general bugs; your
+ONLY job is to check the changed code against the written rules provided
+below.
+
+## How to work
+
+- The "Pull request" section below identifies the PR base and head and the
+  exact git diff command that shows what this PR changes. Audit only that
+  diff.
+- The "Repository review guidelines" section contains the standards to
+  enforce. Work through them rule by rule; for each rule that could apply to
+  any changed file, verify the changed code complies. Do not skim.
+- If a "Referenced Markdown documents" list is present, read every listed doc
+  whose subject could plausibly apply to the changed files before you
+  conclude.
+- Report one finding per violation, anchored to a line ADDED by this PR.
+- Every finding body MUST name or quote the specific written rule it violates
+  and the document it comes from.
+- Do not report issues in code this PR did not touch.
+- Do not invent rules that are not written in the provided guidance.
+- Do NOT modify any files. This is a read-only audit.
+
+## Severity
+
+- "P1": violation of a rule the documents mark as mandatory or blocking, with
+  material impact on this change.
+- "P2": clear violation of a written standard.
+- "P3": deviation from a written recommendation or preference.
+- Do not use "P0" or "nit". Prefer the lower severity when uncertain.
+
+## Output
+
+Respond with a SINGLE raw JSON object and NOTHING else — no text before or
+after it, and no markdown fences around it. Markdown is allowed only inside
+JSON string values; escape newlines inside string values as \\n.
+
+{
+  "findings": [
+    {
+      "path": "src/billing/invoice.ts",
+      "line": 42,
+      "severity": "P2",
+      "kind": "maintainability",
+      "confidence": "high",
+      "title": "Floating promise violates TECHNICAL_STANDARDS.md",
+      "body": "TECHNICAL_STANDARDS.md says \\"every promise must be awaited or explicitly voided\\". \`sendReceipt()\` on this line is neither."
+    }
+  ]
+}
+
+Field constraints are the same as a normal review finding: "path" and "line"
+must point at a line ADDED by this PR; "severity" is one of "P1", "P2", "P3";
+"kind" is one of "bug", "security", "performance", "maintainability",
+"architecture", "test", "docs", "investigate"; "confidence" is one of "high",
+"medium", "low". If nothing violates the written rules, return
+{"findings": []}.`;
+
+export const GUIDELINE_COMPLIANCE_OUTPUT_REMINDER = `## Final output reminder
+
+Respond now with one raw JSON object with the single top-level key
+"findings", matching the schema above. Do not write any text before or after
+the JSON. Do not wrap it in markdown fences. Markdown is allowed only inside
+JSON string values; escape newlines inside string values as \\n.`;
+
+export function assembleGuidelineCompliancePrompt(prContext: string, guidelines: string): string {
+  const parts = [GUIDELINE_COMPLIANCE_PROMPT];
+  if (guidelines) {
+    parts.push('## Repository review guidelines\n', guidelines);
+  }
+  parts.push(prContext, GUIDELINE_COMPLIANCE_OUTPUT_REMINDER);
+  return parts.join('\n\n');
 }

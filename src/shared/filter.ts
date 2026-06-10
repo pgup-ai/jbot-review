@@ -31,6 +31,25 @@ const BLOCKING_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2']);
  * would otherwise flip the review to "Needs changes". Demotes to P3 (advisory)
  * instead of dropping, so the signal stays visible without blocking.
  */
+/**
+ * Merges findings from multiple review sessions. On a path:line collision the
+ * earlier list wins — pass the main review first so its richer context is the
+ * one that posts.
+ */
+export function dedupeFindings(...findingLists: Finding[][]): Finding[] {
+  const seen = new Set<string>();
+  const merged: Finding[] = [];
+  for (const findings of findingLists) {
+    for (const finding of findings) {
+      const key = `${finding.path}:${finding.line}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(finding);
+    }
+  }
+  return merged;
+}
+
 export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
   findings: Finding[];
   demotedCount: number;

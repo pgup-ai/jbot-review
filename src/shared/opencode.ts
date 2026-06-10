@@ -8,7 +8,11 @@ import {
 } from '@opencode-ai/sdk';
 
 import { parseModelName } from './model.ts';
-import { assembleAddressedPriorCommentsPrompt, assembleReviewPrompt } from './prompt.ts';
+import {
+  assembleAddressedPriorCommentsPrompt,
+  assembleGuidelineCompliancePrompt,
+  assembleReviewPrompt,
+} from './prompt.ts';
 import type {
   AddressedPriorComment,
   Finding,
@@ -282,6 +286,18 @@ export async function runAddressedPriorCommentsCheck(
   const prompt = assembleAddressedPriorCommentsPrompt(prContext);
   const raw = await promptPlanAgent(client, model, prompt, 'addressed-prior-comments', log);
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
+}
+
+export async function runGuidelineComplianceCheck(
+  client: OpencodeClient,
+  model: string,
+  prContext: string,
+  guidelines: string,
+  log: (msg: string) => void,
+): Promise<Finding[]> {
+  const prompt = assembleGuidelineCompliancePrompt(prContext, guidelines);
+  const raw = await promptPlanAgent(client, model, prompt, 'guideline-compliance', log);
+  return parseReview(raw, 'guideline-compliance', log).findings;
 }
 
 async function promptPlanAgent(

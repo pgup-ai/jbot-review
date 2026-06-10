@@ -3,9 +3,12 @@ import { describe, it } from 'node:test';
 
 import {
   ADDRESSED_PRIOR_COMMENTS_PROMPT,
+  GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
+  GUIDELINE_COMPLIANCE_PROMPT,
   REVIEW_OUTPUT_REMINDER,
   REVIEW_PROMPT,
   assembleAddressedPriorCommentsPrompt,
+  assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
 } from '../src/shared/prompt.ts';
 
@@ -87,5 +90,39 @@ describe('ADDRESSED_PRIOR_COMMENTS_PROMPT', () => {
   it('uses camelCase schema keys consistently', () => {
     assert.match(ADDRESSED_PRIOR_COMMENTS_PROMPT, /"addressedByCommit"/);
     assert.doesNotMatch(ADDRESSED_PRIOR_COMMENTS_PROMPT, /addressed_by_commit/);
+  });
+});
+
+describe('GUIDELINE_COMPLIANCE_PROMPT', () => {
+  it('requires citing the violated rule in every finding', () => {
+    assert.match(GUIDELINE_COMPLIANCE_PROMPT, /MUST name or quote the specific written rule/);
+  });
+
+  it('forbids P0 and nit severities for compliance findings', () => {
+    assert.match(GUIDELINE_COMPLIANCE_PROMPT, /Do not use "P0" or "nit"/);
+  });
+
+  it('forbids inventing rules that are not written down', () => {
+    assert.match(GUIDELINE_COMPLIANCE_PROMPT, /Do not invent rules/);
+  });
+
+  it('tells the auditor to read listed referenced docs', () => {
+    assert.match(GUIDELINE_COMPLIANCE_PROMPT, /read every listed doc/);
+  });
+});
+
+describe('assembleGuidelineCompliancePrompt', () => {
+  it('places guidelines before context and the reminder last', () => {
+    const prompt = assembleGuidelineCompliancePrompt('PR_CONTEXT_SENTINEL', 'GUIDELINES_SENTINEL');
+
+    assert.ok(prompt.startsWith(GUIDELINE_COMPLIANCE_PROMPT));
+    assert.ok(prompt.endsWith(GUIDELINE_COMPLIANCE_OUTPUT_REMINDER));
+    assert.ok(prompt.indexOf('GUIDELINES_SENTINEL') < prompt.indexOf('PR_CONTEXT_SENTINEL'));
+  });
+
+  it('omits the guidelines section when they are embedded in the context', () => {
+    const prompt = assembleGuidelineCompliancePrompt('PR_CONTEXT_SENTINEL', '');
+
+    assert.doesNotMatch(prompt, /## Repository review guidelines/);
   });
 });

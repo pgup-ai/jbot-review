@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { demoteLowConfidenceBlockingFindings, isNoiseFile } from '../src/shared/filter.ts';
+import {
+  dedupeFindings,
+  demoteLowConfidenceBlockingFindings,
+  isNoiseFile,
+} from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 function finding(overrides: Partial<Finding>): Finding {
@@ -65,5 +69,31 @@ describe('isNoiseFile', () => {
   it('still filters lockfiles', () => {
     assert.equal(isNoiseFile('package-lock.json'), true);
     assert.equal(isNoiseFile('src/app.ts'), false);
+  });
+});
+
+describe('dedupeFindings', () => {
+  it('keeps the first finding on a path:line collision', () => {
+    const main = [finding({ line: 5, title: 'main wins' })];
+    const compliance = [
+      finding({ line: 5, title: 'duplicate from compliance' }),
+      finding({ line: 9, title: 'unique compliance finding' }),
+    ];
+
+    const merged = dedupeFindings(main, compliance);
+
+    assert.deepEqual(
+      merged.map((f) => f.title),
+      ['main wins', 'unique compliance finding'],
+    );
+  });
+
+  it('does not collide findings in different files', () => {
+    const merged = dedupeFindings(
+      [finding({ path: 'a.ts', line: 5 })],
+      [finding({ path: 'b.ts', line: 5 })],
+    );
+
+    assert.equal(merged.length, 2);
   });
 });

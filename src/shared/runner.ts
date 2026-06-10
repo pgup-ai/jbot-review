@@ -1,10 +1,11 @@
-import { demoteLowConfidenceBlockingFindings, isNoiseFile } from './filter.ts';
+import { dedupeFindings, demoteLowConfidenceBlockingFindings, isNoiseFile } from './filter.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import {
   startOpencode,
   runReview,
   runAddressedPriorCommentsCheck,
+  runGuidelineComplianceCheck,
   listProviderModels,
   enableContext7Mcp,
   disableContext7Mcp,
@@ -44,6 +45,7 @@ export interface ReviewRunOptions {
   includePriorComments?: boolean;
   context7Mode?: Context7Mode;
   context7ApiKey?: string;
+  guidelinePass?: boolean;
 }
 
 export async function runPrReview(params: {
@@ -195,6 +197,16 @@ export async function runPrReview(params: {
       log,
     });
 
+    const guidelineComplianceCheck = startGuidelineComplianceCheck({
+      client,
+      model,
+      prContext: basePrContext,
+      guidelinesForPrompt,
+      hasGuidelines: Boolean(guidelines),
+      enabled: options.guidelinePass,
+      log,
+    });
+
     log('Running review');
     const { summary, findings } = await runReviewWithContext7Fallback(
       client,
@@ -209,13 +221,15 @@ export async function runPrReview(params: {
     // The dedicated parallel session is the single owner of addressed-thread
     // verification; the main review no longer reports them.
     const verifiedAddressedPriorComments = await addressedPriorCheck;
-    const confidenceGate = demoteLowConfidenceBlockingFindings(findings);
+    const complianceFindings = await guidelineComplianceCheck;
+    const combinedFindings = dedupeFindings(findings, complianceFindings);
+    const confidenceGate = demoteLowConfidenceBlockingFindings(combinedFindings);
     if (confidenceGate.demotedCount > 0) {
       log(`Demoted ${confidenceGate.demotedCount} low-confidence blocking finding(s) to P3.`);
     }
     const filteredFindings = filterFindings(confidenceGate.findings, options);
     log(
-      `Review complete: ${findings.length} finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
+      `Review complete: ${findings.length} main + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
     const inline: Finding[] = [];
@@ -273,6 +287,7 @@ function normalizeOptions(options: ReviewRunOptions | undefined): Required<Revie
     includePriorComments: options?.includePriorComments ?? true,
     context7Mode: options?.context7Mode ?? 'auto',
     context7ApiKey: options?.context7ApiKey ?? '',
+    guidelinePass: options?.guidelinePass ?? true,
   };
 }
 
@@ -460,6 +475,43 @@ function startAddressedPriorCommentsCheck(params: {
     .catch((error) => {
       params.log(
         `(skipped addressed-prior-comments check: ${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      );
+      return [];
+    });
+}
+
+function startGuidelineComplianceCheck(params: {
+  client: Awaited<ReturnType<typeof startOpencode>>['client'];
+  model: string;
+  prContext: string;
+  guidelinesForPrompt: string;
+  hasGuidelines: boolean;
+  enabled: boolean;
+  log: (msg: string) => void;
+}): Promise<Finding[]> {
+  if (!params.enabled) return Promise.resolve([]);
+  if (!params.hasGuidelines) {
+    params.log('Guideline-compliance check skipped: no repository guidelines discovered.');
+    return Promise.resolve([]);
+  }
+
+  params.log('Starting guideline-compliance check in parallel.');
+  return runGuidelineComplianceCheck(
+    params.client,
+    params.model,
+    params.prContext,
+    params.guidelinesForPrompt,
+    params.log,
+  )
+    .then((findings) => {
+      params.log(`Guideline-compliance check complete: ${findings.length} finding(s)`);
+      return findings;
+    })
+    .catch((error) => {
+      params.log(
+        `(skipped guideline-compliance check: ${
           error instanceof Error ? error.message : String(error)
         })`,
       );
