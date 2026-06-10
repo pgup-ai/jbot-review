@@ -26,12 +26,6 @@ export function isNoiseFile(filename: string): boolean {
 const BLOCKING_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2']);
 
 /**
- * Enforces "do not emit low-confidence P0/P1/P2 findings" in code rather than
- * trusting the prompt: a low-confidence blocking finding from a weak model
- * would otherwise flip the review to "Needs changes". Demotes to P3 (advisory)
- * instead of dropping, so the signal stays visible without blocking.
- */
-/**
  * Merges findings from multiple review sessions. On a path:line collision the
  * earlier list wins — pass the main review first so its richer context is the
  * one that posts.
@@ -50,6 +44,12 @@ export function dedupeFindings(...findingLists: Finding[][]): Finding[] {
   return merged;
 }
 
+/**
+ * Enforces "do not emit low-confidence P0/P1/P2 findings" in code rather than
+ * trusting the prompt: a low-confidence blocking finding from a weak model
+ * would otherwise flip the review to "Needs changes". Demotes to P3 (advisory)
+ * instead of dropping, so the signal stays visible without blocking.
+ */
 export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
   findings: Finding[];
   demotedCount: number;
