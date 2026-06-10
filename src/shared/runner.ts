@@ -145,6 +145,7 @@ export async function runPrReview(params: {
         ? '## Prior review comments\n' + priorComments.map((c) => `- ${c}`).join('\n')
         : '';
     prContext = [
+      '## Pull request',
       pullTitle && `Title: ${pullTitle}`,
       pullBody && `Description: ${pullBody}`,
       formatDiffScope(diffScope),
@@ -223,6 +224,10 @@ export async function runPrReview(params: {
     const verifiedAddressedPriorComments = await addressedPriorCheck;
     const complianceFindings = await guidelineComplianceCheck;
     const combinedFindings = dedupeFindings(findings, complianceFindings);
+    const dedupeDropped = findings.length + complianceFindings.length - combinedFindings.length;
+    if (dedupeDropped > 0) {
+      log(`Deduped ${dedupeDropped} finding(s) that collided on path:line across sessions.`);
+    }
     const confidenceGate = demoteLowConfidenceBlockingFindings(combinedFindings);
     if (confidenceGate.demotedCount > 0) {
       log(`Demoted ${confidenceGate.demotedCount} low-confidence blocking finding(s) to P3.`);
