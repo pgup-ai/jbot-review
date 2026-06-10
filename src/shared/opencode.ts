@@ -470,9 +470,9 @@ const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3',
 /**
  * Defensively parses the agent's JSON. Main review output is strict so we
  * don't post a misleading "good to go" review when the reviewer response is
- * malformed; auxiliary checks stay best-effort.
+ * malformed; auxiliary checks stay best-effort. Exported for direct test coverage.
  */
-function parseReview(
+export function parseReview(
   raw: string,
   label: string,
   log: (msg: string) => void,
@@ -532,12 +532,17 @@ function parseReview(
     const addressed = item as Record<string, unknown>;
     const id = typeof addressed.id === 'string' ? addressed.id.trim() : '';
     if (!id) continue;
+    // Accept both casings: the schema uses camelCase, but models normalize
+    // inconsistently and historic prompts used snake_case.
+    const rawCommit =
+      typeof addressed.addressedByCommit === 'string'
+        ? addressed.addressedByCommit
+        : typeof addressed.addressed_by_commit === 'string'
+          ? addressed.addressed_by_commit
+          : undefined;
     addressedPriorComments.push({
       id,
-      addressedByCommit:
-        typeof addressed.addressed_by_commit === 'string'
-          ? addressed.addressed_by_commit.trim()
-          : undefined,
+      addressedByCommit: rawCommit?.trim(),
       note: typeof addressed.note === 'string' ? addressed.note.trim() : undefined,
     });
   }
