@@ -7,6 +7,44 @@ export interface ReviewCommit {
   author?: string;
 }
 
+export interface DiffScope {
+  baseRef?: string;
+  baseSha?: string;
+  headSha?: string;
+}
+
+/**
+ * Renders the PR base/head and the exact three-dot diff command the agent
+ * should run. Three-dot (merge-base) diff is required: GitHub's patch — which
+ * inline-comment anchors are validated against — is merge-base-relative.
+ * Returns '' when nothing about the scope is known.
+ *
+ * Prefers the base SHA, which is unambiguous in any checkout. Only when the
+ * SHA is absent does it fall back to `origin/<baseRef>`, which assumes the
+ * conventional `origin` remote name; both entry points pass the base SHA, so
+ * the agent can also locate the base from the surrounding context if that
+ * assumption does not hold.
+ */
+export function formatDiffScope(scope: DiffScope): string {
+  const lines: string[] = [];
+  if (scope.baseRef || scope.baseSha) {
+    const sha = scope.baseSha ? ` (${scope.baseSha})` : '';
+    lines.push(`Base: ${scope.baseRef ?? '(unknown ref)'}${sha}`);
+  }
+  if (scope.headSha) lines.push(`Head: ${scope.headSha}`);
+
+  const base = scope.baseSha ?? (scope.baseRef ? `origin/${scope.baseRef}` : undefined);
+  if (base) {
+    const head = scope.headSha ?? 'HEAD';
+    lines.push(
+      'To see exactly what this PR changes, run:',
+      `    git diff ${base}...${head}`,
+      'Only review changes within this diff.',
+    );
+  }
+  return lines.join('\n');
+}
+
 export interface BuildReviewContextParams {
   pullTitle: string;
   pullBody: string;
@@ -15,18 +53,20 @@ export interface BuildReviewContextParams {
   commits: ReviewCommit[];
   checkSummary: string;
   guidelines: string;
+  diffScope?: DiffScope;
 }
 
 export function buildReviewContext(params: BuildReviewContextParams): string {
   const sections: string[] = [];
 
-  sections.push(
-    [
-      '## Pull request',
-      `Title: ${params.pullTitle || '(untitled)'}`,
-      params.pullBody ? `Description:\n${params.pullBody}` : 'Description: (none)',
-    ].join('\n'),
-  );
+  const pullRequestLines = [
+    '## Pull request',
+    `Title: ${params.pullTitle || '(untitled)'}`,
+    params.pullBody ? `Description:\n${params.pullBody}` : 'Description: (none)',
+  ];
+  const diffScopeText = params.diffScope ? formatDiffScope(params.diffScope) : '';
+  if (diffScopeText) pullRequestLines.push(diffScopeText);
+  sections.push(pullRequestLines.join('\n'));
 
   sections.push(
     [
@@ -72,6 +112,8 @@ export function buildReviewContext(params: BuildReviewContextParams): string {
 const ROOT_GUIDELINE_FILES = [
   'AGENTS.md',
   'REVIEW.md',
+  'TECHNICAL_STANDARDS.md',
+  'ARCHITECTURE.md',
   'CLAUDE.md',
   'CONTRIBUTING.md',
   '.cursor/BUGBOT.md',
@@ -86,6 +128,7 @@ const ROOT_GUIDELINE_FILES = [
 const SCOPED_GUIDELINE_FILES = [
   'AGENTS.md',
   'REVIEW.md',
+  'TECHNICAL_STANDARDS.md',
   'CLAUDE.md',
   'CONTRIBUTING.md',
   '.cursor/BUGBOT.md',
@@ -97,8 +140,8 @@ const SCOPED_GUIDELINE_FILES = [
 ];
 
 const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
-const MAX_GUIDELINE_FILE_BYTES = 16 * 1024;
-const MAX_GUIDELINE_TOTAL_BYTES = 48 * 1024;
+const MAX_GUIDELINE_FILE_BYTES = 24 * 1024;
+const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
 
 export async function discoverGuidelines(
   cwd: string,
@@ -256,7 +299,19 @@ export async function discoverGuidelines(
 
   if (readme) {
     for (const reference of extractMarkdownDocumentReferences(readme.text)) {
-      await addReferencedDoc(governanceDir, reference);
+      const referencedPath = resolveMarkdownReference(cwd, governanceDir, reference);
+      if (!referencedPath) continue;
+      // Governance README references are review rules by definition: preload
+      // them (budget permitting) instead of merely listing them. Path-escape
+      // and symlink checks happen inside addGuidelineFile. Nested references
+      // inside preloaded docs are intentionally not followed.
+      const loaded = await addGuidelineFile(
+        formatGuidelineLabel(cwd, referencedPath),
+        referencedPath,
+      );
+      // Budget exhausted (or unreadable): fall back to listing the doc so the
+      // agent can still read it on demand instead of never seeing it.
+      if (!loaded) await addReferencedDoc(governanceDir, reference);
     }
     return formatGuidelineSections(sections, seen, referencedDocs);
   }

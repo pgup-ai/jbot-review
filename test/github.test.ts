@@ -37,6 +37,9 @@ describe('formatPriorJbotThreadsForPrompt', () => {
     assert.match(prompt, /Not applied: `chartAccount` is required/);
     assert.match(prompt, /do not re-post it and do not mark it addressed/);
     assert.doesNotMatch(prompt, /jbot-review:finding/);
+    assert.match(prompt, /Canonical rules for these threads:/);
+    assert.match(prompt, /unless a newer commit creates a materially different problem/);
+    assert.match(prompt, /not re-raising an issue does not make it addressed/);
   });
 
   it('keeps only the latest thread replies in prompt context', () => {

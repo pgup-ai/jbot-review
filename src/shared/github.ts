@@ -455,8 +455,10 @@ export function formatPriorJbotThreadsForPrompt(threads: PriorJbotThread[]): str
     .slice(0, MAX_PRIOR_JBOT_THREADS_FOR_PROMPT);
   const lines = [
     '## Prior jbot-review inline comments',
-    'If a prior jbot-review comment is now definitively addressed by the current PR branch, include its id in "addressedPriorComments". Do not mark a comment addressed merely because you are not re-raising it.',
-    'If later thread replies say the finding was not applied, intentionally declined, accepted as-is, or not worth fixing, treat the issue as already discussed: do not re-post it and do not mark it addressed.',
+    'Canonical rules for these threads:',
+    '- Do not re-raise an issue an existing thread already covers, unless a newer commit creates a materially different problem.',
+    '- If later thread replies say the finding was not applied, intentionally declined, accepted as-is, or not worth fixing, treat the issue as already discussed: do not re-post it and do not mark it addressed.',
+    '- When a task asks you to report addressed threads: only mark a thread addressed when the current branch verifiably fixes the specific issue raised, and use the exact thread id; not re-raising an issue does not make it addressed.',
   ];
   if (threads.length > promptThreads.length) {
     lines.push(

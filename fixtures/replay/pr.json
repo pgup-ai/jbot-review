@@ -1,4 +1,7 @@
 {
   "title": "Add replayable review context",
-  "body": "This fixture demonstrates the local review context builder."
+  "body": "This fixture demonstrates the local review context builder.",
+  "baseRef": "main",
+  "baseSha": "1111111111111111111111111111111111111111",
+  "headSha": "2222222222222222222222222222222222222222"
 }

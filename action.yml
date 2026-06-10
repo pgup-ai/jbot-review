@@ -78,6 +78,10 @@ inputs:
     description: 'Include prior PR review comments in the review context.'
     required: false
     default: 'true'
+  enable-guideline-pass:
+    description: 'Run a dedicated guideline-compliance review session when repository guidelines are discovered.'
+    required: false
+    default: 'true'
   fail-on-error:
     description: 'Fail the workflow when the review cannot complete.'
     required: false
@@ -107,4 +111,5 @@ runs:
     INPUT_MAX-FINDINGS: ${{ inputs.max-findings }}
     INPUT_MIN-SEVERITY: ${{ inputs.min-severity }}
     INPUT_INCLUDE-PRIOR-COMMENTS: ${{ inputs.include-prior-comments }}
+    INPUT_ENABLE-GUIDELINE-PASS: ${{ inputs.enable-guideline-pass }}
     INPUT_FAIL-ON-ERROR: ${{ inputs.fail-on-error }}

@@ -25,8 +25,13 @@ runner. The source code is private; users only see the public [`pgup-ai/jbot-rev
    agent over the SDK. The agent discovers repo guidelines (`AGENTS.md`,
    `REVIEW.md`, `.pr-governance/`, and compatible review-bot rule files) and
    explores the full repo with its own tools.
-4. The agent returns structured findings as JSON; the wrapper validates,
-   gates, and posts one review with inline comments + a deterministic verdict.
+4. The agent receives the PR's exact base...head diff scope and returns
+   structured findings as JSON; the wrapper validates line anchors against the
+   diff, demotes low-confidence blocking findings, gates by severity, and posts
+   one review with inline comments + a deterministic verdict. Two parallel
+   read-only sessions run alongside the main review: one audits the diff
+   against discovered repository guidelines rule-by-rule, and one verifies
+   which prior jbot-review threads the branch has addressed.
 
 ### For the action developer (you)
 
@@ -280,6 +285,7 @@ documentation lookup.
 | `max-findings`            | No       | `0`                   | Cap findings; `0` means no limit                                           |
 | `min-severity`            | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                                   |
 | `include-prior-comments`  | No       | `true`                | Include existing PR review comments in context                             |
+| `enable-guideline-pass`   | No       | `true`                | Run a dedicated guideline-compliance session when repo guidelines exist    |
 | `fail-on-error`           | No       | `true`                | Fail the workflow if the review cannot complete                            |
 
 ### Review output
@@ -849,6 +855,7 @@ Both modes automatically discover repo-level guidance from the checked-out works
 
 - `AGENTS.md` — conventions and rules
 - `REVIEW.md` — review-specific instructions
+- `TECHNICAL_STANDARDS.md`, `ARCHITECTURE.md` — engineering and architecture standards
 - `CLAUDE.md`, `CONTRIBUTING.md`, `.cursorrules`, `.windsurfrules`
 - `.cursor/BUGBOT.md` and `.cursor/rules/*.{md,mdc}` — Cursor/Bugbot rules
 - `.coderabbit.yaml`, `.coderabbit.yml`, `greptile.json`
@@ -856,8 +863,12 @@ Both modes automatically discover repo-level guidance from the checked-out works
 
 These are injected into the prompt after the base instructions but before the
 diff context, so the agent applies your rules when reviewing each change.
-Markdown docs referenced from those files are deduplicated and listed as
-available paths instead of being preloaded into every review.
+Markdown docs referenced from `.pr-governance/README.md` are preloaded (within
+the guidance budget) because a governance index points at review rules by
+definition; docs referenced from other guidance files are deduplicated and
+listed as available paths, read on demand. When any guidelines are discovered,
+a dedicated guideline-compliance session audits the diff rule-by-rule in
+parallel with the main review (disable with `enable-guideline-pass: false`).
 For changed files, J-Bot also checks ancestor directories for scoped review files
 such as `REVIEW.md`, `AGENTS.md`, `.cursor/BUGBOT.md`, and `.cursor/rules/`.
 

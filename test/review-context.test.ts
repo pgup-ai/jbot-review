@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { discoverGuidelines } from '../src/shared/review-context.ts';
+import {
+  buildReviewContext,
+  discoverGuidelines,
+  formatDiffScope,
+} from '../src/shared/review-context.ts';
 
 async function withTempRepo(run: (repo: string) => Promise<void>): Promise<void> {
   const repo = await mkdtemp(join(tmpdir(), 'jbot-review-guidelines-'));
@@ -16,7 +20,7 @@ async function withTempRepo(run: (repo: string) => Promise<void>): Promise<void>
 }
 
 describe('discoverGuidelines', () => {
-  it('lists referenced markdown docs without preloading their content', async () => {
+  it('preloads governance README references while keeping root-guideline references listed', async () => {
     await withTempRepo(async (repo) => {
       await mkdir(join(repo, '.pr-governance', 'design'), { recursive: true });
       await mkdir(join(repo, '.pr-governance', 'review'), { recursive: true });
@@ -47,12 +51,56 @@ describe('discoverGuidelines', () => {
       assert.match(guidelines, /### AGENTS\.md\n# Agents/);
       assert.match(guidelines, /### REVIEW\.md\n# Review/);
       assert.match(guidelines, /### \.pr-governance\/README\.md\n# Governance/);
+      assert.match(guidelines, /### \.pr-governance\/design\/NORTH_STAR\.md\n# North Star/);
+      assert.match(guidelines, /Nested design instructions/);
+      assert.match(guidelines, /Nested review instructions/);
+      assert.doesNotMatch(guidelines, /### Referenced Markdown documents/);
+    });
+  });
+
+  it('preloads TECHNICAL_STANDARDS.md and ARCHITECTURE.md from the repo root', async () => {
+    await withTempRepo(async (repo) => {
+      await writeFile(join(repo, 'TECHNICAL_STANDARDS.md'), '# Standards\nNo floating promises.');
+      await writeFile(
+        join(repo, 'ARCHITECTURE.md'),
+        '# Architecture\nServices never import from app/.',
+      );
+
+      const guidelines = await discoverGuidelines(repo);
+
+      assert.match(guidelines, /### TECHNICAL_STANDARDS\.md\n# Standards/);
+      assert.match(guidelines, /No floating promises\./);
+      assert.match(guidelines, /### ARCHITECTURE\.md\n# Architecture/);
+      assert.match(guidelines, /Services never import from app\//);
+    });
+  });
+
+  it('lists governance references that exceed the guidance budget instead of dropping them', async () => {
+    await withTempRepo(async (repo) => {
+      await mkdir(join(repo, '.pr-governance'), { recursive: true });
+      // 5 x 24KB files exhaust the 96KB total budget before the last reference.
+      const bigBody = 'x'.repeat(25 * 1024);
+      const references: string[] = [];
+      for (let index = 1; index <= 5; index += 1) {
+        await writeFile(
+          join(repo, '.pr-governance', `BIG_${index}.md`),
+          `# Big ${index}\n${bigBody}`,
+        );
+        references.push(`- \`BIG_${index}.md\``);
+      }
+      await writeFile(join(repo, '.pr-governance', 'LAST.md'), '# Last\nBudget exhausted by now');
+      references.push('- `LAST.md`');
+      await writeFile(
+        join(repo, '.pr-governance', 'README.md'),
+        ['# Governance', '', ...references].join('\n'),
+      );
+
+      const guidelines = await discoverGuidelines(repo);
+
+      assert.match(guidelines, /### Review guidance budget/);
+      assert.doesNotMatch(guidelines, /Budget exhausted by now/);
       assert.match(guidelines, /### Referenced Markdown documents/);
-      assert.match(guidelines, /- \.pr-governance\/design\/NORTH_STAR\.md/);
-      assert.match(guidelines, /- \.pr-governance\/review\/PR_REVIEW_RUBRIC\.md/);
-      assert.doesNotMatch(guidelines, /### \.pr-governance\/design\/NORTH_STAR\.md\n# North Star/);
-      assert.doesNotMatch(guidelines, /Nested design instructions/);
-      assert.doesNotMatch(guidelines, /Nested review instructions/);
+      assert.match(guidelines, /- \.pr-governance\/LAST\.md/);
     });
   });
 
@@ -74,11 +122,11 @@ describe('discoverGuidelines', () => {
 
       const guidelines = await discoverGuidelines(repo);
 
-      assert.match(guidelines, /- docs\/SHARED\.md/);
+      assert.match(guidelines, /### docs\/SHARED\.md\n# Shared/);
+      assert.match(guidelines, /Load this once/);
       assert.match(guidelines, /- docs\/EXTRA\.md/);
-      assert.doesNotMatch(guidelines, /Load this once/);
       assert.doesNotMatch(guidelines, /Load this too/);
-      assert.equal(guidelines.match(/^- docs\/SHARED\.md$/gm)?.length, 1);
+      assert.doesNotMatch(guidelines, /^- docs\/SHARED\.md$/m);
     });
   });
 
@@ -158,8 +206,8 @@ describe('discoverGuidelines', () => {
 
           const guidelines = await discoverGuidelines(repo, ['../outside.ts']);
 
-          assert.match(guidelines, /- \.pr-governance\/INSIDE\.md/);
-          assert.doesNotMatch(guidelines, /Available only/);
+          assert.match(guidelines, /### \.pr-governance\/INSIDE\.md\n# Inside/);
+          assert.match(guidelines, /Available only/);
           assert.doesNotMatch(guidelines, /Do not load this/);
           assert.doesNotMatch(guidelines, /Do not load this either/);
         } finally {
@@ -213,5 +261,67 @@ describe('discoverGuidelines', () => {
       assert.doesNotMatch(guidelines, /END_SHOULD_NOT_APPEAR/);
       assert.doesNotMatch(guidelines, /\uFFFD/);
     });
+  });
+});
+
+describe('formatDiffScope', () => {
+  it('prefers SHAs and emits a three-dot diff command', () => {
+    const baseSha = 'a'.repeat(40);
+    const headSha = 'b'.repeat(40);
+    const text = formatDiffScope({ baseRef: 'develop', baseSha, headSha });
+
+    assert.match(text, /Base: develop \(a{40}\)/);
+    assert.match(text, /Head: b{40}/);
+    assert.match(text, new RegExp(`git diff ${baseSha}\\.\\.\\.${headSha}`));
+    assert.match(text, /Only review changes within this diff\./);
+  });
+
+  it('falls back to origin/<baseRef>...HEAD when SHAs are missing', () => {
+    const text = formatDiffScope({ baseRef: 'main' });
+
+    assert.match(text, /Base: main/);
+    assert.match(text, /git diff origin\/main\.\.\.HEAD/);
+  });
+
+  it('uses HEAD when only the base SHA is known', () => {
+    const baseSha = 'c'.repeat(40);
+    const text = formatDiffScope({ baseSha });
+
+    assert.match(text, new RegExp(`git diff ${baseSha}\\.\\.\\.HEAD`));
+  });
+
+  it('returns an empty string when no scope data is available', () => {
+    assert.equal(formatDiffScope({}), '');
+  });
+});
+
+describe('buildReviewContext', () => {
+  const baseParams = {
+    pullTitle: 'Add retry logic',
+    pullBody: '',
+    changedFiles: ['src/a.ts'],
+    priorComments: [],
+    commits: [],
+    checkSummary: 'All checks passed',
+    guidelines: '',
+  };
+
+  it('embeds the diff scope inside the Pull request section', () => {
+    const context = buildReviewContext({
+      ...baseParams,
+      diffScope: { baseRef: 'main', baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40) },
+    });
+
+    const sections = context.split('\n\n');
+    const prSection = sections.find((section) => section.startsWith('## Pull request')) ?? '';
+    assert.match(prSection, /Base: main/);
+    assert.match(prSection, /git diff a{40}\.\.\.b{40}/);
+  });
+
+  it('omits the diff scope lines when no scope is provided', () => {
+    const context = buildReviewContext(baseParams);
+
+    assert.doesNotMatch(context, /git diff/);
+    assert.doesNotMatch(context, /Base:/);
   });
 });

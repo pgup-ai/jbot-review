@@ -39,6 +39,7 @@ async function main(): Promise<void> {
     includePriorComments: parseBooleanInput('include-prior-comments', true),
     context7Mode: parseContext7Mode(core.getInput('enable-context7')),
     context7ApiKey: getInputOrEnv('context7-api-key', 'CONTEXT7_API_KEY'),
+    guidelinePass: parseBooleanInput('enable-guideline-pass', true),
   };
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${model}`);
@@ -70,6 +71,8 @@ async function main(): Promise<void> {
       model,
       apiKey,
       headSha: pull.head.sha,
+      baseRef: pull.base.ref,
+      baseSha: pull.base.sha,
       threadResolutionOctokit,
       options,
       log: (msg) => core.info(msg),

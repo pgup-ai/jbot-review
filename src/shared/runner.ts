@@ -1,16 +1,22 @@
-import { isNoiseFile } from './filter.ts';
+import {
+  SEVERITY_RANK,
+  dedupeFindings,
+  demoteLowConfidenceBlockingFindings,
+  isNoiseFile,
+} from './filter.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import {
   startOpencode,
   runReview,
   runAddressedPriorCommentsCheck,
+  runGuidelineComplianceCheck,
   listProviderModels,
   enableContext7Mcp,
   disableContext7Mcp,
   formatContext7Error,
 } from './opencode.ts';
-import { buildReviewContext, discoverGuidelines } from './review-context.ts';
+import { buildReviewContext, discoverGuidelines, formatDiffScope } from './review-context.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
   listPrFiles,
@@ -28,14 +34,6 @@ import {
 import type { Octokit, PriorJbotThread } from './github.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
-const SEVERITY_RANK: Record<Severity, number> = {
-  P0: 0,
-  P1: 1,
-  P2: 2,
-  P3: 3,
-  nit: 4,
-};
-
 export interface ReviewRunOptions {
   enhancedContext?: boolean;
   dryRun?: boolean;
@@ -44,6 +42,7 @@ export interface ReviewRunOptions {
   includePriorComments?: boolean;
   context7Mode?: Context7Mode;
   context7ApiKey?: string;
+  guidelinePass?: boolean;
 }
 
 export async function runPrReview(params: {
@@ -58,6 +57,8 @@ export async function runPrReview(params: {
   model: string;
   apiKey: string;
   headSha?: string;
+  baseRef?: string;
+  baseSha?: string;
   options?: ReviewRunOptions;
   log: (msg: string) => void;
 }): Promise<void> {
@@ -72,6 +73,8 @@ export async function runPrReview(params: {
     model,
     apiKey,
     headSha,
+    baseRef,
+    baseSha,
     log,
   } = params;
   const options = normalizeOptions(params.options);
@@ -110,6 +113,8 @@ export async function runPrReview(params: {
   const summaryScopeBlock = buildSummaryScopeBlock(priorComments, headSha);
   const reviewFocusBlock = buildReviewFocusBlock(changedFiles);
 
+  const diffScope = { baseRef, baseSha, headSha };
+
   let prContext: string;
   let guidelinesForPrompt = guidelines;
   if (options.enhancedContext) {
@@ -125,6 +130,7 @@ export async function runPrReview(params: {
       commits,
       checkSummary,
       guidelines,
+      diffScope,
     });
     prContext = `${prContext}\n\n${summaryScopeBlock}`;
     prContext = `${prContext}\n\n${reviewFocusBlock}`;
@@ -136,8 +142,10 @@ export async function runPrReview(params: {
         ? '## Prior review comments\n' + priorComments.map((c) => `- ${c}`).join('\n')
         : '';
     prContext = [
+      '## Pull request',
       pullTitle && `Title: ${pullTitle}`,
       pullBody && `Description: ${pullBody}`,
+      formatDiffScope(diffScope),
       `Changed files: ${changedFiles.join(', ')}`,
       summaryScopeBlock,
       reviewFocusBlock,
@@ -187,8 +195,18 @@ export async function runPrReview(params: {
       log,
     });
 
+    const guidelineComplianceCheck = startGuidelineComplianceCheck({
+      client,
+      model,
+      prContext: basePrContext,
+      guidelinesForPrompt,
+      hasGuidelines: Boolean(guidelines),
+      enabled: options.guidelinePass,
+      log,
+    });
+
     log('Running review');
-    const { summary, findings, addressedPriorComments } = await runReviewWithContext7Fallback(
+    const { summary, findings } = await runReviewWithContext7Fallback(
       client,
       model,
       prContext,
@@ -198,13 +216,29 @@ export async function runPrReview(params: {
       context7Active,
       options.context7ApiKey,
     );
-    const verifiedAddressedPriorComments = mergeAddressedPriorComments(
-      addressedPriorComments,
-      await addressedPriorCheck,
-    );
-    const filteredFindings = filterFindings(findings, options);
+    // The dedicated parallel session is the single owner of addressed-thread
+    // verification; the main review no longer reports them.
+    const verifiedAddressedPriorComments = await addressedPriorCheck;
+    const complianceFindings = await guidelineComplianceCheck;
+    // Gate confidence BEFORE deduping so each finding carries its effective
+    // severity into collision resolution; otherwise a low-confidence main
+    // finding could win a path:line collision and then be demoted to P3,
+    // dropping a stronger compliance finding at the same location.
+    const gatedMain = demoteLowConfidenceBlockingFindings(findings);
+    const gatedCompliance = demoteLowConfidenceBlockingFindings(complianceFindings);
+    const demotedCount = gatedMain.demotedCount + gatedCompliance.demotedCount;
+    if (demotedCount > 0) {
+      log(`Demoted ${demotedCount} low-confidence blocking finding(s) to P3.`);
+    }
+    const combinedFindings = dedupeFindings(gatedMain.findings, gatedCompliance.findings);
+    const dedupeDropped =
+      gatedMain.findings.length + gatedCompliance.findings.length - combinedFindings.length;
+    if (dedupeDropped > 0) {
+      log(`Deduped ${dedupeDropped} finding(s) that collided on path:line across sessions.`);
+    }
+    const filteredFindings = filterFindings(combinedFindings, options);
     log(
-      `Review complete: ${findings.length} finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
+      `Review complete: ${findings.length} main + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
     const inline: Finding[] = [];
@@ -262,6 +296,7 @@ function normalizeOptions(options: ReviewRunOptions | undefined): Required<Revie
     includePriorComments: options?.includePriorComments ?? true,
     context7Mode: options?.context7Mode ?? 'auto',
     context7ApiKey: options?.context7ApiKey ?? '',
+    guidelinePass: options?.guidelinePass ?? true,
   };
 }
 
@@ -456,18 +491,41 @@ function startAddressedPriorCommentsCheck(params: {
     });
 }
 
-function mergeAddressedPriorComments(
-  primary: AddressedPriorComment[],
-  secondary: AddressedPriorComment[],
-): AddressedPriorComment[] {
-  const merged: AddressedPriorComment[] = [];
-  const seen = new Set<string>();
-  for (const addressed of [...primary, ...secondary]) {
-    if (seen.has(addressed.id)) continue;
-    seen.add(addressed.id);
-    merged.push(addressed);
+function startGuidelineComplianceCheck(params: {
+  client: Awaited<ReturnType<typeof startOpencode>>['client'];
+  model: string;
+  prContext: string;
+  guidelinesForPrompt: string;
+  hasGuidelines: boolean;
+  enabled: boolean;
+  log: (msg: string) => void;
+}): Promise<Finding[]> {
+  if (!params.enabled) return Promise.resolve([]);
+  if (!params.hasGuidelines) {
+    params.log('Guideline-compliance check skipped: no repository guidelines discovered.');
+    return Promise.resolve([]);
   }
-  return merged;
+
+  params.log('Starting guideline-compliance check in parallel.');
+  return runGuidelineComplianceCheck(
+    params.client,
+    params.model,
+    params.prContext,
+    params.guidelinesForPrompt,
+    params.log,
+  )
+    .then((findings) => {
+      params.log(`Guideline-compliance check complete: ${findings.length} finding(s)`);
+      return findings;
+    })
+    .catch((error) => {
+      params.log(
+        `(skipped guideline-compliance check: ${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      );
+      return [];
+    });
 }
 
 async function acknowledgeAddressedPriorComments(params: {
