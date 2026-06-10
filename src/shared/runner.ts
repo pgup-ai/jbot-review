@@ -383,7 +383,7 @@ function buildContext7PromptBlock(reason: string): string {
   ].join('\n');
 }
 
-function buildReviewFocusBlock(changedFiles: string[]): string {
+export function buildReviewFocusBlock(changedFiles: string[]): string {
   const focusItems = new Set<string>();
 
   for (const file of changedFiles) {
@@ -395,6 +395,14 @@ function buildReviewFocusBlock(changedFiles: string[]): string {
     }
     if (/(^|\/)(db|database|migrations?|prisma|drizzle|schema)\//i.test(file)) {
       focusItems.add('Data: compatibility, migration order, defaults, nullability, indexes.');
+    }
+    if (
+      /(^|\/)(repositor(?:y|ies)|repos?|daos?)\//i.test(file) ||
+      /\.(repository|repo|dao)\.[cm]?[jt]sx?$/i.test(file)
+    ) {
+      focusItems.add(
+        'Data layer: snapshot/aliasing — map writes keyed by id inside loops (first-write-wins), live-entity snapshots, duplicate inputs resolving to one row.',
+      );
     }
     if (/(^|\/)(auth|security|permissions?|policies)\//i.test(file)) {
       focusItems.add('Security: privilege, tokens, tenant isolation, unsafe input boundaries.');

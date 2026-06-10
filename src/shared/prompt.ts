@@ -111,6 +111,33 @@ Review the shape of the change, not just its lines:
 - Emit only findings with a concrete trigger path: input/state, current result,
   why it is wrong, and a focused fix.
 
+## Bug archetypes to actively check
+
+These look correct line-by-line; the bug is in how the code behaves across
+iterations, calls, or inputs. For each archetype present in the diff, state the
+hypothesis to yourself and confirm it against the surrounding code before
+reporting — keep the same concrete-trigger-path bar as any other finding.
+
+- **Map or record writes inside a loop.** When code assigns into a map keyed by
+  an id from inside a loop, check whether the same key can recur across
+  iterations. A "before"/snapshot capture must be first-write-wins (guard it
+  with "only if not already set"); last-write-wins silently corrupts it.
+- **Snapshots of mutable objects.** When code captures the prior state of an
+  object that is mutated later (ORM entities, shared buffers, request-scoped
+  state), confirm the snapshot is an independent copy taken before any mutation,
+  not a live reference that will reflect the later changes.
+- **Duplicate or aliased inputs.** When multiple input rows can resolve to the
+  same underlying entity, check that per-entity accumulation — audit diffs,
+  counters, snapshots — handles the collision instead of overwriting.
+- **Intermediate state across multi-step writes.** A later step that reads or
+  overwrites the intermediate result of an earlier step in the same batch or
+  transaction.
+
+Tests are not proof of correctness. Newly added or passing tests do not make the
+logic right — reason about the logic yourself, and check whether the tests
+actually exercise the collision and edge cases above rather than only the happy
+path.
+
 ## Completeness
 
 - Make one thorough pass over the full PR and return the complete set of

@@ -126,3 +126,21 @@ describe('assembleGuidelineCompliancePrompt', () => {
     assert.doesNotMatch(prompt, /## Repository review guidelines/);
   });
 });
+
+describe('REVIEW_PROMPT bug archetypes', () => {
+  it('enumerates high-recall failure archetypes to actively check', () => {
+    assert.match(REVIEW_PROMPT, /## Bug archetypes to actively check/);
+    assert.match(REVIEW_PROMPT, /Map or record writes inside a loop/);
+    assert.match(REVIEW_PROMPT, /first-write-wins/);
+    assert.match(REVIEW_PROMPT, /Snapshots of mutable objects/);
+    assert.match(REVIEW_PROMPT, /Duplicate or aliased inputs/);
+  });
+
+  it('preserves the concrete-trigger-path bar while prompting hypotheses', () => {
+    assert.match(REVIEW_PROMPT, /concrete-trigger-path bar/);
+  });
+
+  it('warns that tests are not proof of correctness', () => {
+    assert.match(REVIEW_PROMPT, /Tests are not proof of correctness/);
+  });
+});
