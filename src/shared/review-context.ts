@@ -106,6 +106,8 @@ export function buildReviewContext(params: BuildReviewContextParams): string {
 const ROOT_GUIDELINE_FILES = [
   'AGENTS.md',
   'REVIEW.md',
+  'TECHNICAL_STANDARDS.md',
+  'ARCHITECTURE.md',
   'CLAUDE.md',
   'CONTRIBUTING.md',
   '.cursor/BUGBOT.md',
@@ -120,6 +122,7 @@ const ROOT_GUIDELINE_FILES = [
 const SCOPED_GUIDELINE_FILES = [
   'AGENTS.md',
   'REVIEW.md',
+  'TECHNICAL_STANDARDS.md',
   'CLAUDE.md',
   'CONTRIBUTING.md',
   '.cursor/BUGBOT.md',
@@ -131,8 +134,8 @@ const SCOPED_GUIDELINE_FILES = [
 ];
 
 const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
-const MAX_GUIDELINE_FILE_BYTES = 16 * 1024;
-const MAX_GUIDELINE_TOTAL_BYTES = 48 * 1024;
+const MAX_GUIDELINE_FILE_BYTES = 24 * 1024;
+const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
 
 export async function discoverGuidelines(
   cwd: string,
@@ -290,7 +293,12 @@ export async function discoverGuidelines(
 
   if (readme) {
     for (const reference of extractMarkdownDocumentReferences(readme.text)) {
-      await addReferencedDoc(governanceDir, reference);
+      const referencedPath = resolveMarkdownReference(cwd, governanceDir, reference);
+      if (!referencedPath) continue;
+      // Governance README references are review rules by definition: preload
+      // them (budget permitting) instead of merely listing them. Path-escape
+      // and symlink checks happen inside addGuidelineFile.
+      await addGuidelineFile(formatGuidelineLabel(cwd, referencedPath), referencedPath);
     }
     return formatGuidelineSections(sections, seen, referencedDocs);
   }

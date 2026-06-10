@@ -20,7 +20,7 @@ async function withTempRepo(run: (repo: string) => Promise<void>): Promise<void>
 }
 
 describe('discoverGuidelines', () => {
-  it('lists referenced markdown docs without preloading their content', async () => {
+  it('preloads governance README references while keeping root-guideline references listed', async () => {
     await withTempRepo(async (repo) => {
       await mkdir(join(repo, '.pr-governance', 'design'), { recursive: true });
       await mkdir(join(repo, '.pr-governance', 'review'), { recursive: true });
@@ -51,12 +51,27 @@ describe('discoverGuidelines', () => {
       assert.match(guidelines, /### AGENTS\.md\n# Agents/);
       assert.match(guidelines, /### REVIEW\.md\n# Review/);
       assert.match(guidelines, /### \.pr-governance\/README\.md\n# Governance/);
-      assert.match(guidelines, /### Referenced Markdown documents/);
-      assert.match(guidelines, /- \.pr-governance\/design\/NORTH_STAR\.md/);
-      assert.match(guidelines, /- \.pr-governance\/review\/PR_REVIEW_RUBRIC\.md/);
-      assert.doesNotMatch(guidelines, /### \.pr-governance\/design\/NORTH_STAR\.md\n# North Star/);
-      assert.doesNotMatch(guidelines, /Nested design instructions/);
-      assert.doesNotMatch(guidelines, /Nested review instructions/);
+      assert.match(guidelines, /### \.pr-governance\/design\/NORTH_STAR\.md\n# North Star/);
+      assert.match(guidelines, /Nested design instructions/);
+      assert.match(guidelines, /Nested review instructions/);
+      assert.doesNotMatch(guidelines, /### Referenced Markdown documents/);
+    });
+  });
+
+  it('preloads TECHNICAL_STANDARDS.md and ARCHITECTURE.md from the repo root', async () => {
+    await withTempRepo(async (repo) => {
+      await writeFile(join(repo, 'TECHNICAL_STANDARDS.md'), '# Standards\nNo floating promises.');
+      await writeFile(
+        join(repo, 'ARCHITECTURE.md'),
+        '# Architecture\nServices never import from app/.',
+      );
+
+      const guidelines = await discoverGuidelines(repo);
+
+      assert.match(guidelines, /### TECHNICAL_STANDARDS\.md\n# Standards/);
+      assert.match(guidelines, /No floating promises\./);
+      assert.match(guidelines, /### ARCHITECTURE\.md\n# Architecture/);
+      assert.match(guidelines, /Services never import from app\//);
     });
   });
 
@@ -78,11 +93,11 @@ describe('discoverGuidelines', () => {
 
       const guidelines = await discoverGuidelines(repo);
 
-      assert.match(guidelines, /- docs\/SHARED\.md/);
+      assert.match(guidelines, /### docs\/SHARED\.md\n# Shared/);
+      assert.match(guidelines, /Load this once/);
       assert.match(guidelines, /- docs\/EXTRA\.md/);
-      assert.doesNotMatch(guidelines, /Load this once/);
       assert.doesNotMatch(guidelines, /Load this too/);
-      assert.equal(guidelines.match(/^- docs\/SHARED\.md$/gm)?.length, 1);
+      assert.doesNotMatch(guidelines, /^- docs\/SHARED\.md$/m);
     });
   });
 
@@ -162,8 +177,8 @@ describe('discoverGuidelines', () => {
 
           const guidelines = await discoverGuidelines(repo, ['../outside.ts']);
 
-          assert.match(guidelines, /- \.pr-governance\/INSIDE\.md/);
-          assert.doesNotMatch(guidelines, /Available only/);
+          assert.match(guidelines, /### \.pr-governance\/INSIDE\.md\n# Inside/);
+          assert.match(guidelines, /Available only/);
           assert.doesNotMatch(guidelines, /Do not load this/);
           assert.doesNotMatch(guidelines, /Do not load this either/);
         } finally {
