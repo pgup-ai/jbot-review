@@ -10,6 +10,11 @@ import type { Severity } from '../shared/types.ts';
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 
+// Medium effort by default: on throttled tiers, "high" produced 2.5-15min
+// session variance that no budget can absorb. Raise it per-repo for paid
+// heavy tiers; pass '{}' to send no options at all.
+const DEFAULT_MODEL_OPTIONS: Record<string, unknown> = { reasoningEffort: 'medium' };
+
 async function main(): Promise<void> {
   const failOnError = parseBooleanInput('fail-on-error', true);
   const token = core.getInput('github-token', { required: true });
@@ -31,6 +36,10 @@ async function main(): Promise<void> {
 
   const modelInput = getInputOrEnv('model', 'JBOT_REVIEW_MODEL') || cfg.defaultModel;
   const model = formatModelName(resolveModelName(provider, modelInput));
+  // Aux model resolves against the SAME provider as the main model: one API
+  // key per run, so a cross-provider aux model cannot authenticate.
+  const auxModelInput = getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL');
+  const auxModel = auxModelInput ? formatModelName(resolveModelName(provider, auxModelInput)) : '';
   const options = {
     enhancedContext: true,
     dryRun: parseBooleanInput('dry-run', false),
@@ -40,11 +49,18 @@ async function main(): Promise<void> {
     context7Mode: parseContext7Mode(core.getInput('enable-context7')),
     context7ApiKey: getInputOrEnv('context7-api-key', 'CONTEXT7_API_KEY'),
     guidelinePass: parseBooleanInput('enable-guideline-pass', true),
+    auxModel,
+    reviewPasses: parseNumberInput('review-passes', 1),
+    verifyFindings: parseBooleanInput('verify-findings', true),
+    timeBudgetMinutes: parseNumberInput('time-budget-minutes', 10),
+    reviewShards: parseNumberInput('review-shards', 0),
+    modelOptions: parseJsonObjectInput('model-options', DEFAULT_MODEL_OPTIONS),
+    maxConcurrentSessions: parseNumberInput('max-concurrent-sessions', 0),
   };
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${model}`);
   core.info(
-    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode}`,
+    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModel || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} modelOptions=${JSON.stringify(options.modelOptions)}`,
   );
 
   const octokit = github.getOctokit(token) as unknown as Octokit;
@@ -144,6 +160,26 @@ function parseNumberInput(name: string, defaultValue: number): number {
     );
   }
   return value;
+}
+
+function parseJsonObjectInput(
+  name: string,
+  defaultValue: Record<string, unknown>,
+): Record<string, unknown> {
+  const raw = core.getInput(name).trim();
+  if (!raw) return defaultValue;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `Invalid JSON input "${name}": ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Invalid JSON input "${name}": expected a JSON object.`);
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function parseSeverityInput(name: string, defaultValue: Severity): Severity {

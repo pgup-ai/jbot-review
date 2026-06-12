@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { parseReview } from '../src/shared/opencode.ts';
+import { parseFindingVerdicts, parseReview } from '../src/shared/opencode.ts';
 
 const noLog = (): void => undefined;
 
@@ -132,5 +132,74 @@ describe('parseReview', () => {
     const result = parseReview(raw, 'test', noLog);
 
     assert.equal(result.findings[0].kind, 'architecture');
+  });
+});
+
+describe('parseReview line anchors', () => {
+  function rawWithLine(line: unknown): string {
+    return JSON.stringify({
+      summary: 'ok',
+      findings: [{ path: 'src/a.ts', line, severity: 'P2', title: 'Title', body: 'Body' }],
+    });
+  }
+
+  it('accepts line 0 as a file-level anchor', () => {
+    const result = parseReview(rawWithLine(0), 'test', noLog);
+
+    assert.equal(result.findings.length, 1);
+    assert.equal(result.findings[0].line, 0);
+  });
+
+  it('rejects negative and fractional lines as model noise', () => {
+    assert.equal(parseReview(rawWithLine(-1), 'test', noLog).findings.length, 0);
+    assert.equal(parseReview(rawWithLine(4.5), 'test', noLog).findings.length, 0);
+  });
+});
+
+describe('parseFindingVerdicts', () => {
+  it('parses valid verdicts keyed by finding index', () => {
+    const raw = JSON.stringify({
+      verdicts: [
+        { index: 0, verdict: 'confirmed', reason: 'traced it' },
+        { index: 1, verdict: 'refuted', reason: 'guarded above' },
+        { index: 2, verdict: 'uncertain' },
+      ],
+    });
+
+    const verdicts = parseFindingVerdicts(raw, 3, noLog);
+
+    assert.deepEqual(verdicts, [
+      { index: 0, verdict: 'confirmed', reason: 'traced it' },
+      { index: 1, verdict: 'refuted', reason: 'guarded above' },
+      { index: 2, verdict: 'uncertain', reason: undefined },
+    ]);
+  });
+
+  it('skips out-of-range, duplicate, and unknown-verdict entries', () => {
+    const raw = JSON.stringify({
+      verdicts: [
+        { index: 5, verdict: 'refuted' },
+        { index: 0, verdict: 'maybe' },
+        { index: 1, verdict: 'refuted' },
+        { index: 1, verdict: 'confirmed' },
+      ],
+    });
+
+    const verdicts = parseFindingVerdicts(raw, 2, noLog);
+
+    assert.deepEqual(verdicts, [{ index: 1, verdict: 'refuted', reason: undefined }]);
+  });
+
+  it('returns undefined (fail-open signal) on unusable responses', () => {
+    assert.equal(parseFindingVerdicts('not json at all', 2, noLog), undefined);
+    assert.equal(parseFindingVerdicts('{"something": []}', 2, noLog), undefined);
+  });
+
+  it('extracts verdicts from fenced output like the review parser does', () => {
+    const raw = '```json\n{"verdicts": [{"index": 0, "verdict": "confirmed"}]}\n```';
+
+    const verdicts = parseFindingVerdicts(raw, 1, noLog);
+
+    assert.deepEqual(verdicts, [{ index: 0, verdict: 'confirmed', reason: undefined }]);
   });
 });

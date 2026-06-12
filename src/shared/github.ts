@@ -155,6 +155,7 @@ interface ReviewThreadsResponse {
           isResolved: boolean;
           path: string;
           line?: number | null;
+          originalLine?: number | null;
           comments: {
             nodes?: Array<{
               databaseId?: number | null;
@@ -204,6 +205,7 @@ export async function listPriorJbotThreads(
               isResolved
               path
               line
+              originalLine
               comments(first: 100) {
                 nodes {
                   databaseId
@@ -277,7 +279,11 @@ export async function listPriorJbotThreads(
         isResolved: thread.isResolved,
         replyToCommentId: topLevel.databaseId,
         path: thread.path,
-        line: thread.line ?? undefined,
+        // `line` is null both for file-level comments AND for outdated
+        // inline threads. Falling back to originalLine keeps outdated
+        // threads line-anchored so duplicate suppression matches them
+        // against inline findings, not against file-level ones.
+        line: thread.line ?? thread.originalLine ?? undefined,
         body: topLevel.body,
         url: topLevel.url,
         replies,
@@ -374,7 +380,7 @@ export async function postReview(
     path: f.path,
     line: f.line,
     side: 'RIGHT' as const,
-    body: `**${f.severity}${formatFindingMetadata(f)}** — ${f.title}\n\n${f.body}\n\n${FINDING_MARKER}`,
+    body: formatFindingCommentBody(f),
   }));
 
   try {
@@ -403,9 +409,43 @@ export async function postReview(
   }
 }
 
-function formatFindingMetadata(finding: Pick<Finding, 'kind' | 'confidence'>): string {
+export function formatFindingMetadata(finding: Pick<Finding, 'kind' | 'confidence'>): string {
   const parts = [finding.kind, finding.confidence].filter(Boolean);
   return parts.length > 0 ? ` (${parts.join(', ')})` : '';
+}
+
+/**
+ * Single source of the posted comment body. The trailing FINDING_MARKER is
+ * load-bearing: isJbotFinding and duplicate suppression recognize prior
+ * findings by it, so every posting path must go through here.
+ */
+function formatFindingCommentBody(finding: Finding): string {
+  return `**${finding.severity}${formatFindingMetadata(finding)}** — ${finding.title}\n\n${finding.body}\n\n${FINDING_MARKER}`;
+}
+
+/**
+ * Posts one file-level review comment (subject_type "file") for a finding
+ * anchored to line 0 — absence/contract findings that no single added line
+ * can carry. The createReview comments array does not support file-level
+ * anchors, so these go through the standalone review-comment endpoint.
+ */
+export async function postFileLevelComment(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  headSha: string,
+  finding: Finding,
+): Promise<void> {
+  await octokit.rest.pulls.createReviewComment({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    commit_id: headSha,
+    path: finding.path,
+    subject_type: 'file',
+    body: formatFindingCommentBody(finding),
+  });
 }
 
 export async function postAddressedThreadReply(params: {

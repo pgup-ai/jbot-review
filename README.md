@@ -134,8 +134,9 @@ resolve PR review threads, then pass it through `thread-resolution-token`.
 **Step 3 — (Optional) Add review guidelines.** Drop an `AGENTS.md`, `REVIEW.md`,
 `.cursor/BUGBOT.md`, `.coderabbit.yaml`, `greptile.json`, or
 `.pr-governance/README.md` at the repo root. The agent reads these during review.
-Markdown docs referenced from those files are listed as available paths and read
-only when relevant.
+Markdown docs referenced from those files are preloaded into the review context
+(within the guidance byte budget); anything beyond the budget is listed as an
+available path the agent can read on demand.
 
 **Step 4 — Open a PR.** The review runs automatically. To re-trigger, push a
 new commit or close and reopen the PR.
@@ -191,6 +192,46 @@ To replay the prompt context locally from fixtures without posting to GitHub:
 ```bash
 npm run replay
 npm run replay -- fixtures/replay
+```
+
+### Review quality controls
+
+Every run reviews the complete base...head diff (never just the latest
+commit); repeats of findings already covered by prior jbot threads are
+suppressed in code before posting. Several inputs tune the recall/precision/cost
+balance:
+
+| Input                     | Default                        | Effect                                                                                                                                                                                                                                                                                                                       |
+| ------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `review-passes`           | `1`                            | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                               |
+| `verify-findings`         | `true`                         | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                                                                              |
+| `aux-model`               | unset                          | Same-provider model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification). Lets the main review run on a stronger tier while supporting checks stay cheap and fast.                                                                                                           |
+| `review-shards`           | `0`                            | Parallel shards for the main review (`0` = auto from diff size, capped at 4). Each shard deep-reviews a subset of files with the full checkout available; the union covers the complete diff and wall clock tracks the slowest shard instead of one whole-PR session.                                                        |
+| `time-budget-minutes`     | `10`                           | Wall-clock target (`0` = no budget). Finder sessions get the full budget (minus a 30s posting reserve) as their deadline; shard retries and verification use whatever remains, or are skipped (fail-open). A session over its deadline is aborted and degrades only its own coverage — noted in the summary — never the run. |
+| `max-concurrent-sessions` | `0`                            | Max model sessions in flight (0 = unlimited). Free/throttled tiers serialize one key's requests upstream — observed as a flash session queued 7+ minutes behind parallel shards. Capping at 2–3 keeps each session's deadline measuring model time, not queue time.                                                          |
+| `model-options`           | `{"reasoningEffort":"medium"}` | JSON object of provider options for the main model, passed through opencode to the provider SDK. Medium balances depth and latency; set `{"reasoningEffort":"high"}` on paid heavy tiers for maximum depth, or pass `{}` to send no options (e.g. for providers that reject unknown keys).                                   |
+
+**Heavy-model recipe** (deep reviews from GPT‑5.x / Opus-class models in
+~5–6 minutes without timeouts): set the main `model` to the heavy tier, then
+
+```yaml
+model: ${{ vars.JBOT_REVIEW_MODEL }} # heavy tier, e.g. openai/gpt-5.5
+aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL }} # same-provider fast tier for lenses + verification
+# defaults already active: review-shards auto, time-budget-minutes 10,
+# model-options {"reasoningEffort":"medium"}; raise to high on paid heavy tiers:
+time-budget-minutes: '6' # finder deadline ~5.5m; verification uses leftover time
+```
+
+Sharding keeps each heavy session small (one shard ≈ 24KB of diff), so
+reasoning time is bounded by the shard, not the PR; a shard that still
+overruns its deadline is aborted and reported as partial coverage instead of
+failing or stalling the run.
+
+To score review quality against the golden set of labeled PRs (see
+[fixtures/golden/README.md](fixtures/golden/README.md)):
+
+```bash
+npm run eval
 ```
 
 ### Provider configuration (in-repo)

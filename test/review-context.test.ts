@@ -104,7 +104,7 @@ describe('discoverGuidelines', () => {
     });
   });
 
-  it('lists markdown references from root guidelines once when they overlap with governance docs', async () => {
+  it('preloads markdown references from root guidelines once, including governance overlaps', async () => {
     await withTempRepo(async (repo) => {
       await mkdir(join(repo, '.pr-governance'), { recursive: true });
       await mkdir(join(repo, 'docs'), { recursive: true });
@@ -124,9 +124,32 @@ describe('discoverGuidelines', () => {
 
       assert.match(guidelines, /### docs\/SHARED\.md\n# Shared/);
       assert.match(guidelines, /Load this once/);
-      assert.match(guidelines, /- docs\/EXTRA\.md/);
-      assert.doesNotMatch(guidelines, /Load this too/);
-      assert.doesNotMatch(guidelines, /^- docs\/SHARED\.md$/m);
+      assert.match(guidelines, /### docs\/EXTRA\.md\n# Extra/);
+      assert.match(guidelines, /Load this too/);
+      assert.equal(guidelines.match(/Load this once/g)?.length, 1);
+      assert.doesNotMatch(guidelines, /### Referenced Markdown documents/);
+    });
+  });
+
+  it('lists root-guideline references that exceed the guidance budget instead of dropping them', async () => {
+    await withTempRepo(async (repo) => {
+      await mkdir(join(repo, 'docs'), { recursive: true });
+      const bigBody = 'x'.repeat(25 * 1024);
+      const references: string[] = [];
+      for (let index = 1; index <= 4; index += 1) {
+        await writeFile(join(repo, 'docs', `BIG_${index}.md`), `# Big ${index}\n${bigBody}`);
+        references.push(`- \`docs/BIG_${index}.md\``);
+      }
+      await writeFile(join(repo, 'docs', 'LAST.md'), '# Last\nBudget exhausted by now');
+      references.push('- `docs/LAST.md`');
+      await writeFile(join(repo, 'AGENTS.md'), ['# Agents', '', ...references].join('\n'));
+
+      const guidelines = await discoverGuidelines(repo);
+
+      assert.match(guidelines, /### Review guidance budget/);
+      assert.doesNotMatch(guidelines, /Budget exhausted by now/);
+      assert.match(guidelines, /### Referenced Markdown documents/);
+      assert.match(guidelines, /- docs\/LAST\.md/);
     });
   });
 

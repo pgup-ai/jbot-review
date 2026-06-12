@@ -10,14 +10,17 @@ import {
 import { parseModelName } from './model.ts';
 import {
   assembleAddressedPriorCommentsPrompt,
+  assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
+  buildJsonRepairPrompt,
 } from './prompt.ts';
 import type {
   AddressedPriorComment,
   Finding,
   FindingConfidence,
   FindingKind,
+  FindingVerdict,
   ReviewResult,
   Severity,
 } from './types.ts';
@@ -47,15 +50,72 @@ const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
  * Builds the opencode config object that embeds the API key for the selected
  * provider. This is the official way to authenticate opencode (replaces the
  * old "set env var" pattern).
+ *
+ * Permissions enforce read-only at the CONFIG level, not just via the plan
+ * agent: edits are denied outright (never "ask" — an interactive prompt
+ * would hang a headless run), and file access outside the workspace is
+ * denied. Bash stays allowed: the review needs git diff/log/grep.
+ *
+ * `modelOptions` pass through opencode to the provider SDK for the MAIN
+ * model only — the lever for capping reasoning spend on heavy models (e.g.
+ * {"reasoningEffort":"medium"} for OpenAI, thinking budgets for Anthropic).
  */
-function buildConfig(providerID: string, apiKey: string): ServerOptions['config'] {
+function buildConfig(
+  providerID: string,
+  modelID: string,
+  apiKey: string,
+  modelOptions?: Record<string, unknown>,
+): ServerOptions['config'] {
+  const hasModelOptions = modelOptions && Object.keys(modelOptions).length > 0;
   return {
     provider: {
       [providerID]: {
         options: { apiKey },
+        ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
       },
     },
+    permission: {
+      edit: 'deny',
+      external_directory: 'deny',
+    },
   };
+}
+
+/**
+ * Bounds in-flight model sessions. Free / throttled provider tiers serialize
+ * concurrent requests on one API key upstream anyway — observed as a
+ * flash-tier session taking 7+ minutes while queued behind parallel shards.
+ * Capping concurrency on OUR side keeps each session's deadline measuring
+ * model time, not queue time. 0 = unlimited.
+ */
+export class Semaphore {
+  private queue: Array<() => void> = [];
+  private active = 0;
+
+  constructor(private readonly limit: number) {}
+
+  async acquire(): Promise<() => void> {
+    if (this.active < this.limit) {
+      this.active += 1;
+    } else {
+      await new Promise<void>((resolve) => this.queue.push(resolve));
+      this.active += 1;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.active -= 1;
+      const next = this.queue.shift();
+      if (next) next();
+    };
+  }
+}
+
+let sessionSlots: Semaphore | undefined;
+
+export function configureSessionConcurrency(limit: number): void {
+  sessionSlots = limit > 0 ? new Semaphore(limit) : undefined;
 }
 
 /**
@@ -79,6 +139,7 @@ export async function startOpencode(
   modelID: string,
   apiKey: string,
   log: (msg: string) => void,
+  modelOptions?: Record<string, unknown>,
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
   // Serialize against other startOpencode calls so the chdir → spawn → restore
   // sequence runs atomically. This is the only safe way to scope cwd to the
@@ -114,10 +175,12 @@ export async function startOpencode(
         /* best effort */
       }
     };
-    const config = buildConfig(providerID, apiKey);
+    const config = buildConfig(providerID, modelID, apiKey, modelOptions);
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',
-      port: 4096,
+      // Fixed port means two runs on one host collide (e.g. the webhook app
+      // plus a CI job on a self-hosted runner); override per process.
+      port: parsePortEnv('JBOT_OPENCODE_PORT', 4096),
       timeout: READY_TIMEOUT_MS,
       config,
     });
@@ -239,6 +302,13 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+export function parsePortEnv(name: string, defaultValue: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return defaultValue;
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 1 && value <= 65535 ? value : defaultValue;
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   // If the timeout wins, keep any later rejection from the original operation
@@ -261,7 +331,13 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
  *
  * Uses the current SDK API: `client.session.prompt()` (replaces the legacy
  * `chat()` from 0.4.x). The agent runs as the read-only "plan" agent by
- * default.
+ * default. An optional lens addendum (REVIEW_LENSES) turns the session into
+ * a focused recall pass; the label keeps log lines distinguishable when
+ * several passes run in parallel.
+ *
+ * Main-review output is strict: if the response fails JSON parsing, ONE
+ * repair prompt is sent in the same session (the model sees its own
+ * malformed output) before the run fails.
  */
 export async function runReview(
   client: OpencodeClient,
@@ -269,12 +345,36 @@ export async function runReview(
   prContext: string,
   guidelines: string,
   log: (msg: string) => void,
+  options: { lensAddendum?: string; label?: string; timeoutMs?: number } = {},
 ): Promise<ReviewResult> {
-  const prompt = assembleReviewPrompt(prContext, guidelines);
-  log(`Prompt assembled: ${prompt.length} chars, guidelines=${!!guidelines}`);
+  const label = options.label ?? 'review';
+  const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
+  log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
 
-  const raw = await promptPlanAgent(client, model, prompt, 'review', log);
-  return parseReview(raw, 'review', log, { strict: true });
+  const { raw, sessionID } = await promptPlanAgent(
+    client,
+    model,
+    prompt,
+    label,
+    log,
+    options.timeoutMs,
+  );
+  try {
+    return parseReview(raw, label, log, { strict: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
+    const repaired = await promptPlanAgentInSession(
+      client,
+      model,
+      sessionID,
+      buildJsonRepairPrompt(message),
+      `${label}-repair`,
+      log,
+      options.timeoutMs,
+    );
+    return parseReview(repaired, `${label}-repair`, log, { strict: true });
+  }
 }
 
 export async function runAddressedPriorCommentsCheck(
@@ -282,9 +382,17 @@ export async function runAddressedPriorCommentsCheck(
   model: string,
   prContext: string,
   log: (msg: string) => void,
+  timeoutMs?: number,
 ): Promise<AddressedPriorComment[]> {
   const prompt = assembleAddressedPriorCommentsPrompt(prContext);
-  const raw = await promptPlanAgent(client, model, prompt, 'addressed-prior-comments', log);
+  const { raw } = await promptPlanAgent(
+    client,
+    model,
+    prompt,
+    'addressed-prior-comments',
+    log,
+    timeoutMs,
+  );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
 }
 
@@ -294,10 +402,53 @@ export async function runGuidelineComplianceCheck(
   prContext: string,
   guidelines: string,
   log: (msg: string) => void,
+  timeoutMs?: number,
 ): Promise<Finding[]> {
   const prompt = assembleGuidelineCompliancePrompt(prContext, guidelines);
-  const raw = await promptPlanAgent(client, model, prompt, 'guideline-compliance', log);
+  const { raw } = await promptPlanAgent(
+    client,
+    model,
+    prompt,
+    'guideline-compliance',
+    log,
+    timeoutMs,
+  );
   return parseReview(raw, 'guideline-compliance', log).findings;
+}
+
+/**
+ * Adversarially verifies blocking findings in a dedicated session. Returns
+ * undefined when the verifier output cannot be used — the caller MUST treat
+ * that as "verification unavailable" and keep the findings (fail-open): a
+ * broken precision filter must never become a recall hole.
+ */
+export async function runFindingVerification(
+  client: OpencodeClient,
+  model: string,
+  prContext: string,
+  findings: Finding[],
+  log: (msg: string) => void,
+  timeoutMs?: number,
+): Promise<FindingVerdict[] | undefined> {
+  const prompt = assembleFindingVerificationPrompt(
+    prContext,
+    findings.map((finding) => ({
+      path: finding.path,
+      line: finding.line,
+      severity: finding.severity,
+      title: finding.title,
+      body: finding.body,
+    })),
+  );
+  const { raw } = await promptPlanAgent(
+    client,
+    model,
+    prompt,
+    'finding-verification',
+    log,
+    timeoutMs,
+  );
+  return parseFindingVerdicts(raw, findings.length, log);
 }
 
 async function promptPlanAgent(
@@ -306,28 +457,101 @@ async function promptPlanAgent(
   prompt: string,
   label: string,
   log: (msg: string) => void,
-): Promise<string> {
-  const { providerID, modelID } = parseModelName(model);
-
-  log(`Creating ${label} session (provider=${providerID} model=${modelID})`);
-  const created = await client.session.create();
+  timeoutMs?: number,
+): Promise<{ raw: string; sessionID: string }> {
+  log(`Creating ${label} session`);
+  // The title makes parallel sessions distinguishable in opencode's own
+  // session list when debugging a run.
+  const created = await client.session.create({ body: { title: `jbot-review ${label}` } });
   const session = created.data;
   if (!session) throw new Error(`Failed to create ${label} session`);
   log(`${label} session created: ${session.id}`);
 
-  log(`Calling ${label} prompt (agent=plan)`);
+  const raw = await promptPlanAgentInSession(
+    client,
+    model,
+    session.id,
+    prompt,
+    label,
+    log,
+    timeoutMs,
+  );
+  return { raw, sessionID: session.id };
+}
+
+async function promptPlanAgentInSession(
+  client: OpencodeClient,
+  model: string,
+  sessionID: string,
+  prompt: string,
+  label: string,
+  log: (msg: string) => void,
+  timeoutMs = PROMPT_TIMEOUT_MS,
+): Promise<string> {
+  const release = sessionSlots ? await sessionSlots.acquire() : undefined;
+  try {
+    return await promptInSessionHoldingSlot(
+      client,
+      model,
+      sessionID,
+      prompt,
+      label,
+      log,
+      timeoutMs,
+    );
+  } finally {
+    release?.();
+  }
+}
+
+async function promptInSessionHoldingSlot(
+  client: OpencodeClient,
+  model: string,
+  sessionID: string,
+  prompt: string,
+  label: string,
+  log: (msg: string) => void,
+  timeoutMs: number,
+): Promise<string> {
+  const { providerID, modelID } = parseModelName(model);
+
+  // A follow-up prompt in an existing session must not return the previous
+  // completed assistant message: remember its id and wait for a NEWER one.
+  const previous = await getLatestAssistantMessage(client, sessionID, label);
+  const previousMessageID = previous?.info.id;
+
+  log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
   const promptRes = await client.session.promptAsync({
-    path: { id: session.id },
+    path: { id: sessionID },
     body: {
       model: { providerID, modelID },
       agent: 'plan',
+      // Defense-in-depth alongside the plan agent and the config-level
+      // permission.edit deny: mutating tools are off for every prompt.
+      // Bash stays on — the review needs git diff/log/grep.
+      tools: { write: false, edit: false, patch: false },
       parts: [{ type: 'text', text: prompt }],
     },
   });
   const promptError = getResultError(promptRes);
   if (promptError) throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
 
-  const data = await waitForAssistantMessage(client, session.id, label, log);
+  let data;
+  try {
+    data = await waitForAssistantMessage(
+      client,
+      sessionID,
+      label,
+      log,
+      previousMessageID,
+      timeoutMs,
+    );
+  } catch (error) {
+    // A timed-out or failed wait leaves the session generating (and
+    // spending tokens) until the server shuts down; stop it now.
+    await abortSessionBestEffort(client, sessionID, label, log);
+    throw error;
+  }
 
   const parts = data.parts;
   log(
@@ -335,9 +559,36 @@ async function promptPlanAgent(
   );
 
   const textPart = [...parts].reverse().find((p) => p.type === 'text');
-  const raw = textPart?.text ?? '{}';
+  // No text part (e.g. the model exhausted its budget on reasoning) must
+  // surface as a parse failure so the repair loop fires — defaulting to
+  // '{}' would silently score the session as "no findings".
+  const raw = textPart?.text ?? '';
+  if (!raw)
+    log(`${label} response contained no text part (types: ${parts.map((p) => p.type).join(', ')})`);
   log(`Extracted ${label} text: ${raw.length} chars`);
   return raw;
+}
+
+async function abortSessionBestEffort(
+  client: OpencodeClient,
+  sessionID: string,
+  label: string,
+  log: (msg: string) => void,
+): Promise<void> {
+  try {
+    await withTimeout(
+      client.session.abort({ path: { id: sessionID } }),
+      PROMPT_POLL_REQUEST_TIMEOUT_MS,
+      `abort timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms`,
+    );
+    log(`Aborted ${label} session ${sessionID}.`);
+  } catch (error) {
+    log(
+      `(failed to abort ${label} session ${sessionID}: ${
+        error instanceof Error ? error.message : String(error)
+      })`,
+    );
+  }
 }
 
 async function waitForAssistantMessage(
@@ -345,13 +596,16 @@ async function waitForAssistantMessage(
   sessionID: string,
   label: string,
   log: (msg: string) => void,
+  ignoreMessageID?: string,
+  timeoutMs = PROMPT_TIMEOUT_MS,
 ): Promise<{ info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> }> {
   const startedAt = Date.now();
   let lastStatus = 'unknown';
   let lastProgressLogAt = startedAt;
 
-  while (Date.now() - startedAt < PROMPT_TIMEOUT_MS) {
-    const message = await getLatestAssistantMessage(client, sessionID, label);
+  while (Date.now() - startedAt < timeoutMs) {
+    const latest = await getLatestAssistantMessage(client, sessionID, label);
+    const message = latest && latest.info.id === ignoreMessageID ? undefined : latest;
     if (message?.info.error) {
       throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(message.info.error)}`);
     }
@@ -378,7 +632,7 @@ async function waitForAssistantMessage(
 
   throw new Error(
     `opencode ${label} prompt did not finish within ${Math.round(
-      PROMPT_TIMEOUT_MS / 1000,
+      timeoutMs / 1000,
     )}s (last status: ${lastStatus})`,
   );
 }
@@ -492,6 +746,10 @@ export function parseReview(
     if (
       typeof f.path === 'string' &&
       typeof f.line === 'number' &&
+      // Line 0 is a deliberate file-level anchor; negative or fractional
+      // lines are model noise.
+      Number.isInteger(f.line) &&
+      f.line >= 0 &&
       typeof f.title === 'string' &&
       typeof f.body === 'string' &&
       typeof f.severity === 'string' &&
@@ -536,6 +794,58 @@ export function parseReview(
   }
 
   return { summary, findings, addressedPriorComments };
+}
+
+const VALID_VERDICTS = new Set<FindingVerdict['verdict']>(['confirmed', 'refuted', 'uncertain']);
+
+/**
+ * Parses the verifier's {"verdicts": [...]} response. Returns undefined when
+ * the response is unusable so callers fail open. Individual malformed
+ * entries are skipped; a finding without a verdict is treated as confirmed
+ * by the caller. Exported for direct test coverage.
+ */
+export function parseFindingVerdicts(
+  raw: string,
+  findingCount: number,
+  log: (msg: string) => void,
+): FindingVerdict[] | undefined {
+  let parsed: unknown;
+  try {
+    parsed = parseJsonObject(raw);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(`finding-verification response was not valid JSON: ${message}`);
+    return undefined;
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  if (!Array.isArray(obj.verdicts)) {
+    log('finding-verification response had no "verdicts" array.');
+    return undefined;
+  }
+
+  const verdicts: FindingVerdict[] = [];
+  const seen = new Set<number>();
+  for (const item of obj.verdicts) {
+    const v = item as Record<string, unknown>;
+    if (
+      typeof v.index === 'number' &&
+      Number.isInteger(v.index) &&
+      v.index >= 0 &&
+      v.index < findingCount &&
+      !seen.has(v.index) &&
+      typeof v.verdict === 'string' &&
+      VALID_VERDICTS.has(v.verdict as FindingVerdict['verdict'])
+    ) {
+      seen.add(v.index);
+      verdicts.push({
+        index: v.index,
+        verdict: v.verdict as FindingVerdict['verdict'],
+        reason: typeof v.reason === 'string' ? v.reason : undefined,
+      });
+    }
+  }
+  return verdicts;
 }
 
 function parseJsonObject(raw: string): unknown {

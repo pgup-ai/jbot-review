@@ -3,13 +3,20 @@ import { describe, it } from 'node:test';
 
 import {
   ADDRESSED_PRIOR_COMMENTS_PROMPT,
+  FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
+  REVIEW_LENSES,
   REVIEW_OUTPUT_REMINDER,
   REVIEW_PROMPT,
+  VERIFICATION_OUTPUT_REMINDER,
   assembleAddressedPriorCommentsPrompt,
+  assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
+  buildShardAssignmentBlock,
+  formatFindingsForVerification,
+  selectLensKeys,
 } from '../src/shared/prompt.ts';
 
 describe('REVIEW_PROMPT', () => {
@@ -56,6 +63,119 @@ describe('REVIEW_PROMPT', () => {
     assert.match(REVIEW_PROMPT, /## Architecture and design/);
     assert.match(REVIEW_PROMPT, /"architecture"/);
     assert.match(REVIEW_PROMPT, /Architecture notes/);
+  });
+
+  it('demands full-PR scope on every run, never delta-only review', () => {
+    assert.match(REVIEW_PROMPT, /ALWAYS review the COMPLETE pull request/);
+    assert.match(REVIEW_PROMPT, /Never limit your\s+review to the most recent commit/);
+    assert.match(REVIEW_PROMPT, /governs the "summary" field ONLY/);
+    assert.doesNotMatch(REVIEW_PROMPT, /only add comments when new commits/);
+  });
+
+  it('includes a mandatory per-file coverage protocol', () => {
+    assert.match(REVIEW_PROMPT, /## Mandatory coverage protocol/);
+    assert.match(REVIEW_PROMPT, /UNCHANGED code elsewhere in the file or repo/);
+    assert.match(REVIEW_PROMPT, /non-ASCII\s+input/);
+  });
+
+  it('verifies the PR description and docs against the implementation', () => {
+    assert.match(REVIEW_PROMPT, /## Verify the PR's own claims/);
+    assert.match(REVIEW_PROMPT, /documented behavior that the code does not implement/);
+  });
+
+  it('teaches the missed-bug shapes via calibration examples', () => {
+    // Structural: five numbered examples exist, including at least one
+    // negative example (a non-finding). Avoids pinning example prose.
+    const section = REVIEW_PROMPT.split('## Calibration examples')[1]?.split('\n## ')[0] ?? '';
+    const numberedExamples = section.match(/^\d+\.\s/gm) ?? [];
+    assert.equal(numberedExamples.length, 5);
+    assert.match(section, /→ no finding/);
+  });
+
+  it('allows line 0 for file-level findings on changed files', () => {
+    assert.match(REVIEW_PROMPT, /or 0 for a\s+file-level finding on a changed file/);
+  });
+
+  it('mentions the embedded diff hunks as a starting point', () => {
+    assert.match(REVIEW_PROMPT, /"Diff hunks" section/);
+    assert.match(REVIEW_PROMPT, /not the boundary of your\s+investigation/);
+  });
+});
+
+describe('REVIEW_LENSES', () => {
+  it('provides interaction and integrity lenses that narrow attention, not scope', () => {
+    assert.ok(Object.keys(REVIEW_LENSES).includes('interactions'));
+    assert.ok(Object.keys(REVIEW_LENSES).includes('integrity'));
+    for (const lens of Object.values(REVIEW_LENSES)) {
+      assert.match(lens, /## Review lens for this pass/);
+      assert.match(lens, /Still report any other clear bug/);
+    }
+  });
+
+  it('is placed after the PR context and before the output reminder', () => {
+    // Tail placement keeps the prompt prefix identical across parallel
+    // passes (prefix-cache reuse) and puts the lens in the recency window.
+    const prompt = assembleReviewPrompt('PR_CONTEXT_SENTINEL', '', REVIEW_LENSES.interactions);
+
+    assert.ok(prompt.startsWith(REVIEW_PROMPT));
+    const lensIndex = prompt.indexOf('## Review lens for this pass');
+    assert.ok(lensIndex > prompt.indexOf('PR_CONTEXT_SENTINEL'));
+    assert.ok(lensIndex < prompt.indexOf('## Final output reminder'));
+  });
+});
+
+describe('selectLensKeys', () => {
+  it('maps total passes to extra lens keys in declared order', () => {
+    assert.deepEqual(selectLensKeys(1), []);
+    assert.deepEqual(selectLensKeys(2), ['interactions']);
+    assert.deepEqual(selectLensKeys(3), ['interactions', 'integrity']);
+  });
+
+  it('is safe at the extremes', () => {
+    assert.deepEqual(selectLensKeys(0), []);
+    assert.deepEqual(selectLensKeys(-5), []);
+    assert.deepEqual(selectLensKeys(99), Object.keys(REVIEW_LENSES));
+  });
+});
+
+describe('FINDING_VERIFICATION_PROMPT', () => {
+  it('frames the verifier as adversarial with a refute-by-default stance', () => {
+    assert.match(FINDING_VERIFICATION_PROMPT, /default position is\s+that each finding is WRONG/);
+    assert.match(FINDING_VERIFICATION_PROMPT, /Do not propose new findings/);
+  });
+
+  it('uses concrete example verdicts instead of union syntax in the schema', () => {
+    assert.doesNotMatch(FINDING_VERIFICATION_PROMPT, /"confirmed" \| "refuted"/);
+    assert.match(FINDING_VERIFICATION_PROMPT, /"verdict": "confirmed"/);
+    assert.match(FINDING_VERIFICATION_PROMPT, /Field constraints:/);
+  });
+
+  it('routes uncertain verdicts to advisory severity, not silence', () => {
+    assert.match(FINDING_VERIFICATION_PROMPT, /posted as advisory/);
+  });
+});
+
+describe('assembleFindingVerificationPrompt', () => {
+  const findings = [
+    { path: 'src/a.ts', line: 12, severity: 'P1', title: 'Title A', body: 'Body A' },
+    { path: 'src/b.ts', line: 0, severity: 'P2', title: 'Title B', body: 'Body B' },
+  ];
+
+  it('numbers findings by index and places the reminder last', () => {
+    const prompt = assembleFindingVerificationPrompt('PR_CONTEXT_SENTINEL', findings);
+
+    assert.ok(prompt.startsWith(FINDING_VERIFICATION_PROMPT));
+    assert.ok(prompt.endsWith(VERIFICATION_OUTPUT_REMINDER));
+    assert.match(prompt, /### Finding 0/);
+    assert.match(prompt, /### Finding 1/);
+    assert.ok(prompt.indexOf('PR_CONTEXT_SENTINEL') < prompt.indexOf('### Finding 0'));
+  });
+
+  it('renders line-0 findings as file-level locations', () => {
+    const block = formatFindingsForVerification(findings);
+
+    assert.match(block, /Location: src\/a\.ts:12/);
+    assert.match(block, /Location: src\/b\.ts\n/);
   });
 });
 
@@ -124,5 +244,22 @@ describe('assembleGuidelineCompliancePrompt', () => {
     const prompt = assembleGuidelineCompliancePrompt('PR_CONTEXT_SENTINEL', '');
 
     assert.doesNotMatch(prompt, /## Repository review guidelines/);
+  });
+});
+
+describe('buildShardAssignmentBlock', () => {
+  const block = buildShardAssignmentBlock(['src/a.ts', 'src/b.ts'], 1, 3);
+
+  it('lists the assigned files and the shard position', () => {
+    assert.match(block, /## Your assigned files/);
+    assert.match(block, /split across 3 parallel reviewers; you are reviewer 2/);
+    assert.match(block, /- src\/a\.ts/);
+    assert.match(block, /- src\/b\.ts/);
+  });
+
+  it('restricts anchoring, never reasoning scope', () => {
+    assert.match(block, /Anchor findings ONLY in your assigned files/);
+    assert.match(block, /interactions with unchanged code and with OTHER changed files/);
+    assert.match(block, /full checkout and the complete changed-file list are available/);
   });
 });
