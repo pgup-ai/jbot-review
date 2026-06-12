@@ -55,12 +55,23 @@ const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
  * agent: edits are denied outright (never "ask" — an interactive prompt
  * would hang a headless run), and file access outside the workspace is
  * denied. Bash stays allowed: the review needs git diff/log/grep.
+ *
+ * `modelOptions` pass through opencode to the provider SDK for the MAIN
+ * model only — the lever for capping reasoning spend on heavy models (e.g.
+ * {"reasoningEffort":"medium"} for OpenAI, thinking budgets for Anthropic).
  */
-function buildConfig(providerID: string, apiKey: string): ServerOptions['config'] {
+function buildConfig(
+  providerID: string,
+  modelID: string,
+  apiKey: string,
+  modelOptions?: Record<string, unknown>,
+): ServerOptions['config'] {
+  const hasModelOptions = modelOptions && Object.keys(modelOptions).length > 0;
   return {
     provider: {
       [providerID]: {
         options: { apiKey },
+        ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
       },
     },
     permission: {
@@ -91,6 +102,7 @@ export async function startOpencode(
   modelID: string,
   apiKey: string,
   log: (msg: string) => void,
+  modelOptions?: Record<string, unknown>,
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
   // Serialize against other startOpencode calls so the chdir → spawn → restore
   // sequence runs atomically. This is the only safe way to scope cwd to the
@@ -126,7 +138,7 @@ export async function startOpencode(
         /* best effort */
       }
     };
-    const config = buildConfig(providerID, apiKey);
+    const config = buildConfig(providerID, modelID, apiKey, modelOptions);
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',
       // Fixed port means two runs on one host collide (e.g. the webhook app
@@ -296,13 +308,20 @@ export async function runReview(
   prContext: string,
   guidelines: string,
   log: (msg: string) => void,
-  options: { lensAddendum?: string; label?: string } = {},
+  options: { lensAddendum?: string; label?: string; timeoutMs?: number } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
   const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
 
-  const { raw, sessionID } = await promptPlanAgent(client, model, prompt, label, log);
+  const { raw, sessionID } = await promptPlanAgent(
+    client,
+    model,
+    prompt,
+    label,
+    log,
+    options.timeoutMs,
+  );
   try {
     return parseReview(raw, label, log, { strict: true });
   } catch (error) {
@@ -315,6 +334,7 @@ export async function runReview(
       buildJsonRepairPrompt(message),
       `${label}-repair`,
       log,
+      options.timeoutMs,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
@@ -325,9 +345,17 @@ export async function runAddressedPriorCommentsCheck(
   model: string,
   prContext: string,
   log: (msg: string) => void,
+  timeoutMs?: number,
 ): Promise<AddressedPriorComment[]> {
   const prompt = assembleAddressedPriorCommentsPrompt(prContext);
-  const { raw } = await promptPlanAgent(client, model, prompt, 'addressed-prior-comments', log);
+  const { raw } = await promptPlanAgent(
+    client,
+    model,
+    prompt,
+    'addressed-prior-comments',
+    log,
+    timeoutMs,
+  );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
 }
 
@@ -337,9 +365,17 @@ export async function runGuidelineComplianceCheck(
   prContext: string,
   guidelines: string,
   log: (msg: string) => void,
+  timeoutMs?: number,
 ): Promise<Finding[]> {
   const prompt = assembleGuidelineCompliancePrompt(prContext, guidelines);
-  const { raw } = await promptPlanAgent(client, model, prompt, 'guideline-compliance', log);
+  const { raw } = await promptPlanAgent(
+    client,
+    model,
+    prompt,
+    'guideline-compliance',
+    log,
+    timeoutMs,
+  );
   return parseReview(raw, 'guideline-compliance', log).findings;
 }
 
@@ -355,6 +391,7 @@ export async function runFindingVerification(
   prContext: string,
   findings: Finding[],
   log: (msg: string) => void,
+  timeoutMs?: number,
 ): Promise<FindingVerdict[] | undefined> {
   const prompt = assembleFindingVerificationPrompt(
     prContext,
@@ -366,7 +403,14 @@ export async function runFindingVerification(
       body: finding.body,
     })),
   );
-  const { raw } = await promptPlanAgent(client, model, prompt, 'finding-verification', log);
+  const { raw } = await promptPlanAgent(
+    client,
+    model,
+    prompt,
+    'finding-verification',
+    log,
+    timeoutMs,
+  );
   return parseFindingVerdicts(raw, findings.length, log);
 }
 
@@ -376,6 +420,7 @@ async function promptPlanAgent(
   prompt: string,
   label: string,
   log: (msg: string) => void,
+  timeoutMs?: number,
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
   // The title makes parallel sessions distinguishable in opencode's own
@@ -385,7 +430,15 @@ async function promptPlanAgent(
   if (!session) throw new Error(`Failed to create ${label} session`);
   log(`${label} session created: ${session.id}`);
 
-  const raw = await promptPlanAgentInSession(client, model, session.id, prompt, label, log);
+  const raw = await promptPlanAgentInSession(
+    client,
+    model,
+    session.id,
+    prompt,
+    label,
+    log,
+    timeoutMs,
+  );
   return { raw, sessionID: session.id };
 }
 
@@ -396,6 +449,7 @@ async function promptPlanAgentInSession(
   prompt: string,
   label: string,
   log: (msg: string) => void,
+  timeoutMs = PROMPT_TIMEOUT_MS,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
 
@@ -422,7 +476,14 @@ async function promptPlanAgentInSession(
 
   let data;
   try {
-    data = await waitForAssistantMessage(client, sessionID, label, log, previousMessageID);
+    data = await waitForAssistantMessage(
+      client,
+      sessionID,
+      label,
+      log,
+      previousMessageID,
+      timeoutMs,
+    );
   } catch (error) {
     // A timed-out or failed wait leaves the session generating (and
     // spending tokens) until the server shuts down; stop it now.
@@ -474,12 +535,13 @@ async function waitForAssistantMessage(
   label: string,
   log: (msg: string) => void,
   ignoreMessageID?: string,
+  timeoutMs = PROMPT_TIMEOUT_MS,
 ): Promise<{ info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> }> {
   const startedAt = Date.now();
   let lastStatus = 'unknown';
   let lastProgressLogAt = startedAt;
 
-  while (Date.now() - startedAt < PROMPT_TIMEOUT_MS) {
+  while (Date.now() - startedAt < timeoutMs) {
     const latest = await getLatestAssistantMessage(client, sessionID, label);
     const message = latest && latest.info.id === ignoreMessageID ? undefined : latest;
     if (message?.info.error) {
@@ -508,7 +570,7 @@ async function waitForAssistantMessage(
 
   throw new Error(
     `opencode ${label} prompt did not finish within ${Math.round(
-      PROMPT_TIMEOUT_MS / 1000,
+      timeoutMs / 1000,
     )}s (last status: ${lastStatus})`,
   );
 }

@@ -47,6 +47,9 @@ async function main(): Promise<void> {
     auxModel,
     reviewPasses: parseNumberInput('review-passes', 2),
     verifyFindings: parseBooleanInput('verify-findings', true),
+    timeBudgetMinutes: parseNumberInput('time-budget-minutes', 0),
+    reviewShards: parseNumberInput('review-shards', 0),
+    modelOptions: parseJsonObjectInput('model-options'),
   };
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${model}`);
@@ -151,6 +154,23 @@ function parseNumberInput(name: string, defaultValue: number): number {
     );
   }
   return value;
+}
+
+function parseJsonObjectInput(name: string): Record<string, unknown> {
+  const raw = core.getInput(name).trim();
+  if (!raw) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `Invalid JSON input "${name}": ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Invalid JSON input "${name}": expected a JSON object.`);
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function parseSeverityInput(name: string, defaultValue: Severity): Severity {

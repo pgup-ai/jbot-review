@@ -66,6 +66,55 @@ export function diffRiskScore(file: PrFile): number {
   return score + Math.min(addedLines, 400) / 100;
 }
 
+/**
+ * Sharding for heavy-weight models: one session over a whole large diff
+ * scales reasoning time with PR size, so wall clock = one giant session.
+ * Splitting files across parallel shard sessions makes wall clock ≈ the
+ * slowest shard instead. Every changed file lands in exactly one shard, so
+ * the UNION of shards preserves the full-diff-scope invariant.
+ */
+export const TARGET_SHARD_DIFF_BYTES = 24 * 1024;
+export const DEFAULT_MAX_REVIEW_SHARDS = 4;
+
+/**
+ * Splits reviewable files into balanced shards. Shard count grows with total
+ * patch size (one shard per TARGET_SHARD_DIFF_BYTES) up to maxShards;
+ * `requestedShards` > 0 pins the count explicitly. Files are assigned
+ * largest-first to the least-loaded shard, so shards finish in similar time.
+ * Returns a single shard (no split) for small diffs.
+ */
+export function shardFilesForReview(
+  files: PrFile[],
+  options: { requestedShards?: number; maxShards?: number } = {},
+): PrFile[][] {
+  const maxShards = Math.max(1, options.maxShards ?? DEFAULT_MAX_REVIEW_SHARDS);
+  const withPatch = files.filter((file) => file.patch);
+  if (withPatch.length === 0) return [files];
+
+  const patchBytes = (file: PrFile) => Buffer.byteLength(file.patch as string, 'utf8');
+  const totalBytes = withPatch.reduce((sum, file) => sum + patchBytes(file), 0);
+  const autoShards = Math.ceil(totalBytes / TARGET_SHARD_DIFF_BYTES);
+  const requested = options.requestedShards ?? 0;
+  const shardCount = Math.min(
+    Math.max(requested > 0 ? requested : autoShards, 1),
+    maxShards,
+    withPatch.length,
+  );
+  if (shardCount <= 1) return [files];
+
+  const shards: PrFile[][] = Array.from({ length: shardCount }, () => []);
+  const loads = Array.from({ length: shardCount }, () => 0);
+  const bySize = [...withPatch].sort(
+    (a, b) => patchBytes(b) - patchBytes(a) || a.filename.localeCompare(b.filename),
+  );
+  for (const file of bySize) {
+    const target = loads.indexOf(Math.min(...loads));
+    shards[target].push(file);
+    loads[target] += patchBytes(file);
+  }
+  return shards.filter((shard) => shard.length > 0);
+}
+
 export interface DiffHunksOptions {
   totalBudgetBytes?: number;
   perFileBudgetBytes?: number;

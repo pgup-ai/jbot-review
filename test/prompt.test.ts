@@ -14,6 +14,7 @@ import {
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
+  buildShardAssignmentBlock,
   formatFindingsForVerification,
   selectLensKeys,
 } from '../src/shared/prompt.ts';
@@ -243,5 +244,22 @@ describe('assembleGuidelineCompliancePrompt', () => {
     const prompt = assembleGuidelineCompliancePrompt('PR_CONTEXT_SENTINEL', '');
 
     assert.doesNotMatch(prompt, /## Repository review guidelines/);
+  });
+});
+
+describe('buildShardAssignmentBlock', () => {
+  const block = buildShardAssignmentBlock(['src/a.ts', 'src/b.ts'], 1, 3);
+
+  it('lists the assigned files and the shard position', () => {
+    assert.match(block, /## Your assigned files/);
+    assert.match(block, /split across 3 parallel reviewers; you are reviewer 2/);
+    assert.match(block, /- src\/a\.ts/);
+    assert.match(block, /- src\/b\.ts/);
+  });
+
+  it('restricts anchoring, never reasoning scope', () => {
+    assert.match(block, /Anchor findings ONLY in your assigned files/);
+    assert.match(block, /interactions with unchanged code and with OTHER changed files/);
+    assert.match(block, /full checkout and the complete changed-file list are available/);
   });
 });

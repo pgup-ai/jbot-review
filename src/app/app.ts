@@ -62,6 +62,8 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 2),
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
           auxModel: process.env.JBOT_REVIEW_AUX_MODEL?.trim() || '',
+          timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 0),
+          reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });

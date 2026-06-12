@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildSummaryScopeBlock } from '../src/shared/runner.ts';
+import {
+  buildSummaryScopeBlock,
+  computeFinderTimeoutMs,
+  computeVerificationTimeoutMs,
+} from '../src/shared/runner.ts';
 
 const PRIOR_JBOT_REVIEW = [
   '## J-Bot Code Review',
@@ -38,5 +42,24 @@ describe('buildSummaryScopeBlock', () => {
     const block = buildSummaryScopeBlock([], 'fffeeeddd111');
 
     assert.match(block, /first visible jbot-review run/);
+  });
+});
+
+describe('session timeout budgeting', () => {
+  it('gives finders a fixed share of the budget within clamps', () => {
+    assert.equal(computeFinderTimeoutMs(0), undefined);
+    assert.equal(computeFinderTimeoutMs(6), Math.round(6 * 60_000 * 0.65));
+    assert.equal(computeFinderTimeoutMs(1), 60_000); // floor
+    assert.equal(computeFinderTimeoutMs(120), 15 * 60_000); // ceiling
+  });
+
+  it('gives verification what actually remains, or signals a skip', () => {
+    assert.equal(computeVerificationTimeoutMs(0, 999_999), undefined);
+    // 6m budget, 3m elapsed: 3m - 30s reserve = 150s remaining.
+    assert.equal(computeVerificationTimeoutMs(6, 3 * 60_000), 150_000);
+    // Nearly exhausted: skip signal (0), never a tiny unusable timeout.
+    assert.equal(computeVerificationTimeoutMs(6, 6 * 60_000), 0);
+    // Huge budget: capped at 5 minutes.
+    assert.equal(computeVerificationTimeoutMs(120, 0), 5 * 60_000);
   });
 });

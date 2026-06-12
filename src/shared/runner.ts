@@ -8,10 +8,10 @@ import {
   suppressPreviouslyReported,
 } from './filter.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
-import { PATH_PATTERNS, buildDiffHunksBlock } from './diff-context.ts';
+import { PATH_PATTERNS, buildDiffHunksBlock, shardFilesForReview } from './diff-context.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
-import { REVIEW_LENSES, selectLensKeys } from './prompt.ts';
+import { REVIEW_LENSES, buildShardAssignmentBlock, selectLensKeys } from './prompt.ts';
 import {
   startOpencode,
   runReview,
@@ -71,6 +71,26 @@ export interface ReviewRunOptions {
   reviewPasses?: number;
   /** Adversarially verify blocking findings before posting (precision gate). */
   verifyFindings?: boolean;
+  /**
+   * Wall-clock target in minutes (0 = no budget). Derives per-session
+   * timeouts: finder sessions get a share up front, verification gets what
+   * actually remains at its start (or is skipped, fail-open). Lets
+   * heavy-reasoning models run without ever timing out the whole job.
+   */
+  timeBudgetMinutes?: number;
+  /**
+   * Parallel shards for the main review (0 = auto from diff size). Each
+   * shard deep-reviews a subset of files with the full checkout available;
+   * the union covers the complete diff and wall clock ≈ the slowest shard
+   * instead of one whole-PR session.
+   */
+  reviewShards?: number;
+  /**
+   * Provider options for the MAIN model, passed through opencode to the
+   * provider SDK — e.g. {"reasoningEffort":"medium"} to cap reasoning spend
+   * on heavy models. Aux-model sessions are unaffected.
+   */
+  modelOptions?: Record<string, unknown>;
 }
 
 export async function runPrReview(params: {
@@ -106,6 +126,13 @@ export async function runPrReview(params: {
     log,
   } = params;
   const options = normalizeOptions(params.options);
+  const runStartedAt = Date.now();
+  const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes);
+  if (finderTimeoutMs) {
+    log(
+      `Time budget ${options.timeBudgetMinutes}m: finder sessions capped at ${Math.round(finderTimeoutMs / 1000)}s.`,
+    );
+  }
 
   const { providerID, modelID } = parseModelName(model);
 
@@ -149,14 +176,18 @@ export async function runPrReview(params: {
 
   const diffScope = { baseRef, baseSha, headSha };
 
-  let prContext: string;
+  // The diff hunks deliberately stay OUT of the core context: each main
+  // review shard appends its own slice, and the lens/aux sessions append the
+  // full block. Hunks always go last — closest to the output reminder, where
+  // small models attend most.
+  let coreContext: string;
   let guidelinesForPrompt = guidelines;
   if (options.enhancedContext) {
     const commits = await listPrCommits(octokit, owner, repo, pullNumber);
     const checkSummary = headSha
       ? await getCheckStatusSummary(octokit, owner, repo, headSha)
       : 'Check status unavailable: PR head SHA was not provided.';
-    prContext = buildReviewContext({
+    coreContext = buildReviewContext({
       pullTitle,
       pullBody,
       changedFiles,
@@ -166,20 +197,17 @@ export async function runPrReview(params: {
       guidelines,
       diffScope,
     });
-    prContext = `${prContext}\n\n${summaryScopeBlock}`;
-    prContext = `${prContext}\n\n${reviewFocusBlock}`;
-    if (priorJbotThreadBlock) prContext = `${prContext}\n\n${priorJbotThreadBlock}`;
-    if (blastRadiusBlock) prContext = `${prContext}\n\n${blastRadiusBlock}`;
-    // The diff hunks go LAST in the context: closest to the output reminder,
-    // where small models attend most.
-    if (diffHunksBlock) prContext = `${prContext}\n\n${diffHunksBlock}`;
+    coreContext = `${coreContext}\n\n${summaryScopeBlock}`;
+    coreContext = `${coreContext}\n\n${reviewFocusBlock}`;
+    if (priorJbotThreadBlock) coreContext = `${coreContext}\n\n${priorJbotThreadBlock}`;
+    if (blastRadiusBlock) coreContext = `${coreContext}\n\n${blastRadiusBlock}`;
     guidelinesForPrompt = '';
   } else {
     const commentsBlock =
       priorComments.length > 0
         ? '## Prior review comments\n' + priorComments.map((c) => `- ${c}`).join('\n')
         : '';
-    prContext = [
+    coreContext = [
       '## Pull request',
       pullTitle && `Title: ${pullTitle}`,
       pullBody && `Description: ${pullBody}`,
@@ -189,14 +217,21 @@ export async function runPrReview(params: {
       reviewFocusBlock,
       commentsBlock,
       priorJbotThreadBlock,
-      diffHunksBlock,
     ]
       .filter(Boolean)
       .join('\n');
   }
+  const basePrContext = joinContext(coreContext, diffHunksBlock);
 
   log('Starting opencode server');
-  const { client, stop } = await startOpencode(workspace, providerID, modelID, apiKey, log);
+  const { client, stop } = await startOpencode(
+    workspace,
+    providerID,
+    modelID,
+    apiKey,
+    log,
+    options.modelOptions,
+  );
   try {
     try {
       const models = await listProviderModels(client, providerID);
@@ -215,13 +250,11 @@ export async function runPrReview(params: {
       apiKey: options.context7ApiKey,
     });
     let context7Active = false;
-    const basePrContext = prContext;
+    let context7Block = '';
     if (context7.enabled) {
       log(`Context7 MCP requested: ${context7.reason}`);
       context7Active = await enableContext7Mcp(client, options.context7ApiKey, log);
-      if (context7Active) {
-        prContext = `${prContext}\n\n${buildContext7PromptBlock(context7.reason)}`;
-      }
+      if (context7Active) context7Block = buildContext7PromptBlock(context7.reason);
     } else {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }
@@ -233,6 +266,7 @@ export async function runPrReview(params: {
       model: auxModel,
       prContext: basePrContext,
       priorJbotThreads,
+      timeoutMs: finderTimeoutMs,
       log,
     });
 
@@ -243,32 +277,43 @@ export async function runPrReview(params: {
       guidelinesForPrompt,
       hasGuidelines: Boolean(guidelines),
       enabled: options.guidelinePass,
+      timeoutMs: finderTimeoutMs,
       log,
     });
 
-    // Lens passes use the base context (no Context7 block): they have no
+    // Lens passes run on the aux model (recall supplement, not the deep
+    // pass) and use the base context (no Context7 block): they have no
     // Context7 retry path, so a Context7 hiccup must not be able to zero a
     // pass's findings.
     const lensPasses = startLensPasses({
       client,
-      model,
+      model: auxModel,
       prContext: basePrContext,
       guidelinesForPrompt,
       passes: options.reviewPasses,
+      timeoutMs: finderTimeoutMs,
       log,
     });
 
-    log('Running review');
-    const { summary, findings } = await runReviewWithContext7Fallback(
+    const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
+    const shardPlans = buildShardPlans({
+      coreContext,
+      fullDiffBlock: diffHunksBlock,
+      context7Block,
+      shards,
+    });
+    log(`Running review (${shardPlans.length} shard(s))`);
+    const { summary, findings } = await runShardedReview({
       client,
       model,
-      prContext,
-      basePrContext,
       guidelinesForPrompt,
-      log,
+      shardPlans,
+      changedFiles,
+      timeoutMs: finderTimeoutMs,
       context7Active,
-      options.context7ApiKey,
-    );
+      context7ApiKey: options.context7ApiKey,
+      log,
+    });
     const lensFindingLists = await lensPasses;
     // The dedicated parallel session is the single owner of addressed-thread
     // verification; the main review no longer reports them.
@@ -305,6 +350,7 @@ export async function runPrReview(params: {
       client,
       model: auxModel,
       prContext: basePrContext,
+      timeoutMs: computeVerificationTimeoutMs(options.timeBudgetMinutes, Date.now() - runStartedAt),
       findings: suppression.findings,
       enabled: options.verifyFindings,
       log,
@@ -398,7 +444,44 @@ function normalizeOptions(options: ReviewRunOptions | undefined): Required<Revie
     auxModel: options?.auxModel ?? '',
     reviewPasses: Math.min(Math.max(options?.reviewPasses ?? 2, 1), maxPasses),
     verifyFindings: options?.verifyFindings ?? true,
+    timeBudgetMinutes: Math.max(options?.timeBudgetMinutes ?? 0, 0),
+    reviewShards: Math.max(options?.reviewShards ?? 0, 0),
+    modelOptions: options?.modelOptions ?? {},
   };
+}
+
+const FINDER_BUDGET_SHARE = 0.65;
+const MIN_FINDER_TIMEOUT_MS = 60_000;
+const MAX_SESSION_TIMEOUT_MS = 15 * 60_000;
+const POSTING_RESERVE_MS = 30_000;
+const MIN_VERIFICATION_MS = 45_000;
+const MAX_VERIFICATION_MS = 5 * 60_000;
+
+/**
+ * Finder sessions (main shards, lenses, aux checks) get a fixed share of the
+ * time budget up front so they all start with the same deadline. Returns
+ * undefined (default 15-minute cap) when no budget is set.
+ */
+export function computeFinderTimeoutMs(timeBudgetMinutes: number): number | undefined {
+  if (timeBudgetMinutes <= 0) return undefined;
+  const share = Math.round(timeBudgetMinutes * 60_000 * FINDER_BUDGET_SHARE);
+  return Math.min(Math.max(share, MIN_FINDER_TIMEOUT_MS), MAX_SESSION_TIMEOUT_MS);
+}
+
+/**
+ * Verification runs last, so it gets whatever actually remains of the
+ * budget. Returns undefined for no budget (default cap), 0 when too little
+ * remains — the caller skips verification (fail-open: unverified findings
+ * post rather than blow the budget or vanish).
+ */
+export function computeVerificationTimeoutMs(
+  timeBudgetMinutes: number,
+  elapsedMs: number,
+): number | undefined {
+  if (timeBudgetMinutes <= 0) return undefined;
+  const remaining = timeBudgetMinutes * 60_000 - elapsedMs - POSTING_RESERVE_MS;
+  if (remaining < MIN_VERIFICATION_MS) return 0;
+  return Math.min(remaining, MAX_VERIFICATION_MS);
 }
 
 /**
@@ -412,6 +495,7 @@ function startLensPasses(params: {
   prContext: string;
   guidelinesForPrompt: string;
   passes: number;
+  timeoutMs?: number;
   log: (msg: string) => void;
 }): Promise<Finding[][]> {
   const lensKeys = selectLensKeys(params.passes);
@@ -429,6 +513,7 @@ function startLensPasses(params: {
         {
           lensAddendum: REVIEW_LENSES[key],
           label: `review-${key}`,
+          timeoutMs: params.timeoutMs,
         },
       )
         .then((result) => {
@@ -457,9 +542,16 @@ async function verifyBlockingFindings(params: {
   prContext: string;
   findings: Finding[];
   enabled: boolean;
+  timeoutMs?: number;
   log: (msg: string) => void;
 }): Promise<Finding[]> {
   if (!params.enabled) return params.findings;
+  if (params.timeoutMs === 0) {
+    params.log(
+      'Skipping finding verification: time budget exhausted; posting findings unverified (fail-open).',
+    );
+    return params.findings;
+  }
 
   const selectedIndexes = selectBlockingFindingIndexes(params.findings, MAX_VERIFIED_FINDINGS);
   if (selectedIndexes.length === 0) return params.findings;
@@ -475,6 +567,7 @@ async function verifyBlockingFindings(params: {
       params.prContext,
       targets,
       params.log,
+      params.timeoutMs,
     );
   } catch (error) {
     params.log(
@@ -530,30 +623,174 @@ function formatAddressedPriorComment(comment: AddressedPriorComment): string {
   return `- ${comment.id}${commit}${note}`;
 }
 
-async function runReviewWithContext7Fallback(
-  client: Awaited<ReturnType<typeof startOpencode>>['client'],
-  model: string,
-  prContext: string,
-  basePrContext: string,
-  guidelinesForPrompt: string,
-  log: (msg: string) => void,
-  context7Active: boolean,
-  context7ApiKey: string,
-) {
-  try {
-    return await runReview(client, model, prContext, guidelinesForPrompt, log);
-  } catch (error) {
-    if (!context7Active) throw error;
-    log(
-      `Review failed while Context7 MCP was enabled; retrying without Context7: ${formatContext7Error(
-        error,
-        context7ApiKey,
-      )}`,
-    );
-    await disableContext7Mcp(client, log);
-    return await runReview(client, model, basePrContext, guidelinesForPrompt, log);
-  }
+function joinContext(...parts: string[]): string {
+  return parts.filter(Boolean).join('\n\n');
 }
+
+interface ShardPlan {
+  label: string;
+  /** Context including the Context7 block (when active). */
+  context: string;
+  /** Context without the Context7 block, for the fallback retry. */
+  baseContext: string;
+  /** Changed files this shard may anchor findings in. */
+  assignedFiles: string[];
+}
+
+/**
+ * One plan per main-review session. A single shard reproduces the classic
+ * whole-PR review; multiple shards each get the full core context (PR
+ * metadata, guidelines pointers, prior threads, blast radius) plus their own
+ * assignment block and diff slice, so every shard can reason across the
+ * whole PR but anchors only in its files.
+ */
+function buildShardPlans(params: {
+  coreContext: string;
+  fullDiffBlock: string;
+  context7Block: string;
+  shards: ReturnType<typeof shardFilesForReview>;
+}): ShardPlan[] {
+  const { coreContext, fullDiffBlock, context7Block, shards } = params;
+  if (shards.length <= 1) {
+    const baseContext = joinContext(coreContext, fullDiffBlock);
+    return [
+      {
+        label: 'review',
+        context: joinContext(baseContext, context7Block),
+        baseContext,
+        assignedFiles: (shards[0] ?? []).map((file) => file.filename),
+      },
+    ];
+  }
+  return shards.map((shard, index) => {
+    const assignedFiles = shard.map((file) => file.filename);
+    const assignment = buildShardAssignmentBlock(assignedFiles, index, shards.length);
+    const shardDiff = buildDiffHunksBlock(shard);
+    return {
+      label: `review-shard-${index + 1}`,
+      context: joinContext(coreContext, context7Block, assignment, shardDiff),
+      baseContext: joinContext(coreContext, assignment, shardDiff),
+      assignedFiles,
+    };
+  });
+}
+
+/**
+ * Runs the main review as parallel shard sessions and merges the results.
+ * Wall clock is the slowest shard, not the whole PR. Degradation rules:
+ * a failed shard (timeout, provider error) costs its own coverage — noted in
+ * the summary — never the run; the run fails only when EVERY shard fails.
+ * In sharded mode each shard's findings are clamped in code to its assigned
+ * files so parallel shards cannot duplicate or poach each other.
+ */
+async function runShardedReview(params: {
+  client: Awaited<ReturnType<typeof startOpencode>>['client'];
+  model: string;
+  guidelinesForPrompt: string;
+  shardPlans: ShardPlan[];
+  changedFiles: string[];
+  timeoutMs?: number;
+  context7Active: boolean;
+  context7ApiKey: string;
+  log: (msg: string) => void;
+}): Promise<{ summary: string; findings: Finding[] }> {
+  const { client, model, guidelinesForPrompt, shardPlans, timeoutMs, log } = params;
+  const sharded = shardPlans.length > 1;
+  const changed = new Set(params.changedFiles);
+
+  let context7Disabled = false;
+  const disableContext7Once = async () => {
+    if (context7Disabled) return;
+    context7Disabled = true;
+    await disableContext7Mcp(client, log);
+  };
+
+  const outcomes: ShardOutcome[] = await Promise.all(
+    shardPlans.map(async (plan): Promise<ShardOutcome> => {
+      try {
+        const result = await runReview(client, model, plan.context, guidelinesForPrompt, log, {
+          label: plan.label,
+          timeoutMs,
+        });
+        return { plan, result };
+      } catch (error) {
+        if (!params.context7Active) return { plan, error };
+        log(
+          `${plan.label} failed while Context7 MCP was enabled; retrying without Context7: ${formatContext7Error(
+            error,
+            params.context7ApiKey,
+          )}`,
+        );
+        await disableContext7Once();
+        try {
+          const result = await runReview(
+            client,
+            model,
+            plan.baseContext,
+            guidelinesForPrompt,
+            log,
+            { label: `${plan.label}-retry`, timeoutMs },
+          );
+          return { plan, result };
+        } catch (retryError) {
+          return { plan, error: retryError };
+        }
+      }
+    }),
+  );
+
+  const successes = outcomes.filter((outcome) => outcome.result !== undefined);
+  const failures = outcomes.filter((outcome) => outcome.result === undefined);
+  for (const failure of failures) {
+    log(
+      `${failure.plan.label} failed permanently: ${
+        failure.error instanceof Error ? failure.error.message : String(failure.error)
+      }`,
+    );
+  }
+  if (successes.length === 0) {
+    const first = failures[0]?.error;
+    throw first instanceof Error ? first : new Error('All review shards failed.');
+  }
+
+  const findings = successes.flatMap(({ plan, result }) => {
+    if (!sharded) return result.findings;
+    // Anchoring clamp: findings in another shard's changed file are that
+    // shard's to report. Findings outside the changed set (orphaned notes)
+    // pass through and dedupe by path:line.
+    const assigned = new Set(plan.assignedFiles);
+    const kept = result.findings.filter(
+      (finding) => assigned.has(finding.path) || !changed.has(finding.path),
+    );
+    const clamped = result.findings.length - kept.length;
+    if (clamped > 0) {
+      log(`${plan.label}: dropped ${clamped} finding(s) anchored outside its assigned files.`);
+    }
+    return kept;
+  });
+
+  const summaryParts = successes.map(({ result }) => result.summary).filter(Boolean);
+  let summary = summaryParts.join('\n');
+  if (failures.length > 0) {
+    summary = [
+      summary,
+      `⚠️ ${failures.length} of ${shardPlans.length} parallel review shard(s) did not complete; coverage may be partial.`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
+  return { summary, findings };
+}
+
+interface ReviewResultLike {
+  summary: string;
+  findings: Finding[];
+}
+
+type ShardOutcome =
+  | { plan: ShardPlan; result: ReviewResultLike; error?: undefined }
+  | { plan: ShardPlan; error: unknown; result?: undefined };
 
 /**
  * Summary-field instructions ONLY. This block must never narrow review
@@ -677,12 +914,19 @@ function startAddressedPriorCommentsCheck(params: {
   model: string;
   prContext: string;
   priorJbotThreads: PriorJbotThread[];
+  timeoutMs?: number;
   log: (msg: string) => void;
 }): Promise<AddressedPriorComment[]> {
   if (params.priorJbotThreads.length === 0) return Promise.resolve([]);
 
   params.log('Starting addressed-prior-comments check in parallel.');
-  return runAddressedPriorCommentsCheck(params.client, params.model, params.prContext, params.log)
+  return runAddressedPriorCommentsCheck(
+    params.client,
+    params.model,
+    params.prContext,
+    params.log,
+    params.timeoutMs,
+  )
     .then((independentlyAddressed) => {
       params.log(
         `Addressed-prior-comments check complete: ${independentlyAddressed.length} addressed prior comment(s)`,
@@ -706,6 +950,7 @@ function startGuidelineComplianceCheck(params: {
   guidelinesForPrompt: string;
   hasGuidelines: boolean;
   enabled: boolean;
+  timeoutMs?: number;
   log: (msg: string) => void;
 }): Promise<Finding[]> {
   if (!params.enabled) return Promise.resolve([]);
@@ -721,6 +966,7 @@ function startGuidelineComplianceCheck(params: {
     params.prContext,
     params.guidelinesForPrompt,
     params.log,
+    params.timeoutMs,
   )
     .then((findings) => {
       params.log(`Guideline-compliance check complete: ${findings.length} finding(s)`);

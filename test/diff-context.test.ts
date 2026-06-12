@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildDiffHunksBlock, diffRiskScore } from '../src/shared/diff-context.ts';
+import {
+  buildDiffHunksBlock,
+  diffRiskScore,
+  shardFilesForReview,
+} from '../src/shared/diff-context.ts';
 import type { PrFile } from '../src/shared/github.ts';
 
 function makePatch(lines: number, prefix = 'line'): string {
@@ -72,5 +76,61 @@ describe('buildDiffHunksBlock', () => {
     assert.match(block, /### Hunks not embedded \(diff budget reached\)/);
     assert.match(block, /- docs\/b\.md/);
     assert.match(block, /### src\/auth\/a\.ts/);
+  });
+});
+
+describe('shardFilesForReview', () => {
+  function fileOfSize(name: string, bytes: number): PrFile {
+    return { filename: name, patch: `@@ -0,0 +1,1 @@\n+${'x'.repeat(Math.max(bytes - 18, 1))}` };
+  }
+
+  it('keeps small diffs in a single shard', () => {
+    const shards = shardFilesForReview([fileOfSize('a.ts', 2000), fileOfSize('b.ts', 2000)]);
+
+    assert.equal(shards.length, 1);
+  });
+
+  it('auto-scales shard count with total patch size, capped at maxShards', () => {
+    const files = Array.from({ length: 10 }, (_, i) => fileOfSize(`f${i}.ts`, 20_000));
+
+    const auto = shardFilesForReview(files);
+    assert.equal(auto.length, 4);
+
+    const capped = shardFilesForReview(files, { maxShards: 2 });
+    assert.equal(capped.length, 2);
+  });
+
+  it('honors an explicit shard count and never exceeds the file count', () => {
+    const files = [fileOfSize('a.ts', 100_000), fileOfSize('b.ts', 100_000)];
+
+    assert.equal(shardFilesForReview(files, { requestedShards: 3 }).length, 2);
+    assert.equal(shardFilesForReview(files, { requestedShards: 2 }).length, 2);
+  });
+
+  it('assigns every file to exactly one shard', () => {
+    const files = Array.from({ length: 9 }, (_, i) => fileOfSize(`f${i}.ts`, 15_000));
+
+    const shards = shardFilesForReview(files);
+    const assigned = shards.flat().map((file) => file.filename);
+
+    assert.equal(assigned.length, files.length);
+    assert.equal(new Set(assigned).size, files.length);
+  });
+
+  it('balances shard sizes largest-first', () => {
+    const files = [
+      fileOfSize('big.ts', 40_000),
+      fileOfSize('mid1.ts', 20_000),
+      fileOfSize('mid2.ts', 20_000),
+    ];
+
+    const shards = shardFilesForReview(files, { requestedShards: 2 });
+    const loads = shards.map((shard) =>
+      shard.reduce((sum, file) => sum + (file.patch?.length ?? 0), 0),
+    );
+
+    // big.ts alone vs the two mids together: no shard should hold everything.
+    assert.equal(shards.length, 2);
+    assert.ok(Math.max(...loads) <= 41_000);
   });
 });

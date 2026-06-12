@@ -94,6 +94,18 @@ inputs:
     description: 'Adversarially verify blocking findings in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.'
     required: false
     default: 'true'
+  time-budget-minutes:
+    description: 'Wall-clock target in minutes (0 = no budget). Derives per-session timeouts; a session over its share degrades that session (fail-open) instead of failing the run. Recommended with heavy reasoning models.'
+    required: false
+    default: '0'
+  review-shards:
+    description: 'Parallel shards for the main review (0 = auto from diff size, capped at 4). Each shard deep-reviews a subset of files; the union covers the full diff and wall clock tracks the slowest shard.'
+    required: false
+    default: '0'
+  model-options:
+    description: 'JSON object of provider options for the main model, e.g. {"reasoningEffort":"medium"} to cap reasoning spend on heavy models. Aux-model sessions are unaffected.'
+    required: false
+    default: ''
   fail-on-error:
     description: 'Fail the workflow when the review cannot complete.'
     required: false
@@ -127,4 +139,7 @@ runs:
     INPUT_AUX-MODEL: ${{ inputs.aux-model }}
     INPUT_REVIEW-PASSES: ${{ inputs.review-passes }}
     INPUT_VERIFY-FINDINGS: ${{ inputs.verify-findings }}
+    INPUT_TIME-BUDGET-MINUTES: ${{ inputs.time-budget-minutes }}
+    INPUT_REVIEW-SHARDS: ${{ inputs.review-shards }}
+    INPUT_MODEL-OPTIONS: ${{ inputs.model-options }}
     INPUT_FAIL-ON-ERROR: ${{ inputs.fail-on-error }}

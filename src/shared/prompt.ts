@@ -331,6 +331,32 @@ export function selectLensKeys(passes: number): string[] {
 }
 
 /**
+ * Scope block for one shard of a sharded review. The shard owns a subset of
+ * the changed files for ANCHORING, never for reasoning: it must still trace
+ * its files' interactions with the rest of the PR and the checkout. The
+ * anchoring restriction is also enforced in code (findings outside the
+ * assignment are dropped before merge), so parallel shards cannot duplicate
+ * each other.
+ */
+export function buildShardAssignmentBlock(
+  assignedFiles: string[],
+  shardIndex: number,
+  shardCount: number,
+): string {
+  return [
+    '## Your assigned files',
+    `This review is split across ${shardCount} parallel reviewers; you are reviewer ${shardIndex + 1}.`,
+    'Your assigned changed files:',
+    ...assignedFiles.map((file) => `- ${file}`),
+    '',
+    'Rules for this split:',
+    '- Review every assigned file in full depth, including its interactions with unchanged code and with OTHER changed files (the full checkout and the complete changed-file list are available — follow symbols wherever they lead).',
+    '- Anchor findings ONLY in your assigned files. Issues you notice that anchor in another changed file are owned by a parallel reviewer; do not report them.',
+    '- The diff hunks below cover your assigned files; use the git diff command for anything else you need to read.',
+  ].join('\n');
+}
+
+/**
  * Assembles the full review prompt. The output reminder is deliberately LAST:
  * small models weight recent instructions most heavily, and tens of KB of PR
  * context would otherwise bury the output contract. An optional lens addendum
