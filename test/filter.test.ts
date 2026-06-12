@@ -5,6 +5,7 @@ import {
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
+  suppressPreviouslyReported,
 } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
 
@@ -138,5 +139,85 @@ describe('dedupeFindings', () => {
       merged.map((f) => f.title),
       ['main wins', 'main only'],
     );
+  });
+});
+
+describe('suppressPreviouslyReported', () => {
+  const thread = {
+    path: 'src/example.ts',
+    line: 10,
+    body: '**P2 (bug, high)** — Refund amount uses pre-tax subtotal\n\nDetails about the subtotal bug.',
+  };
+
+  it('suppresses a re-detected finding at the same location with matching title words', () => {
+    const { findings, suppressedCount } = suppressPreviouslyReported(
+      [finding({ line: 11, title: 'Refund amount uses pre-tax subtotal' })],
+      [thread],
+    );
+
+    assert.equal(suppressedCount, 1);
+    assert.equal(findings.length, 0);
+  });
+
+  it('keeps a different issue near the same lines', () => {
+    const { findings, suppressedCount } = suppressPreviouslyReported(
+      [finding({ line: 11, title: 'Unhandled rejection when webhook delivery times out' })],
+      [thread],
+    );
+
+    assert.equal(suppressedCount, 0);
+    assert.equal(findings.length, 1);
+  });
+
+  it('keeps a similar issue outside the line tolerance', () => {
+    const { findings } = suppressPreviouslyReported(
+      [finding({ line: 20, title: 'Refund amount uses pre-tax subtotal' })],
+      [thread],
+    );
+
+    assert.equal(findings.length, 1);
+  });
+
+  it('keeps findings in other files', () => {
+    const { findings } = suppressPreviouslyReported(
+      [finding({ path: 'src/other.ts', line: 10, title: 'Refund amount uses pre-tax subtotal' })],
+      [thread],
+    );
+
+    assert.equal(findings.length, 1);
+  });
+
+  it('matches file-level findings only against file-level threads', () => {
+    const fileLevelThread = { path: 'src/example.ts', body: 'Missing provider options wiring' };
+    const { findings, suppressedCount } = suppressPreviouslyReported(
+      [
+        finding({ line: 0, title: 'Missing provider options wiring' }),
+        finding({ line: 0, title: 'Refund amount uses pre-tax subtotal' }),
+      ],
+      [fileLevelThread, thread],
+    );
+
+    assert.equal(suppressedCount, 1);
+    assert.deepEqual(
+      findings.map((f) => f.title),
+      ['Refund amount uses pre-tax subtotal'],
+    );
+  });
+
+  it('never suppresses when a title has no significant words to compare', () => {
+    const { findings } = suppressPreviouslyReported(
+      [finding({ line: 10, title: 'fix it' })],
+      [thread],
+    );
+
+    assert.equal(findings.length, 1);
+  });
+
+  it('is a no-op without prior threads', () => {
+    const input = [finding({})];
+    const { findings, suppressedCount } = suppressPreviouslyReported(input, []);
+
+    assert.equal(suppressedCount, 0);
+    assert.equal(findings, input);
   });
 });

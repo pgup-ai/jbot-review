@@ -31,6 +31,10 @@ async function main(): Promise<void> {
 
   const modelInput = getInputOrEnv('model', 'JBOT_REVIEW_MODEL') || cfg.defaultModel;
   const model = formatModelName(resolveModelName(provider, modelInput));
+  // Aux model resolves against the SAME provider as the main model: one API
+  // key per run, so a cross-provider aux model cannot authenticate.
+  const auxModelInput = getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL');
+  const auxModel = auxModelInput ? formatModelName(resolveModelName(provider, auxModelInput)) : '';
   const options = {
     enhancedContext: true,
     dryRun: parseBooleanInput('dry-run', false),
@@ -40,11 +44,14 @@ async function main(): Promise<void> {
     context7Mode: parseContext7Mode(core.getInput('enable-context7')),
     context7ApiKey: getInputOrEnv('context7-api-key', 'CONTEXT7_API_KEY'),
     guidelinePass: parseBooleanInput('enable-guideline-pass', true),
+    auxModel,
+    reviewPasses: parseNumberInput('review-passes', 2),
+    verifyFindings: parseBooleanInput('verify-findings', true),
   };
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${model}`);
   core.info(
-    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode}`,
+    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModel || '(main model)'}`,
   );
 
   const octokit = github.getOctokit(token) as unknown as Octokit;

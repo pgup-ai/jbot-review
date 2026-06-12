@@ -10,14 +10,17 @@ import {
 import { parseModelName } from './model.ts';
 import {
   assembleAddressedPriorCommentsPrompt,
+  assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
+  buildJsonRepairPrompt,
 } from './prompt.ts';
 import type {
   AddressedPriorComment,
   Finding,
   FindingConfidence,
   FindingKind,
+  FindingVerdict,
   ReviewResult,
   Severity,
 } from './types.ts';
@@ -261,7 +264,13 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
  *
  * Uses the current SDK API: `client.session.prompt()` (replaces the legacy
  * `chat()` from 0.4.x). The agent runs as the read-only "plan" agent by
- * default.
+ * default. An optional lens addendum (REVIEW_LENSES) turns the session into
+ * a focused recall pass; the label keeps log lines distinguishable when
+ * several passes run in parallel.
+ *
+ * Main-review output is strict: if the response fails JSON parsing, ONE
+ * repair prompt is sent in the same session (the model sees its own
+ * malformed output) before the run fails.
  */
 export async function runReview(
   client: OpencodeClient,
@@ -269,12 +278,28 @@ export async function runReview(
   prContext: string,
   guidelines: string,
   log: (msg: string) => void,
+  options: { lensAddendum?: string; label?: string } = {},
 ): Promise<ReviewResult> {
-  const prompt = assembleReviewPrompt(prContext, guidelines);
-  log(`Prompt assembled: ${prompt.length} chars, guidelines=${!!guidelines}`);
+  const label = options.label ?? 'review';
+  const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
+  log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
 
-  const raw = await promptPlanAgent(client, model, prompt, 'review', log);
-  return parseReview(raw, 'review', log, { strict: true });
+  const { raw, sessionID } = await promptPlanAgent(client, model, prompt, label, log);
+  try {
+    return parseReview(raw, label, log, { strict: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
+    const repaired = await promptPlanAgentInSession(
+      client,
+      model,
+      sessionID,
+      buildJsonRepairPrompt(message),
+      `${label}-repair`,
+      log,
+    );
+    return parseReview(repaired, `${label}-repair`, log, { strict: true });
+  }
 }
 
 export async function runAddressedPriorCommentsCheck(
@@ -284,7 +309,7 @@ export async function runAddressedPriorCommentsCheck(
   log: (msg: string) => void,
 ): Promise<AddressedPriorComment[]> {
   const prompt = assembleAddressedPriorCommentsPrompt(prContext);
-  const raw = await promptPlanAgent(client, model, prompt, 'addressed-prior-comments', log);
+  const { raw } = await promptPlanAgent(client, model, prompt, 'addressed-prior-comments', log);
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
 }
 
@@ -296,8 +321,35 @@ export async function runGuidelineComplianceCheck(
   log: (msg: string) => void,
 ): Promise<Finding[]> {
   const prompt = assembleGuidelineCompliancePrompt(prContext, guidelines);
-  const raw = await promptPlanAgent(client, model, prompt, 'guideline-compliance', log);
+  const { raw } = await promptPlanAgent(client, model, prompt, 'guideline-compliance', log);
   return parseReview(raw, 'guideline-compliance', log).findings;
+}
+
+/**
+ * Adversarially verifies blocking findings in a dedicated session. Returns
+ * undefined when the verifier output cannot be used — the caller MUST treat
+ * that as "verification unavailable" and keep the findings (fail-open): a
+ * broken precision filter must never become a recall hole.
+ */
+export async function runFindingVerification(
+  client: OpencodeClient,
+  model: string,
+  prContext: string,
+  findings: Finding[],
+  log: (msg: string) => void,
+): Promise<FindingVerdict[] | undefined> {
+  const prompt = assembleFindingVerificationPrompt(
+    prContext,
+    findings.map((finding) => ({
+      path: finding.path,
+      line: finding.line,
+      severity: finding.severity,
+      title: finding.title,
+      body: finding.body,
+    })),
+  );
+  const { raw } = await promptPlanAgent(client, model, prompt, 'finding-verification', log);
+  return parseFindingVerdicts(raw, findings.length, log);
 }
 
 async function promptPlanAgent(
@@ -306,18 +358,35 @@ async function promptPlanAgent(
   prompt: string,
   label: string,
   log: (msg: string) => void,
-): Promise<string> {
-  const { providerID, modelID } = parseModelName(model);
-
-  log(`Creating ${label} session (provider=${providerID} model=${modelID})`);
+): Promise<{ raw: string; sessionID: string }> {
+  log(`Creating ${label} session`);
   const created = await client.session.create();
   const session = created.data;
   if (!session) throw new Error(`Failed to create ${label} session`);
   log(`${label} session created: ${session.id}`);
 
-  log(`Calling ${label} prompt (agent=plan)`);
+  const raw = await promptPlanAgentInSession(client, model, session.id, prompt, label, log);
+  return { raw, sessionID: session.id };
+}
+
+async function promptPlanAgentInSession(
+  client: OpencodeClient,
+  model: string,
+  sessionID: string,
+  prompt: string,
+  label: string,
+  log: (msg: string) => void,
+): Promise<string> {
+  const { providerID, modelID } = parseModelName(model);
+
+  // A follow-up prompt in an existing session must not return the previous
+  // completed assistant message: remember its id and wait for a NEWER one.
+  const previous = await getLatestAssistantMessage(client, sessionID, label);
+  const previousMessageID = previous?.info.id;
+
+  log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
   const promptRes = await client.session.promptAsync({
-    path: { id: session.id },
+    path: { id: sessionID },
     body: {
       model: { providerID, modelID },
       agent: 'plan',
@@ -327,7 +396,7 @@ async function promptPlanAgent(
   const promptError = getResultError(promptRes);
   if (promptError) throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
 
-  const data = await waitForAssistantMessage(client, session.id, label, log);
+  const data = await waitForAssistantMessage(client, sessionID, label, log, previousMessageID);
 
   const parts = data.parts;
   log(
@@ -345,13 +414,15 @@ async function waitForAssistantMessage(
   sessionID: string,
   label: string,
   log: (msg: string) => void,
+  ignoreMessageID?: string,
 ): Promise<{ info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> }> {
   const startedAt = Date.now();
   let lastStatus = 'unknown';
   let lastProgressLogAt = startedAt;
 
   while (Date.now() - startedAt < PROMPT_TIMEOUT_MS) {
-    const message = await getLatestAssistantMessage(client, sessionID, label);
+    const latest = await getLatestAssistantMessage(client, sessionID, label);
+    const message = latest && latest.info.id === ignoreMessageID ? undefined : latest;
     if (message?.info.error) {
       throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(message.info.error)}`);
     }
@@ -492,6 +563,10 @@ export function parseReview(
     if (
       typeof f.path === 'string' &&
       typeof f.line === 'number' &&
+      // Line 0 is a deliberate file-level anchor; negative or fractional
+      // lines are model noise.
+      Number.isInteger(f.line) &&
+      f.line >= 0 &&
       typeof f.title === 'string' &&
       typeof f.body === 'string' &&
       typeof f.severity === 'string' &&
@@ -536,6 +611,58 @@ export function parseReview(
   }
 
   return { summary, findings, addressedPriorComments };
+}
+
+const VALID_VERDICTS = new Set<FindingVerdict['verdict']>(['confirmed', 'refuted', 'uncertain']);
+
+/**
+ * Parses the verifier's {"verdicts": [...]} response. Returns undefined when
+ * the response is unusable so callers fail open. Individual malformed
+ * entries are skipped; a finding without a verdict is treated as confirmed
+ * by the caller. Exported for direct test coverage.
+ */
+export function parseFindingVerdicts(
+  raw: string,
+  findingCount: number,
+  log: (msg: string) => void,
+): FindingVerdict[] | undefined {
+  let parsed: unknown;
+  try {
+    parsed = parseJsonObject(raw);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(`finding-verification response was not valid JSON: ${message}`);
+    return undefined;
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  if (!Array.isArray(obj.verdicts)) {
+    log('finding-verification response had no "verdicts" array.');
+    return undefined;
+  }
+
+  const verdicts: FindingVerdict[] = [];
+  const seen = new Set<number>();
+  for (const item of obj.verdicts) {
+    const v = item as Record<string, unknown>;
+    if (
+      typeof v.index === 'number' &&
+      Number.isInteger(v.index) &&
+      v.index >= 0 &&
+      v.index < findingCount &&
+      !seen.has(v.index) &&
+      typeof v.verdict === 'string' &&
+      VALID_VERDICTS.has(v.verdict as FindingVerdict['verdict'])
+    ) {
+      seen.add(v.index);
+      verdicts.push({
+        index: v.index,
+        verdict: v.verdict as FindingVerdict['verdict'],
+        reason: typeof v.reason === 'string' ? v.reason : undefined,
+      });
+    }
+  }
+  return verdicts;
 }
 
 function parseJsonObject(raw: string): unknown {

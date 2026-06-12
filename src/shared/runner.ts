@@ -3,13 +3,18 @@ import {
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
+  suppressPreviouslyReported,
 } from './filter.ts';
+import { buildBlastRadiusBlock } from './blast-radius.ts';
+import { buildDiffHunksBlock } from './diff-context.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
+import { REVIEW_LENSES } from './prompt.ts';
 import {
   startOpencode,
   runReview,
   runAddressedPriorCommentsCheck,
+  runFindingVerification,
   runGuidelineComplianceCheck,
   listProviderModels,
   enableContext7Mcp,
@@ -23,6 +28,7 @@ import {
   listPrComments,
   listPrCommits,
   getCheckStatusSummary,
+  postFileLevelComment,
   postReview,
   decideVerdict,
   listPriorJbotThreads,
@@ -34,6 +40,9 @@ import {
 import type { Octokit, PriorJbotThread } from './github.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
+/** Blocking findings verified per run; the rest pass through unverified. */
+const MAX_VERIFIED_FINDINGS = 10;
+
 export interface ReviewRunOptions {
   enhancedContext?: boolean;
   dryRun?: boolean;
@@ -43,6 +52,22 @@ export interface ReviewRunOptions {
   context7Mode?: Context7Mode;
   context7ApiKey?: string;
   guidelinePass?: boolean;
+  /**
+   * Model for the auxiliary sessions (addressed-check, guideline compliance,
+   * finding verification). Lets the main review run on a stronger tier while
+   * the mechanical checks stay on a cheap one. Must be on the same provider
+   * as the main model (one API key per run). Empty = use the main model.
+   */
+  auxModel?: string;
+  /**
+   * Total review passes: 1 = the general pass only; each extra pass adds a
+   * focused recall lens (interactions, then integrity) running in parallel.
+   * Findings are merged and deduped, so extra passes raise recall at roughly
+   * one extra session cost each.
+   */
+  reviewPasses?: number;
+  /** Adversarially verify blocking findings before posting (precision gate). */
+  verifyFindings?: boolean;
 }
 
 export async function runPrReview(params: {
@@ -112,6 +137,12 @@ export async function runPrReview(params: {
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
   const summaryScopeBlock = buildSummaryScopeBlock(priorComments, headSha);
   const reviewFocusBlock = buildReviewFocusBlock(changedFiles);
+  const diffHunksBlock = buildDiffHunksBlock(files);
+  if (diffHunksBlock) log(`Embedded diff hunks block: ${diffHunksBlock.length} chars.`);
+  const blastRadiusBlock = options.enhancedContext
+    ? await buildBlastRadiusBlock(workspace, files)
+    : '';
+  if (blastRadiusBlock) log('Embedded changed-symbol usage block.');
 
   const diffScope = { baseRef, baseSha, headSha };
 
@@ -135,6 +166,10 @@ export async function runPrReview(params: {
     prContext = `${prContext}\n\n${summaryScopeBlock}`;
     prContext = `${prContext}\n\n${reviewFocusBlock}`;
     if (priorJbotThreadBlock) prContext = `${prContext}\n\n${priorJbotThreadBlock}`;
+    if (blastRadiusBlock) prContext = `${prContext}\n\n${blastRadiusBlock}`;
+    // The diff hunks go LAST in the context: closest to the output reminder,
+    // where small models attend most.
+    if (diffHunksBlock) prContext = `${prContext}\n\n${diffHunksBlock}`;
     guidelinesForPrompt = '';
   } else {
     const commentsBlock =
@@ -151,6 +186,7 @@ export async function runPrReview(params: {
       reviewFocusBlock,
       commentsBlock,
       priorJbotThreadBlock,
+      diffHunksBlock,
     ]
       .filter(Boolean)
       .join('\n');
@@ -187,9 +223,11 @@ export async function runPrReview(params: {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }
 
+    const auxModel = options.auxModel || model;
+
     const addressedPriorCheck = startAddressedPriorCommentsCheck({
       client,
-      model,
+      model: auxModel,
       prContext: basePrContext,
       priorJbotThreads,
       log,
@@ -197,11 +235,20 @@ export async function runPrReview(params: {
 
     const guidelineComplianceCheck = startGuidelineComplianceCheck({
       client,
-      model,
+      model: auxModel,
       prContext: basePrContext,
       guidelinesForPrompt,
       hasGuidelines: Boolean(guidelines),
       enabled: options.guidelinePass,
+      log,
+    });
+
+    const lensPasses = startLensPasses({
+      client,
+      model,
+      prContext,
+      guidelinesForPrompt,
+      passes: options.reviewPasses,
       log,
     });
 
@@ -216,6 +263,7 @@ export async function runPrReview(params: {
       context7Active,
       options.context7ApiKey,
     );
+    const lensFindingLists = await lensPasses;
     // The dedicated parallel session is the single owner of addressed-thread
     // verification; the main review no longer reports them.
     const verifiedAddressedPriorComments = await addressedPriorCheck;
@@ -224,39 +272,63 @@ export async function runPrReview(params: {
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
     // dropping a stronger compliance finding at the same location.
-    const gatedMain = demoteLowConfidenceBlockingFindings(findings);
-    const gatedCompliance = demoteLowConfidenceBlockingFindings(complianceFindings);
-    const demotedCount = gatedMain.demotedCount + gatedCompliance.demotedCount;
+    const gatedLists = [findings, ...lensFindingLists, complianceFindings].map(
+      demoteLowConfidenceBlockingFindings,
+    );
+    const demotedCount = gatedLists.reduce((sum, gated) => sum + gated.demotedCount, 0);
     if (demotedCount > 0) {
       log(`Demoted ${demotedCount} low-confidence blocking finding(s) to P3.`);
     }
-    const combinedFindings = dedupeFindings(gatedMain.findings, gatedCompliance.findings);
+    // Main review first: on equal-strength path:line collisions its richer
+    // general context wins over lens and compliance findings.
+    const combinedFindings = dedupeFindings(...gatedLists.map((gated) => gated.findings));
     const dedupeDropped =
-      gatedMain.findings.length + gatedCompliance.findings.length - combinedFindings.length;
+      gatedLists.reduce((sum, gated) => sum + gated.findings.length, 0) - combinedFindings.length;
     if (dedupeDropped > 0) {
       log(`Deduped ${dedupeDropped} finding(s) that collided on path:line across sessions.`);
     }
-    const filteredFindings = filterFindings(combinedFindings, options);
+    // Full-diff re-review means repeats are possible by design; this is the
+    // in-code backstop that drops findings prior jbot threads already cover.
+    const suppression = suppressPreviouslyReported(combinedFindings, priorJbotThreads);
+    if (suppression.suppressedCount > 0) {
+      log(
+        `Suppressed ${suppression.suppressedCount} finding(s) already covered by prior jbot-review threads.`,
+      );
+    }
+    const verifiedFindings = await verifyBlockingFindings({
+      client,
+      model: auxModel,
+      prContext: basePrContext,
+      findings: suppression.findings,
+      enabled: options.verifyFindings,
+      log,
+    });
+    const filteredFindings = filterFindings(verifiedFindings, options);
     log(
-      `Review complete: ${findings.length} main + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
+      `Review complete: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
     const inline: Finding[] = [];
+    const fileLevel: Finding[] = [];
     const orphaned: Finding[] = [];
     for (const f of filteredFindings) {
-      if (addable.get(f.path)?.has(f.line)) inline.push(f);
+      if (f.line === 0 && headSha && addable.has(f.path)) fileLevel.push(f);
+      else if (addable.get(f.path)?.has(f.line)) inline.push(f);
       else orphaned.push(f);
     }
     const verdict = decideVerdict(filteredFindings);
-    const body = buildBody(summary, filteredFindings, orphaned, model, owner, repo, headSha);
 
     if (options.dryRun) {
+      const body = buildBody(summary, filteredFindings, orphaned, model, owner, repo, headSha);
       log(
-        `Dry run enabled; would post verdict=${verdict} inline=${inline.length} orphaned=${orphaned.length}`,
+        `Dry run enabled; would post verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
       );
       log(`Dry run review body:\n${body}`);
       if (inline.length > 0) {
         log(`Dry run inline comments:\n${inline.map(formatInlineFinding).join('\n\n')}`);
+      }
+      if (fileLevel.length > 0) {
+        log(`Dry run file-level comments:\n${fileLevel.map(formatInlineFinding).join('\n\n')}`);
       }
       if (verifiedAddressedPriorComments.length > 0) {
         log(
@@ -268,7 +340,26 @@ export async function runPrReview(params: {
       return;
     }
 
-    log(`Posting review: verdict=${verdict} inline=${inline.length} orphaned=${orphaned.length}`);
+    // File-level comments go first so a posting failure can still fall back
+    // into the review body, which is built afterwards.
+    for (const finding of fileLevel) {
+      try {
+        await postFileLevelComment(octokit, owner, repo, pullNumber, headSha as string, finding);
+        log(`Posted file-level comment for ${finding.path}.`);
+      } catch (error) {
+        log(
+          `Failed to post file-level comment for ${finding.path}; folding into review body: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        orphaned.push(finding);
+      }
+    }
+
+    const body = buildBody(summary, filteredFindings, orphaned, model, owner, repo, headSha);
+    log(
+      `Posting review: verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
+    );
     await postReview(octokit, owner, repo, pullNumber, verdict, body, inline);
     log('Review posted.');
     await acknowledgeAddressedPriorComments({
@@ -288,6 +379,7 @@ export async function runPrReview(params: {
 }
 
 function normalizeOptions(options: ReviewRunOptions | undefined): Required<ReviewRunOptions> {
+  const maxPasses = 1 + Object.keys(REVIEW_LENSES).length;
   return {
     enhancedContext: options?.enhancedContext ?? false,
     dryRun: options?.dryRun ?? false,
@@ -297,7 +389,130 @@ function normalizeOptions(options: ReviewRunOptions | undefined): Required<Revie
     context7Mode: options?.context7Mode ?? 'auto',
     context7ApiKey: options?.context7ApiKey ?? '',
     guidelinePass: options?.guidelinePass ?? true,
+    auxModel: options?.auxModel ?? '',
+    reviewPasses: Math.min(Math.max(options?.reviewPasses ?? 2, 1), maxPasses),
+    verifyFindings: options?.verifyFindings ?? true,
   };
+}
+
+/**
+ * Starts the extra recall passes in parallel with the main review. Each pass
+ * is the full review prompt plus one focus lens; a failed lens pass costs
+ * its own findings only, never the run.
+ */
+function startLensPasses(params: {
+  client: Awaited<ReturnType<typeof startOpencode>>['client'];
+  model: string;
+  prContext: string;
+  guidelinesForPrompt: string;
+  passes: number;
+  log: (msg: string) => void;
+}): Promise<Finding[][]> {
+  const lensKeys = Object.keys(REVIEW_LENSES).slice(0, Math.max(0, params.passes - 1));
+  if (lensKeys.length === 0) return Promise.resolve([]);
+
+  params.log(`Starting ${lensKeys.length} lens pass(es) in parallel: ${lensKeys.join(', ')}.`);
+  return Promise.all(
+    lensKeys.map((key) =>
+      runReview(
+        params.client,
+        params.model,
+        params.prContext,
+        params.guidelinesForPrompt,
+        params.log,
+        {
+          lensAddendum: REVIEW_LENSES[key],
+          label: `review-${key}`,
+        },
+      )
+        .then((result) => {
+          params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
+          return result.findings;
+        })
+        .catch((error) => {
+          params.log(
+            `(skipped ${key} lens pass: ${error instanceof Error ? error.message : String(error)})`,
+          );
+          return [];
+        }),
+    ),
+  );
+}
+
+/**
+ * Adversarial precision gate: blocking findings are re-checked by a verifier
+ * session prompted to refute them. Refuted findings are dropped, uncertain
+ * ones demoted to advisory. Fail-open everywhere — when verification cannot
+ * run or returns garbage, findings pass through unchanged.
+ */
+async function verifyBlockingFindings(params: {
+  client: Awaited<ReturnType<typeof startOpencode>>['client'];
+  model: string;
+  prContext: string;
+  findings: Finding[];
+  enabled: boolean;
+  log: (msg: string) => void;
+}): Promise<Finding[]> {
+  if (!params.enabled) return params.findings;
+
+  const blockingIndexes = params.findings
+    .map((finding, index) => ({ finding, index }))
+    .filter(({ finding }) => SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2)
+    .sort((a, b) => SEVERITY_RANK[a.finding.severity] - SEVERITY_RANK[b.finding.severity])
+    .slice(0, MAX_VERIFIED_FINDINGS)
+    .map(({ index }) => index);
+  if (blockingIndexes.length === 0) return params.findings;
+
+  const targets = blockingIndexes.map((index) => params.findings[index]);
+  params.log(`Verifying ${targets.length} blocking finding(s) before posting.`);
+
+  let verdicts;
+  try {
+    verdicts = await runFindingVerification(
+      params.client,
+      params.model,
+      params.prContext,
+      targets,
+      params.log,
+    );
+  } catch (error) {
+    params.log(
+      `(skipped finding verification: ${error instanceof Error ? error.message : String(error)})`,
+    );
+    return params.findings;
+  }
+  if (!verdicts) {
+    params.log('(finding verification output unusable; keeping findings unverified)');
+    return params.findings;
+  }
+
+  const verdictByTarget = new Map(verdicts.map((verdict) => [verdict.index, verdict]));
+  const drop = new Set<number>();
+  const demote = new Set<number>();
+  targets.forEach((finding, targetIndex) => {
+    const verdict = verdictByTarget.get(targetIndex);
+    // No verdict for a listed finding = confirmed (fail-open per finding).
+    if (!verdict || verdict.verdict === 'confirmed') return;
+    const originalIndex = blockingIndexes[targetIndex];
+    const reason = verdict.reason ? ` Reason: ${verdict.reason}` : '';
+    if (verdict.verdict === 'refuted') {
+      drop.add(originalIndex);
+      params.log(
+        `Dropped refuted finding ${finding.path}:${finding.line} "${finding.title}".${reason}`,
+      );
+    } else {
+      demote.add(originalIndex);
+      params.log(
+        `Demoted uncertain finding ${finding.path}:${finding.line} "${finding.title}" to P3.${reason}`,
+      );
+    }
+  });
+
+  return params.findings.flatMap((finding, index) => {
+    if (drop.has(index)) return [];
+    if (demote.has(index)) return [{ ...finding, severity: 'P3' as const }];
+    return [finding];
+  });
 }
 
 function filterFindings(findings: Finding[], options: Required<ReviewRunOptions>): Finding[] {
@@ -309,10 +524,14 @@ function filterFindings(findings: Finding[], options: Required<ReviewRunOptions>
     .slice(0, options.maxFindings);
 }
 
+function formatFindingLocation(finding: Pick<Finding, 'path' | 'line'>): string {
+  return finding.line > 0 ? `${finding.path}:${finding.line}` : finding.path;
+}
+
 function formatInlineFinding(finding: Finding): string {
   const indentedBody = finding.body.replace(/\n/g, '\n  ');
   const metadata = formatFindingMetadata(finding);
-  return `- ${finding.path}:${finding.line} ${finding.severity}${metadata} ${finding.title}\n  ${indentedBody}`;
+  return `- ${formatFindingLocation(finding)} ${finding.severity}${metadata} ${finding.title}\n  ${indentedBody}`;
 }
 
 function formatAddressedPriorComment(comment: AddressedPriorComment): string {
@@ -346,10 +565,18 @@ async function runReviewWithContext7Fallback(
   }
 }
 
+/**
+ * Summary-field instructions ONLY. This block must never narrow review
+ * scope: an earlier wording ("summarize only what changed since the latest
+ * reviewed head... use git log/diff for prior..head") leaked into review
+ * behavior on small models, which then reviewed only the delta and missed
+ * cross-commit bugs — the single biggest recall gap versus competitor bots.
+ */
 function buildSummaryScopeBlock(priorComments: string[], headSha?: string): string {
   const priorJbotReviews = priorComments.filter(isJbotReviewBody);
   const lines = [
     '## Summary instructions',
+    '- These instructions affect ONLY the text of the "summary" field. They never change what you review: findings always come from the complete PR diff.',
     '- Prefer concise Markdown bullet points in the "summary" field when they make the review easier to scan.',
   ];
 
@@ -362,11 +589,10 @@ function buildSummaryScopeBlock(priorComments: string[], headSha?: string): stri
 
   const latestReviewedHead = findLatestReviewedHead(priorJbotReviews);
   lines.push(
-    '- This PR already has prior jbot-review runs, so summarize only what changed since the latest prior reviewed head. Do not restate the full PR summary unless it is necessary for context.',
+    '- This PR already has prior jbot-review runs, so the summary TEXT should describe what changed since the latest prior reviewed head instead of restating the full PR summary. Your review and findings still cover the full PR diff.',
   );
   if (latestReviewedHead && headSha && latestReviewedHead !== headSha) {
     lines.push(`- Latest prior reviewed head: ${latestReviewedHead}. Current head: ${headSha}.`);
-    lines.push(`- Use git log/diff for ${latestReviewedHead}..${headSha} to identify the delta.`);
   } else if (latestReviewedHead) {
     lines.push(`- Latest prior reviewed head: ${latestReviewedHead}.`);
   }
@@ -622,7 +848,7 @@ function buildBody(
     lines.push('### Findings (outside the diff)');
     for (const f of orphaned) {
       lines.push(
-        `- **${f.severity}${formatFindingMetadata(f)}** ${f.title} — \`${f.path}:${f.line}\``,
+        `- **${f.severity}${formatFindingMetadata(f)}** ${f.title} — \`${formatFindingLocation(f)}\``,
       );
       lines.push(`  ${f.body}`);
     }

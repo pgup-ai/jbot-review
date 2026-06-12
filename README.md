@@ -134,8 +134,9 @@ resolve PR review threads, then pass it through `thread-resolution-token`.
 **Step 3 — (Optional) Add review guidelines.** Drop an `AGENTS.md`, `REVIEW.md`,
 `.cursor/BUGBOT.md`, `.coderabbit.yaml`, `greptile.json`, or
 `.pr-governance/README.md` at the repo root. The agent reads these during review.
-Markdown docs referenced from those files are listed as available paths and read
-only when relevant.
+Markdown docs referenced from those files are preloaded into the review context
+(within the guidance byte budget); anything beyond the budget is listed as an
+available path the agent can read on demand.
 
 **Step 4 — Open a PR.** The review runs automatically. To re-trigger, push a
 new commit or close and reopen the PR.
@@ -191,6 +192,26 @@ To replay the prompt context locally from fixtures without posting to GitHub:
 ```bash
 npm run replay
 npm run replay -- fixtures/replay
+```
+
+### Review quality controls
+
+Every run reviews the complete base...head diff (never just the latest
+commit); repeats of findings already covered by prior jbot threads are
+suppressed in code before posting. Three inputs tune the recall/precision/cost
+balance:
+
+| Input             | Default | Effect                                                                                                                                                                                                             |
+| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `review-passes`   | `2`     | Total review passes (1–3). Extra passes add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel; findings merge and dedupe. Each pass costs roughly one extra model session. |
+| `verify-findings` | `true`  | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                    |
+| `aux-model`       | unset   | Same-provider model for the auxiliary sessions (addressed-thread check, guideline compliance, verification). Lets the main review run on a stronger tier while mechanical checks stay cheap.                       |
+
+To score review quality against the golden set of labeled PRs (see
+[fixtures/golden/README.md](fixtures/golden/README.md)):
+
+```bash
+npm run eval
 ```
 
 ### Provider configuration (in-repo)

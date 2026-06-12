@@ -88,6 +88,67 @@ export function dedupeFindings(...findingLists: Finding[][]): Finding[] {
 }
 
 /**
+ * A previously posted jbot-review thread, reduced to what duplicate
+ * suppression needs. Matches the shape of PriorJbotThread without importing
+ * the GitHub layer into this pure module.
+ */
+export interface PriorFindingRef {
+  path: string;
+  line?: number;
+  body: string;
+}
+
+const SUPPRESS_LINE_TOLERANCE = 3;
+const SUPPRESS_TITLE_OVERLAP = 0.5;
+
+/**
+ * Drops findings that re-report an issue an existing jbot-review thread
+ * already covers. This is the in-code backstop that makes full-diff
+ * re-review safe: every run re-reads the whole PR (so nothing is missed),
+ * and repeats are filtered here instead of by narrowing the model's scope.
+ *
+ * A finding is suppressed only when BOTH hold, keeping the filter
+ * conservative (a genuinely new bug near an old comment must survive):
+ * - location match: same path and within ±3 lines of the thread anchor
+ *   (file-level findings match file-level threads), and
+ * - content match: at least half of the finding title's significant words
+ *   appear in the prior thread's comment body.
+ */
+export function suppressPreviouslyReported(
+  findings: Finding[],
+  priorThreads: PriorFindingRef[],
+): { findings: Finding[]; suppressedCount: number } {
+  if (priorThreads.length === 0) return { findings, suppressedCount: 0 };
+
+  const kept = findings.filter(
+    (finding) => !priorThreads.some((thread) => isSameIssue(finding, thread)),
+  );
+  return { findings: kept, suppressedCount: findings.length - kept.length };
+}
+
+function isSameIssue(finding: Finding, thread: PriorFindingRef): boolean {
+  if (finding.path !== thread.path) return false;
+
+  const locationMatches =
+    thread.line === undefined
+      ? finding.line === 0
+      : finding.line > 0 && Math.abs(finding.line - thread.line) <= SUPPRESS_LINE_TOLERANCE;
+  if (!locationMatches) return false;
+
+  const titleTokens = significantTokens(finding.title);
+  // No comparable content: keep the finding rather than silently dropping it.
+  if (titleTokens.length === 0) return false;
+
+  const threadText = thread.body.toLowerCase();
+  const matched = titleTokens.filter((token) => threadText.includes(token)).length;
+  return matched / titleTokens.length >= SUPPRESS_TITLE_OVERLAP;
+}
+
+function significantTokens(text: string): string[] {
+  return [...new Set(text.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [])];
+}
+
+/**
  * Enforces "do not emit low-confidence P0/P1/P2 findings" in code rather than
  * trusting the prompt: a low-confidence blocking finding from a weak model
  * would otherwise flip the review to "Needs changes". Demotes to P3 (advisory)

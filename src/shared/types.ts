@@ -32,3 +32,12 @@ export interface ReviewResult {
   findings: Finding[];
   addressedPriorComments: AddressedPriorComment[];
 }
+
+export type VerificationVerdict = 'confirmed' | 'refuted' | 'uncertain';
+
+/** One adversarial-verifier judgement, keyed by finding index. */
+export interface FindingVerdict {
+  index: number;
+  verdict: VerificationVerdict;
+  reason?: string;
+}

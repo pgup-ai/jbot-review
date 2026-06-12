@@ -408,6 +408,32 @@ function formatFindingMetadata(finding: Pick<Finding, 'kind' | 'confidence'>): s
   return parts.length > 0 ? ` (${parts.join(', ')})` : '';
 }
 
+/**
+ * Posts one file-level review comment (subject_type "file") for a finding
+ * anchored to line 0 — absence/contract findings that no single added line
+ * can carry. The createReview comments array does not support file-level
+ * anchors, so these go through the standalone review-comment endpoint. The
+ * finding marker keeps them visible to future duplicate suppression.
+ */
+export async function postFileLevelComment(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  headSha: string,
+  finding: Finding,
+): Promise<void> {
+  await octokit.rest.pulls.createReviewComment({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    commit_id: headSha,
+    path: finding.path,
+    subject_type: 'file',
+    body: `**${finding.severity}${formatFindingMetadata(finding)}** — ${finding.title}\n\n${finding.body}\n\n${FINDING_MARKER}`,
+  });
+}
+
 export async function postAddressedThreadReply(params: {
   octokit: Octokit;
   owner: string;

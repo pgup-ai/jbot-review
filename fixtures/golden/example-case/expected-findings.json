@@ -1,0 +1,14 @@
+{
+  "exhaustive": true,
+  "findings": [
+    {
+      "path": "src/normalize.ts",
+      "lineStart": 10,
+      "lineEnd": 14,
+      "category": "data-integrity",
+      "mustFind": true,
+      "description": "ASCII-only normalization drops non-Latin names from duplicate detection",
+      "keywords": ["non-latin", "ascii", "unicode", "cjk", "cyrillic"]
+    }
+  ]
+}

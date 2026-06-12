@@ -1,0 +1,76 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import { buildDiffHunksBlock, diffRiskScore } from '../src/shared/diff-context.ts';
+import type { PrFile } from '../src/shared/github.ts';
+
+function makePatch(lines: number, prefix = 'line'): string {
+  const body = Array.from({ length: lines }, (_, i) => `+const ${prefix}${i} = ${i};`).join('\n');
+  return `@@ -0,0 +1,${lines} @@\n${body}`;
+}
+
+describe('diffRiskScore', () => {
+  it('ranks auth code above source above tests above docs', () => {
+    const auth: PrFile = { filename: 'src/auth/session.ts', patch: makePatch(5) };
+    const source: PrFile = { filename: 'src/billing/invoice.ts', patch: makePatch(5) };
+    const test: PrFile = { filename: 'test/invoice.test.ts', patch: makePatch(5) };
+    const doc: PrFile = { filename: 'docs/notes.md', patch: makePatch(5) };
+
+    assert.ok(diffRiskScore(auth) > diffRiskScore(source));
+    assert.ok(diffRiskScore(source) > diffRiskScore(test));
+    assert.ok(diffRiskScore(test) > diffRiskScore(doc));
+  });
+
+  it('caps the churn tiebreaker so giant patches cannot outrank risky paths', () => {
+    const hugeDoc: PrFile = { filename: 'docs/huge.md', patch: makePatch(5000) };
+    const smallAuth: PrFile = { filename: 'src/auth/guard.ts', patch: makePatch(3) };
+
+    assert.ok(diffRiskScore(smallAuth) > diffRiskScore(hugeDoc));
+  });
+});
+
+describe('buildDiffHunksBlock', () => {
+  it('returns empty for files without patches', () => {
+    assert.equal(buildDiffHunksBlock([{ filename: 'a.ts' }]), '');
+    assert.equal(buildDiffHunksBlock([]), '');
+  });
+
+  it('embeds hunks highest-risk first inside diff fences', () => {
+    const block = buildDiffHunksBlock([
+      { filename: 'README.md', patch: makePatch(2, 'doc') },
+      { filename: 'src/auth/guard.ts', patch: makePatch(2, 'auth') },
+    ]);
+
+    assert.match(block, /## Diff hunks/);
+    assert.ok(block.indexOf('### src/auth/guard.ts') < block.indexOf('### README.md'));
+    assert.match(block, /```diff\n@@ -0,0 \+1,2 @@/);
+  });
+
+  it('truncates a single file at a line boundary with a notice', () => {
+    const block = buildDiffHunksBlock([{ filename: 'src/a.ts', patch: makePatch(100) }], {
+      perFileBudgetBytes: 200,
+      totalBudgetBytes: 10_000,
+    });
+
+    assert.match(block, /_Hunks truncated for src\/a\.ts/);
+    // Every kept diff line is complete (no mid-line cuts).
+    const fenced = block.split('```diff\n')[1].split('\n```')[0];
+    for (const line of fenced.split('\n')) {
+      assert.match(line, /^(@@|\+const \w+ = \d+;$)/);
+    }
+  });
+
+  it('lists files omitted by the total budget instead of dropping them silently', () => {
+    const block = buildDiffHunksBlock(
+      [
+        { filename: 'src/auth/a.ts', patch: makePatch(50, 'a') },
+        { filename: 'docs/b.md', patch: makePatch(50, 'b') },
+      ],
+      { totalBudgetBytes: 600, perFileBudgetBytes: 10_000 },
+    );
+
+    assert.match(block, /### Hunks not embedded \(diff budget reached\)/);
+    assert.match(block, /- docs\/b\.md/);
+    assert.match(block, /### src\/auth\/a\.ts/);
+  });
+});
