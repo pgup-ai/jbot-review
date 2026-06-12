@@ -4,6 +4,8 @@ import { describe, it } from 'node:test';
 import {
   buildSummaryScopeBlock,
   computeFinderTimeoutMs,
+  computeRetryTimeoutMs,
+  computeRunDeadline,
   computeVerificationTimeoutMs,
 } from '../src/shared/runner.ts';
 
@@ -61,5 +63,32 @@ describe('session timeout budgeting', () => {
     assert.equal(computeVerificationTimeoutMs(6, 6 * 60_000), 0);
     // Huge budget: capped at 5 minutes.
     assert.equal(computeVerificationTimeoutMs(120, 0), 5 * 60_000);
+  });
+});
+
+describe('shard retry budgeting', () => {
+  it('retries with the original timeout when no budget is set', () => {
+    assert.equal(computeRetryTimeoutMs(undefined, 1_000, 390_000), 390_000);
+    assert.equal(computeRetryTimeoutMs(undefined, 1_000, undefined), undefined);
+  });
+
+  it('caps the retry at the remaining budget', () => {
+    const deadline = 600_000;
+    // 4 minutes remain, finder timeout is 6.5 — retry gets the 4 minutes.
+    assert.equal(computeRetryTimeoutMs(deadline, 360_000, 390_000), 240_000);
+    // Plenty remains — retry keeps the finder timeout.
+    assert.equal(computeRetryTimeoutMs(deadline, 100_000, 390_000), 390_000);
+  });
+
+  it('skips the retry when under a usable minute remains', () => {
+    assert.equal(computeRetryTimeoutMs(600_000, 550_000, 390_000), 0);
+    assert.equal(computeRetryTimeoutMs(600_000, 700_000, 390_000), 0);
+  });
+});
+
+describe('computeRunDeadline', () => {
+  it('derives the absolute deadline from the budget minus the posting reserve', () => {
+    assert.equal(computeRunDeadline(10, 1_000_000), 1_000_000 + 10 * 60_000 - 30_000);
+    assert.equal(computeRunDeadline(0, 1_000_000), undefined);
   });
 });

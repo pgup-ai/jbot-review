@@ -310,6 +310,7 @@ export async function runPrReview(params: {
       shardPlans,
       changedFiles,
       timeoutMs: finderTimeoutMs,
+      deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt),
       context7Active,
       context7ApiKey: options.context7ApiKey,
       log,
@@ -466,6 +467,34 @@ export function computeFinderTimeoutMs(timeBudgetMinutes: number): number | unde
   if (timeBudgetMinutes <= 0) return undefined;
   const share = Math.round(timeBudgetMinutes * 60_000 * FINDER_BUDGET_SHARE);
   return Math.min(Math.max(share, MIN_FINDER_TIMEOUT_MS), MAX_SESSION_TIMEOUT_MS);
+}
+
+/** Absolute run deadline for retries; undefined when no budget is set. */
+export function computeRunDeadline(
+  timeBudgetMinutes: number,
+  runStartedAt: number,
+): number | undefined {
+  if (timeBudgetMinutes <= 0) return undefined;
+  return runStartedAt + timeBudgetMinutes * 60_000 - POSTING_RESERVE_MS;
+}
+
+const MIN_RETRY_TIMEOUT_MS = 60_000;
+
+/**
+ * Timeout for a shard's single retry: whatever remains until the run
+ * deadline, capped at the original finder timeout. Returns 0 (skip the
+ * retry) when less than a usable minute remains; undefined deadline means
+ * no budget — retry with the original timeout.
+ */
+export function computeRetryTimeoutMs(
+  deadlineAt: number | undefined,
+  now: number,
+  finderTimeoutMs: number | undefined,
+): number | undefined {
+  if (deadlineAt === undefined) return finderTimeoutMs;
+  const remaining = deadlineAt - now;
+  if (remaining < MIN_RETRY_TIMEOUT_MS) return 0;
+  return finderTimeoutMs === undefined ? remaining : Math.min(remaining, finderTimeoutMs);
 }
 
 /**
@@ -690,6 +719,8 @@ async function runShardedReview(params: {
   shardPlans: ShardPlan[];
   changedFiles: string[];
   timeoutMs?: number;
+  /** Absolute run deadline (budget minus posting reserve); bounds retries. */
+  deadlineAt?: number;
   context7Active: boolean;
   context7ApiKey: string;
   log: (msg: string) => void;
@@ -714,14 +745,27 @@ async function runShardedReview(params: {
         });
         return { plan, result };
       } catch (error) {
-        if (!params.context7Active) return { plan, error };
+        // One retry per shard in a fresh session, for ANY failure: upstream
+        // streams drop ("Upstream idle timeout exceeded"), providers blip,
+        // and a shard that died early still has budget left. Context7 is a
+        // possible culprit, so the retry always uses the base context.
+        if (params.context7Active) await disableContext7Once();
+        const retryTimeoutMs = computeRetryTimeoutMs(params.deadlineAt, Date.now(), timeoutMs);
+        if (retryTimeoutMs === 0) {
+          log(
+            `${plan.label} failed with no budget left for a retry: ${formatContext7Error(
+              error,
+              params.context7ApiKey,
+            )}`,
+          );
+          return { plan, error };
+        }
         log(
-          `${plan.label} failed while Context7 MCP was enabled; retrying without Context7: ${formatContext7Error(
+          `${plan.label} failed; retrying once in a fresh session: ${formatContext7Error(
             error,
             params.context7ApiKey,
           )}`,
         );
-        await disableContext7Once();
         try {
           const result = await runReview(
             client,
@@ -729,7 +773,7 @@ async function runShardedReview(params: {
             plan.baseContext,
             guidelinesForPrompt,
             log,
-            { label: `${plan.label}-retry`, timeoutMs },
+            { label: `${plan.label}-retry`, timeoutMs: retryTimeoutMs },
           );
           return { plan, result };
         } catch (retryError) {
