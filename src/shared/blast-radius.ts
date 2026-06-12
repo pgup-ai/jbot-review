@@ -83,9 +83,16 @@ export async function buildBlastRadiusBlock(
     if (symbols.length === 0) return '';
 
     const changed = new Set(files.map((file) => file.filename));
+    // One grep per symbol, all in parallel: serial greps over a large
+    // worktree would add minutes of wall time before the review starts.
+    const callSiteLists = await Promise.all(
+      symbols.map(async (symbol) => ({
+        symbol,
+        callSites: (await grep(workspace, symbol)).filter((file) => !changed.has(file)),
+      })),
+    );
     const entries: string[] = [];
-    for (const symbol of symbols) {
-      const callSites = (await grep(workspace, symbol)).filter((file) => !changed.has(file));
+    for (const { symbol, callSites } of callSiteLists) {
       if (callSites.length === 0) continue;
       const shown = callSites.slice(0, MAX_CALLSITE_FILES_PER_SYMBOL);
       const more =

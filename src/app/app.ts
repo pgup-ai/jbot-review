@@ -18,6 +18,13 @@ export interface AppConfig {
 // an "in" check before accessing the installation field.
 type PullRequestEvent = EmitterWebhookEvent<'pull_request'>;
 
+function parseEnvInt(name: string, defaultValue: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return defaultValue;
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : defaultValue;
+}
+
 export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
   const { payload } = event;
   if (!payload.pull_request) return;
@@ -49,6 +56,13 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         headSha: pr.head.sha,
         baseRef: pr.base.ref,
         baseSha: pr.base.sha,
+        // The multi-pass/verification defaults cost ~3x a single session;
+        // the webhook app has no per-run inputs, so expose env knobs.
+        options: {
+          reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 2),
+          verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
+          auxModel: process.env.JBOT_REVIEW_AUX_MODEL?.trim() || '',
+        },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });
     } catch (error) {

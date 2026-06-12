@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  applyFindingVerdicts,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
+  selectBlockingFindingIndexes,
   suppressPreviouslyReported,
 } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
@@ -142,6 +144,128 @@ describe('dedupeFindings', () => {
   });
 });
 
+describe('dedupeFindings with file-level (line 0) anchors', () => {
+  it('keeps two DIFFERENT file-level findings on the same file', () => {
+    const merged = dedupeFindings(
+      [finding({ line: 0, title: 'Missing provider options wiring in subagent runner' })],
+      [finding({ line: 0, title: 'Duplicate groups beyond cap are unretrievable' })],
+    );
+
+    assert.equal(merged.length, 2);
+  });
+
+  it('dedupes file-level findings describing the same issue, keeping the stronger', () => {
+    const merged = dedupeFindings(
+      [
+        finding({
+          line: 0,
+          severity: 'P2',
+          title: 'Provider options not wired into subagent runner',
+        }),
+      ],
+      [
+        finding({
+          line: 0,
+          severity: 'P1',
+          title: 'Subagent runner provider options wiring missing',
+        }),
+      ],
+    );
+
+    assert.equal(merged.length, 1);
+    assert.equal(merged[0].severity, 'P1');
+  });
+
+  it('never collides a file-level finding with a line-anchored one', () => {
+    const merged = dedupeFindings(
+      [finding({ line: 0, title: 'Same words here' })],
+      [finding({ line: 12, title: 'Same words here' })],
+    );
+
+    assert.equal(merged.length, 2);
+  });
+});
+
+describe('selectBlockingFindingIndexes', () => {
+  it('selects blocking findings most-severe-first with original indexes', () => {
+    const findings = [
+      finding({ severity: 'P3' }),
+      finding({ severity: 'P2' }),
+      finding({ severity: 'nit' }),
+      finding({ severity: 'P0' }),
+      finding({ severity: 'P1' }),
+    ];
+
+    assert.deepEqual(selectBlockingFindingIndexes(findings, 10), [3, 4, 1]);
+  });
+
+  it('caps the selection and never selects advisory findings', () => {
+    const findings = [
+      finding({ severity: 'P2' }),
+      finding({ severity: 'P2' }),
+      finding({ severity: 'P3' }),
+    ];
+
+    assert.deepEqual(selectBlockingFindingIndexes(findings, 1), [0]);
+    assert.deepEqual(selectBlockingFindingIndexes([finding({ severity: 'P3' })], 10), []);
+  });
+});
+
+describe('applyFindingVerdicts', () => {
+  // Non-blocking findings interleaved with blocking ones is the case most
+  // likely to break the verdict-position -> finding-index translation.
+  const findings = [
+    finding({ severity: 'P3', title: 'advisory survives untouched' }),
+    finding({ severity: 'P1', title: 'refute me' }),
+    finding({ severity: 'nit', title: 'nit survives untouched' }),
+    finding({ severity: 'P2', title: 'uncertain me' }),
+    finding({ severity: 'P2', title: 'confirm me' }),
+  ];
+  const selected = selectBlockingFindingIndexes(findings, 10); // [1, 3, 4]
+
+  it('maps verdict positions back to the right findings', () => {
+    const {
+      findings: result,
+      dropped,
+      demoted,
+    } = applyFindingVerdicts(findings, selected, [
+      { index: 0, verdict: 'refuted', reason: 'guarded' },
+      { index: 1, verdict: 'uncertain' },
+      { index: 2, verdict: 'confirmed' },
+    ]);
+
+    assert.deepEqual(
+      dropped.map(({ finding: f }) => f.title),
+      ['refute me'],
+    );
+    assert.deepEqual(
+      demoted.map(({ finding: f }) => f.title),
+      ['uncertain me'],
+    );
+    assert.deepEqual(
+      result.map((f) => `${f.title}:${f.severity}`),
+      [
+        'advisory survives untouched:P3',
+        'nit survives untouched:nit',
+        'uncertain me:P3',
+        'confirm me:P2',
+      ],
+    );
+  });
+
+  it('treats a selected finding with no verdict as confirmed (fail-open)', () => {
+    const {
+      findings: result,
+      dropped,
+      demoted,
+    } = applyFindingVerdicts(findings, selected, [{ index: 0, verdict: 'refuted' }]);
+
+    assert.equal(dropped.length, 1);
+    assert.equal(demoted.length, 0);
+    assert.equal(result.length, findings.length - 1);
+  });
+});
+
 describe('suppressPreviouslyReported', () => {
   const thread = {
     path: 'src/example.ts',
@@ -219,5 +343,16 @@ describe('suppressPreviouslyReported', () => {
 
     assert.equal(suppressedCount, 0);
     assert.equal(findings, input);
+  });
+
+  it('never suppresses against a RESOLVED thread: a re-detection is a regression signal', () => {
+    const resolvedThread = { ...thread, isResolved: true };
+    const { findings, suppressedCount } = suppressPreviouslyReported(
+      [finding({ line: 11, title: 'Refund amount uses pre-tax subtotal' })],
+      [resolvedThread],
+    );
+
+    assert.equal(suppressedCount, 0);
+    assert.equal(findings.length, 1);
   });
 });

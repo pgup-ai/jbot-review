@@ -1,9 +1,0 @@
-[
-  {
-    "path": "src/normalize.ts",
-    "line": 12,
-    "severity": "P1",
-    "title": "Normalization drops non-Latin names",
-    "body": "The ASCII character class empties CJK and Cyrillic names, so exact duplicates are silently skipped."
-  }
-]

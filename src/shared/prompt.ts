@@ -323,10 +323,20 @@ budget on these classes.`,
 };
 
 /**
+ * Lens keys for a given total pass count: pass 1 is the general review, each
+ * extra pass takes the next lens in REVIEW_LENSES order.
+ */
+export function selectLensKeys(passes: number): string[] {
+  return Object.keys(REVIEW_LENSES).slice(0, Math.max(0, passes - 1));
+}
+
+/**
  * Assembles the full review prompt. The output reminder is deliberately LAST:
  * small models weight recent instructions most heavily, and tens of KB of PR
  * context would otherwise bury the output contract. An optional lens addendum
- * (see REVIEW_LENSES) is placed directly after the base instructions.
+ * (see REVIEW_LENSES) goes directly before the reminder — recency keeps the
+ * lens salient, and parallel passes share an identical prompt prefix, so
+ * provider prompt-prefix caching can reuse the expensive common part.
  */
 export function assembleReviewPrompt(
   prContext: string,
@@ -334,11 +344,12 @@ export function assembleReviewPrompt(
   lensAddendum = '',
 ): string {
   const parts = [REVIEW_PROMPT];
-  if (lensAddendum) parts.push(lensAddendum);
   if (guidelines) {
     parts.push('## Repository review guidelines\n', guidelines);
   }
-  parts.push(prContext, REVIEW_OUTPUT_REMINDER);
+  parts.push(prContext);
+  if (lensAddendum) parts.push(lensAddendum);
+  parts.push(REVIEW_OUTPUT_REMINDER);
   return parts.join('\n\n');
 }
 

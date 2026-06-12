@@ -15,6 +15,7 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   formatFindingsForVerification,
+  selectLensKeys,
 } from '../src/shared/prompt.ts';
 
 describe('REVIEW_PROMPT', () => {
@@ -82,10 +83,12 @@ describe('REVIEW_PROMPT', () => {
   });
 
   it('teaches the missed-bug shapes via calibration examples', () => {
-    assert.match(REVIEW_PROMPT, /## Calibration examples/);
-    assert.match(REVIEW_PROMPT, /interaction with unchanged code/);
-    assert.match(REVIEW_PROMPT, /permanently unreachable/);
-    assert.match(REVIEW_PROMPT, /no finding/);
+    // Structural: five numbered examples exist, including at least one
+    // negative example (a non-finding). Avoids pinning example prose.
+    const section = REVIEW_PROMPT.split('## Calibration examples')[1]?.split('\n## ')[0] ?? '';
+    const numberedExamples = section.match(/^\d+\.\s/gm) ?? [];
+    assert.equal(numberedExamples.length, 5);
+    assert.match(section, /→ no finding/);
   });
 
   it('allows line 0 for file-level findings on changed files', () => {
@@ -108,13 +111,29 @@ describe('REVIEW_LENSES', () => {
     }
   });
 
-  it('is injected directly after the base prompt by assembleReviewPrompt', () => {
+  it('is placed after the PR context and before the output reminder', () => {
+    // Tail placement keeps the prompt prefix identical across parallel
+    // passes (prefix-cache reuse) and puts the lens in the recency window.
     const prompt = assembleReviewPrompt('PR_CONTEXT_SENTINEL', '', REVIEW_LENSES.interactions);
 
     assert.ok(prompt.startsWith(REVIEW_PROMPT));
     const lensIndex = prompt.indexOf('## Review lens for this pass');
-    assert.ok(lensIndex > 0);
-    assert.ok(lensIndex < prompt.indexOf('PR_CONTEXT_SENTINEL'));
+    assert.ok(lensIndex > prompt.indexOf('PR_CONTEXT_SENTINEL'));
+    assert.ok(lensIndex < prompt.indexOf('## Final output reminder'));
+  });
+});
+
+describe('selectLensKeys', () => {
+  it('maps total passes to extra lens keys in declared order', () => {
+    assert.deepEqual(selectLensKeys(1), []);
+    assert.deepEqual(selectLensKeys(2), ['interactions']);
+    assert.deepEqual(selectLensKeys(3), ['interactions', 'integrity']);
+  });
+
+  it('is safe at the extremes', () => {
+    assert.deepEqual(selectLensKeys(0), []);
+    assert.deepEqual(selectLensKeys(-5), []);
+    assert.deepEqual(selectLensKeys(99), Object.keys(REVIEW_LENSES));
   });
 });
 

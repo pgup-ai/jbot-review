@@ -9,7 +9,9 @@ Run `npm run eval` to score; CI can gate prompt/pipeline changes on it
 ```
 fixtures/golden/<case-name>/
   expected-findings.json   # labels (committed)
-  actual-findings.json     # one run's findings (produced per evaluation)
+  actual-findings.json     # one run's findings (gitignored — produce per
+                           # evaluation; a committed actual would make the
+                           # gate trivially green forever)
 ```
 
 `expected-findings.json`:

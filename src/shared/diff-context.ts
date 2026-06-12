@@ -11,8 +11,29 @@ import type { PrFile } from './github.ts';
  * data). Anything truncated or omitted is listed so the agent knows to read
  * it via git instead of assuming it saw everything.
  */
-export const MAX_TOTAL_DIFF_BYTES = 64 * 1024;
+
+/**
+ * Path classifiers shared between diff risk ranking here and the review
+ * focus checklist in runner.ts — one taxonomy, two consumers, no drift.
+ */
+export const PATH_PATTERNS = {
+  security: /(^|\/)(auth|security|permissions?|policies)\//i,
+  data: /(^|\/)(db|database|migrations?|prisma|drizzle|schema)\//i,
+  api: /(^|\/)(api|routes?|controllers?|server|webhooks?)\//i,
+  tooling: /(^|\/)(package\.json|action\.ya?ml)$|^\.github\/workflows\/.+\.ya?ml$/i,
+  tests: /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/i,
+} as const;
+
+/**
+ * ~10K tokens. The block is replicated into every session of a run (main,
+ * lenses, compliance, verification), so the cap is per-fragment, not per-run.
+ */
+export const MAX_TOTAL_DIFF_BYTES = 40 * 1024;
 export const MAX_FILE_DIFF_BYTES = 12 * 1024;
+/** Files listed individually in the "not embedded" section before "+N more". */
+const MAX_NOT_EMBEDDED_LISTED = 50;
+/** Allowance for the truncation notice a cut file appends. */
+const TRUNCATION_NOTICE_ALLOWANCE_BYTES = 96;
 
 interface RiskRule {
   pattern: RegExp;
@@ -21,15 +42,14 @@ interface RiskRule {
 
 /** Higher weight = embedded earlier = survives budget truncation longer. */
 const RISK_RULES: RiskRule[] = [
-  { pattern: /(^|\/)(auth|security|permissions?|policies)\//i, weight: 60 },
-  { pattern: /(^|\/)(db|database|migrations?|prisma|drizzle|schema)\//i, weight: 50 },
-  { pattern: /(^|\/)(api|routes?|controllers?|server|webhooks?)\//i, weight: 50 },
+  { pattern: PATH_PATTERNS.security, weight: 60 },
+  { pattern: PATH_PATTERNS.data, weight: 50 },
+  { pattern: PATH_PATTERNS.api, weight: 50 },
   { pattern: /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|rb|cs|swift|c|cc|cpp|h)$/i, weight: 30 },
   { pattern: /\.(vue|svelte)$/i, weight: 30 },
-  { pattern: /(^|\/)(package\.json|action\.ya?ml)$|^\.github\/workflows\/.+\.ya?ml$/i, weight: 25 },
+  { pattern: PATH_PATTERNS.tooling, weight: 25 },
   { pattern: /\.(ya?ml|json|toml|ini|env)$/i, weight: 15 },
-  { pattern: /(^|\/)(test|tests|__tests__|spec)\//i, weight: -20 },
-  { pattern: /\.(test|spec)\.[cm]?[jt]sx?$/i, weight: -20 },
+  { pattern: PATH_PATTERNS.tests, weight: -20 },
   { pattern: /\.(md|mdx|txt|rst)$/i, weight: -25 },
 ];
 
@@ -54,7 +74,8 @@ export interface DiffHunksOptions {
 /**
  * Renders the '## Diff hunks' prompt section. Returns '' when no file has a
  * patch. Truncation is per-file (a single huge file cannot starve the rest)
- * and global (the section never exceeds the total budget).
+ * and global; the budget covers the rendered section including headers and
+ * fences, not just the raw patch bytes.
  */
 export function buildDiffHunksBlock(files: PrFile[], options: DiffHunksOptions = {}): string {
   const totalBudget = options.totalBudgetBytes ?? MAX_TOTAL_DIFF_BYTES;
@@ -73,13 +94,16 @@ export function buildDiffHunksBlock(files: PrFile[], options: DiffHunksOptions =
 
   for (const file of ranked) {
     const patch = file.patch as string;
-    const budget = Math.min(perFileBudget, remaining);
-    const { text, truncated } = truncateAtLineBoundary(patch, budget);
+    const wrapperBytes =
+      Buffer.byteLength(`### ${file.filename}\n\`\`\`diff\n\n\`\`\``, 'utf8') +
+      TRUNCATION_NOTICE_ALLOWANCE_BYTES;
+    const patchBudget = Math.min(perFileBudget, remaining - wrapperBytes);
+    const { text, truncated } = truncateAtLineBoundary(patch, patchBudget);
     if (!text) {
       notEmbedded.push(file.filename);
       continue;
     }
-    remaining -= Buffer.byteLength(text, 'utf8');
+    remaining -= Buffer.byteLength(text, 'utf8') + wrapperBytes;
     sections.push(
       [
         `### ${file.filename}`,
@@ -102,12 +126,16 @@ export function buildDiffHunksBlock(files: PrFile[], options: DiffHunksOptions =
   ];
 
   if (notEmbedded.length > 0) {
+    const listed = notEmbedded.slice(0, MAX_NOT_EMBEDDED_LISTED);
     lines.push(
       '',
       '### Hunks not embedded (diff budget reached)',
       'Read these with the git diff command before concluding the review:',
-      ...notEmbedded.map((filename) => `- ${filename}`),
+      ...listed.map((filename) => `- ${filename}`),
     );
+    if (notEmbedded.length > listed.length) {
+      lines.push(`- …and ${notEmbedded.length - listed.length} more changed files`);
+    }
   }
 
   return lines.join('\n');

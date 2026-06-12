@@ -1,15 +1,17 @@
 import {
   SEVERITY_RANK,
+  applyFindingVerdicts,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
+  selectBlockingFindingIndexes,
   suppressPreviouslyReported,
 } from './filter.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
-import { buildDiffHunksBlock } from './diff-context.ts';
+import { PATH_PATTERNS, buildDiffHunksBlock } from './diff-context.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
-import { REVIEW_LENSES } from './prompt.ts';
+import { REVIEW_LENSES, selectLensKeys } from './prompt.ts';
 import {
   startOpencode,
   runReview,
@@ -28,6 +30,7 @@ import {
   listPrComments,
   listPrCommits,
   getCheckStatusSummary,
+  formatFindingMetadata,
   postFileLevelComment,
   postReview,
   decideVerdict,
@@ -243,10 +246,13 @@ export async function runPrReview(params: {
       log,
     });
 
+    // Lens passes use the base context (no Context7 block): they have no
+    // Context7 retry path, so a Context7 hiccup must not be able to zero a
+    // pass's findings.
     const lensPasses = startLensPasses({
       client,
       model,
-      prContext,
+      prContext: basePrContext,
       guidelinesForPrompt,
       passes: options.reviewPasses,
       log,
@@ -408,7 +414,7 @@ function startLensPasses(params: {
   passes: number;
   log: (msg: string) => void;
 }): Promise<Finding[][]> {
-  const lensKeys = Object.keys(REVIEW_LENSES).slice(0, Math.max(0, params.passes - 1));
+  const lensKeys = selectLensKeys(params.passes);
   if (lensKeys.length === 0) return Promise.resolve([]);
 
   params.log(`Starting ${lensKeys.length} lens pass(es) in parallel: ${lensKeys.join(', ')}.`);
@@ -455,15 +461,10 @@ async function verifyBlockingFindings(params: {
 }): Promise<Finding[]> {
   if (!params.enabled) return params.findings;
 
-  const blockingIndexes = params.findings
-    .map((finding, index) => ({ finding, index }))
-    .filter(({ finding }) => SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2)
-    .sort((a, b) => SEVERITY_RANK[a.finding.severity] - SEVERITY_RANK[b.finding.severity])
-    .slice(0, MAX_VERIFIED_FINDINGS)
-    .map(({ index }) => index);
-  if (blockingIndexes.length === 0) return params.findings;
+  const selectedIndexes = selectBlockingFindingIndexes(params.findings, MAX_VERIFIED_FINDINGS);
+  if (selectedIndexes.length === 0) return params.findings;
 
-  const targets = blockingIndexes.map((index) => params.findings[index]);
+  const targets = selectedIndexes.map((index) => params.findings[index]);
   params.log(`Verifying ${targets.length} blocking finding(s) before posting.`);
 
   let verdicts;
@@ -486,33 +487,22 @@ async function verifyBlockingFindings(params: {
     return params.findings;
   }
 
-  const verdictByTarget = new Map(verdicts.map((verdict) => [verdict.index, verdict]));
-  const drop = new Set<number>();
-  const demote = new Set<number>();
-  targets.forEach((finding, targetIndex) => {
-    const verdict = verdictByTarget.get(targetIndex);
-    // No verdict for a listed finding = confirmed (fail-open per finding).
-    if (!verdict || verdict.verdict === 'confirmed') return;
-    const originalIndex = blockingIndexes[targetIndex];
-    const reason = verdict.reason ? ` Reason: ${verdict.reason}` : '';
-    if (verdict.verdict === 'refuted') {
-      drop.add(originalIndex);
-      params.log(
-        `Dropped refuted finding ${finding.path}:${finding.line} "${finding.title}".${reason}`,
-      );
-    } else {
-      demote.add(originalIndex);
-      params.log(
-        `Demoted uncertain finding ${finding.path}:${finding.line} "${finding.title}" to P3.${reason}`,
-      );
-    }
-  });
-
-  return params.findings.flatMap((finding, index) => {
-    if (drop.has(index)) return [];
-    if (demote.has(index)) return [{ ...finding, severity: 'P3' as const }];
-    return [finding];
-  });
+  const application = applyFindingVerdicts(params.findings, selectedIndexes, verdicts);
+  for (const { finding, reason } of application.dropped) {
+    params.log(
+      `Dropped refuted finding ${formatFindingLocation(finding)} "${finding.title}".${
+        reason ? ` Reason: ${reason}` : ''
+      }`,
+    );
+  }
+  for (const { finding, reason } of application.demoted) {
+    params.log(
+      `Demoted uncertain finding ${formatFindingLocation(finding)} "${finding.title}" to P3.${
+        reason ? ` Reason: ${reason}` : ''
+      }`,
+    );
+  }
+  return application.findings;
 }
 
 function filterFindings(findings: Finding[], options: Required<ReviewRunOptions>): Finding[] {
@@ -572,7 +562,7 @@ async function runReviewWithContext7Fallback(
  * behavior on small models, which then reviewed only the delta and missed
  * cross-commit bugs — the single biggest recall gap versus competitor bots.
  */
-function buildSummaryScopeBlock(priorComments: string[], headSha?: string): string {
+export function buildSummaryScopeBlock(priorComments: string[], headSha?: string): string {
   const priorJbotReviews = priorComments.filter(isJbotReviewBody);
   const lines = [
     '## Summary instructions',
@@ -613,16 +603,16 @@ function buildReviewFocusBlock(changedFiles: string[]): string {
   const focusItems = new Set<string>();
 
   for (const file of changedFiles) {
-    if (/(^|\/)(package\.json|action\.ya?ml)$|^\.github\/workflows\/.+\.ya?ml$/i.test(file)) {
+    if (PATH_PATTERNS.tooling.test(file)) {
       focusItems.add('External/tooling: inputs, permissions, auth, versions, failure modes.');
     }
-    if (/(^|\/)(api|routes?|controllers?|server|webhooks?)\//i.test(file)) {
+    if (PATH_PATTERNS.api.test(file)) {
       focusItems.add('API/server: validation, auth/authz, idempotency, response contracts.');
     }
-    if (/(^|\/)(db|database|migrations?|prisma|drizzle|schema)\//i.test(file)) {
+    if (PATH_PATTERNS.data.test(file)) {
       focusItems.add('Data: compatibility, migration order, defaults, nullability, indexes.');
     }
-    if (/(^|\/)(auth|security|permissions?|policies)\//i.test(file)) {
+    if (PATH_PATTERNS.security.test(file)) {
       focusItems.add('Security: privilege, tokens, tenant isolation, unsafe input boundaries.');
     }
     if (
@@ -633,10 +623,7 @@ function buildReviewFocusBlock(changedFiles: string[]): string {
         'Frontend: loading/error states, stale async state, accessibility, API assumptions.',
       );
     }
-    if (
-      /(^|\/)(test|tests|__tests__|spec)\//i.test(file) ||
-      /\.(test|spec)\.[cm]?[jt]sx?$/i.test(file)
-    ) {
+    if (PATH_PATTERNS.tests.test(file)) {
       focusItems.add('Tests: assertions cover changed behavior and do not mask failures.');
     }
   }
@@ -652,11 +639,6 @@ function buildReviewFocusBlock(changedFiles: string[]): string {
     'Use only as relevant checklists; do not invent findings.',
     ...[...focusItems].map((item) => `- ${item}`),
   ].join('\n');
-}
-
-function formatFindingMetadata(finding: Pick<Finding, 'kind' | 'confidence'>): string {
-  const parts = [finding.kind, finding.confidence].filter(Boolean);
-  return parts.length > 0 ? ` (${parts.join(', ')})` : '';
 }
 
 function findLatestReviewedHead(priorJbotReviews: string[]): string | undefined {

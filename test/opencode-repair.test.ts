@@ -1,0 +1,82 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import { runReview } from '../src/shared/opencode.ts';
+import type { OpencodeClient } from '@opencode-ai/sdk';
+
+const noLog = (): void => undefined;
+
+interface FakeMessage {
+  info: { role: 'assistant'; id: string; time: { completed: number } };
+  parts: Array<{ type: 'text'; text: string }>;
+}
+
+/**
+ * Minimal fake of the opencode client surface runReview touches. Each
+ * promptAsync call appends the next scripted assistant response, mimicking a
+ * session that answers every prompt immediately.
+ */
+function makeFakeClient(responses: string[]): {
+  client: OpencodeClient;
+  prompts: string[];
+} {
+  const messages: FakeMessage[] = [];
+  const prompts: string[] = [];
+
+  const client = {
+    session: {
+      create: async () => ({ data: { id: 'session-1' } }),
+      promptAsync: async (request: { body: { parts: Array<{ text: string }> } }) => {
+        prompts.push(request.body.parts[0].text);
+        const text = responses[prompts.length - 1] ?? '{}';
+        messages.push({
+          info: { role: 'assistant', id: `m${prompts.length}`, time: { completed: 1 } },
+          parts: [{ type: 'text', text }],
+        });
+        return {};
+      },
+      messages: async () => ({ data: [...messages] }),
+      status: async () => ({ data: { 'session-1': { type: 'idle' } } }),
+    },
+  } as unknown as OpencodeClient;
+
+  return { client, prompts };
+}
+
+const VALID_REVIEW = JSON.stringify({
+  summary: 'ok after repair',
+  findings: [{ path: 'src/a.ts', line: 3, severity: 'P2', title: 'T', body: 'B' }],
+});
+
+describe('runReview JSON repair loop', () => {
+  it('repairs a malformed response with one same-session re-prompt', async () => {
+    const { client, prompts } = makeFakeClient(['this is not json at all, sorry', VALID_REVIEW]);
+
+    const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /could not be parsed as JSON/);
+    assert.match(prompts[1], /Parse error:/);
+    assert.equal(result.summary, 'ok after repair');
+    assert.equal(result.findings.length, 1);
+  });
+
+  it('does not send a repair prompt when the first response parses', async () => {
+    const { client, prompts } = makeFakeClient([VALID_REVIEW]);
+
+    const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 1);
+    assert.equal(result.summary, 'ok after repair');
+  });
+
+  it('fails the run when the repair response is also malformed', async () => {
+    const { client, prompts } = makeFakeClient(['garbage one', 'garbage two']);
+
+    await assert.rejects(
+      () => runReview(client, 'prov/model', 'PR CONTEXT', '', noLog),
+      /unparseable JSON/,
+    );
+    assert.equal(prompts.length, 2);
+  });
+});

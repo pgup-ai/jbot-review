@@ -74,6 +74,41 @@ describe('matchFindings', () => {
     assert.equal(result.matched.length, 1);
     assert.equal(result.missed.length, 1);
   });
+
+  it('matches a rangeless (file-level) expectation against any line in the file', () => {
+    const result = matchFindings(
+      [expected({ lineStart: undefined, lineEnd: undefined })],
+      [actual({ line: 999 })],
+    );
+
+    assert.equal(result.matched.length, 1);
+  });
+
+  it('matches a keywordless expectation by location alone', () => {
+    const result = matchFindings(
+      [expected({ keywords: undefined })],
+      [actual({ title: 'Totally different words', body: 'none of the keywords' })],
+    );
+
+    assert.equal(result.matched.length, 1);
+  });
+
+  it('finds the assignment a greedy matcher would miss', () => {
+    // Expectation A matches both actuals; expectation B matches only the
+    // first. Greedy first-match would give actual-1 to A and miss B; the
+    // augmenting-path matcher must match both.
+    const a = expected({ lineStart: 5, lineEnd: 25, description: 'broad', keywords: ['shared'] });
+    const b = expected({ lineStart: 10, lineEnd: 10, description: 'narrow', keywords: ['shared'] });
+    const actuals = [
+      actual({ line: 10, title: 'shared issue one', body: '' }),
+      actual({ line: 20, title: 'shared issue two', body: '' }),
+    ];
+
+    const result = matchFindings([a, b], actuals);
+
+    assert.equal(result.matched.length, 2);
+    assert.equal(result.missed.length, 0);
+  });
 });
 
 describe('scoreCase / aggregateScores', () => {

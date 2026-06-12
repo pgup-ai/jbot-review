@@ -48,23 +48,42 @@ export interface MatchResult {
 export const LINE_MATCH_TOLERANCE = 5;
 
 export function matchFindings(expected: ExpectedFinding[], actuals: ActualFinding[]): MatchResult {
-  const matched: MatchResult['matched'] = [];
-  const usedActuals = new Set<number>();
-  const missed: ExpectedFinding[] = [];
+  // Maximum bipartite matching (augmenting paths), not greedy first-match:
+  // when expectation A matches actuals X and Y while expectation B matches
+  // only X, greedy assignment of X to A would score B as missed — and fail
+  // the eval gate on a run that actually found everything.
+  const candidates = expected.map((expectation) =>
+    actuals.flatMap((actual, index) => (matchesExpectation(expectation, actual) ? [index] : [])),
+  );
+  const actualOwner = Array.from({ length: actuals.length }, () => -1);
 
-  for (const expectation of expected) {
-    const index = actuals.findIndex(
-      (actual, i) => !usedActuals.has(i) && matchesExpectation(expectation, actual),
-    );
-    if (index === -1) {
-      missed.push(expectation);
-    } else {
-      usedActuals.add(index);
-      matched.push({ expected: expectation, actual: actuals[index] });
+  function tryAssign(expectationIndex: number, visited: Set<number>): boolean {
+    for (const actualIndex of candidates[expectationIndex]) {
+      if (visited.has(actualIndex)) continue;
+      visited.add(actualIndex);
+      if (actualOwner[actualIndex] === -1 || tryAssign(actualOwner[actualIndex], visited)) {
+        actualOwner[actualIndex] = expectationIndex;
+        return true;
+      }
     }
+    return false;
   }
 
-  const unmatchedActuals = actuals.filter((_, i) => !usedActuals.has(i));
+  expected.forEach((_, index) => tryAssign(index, new Set()));
+
+  const assignedActualByExpectation = new Map<number, number>();
+  actualOwner.forEach((expectationIndex, actualIndex) => {
+    if (expectationIndex !== -1) assignedActualByExpectation.set(expectationIndex, actualIndex);
+  });
+
+  const matched: MatchResult['matched'] = [];
+  const missed: ExpectedFinding[] = [];
+  expected.forEach((expectation, index) => {
+    const actualIndex = assignedActualByExpectation.get(index);
+    if (actualIndex === undefined) missed.push(expectation);
+    else matched.push({ expected: expectation, actual: actuals[actualIndex] });
+  });
+  const unmatchedActuals = actuals.filter((_, index) => actualOwner[index] === -1);
   return { matched, missed, unmatchedActuals };
 }
 

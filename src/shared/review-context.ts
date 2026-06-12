@@ -268,6 +268,19 @@ export async function discoverGuidelines(
     if (!loaded) await addReferencedDoc(baseDir, reference);
   }
 
+  // Referenced-doc preloading is DEFERRED until every primary guideline file
+  // has had its chance at the budget: primary files have no list-as-available
+  // fallback, so a large referenced doc loading early could silently evict
+  // the actual review rules.
+  const deferredReferences: Array<{ baseDir: string; reference: string }> = [];
+
+  async function flushDeferredReferences(): Promise<void> {
+    for (const { baseDir, reference } of deferredReferences) {
+      await preloadOrListReferencedDoc(baseDir, reference);
+    }
+    deferredReferences.length = 0;
+  }
+
   async function addGuidelineWithReferences(relativePath: string): Promise<void> {
     const result = await addGuidelineFile(relativePath, resolve(cwd, relativePath));
     if (!result) return;
@@ -275,7 +288,7 @@ export async function discoverGuidelines(
       ? cwd
       : dirname(result.absolutePath);
     for (const reference of extractMarkdownDocumentReferences(result.text)) {
-      await preloadOrListReferencedDoc(baseDir, reference);
+      deferredReferences.push({ baseDir, reference });
     }
   }
 
@@ -314,24 +327,29 @@ export async function discoverGuidelines(
   );
 
   if (readme) {
+    // Governance README references are review rules; they outrank the
+    // deferred root-guideline references for the remaining budget.
     for (const reference of extractMarkdownDocumentReferences(readme.text)) {
       await preloadOrListReferencedDoc(governanceDir, reference);
     }
+    await flushDeferredReferences();
     return formatGuidelineSections(sections, seen, referencedDocs);
   }
 
   try {
     const resolvedGovernanceDir = await resolveExistingInsideWorkspace(governanceDir);
-    if (!resolvedGovernanceDir) return formatGuidelineSections(sections, seen, referencedDocs);
-    const entries = await readdir(resolvedGovernanceDir.realPath, { withFileTypes: true });
-    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!entry.isFile()) continue;
-      await addGuidelineFile(`.pr-governance/${entry.name}`, resolve(governanceDir, entry.name));
+    if (resolvedGovernanceDir) {
+      const entries = await readdir(resolvedGovernanceDir.realPath, { withFileTypes: true });
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        if (!entry.isFile()) continue;
+        await addGuidelineFile(`.pr-governance/${entry.name}`, resolve(governanceDir, entry.name));
+      }
     }
   } catch {
     /* directory absent */
   }
 
+  await flushDeferredReferences();
   return formatGuidelineSections(sections, seen, referencedDocs);
 }
 
