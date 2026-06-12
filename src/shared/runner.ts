@@ -72,10 +72,11 @@ export interface ReviewRunOptions {
   /** Adversarially verify blocking findings before posting (precision gate). */
   verifyFindings?: boolean;
   /**
-   * Wall-clock target in minutes (0 = no budget). Derives per-session
-   * timeouts: finder sessions get a share up front, verification gets what
-   * actually remains at its start (or is skipped, fail-open). Lets
-   * heavy-reasoning models run without ever timing out the whole job.
+   * Wall-clock target in minutes (0 = no budget). Finder sessions get the
+   * full budget (minus a posting reserve) as their deadline; retries and
+   * verification use whatever remains at their start or are skipped
+   * (fail-open). Lets heavy-reasoning models run without ever timing out
+   * the whole job.
    */
   timeBudgetMinutes?: number;
   /**
@@ -451,7 +452,6 @@ function normalizeOptions(options: ReviewRunOptions | undefined): Required<Revie
   };
 }
 
-const FINDER_BUDGET_SHARE = 0.65;
 const MIN_FINDER_TIMEOUT_MS = 60_000;
 const MAX_SESSION_TIMEOUT_MS = 15 * 60_000;
 const POSTING_RESERVE_MS = 30_000;
@@ -459,14 +459,17 @@ const MIN_VERIFICATION_MS = 45_000;
 const MAX_VERIFICATION_MS = 5 * 60_000;
 
 /**
- * Finder sessions (main shards, lenses, aux checks) get a fixed share of the
- * time budget up front so they all start with the same deadline. Returns
- * undefined (default 15-minute cap) when no budget is set.
+ * Finder sessions (main shards, lenses, aux checks) get the FULL budget
+ * (minus the posting reserve) as their deadline: heavy reasoning models need
+ * the whole window for a first attempt, and a starved first attempt just
+ * converts into a retry that costs more wall clock overall. Retries and
+ * verification adaptively use whatever remains — or are skipped, fail-open.
+ * Returns undefined (default 15-minute cap) when no budget is set.
  */
 export function computeFinderTimeoutMs(timeBudgetMinutes: number): number | undefined {
   if (timeBudgetMinutes <= 0) return undefined;
-  const share = Math.round(timeBudgetMinutes * 60_000 * FINDER_BUDGET_SHARE);
-  return Math.min(Math.max(share, MIN_FINDER_TIMEOUT_MS), MAX_SESSION_TIMEOUT_MS);
+  const window = timeBudgetMinutes * 60_000 - POSTING_RESERVE_MS;
+  return Math.min(Math.max(window, MIN_FINDER_TIMEOUT_MS), MAX_SESSION_TIMEOUT_MS);
 }
 
 /** Absolute run deadline for retries; undefined when no budget is set. */

@@ -48,9 +48,9 @@ describe('buildSummaryScopeBlock', () => {
 });
 
 describe('session timeout budgeting', () => {
-  it('gives finders a fixed share of the budget within clamps', () => {
+  it('gives finders the full budget minus the posting reserve, within clamps', () => {
     assert.equal(computeFinderTimeoutMs(0), undefined);
-    assert.equal(computeFinderTimeoutMs(6), Math.round(6 * 60_000 * 0.65));
+    assert.equal(computeFinderTimeoutMs(10), 10 * 60_000 - 30_000); // ~9.5m for a 10m budget
     assert.equal(computeFinderTimeoutMs(1), 60_000); // floor
     assert.equal(computeFinderTimeoutMs(120), 15 * 60_000); // ceiling
   });
