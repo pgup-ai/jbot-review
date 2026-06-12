@@ -50,7 +50,7 @@ async function main(): Promise<void> {
     context7ApiKey: getInputOrEnv('context7-api-key', 'CONTEXT7_API_KEY'),
     guidelinePass: parseBooleanInput('enable-guideline-pass', true),
     auxModel,
-    reviewPasses: parseNumberInput('review-passes', 1),
+    reviewPasses: parseNumberInput('review-passes', 2),
     verifyFindings: parseBooleanInput('verify-findings', true),
     timeBudgetMinutes: parseNumberInput('time-budget-minutes', 10),
     reviewShards: parseNumberInput('review-shards', 0),
