@@ -457,7 +457,7 @@ function normalizeOptions(options: ReviewRunOptions | undefined): Required<Revie
     context7ApiKey: options?.context7ApiKey ?? '',
     guidelinePass: options?.guidelinePass ?? true,
     auxModel: options?.auxModel ?? '',
-    reviewPasses: Math.min(Math.max(options?.reviewPasses ?? 2, 1), maxPasses),
+    reviewPasses: Math.min(Math.max(options?.reviewPasses ?? 1, 1), maxPasses),
     verifyFindings: options?.verifyFindings ?? true,
     timeBudgetMinutes: Math.max(options?.timeBudgetMinutes ?? 0, 0),
     reviewShards: Math.max(options?.reviewShards ?? 0, 0),

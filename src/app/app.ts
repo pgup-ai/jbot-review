@@ -77,7 +77,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         // The multi-pass/verification defaults cost ~3x a single session;
         // the webhook app has no per-run inputs, so expose env knobs.
         options: {
-          reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 2),
+          reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 1),
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
           auxModel: process.env.JBOT_REVIEW_AUX_MODEL?.trim() || '',
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 10),
