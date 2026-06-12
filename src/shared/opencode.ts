@@ -436,7 +436,12 @@ async function promptPlanAgentInSession(
   );
 
   const textPart = [...parts].reverse().find((p) => p.type === 'text');
-  const raw = textPart?.text ?? '{}';
+  // No text part (e.g. the model exhausted its budget on reasoning) must
+  // surface as a parse failure so the repair loop fires — defaulting to
+  // '{}' would silently score the session as "no findings".
+  const raw = textPart?.text ?? '';
+  if (!raw)
+    log(`${label} response contained no text part (types: ${parts.map((p) => p.type).join(', ')})`);
   log(`Extracted ${label} text: ${raw.length} chars`);
   return raw;
 }

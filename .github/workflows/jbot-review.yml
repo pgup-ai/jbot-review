@@ -74,6 +74,9 @@ jobs:
           max-findings: ${{ inputs['max-findings'] || '0' }}
           min-severity: ${{ inputs['min-severity'] || 'nit' }}
           include-prior-comments: ${{ inputs['include-prior-comments'] || 'true' }}
+          aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
+          review-passes: ${{ vars.JBOT_REVIEW_PASSES || '2' }}
+          verify-findings: ${{ vars.JBOT_VERIFY_FINDINGS || 'true' }}
           enable-context7: ${{ inputs['enable-context7'] || 'auto' }}
           fail-on-error: ${{ inputs['fail-on-error'] || 'true' }}
           opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}

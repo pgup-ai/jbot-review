@@ -14,9 +14,10 @@ interface FakeMessage {
 /**
  * Minimal fake of the opencode client surface runReview touches. Each
  * promptAsync call appends the next scripted assistant response, mimicking a
- * session that answers every prompt immediately.
+ * session that answers every prompt immediately. A null response scripts a
+ * reasoning-only message with no text part.
  */
-function makeFakeClient(responses: string[]): {
+function makeFakeClient(responses: Array<string | null>): {
   client: OpencodeClient;
   prompts: string[];
 } {
@@ -28,10 +29,13 @@ function makeFakeClient(responses: string[]): {
       create: async () => ({ data: { id: 'session-1' } }),
       promptAsync: async (request: { body: { parts: Array<{ text: string }> } }) => {
         prompts.push(request.body.parts[0].text);
-        const text = responses[prompts.length - 1] ?? '{}';
+        // index access, not `??`: a scripted null means "no text part" and
+        // must not fall back to '{}'.
+        const index = prompts.length - 1;
+        const text = index < responses.length ? responses[index] : '{}';
         messages.push({
           info: { role: 'assistant', id: `m${prompts.length}`, time: { completed: 1 } },
-          parts: [{ type: 'text', text }],
+          parts: text === null ? [] : [{ type: 'text', text }],
         });
         return {};
       },
@@ -68,6 +72,19 @@ describe('runReview JSON repair loop', () => {
 
     assert.equal(prompts.length, 1);
     assert.equal(result.summary, 'ok after repair');
+  });
+
+  it('treats a reasoning-only response (no text part) as repairable, not as zero findings', async () => {
+    // Seen in production: a heavy reasoning model burned its budget and
+    // finished with parts [step-start, reasoning, step-finish] — no text.
+    // That must trigger the repair loop, never silently parse as "{}".
+    const { client, prompts } = makeFakeClient([null, VALID_REVIEW]);
+
+    const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /could not be parsed as JSON/);
+    assert.equal(result.findings.length, 1);
   });
 
   it('fails the run when the repair response is also malformed', async () => {
