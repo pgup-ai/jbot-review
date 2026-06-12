@@ -18,6 +18,24 @@ export interface AppConfig {
 // an "in" check before accessing the installation field.
 type PullRequestEvent = EmitterWebhookEvent<'pull_request'>;
 
+function parseEnvJsonObject(
+  name: string,
+  defaultValue: Record<string, unknown>,
+): Record<string, unknown> {
+  const raw = process.env[name]?.trim();
+  if (!raw) return defaultValue;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* fall through to default */
+  }
+  console.warn(`[jbot-review] Ignoring invalid JSON in ${name}; using default.`);
+  return defaultValue;
+}
+
 function parseEnvInt(name: string, defaultValue: number): number {
   const raw = process.env[name]?.trim();
   if (!raw) return defaultValue;
@@ -62,8 +80,9 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 2),
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
           auxModel: process.env.JBOT_REVIEW_AUX_MODEL?.trim() || '',
-          timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 0),
+          timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 10),
           reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
+          modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'high' }),
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });

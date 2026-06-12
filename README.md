@@ -201,23 +201,24 @@ commit); repeats of findings already covered by prior jbot threads are
 suppressed in code before posting. Three inputs tune the recall/precision/cost
 balance:
 
-| Input                 | Default | Effect                                                                                                                                                                                                                                                                |
-| --------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `review-passes`       | `2`     | Total review passes (1–3). Extra passes add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Each pass costs roughly one extra model session.                                   |
-| `verify-findings`     | `true`  | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                       |
-| `aux-model`           | unset   | Same-provider model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification). Lets the main review run on a stronger tier while supporting checks stay cheap and fast.                                                    |
-| `review-shards`       | `0`     | Parallel shards for the main review (`0` = auto from diff size, capped at 4). Each shard deep-reviews a subset of files with the full checkout available; the union covers the complete diff and wall clock tracks the slowest shard instead of one whole-PR session. |
-| `time-budget-minutes` | `0`     | Wall-clock target (`0` = no budget). Finder sessions get a 65% share up front; verification gets what actually remains or is skipped (fail-open). A session over its deadline is aborted and degrades only its own coverage — noted in the summary — never the run.   |
-| `model-options`       | unset   | JSON object of provider options for the main model, passed through opencode to the provider SDK — e.g. `{"reasoningEffort":"medium"}` to cap reasoning spend on heavy models.                                                                                         |
+| Input                 | Default                      | Effect                                                                                                                                                                                                                                                                        |
+| --------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `review-passes`       | `2`                          | Total review passes (1–3). Extra passes add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Each pass costs roughly one extra model session.                                           |
+| `verify-findings`     | `true`                       | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                               |
+| `aux-model`           | unset                        | Same-provider model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification). Lets the main review run on a stronger tier while supporting checks stay cheap and fast.                                                            |
+| `review-shards`       | `0`                          | Parallel shards for the main review (`0` = auto from diff size, capped at 4). Each shard deep-reviews a subset of files with the full checkout available; the union covers the complete diff and wall clock tracks the slowest shard instead of one whole-PR session.         |
+| `time-budget-minutes` | `10`                         | Wall-clock target (`0` = no budget). Finder sessions get a 65% share up front; verification gets what actually remains or is skipped (fail-open). A session over its deadline is aborted and degrades only its own coverage — noted in the summary — never the run.           |
+| `model-options`       | `{"reasoningEffort":"high"}` | JSON object of provider options for the main model, passed through opencode to the provider SDK. Defaults to maximum reasoning depth; pass `{}` to send no options (e.g. for providers that reject unknown keys), or `{"reasoningEffort":"medium"}` to trade depth for speed. |
 
 **Heavy-model recipe** (deep reviews from GPT‑5.x / Opus-class models in
 ~5–6 minutes without timeouts): set the main `model` to the heavy tier, then
 
 ```yaml
-aux-model: opencode/deepseek-v4-flash-free # lenses + verification on a fast tier
-review-shards: '0' # auto: split big diffs into parallel deep sessions
+model: ${{ vars.JBOT_REVIEW_MODEL }} # heavy tier, e.g. openai/gpt-5.5
+aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL }} # same-provider fast tier for lenses + verification
+# defaults already active: review-shards auto, time-budget-minutes 10,
+# model-options {"reasoningEffort":"high"}; tighten the budget for faster runs:
 time-budget-minutes: '6' # finder deadline ~4m, verification gets the rest
-model-options: '{"reasoningEffort":"medium"}' # optional: cap reasoning depth
 ```
 
 Sharding keeps each heavy session small (one shard ≈ 24KB of diff), so

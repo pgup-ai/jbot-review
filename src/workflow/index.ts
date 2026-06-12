@@ -10,6 +10,10 @@ import type { Severity } from '../shared/types.ts';
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 
+// Max review depth by default; pass model-options: '{}' to send no options
+// (e.g. for providers that reject unknown option keys).
+const DEFAULT_MODEL_OPTIONS: Record<string, unknown> = { reasoningEffort: 'high' };
+
 async function main(): Promise<void> {
   const failOnError = parseBooleanInput('fail-on-error', true);
   const token = core.getInput('github-token', { required: true });
@@ -47,14 +51,14 @@ async function main(): Promise<void> {
     auxModel,
     reviewPasses: parseNumberInput('review-passes', 2),
     verifyFindings: parseBooleanInput('verify-findings', true),
-    timeBudgetMinutes: parseNumberInput('time-budget-minutes', 0),
+    timeBudgetMinutes: parseNumberInput('time-budget-minutes', 10),
     reviewShards: parseNumberInput('review-shards', 0),
-    modelOptions: parseJsonObjectInput('model-options'),
+    modelOptions: parseJsonObjectInput('model-options', DEFAULT_MODEL_OPTIONS),
   };
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${model}`);
   core.info(
-    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModel || '(main model)'}`,
+    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModel || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} modelOptions=${JSON.stringify(options.modelOptions)}`,
   );
 
   const octokit = github.getOctokit(token) as unknown as Octokit;
@@ -156,9 +160,12 @@ function parseNumberInput(name: string, defaultValue: number): number {
   return value;
 }
 
-function parseJsonObjectInput(name: string): Record<string, unknown> {
+function parseJsonObjectInput(
+  name: string,
+  defaultValue: Record<string, unknown>,
+): Record<string, unknown> {
   const raw = core.getInput(name).trim();
-  if (!raw) return {};
+  if (!raw) return defaultValue;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);

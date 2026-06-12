@@ -95,17 +95,17 @@ inputs:
     required: false
     default: 'true'
   time-budget-minutes:
-    description: 'Wall-clock target in minutes (0 = no budget). Derives per-session timeouts; a session over its share degrades that session (fail-open) instead of failing the run. Recommended with heavy reasoning models.'
+    description: 'Wall-clock target in minutes (0 = no budget). Derives per-session timeouts; a session over its share degrades that session (fail-open) instead of failing the run.'
     required: false
-    default: '0'
+    default: '10'
   review-shards:
     description: 'Parallel shards for the main review (0 = auto from diff size, capped at 4). Each shard deep-reviews a subset of files; the union covers the full diff and wall clock tracks the slowest shard.'
     required: false
     default: '0'
   model-options:
-    description: 'JSON object of provider options for the main model, e.g. {"reasoningEffort":"medium"} to cap reasoning spend on heavy models. Aux-model sessions are unaffected.'
+    description: 'JSON object of provider options for the main model. Defaults to {"reasoningEffort":"high"} for maximum review depth; pass {} to send no options (e.g. for providers that reject unknown options). Aux-model sessions are unaffected.'
     required: false
-    default: ''
+    default: '{"reasoningEffort":"high"}'
   fail-on-error:
     description: 'Fail the workflow when the review cannot complete.'
     required: false
