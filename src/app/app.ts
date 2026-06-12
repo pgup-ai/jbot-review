@@ -4,6 +4,7 @@ import type { InstallationAccessTokenAuthentication } from '@octokit/auth-app';
 import { createAppOctokit } from './auth.ts';
 import { clonePr } from './clone.ts';
 import { runPrReview } from '../shared/runner.ts';
+import { formatModelName, parseModelName, resolveModelName } from '../shared/model.ts';
 import { enqueue } from './queue.ts';
 
 export interface AppConfig {
@@ -36,11 +37,18 @@ function parseEnvJsonObject(
   return defaultValue;
 }
 
-function parseEnvInt(name: string, defaultValue: number): number {
+export function parseEnvInt(name: string, defaultValue: number): number {
   const raw = process.env[name]?.trim();
   if (!raw) return defaultValue;
   const value = Number(raw);
-  return Number.isInteger(value) && value > 0 ? value : defaultValue;
+  return Number.isInteger(value) && value >= 0 ? value : defaultValue;
+}
+
+export function resolveAuxModelForMainModel(mainModel: string, auxModelInput?: string): string {
+  const input = auxModelInput?.trim();
+  if (!input) return '';
+  const { providerID } = parseModelName(mainModel);
+  return formatModelName(resolveModelName(providerID, input));
 }
 
 export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
@@ -61,6 +69,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
     const { dir, cleanup } = clonePr(repoInfo.clone_url, pr.head.ref, pr.base.ref, authRes.token);
 
     try {
+      const auxModel = resolveAuxModelForMainModel(cfg.model, process.env.JBOT_REVIEW_AUX_MODEL);
       await runPrReview({
         octokit,
         owner,
@@ -77,9 +86,10 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         // The multi-pass/verification defaults cost ~3x a single session;
         // the webhook app has no per-run inputs, so expose env knobs.
         options: {
-          reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 2),
+          enhancedContext: true,
+          reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 1),
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
-          auxModel: process.env.JBOT_REVIEW_AUX_MODEL?.trim() || '',
+          auxModel,
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 10),
           reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
           modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'medium' }),

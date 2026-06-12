@@ -457,7 +457,7 @@ function normalizeOptions(options: ReviewRunOptions | undefined): Required<Revie
     context7ApiKey: options?.context7ApiKey ?? '',
     guidelinePass: options?.guidelinePass ?? true,
     auxModel: options?.auxModel ?? '',
-    reviewPasses: Math.min(Math.max(options?.reviewPasses ?? 2, 1), maxPasses),
+    reviewPasses: Math.min(Math.max(options?.reviewPasses ?? 1, 1), maxPasses),
     verifyFindings: options?.verifyFindings ?? true,
     timeBudgetMinutes: Math.max(options?.timeBudgetMinutes ?? 0, 0),
     reviewShards: Math.max(options?.reviewShards ?? 0, 0),
@@ -485,7 +485,8 @@ const MAX_VERIFICATION_MS = 5 * 60_000;
 export function computeFinderTimeoutMs(timeBudgetMinutes: number): number | undefined {
   if (timeBudgetMinutes <= 0) return undefined;
   const window = timeBudgetMinutes * 60_000 - POSTING_RESERVE_MS;
-  return Math.min(Math.max(window, MIN_FINDER_TIMEOUT_MS), MAX_SESSION_TIMEOUT_MS);
+  const floor = Math.min(MIN_FINDER_TIMEOUT_MS, window);
+  return Math.min(Math.max(window, floor), MAX_SESSION_TIMEOUT_MS);
 }
 
 /** Absolute run deadline for retries; undefined when no budget is set. */

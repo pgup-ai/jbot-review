@@ -87,9 +87,9 @@ inputs:
     required: false
     default: ''
   review-passes:
-    description: 'Total review passes (1-3). Passes beyond the first add focused recall lenses (interactions, then integrity) in parallel on the aux model; findings are merged and deduped. Each extra pass costs roughly one extra model session — cheap on paid tiers, but adds queue time on throttled free tiers. Default 2; lower to 1 for fastest free-tier runs.'
+    description: 'Total review passes (1-3). Passes beyond the first add focused recall lenses (interactions, then integrity) in parallel on the aux model; findings are merged and deduped. Each extra pass costs roughly one extra model session — cheap on paid tiers, but adds queue time on throttled free tiers. Default 1; raise to 2-3 for maximum recall.'
     required: false
-    default: '2'
+    default: '1'
   verify-findings:
     description: 'Adversarially verify blocking findings in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.'
     required: false

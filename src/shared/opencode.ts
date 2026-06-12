@@ -302,11 +302,11 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function parsePortEnv(name: string, defaultValue: number): number {
+export function parsePortEnv(name: string, defaultValue: number): number {
   const raw = process.env[name]?.trim();
   if (!raw) return defaultValue;
   const value = Number(raw);
-  return Number.isInteger(value) && value >= 0 && value <= 65535 ? value : defaultValue;
+  return Number.isInteger(value) && value >= 1 && value <= 65535 ? value : defaultValue;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {

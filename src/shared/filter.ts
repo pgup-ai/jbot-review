@@ -85,7 +85,11 @@ export function dedupeFindings(...findingLists: Finding[][]): Finding[] {
 function isSameAnchor(a: Finding, b: Finding): boolean {
   if (a.path !== b.path) return false;
   if (a.line > 0 || b.line > 0) return a.line === b.line;
-  return titleTokenOverlap(a.title, b.title) >= SUPPRESS_TITLE_OVERLAP;
+  const titleMatch = titleTokenMatch(a.title, b.title);
+  return (
+    titleMatch.shared >= FILE_LEVEL_DEDUPE_MIN_SHARED_TOKENS &&
+    titleMatch.overlap >= FILE_LEVEL_DEDUPE_TITLE_OVERLAP
+  );
 }
 
 /**
@@ -93,12 +97,12 @@ function isSameAnchor(a: Finding, b: Finding): boolean {
  * 0 when either title has no significant words, so content-blind matching
  * never merges findings it cannot actually compare.
  */
-function titleTokenOverlap(titleA: string, titleB: string): number {
+function titleTokenMatch(titleA: string, titleB: string): { overlap: number; shared: number } {
   const tokensA = significantTokens(titleA);
   const tokensB = new Set(significantTokens(titleB));
-  if (tokensA.length === 0 || tokensB.size === 0) return 0;
+  if (tokensA.length === 0 || tokensB.size === 0) return { overlap: 0, shared: 0 };
   const shared = tokensA.filter((token) => tokensB.has(token)).length;
-  return shared / Math.min(tokensA.length, tokensB.size);
+  return { overlap: shared / Math.min(tokensA.length, tokensB.size), shared };
 }
 
 /**
@@ -120,6 +124,8 @@ export interface PriorFindingRef {
 
 const SUPPRESS_LINE_TOLERANCE = 3;
 const SUPPRESS_TITLE_OVERLAP = 0.5;
+const FILE_LEVEL_DEDUPE_TITLE_OVERLAP = 0.5;
+const FILE_LEVEL_DEDUPE_MIN_SHARED_TOKENS = 2;
 
 /**
  * Drops findings that re-report an issue an existing jbot-review thread
@@ -166,7 +172,7 @@ function isSameIssue(finding: Finding, thread: PriorFindingRef): boolean {
 }
 
 function significantTokens(text: string): string[] {
-  return [...new Set(text.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [])];
+  return [...new Set(text.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])];
 }
 
 /**

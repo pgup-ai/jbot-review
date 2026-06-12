@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 
-import { Semaphore, runReview } from '../src/shared/opencode.ts';
+import { Semaphore, parsePortEnv, runReview } from '../src/shared/opencode.ts';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 
 const noLog = (): void => undefined;
@@ -138,5 +138,25 @@ describe('Semaphore', () => {
     second();
     await third;
     assert.equal(thirdAcquired, true);
+  });
+});
+
+describe('parsePortEnv', () => {
+  const OLD_ENV = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...OLD_ENV };
+  });
+
+  it('rejects port 0 for fixed opencode listener configuration', () => {
+    process.env.JBOT_OPENCODE_PORT = '0';
+
+    assert.equal(parsePortEnv('JBOT_OPENCODE_PORT', 4096), 4096);
+  });
+
+  it('accepts valid fixed ports', () => {
+    process.env.JBOT_OPENCODE_PORT = '4100';
+
+    assert.equal(parsePortEnv('JBOT_OPENCODE_PORT', 4096), 4100);
   });
 });

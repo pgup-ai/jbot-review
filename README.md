@@ -198,12 +198,12 @@ npm run replay -- fixtures/replay
 
 Every run reviews the complete base...head diff (never just the latest
 commit); repeats of findings already covered by prior jbot threads are
-suppressed in code before posting. Three inputs tune the recall/precision/cost
+suppressed in code before posting. Several inputs tune the recall/precision/cost
 balance:
 
 | Input                     | Default                        | Effect                                                                                                                                                                                                                                                                                                                       |
 | ------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `review-passes`           | `2`                            | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Lower to 1 for the fastest free-tier runs; raise to 3 for maximum recall.                                                      |
+| `review-passes`           | `1`                            | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                               |
 | `verify-findings`         | `true`                         | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                                                                              |
 | `aux-model`               | unset                          | Same-provider model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification). Lets the main review run on a stronger tier while supporting checks stay cheap and fast.                                                                                                           |
 | `review-shards`           | `0`                            | Parallel shards for the main review (`0` = auto from diff size, capped at 4). Each shard deep-reviews a subset of files with the full checkout available; the union covers the complete diff and wall clock tracks the slowest shard instead of one whole-PR session.                                                        |
@@ -218,7 +218,7 @@ balance:
 model: ${{ vars.JBOT_REVIEW_MODEL }} # heavy tier, e.g. openai/gpt-5.5
 aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL }} # same-provider fast tier for lenses + verification
 # defaults already active: review-shards auto, time-budget-minutes 10,
-# model-options {"reasoningEffort":"high"}; tighten the budget for faster runs:
+# model-options {"reasoningEffort":"medium"}; raise to high on paid heavy tiers:
 time-budget-minutes: '6' # finder deadline ~5.5m; verification uses leftover time
 ```
 

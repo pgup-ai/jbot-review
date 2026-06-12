@@ -51,7 +51,7 @@ describe('session timeout budgeting', () => {
   it('gives finders the full budget minus the posting reserve, within clamps', () => {
     assert.equal(computeFinderTimeoutMs(0), undefined);
     assert.equal(computeFinderTimeoutMs(10), 10 * 60_000 - 30_000); // ~9.5m for a 10m budget
-    assert.equal(computeFinderTimeoutMs(1), 60_000); // floor
+    assert.equal(computeFinderTimeoutMs(1), 30_000); // never exceeds the run deadline
     assert.equal(computeFinderTimeoutMs(120), 20 * 60_000); // ceiling
   });
 

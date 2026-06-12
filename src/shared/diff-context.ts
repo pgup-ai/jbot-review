@@ -32,9 +32,6 @@ export const MAX_TOTAL_DIFF_BYTES = 40 * 1024;
 export const MAX_FILE_DIFF_BYTES = 12 * 1024;
 /** Files listed individually in the "not embedded" section before "+N more". */
 const MAX_NOT_EMBEDDED_LISTED = 50;
-/** Allowance for the truncation notice a cut file appends. */
-const TRUNCATION_NOTICE_ALLOWANCE_BYTES = 96;
-
 interface RiskRule {
   pattern: RegExp;
   weight: number;
@@ -102,6 +99,7 @@ export function shardFilesForReview(
   );
   if (shardCount <= 1) return [files];
 
+  const patchless = files.filter((file) => !file.patch);
   const shards: PrFile[][] = Array.from({ length: shardCount }, () => []);
   const loads = Array.from({ length: shardCount }, () => 0);
   const bySize = [...withPatch].sort(
@@ -111,6 +109,11 @@ export function shardFilesForReview(
     const target = loads.indexOf(Math.min(...loads));
     shards[target].push(file);
     loads[target] += patchBytes(file);
+  }
+  for (const file of patchless) {
+    const target = loads.indexOf(Math.min(...loads));
+    shards[target].push(file);
+    loads[target] += 1;
   }
   return shards.filter((shard) => shard.length > 0);
 }
@@ -143,27 +146,28 @@ export function buildDiffHunksBlock(files: PrFile[], options: DiffHunksOptions =
 
   for (const file of ranked) {
     const patch = file.patch as string;
-    const wrapperBytes =
-      Buffer.byteLength(`### ${file.filename}\n\`\`\`diff\n\n\`\`\``, 'utf8') +
-      TRUNCATION_NOTICE_ALLOWANCE_BYTES;
-    const patchBudget = Math.min(perFileBudget, remaining - wrapperBytes);
+    const truncationNotice = `_Hunks truncated for ${file.filename}; run the git diff command for the rest._`;
+    const sectionSeparatorBytes = sections.length > 0 ? 2 : 0; // blank line between file sections
+    const truncatedSectionOverhead =
+      sectionSeparatorBytes +
+      Buffer.byteLength(renderDiffSection(file.filename, '', true, truncationNotice), 'utf8');
+    const patchBudget = Math.min(
+      perFileBudget - truncatedSectionOverhead,
+      remaining - truncatedSectionOverhead,
+    );
     const { text, truncated } = truncateAtLineBoundary(patch, patchBudget);
     if (!text) {
       notEmbedded.push(file.filename);
       continue;
     }
-    remaining -= Buffer.byteLength(text, 'utf8') + wrapperBytes;
-    sections.push(
-      [
-        `### ${file.filename}`,
-        '```diff',
-        text,
-        '```',
-        ...(truncated
-          ? [`_Hunks truncated for ${file.filename}; run the git diff command for the rest._`]
-          : []),
-      ].join('\n'),
-    );
+    const section = renderDiffSection(file.filename, text, truncated, truncationNotice);
+    const sectionBytes = sectionSeparatorBytes + Buffer.byteLength(section, 'utf8');
+    if (sectionBytes > remaining) {
+      notEmbedded.push(file.filename);
+      continue;
+    }
+    remaining -= sectionBytes;
+    sections.push(section);
   }
 
   const lines = [
@@ -188,6 +192,17 @@ export function buildDiffHunksBlock(files: PrFile[], options: DiffHunksOptions =
   }
 
   return lines.join('\n');
+}
+
+function renderDiffSection(
+  filename: string,
+  text: string,
+  truncated: boolean,
+  truncationNotice = `_Hunks truncated for ${filename}; run the git diff command for the rest._`,
+): string {
+  return [`### ${filename}`, '```diff', text, '```', ...(truncated ? [truncationNotice] : [])].join(
+    '\n',
+  );
 }
 
 /**

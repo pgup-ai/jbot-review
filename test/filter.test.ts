@@ -154,6 +154,15 @@ describe('dedupeFindings with file-level (line 0) anchors', () => {
     assert.equal(merged.length, 2);
   });
 
+  it('does not merge short missing-* file-level findings only because they share one word', () => {
+    const merged = dedupeFindings(
+      [finding({ line: 0, title: 'Missing provider options wiring' })],
+      [finding({ line: 0, title: 'Missing validation coverage' })],
+    );
+
+    assert.equal(merged.length, 2);
+  });
+
   it('dedupes file-level findings describing the same issue, keeping the stronger', () => {
     const merged = dedupeFindings(
       [
@@ -335,6 +344,22 @@ describe('suppressPreviouslyReported', () => {
     );
 
     assert.equal(findings.length, 1);
+  });
+
+  it('suppresses matching non-Latin titles when the prior thread body contains the same words', () => {
+    const { findings, suppressedCount } = suppressPreviouslyReported(
+      [finding({ line: 10, title: 'Ошибка обработки платежа' })],
+      [
+        {
+          path: 'src/example.ts',
+          line: 10,
+          body: '**P2** — Ошибка обработки платежа при повторе',
+        },
+      ],
+    );
+
+    assert.equal(suppressedCount, 1);
+    assert.equal(findings.length, 0);
   });
 
   it('is a no-op without prior threads', () => {

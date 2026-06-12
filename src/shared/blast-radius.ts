@@ -28,6 +28,7 @@ const EXPORT_DECLARATION = new RegExp(
   String.raw`^\+\s*export\s+(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?` +
     String.raw`(?:function\s*\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)`,
 );
+const NAMED_EXPORTS = /^\+\s*export\s+(?:type\s+)?\{([^}]+)\}/;
 
 export function extractChangedExportedSymbols(files: PrFile[]): string[] {
   const symbols = new Set<string>();
@@ -36,16 +37,36 @@ export function extractChangedExportedSymbols(files: PrFile[]): string[] {
     for (const line of file.patch.split('\n')) {
       const match = line.match(EXPORT_DECLARATION);
       if (match) symbols.add(match[1]);
+      const namedExportMatch = line.match(NAMED_EXPORTS);
+      if (namedExportMatch) {
+        for (const symbol of exportedNamesFromList(namedExportMatch[1])) {
+          symbols.add(symbol);
+        }
+      }
     }
   }
   return [...symbols];
+}
+
+function exportedNamesFromList(exportList: string): string[] {
+  return exportList
+    .split(',')
+    .map((part) => part.trim())
+    .map(
+      (part) =>
+        part
+          .split(/\s+as\s+/i)
+          .at(-1)
+          ?.trim() ?? '',
+    )
+    .filter((part) => /^[A-Za-z_$][\w$]*$/.test(part));
 }
 
 export type SymbolGrep = (workspace: string, symbol: string) => Promise<string[]>;
 
 async function gitGrepFiles(workspace: string, symbol: string): Promise<string[]> {
   try {
-    const { stdout } = await execFileAsync('git', ['grep', '-l', '-w', '--', symbol], {
+    const { stdout } = await execFileAsync('git', ['grep', '-l', '-w', '-F', '--', symbol], {
       cwd: workspace,
       timeout: GIT_GREP_TIMEOUT_MS,
       maxBuffer: 1024 * 1024,
@@ -79,7 +100,8 @@ export async function buildBlastRadiusBlock(
   grep: SymbolGrep = gitGrepFiles,
 ): Promise<string> {
   try {
-    const symbols = extractChangedExportedSymbols(files).slice(0, MAX_BLAST_SYMBOLS);
+    const allSymbols = extractChangedExportedSymbols(files);
+    const symbols = allSymbols.slice(0, MAX_BLAST_SYMBOLS);
     if (symbols.length === 0) return '';
 
     const changed = new Set(files.map((file) => file.filename));
@@ -105,6 +127,9 @@ export async function buildBlastRadiusBlock(
       '## Changed symbol usage',
       'Exported symbols this PR adds or modifies, with UNCHANGED files that reference them.',
       'Check each listed call site: does it still hold after this change? (Coverage protocol step 2.)',
+      ...(allSymbols.length > symbols.length
+        ? [`Showing ${symbols.length} of ${allSymbols.length} exported symbols.`]
+        : []),
       ...entries,
     ].join('\n');
   } catch {

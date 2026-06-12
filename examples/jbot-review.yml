@@ -55,11 +55,11 @@ jobs:
           xai-api-key: ${{ secrets.XAI_API_KEY }}
           enable-context7: auto
           context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
-          # Recall/precision controls (defaults shown): one extra lens pass,
+          # Recall/precision controls (defaults shown): one general pass,
           # blocking findings adversarially verified before posting. Set
           # aux-model to run the auxiliary sessions on a cheaper same-provider
           # model when the main model is a stronger tier.
-          review-passes: '2'
+          review-passes: '1'
           verify-findings: 'true'
           aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}

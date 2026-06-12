@@ -46,6 +46,19 @@ describe('extractChangedExportedSymbols', () => {
     assert.deepEqual(symbols, ['main', 'makeThings', 'BaseStore']);
   });
 
+  it('extracts named export lists and aliases from added lines', () => {
+    const patch = [
+      '@@ -1,1 +1,4 @@',
+      '+export { rawName, localName as exportedName };',
+      '+export type { Shape, Internal as PublicShape };',
+      '+export * from "./elsewhere.ts";',
+    ].join('\n');
+
+    const symbols = extractChangedExportedSymbols([{ filename: 'src/a.ts', patch }]);
+
+    assert.deepEqual(symbols, ['rawName', 'exportedName', 'Shape', 'PublicShape']);
+  });
+
   it('ignores files without patches', () => {
     assert.deepEqual(extractChangedExportedSymbols([{ filename: 'src/a.ts' }]), []);
   });
@@ -106,6 +119,21 @@ describe('buildBlastRadiusBlock', () => {
     assert.equal(grepped.length, MAX_BLAST_SYMBOLS);
   });
 
+  it('lists when exported symbols are omitted by the symbol cap', async () => {
+    const patch = [
+      '@@ -1,1 +1,30 @@',
+      ...Array.from({ length: MAX_BLAST_SYMBOLS + 5 }, (_, i) => `+export const sym${i} = ${i};`),
+    ].join('\n');
+
+    const block = await buildBlastRadiusBlock(
+      '/ws',
+      [{ filename: 'src/a.ts', patch }],
+      async () => ['src/elsewhere.ts'],
+    );
+
+    assert.match(block, new RegExp(`Showing ${MAX_BLAST_SYMBOLS} of ${MAX_BLAST_SYMBOLS + 5}`));
+  });
+
   // The production grep path: git grep exits 1 on "no matches", which must
   // be treated as an empty result. If that regressed, the outer fail-open
   // catch would silently erase the WHOLE block whenever any symbol had zero
@@ -117,6 +145,7 @@ describe('buildBlastRadiusBlock', () => {
       await mkdir(join(repo, 'src'), { recursive: true });
       await writeFile(join(repo, 'src', 'a.ts'), 'export function changedFn() {}\n');
       await writeFile(join(repo, 'src', 'caller.ts'), 'import { changedFn } from "./a.ts";\n');
+      await writeFile(join(repo, 'src', 'dollar.ts'), 'import { foo$ } from "./a.ts";\n');
       await execFileAsync('git', ['add', '-A'], { cwd: repo });
 
       const block = await buildBlastRadiusBlock(repo, [
@@ -124,11 +153,13 @@ describe('buildBlastRadiusBlock', () => {
           filename: 'src/a.ts',
           // ghostFn exists only in the patch, not the worktree: its grep
           // exits 1 (no matches) and must not poison changedFn's result.
-          patch: '@@ -1,1 +1,2 @@\n+export function changedFn() {\n+export function ghostFn() {',
+          patch:
+            '@@ -1,1 +1,3 @@\n+export function changedFn() {\n+export function ghostFn() {\n+export const foo$ = 1;',
         },
       ]);
 
       assert.match(block, /`changedFn` — referenced by unchanged: src\/caller\.ts/);
+      assert.match(block, /`foo\$` — referenced by unchanged: src\/dollar\.ts/);
       assert.doesNotMatch(block, /ghostFn/);
     } finally {
       await rm(repo, { recursive: true, force: true });

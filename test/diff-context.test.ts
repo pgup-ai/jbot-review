@@ -64,6 +64,23 @@ describe('buildDiffHunksBlock', () => {
     }
   });
 
+  it('accounts for long truncation notices when enforcing the file budget', () => {
+    const longName = 'src/very/long/path/to/some/deeply/nested/file-with-a-long-name.ts';
+    const block = buildDiffHunksBlock([{ filename: longName, patch: makePatch(100) }], {
+      perFileBudgetBytes: 360,
+      totalBudgetBytes: 10_000,
+    });
+    const fenced = block.split('```diff\n')[1].split('\n```')[0];
+    const notice = `_Hunks truncated for ${longName}; run the git diff command for the rest._`;
+    const section = [`### ${longName}`, '```diff', fenced, '```', notice].join('\n');
+
+    assert.ok(Buffer.byteLength(section, 'utf8') <= 360);
+    assert.match(
+      block,
+      new RegExp(`_Hunks truncated for ${longName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+    );
+  });
+
   it('lists files omitted by the total budget instead of dropping them silently', () => {
     const block = buildDiffHunksBlock(
       [
@@ -115,6 +132,20 @@ describe('shardFilesForReview', () => {
 
     assert.equal(assigned.length, files.length);
     assert.equal(new Set(assigned).size, files.length);
+  });
+
+  it('assigns patchless files to shards in multi-shard mode', () => {
+    const files = [
+      fileOfSize('large-a.ts', 30_000),
+      fileOfSize('large-b.ts', 30_000),
+      { filename: 'asset.bin' },
+      { filename: 'renamed-only.ts' },
+    ];
+
+    const shards = shardFilesForReview(files, { requestedShards: 2 });
+    const assigned = shards.flat().map((file) => file.filename);
+
+    assert.deepEqual(new Set(assigned), new Set(files.map((file) => file.filename)));
   });
 
   it('balances shard sizes largest-first', () => {
