@@ -50,6 +50,11 @@ const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
  * Builds the opencode config object that embeds the API key for the selected
  * provider. This is the official way to authenticate opencode (replaces the
  * old "set env var" pattern).
+ *
+ * Permissions enforce read-only at the CONFIG level, not just via the plan
+ * agent: edits are denied outright (never "ask" — an interactive prompt
+ * would hang a headless run), and file access outside the workspace is
+ * denied. Bash stays allowed: the review needs git diff/log/grep.
  */
 function buildConfig(providerID: string, apiKey: string): ServerOptions['config'] {
   return {
@@ -57,6 +62,10 @@ function buildConfig(providerID: string, apiKey: string): ServerOptions['config'
       [providerID]: {
         options: { apiKey },
       },
+    },
+    permission: {
+      edit: 'deny',
+      external_directory: 'deny',
     },
   };
 }
@@ -120,7 +129,9 @@ export async function startOpencode(
     const config = buildConfig(providerID, apiKey);
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',
-      port: 4096,
+      // Fixed port means two runs on one host collide (e.g. the webhook app
+      // plus a CI job on a self-hosted runner); override per process.
+      port: parsePortEnv('JBOT_OPENCODE_PORT', 4096),
       timeout: READY_TIMEOUT_MS,
       config,
     });
@@ -242,6 +253,13 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function parsePortEnv(name: string, defaultValue: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return defaultValue;
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 0 && value <= 65535 ? value : defaultValue;
+}
+
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   // If the timeout wins, keep any later rejection from the original operation
@@ -360,7 +378,9 @@ async function promptPlanAgent(
   log: (msg: string) => void,
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
-  const created = await client.session.create();
+  // The title makes parallel sessions distinguishable in opencode's own
+  // session list when debugging a run.
+  const created = await client.session.create({ body: { title: `jbot-review ${label}` } });
   const session = created.data;
   if (!session) throw new Error(`Failed to create ${label} session`);
   log(`${label} session created: ${session.id}`);
@@ -390,13 +410,25 @@ async function promptPlanAgentInSession(
     body: {
       model: { providerID, modelID },
       agent: 'plan',
+      // Defense-in-depth alongside the plan agent and the config-level
+      // permission.edit deny: mutating tools are off for every prompt.
+      // Bash stays on — the review needs git diff/log/grep.
+      tools: { write: false, edit: false, patch: false },
       parts: [{ type: 'text', text: prompt }],
     },
   });
   const promptError = getResultError(promptRes);
   if (promptError) throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
 
-  const data = await waitForAssistantMessage(client, sessionID, label, log, previousMessageID);
+  let data;
+  try {
+    data = await waitForAssistantMessage(client, sessionID, label, log, previousMessageID);
+  } catch (error) {
+    // A timed-out or failed wait leaves the session generating (and
+    // spending tokens) until the server shuts down; stop it now.
+    await abortSessionBestEffort(client, sessionID, label, log);
+    throw error;
+  }
 
   const parts = data.parts;
   log(
@@ -407,6 +439,28 @@ async function promptPlanAgentInSession(
   const raw = textPart?.text ?? '{}';
   log(`Extracted ${label} text: ${raw.length} chars`);
   return raw;
+}
+
+async function abortSessionBestEffort(
+  client: OpencodeClient,
+  sessionID: string,
+  label: string,
+  log: (msg: string) => void,
+): Promise<void> {
+  try {
+    await withTimeout(
+      client.session.abort({ path: { id: sessionID } }),
+      PROMPT_POLL_REQUEST_TIMEOUT_MS,
+      `abort timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms`,
+    );
+    log(`Aborted ${label} session ${sessionID}.`);
+  } catch (error) {
+    log(
+      `(failed to abort ${label} session ${sessionID}: ${
+        error instanceof Error ? error.message : String(error)
+      })`,
+    );
+  }
 }
 
 async function waitForAssistantMessage(

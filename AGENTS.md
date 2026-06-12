@@ -56,8 +56,10 @@ in this repo; `CLAUDE.md` just points here.
    builder).
 7. **Three-dot diff only** (`base...head`): GitHub patches — which anchors
    are validated against — are merge-base-relative.
-8. **Read-only `plan` agent** for every opencode session; the review must
-   never mutate the workspace.
+8. **Read-only enforced in three layers** for every opencode session: the
+   `plan` agent, config-level `permission.edit/external_directory: deny`,
+   and per-prompt `tools: { write/edit/patch: false }`. The review must
+   never mutate the workspace; bash stays allowed for git diff/log/grep.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal.
 10. **Extract pure logic for tests.** New decision logic goes in a pure
