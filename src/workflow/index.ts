@@ -10,9 +10,10 @@ import type { Severity } from '../shared/types.ts';
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 
-// Max review depth by default; pass model-options: '{}' to send no options
-// (e.g. for providers that reject unknown option keys).
-const DEFAULT_MODEL_OPTIONS: Record<string, unknown> = { reasoningEffort: 'high' };
+// Medium effort by default: on throttled tiers, "high" produced 2.5-15min
+// session variance that no budget can absorb. Raise it per-repo for paid
+// heavy tiers; pass '{}' to send no options at all.
+const DEFAULT_MODEL_OPTIONS: Record<string, unknown> = { reasoningEffort: 'medium' };
 
 async function main(): Promise<void> {
   const failOnError = parseBooleanInput('fail-on-error', true);

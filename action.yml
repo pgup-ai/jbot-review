@@ -103,9 +103,9 @@ inputs:
     required: false
     default: '0'
   model-options:
-    description: 'JSON object of provider options for the main model. Defaults to {"reasoningEffort":"high"} for maximum review depth; pass {} to send no options (e.g. for providers that reject unknown options). Aux-model sessions are unaffected.'
+    description: 'JSON object of provider options for the main model. Defaults to {"reasoningEffort":"medium"} — a balance of depth and latency; raise to high for paid heavy tiers, or pass {} to send no options (e.g. for providers that reject unknown options). Aux-model sessions are unaffected.'
     required: false
-    default: '{"reasoningEffort":"high"}'
+    default: '{"reasoningEffort":"medium"}'
   fail-on-error:
     description: 'Fail the workflow when the review cannot complete.'
     required: false

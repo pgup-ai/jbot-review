@@ -82,7 +82,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           auxModel: process.env.JBOT_REVIEW_AUX_MODEL?.trim() || '',
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 10),
           reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
-          modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'high' }),
+          modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'medium' }),
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });

@@ -453,7 +453,9 @@ function normalizeOptions(options: ReviewRunOptions | undefined): Required<Revie
 }
 
 const MIN_FINDER_TIMEOUT_MS = 60_000;
-const MAX_SESSION_TIMEOUT_MS = 15 * 60_000;
+// Ceiling for any single session even under a generous budget: callers who
+// set time-budget-minutes 20+ for powerful models get the full 20 minutes.
+const MAX_SESSION_TIMEOUT_MS = 20 * 60_000;
 const POSTING_RESERVE_MS = 30_000;
 const MIN_VERIFICATION_MS = 45_000;
 const MAX_VERIFICATION_MS = 5 * 60_000;

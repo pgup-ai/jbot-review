@@ -52,7 +52,7 @@ describe('session timeout budgeting', () => {
     assert.equal(computeFinderTimeoutMs(0), undefined);
     assert.equal(computeFinderTimeoutMs(10), 10 * 60_000 - 30_000); // ~9.5m for a 10m budget
     assert.equal(computeFinderTimeoutMs(1), 60_000); // floor
-    assert.equal(computeFinderTimeoutMs(120), 15 * 60_000); // ceiling
+    assert.equal(computeFinderTimeoutMs(120), 20 * 60_000); // ceiling
   });
 
   it('gives verification what actually remains, or signals a skip', () => {
