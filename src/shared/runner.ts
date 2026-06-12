@@ -14,6 +14,7 @@ import { parseAddedLines } from './patch.ts';
 import { REVIEW_LENSES, buildShardAssignmentBlock, selectLensKeys } from './prompt.ts';
 import {
   startOpencode,
+  configureSessionConcurrency,
   runReview,
   runAddressedPriorCommentsCheck,
   runFindingVerification,
@@ -92,6 +93,13 @@ export interface ReviewRunOptions {
    * on heavy models. Aux-model sessions are unaffected.
    */
   modelOptions?: Record<string, unknown>;
+  /**
+   * Max model sessions in flight at once (0 = unlimited). Throttled provider
+   * tiers serialize one key's concurrent requests upstream; capping on our
+   * side keeps session deadlines measuring model time, not queue time.
+   * Try 2-3 on free tiers.
+   */
+  maxConcurrentSessions?: number;
 }
 
 export async function runPrReview(params: {
@@ -223,6 +231,11 @@ export async function runPrReview(params: {
       .join('\n');
   }
   const basePrContext = joinContext(coreContext, diffHunksBlock);
+
+  configureSessionConcurrency(options.maxConcurrentSessions);
+  if (options.maxConcurrentSessions > 0) {
+    log(`Model session concurrency capped at ${options.maxConcurrentSessions}.`);
+  }
 
   log('Starting opencode server');
   const { client, stop } = await startOpencode(
@@ -449,6 +462,7 @@ function normalizeOptions(options: ReviewRunOptions | undefined): Required<Revie
     timeBudgetMinutes: Math.max(options?.timeBudgetMinutes ?? 0, 0),
     reviewShards: Math.max(options?.reviewShards ?? 0, 0),
     modelOptions: options?.modelOptions ?? {},
+    maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 0, 0),
   };
 }
 

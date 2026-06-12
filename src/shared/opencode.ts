@@ -82,6 +82,43 @@ function buildConfig(
 }
 
 /**
+ * Bounds in-flight model sessions. Free / throttled provider tiers serialize
+ * concurrent requests on one API key upstream anyway — observed as a
+ * flash-tier session taking 7+ minutes while queued behind parallel shards.
+ * Capping concurrency on OUR side keeps each session's deadline measuring
+ * model time, not queue time. 0 = unlimited.
+ */
+export class Semaphore {
+  private queue: Array<() => void> = [];
+  private active = 0;
+
+  constructor(private readonly limit: number) {}
+
+  async acquire(): Promise<() => void> {
+    if (this.active < this.limit) {
+      this.active += 1;
+    } else {
+      await new Promise<void>((resolve) => this.queue.push(resolve));
+      this.active += 1;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.active -= 1;
+      const next = this.queue.shift();
+      if (next) next();
+    };
+  }
+}
+
+let sessionSlots: Semaphore | undefined;
+
+export function configureSessionConcurrency(limit: number): void {
+  sessionSlots = limit > 0 ? new Semaphore(limit) : undefined;
+}
+
+/**
  * Serializes the `process.chdir(workspace) → createOpencode → restoreCwd`
  * critical section so concurrent startOpencode calls don't race on the
  * process-global cwd. Each call awaits the previous one before mutating.
@@ -450,6 +487,31 @@ async function promptPlanAgentInSession(
   label: string,
   log: (msg: string) => void,
   timeoutMs = PROMPT_TIMEOUT_MS,
+): Promise<string> {
+  const release = sessionSlots ? await sessionSlots.acquire() : undefined;
+  try {
+    return await promptInSessionHoldingSlot(
+      client,
+      model,
+      sessionID,
+      prompt,
+      label,
+      log,
+      timeoutMs,
+    );
+  } finally {
+    release?.();
+  }
+}
+
+async function promptInSessionHoldingSlot(
+  client: OpencodeClient,
+  model: string,
+  sessionID: string,
+  prompt: string,
+  label: string,
+  log: (msg: string) => void,
+  timeoutMs: number,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
 

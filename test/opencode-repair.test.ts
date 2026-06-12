@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { runReview } from '../src/shared/opencode.ts';
+import { Semaphore, runReview } from '../src/shared/opencode.ts';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 
 const noLog = (): void => undefined;
@@ -95,5 +95,48 @@ describe('runReview JSON repair loop', () => {
       /unparseable JSON/,
     );
     assert.equal(prompts.length, 2);
+  });
+});
+
+describe('Semaphore', () => {
+  it('never exceeds the limit and wakes waiters in order', async () => {
+    const semaphore = new Semaphore(2);
+    let active = 0;
+    let peak = 0;
+    const order: number[] = [];
+
+    await Promise.all(
+      Array.from({ length: 6 }, (_, i) => i).map(async (i) => {
+        const release = await semaphore.acquire();
+        active += 1;
+        peak = Math.max(peak, active);
+        order.push(i);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        release();
+      }),
+    );
+
+    assert.equal(peak, 2);
+    assert.equal(order.length, 6);
+  });
+
+  it('tolerates double release without freeing an extra slot', async () => {
+    const semaphore = new Semaphore(1);
+    const first = await semaphore.acquire();
+    first();
+    first(); // double release must be a no-op
+
+    const second = await semaphore.acquire();
+    let thirdAcquired = false;
+    const third = semaphore.acquire().then((release) => {
+      thirdAcquired = true;
+      release();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(thirdAcquired, false); // limit 1 still enforced
+    second();
+    await third;
+    assert.equal(thirdAcquired, true);
   });
 });

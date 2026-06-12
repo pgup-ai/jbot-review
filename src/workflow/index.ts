@@ -55,6 +55,7 @@ async function main(): Promise<void> {
     timeBudgetMinutes: parseNumberInput('time-budget-minutes', 10),
     reviewShards: parseNumberInput('review-shards', 0),
     modelOptions: parseJsonObjectInput('model-options', DEFAULT_MODEL_OPTIONS),
+    maxConcurrentSessions: parseNumberInput('max-concurrent-sessions', 0),
   };
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${model}`);

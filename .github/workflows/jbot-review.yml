@@ -80,6 +80,7 @@ jobs:
           time-budget-minutes: ${{ vars.JBOT_TIME_BUDGET_MINUTES || '10' }}
           review-shards: ${{ vars.JBOT_REVIEW_SHARDS || '0' }}
           model-options: ${{ vars.JBOT_MODEL_OPTIONS || '' }}
+          max-concurrent-sessions: ${{ vars.JBOT_MAX_CONCURRENT_SESSIONS || '0' }}
           enable-context7: ${{ inputs['enable-context7'] || 'auto' }}
           fail-on-error: ${{ inputs['fail-on-error'] || 'true' }}
           opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
