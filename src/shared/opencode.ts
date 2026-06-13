@@ -220,6 +220,12 @@ let sessionSlots: Semaphore | undefined;
 let sessionSlotLimit = 0;
 const clientDirectories = new WeakMap<OpencodeClient, string>();
 
+type ReadablePart = {
+  type: string;
+  text?: string;
+  structured?: unknown;
+};
+
 export function configureSessionConcurrency(limit: number): void {
   const normalized = Math.max(0, Math.floor(limit));
   if (normalized === sessionSlotLimit) return;
@@ -688,10 +694,8 @@ async function promptInSessionHoldingSlot(
     `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
   );
 
-  const structuredRaw = isRecord(data.info.structured)
-    ? JSON.stringify(data.info.structured)
-    : undefined;
-  const textParts = parts.filter((p) => p.type === 'text' && p.text);
+  const structuredRaw = extractStructuredRaw(data.info.structured, parts);
+  const textParts = parts.filter((p) => p.text);
   // No text part (e.g. the model exhausted its budget on reasoning) must
   // surface as a parse failure so the repair loop fires — defaulting to
   // '{}' would silently score the session as "no findings".
@@ -719,7 +723,7 @@ function createAssistantMessageWaiter(
 ): {
   promise: Promise<{
     info: AssistantMessage;
-    parts: ReadonlyArray<{ type: string; text?: string }>;
+    parts: ReadonlyArray<ReadablePart>;
   }>;
   cancel: () => void;
 } {
@@ -782,7 +786,7 @@ async function waitForAssistantMessageViaEvents(
   log: (msg: string) => void,
   timeoutMs: number,
   controller: AbortController,
-): Promise<{ info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> }> {
+): Promise<{ info: AssistantMessage; parts: ReadonlyArray<ReadablePart> }> {
   const startedAt = Date.now();
   let lastStatus = 'waiting for event stream';
   let progressTimer: NodeJS.Timeout | undefined;
@@ -870,7 +874,7 @@ async function waitForAssistantMessageByPolling(
   messageID: string,
   log: (msg: string) => void,
   timeoutMs = PROMPT_TIMEOUT_MS,
-): Promise<{ info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> }> {
+): Promise<{ info: AssistantMessage; parts: ReadonlyArray<ReadablePart> }> {
   const startedAt = Date.now();
   let lastStatus = 'unknown';
   let lastProgressLogAt = startedAt;
@@ -913,9 +917,7 @@ async function getAssistantMessageBestEffort(
   sessionID: string,
   messageID: string,
   label: string,
-): Promise<
-  { info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> } | undefined
-> {
+): Promise<{ info: AssistantMessage; parts: ReadonlyArray<ReadablePart> } | undefined> {
   try {
     return await fetchAssistantMessage(client, sessionID, messageID, label);
   } catch {
@@ -947,7 +949,7 @@ async function fetchAssistantMessage(
   sessionID: string,
   messageID: string,
   label: string,
-): Promise<{ info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> }> {
+): Promise<{ info: AssistantMessage; parts: ReadonlyArray<ReadablePart> }> {
   const result = await withTimeout(
     client.session.message({ ...directoryParams(client), sessionID, messageID }),
     PROMPT_POLL_REQUEST_TIMEOUT_MS,
@@ -1035,8 +1037,51 @@ function isSessionStatus(value: unknown): value is SessionStatus {
   );
 }
 
-function toTextReadablePart(part: Part): { type: string; text?: string } {
-  return part.type === 'text' ? { type: part.type, text: part.text } : { type: part.type };
+function toTextReadablePart(part: Part): ReadablePart {
+  if (part.type === 'text') return { type: part.type, text: part.text };
+  if (part.type !== 'tool') return { type: part.type };
+
+  const payload = extractToolPartPayload(part);
+  return { type: part.type, ...payload };
+}
+
+function extractStructuredRaw(
+  messageStructured: unknown,
+  parts: ReadonlyArray<ReadablePart>,
+): string | undefined {
+  if (isRecord(messageStructured)) return JSON.stringify(messageStructured);
+  const structured = parts.find((part) => isRecord(part.structured))?.structured;
+  return isRecord(structured) ? JSON.stringify(structured) : undefined;
+}
+
+function extractToolPartPayload(part: Part): { text?: string; structured?: unknown } {
+  if (part.type !== 'tool' || !isRecord(part.state)) return {};
+  const state: Record<string, unknown> = part.state;
+  if (state.status !== 'completed') return {};
+
+  if (isRecord(state.structured)) return { structured: state.structured };
+
+  const output = typeof state.output === 'string' ? state.output.trim() : '';
+  if (output) return { text: output };
+
+  const contentText = extractToolContentText(state.content);
+  if (contentText) return { text: contentText };
+
+  if (typeof state.result === 'string' && state.result.trim()) return { text: state.result.trim() };
+  if (isRecord(state.result)) return { structured: state.result };
+  return {};
+}
+
+function extractToolContentText(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((item) =>
+      isRecord(item) && item.type === 'text' && typeof item.text === 'string' ? item.text : '',
+    )
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+  return text || undefined;
 }
 
 function directoryParams(client: OpencodeClient): { directory: string } | undefined {

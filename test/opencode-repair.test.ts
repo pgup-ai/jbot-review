@@ -14,14 +14,19 @@ interface FakeMessage {
     time: { completed: number };
     structured?: unknown;
   };
-  parts: Array<{ type: 'text'; text: string }>;
+  parts: FakePart[];
 }
+
+type FakePart =
+  | { type: 'text'; text: string }
+  | { type: 'tool'; state: Record<string, unknown> }
+  | { type: 'reasoning' };
 
 type FakeResponse =
   | string
   | string[]
   | null
-  | { text?: string | string[] | null; structured?: unknown };
+  | { text?: string | string[] | null; structured?: unknown; parts?: FakePart[] };
 
 /**
  * Minimal fake of the opencode client surface runReview touches. Each
@@ -73,12 +78,7 @@ function makeFakeClient(
         const index = prompts.length - 1;
         const id = request.messageID ?? `m${prompts.length}`;
         const scripted = index < responses.length ? responses[index] : '{}';
-        const text = isStructuredResponse(scripted) ? scripted.text : scripted;
-        const parts = Array.isArray(text)
-          ? text.map((part) => ({ type: 'text' as const, text: part }))
-          : text === null
-            ? []
-            : [{ type: 'text' as const, text }];
+        const parts = buildFakeParts(scripted);
         const message = {
           info: {
             role: 'assistant' as const,
@@ -119,9 +119,20 @@ function makeFakeClient(
   return { client, prompts, formats };
 }
 
+function buildFakeParts(scripted: FakeResponse): FakePart[] {
+  if (isStructuredResponse(scripted) && scripted.parts) return scripted.parts;
+  const text = isStructuredResponse(scripted) ? scripted.text : scripted;
+  return Array.isArray(text)
+    ? text.map((part) => ({ type: 'text' as const, text: part }))
+    : text === null
+      ? []
+      : [{ type: 'text' as const, text }];
+}
+
 function isStructuredResponse(value: FakeResponse): value is {
   text?: string | string[] | null;
   structured?: unknown;
+  parts?: FakePart[];
 } {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -186,6 +197,42 @@ describe('runReview JSON repair loop', () => {
   it('uses native structured output when OpenCode stores it outside text parts', async () => {
     const { client, prompts } = makeFakeClient([
       { text: null, structured: JSON.parse(VALID_REVIEW) },
+    ]);
+
+    const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 1);
+    assert.equal(result.summary, 'ok after repair');
+    assert.equal(result.findings.length, 1);
+  });
+
+  it('uses completed tool structured output when OpenCode stores JSON schema output in a tool part', async () => {
+    const { client, prompts } = makeFakeClient([
+      {
+        text: null,
+        parts: [
+          { type: 'reasoning' },
+          {
+            type: 'tool',
+            state: { status: 'completed', structured: JSON.parse(VALID_REVIEW), output: '' },
+          },
+        ],
+      },
+    ]);
+
+    const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 1);
+    assert.equal(result.summary, 'ok after repair');
+    assert.equal(result.findings.length, 1);
+  });
+
+  it('uses completed tool output text when OpenCode stores JSON schema output there', async () => {
+    const { client, prompts } = makeFakeClient([
+      {
+        text: null,
+        parts: [{ type: 'tool', state: { status: 'completed', output: VALID_REVIEW } }],
+      },
     ]);
 
     const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
