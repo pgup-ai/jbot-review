@@ -2,20 +2,6 @@
 
 ## Next: OpenCode SDK modernization (validate each via dogfood + golden set)
 
-- **Migrate sessions to `@opencode-ai/sdk/v2` for native structured output.**
-  The v2 generated request types expose JSON-schema output formatting
-  (`type: "json_schema"` plus `schema` and `retryCount`), which should enforce
-  the findings schema at the SDK layer with built-in retries — eventually
-  retiring our salvage parser (`parseJsonObject` candidate extraction) and the
-  one-shot JSON repair loop. Biggest reliability win available; needs runtime
-  validation because v2 request/response shapes differ (`path.sessionID`,
-  message envelopes).
-- **Replace 2s polling with `client.event.subscribe()` (SSE).** The current
-  loop refetches the full message list (including large diff-context parts)
-  every 2 seconds per session, up to 6 sessions in parallel for up to 15
-  minutes. The event stream pushes message/session updates so messages are
-  fetched once, on completion. Alternatively, `session.messages` accepts a
-  `limit` query param — verify its ordering semantics before using it.
 - **Drop the chdir mutex in favor of per-request `directory`.**
   `session.create`/`promptAsync`/`messages`/`status` accept `query.directory`;
   we now pass it while still spawning the server from the workspace cwd for
@@ -24,6 +10,15 @@
 
 ## Completed
 
+- **Migrate sessions to `@opencode-ai/sdk/v2` for native structured output.**
+  Use the v2 SDK import and pass JSON-schema `format` objects on review,
+  guideline, addressed-thread, verifier, and repair prompts. Keep
+  `parseJsonObject` and the one-shot repair loop as fallback validation until
+  dogfood + golden runs prove the native schema path is enough on its own.
+- **Replace 2s full-message polling with `client.event.subscribe()` (SSE).**
+  Wait for `message.updated`/`session.status` events, then fetch the completed
+  assistant message once by id. Keep the bounded polling path as a compatibility
+  fallback if event subscription is unavailable.
 - **Upgrade `@opencode-ai/sdk` 1.16.2 -> 1.17.5.** Re-checked the generated
   type surfaces: v1 supports per-request `query.directory`,
   `session.messages` `limit`, and `event.subscribe()`; v2 exposes JSON-schema

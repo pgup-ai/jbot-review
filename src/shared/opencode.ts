@@ -1,11 +1,13 @@
 import {
   createOpencode,
   type AssistantMessage,
+  type Event as OpencodeEvent,
   type OpencodeClient,
+  type OutputFormat,
   type Part,
   type ServerOptions,
   type SessionStatus,
-} from '@opencode-ai/sdk';
+} from '@opencode-ai/sdk/v2';
 
 import { parseModelName } from './model.ts';
 import {
@@ -31,6 +33,7 @@ const PROMPT_TIMEOUT_MS = 15 * 60_000;
 const PROMPT_POLL_INTERVAL_MS = 2_000;
 const PROMPT_POLL_REQUEST_TIMEOUT_MS = 10_000;
 const PROMPT_PROGRESS_LOG_MS = 60_000;
+const EVENT_SUBSCRIBE_TIMEOUT_MS = 10_000;
 const CONTEXT7_MCP_NAME = 'context7';
 const CONTEXT7_MCP_URL = 'https://mcp.context7.com/mcp';
 const CONTEXT7_MCP_TIMEOUT_MS = 15_000;
@@ -45,6 +48,103 @@ const VALID_FINDING_KINDS = new Set<FindingKind>([
   'investigate',
 ]);
 const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
+const FINDING_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['path', 'line', 'severity', 'kind', 'confidence', 'title', 'body'],
+  properties: {
+    path: { type: 'string' },
+    line: { type: 'integer', minimum: 0 },
+    severity: { type: 'string', enum: ['P0', 'P1', 'P2', 'P3', 'nit'] },
+    kind: {
+      type: 'string',
+      enum: [
+        'bug',
+        'security',
+        'performance',
+        'maintainability',
+        'architecture',
+        'test',
+        'docs',
+        'investigate',
+      ],
+    },
+    confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+    title: { type: 'string' },
+    body: { type: 'string' },
+  },
+} as const;
+const ADDRESSED_PRIOR_COMMENT_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'addressedByCommit', 'note'],
+  properties: {
+    id: { type: 'string' },
+    addressedByCommit: { type: 'string' },
+    note: { type: 'string' },
+  },
+} as const;
+const REVIEW_OUTPUT_FORMAT: OutputFormat = {
+  type: 'json_schema',
+  retryCount: 1,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['summary', 'findings'],
+    properties: {
+      summary: { type: 'string' },
+      findings: { type: 'array', items: FINDING_JSON_SCHEMA },
+    },
+  },
+};
+const FINDINGS_OUTPUT_FORMAT: OutputFormat = {
+  type: 'json_schema',
+  retryCount: 1,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['findings'],
+    properties: {
+      findings: { type: 'array', items: FINDING_JSON_SCHEMA },
+    },
+  },
+};
+const ADDRESSED_OUTPUT_FORMAT: OutputFormat = {
+  type: 'json_schema',
+  retryCount: 1,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['addressedPriorComments'],
+    properties: {
+      addressedPriorComments: { type: 'array', items: ADDRESSED_PRIOR_COMMENT_JSON_SCHEMA },
+    },
+  },
+};
+const VERDICTS_OUTPUT_FORMAT: OutputFormat = {
+  type: 'json_schema',
+  retryCount: 1,
+  schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['verdicts'],
+    properties: {
+      verdicts: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['index', 'verdict', 'reason'],
+          properties: {
+            index: { type: 'integer', minimum: 0 },
+            verdict: { type: 'string', enum: ['confirmed', 'refuted', 'uncertain'] },
+            reason: { type: 'string' },
+          },
+        },
+      },
+    },
+  },
+};
 
 /**
  * Builds the opencode config object that embeds the API key for the selected
@@ -230,7 +330,7 @@ export async function listProviderModels(
   timeoutMs = MODEL_LIST_TIMEOUT_MS,
 ): Promise<string[]> {
   const result = await withTimeout(
-    client.provider.list(),
+    client.provider.list(directoryParams(client)),
     timeoutMs,
     `provider model listing timed out after ${timeoutMs}ms`,
   );
@@ -256,22 +356,21 @@ export async function enableContext7Mcp(
 
   try {
     await client.mcp.add({
-      body: {
-        name: CONTEXT7_MCP_NAME,
-        config: {
-          type: 'remote',
-          url: CONTEXT7_MCP_URL,
-          enabled: true,
-          headers: {
-            CONTEXT7_API_KEY: trimmedKey,
-            Accept: 'application/json, text/event-stream',
-          },
-          timeout: CONTEXT7_MCP_TIMEOUT_MS,
+      ...directoryParams(client),
+      name: CONTEXT7_MCP_NAME,
+      config: {
+        type: 'remote',
+        url: CONTEXT7_MCP_URL,
+        enabled: true,
+        headers: {
+          CONTEXT7_API_KEY: trimmedKey,
+          Accept: 'application/json, text/event-stream',
         },
+        timeout: CONTEXT7_MCP_TIMEOUT_MS,
       },
     });
     added = true;
-    await client.mcp.connect({ path: { name: CONTEXT7_MCP_NAME } });
+    await client.mcp.connect({ ...directoryParams(client), name: CONTEXT7_MCP_NAME });
     log('Context7 MCP enabled for external API/SDK documentation checks.');
     return true;
   } catch (error) {
@@ -288,7 +387,7 @@ export async function disableContext7Mcp(
   log: (msg: string) => void,
 ): Promise<void> {
   try {
-    await client.mcp.disconnect({ path: { name: CONTEXT7_MCP_NAME } });
+    await client.mcp.disconnect({ ...directoryParams(client), name: CONTEXT7_MCP_NAME });
   } catch (error) {
     log(`Context7 MCP disconnect skipped: ${formatContext7Error(error)}`);
   }
@@ -375,6 +474,7 @@ export async function runReview(
     label,
     log,
     options.timeoutMs,
+    REVIEW_OUTPUT_FORMAT,
   );
   try {
     return parseReview(raw, label, log, { strict: true });
@@ -389,6 +489,7 @@ export async function runReview(
       `${label}-repair`,
       log,
       options.timeoutMs,
+      REVIEW_OUTPUT_FORMAT,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
@@ -409,6 +510,7 @@ export async function runAddressedPriorCommentsCheck(
     'addressed-prior-comments',
     log,
     timeoutMs,
+    ADDRESSED_OUTPUT_FORMAT,
   );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
 }
@@ -429,6 +531,7 @@ export async function runGuidelineComplianceCheck(
     'guideline-compliance',
     log,
     timeoutMs,
+    FINDINGS_OUTPUT_FORMAT,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
 }
@@ -464,6 +567,7 @@ export async function runFindingVerification(
     'finding-verification',
     log,
     timeoutMs,
+    VERDICTS_OUTPUT_FORMAT,
   );
   return parseFindingVerdicts(raw, findings.length, log);
 }
@@ -475,13 +579,14 @@ async function promptPlanAgent(
   label: string,
   log: (msg: string) => void,
   timeoutMs?: number,
+  outputFormat?: OutputFormat,
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
   // The title makes parallel sessions distinguishable in opencode's own
   // session list when debugging a run.
   const created = await client.session.create({
-    body: { title: `jbot-review ${label}` },
-    query: queryDirectory(client),
+    ...directoryParams(client),
+    title: `jbot-review ${label}`,
   });
   const session = created.data;
   if (!session) throw new Error(`Failed to create ${label} session`);
@@ -495,6 +600,7 @@ async function promptPlanAgent(
     label,
     log,
     timeoutMs,
+    outputFormat,
   );
   return { raw, sessionID: session.id };
 }
@@ -507,6 +613,7 @@ async function promptPlanAgentInSession(
   label: string,
   log: (msg: string) => void,
   timeoutMs = PROMPT_TIMEOUT_MS,
+  outputFormat?: OutputFormat,
 ): Promise<string> {
   const release = sessionSlots ? await sessionSlots.acquire() : undefined;
   try {
@@ -518,6 +625,7 @@ async function promptPlanAgentInSession(
       label,
       log,
       timeoutMs,
+      outputFormat,
     );
   } finally {
     release?.();
@@ -532,41 +640,42 @@ async function promptInSessionHoldingSlot(
   label: string,
   log: (msg: string) => void,
   timeoutMs: number,
+  outputFormat?: OutputFormat,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
+  const messageID = `msg_jbot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 
-  // A follow-up prompt in an existing session must not return the previous
-  // completed assistant message: remember its id and wait for a NEWER one.
-  const previous = await getLatestAssistantMessage(client, sessionID, label);
-  const previousMessageID = previous?.info.id;
+  const waiter = createAssistantMessageWaiter(client, sessionID, label, messageID, log, timeoutMs);
 
   log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
-  const promptRes = await client.session.promptAsync({
-    path: { id: sessionID },
-    query: queryDirectory(client),
-    body: {
+  let promptRes;
+  try {
+    promptRes = await client.session.promptAsync({
+      ...directoryParams(client),
+      sessionID,
+      messageID,
       model: { providerID, modelID },
       agent: 'plan',
       // Defense-in-depth alongside the plan agent and the config-level
       // permission.edit deny: mutating tools are off for every prompt.
       // Bash stays on — the review needs git diff/log/grep.
       tools: { write: false, edit: false, patch: false },
+      ...(outputFormat ? { format: outputFormat } : {}),
       parts: [{ type: 'text', text: prompt }],
-    },
-  });
+    });
+  } catch (error) {
+    waiter.cancel();
+    throw error;
+  }
   const promptError = getResultError(promptRes);
-  if (promptError) throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
+  if (promptError) {
+    waiter.cancel();
+    throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
+  }
 
   let data;
   try {
-    data = await waitForAssistantMessage(
-      client,
-      sessionID,
-      label,
-      log,
-      previousMessageID,
-      timeoutMs,
-    );
+    data = await waiter.promise;
   } catch (error) {
     // A timed-out or failed wait leaves the session generating (and
     // spending tokens) until the server shuts down; stop it now.
@@ -579,18 +688,68 @@ async function promptInSessionHoldingSlot(
     `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
   );
 
+  const structuredRaw = isRecord(data.info.structured)
+    ? JSON.stringify(data.info.structured)
+    : undefined;
   const textParts = parts.filter((p) => p.type === 'text' && p.text);
   // No text part (e.g. the model exhausted its budget on reasoning) must
   // surface as a parse failure so the repair loop fires — defaulting to
   // '{}' would silently score the session as "no findings".
-  const raw = textParts
-    .map((p) => p.text)
-    .join('\n\n')
-    .trim();
+  const raw =
+    structuredRaw ??
+    textParts
+      .map((p) => p.text)
+      .join('\n\n')
+      .trim();
   if (!raw)
     log(`${label} response contained no text part (types: ${parts.map((p) => p.type).join(', ')})`);
-  log(`Extracted ${label} text: ${raw.length} chars from ${textParts.length} text part(s)`);
+  log(
+    `Extracted ${label} text: ${raw.length} chars from ${textParts.length} text part(s), structured=${structuredRaw ? 'yes' : 'no'}`,
+  );
   return raw;
+}
+
+function createAssistantMessageWaiter(
+  client: OpencodeClient,
+  sessionID: string,
+  label: string,
+  messageID: string,
+  log: (msg: string) => void,
+  timeoutMs: number,
+): {
+  promise: Promise<{
+    info: AssistantMessage;
+    parts: ReadonlyArray<{ type: string; text?: string }>;
+  }>;
+  cancel: () => void;
+} {
+  const controller = new AbortController();
+  const promise = waitForAssistantMessageViaEvents(
+    client,
+    sessionID,
+    label,
+    messageID,
+    log,
+    timeoutMs,
+    controller,
+  ).catch(async (error) => {
+    if (controller.signal.aborted) throw error;
+    if (!shouldFallbackToMessagePolling(error)) throw error;
+    log(
+      `${label} event wait unavailable; falling back to message polling: ${formatUnknownError(
+        error,
+      )}`,
+    );
+    return waitForAssistantMessageByPolling(client, sessionID, label, messageID, log, timeoutMs);
+  });
+
+  return {
+    promise,
+    cancel: () => {
+      controller.abort();
+      void promise.catch(() => undefined);
+    },
+  };
 }
 
 async function abortSessionBestEffort(
@@ -601,7 +760,7 @@ async function abortSessionBestEffort(
 ): Promise<void> {
   try {
     await withTimeout(
-      client.session.abort({ path: { id: sessionID }, query: queryDirectory(client) }),
+      client.session.abort({ ...directoryParams(client), sessionID }),
       PROMPT_POLL_REQUEST_TIMEOUT_MS,
       `abort timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms`,
     );
@@ -615,12 +774,101 @@ async function abortSessionBestEffort(
   }
 }
 
-async function waitForAssistantMessage(
+async function waitForAssistantMessageViaEvents(
   client: OpencodeClient,
   sessionID: string,
   label: string,
+  messageID: string,
   log: (msg: string) => void,
-  ignoreMessageID?: string,
+  timeoutMs: number,
+  controller: AbortController,
+): Promise<{ info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> }> {
+  const startedAt = Date.now();
+  let lastStatus = 'waiting for event stream';
+  let progressTimer: NodeJS.Timeout | undefined;
+  let timeoutTimer: NodeJS.Timeout | undefined;
+
+  const eventsPromise = (async () => {
+    const subscription = await withTimeout(
+      client.event.subscribe(directoryParams(client), {
+        signal: controller.signal,
+        sseMaxRetryAttempts: 1,
+      }),
+      EVENT_SUBSCRIBE_TIMEOUT_MS,
+      `opencode ${label} event subscription timed out after ${EVENT_SUBSCRIBE_TIMEOUT_MS}ms`,
+    );
+
+    for await (const event of subscription.stream) {
+      const status = sessionStatusFromEvent(event, sessionID);
+      if (status) {
+        lastStatus = describeSessionStatus(status);
+        if (status.type === 'idle') {
+          const message = await getAssistantMessageBestEffort(client, sessionID, messageID, label);
+          if (message) return message;
+        }
+      }
+
+      const eventError = sessionErrorFromEvent(event, sessionID);
+      if (eventError) {
+        throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(eventError)}`);
+      }
+
+      const message = assistantMessageFromEvent(event, sessionID);
+      if (!message) continue;
+      if (message.error) {
+        throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(message.error)}`);
+      }
+      if (!message.time.completed) continue;
+
+      return fetchAssistantMessage(client, sessionID, message.id, label);
+    }
+
+    throw new Error(`opencode ${label} event stream ended before the prompt completed`);
+  })();
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutTimer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `opencode ${label} prompt did not finish within ${Math.round(
+              timeoutMs / 1000,
+            )}s (last status: ${lastStatus})`,
+          ),
+        ),
+      timeoutMs,
+    );
+  });
+
+  progressTimer = setInterval(() => {
+    log(
+      `${label} prompt still running (${Math.round(
+        (Date.now() - startedAt) / 1000,
+      )}s, ${lastStatus})`,
+    );
+  }, PROMPT_PROGRESS_LOG_MS);
+
+  try {
+    return await Promise.race([eventsPromise, timeoutPromise]);
+  } finally {
+    controller.abort();
+    void eventsPromise.catch(() => undefined);
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    if (progressTimer) clearInterval(progressTimer);
+  }
+}
+
+function shouldFallbackToMessagePolling(error: unknown): boolean {
+  const message = formatUnknownError(error);
+  return !/prompt (did not finish|failed)/.test(message);
+}
+
+async function waitForAssistantMessageByPolling(
+  client: OpencodeClient,
+  sessionID: string,
+  label: string,
+  messageID: string,
+  log: (msg: string) => void,
   timeoutMs = PROMPT_TIMEOUT_MS,
 ): Promise<{ info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> }> {
   const startedAt = Date.now();
@@ -628,8 +876,7 @@ async function waitForAssistantMessage(
   let lastProgressLogAt = startedAt;
 
   while (Date.now() - startedAt < timeoutMs) {
-    const latest = await getLatestAssistantMessage(client, sessionID, label);
-    const message = latest && latest.info.id === ignoreMessageID ? undefined : latest;
+    const message = await getAssistantMessageBestEffort(client, sessionID, messageID, label);
     if (message?.info.error) {
       throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(message.info.error)}`);
     }
@@ -661,15 +908,23 @@ async function waitForAssistantMessage(
   );
 }
 
-async function getLatestAssistantMessage(
+async function getAssistantMessageBestEffort(
   client: OpencodeClient,
   sessionID: string,
+  messageID: string,
   label: string,
 ): Promise<
   { info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> } | undefined
 > {
+  try {
+    return await fetchAssistantMessage(client, sessionID, messageID, label);
+  } catch {
+    // Fall back to the legacy list endpoint for older servers that accept a
+    // caller-provided prompt messageID but derive a separate assistant id.
+  }
+
   const result = await withTimeout(
-    client.session.messages({ path: { id: sessionID }, query: queryDirectory(client) }),
+    client.session.messages({ ...directoryParams(client), sessionID, limit: 1 }),
     PROMPT_POLL_REQUEST_TIMEOUT_MS,
     `opencode ${label} message polling timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID})`,
   );
@@ -687,13 +942,38 @@ async function getLatestAssistantMessage(
   return undefined;
 }
 
+async function fetchAssistantMessage(
+  client: OpencodeClient,
+  sessionID: string,
+  messageID: string,
+  label: string,
+): Promise<{ info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> }> {
+  const result = await withTimeout(
+    client.session.message({ ...directoryParams(client), sessionID, messageID }),
+    PROMPT_POLL_REQUEST_TIMEOUT_MS,
+    `opencode ${label} message fetch timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID} message=${messageID})`,
+  );
+  const error = getResultError(result);
+  if (error) throw new Error(`opencode ${label} message fetch failed: ${error}`);
+
+  const message = result.data;
+  if (!message) throw new Error(`opencode ${label} message fetch returned no data`);
+  if (message.info.role !== 'assistant') {
+    throw new Error(`opencode ${label} message ${messageID} is not an assistant response`);
+  }
+  return {
+    info: message.info,
+    parts: (message.parts ?? []).map(toTextReadablePart),
+  };
+}
+
 async function getSessionStatus(
   client: OpencodeClient,
   sessionID: string,
   label: string,
 ): Promise<SessionStatus | undefined> {
   const result = await withTimeout(
-    client.session.status({ query: queryDirectory(client) }),
+    client.session.status(directoryParams(client)),
     PROMPT_POLL_REQUEST_TIMEOUT_MS,
     `opencode ${label} status polling timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID})`,
   );
@@ -703,11 +983,63 @@ async function getSessionStatus(
   return statuses?.[sessionID];
 }
 
+function assistantMessageFromEvent(
+  event: OpencodeEvent,
+  sessionID: string,
+): AssistantMessage | undefined {
+  if (!isRecord(event) || event.type !== 'message.updated') return undefined;
+  const properties = event.properties;
+  if (!isRecord(properties) || properties.sessionID !== sessionID) return undefined;
+  const info = properties.info;
+  if (!isAssistantMessage(info)) return undefined;
+  return info;
+}
+
+function sessionStatusFromEvent(
+  event: OpencodeEvent,
+  sessionID: string,
+): SessionStatus | undefined {
+  if (!isRecord(event)) return undefined;
+  if (event.type === 'session.idle') {
+    const properties = event.properties;
+    return isRecord(properties) && properties.sessionID === sessionID
+      ? { type: 'idle' }
+      : undefined;
+  }
+  if (event.type !== 'session.status') return undefined;
+  const properties = event.properties;
+  if (!isRecord(properties) || properties.sessionID !== sessionID) return undefined;
+  return isSessionStatus(properties.status) ? properties.status : undefined;
+}
+
+function sessionErrorFromEvent(event: OpencodeEvent, sessionID: string): unknown {
+  if (!isRecord(event) || event.type !== 'session.error') return undefined;
+  const properties = event.properties;
+  if (!isRecord(properties)) return undefined;
+  if (properties.sessionID && properties.sessionID !== sessionID) return undefined;
+  return properties.error;
+}
+
+function isAssistantMessage(value: unknown): value is AssistantMessage {
+  return isRecord(value) && value.role === 'assistant' && typeof value.id === 'string';
+}
+
+function isSessionStatus(value: unknown): value is SessionStatus {
+  return (
+    isRecord(value) &&
+    (value.type === 'idle' ||
+      value.type === 'busy' ||
+      (value.type === 'retry' &&
+        typeof value.attempt === 'number' &&
+        typeof value.message === 'string'))
+  );
+}
+
 function toTextReadablePart(part: Part): { type: string; text?: string } {
   return part.type === 'text' ? { type: part.type, text: part.text } : { type: part.type };
 }
 
-function queryDirectory(client: OpencodeClient): { directory: string } | undefined {
+function directoryParams(client: OpencodeClient): { directory: string } | undefined {
   const directory = clientDirectories.get(client);
   return directory ? { directory } : undefined;
 }
