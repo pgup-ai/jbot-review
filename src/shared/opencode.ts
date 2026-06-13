@@ -495,7 +495,6 @@ export async function runReview(
       `${label}-repair`,
       log,
       options.timeoutMs,
-      REVIEW_OUTPUT_FORMAT,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
@@ -1060,28 +1059,8 @@ function extractToolPartPayload(part: Part): { text?: string; structured?: unkno
   if (state.status !== 'completed') return {};
 
   if (isRecord(state.structured)) return { structured: state.structured };
-
-  const output = typeof state.output === 'string' ? state.output.trim() : '';
-  if (output) return { text: output };
-
-  const contentText = extractToolContentText(state.content);
-  if (contentText) return { text: contentText };
-
-  if (typeof state.result === 'string' && state.result.trim()) return { text: state.result.trim() };
   if (isRecord(state.result)) return { structured: state.result };
   return {};
-}
-
-function extractToolContentText(content: unknown): string | undefined {
-  if (!Array.isArray(content)) return undefined;
-  const text = content
-    .map((item) =>
-      isRecord(item) && item.type === 'text' && typeof item.text === 'string' ? item.text : '',
-    )
-    .filter(Boolean)
-    .join('\n\n')
-    .trim();
-  return text || undefined;
 }
 
 function directoryParams(client: OpencodeClient): { directory: string } | undefined {
@@ -1142,6 +1121,17 @@ export function parseReview(
   }
 
   const obj = parsed as Record<string, unknown>;
+  if (options.strict && (typeof obj.summary !== 'string' || !Array.isArray(obj.findings))) {
+    const missing = [
+      typeof obj.summary !== 'string' ? 'summary' : '',
+      !Array.isArray(obj.findings) ? 'findings' : '',
+    ]
+      .filter(Boolean)
+      .join(', ');
+    log(`${label} response was missing required review field(s): ${missing}`);
+    log(`${label} response preview:\n${truncateForLog(raw, 2000)}`);
+    throw new Error(`opencode ${label} returned JSON missing required field(s): ${missing}`);
+  }
   const summary = typeof obj.summary === 'string' ? obj.summary : '';
   const rawFindings = Array.isArray(obj.findings) ? obj.findings : [];
   const rawAddressed = Array.isArray(obj.addressedPriorComments) ? obj.addressedPriorComments : [];

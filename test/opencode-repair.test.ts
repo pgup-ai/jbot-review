@@ -166,20 +166,19 @@ describe('runReview JSON repair loop', () => {
     assert.equal(result.summary, 'ok after repair');
   });
 
-  it('requests native JSON schema output for initial and repair prompts', async () => {
+  it('requests native JSON schema output for the initial prompt only', async () => {
     const { client, formats } = makeFakeClient(['garbage', VALID_REVIEW]);
 
     await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
 
     assert.equal(formats.length, 2);
-    for (const format of formats) {
-      assert.equal((format as { type?: unknown }).type, 'json_schema');
-      assert.equal((format as { retryCount?: unknown }).retryCount, 1);
-      assert.deepEqual((format as { schema?: { required?: unknown } }).schema?.required, [
-        'summary',
-        'findings',
-      ]);
-    }
+    assert.equal((formats[0] as { type?: unknown }).type, 'json_schema');
+    assert.equal((formats[0] as { retryCount?: unknown }).retryCount, 1);
+    assert.deepEqual((formats[0] as { schema?: { required?: unknown } }).schema?.required, [
+      'summary',
+      'findings',
+    ]);
+    assert.equal(formats[1], undefined);
   });
 
   it('parses JSON from an earlier text part without repair', async () => {
@@ -227,17 +226,19 @@ describe('runReview JSON repair loop', () => {
     assert.equal(result.findings.length, 1);
   });
 
-  it('uses completed tool output text when OpenCode stores JSON schema output there', async () => {
+  it('does not treat completed tool output text as the reviewer answer', async () => {
     const { client, prompts } = makeFakeClient([
       {
         text: null,
         parts: [{ type: 'tool', state: { status: 'completed', output: VALID_REVIEW } }],
       },
+      VALID_REVIEW,
     ]);
 
     const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
 
-    assert.equal(prompts.length, 1);
+    assert.equal(prompts.length, 2);
+    assert.equal(prompts[1].includes('could not be parsed as JSON'), true);
     assert.equal(result.summary, 'ok after repair');
     assert.equal(result.findings.length, 1);
   });
