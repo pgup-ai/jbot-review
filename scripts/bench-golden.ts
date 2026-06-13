@@ -12,6 +12,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
+import { loadEnvFile } from 'node:process';
 
 import { dedupeFindings } from '../src/shared/filter.ts';
 import { parseModelName } from '../src/shared/model.ts';
@@ -151,6 +152,7 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
 }
 
 async function main(): Promise<void> {
+  loadDefaultEnvFile();
   const args = parseArgs(process.argv.slice(2));
   const caseDirs = await selectCases(args);
 
@@ -236,6 +238,11 @@ async function main(): Promise<void> {
     });
     process.exitCode = score.status ?? 1;
   }
+}
+
+function loadDefaultEnvFile(): void {
+  if (!existsSync('.env')) return;
+  loadEnvFile('.env');
 }
 
 function buildSnapshotOctokit(files: PrFile[], commits: ReviewCommit[]): Octokit {

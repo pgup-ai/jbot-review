@@ -14,9 +14,9 @@
     "dev": "tsx src/app/server.ts",
     "start": "npx tsx src/app/server.ts",
     "replay": "tsx scripts/replay-review.ts",
-    "bench:golden": "node --env-file-if-exists=.env --import tsx scripts/bench-golden.ts",
-    "bench:golden:case": "node --env-file-if-exists=.env --import tsx scripts/bench-golden.ts --case fms-3064-ai-chat-duplicate-review --model openai/gpt-5.4",
-    "bench:golden:all": "node --env-file-if-exists=.env --import tsx scripts/bench-golden.ts --all --model anthropic/claude-sonnet-4-6",
+    "bench:golden": "tsx scripts/bench-golden.ts",
+    "bench:golden:case": "tsx scripts/bench-golden.ts --case fms-3064-ai-chat-duplicate-review --model openai/gpt-5.4",
+    "bench:golden:all": "tsx scripts/bench-golden.ts --all --model anthropic/claude-sonnet-4-6",
     "eval": "tsx scripts/eval-review.ts"
   },
   "dependencies": {
