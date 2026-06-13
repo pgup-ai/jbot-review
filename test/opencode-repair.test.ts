@@ -166,6 +166,16 @@ describe('runReview JSON repair loop', () => {
     assert.equal(result.summary, 'ok after repair');
   });
 
+  it('does not request native JSON schema output for opencode-go models', async () => {
+    const { client, prompts, formats } = makeFakeClient([VALID_REVIEW]);
+
+    const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 1);
+    assert.equal(formats[0], undefined);
+    assert.equal(result.summary, 'ok after repair');
+  });
+
   it('requests native JSON schema output for the initial prompt only', async () => {
     const { client, formats } = makeFakeClient(['garbage', VALID_REVIEW]);
 

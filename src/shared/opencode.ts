@@ -651,6 +651,7 @@ async function promptInSessionHoldingSlot(
   const messageID = `msg_jbot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 
   const waiter = createAssistantMessageWaiter(client, sessionID, label, messageID, log, timeoutMs);
+  const requestFormat = shouldUseNativeOutputFormat(providerID) ? outputFormat : undefined;
 
   log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
   let promptRes;
@@ -665,7 +666,7 @@ async function promptInSessionHoldingSlot(
       // permission.edit deny: mutating tools are off for every prompt.
       // Bash stays on — the review needs git diff/log/grep.
       tools: { write: false, edit: false, patch: false },
-      ...(outputFormat ? { format: outputFormat } : {}),
+      ...(requestFormat ? { format: requestFormat } : {}),
       parts: [{ type: 'text', text: prompt }],
     });
   } catch (error) {
@@ -710,6 +711,13 @@ async function promptInSessionHoldingSlot(
     `Extracted ${label} text: ${raw.length} chars from ${textParts.length} text part(s), structured=${structuredRaw ? 'yes' : 'no'}`,
   );
   return raw;
+}
+
+function shouldUseNativeOutputFormat(providerID: string): boolean {
+  // opencode-go currently maps JSON schema output through provider tool_choice
+  // paths that some models reject and others satisfy with tool-only messages.
+  // Keep prompt-level JSON plus strict parsing for that provider instead.
+  return providerID !== 'opencode-go';
 }
 
 function createAssistantMessageWaiter(
