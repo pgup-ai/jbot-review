@@ -9,7 +9,7 @@
  * reviewer, and stores the model's findings beside the expected labels.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
@@ -229,8 +229,10 @@ async function main(): Promise<void> {
     await runWithConcurrency(heads, args.snapshotConcurrency, async (head) => {
       const opencodePort = nextOpencodePort++;
       console.log(`Snapshot ${head.sha.slice(0, 12)} (${head.reason})`);
-      ensureCommit(repoWorkspace, snapshot.repo, snapshot.pr, head.sha);
-      const workspace = prepareSnapshotWorkspace(repoWorkspace, caseName, head.sha);
+      const workspace = await withRepoLock(repoWorkspace, async () => {
+        ensureCommit(repoWorkspace, snapshot.repo, snapshot.pr, head.sha);
+        return prepareSnapshotWorkspace(repoWorkspace, caseName, head.sha);
+      });
       const baseSha = resolveBaseSha(workspace, snapshot.baseSha, head.sha);
 
       const files = getChangedFiles(workspace, baseSha, head.sha);
@@ -478,12 +480,34 @@ function prepareSnapshotWorkspace(
     headSha.slice(0, 12),
   );
   if (!existsSync(join(target, '.git'))) {
+    rmSync(target, { recursive: true, force: true });
     mkdirSync(dirname(target), { recursive: true });
+    git(repoWorkspace, ['worktree', 'prune']);
     git(repoWorkspace, ['worktree', 'add', '--detach', target, headSha]);
   } else {
     git(target, ['checkout', '--detach', headSha]);
   }
   return target;
+}
+
+const repoLocks = new Map<string, Promise<void>>();
+
+async function withRepoLock<T>(repoWorkspace: string, fn: () => T | Promise<T>): Promise<T> {
+  const previous = repoLocks.get(repoWorkspace) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const chained = previous.then(() => current);
+  repoLocks.set(repoWorkspace, chained);
+
+  await previous;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (repoLocks.get(repoWorkspace) === chained) repoLocks.delete(repoWorkspace);
+  }
 }
 
 function sanitizePathPart(value: string): string {

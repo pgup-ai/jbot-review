@@ -207,7 +207,11 @@ export async function startOpencode(
     log(`opencode server listening at ${server.url} (provider=${providerID} model=${modelID})`);
 
     const stop = () => {
-      server.close();
+      try {
+        server.close();
+      } catch (error) {
+        log(`opencode server close failed: ${formatUnknownError(error)}`);
+      }
     };
 
     return { client, stop };
