@@ -121,12 +121,6 @@
       ]
     },
     {
-      "sha": "c69db9f21631785fedcb9403d70ccc788297d90e",
-      "reason": "review-comment-head",
-      "sourceCommentIds": [3405613993],
-      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3405613993"]
-    },
-    {
       "sha": "84c39b6f42b1c2f5e2bbff0f94ab8a52d8682f0f",
       "reason": "review-comment-head",
       "sourceCommentIds": [3405752447, 3405752451],

@@ -361,7 +361,8 @@ function selectSnapshotHeads(
   snapshot: GoldenSnapshot,
   expected: GoldenExpected,
 ): GoldenSnapshot['heads'] {
-  if (expected.findings.length === 0) return snapshot.heads;
+  const snapshotHeads = dedupeSnapshotHeads(snapshot.heads);
+  if (expected.findings.length === 0) return snapshotHeads;
 
   const wantedHeadShas = new Set<string>();
   const wantedCommentIds = new Set<number>();
@@ -383,17 +384,26 @@ function selectSnapshotHeads(
     for (const id of commentIds) wantedCommentIds.add(id);
   }
 
-  if (findingsWithProvenance !== expected.findings.length) return snapshot.heads;
+  if (findingsWithProvenance !== expected.findings.length) return snapshotHeads;
   if (findingsWithHeadProvenance === expected.findings.length) {
-    const selected = snapshot.heads.filter((head) => wantedHeadShas.has(head.sha));
-    return selected.length > 0 ? selected : snapshot.heads;
+    const selected = snapshotHeads.filter((head) => wantedHeadShas.has(head.sha));
+    return selected.length > 0 ? selected : snapshotHeads;
   }
 
-  const selected = snapshot.heads.filter((head) => {
+  const selected = snapshotHeads.filter((head) => {
     if (wantedHeadShas.has(head.sha)) return true;
     return head.sourceCommentIds?.some((id) => wantedCommentIds.has(id)) ?? false;
   });
-  return selected.length > 0 ? selected : snapshot.heads;
+  return selected.length > 0 ? selected : snapshotHeads;
+}
+
+function dedupeSnapshotHeads(heads: GoldenSnapshot['heads']): GoldenSnapshot['heads'] {
+  const seen = new Set<string>();
+  return heads.filter((head) => {
+    if (seen.has(head.sha)) return false;
+    seen.add(head.sha);
+    return true;
+  });
 }
 
 async function runWithConcurrency<T>(
