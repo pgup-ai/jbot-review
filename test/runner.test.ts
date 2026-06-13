@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   buildSummaryScopeBlock,
+  buildMainShardFailureMessage,
   computeFinderTimeoutMs,
   computeRetryTimeoutMs,
   computeRunDeadline,
@@ -91,5 +92,15 @@ describe('computeRunDeadline', () => {
   it('derives the absolute deadline from the budget minus the posting reserve', () => {
     assert.equal(computeRunDeadline(10, 1_000_000), 1_000_000 + 10 * 60_000 - 30_000);
     assert.equal(computeRunDeadline(0, 1_000_000), undefined);
+  });
+});
+
+describe('buildMainShardFailureMessage', () => {
+  it('makes partial main-review coverage a fatal error', () => {
+    const message = buildMainShardFailureMessage(1, 2, new Error('git diff failed'));
+
+    assert.match(message, /1 of 2 main review shard\(s\) failed/);
+    assert.match(message, /refusing to post partial review coverage/);
+    assert.match(message, /git diff failed/);
   });
 });
