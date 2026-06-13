@@ -1,0 +1,13 @@
+{
+  "repo": "integral-xyz/fms",
+  "pr": 3038,
+  "baseSha": "a3f2025ff6ef8ff58a6a85382042e3f90443e2a7",
+  "finalHeadSha": "e3f2f86a5df80c5fa150ad508b0690379ef86e58",
+  "mergeSha": "c23f9d4e850d9297388bfcd4ecee5e0738707a34",
+  "heads": [
+    {
+      "sha": "e3f2f86a5df80c5fa150ad508b0690379ef86e58",
+      "reason": "clean-final-head"
+    }
+  ]
+}

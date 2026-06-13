@@ -100,6 +100,20 @@ export interface ReviewRunOptions {
    * Try 2-3 on free tiers.
    */
   maxConcurrentSessions?: number;
+  /**
+   * Override opencode server port for this run. Local benchmark workers use
+   * this to run isolated snapshots concurrently.
+   */
+  opencodePort?: number;
+  /**
+   * Local harness hook: receives the same filtered findings that dry-run would
+   * post. Not exposed through the GitHub Action input surface.
+   */
+  onReviewResult?: (result: {
+    summary: string;
+    findings: Finding[];
+    addressedPriorComments: AddressedPriorComment[];
+  }) => void;
 }
 
 export async function runPrReview(params: {
@@ -238,20 +252,22 @@ export async function runPrReview(params: {
   }
 
   log('Starting opencode server');
-  const { client, stop } = await startOpencode(
-    workspace,
-    providerID,
-    modelID,
-    apiKey,
-    log,
-    options.modelOptions,
-  );
+  const { client, stop } = await startOpencode(workspace, providerID, modelID, apiKey, log, {
+    modelOptions: options.modelOptions,
+    port: options.opencodePort > 0 ? options.opencodePort : undefined,
+  });
   try {
     try {
-      const models = await listProviderModels(client, providerID);
+      const modelListCacheKey = `${providerID}:${modelID}`;
+      let models = providerModelListCache.get(modelListCacheKey);
+      const fromCache = !!models;
+      if (!models) {
+        models = await listProviderModels(client, providerID);
+        providerModelListCache.set(modelListCacheKey, models);
+      }
       log(
         models.length > 0
-          ? `Available models for ${providerID} using supplied API key/config:\n${models.join('\n')}`
+          ? `Available models for ${providerID} using supplied API key/config${fromCache ? ' (cached)' : ''}:\n${models.join('\n')}`
           : `Available models for ${providerID} using supplied API key/config: none returned`,
       );
     } catch (e) {
@@ -387,6 +403,11 @@ export async function runPrReview(params: {
 
     if (options.dryRun) {
       const body = buildBody(summary, filteredFindings, orphaned, model, owner, repo, headSha);
+      options.onReviewResult?.({
+        summary,
+        findings: filteredFindings,
+        addressedPriorComments: verifiedAddressedPriorComments,
+      });
       log(
         `Dry run enabled; would post verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
       );
@@ -445,7 +466,10 @@ export async function runPrReview(params: {
   }
 }
 
-function normalizeOptions(options: ReviewRunOptions | undefined): Required<ReviewRunOptions> {
+type NormalizedReviewRunOptions = Required<Omit<ReviewRunOptions, 'onReviewResult'>> &
+  Pick<ReviewRunOptions, 'onReviewResult'>;
+
+function normalizeOptions(options: ReviewRunOptions | undefined): NormalizedReviewRunOptions {
   const maxPasses = 1 + Object.keys(REVIEW_LENSES).length;
   return {
     enhancedContext: options?.enhancedContext ?? false,
@@ -463,13 +487,17 @@ function normalizeOptions(options: ReviewRunOptions | undefined): Required<Revie
     reviewShards: Math.max(options?.reviewShards ?? 0, 0),
     modelOptions: options?.modelOptions ?? {},
     maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 0, 0),
+    opencodePort: Math.max(options?.opencodePort ?? 0, 0),
+    onReviewResult: options?.onReviewResult,
   };
 }
 
+const providerModelListCache = new Map<string, string[]>();
+
 const MIN_FINDER_TIMEOUT_MS = 60_000;
 // Ceiling for any single session even under a generous budget: callers who
-// set time-budget-minutes 20+ for powerful models get the full 20 minutes.
-const MAX_SESSION_TIMEOUT_MS = 20 * 60_000;
+// set time-budget-minutes 30+ for powerful models get the full 30-minute window.
+const MAX_SESSION_TIMEOUT_MS = 30 * 60_000;
 const POSTING_RESERVE_MS = 30_000;
 const MIN_VERIFICATION_MS = 45_000;
 const MAX_VERIFICATION_MS = 5 * 60_000;
@@ -647,7 +675,7 @@ async function verifyBlockingFindings(params: {
   return application.findings;
 }
 
-function filterFindings(findings: Finding[], options: Required<ReviewRunOptions>): Finding[] {
+function filterFindings(findings: Finding[], options: NormalizedReviewRunOptions): Finding[] {
   const maxRank = SEVERITY_RANK[options.minSeverity];
   const filtered = findings.filter((finding) => SEVERITY_RANK[finding.severity] <= maxRank);
   if (options.maxFindings <= 0) return filtered;

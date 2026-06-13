@@ -1,0 +1,27 @@
+{
+  "provenance": {
+    "repo": "integral-xyz/fms-frontend",
+    "pr": 1775,
+    "url": "https://github.com/integral-xyz/fms-frontend/pull/1775",
+    "baseSha": "f15899e8b85c89c5dbed61934c0181d8093dc56a",
+    "headSha": "b1b2bc79fdd06b741bff3a586af28c38f2693a03",
+    "mergeSha": "ddc2f2a9b44fa4fdf73d47b991a2d0b35e6d791d",
+    "source": "high-confidence j-bot review thread, applied before merge"
+  },
+  "exhaustive": false,
+  "findings": [
+    {
+      "path": "src/components/ui/email-recipient-input.tsx",
+      "lineStart": 107,
+      "lineEnd": 112,
+      "category": "ux",
+      "mustFind": true,
+      "description": "Duplicate-only paste must not clear typed draft text when no new recipient was actually added.",
+      "keywords": ["paste", "duplicate", "draft", "recipient", "clear"],
+      "sourceCommentIds": [3399343711],
+      "sourceUrls": [
+        "https://github.com/integral-xyz/fms-frontend/pull/1775#discussion_r3399343711"
+      ]
+    }
+  ]
+}

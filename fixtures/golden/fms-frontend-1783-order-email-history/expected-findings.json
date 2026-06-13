@@ -1,0 +1,25 @@
+{
+  "provenance": {
+    "repo": "integral-xyz/fms-frontend",
+    "pr": 1783,
+    "url": "https://github.com/integral-xyz/fms-frontend/pull/1783",
+    "baseSha": "856fa4575e8ea5290d09068b4da83b0ce04149d4",
+    "headSha": "897d6967e7ff2831346bf6b072999d118a03adcd",
+    "mergeSha": "9f2083737f226a9d14347722192b4a56b12d3998",
+    "source": "high-confidence review thread, applied before merge"
+  },
+  "exhaustive": false,
+  "findings": [
+    {
+      "path": "src/components/orders/order-email-send-history.tsx",
+      "category": "runtime",
+      "mustFind": true,
+      "description": "The order email history actor rendering path must not use the in operator on primitive strings because it can throw at runtime.",
+      "keywords": ["in", "operator", "primitive", "actor", "string"],
+      "sourceCommentIds": [3405895317],
+      "sourceUrls": [
+        "https://github.com/integral-xyz/fms-frontend/pull/1783#discussion_r3405895317"
+      ]
+    }
+  ]
+}

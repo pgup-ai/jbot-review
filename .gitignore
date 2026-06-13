@@ -4,6 +4,7 @@ dist/
 .env
 .DS_Store
 .idea/
+.tmp/
 
 # Golden-set eval: actual findings are produced per run, never committed
 fixtures/golden/**/actual-findings.json

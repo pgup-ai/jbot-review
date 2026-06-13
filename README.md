@@ -207,19 +207,18 @@ balance:
 | `verify-findings`         | `true`                         | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                                                                              |
 | `aux-model`               | unset                          | Same-provider model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification). Lets the main review run on a stronger tier while supporting checks stay cheap and fast.                                                                                                           |
 | `review-shards`           | `0`                            | Parallel shards for the main review (`0` = auto from diff size, capped at 4). Each shard deep-reviews a subset of files with the full checkout available; the union covers the complete diff and wall clock tracks the slowest shard instead of one whole-PR session.                                                        |
-| `time-budget-minutes`     | `10`                           | Wall-clock target (`0` = no budget). Finder sessions get the full budget (minus a 30s posting reserve) as their deadline; shard retries and verification use whatever remains, or are skipped (fail-open). A session over its deadline is aborted and degrades only its own coverage — noted in the summary — never the run. |
+| `time-budget-minutes`     | `30`                           | Wall-clock target (`0` = no budget). Finder sessions get the full budget (minus a 30s posting reserve) as their deadline; shard retries and verification use whatever remains, or are skipped (fail-open). A session over its deadline is aborted and degrades only its own coverage — noted in the summary — never the run. |
 | `max-concurrent-sessions` | `0`                            | Max model sessions in flight (0 = unlimited). Free/throttled tiers serialize one key's requests upstream — observed as a flash session queued 7+ minutes behind parallel shards. Capping at 2–3 keeps each session's deadline measuring model time, not queue time.                                                          |
 | `model-options`           | `{"reasoningEffort":"medium"}` | JSON object of provider options for the main model, passed through opencode to the provider SDK. Medium balances depth and latency; set `{"reasoningEffort":"high"}` on paid heavy tiers for maximum depth, or pass `{}` to send no options (e.g. for providers that reject unknown keys).                                   |
 
-**Heavy-model recipe** (deep reviews from GPT‑5.x / Opus-class models in
-~5–6 minutes without timeouts): set the main `model` to the heavy tier, then
+**Heavy-model recipe** (deep reviews from GPT‑5.x / Opus-class models with
+longer timeout headroom): set the main `model` to the heavy tier, then
 
 ```yaml
 model: ${{ vars.JBOT_REVIEW_MODEL }} # heavy tier, e.g. openai/gpt-5.5
 aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL }} # same-provider fast tier for lenses + verification
-# defaults already active: review-shards auto, time-budget-minutes 10,
-# model-options {"reasoningEffort":"medium"}; raise to high on paid heavy tiers:
-time-budget-minutes: '6' # finder deadline ~5.5m; verification uses leftover time
+# defaults already active: review-shards auto, time-budget-minutes 30,
+# model-options {"reasoningEffort":"medium"}; raise to high on paid heavy tiers.
 ```
 
 Sharding keeps each heavy session small (one shard ≈ 24KB of diff), so

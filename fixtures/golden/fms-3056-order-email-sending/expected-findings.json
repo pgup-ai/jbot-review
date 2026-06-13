@@ -1,0 +1,45 @@
+{
+  "provenance": {
+    "repo": "integral-xyz/fms",
+    "pr": 3056,
+    "url": "https://github.com/integral-xyz/fms/pull/3056",
+    "baseSha": "3225fc43d091641bb78ea22e7698103738b99f51",
+    "headSha": "5c8b8d515a8dc78ebfcb82c177b67c33d0e6965f",
+    "mergeSha": "920142175c489d88855ce21fc32f473793cc548d",
+    "source": "high-confidence review threads, applied before merge"
+  },
+  "exhaustive": false,
+  "findings": [
+    {
+      "path": "apps/core-ledger/src/orders/dto/order-email.dto.ts",
+      "lineStart": 25,
+      "lineEnd": 35,
+      "category": "validation",
+      "mustFind": true,
+      "description": "Order email sending must cap recipient count; otherwise a request can fan out an unbounded number of provider sends.",
+      "keywords": ["recipient", "count", "cap", "email", "validation"],
+      "sourceCommentIds": [3396972385],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3056#discussion_r3396972385"]
+    },
+    {
+      "path": "libs/core-ledger-shared/src/order/entity/order-email-send.entity-schema.ts",
+      "category": "data-modeling",
+      "mustFind": true,
+      "description": "Successful email send history should store one send record with recipient data, not duplicate one send into multiple rows per recipient.",
+      "keywords": ["jsonb", "recipients", "one", "record", "email"],
+      "sourceCommentIds": [3398378486],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3056#discussion_r3398378486"]
+    },
+    {
+      "path": "apps/core-ledger/src/orders/orders.service.ts",
+      "lineStart": 2444,
+      "lineEnd": 2465,
+      "category": "audit",
+      "mustFind": true,
+      "description": "Sending an order email is a user-visible operation and should emit an audit log entry for the send_order_email action.",
+      "keywords": ["audit", "send_order_email", "order", "email", "action"],
+      "sourceCommentIds": [3397476818],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3056#discussion_r3397476818"]
+    }
+  ]
+}

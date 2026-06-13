@@ -52,6 +52,76 @@ npm run eval                 # fixtures/golden
 npm run eval -- path/to/set  # alternate root
 ```
 
+## Running a model benchmark
+
+Golden cases are pinned to review snapshots in `snapshot.json`. Positive cases
+use the commit(s) where the original review comments were made, not the final
+merged head, because the final PR often already contains the fix.
+For GitHub review comments, prefer `original_commit_id` over `commit_id`:
+`commit_id` can move with the thread to a later post-fix head, while
+`original_commit_id` preserves the code state that produced the finding.
+
+Run one case:
+
+```
+npm run bench:golden:case
+```
+
+Run all cases:
+
+```
+npm run bench:golden:all
+```
+
+Both scripts load provider keys from `.env` when present.
+
+The runner:
+
+- finds or clones the target repo,
+- checks out each pinned snapshot head,
+- computes the local `base...head` diff,
+- runs the read-only jbot/opencode review,
+- writes each case's `actual-findings.json` after every completed snapshot,
+- then runs `npm run eval` unless `--no-score` is passed.
+
+When expected findings include `sourceCommentIds` or `sourceHeadSha(s)`, the
+benchmark runs only the snapshot heads needed to cover those labels. Cases
+without per-finding provenance conservatively run every snapshot in
+`snapshot.json`.
+
+By default it uses isolated clones under `.tmp/golden-repos/` so active working
+trees are not disturbed. Override a repo location with:
+
+```
+npm run bench:golden -- \
+  --case fms-3064-ai-chat-duplicate-review \
+  --model openai/gpt-5.4 \
+  --repo-root integral-xyz/fms=/path/to/fms
+```
+
+Snapshots are run serially by default. To run independent snapshots in parallel,
+use isolated git worktrees and per-worker opencode ports:
+
+```
+npm run bench:golden -- \
+  --case fms-3064-ai-chat-duplicate-review \
+  --model opencode/deepseek-v4-flash-free \
+  --snapshot-concurrency 2 \
+  --opencode-port-start 4096
+```
+
+Keep `--snapshot-concurrency` modest. Each snapshot already fans out into review
+shards, guideline checks, and verification sessions; high snapshot concurrency
+can overload a single provider key.
+
+You can set the default in `.env`:
+
+```
+BENCH_GOLDEN_SNAPSHOT_CONCURRENCY=2
+```
+
+Passing `--snapshot-concurrency` on the command line overrides the env value.
+
 ## Seeding the set
 
 Grow this set from real failures — every production miss (a competitor bot or
