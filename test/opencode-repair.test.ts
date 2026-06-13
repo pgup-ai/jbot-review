@@ -36,7 +36,11 @@ type FakeResponse =
  */
 function makeFakeClient(
   responses: FakeResponse[],
-  options: { emitMessageUpdated?: boolean; emitIdle?: boolean } = {},
+  options: {
+    emitMessageUpdated?: boolean;
+    emitIdle?: boolean;
+    emitToolStepBeforeFinal?: boolean;
+  } = {},
 ): {
   client: OpencodeClient;
   prompts: string[];
@@ -79,10 +83,36 @@ function makeFakeClient(
         const id = request.messageID ?? `m${prompts.length}`;
         const scripted = index < responses.length ? responses[index] : '{}';
         const parts = buildFakeParts(scripted);
+        if (options.emitToolStepBeforeFinal) {
+          const toolMessage = {
+            info: {
+              role: 'assistant' as const,
+              id,
+              parentID: id,
+              time: { completed: 1 },
+            },
+            parts: [
+              {
+                type: 'tool' as const,
+                state: { status: 'completed', output: 'git diff output' },
+              },
+            ],
+          };
+          messages.push(toolMessage);
+          if (options.emitMessageUpdated !== false) {
+            emit({
+              type: 'message.updated',
+              properties: {
+                sessionID: 'session-1',
+                info: toolMessage.info,
+              },
+            });
+          }
+        }
         const message = {
           info: {
             role: 'assistant' as const,
-            id,
+            id: options.emitToolStepBeforeFinal ? `${id}-final` : id,
             parentID: id,
             time: { completed: 1 },
             ...(isStructuredResponse(scripted) ? { structured: scripted.structured } : {}),
@@ -111,12 +141,46 @@ function makeFakeClient(
         const message = messages.find((item) => item.info.id === request.messageID);
         return message ? { data: message } : { error: { message: 'not found' } };
       },
-      messages: async () => ({ data: [...messages] }),
+      messages: async (request: { order?: 'asc' | 'desc'; limit?: number } = {}) => {
+        const ordered = request.order === 'desc' ? [...messages].reverse() : [...messages];
+        return { data: ordered.slice(0, request.limit) };
+      },
       status: async () => ({ data: { 'session-1': { type: 'idle' } } }),
+      wait: async () => ({}),
+    },
+    v2: {
+      session: {
+        wait: async () => ({}),
+        messages: async (request: { order?: 'asc' | 'desc'; limit?: number } = {}) => {
+          const ordered = request.order === 'desc' ? [...messages].reverse() : [...messages];
+          return {
+            data: {
+              data: ordered.slice(0, request.limit).map(toFakeProjectedMessage),
+              cursor: {},
+            },
+          };
+        },
+      },
     },
   } as unknown as OpencodeClient;
 
   return { client, prompts, formats };
+}
+
+function toFakeProjectedMessage(message: FakeMessage): unknown {
+  return {
+    type: 'assistant',
+    id: message.info.id,
+    time: message.info.time,
+    content: message.parts.map((part, index) => {
+      if (part.type === 'text') return { type: 'text', id: `p${index}`, text: part.text };
+      if (part.type === 'tool') {
+        return { type: 'tool', id: `p${index}`, name: 'bash', state: part.state };
+      }
+      return { type: 'reasoning', id: `p${index}`, text: '' };
+    }),
+    ...(message.info.structured ? { structured: message.info.structured } : {}),
+  };
 }
 
 function buildFakeParts(scripted: FakeResponse): FakePart[] {
@@ -253,7 +317,7 @@ describe('runReview JSON repair loop', () => {
     assert.equal(result.findings.length, 1);
   });
 
-  it('fetches the assistant message on idle events even without message-updated completion', async () => {
+  it('fetches the assistant message after session wait even without message-updated completion', async () => {
     const { client, prompts } = makeFakeClient([VALID_REVIEW], {
       emitMessageUpdated: false,
       emitIdle: true,
@@ -263,6 +327,18 @@ describe('runReview JSON repair loop', () => {
 
     assert.equal(prompts.length, 1);
     assert.equal(result.summary, 'ok after repair');
+  });
+
+  it('waits for idle and reads the latest assistant message after tool steps', async () => {
+    const { client, prompts } = makeFakeClient([VALID_REVIEW], {
+      emitToolStepBeforeFinal: true,
+    });
+
+    const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 1);
+    assert.equal(result.summary, 'ok after repair');
+    assert.equal(result.findings.length, 1);
   });
 
   it('treats a reasoning-only response (no text part) as repairable, not as zero findings', async () => {
