@@ -57,6 +57,9 @@ npm run eval -- path/to/set  # alternate root
 Golden cases are pinned to review snapshots in `snapshot.json`. Positive cases
 use the commit(s) where the original review comments were made, not the final
 merged head, because the final PR often already contains the fix.
+For GitHub review comments, prefer `original_commit_id` over `commit_id`:
+`commit_id` can move with the thread to a later post-fix head, while
+`original_commit_id` preserves the code state that produced the finding.
 
 Run one case:
 

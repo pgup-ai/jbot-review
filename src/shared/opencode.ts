@@ -110,12 +110,21 @@ export class Semaphore {
       if (next) next();
     };
   }
+
+  isBusy(): boolean {
+    return this.active > 0 || this.queue.length > 0;
+  }
 }
 
 let sessionSlots: Semaphore | undefined;
+let sessionSlotLimit = 0;
 
 export function configureSessionConcurrency(limit: number): void {
-  sessionSlots = limit > 0 ? new Semaphore(limit) : undefined;
+  const normalized = Math.max(0, Math.floor(limit));
+  if (normalized === sessionSlotLimit) return;
+  if (sessionSlots?.isBusy()) return;
+  sessionSlotLimit = normalized;
+  sessionSlots = normalized > 0 ? new Semaphore(normalized) : undefined;
 }
 
 /**

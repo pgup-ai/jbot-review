@@ -18,6 +18,7 @@
       "mustFind": true,
       "description": "A delayed forced fallback can be persisted after a follow-up user message and then incorrectly suppress the follow-up assistant reply.",
       "keywords": ["fallback", "suppress", "follow-up", "stale", "forcePersistResponse"],
+      "sourceHeadSha": "05ba749c592e215ac05ae4d9b5ca4d0203f1e4c2",
       "sourceCommentIds": [3399488933],
       "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3399488933"]
     },
@@ -29,6 +30,7 @@
       "mustFind": true,
       "description": "Counterparty duplicate intent detection must not treat an initial merge request as a merge-preview follow-up before duplicate summary context exists.",
       "keywords": ["initial", "merge", "follow-up", "duplicate", "summary"],
+      "sourceHeadSha": "30e9235f9c98500f827a9be15b7590a1d4be14ca",
       "sourceCommentIds": [3400022310],
       "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3400022310"]
     },
@@ -40,6 +42,7 @@
       "mustFind": true,
       "description": "After a duplicate-summary turn, unrelated merge requests in other domains must not be misclassified as counterparty merge previews.",
       "keywords": ["unrelated", "merge", "counterparty", "dedup", "domain"],
+      "sourceHeadSha": "e3d57f9e74a691ccb84a66e064cdb5e61fce9090",
       "sourceCommentIds": [3400004500],
       "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3400004500"]
     },
@@ -51,6 +54,7 @@
       "mustFind": true,
       "description": "Recent duplicate-summary detection must recognize production-style summary wording, not only one exact phrase.",
       "keywords": ["summary", "wording", "duplicate", "groups", "production"],
+      "sourceHeadSha": "7afb20fe74d6d33842c81ce6c1040ae80b1b1294",
       "sourceCommentIds": [3400100576],
       "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3400100576"]
     },
@@ -62,6 +66,7 @@
       "mustFind": true,
       "description": "Semantic merge previews must allow completed pagination; an earlier truncated page should not block previews after all pages are collected.",
       "keywords": ["pagination", "truncated", "merge", "preview", "page"],
+      "sourceHeadSha": "30e9235f9c98500f827a9be15b7590a1d4be14ca",
       "sourceCommentIds": [3400022308],
       "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3400022308"]
     },
@@ -73,6 +78,7 @@
       "mustFind": true,
       "description": "Semantic counterparty merge previews should dedupe duplicate groups by member identity so the same group is not queued multiple times.",
       "keywords": ["dedupe", "group", "member", "merge", "preview"],
+      "sourceHeadSha": "8e30913c07f34d34c1dfb2f239a96db6a4f82a18",
       "sourceCommentIds": [3400239371],
       "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3400239371"]
     },
@@ -84,6 +90,7 @@
       "mustFind": true,
       "description": "Named merge selection must preserve non-Latin counterparty labels; ASCII-only semantic normalization can make names unselectable.",
       "keywords": ["unicode", "non-latin", "semantic", "normalize", "selection"],
+      "sourceHeadSha": "01310daa19a9c75f55906789f9edd95908392345",
       "sourceCommentIds": [3405200714],
       "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3405200714"]
     },
@@ -95,6 +102,7 @@
       "mustFind": true,
       "description": "Redis artifact index updates need an atomic update path; read-modify-write saveArtifact calls can lose concurrent artifact references.",
       "keywords": ["redis", "artifact", "index", "race", "atomic"],
+      "sourceHeadSha": "7afb20fe74d6d33842c81ce6c1040ae80b1b1294",
       "sourceCommentIds": [3400112863],
       "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3400112863"]
     },
@@ -106,6 +114,7 @@
       "mustFind": true,
       "description": "A catch block must not let unwatch() throw and mask the original Redis transaction error.",
       "keywords": ["unwatch", "catch", "mask", "original", "error"],
+      "sourceHeadSha": "c69db9f21631785fedcb9403d70ccc788297d90e",
       "sourceCommentIds": [3405640517],
       "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3405640517"]
     },
@@ -115,6 +124,7 @@
       "mustFind": true,
       "description": "Redis multi exec results must inspect per-command errors instead of treating any non-null exec result as success.",
       "keywords": ["exec", "multi", "command", "error", "result"],
+      "sourceHeadSha": "39ce16dfd914966a813b17b107c6b1abc6e802f3",
       "sourceCommentIds": [3405842873],
       "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3405842873"]
     }

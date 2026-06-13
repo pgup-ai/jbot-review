@@ -66,6 +66,7 @@ interface BenchArgs {
   modelOptions: Record<string, unknown>;
   reviewPasses: number;
   verifyFindings: boolean;
+  guidelinePass: boolean;
   timeBudgetMinutes: number;
   reviewShards: number;
   maxConcurrentSessions: number;
@@ -83,11 +84,12 @@ function parseArgs(argv: string[]): BenchArgs {
     all: false,
     score: true,
     modelOptions: { reasoningEffort: 'medium' },
-    reviewPasses: 1,
-    verifyFindings: true,
-    timeBudgetMinutes: 10,
-    reviewShards: 0,
-    maxConcurrentSessions: 0,
+    reviewPasses: parsePositiveEnvInt('BENCH_GOLDEN_REVIEW_PASSES', 1),
+    verifyFindings: parseBooleanEnv('BENCH_GOLDEN_VERIFY_FINDINGS', true),
+    guidelinePass: parseBooleanEnv('BENCH_GOLDEN_GUIDELINE_PASS', true),
+    timeBudgetMinutes: parseNonNegativeEnvInt('BENCH_GOLDEN_TIME_BUDGET_MINUTES', 30),
+    reviewShards: parseNonNegativeEnvInt('BENCH_GOLDEN_REVIEW_SHARDS', 0),
+    maxConcurrentSessions: parseNonNegativeEnvInt('BENCH_GOLDEN_MAX_CONCURRENT_SESSIONS', 2),
     snapshotConcurrency: parsePositiveEnvInt('BENCH_GOLDEN_SNAPSHOT_CONCURRENCY', 1),
     opencodePortStart: 4096,
   };
@@ -103,6 +105,7 @@ function parseArgs(argv: string[]): BenchArgs {
     if (arg === '--all') args.all = true;
     else if (arg === '--no-score') args.score = false;
     else if (arg === '--no-verify-findings') args.verifyFindings = false;
+    else if (arg === '--no-guideline-pass') args.guidelinePass = false;
     else if (arg === '--case') args.cases.push(next());
     else if (arg === '--golden-root') args.goldenRoot = next();
     else if (arg === '--model') args.model = next();
@@ -162,6 +165,19 @@ function parsePositiveEnvInt(name: string, fallback: number): number {
   return raw ? parsePositiveInteger(raw, name) : fallback;
 }
 
+function parseNonNegativeEnvInt(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  return raw ? parseNonNegativeInteger(raw, name) : fallback;
+}
+
+function parseBooleanEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (['1', 'true', 'yes', 'on'].includes(raw)) return true;
+  if (['0', 'false', 'no', 'off'].includes(raw)) return false;
+  throw new Error(`${name} must be a boolean: true or false`);
+}
+
 function parseNonNegativeInteger(value: string, label: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
@@ -183,6 +199,19 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const caseDirs = await selectCases(args);
   let nextOpencodePort = args.opencodePortStart;
+
+  console.log(
+    [
+      `Golden benchmark model=${args.model}`,
+      `snapshotConcurrency=${args.snapshotConcurrency}`,
+      `maxConcurrentSessions=${args.maxConcurrentSessions || 'unlimited'}`,
+      `timeBudget=${args.timeBudgetMinutes}m`,
+      `reviewShards=${args.reviewShards || 'auto'}`,
+      `reviewPasses=${args.reviewPasses}`,
+      `verifyFindings=${args.verifyFindings}`,
+      `guidelinePass=${args.guidelinePass}`,
+    ].join(' '),
+  );
 
   for (const caseDir of caseDirs) {
     const expected = await readJson<GoldenExpected>(join(caseDir, 'expected-findings.json'));
@@ -237,7 +266,7 @@ async function main(): Promise<void> {
           minSeverity: 'nit',
           includePriorComments: false,
           context7Mode: 'off',
-          guidelinePass: true,
+          guidelinePass: args.guidelinePass,
           reviewPasses: args.reviewPasses,
           verifyFindings: args.verifyFindings,
           timeBudgetMinutes: args.timeBudgetMinutes,
@@ -335,6 +364,7 @@ function selectSnapshotHeads(
   const wantedHeadShas = new Set<string>();
   const wantedCommentIds = new Set<number>();
   let findingsWithProvenance = 0;
+  let findingsWithHeadProvenance = 0;
 
   for (const finding of expected.findings) {
     const headShas = [
@@ -346,11 +376,16 @@ function selectSnapshotHeads(
       : [];
 
     if (headShas.length > 0 || commentIds.length > 0) findingsWithProvenance += 1;
+    if (headShas.length > 0) findingsWithHeadProvenance += 1;
     for (const sha of headShas) wantedHeadShas.add(sha);
     for (const id of commentIds) wantedCommentIds.add(id);
   }
 
   if (findingsWithProvenance !== expected.findings.length) return snapshot.heads;
+  if (findingsWithHeadProvenance === expected.findings.length) {
+    const selected = snapshot.heads.filter((head) => wantedHeadShas.has(head.sha));
+    return selected.length > 0 ? selected : snapshot.heads;
+  }
 
   const selected = snapshot.heads.filter((head) => {
     if (wantedHeadShas.has(head.sha)) return true;
