@@ -5,6 +5,7 @@ import {
   type OutputFormat,
   type Part,
   type ServerOptions,
+  type SessionStatus,
 } from '@opencode-ai/sdk/v2';
 
 import { parseModelName } from './model.ts';
@@ -28,6 +29,7 @@ import type {
 const READY_TIMEOUT_MS = 15_000;
 const MODEL_LIST_TIMEOUT_MS = 5_000;
 const PROMPT_TIMEOUT_MS = 15 * 60_000;
+const PROMPT_POLL_INTERVAL_MS = 2_000;
 const PROMPT_POLL_REQUEST_TIMEOUT_MS = 10_000;
 const PROMPT_PROGRESS_LOG_MS = 60_000;
 const CONTEXT7_MCP_NAME = 'context7';
@@ -743,7 +745,25 @@ async function waitForSessionIdleThenFetchMessage(
       )}s (last status: waiting for session idle)`,
     );
     const waitError = getResultError(waitResult);
-    if (waitError) throw new Error(`opencode ${label} prompt failed: ${waitError}`);
+    if (waitError) {
+      if (!isSessionWaitUnavailable(waitError)) {
+        throw new Error(`opencode ${label} prompt failed: ${waitError}`);
+      }
+      log(`${label} session.wait unavailable; falling back to status polling.`);
+      if (progressTimer) {
+        clearInterval(progressTimer);
+        progressTimer = undefined;
+      }
+      return waitForAssistantResponseByStatusPolling(
+        client,
+        sessionID,
+        label,
+        messageID,
+        log,
+        timeoutMs,
+        startedAt,
+      );
+    }
 
     const latest = await getLatestAssistantMessage(client, sessionID, label);
     const message = hasResponsePayload(latest)
@@ -757,6 +777,50 @@ async function waitForSessionIdleThenFetchMessage(
   } finally {
     if (progressTimer) clearInterval(progressTimer);
   }
+}
+
+async function waitForAssistantResponseByStatusPolling(
+  client: OpencodeClient,
+  sessionID: string,
+  label: string,
+  messageID: string,
+  log: (msg: string) => void,
+  timeoutMs: number,
+  startedAt: number,
+): Promise<{ info: AssistantMessage; parts: ReadonlyArray<ReadablePart> }> {
+  let lastStatus = 'waiting for session status';
+  let lastProgressLogAt = startedAt;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const status = await getSessionStatus(client, sessionID, label);
+    if (status) lastStatus = describeSessionStatus(status);
+
+    const latest = await getLatestAssistantMessage(client, sessionID, label);
+    const message = hasResponsePayload(latest)
+      ? latest
+      : ((await getAssistantMessageBestEffort(client, sessionID, messageID, label)) ?? latest);
+    if (message?.info.error) {
+      throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(message.info.error)}`);
+    }
+    if (status?.type === 'idle' && message && hasResponsePayload(message)) return message;
+    if (status?.type === 'idle') lastStatus = 'idle without response payload';
+
+    const now = Date.now();
+    if (now - lastProgressLogAt >= PROMPT_PROGRESS_LOG_MS) {
+      log(
+        `${label} prompt still running (${Math.round((now - startedAt) / 1000)}s, ${lastStatus})`,
+      );
+      lastProgressLogAt = now;
+    }
+
+    await sleep(PROMPT_POLL_INTERVAL_MS);
+  }
+
+  throw new Error(
+    `opencode ${label} prompt did not finish within ${Math.round(
+      timeoutMs / 1000,
+    )}s (last status: ${lastStatus})`,
+  );
 }
 
 async function abortSessionBestEffort(
@@ -872,6 +936,22 @@ async function fetchAssistantMessage(
   };
 }
 
+async function getSessionStatus(
+  client: OpencodeClient,
+  sessionID: string,
+  label: string,
+): Promise<SessionStatus | undefined> {
+  const result = await withTimeout(
+    client.session.status(directoryParams(client)),
+    PROMPT_POLL_REQUEST_TIMEOUT_MS,
+    `opencode ${label} status polling timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID})`,
+  );
+  const error = getResultError(result);
+  if (error) throw new Error(`opencode ${label} status polling failed: ${error}`);
+  const statuses = result.data;
+  return statuses?.[sessionID];
+}
+
 function toTextReadablePart(part: Part): ReadablePart {
   if (part.type === 'text') return { type: part.type, text: part.text };
   if (part.type !== 'tool') return { type: part.type };
@@ -922,6 +1002,11 @@ function directoryParams(client: OpencodeClient): { directory: string } | undefi
   return directory ? { directory } : undefined;
 }
 
+function describeSessionStatus(status: SessionStatus): string {
+  if (status.type === 'retry') return `retry attempt ${status.attempt}: ${status.message}`;
+  return status.type;
+}
+
 function getResultError(result: unknown): string | undefined {
   if (!isRecord(result) || !('error' in result) || result.error == null) return undefined;
   return formatUnknownError(result.error);
@@ -935,6 +1020,14 @@ function formatUnknownError(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function isSessionWaitUnavailable(message: string): boolean {
+  return /Session wait is not available yet|session\.wait|ServiceUnavailable/i.test(message);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);

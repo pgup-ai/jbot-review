@@ -40,6 +40,7 @@ function makeFakeClient(
     emitMessageUpdated?: boolean;
     emitIdle?: boolean;
     emitToolStepBeforeFinal?: boolean;
+    sessionWaitUnavailable?: boolean;
   } = {},
 ): {
   client: OpencodeClient;
@@ -150,7 +151,16 @@ function makeFakeClient(
     },
     v2: {
       session: {
-        wait: async () => ({}),
+        wait: async () =>
+          options.sessionWaitUnavailable
+            ? {
+                error: {
+                  _tag: 'ServiceUnavailableError',
+                  message: 'Session wait is not available yet',
+                  service: 'session.wait',
+                },
+              }
+            : {},
         messages: async (request: { order?: 'asc' | 'desc'; limit?: number } = {}) => {
           const ordered = request.order === 'desc' ? [...messages].reverse() : [...messages];
           return {
@@ -332,6 +342,18 @@ describe('runReview JSON repair loop', () => {
   it('waits for idle and reads the latest assistant message after tool steps', async () => {
     const { client, prompts } = makeFakeClient([VALID_REVIEW], {
       emitToolStepBeforeFinal: true,
+    });
+
+    const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 1);
+    assert.equal(result.summary, 'ok after repair');
+    assert.equal(result.findings.length, 1);
+  });
+
+  it('falls back to status polling when session wait is unavailable', async () => {
+    const { client, prompts } = makeFakeClient([VALID_REVIEW], {
+      sessionWaitUnavailable: true,
     });
 
     const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
