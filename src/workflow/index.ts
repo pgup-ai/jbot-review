@@ -52,7 +52,7 @@ async function main(): Promise<void> {
     auxModel,
     reviewPasses: parseNumberInput('review-passes', 1),
     verifyFindings: parseBooleanInput('verify-findings', true),
-    timeBudgetMinutes: parseNumberInput('time-budget-minutes', 10),
+    timeBudgetMinutes: parseNumberInput('time-budget-minutes', 30),
     reviewShards: parseNumberInput('review-shards', 0),
     modelOptions: parseJsonObjectInput('model-options', DEFAULT_MODEL_OPTIONS),
     maxConcurrentSessions: parseNumberInput('max-concurrent-sessions', 0),

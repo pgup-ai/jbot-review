@@ -1,0 +1,48 @@
+{
+  "provenance": {
+    "repo": "integral-xyz/fms-frontend",
+    "pr": 1753,
+    "url": "https://github.com/integral-xyz/fms-frontend/pull/1753",
+    "baseSha": "6fbf00192221435ddc356a05d21eafed67eaa88f",
+    "headSha": "c76686ca12e7027f6f61a4f1de56a42033e85ac8",
+    "mergeSha": "b77296a63cb3c5a5c3432aaf7a950371d2db2880",
+    "source": "high-confidence review threads, applied before merge"
+  },
+  "exhaustive": false,
+  "findings": [
+    {
+      "path": "src/components/chart-of-accounts/edit-coa/index.tsx",
+      "lineStart": 38,
+      "lineEnd": 55,
+      "category": "validation",
+      "mustFind": true,
+      "description": "Chart account edit validation must reject empty name and code strings because dirty empty values are persisted verbatim.",
+      "keywords": ["name", "code", "empty", "validation", "persist"]
+    },
+    {
+      "path": "src/api/chart-of-accounts.ts",
+      "category": "ui-data",
+      "mustFind": true,
+      "description": "Filtering archived parents after path computation can render active descendants under blank filler rows in the chart-of-accounts tree.",
+      "keywords": ["archived", "parent", "blank", "tree", "descendant"]
+    },
+    {
+      "path": "src/components/chart-of-accounts/edit-coa/index.tsx",
+      "lineStart": 66,
+      "lineEnd": 85,
+      "category": "data-integrity",
+      "mustFind": true,
+      "description": "Using chart account subtype as a no-parent sentinel can collide with a real account id and corrupt parentId updates.",
+      "keywords": ["parentId", "sentinel", "subtype", "collision", "account"]
+    },
+    {
+      "path": "src/components/chart-of-accounts/edit-coa/index.tsx",
+      "lineStart": 120,
+      "lineEnd": 140,
+      "category": "state",
+      "mustFind": true,
+      "description": "The edit success handler must avoid stale closure behavior when the dialog switches edit targets during an in-flight mutation.",
+      "keywords": ["stale", "closure", "onSuccess", "mutation", "dialog"]
+    }
+  ]
+}

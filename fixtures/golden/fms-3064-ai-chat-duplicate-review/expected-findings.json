@@ -1,0 +1,102 @@
+{
+  "provenance": {
+    "repo": "integral-xyz/fms",
+    "pr": 3064,
+    "url": "https://github.com/integral-xyz/fms/pull/3064",
+    "baseSha": "bf24f578ce17257210f90cacb07eb7d6455f49be",
+    "headSha": "11a46b801a3c8d4800772ddf3de56471c8ce924e",
+    "mergeSha": "3545ccc235af61a5bb0561f8a5d767a0e426931c",
+    "source": "high-confidence review threads, applied before merge"
+  },
+  "exhaustive": false,
+  "findings": [
+    {
+      "path": "apps/core-ledger/src/ai-chat/ai-chat.service.ts",
+      "lineStart": 290,
+      "lineEnd": 315,
+      "category": "logic",
+      "mustFind": true,
+      "description": "A delayed forced fallback can be persisted after a follow-up user message and then incorrectly suppress the follow-up assistant reply.",
+      "keywords": ["fallback", "suppress", "follow-up", "stale", "forcePersistResponse"]
+    },
+    {
+      "path": "apps/core-ledger/src/ai-chat/agents/counterparty-dedup-intent.util.ts",
+      "lineStart": 36,
+      "lineEnd": 75,
+      "category": "logic",
+      "mustFind": true,
+      "description": "Counterparty duplicate intent detection must not treat an initial merge request as a merge-preview follow-up before duplicate summary context exists.",
+      "keywords": ["initial", "merge", "follow-up", "duplicate", "summary"]
+    },
+    {
+      "path": "apps/core-ledger/src/ai-chat/agents/counterparty-dedup-intent.util.ts",
+      "lineStart": 43,
+      "lineEnd": 75,
+      "category": "logic",
+      "mustFind": true,
+      "description": "After a duplicate-summary turn, unrelated merge requests in other domains must not be misclassified as counterparty merge previews.",
+      "keywords": ["unrelated", "merge", "counterparty", "dedup", "domain"]
+    },
+    {
+      "path": "apps/core-ledger/src/ai-chat/agents/counterparty-dedup-intent.util.ts",
+      "lineStart": 73,
+      "lineEnd": 95,
+      "category": "logic",
+      "mustFind": true,
+      "description": "Recent duplicate-summary detection must recognize production-style summary wording, not only one exact phrase.",
+      "keywords": ["summary", "wording", "duplicate", "groups", "production"]
+    },
+    {
+      "path": "apps/core-ledger/src/ai-chat/agents/semantic-write-preview.builder.ts",
+      "lineStart": 58,
+      "lineEnd": 95,
+      "category": "data-integrity",
+      "mustFind": true,
+      "description": "Semantic merge previews must allow completed pagination; an earlier truncated page should not block previews after all pages are collected.",
+      "keywords": ["pagination", "truncated", "merge", "preview", "page"]
+    },
+    {
+      "path": "apps/core-ledger/src/ai-chat/agents/semantic-write-preview.builder.ts",
+      "lineStart": 75,
+      "lineEnd": 115,
+      "category": "data-integrity",
+      "mustFind": true,
+      "description": "Semantic counterparty merge previews should dedupe duplicate groups by member identity so the same group is not queued multiple times.",
+      "keywords": ["dedupe", "group", "member", "merge", "preview"]
+    },
+    {
+      "path": "apps/core-ledger/src/ai-chat/agents/semantic-write-preview.builder.ts",
+      "lineStart": 135,
+      "lineEnd": 170,
+      "category": "data-integrity",
+      "mustFind": true,
+      "description": "Named merge selection must preserve non-Latin counterparty labels; ASCII-only semantic normalization can make names unselectable.",
+      "keywords": ["unicode", "non-latin", "semantic", "normalize", "selection"]
+    },
+    {
+      "path": "apps/core-ledger/src/ai-chat/computation/computation-artifact-storage.backend.ts",
+      "lineStart": 228,
+      "lineEnd": 245,
+      "category": "race",
+      "mustFind": true,
+      "description": "Redis artifact index updates need an atomic update path; read-modify-write saveArtifact calls can lose concurrent artifact references.",
+      "keywords": ["redis", "artifact", "index", "race", "atomic"]
+    },
+    {
+      "path": "libs/shared/src/redis/redis.service.ts",
+      "lineStart": 70,
+      "lineEnd": 85,
+      "category": "error-handling",
+      "mustFind": true,
+      "description": "A catch block must not let unwatch() throw and mask the original Redis transaction error.",
+      "keywords": ["unwatch", "catch", "mask", "original", "error"]
+    },
+    {
+      "path": "libs/shared/src/redis/redis.service.ts",
+      "category": "error-handling",
+      "mustFind": true,
+      "description": "Redis multi exec results must inspect per-command errors instead of treating any non-null exec result as success.",
+      "keywords": ["exec", "multi", "command", "error", "result"]
+    }
+  ]
+}

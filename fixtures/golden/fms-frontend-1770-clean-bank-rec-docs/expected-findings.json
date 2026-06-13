@@ -1,0 +1,13 @@
+{
+  "provenance": {
+    "repo": "integral-xyz/fms-frontend",
+    "pr": 1770,
+    "url": "https://github.com/integral-xyz/fms-frontend/pull/1770",
+    "baseSha": "8f0d8432772576db3368d33346a31c156c9d1011",
+    "headSha": "0c42e3bbd6c911ae6713e8712ed2edb1071348f9",
+    "mergeSha": "3d455c3094ed5caa8851282f41b4b2d7c7e6535a",
+    "source": "clean high-confidence candidate with no explicit applied findings"
+  },
+  "exhaustive": true,
+  "findings": []
+}

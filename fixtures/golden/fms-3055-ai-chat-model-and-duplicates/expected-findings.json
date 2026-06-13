@@ -1,0 +1,53 @@
+{
+  "provenance": {
+    "repo": "integral-xyz/fms",
+    "pr": 3055,
+    "url": "https://github.com/integral-xyz/fms/pull/3055",
+    "baseSha": "1e83489d2768323c986bb192a67d3e2f4577f617",
+    "headSha": "2a1e8622195190bedd737b38512fbd70b73b3560",
+    "mergeSha": "d830f6681ff22f59a689c96a077084a433851a09",
+    "source": "high-confidence review threads, applied before merge"
+  },
+  "exhaustive": false,
+  "findings": [
+    {
+      "path": "apps/core-ledger/src/ai-chat/agents/chat.agent.ts",
+      "lineStart": 2840,
+      "lineEnd": 2865,
+      "category": "contract",
+      "mustFind": true,
+      "description": "Prompt cache stabilization can drop steering/tool-choice steps, so forced tool steering is lost when cache stabilization remains enabled.",
+      "keywords": ["cache", "steering", "tool", "forced", "stabilize"]
+    },
+    {
+      "path": "apps/core-ledger/src/ai-chat/agents/chat.agent.ts",
+      "lineStart": 2840,
+      "lineEnd": 2865,
+      "category": "contract",
+      "mustFind": true,
+      "description": "Thinking/model tuning disables forced tool choice while still leaving active tools available, allowing the model to skip the intended forced service call.",
+      "keywords": ["thinking", "tool_choice", "forced", "activeTools", "service"]
+    },
+    {
+      "path": "apps/core-ledger/src/ai-chat/agents/chat.agent.ts",
+      "category": "contract",
+      "mustFind": true,
+      "description": "Subagent invocations must receive the governed provider profile so parent and subagent model behavior stay consistent.",
+      "keywords": ["subagent", "provider", "profile", "model", "thinking"]
+    },
+    {
+      "path": "apps/core-ledger/src/counterparties/ai/counterparties.capabilities.ts",
+      "category": "data-integrity",
+      "mustFind": true,
+      "description": "Duplicate groups beyond the first page must remain reachable; truncating at 200 without pagination makes later groups unretrievable.",
+      "keywords": ["duplicate", "groups", "pagination", "truncated", "page"]
+    },
+    {
+      "path": "libs/core-ledger-shared/src/counterparties/util/counterparty-duplicate.util.ts",
+      "category": "data-integrity",
+      "mustFind": true,
+      "description": "Duplicate-name normalization must preserve non-Latin letters; ASCII-only stripping can erase names and skip valid duplicate groups.",
+      "keywords": ["unicode", "non-latin", "ascii", "normalization", "duplicate"]
+    }
+  ]
+}

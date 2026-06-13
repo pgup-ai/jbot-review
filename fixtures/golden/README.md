@@ -52,6 +52,45 @@ npm run eval                 # fixtures/golden
 npm run eval -- path/to/set  # alternate root
 ```
 
+## Running a model benchmark
+
+Golden cases are pinned to review snapshots in `snapshot.json`. Positive cases
+use the commit(s) where the original review comments were made, not the final
+merged head, because the final PR often already contains the fix.
+
+Run one case:
+
+```
+npm run bench:golden:case
+```
+
+Run all cases:
+
+```
+npm run bench:golden:all
+```
+
+Both scripts load provider keys from `.env` when present.
+
+The runner:
+
+- finds or clones the target repo,
+- checks out each pinned snapshot head,
+- computes the local `base...head` diff,
+- runs the read-only jbot/opencode review,
+- writes each case's `actual-findings.json`,
+- then runs `npm run eval` unless `--no-score` is passed.
+
+By default it uses isolated clones under `.tmp/golden-repos/` so active working
+trees are not disturbed. Override a repo location with:
+
+```
+npm run bench:golden -- \
+  --case fms-3064-ai-chat-duplicate-review \
+  --model openai/gpt-5.4 \
+  --repo-root integral-xyz/fms=/path/to/fms
+```
+
 ## Seeding the set
 
 Grow this set from real failures — every production miss (a competitor bot or

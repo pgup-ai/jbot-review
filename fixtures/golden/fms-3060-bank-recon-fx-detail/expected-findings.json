@@ -1,0 +1,28 @@
+{
+  "provenance": {
+    "repo": "integral-xyz/fms",
+    "pr": 3060,
+    "url": "https://github.com/integral-xyz/fms/pull/3060",
+    "baseSha": "9e2cdb6604960be9b97dfc9b0352baf6f60376c5",
+    "headSha": "a3e700d611497541d6ac5fb36e2d32fb60186414",
+    "mergeSha": "de9e6cb0cf698692e6fe3f488a0826d7f8bd60f8",
+    "source": "high-confidence j-bot review thread, applied before merge"
+  },
+  "exhaustive": false,
+  "findings": [
+    {
+      "path": "libs/modules/src/reconciliation/bank/bank-reconciliation.service.ts",
+      "category": "error-handling",
+      "mustFind": true,
+      "description": "Bank reconciliation detail retrieval should handle FX-rate lookup failure and return a safe null value instead of crashing getDetail.",
+      "keywords": ["fx", "rate", "lookup", "getDetail", "null"]
+    },
+    {
+      "path": "libs/modules/src/reconciliation/bank/bank-reconciliation.service.ts",
+      "category": "error-handling",
+      "mustFind": true,
+      "description": "Caught errors should be serialized with the shared errorToString helper rather than interpolated directly.",
+      "keywords": ["caught", "errorToString", "serialize", "error", "logging"]
+    }
+  ]
+}

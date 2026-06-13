@@ -1,0 +1,65 @@
+{
+  "provenance": {
+    "repo": "integral-xyz/fms-frontend",
+    "pr": 1751,
+    "url": "https://github.com/integral-xyz/fms-frontend/pull/1751",
+    "baseSha": "3479a91b81e9d08f3fb4f76a4d295f4692982eda",
+    "headSha": "540559d7e378702f89372a849353656669c3a5d7",
+    "mergeSha": "ef58a760f905a028d066219fc873be25ec903c6c",
+    "source": "high-confidence review threads, applied before merge"
+  },
+  "exhaustive": false,
+  "findings": [
+    {
+      "path": "src/components/business-events/layout.tsx",
+      "category": "validation",
+      "mustFind": true,
+      "description": "Navigation-provided filters must use the same validation path as normal filters; otherwise invalid ranges can be serialized and sent to the backend.",
+      "keywords": ["navigation", "filter", "validation", "invalid", "range"]
+    },
+    {
+      "path": "src/components/business-events/layout.tsx",
+      "category": "data-integrity",
+      "mustFind": true,
+      "description": "Navigation filter state must preserve duplicate numeric bounds for the same field instead of overwriting one bound by filterKey.",
+      "keywords": ["navigation", "numeric", "bounds", "filterKey", "gte"]
+    },
+    {
+      "path": "src/components/filter-bar/filter-number-range-inputs.tsx",
+      "lineStart": 22,
+      "lineEnd": 55,
+      "category": "state",
+      "mustFind": true,
+      "description": "Range input popovers must reset from the current chip value when reopened, not retain stale draft strings from a previous failed submit.",
+      "keywords": ["range", "input", "chip", "draft", "reset"]
+    },
+    {
+      "path": "src/components/filter-bar/index.tsx",
+      "category": "validation",
+      "mustFind": true,
+      "description": "A single numeric gte or lte bound is a complete filter and must not be treated as incomplete.",
+      "keywords": ["single", "numeric", "gte", "lte", "complete"]
+    },
+    {
+      "path": "src/components/filter-bar/filter-dropdown-menu.tsx",
+      "category": "state",
+      "mustFind": true,
+      "description": "Adding numeric filters from the dropdown must store state under normalized condition-specific keys so hydration and persistence agree.",
+      "keywords": ["dropdown", "numeric", "state", "keys", "hydration"]
+    },
+    {
+      "path": "src/components/filter-bar/context.tsx",
+      "category": "state",
+      "mustFind": true,
+      "description": "Filter state updates should not call other setState functions or fire side effects from inside a setDraftFilters updater.",
+      "keywords": ["setState", "updater", "side", "effects", "draftFilters"]
+    },
+    {
+      "path": "src/components/filter-bar/context.tsx",
+      "category": "ux",
+      "mustFind": true,
+      "description": "Changing a numeric filter condition must not silently reject the update with no user feedback when both range bounds exist.",
+      "keywords": ["condition", "numeric", "reject", "feedback", "bounds"]
+    }
+  ]
+}
