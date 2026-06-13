@@ -17,14 +17,22 @@
       "category": "validation",
       "mustFind": true,
       "description": "Chart account edit validation must reject empty name and code strings because dirty empty values are persisted verbatim.",
-      "keywords": ["name", "code", "empty", "validation", "persist"]
+      "keywords": ["name", "code", "empty", "validation", "persist"],
+      "sourceCommentIds": [3382767293],
+      "sourceUrls": [
+        "https://github.com/integral-xyz/fms-frontend/pull/1753#discussion_r3382767293"
+      ]
     },
     {
       "path": "src/api/chart-of-accounts.ts",
       "category": "ui-data",
       "mustFind": true,
       "description": "Filtering archived parents after path computation can render active descendants under blank filler rows in the chart-of-accounts tree.",
-      "keywords": ["archived", "parent", "blank", "tree", "descendant"]
+      "keywords": ["archived", "parent", "blank", "tree", "descendant"],
+      "sourceCommentIds": [3382767305],
+      "sourceUrls": [
+        "https://github.com/integral-xyz/fms-frontend/pull/1753#discussion_r3382767305"
+      ]
     },
     {
       "path": "src/components/chart-of-accounts/edit-coa/index.tsx",
@@ -33,7 +41,11 @@
       "category": "data-integrity",
       "mustFind": true,
       "description": "Using chart account subtype as a no-parent sentinel can collide with a real account id and corrupt parentId updates.",
-      "keywords": ["parentId", "sentinel", "subtype", "collision", "account"]
+      "keywords": ["parentId", "sentinel", "subtype", "collision", "account"],
+      "sourceCommentIds": [3381951374],
+      "sourceUrls": [
+        "https://github.com/integral-xyz/fms-frontend/pull/1753#discussion_r3381951374"
+      ]
     },
     {
       "path": "src/components/chart-of-accounts/edit-coa/index.tsx",
@@ -42,7 +54,11 @@
       "category": "state",
       "mustFind": true,
       "description": "The edit success handler must avoid stale closure behavior when the dialog switches edit targets during an in-flight mutation.",
-      "keywords": ["stale", "closure", "onSuccess", "mutation", "dialog"]
+      "keywords": ["stale", "closure", "onSuccess", "mutation", "dialog"],
+      "sourceCommentIds": [3382431824],
+      "sourceUrls": [
+        "https://github.com/integral-xyz/fms-frontend/pull/1753#discussion_r3382431824"
+      ]
     }
   ]
 }

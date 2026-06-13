@@ -17,7 +17,9 @@
       "category": "contract",
       "mustFind": true,
       "description": "Prompt cache stabilization can drop steering/tool-choice steps, so forced tool steering is lost when cache stabilization remains enabled.",
-      "keywords": ["cache", "steering", "tool", "forced", "stabilize"]
+      "keywords": ["cache", "steering", "tool", "forced", "stabilize"],
+      "sourceCommentIds": [3393134604],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3055#discussion_r3393134604"]
     },
     {
       "path": "apps/core-ledger/src/ai-chat/agents/chat.agent.ts",
@@ -26,28 +28,36 @@
       "category": "contract",
       "mustFind": true,
       "description": "Thinking/model tuning disables forced tool choice while still leaving active tools available, allowing the model to skip the intended forced service call.",
-      "keywords": ["thinking", "tool_choice", "forced", "activeTools", "service"]
+      "keywords": ["thinking", "tool_choice", "forced", "activeTools", "service"],
+      "sourceCommentIds": [3393160279],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3055#discussion_r3393160279"]
     },
     {
       "path": "apps/core-ledger/src/ai-chat/agents/chat.agent.ts",
       "category": "contract",
       "mustFind": true,
       "description": "Subagent invocations must receive the governed provider profile so parent and subagent model behavior stay consistent.",
-      "keywords": ["subagent", "provider", "profile", "model", "thinking"]
+      "keywords": ["subagent", "provider", "profile", "model", "thinking"],
+      "sourceCommentIds": [3397320970],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3055#discussion_r3397320970"]
     },
     {
       "path": "apps/core-ledger/src/counterparties/ai/counterparties.capabilities.ts",
       "category": "data-integrity",
       "mustFind": true,
       "description": "Duplicate groups beyond the first page must remain reachable; truncating at 200 without pagination makes later groups unretrievable.",
-      "keywords": ["duplicate", "groups", "pagination", "truncated", "page"]
+      "keywords": ["duplicate", "groups", "pagination", "truncated", "page"],
+      "sourceCommentIds": [3397320980],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3055#discussion_r3397320980"]
     },
     {
       "path": "libs/core-ledger-shared/src/counterparties/util/counterparty-duplicate.util.ts",
       "category": "data-integrity",
       "mustFind": true,
       "description": "Duplicate-name normalization must preserve non-Latin letters; ASCII-only stripping can erase names and skip valid duplicate groups.",
-      "keywords": ["unicode", "non-latin", "ascii", "normalization", "duplicate"]
+      "keywords": ["unicode", "non-latin", "ascii", "normalization", "duplicate"],
+      "sourceCommentIds": [3397320985],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3055#discussion_r3397320985"]
     }
   ]
 }

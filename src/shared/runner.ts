@@ -101,6 +101,11 @@ export interface ReviewRunOptions {
    */
   maxConcurrentSessions?: number;
   /**
+   * Override opencode server port for this run. Local benchmark workers use
+   * this to run isolated snapshots concurrently.
+   */
+  opencodePort?: number;
+  /**
    * Local harness hook: receives the same filtered findings that dry-run would
    * post. Not exposed through the GitHub Action input surface.
    */
@@ -247,20 +252,22 @@ export async function runPrReview(params: {
   }
 
   log('Starting opencode server');
-  const { client, stop } = await startOpencode(
-    workspace,
-    providerID,
-    modelID,
-    apiKey,
-    log,
-    options.modelOptions,
-  );
+  const { client, stop } = await startOpencode(workspace, providerID, modelID, apiKey, log, {
+    modelOptions: options.modelOptions,
+    port: options.opencodePort > 0 ? options.opencodePort : undefined,
+  });
   try {
     try {
-      const models = await listProviderModels(client, providerID);
+      const modelListCacheKey = `${providerID}:${modelID}`;
+      let models = providerModelListCache.get(modelListCacheKey);
+      const fromCache = !!models;
+      if (!models) {
+        models = await listProviderModels(client, providerID);
+        providerModelListCache.set(modelListCacheKey, models);
+      }
       log(
         models.length > 0
-          ? `Available models for ${providerID} using supplied API key/config:\n${models.join('\n')}`
+          ? `Available models for ${providerID} using supplied API key/config${fromCache ? ' (cached)' : ''}:\n${models.join('\n')}`
           : `Available models for ${providerID} using supplied API key/config: none returned`,
       );
     } catch (e) {
@@ -480,9 +487,12 @@ function normalizeOptions(options: ReviewRunOptions | undefined): NormalizedRevi
     reviewShards: Math.max(options?.reviewShards ?? 0, 0),
     modelOptions: options?.modelOptions ?? {},
     maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 0, 0),
+    opencodePort: Math.max(options?.opencodePort ?? 0, 0),
     onReviewResult: options?.onReviewResult,
   };
 }
+
+const providerModelListCache = new Map<string, string[]>();
 
 const MIN_FINDER_TIMEOUT_MS = 60_000;
 // Ceiling for any single session even under a generous budget: callers who

@@ -17,7 +17,9 @@
       "category": "logic",
       "mustFind": true,
       "description": "A delayed forced fallback can be persisted after a follow-up user message and then incorrectly suppress the follow-up assistant reply.",
-      "keywords": ["fallback", "suppress", "follow-up", "stale", "forcePersistResponse"]
+      "keywords": ["fallback", "suppress", "follow-up", "stale", "forcePersistResponse"],
+      "sourceCommentIds": [3399488933],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3399488933"]
     },
     {
       "path": "apps/core-ledger/src/ai-chat/agents/counterparty-dedup-intent.util.ts",
@@ -26,7 +28,9 @@
       "category": "logic",
       "mustFind": true,
       "description": "Counterparty duplicate intent detection must not treat an initial merge request as a merge-preview follow-up before duplicate summary context exists.",
-      "keywords": ["initial", "merge", "follow-up", "duplicate", "summary"]
+      "keywords": ["initial", "merge", "follow-up", "duplicate", "summary"],
+      "sourceCommentIds": [3400022310],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3400022310"]
     },
     {
       "path": "apps/core-ledger/src/ai-chat/agents/counterparty-dedup-intent.util.ts",
@@ -35,7 +39,9 @@
       "category": "logic",
       "mustFind": true,
       "description": "After a duplicate-summary turn, unrelated merge requests in other domains must not be misclassified as counterparty merge previews.",
-      "keywords": ["unrelated", "merge", "counterparty", "dedup", "domain"]
+      "keywords": ["unrelated", "merge", "counterparty", "dedup", "domain"],
+      "sourceCommentIds": [3400004500],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3400004500"]
     },
     {
       "path": "apps/core-ledger/src/ai-chat/agents/counterparty-dedup-intent.util.ts",
@@ -44,7 +50,9 @@
       "category": "logic",
       "mustFind": true,
       "description": "Recent duplicate-summary detection must recognize production-style summary wording, not only one exact phrase.",
-      "keywords": ["summary", "wording", "duplicate", "groups", "production"]
+      "keywords": ["summary", "wording", "duplicate", "groups", "production"],
+      "sourceCommentIds": [3400100576],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3400100576"]
     },
     {
       "path": "apps/core-ledger/src/ai-chat/agents/semantic-write-preview.builder.ts",
@@ -53,7 +61,9 @@
       "category": "data-integrity",
       "mustFind": true,
       "description": "Semantic merge previews must allow completed pagination; an earlier truncated page should not block previews after all pages are collected.",
-      "keywords": ["pagination", "truncated", "merge", "preview", "page"]
+      "keywords": ["pagination", "truncated", "merge", "preview", "page"],
+      "sourceCommentIds": [3400022308],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3400022308"]
     },
     {
       "path": "apps/core-ledger/src/ai-chat/agents/semantic-write-preview.builder.ts",
@@ -62,7 +72,9 @@
       "category": "data-integrity",
       "mustFind": true,
       "description": "Semantic counterparty merge previews should dedupe duplicate groups by member identity so the same group is not queued multiple times.",
-      "keywords": ["dedupe", "group", "member", "merge", "preview"]
+      "keywords": ["dedupe", "group", "member", "merge", "preview"],
+      "sourceCommentIds": [3400239371],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3400239371"]
     },
     {
       "path": "apps/core-ledger/src/ai-chat/agents/semantic-write-preview.builder.ts",
@@ -71,7 +83,9 @@
       "category": "data-integrity",
       "mustFind": true,
       "description": "Named merge selection must preserve non-Latin counterparty labels; ASCII-only semantic normalization can make names unselectable.",
-      "keywords": ["unicode", "non-latin", "semantic", "normalize", "selection"]
+      "keywords": ["unicode", "non-latin", "semantic", "normalize", "selection"],
+      "sourceCommentIds": [3405200714],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3405200714"]
     },
     {
       "path": "apps/core-ledger/src/ai-chat/computation/computation-artifact-storage.backend.ts",
@@ -80,7 +94,9 @@
       "category": "race",
       "mustFind": true,
       "description": "Redis artifact index updates need an atomic update path; read-modify-write saveArtifact calls can lose concurrent artifact references.",
-      "keywords": ["redis", "artifact", "index", "race", "atomic"]
+      "keywords": ["redis", "artifact", "index", "race", "atomic"],
+      "sourceCommentIds": [3400112863],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3400112863"]
     },
     {
       "path": "libs/shared/src/redis/redis.service.ts",
@@ -89,14 +105,18 @@
       "category": "error-handling",
       "mustFind": true,
       "description": "A catch block must not let unwatch() throw and mask the original Redis transaction error.",
-      "keywords": ["unwatch", "catch", "mask", "original", "error"]
+      "keywords": ["unwatch", "catch", "mask", "original", "error"],
+      "sourceCommentIds": [3405640517],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3405640517"]
     },
     {
       "path": "libs/shared/src/redis/redis.service.ts",
       "category": "error-handling",
       "mustFind": true,
       "description": "Redis multi exec results must inspect per-command errors instead of treating any non-null exec result as success.",
-      "keywords": ["exec", "multi", "command", "error", "result"]
+      "keywords": ["exec", "multi", "command", "error", "result"],
+      "sourceCommentIds": [3405842873],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3064#discussion_r3405842873"]
     }
   ]
 }

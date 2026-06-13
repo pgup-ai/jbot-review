@@ -17,7 +17,11 @@
       "category": "date-time",
       "mustFind": true,
       "description": "Invoice preview payload dates must parse orderDate in UTC to avoid local timezone shifts for date-only values.",
-      "keywords": ["orderDate", "DateTime", "fromISO", "UTC", "timezone"]
+      "keywords": ["orderDate", "DateTime", "fromISO", "UTC", "timezone"],
+      "sourceCommentIds": [3389149749],
+      "sourceUrls": [
+        "https://github.com/integral-xyz/fms-frontend/pull/1766#discussion_r3389149749"
+      ]
     },
     {
       "path": "src/components/orders/order-details-form.tsx",
@@ -26,14 +30,22 @@
       "category": "lifecycle",
       "mustFind": true,
       "description": "The onFormReady effect must clean up on unmount; otherwise the wizard context can retain a stale form control reference.",
-      "keywords": ["onFormReady", "cleanup", "stale", "control", "wizard"]
+      "keywords": ["onFormReady", "cleanup", "stale", "control", "wizard"],
+      "sourceCommentIds": [3389191574],
+      "sourceUrls": [
+        "https://github.com/integral-xyz/fms-frontend/pull/1766#discussion_r3389191574"
+      ]
     },
     {
       "path": "src/components/orders/order-wizard/invoice-preview-sheet.tsx",
       "category": "lifecycle",
       "mustFind": true,
       "description": "Invoice preview ErrorBoundary resetKey must change when the preview input changes; a stable Control reference prevents retry within the session.",
-      "keywords": ["ErrorBoundary", "resetKey", "Control", "retry", "preview"]
+      "keywords": ["ErrorBoundary", "resetKey", "Control", "retry", "preview"],
+      "sourceCommentIds": [3389161156],
+      "sourceUrls": [
+        "https://github.com/integral-xyz/fms-frontend/pull/1766#discussion_r3389161156"
+      ]
     }
   ]
 }

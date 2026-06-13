@@ -15,7 +15,11 @@
       "category": "runtime",
       "mustFind": true,
       "description": "The order email history actor rendering path must not use the in operator on primitive strings because it can throw at runtime.",
-      "keywords": ["in", "operator", "primitive", "actor", "string"]
+      "keywords": ["in", "operator", "primitive", "actor", "string"],
+      "sourceCommentIds": [3405895317],
+      "sourceUrls": [
+        "https://github.com/integral-xyz/fms-frontend/pull/1783#discussion_r3405895317"
+      ]
     }
   ]
 }

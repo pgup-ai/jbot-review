@@ -17,7 +17,11 @@
       "category": "ux",
       "mustFind": true,
       "description": "Duplicate-only paste must not clear typed draft text when no new recipient was actually added.",
-      "keywords": ["paste", "duplicate", "draft", "recipient", "clear"]
+      "keywords": ["paste", "duplicate", "draft", "recipient", "clear"],
+      "sourceCommentIds": [3399343711],
+      "sourceUrls": [
+        "https://github.com/integral-xyz/fms-frontend/pull/1775#discussion_r3399343711"
+      ]
     }
   ]
 }

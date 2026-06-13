@@ -282,7 +282,8 @@ Respond now with one raw JSON object with exactly two top-level keys,
 "summary" and "findings", matching the Output section above. Do not write any
 text before or after the JSON. Do not wrap it in markdown fences. Markdown is
 allowed only inside JSON string values; escape newlines inside string values
-as \\n.`;
+as \\n. Do not write a session recap, completion note, question, or "what would
+you like next" message.`;
 
 /**
  * Focus addenda for extra recall passes. Each lens narrows ATTENTION, not
@@ -479,7 +480,9 @@ export const GUIDELINE_COMPLIANCE_OUTPUT_REMINDER = `## Final output reminder
 Respond now with one raw JSON object with the single top-level key
 "findings", matching the schema above. Do not write any text before or after
 the JSON. Do not wrap it in markdown fences. Markdown is allowed only inside
-JSON string values; escape newlines inside string values as \\n.`;
+JSON string values; escape newlines inside string values as \\n. Do not write
+an audit recap, completion note, question, or "what would you like next"
+message.`;
 
 export function assembleGuidelineCompliancePrompt(prContext: string, guidelines: string): string {
   const parts = [GUIDELINE_COMPLIANCE_PROMPT];

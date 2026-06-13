@@ -129,9 +129,10 @@ let cwdChain: Promise<void> = Promise.resolve();
  * Starts an opencode server with the given provider API key embedded in its
  * config, and returns an SDK client pointed at it. The server's child process
  * inherits the current working directory, so we set cwd to the workspace
- * before spawning and restore it on stop. The read-only "plan" agent is used
- * by default — it cannot edit files, which keeps the review safe and avoids
- * non-interactive permission prompts that would hang a CI run.
+ * before spawning and restore it immediately after startup. The read-only
+ * "plan" agent is used by default — it cannot edit files, which keeps the
+ * review safe and avoids non-interactive permission prompts that would hang a
+ * CI run.
  */
 export async function startOpencode(
   workspace: string,
@@ -139,7 +140,7 @@ export async function startOpencode(
   modelID: string,
   apiKey: string,
   log: (msg: string) => void,
-  modelOptions?: Record<string, unknown>,
+  options: { modelOptions?: Record<string, unknown>; port?: number } = {},
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
   // Serialize against other startOpencode calls so the chdir → spawn → restore
   // sequence runs atomically. This is the only safe way to scope cwd to the
@@ -162,6 +163,14 @@ export async function startOpencode(
       /* best effort */
     }
   };
+  let lockReleased = false;
+  const restoreAndRelease = () => {
+    restoreCwd();
+    if (!lockReleased) {
+      lockReleased = true;
+      release();
+    }
+  };
 
   try {
     // Move chdir inside try so the mutex is released on any error.
@@ -175,34 +184,27 @@ export async function startOpencode(
         /* best effort */
       }
     };
-    const config = buildConfig(providerID, modelID, apiKey, modelOptions);
+    const config = buildConfig(providerID, modelID, apiKey, options.modelOptions);
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',
       // Fixed port means two runs on one host collide (e.g. the webhook app
       // plus a CI job on a self-hosted runner); override per process.
-      port: parsePortEnv('JBOT_OPENCODE_PORT', 4096),
+      port: options.port ?? parsePortEnv('JBOT_OPENCODE_PORT', 4096),
       timeout: READY_TIMEOUT_MS,
       config,
     });
+    restoreAndRelease();
 
     log(`opencode server listening at ${server.url} (provider=${providerID} model=${modelID})`);
 
     const stop = () => {
-      // Wrap server.close() in try/finally so cwd is always restored, even
-      // if close() throws (e.g., double-close).
-      try {
-        server.close();
-      } finally {
-        restoreCwd();
-        release();
-      }
+      server.close();
     };
 
     return { client, stop };
   } catch (err) {
     // Restore cwd on failure and release the lock so the next caller can proceed.
-    restoreCwd();
-    release();
+    restoreAndRelease();
     throw err;
   }
 }
@@ -558,14 +560,17 @@ async function promptInSessionHoldingSlot(
     `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
   );
 
-  const textPart = [...parts].reverse().find((p) => p.type === 'text');
+  const textParts = parts.filter((p) => p.type === 'text' && p.text);
   // No text part (e.g. the model exhausted its budget on reasoning) must
   // surface as a parse failure so the repair loop fires — defaulting to
   // '{}' would silently score the session as "no findings".
-  const raw = textPart?.text ?? '';
+  const raw = textParts
+    .map((p) => p.text)
+    .join('\n\n')
+    .trim();
   if (!raw)
     log(`${label} response contained no text part (types: ${parts.map((p) => p.type).join(', ')})`);
-  log(`Extracted ${label} text: ${raw.length} chars`);
+  log(`Extracted ${label} text: ${raw.length} chars from ${textParts.length} text part(s)`);
   return raw;
 }
 

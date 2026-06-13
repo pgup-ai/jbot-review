@@ -17,14 +17,18 @@
       "category": "validation",
       "mustFind": true,
       "description": "Order email sending must cap recipient count; otherwise a request can fan out an unbounded number of provider sends.",
-      "keywords": ["recipient", "count", "cap", "email", "validation"]
+      "keywords": ["recipient", "count", "cap", "email", "validation"],
+      "sourceCommentIds": [3396972385],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3056#discussion_r3396972385"]
     },
     {
       "path": "libs/core-ledger-shared/src/order/entity/order-email-send.entity-schema.ts",
       "category": "data-modeling",
       "mustFind": true,
       "description": "Successful email send history should store one send record with recipient data, not duplicate one send into multiple rows per recipient.",
-      "keywords": ["jsonb", "recipients", "one", "record", "email"]
+      "keywords": ["jsonb", "recipients", "one", "record", "email"],
+      "sourceCommentIds": [3398378486],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3056#discussion_r3398378486"]
     },
     {
       "path": "apps/core-ledger/src/orders/orders.service.ts",
@@ -33,7 +37,9 @@
       "category": "audit",
       "mustFind": true,
       "description": "Sending an order email is a user-visible operation and should emit an audit log entry for the send_order_email action.",
-      "keywords": ["audit", "send_order_email", "order", "email", "action"]
+      "keywords": ["audit", "send_order_email", "order", "email", "action"],
+      "sourceCommentIds": [3397476818],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3056#discussion_r3397476818"]
     }
   ]
 }

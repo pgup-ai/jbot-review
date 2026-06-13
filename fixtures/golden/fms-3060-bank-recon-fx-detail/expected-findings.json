@@ -15,14 +15,18 @@
       "category": "error-handling",
       "mustFind": true,
       "description": "Bank reconciliation detail retrieval should handle FX-rate lookup failure and return a safe null value instead of crashing getDetail.",
-      "keywords": ["fx", "rate", "lookup", "getDetail", "null"]
+      "keywords": ["fx", "rate", "lookup", "getDetail", "null"],
+      "sourceCommentIds": [3398687893],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3060#discussion_r3398687893"]
     },
     {
       "path": "libs/modules/src/reconciliation/bank/bank-reconciliation.service.ts",
       "category": "error-handling",
       "mustFind": true,
       "description": "Caught errors should be serialized with the shared errorToString helper rather than interpolated directly.",
-      "keywords": ["caught", "errorToString", "serialize", "error", "logging"]
+      "keywords": ["caught", "errorToString", "serialize", "error", "logging"],
+      "sourceCommentIds": [3399111029],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3060#discussion_r3399111029"]
     }
   ]
 }

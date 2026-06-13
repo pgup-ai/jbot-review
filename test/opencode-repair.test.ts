@@ -17,7 +17,7 @@ interface FakeMessage {
  * session that answers every prompt immediately. A null response scripts a
  * reasoning-only message with no text part.
  */
-function makeFakeClient(responses: Array<string | null>): {
+function makeFakeClient(responses: Array<string | string[] | null>): {
   client: OpencodeClient;
   prompts: string[];
 } {
@@ -33,9 +33,14 @@ function makeFakeClient(responses: Array<string | null>): {
         // must not fall back to '{}'.
         const index = prompts.length - 1;
         const text = index < responses.length ? responses[index] : '{}';
+        const parts = Array.isArray(text)
+          ? text.map((part) => ({ type: 'text' as const, text: part }))
+          : text === null
+            ? []
+            : [{ type: 'text' as const, text }];
         messages.push({
           info: { role: 'assistant', id: `m${prompts.length}`, time: { completed: 1 } },
-          parts: text === null ? [] : [{ type: 'text', text }],
+          parts,
         });
         return {};
       },
@@ -72,6 +77,18 @@ describe('runReview JSON repair loop', () => {
 
     assert.equal(prompts.length, 1);
     assert.equal(result.summary, 'ok after repair');
+  });
+
+  it('parses JSON from an earlier text part without repair', async () => {
+    const { client, prompts } = makeFakeClient([
+      [VALID_REVIEW, 'The review is complete. My findings are captured in the JSON above.'],
+    ]);
+
+    const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 1);
+    assert.equal(result.summary, 'ok after repair');
+    assert.equal(result.findings.length, 1);
   });
 
   it('treats a reasoning-only response (no text part) as repairable, not as zero findings', async () => {

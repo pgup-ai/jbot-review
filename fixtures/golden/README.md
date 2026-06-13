@@ -78,8 +78,13 @@ The runner:
 - checks out each pinned snapshot head,
 - computes the local `base...head` diff,
 - runs the read-only jbot/opencode review,
-- writes each case's `actual-findings.json`,
+- writes each case's `actual-findings.json` after every completed snapshot,
 - then runs `npm run eval` unless `--no-score` is passed.
+
+When expected findings include `sourceCommentIds` or `sourceHeadSha(s)`, the
+benchmark runs only the snapshot heads needed to cover those labels. Cases
+without per-finding provenance conservatively run every snapshot in
+`snapshot.json`.
 
 By default it uses isolated clones under `.tmp/golden-repos/` so active working
 trees are not disturbed. Override a repo location with:
@@ -90,6 +95,29 @@ npm run bench:golden -- \
   --model openai/gpt-5.4 \
   --repo-root integral-xyz/fms=/path/to/fms
 ```
+
+Snapshots are run serially by default. To run independent snapshots in parallel,
+use isolated git worktrees and per-worker opencode ports:
+
+```
+npm run bench:golden -- \
+  --case fms-3064-ai-chat-duplicate-review \
+  --model opencode/deepseek-v4-flash-free \
+  --snapshot-concurrency 2 \
+  --opencode-port-start 4096
+```
+
+Keep `--snapshot-concurrency` modest. Each snapshot already fans out into review
+shards, guideline checks, and verification sessions; high snapshot concurrency
+can overload a single provider key.
+
+You can set the default in `.env`:
+
+```
+BENCH_GOLDEN_SNAPSHOT_CONCURRENCY=2
+```
+
+Passing `--snapshot-concurrency` on the command line overrides the env value.
 
 ## Seeding the set
 

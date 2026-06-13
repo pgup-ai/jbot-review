@@ -22,6 +22,13 @@ import type { Octokit, PrFile } from '../src/shared/github.ts';
 import type { ReviewCommit } from '../src/shared/review-context.ts';
 import type { Finding } from '../src/shared/types.ts';
 
+interface GoldenExpectedFinding {
+  sourceHeadSha?: string;
+  sourceHeadShas?: string[];
+  sourceCommentIds?: number[];
+  [key: string]: unknown;
+}
+
 interface GoldenExpected {
   provenance: {
     repo: string;
@@ -31,7 +38,7 @@ interface GoldenExpected {
     headSha: string;
     mergeSha?: string;
   };
-  findings: unknown[];
+  findings: GoldenExpectedFinding[];
 }
 
 interface GoldenSnapshot {
@@ -62,6 +69,8 @@ interface BenchArgs {
   timeBudgetMinutes: number;
   reviewShards: number;
   maxConcurrentSessions: number;
+  snapshotConcurrency: number;
+  opencodePortStart: number;
 }
 
 function parseArgs(argv: string[]): BenchArgs {
@@ -79,6 +88,8 @@ function parseArgs(argv: string[]): BenchArgs {
     timeBudgetMinutes: 10,
     reviewShards: 0,
     maxConcurrentSessions: 0,
+    snapshotConcurrency: parsePositiveEnvInt('BENCH_GOLDEN_SNAPSHOT_CONCURRENCY', 1),
+    opencodePortStart: 4096,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -103,6 +114,10 @@ function parseArgs(argv: string[]): BenchArgs {
     else if (arg === '--review-shards') args.reviewShards = parseNonNegativeInteger(next(), arg);
     else if (arg === '--max-concurrent-sessions')
       args.maxConcurrentSessions = parseNonNegativeInteger(next(), arg);
+    else if (arg === '--snapshot-concurrency')
+      args.snapshotConcurrency = parsePositiveInteger(next(), arg);
+    else if (arg === '--opencode-port-start')
+      args.opencodePortStart = parsePositiveInteger(next(), arg);
     else if (arg === '--repo-root') {
       const value = next();
       const eq = value.indexOf('=');
@@ -142,6 +157,11 @@ function parsePositiveInteger(value: string, label: string): number {
   return parsed;
 }
 
+function parsePositiveEnvInt(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  return raw ? parsePositiveInteger(raw, name) : fallback;
+}
+
 function parseNonNegativeInteger(value: string, label: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
@@ -162,25 +182,37 @@ async function main(): Promise<void> {
   loadDefaultEnvFile();
   const args = parseArgs(process.argv.slice(2));
   const caseDirs = await selectCases(args);
+  let nextOpencodePort = args.opencodePortStart;
 
   for (const caseDir of caseDirs) {
     const expected = await readJson<GoldenExpected>(join(caseDir, 'expected-findings.json'));
     const snapshot = await readSnapshot(caseDir, expected);
-    const workspace = ensureRepo(snapshot.repo, snapshot.pr, args.repoRoots);
+    const repoWorkspace = ensureRepo(snapshot.repo, snapshot.pr, args.repoRoots);
     const caseName = basename(caseDir);
-    const actuals: Finding[] = [];
+    const heads = selectSnapshotHeads(snapshot, expected);
+    const snapshotFindings = new Map<string, Finding[]>();
+    let writeChain = Promise.resolve();
 
     console.log(`\n=== ${caseName} (${snapshot.repo}#${snapshot.pr}) ===`);
-    for (const head of snapshot.heads) {
+    if (heads.length < snapshot.heads.length) {
+      console.log(`Pruned snapshots: ${heads.length}/${snapshot.heads.length} head(s).`);
+    }
+    await runWithConcurrency(heads, args.snapshotConcurrency, async (head) => {
+      const opencodePort = nextOpencodePort++;
       console.log(`Snapshot ${head.sha.slice(0, 12)} (${head.reason})`);
-      ensureCommit(workspace, snapshot.repo, snapshot.pr, head.sha);
+      ensureCommit(repoWorkspace, snapshot.repo, snapshot.pr, head.sha);
+      const workspace = prepareSnapshotWorkspace(repoWorkspace, caseName, head.sha);
       const baseSha = resolveBaseSha(workspace, snapshot.baseSha, head.sha);
-      git(workspace, ['checkout', '--detach', head.sha]);
 
       const files = getChangedFiles(workspace, baseSha, head.sha);
       if (files.length === 0) {
         console.log('No reviewable files in snapshot.');
-        continue;
+        snapshotFindings.set(head.sha, []);
+        writeChain = writeChain.then(() =>
+          writeActualFindings(caseDir, heads, snapshotFindings, `${head.sha.slice(0, 12)} empty`),
+        );
+        await writeChain;
+        return;
       }
 
       const commits = getCommits(workspace, baseSha, head.sha);
@@ -212,6 +244,7 @@ async function main(): Promise<void> {
           reviewShards: args.reviewShards,
           modelOptions: args.modelOptions,
           maxConcurrentSessions: args.maxConcurrentSessions,
+          opencodePort,
           onReviewResult: (result) => {
             resultFindings = result.findings;
           },
@@ -220,22 +253,13 @@ async function main(): Promise<void> {
       });
       const findings = resultFindings ?? [];
       console.log(`Findings: ${findings.length}`);
-      actuals.push(...findings);
-    }
-
-    const dedupedActuals = dedupeFindings(actuals);
-    const actualFindings = dedupedActuals.map((finding) => ({
-      path: finding.path,
-      line: finding.line,
-      severity: finding.severity,
-      title: finding.title,
-      body: finding.body,
-    }));
-    await writeFile(
-      join(caseDir, 'actual-findings.json'),
-      `${JSON.stringify(actualFindings, null, 2)}\n`,
-    );
-    console.log(`Wrote ${actualFindings.length} actual finding(s).`);
+      snapshotFindings.set(head.sha, findings);
+      writeChain = writeChain.then(() =>
+        writeActualFindings(caseDir, heads, snapshotFindings, head.sha.slice(0, 12)),
+      );
+      await writeChain;
+    });
+    await writeChain;
   }
 
   if (args.score) {
@@ -302,6 +326,79 @@ async function selectCases(args: BenchArgs): Promise<string[]> {
   return selected;
 }
 
+function selectSnapshotHeads(
+  snapshot: GoldenSnapshot,
+  expected: GoldenExpected,
+): GoldenSnapshot['heads'] {
+  if (expected.findings.length === 0) return snapshot.heads;
+
+  const wantedHeadShas = new Set<string>();
+  const wantedCommentIds = new Set<number>();
+  let findingsWithProvenance = 0;
+
+  for (const finding of expected.findings) {
+    const headShas = [
+      finding.sourceHeadSha,
+      ...(Array.isArray(finding.sourceHeadShas) ? finding.sourceHeadShas : []),
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+    const commentIds = Array.isArray(finding.sourceCommentIds)
+      ? finding.sourceCommentIds.filter((value): value is number => Number.isInteger(value))
+      : [];
+
+    if (headShas.length > 0 || commentIds.length > 0) findingsWithProvenance += 1;
+    for (const sha of headShas) wantedHeadShas.add(sha);
+    for (const id of commentIds) wantedCommentIds.add(id);
+  }
+
+  if (findingsWithProvenance !== expected.findings.length) return snapshot.heads;
+
+  const selected = snapshot.heads.filter((head) => {
+    if (wantedHeadShas.has(head.sha)) return true;
+    return head.sourceCommentIds?.some((id) => wantedCommentIds.has(id)) ?? false;
+  });
+  return selected.length > 0 ? selected : snapshot.heads;
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    for (;;) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      await worker(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+}
+
+async function writeActualFindings(
+  caseDir: string,
+  heads: GoldenSnapshot['heads'],
+  snapshotFindings: ReadonlyMap<string, Finding[]>,
+  completedSnapshot: string,
+): Promise<void> {
+  const actuals = heads.flatMap((head) => snapshotFindings.get(head.sha) ?? []);
+  const actualFindings = dedupeFindings(actuals).map((finding) => ({
+    path: finding.path,
+    line: finding.line,
+    severity: finding.severity,
+    title: finding.title,
+    body: finding.body,
+  }));
+  await writeFile(
+    join(caseDir, 'actual-findings.json'),
+    `${JSON.stringify(actualFindings, null, 2)}\n`,
+  );
+  console.log(
+    `Wrote ${actualFindings.length} actual finding(s) after snapshot ${completedSnapshot}.`,
+  );
+}
+
 async function readSnapshot(caseDir: string, expected: GoldenExpected): Promise<GoldenSnapshot> {
   const snapshotPath = join(caseDir, 'snapshot.json');
   if (existsSync(snapshotPath)) return readJson<GoldenSnapshot>(snapshotPath);
@@ -332,6 +429,30 @@ function ensureRepo(repo: string, pr: number, overrides: ReadonlyMap<string, str
   }
   fetchRepo(target, repo, pr);
   return target;
+}
+
+function prepareSnapshotWorkspace(
+  repoWorkspace: string,
+  caseName: string,
+  headSha: string,
+): string {
+  const target = resolve(
+    '.tmp',
+    'golden-worktrees',
+    sanitizePathPart(caseName),
+    headSha.slice(0, 12),
+  );
+  if (!existsSync(join(target, '.git'))) {
+    mkdirSync(dirname(target), { recursive: true });
+    git(repoWorkspace, ['worktree', 'add', '--detach', target, headSha]);
+  } else {
+    git(target, ['checkout', '--detach', headSha]);
+  }
+  return target;
+}
+
+function sanitizePathPart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '-');
 }
 
 function ensureCommit(workspace: string, repo: string, pr: number, sha: string): void {

@@ -17,7 +17,9 @@
       "category": "logic",
       "mustFind": true,
       "description": "stableStringify must not silently collapse Date, Map, or Set values to empty objects through JSON.stringify handling.",
-      "keywords": ["stableStringify", "Date", "Map", "Set", "JSON"]
+      "keywords": ["stableStringify", "Date", "Map", "Set", "JSON"],
+      "sourceCommentIds": [3399069384],
+      "sourceUrls": ["https://github.com/integral-xyz/fms/pull/3062#discussion_r3399069384"]
     }
   ]
 }

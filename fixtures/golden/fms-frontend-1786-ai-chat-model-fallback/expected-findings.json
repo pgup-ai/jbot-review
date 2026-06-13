@@ -17,7 +17,11 @@
       "category": "contract",
       "mustFind": true,
       "description": "Removing model metadata requires a stale-model fallback; saved configs that reference removed GPT models can otherwise crash selector and send paths.",
-      "keywords": ["model", "metadata", "fallback", "stale", "selector"]
+      "keywords": ["model", "metadata", "fallback", "stale", "selector"],
+      "sourceCommentIds": [3406334504],
+      "sourceUrls": [
+        "https://github.com/integral-xyz/fms-frontend/pull/1786#discussion_r3406334504"
+      ]
     }
   ]
 }
