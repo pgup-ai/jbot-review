@@ -118,6 +118,7 @@ export class Semaphore {
 
 let sessionSlots: Semaphore | undefined;
 let sessionSlotLimit = 0;
+const clientDirectories = new WeakMap<OpencodeClient, string>();
 
 export function configureSessionConcurrency(limit: number): void {
   const normalized = Math.max(0, Math.floor(limit));
@@ -205,6 +206,7 @@ export async function startOpencode(
     restoreAndRelease();
 
     log(`opencode server listening at ${server.url} (provider=${providerID} model=${modelID})`);
+    clientDirectories.set(client, workspace);
 
     const stop = () => {
       try {
@@ -477,7 +479,10 @@ async function promptPlanAgent(
   log(`Creating ${label} session`);
   // The title makes parallel sessions distinguishable in opencode's own
   // session list when debugging a run.
-  const created = await client.session.create({ body: { title: `jbot-review ${label}` } });
+  const created = await client.session.create({
+    body: { title: `jbot-review ${label}` },
+    query: queryDirectory(client),
+  });
   const session = created.data;
   if (!session) throw new Error(`Failed to create ${label} session`);
   log(`${label} session created: ${session.id}`);
@@ -538,6 +543,7 @@ async function promptInSessionHoldingSlot(
   log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
   const promptRes = await client.session.promptAsync({
     path: { id: sessionID },
+    query: queryDirectory(client),
     body: {
       model: { providerID, modelID },
       agent: 'plan',
@@ -595,7 +601,7 @@ async function abortSessionBestEffort(
 ): Promise<void> {
   try {
     await withTimeout(
-      client.session.abort({ path: { id: sessionID } }),
+      client.session.abort({ path: { id: sessionID }, query: queryDirectory(client) }),
       PROMPT_POLL_REQUEST_TIMEOUT_MS,
       `abort timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms`,
     );
@@ -663,7 +669,7 @@ async function getLatestAssistantMessage(
   { info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> } | undefined
 > {
   const result = await withTimeout(
-    client.session.messages({ path: { id: sessionID } }),
+    client.session.messages({ path: { id: sessionID }, query: queryDirectory(client) }),
     PROMPT_POLL_REQUEST_TIMEOUT_MS,
     `opencode ${label} message polling timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID})`,
   );
@@ -687,7 +693,7 @@ async function getSessionStatus(
   label: string,
 ): Promise<SessionStatus | undefined> {
   const result = await withTimeout(
-    client.session.status(),
+    client.session.status({ query: queryDirectory(client) }),
     PROMPT_POLL_REQUEST_TIMEOUT_MS,
     `opencode ${label} status polling timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID})`,
   );
@@ -699,6 +705,11 @@ async function getSessionStatus(
 
 function toTextReadablePart(part: Part): { type: string; text?: string } {
   return part.type === 'text' ? { type: part.type, text: part.text } : { type: part.type };
+}
+
+function queryDirectory(client: OpencodeClient): { directory: string } | undefined {
+  const directory = clientDirectories.get(client);
+  return directory ? { directory } : undefined;
 }
 
 function describeSessionStatus(status: SessionStatus): string {
