@@ -119,13 +119,20 @@ function parseArgs(argv: string[]): BenchArgs {
   }
   const provider = parseModelName(args.model).providerID;
   const providerConfig = PROVIDERS[provider];
-  args.apiKey ||= providerConfig ? (process.env[providerConfig.keyEnv] ?? '') : '';
+  const envApiKey = providerConfig ? (process.env[providerConfig.keyEnv] ?? '') : '';
+  args.apiKey = isPlaceholderValue(args.apiKey) ? '' : args.apiKey;
+  args.apiKey ||= isPlaceholderValue(envApiKey) ? '' : envApiKey;
   if (!args.apiKey) {
     const envHint =
       providerConfig?.keyEnv ?? `${provider.toUpperCase().replaceAll('-', '_')}_API_KEY`;
     throw new Error(`Missing API key for ${provider}. Set ${envHint} or pass --api-key.`);
   }
   return args;
+}
+
+function isPlaceholderValue(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === '' || normalized.startsWith('your_') || normalized.startsWith('<');
 }
 
 function parsePositiveInteger(value: string, label: string): number {
@@ -166,17 +173,17 @@ async function main(): Promise<void> {
     console.log(`\n=== ${caseName} (${snapshot.repo}#${snapshot.pr}) ===`);
     for (const head of snapshot.heads) {
       console.log(`Snapshot ${head.sha.slice(0, 12)} (${head.reason})`);
-      ensureCommit(workspace, snapshot.repo, snapshot.pr, snapshot.baseSha);
       ensureCommit(workspace, snapshot.repo, snapshot.pr, head.sha);
+      const baseSha = resolveBaseSha(workspace, snapshot.baseSha, head.sha);
       git(workspace, ['checkout', '--detach', head.sha]);
 
-      const files = getChangedFiles(workspace, snapshot.baseSha, head.sha);
+      const files = getChangedFiles(workspace, baseSha, head.sha);
       if (files.length === 0) {
         console.log('No reviewable files in snapshot.');
         continue;
       }
 
-      const commits = getCommits(workspace, snapshot.baseSha, head.sha);
+      const commits = getCommits(workspace, baseSha, head.sha);
       const octokit = buildSnapshotOctokit(files, commits);
       let resultFindings: Finding[] | undefined;
 
@@ -191,7 +198,7 @@ async function main(): Promise<void> {
         model: args.model,
         apiKey: args.apiKey,
         headSha: head.sha,
-        baseSha: snapshot.baseSha,
+        baseSha,
         options: {
           enhancedContext: true,
           dryRun: true,
@@ -333,6 +340,24 @@ function ensureCommit(workspace: string, repo: string, pr: number, sha: string):
   } catch {
     fetchRepo(workspace, repo, pr);
     git(workspace, ['cat-file', '-e', `${sha}^{commit}`]);
+  }
+}
+
+function resolveBaseSha(workspace: string, snapshotBaseSha: string, headSha: string): string {
+  if (hasCommit(workspace, snapshotBaseSha)) return snapshotBaseSha;
+  const fallback = git(workspace, ['merge-base', headSha, 'origin/main']).trim();
+  console.log(
+    `Stored base ${snapshotBaseSha.slice(0, 12)} is unavailable; using merge-base ${fallback.slice(0, 12)}.`,
+  );
+  return fallback;
+}
+
+function hasCommit(workspace: string, sha: string): boolean {
+  try {
+    git(workspace, ['cat-file', '-e', `${sha}^{commit}`]);
+    return true;
+  } catch {
+    return false;
   }
 }
 
