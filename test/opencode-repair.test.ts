@@ -63,6 +63,7 @@ function makeFakeClient(
     event: {
       subscribe: async () => {
         if (options.eventSubscribeFails) throw new Error('SSE unavailable');
+        emit({ type: 'server.connected', properties: {} });
         return {
           stream: (async function* () {
             for (;;) {

@@ -33,6 +33,7 @@ const PROMPT_TIMEOUT_MS = 15 * 60_000;
 const PROMPT_POLL_INTERVAL_MS = 2_000;
 const PROMPT_POLL_REQUEST_TIMEOUT_MS = 10_000;
 const PROMPT_PROGRESS_LOG_MS = 60_000;
+const EVENT_STREAM_READY_TIMEOUT_MS = 5_000;
 const CONTEXT7_MCP_NAME = 'context7';
 const CONTEXT7_MCP_URL = 'https://mcp.context7.com/mcp';
 const CONTEXT7_MCP_TIMEOUT_MS = 15_000;
@@ -231,6 +232,7 @@ type AssistantResponse = {
 };
 
 type SessionEventWaiter = {
+  ready: Promise<void>;
   wait: Promise<AssistantResponse>;
   abort: () => void;
 };
@@ -662,7 +664,7 @@ async function promptInSessionHoldingSlot(
   const requestFormat = shouldUseNativeOutputFormat(providerID) ? outputFormat : undefined;
 
   log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
-  const eventWaiter = await createSessionEventWaiter(
+  let eventWaiter = await createSessionEventWaiter(
     client,
     sessionID,
     label,
@@ -670,6 +672,20 @@ async function promptInSessionHoldingSlot(
     log,
     timeoutMs,
   );
+  if (eventWaiter) {
+    try {
+      await eventWaiter.ready;
+    } catch (error) {
+      eventWaiter.abort();
+      void eventWaiter.wait.catch(() => undefined);
+      log(
+        `${label} event stream not ready; falling back to session wait/status: ${formatUnknownError(
+          error,
+        )}`,
+      );
+      eventWaiter = undefined;
+    }
+  }
   const promptRes = await client.session.promptAsync({
     ...directoryParams(client),
     sessionID,
@@ -855,6 +871,14 @@ async function createSessionEventWaiter(
     const events = await client.event.subscribe(directoryParams(client), {
       signal: controller.signal,
     });
+    let markReady: () => void = () => undefined;
+    const ready = withTimeout(
+      new Promise<void>((resolve) => {
+        markReady = resolve;
+      }),
+      EVENT_STREAM_READY_TIMEOUT_MS,
+      `event stream did not connect within ${EVENT_STREAM_READY_TIMEOUT_MS}ms`,
+    );
     const wait = waitForSessionIdleByEvents(
       client,
       sessionID,
@@ -862,10 +886,12 @@ async function createSessionEventWaiter(
       messageID,
       events.stream,
       controller,
+      markReady,
       log,
       timeoutMs,
     );
     return {
+      ready,
       wait,
       abort: () => controller.abort(),
     };
@@ -887,6 +913,7 @@ async function waitForSessionIdleByEvents(
   messageID: string,
   stream: AsyncIterable<unknown>,
   controller: AbortController,
+  markReady: () => void,
   log: (msg: string) => void,
   timeoutMs: number,
 ): Promise<AssistantResponse> {
@@ -909,6 +936,9 @@ async function waitForSessionIdleByEvents(
       for await (const rawEvent of stream) {
         const event = unwrapOpencodeEvent(rawEvent);
         if (!isRecord(event) || typeof event.type !== 'string') continue;
+        markReady();
+
+        if (event.type === 'server.connected') continue;
 
         if (event.type === 'message.updated' && eventSessionID(event) === sessionID) {
           const info = isRecord(event.properties) ? event.properties.info : undefined;
