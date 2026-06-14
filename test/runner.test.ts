@@ -103,4 +103,17 @@ describe('buildMainShardFailureMessage', () => {
     assert.match(message, /refusing to post partial review coverage/);
     assert.match(message, /git diff failed/);
   });
+
+  it('labels a missing error as unknown', () => {
+    const message = buildMainShardFailureMessage(2, 3, undefined);
+
+    assert.match(message, /2 of 3 main review shard\(s\) failed/);
+    assert.match(message, /First failure: unknown error/);
+  });
+
+  it('stringifies a non-Error failure value', () => {
+    const message = buildMainShardFailureMessage(1, 4, 'provider 429');
+
+    assert.match(message, /First failure: provider 429/);
+  });
 });
