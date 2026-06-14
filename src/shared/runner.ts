@@ -12,6 +12,7 @@ import { PATH_PATTERNS, buildDiffHunksBlock, shardFilesForReview } from './diff-
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import { REVIEW_LENSES, buildShardAssignmentBlock, selectLensKeys } from './prompt.ts';
+import { ensureGitSafeDirectory } from './git.ts';
 import {
   startOpencode,
   configureSessionConcurrency,
@@ -158,6 +159,8 @@ export async function runPrReview(params: {
   }
 
   const { providerID, modelID } = parseModelName(model);
+
+  await ensureGitSafeDirectory(workspace, log);
 
   log(`Listing PR files for ${owner}/${repo}#${pullNumber}`);
   const rawFiles = await listPrFiles(octokit, owner, repo, pullNumber);
@@ -754,11 +757,11 @@ function buildShardPlans(params: {
 
 /**
  * Runs the main review as parallel shard sessions and merges the results.
- * Wall clock is the slowest shard, not the whole PR. Degradation rules:
- * a failed shard (timeout, provider error) costs its own coverage — noted in
- * the summary — never the run; the run fails only when EVERY shard fails.
- * In sharded mode each shard's findings are clamped in code to its assigned
- * files so parallel shards cannot duplicate or poach each other.
+ * Wall clock is the slowest shard, not the whole PR. Each shard owns a slice
+ * of the changed files, so an unrecovered main-shard failure is a coverage
+ * hole and fails the main review. Auxiliary sessions fail open; main shards
+ * do not. In sharded mode each shard's findings are clamped in code to its
+ * assigned files so parallel shards cannot duplicate or poach each other.
  */
 async function runShardedReview(params: {
   client: Awaited<ReturnType<typeof startOpencode>>['client'];
@@ -840,9 +843,9 @@ async function runShardedReview(params: {
       }`,
     );
   }
-  if (successes.length === 0) {
+  if (failures.length > 0) {
     const first = failures[0]?.error;
-    throw first instanceof Error ? first : new Error('All review shards failed.');
+    throw new Error(buildMainShardFailureMessage(failures.length, shardPlans.length, first));
   }
 
   const findings = successes.flatMap(({ plan, result }) => {
@@ -862,17 +865,22 @@ async function runShardedReview(params: {
   });
 
   const summaryParts = successes.map(({ result }) => result.summary).filter(Boolean);
-  let summary = summaryParts.join('\n');
-  if (failures.length > 0) {
-    summary = [
-      summary,
-      `⚠️ ${failures.length} of ${shardPlans.length} parallel review shard(s) did not complete; coverage may be partial.`,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-  }
-
+  const summary = summaryParts.join('\n');
   return { summary, findings };
+}
+
+export function buildMainShardFailureMessage(
+  failedCount: number,
+  totalCount: number,
+  firstError: unknown,
+): string {
+  const reason =
+    firstError instanceof Error
+      ? firstError.message
+      : firstError === undefined
+        ? 'unknown error'
+        : String(firstError);
+  return `${failedCount} of ${totalCount} main review shard(s) failed; refusing to post partial review coverage. First failure: ${reason}`;
 }
 
 interface ReviewResultLike {
