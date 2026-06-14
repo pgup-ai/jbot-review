@@ -106,13 +106,6 @@ describe('parseReview', () => {
     );
   });
 
-  it('throws in strict mode when JSON is not shaped like a review result', () => {
-    assert.throws(
-      () => parseReview('{"name":"package","version":"1.0.0"}', 'review', noLog, { strict: true }),
-      /missing required field\(s\): summary, findings/,
-    );
-  });
-
   it('returns a fallback result in non-strict mode', () => {
     const result = parseReview('not json at all', 'aux', noLog);
 

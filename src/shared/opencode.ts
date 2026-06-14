@@ -5,7 +5,7 @@ import {
   type Part,
   type ServerOptions,
   type SessionStatus,
-} from '@opencode-ai/sdk/v2';
+} from '@opencode-ai/sdk';
 
 import { parseModelName } from './model.ts';
 import {
@@ -120,16 +120,6 @@ let sessionSlots: Semaphore | undefined;
 let sessionSlotLimit = 0;
 const clientDirectories = new WeakMap<OpencodeClient, string>();
 
-type ReadablePart = {
-  type: string;
-  text?: string;
-};
-
-type AssistantResponse = {
-  info: AssistantMessage;
-  parts: ReadonlyArray<ReadablePart>;
-};
-
 export function configureSessionConcurrency(limit: number): void {
   const normalized = Math.max(0, Math.floor(limit));
   if (normalized === sessionSlotLimit) return;
@@ -240,7 +230,7 @@ export async function listProviderModels(
   timeoutMs = MODEL_LIST_TIMEOUT_MS,
 ): Promise<string[]> {
   const result = await withTimeout(
-    client.provider.list(directoryParams(client)),
+    client.provider.list(),
     timeoutMs,
     `provider model listing timed out after ${timeoutMs}ms`,
   );
@@ -266,21 +256,22 @@ export async function enableContext7Mcp(
 
   try {
     await client.mcp.add({
-      ...directoryParams(client),
-      name: CONTEXT7_MCP_NAME,
-      config: {
-        type: 'remote',
-        url: CONTEXT7_MCP_URL,
-        enabled: true,
-        headers: {
-          CONTEXT7_API_KEY: trimmedKey,
-          Accept: 'application/json, text/event-stream',
+      body: {
+        name: CONTEXT7_MCP_NAME,
+        config: {
+          type: 'remote',
+          url: CONTEXT7_MCP_URL,
+          enabled: true,
+          headers: {
+            CONTEXT7_API_KEY: trimmedKey,
+            Accept: 'application/json, text/event-stream',
+          },
+          timeout: CONTEXT7_MCP_TIMEOUT_MS,
         },
-        timeout: CONTEXT7_MCP_TIMEOUT_MS,
       },
     });
     added = true;
-    await client.mcp.connect({ ...directoryParams(client), name: CONTEXT7_MCP_NAME });
+    await client.mcp.connect({ path: { name: CONTEXT7_MCP_NAME } });
     log('Context7 MCP enabled for external API/SDK documentation checks.');
     return true;
   } catch (error) {
@@ -297,7 +288,7 @@ export async function disableContext7Mcp(
   log: (msg: string) => void,
 ): Promise<void> {
   try {
-    await client.mcp.disconnect({ ...directoryParams(client), name: CONTEXT7_MCP_NAME });
+    await client.mcp.disconnect({ path: { name: CONTEXT7_MCP_NAME } });
   } catch (error) {
     log(`Context7 MCP disconnect skipped: ${formatContext7Error(error)}`);
   }
@@ -489,8 +480,8 @@ async function promptPlanAgent(
   // The title makes parallel sessions distinguishable in opencode's own
   // session list when debugging a run.
   const created = await client.session.create({
-    ...directoryParams(client),
-    title: `jbot-review ${label}`,
+    body: { title: `jbot-review ${label}` },
+    query: queryDirectory(client),
   });
   const session = created.data;
   if (!session) throw new Error(`Failed to create ${label} session`);
@@ -543,46 +534,42 @@ async function promptInSessionHoldingSlot(
   timeoutMs: number,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
-  const messageID = `msg_jbot_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 
-  // A follow-up prompt (the repair) in an existing session must not return the
-  // previous completed assistant message: remember its id and wait for a newer
-  // one. For a fresh session there is no prior message and this is undefined.
-  const previous = await getAssistantMessageAfterIdle(client, sessionID, messageID, label).catch(
-    () => undefined,
-  );
+  // A follow-up prompt in an existing session must not return the previous
+  // completed assistant message: remember its id and wait for a NEWER one.
+  const previous = await getLatestAssistantMessage(client, sessionID, label);
   const previousMessageID = previous?.info.id;
 
   log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
   const promptRes = await client.session.promptAsync({
-    ...directoryParams(client),
-    sessionID,
-    messageID,
-    model: { providerID, modelID },
-    agent: 'plan',
-    // Defense-in-depth alongside the plan agent and the config-level
-    // permission.edit deny: mutating tools are off for every prompt.
-    // Bash stays on — the review needs git diff/log/grep.
-    tools: { write: false, edit: false, patch: false },
-    parts: [{ type: 'text', text: prompt }],
+    path: { id: sessionID },
+    query: queryDirectory(client),
+    body: {
+      model: { providerID, modelID },
+      agent: 'plan',
+      // Defense-in-depth alongside the plan agent and the config-level
+      // permission.edit deny: mutating tools are off for every prompt.
+      // Bash stays on — the review needs git diff/log/grep.
+      tools: { write: false, edit: false, patch: false },
+      parts: [{ type: 'text', text: prompt }],
+    },
   });
   const promptError = getResultError(promptRes);
   if (promptError) throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
 
-  let data: AssistantResponse;
+  let data;
   try {
     data = await waitForAssistantMessage(
       client,
       sessionID,
       label,
-      messageID,
-      previousMessageID,
       log,
+      previousMessageID,
       timeoutMs,
     );
   } catch (error) {
-    // A timed-out or failed wait leaves the session generating (and spending
-    // tokens) until the server shuts down; stop it now.
+    // A timed-out or failed wait leaves the session generating (and
+    // spending tokens) until the server shuts down; stop it now.
     await abortSessionBestEffort(client, sessionID, label, log);
     throw error;
   }
@@ -592,7 +579,7 @@ async function promptInSessionHoldingSlot(
     `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
   );
 
-  const textParts = parts.filter((p) => p.text);
+  const textParts = parts.filter((p) => p.type === 'text' && p.text);
   // No text part (e.g. the model exhausted its budget on reasoning) must
   // surface as a parse failure so the repair loop fires — defaulting to
   // '{}' would silently score the session as "no findings".
@@ -606,43 +593,54 @@ async function promptInSessionHoldingSlot(
   return raw;
 }
 
+async function abortSessionBestEffort(
+  client: OpencodeClient,
+  sessionID: string,
+  label: string,
+  log: (msg: string) => void,
+): Promise<void> {
+  try {
+    await withTimeout(
+      client.session.abort({ path: { id: sessionID }, query: queryDirectory(client) }),
+      PROMPT_POLL_REQUEST_TIMEOUT_MS,
+      `abort timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms`,
+    );
+    log(`Aborted ${label} session ${sessionID}.`);
+  } catch (error) {
+    log(
+      `(failed to abort ${label} session ${sessionID}: ${
+        error instanceof Error ? error.message : String(error)
+      })`,
+    );
+  }
+}
+
 async function waitForAssistantMessage(
   client: OpencodeClient,
   sessionID: string,
   label: string,
-  messageID: string,
-  ignoreMessageID: string | undefined,
   log: (msg: string) => void,
-  timeoutMs: number,
-): Promise<AssistantResponse> {
+  ignoreMessageID?: string,
+  timeoutMs = PROMPT_TIMEOUT_MS,
+): Promise<{ info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> }> {
   const startedAt = Date.now();
   let lastStatus = 'unknown';
   let lastProgressLogAt = startedAt;
 
   while (Date.now() - startedAt < timeoutMs) {
-    const latest = await getAssistantMessageAfterIdle(client, sessionID, messageID, label);
-    // During the repair re-prompt the previous (malformed) message is still the
-    // latest until the new one streams in; ignore it so we wait for a newer one.
-    const message = latest && latest.info.id !== ignoreMessageID ? latest : undefined;
+    const latest = await getLatestAssistantMessage(client, sessionID, label);
+    const message = latest && latest.info.id === ignoreMessageID ? undefined : latest;
     if (message?.info.error) {
       throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(message.info.error)}`);
     }
 
-    let status: SessionStatus | undefined;
-    try {
-      status = await getSessionStatus(client, sessionID, label);
-    } catch {
-      // Session status is best-effort: the per-message completed flag below is
-      // the authoritative "this prompt is done" signal.
-    }
+    const status = await getSessionStatus(client, sessionID, label);
     if (status) lastStatus = describeSessionStatus(status);
-
-    // Done when the assistant message itself is marked completed, OR the session
-    // reports idle. The per-MESSAGE flag is the reliable signal — under the
-    // opencode-go gateway the session status can stay "busy" long after (or
-    // without ever) reaching idle, which is what hung the earlier idle-only wait.
-    if (message && (Boolean(message.info.time.completed) || status?.type === 'idle')) {
-      return message;
+    if (message && (status?.type === 'idle' || message.info.time.completed)) {
+      return {
+        info: message.info,
+        parts: message.parts,
+      };
     }
 
     const now = Date.now();
@@ -663,66 +661,15 @@ async function waitForAssistantMessage(
   );
 }
 
-async function getAssistantMessageAfterIdle(
-  client: OpencodeClient,
-  sessionID: string,
-  messageID: string,
-  label: string,
-): Promise<AssistantResponse | undefined> {
-  let latest: AssistantResponse | undefined;
-  try {
-    latest = await getLatestAssistantMessage(client, sessionID, label);
-  } catch {
-    // Older servers may not expose the projected v2 messages endpoint.
-  }
-  if (hasResponsePayload(latest)) return latest;
-
-  try {
-    const exact = await getAssistantMessageBestEffort(client, sessionID, messageID, label);
-    if (hasResponsePayload(exact)) return exact;
-    return exact ?? latest;
-  } catch {
-    return latest;
-  }
-}
-
-async function abortSessionBestEffort(
+async function getLatestAssistantMessage(
   client: OpencodeClient,
   sessionID: string,
   label: string,
-  log: (msg: string) => void,
-): Promise<void> {
-  try {
-    await withTimeout(
-      client.session.abort({ ...directoryParams(client), sessionID }),
-      PROMPT_POLL_REQUEST_TIMEOUT_MS,
-      `abort timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms`,
-    );
-    log(`Aborted ${label} session ${sessionID}.`);
-  } catch (error) {
-    log(
-      `(failed to abort ${label} session ${sessionID}: ${
-        error instanceof Error ? error.message : String(error)
-      })`,
-    );
-  }
-}
-
-async function getAssistantMessageBestEffort(
-  client: OpencodeClient,
-  sessionID: string,
-  messageID: string,
-  label: string,
-): Promise<{ info: AssistantMessage; parts: ReadonlyArray<ReadablePart> } | undefined> {
-  try {
-    return await fetchAssistantMessage(client, sessionID, messageID, label);
-  } catch {
-    // Fall back to the legacy list endpoint for older servers that accept a
-    // caller-provided prompt messageID but derive a separate assistant id.
-  }
-
+): Promise<
+  { info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> } | undefined
+> {
   const result = await withTimeout(
-    client.session.messages({ ...directoryParams(client), sessionID, limit: 1 }),
+    client.session.messages({ path: { id: sessionID }, query: queryDirectory(client) }),
     PROMPT_POLL_REQUEST_TIMEOUT_MS,
     `opencode ${label} message polling timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID})`,
   );
@@ -740,72 +687,13 @@ async function getAssistantMessageBestEffort(
   return undefined;
 }
 
-async function getLatestAssistantMessage(
-  client: OpencodeClient,
-  sessionID: string,
-  label: string,
-): Promise<{ info: AssistantMessage; parts: ReadonlyArray<ReadablePart> } | undefined> {
-  const result = await withTimeout(
-    client.v2.session.messages({ sessionID, limit: 5, order: 'desc' }),
-    PROMPT_POLL_REQUEST_TIMEOUT_MS,
-    `opencode ${label} message polling timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID})`,
-  );
-  const error = getResultError(result);
-  if (error) throw new Error(`opencode ${label} message polling failed: ${error}`);
-
-  const messages = extractProjectedMessages(result.data);
-  for (const message of messages) {
-    if (!isRecord(message) || message.type !== 'assistant') continue;
-    return {
-      info: {
-        role: 'assistant',
-        id: typeof message.id === 'string' ? message.id : '',
-        parentID: '',
-        time: isRecord(message.time) ? message.time : {},
-        ...(message.error ? { error: message.error } : {}),
-      } as AssistantMessage,
-      parts: Array.isArray(message.content) ? message.content.map(toProjectedReadablePart) : [],
-    };
-  }
-  return undefined;
-}
-
-function extractProjectedMessages(payload: unknown): unknown[] {
-  return isRecord(payload) && Array.isArray(payload.data) ? payload.data : [];
-}
-
-async function fetchAssistantMessage(
-  client: OpencodeClient,
-  sessionID: string,
-  messageID: string,
-  label: string,
-): Promise<{ info: AssistantMessage; parts: ReadonlyArray<ReadablePart> }> {
-  const result = await withTimeout(
-    client.session.message({ ...directoryParams(client), sessionID, messageID }),
-    PROMPT_POLL_REQUEST_TIMEOUT_MS,
-    `opencode ${label} message fetch timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID} message=${messageID})`,
-  );
-  const error = getResultError(result);
-  if (error) throw new Error(`opencode ${label} message fetch failed: ${error}`);
-
-  const message = result.data;
-  if (!message) throw new Error(`opencode ${label} message fetch returned no data`);
-  if (message.info.role !== 'assistant') {
-    throw new Error(`opencode ${label} message ${messageID} is not an assistant response`);
-  }
-  return {
-    info: message.info,
-    parts: (message.parts ?? []).map(toTextReadablePart),
-  };
-}
-
 async function getSessionStatus(
   client: OpencodeClient,
   sessionID: string,
   label: string,
 ): Promise<SessionStatus | undefined> {
   const result = await withTimeout(
-    client.session.status(directoryParams(client)),
+    client.session.status({ query: queryDirectory(client) }),
     PROMPT_POLL_REQUEST_TIMEOUT_MS,
     `opencode ${label} status polling timed out after ${PROMPT_POLL_REQUEST_TIMEOUT_MS}ms (session=${sessionID})`,
   );
@@ -815,29 +703,11 @@ async function getSessionStatus(
   return statuses?.[sessionID];
 }
 
-// Tool output is deliberately NOT surfaced as a text part: the reviewer answer
-// must come from the model's own text (or a genuine structured reply), never
-// from a `git diff` it echoed through a bash tool call.
-function toTextReadablePart(part: Part): ReadablePart {
+function toTextReadablePart(part: Part): { type: string; text?: string } {
   return part.type === 'text' ? { type: part.type, text: part.text } : { type: part.type };
 }
 
-function toProjectedReadablePart(part: unknown): ReadablePart {
-  if (!isRecord(part)) return { type: 'unknown' };
-  if (part.type === 'text' && typeof part.text === 'string') {
-    return { type: part.type, text: part.text };
-  }
-  return { type: typeof part.type === 'string' ? part.type : 'unknown' };
-}
-
-function hasResponsePayload(
-  message: { info: AssistantMessage; parts: ReadonlyArray<ReadablePart> } | undefined,
-): boolean {
-  if (!message) return false;
-  return message.parts.some((part) => Boolean(part.text));
-}
-
-function directoryParams(client: OpencodeClient): { directory: string } | undefined {
+function queryDirectory(client: OpencodeClient): { directory: string } | undefined {
   const directory = clientDirectories.get(client);
   return directory ? { directory } : undefined;
 }
@@ -895,17 +765,6 @@ export function parseReview(
   }
 
   const obj = parsed as Record<string, unknown>;
-  if (options.strict && (typeof obj.summary !== 'string' || !Array.isArray(obj.findings))) {
-    const missing = [
-      typeof obj.summary !== 'string' ? 'summary' : '',
-      !Array.isArray(obj.findings) ? 'findings' : '',
-    ]
-      .filter(Boolean)
-      .join(', ');
-    log(`${label} response was missing required review field(s): ${missing}`);
-    log(`${label} response preview:\n${truncateForLog(raw, 2000)}`);
-    throw new Error(`opencode ${label} returned JSON missing required field(s): ${missing}`);
-  }
   const summary = typeof obj.summary === 'string' ? obj.summary : '';
   const rawFindings = Array.isArray(obj.findings) ? obj.findings : [];
   const rawAddressed = Array.isArray(obj.addressedPriorComments) ? obj.addressedPriorComments : [];

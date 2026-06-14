@@ -2,148 +2,54 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import { Semaphore, parsePortEnv, runReview } from '../src/shared/opencode.ts';
-import type { OpencodeClient } from '@opencode-ai/sdk/v2';
+import type { OpencodeClient } from '@opencode-ai/sdk';
 
 const noLog = (): void => undefined;
 
 interface FakeMessage {
-  info: {
-    role: 'assistant';
-    id: string;
-    parentID: string;
-    time: { created?: number; completed?: number };
-  };
-  parts: FakePart[];
+  info: { role: 'assistant'; id: string; time: { completed: number } };
+  parts: Array<{ type: 'text'; text: string }>;
 }
-
-type FakePart =
-  | { type: 'text'; text: string }
-  | { type: 'tool'; state: Record<string, unknown> }
-  | { type: 'reasoning' };
-
-type FakeResponse =
-  | string
-  | string[]
-  | null
-  | { text?: string | string[] | null; parts?: FakePart[] };
 
 /**
  * Minimal fake of the opencode client surface runReview touches. Each
  * promptAsync call appends the next scripted assistant response, mimicking a
  * session that answers every prompt immediately. A null response scripts a
  * reasoning-only message with no text part.
- *
- * `status` controls what `session.status` reports and `messageCompleted`
- * controls whether the pushed assistant message carries `time.completed`. The
- * wait must finish as soon as EITHER signal says "done" — the regression that
- * hung CI was a wait that keyed only on session idle while the gateway sat at
- * `busy` forever.
  */
-function makeFakeClient(
-  responses: FakeResponse[],
-  options: {
-    status?: 'idle' | 'busy';
-    messageCompleted?: boolean;
-    emitToolStepBeforeFinal?: boolean;
-  } = {},
-): {
+function makeFakeClient(responses: Array<string | string[] | null>): {
   client: OpencodeClient;
   prompts: string[];
-  formats: unknown[];
 } {
   const messages: FakeMessage[] = [];
   const prompts: string[] = [];
-  const formats: unknown[] = [];
-  const completed = options.messageCompleted !== false;
-  const time = completed ? { completed: 1 } : { created: 1 };
 
   const client = {
     session: {
       create: async () => ({ data: { id: 'session-1' } }),
-      promptAsync: async (request: {
-        messageID?: string;
-        parts: Array<{ text: string }>;
-        format?: unknown;
-      }) => {
-        prompts.push(request.parts[0].text);
-        formats.push(request.format);
+      promptAsync: async (request: { body: { parts: Array<{ text: string }> } }) => {
+        prompts.push(request.body.parts[0].text);
         // index access, not `??`: a scripted null means "no text part" and
         // must not fall back to '{}'.
         const index = prompts.length - 1;
-        const id = request.messageID ?? `m${prompts.length}`;
-        const scripted = index < responses.length ? responses[index] : '{}';
-        if (options.emitToolStepBeforeFinal) {
-          messages.push({
-            info: { role: 'assistant', id, parentID: id, time: { ...time } },
-            parts: [{ type: 'tool', state: { status: 'completed', output: 'git diff output' } }],
-          });
-        }
+        const text = index < responses.length ? responses[index] : '{}';
+        const parts = Array.isArray(text)
+          ? text.map((part) => ({ type: 'text' as const, text: part }))
+          : text === null
+            ? []
+            : [{ type: 'text' as const, text }];
         messages.push({
-          info: {
-            role: 'assistant',
-            id: options.emitToolStepBeforeFinal ? `${id}-final` : id,
-            parentID: id,
-            time: { ...time },
-          },
-          parts: buildFakeParts(scripted),
+          info: { role: 'assistant', id: `m${prompts.length}`, time: { completed: 1 } },
+          parts,
         });
         return {};
       },
-      message: async (request: { messageID: string }) => {
-        const message = messages.find((item) => item.info.id === request.messageID);
-        return message ? { data: message } : { error: { message: 'not found' } };
-      },
-      messages: async (request: { order?: 'asc' | 'desc'; limit?: number } = {}) => {
-        const ordered = request.order === 'desc' ? [...messages].reverse() : [...messages];
-        return { data: ordered.slice(0, request.limit) };
-      },
-      status: async () => ({ data: { 'session-1': { type: options.status ?? 'idle' } } }),
-      abort: async () => ({}),
-    },
-    v2: {
-      session: {
-        messages: async (request: { order?: 'asc' | 'desc'; limit?: number } = {}) => {
-          const ordered = request.order === 'desc' ? [...messages].reverse() : [...messages];
-          return {
-            data: { data: ordered.slice(0, request.limit).map(toFakeProjectedMessage), cursor: {} },
-          };
-        },
-      },
+      messages: async () => ({ data: [...messages] }),
+      status: async () => ({ data: { 'session-1': { type: 'idle' } } }),
     },
   } as unknown as OpencodeClient;
 
-  return { client, prompts, formats };
-}
-
-function toFakeProjectedMessage(message: FakeMessage): unknown {
-  return {
-    type: 'assistant',
-    id: message.info.id,
-    time: message.info.time,
-    content: message.parts.map((part, index) => {
-      if (part.type === 'text') return { type: 'text', id: `p${index}`, text: part.text };
-      if (part.type === 'tool')
-        return { type: 'tool', id: `p${index}`, name: 'bash', state: part.state };
-      return { type: 'reasoning', id: `p${index}`, text: '' };
-    }),
-  };
-}
-
-function buildFakeParts(scripted: FakeResponse): FakePart[] {
-  if (isStructuredResponse(scripted) && scripted.parts) return scripted.parts;
-  const text = isStructuredResponse(scripted) ? scripted.text : scripted;
-  return Array.isArray(text)
-    ? text.map((part) => ({ type: 'text' as const, text: part }))
-    : text === null
-      ? []
-      : [{ type: 'text' as const, text }];
-}
-
-function isStructuredResponse(value: FakeResponse): value is {
-  text?: string | string[] | null;
-  parts?: FakePart[];
-} {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return { client, prompts };
 }
 
 const VALID_REVIEW = JSON.stringify({
@@ -173,54 +79,6 @@ describe('runReview JSON repair loop', () => {
     assert.equal(result.summary, 'ok after repair');
   });
 
-  it('never requests native JSON-schema output (prompt-level JSON + strict parsing only)', async () => {
-    const { client, formats } = makeFakeClient(['garbage', VALID_REVIEW]);
-
-    await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
-
-    assert.equal(formats.length, 2);
-    assert.equal(formats[0], undefined);
-    assert.equal(formats[1], undefined);
-  });
-
-  it('returns once the assistant message completes even while the session stays busy', async () => {
-    // The CI hang: the opencode-go gateway sat at status "busy" for the full
-    // budget while the assistant message had already completed. The wait must
-    // key on the per-message completed flag, not only on session idle.
-    const { client, prompts } = makeFakeClient([VALID_REVIEW], {
-      status: 'busy',
-      messageCompleted: true,
-    });
-
-    const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
-
-    assert.equal(prompts.length, 1);
-    assert.equal(result.summary, 'ok after repair');
-    assert.equal(result.findings.length, 1);
-  });
-
-  it('returns when the session reports idle even if the message lacks a completed flag', async () => {
-    const { client, prompts } = makeFakeClient([VALID_REVIEW], {
-      status: 'idle',
-      messageCompleted: false,
-    });
-
-    const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
-
-    assert.equal(prompts.length, 1);
-    assert.equal(result.summary, 'ok after repair');
-  });
-
-  it('reads the latest assistant message after intermediate tool steps', async () => {
-    const { client, prompts } = makeFakeClient([VALID_REVIEW], { emitToolStepBeforeFinal: true });
-
-    const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
-
-    assert.equal(prompts.length, 1);
-    assert.equal(result.summary, 'ok after repair');
-    assert.equal(result.findings.length, 1);
-  });
-
   it('parses JSON from an earlier text part without repair', async () => {
     const { client, prompts } = makeFakeClient([
       [VALID_REVIEW, 'The review is complete. My findings are captured in the JSON above.'],
@@ -229,23 +87,6 @@ describe('runReview JSON repair loop', () => {
     const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
 
     assert.equal(prompts.length, 1);
-    assert.equal(result.summary, 'ok after repair');
-    assert.equal(result.findings.length, 1);
-  });
-
-  it('does not treat completed tool output text as the reviewer answer', async () => {
-    const { client, prompts } = makeFakeClient([
-      {
-        text: null,
-        parts: [{ type: 'tool', state: { status: 'completed', output: VALID_REVIEW } }],
-      },
-      VALID_REVIEW,
-    ]);
-
-    const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
-
-    assert.equal(prompts.length, 2);
-    assert.equal(prompts[1].includes('could not be parsed as JSON'), true);
     assert.equal(result.summary, 'ok after repair');
     assert.equal(result.findings.length, 1);
   });

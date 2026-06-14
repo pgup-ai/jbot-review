@@ -1,31 +1,25 @@
 # Roadmap
 
-## Next: OpenCode SDK modernization (validate each via dogfood + golden set)
+## Abandoned: `@opencode-ai/sdk/v2` client migration
 
-- **Drop the chdir mutex in favor of per-request `directory`.**
-  `session.create`/`promptAsync`/`messages`/`status` accept `query.directory`;
-  we now pass it while still spawning the server from the workspace cwd for
-  compatibility. Next step: verify the directory param fully scopes tool
-  execution (git, file reads) in app mode before removing the chdir mutex.
-
-## Completed
-
-- **Migrate sessions to `@opencode-ai/sdk/v2`.** Use the v2 SDK import and its
-  flat session API (`promptAsync`/`messages`/`status` with projected message
-  reads). Native JSON-schema `format` was evaluated and **not** adopted: the
-  live `opencode-go` provider routes schema output through tool_choice paths
-  that small models satisfy with tool-only messages, so prompt-level JSON plus
-  `parseJsonObject` and the one-shot repair loop remain the validation path.
-- **Prompt completion keys on the assistant message, not session idle.** The
-  wait polls `session.messages`/`session.status` and returns as soon as the new
-  assistant message reports `time.completed` (or the session reports idle).
-  An earlier SSE/`event.subscribe()` rewrite that waited only for session idle
-  was reverted — under `opencode-go` the session can stay `busy` long after the
-  message completes, which hung every shard to the timeout.
-- **Upgrade `@opencode-ai/sdk` 1.16.2 -> 1.17.5.** Re-checked the generated
-  type surfaces: v1 supports per-request `query.directory`,
-  `session.messages` `limit`, and `event.subscribe()`; v2 exposes JSON-schema
-  output formatting but still needs a dedicated migration branch.
+- **The v2 client (`@opencode-ai/sdk/v2`) breaks review completion** and was
+  reverted to the proven v1 client (`@opencode-ai/sdk`). Same installed package
+  (`1.17.5`) and same spawned server in both cases — only the client API surface
+  differs. Under v2, every review shard streamed `busy` for the full per-prompt
+  budget and never produced a completed assistant message, so the run timed out
+  (`did not finish within 1770s`). The v1 client completes the same PRs in
+  minutes (confirmed against other branches' runs). Root cause was upstream of
+  the wait: the model session never terminates under the v2 `promptAsync` path
+  (suspected `agent: 'plan'` / caller-supplied `messageID` semantics), so no
+  wait logic — message-completion or session-idle — could help.
+- Native JSON-schema `format` and the SSE/`event.subscribe()` wait were part of
+  the same v2 effort and went with it. They added no production value: `format`
+  was inert for the live `opencode-go` provider, and the SSE wait keyed on a
+  session-idle signal that never fires under that gateway. Prompt-level JSON +
+  `parseJsonObject` + the one-shot repair loop remain the validation path.
+- If v2 is revisited, isolate the non-termination first (drop the caller
+  `messageID`, verify the `plan` agent is honored) on a throwaway branch before
+  touching the review runtime.
 
 ## Later: feedback memory for review quality
 
