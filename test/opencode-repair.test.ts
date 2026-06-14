@@ -40,6 +40,7 @@ function makeFakeClient(
     emitMessageUpdated?: boolean;
     emitIdle?: boolean;
     emitToolStepBeforeFinal?: boolean;
+    eventSubscribeFails?: boolean;
     sessionWaitUnavailable?: boolean;
   } = {},
 ): {
@@ -60,14 +61,17 @@ function makeFakeClient(
 
   const client = {
     event: {
-      subscribe: async () => ({
-        stream: (async function* () {
-          for (;;) {
-            if (!events.length) await new Promise<void>((resolve) => waiters.push(resolve));
-            while (events.length) yield events.shift();
-          }
-        })(),
-      }),
+      subscribe: async () => {
+        if (options.eventSubscribeFails) throw new Error('SSE unavailable');
+        return {
+          stream: (async function* () {
+            for (;;) {
+              if (!events.length) await new Promise<void>((resolve) => waiters.push(resolve));
+              while (events.length) yield events.shift();
+            }
+          })(),
+        };
+      },
     },
     session: {
       create: async () => ({ data: { id: 'session-1' } }),
@@ -130,7 +134,7 @@ function makeFakeClient(
             },
           });
         }
-        if (options.emitIdle) {
+        if (options.emitIdle !== false) {
           emit({
             type: 'session.status',
             properties: { sessionID: 'session-1', status: { type: 'idle' } },
@@ -327,7 +331,7 @@ describe('runReview JSON repair loop', () => {
     assert.equal(result.findings.length, 1);
   });
 
-  it('fetches the assistant message after session wait even without message-updated completion', async () => {
+  it('fetches the assistant message after event idle even without message-updated completion', async () => {
     const { client, prompts } = makeFakeClient([VALID_REVIEW], {
       emitMessageUpdated: false,
       emitIdle: true,
@@ -351,8 +355,9 @@ describe('runReview JSON repair loop', () => {
     assert.equal(result.findings.length, 1);
   });
 
-  it('falls back to status polling when session wait is unavailable', async () => {
+  it('falls back to status polling when the event stream and session wait are unavailable', async () => {
     const { client, prompts } = makeFakeClient([VALID_REVIEW], {
+      eventSubscribeFails: true,
       sessionWaitUnavailable: true,
     });
 

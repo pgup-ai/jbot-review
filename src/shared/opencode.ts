@@ -1,6 +1,7 @@
 import {
   createOpencode,
   type AssistantMessage,
+  type Event as OpencodeEvent,
   type OpencodeClient,
   type OutputFormat,
   type Part,
@@ -222,6 +223,16 @@ type ReadablePart = {
   type: string;
   text?: string;
   structured?: unknown;
+};
+
+type AssistantResponse = {
+  info: AssistantMessage;
+  parts: ReadonlyArray<ReadablePart>;
+};
+
+type SessionEventWaiter = {
+  wait: Promise<AssistantResponse>;
+  abort: () => void;
 };
 
 export function configureSessionConcurrency(limit: number): void {
@@ -651,6 +662,14 @@ async function promptInSessionHoldingSlot(
   const requestFormat = shouldUseNativeOutputFormat(providerID) ? outputFormat : undefined;
 
   log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
+  const eventWaiter = await createSessionEventWaiter(
+    client,
+    sessionID,
+    label,
+    messageID,
+    log,
+    timeoutMs,
+  );
   const promptRes = await client.session.promptAsync({
     ...directoryParams(client),
     sessionID,
@@ -666,22 +685,26 @@ async function promptInSessionHoldingSlot(
   });
   const promptError = getResultError(promptRes);
   if (promptError) {
+    eventWaiter?.abort();
     throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
   }
 
-  let data;
+  let data: AssistantResponse;
   try {
-    data = await waitForSessionIdleThenFetchMessage(
-      client,
-      sessionID,
-      label,
-      messageID,
-      log,
-      timeoutMs,
-    );
+    data = eventWaiter
+      ? await eventWaiter.wait
+      : await waitForSessionIdleThenFetchMessage(
+          client,
+          sessionID,
+          label,
+          messageID,
+          log,
+          timeoutMs,
+        );
   } catch (error) {
     // A timed-out or failed wait leaves the session generating (and
     // spending tokens) until the server shuts down; stop it now.
+    eventWaiter?.abort();
     await abortSessionBestEffort(client, sessionID, label, log);
     throw error;
   }
@@ -724,7 +747,7 @@ async function waitForSessionIdleThenFetchMessage(
   messageID: string,
   log: (msg: string) => void,
   timeoutMs: number,
-): Promise<{ info: AssistantMessage; parts: ReadonlyArray<ReadablePart> }> {
+): Promise<AssistantResponse> {
   const startedAt = Date.now();
   let progressTimer: NodeJS.Timeout | undefined;
 
@@ -765,10 +788,7 @@ async function waitForSessionIdleThenFetchMessage(
       );
     }
 
-    const latest = await getLatestAssistantMessage(client, sessionID, label);
-    const message = hasResponsePayload(latest)
-      ? latest
-      : ((await getAssistantMessageBestEffort(client, sessionID, messageID, label)) ?? latest);
+    const message = await getAssistantMessageAfterIdle(client, sessionID, messageID, label);
     if (!message) throw new Error(`opencode ${label} prompt completed without assistant message`);
     if (message.info.error) {
       throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(message.info.error)}`);
@@ -787,7 +807,7 @@ async function waitForAssistantResponseByStatusPolling(
   log: (msg: string) => void,
   timeoutMs: number,
   startedAt: number,
-): Promise<{ info: AssistantMessage; parts: ReadonlyArray<ReadablePart> }> {
+): Promise<AssistantResponse> {
   let lastStatus = 'waiting for session status';
   let lastProgressLogAt = startedAt;
 
@@ -795,15 +815,14 @@ async function waitForAssistantResponseByStatusPolling(
     const status = await getSessionStatus(client, sessionID, label);
     if (status) lastStatus = describeSessionStatus(status);
 
-    const latest = await getLatestAssistantMessage(client, sessionID, label);
-    const message = hasResponsePayload(latest)
-      ? latest
-      : ((await getAssistantMessageBestEffort(client, sessionID, messageID, label)) ?? latest);
+    const message = await getAssistantMessageAfterIdle(client, sessionID, messageID, label);
     if (message?.info.error) {
       throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(message.info.error)}`);
     }
-    if (status?.type === 'idle' && message && hasResponsePayload(message)) return message;
-    if (status?.type === 'idle') lastStatus = 'idle without response payload';
+    if (status?.type === 'idle') {
+      if (!message) throw new Error(`opencode ${label} prompt completed without assistant message`);
+      return message;
+    }
 
     const now = Date.now();
     if (now - lastProgressLogAt >= PROMPT_PROGRESS_LOG_MS) {
@@ -821,6 +840,177 @@ async function waitForAssistantResponseByStatusPolling(
       timeoutMs / 1000,
     )}s (last status: ${lastStatus})`,
   );
+}
+
+async function createSessionEventWaiter(
+  client: OpencodeClient,
+  sessionID: string,
+  label: string,
+  messageID: string,
+  log: (msg: string) => void,
+  timeoutMs: number,
+): Promise<SessionEventWaiter | undefined> {
+  const controller = new AbortController();
+  try {
+    const events = await client.event.subscribe(directoryParams(client), {
+      signal: controller.signal,
+    });
+    const wait = waitForSessionIdleByEvents(
+      client,
+      sessionID,
+      label,
+      messageID,
+      events.stream,
+      controller,
+      log,
+      timeoutMs,
+    );
+    return {
+      wait,
+      abort: () => controller.abort(),
+    };
+  } catch (error) {
+    controller.abort();
+    log(
+      `${label} event stream unavailable; falling back to session wait/status: ${formatUnknownError(
+        error,
+      )}`,
+    );
+    return undefined;
+  }
+}
+
+async function waitForSessionIdleByEvents(
+  client: OpencodeClient,
+  sessionID: string,
+  label: string,
+  messageID: string,
+  stream: AsyncIterable<unknown>,
+  controller: AbortController,
+  log: (msg: string) => void,
+  timeoutMs: number,
+): Promise<AssistantResponse> {
+  const startedAt = Date.now();
+  const partsByID = new Map<string, ReadablePart>();
+  let assistantInfo: AssistantMessage | undefined;
+  let lastStatus = 'waiting for event stream';
+  let progressTimer: NodeJS.Timeout | undefined;
+
+  progressTimer = setInterval(() => {
+    log(
+      `${label} prompt still running (${Math.round(
+        (Date.now() - startedAt) / 1000,
+      )}s, ${lastStatus})`,
+    );
+  }, PROMPT_PROGRESS_LOG_MS);
+
+  const waitForIdle = (async () => {
+    try {
+      for await (const rawEvent of stream) {
+        const event = unwrapOpencodeEvent(rawEvent);
+        if (!isRecord(event) || typeof event.type !== 'string') continue;
+
+        if (event.type === 'message.updated' && eventSessionID(event) === sessionID) {
+          const info = isRecord(event.properties) ? event.properties.info : undefined;
+          if (isRecord(info) && info.role === 'assistant') {
+            assistantInfo = info as AssistantMessage;
+            lastStatus = 'assistant message updated';
+          }
+          continue;
+        }
+
+        if (event.type === 'message.part.updated' && eventSessionID(event) === sessionID) {
+          const part = isRecord(event.properties) ? event.properties.part : undefined;
+          if (isRecord(part)) {
+            const id = typeof part.id === 'string' ? part.id : String(partsByID.size);
+            partsByID.set(id, toProjectedReadablePart(part));
+            lastStatus = `assistant part updated: ${typeof part.type === 'string' ? part.type : 'unknown'}`;
+          }
+          continue;
+        }
+
+        if (event.type === 'session.error' && eventSessionID(event) === sessionID) {
+          const error = isRecord(event.properties) ? event.properties.error : undefined;
+          throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(error)}`);
+        }
+
+        if (event.type === 'session.status' && eventSessionID(event) === sessionID) {
+          const status = isRecord(event.properties) ? event.properties.status : undefined;
+          if (isSessionStatus(status)) {
+            lastStatus = describeSessionStatus(status);
+            if (status.type === 'idle') return;
+          }
+          continue;
+        }
+
+        if (event.type === 'session.idle' && eventSessionID(event) === sessionID) {
+          lastStatus = 'idle';
+          return;
+        }
+      }
+      throw new Error(`opencode ${label} event stream ended before session became idle`);
+    } finally {
+      controller.abort();
+    }
+  })();
+
+  try {
+    await withTimeout(
+      waitForIdle,
+      timeoutMs,
+      `opencode ${label} prompt did not finish within ${Math.round(
+        timeoutMs / 1000,
+      )}s (last status: ${lastStatus})`,
+    );
+  } finally {
+    if (progressTimer) clearInterval(progressTimer);
+    const returnable = stream as unknown as { return?: () => Promise<unknown> | unknown };
+    void returnable.return?.();
+  }
+
+  const message = await getAssistantMessageAfterIdle(client, sessionID, messageID, label);
+  if (message?.info.error) {
+    throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(message.info.error)}`);
+  }
+  if (message && hasResponsePayload(message)) return message;
+  if (partsByID.size > 0) {
+    return {
+      info:
+        assistantInfo ??
+        ({
+          role: 'assistant',
+          id: messageID,
+          parentID: messageID,
+          time: {},
+        } as AssistantMessage),
+      parts: [...partsByID.values()],
+    };
+  }
+  if (message) return message;
+  throw new Error(`opencode ${label} prompt completed without assistant message`);
+}
+
+async function getAssistantMessageAfterIdle(
+  client: OpencodeClient,
+  sessionID: string,
+  messageID: string,
+  label: string,
+): Promise<AssistantResponse | undefined> {
+  let latest: AssistantResponse | undefined;
+  try {
+    latest = await getLatestAssistantMessage(client, sessionID, label);
+  } catch {
+    // Older servers may not expose the projected v2 messages endpoint.
+  }
+  if (hasResponsePayload(latest)) return latest;
+
+  try {
+    const exact = await getAssistantMessageBestEffort(client, sessionID, messageID, label);
+    if (hasResponsePayload(exact)) return exact;
+    return exact ?? latest;
+  } catch {
+    return latest;
+  }
 }
 
 async function abortSessionBestEffort(
@@ -1005,6 +1195,22 @@ function directoryParams(client: OpencodeClient): { directory: string } | undefi
 function describeSessionStatus(status: SessionStatus): string {
   if (status.type === 'retry') return `retry attempt ${status.attempt}: ${status.message}`;
   return status.type;
+}
+
+function isSessionStatus(value: unknown): value is SessionStatus {
+  return isRecord(value) && typeof value.type === 'string';
+}
+
+function unwrapOpencodeEvent(value: unknown): OpencodeEvent | unknown {
+  return isRecord(value) && isRecord(value.payload) ? value.payload : value;
+}
+
+function eventSessionID(event: Record<string, unknown>): string | undefined {
+  const properties = isRecord(event.properties) ? event.properties : undefined;
+  if (!properties) return undefined;
+  if (typeof properties.sessionID === 'string') return properties.sessionID;
+  const part = isRecord(properties.part) ? properties.part : undefined;
+  return typeof part?.sessionID === 'string' ? part.sessionID : undefined;
 }
 
 function getResultError(result: unknown): string | undefined {
