@@ -10,15 +10,18 @@
 
 ## Completed
 
-- **Migrate sessions to `@opencode-ai/sdk/v2` for native structured output.**
-  Use the v2 SDK import and pass JSON-schema `format` objects on review,
-  guideline, addressed-thread, verifier, and repair prompts. Keep
-  `parseJsonObject` and the one-shot repair loop as fallback validation until
-  dogfood + golden runs prove the native schema path is enough on its own.
-- **Replace 2s full-message polling with `client.event.subscribe()` (SSE).**
-  Wait for `message.updated`/`session.status` events, then fetch the completed
-  assistant message once by id. Keep the bounded polling path as a compatibility
-  fallback if event subscription is unavailable.
+- **Migrate sessions to `@opencode-ai/sdk/v2`.** Use the v2 SDK import and its
+  flat session API (`promptAsync`/`messages`/`status` with projected message
+  reads). Native JSON-schema `format` was evaluated and **not** adopted: the
+  live `opencode-go` provider routes schema output through tool_choice paths
+  that small models satisfy with tool-only messages, so prompt-level JSON plus
+  `parseJsonObject` and the one-shot repair loop remain the validation path.
+- **Prompt completion keys on the assistant message, not session idle.** The
+  wait polls `session.messages`/`session.status` and returns as soon as the new
+  assistant message reports `time.completed` (or the session reports idle).
+  An earlier SSE/`event.subscribe()` rewrite that waited only for session idle
+  was reverted — under `opencode-go` the session can stay `busy` long after the
+  message completes, which hung every shard to the timeout.
 - **Upgrade `@opencode-ai/sdk` 1.16.2 -> 1.17.5.** Re-checked the generated
   type surfaces: v1 supports per-request `query.directory`,
   `session.messages` `limit`, and `event.subscribe()`; v2 exposes JSON-schema

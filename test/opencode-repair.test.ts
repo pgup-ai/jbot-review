@@ -11,8 +11,7 @@ interface FakeMessage {
     role: 'assistant';
     id: string;
     parentID: string;
-    time: { completed: number };
-    structured?: unknown;
+    time: { created?: number; completed?: number };
   };
   parts: FakePart[];
 }
@@ -26,22 +25,26 @@ type FakeResponse =
   | string
   | string[]
   | null
-  | { text?: string | string[] | null; structured?: unknown; parts?: FakePart[] };
+  | { text?: string | string[] | null; parts?: FakePart[] };
 
 /**
  * Minimal fake of the opencode client surface runReview touches. Each
  * promptAsync call appends the next scripted assistant response, mimicking a
  * session that answers every prompt immediately. A null response scripts a
  * reasoning-only message with no text part.
+ *
+ * `status` controls what `session.status` reports and `messageCompleted`
+ * controls whether the pushed assistant message carries `time.completed`. The
+ * wait must finish as soon as EITHER signal says "done" — the regression that
+ * hung CI was a wait that keyed only on session idle while the gateway sat at
+ * `busy` forever.
  */
 function makeFakeClient(
   responses: FakeResponse[],
   options: {
-    emitMessageUpdated?: boolean;
-    emitIdle?: boolean;
+    status?: 'idle' | 'busy';
+    messageCompleted?: boolean;
     emitToolStepBeforeFinal?: boolean;
-    eventSubscribeFails?: boolean;
-    sessionWaitUnavailable?: boolean;
   } = {},
 ): {
   client: OpencodeClient;
@@ -51,29 +54,10 @@ function makeFakeClient(
   const messages: FakeMessage[] = [];
   const prompts: string[] = [];
   const formats: unknown[] = [];
-  const events: unknown[] = [];
-  const waiters: Array<() => void> = [];
-
-  const emit = (event: unknown) => {
-    events.push(event);
-    waiters.splice(0).forEach((resolve) => resolve());
-  };
+  const completed = options.messageCompleted !== false;
+  const time = completed ? { completed: 1 } : { created: 1 };
 
   const client = {
-    event: {
-      subscribe: async () => {
-        if (options.eventSubscribeFails) throw new Error('SSE unavailable');
-        emit({ type: 'server.connected', properties: {} });
-        return {
-          stream: (async function* () {
-            for (;;) {
-              if (!events.length) await new Promise<void>((resolve) => waiters.push(resolve));
-              while (events.length) yield events.shift();
-            }
-          })(),
-        };
-      },
-    },
     session: {
       create: async () => ({ data: { id: 'session-1' } }),
       promptAsync: async (request: {
@@ -88,59 +72,21 @@ function makeFakeClient(
         const index = prompts.length - 1;
         const id = request.messageID ?? `m${prompts.length}`;
         const scripted = index < responses.length ? responses[index] : '{}';
-        const parts = buildFakeParts(scripted);
         if (options.emitToolStepBeforeFinal) {
-          const toolMessage = {
-            info: {
-              role: 'assistant' as const,
-              id,
-              parentID: id,
-              time: { completed: 1 },
-            },
-            parts: [
-              {
-                type: 'tool' as const,
-                state: { status: 'completed', output: 'git diff output' },
-              },
-            ],
-          };
-          messages.push(toolMessage);
-          if (options.emitMessageUpdated !== false) {
-            emit({
-              type: 'message.updated',
-              properties: {
-                sessionID: 'session-1',
-                info: toolMessage.info,
-              },
-            });
-          }
+          messages.push({
+            info: { role: 'assistant', id, parentID: id, time: { ...time } },
+            parts: [{ type: 'tool', state: { status: 'completed', output: 'git diff output' } }],
+          });
         }
-        const message = {
+        messages.push({
           info: {
-            role: 'assistant' as const,
+            role: 'assistant',
             id: options.emitToolStepBeforeFinal ? `${id}-final` : id,
             parentID: id,
-            time: { completed: 1 },
-            ...(isStructuredResponse(scripted) ? { structured: scripted.structured } : {}),
+            time: { ...time },
           },
-          parts,
-        };
-        messages.push(message);
-        if (options.emitMessageUpdated !== false) {
-          emit({
-            type: 'message.updated',
-            properties: {
-              sessionID: 'session-1',
-              info: message.info,
-            },
-          });
-        }
-        if (options.emitIdle !== false) {
-          emit({
-            type: 'session.status',
-            properties: { sessionID: 'session-1', status: { type: 'idle' } },
-          });
-        }
+          parts: buildFakeParts(scripted),
+        });
         return {};
       },
       message: async (request: { messageID: string }) => {
@@ -151,28 +97,15 @@ function makeFakeClient(
         const ordered = request.order === 'desc' ? [...messages].reverse() : [...messages];
         return { data: ordered.slice(0, request.limit) };
       },
-      status: async () => ({ data: { 'session-1': { type: 'idle' } } }),
-      wait: async () => ({}),
+      status: async () => ({ data: { 'session-1': { type: options.status ?? 'idle' } } }),
+      abort: async () => ({}),
     },
     v2: {
       session: {
-        wait: async () =>
-          options.sessionWaitUnavailable
-            ? {
-                error: {
-                  _tag: 'ServiceUnavailableError',
-                  message: 'Session wait is not available yet',
-                  service: 'session.wait',
-                },
-              }
-            : {},
         messages: async (request: { order?: 'asc' | 'desc'; limit?: number } = {}) => {
           const ordered = request.order === 'desc' ? [...messages].reverse() : [...messages];
           return {
-            data: {
-              data: ordered.slice(0, request.limit).map(toFakeProjectedMessage),
-              cursor: {},
-            },
+            data: { data: ordered.slice(0, request.limit).map(toFakeProjectedMessage), cursor: {} },
           };
         },
       },
@@ -189,12 +122,10 @@ function toFakeProjectedMessage(message: FakeMessage): unknown {
     time: message.info.time,
     content: message.parts.map((part, index) => {
       if (part.type === 'text') return { type: 'text', id: `p${index}`, text: part.text };
-      if (part.type === 'tool') {
+      if (part.type === 'tool')
         return { type: 'tool', id: `p${index}`, name: 'bash', state: part.state };
-      }
       return { type: 'reasoning', id: `p${index}`, text: '' };
     }),
-    ...(message.info.structured ? { structured: message.info.structured } : {}),
   };
 }
 
@@ -210,7 +141,6 @@ function buildFakeParts(scripted: FakeResponse): FakePart[] {
 
 function isStructuredResponse(value: FakeResponse): value is {
   text?: string | string[] | null;
-  structured?: unknown;
   parts?: FakePart[];
 } {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -235,77 +165,65 @@ describe('runReview JSON repair loop', () => {
   });
 
   it('does not send a repair prompt when the first response parses', async () => {
-    const { client, prompts, formats } = makeFakeClient([VALID_REVIEW]);
+    const { client, prompts } = makeFakeClient([VALID_REVIEW]);
 
     const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
 
     assert.equal(prompts.length, 1);
-    assert.equal((formats[0] as { type?: unknown }).type, 'json_schema');
-    assert.equal((formats[0] as { retryCount?: unknown }).retryCount, 1);
     assert.equal(result.summary, 'ok after repair');
   });
 
-  it('does not request native JSON schema output for opencode-go models', async () => {
-    const { client, prompts, formats } = makeFakeClient([VALID_REVIEW]);
-
-    const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
-
-    assert.equal(prompts.length, 1);
-    assert.equal(formats[0], undefined);
-    assert.equal(result.summary, 'ok after repair');
-  });
-
-  it('requests native JSON schema output for the initial prompt only', async () => {
+  it('never requests native JSON-schema output (prompt-level JSON + strict parsing only)', async () => {
     const { client, formats } = makeFakeClient(['garbage', VALID_REVIEW]);
 
     await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
 
     assert.equal(formats.length, 2);
-    assert.equal((formats[0] as { type?: unknown }).type, 'json_schema');
-    assert.equal((formats[0] as { retryCount?: unknown }).retryCount, 1);
-    assert.deepEqual((formats[0] as { schema?: { required?: unknown } }).schema?.required, [
-      'summary',
-      'findings',
-    ]);
+    assert.equal(formats[0], undefined);
     assert.equal(formats[1], undefined);
+  });
+
+  it('returns once the assistant message completes even while the session stays busy', async () => {
+    // The CI hang: the opencode-go gateway sat at status "busy" for the full
+    // budget while the assistant message had already completed. The wait must
+    // key on the per-message completed flag, not only on session idle.
+    const { client, prompts } = makeFakeClient([VALID_REVIEW], {
+      status: 'busy',
+      messageCompleted: true,
+    });
+
+    const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 1);
+    assert.equal(result.summary, 'ok after repair');
+    assert.equal(result.findings.length, 1);
+  });
+
+  it('returns when the session reports idle even if the message lacks a completed flag', async () => {
+    const { client, prompts } = makeFakeClient([VALID_REVIEW], {
+      status: 'idle',
+      messageCompleted: false,
+    });
+
+    const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 1);
+    assert.equal(result.summary, 'ok after repair');
+  });
+
+  it('reads the latest assistant message after intermediate tool steps', async () => {
+    const { client, prompts } = makeFakeClient([VALID_REVIEW], { emitToolStepBeforeFinal: true });
+
+    const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 1);
+    assert.equal(result.summary, 'ok after repair');
+    assert.equal(result.findings.length, 1);
   });
 
   it('parses JSON from an earlier text part without repair', async () => {
     const { client, prompts } = makeFakeClient([
       [VALID_REVIEW, 'The review is complete. My findings are captured in the JSON above.'],
-    ]);
-
-    const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
-
-    assert.equal(prompts.length, 1);
-    assert.equal(result.summary, 'ok after repair');
-    assert.equal(result.findings.length, 1);
-  });
-
-  it('uses native structured output when OpenCode stores it outside text parts', async () => {
-    const { client, prompts } = makeFakeClient([
-      { text: null, structured: JSON.parse(VALID_REVIEW) },
-    ]);
-
-    const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
-
-    assert.equal(prompts.length, 1);
-    assert.equal(result.summary, 'ok after repair');
-    assert.equal(result.findings.length, 1);
-  });
-
-  it('uses completed tool structured output when OpenCode stores JSON schema output in a tool part', async () => {
-    const { client, prompts } = makeFakeClient([
-      {
-        text: null,
-        parts: [
-          { type: 'reasoning' },
-          {
-            type: 'tool',
-            state: { status: 'completed', structured: JSON.parse(VALID_REVIEW), output: '' },
-          },
-        ],
-      },
     ]);
 
     const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
@@ -328,43 +246,6 @@ describe('runReview JSON repair loop', () => {
 
     assert.equal(prompts.length, 2);
     assert.equal(prompts[1].includes('could not be parsed as JSON'), true);
-    assert.equal(result.summary, 'ok after repair');
-    assert.equal(result.findings.length, 1);
-  });
-
-  it('fetches the assistant message after event idle even without message-updated completion', async () => {
-    const { client, prompts } = makeFakeClient([VALID_REVIEW], {
-      emitMessageUpdated: false,
-      emitIdle: true,
-    });
-
-    const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
-
-    assert.equal(prompts.length, 1);
-    assert.equal(result.summary, 'ok after repair');
-  });
-
-  it('waits for idle and reads the latest assistant message after tool steps', async () => {
-    const { client, prompts } = makeFakeClient([VALID_REVIEW], {
-      emitToolStepBeforeFinal: true,
-    });
-
-    const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
-
-    assert.equal(prompts.length, 1);
-    assert.equal(result.summary, 'ok after repair');
-    assert.equal(result.findings.length, 1);
-  });
-
-  it('falls back to status polling when the event stream and session wait are unavailable', async () => {
-    const { client, prompts } = makeFakeClient([VALID_REVIEW], {
-      eventSubscribeFails: true,
-      sessionWaitUnavailable: true,
-    });
-
-    const result = await runReview(client, 'opencode-go/minimax-m3', 'PR CONTEXT', '', noLog);
-
-    assert.equal(prompts.length, 1);
     assert.equal(result.summary, 'ok after repair');
     assert.equal(result.findings.length, 1);
   });
