@@ -65,10 +65,10 @@ describe('REVIEW_PROMPT', () => {
     assert.match(REVIEW_PROMPT, /Architecture notes/);
   });
 
-  it('groups a long summary under category headers', () => {
-    assert.match(REVIEW_PROMPT, /group the bullets\s+under short bold category headers/);
-    assert.match(REVIEW_PROMPT, /\*\*Rule violations\*\*/);
-    assert.match(REVIEW_PROMPT, /\*\*Requirement gaps\*\*/);
+  it('lets the model name and group summary categories, omitting empty ones', () => {
+    assert.match(REVIEW_PROMPT, /bullets under short bold category headers you choose/);
+    assert.match(REVIEW_PROMPT, /pick whatever names fit/);
+    assert.match(REVIEW_PROMPT, /omit empty categories/);
   });
 
   it('demands full-PR scope on every run, never delta-only review', () => {
