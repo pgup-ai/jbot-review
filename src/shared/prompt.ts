@@ -262,9 +262,7 @@ Field constraints:
   under short bold category headers (only the ones that apply) instead of one
   flat list, for example: **Changes**, **Bugs**, **Rule violations**,
   **Requirement gaps**, **Architecture notes**, **Tests**. Keep each group's
-  bullets tight, and put material repo-wide design observations that no changed
-  file can carry under **Architecture notes**. Follow the "Summary
-  instructions" section below when present.
+  bullets tight. Follow the "Summary instructions" section below when present.
 - "path": exact file path as it appears in the diff.
 - "line": integer line number on the NEW side of the file. The line must have
   been ADDED by this PR (it starts with '+' in the diff), or 0 for a
