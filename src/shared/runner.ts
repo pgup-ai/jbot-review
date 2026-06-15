@@ -83,10 +83,12 @@ export interface ReviewRunOptions {
    */
   timeBudgetMinutes?: number;
   /**
-   * Parallel shards for the main review (0 = auto from diff size). Each
-   * shard deep-reviews a subset of files with the full checkout available;
-   * the union covers the complete diff and wall clock ≈ the slowest shard
-   * instead of one whole-PR session.
+   * Parallel shards for the main review. 1 = no sharding, a single full-diff
+   * session (default). 0 = auto from diff size. N = pin N shards. Each shard
+   * deep-reviews a subset of files with the full checkout available; the union
+   * covers the complete diff and wall clock ≈ the slowest shard. Only a win on
+   * providers that serve concurrent sessions; free/throttled tiers serialize
+   * the shards on one key, so single-session is the better default there.
    */
   reviewShards?: number;
   /**

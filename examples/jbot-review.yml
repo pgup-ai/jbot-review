@@ -62,5 +62,11 @@ jobs:
           review-passes: '1'
           verify-findings: 'true'
           aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
+          # Sharding is OFF by default (one full-diff session). It only speeds up
+          # review on providers that serve concurrent sessions; on free/throttled
+          # tiers the shards serialize on one key. To A/B, set the JBOT_REVIEW_SHARDS
+          # repo variable to 0 (auto) or 2-4 (pinned), and cap concurrency to 2-3.
+          review-shards: ${{ vars.JBOT_REVIEW_SHARDS || '1' }}
+          max-concurrent-sessions: ${{ vars.JBOT_MAX_CONCURRENT_SESSIONS || '0' }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
