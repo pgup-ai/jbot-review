@@ -57,9 +57,9 @@ release tag if you need fully stable action behavior.
 
 ### For the user (repo owner who wants reviews)
 
-**Step 1 — Add the workflow file.** Copy
-[`examples/jbot-review.yml`](examples/jbot-review.yml) into
-`.github/workflows/jbot-review.yml`, or use this minimal version:
+**Step 1 — Add the workflow file.** Copy the full example from the
+[`pgup-ai/jbot-review-action`](https://github.com/pgup-ai/jbot-review-action/blob/main/examples/jbot-review.yml)
+repo into `.github/workflows/jbot-review.yml`, or use this minimal version:
 
 ```yaml
 name: J-Bot Code Review
@@ -206,7 +206,7 @@ balance:
 | `review-passes`           | `1`                            | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                                                                                                                                                                                            |
 | `verify-findings`         | `true`                         | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                                                                                                                                                                                                                                           |
 | `aux-model`               | unset                          | Same-provider model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification). Lets the main review run on a stronger tier while supporting checks stay cheap and fast.                                                                                                                                                                                                                                                                        |
-| `review-shards`           | `0`                            | Parallel shards for the main review (`0` = auto from diff size, capped at 4). Each shard deep-reviews a subset of files with the full checkout available; the union covers the complete diff and wall clock tracks the slowest shard instead of one whole-PR session.                                                                                                                                                                                                                     |
+| `review-shards`           | `1`                            | Parallel shards for the main review. `1` = no sharding, one full-diff session (default). `0` = auto from diff size, capped at 4. `N` = pin N shards. Sharding only speeds review up on providers that serve concurrent sessions; on free/throttled tiers the shards serialize on one key (see `max-concurrent-sessions`), so single-session is the better default. Either way the review covers the complete diff; raise it on paid concurrent tiers, or for very large PRs where smaller per-shard context helps depth. |
 | `time-budget-minutes`     | `30`                           | Wall-clock target (`0` = no budget). Finder sessions get the full budget (minus a 30s posting reserve) as their deadline; shard retries and verification use whatever remains, or are skipped (fail-open). An auxiliary session (lens, addressed-thread, guideline, verification) over its deadline is aborted and fails open — degrading only its own coverage, never the run. A main review shard that still fails after its retry aborts the run rather than posting partial coverage. |
 | `max-concurrent-sessions` | `0`                            | Max model sessions in flight (0 = unlimited). Free/throttled tiers serialize one key's requests upstream — observed as a flash session queued 7+ minutes behind parallel shards. Capping at 2–3 keeps each session's deadline measuring model time, not queue time.                                                                                                                                                                                                                       |
 | `model-options`           | `{"reasoningEffort":"medium"}` | JSON object of provider options for the main model, passed through opencode to the provider SDK. Medium balances depth and latency; set `{"reasoningEffort":"high"}` on paid heavy tiers for maximum depth, or pass `{}` to send no options (e.g. for providers that reject unknown keys).                                                                                                                                                                                                |
@@ -217,14 +217,19 @@ longer timeout headroom): set the main `model` to the heavy tier, then
 ```yaml
 model: ${{ vars.JBOT_REVIEW_MODEL }} # heavy tier, e.g. openai/gpt-5.5
 aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL }} # same-provider fast tier for lenses + verification
-# defaults already active: review-shards auto, time-budget-minutes 30,
+review-shards: '0' # opt into auto-sharding on a paid concurrent tier
+max-concurrent-sessions: '0' # paid tiers serve shards in parallel; cap to 2-3 on throttled keys
+# defaults already active: review-shards 1 (off), time-budget-minutes 30,
 # model-options {"reasoningEffort":"medium"}; raise to high on paid heavy tiers.
 ```
 
-Sharding keeps each heavy session small (one shard ≈ 24KB of diff), so
-reasoning time is bounded by the shard, not the PR; a main shard that still
-fails after its retry aborts the run rather than posting partial coverage
-(auxiliary sessions fail open and degrade only their own coverage).
+On a paid tier with real session concurrency, sharding keeps each heavy session
+small (one shard ≈ 24KB of diff), so reasoning time is bounded by the shard, not
+the PR; a main shard that still fails after its retry aborts the run rather than
+posting partial coverage (auxiliary sessions fail open and degrade only their
+own coverage). On free/throttled tiers the shards serialize on one key, so the
+default single session is both simpler and no slower — leave `review-shards` at
+`1` there.
 
 To score review quality against the golden set of labeled PRs (see
 [fixtures/golden/README.md](fixtures/golden/README.md)):

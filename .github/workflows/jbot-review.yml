@@ -78,7 +78,7 @@ jobs:
           review-passes: ${{ vars.JBOT_REVIEW_PASSES || '1' }}
           verify-findings: ${{ vars.JBOT_VERIFY_FINDINGS || 'true' }}
           time-budget-minutes: ${{ vars.JBOT_TIME_BUDGET_MINUTES || '30' }}
-          review-shards: ${{ vars.JBOT_REVIEW_SHARDS || '0' }}
+          review-shards: ${{ vars.JBOT_REVIEW_SHARDS || '1' }}
           model-options: ${{ vars.JBOT_MODEL_OPTIONS || '' }}
           max-concurrent-sessions: ${{ vars.JBOT_MAX_CONCURRENT_SESSIONS || '0' }}
           enable-context7: ${{ inputs['enable-context7'] || 'auto' }}

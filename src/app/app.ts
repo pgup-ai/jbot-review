@@ -91,7 +91,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
           auxModel,
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
-          reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
+          reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
           modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'medium' }),
           maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 0),
         },

@@ -33,6 +33,7 @@ import {
   listPrCommits,
   getCheckStatusSummary,
   formatFindingMetadata,
+  formatFindingLocation,
   postFileLevelComment,
   postReview,
   decideVerdict,
@@ -43,6 +44,7 @@ import {
   isJbotReviewBody,
 } from './github.ts';
 import type { Octokit, PriorJbotThread } from './github.ts';
+import { condenseSummary, renderOrphanedSection } from './report.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
 /** Blocking findings verified per run; the rest pass through unverified. */
@@ -82,10 +84,12 @@ export interface ReviewRunOptions {
    */
   timeBudgetMinutes?: number;
   /**
-   * Parallel shards for the main review (0 = auto from diff size). Each
-   * shard deep-reviews a subset of files with the full checkout available;
-   * the union covers the complete diff and wall clock ≈ the slowest shard
-   * instead of one whole-PR session.
+   * Parallel shards for the main review. 1 = no sharding, a single full-diff
+   * session (default). 0 = auto from diff size. N = pin N shards. Each shard
+   * deep-reviews a subset of files with the full checkout available; the union
+   * covers the complete diff and wall clock ≈ the slowest shard. Only a win on
+   * providers that serve concurrent sessions; free/throttled tiers serialize
+   * the shards on one key, so single-session is the better default there.
    */
   reviewShards?: number;
   /**
@@ -687,10 +691,6 @@ function filterFindings(findings: Finding[], options: NormalizedReviewRunOptions
     .slice(0, options.maxFindings);
 }
 
-function formatFindingLocation(finding: Pick<Finding, 'path' | 'line'>): string {
-  return finding.line > 0 ? `${finding.path}:${finding.line}` : finding.path;
-}
-
 function formatInlineFinding(finding: Finding): string {
   const indentedBody = finding.body.replace(/\n/g, '\n  ');
   const metadata = formatFindingMetadata(finding);
@@ -865,7 +865,7 @@ async function runShardedReview(params: {
   });
 
   const summaryParts = successes.map(({ result }) => result.summary).filter(Boolean);
-  const summary = summaryParts.join('\n');
+  const summary = condenseSummary(summaryParts);
   return { summary, findings };
 }
 
@@ -1172,15 +1172,8 @@ function buildBody(
   } else {
     lines.push('### Findings Summary', '', ...buildSeverityTable(all), '');
   }
-  if (orphaned.length > 0) {
-    lines.push('### Findings (outside the diff)');
-    for (const f of orphaned) {
-      lines.push(
-        `- **${f.severity}${formatFindingMetadata(f)}** ${f.title} — \`${formatFindingLocation(f)}\``,
-      );
-      lines.push(`  ${f.body}`);
-    }
-  }
+  const orphanedSection = renderOrphanedSection(orphaned);
+  if (orphanedSection.length > 0) lines.push(...orphanedSection);
   lines.push('', `<sup>Reviewed with \`${model}\`.</sup>`);
   return lines.join('\n');
 }

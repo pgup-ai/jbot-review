@@ -414,6 +414,11 @@ export function formatFindingMetadata(finding: Pick<Finding, 'kind' | 'confidenc
   return parts.length > 0 ? ` (${parts.join(', ')})` : '';
 }
 
+/** `path:line` for an anchored finding, or just `path` for a file-level one. */
+export function formatFindingLocation(finding: Pick<Finding, 'path' | 'line'>): string {
+  return finding.line > 0 ? `${finding.path}:${finding.line}` : finding.path;
+}
+
 /**
  * Single source of the posted comment body. The trailing FINDING_MARKER is
  * load-bearing: isJbotFinding and duplicate suppression recognize prior
