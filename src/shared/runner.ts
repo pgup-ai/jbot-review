@@ -43,6 +43,7 @@ import {
   isJbotReviewBody,
 } from './github.ts';
 import type { Octokit, PriorJbotThread } from './github.ts';
+import { condenseSummary, renderGroupedFindingIndex, renderOrphanedSection } from './report.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
 /** Blocking findings verified per run; the rest pass through unverified. */
@@ -865,7 +866,7 @@ async function runShardedReview(params: {
   });
 
   const summaryParts = successes.map(({ result }) => result.summary).filter(Boolean);
-  const summary = summaryParts.join('\n');
+  const summary = condenseSummary(summaryParts);
   return { summary, findings };
 }
 
@@ -1171,16 +1172,15 @@ function buildBody(
     lines.push('✅ _No new findings._');
   } else {
     lines.push('### Findings Summary', '', ...buildSeverityTable(all), '');
+    // Findings posted as comments (inline + file-level); orphaned get their own
+    // detailed section below, so they are excluded from the scannable index.
+    const orphanedSet = new Set(orphaned);
+    const commented = all.filter((f) => !orphanedSet.has(f));
+    const index = renderGroupedFindingIndex(commented);
+    if (index.length > 0) lines.push(...index, '');
   }
-  if (orphaned.length > 0) {
-    lines.push('### Findings (outside the diff)');
-    for (const f of orphaned) {
-      lines.push(
-        `- **${f.severity}${formatFindingMetadata(f)}** ${f.title} — \`${formatFindingLocation(f)}\``,
-      );
-      lines.push(`  ${f.body}`);
-    }
-  }
+  const orphanedSection = renderOrphanedSection(orphaned);
+  if (orphanedSection.length > 0) lines.push(...orphanedSection);
   lines.push('', `<sup>Reviewed with \`${model}\`.</sup>`);
   return lines.join('\n');
 }
