@@ -59,18 +59,27 @@ const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
  * `modelOptions` pass through opencode to the provider SDK for the MAIN
  * model only — the lever for capping reasoning spend on heavy models (e.g.
  * {"reasoningEffort":"medium"} for OpenAI, thinking budgets for Anthropic).
+ *
+ * `promptCache` sets the provider's `setCacheKey` option (opencode's
+ * promptCacheKey toggle, default off in the SDK). Parallel review shards and
+ * re-reviews of the same PR share a byte-identical prompt prefix (base
+ * instructions + guidelines + PR context), so caching cuts input-token cost
+ * on providers that honor it. It is a no-op on providers that don't, so it
+ * is safe to leave on; cache hits are observable in the per-session token
+ * log (`formatTokenUsage`). Exported for unit testing (pure).
  */
-function buildConfig(
+export function buildConfig(
   providerID: string,
   modelID: string,
   apiKey: string,
   modelOptions?: Record<string, unknown>,
+  promptCache = true,
 ): ServerOptions['config'] {
   const hasModelOptions = modelOptions && Object.keys(modelOptions).length > 0;
   return {
     provider: {
       [providerID]: {
-        options: { apiKey },
+        options: { apiKey, setCacheKey: promptCache },
         ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
       },
     },
@@ -79,6 +88,36 @@ function buildConfig(
       external_directory: 'deny',
     },
   };
+}
+
+interface TokenUsageInfo {
+  cost?: number;
+  tokens?: {
+    input?: number;
+    output?: number;
+    reasoning?: number;
+    cache?: { read?: number; write?: number };
+  };
+}
+
+/**
+ * One-line token/cost summary for a completed session. Defensive about
+ * missing fields: gateways like opencode-go may not populate every counter,
+ * and cache read/write are the signal for whether prompt caching is actually
+ * working (cache.read > 0 on a later shard or re-review means a hit).
+ * Exported for unit testing (pure).
+ */
+export function formatTokenUsage(info: TokenUsageInfo): string {
+  const tokens = info.tokens ?? {};
+  const cache = tokens.cache ?? {};
+  const parts = [
+    `input=${tokens.input ?? 0}`,
+    `output=${tokens.output ?? 0}`,
+    `reasoning=${tokens.reasoning ?? 0}`,
+    `cache(read=${cache.read ?? 0} write=${cache.write ?? 0})`,
+  ];
+  if (typeof info.cost === 'number') parts.push(`cost=$${info.cost.toFixed(4)}`);
+  return `tokens: ${parts.join(' ')}`;
 }
 
 /**
@@ -150,7 +189,11 @@ export async function startOpencode(
   modelID: string,
   apiKey: string,
   log: (msg: string) => void,
-  options: { modelOptions?: Record<string, unknown>; port?: number } = {},
+  options: {
+    modelOptions?: Record<string, unknown>;
+    port?: number;
+    promptCache?: boolean;
+  } = {},
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
   // Serialize against other startOpencode calls so the chdir → spawn → restore
   // sequence runs atomically. This is the only safe way to scope cwd to the
@@ -194,7 +237,13 @@ export async function startOpencode(
         /* best effort */
       }
     };
-    const config = buildConfig(providerID, modelID, apiKey, options.modelOptions);
+    const config = buildConfig(
+      providerID,
+      modelID,
+      apiKey,
+      options.modelOptions,
+      options.promptCache ?? true,
+    );
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',
       // Fixed port means two runs on one host collide (e.g. the webhook app
@@ -578,6 +627,7 @@ async function promptInSessionHoldingSlot(
   log(
     `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
   );
+  log(`${label} ${formatTokenUsage(data.info)}`);
 
   const textParts = parts.filter((p) => p.type === 'text' && p.text);
   // No text part (e.g. the model exhausted its budget on reasoning) must

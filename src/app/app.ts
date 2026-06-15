@@ -93,6 +93,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
           reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
           modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'medium' }),
+          promptCache: process.env.JBOT_PROMPT_CACHE?.trim() !== 'false',
           maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 0),
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
