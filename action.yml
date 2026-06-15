@@ -111,7 +111,7 @@ inputs:
     required: false
     default: 'true'
   skip-doc-only:
-    description: 'Skip the full LLM review when a push changes only documentation/prose files (.md, .mdx, .markdown, .rst, .adoc, .txt). The PR still gets the review-done reaction; a single code/config file forces a full review. Deterministic, no model call.'
+    description: 'Skip the full LLM review when a PR changes only documentation, prose, or diagram assets (.md, .mdx, .markdown, .rst, .adoc, .txt, .pdf, .svg, .drawio, .dio, .excalidraw, .mmd, .puml, .plantuml). The PR still gets the review-done reaction; a single code/config file forces a full review. Deterministic, no model call.'
     required: false
     default: 'true'
   max-concurrent-sessions:

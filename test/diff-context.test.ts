@@ -169,7 +169,7 @@ describe('shardFilesForReview', () => {
 });
 
 describe('isDocOnlyChange', () => {
-  it('treats prose/doc extensions as docs', () => {
+  it('treats prose, document, and diagram assets as docs', () => {
     for (const f of [
       'README.md',
       'docs/guide.mdx',
@@ -177,6 +177,14 @@ describe('isDocOnlyChange', () => {
       'a/b.rst',
       'x.adoc',
       'notes.txt',
+      'spec/report.pdf',
+      'assets/icon.svg',
+      'design/architecture.drawio',
+      'design/flow.dio',
+      'design/sketch.excalidraw',
+      'docs/seq.mmd',
+      'docs/component.puml',
+      'docs/uml.plantuml',
     ]) {
       assert.equal(isDocFile(f), true, f);
     }
