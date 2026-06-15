@@ -156,3 +156,16 @@ test('condenseSummary preserves distinct per-file observations', () => {
   const out = condenseSummary(['- `foo.ts` looks correct', '- `bar.ts` looks correct']);
   assert.equal(out.split('\n').length, 2);
 });
+
+test('condenseSummary keeps repeated category headers across shards (no misattribution)', () => {
+  const out = condenseSummary(['**Changes**\n- A\n**Bugs**\n- B1', '**Changes**\n- C\n**Bugs**\n- B2']);
+  const lines = out.split('\n');
+  // Both shards' headers survive (headers are not bullets, so never deduped).
+  assert.equal(lines.filter((l) => l === '**Changes**').length, 2);
+  assert.equal(lines.filter((l) => l === '**Bugs**').length, 2);
+  // Each bullet stays under its own header; `- C` is a Change, not a Bug.
+  assert.match(out, /\*\*Changes\*\*\n- A/);
+  assert.match(out, /\*\*Changes\*\*\n- C/);
+  assert.match(out, /\*\*Bugs\*\*\n- B1/);
+  assert.match(out, /\*\*Bugs\*\*\n- B2/);
+});

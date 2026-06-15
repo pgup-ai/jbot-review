@@ -116,8 +116,10 @@ function bulletKey(line: string): string {
 /**
  * Merge per-shard summaries into one block, dropping verbatim-duplicate bullets
  * that sharded runs repeat (boilerplate like "no blocking issues found") and
- * collapsing blank-line runs. Conservative: only case/spacing-identical lines
- * are removed, so distinct per-file observations survive.
+ * collapsing blank-line runs. Only bullet lines are deduped (case/spacing
+ * insensitive); headers and prose pass through verbatim, so a grouped summary's
+ * bold category headers are never collapsed across shards (which would otherwise
+ * reattach the next shard's bullets under the wrong header).
  */
 export function condenseSummary(parts: string[]): string {
   const seen = new Set<string>();
@@ -129,9 +131,11 @@ export function condenseSummary(parts: string[]): string {
         if (out.length > 0 && out[out.length - 1] !== '') out.push('');
         continue;
       }
-      const key = bulletKey(line);
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (/^\s*[-*+]\s+/.test(line)) {
+        const key = bulletKey(line);
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
       out.push(line);
     }
   }
