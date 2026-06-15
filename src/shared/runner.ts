@@ -113,11 +113,14 @@ export interface ReviewRunOptions {
    */
   promptCache?: boolean;
   /**
-   * Skip the full LLM review when the WHOLE PR diff is doc/prose files
-   * (deterministic, see `isDocOnlyChange`; evaluated on the cumulative
-   * base...head file list, so a mixed code+docs PR never qualifies). Default
-   * true: a docs-only PR gets the "review done" reaction and no review
-   * session, saving the whole model cost.
+   * Skip the full LLM review when every REVIEWABLE changed file is a
+   * doc/prose/diagram asset (deterministic, see `isDocOnlyChange`). Evaluated
+   * on the reviewable set — noise files (lockfiles, generated) and
+   * patchless/binary files are already excluded, and the bot never reviews
+   * those regardless, so the skip never suppresses content a full review
+   * would have covered. Any reviewable code/config file forces a full review.
+   * Default true: a docs-only PR gets the "review done" reaction and no
+   * review session, saving the whole model cost.
    */
   skipDocOnly?: boolean;
   /**
@@ -213,11 +216,13 @@ export async function runPrReview(params: {
     changedFiles.push(f.filename);
   }
 
-  // Deterministic doc-only gate: when the entire PR diff is prose, it isn't
-  // worth a full model review. `changedFiles` is the cumulative base...head
-  // list, so a PR with any code/config file never qualifies — even if the
-  // latest push touched only docs. React "done" and return before any server
-  // boot or LLM session.
+  // Deterministic doc-only gate: when every REVIEWABLE file is prose, there
+  // is nothing the model would review, so skip before any server boot or LLM
+  // session. `changedFiles` is the reviewable set — noise files (lockfiles,
+  // generated) and patchless binaries were already filtered out above and are
+  // never reviewed regardless, so only never-reviewed files can be absent
+  // here; a real code/config change always keeps a non-doc entry and forces a
+  // full review.
   if (options.skipDocOnly && isDocOnlyChange(changedFiles)) {
     log(`Doc-only PR (${changedFiles.length} file(s)); skipping the full review.`);
     if (!options.dryRun) await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
