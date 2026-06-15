@@ -57,9 +57,9 @@ release tag if you need fully stable action behavior.
 
 ### For the user (repo owner who wants reviews)
 
-**Step 1 — Add the workflow file.** Copy
-[`examples/jbot-review.yml`](examples/jbot-review.yml) into
-`.github/workflows/jbot-review.yml`, or use this minimal version:
+**Step 1 — Add the workflow file.** Copy the full example from the
+[`pgup-ai/jbot-review-action`](https://github.com/pgup-ai/jbot-review-action/blob/main/examples/jbot-review.yml)
+repo into `.github/workflows/jbot-review.yml`, or use this minimal version:
 
 ```yaml
 name: J-Bot Code Review
