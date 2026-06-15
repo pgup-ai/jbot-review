@@ -70,3 +70,14 @@ test('condenseSummary keeps repeated category headers across shards (no misattri
   assert.match(out, /\*\*Bugs\*\*\n- B1/);
   assert.match(out, /\*\*Bugs\*\*\n- B2/);
 });
+
+test('condenseSummary prunes a category header left empty by cross-shard dedup', () => {
+  // Shard 2 repeats the same `- A` under **Changes**; the bullet is deduped,
+  // which would otherwise leave shard 2's **Changes** header with nothing below.
+  const out = condenseSummary(['**Changes**\n- A\n**Bugs**\n- B', '**Changes**\n- A']);
+  assert.equal(out.split('\n').filter((l) => l === '**Changes**').length, 1);
+  assert.match(out, /\*\*Changes\*\*\n- A/);
+  assert.match(out, /\*\*Bugs\*\*\n- B/);
+  // No trailing empty header left dangling.
+  assert.doesNotMatch(out, /\*\*Changes\*\*\s*$/);
+});

@@ -65,10 +65,12 @@ describe('REVIEW_PROMPT', () => {
     assert.match(REVIEW_PROMPT, /Architecture notes/);
   });
 
-  it('lets the model name and group summary categories, omitting empty ones', () => {
-    assert.match(REVIEW_PROMPT, /bullets under short bold category headers you choose/);
-    assert.match(REVIEW_PROMPT, /pick whatever names fit/);
-    assert.match(REVIEW_PROMPT, /omit empty categories/);
+  it('groups the summary by default (multi-theme), model names the groups, omits empties', () => {
+    const flat = REVIEW_PROMPT.replace(/\s+/g, ' ');
+    assert.match(flat, /bullets under short bold category headers you choose/);
+    assert.match(flat, /whenever the summary covers more than one theme/);
+    assert.match(flat, /pick whatever names fit/);
+    assert.match(flat, /omit empty categories/);
   });
 
   it('demands full-PR scope on every run, never delta-only review', () => {
