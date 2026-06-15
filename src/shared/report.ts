@@ -33,29 +33,50 @@ function bulletKey(line: string): string {
     .toLowerCase();
 }
 
+/** A line that is only a bold category header, e.g. `**Bugs**` or `**Bugs**:`. */
+function isCategoryHeader(line: string): boolean {
+  return /^\s*\*\*[^*]+\*\*:?\s*$/.test(line);
+}
+
 /**
- * Merge per-shard summaries into one block, dropping verbatim-duplicate bullets
- * that sharded runs repeat (boilerplate like "no blocking issues found") and
- * collapsing blank-line runs. Only bullet lines are deduped (case/spacing
- * insensitive); headers and prose pass through verbatim, so a grouped summary's
- * bold category headers are never collapsed across shards (which would otherwise
- * reattach the next shard's bullets under the wrong header).
+ * Merge per-shard summaries into one block. Only bullet lines are deduped
+ * (case/spacing insensitive); headers and prose pass through verbatim, so a
+ * grouped summary's bold category headers are never collapsed across shards
+ * (which would otherwise reattach the next shard's bullets under the wrong
+ * header). A header left with no content beneath it after dedup (a duplicate
+ * shard whose only bullets were already seen) is then dropped, and blank-line
+ * runs are collapsed.
  */
 export function condenseSummary(parts: string[]): string {
   const seen = new Set<string>();
-  const out: string[] = [];
+  const merged: string[] = [];
   for (const part of parts) {
     for (const raw of part.split('\n')) {
       const line = raw.replace(/\s+$/, '');
-      if (!line.trim()) {
-        if (out.length > 0 && out[out.length - 1] !== '') out.push('');
-        continue;
-      }
-      if (/^\s*[-*+]\s+/.test(line)) {
+      if (line.trim() && /^\s*[-*+]\s+/.test(line)) {
         const key = bulletKey(line);
         if (seen.has(key)) continue;
         seen.add(key);
       }
+      merged.push(line);
+    }
+  }
+
+  // Drop category headers left empty by cross-shard dedup: a header whose next
+  // non-blank line is another header (or the end) has nothing beneath it.
+  const kept = merged.filter((line, i) => {
+    if (!isCategoryHeader(line)) return true;
+    let j = i + 1;
+    while (j < merged.length && merged[j].trim() === '') j++;
+    return j < merged.length && !isCategoryHeader(merged[j]);
+  });
+
+  // Collapse blank-line runs and trim.
+  const out: string[] = [];
+  for (const line of kept) {
+    if (!line.trim()) {
+      if (out.length > 0 && out[out.length - 1] !== '') out.push('');
+    } else {
       out.push(line);
     }
   }
