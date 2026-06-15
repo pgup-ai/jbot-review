@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
-import { Semaphore, parsePortEnv, runReview } from '../src/shared/opencode.ts';
+import {
+  Semaphore,
+  buildConfig,
+  formatTokenUsage,
+  parsePortEnv,
+  runReview,
+} from '../src/shared/opencode.ts';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 
 const noLog = (): void => undefined;
@@ -175,5 +181,58 @@ describe('parsePortEnv', () => {
     process.env.JBOT_OPENCODE_PORT = '4100';
 
     assert.equal(parsePortEnv('JBOT_OPENCODE_PORT', 4096), 4100);
+  });
+});
+
+describe('buildConfig prompt caching', () => {
+  function providerOptions(config: ReturnType<typeof buildConfig>) {
+    return (config as { provider: Record<string, { options: Record<string, unknown> }> }).provider
+      .openai.options;
+  }
+
+  it('enables setCacheKey by default', () => {
+    const config = buildConfig('openai', 'gpt-5', 'key');
+    assert.equal(providerOptions(config).setCacheKey, true);
+    assert.equal(providerOptions(config).apiKey, 'key');
+  });
+
+  it('omits setCacheKey entirely when prompt caching is off', () => {
+    // The off switch exists for providers that reject unknown option keys,
+    // so disabled must send no key at all — not setCacheKey: false.
+    const config = buildConfig('openai', 'gpt-5', 'key', undefined, false);
+    assert.equal('setCacheKey' in providerOptions(config), false);
+    assert.equal(providerOptions(config).apiKey, 'key');
+  });
+
+  it('keeps the read-only permission deny regardless of caching', () => {
+    const config = buildConfig('openai', 'gpt-5', 'key', { reasoningEffort: 'high' }, true);
+    const permission = (config as { permission: Record<string, string> }).permission;
+    assert.equal(permission.edit, 'deny');
+    assert.equal(permission.external_directory, 'deny');
+  });
+});
+
+describe('formatTokenUsage', () => {
+  it('summarizes input/output/reasoning/cache/cost', () => {
+    const line = formatTokenUsage({
+      cost: 0.0123,
+      tokens: { input: 12000, output: 600, reasoning: 900, cache: { read: 11000, write: 1000 } },
+    });
+
+    assert.equal(
+      line,
+      'tokens: input=12000 output=600 reasoning=900 cache(read=11000 write=1000) cost=$0.0123',
+    );
+  });
+
+  it('defaults missing counters to 0 and omits cost when absent', () => {
+    assert.equal(
+      formatTokenUsage({}),
+      'tokens: input=0 output=0 reasoning=0 cache(read=0 write=0)',
+    );
+    assert.equal(
+      formatTokenUsage({ tokens: { input: 5 } }),
+      'tokens: input=5 output=0 reasoning=0 cache(read=0 write=0)',
+    );
   });
 });

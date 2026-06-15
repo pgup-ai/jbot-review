@@ -99,6 +99,13 @@ export interface ReviewRunOptions {
    */
   modelOptions?: Record<string, unknown>;
   /**
+   * Enable opencode prompt caching (provider `setCacheKey`). Default true:
+   * parallel shards and re-reviews share a byte-identical prompt prefix, so
+   * caching cuts input-token cost on providers that honor it and is a no-op
+   * elsewhere. Per-session cache hits are logged via `formatTokenUsage`.
+   */
+  promptCache?: boolean;
+  /**
    * Max model sessions in flight at once (0 = unlimited). Throttled provider
    * tiers serialize one key's concurrent requests upstream; capping on our
    * side keeps session deadlines measuring model time, not queue time.
@@ -261,6 +268,7 @@ export async function runPrReview(params: {
   log('Starting opencode server');
   const { client, stop } = await startOpencode(workspace, providerID, modelID, apiKey, log, {
     modelOptions: options.modelOptions,
+    promptCache: options.promptCache,
     port: options.opencodePort > 0 ? options.opencodePort : undefined,
   });
   try {
@@ -493,6 +501,7 @@ function normalizeOptions(options: ReviewRunOptions | undefined): NormalizedRevi
     timeBudgetMinutes: Math.max(options?.timeBudgetMinutes ?? 0, 0),
     reviewShards: Math.max(options?.reviewShards ?? 0, 0),
     modelOptions: options?.modelOptions ?? {},
+    promptCache: options?.promptCache ?? true,
     maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 0, 0),
     opencodePort: Math.max(options?.opencodePort ?? 0, 0),
     onReviewResult: options?.onReviewResult,

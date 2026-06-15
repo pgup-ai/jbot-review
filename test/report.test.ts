@@ -43,7 +43,11 @@ test('condenseSummary drops verbatim duplicate bullets across shards', () => {
 });
 
 test('condenseSummary dedups case- and spacing-insensitively, keeps distinct lines', () => {
-  const out = condenseSummary(['-  No   Blocking Issues', '- no blocking issues', '- Real finding']);
+  const out = condenseSummary([
+    '-  No   Blocking Issues',
+    '- no blocking issues',
+    '- Real finding',
+  ]);
   assert.equal(out.split('\n').length, 2);
   assert.match(out, /Real finding/);
 });
@@ -59,7 +63,10 @@ test('condenseSummary preserves distinct per-file observations', () => {
 });
 
 test('condenseSummary keeps repeated category headers across shards (no misattribution)', () => {
-  const out = condenseSummary(['**Changes**\n- A\n**Bugs**\n- B1', '**Changes**\n- C\n**Bugs**\n- B2']);
+  const out = condenseSummary([
+    '**Changes**\n- A\n**Bugs**\n- B1',
+    '**Changes**\n- C\n**Bugs**\n- B2',
+  ]);
   const lines = out.split('\n');
   // Headers are not bullets, so they are never deduped across shards.
   assert.equal(lines.filter((l) => l === '**Changes**').length, 2);
