@@ -65,6 +65,12 @@ describe('REVIEW_PROMPT', () => {
     assert.match(REVIEW_PROMPT, /Architecture notes/);
   });
 
+  it('groups a long summary under category headers', () => {
+    assert.match(REVIEW_PROMPT, /group the bullets\s+under short bold category headers/);
+    assert.match(REVIEW_PROMPT, /\*\*Rule violations\*\*/);
+    assert.match(REVIEW_PROMPT, /\*\*Requirement gaps\*\*/);
+  });
+
   it('demands full-PR scope on every run, never delta-only review', () => {
     assert.match(REVIEW_PROMPT, /ALWAYS review the COMPLETE pull request/);
     assert.match(REVIEW_PROMPT, /Never limit your\s+review to the most recent commit/);
