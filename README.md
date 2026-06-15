@@ -1,4 +1,4 @@
-# jbot-review
+# J-Bot Code Review
 
 An agentic PR reviewer built on OpenCode. Two deployment modes, one review engine:
 
