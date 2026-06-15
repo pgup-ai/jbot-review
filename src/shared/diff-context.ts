@@ -25,6 +25,26 @@ export const PATH_PATTERNS = {
 } as const;
 
 /**
+ * Prose/documentation files. Conservative on purpose: extension-based only,
+ * so a config or code file is never misclassified as a doc. A change that
+ * touches ONLY these is safe to skip a full LLM review for.
+ */
+const DOC_FILE = /\.(md|mdx|markdown|rst|adoc|txt)$/i;
+
+export function isDocFile(filename: string): boolean {
+  return DOC_FILE.test(filename);
+}
+
+/**
+ * True when every changed file is a doc/prose file — the deterministic gate
+ * for skipping a full review. Empty input is NOT doc-only (nothing to skip);
+ * a single non-doc file forces a full review.
+ */
+export function isDocOnlyChange(filenames: string[]): boolean {
+  return filenames.length > 0 && filenames.every(isDocFile);
+}
+
+/**
  * ~10K tokens. The block is replicated into every session of a run (main,
  * lenses, compliance, verification), so the cap is per-fragment, not per-run.
  */

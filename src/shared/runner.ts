@@ -8,7 +8,12 @@ import {
   suppressPreviouslyReported,
 } from './filter.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
-import { PATH_PATTERNS, buildDiffHunksBlock, shardFilesForReview } from './diff-context.ts';
+import {
+  PATH_PATTERNS,
+  buildDiffHunksBlock,
+  isDocOnlyChange,
+  shardFilesForReview,
+} from './diff-context.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import { REVIEW_LENSES, buildShardAssignmentBlock, selectLensKeys } from './prompt.ts';
@@ -35,6 +40,8 @@ import {
   formatFindingMetadata,
   formatFindingLocation,
   postFileLevelComment,
+  addPrReaction,
+  removeOwnPrReaction,
   postReview,
   decideVerdict,
   listPriorJbotThreads,
@@ -106,6 +113,14 @@ export interface ReviewRunOptions {
    */
   promptCache?: boolean;
   /**
+   * Skip the full LLM review when the WHOLE PR diff is doc/prose files
+   * (deterministic, see `isDocOnlyChange`; evaluated on the cumulative
+   * base...head file list, so a mixed code+docs PR never qualifies). Default
+   * true: a docs-only PR gets the "review done" reaction and no review
+   * session, saving the whole model cost.
+   */
+  skipDocOnly?: boolean;
+  /**
    * Max model sessions in flight at once (0 = unlimited). Throttled provider
    * tiers serialize one key's concurrent requests upstream; capping on our
    * side keeps session deadlines measuring model time, not queue time.
@@ -171,6 +186,13 @@ export async function runPrReview(params: {
 
   const { providerID, modelID } = parseModelName(model);
 
+  // Clear the prior "review done" reaction up front so it only reappears
+  // when THIS run finishes — a removed reaction means a review is in flight.
+  // Skipped on dry runs (which must not touch the PR).
+  if (!options.dryRun) {
+    await safeRemoveReviewReaction(octokit, owner, repo, pullNumber, log);
+  }
+
   await ensureGitSafeDirectory(workspace, log);
 
   log(`Listing PR files for ${owner}/${repo}#${pullNumber}`);
@@ -179,6 +201,7 @@ export async function runPrReview(params: {
   const files = rawFiles.filter((f) => f.patch && !isNoiseFile(f.filename));
   if (files.length === 0) {
     log('No reviewable files after filtering.');
+    if (!options.dryRun) await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
     return;
   }
   log(`Reviewable files: ${files.length} (noise filtered: ${rawFiles.length - files.length})`);
@@ -188,6 +211,17 @@ export async function runPrReview(params: {
   for (const f of files) {
     addable.set(f.filename, parseAddedLines(f.patch));
     changedFiles.push(f.filename);
+  }
+
+  // Deterministic doc-only gate: when the entire PR diff is prose, it isn't
+  // worth a full model review. `changedFiles` is the cumulative base...head
+  // list, so a PR with any code/config file never qualifies — even if the
+  // latest push touched only docs. React "done" and return before any server
+  // boot or LLM session.
+  if (options.skipDocOnly && isDocOnlyChange(changedFiles)) {
+    log(`Doc-only PR (${changedFiles.length} file(s)); skipping the full review.`);
+    if (!options.dryRun) await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
+    return;
   }
 
   const guidelines = await discoverGuidelines(workspace, changedFiles);
@@ -443,28 +477,39 @@ export async function runPrReview(params: {
       return;
     }
 
-    // File-level comments go first so a posting failure can still fall back
-    // into the review body, which is built afterwards.
-    for (const finding of fileLevel) {
-      try {
-        await postFileLevelComment(octokit, owner, repo, pullNumber, headSha as string, finding);
-        log(`Posted file-level comment for ${finding.path}.`);
-      } catch (error) {
-        log(
-          `Failed to post file-level comment for ${finding.path}; folding into review body: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-        orphaned.push(finding);
+    // Don't post a redundant "all clear" comment on a re-run: the first
+    // visible run always posts (sets a baseline), and any run with findings
+    // posts. A clean re-run is signaled by the reaction instead. Addressed
+    // -thread replies (below) still run regardless.
+    const isFirstRun = priorComments.filter(isJbotReviewBody).length === 0;
+    const hasFindings = inline.length + fileLevel.length + orphaned.length > 0;
+    if (isFirstRun || hasFindings) {
+      // File-level comments go first so a posting failure can still fall back
+      // into the review body, which is built afterwards.
+      for (const finding of fileLevel) {
+        try {
+          await postFileLevelComment(octokit, owner, repo, pullNumber, headSha as string, finding);
+          log(`Posted file-level comment for ${finding.path}.`);
+        } catch (error) {
+          log(
+            `Failed to post file-level comment for ${finding.path}; folding into review body: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          orphaned.push(finding);
+        }
       }
+
+      const body = buildBody(summary, filteredFindings, orphaned, model, owner, repo, headSha);
+      log(
+        `Posting review: verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
+      );
+      await postReview(octokit, owner, repo, pullNumber, verdict, body, inline);
+      log('Review posted.');
+    } else {
+      log('No new findings on a re-run; skipping the review comment (reacting instead).');
     }
 
-    const body = buildBody(summary, filteredFindings, orphaned, model, owner, repo, headSha);
-    log(
-      `Posting review: verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
-    );
-    await postReview(octokit, owner, repo, pullNumber, verdict, body, inline);
-    log('Review posted.');
     await acknowledgeAddressedPriorComments({
       octokit,
       threadResolutionOctokit: params.threadResolutionOctokit,
@@ -476,9 +521,51 @@ export async function runPrReview(params: {
       addressedPriorComments: verifiedAddressedPriorComments,
       log,
     });
+    // The "review done" reaction goes on only after a fully successful run;
+    // a thrown/aborted run leaves the reaction absent (review didn't finish).
+    await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
   } finally {
     stop();
   }
+}
+
+/**
+ * The PR reaction jbot uses as a "current head reviewed, no comment needed"
+ * marker. GitHub has no checkmark reaction; rocket is the closest "shipped".
+ */
+const REVIEW_DONE_REACTION = 'rocket' as const;
+
+/** Best-effort: a reaction failure (e.g. missing permission) never fails the run. */
+async function safeAddReviewReaction(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  log: (msg: string) => void,
+): Promise<void> {
+  try {
+    await addPrReaction(octokit, owner, repo, pullNumber, REVIEW_DONE_REACTION);
+  } catch (error) {
+    log(`(could not add ${REVIEW_DONE_REACTION} reaction: ${describeError(error)})`);
+  }
+}
+
+async function safeRemoveReviewReaction(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  log: (msg: string) => void,
+): Promise<void> {
+  try {
+    await removeOwnPrReaction(octokit, owner, repo, pullNumber, REVIEW_DONE_REACTION);
+  } catch (error) {
+    log(`(could not clear prior ${REVIEW_DONE_REACTION} reaction: ${describeError(error)})`);
+  }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 type NormalizedReviewRunOptions = Required<Omit<ReviewRunOptions, 'onReviewResult'>> &
@@ -502,6 +589,7 @@ function normalizeOptions(options: ReviewRunOptions | undefined): NormalizedRevi
     reviewShards: Math.max(options?.reviewShards ?? 0, 0),
     modelOptions: options?.modelOptions ?? {},
     promptCache: options?.promptCache ?? true,
+    skipDocOnly: options?.skipDocOnly ?? true,
     maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 0, 0),
     opencodePort: Math.max(options?.opencodePort ?? 0, 0),
     onReviewResult: options?.onReviewResult,

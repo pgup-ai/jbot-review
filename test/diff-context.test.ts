@@ -4,6 +4,8 @@ import { describe, it } from 'node:test';
 import {
   buildDiffHunksBlock,
   diffRiskScore,
+  isDocFile,
+  isDocOnlyChange,
   shardFilesForReview,
 } from '../src/shared/diff-context.ts';
 import type { PrFile } from '../src/shared/github.ts';
@@ -163,5 +165,43 @@ describe('shardFilesForReview', () => {
     // big.ts alone vs the two mids together: no shard should hold everything.
     assert.equal(shards.length, 2);
     assert.ok(Math.max(...loads) <= 41_000);
+  });
+});
+
+describe('isDocOnlyChange', () => {
+  it('treats prose/doc extensions as docs', () => {
+    for (const f of [
+      'README.md',
+      'docs/guide.mdx',
+      'CHANGELOG.markdown',
+      'a/b.rst',
+      'x.adoc',
+      'notes.txt',
+    ]) {
+      assert.equal(isDocFile(f), true, f);
+    }
+  });
+
+  it('treats code, config, and extensionless files as non-docs', () => {
+    for (const f of [
+      'src/a.ts',
+      'action.yml',
+      'package.json',
+      'Dockerfile',
+      'LICENSE',
+      'a.md.ts',
+    ]) {
+      assert.equal(isDocFile(f), false, f);
+    }
+  });
+
+  it('is doc-only only when every changed file is a doc', () => {
+    assert.equal(isDocOnlyChange(['README.md', 'docs/x.md']), true);
+    assert.equal(isDocOnlyChange(['README.md', 'src/a.ts']), false);
+    assert.equal(isDocOnlyChange(['src/a.ts']), false);
+  });
+
+  it('is not doc-only for an empty change set (nothing to skip)', () => {
+    assert.equal(isDocOnlyChange([]), false);
   });
 });
