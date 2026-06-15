@@ -98,7 +98,7 @@ test('renderGroupedFindingIndex groups a long, multi-category list', () => {
   assert.notEqual(lines[lines.length - 1], '');
 });
 
-test('renderOrphanedSection: flat list with bodies when short', () => {
+test('renderOrphanedSection: lists outside-diff findings flat with bodies', () => {
   const lines = renderOrphanedSection([
     f({ title: 'Outside one', body: 'b1', path: 'src/o.ts', line: 2 }),
     f({ title: 'Outside two', body: 'b2', path: 'src/o.ts', line: 4 }),
@@ -107,11 +107,9 @@ test('renderOrphanedSection: flat list with bodies when short', () => {
   const text = lines.join('\n');
   assert.match(text, /- \*\*P2 \(bug, high\)\*\* Outside one — `src\/o\.ts:2`/);
   assert.match(text, /\n {2}b1/);
-  // Flat list: no category subheaders.
-  assert.doesNotMatch(text, /\*\*Correctness\*\*/);
 });
 
-test('renderOrphanedSection: grouped with bodies when long and multi-category', () => {
+test('renderOrphanedSection: stays flat even when long (no category headers)', () => {
   const orphaned: Finding[] = [
     f({ kind: 'bug', title: 'b1', body: 'x' }),
     f({ kind: 'bug', title: 'b2', body: 'x' }),
@@ -120,8 +118,7 @@ test('renderOrphanedSection: grouped with bodies when long and multi-category', 
     f({ kind: 'docs', title: 'd2', body: 'x' }),
   ];
   const text = renderOrphanedSection(orphaned).join('\n');
-  assert.match(text, /\*\*Correctness\*\* \(3\)/);
-  assert.match(text, /\*\*Docs\*\* \(2\)/);
+  assert.doesNotMatch(text, /\*\*Correctness\*\*/);
   assert.match(text, /\n {2}x/); // bodies retained
 });
 

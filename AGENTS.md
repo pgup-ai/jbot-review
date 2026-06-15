@@ -26,6 +26,7 @@ in this repo; `CLAUDE.md` just points here.
 | `src/shared/diff-context.ts`   | Budgeted diff-hunk embedding + the shared path-risk taxonomy (`PATH_PATTERNS`)                  |
 | `src/shared/blast-radius.ts`   | Call sites of changed exported symbols (git grep, best-effort)                                  |
 | `src/shared/filter.ts`         | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts |
+| `src/shared/report.ts`         | Pure review-body layout: category grouping of findings + multi-shard summary dedupe             |
 | `src/shared/github.ts`         | GitHub REST/GraphQL: listing, posting, markers, thread resolution                               |
 | `src/shared/eval.ts`           | Golden-set scoring (recall/precision/noise) for `scripts/eval-review.ts`                        |
 

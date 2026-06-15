@@ -33,6 +33,7 @@ import {
   listPrCommits,
   getCheckStatusSummary,
   formatFindingMetadata,
+  formatFindingLocation,
   postFileLevelComment,
   postReview,
   decideVerdict,
@@ -688,10 +689,6 @@ function filterFindings(findings: Finding[], options: NormalizedReviewRunOptions
   return [...filtered]
     .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
     .slice(0, options.maxFindings);
-}
-
-function formatFindingLocation(finding: Pick<Finding, 'path' | 'line'>): string {
-  return finding.line > 0 ? `${finding.path}:${finding.line}` : finding.path;
 }
 
 function formatInlineFinding(finding: Finding): string {
