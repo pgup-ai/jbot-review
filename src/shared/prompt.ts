@@ -258,11 +258,13 @@ The object has exactly two top-level keys, shaped like this example:
 Field constraints:
 
 - "summary": brief assessment of the change. A short summary can stay a flat
-  list of 2-4 bullets; group the bullets under short bold category headers
-  (only the ones that apply) when that makes the review easier to scan, for
-  example: **Changes**, **Bugs**, **Rule violations**, **Requirement gaps**,
-  **Architecture notes**, **Tests**. Keep each group's bullets tight. Follow
-  the "Summary instructions" section below when present.
+  list of 2-4 bullets; when grouping makes the review easier to scan, group the
+  bullets under short bold category headers you choose to fit this change (for
+  example **Changes**, **Bugs**, or **Architecture notes** — these are only
+  examples; pick whatever names fit). Only include a header when it has
+  something to report: omit empty categories, and never emit a header whose
+  only content is "None". Keep each group's bullets tight. Follow the "Summary
+  instructions" section below when present.
 - "path": exact file path as it appears in the diff.
 - "line": integer line number on the NEW side of the file. The line must have
   been ADDED by this PR (it starts with '+' in the diff), or 0 for a
