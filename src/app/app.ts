@@ -44,6 +44,19 @@ export function parseEnvInt(name: string, defaultValue: number): number {
   return Number.isInteger(value) && value >= 0 ? value : defaultValue;
 }
 
+/**
+ * Boolean env knob. Only the exact lowercased string `'false'` disables;
+ * unset or anything else keeps the default-on behavior, mirroring the
+ * workflow's `parseBooleanInput` "unset and 'true' both enable" semantics.
+ */
+export function parseEnvBoolean(name: string, defaultValue: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return defaultValue;
+  if (raw === 'false') return false;
+  if (raw === 'true') return true;
+  return defaultValue;
+}
+
 export function resolveAuxModelForMainModel(mainModel: string, auxModelInput?: string): string {
   const input = auxModelInput?.trim();
   if (!input) return '';
@@ -93,7 +106,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
           reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
           modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'medium' }),
-          promptCache: process.env.JBOT_PROMPT_CACHE?.trim() !== 'false',
+          promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),
           maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 0),
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),

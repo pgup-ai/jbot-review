@@ -196,9 +196,12 @@ describe('buildConfig prompt caching', () => {
     assert.equal(providerOptions(config).apiKey, 'key');
   });
 
-  it('disables setCacheKey when prompt caching is off', () => {
+  it('omits setCacheKey entirely when prompt caching is off', () => {
+    // The off switch exists for providers that reject unknown option keys,
+    // so disabled must send no key at all — not setCacheKey: false.
     const config = buildConfig('openai', 'gpt-5', 'key', undefined, false);
-    assert.equal(providerOptions(config).setCacheKey, false);
+    assert.equal('setCacheKey' in providerOptions(config), false);
+    assert.equal(providerOptions(config).apiKey, 'key');
   });
 
   it('keeps the read-only permission deny regardless of caching', () => {

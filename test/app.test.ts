@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
-import { parseEnvInt, resolveAuxModelForMainModel } from '../src/app/app.ts';
+import { parseEnvBoolean, parseEnvInt, resolveAuxModelForMainModel } from '../src/app/app.ts';
 
 const OLD_ENV = { ...process.env };
 
@@ -22,6 +22,32 @@ describe('parseEnvInt', () => {
 
     assert.equal(parseEnvInt('JBOT_REVIEW_SHARDS', 3), 3);
     assert.equal(parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 2), 2);
+  });
+});
+
+describe('parseEnvBoolean', () => {
+  it('defaults when unset', () => {
+    delete process.env.JBOT_PROMPT_CACHE;
+
+    assert.equal(parseEnvBoolean('JBOT_PROMPT_CACHE', true), true);
+    assert.equal(parseEnvBoolean('JBOT_PROMPT_CACHE', false), false);
+  });
+
+  it('disables only on the literal "false" (case-insensitive)', () => {
+    process.env.JBOT_PROMPT_CACHE = 'false';
+    assert.equal(parseEnvBoolean('JBOT_PROMPT_CACHE', true), false);
+
+    process.env.JBOT_PROMPT_CACHE = 'FALSE';
+    assert.equal(parseEnvBoolean('JBOT_PROMPT_CACHE', true), false);
+  });
+
+  it('enables on "true" and falls back to the default for unrecognized values', () => {
+    process.env.JBOT_PROMPT_CACHE = 'true';
+    assert.equal(parseEnvBoolean('JBOT_PROMPT_CACHE', false), true);
+
+    process.env.JBOT_PROMPT_CACHE = 'garbage';
+    assert.equal(parseEnvBoolean('JBOT_PROMPT_CACHE', true), true);
+    assert.equal(parseEnvBoolean('JBOT_PROMPT_CACHE', false), false);
   });
 });
 

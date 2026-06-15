@@ -66,7 +66,10 @@ const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
  * instructions + guidelines + PR context), so caching cuts input-token cost
  * on providers that honor it. It is a no-op on providers that don't, so it
  * is safe to leave on; cache hits are observable in the per-session token
- * log (`formatTokenUsage`). Exported for unit testing (pure).
+ * log (`formatTokenUsage`). When disabled, the key is OMITTED entirely
+ * rather than sent as `false` — the off switch exists for providers that
+ * reject unknown option keys, so it must not send the key at all. Exported
+ * for unit testing (pure).
  */
 export function buildConfig(
   providerID: string,
@@ -79,7 +82,7 @@ export function buildConfig(
   return {
     provider: {
       [providerID]: {
-        options: { apiKey, setCacheKey: promptCache },
+        options: { apiKey, ...(promptCache ? { setCacheKey: true } : {}) },
         ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
       },
     },
