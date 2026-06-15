@@ -477,13 +477,12 @@ export async function runPrReview(params: {
       return;
     }
 
-    // Don't post a redundant "all clear" comment on a re-run: the first
-    // visible run always posts (sets a baseline), and any run with findings
-    // posts. A clean re-run is signaled by the reaction instead. Addressed
-    // -thread replies (below) still run regardless.
-    const isFirstRun = priorComments.filter(isJbotReviewBody).length === 0;
-    const hasFindings = inline.length + fileLevel.length + orphaned.length > 0;
-    if (isFirstRun || hasFindings) {
+    // Don't post a redundant "all clear" comment on a re-run; a clean re-run
+    // is signaled by the reaction instead. Addressed-thread replies (below)
+    // still run regardless.
+    const priorJbotReviewCount = priorComments.filter(isJbotReviewBody).length;
+    const findingCount = inline.length + fileLevel.length + orphaned.length;
+    if (shouldPostReviewComment(priorJbotReviewCount, findingCount)) {
       // File-level comments go first so a posting failure can still fall back
       // into the review body, which is built afterwards.
       for (const finding of fileLevel) {
@@ -546,7 +545,11 @@ async function safeAddReviewReaction(
   try {
     await addPrReaction(octokit, owner, repo, pullNumber, REVIEW_DONE_REACTION);
   } catch (error) {
-    log(`(could not add ${REVIEW_DONE_REACTION} reaction: ${describeError(error)})`);
+    log(
+      `(could not add ${REVIEW_DONE_REACTION} reaction: ${
+        error instanceof Error ? error.message : String(error)
+      })`,
+    );
   }
 }
 
@@ -560,12 +563,12 @@ async function safeRemoveReviewReaction(
   try {
     await removeOwnPrReaction(octokit, owner, repo, pullNumber, REVIEW_DONE_REACTION);
   } catch (error) {
-    log(`(could not clear prior ${REVIEW_DONE_REACTION} reaction: ${describeError(error)})`);
+    log(
+      `(could not clear prior ${REVIEW_DONE_REACTION} reaction: ${
+        error instanceof Error ? error.message : String(error)
+      })`,
+    );
   }
-}
-
-function describeError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 type NormalizedReviewRunOptions = Required<Omit<ReviewRunOptions, 'onReviewResult'>> &
@@ -996,6 +999,18 @@ type ShardOutcome =
  * behavior on small models, which then reviewed only the delta and missed
  * cross-commit bugs — the single biggest recall gap versus competitor bots.
  */
+/**
+ * Whether to post a review comment this run. The first visible run always
+ * posts (sets a baseline) and any run with findings posts; a clean re-run
+ * posts nothing — the "review done" reaction signals it instead.
+ */
+export function shouldPostReviewComment(
+  priorJbotReviewCount: number,
+  findingCount: number,
+): boolean {
+  return priorJbotReviewCount === 0 || findingCount > 0;
+}
+
 export function buildSummaryScopeBlock(priorComments: string[], headSha?: string): string {
   const priorJbotReviews = priorComments.filter(isJbotReviewBody);
   const lines = [

@@ -8,6 +8,7 @@ import {
   computeRetryTimeoutMs,
   computeRunDeadline,
   computeVerificationTimeoutMs,
+  shouldPostReviewComment,
 } from '../src/shared/runner.ts';
 
 const PRIOR_JBOT_REVIEW = [
@@ -115,5 +116,17 @@ describe('buildMainShardFailureMessage', () => {
     const message = buildMainShardFailureMessage(1, 4, 'provider 429');
 
     assert.match(message, /First failure: provider 429/);
+  });
+});
+
+describe('shouldPostReviewComment', () => {
+  it('always posts the first visible run, clean or not', () => {
+    assert.equal(shouldPostReviewComment(0, 0), true);
+    assert.equal(shouldPostReviewComment(0, 3), true);
+  });
+
+  it('posts a re-run only when it has findings', () => {
+    assert.equal(shouldPostReviewComment(2, 0), false);
+    assert.equal(shouldPostReviewComment(2, 1), true);
   });
 });
