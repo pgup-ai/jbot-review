@@ -44,7 +44,7 @@ import {
   isJbotReviewBody,
 } from './github.ts';
 import type { Octokit, PriorJbotThread } from './github.ts';
-import { condenseSummary, renderGroupedFindingIndex, renderOrphanedSection } from './report.ts';
+import { condenseSummary, renderOrphanedSection } from './report.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
 /** Blocking findings verified per run; the rest pass through unverified. */
@@ -1171,12 +1171,6 @@ function buildBody(
     lines.push('✅ _No new findings._');
   } else {
     lines.push('### Findings Summary', '', ...buildSeverityTable(all), '');
-    // Findings posted as comments (inline + file-level); orphaned get their own
-    // detailed section below, so they are excluded from the scannable index.
-    const orphanedSet = new Set(orphaned);
-    const commented = all.filter((f) => !orphanedSet.has(f));
-    const index = renderGroupedFindingIndex(commented);
-    if (index.length > 0) lines.push(...index, '');
   }
   const orphanedSection = renderOrphanedSection(orphaned);
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
