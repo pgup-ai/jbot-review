@@ -2,6 +2,12 @@ FROM node:20-slim
 
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
+# Survive transient npm-registry blips (observed ECONNRESET on fetch) instead
+# of failing the whole image build on a single dropped connection.
+RUN npm config set fetch-retries 5 \
+  && npm config set fetch-retry-mintimeout 20000 \
+  && npm config set fetch-retry-maxtimeout 120000
+
 # Use the latest opencode-ai for access to the most current model catalog.
 RUN npm install -g opencode-ai@latest
 
