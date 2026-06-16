@@ -204,13 +204,16 @@ balance:
 
 **Posting behavior.** The first visible run on a PR always posts a review
 (baseline), and any run that finds something posts. A clean re-run posts no
-comment — it adds a 🚀 reaction to the PR instead (removed at the start of
-each run, re-added when the run finishes, so 🚀-absent means a review is in
-flight). Addressed-thread replies and resolution always run regardless. A PR
-whose entire diff is documentation/prose is skipped before any model call
-(see `skip-doc-only`) and just gets the 🚀. _Reactions are best-effort: if
-they don't appear, grant the workflow `issues: write` (PR reactions use the
-issues API); the review itself is unaffected._
+comment. The 🚀 reaction means **the PR has no open jbot findings** — it is
+added only when a real review leaves zero new findings _and_ every prior
+finding thread is resolved, and removed when a review starts. So 🚀-present
+means "reviewed, all good"; 🚀-absent means a review is in flight or the PR
+has open findings. Addressed-thread replies and resolution always run
+regardless. A docs/diagram-only PR is skipped before any model call (see
+`skip-doc-only`) and leaves the reaction unchanged (it isn't reviewed, so it
+neither earns nor loses the 🚀). _Reactions are best-effort: if they don't
+appear, grant the workflow `issues: write` (PR reactions use the issues API);
+the review itself is unaffected._
 
 | Input                     | Default                        | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

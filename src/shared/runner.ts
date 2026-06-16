@@ -189,22 +189,18 @@ export async function runPrReview(params: {
 
   const { providerID, modelID } = parseModelName(model);
 
-  // Clear the prior "review done" reaction up front so it only reappears
-  // when THIS run finishes — a removed reaction means a review is in flight.
-  // Skipped on dry runs (which must not touch the PR).
-  if (!options.dryRun) {
-    await safeRemoveReviewReaction(octokit, owner, repo, pullNumber, log);
-  }
-
   await ensureGitSafeDirectory(workspace, log);
 
   log(`Listing PR files for ${owner}/${repo}#${pullNumber}`);
   const rawFiles = await listPrFiles(octokit, owner, repo, pullNumber);
   log(`Files in PR: ${rawFiles.length} total`);
   const files = rawFiles.filter((f) => f.patch && !isNoiseFile(f.filename));
+  // The "review done" 🚀 reaction means "the PR has no open jbot findings".
+  // Skip paths below do NOT touch it: a no-reviewable-files or docs-only push
+  // doesn't change the review verdict, so leaving the reaction as-is keeps it
+  // honest (a prior clean 🚀 stays; a PR with open findings stays 🚀-less).
   if (files.length === 0) {
-    log('No reviewable files after filtering.');
-    if (!options.dryRun) await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
+    log('No reviewable files after filtering; leaving the review reaction unchanged.');
     return;
   }
   log(`Reviewable files: ${files.length} (noise filtered: ${rawFiles.length - files.length})`);
@@ -225,17 +221,30 @@ export async function runPrReview(params: {
   // full review.
   if (options.skipDocOnly && isDocOnlyChange(changedFiles)) {
     log(`Doc-only PR (${changedFiles.length} file(s)); skipping the full review.`);
-    if (!options.dryRun) await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
     return;
   }
 
   const guidelines = await discoverGuidelines(workspace, changedFiles);
   if (guidelines) log(`Guidelines loaded (${guidelines.length} bytes).`);
 
-  const priorComments = options.includePriorComments
-    ? await listPrComments(octokit, owner, repo, pullNumber)
-    : [];
-  if (!options.includePriorComments) log('Prior review comments excluded by configuration.');
+  // A real review is about to run: clear the prior 🚀 so it only reappears if
+  // this run leaves the PR with zero open findings. A removed reaction means
+  // "review in flight"; a thrown/aborted run leaves it absent.
+  if (!options.dryRun) {
+    await safeRemoveReviewReaction(octokit, owner, repo, pullNumber, log);
+  }
+
+  // Always fetch prior reviews: whether the bot has reviewed this PR before
+  // (the first-run decision) is independent of whether prior comments are
+  // injected into the review CONTEXT. includePriorComments gates the context
+  // use below; it must NOT gate the count, or quiet-clean re-runs break for
+  // include-prior-comments: false (every run would look like a first run).
+  const allPriorReviewComments = await listPrComments(octokit, owner, repo, pullNumber);
+  const priorJbotReviewCount = allPriorReviewComments.filter(isJbotReviewBody).length;
+  const priorComments = options.includePriorComments ? allPriorReviewComments : [];
+  if (!options.includePriorComments) {
+    log('Prior review comments excluded from review context by configuration.');
+  }
   const priorJbotThreads = options.includePriorComments
     ? await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log)
     : [];
@@ -483,9 +492,9 @@ export async function runPrReview(params: {
     }
 
     // Don't post a redundant "all clear" comment on a re-run; a clean re-run
-    // is signaled by the reaction instead. Addressed-thread replies (below)
-    // still run regardless.
-    const priorJbotReviewCount = priorComments.filter(isJbotReviewBody).length;
+    // is signaled by the reaction instead. `priorJbotReviewCount` is computed
+    // up front (independent of includePriorComments). Addressed-thread replies
+    // (below) still run regardless.
     const findingCount = inline.length + fileLevel.length + orphaned.length;
     if (shouldPostReviewComment(priorJbotReviewCount, findingCount)) {
       // File-level comments go first so a posting failure can still fall back
@@ -525,9 +534,18 @@ export async function runPrReview(params: {
       addressedPriorComments: verifiedAddressedPriorComments,
       log,
     });
-    // The "review done" reaction goes on only after a fully successful run;
-    // a thrown/aborted run leaves the reaction absent (review didn't finish).
-    await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
+    // React 🚀 only when the PR has NO open jbot findings after this run.
+    if (
+      isPrCleanAfterRun({
+        findingCount,
+        priorThreadIds: priorJbotThreads.map((thread) => thread.id),
+        addressedThreadIds: verifiedAddressedPriorComments.map((comment) => comment.id),
+      })
+    ) {
+      await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
+    } else {
+      log('Open findings remain; not adding the review-done reaction.');
+    }
   } finally {
     stop();
   }
@@ -1014,6 +1032,24 @@ export function shouldPostReviewComment(
   findingCount: number,
 ): boolean {
   return priorJbotReviewCount === 0 || findingCount > 0;
+}
+
+/**
+ * Whether the PR is clean after this run — the gate for the "review done" 🚀
+ * reaction, which means "no open jbot findings", not merely "this run was
+ * quiet". Clean requires BOTH no new findings posted now AND every prior
+ * finding thread addressed/resolved this run: a still-open prior finding can
+ * be suppressed from `findingCount`, so the open-thread check is what keeps
+ * the reaction honest.
+ */
+export function isPrCleanAfterRun(params: {
+  findingCount: number;
+  priorThreadIds: string[];
+  addressedThreadIds: string[];
+}): boolean {
+  if (params.findingCount > 0) return false;
+  const addressed = new Set(params.addressedThreadIds);
+  return params.priorThreadIds.every((id) => addressed.has(id));
 }
 
 export function buildSummaryScopeBlock(priorComments: string[], headSha?: string): string {
