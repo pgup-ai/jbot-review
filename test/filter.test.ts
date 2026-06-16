@@ -7,6 +7,7 @@ import {
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
   isPrCleanAfterRun,
+  openFindingThreadIds,
   selectBlockingFindingIndexes,
   shouldPostReviewComment,
   suppressPreviouslyReported,
@@ -397,47 +398,33 @@ describe('shouldPostReviewComment', () => {
 });
 
 describe('isPrCleanAfterRun', () => {
-  it('is clean when no new findings and no prior threads', () => {
-    assert.equal(
-      isPrCleanAfterRun({ findingCount: 0, priorThreadIds: [], addressedThreadIds: [] }),
-      true,
-    );
+  it('is clean only with no new findings and no open threads', () => {
+    assert.equal(isPrCleanAfterRun(0, 0), true);
+    assert.equal(isPrCleanAfterRun(2, 0), false); // this run posted findings
+    assert.equal(isPrCleanAfterRun(0, 1), false); // a finding thread is still open
+  });
+});
+
+describe('openFindingThreadIds', () => {
+  it('counts threads not already resolved and not resolved this run', () => {
+    const threads = [
+      { id: 't1', isResolved: false },
+      { id: 't2', isResolved: false },
+      { id: 't3', isResolved: true }, // resolved earlier / by a human → closed
+    ];
+    assert.deepEqual(openFindingThreadIds(threads, []), ['t1', 't2']);
+    assert.deepEqual(openFindingThreadIds(threads, ['t1']), ['t2']);
+    assert.deepEqual(openFindingThreadIds(threads, ['t1', 't2']), []);
   });
 
-  it('is not clean when this run posted findings', () => {
-    assert.equal(
-      isPrCleanAfterRun({ findingCount: 2, priorThreadIds: [], addressedThreadIds: [] }),
-      false,
-    );
+  it('keeps a thread open when its resolve failed (id not in resolvedThisRun)', () => {
+    // The model claimed t1 addressed but the reply/resolve post failed, so t1
+    // is NOT in resolvedThisRun → it stays open and blocks the 🚀.
+    const threads = [{ id: 't1', isResolved: false }];
+    assert.deepEqual(openFindingThreadIds(threads, []), ['t1']);
   });
 
-  it('is not clean while a prior finding thread is still open (e.g. suppressed)', () => {
-    // findingCount 0 because the still-open P1 was suppressed, not re-posted.
-    assert.equal(
-      isPrCleanAfterRun({ findingCount: 0, priorThreadIds: ['t1'], addressedThreadIds: [] }),
-      false,
-    );
-  });
-
-  it('is clean in the same run that addresses the last open finding', () => {
-    assert.equal(
-      isPrCleanAfterRun({
-        findingCount: 0,
-        priorThreadIds: ['t1', 't2'],
-        addressedThreadIds: ['t1', 't2'],
-      }),
-      true,
-    );
-  });
-
-  it('is not clean when only some prior threads were addressed', () => {
-    assert.equal(
-      isPrCleanAfterRun({
-        findingCount: 0,
-        priorThreadIds: ['t1', 't2'],
-        addressedThreadIds: ['t1'],
-      }),
-      false,
-    );
+  it('treats an already-resolved thread as closed regardless of this run', () => {
+    assert.deepEqual(openFindingThreadIds([{ id: 't1', isResolved: true }], []), []);
   });
 });

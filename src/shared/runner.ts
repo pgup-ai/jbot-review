@@ -5,6 +5,7 @@ import {
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
   isPrCleanAfterRun,
+  openFindingThreadIds,
   selectBlockingFindingIndexes,
   shouldPostReviewComment,
   suppressPreviouslyReported,
@@ -121,8 +122,8 @@ export interface ReviewRunOptions {
    * patchless/binary files are already excluded, and the bot never reviews
    * those regardless, so the skip never suppresses content a full review
    * would have covered. Any reviewable code/config file forces a full review.
-   * Default true: a docs-only PR gets the "review done" reaction and no
-   * review session, saving the whole model cost.
+   * Default true: a docs-only PR is skipped with no review session (saving
+   * the whole model cost) and leaves the review reaction unchanged.
    */
   skipDocOnly?: boolean;
   /**
@@ -529,7 +530,7 @@ export async function runPrReview(params: {
       log('No new findings on a re-run; skipping the review comment (reacting instead).');
     }
 
-    await acknowledgeAddressedPriorComments({
+    const resolvedThisRun = await acknowledgeAddressedPriorComments({
       octokit,
       threadResolutionOctokit: params.threadResolutionOctokit,
       owner,
@@ -541,15 +542,13 @@ export async function runPrReview(params: {
       log,
     });
     // React 🚀 only when the PR has NO open jbot findings after this run.
-    // Uses allPriorJbotThreads (not the includePriorComments-gated list) so
-    // the gate sees open findings even when prior context is disabled.
-    if (
-      isPrCleanAfterRun({
-        findingCount,
-        priorThreadIds: allPriorJbotThreads.map((thread) => thread.id),
-        addressedThreadIds: verifiedAddressedPriorComments.map((comment) => comment.id),
-      })
-    ) {
+    // Open = threads that are not already resolved AND were not resolved this
+    // run (a model-claimed "addressed" whose reply/resolve failed stays open,
+    // and a human-resolved thread counts as closed). Uses allPriorJbotThreads,
+    // not the includePriorComments-gated list, so the gate is honest even when
+    // prior context is disabled.
+    const openThreadCount = openFindingThreadIds(allPriorJbotThreads, resolvedThisRun).length;
+    if (isPrCleanAfterRun(findingCount, openThreadCount)) {
       await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
     } else {
       log('Open findings remain; not adding the review-done reaction.');
@@ -1230,8 +1229,15 @@ async function acknowledgeAddressedPriorComments(params: {
   priorJbotThreads: PriorJbotThread[];
   addressedPriorComments: AddressedPriorComment[];
   log: (msg: string) => void;
-}): Promise<void> {
-  if (params.addressedPriorComments.length === 0 || params.priorJbotThreads.length === 0) return;
+}): Promise<string[]> {
+  // Returns the thread ids actually resolved this run — only a successful
+  // resolve counts, so the reaction gate never trusts a reply/resolve that
+  // failed to post. An already-resolved thread is handled by the gate's
+  // isResolved check, so it is not included here.
+  const resolved: string[] = [];
+  if (params.addressedPriorComments.length === 0 || params.priorJbotThreads.length === 0) {
+    return resolved;
+  }
 
   const threadsById = new Map(params.priorJbotThreads.map((thread) => [thread.id, thread]));
   const seen = new Set<string>();
@@ -1269,6 +1275,7 @@ async function acknowledgeAddressedPriorComments(params: {
     if (thread.isResolved) continue;
     try {
       await resolveReviewThread(params.threadResolutionOctokit ?? params.octokit, thread.id);
+      resolved.push(thread.id);
       params.log(`Resolved prior jbot-review thread ${thread.id}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1279,6 +1286,7 @@ async function acknowledgeAddressedPriorComments(params: {
       params.log(`Failed to resolve prior jbot-review thread ${thread.id}: ${message}${hint}`);
     }
   }
+  return resolved;
 }
 
 function isResourceNotAccessibleByIntegration(message: string): boolean {
