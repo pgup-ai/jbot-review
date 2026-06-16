@@ -6,7 +6,9 @@ import {
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
+  isPrCleanAfterRun,
   selectBlockingFindingIndexes,
+  shouldPostReviewComment,
   suppressPreviouslyReported,
 } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
@@ -379,5 +381,63 @@ describe('suppressPreviouslyReported', () => {
 
     assert.equal(suppressedCount, 0);
     assert.equal(findings.length, 1);
+  });
+});
+
+describe('shouldPostReviewComment', () => {
+  it('always posts the first visible run, clean or not', () => {
+    assert.equal(shouldPostReviewComment(0, 0), true);
+    assert.equal(shouldPostReviewComment(0, 3), true);
+  });
+
+  it('posts a re-run only when it has findings', () => {
+    assert.equal(shouldPostReviewComment(2, 0), false);
+    assert.equal(shouldPostReviewComment(2, 1), true);
+  });
+});
+
+describe('isPrCleanAfterRun', () => {
+  it('is clean when no new findings and no prior threads', () => {
+    assert.equal(
+      isPrCleanAfterRun({ findingCount: 0, priorThreadIds: [], addressedThreadIds: [] }),
+      true,
+    );
+  });
+
+  it('is not clean when this run posted findings', () => {
+    assert.equal(
+      isPrCleanAfterRun({ findingCount: 2, priorThreadIds: [], addressedThreadIds: [] }),
+      false,
+    );
+  });
+
+  it('is not clean while a prior finding thread is still open (e.g. suppressed)', () => {
+    // findingCount 0 because the still-open P1 was suppressed, not re-posted.
+    assert.equal(
+      isPrCleanAfterRun({ findingCount: 0, priorThreadIds: ['t1'], addressedThreadIds: [] }),
+      false,
+    );
+  });
+
+  it('is clean in the same run that addresses the last open finding', () => {
+    assert.equal(
+      isPrCleanAfterRun({
+        findingCount: 0,
+        priorThreadIds: ['t1', 't2'],
+        addressedThreadIds: ['t1', 't2'],
+      }),
+      true,
+    );
+  });
+
+  it('is not clean when only some prior threads were addressed', () => {
+    assert.equal(
+      isPrCleanAfterRun({
+        findingCount: 0,
+        priorThreadIds: ['t1', 't2'],
+        addressedThreadIds: ['t1'],
+      }),
+      false,
+    );
   });
 });

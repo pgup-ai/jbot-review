@@ -4,7 +4,9 @@ import {
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
+  isPrCleanAfterRun,
   selectBlockingFindingIndexes,
+  shouldPostReviewComment,
   suppressPreviouslyReported,
 } from './filter.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
@@ -245,9 +247,13 @@ export async function runPrReview(params: {
   if (!options.includePriorComments) {
     log('Prior review comments excluded from review context by configuration.');
   }
-  const priorJbotThreads = options.includePriorComments
-    ? await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log)
-    : [];
+  // Always fetch open jbot threads: the "no open findings" reaction gate must
+  // see them regardless of includePriorComments (which gates only the prompt
+  // CONTEXT and the addressed-reply posting). Otherwise a still-open finding
+  // is invisible to the gate and the 🚀 lies — the same bug class as the
+  // priorJbotReviewCount fetch above. safeListPriorJbotThreads is fail-open.
+  const allPriorJbotThreads = await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
+  const priorJbotThreads = options.includePriorComments ? allPriorJbotThreads : [];
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
   const summaryScopeBlock = buildSummaryScopeBlock(priorComments, headSha);
@@ -535,10 +541,12 @@ export async function runPrReview(params: {
       log,
     });
     // React 🚀 only when the PR has NO open jbot findings after this run.
+    // Uses allPriorJbotThreads (not the includePriorComments-gated list) so
+    // the gate sees open findings even when prior context is disabled.
     if (
       isPrCleanAfterRun({
         findingCount,
-        priorThreadIds: priorJbotThreads.map((thread) => thread.id),
+        priorThreadIds: allPriorJbotThreads.map((thread) => thread.id),
         addressedThreadIds: verifiedAddressedPriorComments.map((comment) => comment.id),
       })
     ) {
@@ -1029,36 +1037,6 @@ type ShardOutcome =
  * behavior on small models, which then reviewed only the delta and missed
  * cross-commit bugs — the single biggest recall gap versus competitor bots.
  */
-/**
- * Whether to post a review comment this run. The first visible run always
- * posts (sets a baseline) and any run with findings posts; a clean re-run
- * posts nothing — the "review done" reaction signals it instead.
- */
-export function shouldPostReviewComment(
-  priorJbotReviewCount: number,
-  findingCount: number,
-): boolean {
-  return priorJbotReviewCount === 0 || findingCount > 0;
-}
-
-/**
- * Whether the PR is clean after this run — the gate for the "review done" 🚀
- * reaction, which means "no open jbot findings", not merely "this run was
- * quiet". Clean requires BOTH no new findings posted now AND every prior
- * finding thread addressed/resolved this run: a still-open prior finding can
- * be suppressed from `findingCount`, so the open-thread check is what keeps
- * the reaction honest.
- */
-export function isPrCleanAfterRun(params: {
-  findingCount: number;
-  priorThreadIds: string[];
-  addressedThreadIds: string[];
-}): boolean {
-  if (params.findingCount > 0) return false;
-  const addressed = new Set(params.addressedThreadIds);
-  return params.priorThreadIds.every((id) => addressed.has(id));
-}
-
 export function buildSummaryScopeBlock(priorComments: string[], headSha?: string): string {
   const priorJbotReviews = priorComments.filter(isJbotReviewBody);
   const lines = [

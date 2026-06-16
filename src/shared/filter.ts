@@ -257,3 +257,33 @@ export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
   });
   return { findings: result, demotedCount };
 }
+
+/**
+ * Whether to post a review comment this run. The first visible run always
+ * posts (sets a baseline) and any run with findings posts; a clean re-run
+ * posts nothing — the "review done" reaction signals it instead.
+ */
+export function shouldPostReviewComment(
+  priorJbotReviewCount: number,
+  findingCount: number,
+): boolean {
+  return priorJbotReviewCount === 0 || findingCount > 0;
+}
+
+/**
+ * Whether the PR is clean after this run — the gate for the "review done" 🚀
+ * reaction, which means "no open jbot findings", not merely "this run was
+ * quiet". Clean requires BOTH no new findings posted now AND every prior
+ * finding thread addressed/resolved this run: a still-open prior finding can
+ * be suppressed from `findingCount`, so the open-thread check is what keeps
+ * the reaction honest.
+ */
+export function isPrCleanAfterRun(params: {
+  findingCount: number;
+  priorThreadIds: string[];
+  addressedThreadIds: string[];
+}): boolean {
+  if (params.findingCount > 0) return false;
+  const addressed = new Set(params.addressedThreadIds);
+  return params.priorThreadIds.every((id) => addressed.has(id));
+}
