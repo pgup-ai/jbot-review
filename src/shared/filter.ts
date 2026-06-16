@@ -257,3 +257,49 @@ export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
   });
   return { findings: result, demotedCount };
 }
+
+/**
+ * Whether to post a review comment this run. The first visible run always
+ * posts (sets a baseline) and any run with findings posts; a clean re-run
+ * posts nothing — the "review done" reaction signals it instead.
+ */
+export function shouldPostReviewComment(
+  priorJbotReviewCount: number,
+  findingCount: number,
+): boolean {
+  return priorJbotReviewCount === 0 || findingCount > 0;
+}
+
+/** Minimal review-thread shape for the reaction gate (no GitHub-layer import). */
+export interface ReviewThreadState {
+  id: string;
+  isResolved: boolean;
+}
+
+/**
+ * Thread ids that remain OPEN after a run: not already resolved (by anyone,
+ * including a human) and not resolved during this run. Relies on ACTUAL
+ * resolution state — a thread the model claimed addressed but whose reply or
+ * resolve failed to post is still open, so it stays in this list and keeps
+ * the reaction honest.
+ */
+export function openFindingThreadIds(
+  threads: ReviewThreadState[],
+  resolvedThisRun: Iterable<string>,
+): string[] {
+  const resolved = new Set(resolvedThisRun);
+  return threads
+    .filter((thread) => !thread.isResolved && !resolved.has(thread.id))
+    .map((t) => t.id);
+}
+
+/**
+ * Whether the PR is clean after this run — the gate for the "review done" 🚀
+ * reaction, which means "no open jbot findings", not merely "this run was
+ * quiet". Clean requires BOTH no new findings posted now AND no finding
+ * thread still open (a still-open prior finding can be suppressed from
+ * `findingCount`, so the open-thread count is what keeps the reaction honest).
+ */
+export function isPrCleanAfterRun(findingCount: number, openThreadCount: number): boolean {
+  return findingCount === 0 && openThreadCount === 0;
+}

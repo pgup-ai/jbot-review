@@ -48,6 +48,7 @@ permissions:
   contents: read
   packages: read
   pull-requests: write
+  issues: write # PR reactions (jbot's review-done 🚀) use the issues API
   checks: read
 
 jobs:
@@ -81,6 +82,7 @@ jobs:
           review-shards: ${{ vars.JBOT_REVIEW_SHARDS || '1' }}
           model-options: ${{ vars.JBOT_MODEL_OPTIONS || '' }}
           prompt-cache: ${{ vars.JBOT_PROMPT_CACHE || 'true' }}
+          skip-doc-only: ${{ vars.JBOT_SKIP_DOC_ONLY || 'true' }}
           max-concurrent-sessions: ${{ vars.JBOT_MAX_CONCURRENT_SESSIONS || '0' }}
           enable-context7: ${{ inputs['enable-context7'] || 'auto' }}
           fail-on-error: ${{ inputs['fail-on-error'] || 'true' }}

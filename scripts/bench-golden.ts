@@ -274,6 +274,9 @@ async function main(): Promise<void> {
           timeBudgetMinutes: args.timeBudgetMinutes,
           reviewShards: args.reviewShards,
           modelOptions: args.modelOptions,
+          // The harness measures the model on every snapshot, so never let
+          // the doc-only gate short-circuit a case before scoring.
+          skipDocOnly: false,
           maxConcurrentSessions: args.maxConcurrentSessions,
           opencodePort,
           onReviewResult: (result) => {

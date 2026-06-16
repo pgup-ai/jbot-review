@@ -25,6 +25,31 @@ export const PATH_PATTERNS = {
 } as const;
 
 /**
+ * Documentation, prose, and diagram/graphic assets — none worth a code
+ * review. Extension-based only, conservative on purpose so a config or code
+ * file is never misclassified. A change touching ONLY these is safe to skip
+ * a full LLM review for. (Binary formats like .pdf/.vsdx rarely carry a diff
+ * — GitHub omits the patch — so they're usually filtered upstream anyway;
+ * they're listed here for completeness. The text-based diagram formats
+ * .svg/.drawio/.mmd/etc. DO carry a diff, which is the real win.)
+ */
+const DOC_FILE =
+  /\.(md|mdx|markdown|rst|adoc|txt|pdf|svg|drawio|dio|excalidraw|mmd|puml|plantuml)$/i;
+
+export function isDocFile(filename: string): boolean {
+  return DOC_FILE.test(filename);
+}
+
+/**
+ * True when every changed file is a doc/prose/diagram asset — the
+ * deterministic gate for skipping a full review. Empty input is NOT doc-only
+ * (nothing to skip); a single non-doc file forces a full review.
+ */
+export function isDocOnlyChange(filenames: string[]): boolean {
+  return filenames.length > 0 && filenames.every(isDocFile);
+}
+
+/**
  * ~10K tokens. The block is replicated into every session of a run (main,
  * lenses, compliance, verification), so the cap is per-fragment, not per-run.
  */

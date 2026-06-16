@@ -4,11 +4,19 @@ import {
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
+  isPrCleanAfterRun,
+  openFindingThreadIds,
   selectBlockingFindingIndexes,
+  shouldPostReviewComment,
   suppressPreviouslyReported,
 } from './filter.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
-import { PATH_PATTERNS, buildDiffHunksBlock, shardFilesForReview } from './diff-context.ts';
+import {
+  PATH_PATTERNS,
+  buildDiffHunksBlock,
+  isDocOnlyChange,
+  shardFilesForReview,
+} from './diff-context.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import { REVIEW_LENSES, buildShardAssignmentBlock, selectLensKeys } from './prompt.ts';
@@ -35,6 +43,8 @@ import {
   formatFindingMetadata,
   formatFindingLocation,
   postFileLevelComment,
+  addPrReaction,
+  removeOwnPrReaction,
   postReview,
   decideVerdict,
   listPriorJbotThreads,
@@ -105,6 +115,17 @@ export interface ReviewRunOptions {
    * elsewhere. Per-session cache hits are logged via `formatTokenUsage`.
    */
   promptCache?: boolean;
+  /**
+   * Skip the full LLM review when every REVIEWABLE changed file is a
+   * doc/prose/diagram asset (deterministic, see `isDocOnlyChange`). Evaluated
+   * on the reviewable set — noise files (lockfiles, generated) and
+   * patchless/binary files are already excluded, and the bot never reviews
+   * those regardless, so the skip never suppresses content a full review
+   * would have covered. Any reviewable code/config file forces a full review.
+   * Default true: a docs-only PR is skipped with no review session (saving
+   * the whole model cost) and leaves the review reaction unchanged.
+   */
+  skipDocOnly?: boolean;
   /**
    * Max model sessions in flight at once (0 = unlimited). Throttled provider
    * tiers serialize one key's concurrent requests upstream; capping on our
@@ -177,8 +198,12 @@ export async function runPrReview(params: {
   const rawFiles = await listPrFiles(octokit, owner, repo, pullNumber);
   log(`Files in PR: ${rawFiles.length} total`);
   const files = rawFiles.filter((f) => f.patch && !isNoiseFile(f.filename));
+  // The "review done" 🚀 reaction means "the PR has no open jbot findings".
+  // Skip paths below do NOT touch it: a no-reviewable-files or docs-only push
+  // doesn't change the review verdict, so leaving the reaction as-is keeps it
+  // honest (a prior clean 🚀 stays; a PR with open findings stays 🚀-less).
   if (files.length === 0) {
-    log('No reviewable files after filtering.');
+    log('No reviewable files after filtering; leaving the review reaction unchanged.');
     return;
   }
   log(`Reviewable files: ${files.length} (noise filtered: ${rawFiles.length - files.length})`);
@@ -190,16 +215,46 @@ export async function runPrReview(params: {
     changedFiles.push(f.filename);
   }
 
+  // Deterministic doc-only gate: when every REVIEWABLE file is prose, there
+  // is nothing the model would review, so skip before any server boot or LLM
+  // session. `changedFiles` is the reviewable set — noise files (lockfiles,
+  // generated) and patchless binaries were already filtered out above and are
+  // never reviewed regardless, so only never-reviewed files can be absent
+  // here; a real code/config change always keeps a non-doc entry and forces a
+  // full review.
+  if (options.skipDocOnly && isDocOnlyChange(changedFiles)) {
+    log(`Doc-only PR (${changedFiles.length} file(s)); skipping the full review.`);
+    return;
+  }
+
   const guidelines = await discoverGuidelines(workspace, changedFiles);
   if (guidelines) log(`Guidelines loaded (${guidelines.length} bytes).`);
 
-  const priorComments = options.includePriorComments
-    ? await listPrComments(octokit, owner, repo, pullNumber)
-    : [];
-  if (!options.includePriorComments) log('Prior review comments excluded by configuration.');
-  const priorJbotThreads = options.includePriorComments
-    ? await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log)
-    : [];
+  // A real review is about to run: clear the prior 🚀 so it only reappears if
+  // this run leaves the PR with zero open findings. A removed reaction means
+  // "review in flight"; a thrown/aborted run leaves it absent.
+  if (!options.dryRun) {
+    await safeRemoveReviewReaction(octokit, owner, repo, pullNumber, log);
+  }
+
+  // Always fetch prior reviews: whether the bot has reviewed this PR before
+  // (the first-run decision) is independent of whether prior comments are
+  // injected into the review CONTEXT. includePriorComments gates the context
+  // use below; it must NOT gate the count, or quiet-clean re-runs break for
+  // include-prior-comments: false (every run would look like a first run).
+  const allPriorReviewComments = await listPrComments(octokit, owner, repo, pullNumber);
+  const priorJbotReviewCount = allPriorReviewComments.filter(isJbotReviewBody).length;
+  const priorComments = options.includePriorComments ? allPriorReviewComments : [];
+  if (!options.includePriorComments) {
+    log('Prior review comments excluded from review context by configuration.');
+  }
+  // Always fetch open jbot threads: the "no open findings" reaction gate must
+  // see them regardless of includePriorComments (which gates only the prompt
+  // CONTEXT and the addressed-reply posting). Otherwise a still-open finding
+  // is invisible to the gate and the 🚀 lies — the same bug class as the
+  // priorJbotReviewCount fetch above. safeListPriorJbotThreads is fail-open.
+  const allPriorJbotThreads = await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
+  const priorJbotThreads = options.includePriorComments ? allPriorJbotThreads : [];
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
   const summaryScopeBlock = buildSummaryScopeBlock(priorComments, headSha);
@@ -443,29 +498,39 @@ export async function runPrReview(params: {
       return;
     }
 
-    // File-level comments go first so a posting failure can still fall back
-    // into the review body, which is built afterwards.
-    for (const finding of fileLevel) {
-      try {
-        await postFileLevelComment(octokit, owner, repo, pullNumber, headSha as string, finding);
-        log(`Posted file-level comment for ${finding.path}.`);
-      } catch (error) {
-        log(
-          `Failed to post file-level comment for ${finding.path}; folding into review body: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-        orphaned.push(finding);
+    // Don't post a redundant "all clear" comment on a re-run; a clean re-run
+    // is signaled by the reaction instead. `priorJbotReviewCount` is computed
+    // up front (independent of includePriorComments). Addressed-thread replies
+    // (below) still run regardless.
+    const findingCount = inline.length + fileLevel.length + orphaned.length;
+    if (shouldPostReviewComment(priorJbotReviewCount, findingCount)) {
+      // File-level comments go first so a posting failure can still fall back
+      // into the review body, which is built afterwards.
+      for (const finding of fileLevel) {
+        try {
+          await postFileLevelComment(octokit, owner, repo, pullNumber, headSha as string, finding);
+          log(`Posted file-level comment for ${finding.path}.`);
+        } catch (error) {
+          log(
+            `Failed to post file-level comment for ${finding.path}; folding into review body: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          orphaned.push(finding);
+        }
       }
+
+      const body = buildBody(summary, filteredFindings, orphaned, model, owner, repo, headSha);
+      log(
+        `Posting review: verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
+      );
+      await postReview(octokit, owner, repo, pullNumber, verdict, body, inline);
+      log('Review posted.');
+    } else {
+      log('No new findings on a re-run; skipping the review comment (reacting instead).');
     }
 
-    const body = buildBody(summary, filteredFindings, orphaned, model, owner, repo, headSha);
-    log(
-      `Posting review: verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
-    );
-    await postReview(octokit, owner, repo, pullNumber, verdict, body, inline);
-    log('Review posted.');
-    await acknowledgeAddressedPriorComments({
+    const resolvedThisRun = await acknowledgeAddressedPriorComments({
       octokit,
       threadResolutionOctokit: params.threadResolutionOctokit,
       owner,
@@ -476,9 +541,71 @@ export async function runPrReview(params: {
       addressedPriorComments: verifiedAddressedPriorComments,
       log,
     });
+    // React 🚀 only when the PR has NO open jbot findings after this run.
+    // Open = threads that are not already resolved AND were not resolved this
+    // run (a model-claimed "addressed" whose reply/resolve failed stays open,
+    // and a human-resolved thread counts as closed). Uses allPriorJbotThreads,
+    // not the includePriorComments-gated list, so the gate is honest even when
+    // prior context is disabled.
+    const openThreadCount = openFindingThreadIds(allPriorJbotThreads, resolvedThisRun).length;
+    if (isPrCleanAfterRun(findingCount, openThreadCount)) {
+      await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
+    } else {
+      log('Open findings remain; not adding the review-done reaction.');
+    }
   } finally {
     stop();
   }
+}
+
+/**
+ * The PR reaction jbot uses as a "current head reviewed, no comment needed"
+ * marker. GitHub has no checkmark reaction; rocket is the closest "shipped".
+ */
+const REVIEW_DONE_REACTION = 'rocket' as const;
+
+/** Best-effort: a reaction failure (e.g. missing permission) never fails the run. */
+async function safeAddReviewReaction(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  log: (msg: string) => void,
+): Promise<void> {
+  try {
+    await addPrReaction(octokit, owner, repo, pullNumber, REVIEW_DONE_REACTION);
+  } catch (error) {
+    log(`(could not add ${REVIEW_DONE_REACTION} reaction: ${describeReactionError(error)})`);
+  }
+}
+
+async function safeRemoveReviewReaction(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  log: (msg: string) => void,
+): Promise<void> {
+  try {
+    await removeOwnPrReaction(octokit, owner, repo, pullNumber, REVIEW_DONE_REACTION);
+  } catch (error) {
+    log(
+      `(could not clear prior ${REVIEW_DONE_REACTION} reaction: ${describeReactionError(error)})`,
+    );
+  }
+}
+
+/**
+ * Reaction failures are most often a missing permission: PR reactions use the
+ * issues API, and listing/deleting them needs `issues: write` (creating one
+ * happens to work under `pull-requests: write`, which is why an unclearable
+ * reaction can appear). Surface the fix in the log.
+ */
+function describeReactionError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return isResourceNotAccessibleByIntegration(message)
+    ? `${message} — grant the workflow \`issues: write\` so jbot can manage its review reaction`
+    : message;
 }
 
 type NormalizedReviewRunOptions = Required<Omit<ReviewRunOptions, 'onReviewResult'>> &
@@ -502,6 +629,7 @@ function normalizeOptions(options: ReviewRunOptions | undefined): NormalizedRevi
     reviewShards: Math.max(options?.reviewShards ?? 0, 0),
     modelOptions: options?.modelOptions ?? {},
     promptCache: options?.promptCache ?? true,
+    skipDocOnly: options?.skipDocOnly ?? true,
     maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 0, 0),
     opencodePort: Math.max(options?.opencodePort ?? 0, 0),
     onReviewResult: options?.onReviewResult,
@@ -1101,8 +1229,15 @@ async function acknowledgeAddressedPriorComments(params: {
   priorJbotThreads: PriorJbotThread[];
   addressedPriorComments: AddressedPriorComment[];
   log: (msg: string) => void;
-}): Promise<void> {
-  if (params.addressedPriorComments.length === 0 || params.priorJbotThreads.length === 0) return;
+}): Promise<string[]> {
+  // Returns the thread ids actually resolved this run — only a successful
+  // resolve counts, so the reaction gate never trusts a reply/resolve that
+  // failed to post. An already-resolved thread is handled by the gate's
+  // isResolved check, so it is not included here.
+  const resolved: string[] = [];
+  if (params.addressedPriorComments.length === 0 || params.priorJbotThreads.length === 0) {
+    return resolved;
+  }
 
   const threadsById = new Map(params.priorJbotThreads.map((thread) => [thread.id, thread]));
   const seen = new Set<string>();
@@ -1140,6 +1275,7 @@ async function acknowledgeAddressedPriorComments(params: {
     if (thread.isResolved) continue;
     try {
       await resolveReviewThread(params.threadResolutionOctokit ?? params.octokit, thread.id);
+      resolved.push(thread.id);
       params.log(`Resolved prior jbot-review thread ${thread.id}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1150,6 +1286,7 @@ async function acknowledgeAddressedPriorComments(params: {
       params.log(`Failed to resolve prior jbot-review thread ${thread.id}: ${message}${hint}`);
     }
   }
+  return resolved;
 }
 
 function isResourceNotAccessibleByIntegration(message: string): boolean {

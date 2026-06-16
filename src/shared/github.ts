@@ -453,6 +453,75 @@ export async function postFileLevelComment(
   });
 }
 
+/** The fixed set of reaction contents GitHub accepts (no ✅ / checkmark). */
+export type PrReactionContent =
+  | '+1'
+  | '-1'
+  | 'laugh'
+  | 'confused'
+  | 'heart'
+  | 'hooray'
+  | 'rocket'
+  | 'eyes';
+
+async function getViewerLogin(octokit: Octokit): Promise<string> {
+  const response = (await octokit.graphql('query { viewer { login } }')) as {
+    viewer: { login: string };
+  };
+  return response.viewer.login;
+}
+
+/**
+ * Removes the bot's own prior reaction of the given content from the PR.
+ * Scoped to OUR reactions (viewer login, with the github-actions[bot] alias)
+ * so a human's reaction is never touched. Used to clear the "review done"
+ * marker at the start of a new run so it only reappears when the run
+ * finishes.
+ */
+export async function removeOwnPrReaction(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  content: PrReactionContent,
+): Promise<void> {
+  const viewerLogin = await getViewerLogin(octokit);
+  const reactions = await octokit.paginate(octokit.rest.reactions.listForIssue, {
+    owner,
+    repo,
+    issue_number: pullNumber,
+    content,
+    per_page: 100,
+  });
+  for (const reaction of reactions) {
+    if (reaction.content !== content) continue;
+    const login = reaction.user?.login;
+    if (login !== viewerLogin && !isGithubActionsAlias(login, viewerLogin)) continue;
+    await octokit.rest.reactions.deleteForIssue({
+      owner,
+      repo,
+      issue_number: pullNumber,
+      reaction_id: reaction.id,
+    });
+  }
+}
+
+/** Adds a reaction to the PR (the "review done" marker). Idempotent server-side. */
+export async function addPrReaction(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  content: PrReactionContent,
+): Promise<void> {
+  await octokit.rest.reactions.createForIssue({
+    owner,
+    repo,
+    issue_number: pullNumber,
+    content,
+  });
+}
+
 export async function postAddressedThreadReply(params: {
   octokit: Octokit;
   owner: string;

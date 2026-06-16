@@ -56,12 +56,13 @@ async function main(): Promise<void> {
     reviewShards: parseNumberInput('review-shards', 1),
     modelOptions: parseJsonObjectInput('model-options', DEFAULT_MODEL_OPTIONS),
     promptCache: parseBooleanInput('prompt-cache', true),
+    skipDocOnly: parseBooleanInput('skip-doc-only', true),
     maxConcurrentSessions: parseNumberInput('max-concurrent-sessions', 0),
   };
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${model}`);
   core.info(
-    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModel || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} modelOptions=${JSON.stringify(options.modelOptions)} promptCache=${options.promptCache}`,
+    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModel || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} modelOptions=${JSON.stringify(options.modelOptions)} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly}`,
   );
 
   const octokit = github.getOctokit(token) as unknown as Octokit;

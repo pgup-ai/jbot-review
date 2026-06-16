@@ -6,7 +6,10 @@ import {
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
+  isPrCleanAfterRun,
+  openFindingThreadIds,
   selectBlockingFindingIndexes,
+  shouldPostReviewComment,
   suppressPreviouslyReported,
 } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
@@ -379,5 +382,49 @@ describe('suppressPreviouslyReported', () => {
 
     assert.equal(suppressedCount, 0);
     assert.equal(findings.length, 1);
+  });
+});
+
+describe('shouldPostReviewComment', () => {
+  it('always posts the first visible run, clean or not', () => {
+    assert.equal(shouldPostReviewComment(0, 0), true);
+    assert.equal(shouldPostReviewComment(0, 3), true);
+  });
+
+  it('posts a re-run only when it has findings', () => {
+    assert.equal(shouldPostReviewComment(2, 0), false);
+    assert.equal(shouldPostReviewComment(2, 1), true);
+  });
+});
+
+describe('isPrCleanAfterRun', () => {
+  it('is clean only with no new findings and no open threads', () => {
+    assert.equal(isPrCleanAfterRun(0, 0), true);
+    assert.equal(isPrCleanAfterRun(2, 0), false); // this run posted findings
+    assert.equal(isPrCleanAfterRun(0, 1), false); // a finding thread is still open
+  });
+});
+
+describe('openFindingThreadIds', () => {
+  it('counts threads not already resolved and not resolved this run', () => {
+    const threads = [
+      { id: 't1', isResolved: false },
+      { id: 't2', isResolved: false },
+      { id: 't3', isResolved: true }, // resolved earlier / by a human → closed
+    ];
+    assert.deepEqual(openFindingThreadIds(threads, []), ['t1', 't2']);
+    assert.deepEqual(openFindingThreadIds(threads, ['t1']), ['t2']);
+    assert.deepEqual(openFindingThreadIds(threads, ['t1', 't2']), []);
+  });
+
+  it('keeps a thread open when its resolve failed (id not in resolvedThisRun)', () => {
+    // The model claimed t1 addressed but the reply/resolve post failed, so t1
+    // is NOT in resolvedThisRun → it stays open and blocks the 🚀.
+    const threads = [{ id: 't1', isResolved: false }];
+    assert.deepEqual(openFindingThreadIds(threads, []), ['t1']);
+  });
+
+  it('treats an already-resolved thread as closed regardless of this run', () => {
+    assert.deepEqual(openFindingThreadIds([{ id: 't1', isResolved: true }], []), []);
   });
 });
