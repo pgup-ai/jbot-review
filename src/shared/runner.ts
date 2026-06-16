@@ -568,11 +568,7 @@ async function safeAddReviewReaction(
   try {
     await addPrReaction(octokit, owner, repo, pullNumber, REVIEW_DONE_REACTION);
   } catch (error) {
-    log(
-      `(could not add ${REVIEW_DONE_REACTION} reaction: ${
-        error instanceof Error ? error.message : String(error)
-      })`,
-    );
+    log(`(could not add ${REVIEW_DONE_REACTION} reaction: ${describeReactionError(error)})`);
   }
 }
 
@@ -587,11 +583,22 @@ async function safeRemoveReviewReaction(
     await removeOwnPrReaction(octokit, owner, repo, pullNumber, REVIEW_DONE_REACTION);
   } catch (error) {
     log(
-      `(could not clear prior ${REVIEW_DONE_REACTION} reaction: ${
-        error instanceof Error ? error.message : String(error)
-      })`,
+      `(could not clear prior ${REVIEW_DONE_REACTION} reaction: ${describeReactionError(error)})`,
     );
   }
+}
+
+/**
+ * Reaction failures are most often a missing permission: PR reactions use the
+ * issues API, and listing/deleting them needs `issues: write` (creating one
+ * happens to work under `pull-requests: write`, which is why an unclearable
+ * reaction can appear). Surface the fix in the log.
+ */
+function describeReactionError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return isResourceNotAccessibleByIntegration(message)
+    ? `${message} — grant the workflow \`issues: write\` so jbot can manage its review reaction`
+    : message;
 }
 
 type NormalizedReviewRunOptions = Required<Omit<ReviewRunOptions, 'onReviewResult'>> &

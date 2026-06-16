@@ -48,6 +48,7 @@ permissions:
   contents: read
   packages: read
   pull-requests: write
+  issues: write # PR reactions (jbot's review-done 🚀) use the issues API
   checks: read
 
 jobs:
