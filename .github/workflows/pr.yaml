@@ -1,0 +1,63 @@
+name: PR Checks
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  lint-format:
+    name: Lint, format & test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+      - name: Setup node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Format
+        run: npm run format
+      - name: Detect formatting changes
+        id: formatting
+        run: |
+          if [[ -n "$(git status --short --untracked-files=all)" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git status --short --untracked-files=all
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Fail on formatting changes from fork PRs
+        if: ${{ steps.formatting.outputs.changed == 'true' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          echo "Formatting changes are required, but CI cannot push repairs to fork PR branches. Run 'npm run format' locally and push."
+          git diff --stat
+          exit 1
+      - name: Auto-commit formatting changes
+        if: ${{ steps.formatting.outputs.changed == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: apply formatting"
+          git push origin HEAD:"$PR_BRANCH"
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
