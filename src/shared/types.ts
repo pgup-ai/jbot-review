@@ -24,7 +24,6 @@ export interface Finding {
 export interface AddressedPriorComment {
   id: string;
   addressedByCommit?: string;
-  note?: string;
 }
 
 export interface ReviewResult {

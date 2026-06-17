@@ -73,7 +73,7 @@ describe('formatPriorJbotThreadsForPrompt', () => {
 });
 
 describe('postAddressedThreadReply', () => {
-  it('posts a concise addressed reply without exposing the model note', async () => {
+  it('posts a concise addressed reply with the hidden marker', async () => {
     let postedBody = '';
     const octokit = {
       rest: {
@@ -101,7 +101,6 @@ describe('postAddressedThreadReply', () => {
         replies: [],
       },
       addressedByCommit: 'abcdef1234567890',
-      note: 'Fixed by adding a guard and test.',
     });
 
     assert.equal(
@@ -112,6 +111,5 @@ describe('postAddressedThreadReply', () => {
         '<!-- jbot-review:addressed -->',
       ].join('\n'),
     );
-    assert.doesNotMatch(postedBody, /Fixed by adding/);
   });
 });

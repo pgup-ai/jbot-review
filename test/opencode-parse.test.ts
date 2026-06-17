@@ -19,8 +19,8 @@ describe('parseReview', () => {
     const result = parseReview(raw, 'test', noLog);
 
     assert.deepEqual(result.addressedPriorComments, [
-      { id: 'PRRT_1', addressedByCommit: 'abc1234', note: 'fixed' },
-      { id: 'PRRT_2', addressedByCommit: 'def5678', note: 'also fixed' },
+      { id: 'PRRT_1', addressedByCommit: 'abc1234' },
+      { id: 'PRRT_2', addressedByCommit: 'def5678' },
     ]);
   });
 
@@ -36,7 +36,7 @@ describe('parseReview', () => {
     const result = parseReview(raw, 'test', noLog);
 
     assert.deepEqual(result.addressedPriorComments, [
-      { id: 'PRRT_3', addressedByCommit: 'camel-wins', note: undefined },
+      { id: 'PRRT_3', addressedByCommit: 'camel-wins' },
     ]);
   });
 

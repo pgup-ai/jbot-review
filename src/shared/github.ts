@@ -529,7 +529,6 @@ export async function postAddressedThreadReply(params: {
   pullNumber: number;
   thread: PriorJbotThread;
   addressedByCommit: string;
-  note?: string;
 }): Promise<void> {
   const commitLabel = formatCommitLabel(params.owner, params.repo, params.addressedByCommit);
   const body = [`✅ Addressed in ${commitLabel}.`, '', ADDRESSED_MARKER].join('\n');

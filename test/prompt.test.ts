@@ -218,6 +218,7 @@ describe('ADDRESSED_PRIOR_COMMENTS_PROMPT', () => {
   it('uses camelCase schema keys consistently', () => {
     assert.match(ADDRESSED_PRIOR_COMMENTS_PROMPT, /"addressedByCommit"/);
     assert.doesNotMatch(ADDRESSED_PRIOR_COMMENTS_PROMPT, /addressed_by_commit/);
+    assert.doesNotMatch(ADDRESSED_PRIOR_COMMENTS_PROMPT, /"note"/);
   });
 });
 

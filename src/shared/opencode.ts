@@ -871,7 +871,6 @@ export function parseReview(
     addressedPriorComments.push({
       id,
       addressedByCommit: rawCommit?.trim(),
-      note: typeof addressed.note === 'string' ? addressed.note.trim() : undefined,
     });
   }
 
