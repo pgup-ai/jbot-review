@@ -532,10 +532,7 @@ export async function postAddressedThreadReply(params: {
   note?: string;
 }): Promise<void> {
   const commitLabel = formatCommitLabel(params.owner, params.repo, params.addressedByCommit);
-  const note = params.note?.trim();
-  const body = [`Addressed in ${commitLabel}.${note ? ` ${note}` : ''}`, '', ADDRESSED_MARKER].join(
-    '\n',
-  );
+  const body = [`✅ Addressed in ${commitLabel}.`, '', ADDRESSED_MARKER].join('\n');
 
   await params.octokit.rest.pulls.createReplyForReviewComment({
     owner: params.owner,
