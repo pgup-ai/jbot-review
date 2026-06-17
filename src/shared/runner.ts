@@ -836,8 +836,7 @@ function formatInlineFinding(finding: Finding): string {
 
 function formatAddressedPriorComment(comment: AddressedPriorComment): string {
   const commit = comment.addressedByCommit ? ` (${comment.addressedByCommit})` : '';
-  const note = comment.note ? `: ${comment.note}` : '';
-  return `- ${comment.id}${commit}${note}`;
+  return `- ${comment.id}${commit}`;
 }
 
 function joinContext(...parts: string[]): string {
@@ -1260,7 +1259,6 @@ async function acknowledgeAddressedPriorComments(params: {
         pullNumber: params.pullNumber,
         thread,
         addressedByCommit,
-        note: addressed.note,
       });
       params.log(`Posted addressed reply for prior thread ${thread.id}`);
     } catch (error) {

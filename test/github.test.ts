@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { formatPriorJbotThreadsForPrompt, type PriorJbotThread } from '../src/shared/github.ts';
+import {
+  formatPriorJbotThreadsForPrompt,
+  postAddressedThreadReply,
+  type PriorJbotThread,
+} from '../src/shared/github.ts';
 
 describe('formatPriorJbotThreadsForPrompt', () => {
   it('includes human thread replies so declined suggestions are not re-raised', () => {
@@ -65,5 +69,47 @@ describe('formatPriorJbotThreadsForPrompt', () => {
     assert.doesNotMatch(prompt, /reply 2/);
     assert.match(prompt, /reply 3/);
     assert.match(prompt, /reply 7/);
+  });
+});
+
+describe('postAddressedThreadReply', () => {
+  it('posts a concise addressed reply with the hidden marker', async () => {
+    let postedBody = '';
+    const octokit = {
+      rest: {
+        pulls: {
+          createReplyForReviewComment: async (params: { body: string }) => {
+            postedBody = params.body;
+          },
+        },
+      },
+    };
+
+    await postAddressedThreadReply({
+      octokit: octokit as Parameters<typeof postAddressedThreadReply>[0]['octokit'],
+      owner: 'acme',
+      repo: 'widget',
+      pullNumber: 12,
+      thread: {
+        id: 'PRRT_example',
+        isResolved: false,
+        replyToCommentId: 123,
+        path: 'src/example.ts',
+        line: 9,
+        body: 'Prior finding',
+        url: 'https://github.com/acme/widget/pull/12#discussion_r123',
+        replies: [],
+      },
+      addressedByCommit: 'abcdef1234567890',
+    });
+
+    assert.equal(
+      postedBody,
+      [
+        '✅ Addressed in [abcdef1](https://github.com/acme/widget/commit/abcdef1234567890).',
+        '',
+        '<!-- jbot-review:addressed -->',
+      ].join('\n'),
+    );
   });
 });

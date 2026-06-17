@@ -394,7 +394,6 @@ Rules:
 - Do not mark a thread addressed because a human reply declined the suggestion, such as "Not applied", "accepted as-is", or "not worth fixing".
 - Use the exact prior jbot-review thread id from the prompt.
 - Prefer the commit SHA that fixed the issue for "addressedByCommit"; use the current head only if the exact fixing commit cannot be determined.
-- Keep "note" to one short sentence explaining why it is addressed.
 
 Respond with a SINGLE raw JSON object and NOTHING else:
 
@@ -402,8 +401,7 @@ Respond with a SINGLE raw JSON object and NOTHING else:
   "addressedPriorComments": [
     {
       "id": "exact prior jbot-review thread id",
-      "addressedByCommit": "commit sha",
-      "note": "Short reason this prior comment is now addressed."
+      "addressedByCommit": "commit sha"
     }
   ]
 }`;
