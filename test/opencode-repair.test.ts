@@ -210,6 +210,18 @@ describe('buildConfig prompt caching', () => {
     assert.equal(permission.edit, 'deny');
     assert.equal(permission.external_directory, 'deny');
   });
+
+  it('embeds secondary provider keys for cross-provider aux models', () => {
+    const config = buildConfig('openai', 'gpt-5', 'openai-key', undefined, true, [
+      { providerID: 'openrouter', apiKey: 'openrouter-key' },
+    ]);
+    const providers = (config as { provider: Record<string, { options: Record<string, unknown> }> })
+      .provider;
+
+    assert.equal(providers.openai.options.apiKey, 'openai-key');
+    assert.equal(providers.openrouter.options.apiKey, 'openrouter-key');
+    assert.equal(providers.openrouter.options.setCacheKey, true);
+  });
 });
 
 describe('formatTokenUsage', () => {

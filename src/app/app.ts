@@ -4,7 +4,7 @@ import type { InstallationAccessTokenAuthentication } from '@octokit/auth-app';
 import { createAppOctokit } from './auth.ts';
 import { clonePr } from './clone.ts';
 import { runPrReview } from '../shared/runner.ts';
-import { formatModelName, parseModelName, resolveModelName } from '../shared/model.ts';
+import { parseModelName, resolveAuxModelName } from '../shared/model.ts';
 import { enqueue } from './queue.ts';
 
 export interface AppConfig {
@@ -12,6 +12,8 @@ export interface AppConfig {
   privateKey: string;
   apiKey: string;
   model: string;
+  auxProvider?: string;
+  auxApiKey?: string;
 }
 
 // The pull_request webhook event is a union of action-specific payload types.
@@ -57,13 +59,6 @@ export function parseEnvBoolean(name: string, defaultValue: boolean): boolean {
   return defaultValue;
 }
 
-export function resolveAuxModelForMainModel(mainModel: string, auxModelInput?: string): string {
-  const input = auxModelInput?.trim();
-  if (!input) return '';
-  const { providerID } = parseModelName(mainModel);
-  return formatModelName(resolveModelName(providerID, input));
-}
-
 export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
   const { payload } = event;
   if (!payload.pull_request) return;
@@ -82,7 +77,12 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
     const { dir, cleanup } = clonePr(repoInfo.clone_url, pr.head.ref, pr.base.ref, authRes.token);
 
     try {
-      const auxModel = resolveAuxModelForMainModel(cfg.model, process.env.JBOT_REVIEW_AUX_MODEL);
+      const { providerID } = parseModelName(cfg.model);
+      const auxModel = resolveAuxModelName(
+        providerID,
+        process.env.JBOT_REVIEW_AUX_MODEL,
+        cfg.auxProvider,
+      );
       await runPrReview({
         octokit,
         owner,
@@ -103,6 +103,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 1),
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
           auxModel,
+          ...(cfg.auxApiKey ? { auxApiKey: cfg.auxApiKey } : {}),
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
           reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
           modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'medium' }),

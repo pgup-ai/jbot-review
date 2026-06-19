@@ -72,10 +72,14 @@ export interface ReviewRunOptions {
   /**
    * Model for the auxiliary sessions (addressed-check, guideline compliance,
    * finding verification). Lets the main review run on a stronger tier while
-   * the mechanical checks stay on a cheap one. Must be on the same provider
-   * as the main model (one API key per run). Empty = use the main model.
+   * the mechanical checks stay on a cheap one. Empty = use the main model.
    */
   auxModel?: string;
+  /**
+   * Optional API key for the auxiliary model provider when it differs from the
+   * main model provider. Empty = reuse the main review API key.
+   */
+  auxApiKey?: string;
   /**
    * Total review passes: 1 = the general pass only; each extra pass adds a
    * focused recall lens (interactions, then integrity) running in parallel.
@@ -191,6 +195,8 @@ export async function runPrReview(params: {
   }
 
   const { providerID, modelID } = parseModelName(model);
+  const auxModel = options.auxModel || model;
+  const { providerID: auxProviderID } = parseModelName(auxModel);
 
   await ensureGitSafeDirectory(workspace, log);
 
@@ -325,6 +331,10 @@ export async function runPrReview(params: {
     modelOptions: options.modelOptions,
     promptCache: options.promptCache,
     port: options.opencodePort > 0 ? options.opencodePort : undefined,
+    additionalProviderKeys:
+      auxProviderID !== providerID
+        ? [{ providerID: auxProviderID, apiKey: options.auxApiKey || apiKey }]
+        : undefined,
   });
   try {
     try {
@@ -358,8 +368,6 @@ export async function runPrReview(params: {
     } else {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }
-
-    const auxModel = options.auxModel || model;
 
     const addressedPriorCheck = startAddressedPriorCommentsCheck({
       client,
@@ -623,6 +631,7 @@ function normalizeOptions(options: ReviewRunOptions | undefined): NormalizedRevi
     context7ApiKey: options?.context7ApiKey ?? '',
     guidelinePass: options?.guidelinePass ?? true,
     auxModel: options?.auxModel ?? '',
+    auxApiKey: options?.auxApiKey ?? '',
     reviewPasses: Math.min(Math.max(options?.reviewPasses ?? 1, 1), maxPasses),
     verifyFindings: options?.verifyFindings ?? true,
     timeBudgetMinutes: Math.max(options?.timeBudgetMinutes ?? 0, 0),

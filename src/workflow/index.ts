@@ -3,7 +3,12 @@ import * as github from '@actions/github';
 
 import { PROVIDERS } from '../shared/config.ts';
 import { parseContext7Mode } from '../shared/context7.ts';
-import { formatModelName, resolveModelName } from '../shared/model.ts';
+import {
+  formatModelName,
+  parseModelName,
+  resolveAuxModelName,
+  resolveModelName,
+} from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { Octokit } from '../shared/github.ts';
 import type { Severity } from '../shared/types.ts';
@@ -36,10 +41,27 @@ async function main(): Promise<void> {
 
   const modelInput = getInputOrEnv('model', 'JBOT_REVIEW_MODEL') || cfg.defaultModel;
   const model = formatModelName(resolveModelName(provider, modelInput));
-  // Aux model resolves against the SAME provider as the main model: one API
-  // key per run, so a cross-provider aux model cannot authenticate.
   const auxModelInput = getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL');
-  const auxModel = auxModelInput ? formatModelName(resolveModelName(provider, auxModelInput)) : '';
+  const auxProvider = auxModelInput
+    ? getInputOrEnv('aux-provider', 'JBOT_AUX_PROVIDER') || provider
+    : provider;
+  const auxCfg = auxModelInput ? PROVIDERS[auxProvider] : undefined;
+  if (auxModelInput && !auxCfg) {
+    throw new Error(
+      `Unknown aux provider "${auxProvider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
+    );
+  }
+  const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
+  const auxProviderID = auxModel ? parseModelName(auxModel).providerID : provider;
+  let auxApiKey = '';
+  if (auxModel && auxProviderID !== provider) {
+    if (!auxCfg) {
+      throw new Error(
+        `Unknown aux provider "${auxProviderID}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
+      );
+    }
+    auxApiKey = getInputOrEnv(auxCfg.keyInput, auxCfg.keyEnv);
+  }
   const options = {
     enhancedContext: true,
     dryRun: parseBooleanInput('dry-run', false),
@@ -50,6 +72,7 @@ async function main(): Promise<void> {
     context7ApiKey: getInputOrEnv('context7-api-key', 'CONTEXT7_API_KEY'),
     guidelinePass: parseBooleanInput('enable-guideline-pass', true),
     auxModel,
+    auxApiKey,
     reviewPasses: parseNumberInput('review-passes', 1),
     verifyFindings: parseBooleanInput('verify-findings', true),
     timeBudgetMinutes: parseNumberInput('time-budget-minutes', 30),
