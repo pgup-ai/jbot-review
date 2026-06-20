@@ -66,6 +66,11 @@ describe('resolveModelName', () => {
       defaultModel: 'zai-coding-plan/glm-5.2',
       keyEnv: 'ZAI_API_KEY',
       keyInput: 'zai-api-key',
+      models: {
+        'glm-5': { promptCache: false },
+        'glm-5.1': { promptCache: false },
+        'glm-5.2': { promptCache: false },
+      },
     });
   });
 
@@ -98,6 +103,7 @@ describe('resolveAuxModelName', () => {
 describe('modelSupportsPromptCache', () => {
   it('disables prompt caching only for models explicitly marked unsupported', () => {
     assert.equal(modelSupportsPromptCache('opencode-go', 'glm-5.2'), false);
+    assert.equal(modelSupportsPromptCache('zai-coding-plan', 'glm-5.2'), false);
     assert.equal(modelSupportsPromptCache('opencode-go', 'deepseek-v4-flash'), true);
     assert.equal(modelSupportsPromptCache('opencode-go', 'kimi-k2.6'), true);
     assert.equal(modelSupportsPromptCache('opencode-go', 'minimax-m3'), true);

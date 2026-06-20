@@ -13,6 +13,12 @@ export interface ModelConfig {
   promptCache?: boolean;
 }
 
+const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
+  'glm-5.1': { promptCache: false },
+  'glm-5.2': { promptCache: false },
+  'glm-5': { promptCache: false },
+} satisfies Record<string, ModelConfig>;
+
 // See https://models.dev/ for the full list of available models and providers.
 export const PROVIDERS: Record<string, ProviderConfig> = {
   opencode: {
@@ -24,13 +30,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'opencode-go/deepseek-v4-flash',
     keyEnv: 'OPENCODE_API_KEY',
     keyInput: 'opencode-api-key',
-    // Models.dev marks these opencode-go models as family=glm; that gateway
-    // rejects promptCacheKey for GLM models. Omitted models default enabled.
-    models: {
-      'glm-5.1': { promptCache: false },
-      'glm-5.2': { promptCache: false },
-      'glm-5': { promptCache: false },
-    },
+    // Models.dev marks these as family=glm; GLM rejects promptCacheKey.
+    // Omitted models default enabled.
+    models: GLM_PROMPT_CACHE_UNSUPPORTED_MODELS,
   },
   deepseek: {
     defaultModel: 'deepseek/deepseek-v4-flash',
@@ -66,6 +68,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'zai-coding-plan/glm-5.2',
     keyEnv: 'ZAI_API_KEY',
     keyInput: 'zai-api-key',
+    models: GLM_PROMPT_CACHE_UNSUPPORTED_MODELS,
   },
   xai: {
     defaultModel: 'xai/grok-4.3',
