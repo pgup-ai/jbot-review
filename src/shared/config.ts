@@ -8,7 +8,7 @@ export interface ProviderConfig {
 export interface ModelConfig {
   /**
    * Whether opencode should send promptCacheKey for this model. Defaults true
-   * when omitted; false entries are seeded from Models.dev cache-write support.
+   * when omitted; false entries are seeded from Models.dev provider metadata.
    */
   promptCache?: boolean;
 }
@@ -24,17 +24,14 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'opencode-go/deepseek-v4-flash',
     keyEnv: 'OPENCODE_API_KEY',
     keyInput: 'opencode-api-key',
-    // Models.dev entries without cost.cache_write reject opencode's promptCacheKey
-    // through this gateway; omitted models default to prompt cache enabled.
+    // Models.dev opencode-go entries without provider routing metadata reject
+    // promptCacheKey through this gateway; omitted models default enabled.
     models: {
       'deepseek-v4-flash': { promptCache: false },
-      'minimax-m2.5': { promptCache: false },
       'kimi-k2.7-code': { promptCache: false },
       'glm-5.1': { promptCache: false },
       'deepseek-v4-pro': { promptCache: false },
       'glm-5.2': { promptCache: false },
-      'minimax-m3': { promptCache: false },
-      'minimax-m2.7': { promptCache: false },
       'kimi-k2.5': { promptCache: false },
       'mimo-v2.5': { promptCache: false },
       'mimo-v2-omni': { promptCache: false },
