@@ -90,6 +90,8 @@ jobs:
         with:
           provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
           model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
+          aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
+          aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
           opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
           deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -107,20 +109,25 @@ jobs:
 and variables → Actions → New repository secret. Add the keys for the providers
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `XAI_API_KEY`, or `ANTHROPIC_API_KEY`.
-Empty provider key inputs are ignored unless that provider is selected.
+Empty provider key inputs are ignored; if a cross-provider auxiliary model has
+no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
 Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
 framework, CLI, cloud-service, or workflow changes.
 
 **Secret exposure:** the example above passes multiple provider secrets so
-`JBOT_REVIEW_PROVIDER` can switch providers without another YAML edit. For a
-least-privilege setup, pass only the selected provider's key:
+`JBOT_REVIEW_PROVIDER` and `JBOT_AUX_PROVIDER` can switch providers without
+another YAML edit. For a least-privilege setup, pass only the selected provider
+keys:
 
 ```yaml
 with:
   provider: opencode
   model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
+  aux-provider: openrouter
+  aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
   opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
+  openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
   github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
@@ -152,6 +159,7 @@ This repo's own `.github/workflows/jbot-review.yml` dogfoods branch-local action
 changes before they are published to `pgup-ai/jbot-review-action@v0`. It builds
 the branch image, uses the relative `./` action, and passes every provider key
 input so `JBOT_REVIEW_PROVIDER` / `JBOT_REVIEW_MODEL` can switch providers
+and `JBOT_AUX_PROVIDER` / `JBOT_REVIEW_AUX_MODEL` can switch auxiliary providers
 without editing the workflow.
 
 ```yaml
@@ -169,6 +177,8 @@ without editing the workflow.
   with:
     provider: ${{ inputs.provider || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
     model: ${{ inputs.model || vars.JBOT_REVIEW_MODEL || '' }}
+    aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
+    aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
     pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] }}
     dry-run: ${{ inputs['dry-run'] || 'false' }}
     max-findings: ${{ inputs['max-findings'] || '0' }}
@@ -219,7 +229,8 @@ the review itself is unaffected._
 | ------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `review-passes`           | `1`                            | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `verify-findings`         | `true`                         | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `aux-model`               | unset                          | Same-provider model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification). Lets the main review run on a stronger tier while supporting checks stay cheap and fast.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `aux-model`               | unset                          | Model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification). Resolves against `aux-provider`/`JBOT_AUX_PROVIDER` when set, otherwise the main provider. Lets the main review run on a stronger tier while supporting checks stay cheap and fast.                                                                                                                                                                                                                                                                                                                                                             |
+| `aux-provider`            | main provider                  | Optional provider for `aux-model`; can come from `JBOT_AUX_PROVIDER`. If the aux provider's key input/env var is supplied, aux sessions use it; otherwise they reuse the review provider API key.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `review-shards`           | `1`                            | Parallel shards for the main review. `1` = no sharding, one full-diff session (default). `0` = auto from diff size, capped at 4. `N` = pin N shards. Sharding only speeds review up on providers that serve concurrent sessions; on free/throttled tiers the shards serialize on one key (see `max-concurrent-sessions`), so single-session is the better default. Either way the review covers the complete diff; raise it on paid concurrent tiers, or for very large PRs where smaller per-shard context helps depth.                                                                                                                                    |
 | `time-budget-minutes`     | `30`                           | Wall-clock target (`0` = no budget). Finder sessions get the full budget (minus a 30s posting reserve) as their deadline; shard retries and verification use whatever remains, or are skipped (fail-open). An auxiliary session (lens, addressed-thread, guideline, verification) over its deadline is aborted and fails open — degrading only its own coverage, never the run. A main review shard that still fails after its retry aborts the run rather than posting partial coverage.                                                                                                                                                                   |
 | `max-concurrent-sessions` | `0`                            | Max model sessions in flight (0 = unlimited). Free/throttled tiers serialize one key's requests upstream — observed as a flash session queued 7+ minutes behind parallel shards. Capping at 2–3 keeps each session's deadline measuring model time, not queue time.                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -232,7 +243,8 @@ longer timeout headroom): set the main `model` to the heavy tier, then
 
 ```yaml
 model: ${{ vars.JBOT_REVIEW_MODEL }} # heavy tier, e.g. openai/gpt-5.5
-aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL }} # same-provider fast tier for lenses + verification
+aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
+aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL }} # fast tier for lenses + verification
 review-shards: '0' # opt into auto-sharding on a paid concurrent tier
 max-concurrent-sessions: '0' # paid tiers serve shards in parallel; cap to 2-3 on throttled keys
 # defaults already active: review-shards 1 (off), time-budget-minutes 30,
@@ -281,6 +293,8 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
   with:
     provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
     model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
+    aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
+    aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
     opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
     deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
     openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -294,20 +308,26 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
 ```
 
-The action reads only the key matching the selected `provider`, so future
-provider changes can be made through `JBOT_REVIEW_PROVIDER` without editing the
-workflow YAML. It accepts provider and model from either action inputs or
-environment variables: `provider` or `JBOT_REVIEW_PROVIDER` for the provider,
-and `model` or `JBOT_REVIEW_MODEL` for the model. Provider API keys can also be
-supplied through their standard env vars, such as `OPENROUTER_API_KEY` or
-`NVIDIA_API_KEY`. This convenience pattern exposes every configured provider key
-to the action runtime. For the smallest secret surface area, pass only the key
-for the provider used by that workflow. If `model` is set, it is interpreted as
-a model id for the selected `provider`. A matching `provider/model` prefix is
-accepted and normalized, so `deepseek-v4-flash-free` and
-`opencode/deepseek-v4-flash-free` are equivalent when `provider` is `opencode`.
-Slash-containing provider catalog ids such as `moonshotai/kimi-k2.6` are passed
-through as the model id for the selected provider.
+The action reads the key matching the selected `provider`. When `aux-model` uses
+a different provider, the action uses the aux provider's key input/env var if it
+is supplied; otherwise it reuses the review provider API key for the aux
+provider. Future provider changes can be made through `JBOT_REVIEW_PROVIDER` and
+`JBOT_AUX_PROVIDER` without editing the workflow YAML. It accepts provider and
+model from either action inputs or environment variables: `provider` or
+`JBOT_REVIEW_PROVIDER` for the main provider, `model` or `JBOT_REVIEW_MODEL` for
+the main model, `aux-provider` or `JBOT_AUX_PROVIDER` for the auxiliary
+provider, and `aux-model` or `JBOT_REVIEW_AUX_MODEL` for the auxiliary model.
+Provider API keys can also be supplied through their standard env vars, such as
+`OPENROUTER_API_KEY` or `NVIDIA_API_KEY`. This convenience pattern exposes every
+configured provider key to the action runtime. For the smallest secret surface
+area, pass only the review provider key, plus an aux provider key only when it
+must be different.
+If `model` is set, it is interpreted as a model id for the selected `provider`.
+A matching `provider/model` prefix is accepted and normalized, so
+`deepseek-v4-flash-free` and `opencode/deepseek-v4-flash-free` are equivalent
+when `provider` is `opencode`. Slash-containing provider catalog ids such as
+`moonshotai/kimi-k2.6` are passed through as the model id for the selected
+provider.
 
 For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
@@ -330,13 +350,15 @@ documentation lookup.
 | ------------------------- | -------- | --------------------- | -------------------------------------------------------------------------- |
 | `provider`                | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`                     |
 | `model`                   | No       | Provider default      | Provider model id; can come from `JBOT_REVIEW_MODEL`                       |
-| `opencode-api-key`        | No       | —                     | Required when `provider=opencode` or `provider=opencode-go`                |
-| `deepseek-api-key`        | No       | —                     | Required when `provider=deepseek`                                          |
-| `openai-api-key`          | No       | —                     | Required when `provider=openai`                                            |
-| `anthropic-api-key`       | No       | —                     | Required when `provider=anthropic`                                         |
-| `openrouter-api-key`      | No       | —                     | Required when `provider=openrouter`                                        |
-| `nvidia-api-key`          | No       | —                     | Required when `provider=nvidia`                                            |
-| `xai-api-key`             | No       | —                     | Required when `provider=xai`                                               |
+| `aux-provider`            | No       | Main provider         | Auxiliary model provider; can come from `JBOT_AUX_PROVIDER`                |
+| `aux-model`               | No       | Main model            | Auxiliary model id; can come from `JBOT_REVIEW_AUX_MODEL`                  |
+| `opencode-api-key`        | No       | —                     | Used when `provider` or `aux-provider` is `opencode`/`opencode-go`         |
+| `deepseek-api-key`        | No       | —                     | Used when `provider` or `aux-provider` is `deepseek`                       |
+| `openai-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `openai`                         |
+| `anthropic-api-key`       | No       | —                     | Used when `provider` or `aux-provider` is `anthropic`                      |
+| `openrouter-api-key`      | No       | —                     | Used when `provider` or `aux-provider` is `openrouter`                     |
+| `nvidia-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `nvidia`                         |
+| `xai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `xai`                            |
 | `enable-context7`         | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false` |
 | `context7-api-key`        | No       | —                     | Optional Context7 key for reliable CI docs lookup                          |
 | `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                                           |
@@ -466,6 +488,7 @@ during checkout.
 | `GITHUB_APP_PRIVATE_KEY` | Yes         | —                | Contents of the `.pem` file                |
 | `GITHUB_WEBHOOK_SECRET`  | Yes         | —                | Random string for signing                  |
 | `PROVIDER`               | No          | `opencode`       | Provider key (see table below)             |
+| `JBOT_AUX_PROVIDER`      | No          | `PROVIDER`       | Provider key for `JBOT_REVIEW_AUX_MODEL`   |
 | `OPENCODE_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=opencode   |
 | `DEEPSEEK_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=deepseek   |
 | `OPENAI_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=openai     |
@@ -474,15 +497,17 @@ during checkout.
 | `NVIDIA_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=nvidia     |
 | `XAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=xai        |
 | `MODEL`                  | No          | Provider default | Provider model id, optionally prefixed     |
+| `JBOT_REVIEW_AUX_MODEL`  | No          | Main model       | Aux model id, optionally prefixed          |
 | `PORT`                   | No          | `3000`           | HTTP listen port                           |
 
 ### Provider configuration (hosted App)
 
 Set `PROVIDER` and the matching operator API key in `.env`. You can set all
-provider keys up front, but the current hosted server reads only the key matching
-the selected `PROVIDER` at boot. The `MODEL` env var overrides the provider
-default and may be either the raw provider model id or a matching
-`provider/model` string:
+provider keys up front, but the hosted server reads the key matching the
+selected `PROVIDER` and only uses the `JBOT_AUX_PROVIDER` key when it is present;
+otherwise cross-provider aux sessions reuse the review provider API key. The
+`MODEL` env var overrides the provider default and may be either the raw
+provider model id or a matching `provider/model` string:
 
 ```bash
 PROVIDER=deepseek

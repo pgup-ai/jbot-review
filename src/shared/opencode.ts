@@ -48,8 +48,9 @@ const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
 
 /**
  * Builds the opencode config object that embeds the API key for the selected
- * provider. This is the official way to authenticate opencode (replaces the
- * old "set env var" pattern).
+ * provider, plus any secondary providers needed by aux-model sessions. This is
+ * the official way to authenticate opencode (replaces the old "set env var"
+ * pattern).
  *
  * Permissions enforce read-only at the CONFIG level, not just via the plan
  * agent: edits are denied outright (never "ask" — an interactive prompt
@@ -77,15 +78,26 @@ export function buildConfig(
   apiKey: string,
   modelOptions?: Record<string, unknown>,
   promptCache = true,
+  additionalProviderKeys: Array<{ providerID: string; apiKey: string }> = [],
 ): ServerOptions['config'] {
   const hasModelOptions = modelOptions && Object.keys(modelOptions).length > 0;
-  return {
-    provider: {
-      [providerID]: {
-        options: { apiKey, ...(promptCache ? { setCacheKey: true } : {}) },
-        ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
-      },
+  const providerConfig: NonNullable<ServerOptions['config']>['provider'] = {
+    [providerID]: {
+      options: { apiKey, ...(promptCache ? { setCacheKey: true } : {}) },
+      ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
     },
+  };
+  for (const providerKey of additionalProviderKeys) {
+    if (!providerKey.providerID || providerKey.providerID === providerID) continue;
+    providerConfig[providerKey.providerID] = {
+      options: {
+        apiKey: providerKey.apiKey,
+        ...(promptCache ? { setCacheKey: true } : {}),
+      },
+    };
+  }
+  return {
+    provider: providerConfig,
     permission: {
       edit: 'deny',
       external_directory: 'deny',
@@ -196,6 +208,7 @@ export async function startOpencode(
     modelOptions?: Record<string, unknown>;
     port?: number;
     promptCache?: boolean;
+    additionalProviderKeys?: Array<{ providerID: string; apiKey: string }>;
   } = {},
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
   // Serialize against other startOpencode calls so the chdir → spawn → restore
@@ -246,6 +259,7 @@ export async function startOpencode(
       apiKey,
       options.modelOptions,
       options.promptCache ?? true,
+      options.additionalProviderKeys,
     );
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',

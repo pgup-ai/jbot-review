@@ -36,6 +36,17 @@ export function resolveModelName(providerID: string, model: string): ParsedModel
   };
 }
 
+export function resolveAuxModelName(
+  defaultProviderID: string,
+  auxModel?: string,
+  auxProvider?: string,
+): string {
+  const input = auxModel?.trim();
+  if (!input) return '';
+  const providerID = auxProvider?.trim() || defaultProviderID;
+  return formatModelName(resolveModelName(providerID, input));
+}
+
 export function formatModelName(model: ParsedModel): string {
   return `${model.providerID}/${model.modelID}`;
 }

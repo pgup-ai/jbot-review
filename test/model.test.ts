@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { PROVIDERS } from '../src/shared/config.ts';
-import { formatModelName, parseModelName, resolveModelName } from '../src/shared/model.ts';
+import {
+  formatModelName,
+  parseModelName,
+  resolveAuxModelName,
+  resolveModelName,
+} from '../src/shared/model.ts';
 
 describe('parseModelName', () => {
   it('keeps the first segment as provider and the remaining path as model id', () => {
@@ -54,5 +59,18 @@ describe('resolveModelName', () => {
 
   it('rejects an empty selected-provider-prefixed model id', () => {
     assert.throws(() => resolveModelName('opencode', 'opencode/'), /expected a non-empty model id/);
+  });
+});
+
+describe('resolveAuxModelName', () => {
+  it('defaults aux models to the main provider', () => {
+    assert.equal(resolveAuxModelName('openai', 'gpt-5.4-mini'), 'openai/gpt-5.4-mini');
+  });
+
+  it('uses an explicit aux provider when present', () => {
+    assert.equal(
+      resolveAuxModelName('openai', 'google/gemini-2.5-flash', 'openrouter'),
+      'openrouter/google/gemini-2.5-flash',
+    );
   });
 });

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
-import { parseEnvBoolean, parseEnvInt, resolveAuxModelForMainModel } from '../src/app/app.ts';
+import { parseEnvBoolean, parseEnvInt } from '../src/app/app.ts';
 
 const OLD_ENV = { ...process.env };
 
@@ -48,21 +48,5 @@ describe('parseEnvBoolean', () => {
     process.env.JBOT_PROMPT_CACHE = 'garbage';
     assert.equal(parseEnvBoolean('JBOT_PROMPT_CACHE', true), true);
     assert.equal(parseEnvBoolean('JBOT_PROMPT_CACHE', false), false);
-  });
-});
-
-describe('resolveAuxModelForMainModel', () => {
-  it('prefixes bare aux models with the main provider', () => {
-    assert.equal(
-      resolveAuxModelForMainModel('opencode/deepseek-v4-pro', 'deepseek-v4-flash-free'),
-      'opencode/deepseek-v4-flash-free',
-    );
-  });
-
-  it('keeps already-prefixed aux models on the same provider', () => {
-    assert.equal(
-      resolveAuxModelForMainModel('opencode/deepseek-v4-pro', 'opencode/deepseek-v4-flash-free'),
-      'opencode/deepseek-v4-flash-free',
-    );
   });
 });

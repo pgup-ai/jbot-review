@@ -20,11 +20,27 @@ if (!cfg) {
   );
 }
 
+const auxModelInput = process.env.JBOT_REVIEW_AUX_MODEL?.trim();
+const auxProvider = auxModelInput ? process.env.JBOT_AUX_PROVIDER?.trim() || provider : provider;
+const auxCfg = auxModelInput ? PROVIDERS[auxProvider] : undefined;
+if (auxModelInput && !auxCfg) {
+  throw new Error(
+    `Unknown aux provider "${auxProvider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
+  );
+}
+const apiKey = mustEnv(cfg.keyEnv);
+const auxApiKey =
+  auxModelInput && auxProvider !== provider && auxCfg
+    ? process.env[auxCfg.keyEnv]?.trim()
+    : undefined;
+
 const appCfg: AppConfig = {
   appId: mustEnv('GITHUB_APP_ID'),
   privateKey: mustEnv('GITHUB_APP_PRIVATE_KEY').replace(/\\n/g, '\n'),
-  apiKey: mustEnv(cfg.keyEnv),
+  apiKey,
   model: formatModelName(resolveModelName(provider, process.env.MODEL || cfg.defaultModel)),
+  auxProvider,
+  ...(auxApiKey ? { auxApiKey } : {}),
 };
 
 const webhooks = new Webhooks({ secret: mustEnv('GITHUB_WEBHOOK_SECRET') });
