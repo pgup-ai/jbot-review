@@ -8,6 +8,7 @@ import {
   computeRetryTimeoutMs,
   computeRunDeadline,
   computeVerificationTimeoutMs,
+  renderReviewMetadataBlock,
 } from '../src/shared/runner.ts';
 
 const PRIOR_JBOT_REVIEW = [
@@ -115,5 +116,31 @@ describe('buildMainShardFailureMessage', () => {
     const message = buildMainShardFailureMessage(1, 4, 'provider 429');
 
     assert.match(message, /First failure: provider 429/);
+  });
+});
+
+describe('renderReviewMetadataBlock', () => {
+  it('renders collapsed review metadata with model and token counters', () => {
+    const block = renderReviewMetadataBlock('opencode/deepseek-v4-flash-free', {
+      input: 100,
+      output: 20,
+      reasoning: 30,
+      cacheRead: 40,
+      cacheWrite: 50,
+    }).join('\n');
+
+    assert.match(block, /^<details>/m);
+    assert.doesNotMatch(block, /<details open>/);
+    assert.match(block, /<summary>Review metadata<\/summary>/);
+    assert.match(block, /model=opencode\/deepseek-v4-flash-free/);
+    assert.match(block, /input=100/);
+    assert.match(block, /output=20/);
+    assert.match(block, /reasoning=30/);
+    assert.match(block, /cache read=40/);
+    assert.match(block, /cache write=50/);
+  });
+
+  it('omits the block when token usage was unavailable', () => {
+    assert.deepEqual(renderReviewMetadataBlock('opencode/deepseek-v4-flash-free'), []);
   });
 });

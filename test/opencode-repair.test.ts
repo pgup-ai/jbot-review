@@ -13,7 +13,17 @@ import type { OpencodeClient } from '@opencode-ai/sdk';
 const noLog = (): void => undefined;
 
 interface FakeMessage {
-  info: { role: 'assistant'; id: string; time: { completed: number } };
+  info: {
+    role: 'assistant';
+    id: string;
+    time: { completed: number };
+    tokens?: {
+      input?: number;
+      output?: number;
+      reasoning?: number;
+      cache?: { read?: number; write?: number };
+    };
+  };
   parts: Array<{ type: 'text'; text: string }>;
 }
 
@@ -23,7 +33,10 @@ interface FakeMessage {
  * session that answers every prompt immediately. A null response scripts a
  * reasoning-only message with no text part.
  */
-function makeFakeClient(responses: Array<string | string[] | null>): {
+function makeFakeClient(
+  responses: Array<string | string[] | null>,
+  tokenUsages: FakeMessage['info']['tokens'][] = [],
+): {
   client: OpencodeClient;
   prompts: string[];
 } {
@@ -45,7 +58,12 @@ function makeFakeClient(responses: Array<string | string[] | null>): {
             ? []
             : [{ type: 'text' as const, text }];
         messages.push({
-          info: { role: 'assistant', id: `m${prompts.length}`, time: { completed: 1 } },
+          info: {
+            role: 'assistant',
+            id: `m${prompts.length}`,
+            time: { completed: 1 },
+            ...(tokenUsages[index] ? { tokens: tokenUsages[index] } : {}),
+          },
           parts,
         });
         return {};
@@ -83,6 +101,32 @@ describe('runReview JSON repair loop', () => {
 
     assert.equal(prompts.length, 1);
     assert.equal(result.summary, 'ok after repair');
+  });
+
+  it('records token usage for each completed prompt, including repair prompts', async () => {
+    const { client } = makeFakeClient(
+      ['broken', VALID_REVIEW],
+      [
+        { input: 10, output: 2, reasoning: 3, cache: { read: 4, write: 5 } },
+        { input: 6, output: 7 },
+      ],
+    );
+    const usages: Array<{
+      input: number;
+      output: number;
+      reasoning: number;
+      cacheRead: number;
+      cacheWrite: number;
+    }> = [];
+
+    await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog, {
+      onTokenUsage: (usage) => usages.push(usage),
+    });
+
+    assert.deepEqual(usages, [
+      { input: 10, output: 2, reasoning: 3, cacheRead: 4, cacheWrite: 5 },
+      { input: 6, output: 7, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+    ]);
   });
 
   it('parses JSON from an earlier text part without repair', async () => {

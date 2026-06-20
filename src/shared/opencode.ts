@@ -105,13 +105,36 @@ export function buildConfig(
   };
 }
 
-interface TokenUsageInfo {
+export interface TokenUsageInfo {
   cost?: number;
   tokens?: {
     input?: number;
     output?: number;
     reasoning?: number;
     cache?: { read?: number; write?: number };
+  };
+}
+
+export interface PromptTokenUsage {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export type TokenUsageRecorder = (usage: PromptTokenUsage) => void;
+
+export function extractPromptTokenUsage(info: TokenUsageInfo): PromptTokenUsage | undefined {
+  const tokens = info.tokens;
+  if (!tokens) return undefined;
+  const cache = tokens.cache ?? {};
+  return {
+    input: tokens.input ?? 0,
+    output: tokens.output ?? 0,
+    reasoning: tokens.reasoning ?? 0,
+    cacheRead: cache.read ?? 0,
+    cacheWrite: cache.write ?? 0,
   };
 }
 
@@ -428,7 +451,12 @@ export async function runReview(
   prContext: string,
   guidelines: string,
   log: (msg: string) => void,
-  options: { lensAddendum?: string; label?: string; timeoutMs?: number } = {},
+  options: {
+    lensAddendum?: string;
+    label?: string;
+    timeoutMs?: number;
+    onTokenUsage?: TokenUsageRecorder;
+  } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
   const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
@@ -441,6 +469,7 @@ export async function runReview(
     label,
     log,
     options.timeoutMs,
+    options.onTokenUsage,
   );
   try {
     return parseReview(raw, label, log, { strict: true });
@@ -455,6 +484,7 @@ export async function runReview(
       `${label}-repair`,
       log,
       options.timeoutMs,
+      options.onTokenUsage,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
@@ -466,6 +496,7 @@ export async function runAddressedPriorCommentsCheck(
   prContext: string,
   log: (msg: string) => void,
   timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
 ): Promise<AddressedPriorComment[]> {
   const prompt = assembleAddressedPriorCommentsPrompt(prContext);
   const { raw } = await promptPlanAgent(
@@ -475,6 +506,7 @@ export async function runAddressedPriorCommentsCheck(
     'addressed-prior-comments',
     log,
     timeoutMs,
+    onTokenUsage,
   );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
 }
@@ -486,6 +518,7 @@ export async function runGuidelineComplianceCheck(
   guidelines: string,
   log: (msg: string) => void,
   timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
 ): Promise<Finding[]> {
   const prompt = assembleGuidelineCompliancePrompt(prContext, guidelines);
   const { raw } = await promptPlanAgent(
@@ -495,6 +528,7 @@ export async function runGuidelineComplianceCheck(
     'guideline-compliance',
     log,
     timeoutMs,
+    onTokenUsage,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
 }
@@ -512,6 +546,7 @@ export async function runFindingVerification(
   findings: Finding[],
   log: (msg: string) => void,
   timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
 ): Promise<FindingVerdict[] | undefined> {
   const prompt = assembleFindingVerificationPrompt(
     prContext,
@@ -530,6 +565,7 @@ export async function runFindingVerification(
     'finding-verification',
     log,
     timeoutMs,
+    onTokenUsage,
   );
   return parseFindingVerdicts(raw, findings.length, log);
 }
@@ -541,6 +577,7 @@ async function promptPlanAgent(
   label: string,
   log: (msg: string) => void,
   timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
   // The title makes parallel sessions distinguishable in opencode's own
@@ -561,6 +598,7 @@ async function promptPlanAgent(
     label,
     log,
     timeoutMs,
+    onTokenUsage,
   );
   return { raw, sessionID: session.id };
 }
@@ -573,6 +611,7 @@ async function promptPlanAgentInSession(
   label: string,
   log: (msg: string) => void,
   timeoutMs = PROMPT_TIMEOUT_MS,
+  onTokenUsage?: TokenUsageRecorder,
 ): Promise<string> {
   const release = sessionSlots ? await sessionSlots.acquire() : undefined;
   try {
@@ -584,6 +623,7 @@ async function promptPlanAgentInSession(
       label,
       log,
       timeoutMs,
+      onTokenUsage,
     );
   } finally {
     release?.();
@@ -598,6 +638,7 @@ async function promptInSessionHoldingSlot(
   label: string,
   log: (msg: string) => void,
   timeoutMs: number,
+  onTokenUsage?: TokenUsageRecorder,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
 
@@ -645,6 +686,8 @@ async function promptInSessionHoldingSlot(
     `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
   );
   log(`${label} ${formatTokenUsage(data.info)}`);
+  const usage = extractPromptTokenUsage(data.info);
+  if (usage) onTokenUsage?.(usage);
 
   const textParts = parts.filter((p) => p.type === 'text' && p.text);
   // No text part (e.g. the model exhausted its budget on reasoning) must
