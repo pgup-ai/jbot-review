@@ -123,7 +123,7 @@ export interface PromptTokenUsage {
   cacheWrite: number;
 }
 
-export type TokenUsageRecorder = (usage: PromptTokenUsage) => void;
+export type TokenUsageRecorder = (usage: PromptTokenUsage, model: string) => void;
 
 export function extractPromptTokenUsage(info: TokenUsageInfo): PromptTokenUsage | undefined {
   const tokens = info.tokens;
@@ -687,7 +687,7 @@ async function promptInSessionHoldingSlot(
   );
   log(`${label} ${formatTokenUsage(data.info)}`);
   const usage = extractPromptTokenUsage(data.info);
-  if (usage) onTokenUsage?.(usage);
+  if (usage) onTokenUsage?.(usage, model);
 
   const textParts = parts.filter((p) => p.type === 'text' && p.text);
   // No text part (e.g. the model exhausted its budget on reasoning) must

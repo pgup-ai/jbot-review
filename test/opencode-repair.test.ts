@@ -112,6 +112,7 @@ describe('runReview JSON repair loop', () => {
       ],
     );
     const usages: Array<{
+      model: string;
       input: number;
       output: number;
       reasoning: number;
@@ -120,12 +121,12 @@ describe('runReview JSON repair loop', () => {
     }> = [];
 
     await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog, {
-      onTokenUsage: (usage) => usages.push(usage),
+      onTokenUsage: (usage, model) => usages.push({ model, ...usage }),
     });
 
     assert.deepEqual(usages, [
-      { input: 10, output: 2, reasoning: 3, cacheRead: 4, cacheWrite: 5 },
-      { input: 6, output: 7, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+      { model: 'prov/model', input: 10, output: 2, reasoning: 3, cacheRead: 4, cacheWrite: 5 },
+      { model: 'prov/model', input: 6, output: 7, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
     ]);
   });
 

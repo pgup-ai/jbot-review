@@ -122,6 +122,7 @@ describe('buildMainShardFailureMessage', () => {
 describe('renderReviewMetadataBlock', () => {
   it('renders collapsed review metadata with model and token counters', () => {
     const block = renderReviewMetadataBlock('opencode/deepseek-v4-flash-free', {
+      models: ['opencode/deepseek-v4-flash-free'],
       input: 100,
       output: 20,
       reasoning: 30,
@@ -138,6 +139,20 @@ describe('renderReviewMetadataBlock', () => {
     assert.match(block, /reasoning=30/);
     assert.match(block, /cache read=40/);
     assert.match(block, /cache write=50/);
+  });
+
+  it('labels aggregate totals with every model that contributed usage', () => {
+    const block = renderReviewMetadataBlock('openai/gpt-5', {
+      models: ['openai/gpt-5', 'opencode-go/minimax-m3'],
+      input: 100,
+      output: 20,
+      reasoning: 30,
+      cacheRead: 40,
+      cacheWrite: 50,
+    }).join('\n');
+
+    assert.match(block, /models=openai\/gpt-5, opencode-go\/minimax-m3/);
+    assert.doesNotMatch(block, /model=openai\/gpt-5\ninput=100/);
   });
 
   it('omits the block when token usage was unavailable', () => {

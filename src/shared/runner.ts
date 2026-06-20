@@ -19,8 +19,13 @@ import {
 } from './diff-context.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
-import { REVIEW_LENSES, buildShardAssignmentBlock, selectLensKeys } from './prompt.ts';
-import { buildReviewPlaybookBlock } from './review-playbooks.ts';
+import {
+  REVIEW_LENSES,
+  buildReviewPlaybookBlock,
+  buildShardAssignmentBlock,
+  selectLensKeys,
+} from './prompt.ts';
+import { selectReviewPlaybookIds } from './review-playbooks.ts';
 import { ensureGitSafeDirectory } from './git.ts';
 import {
   startOpencode,
@@ -200,7 +205,8 @@ export async function runPrReview(params: {
   const auxModel = options.auxModel || model;
   const { providerID: auxProviderID } = parseModelName(auxModel);
   const tokenUsage = createReviewTokenUsageAccumulator();
-  const recordTokenUsage: TokenUsageRecorder = (usage) => tokenUsage.add(usage);
+  const recordTokenUsage: TokenUsageRecorder = (usage, usageModel) =>
+    tokenUsage.add(usage, usageModel);
 
   await ensureGitSafeDirectory(workspace, log);
 
@@ -1075,6 +1081,7 @@ type ShardOutcome =
   | { plan: ShardPlan; error: unknown; result?: undefined };
 
 export interface ReviewTokenUsage {
+  models: string[];
   input: number;
   output: number;
   reasoning: number;
@@ -1087,16 +1094,18 @@ function createReviewTokenUsageAccumulator(): {
   snapshot: () => ReviewTokenUsage | undefined;
 } {
   let total: ReviewTokenUsage | undefined;
+  const models = new Set<string>();
   return {
-    add: (usage: PromptTokenUsage) => {
-      total ??= { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+    add: (usage: PromptTokenUsage, model: string) => {
+      total ??= { models: [], input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+      models.add(model);
       total.input += usage.input;
       total.output += usage.output;
       total.reasoning += usage.reasoning;
       total.cacheRead += usage.cacheRead;
       total.cacheWrite += usage.cacheWrite;
     },
-    snapshot: () => (total ? { ...total } : undefined),
+    snapshot: () => (total ? { ...total, models: [...models] } : undefined),
   };
 }
 
@@ -1184,7 +1193,7 @@ function buildReviewFocusBlock(changedFiles: string[]): string {
     'Use only as relevant checklists; do not invent findings.',
     ...[...focusItems].map((item) => `- ${item}`),
   ].join('\n');
-  return [buildReviewPlaybookBlock(changedFiles), focusBlock].join('\n\n');
+  return [buildReviewPlaybookBlock(selectReviewPlaybookIds(changedFiles)), focusBlock].join('\n\n');
 }
 
 function findLatestReviewedHead(priorJbotReviews: string[]): string | undefined {
@@ -1403,13 +1412,14 @@ function buildBody(
 
 export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewTokenUsage): string[] {
   if (!tokenUsage) return [];
+  const models = tokenUsage.models.length > 0 ? tokenUsage.models : [model];
   return [
     '',
     '<details>',
     '<summary>Review metadata</summary>',
     '',
     '```text',
-    `model=${model}`,
+    models.length === 1 ? `model=${models[0]}` : `models=${models.join(', ')}`,
     `input=${tokenUsage.input}`,
     `output=${tokenUsage.output}`,
     `reasoning=${tokenUsage.reasoning}`,
