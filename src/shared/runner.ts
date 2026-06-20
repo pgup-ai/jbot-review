@@ -19,7 +19,13 @@ import {
 } from './diff-context.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
-import { REVIEW_LENSES, buildShardAssignmentBlock, selectLensKeys } from './prompt.ts';
+import {
+  REVIEW_LENSES,
+  buildReviewPlaybookBlock,
+  buildShardAssignmentBlock,
+  selectLensKeys,
+} from './prompt.ts';
+import { selectReviewPlaybookIds } from './review-playbooks.ts';
 import { ensureGitSafeDirectory } from './git.ts';
 import {
   startOpencode,
@@ -33,6 +39,7 @@ import {
   disableContext7Mcp,
   formatContext7Error,
 } from './opencode.ts';
+import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
 import { buildReviewContext, discoverGuidelines, formatDiffScope } from './review-context.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
@@ -197,6 +204,9 @@ export async function runPrReview(params: {
   const { providerID, modelID } = parseModelName(model);
   const auxModel = options.auxModel || model;
   const { providerID: auxProviderID } = parseModelName(auxModel);
+  const tokenUsage = createReviewTokenUsageAccumulator();
+  const recordTokenUsage: TokenUsageRecorder = (usage, usageModel) =>
+    tokenUsage.add(usage, usageModel);
 
   await ensureGitSafeDirectory(workspace, log);
 
@@ -376,6 +386,7 @@ export async function runPrReview(params: {
       priorJbotThreads,
       timeoutMs: finderTimeoutMs,
       log,
+      onTokenUsage: recordTokenUsage,
     });
 
     const guidelineComplianceCheck = startGuidelineComplianceCheck({
@@ -387,6 +398,7 @@ export async function runPrReview(params: {
       enabled: options.guidelinePass,
       timeoutMs: finderTimeoutMs,
       log,
+      onTokenUsage: recordTokenUsage,
     });
 
     // Lens passes run on the aux model (recall supplement, not the deep
@@ -401,6 +413,7 @@ export async function runPrReview(params: {
       passes: options.reviewPasses,
       timeoutMs: finderTimeoutMs,
       log,
+      onTokenUsage: recordTokenUsage,
     });
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
@@ -422,6 +435,7 @@ export async function runPrReview(params: {
       context7Active,
       context7ApiKey: options.context7ApiKey,
       log,
+      onTokenUsage: recordTokenUsage,
     });
     const lensFindingLists = await lensPasses;
     // The dedicated parallel session is the single owner of addressed-thread
@@ -463,6 +477,7 @@ export async function runPrReview(params: {
       findings: suppression.findings,
       enabled: options.verifyFindings,
       log,
+      onTokenUsage: recordTokenUsage,
     });
     const filteredFindings = filterFindings(verifiedFindings, options);
     log(
@@ -480,7 +495,16 @@ export async function runPrReview(params: {
     const verdict = decideVerdict(filteredFindings);
 
     if (options.dryRun) {
-      const body = buildBody(summary, filteredFindings, orphaned, model, owner, repo, headSha);
+      const body = buildBody(
+        summary,
+        filteredFindings,
+        orphaned,
+        model,
+        owner,
+        repo,
+        headSha,
+        tokenUsage.snapshot(),
+      );
       options.onReviewResult?.({
         summary,
         findings: filteredFindings,
@@ -528,7 +552,16 @@ export async function runPrReview(params: {
         }
       }
 
-      const body = buildBody(summary, filteredFindings, orphaned, model, owner, repo, headSha);
+      const body = buildBody(
+        summary,
+        filteredFindings,
+        orphaned,
+        model,
+        owner,
+        repo,
+        headSha,
+        tokenUsage.snapshot(),
+      );
       log(
         `Posting review: verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
       );
@@ -727,6 +760,7 @@ function startLensPasses(params: {
   passes: number;
   timeoutMs?: number;
   log: (msg: string) => void;
+  onTokenUsage?: TokenUsageRecorder;
 }): Promise<Finding[][]> {
   const lensKeys = selectLensKeys(params.passes);
   if (lensKeys.length === 0) return Promise.resolve([]);
@@ -744,6 +778,7 @@ function startLensPasses(params: {
           lensAddendum: REVIEW_LENSES[key],
           label: `review-${key}`,
           timeoutMs: params.timeoutMs,
+          onTokenUsage: params.onTokenUsage,
         },
       )
         .then((result) => {
@@ -774,6 +809,7 @@ async function verifyBlockingFindings(params: {
   enabled: boolean;
   timeoutMs?: number;
   log: (msg: string) => void;
+  onTokenUsage?: TokenUsageRecorder;
 }): Promise<Finding[]> {
   if (!params.enabled) return params.findings;
   if (params.timeoutMs === 0) {
@@ -798,6 +834,7 @@ async function verifyBlockingFindings(params: {
       targets,
       params.log,
       params.timeoutMs,
+      params.onTokenUsage,
     );
   } catch (error) {
     params.log(
@@ -920,6 +957,7 @@ async function runShardedReview(params: {
   context7Active: boolean;
   context7ApiKey: string;
   log: (msg: string) => void;
+  onTokenUsage?: TokenUsageRecorder;
 }): Promise<{ summary: string; findings: Finding[] }> {
   const { client, model, guidelinesForPrompt, shardPlans, timeoutMs, log } = params;
   const sharded = shardPlans.length > 1;
@@ -938,6 +976,7 @@ async function runShardedReview(params: {
         const result = await runReview(client, model, plan.context, guidelinesForPrompt, log, {
           label: plan.label,
           timeoutMs,
+          onTokenUsage: params.onTokenUsage,
         });
         return { plan, result };
       } catch (error) {
@@ -969,7 +1008,11 @@ async function runShardedReview(params: {
             plan.baseContext,
             guidelinesForPrompt,
             log,
-            { label: `${plan.label}-retry`, timeoutMs: retryTimeoutMs },
+            {
+              label: `${plan.label}-retry`,
+              timeoutMs: retryTimeoutMs,
+              onTokenUsage: params.onTokenUsage,
+            },
           );
           return { plan, result };
         } catch (retryError) {
@@ -1036,6 +1079,35 @@ interface ReviewResultLike {
 type ShardOutcome =
   | { plan: ShardPlan; result: ReviewResultLike; error?: undefined }
   | { plan: ShardPlan; error: unknown; result?: undefined };
+
+export interface ReviewTokenUsage {
+  models: string[];
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+function createReviewTokenUsageAccumulator(): {
+  add: TokenUsageRecorder;
+  snapshot: () => ReviewTokenUsage | undefined;
+} {
+  let total: ReviewTokenUsage | undefined;
+  const models = new Set<string>();
+  return {
+    add: (usage: PromptTokenUsage, model: string) => {
+      total ??= { models: [], input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 };
+      models.add(model);
+      total.input += usage.input;
+      total.output += usage.output;
+      total.reasoning += usage.reasoning;
+      total.cacheRead += usage.cacheRead;
+      total.cacheWrite += usage.cacheWrite;
+    },
+    snapshot: () => (total ? { ...total, models: [...models] } : undefined),
+  };
+}
 
 /**
  * Summary-field instructions ONLY. This block must never narrow review
@@ -1116,11 +1188,12 @@ function buildReviewFocusBlock(changedFiles: string[]): string {
     );
   }
 
-  return [
+  const focusBlock = [
     '## Relevant review focus',
     'Use only as relevant checklists; do not invent findings.',
     ...[...focusItems].map((item) => `- ${item}`),
   ].join('\n');
+  return [buildReviewPlaybookBlock(selectReviewPlaybookIds(changedFiles)), focusBlock].join('\n\n');
 }
 
 function findLatestReviewedHead(priorJbotReviews: string[]): string | undefined {
@@ -1161,6 +1234,7 @@ function startAddressedPriorCommentsCheck(params: {
   priorJbotThreads: PriorJbotThread[];
   timeoutMs?: number;
   log: (msg: string) => void;
+  onTokenUsage?: TokenUsageRecorder;
 }): Promise<AddressedPriorComment[]> {
   if (params.priorJbotThreads.length === 0) return Promise.resolve([]);
 
@@ -1171,6 +1245,7 @@ function startAddressedPriorCommentsCheck(params: {
     params.prContext,
     params.log,
     params.timeoutMs,
+    params.onTokenUsage,
   )
     .then((independentlyAddressed) => {
       params.log(
@@ -1197,6 +1272,7 @@ function startGuidelineComplianceCheck(params: {
   enabled: boolean;
   timeoutMs?: number;
   log: (msg: string) => void;
+  onTokenUsage?: TokenUsageRecorder;
 }): Promise<Finding[]> {
   if (!params.enabled) return Promise.resolve([]);
   if (!params.hasGuidelines) {
@@ -1212,6 +1288,7 @@ function startGuidelineComplianceCheck(params: {
     params.guidelinesForPrompt,
     params.log,
     params.timeoutMs,
+    params.onTokenUsage,
   )
     .then((findings) => {
       params.log(`Guideline-compliance check complete: ${findings.length} finding(s)`);
@@ -1308,6 +1385,7 @@ function buildBody(
   owner: string,
   repo: string,
   headSha?: string,
+  tokenUsage?: ReviewTokenUsage,
 ): string {
   const total = all.length;
   const lines = ['## J-Bot Code Review', '', summary || 'No summary provided.', ''];
@@ -1327,8 +1405,30 @@ function buildBody(
   }
   const orphanedSection = renderOrphanedSection(orphaned);
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
+  lines.push(...renderReviewMetadataBlock(model, tokenUsage));
   lines.push('', `<sup>Reviewed with \`${model}\`.</sup>`);
   return lines.join('\n');
+}
+
+export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewTokenUsage): string[] {
+  if (!tokenUsage) return [];
+  const models = tokenUsage.models.length > 0 ? tokenUsage.models : [model];
+  return [
+    '',
+    '<details>',
+    '<summary>Review metadata</summary>',
+    '',
+    '```text',
+    models.length === 1 ? `model=${models[0]}` : `models=${models.join(', ')}`,
+    `input=${tokenUsage.input}`,
+    `output=${tokenUsage.output}`,
+    `reasoning=${tokenUsage.reasoning}`,
+    `cache read=${tokenUsage.cacheRead}`,
+    `cache write=${tokenUsage.cacheWrite}`,
+    '```',
+    '',
+    '</details>',
+  ];
 }
 
 function getMergeGuidance(findings: Pick<Finding, 'severity'>[]): {

@@ -327,6 +327,139 @@ Still report any other clear bug you encounter, but spend your exploration
 budget on these classes.`,
 };
 
+export type ReviewPlaybookId =
+  | 'code-review-core'
+  | 'contract-api'
+  | 'backend-data'
+  | 'frontend-workflow'
+  | 'external-integration';
+
+export interface ReviewPlaybook {
+  id: ReviewPlaybookId;
+  title: string;
+  triggers: string[];
+  checks: string[];
+}
+
+const CODE_REVIEW_CORE: ReviewPlaybook = {
+  id: 'code-review-core',
+  title: 'Code review core',
+  triggers: ['always'],
+  checks: [
+    'Look for runtime errors, null/undefined paths, missing awaits, unhandled errors, and edge cases introduced by the diff.',
+    'Check unintended side effects, backward-compatibility breaks, and changed defaults that can surprise unchanged callers.',
+    'Flag security, performance, test, and maintainability risks only when they have a concrete trigger path.',
+  ],
+};
+
+const CONTRACT_API: ReviewPlaybook = {
+  id: 'contract-api',
+  title: 'Contract/API review',
+  triggers: [
+    'API, route, schema, descriptor, config, docs-for-behavior, or package/workflow changes',
+  ],
+  checks: [
+    'Verify every new or changed contract claim against implementation, callers, and docs/examples.',
+    'Check schema/default/env/input compatibility, response shape drift, and migration or rollout path for breaking changes.',
+    'Treat bounded results as suspicious: pagination, max rows, truncation, or caching must not be described as complete.',
+  ],
+};
+
+const BACKEND_DATA: ReviewPlaybook = {
+  id: 'backend-data',
+  title: 'Persistence/data review',
+  triggers: [
+    'database, migration, repository, query, ledger/accounting, import/export, or aggregation changes',
+  ],
+  checks: [
+    'Check query predicates, joins, tenant/entity scoping, ordering, grouping, totals, and nullable/empty-set behavior.',
+    'Verify writes are transactional/idempotent where retries or duplicate events are plausible.',
+    'Look for silent data loss from dropped rows, lossy normalization, precision changes, partial writes, or stale read models.',
+  ],
+};
+
+const FRONTEND_WORKFLOW: ReviewPlaybook = {
+  id: 'frontend-workflow',
+  title: 'Frontend/workflow review',
+  triggers: ['React, UI component, route, frontend state, form, or client workflow changes'],
+  checks: [
+    'Check loading, error, empty, disabled, permission-denied, and retry states for each changed workflow.',
+    'Verify React hook dependencies, stale closures, async cancellation, optimistic updates, and derived state consistency.',
+    'Look for lost user input, double-submit paths, stale data after mutations, and controls enabled before prerequisites are ready.',
+  ],
+};
+
+const EXTERNAL_INTEGRATION: ReviewPlaybook = {
+  id: 'external-integration',
+  title: 'External integration review',
+  triggers: [
+    'SDK/client, webhook, auth, GitHub Action, workflow, package, or external-service changes',
+  ],
+  checks: [
+    'Verify current API/SDK contract, auth scopes, request/response shape, pagination, retry semantics, and rate/error handling.',
+    'Check idempotency for webhooks, jobs, and retries; avoid duplicate writes or dropped events after partial failure.',
+    'Confirm config/env/docs expose the same provider, version, permission, and secret requirements the code actually uses.',
+  ],
+};
+
+export const REVIEW_PLAYBOOKS = [
+  CODE_REVIEW_CORE,
+  CONTRACT_API,
+  BACKEND_DATA,
+  FRONTEND_WORKFLOW,
+  EXTERNAL_INTEGRATION,
+] as const satisfies readonly ReviewPlaybook[];
+
+export const MAX_REVIEW_PLAYBOOK_BLOCK_BYTES = 8 * 1024;
+
+export function buildReviewPlaybookBlock(
+  playbookIds: readonly ReviewPlaybookId[],
+  options: { budgetBytes?: number } = {},
+): string {
+  const budgetBytes = options.budgetBytes ?? MAX_REVIEW_PLAYBOOK_BLOCK_BYTES;
+  const idSet = new Set(playbookIds);
+  const playbooks = REVIEW_PLAYBOOKS.filter((playbook) => idSet.has(playbook.id));
+  const lines = [
+    '## Built-in review playbooks',
+    'Apply these curated review skills as focused checklists. They narrow attention, not scope; still review the complete PR diff.',
+  ];
+  const omitted: string[] = [];
+
+  for (const playbook of playbooks) {
+    const section = formatPlaybook(playbook);
+    const nextBlock = [...lines, section].join('\n');
+    if (Buffer.byteLength(nextBlock, 'utf8') <= budgetBytes) {
+      lines.push(section);
+    } else {
+      omitted.push(playbook.id);
+    }
+  }
+
+  if (omitted.length > 0) {
+    const notice = `_Review playbooks omitted after the ${budgetBytes} byte budget was reached: ${omitted.join(', ')}._`;
+    const nextBlock = [...lines, '', notice].join('\n');
+    if (Buffer.byteLength(nextBlock, 'utf8') <= budgetBytes) {
+      lines.push('', notice);
+    } else {
+      lines.push(
+        '',
+        `_Additional review playbooks omitted after the ${budgetBytes} byte budget was reached._`,
+      );
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function formatPlaybook(playbook: ReviewPlaybook): string {
+  return [
+    '',
+    `### ${playbook.title} (${playbook.id})`,
+    `When relevant: ${playbook.triggers.join('; ')}.`,
+    ...playbook.checks.map((check) => `- ${check}`),
+  ].join('\n');
+}
+
 /**
  * Lens keys for a given total pass count: pass 1 is the general review, each
  * extra pass takes the next lens in REVIEW_LENSES order.
