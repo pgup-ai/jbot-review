@@ -90,7 +90,7 @@ jobs:
         with:
           provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
           model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
-          aux-provider: ${{ vars.JBOT_AUX_PROVIDER || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
+          aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
           aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
           opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
           deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -110,7 +110,7 @@ and variables → Actions → New repository secret. Add the keys for the provid
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `XAI_API_KEY`, or `ANTHROPIC_API_KEY`.
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
-no aux-provider key, it reuses the review provider API key.
+no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
 Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
 framework, CLI, cloud-service, or workflow changes.
@@ -177,7 +177,7 @@ without editing the workflow.
   with:
     provider: ${{ inputs.provider || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
     model: ${{ inputs.model || vars.JBOT_REVIEW_MODEL || '' }}
-    aux-provider: ${{ vars.JBOT_AUX_PROVIDER || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
+    aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
     aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
     pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] }}
     dry-run: ${{ inputs['dry-run'] || 'false' }}
@@ -243,7 +243,7 @@ longer timeout headroom): set the main `model` to the heavy tier, then
 
 ```yaml
 model: ${{ vars.JBOT_REVIEW_MODEL }} # heavy tier, e.g. openai/gpt-5.5
-aux-provider: ${{ vars.JBOT_AUX_PROVIDER || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
+aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
 aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL }} # fast tier for lenses + verification
 review-shards: '0' # opt into auto-sharding on a paid concurrent tier
 max-concurrent-sessions: '0' # paid tiers serve shards in parallel; cap to 2-3 on throttled keys
@@ -293,7 +293,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
   with:
     provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
     model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
-    aux-provider: ${{ vars.JBOT_AUX_PROVIDER || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
+    aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
     aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
     opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
     deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -352,13 +352,13 @@ documentation lookup.
 | `model`                   | No       | Provider default      | Provider model id; can come from `JBOT_REVIEW_MODEL`                       |
 | `aux-provider`            | No       | Main provider         | Auxiliary model provider; can come from `JBOT_AUX_PROVIDER`                |
 | `aux-model`               | No       | Main model            | Auxiliary model id; can come from `JBOT_REVIEW_AUX_MODEL`                  |
-| `opencode-api-key`        | No       | —                     | Required when `provider=opencode` or `provider=opencode-go`                |
-| `deepseek-api-key`        | No       | —                     | Required when `provider=deepseek`                                          |
-| `openai-api-key`          | No       | —                     | Required when `provider=openai`                                            |
-| `anthropic-api-key`       | No       | —                     | Required when `provider=anthropic`                                         |
-| `openrouter-api-key`      | No       | —                     | Required when `provider=openrouter`                                        |
-| `nvidia-api-key`          | No       | —                     | Required when `provider=nvidia`                                            |
-| `xai-api-key`             | No       | —                     | Required when `provider=xai`                                               |
+| `opencode-api-key`        | No       | —                     | Used when `provider` or `aux-provider` is `opencode`/`opencode-go`         |
+| `deepseek-api-key`        | No       | —                     | Used when `provider` or `aux-provider` is `deepseek`                       |
+| `openai-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `openai`                         |
+| `anthropic-api-key`       | No       | —                     | Used when `provider` or `aux-provider` is `anthropic`                      |
+| `openrouter-api-key`      | No       | —                     | Used when `provider` or `aux-provider` is `openrouter`                     |
+| `nvidia-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `nvidia`                         |
+| `xai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `xai`                            |
 | `enable-context7`         | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false` |
 | `context7-api-key`        | No       | —                     | Optional Context7 key for reliable CI docs lookup                          |
 | `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                                           |

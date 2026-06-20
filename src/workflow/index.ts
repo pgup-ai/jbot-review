@@ -55,12 +55,7 @@ async function main(): Promise<void> {
   const auxProviderID = auxModel ? parseModelName(auxModel).providerID : provider;
   let auxApiKey = '';
   if (auxModel && auxProviderID !== provider) {
-    if (!auxCfg) {
-      throw new Error(
-        `Unknown aux provider "${auxProviderID}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-      );
-    }
-    auxApiKey = getInputOrEnv(auxCfg.keyInput, auxCfg.keyEnv);
+    auxApiKey = getInputOrEnv(auxCfg!.keyInput, auxCfg!.keyEnv);
   }
   const options = {
     enhancedContext: true,
