@@ -57,6 +57,14 @@ describe('resolveModelName', () => {
     }
   });
 
+  it('configures Z.AI Coding Plan with the direct Z.AI key surface', () => {
+    assert.deepEqual(PROVIDERS['zai-coding-plan'], {
+      defaultModel: 'zai-coding-plan/glm-5.2',
+      keyEnv: 'ZAI_API_KEY',
+      keyInput: 'zai-api-key',
+    });
+  });
+
   it('rejects an empty selected-provider-prefixed model id', () => {
     assert.throws(() => resolveModelName('opencode', 'opencode/'), /expected a non-empty model id/);
   });

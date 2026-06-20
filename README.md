@@ -98,6 +98,7 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
           nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
+          zai-api-key: ${{ secrets.ZAI_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
           enable-context7: auto
           context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
@@ -108,7 +109,8 @@ jobs:
 **Step 2 — Add provider API keys as secrets.** In the repo: Settings → Secrets
 and variables → Actions → New repository secret. Add the keys for the providers
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
-`OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `XAI_API_KEY`, or `ANTHROPIC_API_KEY`.
+`OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`, `XAI_API_KEY`, or
+`ANTHROPIC_API_KEY`.
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
 no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
@@ -191,6 +193,7 @@ without editing the workflow.
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
+    zai-api-key: ${{ secrets.ZAI_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
     enable-context7: auto
     context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
@@ -270,16 +273,20 @@ npm run eval
 
 See [models.dev](https://models.dev/) for the full list of models and providers.
 
-| `provider`    | Default model                       | Action key input     | Secret/env var       |
-| ------------- | ----------------------------------- | -------------------- | -------------------- |
-| `opencode`    | `opencode/deepseek-v4-flash-free`   | `opencode-api-key`   | `OPENCODE_API_KEY`   |
-| `opencode-go` | `opencode-go/deepseek-v4-flash`     | `opencode-api-key`   | `OPENCODE_API_KEY`   |
-| `deepseek`    | `deepseek/deepseek-v4-flash`        | `deepseek-api-key`   | `DEEPSEEK_API_KEY`   |
-| `openai`      | `openai/gpt-5.4-nano`               | `openai-api-key`     | `OPENAI_API_KEY`     |
-| `anthropic`   | `anthropic/claude-sonnet-4-6`       | `anthropic-api-key`  | `ANTHROPIC_API_KEY`  |
-| `openrouter`  | `openrouter/openai/gpt-4o-mini`     | `openrouter-api-key` | `OPENROUTER_API_KEY` |
-| `nvidia`      | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia-api-key`     | `NVIDIA_API_KEY`     |
-| `xai`         | `xai/grok-4.3`                      | `xai-api-key`        | `XAI_API_KEY`        |
+| `provider`        | Default model                       | Action key input     | Secret/env var       |
+| ----------------- | ----------------------------------- | -------------------- | -------------------- |
+| `opencode`        | `opencode/deepseek-v4-flash-free`   | `opencode-api-key`   | `OPENCODE_API_KEY`   |
+| `opencode-go`     | `opencode-go/deepseek-v4-flash`     | `opencode-api-key`   | `OPENCODE_API_KEY`   |
+| `deepseek`        | `deepseek/deepseek-v4-flash`        | `deepseek-api-key`   | `DEEPSEEK_API_KEY`   |
+| `openai`          | `openai/gpt-5.4-nano`               | `openai-api-key`     | `OPENAI_API_KEY`     |
+| `anthropic`       | `anthropic/claude-sonnet-4-6`       | `anthropic-api-key`  | `ANTHROPIC_API_KEY`  |
+| `openrouter`      | `openrouter/openai/gpt-4o-mini`     | `openrouter-api-key` | `OPENROUTER_API_KEY` |
+| `nvidia`          | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia-api-key`     | `NVIDIA_API_KEY`     |
+| `zai-coding-plan` | `zai-coding-plan/glm-5.2`           | `zai-api-key`        | `ZAI_API_KEY`        |
+| `xai`             | `xai/grok-4.3`                      | `xai-api-key`        | `XAI_API_KEY`        |
+
+Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
+Z.AI GLM Coding Plan subscription endpoint.
 
 Set the `provider` and `model` inputs to override the defaults. For automatic
 PR reviews without editing workflow YAML on every provider or model change,
@@ -301,6 +308,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
+    zai-api-key: ${{ secrets.ZAI_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
     enable-context7: auto
     context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
@@ -318,10 +326,10 @@ model from either action inputs or environment variables: `provider` or
 the main model, `aux-provider` or `JBOT_AUX_PROVIDER` for the auxiliary
 provider, and `aux-model` or `JBOT_REVIEW_AUX_MODEL` for the auxiliary model.
 Provider API keys can also be supplied through their standard env vars, such as
-`OPENROUTER_API_KEY` or `NVIDIA_API_KEY`. This convenience pattern exposes every
-configured provider key to the action runtime. For the smallest secret surface
-area, pass only the review provider key, plus an aux provider key only when it
-must be different.
+`OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, or `ZAI_API_KEY`. This convenience
+pattern exposes every configured provider key to the action runtime. For the
+smallest secret surface area, pass only the review provider key, plus an aux
+provider key only when it must be different.
 If `model` is set, it is interpreted as a model id for the selected `provider`.
 A matching `provider/model` prefix is accepted and normalized, so
 `deepseek-v4-flash-free` and `opencode/deepseek-v4-flash-free` are equivalent
@@ -358,6 +366,7 @@ documentation lookup.
 | `anthropic-api-key`       | No       | —                     | Used when `provider` or `aux-provider` is `anthropic`                      |
 | `openrouter-api-key`      | No       | —                     | Used when `provider` or `aux-provider` is `openrouter`                     |
 | `nvidia-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `nvidia`                         |
+| `zai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `zai-coding-plan`                |
 | `xai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `xai`                            |
 | `enable-context7`         | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false` |
 | `context7-api-key`        | No       | —                     | Optional Context7 key for reliable CI docs lookup                          |
@@ -482,23 +491,24 @@ during checkout.
 
 ### Env var reference (hosted App)
 
-| Variable                 | Required    | Default          | Description                                |
-| ------------------------ | ----------- | ---------------- | ------------------------------------------ |
-| `GITHUB_APP_ID`          | Yes         | —                | Numeric App ID from GitHub                 |
-| `GITHUB_APP_PRIVATE_KEY` | Yes         | —                | Contents of the `.pem` file                |
-| `GITHUB_WEBHOOK_SECRET`  | Yes         | —                | Random string for signing                  |
-| `PROVIDER`               | No          | `opencode`       | Provider key (see table below)             |
-| `JBOT_AUX_PROVIDER`      | No          | `PROVIDER`       | Provider key for `JBOT_REVIEW_AUX_MODEL`   |
-| `OPENCODE_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=opencode   |
-| `DEEPSEEK_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=deepseek   |
-| `OPENAI_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=openai     |
-| `ANTHROPIC_API_KEY`      | Conditional | —                | Operator key used when PROVIDER=anthropic  |
-| `OPENROUTER_API_KEY`     | Conditional | —                | Operator key used when PROVIDER=openrouter |
-| `NVIDIA_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=nvidia     |
-| `XAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=xai        |
-| `MODEL`                  | No          | Provider default | Provider model id, optionally prefixed     |
-| `JBOT_REVIEW_AUX_MODEL`  | No          | Main model       | Aux model id, optionally prefixed          |
-| `PORT`                   | No          | `3000`           | HTTP listen port                           |
+| Variable                 | Required    | Default          | Description                                     |
+| ------------------------ | ----------- | ---------------- | ----------------------------------------------- |
+| `GITHUB_APP_ID`          | Yes         | —                | Numeric App ID from GitHub                      |
+| `GITHUB_APP_PRIVATE_KEY` | Yes         | —                | Contents of the `.pem` file                     |
+| `GITHUB_WEBHOOK_SECRET`  | Yes         | —                | Random string for signing                       |
+| `PROVIDER`               | No          | `opencode`       | Provider key (see table below)                  |
+| `JBOT_AUX_PROVIDER`      | No          | `PROVIDER`       | Provider key for `JBOT_REVIEW_AUX_MODEL`        |
+| `OPENCODE_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=opencode        |
+| `DEEPSEEK_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=deepseek        |
+| `OPENAI_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=openai          |
+| `ANTHROPIC_API_KEY`      | Conditional | —                | Operator key used when PROVIDER=anthropic       |
+| `OPENROUTER_API_KEY`     | Conditional | —                | Operator key used when PROVIDER=openrouter      |
+| `NVIDIA_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=nvidia          |
+| `ZAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=zai-coding-plan |
+| `XAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=xai             |
+| `MODEL`                  | No          | Provider default | Provider model id, optionally prefixed          |
+| `JBOT_REVIEW_AUX_MODEL`  | No          | Main model       | Aux model id, optionally prefixed               |
+| `PORT`                   | No          | `3000`           | HTTP listen port                                |
 
 ### Provider configuration (hosted App)
 
@@ -517,6 +527,7 @@ OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 OPENROUTER_API_KEY=sk-or-...
 NVIDIA_API_KEY=nvapi-...
+ZAI_API_KEY=zai-...
 XAI_API_KEY=xai-...
 MODEL=deepseek/deepseek-v4-flash
 ```
@@ -565,6 +576,7 @@ gcloud run deploy jbot-review \
   --set-env-vars ANTHROPIC_API_KEY=sk-ant-... \
   --set-env-vars OPENROUTER_API_KEY=sk-or-... \
   --set-env-vars NVIDIA_API_KEY=nvapi-... \
+  --set-env-vars ZAI_API_KEY=zai-... \
   --set-env-vars XAI_API_KEY=xai-... \
   --allow-unauthenticated
 
@@ -609,6 +621,7 @@ fly secrets set \
   ANTHROPIC_API_KEY=sk-ant-... \
   OPENROUTER_API_KEY=sk-or-... \
   NVIDIA_API_KEY=nvapi-... \
+  ZAI_API_KEY=zai-... \
   XAI_API_KEY=xai-...
 
 # 4. Scale and deploy
@@ -672,6 +685,8 @@ services:
         value: sk-or-...
       - key: NVIDIA_API_KEY
         value: nvapi-...
+      - key: ZAI_API_KEY
+        value: zai-...
       - key: XAI_API_KEY
         value: xai-...
 ```
@@ -742,6 +757,8 @@ services:
         value: sk-or-...
       - key: NVIDIA_API_KEY
         value: nvapi-...
+      - key: ZAI_API_KEY
+        value: zai-...
       - key: XAI_API_KEY
         value: xai-...
 ```
@@ -840,6 +857,7 @@ railway variables set \
   ANTHROPIC_API_KEY=sk-ant-... \
   OPENROUTER_API_KEY=sk-or-... \
   NVIDIA_API_KEY=nvapi-... \
+  ZAI_API_KEY=zai-... \
   XAI_API_KEY=xai-... \
   PORT=3000
 
@@ -879,6 +897,7 @@ koyeb service create jbot-review \
   --env ANTHROPIC_API_KEY=sk-ant-... \
   --env OPENROUTER_API_KEY=sk-or-... \
   --env NVIDIA_API_KEY=nvapi-... \
+  --env ZAI_API_KEY=zai-... \
   --env XAI_API_KEY=xai-...
 
 # Webhook URL: https://jbot-review-<org>.koyeb.app/webhooks

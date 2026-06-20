@@ -41,6 +41,11 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyEnv: 'NVIDIA_API_KEY',
     keyInput: 'nvidia-api-key',
   },
+  'zai-coding-plan': {
+    defaultModel: 'zai-coding-plan/glm-5.2',
+    keyEnv: 'ZAI_API_KEY',
+    keyInput: 'zai-api-key',
+  },
   xai: {
     defaultModel: 'xai/grok-4.3',
     keyEnv: 'XAI_API_KEY',
