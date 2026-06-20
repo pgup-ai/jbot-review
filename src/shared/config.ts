@@ -2,6 +2,15 @@ export interface ProviderConfig {
   defaultModel: string;
   keyEnv: string;
   keyInput: string;
+  models?: Record<string, ModelConfig>;
+}
+
+export interface ModelConfig {
+  /**
+   * Whether opencode should send promptCacheKey for this model. Defaults true
+   * when omitted; false entries are seeded from Models.dev cache-write support.
+   */
+  promptCache?: boolean;
 }
 
 // See https://models.dev/ for the full list of available models and providers.
@@ -15,6 +24,25 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'opencode-go/deepseek-v4-flash',
     keyEnv: 'OPENCODE_API_KEY',
     keyInput: 'opencode-api-key',
+    // Models.dev entries without cost.cache_write reject opencode's promptCacheKey
+    // through this gateway; omitted models default to prompt cache enabled.
+    models: {
+      'deepseek-v4-flash': { promptCache: false },
+      'minimax-m2.5': { promptCache: false },
+      'kimi-k2.7-code': { promptCache: false },
+      'glm-5.1': { promptCache: false },
+      'deepseek-v4-pro': { promptCache: false },
+      'glm-5.2': { promptCache: false },
+      'minimax-m3': { promptCache: false },
+      'minimax-m2.7': { promptCache: false },
+      'kimi-k2.5': { promptCache: false },
+      'mimo-v2.5': { promptCache: false },
+      'mimo-v2-omni': { promptCache: false },
+      'kimi-k2.6': { promptCache: false },
+      'mimo-v2-pro': { promptCache: false },
+      'mimo-v2.5-pro': { promptCache: false },
+      'glm-5': { promptCache: false },
+    },
   },
   deepseek: {
     defaultModel: 'deepseek/deepseek-v4-flash',
@@ -57,3 +85,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyInput: 'xai-api-key',
   },
 };
+
+export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {
+  return PROVIDERS[providerID]?.models?.[modelID]?.promptCache !== false;
+}

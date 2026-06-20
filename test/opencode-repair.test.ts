@@ -267,6 +267,18 @@ describe('buildConfig prompt caching', () => {
     assert.equal(providers.openrouter.options.apiKey, 'openrouter-key');
     assert.equal(providers.openrouter.options.setCacheKey, true);
   });
+
+  it('omits setCacheKey for secondary providers that disable prompt caching', () => {
+    const config = buildConfig('openai', 'gpt-5', 'openai-key', undefined, true, [
+      { providerID: 'opencode-go', apiKey: 'opencode-key', promptCache: false },
+    ]);
+    const providers = (config as { provider: Record<string, { options: Record<string, unknown> }> })
+      .provider;
+
+    assert.equal(providers.openai.options.setCacheKey, true);
+    assert.equal(providers['opencode-go'].options.apiKey, 'opencode-key');
+    assert.equal('setCacheKey' in providers['opencode-go'].options, false);
+  });
 });
 
 describe('formatTokenUsage', () => {

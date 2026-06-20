@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { PROVIDERS } from '../src/shared/config.ts';
+import { PROVIDERS, modelSupportsPromptCache } from '../src/shared/config.ts';
 import {
   formatModelName,
   parseModelName,
@@ -88,5 +88,13 @@ describe('resolveAuxModelName', () => {
       resolveAuxModelName('openai', 'google/gemini-2.5-flash', 'openrouter'),
       'openrouter/google/gemini-2.5-flash',
     );
+  });
+});
+
+describe('modelSupportsPromptCache', () => {
+  it('disables prompt caching only for models explicitly marked unsupported', () => {
+    assert.equal(modelSupportsPromptCache('opencode-go', 'glm-5.2'), false);
+    assert.equal(modelSupportsPromptCache('opencode-go', 'qwen3.6-plus'), true);
+    assert.equal(modelSupportsPromptCache('unknown-provider', 'unknown-model'), true);
   });
 });
