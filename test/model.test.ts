@@ -167,6 +167,25 @@ describe('resolvePromptCachePolicy', () => {
     );
   });
 
+  it('defaults an omitted prompt-cache flag to enabled', () => {
+    assert.deepEqual(
+      resolvePromptCachePolicy({
+        mainModel: 'openai/gpt-5.4-nano',
+        mainProviderID: 'openai',
+        mainModelID: 'gpt-5.4-nano',
+        auxModel: 'openai/gpt-5.4-nano',
+        auxProviderID: 'openai',
+        auxModelID: 'gpt-5.4-nano',
+      }),
+      {
+        providerPromptCache: true,
+        auxProviderPromptCache: true,
+        disabledPromptCacheModels: [],
+        sharedProviderCacheDisabled: false,
+      },
+    );
+  });
+
   it('honors the global prompt-cache off switch without reporting model support warnings', () => {
     assert.deepEqual(
       resolvePromptCachePolicy({
