@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { PROVIDERS } from '../src/shared/config.ts';
+import {
+  PROVIDERS,
+  modelSupportsPromptCache,
+  resolvePromptCachePolicy,
+} from '../src/shared/config.ts';
 import {
   formatModelName,
   parseModelName,
@@ -57,6 +61,27 @@ describe('resolveModelName', () => {
     }
   });
 
+  it('configures Z.AI Coding Plan with the direct Z.AI key surface', () => {
+    assert.deepEqual(PROVIDERS['zai-coding-plan'], {
+      defaultModel: 'zai-coding-plan/glm-5.2',
+      keyEnv: 'ZAI_API_KEY',
+      keyInput: 'zai-api-key',
+      models: {
+        'glm-5': { promptCache: false },
+        'glm-5.1': { promptCache: false },
+        'glm-5.2': { promptCache: false },
+      },
+    });
+  });
+
+  it('configures Gemini with the direct Gemini key surface', () => {
+    assert.deepEqual(PROVIDERS.google, {
+      defaultModel: 'google/gemini-2.5-flash',
+      keyEnv: 'GEMINI_API_KEY',
+      keyInput: 'gemini-api-key',
+    });
+  });
+
   it('rejects an empty selected-provider-prefixed model id', () => {
     assert.throws(() => resolveModelName('opencode', 'opencode/'), /expected a non-empty model id/);
   });
@@ -71,6 +96,119 @@ describe('resolveAuxModelName', () => {
     assert.equal(
       resolveAuxModelName('openai', 'google/gemini-2.5-flash', 'openrouter'),
       'openrouter/google/gemini-2.5-flash',
+    );
+  });
+});
+
+describe('modelSupportsPromptCache', () => {
+  it('disables prompt caching only for models explicitly marked unsupported', () => {
+    assert.equal(modelSupportsPromptCache('opencode-go', 'glm-5.2'), false);
+    assert.equal(modelSupportsPromptCache('zai-coding-plan', 'glm-5.2'), false);
+    assert.equal(modelSupportsPromptCache('opencode-go', 'deepseek-v4-flash'), true);
+    assert.equal(modelSupportsPromptCache('opencode-go', 'kimi-k2.6'), true);
+    assert.equal(modelSupportsPromptCache('opencode-go', 'minimax-m3'), true);
+    assert.equal(modelSupportsPromptCache('opencode-go', 'qwen3.6-plus'), true);
+    assert.equal(modelSupportsPromptCache('unknown-provider', 'unknown-model'), true);
+  });
+});
+
+describe('resolvePromptCachePolicy', () => {
+  it('disables prompt caching for an unsupported main model once', () => {
+    assert.deepEqual(
+      resolvePromptCachePolicy({
+        promptCache: true,
+        mainModel: 'opencode-go/glm-5.2',
+        mainProviderID: 'opencode-go',
+        mainModelID: 'glm-5.2',
+        auxModel: 'opencode-go/glm-5.2',
+        auxProviderID: 'opencode-go',
+        auxModelID: 'glm-5.2',
+      }),
+      {
+        providerPromptCache: false,
+        auxProviderPromptCache: false,
+        disabledPromptCacheModels: ['opencode-go/glm-5.2'],
+        sharedProviderCacheDisabled: false,
+      },
+    );
+  });
+
+  it('disables the shared provider cache when only a same-provider aux model is unsupported', () => {
+    assert.deepEqual(
+      resolvePromptCachePolicy({
+        promptCache: true,
+        mainModel: 'opencode-go/deepseek-v4-flash',
+        mainProviderID: 'opencode-go',
+        mainModelID: 'deepseek-v4-flash',
+        auxModel: 'opencode-go/glm-5.2',
+        auxProviderID: 'opencode-go',
+        auxModelID: 'glm-5.2',
+      }),
+      {
+        providerPromptCache: false,
+        auxProviderPromptCache: false,
+        disabledPromptCacheModels: ['opencode-go/glm-5.2'],
+        sharedProviderCacheDisabled: true,
+      },
+    );
+  });
+
+  it('keeps the main provider cache enabled when an unsupported aux model uses another provider', () => {
+    assert.deepEqual(
+      resolvePromptCachePolicy({
+        promptCache: true,
+        mainModel: 'openai/gpt-5.4-nano',
+        mainProviderID: 'openai',
+        mainModelID: 'gpt-5.4-nano',
+        auxModel: 'opencode-go/glm-5.2',
+        auxProviderID: 'opencode-go',
+        auxModelID: 'glm-5.2',
+      }),
+      {
+        providerPromptCache: true,
+        auxProviderPromptCache: false,
+        disabledPromptCacheModels: ['opencode-go/glm-5.2'],
+        sharedProviderCacheDisabled: false,
+      },
+    );
+  });
+
+  it('defaults an omitted prompt-cache flag to enabled', () => {
+    assert.deepEqual(
+      resolvePromptCachePolicy({
+        mainModel: 'openai/gpt-5.4-nano',
+        mainProviderID: 'openai',
+        mainModelID: 'gpt-5.4-nano',
+        auxModel: 'openai/gpt-5.4-nano',
+        auxProviderID: 'openai',
+        auxModelID: 'gpt-5.4-nano',
+      }),
+      {
+        providerPromptCache: true,
+        auxProviderPromptCache: true,
+        disabledPromptCacheModels: [],
+        sharedProviderCacheDisabled: false,
+      },
+    );
+  });
+
+  it('honors the global prompt-cache off switch without reporting model support warnings', () => {
+    assert.deepEqual(
+      resolvePromptCachePolicy({
+        promptCache: false,
+        mainModel: 'openai/gpt-5.4-nano',
+        mainProviderID: 'openai',
+        mainModelID: 'gpt-5.4-nano',
+        auxModel: 'opencode-go/glm-5.2',
+        auxProviderID: 'opencode-go',
+        auxModelID: 'glm-5.2',
+      }),
+      {
+        providerPromptCache: false,
+        auxProviderPromptCache: false,
+        disabledPromptCacheModels: [],
+        sharedProviderCacheDisabled: false,
+      },
     );
   });
 });

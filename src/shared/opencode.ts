@@ -46,6 +46,12 @@ const VALID_FINDING_KINDS = new Set<FindingKind>([
 ]);
 const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
 
+export interface ProviderKeyConfig {
+  providerID: string;
+  apiKey: string;
+  promptCache?: boolean;
+}
+
 /**
  * Builds the opencode config object that embeds the API key for the selected
  * provider, plus any secondary providers needed by aux-model sessions. This is
@@ -65,12 +71,12 @@ const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
  * promptCacheKey toggle, default off in the SDK). Parallel review shards and
  * re-reviews of the same PR share a byte-identical prompt prefix (base
  * instructions + guidelines + PR context), so caching cuts input-token cost
- * on providers that honor it. It is a no-op on providers that don't, so it
- * is safe to leave on; cache hits are observable in the per-session token
- * log (`formatTokenUsage`). When disabled, the key is OMITTED entirely
- * rather than sent as `false` — the off switch exists for providers that
- * reject unknown option keys, so it must not send the key at all. Exported
- * for unit testing (pure).
+ * on models that honor it. Runner-level model capability checks should pass
+ * `false` for models known to reject promptCacheKey; cache hits are observable
+ * in the per-session token log (`formatTokenUsage`). When disabled, the key is
+ * OMITTED entirely rather than sent as `false` — the off switch exists for
+ * providers that reject unknown option keys, so it must not send the key at
+ * all. Exported for unit testing (pure).
  */
 export function buildConfig(
   providerID: string,
@@ -78,7 +84,7 @@ export function buildConfig(
   apiKey: string,
   modelOptions?: Record<string, unknown>,
   promptCache = true,
-  additionalProviderKeys: Array<{ providerID: string; apiKey: string }> = [],
+  additionalProviderKeys: ProviderKeyConfig[] = [],
 ): ServerOptions['config'] {
   const hasModelOptions = modelOptions && Object.keys(modelOptions).length > 0;
   const providerConfig: NonNullable<ServerOptions['config']>['provider'] = {
@@ -89,10 +95,11 @@ export function buildConfig(
   };
   for (const providerKey of additionalProviderKeys) {
     if (!providerKey.providerID || providerKey.providerID === providerID) continue;
+    const providerPromptCache = providerKey.promptCache ?? promptCache;
     providerConfig[providerKey.providerID] = {
       options: {
         apiKey: providerKey.apiKey,
-        ...(promptCache ? { setCacheKey: true } : {}),
+        ...(providerPromptCache ? { setCacheKey: true } : {}),
       },
     };
   }
@@ -231,7 +238,7 @@ export async function startOpencode(
     modelOptions?: Record<string, unknown>;
     port?: number;
     promptCache?: boolean;
-    additionalProviderKeys?: Array<{ providerID: string; apiKey: string }>;
+    additionalProviderKeys?: ProviderKeyConfig[];
   } = {},
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
   // Serialize against other startOpencode calls so the chdir → spawn → restore
