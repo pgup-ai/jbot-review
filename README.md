@@ -96,6 +96,7 @@ jobs:
           deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
           nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
           zai-api-key: ${{ secrets.ZAI_API_KEY }}
@@ -109,8 +110,8 @@ jobs:
 **Step 2 — Add provider API keys as secrets.** In the repo: Settings → Secrets
 and variables → Actions → New repository secret. Add the keys for the providers
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
-`OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`, `XAI_API_KEY`, or
-`ANTHROPIC_API_KEY`.
+`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
+`XAI_API_KEY`, or `ANTHROPIC_API_KEY`.
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
 no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
@@ -191,6 +192,7 @@ without editing the workflow.
     deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
     openai-api-key: ${{ secrets.OPENAI_API_KEY }}
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     zai-api-key: ${{ secrets.ZAI_API_KEY }}
@@ -280,6 +282,7 @@ See [models.dev](https://models.dev/) for the full list of models and providers.
 | `deepseek`        | `deepseek/deepseek-v4-flash`        | `deepseek-api-key`   | `DEEPSEEK_API_KEY`   |
 | `openai`          | `openai/gpt-5.4-nano`               | `openai-api-key`     | `OPENAI_API_KEY`     |
 | `anthropic`       | `anthropic/claude-sonnet-4-6`       | `anthropic-api-key`  | `ANTHROPIC_API_KEY`  |
+| `google`          | `google/gemini-2.5-flash`           | `gemini-api-key`     | `GEMINI_API_KEY`     |
 | `openrouter`      | `openrouter/openai/gpt-4o-mini`     | `openrouter-api-key` | `OPENROUTER_API_KEY` |
 | `nvidia`          | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia-api-key`     | `NVIDIA_API_KEY`     |
 | `zai-coding-plan` | `zai-coding-plan/glm-5.2`           | `zai-api-key`        | `ZAI_API_KEY`        |
@@ -287,6 +290,8 @@ See [models.dev](https://models.dev/) for the full list of models and providers.
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
+Use `provider: google` with `gemini-api-key` / `GEMINI_API_KEY` for direct
+Gemini API key auth.
 
 Set the `provider` and `model` inputs to override the defaults. For automatic
 PR reviews without editing workflow YAML on every provider or model change,
@@ -306,6 +311,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
     openai-api-key: ${{ secrets.OPENAI_API_KEY }}
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     zai-api-key: ${{ secrets.ZAI_API_KEY }}
@@ -326,10 +332,10 @@ model from either action inputs or environment variables: `provider` or
 the main model, `aux-provider` or `JBOT_AUX_PROVIDER` for the auxiliary
 provider, and `aux-model` or `JBOT_REVIEW_AUX_MODEL` for the auxiliary model.
 Provider API keys can also be supplied through their standard env vars, such as
-`OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, or `ZAI_API_KEY`. This convenience
-pattern exposes every configured provider key to the action runtime. For the
-smallest secret surface area, pass only the review provider key, plus an aux
-provider key only when it must be different.
+`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, or `ZAI_API_KEY`. This
+convenience pattern exposes every configured provider key to the action runtime.
+For the smallest secret surface area, pass only the review provider key, plus an
+aux provider key only when it must be different.
 If `model` is set, it is interpreted as a model id for the selected `provider`.
 A matching `provider/model` prefix is accepted and normalized, so
 `deepseek-v4-flash-free` and `opencode/deepseek-v4-flash-free` are equivalent
@@ -364,6 +370,7 @@ documentation lookup.
 | `deepseek-api-key`        | No       | —                     | Used when `provider` or `aux-provider` is `deepseek`                       |
 | `openai-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `openai`                         |
 | `anthropic-api-key`       | No       | —                     | Used when `provider` or `aux-provider` is `anthropic`                      |
+| `gemini-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `google`                         |
 | `openrouter-api-key`      | No       | —                     | Used when `provider` or `aux-provider` is `openrouter`                     |
 | `nvidia-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `nvidia`                         |
 | `zai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `zai-coding-plan`                |
@@ -502,6 +509,7 @@ during checkout.
 | `DEEPSEEK_API_KEY`       | Conditional | —                | Operator key used when PROVIDER=deepseek        |
 | `OPENAI_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=openai          |
 | `ANTHROPIC_API_KEY`      | Conditional | —                | Operator key used when PROVIDER=anthropic       |
+| `GEMINI_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=google          |
 | `OPENROUTER_API_KEY`     | Conditional | —                | Operator key used when PROVIDER=openrouter      |
 | `NVIDIA_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=nvidia          |
 | `ZAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=zai-coding-plan |
@@ -525,6 +533,7 @@ OPENCODE_API_KEY=oc-...
 DEEPSEEK_API_KEY=sk-...
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=gemini-...
 OPENROUTER_API_KEY=sk-or-...
 NVIDIA_API_KEY=nvapi-...
 ZAI_API_KEY=zai-...
@@ -574,6 +583,7 @@ gcloud run deploy jbot-review \
   --set-env-vars DEEPSEEK_API_KEY=sk-... \
   --set-env-vars OPENAI_API_KEY=sk-... \
   --set-env-vars ANTHROPIC_API_KEY=sk-ant-... \
+  --set-env-vars GEMINI_API_KEY=gemini-... \
   --set-env-vars OPENROUTER_API_KEY=sk-or-... \
   --set-env-vars NVIDIA_API_KEY=nvapi-... \
   --set-env-vars ZAI_API_KEY=zai-... \
@@ -619,6 +629,7 @@ fly secrets set \
   DEEPSEEK_API_KEY=sk-... \
   OPENAI_API_KEY=sk-... \
   ANTHROPIC_API_KEY=sk-ant-... \
+  GEMINI_API_KEY=gemini-... \
   OPENROUTER_API_KEY=sk-or-... \
   NVIDIA_API_KEY=nvapi-... \
   ZAI_API_KEY=zai-... \
@@ -681,6 +692,8 @@ services:
         value: sk-...
       - key: ANTHROPIC_API_KEY
         value: sk-ant-...
+      - key: GEMINI_API_KEY
+        value: gemini-...
       - key: OPENROUTER_API_KEY
         value: sk-or-...
       - key: NVIDIA_API_KEY
@@ -753,6 +766,8 @@ services:
         value: sk-...
       - key: ANTHROPIC_API_KEY
         value: sk-ant-...
+      - key: GEMINI_API_KEY
+        value: gemini-...
       - key: OPENROUTER_API_KEY
         value: sk-or-...
       - key: NVIDIA_API_KEY
@@ -855,6 +870,7 @@ railway variables set \
   DEEPSEEK_API_KEY=sk-... \
   OPENAI_API_KEY=sk-... \
   ANTHROPIC_API_KEY=sk-ant-... \
+  GEMINI_API_KEY=gemini-... \
   OPENROUTER_API_KEY=sk-or-... \
   NVIDIA_API_KEY=nvapi-... \
   ZAI_API_KEY=zai-... \
@@ -895,6 +911,7 @@ koyeb service create jbot-review \
   --env DEEPSEEK_API_KEY=sk-... \
   --env OPENAI_API_KEY=sk-... \
   --env ANTHROPIC_API_KEY=sk-ant-... \
+  --env GEMINI_API_KEY=gemini-... \
   --env OPENROUTER_API_KEY=sk-or-... \
   --env NVIDIA_API_KEY=nvapi-... \
   --env ZAI_API_KEY=zai-... \

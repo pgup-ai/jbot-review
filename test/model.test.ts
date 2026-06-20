@@ -65,6 +65,14 @@ describe('resolveModelName', () => {
     });
   });
 
+  it('configures Gemini with the direct Gemini key surface', () => {
+    assert.deepEqual(PROVIDERS.google, {
+      defaultModel: 'google/gemini-2.5-flash',
+      keyEnv: 'GEMINI_API_KEY',
+      keyInput: 'gemini-api-key',
+    });
+  });
+
   it('rejects an empty selected-provider-prefixed model id', () => {
     assert.throws(() => resolveModelName('opencode', 'opencode/'), /expected a non-empty model id/);
   });

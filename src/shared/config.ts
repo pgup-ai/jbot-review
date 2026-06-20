@@ -31,6 +31,11 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyEnv: 'ANTHROPIC_API_KEY',
     keyInput: 'anthropic-api-key',
   },
+  google: {
+    defaultModel: 'google/gemini-2.5-flash',
+    keyEnv: 'GEMINI_API_KEY',
+    keyInput: 'gemini-api-key',
+  },
   openrouter: {
     defaultModel: 'openrouter/openai/gpt-4o-mini',
     keyEnv: 'OPENROUTER_API_KEY',
