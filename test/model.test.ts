@@ -94,6 +94,8 @@ describe('resolveAuxModelName', () => {
 describe('modelSupportsPromptCache', () => {
   it('disables prompt caching only for models explicitly marked unsupported', () => {
     assert.equal(modelSupportsPromptCache('opencode-go', 'glm-5.2'), false);
+    assert.equal(modelSupportsPromptCache('opencode-go', 'deepseek-v4-flash'), true);
+    assert.equal(modelSupportsPromptCache('opencode-go', 'kimi-k2.6'), true);
     assert.equal(modelSupportsPromptCache('opencode-go', 'minimax-m3'), true);
     assert.equal(modelSupportsPromptCache('opencode-go', 'qwen3.6-plus'), true);
     assert.equal(modelSupportsPromptCache('unknown-provider', 'unknown-model'), true);
