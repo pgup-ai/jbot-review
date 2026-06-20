@@ -77,3 +77,47 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
 export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {
   return PROVIDERS[providerID]?.models?.[modelID]?.promptCache !== false;
 }
+
+export interface PromptCachePolicyInput {
+  promptCache: boolean;
+  mainModel: string;
+  mainProviderID: string;
+  mainModelID: string;
+  auxModel: string;
+  auxProviderID: string;
+  auxModelID: string;
+}
+
+export interface PromptCachePolicy {
+  providerPromptCache: boolean;
+  auxProviderPromptCache: boolean;
+  disabledPromptCacheModels: string[];
+  sharedProviderCacheDisabled: boolean;
+}
+
+export function resolvePromptCachePolicy(input: PromptCachePolicyInput): PromptCachePolicy {
+  const mainSupportsPromptCache = modelSupportsPromptCache(input.mainProviderID, input.mainModelID);
+  const auxSupportsPromptCache = modelSupportsPromptCache(input.auxProviderID, input.auxModelID);
+  const sameProvider = input.auxProviderID === input.mainProviderID;
+  const disabledPromptCacheModels: string[] = [];
+
+  if (input.promptCache && !mainSupportsPromptCache) {
+    disabledPromptCacheModels.push(input.mainModel);
+  }
+  if (input.promptCache && input.auxModel !== input.mainModel && !auxSupportsPromptCache) {
+    disabledPromptCacheModels.push(input.auxModel);
+  }
+
+  return {
+    providerPromptCache:
+      input.promptCache && mainSupportsPromptCache && (!sameProvider || auxSupportsPromptCache),
+    auxProviderPromptCache: input.promptCache && auxSupportsPromptCache,
+    disabledPromptCacheModels,
+    sharedProviderCacheDisabled:
+      input.promptCache &&
+      sameProvider &&
+      mainSupportsPromptCache &&
+      !auxSupportsPromptCache &&
+      input.auxModel !== input.mainModel,
+  };
+}

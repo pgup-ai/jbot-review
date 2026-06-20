@@ -17,7 +17,7 @@ import {
   isDocOnlyChange,
   shardFilesForReview,
 } from './diff-context.ts';
-import { modelSupportsPromptCache } from './config.ts';
+import { resolvePromptCachePolicy } from './config.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -206,21 +206,25 @@ export async function runPrReview(params: {
   const { providerID, modelID } = parseModelName(model);
   const auxModel = options.auxModel || model;
   const { providerID: auxProviderID, modelID: auxModelID } = parseModelName(auxModel);
-  const mainSupportsPromptCache = modelSupportsPromptCache(providerID, modelID);
-  const auxSupportsPromptCache = modelSupportsPromptCache(auxProviderID, auxModelID);
-  const disabledPromptCacheModels: string[] = [];
-  if (options.promptCache && !mainSupportsPromptCache) disabledPromptCacheModels.push(model);
-  if (options.promptCache && auxModel !== model && !auxSupportsPromptCache) {
-    disabledPromptCacheModels.push(auxModel);
+  const promptCachePolicy = resolvePromptCachePolicy({
+    promptCache: options.promptCache,
+    mainModel: model,
+    mainProviderID: providerID,
+    mainModelID: modelID,
+    auxModel,
+    auxProviderID,
+    auxModelID,
+  });
+  if (promptCachePolicy.disabledPromptCacheModels.length > 0) {
+    log(
+      `Prompt cache disabled for unsupported model(s): ${promptCachePolicy.disabledPromptCacheModels.join(', ')}.`,
+    );
   }
-  if (disabledPromptCacheModels.length > 0) {
-    log(`Prompt cache disabled for unsupported model(s): ${disabledPromptCacheModels.join(', ')}.`);
+  if (promptCachePolicy.sharedProviderCacheDisabled) {
+    log(
+      `Prompt cache disabled for provider ${providerID} because aux model ${auxModel} does not support it; main model ${model} shares that provider config.`,
+    );
   }
-  const providerPromptCache =
-    options.promptCache &&
-    mainSupportsPromptCache &&
-    (auxProviderID !== providerID || auxSupportsPromptCache);
-  const auxProviderPromptCache = options.promptCache && auxSupportsPromptCache;
   const tokenUsage = createReviewTokenUsageAccumulator();
   const recordTokenUsage: TokenUsageRecorder = (usage, usageModel) =>
     tokenUsage.add(usage, usageModel);
@@ -356,7 +360,7 @@ export async function runPrReview(params: {
   log('Starting opencode server');
   const { client, stop } = await startOpencode(workspace, providerID, modelID, apiKey, log, {
     modelOptions: options.modelOptions,
-    promptCache: providerPromptCache,
+    promptCache: promptCachePolicy.providerPromptCache,
     port: options.opencodePort > 0 ? options.opencodePort : undefined,
     additionalProviderKeys:
       auxProviderID !== providerID
@@ -364,7 +368,7 @@ export async function runPrReview(params: {
             {
               providerID: auxProviderID,
               apiKey: options.auxApiKey || apiKey,
-              promptCache: auxProviderPromptCache,
+              promptCache: promptCachePolicy.auxProviderPromptCache,
             },
           ]
         : undefined,

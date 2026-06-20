@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { PROVIDERS, modelSupportsPromptCache } from '../src/shared/config.ts';
+import {
+  PROVIDERS,
+  modelSupportsPromptCache,
+  resolvePromptCachePolicy,
+} from '../src/shared/config.ts';
 import {
   formatModelName,
   parseModelName,
@@ -99,5 +103,87 @@ describe('modelSupportsPromptCache', () => {
     assert.equal(modelSupportsPromptCache('opencode-go', 'minimax-m3'), true);
     assert.equal(modelSupportsPromptCache('opencode-go', 'qwen3.6-plus'), true);
     assert.equal(modelSupportsPromptCache('unknown-provider', 'unknown-model'), true);
+  });
+});
+
+describe('resolvePromptCachePolicy', () => {
+  it('disables prompt caching for an unsupported main model once', () => {
+    assert.deepEqual(
+      resolvePromptCachePolicy({
+        promptCache: true,
+        mainModel: 'opencode-go/glm-5.2',
+        mainProviderID: 'opencode-go',
+        mainModelID: 'glm-5.2',
+        auxModel: 'opencode-go/glm-5.2',
+        auxProviderID: 'opencode-go',
+        auxModelID: 'glm-5.2',
+      }),
+      {
+        providerPromptCache: false,
+        auxProviderPromptCache: false,
+        disabledPromptCacheModels: ['opencode-go/glm-5.2'],
+        sharedProviderCacheDisabled: false,
+      },
+    );
+  });
+
+  it('disables the shared provider cache when only a same-provider aux model is unsupported', () => {
+    assert.deepEqual(
+      resolvePromptCachePolicy({
+        promptCache: true,
+        mainModel: 'opencode-go/deepseek-v4-flash',
+        mainProviderID: 'opencode-go',
+        mainModelID: 'deepseek-v4-flash',
+        auxModel: 'opencode-go/glm-5.2',
+        auxProviderID: 'opencode-go',
+        auxModelID: 'glm-5.2',
+      }),
+      {
+        providerPromptCache: false,
+        auxProviderPromptCache: false,
+        disabledPromptCacheModels: ['opencode-go/glm-5.2'],
+        sharedProviderCacheDisabled: true,
+      },
+    );
+  });
+
+  it('keeps the main provider cache enabled when an unsupported aux model uses another provider', () => {
+    assert.deepEqual(
+      resolvePromptCachePolicy({
+        promptCache: true,
+        mainModel: 'openai/gpt-5.4-nano',
+        mainProviderID: 'openai',
+        mainModelID: 'gpt-5.4-nano',
+        auxModel: 'opencode-go/glm-5.2',
+        auxProviderID: 'opencode-go',
+        auxModelID: 'glm-5.2',
+      }),
+      {
+        providerPromptCache: true,
+        auxProviderPromptCache: false,
+        disabledPromptCacheModels: ['opencode-go/glm-5.2'],
+        sharedProviderCacheDisabled: false,
+      },
+    );
+  });
+
+  it('honors the global prompt-cache off switch without reporting model support warnings', () => {
+    assert.deepEqual(
+      resolvePromptCachePolicy({
+        promptCache: false,
+        mainModel: 'openai/gpt-5.4-nano',
+        mainProviderID: 'openai',
+        mainModelID: 'gpt-5.4-nano',
+        auxModel: 'opencode-go/glm-5.2',
+        auxProviderID: 'opencode-go',
+        auxModelID: 'glm-5.2',
+      }),
+      {
+        providerPromptCache: false,
+        auxProviderPromptCache: false,
+        disabledPromptCacheModels: [],
+        sharedProviderCacheDisabled: false,
+      },
+    );
   });
 });
