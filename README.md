@@ -958,6 +958,25 @@ parallel with the main review (disable with `enable-guideline-pass: false`).
 For changed files, J-Bot also checks ancestor directories for scoped review files
 such as `REVIEW.md`, `AGENTS.md`, `.cursor/BUGBOT.md`, and `.cursor/rules/`.
 
+## Built-in review playbooks
+
+J-Bot also injects a compact set of built-in review playbooks into each review.
+These are bundled prompt checklists, not external skills loaded at runtime, so
+reviews stay deterministic and bounded.
+
+- `code-review-core` always runs: correctness, side effects, compatibility,
+  tests, security, performance, and maintainability.
+- `contract-api` is selected for API, schema, descriptor, config, package,
+  workflow, and documented-behavior changes.
+- `backend-data` is selected for database, migration, repository, query,
+  transaction, idempotency, aggregation, and data-integrity changes.
+- `frontend-workflow` is selected for React/UI/client workflow changes.
+- `external-integration` is selected for SDK/API clients, webhooks, auth,
+  GitHub Actions, workflow, package, and provider/version changes.
+
+The playbooks narrow attention, not scope: every selected reviewer still covers
+the complete PR diff and must report only concrete, code-grounded findings.
+
 ## Project structure
 
 ```

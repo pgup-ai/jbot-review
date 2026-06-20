@@ -20,6 +20,7 @@ import {
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import { REVIEW_LENSES, buildShardAssignmentBlock, selectLensKeys } from './prompt.ts';
+import { buildReviewPlaybookBlock } from './review-playbooks.ts';
 import { ensureGitSafeDirectory } from './git.ts';
 import {
   startOpencode,
@@ -1116,11 +1117,12 @@ function buildReviewFocusBlock(changedFiles: string[]): string {
     );
   }
 
-  return [
+  const focusBlock = [
     '## Relevant review focus',
     'Use only as relevant checklists; do not invent findings.',
     ...[...focusItems].map((item) => `- ${item}`),
   ].join('\n');
+  return [buildReviewPlaybookBlock(changedFiles), focusBlock].join('\n\n');
 }
 
 function findLatestReviewedHead(priorJbotReviews: string[]): string | undefined {
