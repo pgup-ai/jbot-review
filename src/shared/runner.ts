@@ -21,6 +21,7 @@ import { resolvePromptCachePolicy } from './config.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import {
+  COUNTED_LENS_KEYS,
   REVIEW_LENSES,
   buildReviewGuidelineBlock,
   buildReviewPlaybookBlock,
@@ -94,10 +95,12 @@ export interface ReviewRunOptions {
    */
   auxApiKey?: string;
   /**
-   * Total review passes: 1 = the general pass only; each extra pass adds a
-   * focused recall lens (interactions, then integrity) running in parallel.
-   * Findings are merged and deduped, so extra passes raise recall at roughly
-   * one extra session cost each.
+   * Total review passes: 1 = the general pass only; each extra pass adds the
+   * next count-rationed recall lens (interactions, then integrity) in parallel.
+   * The frontend lens is content-triggered, not passes-rationed: a PR that
+   * touches frontend files runs it IN ADDITION (when passes >= 2), so a frontend
+   * PR runs one more aux session than `passes` implies. Findings are merged and
+   * deduped, so extra passes raise recall at roughly one session each.
    */
   reviewPasses?: number;
   /** Adversarially verify blocking findings before posting (precision gate). */
@@ -699,7 +702,10 @@ type NormalizedReviewRunOptions = Required<Omit<ReviewRunOptions, 'onReviewResul
   Pick<ReviewRunOptions, 'onReviewResult'>;
 
 function normalizeOptions(options: ReviewRunOptions | undefined): NormalizedReviewRunOptions {
-  const maxPasses = 1 + Object.keys(REVIEW_LENSES).length;
+  // Only the count-rationed lenses scale with passes; the frontend lens is
+  // content-triggered and added on top (see selectLensKeys), so it does not
+  // raise the useful pass ceiling.
+  const maxPasses = 1 + COUNTED_LENS_KEYS.length;
   return {
     enhancedContext: options?.enhancedContext ?? false,
     dryRun: options?.dryRun ?? false,

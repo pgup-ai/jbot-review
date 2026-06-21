@@ -147,34 +147,40 @@ describe('REVIEW_LENSES', () => {
 });
 
 describe('selectLensKeys', () => {
-  it('maps total passes to extra lens keys in declared order', () => {
+  it('rations the base lenses by pass count', () => {
     assert.deepEqual(selectLensKeys(1), []);
     assert.deepEqual(selectLensKeys(2), ['interactions']);
     assert.deepEqual(selectLensKeys(3), ['interactions', 'integrity']);
   });
 
-  it('offers the frontend lens only when the PR changes frontend files', () => {
-    // Frontend files present: the frontend lens joins as the third recall lens.
-    assert.deepEqual(selectLensKeys(4, ['apps/web/src/pages/History.tsx']), [
+  it('adds the frontend lens (content-triggered) when the PR changes frontend files', () => {
+    // Runs IN ADDITION to the rationed lenses — never displacing integrity, and
+    // without needing a higher pass count.
+    assert.deepEqual(selectLensKeys(2, ['apps/web/src/pages/History.tsx']), [
       'interactions',
-      'integrity',
       'frontend',
     ]);
-    // A frontend .ts file (no JSX) under a frontend path still counts — the lens
-    // uses the same trigger as the frontend-workflow playbook (path + name +
-    // extension), not extensions alone.
-    assert.deepEqual(selectLensKeys(4, ['apps/web/src/lib/api.ts']), [
-      'interactions',
-      'integrity',
-      'frontend',
-    ]);
-    // No frontend files: that pass slot is never spent on a frontend lens.
-    assert.deepEqual(selectLensKeys(4, ['src/server/api.ts']), ['interactions', 'integrity']);
-    // The frontend lens never displaces interactions/integrity at lower pass counts.
     assert.deepEqual(selectLensKeys(3, ['apps/web/src/pages/History.tsx']), [
       'interactions',
       'integrity',
+      'frontend',
     ]);
+    // A frontend .ts file (no JSX) under a frontend path counts too — same
+    // trigger as the frontend-workflow playbook (path + name + extension).
+    assert.deepEqual(selectLensKeys(3, ['apps/web/src/lib/api.ts']), [
+      'interactions',
+      'integrity',
+      'frontend',
+    ]);
+  });
+
+  it('does not add the frontend lens for non-frontend PRs', () => {
+    assert.deepEqual(selectLensKeys(3, ['src/server/api.ts']), ['interactions', 'integrity']);
+  });
+
+  it('respects passes=1 (no lenses at all) even on a frontend PR', () => {
+    // passes=1 is the explicit "single cheap read, no extra sessions" mode.
+    assert.deepEqual(selectLensKeys(1, ['apps/web/src/pages/History.tsx']), []);
   });
 
   it('is safe at the extremes', () => {

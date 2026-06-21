@@ -484,27 +484,30 @@ function formatPlaybook(playbook: ReviewPlaybook): string {
   ].join('\n');
 }
 
-// Recall lenses in marginal-value order. interactions/integrity apply to any
-// PR; the frontend lens is conditional (see selectLensKeys).
-const BASE_LENS_ORDER = ['interactions', 'integrity'] as const;
+// Count-rationed recall lenses, in marginal-value order: each extra review pass
+// adds the next one. The maximum useful pass count is 1 (general) + this length.
+export const COUNTED_LENS_KEYS = ['interactions', 'integrity'] as const;
+// Content-triggered lens (NOT passes-rationed): runs when the PR touches
+// frontend files, like the frontend-workflow playbook.
 const FRONTEND_LENS_KEY = 'frontend';
 
 /**
- * Lens keys for a given total pass count: pass 1 is the general review, each
- * extra pass takes the next lens. The frontend lens is appended AFTER the
- * always-relevant interactions/integrity lenses (never displacing them) and
- * only when the PR changes frontend files — by the SAME trigger as the
- * frontend-workflow playbook, so a `.ts` store/hook under apps/web counts too,
- * not just `.tsx`. It therefore activates at higher pass counts on frontend
- * PRs and is never a wasted slot elsewhere.
+ * Lens keys for a review run. Pass 1 is the general review; each extra pass adds
+ * the next count-rationed lens (interactions, then integrity).
+ *
+ * The frontend lens is content-triggered, not passes-rationed: when the PR
+ * touches frontend files (same trigger as the frontend-workflow playbook — path,
+ * name, or extension, so a `.ts` store/hook under apps/web counts) it runs IN
+ * ADDITION to the rationed lenses, never displacing integrity. It is gated on
+ * lenses being enabled at all (passes >= 2), so passes=1 stays a single read.
+ * A frontend PR therefore runs one more lens session than `passes` implies.
  */
 export function selectLensKeys(passes: number, changedFiles: string[] = []): string[] {
   const extraPasses = Math.max(0, passes - 1);
   if (extraPasses === 0) return [];
-  const ordered = changedFilesIncludeFrontend(changedFiles)
-    ? [...BASE_LENS_ORDER, FRONTEND_LENS_KEY]
-    : [...BASE_LENS_ORDER];
-  return ordered.slice(0, extraPasses);
+  const lenses: string[] = COUNTED_LENS_KEYS.slice(0, extraPasses);
+  if (changedFilesIncludeFrontend(changedFiles)) lenses.push(FRONTEND_LENS_KEY);
+  return lenses;
 }
 
 /**
