@@ -322,6 +322,28 @@ This pass concentrates on SECURITY, CONCURRENCY, and DATA-INTEGRITY bugs:
 - Silent data loss: truncation without pagination, lossy normalization
   (including non-ASCII/Unicode input), dropped records, results presented as
   complete when bounded, lossy type coercions.
+- Untrusted third-party content (fetched assets, vendored files, downloaded
+  payloads) persisted into a served or bundled directory is a supply-chain /
+  stored-XSS risk even when the app only consumes it indirectly (e.g. as a CSS
+  mask): the file is still reachable at its own URL, so a type/shape check is
+  not sanitization.
+
+Still report any other clear bug you encounter, but spend your exploration
+budget on these classes.`,
+  frontend: `## Review lens for this pass
+
+This pass concentrates on FRONTEND STATE & RENDER bugs — the class a
+hunk-by-hunk read misses in React/Vue/Svelte UIs:
+
+- Derived state computed from one source while the rendered data comes from
+  another: a header, count, or label derived from fresh state while the list
+  or body still shows the previous response during an in-flight refetch.
+- Hook dependencies, stale closures, missing async cancellation or
+  request-ordering on refetch, and effects that do not reset state when their
+  inputs change.
+- Loading, error, empty, disabled, and permission-denied states for each
+  changed workflow; lost user input, double-submit paths, and stale data
+  after mutations.
 
 Still report any other clear bug you encounter, but spend your exploration
 budget on these classes.`,
@@ -460,12 +482,28 @@ function formatPlaybook(playbook: ReviewPlaybook): string {
   ].join('\n');
 }
 
+// Recall lenses in marginal-value order. interactions/integrity apply to any
+// PR; the frontend lens is conditional (see selectLensKeys).
+const BASE_LENS_ORDER = ['interactions', 'integrity'] as const;
+const FRONTEND_LENS_KEY = 'frontend';
+// Mirrors the frontend-workflow playbook's extension trigger. Kept local to
+// avoid a prompt -> review-playbooks import cycle (review-playbooks imports
+// types from this module).
+const FRONTEND_LENS_FILE_PATTERN = /\.(tsx|jsx|vue|svelte)$/i;
+
 /**
  * Lens keys for a given total pass count: pass 1 is the general review, each
- * extra pass takes the next lens in REVIEW_LENSES order.
+ * extra pass takes the next lens. The frontend lens is appended AFTER the
+ * always-relevant interactions/integrity lenses (never displacing them) and
+ * only when the PR changes frontend files, so it activates at higher pass
+ * counts on frontend PRs and is never a wasted slot elsewhere.
  */
-export function selectLensKeys(passes: number): string[] {
-  return Object.keys(REVIEW_LENSES).slice(0, Math.max(0, passes - 1));
+export function selectLensKeys(passes: number, changedFiles: string[] = []): string[] {
+  const extraPasses = Math.max(0, passes - 1);
+  if (extraPasses === 0) return [];
+  const touchesFrontend = changedFiles.some((file) => FRONTEND_LENS_FILE_PATTERN.test(file));
+  const ordered = touchesFrontend ? [...BASE_LENS_ORDER, FRONTEND_LENS_KEY] : [...BASE_LENS_ORDER];
+  return ordered.slice(0, extraPasses);
 }
 
 /**

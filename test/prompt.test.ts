@@ -120,6 +120,19 @@ describe('REVIEW_LENSES', () => {
     }
   });
 
+  it('adds a frontend lens for render/state bugs the other lenses miss', () => {
+    assert.ok(Object.keys(REVIEW_LENSES).includes('frontend'));
+    assert.match(REVIEW_LENSES.frontend, /derived state/i);
+    assert.match(REVIEW_LENSES.frontend, /refetch/i);
+  });
+
+  it('integrity lens treats vendored third-party content as a supply-chain risk', () => {
+    // Counters the "used only as a CSS mask, so it is safe" dismissal that let
+    // an unsanitized vendored-SVG supply-chain risk slip through.
+    assert.match(REVIEW_LENSES.integrity, /supply-chain|third-party/i);
+    assert.match(REVIEW_LENSES.integrity, /served|bundled|mask/i);
+  });
+
   it('is placed after the PR context and before the output reminder', () => {
     // Tail placement keeps the prompt prefix identical across parallel
     // passes (prefix-cache reuse) and puts the lens in the recency window.
@@ -139,10 +152,24 @@ describe('selectLensKeys', () => {
     assert.deepEqual(selectLensKeys(3), ['interactions', 'integrity']);
   });
 
+  it('offers the frontend lens only when the PR changes frontend files', () => {
+    // Frontend files present: the frontend lens joins as the third recall lens.
+    assert.deepEqual(selectLensKeys(4, ['apps/web/src/pages/History.tsx']), [
+      'interactions',
+      'integrity',
+      'frontend',
+    ]);
+    // No frontend files: that pass slot is never spent on a frontend lens.
+    assert.deepEqual(selectLensKeys(4, ['src/server/api.ts']), ['interactions', 'integrity']);
+    // The frontend lens never displaces interactions/integrity at lower pass counts.
+    assert.deepEqual(selectLensKeys(3, ['x.tsx']), ['interactions', 'integrity']);
+  });
+
   it('is safe at the extremes', () => {
     assert.deepEqual(selectLensKeys(0), []);
     assert.deepEqual(selectLensKeys(-5), []);
-    assert.deepEqual(selectLensKeys(99), Object.keys(REVIEW_LENSES));
+    assert.deepEqual(selectLensKeys(99), ['interactions', 'integrity']);
+    assert.deepEqual(selectLensKeys(99, ['a.tsx']), ['interactions', 'integrity', 'frontend']);
   });
 });
 

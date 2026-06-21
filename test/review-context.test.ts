@@ -8,6 +8,7 @@ import {
   buildReviewContext,
   discoverGuidelines,
   formatDiffScope,
+  trimGuidelinesForReview,
 } from '../src/shared/review-context.ts';
 
 async function withTempRepo(run: (repo: string) => Promise<void>): Promise<void> {
@@ -284,6 +285,37 @@ describe('discoverGuidelines', () => {
       assert.doesNotMatch(guidelines, /END_SHOULD_NOT_APPEAR/);
       assert.doesNotMatch(guidelines, /\uFFFD/);
     });
+  });
+});
+
+describe('trimGuidelinesForReview', () => {
+  it('returns guidelines unchanged when within budget', () => {
+    const g = '### AGENTS.md\nrule one\n\n### REVIEW.md\nrule two';
+    assert.equal(trimGuidelinesForReview(g, 10_000), g);
+  });
+
+  it('returns an empty string unchanged', () => {
+    assert.equal(trimGuidelinesForReview('', 10_000), '');
+  });
+
+  it('keeps whole leading sections within budget and appends a trim notice', () => {
+    const a = `### AGENTS.md\n${'a'.repeat(2000)}`;
+    const b = `### REVIEW.md\n${'b'.repeat(2000)}`;
+    const c = `### EXTRA.md\n${'c'.repeat(2000)}`;
+    const trimmed = trimGuidelinesForReview([a, b, c].join('\n\n'), 2600);
+
+    assert.match(trimmed, /### AGENTS\.md/);
+    assert.doesNotMatch(trimmed, /### EXTRA\.md/);
+    assert.match(trimmed, /trimmed .* for the bug-finding pass/i);
+  });
+
+  it('never splits a section: keeps at least the first section whole', () => {
+    const big = `### AGENTS.md\n${'x'.repeat(5000)}`;
+    const trimmed = trimGuidelinesForReview(`${big}\n\n### REVIEW.md\nsecond`, 1000);
+
+    assert.ok(trimmed.startsWith('### AGENTS.md'));
+    assert.doesNotMatch(trimmed, /### REVIEW\.md/);
+    assert.match(trimmed, /trimmed/i);
   });
 });
 

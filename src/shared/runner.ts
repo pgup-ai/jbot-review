@@ -41,7 +41,12 @@ import {
   formatContext7Error,
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
-import { buildReviewContext, discoverGuidelines, formatDiffScope } from './review-context.ts';
+import {
+  buildReviewContext,
+  discoverGuidelines,
+  formatDiffScope,
+  trimGuidelinesForReview,
+} from './review-context.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
   listPrFiles,
@@ -310,7 +315,7 @@ export async function runPrReview(params: {
   // full block. Hunks always go last — closest to the output reminder, where
   // small models attend most.
   let coreContext: string;
-  let guidelinesForPrompt = guidelines;
+  const guidelinesForPrompt = guidelines;
   if (options.enhancedContext) {
     const commits = await listPrCommits(octokit, owner, repo, pullNumber);
     const checkSummary = headSha
@@ -323,14 +328,16 @@ export async function runPrReview(params: {
       priorComments,
       commits,
       checkSummary,
-      guidelines,
+      // Guidelines are injected per-pass below — trimmed for the bug-finding
+      // passes, full for the compliance pass — never baked into the shared
+      // context, where they would dilute every pass equally.
+      guidelines: '',
       diffScope,
     });
     coreContext = `${coreContext}\n\n${summaryScopeBlock}`;
     coreContext = `${coreContext}\n\n${reviewFocusBlock}`;
     if (priorJbotThreadBlock) coreContext = `${coreContext}\n\n${priorJbotThreadBlock}`;
     if (blastRadiusBlock) coreContext = `${coreContext}\n\n${blastRadiusBlock}`;
-    guidelinesForPrompt = '';
   } else {
     const commentsBlock =
       priorComments.length > 0
@@ -350,6 +357,15 @@ export async function runPrReview(params: {
       .filter(Boolean)
       .join('\n');
   }
+  // Bug-finding passes (main shards + recall lenses) get a trimmed guideline
+  // set so the diff — not tens of KB of standards — stays in the model's
+  // attention (and, since glm-class models don't cache, to cut per-shard cost).
+  // The dedicated compliance pass keeps the full set. When that pass is
+  // disabled, the bug passes are the only guideline channel, so don't trim.
+  const reviewGuidelinesForPrompt = options.guidelinePass
+    ? trimGuidelinesForReview(guidelinesForPrompt)
+    : guidelinesForPrompt;
+
   const basePrContext = joinContext(coreContext, diffHunksBlock);
 
   configureSessionConcurrency(options.maxConcurrentSessions);
@@ -436,7 +452,8 @@ export async function runPrReview(params: {
       client,
       model: auxModel,
       prContext: basePrContext,
-      guidelinesForPrompt,
+      guidelinesForPrompt: reviewGuidelinesForPrompt,
+      changedFiles,
       passes: options.reviewPasses,
       timeoutMs: finderTimeoutMs,
       log,
@@ -454,7 +471,7 @@ export async function runPrReview(params: {
     const { summary, findings } = await runShardedReview({
       client,
       model,
-      guidelinesForPrompt,
+      guidelinesForPrompt: reviewGuidelinesForPrompt,
       shardPlans,
       changedFiles,
       timeoutMs: finderTimeoutMs,
@@ -784,12 +801,13 @@ function startLensPasses(params: {
   model: string;
   prContext: string;
   guidelinesForPrompt: string;
+  changedFiles: string[];
   passes: number;
   timeoutMs?: number;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
 }): Promise<Finding[][]> {
-  const lensKeys = selectLensKeys(params.passes);
+  const lensKeys = selectLensKeys(params.passes, params.changedFiles);
   if (lensKeys.length === 0) return Promise.resolve([]);
 
   params.log(`Starting ${lensKeys.length} lens pass(es) in parallel: ${lensKeys.join(', ')}.`);
