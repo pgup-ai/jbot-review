@@ -109,51 +109,6 @@ export function buildReviewContext(params: BuildReviewContextParams): string {
   return sections.join('\n\n');
 }
 
-/**
- * Per-pass guideline budget for the BUG-finding passes (main review shards +
- * recall lenses). The dedicated guideline-compliance pass audits against the
- * full guideline set, so the bug passes only need the highest-priority
- * conventions; injecting all of them (often tens of KB) just dilutes the diff
- * the model must actually reason about. Comfortably under
- * MAX_GUIDELINE_TOTAL_BYTES.
- */
-export const MAX_REVIEW_GUIDELINE_BYTES = 24 * 1024;
-
-const REVIEW_GUIDELINE_TRIM_NOTICE =
-  '_Repository guidelines were trimmed to the highest-priority sections for the bug-finding pass; the guideline-compliance pass audits against the full set._';
-
-/**
- * Trims a discovered guideline blob to a byte budget for the bug-finding pass,
- * keeping whole leading sections (highest priority first — the order
- * discoverGuidelines emits) and appending a notice. Returns the input
- * unchanged when it already fits and '' for empty input. Pure and synchronous
- * so the recall-vs-attention trade-off is unit-tested in isolation.
- */
-export function trimGuidelinesForReview(
-  guidelines: string,
-  budgetBytes: number = MAX_REVIEW_GUIDELINE_BYTES,
-): string {
-  if (!guidelines) return '';
-  if (Buffer.byteLength(guidelines, 'utf8') <= budgetBytes) return guidelines;
-
-  const noticeBytes = Buffer.byteLength(`\n\n${REVIEW_GUIDELINE_TRIM_NOTICE}`, 'utf8');
-  const kept: string[] = [];
-  let usedBytes = 0;
-
-  for (const block of guidelines.split('\n\n')) {
-    const separatorBytes = kept.length > 0 ? 2 : 0; // the rejoining '\n\n'
-    const blockBytes = separatorBytes + Buffer.byteLength(block, 'utf8');
-    // Always keep the first section whole so an oversized single section is not
-    // replaced by a bare notice; otherwise stop before a section that — with
-    // the notice — would exceed the budget.
-    if (kept.length > 0 && usedBytes + blockBytes + noticeBytes > budgetBytes) break;
-    kept.push(block);
-    usedBytes += blockBytes;
-  }
-
-  return `${kept.join('\n\n')}\n\n${REVIEW_GUIDELINE_TRIM_NOTICE}`;
-}
-
 const ROOT_GUIDELINE_FILES = [
   'AGENTS.md',
   'REVIEW.md',

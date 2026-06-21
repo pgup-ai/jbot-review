@@ -22,6 +22,7 @@ import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import {
   REVIEW_LENSES,
+  buildReviewGuidelineBlock,
   buildReviewPlaybookBlock,
   buildShardAssignmentBlock,
   selectLensKeys,
@@ -41,12 +42,7 @@ import {
   formatContext7Error,
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
-import {
-  buildReviewContext,
-  discoverGuidelines,
-  formatDiffScope,
-  trimGuidelinesForReview,
-} from './review-context.ts';
+import { buildReviewContext, discoverGuidelines, formatDiffScope } from './review-context.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
   listPrFiles,
@@ -357,14 +353,15 @@ export async function runPrReview(params: {
       .filter(Boolean)
       .join('\n');
   }
-  // Bug-finding passes (main shards + recall lenses) get a trimmed guideline
-  // set so the diff — not tens of KB of standards — stays in the model's
+  // Bug-finding passes (main shards + recall lenses) get a budgeted guideline
+  // block so the diff — not tens of KB of standards — stays in the model's
   // attention (and, since glm-class models don't cache, to cut per-shard cost).
-  // The dedicated compliance pass keeps the full set. When that pass is
-  // disabled, the bug passes are the only guideline channel, so don't trim.
-  const reviewGuidelinesForPrompt = options.guidelinePass
-    ? trimGuidelinesForReview(guidelinesForPrompt)
-    : guidelinesForPrompt;
+  // The dedicated compliance pass keeps the full set; buildReviewGuidelineBlock
+  // returns the full set untrimmed when that pass is disabled, so coverage
+  // never silently drops. Trim policy lives in the pure function, not here.
+  const reviewGuidelinesForPrompt = buildReviewGuidelineBlock(guidelinesForPrompt, {
+    compliancePassEnabled: options.guidelinePass,
+  });
 
   const basePrContext = joinContext(coreContext, diffHunksBlock);
 

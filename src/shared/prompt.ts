@@ -17,6 +17,8 @@
  * passes, and the pure assembly functions that place a final output reminder
  * last (recency bias for small models).
  */
+import { changedFilesIncludeFrontend } from './review-playbooks.ts';
+
 export const REVIEW_PROMPT = `You are a rigorous, pragmatic code reviewer. Your goal is to find real bugs
 that would ship to production — and to stay silent otherwise. A missed bug
 costs far more than a duplicate comment; noise costs developer trust.
@@ -486,24 +488,111 @@ function formatPlaybook(playbook: ReviewPlaybook): string {
 // PR; the frontend lens is conditional (see selectLensKeys).
 const BASE_LENS_ORDER = ['interactions', 'integrity'] as const;
 const FRONTEND_LENS_KEY = 'frontend';
-// Mirrors the frontend-workflow playbook's extension trigger. Kept local to
-// avoid a prompt -> review-playbooks import cycle (review-playbooks imports
-// types from this module).
-const FRONTEND_LENS_FILE_PATTERN = /\.(tsx|jsx|vue|svelte)$/i;
 
 /**
  * Lens keys for a given total pass count: pass 1 is the general review, each
  * extra pass takes the next lens. The frontend lens is appended AFTER the
  * always-relevant interactions/integrity lenses (never displacing them) and
- * only when the PR changes frontend files, so it activates at higher pass
- * counts on frontend PRs and is never a wasted slot elsewhere.
+ * only when the PR changes frontend files — by the SAME trigger as the
+ * frontend-workflow playbook, so a `.ts` store/hook under apps/web counts too,
+ * not just `.tsx`. It therefore activates at higher pass counts on frontend
+ * PRs and is never a wasted slot elsewhere.
  */
 export function selectLensKeys(passes: number, changedFiles: string[] = []): string[] {
   const extraPasses = Math.max(0, passes - 1);
   if (extraPasses === 0) return [];
-  const touchesFrontend = changedFiles.some((file) => FRONTEND_LENS_FILE_PATTERN.test(file));
-  const ordered = touchesFrontend ? [...BASE_LENS_ORDER, FRONTEND_LENS_KEY] : [...BASE_LENS_ORDER];
+  const ordered = changedFilesIncludeFrontend(changedFiles)
+    ? [...BASE_LENS_ORDER, FRONTEND_LENS_KEY]
+    : [...BASE_LENS_ORDER];
   return ordered.slice(0, extraPasses);
+}
+
+/**
+ * Per-pass guideline budget for the BUG-finding passes (main review shards +
+ * recall lenses). The dedicated guideline-compliance pass audits against the
+ * full set, so the bug passes only need the highest-priority conventions;
+ * injecting all of them (often tens of KB) dilutes the diff the model must
+ * reason about. Comfortably under review-context's MAX_GUIDELINE_TOTAL_BYTES.
+ */
+export const MAX_REVIEW_GUIDELINE_BYTES = 24 * 1024;
+
+const MAX_OMITTED_GUIDELINES_LISTED = 20;
+
+function guidelineSectionLabel(section: string): string {
+  const firstLine = section.split('\n', 1)[0] ?? '';
+  return firstLine.replace(/^#{1,6}\s*/, '').trim() || 'untitled section';
+}
+
+function formatOmittedGuidelineNotice(omitted: string[], truncatedFirst: boolean): string {
+  const shown = omitted.slice(0, MAX_OMITTED_GUIDELINES_LISTED);
+  const extra = omitted.length - shown.length;
+  const lines = [
+    '### Repository guidelines trimmed for this pass',
+    'The guideline-compliance pass audits against the full set; these sections were omitted here to keep the diff in focus:',
+    ...shown.map((label) => `- ${label}`),
+  ];
+  if (extra > 0) lines.push(`- …and ${extra} more`);
+  if (truncatedFirst) lines.push('(The kept section above was truncated to fit the budget.)');
+  return lines.join('\n');
+}
+
+function truncateGuidelineToBudget(text: string, budgetBytes: number): string {
+  if (Buffer.byteLength(text, 'utf8') <= budgetBytes) return text;
+  // Drop whole trailing lines until it fits — avoids mid-line cuts.
+  const lines = text.split('\n');
+  while (lines.length > 1 && Buffer.byteLength(lines.join('\n'), 'utf8') > budgetBytes) {
+    lines.pop();
+  }
+  let out = lines.join('\n');
+  // Pathological single over-long line: hard-cut on a UTF-8 boundary.
+  if (Buffer.byteLength(out, 'utf8') > budgetBytes) {
+    const buf = Buffer.from(out, 'utf8').subarray(0, Math.max(0, budgetBytes));
+    out = buf.toString('utf8').replace(/�+$/u, '');
+  }
+  return out;
+}
+
+/**
+ * Builds the guideline block for the bug-finding passes. Returns the FULL set
+ * untrimmed when the compliance pass is disabled (then the bug passes are the
+ * only guideline channel) or when it already fits. Otherwise keeps the longest
+ * PREFIX of whole sections — split on discoverGuidelines's "### <label>"
+ * boundary, never mid-body — within a HARD byte budget, and appends a notice
+ * listing the omitted sections (invariant #4). Pure and unit-tested; owns the
+ * trim policy so runner.ts stays pure wiring (invariant #10).
+ */
+export function buildReviewGuidelineBlock(
+  fullGuidelines: string,
+  options: { compliancePassEnabled: boolean; budgetBytes?: number },
+): string {
+  if (!fullGuidelines) return '';
+  if (!options.compliancePassEnabled) return fullGuidelines;
+  const budgetBytes = options.budgetBytes ?? MAX_REVIEW_GUIDELINE_BYTES;
+  if (Buffer.byteLength(fullGuidelines, 'utf8') <= budgetBytes) return fullGuidelines;
+
+  const sections = fullGuidelines.split(/\n\n(?=### )/);
+
+  // Keep the longest PREFIX (priority order) that fits with its omissions notice.
+  let keptCount = 0;
+  for (let index = 0; index < sections.length; index += 1) {
+    const candidate = sections.slice(0, index + 1).join('\n\n');
+    const omittedLabels = sections.slice(index + 1).map(guidelineSectionLabel);
+    const notice = `\n\n${formatOmittedGuidelineNotice(omittedLabels, false)}`;
+    if (Buffer.byteLength(candidate + notice, 'utf8') <= budgetBytes) keptCount = index + 1;
+    else break;
+  }
+
+  if (keptCount === 0) {
+    // The highest-priority section alone overflows: truncate it (never skip to a
+    // lower-priority one) so the block honors the hard budget.
+    const [first = '', ...rest] = sections;
+    const notice = `\n\n${formatOmittedGuidelineNotice(rest.map(guidelineSectionLabel), true)}`;
+    const room = Math.max(0, budgetBytes - Buffer.byteLength(notice, 'utf8'));
+    return `${truncateGuidelineToBudget(first, room)}${notice}`;
+  }
+
+  const omittedLabels = sections.slice(keptCount).map(guidelineSectionLabel);
+  return `${sections.slice(0, keptCount).join('\n\n')}\n\n${formatOmittedGuidelineNotice(omittedLabels, false)}`;
 }
 
 /**

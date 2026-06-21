@@ -14,6 +14,7 @@ import {
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
+  buildReviewGuidelineBlock,
   buildShardAssignmentBlock,
   formatFindingsForVerification,
   selectLensKeys,
@@ -159,10 +160,21 @@ describe('selectLensKeys', () => {
       'integrity',
       'frontend',
     ]);
+    // A frontend .ts file (no JSX) under a frontend path still counts — the lens
+    // uses the same trigger as the frontend-workflow playbook (path + name +
+    // extension), not extensions alone.
+    assert.deepEqual(selectLensKeys(4, ['apps/web/src/lib/api.ts']), [
+      'interactions',
+      'integrity',
+      'frontend',
+    ]);
     // No frontend files: that pass slot is never spent on a frontend lens.
     assert.deepEqual(selectLensKeys(4, ['src/server/api.ts']), ['interactions', 'integrity']);
     // The frontend lens never displaces interactions/integrity at lower pass counts.
-    assert.deepEqual(selectLensKeys(3, ['x.tsx']), ['interactions', 'integrity']);
+    assert.deepEqual(selectLensKeys(3, ['apps/web/src/pages/History.tsx']), [
+      'interactions',
+      'integrity',
+    ]);
   });
 
   it('is safe at the extremes', () => {
@@ -170,6 +182,69 @@ describe('selectLensKeys', () => {
     assert.deepEqual(selectLensKeys(-5), []);
     assert.deepEqual(selectLensKeys(99), ['interactions', 'integrity']);
     assert.deepEqual(selectLensKeys(99, ['a.tsx']), ['interactions', 'integrity', 'frontend']);
+  });
+});
+
+describe('buildReviewGuidelineBlock', () => {
+  const compliance = { compliancePassEnabled: true };
+
+  it('returns the full set unchanged when within budget', () => {
+    const g = '### AGENTS.md\nrule one\n\n### REVIEW.md\nrule two';
+    assert.equal(buildReviewGuidelineBlock(g, { ...compliance, budgetBytes: 10_000 }), g);
+  });
+
+  it('returns empty for empty input', () => {
+    assert.equal(buildReviewGuidelineBlock('', compliance), '');
+  });
+
+  it('keeps the full set (no trim) when the compliance pass is disabled', () => {
+    const big = `### AGENTS.md\n${'a'.repeat(50_000)}`;
+    assert.equal(
+      buildReviewGuidelineBlock(big, { compliancePassEnabled: false, budgetBytes: 1_000 }),
+      big,
+    );
+  });
+
+  it('keeps whole sections — never splits a section body on its blank lines', () => {
+    // The bug cursor/qodo caught: splitting on every blank line cut a section
+    // mid-body. A high-priority section with paragraph breaks must stay whole.
+    const agents = '### AGENTS.md\npara one\n\npara two\n\npara three';
+    const review = `### REVIEW.md\n${'b'.repeat(40_000)}`;
+    const block = buildReviewGuidelineBlock([agents, review].join('\n\n'), {
+      ...compliance,
+      budgetBytes: 2_000,
+    });
+
+    assert.match(block, /para one/);
+    assert.match(block, /para two/);
+    assert.match(block, /para three/);
+    assert.doesNotMatch(block, /bbbb/);
+    assert.match(block, /REVIEW\.md/); // omitted section is named
+  });
+
+  it('enforces a hard byte budget and lists what it omitted', () => {
+    const a = `### A.md\n${'a'.repeat(1500)}`;
+    const b = `### B.md\n${'b'.repeat(1500)}`;
+    const c = `### C.md\n${'c'.repeat(1500)}`;
+    const block = buildReviewGuidelineBlock([a, b, c].join('\n\n'), {
+      ...compliance,
+      budgetBytes: 2_000,
+    });
+
+    assert.ok(Buffer.byteLength(block, 'utf8') <= 2_000);
+    assert.match(block, /trimmed for this pass/i);
+    assert.ok(/B\.md/.test(block) || /C\.md/.test(block));
+  });
+
+  it('truncates the first section when it alone exceeds budget (hard cap honored)', () => {
+    const big = `### AGENTS.md\n${'x'.repeat(10_000)}`;
+    const block = buildReviewGuidelineBlock(`${big}\n\n### REVIEW.md\nsecond`, {
+      ...compliance,
+      budgetBytes: 1_000,
+    });
+
+    assert.ok(Buffer.byteLength(block, 'utf8') <= 1_000);
+    assert.match(block, /AGENTS\.md/);
   });
 });
 
