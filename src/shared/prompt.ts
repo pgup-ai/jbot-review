@@ -553,24 +553,27 @@ function truncateGuidelineToBudget(text: string, budgetBytes: number): string {
 }
 
 /**
- * Builds the guideline block for the bug-finding passes. Returns the FULL set
- * untrimmed when the compliance pass is disabled (then the bug passes are the
- * only guideline channel) or when it already fits. Otherwise keeps the longest
- * PREFIX of whole sections — split on discoverGuidelines's "### <label>"
- * boundary, never mid-body — within a HARD byte budget, and appends a notice
- * listing the omitted sections (invariant #4). Pure and unit-tested; owns the
- * trim policy so runner.ts stays pure wiring (invariant #10).
+ * Builds the guideline block for the bug-finding passes from the section list
+ * `discoverGuidelineSections` emits (one element per guideline file/trailer).
+ * Returns the FULL set untrimmed when the compliance pass is disabled (then the
+ * bug passes are the only guideline channel) or when it already fits. Otherwise
+ * keeps the longest PREFIX of whole sections (priority order) within a HARD byte
+ * budget and appends a notice listing the omitted sections (invariant #4).
+ *
+ * It takes the real section array rather than re-splitting a joined string, so a
+ * file body with internal blank lines or "### " subheadings is never fragmented
+ * or mislabeled. Pure and unit-tested; owns the trim policy so runner.ts stays
+ * pure wiring (invariant #10).
  */
 export function buildReviewGuidelineBlock(
-  fullGuidelines: string,
+  sections: string[],
   options: { compliancePassEnabled: boolean; budgetBytes?: number },
 ): string {
-  if (!fullGuidelines) return '';
-  if (!options.compliancePassEnabled) return fullGuidelines;
+  const full = sections.join('\n\n');
+  if (!full) return '';
+  if (!options.compliancePassEnabled) return full;
   const budgetBytes = options.budgetBytes ?? MAX_REVIEW_GUIDELINE_BYTES;
-  if (Buffer.byteLength(fullGuidelines, 'utf8') <= budgetBytes) return fullGuidelines;
-
-  const sections = fullGuidelines.split(/\n\n(?=### )/);
+  if (Buffer.byteLength(full, 'utf8') <= budgetBytes) return full;
 
   // Keep the longest PREFIX (priority order) that fits with its omissions notice.
   let keptCount = 0;

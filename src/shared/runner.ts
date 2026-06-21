@@ -42,7 +42,11 @@ import {
   formatContext7Error,
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
-import { buildReviewContext, discoverGuidelines, formatDiffScope } from './review-context.ts';
+import {
+  buildReviewContext,
+  discoverGuidelineSections,
+  formatDiffScope,
+} from './review-context.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
   listPrFiles,
@@ -265,7 +269,8 @@ export async function runPrReview(params: {
     return;
   }
 
-  const guidelines = await discoverGuidelines(workspace, changedFiles);
+  const guidelineSections = await discoverGuidelineSections(workspace, changedFiles);
+  const guidelines = guidelineSections.join('\n\n');
   if (guidelines) log(`Guidelines loaded (${guidelines.length} bytes).`);
 
   // A real review is about to run: clear the prior 🚀 so it only reappears if
@@ -359,7 +364,7 @@ export async function runPrReview(params: {
   // The dedicated compliance pass keeps the full set; buildReviewGuidelineBlock
   // returns the full set untrimmed when that pass is disabled, so coverage
   // never silently drops. Trim policy lives in the pure function, not here.
-  const reviewGuidelinesForPrompt = buildReviewGuidelineBlock(guidelinesForPrompt, {
+  const reviewGuidelinesForPrompt = buildReviewGuidelineBlock(guidelineSections, {
     compliancePassEnabled: options.guidelinePass,
   });
 
