@@ -1,0 +1,85 @@
+{
+  "provenance": {
+    "repo": "pgup-ai/jbot-review-app",
+    "pr": 11,
+    "url": "https://github.com/pgup-ai/jbot-review-app/pull/11",
+    "baseSha": "6b6cdd53628c587225363414a1b08dc9a68c03dd",
+    "headSha": "1cdfdd30fa5712fc3b782498c9811018a86b56c7",
+    "source": "Recall-gap case (investigated 2026-06-21): findings cursor/qodo/cubic caught that jbot missed on the first run (passes=2, shards=1), plus jbot's own catches. The first run found only the keyboard-nav issue; glm-5.2 caught every miss in isolation, so the gap was context dilution, not model capability."
+  },
+  "exhaustive": false,
+  "findings": [
+    {
+      "path": "apps/web/src/pages/History.tsx",
+      "lineStart": 24,
+      "lineEnd": 36,
+      "category": "logic",
+      "mustFind": true,
+      "description": "The 'Showing X-Y of N' subtitle derives from/to from the updated `page` while `data` still holds the previous page during refetch (data is never cleared and the `loading && !data` guard keeps stale items rendered), so the header desyncs from the displayed cards on page change. Consensus P2 (cursor + cubic); missed by jbot on the first run.",
+      "keywords": ["desync", "pagination", "stale", "refetch", "from", "to", "page"],
+      "sourceCommentIds": [3448835414, 3448838398],
+      "sourceUrls": [
+        "https://github.com/pgup-ai/jbot-review-app/pull/11#discussion_r3448835414",
+        "https://github.com/pgup-ai/jbot-review-app/pull/11#discussion_r3448838398"
+      ]
+    },
+    {
+      "path": "scripts/fetch-logos.mjs",
+      "lineStart": 26,
+      "lineEnd": 36,
+      "category": "security",
+      "mustFind": true,
+      "description": "Remote third-party SVGs from models.dev are written into the same-origin served apps/web/public/logos directory after only a startsWith('<svg') check (no sanitization). A compromised/typo-squatted upstream yields stored XSS / supply-chain risk reachable directly at /logos/*.svg, even though the app consumes them as CSS masks. Consensus P2 (cubic + qodo); missed by jbot on both runs (dismissed as mask-only-safe).",
+      "keywords": ["svg", "sanitize", "xss", "supply-chain", "vendored", "unsanitized", "mask"],
+      "sourceCommentIds": [3448838399, 3448840100],
+      "sourceUrls": [
+        "https://github.com/pgup-ai/jbot-review-app/pull/11#discussion_r3448838399",
+        "https://github.com/pgup-ai/jbot-review-app/pull/11#discussion_r3448840100"
+      ]
+    },
+    {
+      "path": "apps/web/src/pages/Keys.tsx",
+      "lineStart": 103,
+      "lineEnd": 103,
+      "category": "accessibility",
+      "mustFind": true,
+      "description": "ProviderPicker replaces a native <select> but implements no keyboard navigation (arrow keys, type-to-jump, Enter/Escape), so keyboard-only users lose access the native control had. jbot's own catch on this PR (via the interactions lens) - the recall anchor that must not regress.",
+      "keywords": ["keyboard", "navigation", "select", "arrow", "accessibility", "listbox"],
+      "sourceCommentIds": [3448837941],
+      "sourceUrls": ["https://github.com/pgup-ai/jbot-review-app/pull/11#discussion_r3448837941"]
+    },
+    {
+      "path": "apps/web/src/pages/History.tsx",
+      "lineStart": 18,
+      "lineEnd": 23,
+      "category": "error-handling",
+      "mustFind": false,
+      "description": "The data-fetch effect calls api.jobs.list(...).then(setData).finally(...) with no .catch(): an API failure becomes an unhandled rejection and the user sees a blank/stale page with no error state (the prior api.get() path had a .catch). Bonus bug jbot surfaced after the passes=3/shards=3 retune; not flagged by cursor/qodo/cubic.",
+      "keywords": ["catch", "error", "unhandled", "rejection", "loading"],
+      "sourceCommentIds": [],
+      "sourceUrls": []
+    },
+    {
+      "path": "apps/web/src/App.tsx",
+      "lineStart": 5,
+      "lineEnd": 13,
+      "category": "maintainability",
+      "mustFind": false,
+      "description": "Learnings is statically imported at module scope while its route is gated by import.meta.env.DEV, so keeping the dev-only mock out of the production bundle relies on tree-shaking rather than being guaranteed (the Login page, defined in-module, is). Soft P3 - Vite dead-code elimination usually drops it. Caught by qodo and by jbot after the retune.",
+      "keywords": ["import", "dev-only", "tree-shaking", "bundle", "learnings", "lazy"],
+      "sourceCommentIds": [3448840096],
+      "sourceUrls": ["https://github.com/pgup-ai/jbot-review-app/pull/11#discussion_r3448840096"]
+    },
+    {
+      "path": "apps/web/src/lib/format.ts",
+      "lineStart": 2,
+      "lineEnd": 10,
+      "category": "edge-case",
+      "mustFind": false,
+      "description": "relativeTime() does not guard invalid/optional input: new Date(bad).getTime() is NaN and the function returns 'NaNd ago' (and new Date(null) maps to the epoch -> '29000d ago'). Soft/low severity; qodo's 'premature rounding' framing is partly overstated (the double-rounding does not cross a unit boundary).",
+      "keywords": ["relativetime", "nan", "invalid", "date", "round"],
+      "sourceCommentIds": [3448840099],
+      "sourceUrls": ["https://github.com/pgup-ai/jbot-review-app/pull/11#discussion_r3448840099"]
+    }
+  ]
+}

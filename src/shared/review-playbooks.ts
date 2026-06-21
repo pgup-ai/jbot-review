@@ -45,6 +45,16 @@ const EXTERNAL_INTEGRATION_PATTERNS = [
   /(^|\/)[^/]*(client|provider|webhook|oauth|github|octokit|stripe|openai|anthropic|sdk)[^/]*\.[cm]?[jt]sx?$/i,
 ];
 
+/**
+ * Whether the PR touches frontend files, by the SAME trigger the
+ * frontend-workflow playbook uses (path + filename + extension — not extension
+ * alone). Shared so the frontend recall lens and the playbook stay consistent:
+ * a `.ts` store/hook under apps/web counts for both, or neither.
+ */
+export function changedFilesIncludeFrontend(changedFiles: string[]): boolean {
+  return matchesAny(changedFiles, FRONTEND_WORKFLOW_PATTERNS);
+}
+
 export function selectReviewPlaybookIds(changedFiles: string[]): ReviewPlaybookId[] {
   const selected = new Set<ReviewPlaybookId>([CODE_REVIEW_CORE]);
 

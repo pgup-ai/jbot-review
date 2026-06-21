@@ -17,6 +17,8 @@
  * passes, and the pure assembly functions that place a final output reminder
  * last (recency bias for small models).
  */
+import { changedFilesIncludeFrontend } from './review-playbooks.ts';
+
 export const REVIEW_PROMPT = `You are a rigorous, pragmatic code reviewer. Your goal is to find real bugs
 that would ship to production — and to stay silent otherwise. A missed bug
 costs far more than a duplicate comment; noise costs developer trust.
@@ -322,6 +324,28 @@ This pass concentrates on SECURITY, CONCURRENCY, and DATA-INTEGRITY bugs:
 - Silent data loss: truncation without pagination, lossy normalization
   (including non-ASCII/Unicode input), dropped records, results presented as
   complete when bounded, lossy type coercions.
+- Untrusted third-party content (fetched assets, vendored files, downloaded
+  payloads) persisted into a served or bundled directory is a supply-chain /
+  stored-XSS risk even when the app only consumes it indirectly (e.g. as a CSS
+  mask): the file is still reachable at its own URL, so a type/shape check is
+  not sanitization.
+
+Still report any other clear bug you encounter, but spend your exploration
+budget on these classes.`,
+  frontend: `## Review lens for this pass
+
+This pass concentrates on FRONTEND STATE & RENDER bugs — the class a
+hunk-by-hunk read misses in React/Vue/Svelte UIs:
+
+- Derived state computed from one source while the rendered data comes from
+  another: a header, count, or label derived from fresh state while the list
+  or body still shows the previous response during an in-flight refetch.
+- Hook dependencies, stale closures, missing async cancellation or
+  request-ordering on refetch, and effects that do not reset state when their
+  inputs change.
+- Loading, error, empty, disabled, and permission-denied states for each
+  changed workflow; lost user input, double-submit paths, and stale data
+  after mutations.
 
 Still report any other clear bug you encounter, but spend your exploration
 budget on these classes.`,
@@ -460,12 +484,30 @@ function formatPlaybook(playbook: ReviewPlaybook): string {
   ].join('\n');
 }
 
+// Count-rationed recall lenses, in marginal-value order: each extra review pass
+// adds the next one. The maximum useful pass count is 1 (general) + this length.
+export const COUNTED_LENS_KEYS = ['interactions', 'integrity'] as const;
+// Content-triggered lens (NOT passes-rationed): runs when the PR touches
+// frontend files, like the frontend-workflow playbook.
+const FRONTEND_LENS_KEY = 'frontend';
+
 /**
- * Lens keys for a given total pass count: pass 1 is the general review, each
- * extra pass takes the next lens in REVIEW_LENSES order.
+ * Lens keys for a review run. Pass 1 is the general review; each extra pass adds
+ * the next count-rationed lens (interactions, then integrity).
+ *
+ * The frontend lens is content-triggered, not passes-rationed: when the PR
+ * touches frontend files (same trigger as the frontend-workflow playbook — path,
+ * name, or extension, so a `.ts` store/hook under apps/web counts) it runs IN
+ * ADDITION to the rationed lenses, never displacing integrity. It is gated on
+ * lenses being enabled at all (passes >= 2), so passes=1 stays a single read.
+ * A frontend PR therefore runs one more lens session than `passes` implies.
  */
-export function selectLensKeys(passes: number): string[] {
-  return Object.keys(REVIEW_LENSES).slice(0, Math.max(0, passes - 1));
+export function selectLensKeys(passes: number, changedFiles: string[] = []): string[] {
+  const extraPasses = Math.max(0, passes - 1);
+  if (extraPasses === 0) return [];
+  const lenses: string[] = COUNTED_LENS_KEYS.slice(0, extraPasses);
+  if (changedFilesIncludeFrontend(changedFiles)) lenses.push(FRONTEND_LENS_KEY);
+  return lenses;
 }
 
 /**
