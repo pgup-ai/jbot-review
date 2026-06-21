@@ -23,7 +23,6 @@ import { parseAddedLines } from './patch.ts';
 import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
-  buildReviewGuidelineBlock,
   buildReviewPlaybookBlock,
   buildShardAssignmentBlock,
   selectLensKeys,
@@ -43,11 +42,7 @@ import {
   formatContext7Error,
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
-import {
-  buildReviewContext,
-  discoverGuidelineSections,
-  formatDiffScope,
-} from './review-context.ts';
+import { buildReviewContext, discoverGuidelines, formatDiffScope } from './review-context.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
   listPrFiles,
@@ -272,8 +267,7 @@ export async function runPrReview(params: {
     return;
   }
 
-  const guidelineSections = await discoverGuidelineSections(workspace, changedFiles);
-  const guidelines = guidelineSections.join('\n\n');
+  const guidelines = await discoverGuidelines(workspace, changedFiles);
   if (guidelines) log(`Guidelines loaded (${guidelines.length} bytes).`);
 
   // A real review is about to run: clear the prior 🚀 so it only reappears if
@@ -332,9 +326,9 @@ export async function runPrReview(params: {
       priorComments,
       commits,
       checkSummary,
-      // Guidelines are injected per-pass below — trimmed for the bug-finding
-      // passes, full for the compliance pass — never baked into the shared
-      // context, where they would dilute every pass equally.
+      // Guidelines are injected per pass via guidelinesForPrompt (the full set,
+      // in every pass), kept out of the shared context so they land in the early
+      // prompt slot (invariant #5) instead of being buried mid-context.
       guidelines: '',
       diffScope,
     });
@@ -361,16 +355,6 @@ export async function runPrReview(params: {
       .filter(Boolean)
       .join('\n');
   }
-  // Bug-finding passes (main shards + recall lenses) get a budgeted guideline
-  // block so the diff — not tens of KB of standards — stays in the model's
-  // attention (and, since glm-class models don't cache, to cut per-shard cost).
-  // The dedicated compliance pass keeps the full set; buildReviewGuidelineBlock
-  // returns the full set untrimmed when that pass is disabled, so coverage
-  // never silently drops. Trim policy lives in the pure function, not here.
-  const reviewGuidelinesForPrompt = buildReviewGuidelineBlock(guidelineSections, {
-    compliancePassEnabled: options.guidelinePass,
-  });
-
   const basePrContext = joinContext(coreContext, diffHunksBlock);
 
   configureSessionConcurrency(options.maxConcurrentSessions);
@@ -457,7 +441,7 @@ export async function runPrReview(params: {
       client,
       model: auxModel,
       prContext: basePrContext,
-      guidelinesForPrompt: reviewGuidelinesForPrompt,
+      guidelinesForPrompt,
       changedFiles,
       passes: options.reviewPasses,
       timeoutMs: finderTimeoutMs,
@@ -476,7 +460,7 @@ export async function runPrReview(params: {
     const { summary, findings } = await runShardedReview({
       client,
       model,
-      guidelinesForPrompt: reviewGuidelinesForPrompt,
+      guidelinesForPrompt,
       shardPlans,
       changedFiles,
       timeoutMs: finderTimeoutMs,

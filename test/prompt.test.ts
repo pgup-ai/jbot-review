@@ -14,7 +14,6 @@ import {
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
-  buildReviewGuidelineBlock,
   buildShardAssignmentBlock,
   formatFindingsForVerification,
   selectLensKeys,
@@ -188,72 +187,6 @@ describe('selectLensKeys', () => {
     assert.deepEqual(selectLensKeys(-5), []);
     assert.deepEqual(selectLensKeys(99), ['interactions', 'integrity']);
     assert.deepEqual(selectLensKeys(99, ['a.tsx']), ['interactions', 'integrity', 'frontend']);
-  });
-});
-
-describe('buildReviewGuidelineBlock', () => {
-  const compliance = { compliancePassEnabled: true };
-
-  it('returns the full set unchanged when within budget', () => {
-    const sections = ['### AGENTS.md\nrule one', '### REVIEW.md\nrule two'];
-    assert.equal(
-      buildReviewGuidelineBlock(sections, { ...compliance, budgetBytes: 10_000 }),
-      sections.join('\n\n'),
-    );
-  });
-
-  it('returns empty for empty input', () => {
-    assert.equal(buildReviewGuidelineBlock([], compliance), '');
-    assert.equal(buildReviewGuidelineBlock([''], compliance), '');
-  });
-
-  it('keeps the full set (no trim) when the compliance pass is disabled', () => {
-    const sections = [`### AGENTS.md\n${'a'.repeat(50_000)}`];
-    assert.equal(
-      buildReviewGuidelineBlock(sections, { compliancePassEnabled: false, budgetBytes: 1_000 }),
-      sections.join('\n\n'),
-    );
-  });
-
-  it('keeps each section whole — even when its body has blank lines AND internal ### subheadings', () => {
-    // The bug class cursor/qodo/J-Bot caught: a section is one discoverGuidelines
-    // unit; its body's paragraphs and internal "### " subheadings must never be
-    // treated as separate sections or listed as omitted documents.
-    const agents =
-      '### AGENTS.md\nintro\n\n### Context7 Steps\nstep one\n\n### Review MCP Stack\nuse it';
-    const review = `### REVIEW.md\n${'b'.repeat(40_000)}`;
-    const block = buildReviewGuidelineBlock([agents, review], {
-      ...compliance,
-      budgetBytes: 2_000,
-    });
-
-    assert.match(block, /Context7 Steps/); // body subheading kept intact
-    assert.match(block, /Review MCP Stack/);
-    assert.match(block, /use it/);
-    assert.doesNotMatch(block, /bbbb/);
-    assert.doesNotMatch(block, /- Context7 Steps/); // NOT listed as an omitted document
-    assert.match(block, /REVIEW\.md/); // the real omitted section IS listed
-  });
-
-  it('enforces a hard byte budget and lists what it omitted', () => {
-    const sections = [
-      `### A.md\n${'a'.repeat(1500)}`,
-      `### B.md\n${'b'.repeat(1500)}`,
-      `### C.md\n${'c'.repeat(1500)}`,
-    ];
-    const block = buildReviewGuidelineBlock(sections, { ...compliance, budgetBytes: 2_000 });
-
-    assert.ok(Buffer.byteLength(block, 'utf8') <= 2_000);
-    assert.match(block, /trimmed for this pass/i);
-    assert.ok(/B\.md/.test(block) || /C\.md/.test(block));
-  });
-
-  it('truncates the first section when it alone exceeds budget (hard cap honored)', () => {
-    const sections = [`### AGENTS.md\n${'x'.repeat(10_000)}`, '### REVIEW.md\nsecond'];
-    const block = buildReviewGuidelineBlock(sections, { ...compliance, budgetBytes: 1_000 });
-
-    assert.ok(Buffer.byteLength(block, 'utf8') <= 1_000);
-    assert.match(block, /AGENTS\.md/);
   });
 });
 

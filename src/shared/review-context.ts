@@ -143,28 +143,10 @@ const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
 const MAX_GUIDELINE_FILE_BYTES = 24 * 1024;
 const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
 
-/**
- * Joined guideline text — the full set for the compliance pass, the PR context,
- * and replay. Prefer discoverGuidelineSections when you need the structured
- * form (e.g. the bug-pass trimmer buildReviewGuidelineBlock), so section
- * boundaries are exact rather than re-derived from the joined string.
- */
 export async function discoverGuidelines(
   cwd: string,
   changedFiles: string[] = [],
 ): Promise<string> {
-  return (await discoverGuidelineSections(cwd, changedFiles)).join('\n\n');
-}
-
-/**
- * Discovers repository guideline files and returns them as one section per
- * file/trailer, in priority order (root files, scoped files, governance, then
- * the referenced-docs/budget trailers). The joined form is discoverGuidelines.
- */
-export async function discoverGuidelineSections(
-  cwd: string,
-  changedFiles: string[] = [],
-): Promise<string[]> {
   const sections: string[] = [];
   const seen = new Set<string>();
   const seenRealPaths = new Set<string>();
@@ -351,7 +333,7 @@ export async function discoverGuidelineSections(
       await preloadOrListReferencedDoc(governanceDir, reference);
     }
     await flushDeferredReferences();
-    return finalizeGuidelineSections(sections, seen, referencedDocs);
+    return formatGuidelineSections(sections, seen, referencedDocs);
   }
 
   try {
@@ -368,7 +350,7 @@ export async function discoverGuidelineSections(
   }
 
   await flushDeferredReferences();
-  return finalizeGuidelineSections(sections, seen, referencedDocs);
+  return formatGuidelineSections(sections, seen, referencedDocs);
 }
 
 function getChangedFileAncestorDirs(changedFiles: string[]): string[] {
@@ -383,11 +365,11 @@ function getChangedFileAncestorDirs(changedFiles: string[]): string[] {
   return [...dirs].sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b));
 }
 
-function finalizeGuidelineSections(
+function formatGuidelineSections(
   sections: string[],
   loadedPaths: Set<string>,
   referencedDocs: Map<string, string>,
-): string[] {
+): string {
   const availableDocs = [...referencedDocs]
     .filter(([path]) => !loadedPaths.has(path))
     .map(([, label]) => label)
@@ -403,7 +385,7 @@ function finalizeGuidelineSections(
     );
   }
 
-  return sections;
+  return sections.join('\n\n');
 }
 
 function extractMarkdownDocumentReferences(markdown: string): string[] {
