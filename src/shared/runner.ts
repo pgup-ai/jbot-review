@@ -1207,7 +1207,9 @@ function buildReviewFocusBlock(changedFiles: string[]): string {
       focusItems.add('Security: privilege, tokens, tenant isolation, unsafe input boundaries.');
     }
     if (PATH_PATTERNS.infra.test(file)) {
-      focusItems.add('Infra/ops: least privilege, exposure, pinned versions, rollout/rollback safety.');
+      focusItems.add(
+        'Infra/ops: least privilege, exposure, pinned versions, rollout/rollback safety.',
+      );
     }
     if (
       /\.(tsx|jsx|vue|svelte)$/i.test(file) ||
