@@ -28,4 +28,10 @@ await esbuild.build({
   outfile: 'dist/app/server.js',
 });
 
+await esbuild.build({
+  ...shared,
+  entryPoints: ['src/worker/index.ts'],
+  outfile: 'dist/worker/index.js',
+});
+
 console.log('Build complete.');
