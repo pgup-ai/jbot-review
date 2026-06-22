@@ -20,11 +20,13 @@ export function octokitForToken(token: string): Octokit {
 /** Run one claimed job; resolves to the terminal JobUpdate (never throws). */
 export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise<JobUpdate> {
   const startedAt = Date.now();
-  const [owner, repo] = job.repoFullName.split('/');
-  if (!owner || !repo) {
+  // Exactly "owner/repo" — reject empty segments AND extra slashes (e.g. "a/b/c").
+  const parts = job.repoFullName.split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
     log(`job ${job.jobId}: malformed repoFullName "${job.repoFullName}"`);
     return { status: 'failed', durationMs: Date.now() - startedAt };
   }
+  const [owner, repo] = parts;
   const octokit = octokitForToken(job.installationToken);
   let cleanup: (() => void) | null = null;
   try {
