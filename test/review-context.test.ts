@@ -6,8 +6,12 @@ import { describe, it } from 'node:test';
 
 import {
   buildReviewContext,
+  discoverGuidelineDocs,
   discoverGuidelines,
   formatDiffScope,
+  formatFinderGuidelines,
+  formatGuidelines,
+  MAX_FINDER_GUIDELINE_BYTES,
 } from '../src/shared/review-context.ts';
 
 async function withTempRepo(run: (repo: string) => Promise<void>): Promise<void> {
@@ -270,6 +274,16 @@ describe('discoverGuidelines', () => {
     }
   });
 
+  it('loads DESIGN.md and DECISIONS.md as root guidance', async () => {
+    await withTempRepo(async (repo) => {
+      await writeFile(join(repo, 'DESIGN.md'), '# Design\nArchitecture decisions');
+      await writeFile(join(repo, 'DECISIONS.md'), '# Decisions\nADR log');
+      const guidelines = await discoverGuidelines(repo);
+      assert.match(guidelines, /### DESIGN\.md\n# Design/);
+      assert.match(guidelines, /### DECISIONS\.md\n# Decisions/);
+    });
+  });
+
   it('truncates large guideline files instead of inlining them fully', async () => {
     await withTempRepo(async (repo) => {
       await writeFile(
@@ -346,5 +360,72 @@ describe('buildReviewContext', () => {
 
     assert.doesNotMatch(context, /git diff/);
     assert.doesNotMatch(context, /Base:/);
+  });
+});
+
+describe('discoverGuidelineDocs', () => {
+  it('returns structured docs and marks scoped guidance higher relevance', async () => {
+    await withTempRepo(async (repo) => {
+      await writeFile(join(repo, 'AGENTS.md'), '# Agents\nRoot');
+      await mkdir(join(repo, 'apps', 'web'), { recursive: true });
+      await writeFile(join(repo, 'apps', 'web', 'AGENTS.md'), '# Web Agents\nScoped');
+
+      const discovered = await discoverGuidelineDocs(repo, ['apps/web/index.ts']);
+      const root = discovered.docs.find((d) => d.label === 'AGENTS.md');
+      const scoped = discovered.docs.find((d) => d.label === 'apps/web/AGENTS.md');
+
+      assert.ok(root, 'root AGENTS.md present');
+      assert.ok(scoped, 'scoped AGENTS.md present');
+      assert.ok(scoped.relevance > root.relevance, 'scoped outranks root');
+      // formatGuidelines still emits the legacy section markers for both docs.
+      // (Asserting against discoverGuidelines() would be circular — it now
+      // delegates to formatGuidelines. The pre-existing discoverGuidelines
+      // regex assertions above are the real behavior-preservation guard.)
+      const full = formatGuidelines(discovered);
+      assert.match(full, /### AGENTS\.md\n# Agents/);
+      assert.match(full, /### apps\/web\/AGENTS\.md\n# Web Agents/);
+    });
+  });
+});
+
+describe('formatFinderGuidelines', () => {
+  it('keeps scoped guidance and drops lower-relevance root docs past the cap', async () => {
+    await withTempRepo(async (repo) => {
+      await writeFile(join(repo, 'AGENTS.md'), '# Root\n' + 'x'.repeat(4000));
+      await mkdir(join(repo, 'apps', 'web'), { recursive: true });
+      await writeFile(join(repo, 'apps', 'web', 'REVIEW.md'), '# Scoped review\nfindme-scoped');
+
+      const discovered = await discoverGuidelineDocs(repo, ['apps/web/index.ts']);
+      const finder = formatFinderGuidelines(discovered, { capBytes: 1024 });
+
+      assert.ok(Buffer.byteLength(finder, 'utf8') <= 1024 + 256, 'within cap (+ notice slack)');
+      assert.match(finder, /findme-scoped/, 'scoped doc kept');
+      assert.doesNotMatch(finder, /x{4000}/, 'large root doc dropped');
+      assert.match(finder, /omitted from this pass/, 'omission notice present');
+    });
+  });
+
+  it('returns the same docs as the full render when everything fits', async () => {
+    await withTempRepo(async (repo) => {
+      await writeFile(join(repo, 'AGENTS.md'), '# Agents\nsmall');
+      const discovered = await discoverGuidelineDocs(repo, []);
+      const finder = formatFinderGuidelines(discovered, { capBytes: 96 * 1024 });
+      assert.match(finder, /### AGENTS\.md\n# Agents/);
+      assert.doesNotMatch(finder, /omitted from this pass/);
+    });
+  });
+
+  it('always keeps the highest-relevance doc even when it alone exceeds the cap', async () => {
+    await withTempRepo(async (repo) => {
+      await mkdir(join(repo, 'apps', 'web'), { recursive: true });
+      await writeFile(join(repo, 'apps', 'web', 'REVIEW.md'), '# Scoped\n' + 'findme '.repeat(500));
+      const discovered = await discoverGuidelineDocs(repo, ['apps/web/index.ts']);
+      const finder = formatFinderGuidelines(discovered, { capBytes: 256 });
+      assert.match(finder, /findme/, 'top doc kept despite exceeding the cap');
+    });
+  });
+
+  it('uses MAX_FINDER_GUIDELINE_BYTES by default and is smaller than the total cap', () => {
+    assert.ok(MAX_FINDER_GUIDELINE_BYTES < 96 * 1024);
   });
 });

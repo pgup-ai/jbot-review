@@ -42,7 +42,13 @@ import {
   formatContext7Error,
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
-import { buildReviewContext, discoverGuidelines, formatDiffScope } from './review-context.ts';
+import {
+  buildReviewContext,
+  discoverGuidelineDocs,
+  formatGuidelines,
+  formatFinderGuidelines,
+  formatDiffScope,
+} from './review-context.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
   listPrFiles,
@@ -267,8 +273,14 @@ export async function runPrReview(params: {
     return;
   }
 
-  const guidelines = await discoverGuidelines(workspace, changedFiles);
-  if (guidelines) log(`Guidelines loaded (${guidelines.length} bytes).`);
+  const discoveredGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
+  const guidelines = formatGuidelines(discoveredGuidelines);
+  const finderGuidelines = formatFinderGuidelines(discoveredGuidelines);
+  if (guidelines) {
+    log(
+      `Guidelines loaded (${guidelines.length} bytes; finder slice ${finderGuidelines.length} bytes).`,
+    );
+  }
 
   // A real review is about to run: clear the prior 🚀 so it only reappears if
   // this run leaves the PR with zero open findings. A removed reaction means
@@ -313,7 +325,12 @@ export async function runPrReview(params: {
   // full block. Hunks always go last — closest to the output reminder, where
   // small models attend most.
   let coreContext: string;
-  const guidelinesForPrompt = guidelines;
+  // Finder shards + recall lenses get the capped, relevance-ranked slice, but
+  // ONLY when the guideline-compliance pass is enabled to audit the full set in
+  // parallel. With compliance off, finders fall back to the full set so no
+  // guideline coverage is silently dropped — otherwise the omitted docs would
+  // be seen by no session at all.
+  const guidelinesForPrompt = options.guidelinePass ? finderGuidelines : guidelines;
   if (options.enhancedContext) {
     const commits = await listPrCommits(octokit, owner, repo, pullNumber);
     const checkSummary = headSha
@@ -326,9 +343,11 @@ export async function runPrReview(params: {
       priorComments,
       commits,
       checkSummary,
-      // Guidelines are injected per pass via guidelinesForPrompt (the full set,
-      // in every pass), kept out of the shared context so they land in the early
-      // prompt slot (invariant #5) instead of being buried mid-context.
+      // Guidelines are injected per pass via guidelinesForPrompt (defined
+      // above: the capped finder slice for shards/lenses when the compliance
+      // pass carries the full set, else the full set), kept out of the shared
+      // context so they land in the early prompt slot (invariant #5) instead
+      // of being buried mid-context.
       guidelines: '',
       diffScope,
     });
@@ -425,7 +444,7 @@ export async function runPrReview(params: {
       client,
       model: auxModel,
       prContext: basePrContext,
-      guidelinesForPrompt,
+      guidelinesForPrompt: guidelines,
       hasGuidelines: Boolean(guidelines),
       enabled: options.guidelinePass,
       timeoutMs: finderTimeoutMs,
@@ -1205,6 +1224,11 @@ function buildReviewFocusBlock(changedFiles: string[]): string {
     }
     if (PATH_PATTERNS.security.test(file)) {
       focusItems.add('Security: privilege, tokens, tenant isolation, unsafe input boundaries.');
+    }
+    if (PATH_PATTERNS.infra.test(file)) {
+      focusItems.add(
+        'Infra/ops: least privilege, exposure, pinned versions, rollout/rollback safety.',
+      );
     }
     if (
       /\.(tsx|jsx|vue|svelte)$/i.test(file) ||

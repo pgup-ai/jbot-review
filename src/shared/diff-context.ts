@@ -22,6 +22,8 @@ export const PATH_PATTERNS = {
   api: /(^|\/)(api|routes?|controllers?|server|webhooks?)\//i,
   tooling: /(^|\/)(package\.json|action\.ya?ml)$|^\.github\/workflows\/.+\.ya?ml$/i,
   tests: /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/i,
+  infra:
+    /(^|\/)(infra(?:structure)?|terraform|deploy(?:ment)?|k8s|kubernetes|helm|ansible|pulumi)\/|(^|\/)Dockerfile(?:\.[^/]+)?$|(^|\/)Chart\.ya?ml$|(^|\/)(?:docker-)?compose\.ya?ml$|\.(?:tf|tfvars|bicep)$/i,
 } as const;
 
 /**
@@ -67,6 +69,7 @@ const RISK_RULES: RiskRule[] = [
   { pattern: PATH_PATTERNS.security, weight: 60 },
   { pattern: PATH_PATTERNS.data, weight: 50 },
   { pattern: PATH_PATTERNS.api, weight: 50 },
+  { pattern: PATH_PATTERNS.infra, weight: 40 },
   { pattern: /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|rb|cs|swift|c|cc|cpp|h)$/i, weight: 30 },
   { pattern: /\.(vue|svelte)$/i, weight: 30 },
   { pattern: PATH_PATTERNS.tooling, weight: 25 },

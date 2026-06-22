@@ -64,6 +64,17 @@ describe('selectReviewPlaybookIds', () => {
 
     assert.equal(ids.filter((id) => id === 'frontend-workflow').length, 1);
   });
+
+  it('selects infra-ops for IaC and container changes', () => {
+    assert.ok(selectReviewPlaybookIds(['infra/main.tf']).includes('infra-ops'));
+    assert.ok(selectReviewPlaybookIds(['Dockerfile']).includes('infra-ops'));
+    assert.ok(selectReviewPlaybookIds(['deploy/k8s/app.yaml']).includes('infra-ops'));
+  });
+
+  it('routes remote-fetch scripts to external-integration (supply-chain)', () => {
+    const ids = selectReviewPlaybookIds(['scripts/fetch-logos.mjs']);
+    assert.ok(ids.includes('external-integration'), `got: ${ids.join(', ')}`);
+  });
 });
 
 describe('buildReviewPlaybookBlock', () => {
@@ -100,6 +111,11 @@ describe('buildReviewPlaybookBlock', () => {
 
     assert.ok(Buffer.byteLength(block, 'utf8') <= 800);
     assert.match(block, /contract-api, backend-data, frontend-workflow, external-integration/);
+  });
+
+  it('renders the infra-ops playbook when infra files change', () => {
+    const block = buildReviewPlaybookBlock(selectReviewPlaybookIds(['infra/main.tf']));
+    assert.match(block, /### Infra\/ops review \(infra-ops\)/);
   });
 
   it('renders the playbooks selected for a representative PR', () => {

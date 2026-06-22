@@ -13,6 +13,28 @@ export interface DiffScope {
   headSha?: string;
 }
 
+/** Relevance tiers for finder-pass guideline ranking; higher = kept first. */
+const GUIDELINE_RELEVANCE = { root: 1, governance: 2, scoped: 3 } as const;
+type GuidelineRelevance = (typeof GUIDELINE_RELEVANCE)[keyof typeof GUIDELINE_RELEVANCE];
+
+export interface GuidelineDoc {
+  /** Relative-path label, e.g. "apps/web/AGENTS.md". */
+  label: string;
+  /** Trimmed, byte-bounded text (may end with a per-file truncation notice). */
+  text: string;
+  /** Higher = more relevant to the changed files (scoped > governance > root). */
+  relevance: GuidelineRelevance;
+}
+
+export interface DiscoveredGuidelines {
+  /** Loaded docs in discovery order. */
+  docs: GuidelineDoc[];
+  /** Labels referenced by loaded docs but not themselves loaded (sorted). */
+  referenced: string[];
+  /** True when the total discovery budget was exhausted before all files. */
+  budgetExhausted: boolean;
+}
+
 /**
  * Renders the PR base/head and the exact three-dot diff command the agent
  * should run. Three-dot (merge-base) diff is required: GitHub's patch — which
@@ -114,6 +136,8 @@ const ROOT_GUIDELINE_FILES = [
   'REVIEW.md',
   'TECHNICAL_STANDARDS.md',
   'ARCHITECTURE.md',
+  'DESIGN.md',
+  'DECISIONS.md',
   'CLAUDE.md',
   'CONTRIBUTING.md',
   '.cursor/BUGBOT.md',
@@ -129,6 +153,8 @@ const SCOPED_GUIDELINE_FILES = [
   'AGENTS.md',
   'REVIEW.md',
   'TECHNICAL_STANDARDS.md',
+  'DESIGN.md',
+  'DECISIONS.md',
   'CLAUDE.md',
   'CONTRIBUTING.md',
   '.cursor/BUGBOT.md',
@@ -143,27 +169,20 @@ const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
 const MAX_GUIDELINE_FILE_BYTES = 24 * 1024;
 const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
 
-export async function discoverGuidelines(
+export async function discoverGuidelineDocs(
   cwd: string,
   changedFiles: string[] = [],
-): Promise<string> {
-  const sections: string[] = [];
+): Promise<DiscoveredGuidelines> {
+  const docs: GuidelineDoc[] = [];
   const seen = new Set<string>();
   const seenRealPaths = new Set<string>();
   const referencedDocs = new Map<string, string>();
   const workspaceRoot = await realpath(cwd);
   let remainingGuidelineBytes = MAX_GUIDELINE_TOTAL_BYTES;
-  let budgetNoticeAdded = false;
+  let budgetExhausted = false;
 
-  function addBudgetNotice(): void {
-    if (budgetNoticeAdded) return;
-    budgetNoticeAdded = true;
-    sections.push(
-      [
-        '### Review guidance budget',
-        `Additional guidance was skipped after the ${MAX_GUIDELINE_TOTAL_BYTES} byte review guidance budget was reached.`,
-      ].join('\n'),
-    );
+  function markBudgetExhausted(): void {
+    budgetExhausted = true;
   }
 
   async function resolveExistingInsideWorkspace(
@@ -182,7 +201,7 @@ export async function discoverGuidelines(
 
   async function readBoundedGuidelineFile(realPath: string): Promise<string | undefined> {
     if (remainingGuidelineBytes <= 0) {
-      addBudgetNotice();
+      markBudgetExhausted();
       return undefined;
     }
 
@@ -216,23 +235,19 @@ export async function discoverGuidelines(
   async function addGuidelineFile(
     label: string,
     path: string,
-  ): Promise<
-    | {
-        text: string;
-        absolutePath: string;
-      }
-    | undefined
-  > {
+    relevance: GuidelineRelevance,
+  ): Promise<{ text: string; absolutePath: string } | undefined> {
     const resolved = await resolveExistingInsideWorkspace(path);
     if (!resolved) return undefined;
     if (seen.has(resolved.absolutePath) || seenRealPaths.has(resolved.realPath)) return undefined;
     try {
       const text = await readBoundedGuidelineFile(resolved.realPath);
       if (!text) return undefined;
-      if (!text.trim()) return undefined;
+      const trimmed = text.trim();
+      if (!trimmed) return undefined;
       seen.add(resolved.absolutePath);
       seenRealPaths.add(resolved.realPath);
-      sections.push(`### ${label}\n${text.trim()}`);
+      docs.push({ label, text: trimmed, relevance });
       return { text, absolutePath: resolved.absolutePath };
     } catch {
       return undefined;
@@ -262,6 +277,7 @@ export async function discoverGuidelines(
     const loaded = await addGuidelineFile(
       formatGuidelineLabel(cwd, referencedPath),
       referencedPath,
+      GUIDELINE_RELEVANCE.governance,
     );
     // Budget exhausted (or unreadable): fall back to listing the doc so the
     // agent can still read it on demand instead of never seeing it.
@@ -281,8 +297,11 @@ export async function discoverGuidelines(
     deferredReferences.length = 0;
   }
 
-  async function addGuidelineWithReferences(relativePath: string): Promise<void> {
-    const result = await addGuidelineFile(relativePath, resolve(cwd, relativePath));
+  async function addGuidelineWithReferences(
+    relativePath: string,
+    relevance: GuidelineRelevance,
+  ): Promise<void> {
+    const result = await addGuidelineFile(relativePath, resolve(cwd, relativePath), relevance);
     if (!result) return;
     const baseDir = ['AGENTS.md', 'REVIEW.md'].includes(relativePath)
       ? cwd
@@ -292,7 +311,10 @@ export async function discoverGuidelines(
     }
   }
 
-  async function addRuleDirectory(relativeDir: string): Promise<void> {
+  async function addRuleDirectory(
+    relativeDir: string,
+    relevance: GuidelineRelevance,
+  ): Promise<void> {
     const resolvedDir = await resolveExistingInsideWorkspace(resolve(cwd, relativeDir));
     if (!resolvedDir) return;
     try {
@@ -301,7 +323,7 @@ export async function discoverGuidelines(
         if (!entry.isFile()) continue;
         const ext = entry.name.match(/\.[^.]+$/)?.[0] ?? '';
         if (!RULE_DIRECTORY_FILES.has(ext)) continue;
-        await addGuidelineWithReferences(`${relativeDir}/${entry.name}`);
+        await addGuidelineWithReferences(`${relativeDir}/${entry.name}`, relevance);
       }
     } catch {
       /* directory absent */
@@ -309,21 +331,22 @@ export async function discoverGuidelines(
   }
 
   for (const relativePath of ROOT_GUIDELINE_FILES) {
-    await addGuidelineWithReferences(relativePath);
+    await addGuidelineWithReferences(relativePath, GUIDELINE_RELEVANCE.root);
   }
-  await addRuleDirectory('.cursor/rules');
+  await addRuleDirectory('.cursor/rules', GUIDELINE_RELEVANCE.root);
 
   for (const dir of getChangedFileAncestorDirs(changedFiles)) {
     for (const name of SCOPED_GUIDELINE_FILES) {
-      await addGuidelineWithReferences(`${dir}/${name}`);
+      await addGuidelineWithReferences(`${dir}/${name}`, GUIDELINE_RELEVANCE.scoped);
     }
-    await addRuleDirectory(`${dir}/.cursor/rules`);
+    await addRuleDirectory(`${dir}/.cursor/rules`, GUIDELINE_RELEVANCE.scoped);
   }
 
   const governanceDir = resolve(cwd, '.pr-governance');
   const readme = await addGuidelineFile(
     '.pr-governance/README.md',
     resolve(governanceDir, 'README.md'),
+    GUIDELINE_RELEVANCE.governance,
   );
 
   if (readme) {
@@ -333,7 +356,7 @@ export async function discoverGuidelines(
       await preloadOrListReferencedDoc(governanceDir, reference);
     }
     await flushDeferredReferences();
-    return formatGuidelineSections(sections, seen, referencedDocs);
+    return buildDiscoveredGuidelines(docs, seen, referencedDocs, budgetExhausted);
   }
 
   try {
@@ -342,7 +365,11 @@ export async function discoverGuidelines(
       const entries = await readdir(resolvedGovernanceDir.realPath, { withFileTypes: true });
       for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
         if (!entry.isFile()) continue;
-        await addGuidelineFile(`.pr-governance/${entry.name}`, resolve(governanceDir, entry.name));
+        await addGuidelineFile(
+          `.pr-governance/${entry.name}`,
+          resolve(governanceDir, entry.name),
+          GUIDELINE_RELEVANCE.governance,
+        );
       }
     }
   } catch {
@@ -350,7 +377,14 @@ export async function discoverGuidelines(
   }
 
   await flushDeferredReferences();
-  return formatGuidelineSections(sections, seen, referencedDocs);
+  return buildDiscoveredGuidelines(docs, seen, referencedDocs, budgetExhausted);
+}
+
+export async function discoverGuidelines(
+  cwd: string,
+  changedFiles: string[] = [],
+): Promise<string> {
+  return formatGuidelines(await discoverGuidelineDocs(cwd, changedFiles));
 }
 
 function getChangedFileAncestorDirs(changedFiles: string[]): string[] {
@@ -365,22 +399,119 @@ function getChangedFileAncestorDirs(changedFiles: string[]): string[] {
   return [...dirs].sort((a, b) => a.split('/').length - b.split('/').length || a.localeCompare(b));
 }
 
-function formatGuidelineSections(
-  sections: string[],
+function buildDiscoveredGuidelines(
+  docs: GuidelineDoc[],
   loadedPaths: Set<string>,
   referencedDocs: Map<string, string>,
-): string {
-  const availableDocs = [...referencedDocs]
+  budgetExhausted: boolean,
+): DiscoveredGuidelines {
+  const referenced = [...referencedDocs]
     .filter(([path]) => !loadedPaths.has(path))
     .map(([, label]) => label)
     .sort();
+  return { docs, referenced, budgetExhausted };
+}
 
-  if (availableDocs.length > 0) {
+/** A single loaded guideline doc rendered as a prompt section. */
+function formatGuidelineDoc(doc: GuidelineDoc): string {
+  return `### ${doc.label}\n${doc.text}`;
+}
+
+/**
+ * Full guideline render: every loaded doc, plus the budget notice (when the
+ * total discovery budget was exhausted) and the referenced-but-not-loaded
+ * pointer list. This is what the dedicated guideline-compliance session and
+ * the back-compat `discoverGuidelines` wrapper receive.
+ */
+export function formatGuidelines(discovered: DiscoveredGuidelines): string {
+  const sections = discovered.docs.map(formatGuidelineDoc);
+
+  if (discovered.budgetExhausted) {
+    sections.push(
+      [
+        '### Review guidance budget',
+        `Additional guidance was skipped after the ${MAX_GUIDELINE_TOTAL_BYTES} byte review guidance budget was reached.`,
+      ].join('\n'),
+    );
+  }
+
+  if (discovered.referenced.length > 0) {
     sections.push(
       [
         '### Referenced Markdown documents',
         'These docs were mentioned by loaded review guidance but were not preloaded. Read them only when relevant to the changed files or review question.',
-        availableDocs.map((label) => `- ${label}`).join('\n'),
+        discovered.referenced.map((label) => `- ${label}`).join('\n'),
+      ].join('\n'),
+    );
+  }
+
+  return sections.join('\n\n');
+}
+
+/**
+ * Finder-pass guideline budget. Bug-finder shards and recall lenses get this
+ * relevance-ranked slice instead of the full set; the dedicated
+ * guideline-compliance session still receives every loaded doc via
+ * formatGuidelines. Smaller than MAX_GUIDELINE_TOTAL_BYTES on purpose: finders
+ * spend attention on the diff, not on the full standards corpus.
+ */
+export const MAX_FINDER_GUIDELINE_BYTES = 24 * 1024;
+
+/**
+ * Relevance-ranked, byte-capped render for finder sessions (shards + lenses).
+ * Docs are CHOSEN by relevance (scoped > governance > root) but RENDERED in
+ * discovery order. The single highest-relevance doc is always kept even if it
+ * alone exceeds the cap, so finders are never left with zero guidance; the
+ * referenced-doc pointer list is omitted to avoid inviting extra reads.
+ */
+export function formatFinderGuidelines(
+  discovered: DiscoveredGuidelines,
+  options: { capBytes?: number } = {},
+): string {
+  const capBytes = options.capBytes ?? MAX_FINDER_GUIDELINE_BYTES;
+
+  const ranked = discovered.docs
+    .map((doc, index) => ({ doc, index }))
+    .sort((a, b) => b.doc.relevance - a.doc.relevance || a.index - b.index);
+
+  const keptIndices = new Set<number>();
+  let usedBytes = 0;
+  let omitted = 0;
+  for (const { doc, index } of ranked) {
+    const separatorBytes = keptIndices.size > 0 ? 2 : 0;
+    const sectionBytes = Buffer.byteLength(formatGuidelineDoc(doc), 'utf8') + separatorBytes;
+    // Always keep the single highest-relevance doc, even if it alone exceeds
+    // the cap (the per-file read bound can equal this budget): finders must
+    // never be left with zero guidance when guidance exists. This makes the
+    // cap intentionally soft for the first doc only.
+    if (keptIndices.size === 0 || usedBytes + sectionBytes <= capBytes) {
+      keptIndices.add(index);
+      usedBytes += sectionBytes;
+    } else {
+      omitted += 1;
+    }
+  }
+
+  const sections = discovered.docs
+    .filter((_, index) => keptIndices.has(index))
+    .map(formatGuidelineDoc);
+
+  const budgetNotes: string[] = [];
+  if (omitted > 0) {
+    budgetNotes.push(
+      `${omitted} lower-relevance guideline file(s) were omitted from this pass to stay within the ${capBytes} byte finder budget`,
+    );
+  }
+  if (discovered.budgetExhausted) {
+    budgetNotes.push(
+      `repository guidance also hit the ${MAX_GUIDELINE_TOTAL_BYTES} byte discovery budget upstream`,
+    );
+  }
+  if (budgetNotes.length > 0) {
+    sections.push(
+      [
+        '### Review guidance budget',
+        `${budgetNotes.join('; ')}. The full set is reviewed by the separate guideline-compliance pass.`,
       ].join('\n'),
     );
   }
