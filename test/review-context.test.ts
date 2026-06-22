@@ -270,6 +270,16 @@ describe('discoverGuidelines', () => {
     }
   });
 
+  it('loads DESIGN.md and DECISIONS.md as root guidance', async () => {
+    await withTempRepo(async (repo) => {
+      await writeFile(join(repo, 'DESIGN.md'), '# Design\nArchitecture decisions');
+      await writeFile(join(repo, 'DECISIONS.md'), '# Decisions\nADR log');
+      const guidelines = await discoverGuidelines(repo);
+      assert.match(guidelines, /### DESIGN\.md\n# Design/);
+      assert.match(guidelines, /### DECISIONS\.md\n# Decisions/);
+    });
+  });
+
   it('truncates large guideline files instead of inlining them fully', async () => {
     await withTempRepo(async (repo) => {
       await writeFile(
