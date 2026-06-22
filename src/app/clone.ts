@@ -19,9 +19,13 @@ export function clonePr(
   });
   if (cloneRes.status !== 0) {
     safeRm(dir);
-    throw new Error(
-      `Failed to clone PR branch: ${cloneRes.stderr?.toString().trim() ?? 'unknown error'}`,
+    // Scrub the credential — git echoes the auth URL (x-access-token:<token>@…)
+    // in its stderr on failure, which would otherwise leak into logs.
+    const stderr = (cloneRes.stderr?.toString().trim() ?? 'unknown error').replace(
+      /x-access-token:[^@]+@/g,
+      'x-access-token:***@',
     );
+    throw new Error(`Failed to clone PR branch: ${stderr}`);
   }
 
   // base ref may not be fetchable; non-fatal.

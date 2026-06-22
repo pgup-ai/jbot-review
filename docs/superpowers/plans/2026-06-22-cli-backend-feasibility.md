@@ -77,7 +77,7 @@ export interface ReviewAgentBackend {
       repo: string;
       pullNumber: number;
       shardId?: string;
-      passKind: "main" | "lens" | "guideline" | "verify" | "addressed";
+      passKind: 'main' | 'lens' | 'guideline' | 'verify' | 'addressed';
     };
   }): Promise<{
     text: string;
@@ -118,17 +118,17 @@ Operational requirements:
 
 ## Ranking
 
-| Rank | CLI | Noninteractive support | Structured output | Read-only/security fit | Observability | Recommendation |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1 | Codex CLI | Strong: `codex exec` is designed for noninteractive automation | Strong: output schema and last-message output are documented | Good, but CI secret handling and tool permissions still need a spike | Good: JSONL/structured streams and code-review cookbook path | Best first primary-backend spike |
-| 2 | Claude Code | Strong: `claude -p` headless mode | Strong: JSON/stream-json and JSON schema are documented | Needs permission-mode verification for jbot's read-only-plus-git-shell model | Good: JSON result and usage metadata | Strong second candidate |
-| 3 | Devin CLI | Strong: `devin -p`, `--prompt-file`, `--export`, and `acp` exist | Medium: no documented final-answer schema mode; ATIF export may be parseable | Strong: permissions, profiles, and sandbox/autonomous mode are well documented | Medium/strong: ATIF export includes richer transcript and usage/cost | Promising tier-2 spike, especially as auxiliary lens |
-| 4 | CommandCode CLI | Strong: `cmd -p`/`--print`, stdin, max turns, trust flags | Weak/unknown: no clearly documented schema final-answer mode found | Mixed: default headless blocks writes and shell; `--yolo` is too broad | Limited compared with Codex/Claude/Devin | Auxiliary-only unless JSON and shell contract are proven |
-| 5 | Gemini CLI / Qwen Code | Plausible: documented headless prompt modes | Medium/unknown: JSON output exists, schema guarantees need verification | Needs permission and sandbox proof | Unknown to medium | Worth later spike if provider diversity matters |
-| 6 | OpenCode CLI | Strong: `opencode run` and JSON format | Good, but redundant with existing SDK/server path | Existing SDK path is stronger and already integrated | Existing SDK path is better | Do not replace SDK with CLI without a specific reason |
-| 7 | Cursor CLI | Strong: headless agent mode exists | Weak/medium: schema support appears missing or limited | Ask/read-only modes need current verification | Mixed; cost/metadata gaps reported | Experimental only |
-| 8 | Goose / Continue / CodeBuddy / Letta Code | Headless modes exist | Unknown or weak for strict schema | Needs proof | Unknown | Investigate only after top candidates |
-| 9 | Aider | Scriptable, but edit-oriented | Weak for structured review output | Poor fit for no-mutation review | Limited for this use case | Not recommended as primary backend |
+| Rank | CLI                                       | Noninteractive support                                           | Structured output                                                            | Read-only/security fit                                                         | Observability                                                        | Recommendation                                           |
+| ---- | ----------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------- | -------------------------------------------------------- |
+| 1    | Codex CLI                                 | Strong: `codex exec` is designed for noninteractive automation   | Strong: output schema and last-message output are documented                 | Good, but CI secret handling and tool permissions still need a spike           | Good: JSONL/structured streams and code-review cookbook path         | Best first primary-backend spike                         |
+| 2    | Claude Code                               | Strong: `claude -p` headless mode                                | Strong: JSON/stream-json and JSON schema are documented                      | Needs permission-mode verification for jbot's read-only-plus-git-shell model   | Good: JSON result and usage metadata                                 | Strong second candidate                                  |
+| 3    | Devin CLI                                 | Strong: `devin -p`, `--prompt-file`, `--export`, and `acp` exist | Medium: no documented final-answer schema mode; ATIF export may be parseable | Strong: permissions, profiles, and sandbox/autonomous mode are well documented | Medium/strong: ATIF export includes richer transcript and usage/cost | Promising tier-2 spike, especially as auxiliary lens     |
+| 4    | CommandCode CLI                           | Strong: `cmd -p`/`--print`, stdin, max turns, trust flags        | Weak/unknown: no clearly documented schema final-answer mode found           | Mixed: default headless blocks writes and shell; `--yolo` is too broad         | Limited compared with Codex/Claude/Devin                             | Auxiliary-only unless JSON and shell contract are proven |
+| 5    | Gemini CLI / Qwen Code                    | Plausible: documented headless prompt modes                      | Medium/unknown: JSON output exists, schema guarantees need verification      | Needs permission and sandbox proof                                             | Unknown to medium                                                    | Worth later spike if provider diversity matters          |
+| 6    | OpenCode CLI                              | Strong: `opencode run` and JSON format                           | Good, but redundant with existing SDK/server path                            | Existing SDK path is stronger and already integrated                           | Existing SDK path is better                                          | Do not replace SDK with CLI without a specific reason    |
+| 7    | Cursor CLI                                | Strong: headless agent mode exists                               | Weak/medium: schema support appears missing or limited                       | Ask/read-only modes need current verification                                  | Mixed; cost/metadata gaps reported                                   | Experimental only                                        |
+| 8    | Goose / Continue / CodeBuddy / Letta Code | Headless modes exist                                             | Unknown or weak for strict schema                                            | Needs proof                                                                    | Unknown                                                              | Investigate only after top candidates                    |
+| 9    | Aider                                     | Scriptable, but edit-oriented                                    | Weak for structured review output                                            | Poor fit for no-mutation review                                                | Limited for this use case                                            | Not recommended as primary backend                       |
 
 ## Devin CLI Notes
 
