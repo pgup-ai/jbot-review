@@ -356,7 +356,8 @@ export type ReviewPlaybookId =
   | 'contract-api'
   | 'backend-data'
   | 'frontend-workflow'
-  | 'external-integration';
+  | 'external-integration'
+  | 'infra-ops';
 
 export interface ReviewPlaybook {
   id: ReviewPlaybookId;
@@ -426,12 +427,24 @@ const EXTERNAL_INTEGRATION: ReviewPlaybook = {
   ],
 };
 
+const INFRA_OPS: ReviewPlaybook = {
+  id: 'infra-ops',
+  title: 'Infra/ops review',
+  triggers: ['IaC, container, Kubernetes/Helm, or deployment-config changes'],
+  checks: [
+    'Check least privilege and exposure: IAM/roles, security groups, network policies, public ingress, and that no plaintext secrets are committed (secret refs only).',
+    'Verify resource correctness: pinned image tags/digests (not floating latest), replica/probe/resource-limit config, and env/config wiring matching what the app reads.',
+    'Confirm change safety: no destructive resource replacement, correct apply/migration ordering, and no drift between declared names and the names other manifests reference.',
+  ],
+};
+
 export const REVIEW_PLAYBOOKS = [
   CODE_REVIEW_CORE,
   CONTRACT_API,
   BACKEND_DATA,
   FRONTEND_WORKFLOW,
   EXTERNAL_INTEGRATION,
+  INFRA_OPS,
 ] as const satisfies readonly ReviewPlaybook[];
 
 export const MAX_REVIEW_PLAYBOOK_BLOCK_BYTES = 8 * 1024;
