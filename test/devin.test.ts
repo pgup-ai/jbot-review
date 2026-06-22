@@ -8,6 +8,7 @@ import {
   buildDevinCliArgs,
   devinCredentialsPath,
   isDevinProvider,
+  truncateUtf8WithNotice,
   writeDevinCredentials,
 } from '../src/shared/devin.ts';
 
@@ -46,14 +47,15 @@ describe('Devin CLI provider helpers', () => {
         model: 'devin/default',
         promptFile: '/tmp/prompt.txt',
         exportFile: '/tmp/out.atif',
+        agentConfigFile: '/tmp/agent-config.json',
       }),
       [
-        '--permission-mode',
-        'auto',
         '--prompt-file',
         '/tmp/prompt.txt',
         '--export',
         '/tmp/out.atif',
+        '--agent-config',
+        '/tmp/agent-config.json',
         '-p',
       ],
     );
@@ -65,18 +67,27 @@ describe('Devin CLI provider helpers', () => {
         model: 'devin/codex',
         promptFile: '/tmp/prompt.txt',
         exportFile: '/tmp/out.atif',
+        agentConfigFile: '/tmp/agent-config.json',
       }),
       [
-        '--permission-mode',
-        'auto',
         '--prompt-file',
         '/tmp/prompt.txt',
         '--export',
         '/tmp/out.atif',
+        '--agent-config',
+        '/tmp/agent-config.json',
         '--model',
         'codex',
         '-p',
       ],
     );
+  });
+
+  it('truncates repair context by bytes with an omission notice', () => {
+    const value = 'abc😃def';
+    const truncated = truncateUtf8WithNotice(value, 6, 'Context');
+
+    assert.equal(Buffer.byteLength(truncated.split('\n\n')[0]!, 'utf8') <= 6, true);
+    assert.match(truncated, /\[Context truncated to \d+ bytes; omitted \d+ bytes\.\]/);
   });
 });

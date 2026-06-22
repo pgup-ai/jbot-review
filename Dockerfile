@@ -13,10 +13,13 @@ RUN npm install -g opencode-ai@latest
 
 # Devin CLI is available for the optional devin provider path. Credentials are
 # written at runtime only when that provider is selected.
-RUN curl -fsSL https://cli.devin.ai/install.sh \
-  | sed '/"\$VERSION_DIR\/bin\/\$COMPILED_BIN_NAME" setup/d' \
-  | bash \
-  && test -x /root/.local/bin/devin
+RUN curl -fsSL https://cli.devin.ai/install.sh -o /tmp/devin-install.sh \
+  && grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install.sh \
+  && sed '/"\$VERSION_DIR\/bin\/\$COMPILED_BIN_NAME" setup/d' /tmp/devin-install.sh > /tmp/devin-install-no-setup.sh \
+  && ! grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install-no-setup.sh \
+  && bash /tmp/devin-install-no-setup.sh \
+  && test -x /root/.local/bin/devin \
+  && rm -f /tmp/devin-install.sh /tmp/devin-install-no-setup.sh
 ENV PATH="/root/.local/bin:${PATH}"
 
 WORKDIR /app

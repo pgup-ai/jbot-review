@@ -8,7 +8,9 @@ import {
   computeRetryTimeoutMs,
   computeRunDeadline,
   computeVerificationTimeoutMs,
+  formatReviewedWith,
   renderReviewMetadataBlock,
+  selectReviewBackends,
 } from '../src/shared/runner.ts';
 
 const PRIOR_JBOT_REVIEW = [
@@ -96,6 +98,92 @@ describe('computeRunDeadline', () => {
   });
 });
 
+describe('selectReviewBackends', () => {
+  const base = {
+    providerID: 'opencode',
+    modelID: 'deepseek-v4-flash-free',
+    apiKey: 'main-key',
+    auxProviderID: 'opencode',
+    auxModelID: 'deepseek-v4-flash-free',
+    auxApiKey: '',
+  };
+
+  it('uses only opencode for default main and aux providers', () => {
+    assert.deepEqual(selectReviewBackends(base), {
+      mainUsesDevin: false,
+      auxUsesDevin: false,
+      needsOpencode: true,
+      devinApiKey: '',
+      opencodeProviderID: 'opencode',
+      opencodeModelID: 'deepseek-v4-flash-free',
+      opencodeApiKey: 'main-key',
+    });
+  });
+
+  it('uses Devin for main review and OpenCode for aux sessions', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'devin',
+        modelID: 'glm-5.2',
+        apiKey: 'devin-key',
+        auxApiKey: 'opencode-key',
+      }),
+      {
+        mainUsesDevin: true,
+        auxUsesDevin: false,
+        needsOpencode: true,
+        devinApiKey: 'devin-key',
+        opencodeProviderID: 'opencode',
+        opencodeModelID: 'deepseek-v4-flash-free',
+        opencodeApiKey: 'opencode-key',
+      },
+    );
+  });
+
+  it('uses OpenCode for main review and Devin for aux sessions', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        auxProviderID: 'devin',
+        auxModelID: 'codex',
+        auxApiKey: 'devin-key',
+      }),
+      {
+        mainUsesDevin: false,
+        auxUsesDevin: true,
+        needsOpencode: true,
+        devinApiKey: 'devin-key',
+        opencodeProviderID: 'opencode',
+        opencodeModelID: 'deepseek-v4-flash-free',
+        opencodeApiKey: 'main-key',
+      },
+    );
+  });
+
+  it('skips OpenCode when both main and aux sessions use Devin', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'devin',
+        modelID: 'glm-5.2',
+        apiKey: 'devin-key',
+        auxProviderID: 'devin',
+        auxModelID: 'codex',
+      }),
+      {
+        mainUsesDevin: true,
+        auxUsesDevin: true,
+        needsOpencode: false,
+        devinApiKey: 'devin-key',
+        opencodeProviderID: 'devin',
+        opencodeModelID: 'codex',
+        opencodeApiKey: '',
+      },
+    );
+  });
+});
+
 describe('buildMainShardFailureMessage', () => {
   it('makes partial main-review coverage a fatal error', () => {
     const message = buildMainShardFailureMessage(1, 2, new Error('git diff failed'));
@@ -155,7 +243,36 @@ describe('renderReviewMetadataBlock', () => {
     assert.doesNotMatch(block, /model=openai\/gpt-5\ninput=100/);
   });
 
+  it('includes the main model even when only aux providers report token usage', () => {
+    const block = renderReviewMetadataBlock('devin/glm-5.2', {
+      models: ['opencode/deepseek-v4-flash-free'],
+      input: 100,
+      output: 20,
+      reasoning: 30,
+      cacheRead: 40,
+      cacheWrite: 50,
+    }).join('\n');
+
+    assert.match(block, /models=devin\/glm-5\.2, opencode\/deepseek-v4-flash-free/);
+  });
+
   it('omits the block when token usage was unavailable', () => {
     assert.deepEqual(renderReviewMetadataBlock('opencode/deepseek-v4-flash-free'), []);
+  });
+});
+
+describe('formatReviewedWith', () => {
+  it('mentions auxiliary models when they differ from the main reviewer', () => {
+    assert.equal(
+      formatReviewedWith('devin/glm-5.2', {
+        models: ['opencode/deepseek-v4-flash-free'],
+        input: 100,
+        output: 20,
+        reasoning: 30,
+        cacheRead: 40,
+        cacheWrite: 50,
+      }),
+      'Reviewed with `devin/glm-5.2`; auxiliary sessions used `opencode/deepseek-v4-flash-free`.',
+    );
   });
 });

@@ -17,6 +17,8 @@ import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } fro
 
 const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const KILL_GRACE_MS = 2_000;
+const DEVIN_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
+const DEVIN_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 
 export const DEVIN_PROVIDER_ID = 'devin';
 
@@ -61,17 +63,18 @@ export interface DevinCliArgsInput {
   model: string;
   promptFile: string;
   exportFile: string;
+  agentConfigFile: string;
 }
 
 export function buildDevinCliArgs(input: DevinCliArgsInput): string[] {
   const { modelID } = parseModelName(input.model);
   const args = [
-    '--permission-mode',
-    'auto',
     '--prompt-file',
     input.promptFile,
     '--export',
     input.exportFile,
+    '--agent-config',
+    input.agentConfigFile,
   ];
   if (modelID !== 'default') args.push('--model', modelID);
   args.push('-p');
@@ -104,7 +107,16 @@ export async function runDevinReview(
     const repaired = await runDevinPrompt(
       workspace,
       model,
-      [prompt, '## Previous invalid response', raw, buildJsonRepairPrompt(message)].join('\n\n'),
+      [
+        truncateUtf8WithNotice(prompt, DEVIN_REPAIR_PROMPT_BUDGET_BYTES, 'Original review prompt'),
+        '## Previous invalid response',
+        truncateUtf8WithNotice(
+          raw,
+          DEVIN_REPAIR_RESPONSE_BUDGET_BYTES,
+          'Previous invalid response',
+        ),
+        buildJsonRepairPrompt(message),
+      ].join('\n\n'),
       `${label}-repair`,
       log,
       options.timeoutMs,
@@ -186,8 +198,10 @@ async function runDevinPrompt(
   const dir = mkdtempSync(join(tmpdir(), 'jbot-devin-'));
   const promptFile = join(dir, 'prompt.txt');
   const exportFile = join(dir, 'conversation.atif');
+  const agentConfigFile = join(dir, 'agent-config.json');
   writeFileSync(promptFile, prompt, { mode: 0o600 });
-  const args = buildDevinCliArgs({ model, promptFile, exportFile });
+  writeFileSync(agentConfigFile, JSON.stringify(readOnlyAgentConfig(), null, 2), { mode: 0o600 });
+  const args = buildDevinCliArgs({ model, promptFile, exportFile, agentConfigFile });
   log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
   try {
     const result = await spawnWithTimeout('devin', args, workspace, timeoutMs);
@@ -276,4 +290,28 @@ function tomlString(value: string): string {
 function truncateForLog(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
   return `${value.slice(0, maxChars)}... [truncated]`;
+}
+
+function readOnlyAgentConfig(): unknown {
+  return {
+    permissions: {
+      allow: ['read', 'grep', 'glob', 'Read(**)'],
+      deny: ['edit', 'Write(**)', 'exec'],
+    },
+  };
+}
+
+export function truncateUtf8WithNotice(value: string, maxBytes: number, label: string): string {
+  const totalBytes = Buffer.byteLength(value, 'utf8');
+  if (totalBytes <= maxBytes) return value;
+
+  let end = Math.min(value.length, maxBytes);
+  while (end > 0 && Buffer.byteLength(value.slice(0, end), 'utf8') > maxBytes) end -= 1;
+  const truncated = value.slice(0, end);
+  const keptBytes = Buffer.byteLength(truncated, 'utf8');
+  return [
+    truncated,
+    '',
+    `[${label} truncated to ${keptBytes} bytes; omitted ${totalBytes - keptBytes} bytes.]`,
+  ].join('\n');
 }

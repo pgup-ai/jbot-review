@@ -101,7 +101,7 @@ jobs:
           nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
           zai-api-key: ${{ secrets.ZAI_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
-          devin-windsurf-api-key: ${{ (vars.JBOT_REVIEW_PROVIDER == 'devin' || (vars.JBOT_AUX_PROVIDER == 'devin' && vars.JBOT_REVIEW_AUX_MODEL != '')) && secrets.DEVIN_WINDSURF_API_KEY || '' }}
+          devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
           enable-context7: auto
           context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -116,8 +116,9 @@ you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
 no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
-Devin is a separate CLI backend: any run where the main provider or active
-auxiliary provider is `devin` must pass `DEVIN_WINDSURF_API_KEY`.
+Devin is a separate CLI backend: pass `DEVIN_WINDSURF_API_KEY` when you want to
+support `provider: devin` or `aux-provider: devin`; the action writes Devin
+credentials only when a Devin-backed run is selected.
 Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
 framework, CLI, cloud-service, or workflow changes.
 
@@ -200,7 +201,7 @@ without editing the workflow.
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     zai-api-key: ${{ secrets.ZAI_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
-    devin-windsurf-api-key: ${{ ((inputs.provider || vars.JBOT_REVIEW_PROVIDER || 'opencode') == 'devin' || (vars.JBOT_AUX_PROVIDER == 'devin' && vars.JBOT_REVIEW_AUX_MODEL != '')) && secrets.DEVIN_WINDSURF_API_KEY || '' }}
+    devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     enable-context7: auto
     context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -325,7 +326,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     zai-api-key: ${{ secrets.ZAI_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
-    devin-windsurf-api-key: ${{ (vars.JBOT_REVIEW_PROVIDER == 'devin' || (vars.JBOT_AUX_PROVIDER == 'devin' && vars.JBOT_REVIEW_AUX_MODEL != '')) && secrets.DEVIN_WINDSURF_API_KEY || '' }}
+    devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     enable-context7: auto
     context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}

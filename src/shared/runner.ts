@@ -206,9 +206,11 @@ function createDevinBackend(workspace: string): ReviewBackend {
   };
 }
 
-function limitBackendConcurrency(backend: ReviewBackend, limit: number): ReviewBackend {
-  if (limit <= 0) return backend;
-  const slots = new Semaphore(limit);
+function limitBackendConcurrency(
+  backend: ReviewBackend,
+  slots: Semaphore | undefined,
+): ReviewBackend {
+  if (!slots) return backend;
   const withSlot = async <T>(run: () => Promise<T>): Promise<T> => {
     const release = await slots.acquire();
     try {
@@ -225,6 +227,39 @@ function limitBackendConcurrency(backend: ReviewBackend, limit: number): ReviewB
     runGuidelineComplianceCheck: (...args) =>
       withSlot(() => backend.runGuidelineComplianceCheck(...args)),
     runFindingVerification: (...args) => withSlot(() => backend.runFindingVerification(...args)),
+  };
+}
+
+export interface ReviewBackendSelectionInput {
+  providerID: string;
+  modelID: string;
+  apiKey: string;
+  auxProviderID: string;
+  auxModelID: string;
+  auxApiKey: string;
+}
+
+export interface ReviewBackendSelection {
+  mainUsesDevin: boolean;
+  auxUsesDevin: boolean;
+  needsOpencode: boolean;
+  devinApiKey: string;
+  opencodeProviderID: string;
+  opencodeModelID: string;
+  opencodeApiKey: string;
+}
+
+export function selectReviewBackends(input: ReviewBackendSelectionInput): ReviewBackendSelection {
+  const mainUsesDevin = isDevinProvider(input.providerID);
+  const auxUsesDevin = isDevinProvider(input.auxProviderID);
+  return {
+    mainUsesDevin,
+    auxUsesDevin,
+    needsOpencode: !mainUsesDevin || !auxUsesDevin,
+    devinApiKey: mainUsesDevin ? input.apiKey : input.auxApiKey,
+    opencodeProviderID: mainUsesDevin ? input.auxProviderID : input.providerID,
+    opencodeModelID: mainUsesDevin ? input.auxModelID : input.modelID,
+    opencodeApiKey: mainUsesDevin ? input.auxApiKey : input.apiKey,
   };
 }
 
@@ -529,37 +564,43 @@ export async function runPrReview(params: {
   }
   const basePrContext = joinContext(coreContext, diffHunksBlock);
 
-  configureSessionConcurrency(options.maxConcurrentSessions);
+  // Use a per-run limiter around every backend so mixed Devin/OpenCode runs
+  // honor one global cap. Disable opencode's older process-global limiter to
+  // avoid double-limiting OpenCode sessions inside this runner path.
+  configureSessionConcurrency(0);
+  const sessionSlots =
+    options.maxConcurrentSessions > 0 ? new Semaphore(options.maxConcurrentSessions) : undefined;
   if (options.maxConcurrentSessions > 0) {
     log(`Model session concurrency capped at ${options.maxConcurrentSessions}.`);
   }
 
-  const mainUsesDevin = isDevinProvider(providerID);
-  const auxUsesDevin = isDevinProvider(auxProviderID);
-  const needsOpencode = !mainUsesDevin || !auxUsesDevin;
+  const backendSelection = selectReviewBackends({
+    providerID,
+    modelID,
+    apiKey,
+    auxProviderID,
+    auxModelID,
+    auxApiKey: options.auxApiKey,
+  });
+  const { mainUsesDevin, auxUsesDevin, needsOpencode } = backendSelection;
   let opencodeRuntime: Awaited<ReturnType<typeof startOpencode>> | undefined;
   let opencodeBackend: ReviewBackend | undefined;
   let devinBackend: ReviewBackend | undefined;
 
   if (mainUsesDevin || auxUsesDevin) {
-    const devinApiKey = mainUsesDevin ? apiKey : options.auxApiKey;
+    const devinApiKey = backendSelection.devinApiKey;
     if (!devinApiKey) {
       throw new Error(`Missing API key for ${DEVIN_PROVIDER_ID} provider.`);
     }
     const credentialsPath = writeDevinCredentials(devinApiKey);
     log(`Devin CLI credentials configured at ${credentialsPath}.`);
-    devinBackend = limitBackendConcurrency(
-      createDevinBackend(workspace),
-      options.maxConcurrentSessions,
-    );
+    devinBackend = limitBackendConcurrency(createDevinBackend(workspace), sessionSlots);
   }
 
   if (needsOpencode) {
-    const opencodeProviderID = mainUsesDevin ? auxProviderID : providerID;
-    const opencodeModelID = mainUsesDevin ? auxModelID : modelID;
-    const opencodeApiKey = mainUsesDevin ? options.auxApiKey : apiKey;
+    const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
     if (!opencodeApiKey) {
-      throw new Error(`Missing API key for auxiliary provider "${opencodeProviderID}".`);
+      throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
     }
     log('Starting opencode server');
     opencodeRuntime = await startOpencode(
@@ -586,7 +627,10 @@ export async function runPrReview(params: {
             : undefined,
       },
     );
-    opencodeBackend = createOpencodeBackend(opencodeRuntime.client);
+    opencodeBackend = limitBackendConcurrency(
+      createOpencodeBackend(opencodeRuntime.client),
+      sessionSlots,
+    );
   }
 
   const mainBackend = mainUsesDevin ? devinBackend! : opencodeBackend!;
@@ -1664,13 +1708,13 @@ function buildBody(
   const orphanedSection = renderOrphanedSection(orphaned);
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
   lines.push(...renderReviewMetadataBlock(model, tokenUsage));
-  lines.push('', `<sup>Reviewed with \`${model}\`.</sup>`);
+  lines.push('', `<sup>${formatReviewedWith(model, tokenUsage)}</sup>`);
   return lines.join('\n');
 }
 
 export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewTokenUsage): string[] {
   if (!tokenUsage) return [];
-  const models = tokenUsage.models.length > 0 ? tokenUsage.models : [model];
+  const models = uniqueModels(model, tokenUsage.models);
   return [
     '',
     '<details>',
@@ -1687,6 +1731,20 @@ export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewToke
     '',
     '</details>',
   ];
+}
+
+export function formatReviewedWith(model: string, tokenUsage?: ReviewTokenUsage): string {
+  const auxiliaryModels = uniqueModels(model, tokenUsage?.models ?? []).filter(
+    (usageModel) => usageModel !== model,
+  );
+  if (auxiliaryModels.length === 0) return `Reviewed with \`${model}\`.`;
+  return `Reviewed with \`${model}\`; auxiliary sessions used ${auxiliaryModels
+    .map((usageModel) => `\`${usageModel}\``)
+    .join(', ')}.`;
+}
+
+function uniqueModels(primary: string, others: string[]): string[] {
+  return [...new Set([primary, ...others])];
 }
 
 function getMergeGuidance(findings: Pick<Finding, 'severity'>[]): {
