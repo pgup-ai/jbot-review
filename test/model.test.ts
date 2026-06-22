@@ -44,6 +44,13 @@ describe('resolveModelName', () => {
     });
   });
 
+  it('resolves Devin CLI model ids against the devin provider', () => {
+    assert.deepEqual(resolveModelName('devin', 'glm-5.2'), {
+      providerID: 'devin',
+      modelID: 'glm-5.2',
+    });
+  });
+
   it('formats resolved models into the canonical provider/model id string', () => {
     assert.equal(
       formatModelName(resolveModelName('nvidia', 'moonshotai/kimi-k2.6')),
@@ -82,6 +89,17 @@ describe('resolveModelName', () => {
     });
   });
 
+  it('configures Devin with the Windsurf key surface', () => {
+    assert.deepEqual(PROVIDERS.devin, {
+      defaultModel: 'devin/default',
+      keyEnv: 'DEVIN_WINDSURF_API_KEY',
+      keyInput: 'devin-windsurf-api-key',
+      models: {
+        default: { promptCache: false },
+      },
+    });
+  });
+
   it('rejects an empty selected-provider-prefixed model id', () => {
     assert.throws(() => resolveModelName('opencode', 'opencode/'), /expected a non-empty model id/);
   });
@@ -108,6 +126,8 @@ describe('modelSupportsPromptCache', () => {
     assert.equal(modelSupportsPromptCache('opencode-go', 'kimi-k2.6'), true);
     assert.equal(modelSupportsPromptCache('opencode-go', 'minimax-m3'), true);
     assert.equal(modelSupportsPromptCache('opencode-go', 'qwen3.6-plus'), true);
+    assert.equal(modelSupportsPromptCache('devin', 'default'), false);
+    assert.equal(modelSupportsPromptCache('devin', 'codex'), false);
     assert.equal(modelSupportsPromptCache('unknown-provider', 'unknown-model'), true);
   });
 });
