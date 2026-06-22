@@ -411,6 +411,11 @@ function buildDiscoveredGuidelines(
   return { docs, referenced, budgetExhausted };
 }
 
+/** A single loaded guideline doc rendered as a prompt section. */
+function formatGuidelineDoc(doc: GuidelineDoc): string {
+  return `### ${doc.label}\n${doc.text}`;
+}
+
 /**
  * Full guideline render: every loaded doc, plus the budget notice (when the
  * total discovery budget was exhausted) and the referenced-but-not-loaded
@@ -418,7 +423,7 @@ function buildDiscoveredGuidelines(
  * the back-compat `discoverGuidelines` wrapper receive.
  */
 export function formatGuidelines(discovered: DiscoveredGuidelines): string {
-  const sections = discovered.docs.map((doc) => `### ${doc.label}\n${doc.text}`);
+  const sections = discovered.docs.map(formatGuidelineDoc);
 
   if (discovered.budgetExhausted) {
     sections.push(
@@ -473,8 +478,7 @@ export function formatFinderGuidelines(
   let omitted = 0;
   for (const { doc, index } of ranked) {
     const separatorBytes = keptIndices.size > 0 ? 2 : 0;
-    const sectionBytes =
-      Buffer.byteLength(`### ${doc.label}\n${doc.text}`, 'utf8') + separatorBytes;
+    const sectionBytes = Buffer.byteLength(formatGuidelineDoc(doc), 'utf8') + separatorBytes;
     // Always keep the single highest-relevance doc, even if it alone exceeds
     // the cap (the per-file read bound can equal this budget): finders must
     // never be left with zero guidance when guidance exists. This makes the
@@ -489,7 +493,7 @@ export function formatFinderGuidelines(
 
   const sections = discovered.docs
     .filter((_, index) => keptIndices.has(index))
-    .map((doc) => `### ${doc.label}\n${doc.text}`);
+    .map(formatGuidelineDoc);
 
   if (omitted > 0) {
     sections.push(
