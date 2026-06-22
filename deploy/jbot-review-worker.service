@@ -1,0 +1,30 @@
+# jbot-review worker — systemd unit for the VPS (Model 1: native node process).
+# Outbound-only: it polls the control plane and posts reviews; no inbound port.
+#
+# Install:
+#   cp deploy/jbot-review-worker.service /etc/systemd/system/
+#   # /etc/jbot-review-worker.env (chmod 600) holds ONLY:
+#   #   CONTROL_PLANE_URL=https://<control-plane>
+#   #   WORKER_SHARED_SECRET=<same value as the control plane>
+#   #   WORKER_POLL_MS=5000
+#   systemctl daemon-reload && systemctl enable --now jbot-review-worker
+
+[Unit]
+Description=jbot-review worker (polls the control plane, runs reviews)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/jbot-review
+EnvironmentFile=/etc/jbot-review-worker.env
+# /usr/local/bin so the review's child processes find the global `opencode`.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/node /opt/jbot-review/dist/worker/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
