@@ -20,16 +20,18 @@ export function octokitForToken(token: string): Octokit {
 /** Run one claimed job; resolves to the terminal JobUpdate (never throws). */
 export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise<JobUpdate> {
   const startedAt = Date.now();
-  // Exactly "owner/repo" — reject empty segments AND extra slashes (e.g. "a/b/c").
-  const parts = job.repoFullName.split('/');
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    log(`job ${job.jobId}: malformed repoFullName "${job.repoFullName}"`);
-    return { status: 'failed', durationMs: Date.now() - startedAt };
-  }
-  const [owner, repo] = parts;
-  const octokit = octokitForToken(job.installationToken);
   let cleanup: (() => void) | null = null;
   try {
+    // Exactly "owner/repo" — reject empty segments AND extra slashes (e.g. "a/b/c").
+    // Parsing lives inside the try so a malformed/absent repoFullName fails the
+    // job rather than throwing out of runJob (which is documented never-throws).
+    const parts = job.repoFullName.split('/');
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      log(`job ${job.jobId}: malformed repoFullName "${job.repoFullName}"`);
+      return { status: 'failed', durationMs: Date.now() - startedAt };
+    }
+    const [owner, repo] = parts;
+    const octokit = octokitForToken(job.installationToken);
     const pr = await octokit.rest.pulls.get({ owner, repo, pull_number: job.prNumber });
     // Clone the base repo (the one the App is installed on) and check out the
     // PR head + base — mirrors the hosted-app flow in src/app/app.ts.
