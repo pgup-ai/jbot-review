@@ -10,6 +10,7 @@ import {
   shouldPostReviewComment,
   suppressPreviouslyReported,
 } from './filter.ts';
+import { selectReviewBackends } from './backend-selection.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   PATH_PATTERNS,
@@ -32,16 +33,25 @@ import { ensureGitSafeDirectory } from './git.ts';
 import {
   startOpencode,
   configureSessionConcurrency,
-  runReview,
-  runAddressedPriorCommentsCheck,
-  runFindingVerification,
-  runGuidelineComplianceCheck,
+  runReview as runOpencodeReview,
+  runAddressedPriorCommentsCheck as runOpencodeAddressedPriorCommentsCheck,
+  runFindingVerification as runOpencodeFindingVerification,
+  runGuidelineComplianceCheck as runOpencodeGuidelineComplianceCheck,
   listProviderModels,
   enableContext7Mcp,
   disableContext7Mcp,
   formatContext7Error,
+  Semaphore,
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
+import {
+  DEVIN_PROVIDER_ID,
+  runDevinAddressedPriorCommentsCheck,
+  runDevinFindingVerification,
+  runDevinGuidelineComplianceCheck,
+  runDevinReview,
+  writeDevinCredentials,
+} from './devin.ts';
 import {
   buildReviewContext,
   discoverGuidelineDocs,
@@ -70,10 +80,155 @@ import {
 } from './github.ts';
 import type { Octokit, PriorJbotThread } from './github.ts';
 import { condenseSummary, renderOrphanedSection } from './report.ts';
-import type { AddressedPriorComment, Finding, Severity } from './types.ts';
+import type {
+  AddressedPriorComment,
+  Finding,
+  FindingVerdict,
+  ReviewResult,
+  Severity,
+} from './types.ts';
 
 /** Blocking findings verified per run; the rest pass through unverified. */
 const MAX_VERIFIED_FINDINGS = 10;
+
+interface ReviewBackend {
+  name: string;
+  runReview(
+    model: string,
+    prContext: string,
+    guidelines: string,
+    log: (msg: string) => void,
+    options?: {
+      lensAddendum?: string;
+      label?: string;
+      timeoutMs?: number;
+      onTokenUsage?: TokenUsageRecorder;
+    },
+  ): Promise<ReviewResult>;
+  runAddressedPriorCommentsCheck(
+    model: string,
+    prContext: string,
+    log: (msg: string) => void,
+    timeoutMs?: number,
+    onTokenUsage?: TokenUsageRecorder,
+  ): Promise<AddressedPriorComment[]>;
+  runGuidelineComplianceCheck(
+    model: string,
+    prContext: string,
+    guidelines: string,
+    log: (msg: string) => void,
+    timeoutMs?: number,
+    onTokenUsage?: TokenUsageRecorder,
+  ): Promise<Finding[]>;
+  runFindingVerification(
+    model: string,
+    prContext: string,
+    findings: Finding[],
+    log: (msg: string) => void,
+    timeoutMs?: number,
+    onTokenUsage?: TokenUsageRecorder,
+  ): Promise<FindingVerdict[] | undefined>;
+}
+
+function createOpencodeBackend(
+  client: Awaited<ReturnType<typeof startOpencode>>['client'],
+): ReviewBackend {
+  return {
+    name: 'opencode',
+    runReview: (model, prContext, guidelines, log, options) =>
+      runOpencodeReview(client, model, prContext, guidelines, log, options),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runOpencodeAddressedPriorCommentsCheck(
+        client,
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runOpencodeGuidelineComplianceCheck(
+        client,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runOpencodeFindingVerification(
+        client,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+  };
+}
+
+function createDevinBackend(workspace: string): ReviewBackend {
+  return {
+    name: DEVIN_PROVIDER_ID,
+    runReview: (model, prContext, guidelines, log, options) =>
+      runDevinReview(workspace, model, prContext, guidelines, log, options),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runDevinAddressedPriorCommentsCheck(
+        workspace,
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runDevinGuidelineComplianceCheck(
+        workspace,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runDevinFindingVerification(
+        workspace,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+  };
+}
+
+function limitBackendConcurrency(
+  backend: ReviewBackend,
+  slots: Semaphore | undefined,
+): ReviewBackend {
+  if (!slots) return backend;
+  const withSlot = async <T>(run: () => Promise<T>): Promise<T> => {
+    const release = await slots.acquire();
+    try {
+      return await run();
+    } finally {
+      release();
+    }
+  };
+  return {
+    name: backend.name,
+    runReview: (...args) => withSlot(() => backend.runReview(...args)),
+    runAddressedPriorCommentsCheck: (...args) =>
+      withSlot(() => backend.runAddressedPriorCommentsCheck(...args)),
+    runGuidelineComplianceCheck: (...args) =>
+      withSlot(() => backend.runGuidelineComplianceCheck(...args)),
+    runFindingVerification: (...args) => withSlot(() => backend.runFindingVerification(...args)),
+  };
+}
 
 export interface ReviewRunOptions {
   enhancedContext?: boolean;
@@ -376,43 +531,98 @@ export async function runPrReview(params: {
   }
   const basePrContext = joinContext(coreContext, diffHunksBlock);
 
-  configureSessionConcurrency(options.maxConcurrentSessions);
+  // Use a per-run limiter around every backend so mixed Devin/OpenCode runs
+  // honor one global cap. Disable opencode's older process-global limiter to
+  // avoid double-limiting OpenCode sessions inside this runner path.
+  configureSessionConcurrency(0);
+  const sessionSlots =
+    options.maxConcurrentSessions > 0 ? new Semaphore(options.maxConcurrentSessions) : undefined;
   if (options.maxConcurrentSessions > 0) {
     log(`Model session concurrency capped at ${options.maxConcurrentSessions}.`);
   }
 
-  log('Starting opencode server');
-  const { client, stop } = await startOpencode(workspace, providerID, modelID, apiKey, log, {
-    modelOptions: options.modelOptions,
-    promptCache: promptCachePolicy.providerPromptCache,
-    port: options.opencodePort > 0 ? options.opencodePort : undefined,
-    additionalProviderKeys:
-      auxProviderID !== providerID
-        ? [
-            {
-              providerID: auxProviderID,
-              apiKey: options.auxApiKey || apiKey,
-              promptCache: promptCachePolicy.auxProviderPromptCache,
-            },
-          ]
-        : undefined,
+  const backendSelection = selectReviewBackends({
+    providerID,
+    modelID,
+    apiKey,
+    auxProviderID,
+    auxModelID,
+    auxApiKey: options.auxApiKey,
   });
+  const { mainUsesDevin, auxUsesDevin, needsOpencode } = backendSelection;
+  let opencodeRuntime: Awaited<ReturnType<typeof startOpencode>> | undefined;
+  let opencodeBackend: ReviewBackend | undefined;
+  let devinBackend: ReviewBackend | undefined;
+
+  if (mainUsesDevin || auxUsesDevin) {
+    const devinApiKey = backendSelection.devinApiKey;
+    if (!devinApiKey) {
+      throw new Error(`Missing API key for ${DEVIN_PROVIDER_ID} provider.`);
+    }
+    const credentialsPath = writeDevinCredentials(devinApiKey);
+    log(`Devin CLI credentials configured at ${credentialsPath}.`);
+    devinBackend = limitBackendConcurrency(createDevinBackend(workspace), sessionSlots);
+  }
+
+  if (needsOpencode) {
+    const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
+    if (!opencodeApiKey) {
+      throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
+    }
+    log('Starting opencode server');
+    opencodeRuntime = await startOpencode(
+      workspace,
+      opencodeProviderID,
+      opencodeModelID,
+      opencodeApiKey,
+      log,
+      {
+        modelOptions: mainUsesDevin ? undefined : options.modelOptions,
+        promptCache: mainUsesDevin
+          ? promptCachePolicy.auxProviderPromptCache
+          : promptCachePolicy.providerPromptCache,
+        port: options.opencodePort > 0 ? options.opencodePort : undefined,
+        additionalProviderKeys:
+          !mainUsesDevin && !auxUsesDevin && auxProviderID !== providerID
+            ? [
+                {
+                  providerID: auxProviderID,
+                  apiKey: options.auxApiKey || apiKey,
+                  promptCache: promptCachePolicy.auxProviderPromptCache,
+                },
+              ]
+            : undefined,
+      },
+    );
+    opencodeBackend = limitBackendConcurrency(
+      createOpencodeBackend(opencodeRuntime.client),
+      sessionSlots,
+    );
+  }
+
+  const mainBackend = mainUsesDevin ? devinBackend! : opencodeBackend!;
+  const auxBackend = auxUsesDevin ? devinBackend! : opencodeBackend!;
+  const stop = opencodeRuntime?.stop ?? (() => undefined);
   try {
-    try {
-      const modelListCacheKey = `${providerID}:${modelID}`;
-      let models = providerModelListCache.get(modelListCacheKey);
-      const fromCache = !!models;
-      if (!models) {
-        models = await listProviderModels(client, providerID);
-        providerModelListCache.set(modelListCacheKey, models);
+    if (opencodeRuntime && !mainUsesDevin) {
+      try {
+        const modelListCacheKey = `${providerID}:${modelID}`;
+        let models = providerModelListCache.get(modelListCacheKey);
+        const fromCache = !!models;
+        if (!models) {
+          models = await listProviderModels(opencodeRuntime.client, providerID);
+          providerModelListCache.set(modelListCacheKey, models);
+        }
+        log(
+          models.length > 0
+            ? `Available models for ${providerID} using supplied API key/config${fromCache ? ' (cached)' : ''}:\n${models.join('\n')}`
+            : `Available models for ${providerID} using supplied API key/config: none returned`,
+        );
+      } catch (e) {
+        log(`(skipped provider model listing: ${(e as Error).message})`);
       }
-      log(
-        models.length > 0
-          ? `Available models for ${providerID} using supplied API key/config${fromCache ? ' (cached)' : ''}:\n${models.join('\n')}`
-          : `Available models for ${providerID} using supplied API key/config: none returned`,
-      );
-    } catch (e) {
-      log(`(skipped provider model listing: ${(e as Error).message})`);
+    } else if (mainUsesDevin) {
+      log('Provider model listing skipped: main review uses Devin CLI.');
     }
 
     const context7 = decideContext7Mode({
@@ -422,16 +632,18 @@ export async function runPrReview(params: {
     });
     let context7Active = false;
     let context7Block = '';
-    if (context7.enabled) {
+    if (context7.enabled && opencodeRuntime && !mainUsesDevin) {
       log(`Context7 MCP requested: ${context7.reason}`);
-      context7Active = await enableContext7Mcp(client, options.context7ApiKey, log);
+      context7Active = await enableContext7Mcp(opencodeRuntime.client, options.context7ApiKey, log);
       if (context7Active) context7Block = buildContext7PromptBlock(context7.reason);
+    } else if (context7.enabled && mainUsesDevin) {
+      log(`Context7 MCP skipped: main review uses Devin CLI (${context7.reason}).`);
     } else {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }
 
     const addressedPriorCheck = startAddressedPriorCommentsCheck({
-      client,
+      backend: auxBackend,
       model: auxModel,
       prContext: basePrContext,
       priorJbotThreads,
@@ -441,7 +653,7 @@ export async function runPrReview(params: {
     });
 
     const guidelineComplianceCheck = startGuidelineComplianceCheck({
-      client,
+      backend: auxBackend,
       model: auxModel,
       prContext: basePrContext,
       guidelinesForPrompt: guidelines,
@@ -457,7 +669,7 @@ export async function runPrReview(params: {
     // Context7 retry path, so a Context7 hiccup must not be able to zero a
     // pass's findings.
     const lensPasses = startLensPasses({
-      client,
+      backend: auxBackend,
       model: auxModel,
       prContext: basePrContext,
       guidelinesForPrompt,
@@ -477,7 +689,7 @@ export async function runPrReview(params: {
     });
     log(`Running review (${shardPlans.length} shard(s))`);
     const { summary, findings } = await runShardedReview({
-      client,
+      backend: mainBackend,
       model,
       guidelinesForPrompt,
       shardPlans,
@@ -486,6 +698,9 @@ export async function runPrReview(params: {
       deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt),
       context7Active,
       context7ApiKey: options.context7ApiKey,
+      disableContext7: opencodeRuntime
+        ? () => disableContext7Mcp(opencodeRuntime!.client, log)
+        : undefined,
       log,
       onTokenUsage: recordTokenUsage,
     });
@@ -522,7 +737,7 @@ export async function runPrReview(params: {
       );
     }
     const verifiedFindings = await verifyBlockingFindings({
-      client,
+      backend: auxBackend,
       model: auxModel,
       prContext: basePrContext,
       timeoutMs: computeVerificationTimeoutMs(options.timeBudgetMinutes, Date.now() - runStartedAt),
@@ -808,7 +1023,7 @@ export function computeVerificationTimeoutMs(
  * its own findings only, never the run.
  */
 function startLensPasses(params: {
-  client: Awaited<ReturnType<typeof startOpencode>>['client'];
+  backend: ReviewBackend;
   model: string;
   prContext: string;
   guidelinesForPrompt: string;
@@ -824,19 +1039,13 @@ function startLensPasses(params: {
   params.log(`Starting ${lensKeys.length} lens pass(es) in parallel: ${lensKeys.join(', ')}.`);
   return Promise.all(
     lensKeys.map((key) =>
-      runReview(
-        params.client,
-        params.model,
-        params.prContext,
-        params.guidelinesForPrompt,
-        params.log,
-        {
+      params.backend
+        .runReview(params.model, params.prContext, params.guidelinesForPrompt, params.log, {
           lensAddendum: REVIEW_LENSES[key],
           label: `review-${key}`,
           timeoutMs: params.timeoutMs,
           onTokenUsage: params.onTokenUsage,
-        },
-      )
+        })
         .then((result) => {
           params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
           return result.findings;
@@ -858,7 +1067,7 @@ function startLensPasses(params: {
  * run or returns garbage, findings pass through unchanged.
  */
 async function verifyBlockingFindings(params: {
-  client: Awaited<ReturnType<typeof startOpencode>>['client'];
+  backend: ReviewBackend;
   model: string;
   prContext: string;
   findings: Finding[];
@@ -883,8 +1092,7 @@ async function verifyBlockingFindings(params: {
 
   let verdicts;
   try {
-    verdicts = await runFindingVerification(
-      params.client,
+    verdicts = await params.backend.runFindingVerification(
       params.model,
       params.prContext,
       targets,
@@ -1002,7 +1210,7 @@ function buildShardPlans(params: {
  * assigned files so parallel shards cannot duplicate or poach each other.
  */
 async function runShardedReview(params: {
-  client: Awaited<ReturnType<typeof startOpencode>>['client'];
+  backend: ReviewBackend;
   model: string;
   guidelinesForPrompt: string;
   shardPlans: ShardPlan[];
@@ -1012,10 +1220,11 @@ async function runShardedReview(params: {
   deadlineAt?: number;
   context7Active: boolean;
   context7ApiKey: string;
+  disableContext7?: () => Promise<void>;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
 }): Promise<{ summary: string; findings: Finding[] }> {
-  const { client, model, guidelinesForPrompt, shardPlans, timeoutMs, log } = params;
+  const { backend, model, guidelinesForPrompt, shardPlans, timeoutMs, log } = params;
   const sharded = shardPlans.length > 1;
   const changed = new Set(params.changedFiles);
 
@@ -1023,13 +1232,13 @@ async function runShardedReview(params: {
   const disableContext7Once = async () => {
     if (context7Disabled) return;
     context7Disabled = true;
-    await disableContext7Mcp(client, log);
+    await params.disableContext7?.();
   };
 
   const outcomes: ShardOutcome[] = await Promise.all(
     shardPlans.map(async (plan): Promise<ShardOutcome> => {
       try {
-        const result = await runReview(client, model, plan.context, guidelinesForPrompt, log, {
+        const result = await backend.runReview(model, plan.context, guidelinesForPrompt, log, {
           label: plan.label,
           timeoutMs,
           onTokenUsage: params.onTokenUsage,
@@ -1058,8 +1267,7 @@ async function runShardedReview(params: {
           )}`,
         );
         try {
-          const result = await runReview(
-            client,
+          const result = await backend.runReview(
             model,
             plan.baseContext,
             guidelinesForPrompt,
@@ -1289,7 +1497,7 @@ async function safeListPriorJbotThreads(
 }
 
 function startAddressedPriorCommentsCheck(params: {
-  client: Awaited<ReturnType<typeof startOpencode>>['client'];
+  backend: ReviewBackend;
   model: string;
   prContext: string;
   priorJbotThreads: PriorJbotThread[];
@@ -1300,14 +1508,14 @@ function startAddressedPriorCommentsCheck(params: {
   if (params.priorJbotThreads.length === 0) return Promise.resolve([]);
 
   params.log('Starting addressed-prior-comments check in parallel.');
-  return runAddressedPriorCommentsCheck(
-    params.client,
-    params.model,
-    params.prContext,
-    params.log,
-    params.timeoutMs,
-    params.onTokenUsage,
-  )
+  return params.backend
+    .runAddressedPriorCommentsCheck(
+      params.model,
+      params.prContext,
+      params.log,
+      params.timeoutMs,
+      params.onTokenUsage,
+    )
     .then((independentlyAddressed) => {
       params.log(
         `Addressed-prior-comments check complete: ${independentlyAddressed.length} addressed prior comment(s)`,
@@ -1325,7 +1533,7 @@ function startAddressedPriorCommentsCheck(params: {
 }
 
 function startGuidelineComplianceCheck(params: {
-  client: Awaited<ReturnType<typeof startOpencode>>['client'];
+  backend: ReviewBackend;
   model: string;
   prContext: string;
   guidelinesForPrompt: string;
@@ -1342,15 +1550,15 @@ function startGuidelineComplianceCheck(params: {
   }
 
   params.log('Starting guideline-compliance check in parallel.');
-  return runGuidelineComplianceCheck(
-    params.client,
-    params.model,
-    params.prContext,
-    params.guidelinesForPrompt,
-    params.log,
-    params.timeoutMs,
-    params.onTokenUsage,
-  )
+  return params.backend
+    .runGuidelineComplianceCheck(
+      params.model,
+      params.prContext,
+      params.guidelinesForPrompt,
+      params.log,
+      params.timeoutMs,
+      params.onTokenUsage,
+    )
     .then((findings) => {
       params.log(`Guideline-compliance check complete: ${findings.length} finding(s)`);
       return findings;
@@ -1467,13 +1675,13 @@ function buildBody(
   const orphanedSection = renderOrphanedSection(orphaned);
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
   lines.push(...renderReviewMetadataBlock(model, tokenUsage));
-  lines.push('', `<sup>Reviewed with \`${model}\`.</sup>`);
+  lines.push('', `<sup>${formatReviewedWith(model, tokenUsage)}</sup>`);
   return lines.join('\n');
 }
 
 export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewTokenUsage): string[] {
   if (!tokenUsage) return [];
-  const models = tokenUsage.models.length > 0 ? tokenUsage.models : [model];
+  const models = uniqueModels(model, tokenUsage.models);
   return [
     '',
     '<details>',
@@ -1490,6 +1698,20 @@ export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewToke
     '',
     '</details>',
   ];
+}
+
+export function formatReviewedWith(model: string, tokenUsage?: ReviewTokenUsage): string {
+  const auxiliaryModels = uniqueModels(model, tokenUsage?.models ?? []).filter(
+    (usageModel) => usageModel !== model,
+  );
+  if (auxiliaryModels.length === 0) return `Reviewed with \`${model}\`.`;
+  return `Reviewed with \`${model}\`; auxiliary sessions used ${auxiliaryModels
+    .map((usageModel) => `\`${usageModel}\``)
+    .join(', ')}.`;
+}
+
+function uniqueModels(primary: string, others: string[]): string[] {
+  return [...new Set([primary, ...others])];
 }
 
 function getMergeGuidance(findings: Pick<Finding, 'severity'>[]): {

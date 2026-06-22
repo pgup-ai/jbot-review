@@ -8,6 +8,7 @@ import {
   computeRetryTimeoutMs,
   computeRunDeadline,
   computeVerificationTimeoutMs,
+  formatReviewedWith,
   renderReviewMetadataBlock,
 } from '../src/shared/runner.ts';
 
@@ -155,7 +156,36 @@ describe('renderReviewMetadataBlock', () => {
     assert.doesNotMatch(block, /model=openai\/gpt-5\ninput=100/);
   });
 
+  it('includes the main model even when only aux providers report token usage', () => {
+    const block = renderReviewMetadataBlock('devin/glm-5.2', {
+      models: ['opencode/deepseek-v4-flash-free'],
+      input: 100,
+      output: 20,
+      reasoning: 30,
+      cacheRead: 40,
+      cacheWrite: 50,
+    }).join('\n');
+
+    assert.match(block, /models=devin\/glm-5\.2, opencode\/deepseek-v4-flash-free/);
+  });
+
   it('omits the block when token usage was unavailable', () => {
     assert.deepEqual(renderReviewMetadataBlock('opencode/deepseek-v4-flash-free'), []);
+  });
+});
+
+describe('formatReviewedWith', () => {
+  it('mentions auxiliary models when they differ from the main reviewer', () => {
+    assert.equal(
+      formatReviewedWith('devin/glm-5.2', {
+        models: ['opencode/deepseek-v4-flash-free'],
+        input: 100,
+        output: 20,
+        reasoning: 30,
+        cacheRead: 40,
+        cacheWrite: 50,
+      }),
+      'Reviewed with `devin/glm-5.2`; auxiliary sessions used `opencode/deepseek-v4-flash-free`.',
+    );
   });
 });

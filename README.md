@@ -101,6 +101,7 @@ jobs:
           nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
           zai-api-key: ${{ secrets.ZAI_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
+          devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
           enable-context7: auto
           context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -111,10 +112,13 @@ jobs:
 and variables → Actions → New repository secret. Add the keys for the providers
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
-`XAI_API_KEY`, or `ANTHROPIC_API_KEY`.
+`XAI_API_KEY`, `DEVIN_WINDSURF_API_KEY`, or `ANTHROPIC_API_KEY`.
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
 no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
+Devin is a separate CLI backend: pass `DEVIN_WINDSURF_API_KEY` when you want to
+support `provider: devin` or `aux-provider: devin`; the action writes Devin
+credentials only when a Devin-backed run is selected.
 Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
 framework, CLI, cloud-service, or workflow changes.
 
@@ -197,6 +201,7 @@ without editing the workflow.
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     zai-api-key: ${{ secrets.ZAI_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
+    devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     enable-context7: auto
     context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -275,23 +280,28 @@ npm run eval
 
 See [models.dev](https://models.dev/) for the full list of models and providers.
 
-| `provider`        | Default model                       | Action key input     | Secret/env var       |
-| ----------------- | ----------------------------------- | -------------------- | -------------------- |
-| `opencode`        | `opencode/deepseek-v4-flash-free`   | `opencode-api-key`   | `OPENCODE_API_KEY`   |
-| `opencode-go`     | `opencode-go/deepseek-v4-flash`     | `opencode-api-key`   | `OPENCODE_API_KEY`   |
-| `deepseek`        | `deepseek/deepseek-v4-flash`        | `deepseek-api-key`   | `DEEPSEEK_API_KEY`   |
-| `openai`          | `openai/gpt-5.4-nano`               | `openai-api-key`     | `OPENAI_API_KEY`     |
-| `anthropic`       | `anthropic/claude-sonnet-4-6`       | `anthropic-api-key`  | `ANTHROPIC_API_KEY`  |
-| `google`          | `google/gemini-2.5-flash`           | `gemini-api-key`     | `GEMINI_API_KEY`     |
-| `openrouter`      | `openrouter/openai/gpt-4o-mini`     | `openrouter-api-key` | `OPENROUTER_API_KEY` |
-| `nvidia`          | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia-api-key`     | `NVIDIA_API_KEY`     |
-| `zai-coding-plan` | `zai-coding-plan/glm-5.2`           | `zai-api-key`        | `ZAI_API_KEY`        |
-| `xai`             | `xai/grok-4.3`                      | `xai-api-key`        | `XAI_API_KEY`        |
+| `provider`        | Default model                       | Action key input         | Secret/env var           |
+| ----------------- | ----------------------------------- | ------------------------ | ------------------------ |
+| `opencode`        | `opencode/deepseek-v4-flash-free`   | `opencode-api-key`       | `OPENCODE_API_KEY`       |
+| `opencode-go`     | `opencode-go/deepseek-v4-flash`     | `opencode-api-key`       | `OPENCODE_API_KEY`       |
+| `deepseek`        | `deepseek/deepseek-v4-flash`        | `deepseek-api-key`       | `DEEPSEEK_API_KEY`       |
+| `openai`          | `openai/gpt-5.4-nano`               | `openai-api-key`         | `OPENAI_API_KEY`         |
+| `anthropic`       | `anthropic/claude-sonnet-4-6`       | `anthropic-api-key`      | `ANTHROPIC_API_KEY`      |
+| `google`          | `google/gemini-2.5-flash`           | `gemini-api-key`         | `GEMINI_API_KEY`         |
+| `openrouter`      | `openrouter/openai/gpt-4o-mini`     | `openrouter-api-key`     | `OPENROUTER_API_KEY`     |
+| `nvidia`          | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia-api-key`         | `NVIDIA_API_KEY`         |
+| `zai-coding-plan` | `zai-coding-plan/glm-5.2`           | `zai-api-key`            | `ZAI_API_KEY`            |
+| `xai`             | `xai/grok-4.3`                      | `xai-api-key`            | `XAI_API_KEY`            |
+| `devin`           | `devin/default`                     | `devin-windsurf-api-key` | `DEVIN_WINDSURF_API_KEY` |
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
 Use `provider: google` with `gemini-api-key` / `GEMINI_API_KEY` for direct
 Gemini API key auth.
+Use `provider: devin` with `devin-windsurf-api-key` /
+`DEVIN_WINDSURF_API_KEY` for the Devin CLI backend. The Docker image includes
+the Devin CLI, but credentials are written only when the main or active
+auxiliary provider is `devin`.
 
 Set the `provider` and `model` inputs to override the defaults. For automatic
 PR reviews without editing workflow YAML on every provider or model change,
@@ -316,6 +326,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     zai-api-key: ${{ secrets.ZAI_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
+    devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     enable-context7: auto
     context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -323,9 +334,12 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
 ```
 
 The action reads the key matching the selected `provider`. When `aux-model` uses
-a different provider, the action uses the aux provider's key input/env var if it
-is supplied; otherwise it reuses the review provider API key for the aux
-provider. Future provider changes can be made through `JBOT_REVIEW_PROVIDER` and
+a different opencode-backed provider, the action uses the aux provider's key
+input/env var if it is supplied; otherwise it reuses the review provider API key
+for the aux provider. Devin cannot reuse opencode-provider keys, and
+opencode-backed providers cannot reuse `DEVIN_WINDSURF_API_KEY`, so mixed
+Devin/opencode-backed main+aux configurations must pass both keys. Future
+provider changes can be made through `JBOT_REVIEW_PROVIDER` and
 `JBOT_AUX_PROVIDER` without editing the workflow YAML. It accepts provider and
 model from either action inputs or environment variables: `provider` or
 `JBOT_REVIEW_PROVIDER` for the main provider, `model` or `JBOT_REVIEW_MODEL` for
@@ -375,6 +389,7 @@ documentation lookup.
 | `nvidia-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `nvidia`                         |
 | `zai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `zai-coding-plan`                |
 | `xai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `xai`                            |
+| `devin-windsurf-api-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `devin`                   |
 | `enable-context7`         | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false` |
 | `context7-api-key`        | No       | —                     | Optional Context7 key for reliable CI docs lookup                          |
 | `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                                           |
@@ -460,9 +475,11 @@ cp .env.example .env
 The hosted App currently uses operator-managed provider keys from environment
 variables. These are not per-user BYOK keys. For a multi-provider deployment,
 set every provider key you want the operator account to support, then choose the
-active provider with `PROVIDER` and optional `MODEL`. Future dashboard BYOK
-should store encrypted per-user/per-installation keys in the dashboard database
-and resolve them per review job, not through Fly/Cloud Run app secrets.
+active provider with `PROVIDER` and optional `MODEL`. Pass
+`DEVIN_WINDSURF_API_KEY` when `PROVIDER=devin` or when `JBOT_AUX_PROVIDER=devin`
+with an active `JBOT_REVIEW_AUX_MODEL`. Future dashboard BYOK should store
+encrypted per-user/per-installation keys in the dashboard database and resolve
+them per review job, not through Fly/Cloud Run app secrets.
 
 **4. Deploy.** Pick any provider from the [deployment guides](#deploying-the-hosted-app)
 below. All follow the same pattern: build the Docker image, inject env vars,
@@ -514,6 +531,7 @@ during checkout.
 | `NVIDIA_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=nvidia          |
 | `ZAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=zai-coding-plan |
 | `XAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=xai             |
+| `DEVIN_WINDSURF_API_KEY` | Conditional | —                | Operator key used when PROVIDER=devin           |
 | `MODEL`                  | No          | Provider default | Provider model id, optionally prefixed          |
 | `JBOT_REVIEW_AUX_MODEL`  | No          | Main model       | Aux model id, optionally prefixed               |
 | `PORT`                   | No          | `3000`           | HTTP listen port                                |
@@ -523,9 +541,10 @@ during checkout.
 Set `PROVIDER` and the matching operator API key in `.env`. You can set all
 provider keys up front, but the hosted server reads the key matching the
 selected `PROVIDER` and only uses the `JBOT_AUX_PROVIDER` key when it is present;
-otherwise cross-provider aux sessions reuse the review provider API key. The
-`MODEL` env var overrides the provider default and may be either the raw
-provider model id or a matching `provider/model` string:
+otherwise opencode-backed cross-provider aux sessions reuse the review provider
+API key. Mixed Devin/opencode-backed main+aux configurations require both
+provider keys. The `MODEL` env var overrides the provider default and may be
+either the raw provider model id or a matching `provider/model` string:
 
 ```bash
 PROVIDER=deepseek

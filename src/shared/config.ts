@@ -75,9 +75,19 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyEnv: 'XAI_API_KEY',
     keyInput: 'xai-api-key',
   },
+  devin: {
+    defaultModel: 'devin/default',
+    keyEnv: 'DEVIN_WINDSURF_API_KEY',
+    keyInput: 'devin-windsurf-api-key',
+    models: {
+      // Devin CLI is not driven through opencode, so prompt-cache options do not apply.
+      default: { promptCache: false },
+    },
+  },
 };
 
 export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {
+  if (providerID === 'devin') return false;
   return PROVIDERS[providerID]?.models?.[modelID]?.promptCache !== false;
 }
 
