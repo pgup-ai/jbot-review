@@ -23,7 +23,7 @@ export const PATH_PATTERNS = {
   tooling: /(^|\/)(package\.json|action\.ya?ml)$|^\.github\/workflows\/.+\.ya?ml$/i,
   tests: /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/i,
   infra:
-    /(^|\/)(infra(?:structure)?|terraform|deploy(?:ment)?|k8s|kubernetes|helm|charts?|ansible|pulumi)\/|(^|\/)Dockerfile(?:\.[^/]+)?$|(^|\/)(?:docker-)?compose\.ya?ml$|\.(?:tf|tfvars|bicep)$/i,
+    /(^|\/)(infra(?:structure)?|terraform|deploy(?:ment)?|k8s|kubernetes|helm|ansible|pulumi)\/|(^|\/)Dockerfile(?:\.[^/]+)?$|(^|\/)Chart\.ya?ml$|(^|\/)(?:docker-)?compose\.ya?ml$|\.(?:tf|tfvars|bicep)$/i,
 } as const;
 
 /**

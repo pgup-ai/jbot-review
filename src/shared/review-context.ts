@@ -154,6 +154,7 @@ const SCOPED_GUIDELINE_FILES = [
   'REVIEW.md',
   'TECHNICAL_STANDARDS.md',
   'DESIGN.md',
+  'DECISIONS.md',
   'CLAUDE.md',
   'CONTRIBUTING.md',
   '.cursor/BUGBOT.md',
@@ -495,11 +496,22 @@ export function formatFinderGuidelines(
     .filter((_, index) => keptIndices.has(index))
     .map(formatGuidelineDoc);
 
+  const budgetNotes: string[] = [];
   if (omitted > 0) {
+    budgetNotes.push(
+      `${omitted} lower-relevance guideline file(s) were omitted from this pass to stay within the ${capBytes} byte finder budget`,
+    );
+  }
+  if (discovered.budgetExhausted) {
+    budgetNotes.push(
+      `repository guidance also hit the ${MAX_GUIDELINE_TOTAL_BYTES} byte discovery budget upstream`,
+    );
+  }
+  if (budgetNotes.length > 0) {
     sections.push(
       [
         '### Review guidance budget',
-        `${omitted} lower-relevance guideline file(s) were omitted from this pass to stay within the ${capBytes} byte finder budget. The guideline-compliance pass audits the full set.`,
+        `${budgetNotes.join('; ')}. The full set is reviewed by the separate guideline-compliance pass.`,
       ].join('\n'),
     );
   }

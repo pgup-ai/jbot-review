@@ -325,10 +325,12 @@ export async function runPrReview(params: {
   // full block. Hunks always go last — closest to the output reminder, where
   // small models attend most.
   let coreContext: string;
-  // Finder shards + recall lenses get the capped, relevance-ranked slice;
-  // the guideline-compliance session (below) gets the full set — its job is
-  // rule-by-rule auditing, so it must see every loaded doc.
-  const guidelinesForPrompt = finderGuidelines;
+  // Finder shards + recall lenses get the capped, relevance-ranked slice, but
+  // ONLY when the guideline-compliance pass is enabled to audit the full set in
+  // parallel. With compliance off, finders fall back to the full set so no
+  // guideline coverage is silently dropped — otherwise the omitted docs would
+  // be seen by no session at all.
+  const guidelinesForPrompt = options.guidelinePass ? finderGuidelines : guidelines;
   if (options.enhancedContext) {
     const commits = await listPrCommits(octokit, owner, repo, pullNumber);
     const checkSummary = headSha
@@ -341,10 +343,11 @@ export async function runPrReview(params: {
       priorComments,
       commits,
       checkSummary,
-      // Guidelines are injected per pass via guidelinesForPrompt (the finder
-      // slice for shards/lenses; the full set goes to the compliance pass),
-      // kept out of the shared context so they land in the early prompt slot
-      // (invariant #5) instead of being buried mid-context.
+      // Guidelines are injected per pass via guidelinesForPrompt (defined
+      // above: the capped finder slice for shards/lenses when the compliance
+      // pass carries the full set, else the full set), kept out of the shared
+      // context so they land in the early prompt slot (invariant #5) instead
+      // of being buried mid-context.
       guidelines: '',
       diffScope,
     });

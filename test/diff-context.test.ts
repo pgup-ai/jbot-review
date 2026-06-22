@@ -178,14 +178,20 @@ describe('PATH_PATTERNS.infra', () => {
       'services/api/Dockerfile.prod',
       'deploy/k8s/app.yaml',
       'helm/charts/web/values.yaml',
+      'charts/myapp/Chart.yaml',
       'pulumi/index.ts',
     ]) {
       assert.ok(PATH_PATTERNS.infra.test(file), `expected infra match: ${file}`);
     }
   });
 
-  it('does not match application code or CI workflows', () => {
-    for (const file of ['src/shared/runner.ts', '.github/workflows/ci.yml', 'README.md']) {
+  it('does not match application code, CI workflows, or frontend chart components', () => {
+    for (const file of [
+      'src/shared/runner.ts',
+      '.github/workflows/ci.yml',
+      'README.md',
+      'src/components/charts/LineChart.tsx',
+    ]) {
       assert.ok(!PATH_PATTERNS.infra.test(file), `unexpected infra match: ${file}`);
     }
   });
