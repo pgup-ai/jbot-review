@@ -57,8 +57,11 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         enhancedContext: true,
         reviewPasses: 1,
         verifyFindings: true,
-        // Match the hosted app's sane defaults: a wall-clock cap so one slow job
-        // can't starve the single worker, and medium reasoning effort.
+        // Match the hosted app / Action defaults explicitly. The runner otherwise
+        // auto-shards when reviewShards is unset (default 0) — bad on one BYOK key
+        // and a small VPS — so pin a single shard, plus a 30-min wall-clock cap so
+        // one slow job can't starve the worker, and medium reasoning effort.
+        reviewShards: 1,
         timeBudgetMinutes: 30,
         modelOptions: { reasoningEffort: 'medium' },
         ...(job.auxModel ? { auxModel: job.auxModel } : {}),
