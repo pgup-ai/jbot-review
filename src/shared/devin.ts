@@ -63,6 +63,14 @@ export interface DevinCliArgsInput {
   model: string;
   promptFile: string;
   exportFile: string;
+  configFile: string;
+}
+
+export interface DevinCliConfig {
+  permissions: {
+    allow: string[];
+    deny: string[];
+  };
 }
 
 export function buildDevinCliArgs(input: DevinCliArgsInput): string[] {
@@ -70,6 +78,8 @@ export function buildDevinCliArgs(input: DevinCliArgsInput): string[] {
   const args = [
     '--permission-mode',
     'auto',
+    '--config',
+    input.configFile,
     '--prompt-file',
     input.promptFile,
     '--export',
@@ -197,8 +207,9 @@ async function runDevinPrompt(
   const dir = mkdtempSync(join(tmpdir(), 'jbot-devin-'));
   const promptFile = join(dir, 'prompt.txt');
   const exportFile = join(dir, 'conversation.atif');
+  const configFile = writeDevinReadOnlyConfig(dir);
   writeFileSync(promptFile, prompt, { mode: 0o600 });
-  const args = buildDevinCliArgs({ model, promptFile, exportFile });
+  const args = buildDevinCliArgs({ model, promptFile, exportFile, configFile });
   log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
   try {
     const result = await spawnWithTimeout('devin', args, workspace, timeoutMs);
@@ -287,6 +298,39 @@ function tomlString(value: string): string {
 function truncateForLog(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
   return `${value.slice(0, maxChars)}... [truncated]`;
+}
+
+export function buildDevinReadOnlyConfig(): DevinCliConfig {
+  return {
+    permissions: {
+      allow: [
+        'read',
+        'grep',
+        'glob',
+        'Read(**)',
+        'Exec(git status)',
+        'Exec(git diff)',
+        'Exec(git log)',
+        'Exec(git show)',
+        'Exec(git grep)',
+        'Exec(git ls-files)',
+        'Exec(git rev-parse)',
+        'Exec(git merge-base)',
+      ],
+      deny: ['edit', 'write', 'Write(**)', 'Write(/**)'],
+    },
+  };
+}
+
+function writeDevinReadOnlyConfig(dir: string): string {
+  const path = join(dir, 'config.json');
+  writeFileSync(path, JSON.stringify(buildDevinReadOnlyConfig(), null, 2), { mode: 0o600 });
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    /* best effort on filesystems that do not support chmod */
+  }
+  return path;
 }
 
 export function truncateUtf8WithNotice(value: string, maxBytes: number, label: string): string {

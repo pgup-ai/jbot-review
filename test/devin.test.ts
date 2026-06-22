@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 
 import {
   buildDevinCliArgs,
+  buildDevinReadOnlyConfig,
   devinCredentialsPath,
   isDevinProvider,
   truncateUtf8WithNotice,
@@ -47,10 +48,13 @@ describe('Devin CLI provider helpers', () => {
         model: 'devin/default',
         promptFile: '/tmp/prompt.txt',
         exportFile: '/tmp/out.atif',
+        configFile: '/tmp/config.json',
       }),
       [
         '--permission-mode',
         'auto',
+        '--config',
+        '/tmp/config.json',
         '--prompt-file',
         '/tmp/prompt.txt',
         '--export',
@@ -66,10 +70,13 @@ describe('Devin CLI provider helpers', () => {
         model: 'devin/codex',
         promptFile: '/tmp/prompt.txt',
         exportFile: '/tmp/out.atif',
+        configFile: '/tmp/config.json',
       }),
       [
         '--permission-mode',
         'auto',
+        '--config',
+        '/tmp/config.json',
         '--prompt-file',
         '/tmp/prompt.txt',
         '--export',
@@ -79,6 +86,28 @@ describe('Devin CLI provider helpers', () => {
         '-p',
       ],
     );
+  });
+
+  it('pins Devin sessions to read-only review permissions', () => {
+    assert.deepEqual(buildDevinReadOnlyConfig(), {
+      permissions: {
+        allow: [
+          'read',
+          'grep',
+          'glob',
+          'Read(**)',
+          'Exec(git status)',
+          'Exec(git diff)',
+          'Exec(git log)',
+          'Exec(git show)',
+          'Exec(git grep)',
+          'Exec(git ls-files)',
+          'Exec(git rev-parse)',
+          'Exec(git merge-base)',
+        ],
+        deny: ['edit', 'write', 'Write(**)', 'Write(/**)'],
+      },
+    });
   });
 
   it('truncates repair context by bytes with an omission notice', () => {
