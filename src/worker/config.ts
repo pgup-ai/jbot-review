@@ -14,8 +14,15 @@ export interface WorkerConfig {
 export function loadWorkerConfig(): WorkerConfig {
   const controlPlaneUrl = must('CONTROL_PLANE_URL').replace(/\/$/, '');
   // The claim response carries a DECRYPTED provider key — never send it over
-  // plaintext HTTP. Allow http only for localhost dev tunnels.
-  const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(controlPlaneUrl);
+  // plaintext HTTP. Parse the URL and check the REAL hostname; a regex is fooled
+  // by a userinfo authority (e.g. http://localhost@evil.com → host is evil.com).
+  let host: string;
+  try {
+    host = new URL(controlPlaneUrl).hostname;
+  } catch {
+    throw new Error(`CONTROL_PLANE_URL is not a valid URL (got "${controlPlaneUrl}")`);
+  }
+  const isLocal = host === 'localhost' || host === '127.0.0.1';
   if (!controlPlaneUrl.startsWith('https://') && !isLocal) {
     throw new Error(`CONTROL_PLANE_URL must be https:// (got "${controlPlaneUrl}")`);
   }

@@ -38,4 +38,8 @@ test('CONTROL_PLANE_URL: non-https is rejected (localhost allowed)', () => {
   withEnv({ CONTROL_PLANE_URL: 'http://localhost:3001' }, () => {
     assert.equal(loadWorkerConfig().controlPlaneUrl, 'http://localhost:3001');
   });
+  // userinfo trick: real host is evil.com, must NOT be treated as localhost.
+  withEnv({ CONTROL_PLANE_URL: 'http://localhost@evil.com' }, () => {
+    assert.throws(() => loadWorkerConfig(), /https/);
+  });
 });
