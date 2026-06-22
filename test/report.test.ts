@@ -86,6 +86,11 @@ test('condenseSummary groups category headers with colon variants', () => {
   assert.equal(out, '**Changes:**\n- A\n- B');
 });
 
+test('condenseSummary keeps flat shard continuations under the prior category', () => {
+  const out = condenseSummary(['**Changes**\n- A', '- B']);
+  assert.equal(out, '**Changes**\n- A\n- B');
+});
+
 test('condenseSummary groups bold lead-in summary lines with matching headers', () => {
   const out = condenseSummary([
     '**Changes** — Two minimal changes in assigned files:\n- A',

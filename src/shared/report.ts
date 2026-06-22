@@ -149,9 +149,9 @@ export function condenseSummary(parts: string[]): string {
   const seen = new Set<string>();
   const topLevel: string[] = [];
   const sections = new Map<string, { header: string; lines: string[] }>();
+  let currentKey = '';
 
   for (const part of parts) {
-    let currentKey = '';
     for (const raw of part.split('\n')) {
       const line = raw.replace(/\s+$/, '');
       if (!line.trim()) continue;
