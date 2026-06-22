@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  PATH_PATTERNS,
   buildDiffHunksBlock,
   diffRiskScore,
   isDocFile,
@@ -165,6 +166,38 @@ describe('shardFilesForReview', () => {
     // big.ts alone vs the two mids together: no shard should hold everything.
     assert.equal(shards.length, 2);
     assert.ok(Math.max(...loads) <= 41_000);
+  });
+});
+
+describe('PATH_PATTERNS.infra', () => {
+  it('matches IaC, containers, and deploy manifests', () => {
+    for (const file of [
+      'infra/main.tf',
+      'terraform/prod.tfvars',
+      'Dockerfile',
+      'services/api/Dockerfile.prod',
+      'deploy/k8s/app.yaml',
+      'helm/charts/web/values.yaml',
+      'pulumi/index.ts',
+    ]) {
+      assert.ok(PATH_PATTERNS.infra.test(file), `expected infra match: ${file}`);
+    }
+  });
+
+  it('does not match application code or CI workflows', () => {
+    for (const file of ['src/shared/runner.ts', '.github/workflows/ci.yml', 'README.md']) {
+      assert.ok(!PATH_PATTERNS.infra.test(file), `unexpected infra match: ${file}`);
+    }
+  });
+});
+
+describe('diffRiskScore infra weighting', () => {
+  it('ranks an infra change above prose and above a generic config file', () => {
+    const infra = { filename: 'deploy/k8s/app.yaml', patch: '+ replicas: 3' };
+    const genericYaml = { filename: 'config/app.yaml', patch: '+ key: value' };
+    const doc = { filename: 'docs/guide.md', patch: '+ words' };
+    assert.ok(diffRiskScore(infra) > diffRiskScore(genericYaml));
+    assert.ok(diffRiskScore(genericYaml) > diffRiskScore(doc));
   });
 });
 
