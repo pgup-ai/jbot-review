@@ -63,18 +63,17 @@ export interface DevinCliArgsInput {
   model: string;
   promptFile: string;
   exportFile: string;
-  agentConfigFile: string;
 }
 
 export function buildDevinCliArgs(input: DevinCliArgsInput): string[] {
   const { modelID } = parseModelName(input.model);
   const args = [
+    '--permission-mode',
+    'auto',
     '--prompt-file',
     input.promptFile,
     '--export',
     input.exportFile,
-    '--agent-config',
-    input.agentConfigFile,
   ];
   if (modelID !== 'default') args.push('--model', modelID);
   args.push('-p');
@@ -198,10 +197,8 @@ async function runDevinPrompt(
   const dir = mkdtempSync(join(tmpdir(), 'jbot-devin-'));
   const promptFile = join(dir, 'prompt.txt');
   const exportFile = join(dir, 'conversation.atif');
-  const agentConfigFile = join(dir, 'agent-config.json');
   writeFileSync(promptFile, prompt, { mode: 0o600 });
-  writeFileSync(agentConfigFile, JSON.stringify(readOnlyAgentConfig(), null, 2), { mode: 0o600 });
-  const args = buildDevinCliArgs({ model, promptFile, exportFile, agentConfigFile });
+  const args = buildDevinCliArgs({ model, promptFile, exportFile });
   log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
   try {
     const result = await spawnWithTimeout('devin', args, workspace, timeoutMs);
@@ -290,15 +287,6 @@ function tomlString(value: string): string {
 function truncateForLog(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
   return `${value.slice(0, maxChars)}... [truncated]`;
-}
-
-function readOnlyAgentConfig(): unknown {
-  return {
-    permissions: {
-      allow: ['read', 'grep', 'glob', 'Read(**)'],
-      deny: ['edit', 'Write(**)', 'exec'],
-    },
-  };
 }
 
 export function truncateUtf8WithNotice(value: string, maxBytes: number, label: string): string {
