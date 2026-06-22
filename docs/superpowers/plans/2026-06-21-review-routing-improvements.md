@@ -12,13 +12,14 @@
 
 ## Invariants this plan must respect
 
-- **#1 Full-diff scope, always.** None of these changes narrow what the model reviews — finders still receive the whole diff; only the *guideline text* attached to finder sessions shrinks. The compliance session still audits the full guideline set.
+- **#1 Full-diff scope, always.** None of these changes narrow what the model reviews — finders still receive the whole diff; only the _guideline text_ attached to finder sessions shrinks. The compliance session still audits the full guideline set.
 - **#3 Auxiliary sessions fail open.** The compliance and lens sessions keep their fail-open behavior; this plan does not add a failure path that can drop findings.
 - **#4 Every injected context block has a hard byte budget and lists what it omitted.** The new finder render is capped and appends an omission notice (no silent truncation).
-- **#5 Prompt assembly order unchanged.** Guidelines still land in the early prompt slot via `assembleReviewPrompt`; only the *content* attached to finders changes.
+- **#5 Prompt assembly order unchanged.** Guidelines still land in the early prompt slot via `assembleReviewPrompt`; only the _content_ attached to finders changes.
 - **#10 Extract pure logic for tests; `runner.ts` only wires.** All routing/budget decisions live in `diff-context.ts`, `review-playbooks.ts`, `prompt.ts`, and `review-context.ts` as pure, unit-tested functions. `runner.ts` changes are wiring only.
 
 **Out of scope (deliberate, YAGNI):**
+
 - Item 2 (per-shard / per-category playbook scoping) — evaluated and rejected: playbooks are ~2 KB, not the dilution driver, and narrowing risks cross-category interaction recall.
 - LLM/content-based categorization — the additive union-on-uncertainty design already absorbs path-regex misses.
 - Recursive (>1 hop) reference following and whole-ADR-directory loading — would reintroduce dilution; we add specific filenames only.
@@ -29,17 +30,17 @@
 
 ## File Structure
 
-| File | Change | Responsibility |
-| --- | --- | --- |
-| `src/shared/diff-context.ts` | Modify | Add `PATH_PATTERNS.infra`; add an infra `RISK_RULES` weight so infra hunks get embedded. |
-| `test/diff-context.test.ts` | Modify | Cover the infra pattern + risk weight. |
-| `src/shared/prompt.ts` | Modify | Add `'infra-ops'` to `ReviewPlaybookId`; add the `INFRA_OPS` playbook to `REVIEW_PLAYBOOKS`. |
-| `test/prompt.test.ts` | Modify | Cover the infra playbook id is unioned-in (via review-playbooks) — see Task A3. |
-| `src/shared/review-playbooks.ts` | Modify | Add `INFRA_OPS` selection + ordering; broaden `EXTERNAL_INTEGRATION_PATTERNS` to catch fetch/download scripts. |
-| `test/review-playbooks.test.ts` | Modify | Cover infra selection + the `fetch-logos.mjs` supply-chain trigger. |
-| `src/shared/review-context.ts` | Modify | Add `DESIGN.md`/`DECISIONS.md` to discovery lists; introduce structured `discoverGuidelineDocs` + `formatGuidelines` + `formatFinderGuidelines`; keep `discoverGuidelines` as a wrapper. |
-| `test/review-context.test.ts` | Modify | Cover DESIGN.md discovery, structured docs, finder cap + scoped-first ranking, full render unchanged. |
-| `src/shared/runner.ts` | Modify | Wire finders/lenses to the finder render and the compliance session to the full render; add infra focus bullet. |
+| File                             | Change | Responsibility                                                                                                                                                                           |
+| -------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/shared/diff-context.ts`     | Modify | Add `PATH_PATTERNS.infra`; add an infra `RISK_RULES` weight so infra hunks get embedded.                                                                                                 |
+| `test/diff-context.test.ts`      | Modify | Cover the infra pattern + risk weight.                                                                                                                                                   |
+| `src/shared/prompt.ts`           | Modify | Add `'infra-ops'` to `ReviewPlaybookId`; add the `INFRA_OPS` playbook to `REVIEW_PLAYBOOKS`.                                                                                             |
+| `test/prompt.test.ts`            | Modify | Cover the infra playbook id is unioned-in (via review-playbooks) — see Task A3.                                                                                                          |
+| `src/shared/review-playbooks.ts` | Modify | Add `INFRA_OPS` selection + ordering; broaden `EXTERNAL_INTEGRATION_PATTERNS` to catch fetch/download scripts.                                                                           |
+| `test/review-playbooks.test.ts`  | Modify | Cover infra selection + the `fetch-logos.mjs` supply-chain trigger.                                                                                                                      |
+| `src/shared/review-context.ts`   | Modify | Add `DESIGN.md`/`DECISIONS.md` to discovery lists; introduce structured `discoverGuidelineDocs` + `formatGuidelines` + `formatFinderGuidelines`; keep `discoverGuidelines` as a wrapper. |
+| `test/review-context.test.ts`    | Modify | Cover DESIGN.md discovery, structured docs, finder cap + scoped-first ranking, full render unchanged.                                                                                    |
+| `src/shared/runner.ts`           | Modify | Wire finders/lenses to the finder render and the compliance session to the full render; add infra focus bullet.                                                                          |
 
 ---
 
@@ -48,6 +49,7 @@
 ### Task A1: Add the `infra` path pattern and diff-risk weight
 
 **Files:**
+
 - Modify: `src/shared/diff-context.ts:19-25` (`PATH_PATTERNS`) and `src/shared/diff-context.ts:66-76` (`RISK_RULES`)
 - Test: `test/diff-context.test.ts`
 
@@ -105,7 +107,8 @@ export const PATH_PATTERNS = {
   api: /(^|\/)(api|routes?|controllers?|server|webhooks?)\//i,
   tooling: /(^|\/)(package\.json|action\.ya?ml)$|^\.github\/workflows\/.+\.ya?ml$/i,
   tests: /(^|\/)(test|tests|__tests__|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/i,
-  infra: /(^|\/)(infra(?:structure)?|terraform|deploy(?:ment)?|k8s|kubernetes|helm|charts?|ansible|pulumi)\/|(^|\/)Dockerfile(?:\.[^/]+)?$|(^|\/)(?:docker-)?compose\.ya?ml$|\.(?:tf|tfvars|bicep)$/i,
+  infra:
+    /(^|\/)(infra(?:structure)?|terraform|deploy(?:ment)?|k8s|kubernetes|helm|charts?|ansible|pulumi)\/|(^|\/)Dockerfile(?:\.[^/]+)?$|(^|\/)(?:docker-)?compose\.ya?ml$|\.(?:tf|tfvars|bicep)$/i,
 } as const;
 ```
 
@@ -143,6 +146,7 @@ git commit -m "feat(diff-context): add infra path category and diff-risk weight"
 ### Task A2: Add the `infra-ops` review playbook
 
 **Files:**
+
 - Modify: `src/shared/prompt.ts:354-435` (`ReviewPlaybookId`, playbook consts, `REVIEW_PLAYBOOKS`)
 - Test: covered via `test/review-playbooks.test.ts` in Task A3 (the block renderer is data-driven, so the existing `buildReviewPlaybookBlock` test in Task A3 asserts the new section).
 
@@ -207,6 +211,7 @@ git commit -m "feat(prompt): add infra-ops review playbook"
 ### Task A3: Select the infra playbook and broaden the supply-chain trigger
 
 **Files:**
+
 - Modify: `src/shared/review-playbooks.ts`
 - Test: `test/review-playbooks.test.ts`
 
@@ -319,21 +324,22 @@ git commit -m "feat(review-playbooks): select infra-ops and route remote-fetch s
 ### Task A4: Mirror infra in the runner focus block (wiring)
 
 **Files:**
+
 - Modify: `src/shared/runner.ts:1193-1234` (`buildReviewFocusBlock`)
 
-> Note: `buildReviewFocusBlock` is a private wiring helper in `runner.ts` and is intentionally untested (the routing *decision* is tested in `selectReviewPlaybookIds` / `PATH_PATTERNS`). This step keeps the focus checklist consistent with the new playbook; it adds no new decision logic, so it follows invariant #10 by not introducing testable logic into the runner.
+> Note: `buildReviewFocusBlock` is a private wiring helper in `runner.ts` and is intentionally untested (the routing _decision_ is tested in `selectReviewPlaybookIds` / `PATH_PATTERNS`). This step keeps the focus checklist consistent with the new playbook; it adds no new decision logic, so it follows invariant #10 by not introducing testable logic into the runner.
 
 - [ ] **Step 1: Add the infra focus bullet**
 
 In `buildReviewFocusBlock`, add a branch after the `security` branch:
 
 ```typescript
-    if (PATH_PATTERNS.security.test(file)) {
-      focusItems.add('Security: privilege, tokens, tenant isolation, unsafe input boundaries.');
-    }
-    if (PATH_PATTERNS.infra.test(file)) {
-      focusItems.add('Infra/ops: least privilege, exposure, pinned versions, rollout/rollback safety.');
-    }
+if (PATH_PATTERNS.security.test(file)) {
+  focusItems.add('Security: privilege, tokens, tenant isolation, unsafe input boundaries.');
+}
+if (PATH_PATTERNS.infra.test(file)) {
+  focusItems.add('Infra/ops: least privilege, exposure, pinned versions, rollout/rollback safety.');
+}
 ```
 
 - [ ] **Step 2: Typecheck + full test sweep**
@@ -355,6 +361,7 @@ git commit -m "feat(runner): add infra focus bullet to the review focus block"
 ### Task B1: Add `DESIGN.md` and `DECISIONS.md` to the discovery lists
 
 **Files:**
+
 - Modify: `src/shared/review-context.ts:112-140` (`ROOT_GUIDELINE_FILES`, `SCOPED_GUIDELINE_FILES`)
 - Test: `test/review-context.test.ts`
 
@@ -439,6 +446,7 @@ This is the dilution fix. C1 is a behavior-preserving refactor (existing tests a
 ### Task C1: Extract structured discovery (`discoverGuidelineDocs` + `formatGuidelines`)
 
 **Files:**
+
 - Modify: `src/shared/review-context.ts` (the `discoverGuidelines` function body + `formatGuidelineSections`)
 - Test: `test/review-context.test.ts` (new structured-output test; all existing tests must stay green unchanged)
 
@@ -552,21 +560,21 @@ Rename the existing `export async function discoverGuidelines(...)` to `export a
 Replace the accumulator declarations near the top of the function:
 
 ```typescript
-  const docs: GuidelineDoc[] = [];
-  const seen = new Set<string>();
-  const seenRealPaths = new Set<string>();
-  const referencedDocs = new Map<string, string>();
-  const workspaceRoot = await realpath(cwd);
-  let remainingGuidelineBytes = MAX_GUIDELINE_TOTAL_BYTES;
-  let budgetExhausted = false;
+const docs: GuidelineDoc[] = [];
+const seen = new Set<string>();
+const seenRealPaths = new Set<string>();
+const referencedDocs = new Map<string, string>();
+const workspaceRoot = await realpath(cwd);
+let remainingGuidelineBytes = MAX_GUIDELINE_TOTAL_BYTES;
+let budgetExhausted = false;
 ```
 
 Replace `addBudgetNotice()` (it no longer pushes a section — it just flips the flag):
 
 ```typescript
-  function markBudgetExhausted(): void {
-    budgetExhausted = true;
-  }
+function markBudgetExhausted(): void {
+  budgetExhausted = true;
+}
 ```
 
 In `readBoundedGuidelineFile`, change the early `addBudgetNotice()` call to `markBudgetExhausted()`.
@@ -574,115 +582,112 @@ In `readBoundedGuidelineFile`, change the early `addBudgetNotice()` call to `mar
 Change `addGuidelineFile` to accept a relevance tier and record a structured doc (it still returns the raw text + path for reference extraction):
 
 ```typescript
-  async function addGuidelineFile(
-    label: string,
-    path: string,
-    relevance: GuidelineRelevance,
-  ): Promise<{ text: string; absolutePath: string } | undefined> {
-    const resolved = await resolveExistingInsideWorkspace(path);
-    if (!resolved) return undefined;
-    if (seen.has(resolved.absolutePath) || seenRealPaths.has(resolved.realPath)) return undefined;
-    try {
-      const text = await readBoundedGuidelineFile(resolved.realPath);
-      if (!text) return undefined;
-      const trimmed = text.trim();
-      if (!trimmed) return undefined;
-      seen.add(resolved.absolutePath);
-      seenRealPaths.add(resolved.realPath);
-      docs.push({ label, text: trimmed, relevance });
-      return { text, absolutePath: resolved.absolutePath };
-    } catch {
-      return undefined;
-    }
+async function addGuidelineFile(
+  label: string,
+  path: string,
+  relevance: GuidelineRelevance,
+): Promise<{ text: string; absolutePath: string } | undefined> {
+  const resolved = await resolveExistingInsideWorkspace(path);
+  if (!resolved) return undefined;
+  if (seen.has(resolved.absolutePath) || seenRealPaths.has(resolved.realPath)) return undefined;
+  try {
+    const text = await readBoundedGuidelineFile(resolved.realPath);
+    if (!text) return undefined;
+    const trimmed = text.trim();
+    if (!trimmed) return undefined;
+    seen.add(resolved.absolutePath);
+    seenRealPaths.add(resolved.realPath);
+    docs.push({ label, text: trimmed, relevance });
+    return { text, absolutePath: resolved.absolutePath };
+  } catch {
+    return undefined;
   }
+}
 ```
 
 Thread `relevance` through the helpers that call `addGuidelineFile`:
 
 ```typescript
-  async function preloadOrListReferencedDoc(baseDir: string, reference: string): Promise<void> {
-    const referencedPath = resolveMarkdownReference(cwd, baseDir, reference);
-    if (!referencedPath || seen.has(referencedPath)) return;
-    const loaded = await addGuidelineFile(
-      formatGuidelineLabel(cwd, referencedPath),
-      referencedPath,
-      GUIDELINE_RELEVANCE.governance,
-    );
-    if (!loaded) await addReferencedDoc(baseDir, reference);
-  }
+async function preloadOrListReferencedDoc(baseDir: string, reference: string): Promise<void> {
+  const referencedPath = resolveMarkdownReference(cwd, baseDir, reference);
+  if (!referencedPath || seen.has(referencedPath)) return;
+  const loaded = await addGuidelineFile(
+    formatGuidelineLabel(cwd, referencedPath),
+    referencedPath,
+    GUIDELINE_RELEVANCE.governance,
+  );
+  if (!loaded) await addReferencedDoc(baseDir, reference);
+}
 
-  async function addGuidelineWithReferences(
-    relativePath: string,
-    relevance: GuidelineRelevance,
-  ): Promise<void> {
-    const result = await addGuidelineFile(relativePath, resolve(cwd, relativePath), relevance);
-    if (!result) return;
-    const baseDir = ['AGENTS.md', 'REVIEW.md'].includes(relativePath)
-      ? cwd
-      : dirname(result.absolutePath);
-    for (const reference of extractMarkdownDocumentReferences(result.text)) {
-      deferredReferences.push({ baseDir, reference });
-    }
+async function addGuidelineWithReferences(
+  relativePath: string,
+  relevance: GuidelineRelevance,
+): Promise<void> {
+  const result = await addGuidelineFile(relativePath, resolve(cwd, relativePath), relevance);
+  if (!result) return;
+  const baseDir = ['AGENTS.md', 'REVIEW.md'].includes(relativePath)
+    ? cwd
+    : dirname(result.absolutePath);
+  for (const reference of extractMarkdownDocumentReferences(result.text)) {
+    deferredReferences.push({ baseDir, reference });
   }
+}
 
-  async function addRuleDirectory(
-    relativeDir: string,
-    relevance: GuidelineRelevance,
-  ): Promise<void> {
-    const resolvedDir = await resolveExistingInsideWorkspace(resolve(cwd, relativeDir));
-    if (!resolvedDir) return;
-    try {
-      const entries = await readdir(resolvedDir.realPath, { withFileTypes: true });
-      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-        if (!entry.isFile()) continue;
-        const ext = entry.name.match(/\.[^.]+$/)?.[0] ?? '';
-        if (!RULE_DIRECTORY_FILES.has(ext)) continue;
-        await addGuidelineWithReferences(`${relativeDir}/${entry.name}`, relevance);
-      }
-    } catch {
-      /* directory absent */
+async function addRuleDirectory(relativeDir: string, relevance: GuidelineRelevance): Promise<void> {
+  const resolvedDir = await resolveExistingInsideWorkspace(resolve(cwd, relativeDir));
+  if (!resolvedDir) return;
+  try {
+    const entries = await readdir(resolvedDir.realPath, { withFileTypes: true });
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!entry.isFile()) continue;
+      const ext = entry.name.match(/\.[^.]+$/)?.[0] ?? '';
+      if (!RULE_DIRECTORY_FILES.has(ext)) continue;
+      await addGuidelineWithReferences(`${relativeDir}/${entry.name}`, relevance);
     }
+  } catch {
+    /* directory absent */
   }
+}
 ```
 
 Update the call sites in the body to pass relevance tiers:
 
 ```typescript
-  for (const relativePath of ROOT_GUIDELINE_FILES) {
-    await addGuidelineWithReferences(relativePath, GUIDELINE_RELEVANCE.root);
-  }
-  await addRuleDirectory('.cursor/rules', GUIDELINE_RELEVANCE.root);
+for (const relativePath of ROOT_GUIDELINE_FILES) {
+  await addGuidelineWithReferences(relativePath, GUIDELINE_RELEVANCE.root);
+}
+await addRuleDirectory('.cursor/rules', GUIDELINE_RELEVANCE.root);
 
-  for (const dir of getChangedFileAncestorDirs(changedFiles)) {
-    for (const name of SCOPED_GUIDELINE_FILES) {
-      await addGuidelineWithReferences(`${dir}/${name}`, GUIDELINE_RELEVANCE.scoped);
-    }
-    await addRuleDirectory(`${dir}/.cursor/rules`, GUIDELINE_RELEVANCE.scoped);
+for (const dir of getChangedFileAncestorDirs(changedFiles)) {
+  for (const name of SCOPED_GUIDELINE_FILES) {
+    await addGuidelineWithReferences(`${dir}/${name}`, GUIDELINE_RELEVANCE.scoped);
   }
+  await addRuleDirectory(`${dir}/.cursor/rules`, GUIDELINE_RELEVANCE.scoped);
+}
 
-  const governanceDir = resolve(cwd, '.pr-governance');
-  const readme = await addGuidelineFile(
-    '.pr-governance/README.md',
-    resolve(governanceDir, 'README.md'),
-    GUIDELINE_RELEVANCE.governance,
-  );
+const governanceDir = resolve(cwd, '.pr-governance');
+const readme = await addGuidelineFile(
+  '.pr-governance/README.md',
+  resolve(governanceDir, 'README.md'),
+  GUIDELINE_RELEVANCE.governance,
+);
 ```
 
 In the governance directory-listing fallback, pass governance relevance:
 
 ```typescript
-        await addGuidelineFile(
-          `.pr-governance/${entry.name}`,
-          resolve(governanceDir, entry.name),
-          GUIDELINE_RELEVANCE.governance,
-        );
+await addGuidelineFile(
+  `.pr-governance/${entry.name}`,
+  resolve(governanceDir, entry.name),
+  GUIDELINE_RELEVANCE.governance,
+);
 ```
 
 Replace BOTH `return formatGuidelineSections(sections, seen, referencedDocs);` sites with:
 
 ```typescript
-    await flushDeferredReferences();
-    return buildDiscoveredGuidelines(docs, seen, referencedDocs, budgetExhausted);
+await flushDeferredReferences();
+return buildDiscoveredGuidelines(docs, seen, referencedDocs, budgetExhausted);
 ```
 
 (The early-return governance-README branch and the final return both use this.)
@@ -734,6 +739,7 @@ git commit -m "refactor(review-context): structured guideline discovery behind a
 ### Task C2: Add the capped, relevance-ranked finder render
 
 **Files:**
+
 - Modify: `src/shared/review-context.ts` (add `MAX_FINDER_GUIDELINE_BYTES`, `formatFinderGuidelines`)
 - Test: `test/review-context.test.ts`
 
@@ -828,7 +834,8 @@ export function formatFinderGuidelines(
   let omitted = 0;
   for (const { doc, index } of ranked) {
     const separatorBytes = keptIndices.size > 0 ? 2 : 0;
-    const sectionBytes = Buffer.byteLength(`### ${doc.label}\n${doc.text}`, 'utf8') + separatorBytes;
+    const sectionBytes =
+      Buffer.byteLength(`### ${doc.label}\n${doc.text}`, 'utf8') + separatorBytes;
     // Always keep the single highest-relevance doc, even if it alone exceeds
     // the cap: the per-file read bound (MAX_GUIDELINE_FILE_BYTES) equals this
     // budget, and the `### label` header tips a max-size doc over — without
@@ -879,6 +886,7 @@ git commit -m "feat(review-context): relevance-ranked, capped finder guideline r
 ### Task C3: Wire roles in the runner
 
 **Files:**
+
 - Modify: `src/shared/runner.ts` (import; `discoverGuidelines` call site ~line 270; `guidelinesForPrompt` usage)
 - Test: `test/runner.test.ts` (only if a runner unit test references the changed wiring; otherwise the full suite is the guard)
 
@@ -903,21 +911,21 @@ import {
 Replace (around `src/shared/runner.ts:270-271`):
 
 ```typescript
-  const guidelines = await discoverGuidelines(workspace, changedFiles);
-  if (guidelines) log(`Guidelines loaded (${guidelines.length} bytes).`);
+const guidelines = await discoverGuidelines(workspace, changedFiles);
+if (guidelines) log(`Guidelines loaded (${guidelines.length} bytes).`);
 ```
 
 with:
 
 ```typescript
-  const discoveredGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
-  const guidelines = formatGuidelines(discoveredGuidelines);
-  const finderGuidelines = formatFinderGuidelines(discoveredGuidelines);
-  if (guidelines) {
-    log(
-      `Guidelines loaded (${guidelines.length} bytes; finder slice ${finderGuidelines.length} bytes).`,
-    );
-  }
+const discoveredGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
+const guidelines = formatGuidelines(discoveredGuidelines);
+const finderGuidelines = formatFinderGuidelines(discoveredGuidelines);
+if (guidelines) {
+  log(
+    `Guidelines loaded (${guidelines.length} bytes; finder slice ${finderGuidelines.length} bytes).`,
+  );
+}
 ```
 
 - [ ] **Step 3: Point finder sessions at the finder slice, compliance at the full set**
@@ -925,34 +933,34 @@ with:
 The local `guidelinesForPrompt` currently feeds every session. Replace its definition (around `src/shared/runner.ts:316`):
 
 ```typescript
-  let coreContext: string;
-  const guidelinesForPrompt = guidelines;
+let coreContext: string;
+const guidelinesForPrompt = guidelines;
 ```
 
 with:
 
 ```typescript
-  let coreContext: string;
-  // Finder shards + recall lenses get the capped, relevance-ranked slice;
-  // the guideline-compliance session (below) gets the full set — its job is
-  // rule-by-rule auditing, so it must see every loaded doc.
-  const guidelinesForPrompt = finderGuidelines;
+let coreContext: string;
+// Finder shards + recall lenses get the capped, relevance-ranked slice;
+// the guideline-compliance session (below) gets the full set — its job is
+// rule-by-rule auditing, so it must see every loaded doc.
+const guidelinesForPrompt = finderGuidelines;
 ```
 
 Then change ONLY the guideline-compliance call to use the full set. In the `startGuidelineComplianceCheck({ ... })` call (around `src/shared/runner.ts:424-434`), set:
 
 ```typescript
-    const guidelineComplianceCheck = startGuidelineComplianceCheck({
-      client,
-      model: auxModel,
-      prContext: basePrContext,
-      guidelinesForPrompt: guidelines,
-      hasGuidelines: Boolean(guidelines),
-      enabled: options.guidelinePass,
-      timeoutMs: finderTimeoutMs,
-      log,
-      onTokenUsage: recordTokenUsage,
-    });
+const guidelineComplianceCheck = startGuidelineComplianceCheck({
+  client,
+  model: auxModel,
+  prContext: basePrContext,
+  guidelinesForPrompt: guidelines,
+  hasGuidelines: Boolean(guidelines),
+  enabled: options.guidelinePass,
+  timeoutMs: finderTimeoutMs,
+  log,
+  onTokenUsage: recordTokenUsage,
+});
 ```
 
 (Leave `startLensPasses` and `runShardedReview` using `guidelinesForPrompt`, which is now the finder slice.)
@@ -986,6 +994,7 @@ git commit -m "feat(runner): give finders the capped guideline slice, compliance
 ### Task C4: Validate the dilution fix on the pr11 golden case
 
 **Files:**
+
 - None (validation only). Uses `fixtures/golden/jbot-app-pr11-recall`.
 
 > This task proves the change recovers the two `mustFind` misses (pagination desync, SVG supply-chain) that context dilution caused, at the original `passes=2, shards=1` config — the headline metric from the evaluation.
@@ -1023,6 +1032,7 @@ git commit -m "chore(review-context): tune finder guideline budget against pr11 
 ## Self-Review (writing-plans checklist)
 
 **1. Spec coverage:**
+
 - Item 1 (path/regex mis-route + infra hole): Tasks A1–A4 (infra pattern, risk weight, playbook, selection, focus bullet) + the `fetch-logos.mjs` supply-chain trigger in A3. ✓
 - Item 2 (leave alone): documented as out-of-scope. ✓
 - Item 3 (per-role guideline budget, fix positional eviction): Tasks C1–C4. ✓
@@ -1032,6 +1042,7 @@ git commit -m "chore(review-context): tune finder guideline budget against pr11 
 **2. Placeholder scan:** No "TBD"/"add error handling"/"similar to Task N". Every code step shows complete code; every test step shows full assertions. ✓
 
 **3. Type/name consistency:**
+
 - `discoverGuidelineDocs` → `DiscoveredGuidelines` → `formatGuidelines`/`formatFinderGuidelines` used identically in tests (C1/C2) and runner (C3). ✓
 - `GuidelineDoc.relevance` typed via `GUIDELINE_RELEVANCE`; set in C1, read in C2. ✓
 - `MAX_FINDER_GUIDELINE_BYTES` defined in C2, used by default in C2 + runner C3. ✓
