@@ -6,6 +6,7 @@ const CONTRACT_API: ReviewPlaybookId = 'contract-api';
 const BACKEND_DATA: ReviewPlaybookId = 'backend-data';
 const FRONTEND_WORKFLOW: ReviewPlaybookId = 'frontend-workflow';
 const EXTERNAL_INTEGRATION: ReviewPlaybookId = 'external-integration';
+const INFRA_OPS: ReviewPlaybookId = 'infra-ops';
 
 const REVIEW_PLAYBOOK_ORDER = [
   CODE_REVIEW_CORE,
@@ -13,6 +14,7 @@ const REVIEW_PLAYBOOK_ORDER = [
   BACKEND_DATA,
   FRONTEND_WORKFLOW,
   EXTERNAL_INTEGRATION,
+  INFRA_OPS,
 ] as const satisfies readonly ReviewPlaybookId[];
 
 const CONTRACT_API_PATTERNS = [
@@ -43,7 +45,10 @@ const EXTERNAL_INTEGRATION_PATTERNS = [
   /(^|\/)\.github\/workflows\/.+\.ya?ml$/i,
   /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|action\.ya?ml)$/i,
   /(^|\/)[^/]*(client|provider|webhook|oauth|github|octokit|stripe|openai|anthropic|sdk)[^/]*\.[cm]?[jt]sx?$/i,
+  /(^|\/)[^/]*(fetch|download|scrape|crawl|ingest)[^/]*\.[cm]?[jt]sx?$/i,
 ];
+
+const INFRA_OPS_PATTERNS = [PATH_PATTERNS.infra];
 
 /**
  * Whether the PR touches frontend files, by the SAME trigger the
@@ -62,6 +67,7 @@ export function selectReviewPlaybookIds(changedFiles: string[]): ReviewPlaybookI
   if (matchesAny(changedFiles, BACKEND_DATA_PATTERNS)) selected.add(BACKEND_DATA);
   if (matchesAny(changedFiles, FRONTEND_WORKFLOW_PATTERNS)) selected.add(FRONTEND_WORKFLOW);
   if (matchesAny(changedFiles, EXTERNAL_INTEGRATION_PATTERNS)) selected.add(EXTERNAL_INTEGRATION);
+  if (matchesAny(changedFiles, INFRA_OPS_PATTERNS)) selected.add(INFRA_OPS);
 
   return REVIEW_PLAYBOOK_ORDER.filter((id) => selected.has(id));
 }
