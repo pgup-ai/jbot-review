@@ -1,7 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { renderOrphanedSection, condenseSummary } from '../src/shared/report.ts';
+import {
+  renderOrphanedSection,
+  condenseSummary,
+  formatSummaryMarkdown,
+} from '../src/shared/report.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 function f(overrides: Partial<Finding> = {}): Finding {
@@ -54,7 +58,7 @@ test('condenseSummary dedups case- and spacing-insensitively, keeps distinct lin
 
 test('condenseSummary collapses blank runs and trims trailing blanks', () => {
   const out = condenseSummary(['- a\n\n\n- b', '\n']);
-  assert.equal(out, '- a\n\n- b');
+  assert.equal(out, '- a\n- b');
 });
 
 test('condenseSummary preserves distinct per-file observations', () => {
@@ -62,20 +66,36 @@ test('condenseSummary preserves distinct per-file observations', () => {
   assert.equal(out.split('\n').length, 2);
 });
 
-test('condenseSummary keeps repeated category headers across shards (no misattribution)', () => {
+test('condenseSummary groups repeated category headers across shards', () => {
   const out = condenseSummary([
     '**Changes**\n- A\n**Bugs**\n- B1',
     '**Changes**\n- C\n**Bugs**\n- B2',
   ]);
   const lines = out.split('\n');
-  // Headers are not bullets, so they are never deduped across shards.
-  assert.equal(lines.filter((l) => l === '**Changes**').length, 2);
-  assert.equal(lines.filter((l) => l === '**Bugs**').length, 2);
-  // Each bullet stays under its own header; `- C` is a Change, not a Bug.
+  assert.equal(lines.filter((l) => l === '**Changes**').length, 1);
+  assert.equal(lines.filter((l) => l === '**Bugs**').length, 1);
   assert.match(out, /\*\*Changes\*\*\n- A/);
-  assert.match(out, /\*\*Changes\*\*\n- C/);
+  assert.match(out, /\*\*Changes\*\*\n- A\n- C/);
   assert.match(out, /\*\*Bugs\*\*\n- B1/);
-  assert.match(out, /\*\*Bugs\*\*\n- B2/);
+  assert.match(out, /\*\*Bugs\*\*\n- B1\n- B2/);
+  assert.doesNotMatch(out, /- C\n\*\*Bugs\*\*/);
+});
+
+test('condenseSummary groups category headers with colon variants', () => {
+  const out = condenseSummary(['**Changes:**\n- A', '**Changes**:\n- B']);
+  assert.equal(out, '**Changes:**\n- A\n- B');
+});
+
+test('condenseSummary groups bold lead-in summary lines with matching headers', () => {
+  const out = condenseSummary([
+    '**Changes** — Two minimal changes in assigned files:\n- A',
+    '**Changes**\n- B',
+    '**No bugs found** — Both changes are correct.',
+  ]);
+  assert.equal(
+    out,
+    '**Changes**\nTwo minimal changes in assigned files:\n- A\n- B\n\n**No bugs found**\nBoth changes are correct.',
+  );
 });
 
 test('condenseSummary prunes a category header left empty by cross-shard dedup', () => {
@@ -87,4 +107,65 @@ test('condenseSummary prunes a category header left empty by cross-shard dedup',
   assert.match(out, /\*\*Bugs\*\*\n- B/);
   // No trailing empty header left dangling.
   assert.doesNotMatch(out, /\*\*Changes\*\*\s*$/);
+});
+
+test('condenseSummary formats code-like tokens in grouped summaries', () => {
+  const out = condenseSummary([
+    [
+      '**Changes**',
+      '- Adds integration tests for non-draft REVENUE (INVOICE_SENT) and EXPENSE (BILL_RECEIVED) orders',
+      '- Fixes write-business-event.repository.ts to return { version } from updateStageAndEntryStatus',
+      '- Uses { entryStatus, invoiceId } for INVOICE_SENT orders',
+      '- Makes updateStageAndEntryStatus return { version: version + 1 } instead of void',
+      '- Re-enables the skipped test in business-event-object-matches.api-spec.ts',
+    ].join('\n'),
+  ]);
+  assert.match(out, /`REVENUE` \(`INVOICE_SENT`\)/);
+  assert.match(out, /`EXPENSE` \(`BILL_RECEIVED`\)/);
+  assert.match(out, /`write-business-event\.repository\.ts`/);
+  assert.match(out, /`\{ version \}`/);
+  assert.match(out, /`\{ entryStatus, invoiceId \}` for `INVOICE_SENT` orders/);
+  assert.match(out, /`\{ version: version \+ 1 \}`/);
+  assert.match(out, /`updateStageAndEntryStatus`/);
+  assert.match(out, /`business-event-object-matches\.api-spec\.ts`/);
+});
+
+test('formatSummaryMarkdown does not add nested code spans inside formatted filenames', () => {
+  const out = formatSummaryMarkdown('- Updates src/FMS-123.ts for INVOICE_SENT');
+  assert.equal(out, '- Updates `src/FMS-123.ts` for `INVOICE_SENT`');
+});
+
+test('condenseSummary formats dotted member expressions as a single code span', () => {
+  const out = condenseSummary([
+    '- Uses the version from updateOne rather than reloading updatedEvent.version',
+  ]);
+  assert.equal(
+    out,
+    '- Uses the version from `updateOne` rather than reloading `updatedEvent.version`',
+  );
+});
+
+test('formatSummaryMarkdown does not code-span product and protocol proper nouns', () => {
+  const out = formatSummaryMarkdown(
+    '- Keeps OpenAI, QuickBooks, OAuth, GitHub, and TypeScript readable',
+  );
+  assert.equal(out, '- Keeps OpenAI, QuickBooks, OAuth, GitHub, and TypeScript readable');
+});
+
+test('condenseSummary dedups raw and already-formatted code-like summary lines', () => {
+  const out = condenseSummary([
+    '- Fixes write-business-event.repository.ts to return { version }',
+    '- Fixes `write-business-event.repository.ts` to return `{ version }`',
+  ]);
+  assert.equal(out, '- Fixes `write-business-event.repository.ts` to return `{ version }`');
+});
+
+test('formatSummaryMarkdown preserves existing links, bare URLs, and code spans', () => {
+  const out = formatSummaryMarkdown(
+    '- Keeps `alreadyFormatted`, https://example.com/business-events.common.service.ts, and [business-events.common.service.ts](https://example.com/path.ts) untouched while formatting updateOne',
+  );
+  assert.equal(
+    out,
+    '- Keeps `alreadyFormatted`, https://example.com/business-events.common.service.ts, and [business-events.common.service.ts](https://example.com/path.ts) untouched while formatting `updateOne`',
+  );
 });
