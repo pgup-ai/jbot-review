@@ -55,6 +55,10 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         enhancedContext: true,
         reviewPasses: 1,
         verifyFindings: true,
+        // Match the hosted app's sane defaults: a wall-clock cap so one slow job
+        // can't starve the single worker, and medium reasoning effort.
+        timeBudgetMinutes: 30,
+        modelOptions: { reasoningEffort: 'medium' },
         ...(job.auxModel ? { auxModel: job.auxModel } : {}),
       },
       log,

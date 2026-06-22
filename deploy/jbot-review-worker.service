@@ -25,6 +25,10 @@ Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
+# Recommended hardening: run as a dedicated non-root user (the worker clones
+# untrusted PR code and runs opencode). Create it (see deploy/README.md), then
+# uncomment:
+# User=jbot-worker
 
 [Install]
 WantedBy=multi-user.target
