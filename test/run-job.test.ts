@@ -16,6 +16,7 @@ test('runJob returns failed (never throws) on a malformed repoFullName', async (
       model: 'opencode/x',
       auxModel: null,
       apiKey: 'k',
+      auxApiKey: null,
       installationToken: 't',
     },
     () => {},

@@ -55,9 +55,10 @@ ssh jbot-vps 'cd /opt/jbot-review && npm ci --omit=dev'    # only if deps change
 ssh jbot-vps 'ls -l /opt/jbot-review/dist/worker/index.js'
 ```
 
-## 3. (Recommended) run as a dedicated non-root user
+## 3. Create the dedicated worker user (required)
 
-The worker clones untrusted PR code and runs opencode, so don't run it as root:
+The unit runs as `jbot-worker` (the worker clones untrusted PR code + runs
+opencode, so it must not be root). Create the user before installing the unit:
 
 ```bash
 ssh jbot-vps '
@@ -66,9 +67,8 @@ ssh jbot-vps '
 '
 ```
 
-Then uncomment `# User=jbot-worker` in `deploy/jbot-review-worker.service` before
-installing it. (Skip this to run as root — matches the current hosted app, but
-less safe.)
+The unit's `User=jbot-worker` directive won't start until this user exists. (To
+run as root instead — less safe — comment that line out in the unit.)
 
 ## 4. Worker env file (no provider keys!)
 
@@ -137,8 +137,9 @@ worker as a container instead of natively (container-level isolation; needs
 Docker on the box, tight on 1 GB):
 
 ```bash
+# The image ENTRYPOINT runs the hosted-app server, so override it for the worker.
 docker run -d --restart=unless-stopped --env-file /etc/jbot-review-worker.env \
-  ghcr.io/pgup-ai/jbot-review node /app/dist/worker/index.js
+  --entrypoint node ghcr.io/pgup-ai/jbot-review /app/dist/worker/index.js
 ```
 
 The native systemd unit above is the v1 path; per-review container isolation

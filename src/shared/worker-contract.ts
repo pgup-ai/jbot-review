@@ -7,6 +7,7 @@ export interface ClaimedJob {
   model: string; // qualified ref, e.g. "opencode/deepseek-v4-flash-free"
   auxModel: string | null;
   apiKey: string; // DECRYPTED provider key for the model's provider
+  auxApiKey: string | null; // aux model's provider key when it differs; else null
   installationToken: string; // short-lived (~1h) GitHub installation token
 }
 

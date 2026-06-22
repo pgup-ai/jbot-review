@@ -25,10 +25,10 @@ Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
-# Recommended hardening: run as a dedicated non-root user (the worker clones
-# untrusted PR code and runs opencode). Create it (see deploy/README.md), then
-# uncomment:
-# User=jbot-worker
+# Runs as a dedicated non-root user — the worker clones untrusted PR code and
+# runs opencode, so it must not be root. Create the user first (deploy/README.md
+# §3); the unit won't start until it exists. (To run as root anyway, comment this.)
+User=jbot-worker
 
 [Install]
 WantedBy=multi-user.target

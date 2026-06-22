@@ -33,14 +33,11 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
     const [owner, repo] = parts;
     const octokit = octokitForToken(job.installationToken);
     const pr = await octokit.rest.pulls.get({ owner, repo, pull_number: job.prNumber });
-    // Clone the base repo (the one the App is installed on) and check out the
-    // PR head + base — mirrors the hosted-app flow in src/app/app.ts.
-    const cloned = clonePr(
-      pr.data.base.repo.clone_url,
-      pr.data.head.ref,
-      pr.data.base.ref,
-      job.installationToken,
-    );
+    // Clone the PR HEAD repo (the contributor's fork, for fork PRs) so head.ref
+    // exists there; fall back to the base repo if the head repo is gone. The
+    // base ref is fetched separately inside clonePr for the three-dot diff.
+    const cloneUrl = pr.data.head.repo?.clone_url ?? pr.data.base.repo.clone_url;
+    const cloned = clonePr(cloneUrl, pr.data.head.ref, pr.data.base.ref, job.installationToken);
     cleanup = cloned.cleanup;
     await runPrReview({
       octokit,
@@ -67,6 +64,7 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         timeBudgetMinutes: 30,
         modelOptions: { reasoningEffort: 'medium' },
         ...(job.auxModel ? { auxModel: job.auxModel } : {}),
+        ...(job.auxApiKey ? { auxApiKey: job.auxApiKey } : {}),
       },
       log,
     });
