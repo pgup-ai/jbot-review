@@ -35,6 +35,23 @@ function summaryLineKey(line: string): string {
     .toLowerCase();
 }
 
+function isNoFindingVerdict(line: string): boolean {
+  if (isCategoryHeader(line)) return isNoFindingKey(categoryKey(line));
+  const key = summaryLineKey(
+    line
+      .trim()
+      .replace(/^\*\*[^*]+\*\*\s*/, '')
+      .replace(/^review\s+/, ''),
+  );
+  return isNoFindingKey(key);
+}
+
+function isNoFindingKey(key: string): boolean {
+  return /^(no (?:new |blocking )?(?:bugs?|findings?|issues?) found|no (?:bugs?|findings?|issues?))\b/.test(
+    key,
+  );
+}
+
 /** A line that is only a bold category header, e.g. `**Bugs**` or `**Bugs**:`. */
 function isCategoryHeader(line: string): boolean {
   return /^\s*\*\*[^*]+\*\*:?\s*$/.test(line);
@@ -148,18 +165,28 @@ const COMMON_CAMELCASE_WORDS = new Set(['eBay', 'iPad', 'iPhone', 'iOS', 'macOS'
  * category headers are grouped together, duplicate content is removed, and
  * code-like tokens get conservative markdown formatting for readability.
  */
-export function condenseSummary(parts: string[]): string {
+export function condenseSummary(
+  parts: string[],
+  options: { suppressNoFindingVerdicts?: boolean } = {},
+): string {
   const seen = new Set<string>();
   const sections = new Map<string, { header: string; lines: string[] }>();
   const blocks: Array<{ type: 'section'; key: string } | { type: 'top'; lines: string[] }> = [];
 
   for (const part of parts) {
     let currentKey = '';
+    let suppressingNoFindingSection = false;
     for (const raw of part.split('\n')) {
       const line = raw.replace(/\s+$/, '');
       if (!line.trim()) continue;
 
       if (isCategoryHeader(line)) {
+        if (options.suppressNoFindingVerdicts && isNoFindingVerdict(line)) {
+          currentKey = '';
+          suppressingNoFindingSection = true;
+          continue;
+        }
+        suppressingNoFindingSection = false;
         currentKey = categoryKey(line);
         if (!sections.has(currentKey)) {
           sections.set(currentKey, { header: line.trim(), lines: [] });
@@ -170,6 +197,13 @@ export function condenseSummary(parts: string[]): string {
 
       const leadIn = splitCategoryLeadIn(line);
       if (leadIn) {
+        suppressingNoFindingSection = false;
+        if (
+          options.suppressNoFindingVerdicts &&
+          (isNoFindingVerdict(leadIn.header) || isNoFindingVerdict(leadIn.rest))
+        ) {
+          continue;
+        }
         currentKey = categoryKey(leadIn.header);
         if (!sections.has(currentKey)) {
           sections.set(currentKey, { header: leadIn.header, lines: [] });
@@ -182,6 +216,9 @@ export function condenseSummary(parts: string[]): string {
         }
         continue;
       }
+
+      if (suppressingNoFindingSection) continue;
+      if (options.suppressNoFindingVerdicts && isNoFindingVerdict(line)) continue;
 
       const key = `${currentKey || 'top'}:${summaryLineKey(line)}`;
       if (seen.has(key)) continue;
@@ -221,14 +258,28 @@ export function condenseSummary(parts: string[]): string {
   return out.join('\n');
 }
 
-export function formatSummaryMarkdown(summary: string): string {
+export function formatSummaryMarkdown(
+  summary: string,
+  options: { suppressNoFindingVerdicts?: boolean } = {},
+): string {
   const out: string[] = [];
+  let suppressingNoFindingSection = false;
   for (const raw of summary.split('\n')) {
     const line = raw.replace(/\s+$/, '');
     if (!line.trim()) {
       if (out.length > 0 && out[out.length - 1] !== '') out.push('');
       continue;
     }
+    if (isCategoryHeader(line)) {
+      if (options.suppressNoFindingVerdicts && isNoFindingVerdict(line)) {
+        suppressingNoFindingSection = true;
+        continue;
+      }
+      suppressingNoFindingSection = false;
+    } else if (suppressingNoFindingSection) {
+      continue;
+    }
+    if (options.suppressNoFindingVerdicts && isNoFindingVerdict(line)) continue;
     out.push(formatSummaryLine(line));
   }
   while (out.length > 0 && out[out.length - 1] === '') out.pop();

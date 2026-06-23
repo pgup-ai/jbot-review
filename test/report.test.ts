@@ -108,6 +108,52 @@ test('condenseSummary groups bold lead-in summary lines with matching headers', 
   );
 });
 
+test('condenseSummary suppresses no-finding shard verdicts when findings exist', () => {
+  const out = condenseSummary(
+    [
+      [
+        '**Changes**',
+        '- Pins accounts at creation',
+        '',
+        '**Bugs**',
+        '- Draft completion skips v3 agreement checks',
+      ].join('\n'),
+      '**Review** No bugs found in assigned files.',
+      'No bugs found in the assigned files. The functions handle edge cases consistently.',
+    ],
+    { suppressNoFindingVerdicts: true },
+  );
+  assert.equal(
+    out,
+    '**Changes**\n- Pins accounts at creation\n\n**Bugs**\n- Draft completion skips v3 agreement checks',
+  );
+});
+
+test('condenseSummary keeps no-finding shard verdicts when no findings exist', () => {
+  const out = condenseSummary(['**Review** No bugs found in assigned files.']);
+  assert.equal(out, '**Review** No bugs found in assigned files.');
+});
+
+test('formatSummaryMarkdown suppresses no-finding sections when findings exist', () => {
+  const out = formatSummaryMarkdown(
+    [
+      '**Changes**',
+      '- Updates account pinning',
+      '',
+      '**No bugs found**',
+      'The assigned files look correct.',
+      '',
+      '**Bugs**',
+      '- Draft completion skips v3 checks',
+    ].join('\n'),
+    { suppressNoFindingVerdicts: true },
+  );
+  assert.equal(
+    out,
+    '**Changes**\n- Updates account pinning\n\n**Bugs**\n- Draft completion skips v3 checks',
+  );
+});
+
 test('condenseSummary prunes a category header left empty by cross-shard dedup', () => {
   // Shard 2 repeats the same `- A` under **Changes**; the bullet is deduped,
   // which would otherwise leave shard 2's **Changes** header with nothing below.

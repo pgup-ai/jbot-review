@@ -1660,7 +1660,9 @@ function buildBody(
   const lines = [
     '## J-Bot Code Review',
     '',
-    summary ? formatSummaryMarkdown(summary) : 'No summary provided.',
+    summary
+      ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: total > 0 })
+      : 'No summary provided.',
     '',
   ];
   const guidance = getMergeGuidance(all);
