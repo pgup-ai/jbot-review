@@ -157,9 +157,12 @@ test('condenseSummary formats dotted member expressions as a single code span', 
 
 test('formatSummaryMarkdown does not code-span product and protocol proper nouns', () => {
   const out = formatSummaryMarkdown(
-    '- Keeps OpenAI, QuickBooks, OAuth, GitHub, and TypeScript readable',
+    '- Keeps OpenAI, QuickBooks, OAuth, GitHub, TypeScript, iPhone, and macOS readable',
   );
-  assert.equal(out, '- Keeps OpenAI, QuickBooks, OAuth, GitHub, and TypeScript readable');
+  assert.equal(
+    out,
+    '- Keeps OpenAI, QuickBooks, OAuth, GitHub, TypeScript, iPhone, and macOS readable',
+  );
 });
 
 test('condenseSummary dedups raw and already-formatted code-like summary lines', () => {

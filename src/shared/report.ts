@@ -95,7 +95,8 @@ function formatPlainSummarySegment(segment: string): string {
   out = formatOutsideCodeSpans(out, (part) =>
     part.replace(
       /(^|[^\w`])([a-z_$][\w$]*(?:(?:[A-Z][a-z0-9]+)|(?:[a-z0-9][A-Z]))[\w$]*(?:\(\))?)(?=$|[^\w`])/g,
-      '$1`$2`',
+      (match, prefix, token) =>
+        COMMON_CAMELCASE_WORDS.has(token) ? match : `${prefix}\`${token}\``,
     ),
   );
   out = formatOutsideCodeSpans(out, (part) =>
@@ -139,6 +140,8 @@ const COMMON_UPPERCASE_WORDS = new Set([
   'XML',
   'YAML',
 ]);
+
+const COMMON_CAMELCASE_WORDS = new Set(['eBay', 'iPad', 'iPhone', 'iOS', 'macOS']);
 
 /**
  * Merge per-shard summaries into one public block. Lines under matching bold
