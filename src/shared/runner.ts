@@ -95,6 +95,7 @@ import {
 } from './github.ts';
 import type { Octokit, PriorJbotThread } from './github.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
+import { isFiniteNumber } from './text.ts';
 import type {
   AddressedPriorComment,
   Finding,
@@ -1639,10 +1640,6 @@ function createReviewTokenUsageAccumulator(): {
     },
     snapshot: () => (total ? { ...total, models: [...models] } : undefined),
   };
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
 }
 
 /**

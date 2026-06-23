@@ -15,6 +15,7 @@ import {
   assembleReviewPrompt,
   buildJsonRepairPrompt,
 } from './prompt.ts';
+import { isFiniteNumber } from './text.ts';
 import type {
   AddressedPriorComment,
   Finding,
@@ -45,10 +46,6 @@ const VALID_FINDING_KINDS = new Set<FindingKind>([
   'investigate',
 ]);
 const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
 
 export interface ProviderKeyConfig {
   providerID: string;
