@@ -31,6 +31,7 @@ import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } fro
 
 const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const KILL_GRACE_MS = 2_000;
+const DEVIN_SETUP_OUTPUT_RETRY_LIMIT = 1;
 const DEVIN_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const DEVIN_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 const DEVIN_INPUT_TOKEN_FIELDS = [
@@ -133,6 +134,15 @@ export function buildDevinCliArgs(input: DevinCliArgsInput): string[] {
   if (modelID !== 'default') args.push('--model', modelID);
   args.push('-p');
   return args;
+}
+
+export function isDevinFirstRunSetupOutput(output: string): boolean {
+  return (
+    output.includes('Welcome to Devin CLI') &&
+    output.includes("You're all set") &&
+    output.includes('Run') &&
+    output.includes('devin')
+  );
 }
 
 export async function runDevinReview(
@@ -263,20 +273,32 @@ async function runDevinPrompt(
   const args = buildDevinCliArgs({ model, promptFile, exportFile, configFile });
   log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
   try {
-    const result = await spawnWithTimeout('devin', args, workspace, timeoutMs);
-    if (result.exitCode !== 0) {
-      throw new Error(
-        `devin ${label} exited ${result.exitCode}: ${truncateForLog(
-          result.stderr || result.stdout,
-          1000,
-        )}`,
+    for (let attempt = 0; ; attempt += 1) {
+      const result = await spawnWithTimeout('devin', args, workspace, timeoutMs);
+      if (result.exitCode !== 0) {
+        throw new Error(
+          `devin ${label} exited ${result.exitCode}: ${truncateForLog(
+            result.stderr || result.stdout,
+            1000,
+          )}`,
+        );
+      }
+      if (isDevinFirstRunSetupOutput(result.stdout)) {
+        if (attempt < DEVIN_SETUP_OUTPUT_RETRY_LIMIT) {
+          log(`${label} devin first-run setup output detected; retrying prompt once.`);
+          rmSync(exportFile, { force: true });
+          continue;
+        }
+        throw new Error(
+          `devin ${label} returned first-run setup output instead of a prompt response.`,
+        );
+      }
+      log(
+        `${label} prompt complete via devin: stdout=${result.stdout.length} chars stderr=${result.stderr.length} chars`,
       );
+      recordDevinAtifUsage(exportFile, model, label, log, onTokenUsage);
+      return result.stdout;
     }
-    log(
-      `${label} prompt complete via devin: stdout=${result.stdout.length} chars stderr=${result.stderr.length} chars`,
-    );
-    recordDevinAtifUsage(exportFile, model, label, log, onTokenUsage);
-    return result.stdout;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

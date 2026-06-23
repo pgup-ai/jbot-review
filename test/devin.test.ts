@@ -8,6 +8,7 @@ import {
   buildDevinCliArgs,
   buildDevinReadOnlyConfig,
   devinCredentialsPath,
+  isDevinFirstRunSetupOutput,
   isDevinProvider,
   parseDevinAtifUsage,
   writeDevinCredentials,
@@ -86,6 +87,25 @@ describe('Devin CLI provider helpers', () => {
         'codex',
         '-p',
       ],
+    );
+  });
+
+  it('detects Devin first-run setup output separately from prompt output', () => {
+    assert.equal(
+      isDevinFirstRunSetupOutput(
+        [
+          '\u001b[1mWelcome to Devin CLI!\u001b[0m',
+          'Logged in as user@example.com.',
+          '',
+          "You're all set. Run \u001b[1mdevin\u001b[0m to get started.",
+          '',
+        ].join('\n'),
+      ),
+      true,
+    );
+    assert.equal(
+      isDevinFirstRunSetupOutput('{"summary":"ok","findings":[],"addressedPriorComments":[]}'),
+      false,
     );
   });
 
