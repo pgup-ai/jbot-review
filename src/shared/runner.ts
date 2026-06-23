@@ -816,43 +816,56 @@ export async function runPrReview(params: {
         mainCliBackend === COMMANDCODE_PROVIDER_ID ? COMMANDCODE_DIFF_HUNKS_OPTIONS : undefined,
     });
 
-    const addressedPriorCheck = startAddressedPriorCommentsCheck({
-      backend: auxBackend,
-      model: auxModel,
-      prContext: auxPrContext,
-      priorJbotThreads: auxCommandCodeHasCompleteDiff ? priorJbotThreads : [],
-      timeoutMs: finderTimeoutMs,
-      log,
-      onTokenUsage: recordTokenUsage,
-    });
+    const addressedPriorCheck = trackAuxiliarySession(
+      'addressed-prior-comments',
+      startAddressedPriorCommentsCheck({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: auxPrContext,
+        priorJbotThreads: auxCommandCodeHasCompleteDiff ? priorJbotThreads : [],
+        timeoutMs: finderTimeoutMs,
+        log,
+        onTokenUsage: recordTokenUsage,
+      }),
+    );
 
-    const guidelineComplianceCheck = startGuidelineComplianceCheck({
-      backend: auxBackend,
-      model: auxModel,
-      prContext: auxPrContext,
-      guidelinesForPrompt: guidelines,
-      hasGuidelines: Boolean(guidelines),
-      enabled: options.guidelinePass && auxCommandCodeHasCompleteDiff,
-      timeoutMs: finderTimeoutMs,
-      log,
-      onTokenUsage: recordTokenUsage,
-    });
+    const guidelineComplianceCheck = trackAuxiliarySession(
+      'guideline-compliance',
+      startGuidelineComplianceCheck({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: auxPrContext,
+        guidelinesForPrompt: guidelines,
+        hasGuidelines: Boolean(guidelines),
+        enabled: options.guidelinePass && auxCommandCodeHasCompleteDiff,
+        timeoutMs: finderTimeoutMs,
+        log,
+        onTokenUsage: recordTokenUsage,
+      }),
+    );
 
     // Lens passes run on the aux model (recall supplement, not the deep
     // pass) and use the aux context (no Context7 block): they have no
     // Context7 retry path, so a Context7 hiccup must not be able to zero a
     // pass's findings.
-    const lensPasses = startLensPasses({
-      backend: auxBackend,
-      model: auxModel,
-      prContext: auxPrContext,
-      guidelinesForPrompt,
+    const lensPassCount = selectLensKeys(
+      auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,
       changedFiles,
-      passes: auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,
-      timeoutMs: finderTimeoutMs,
-      log,
-      onTokenUsage: recordTokenUsage,
-    });
+    ).length;
+    const lensPasses = trackAuxiliarySession(
+      `${lensPassCount} lens pass(es)`,
+      startLensPasses({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: auxPrContext,
+        guidelinesForPrompt,
+        changedFiles,
+        passes: auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,
+        timeoutMs: finderTimeoutMs,
+        log,
+        onTokenUsage: recordTokenUsage,
+      }),
+    );
 
     log(`Running review (${shardPlans.length} shard(s))`);
     const { summary, findings } = await runShardedReview({
@@ -871,11 +884,23 @@ export async function runPrReview(params: {
       log,
       onTokenUsage: recordTokenUsage,
     });
-    const lensFindingLists = await lensPasses;
+    const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
+      lensPasses,
+      addressedPriorCheck,
+      guidelineComplianceCheck,
+    ]);
+    if (auxiliaryWaitLabels.length > 0) {
+      log(
+        `Main review shards complete; waiting for auxiliary session(s) to settle: ${auxiliaryWaitLabels.join(
+          ', ',
+        )}.`,
+      );
+    }
+    const lensFindingLists = await lensPasses.promise;
     // The dedicated parallel session is the single owner of addressed-thread
     // verification; the main review no longer reports them.
-    const verifiedAddressedPriorComments = await addressedPriorCheck;
-    const complianceFindings = await guidelineComplianceCheck;
+    const verifiedAddressedPriorComments = await addressedPriorCheck.promise;
+    const complianceFindings = await guidelineComplianceCheck.promise;
     // Gate confidence BEFORE deduping so each finding carries its effective
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
@@ -1226,6 +1251,29 @@ function startLensPasses(params: {
         }),
     ),
   );
+}
+
+interface AuxiliarySession<T> {
+  label: string;
+  promise: Promise<T>;
+  isSettled: () => boolean;
+}
+
+function trackAuxiliarySession<T>(label: string, promise: Promise<T>): AuxiliarySession<T> {
+  let settled = false;
+  return {
+    label,
+    promise: promise.finally(() => {
+      settled = true;
+    }),
+    isSettled: () => settled,
+  };
+}
+
+function pendingAuxiliarySessionLabels(
+  sessions: { label: string; isSettled: () => boolean }[],
+): string[] {
+  return sessions.filter((session) => !session.isSettled()).map((session) => session.label);
 }
 
 /**

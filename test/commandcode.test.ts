@@ -8,6 +8,7 @@ import {
   buildCommandCodeCliArgs,
   commandCodeEnvForHome,
   commandCodeAuthPath,
+  formatCommandCodePromptTimeoutMessage,
   isCommandCodeProvider,
   parseCommandCodeModelList,
   writeCommandCodeAuth,
@@ -78,6 +79,17 @@ describe('CommandCode CLI provider helpers', () => {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
     }
+  });
+
+  it('labels prompt timeouts with the session and model', () => {
+    assert.equal(
+      formatCommandCodePromptTimeoutMessage(
+        'review-integrity',
+        'commandcode/zai-org/GLM-5.2',
+        1770_000,
+      ),
+      'commandcode review-integrity prompt timed out after 1770s (model=commandcode/zai-org/GLM-5.2)',
+    );
   });
 
   it('parses model ids from CommandCode list output', () => {

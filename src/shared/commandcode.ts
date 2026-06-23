@@ -211,6 +211,9 @@ export async function listCommandCodeModels(workspace: string, home?: string): P
     '',
     COMMANDCODE_MODEL_LIST_TIMEOUT_MS,
     commandCodeEnvForHome(home),
+    `commandcode model listing timed out after ${Math.round(
+      COMMANDCODE_MODEL_LIST_TIMEOUT_MS / 1000,
+    )}s`,
   );
   if (result.exitCode !== 0) {
     throw new Error(
@@ -250,6 +253,7 @@ async function runCommandCodePrompt(
     prompt,
     timeoutMs,
     commandCodeEnvForHome(home),
+    formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
   );
   if (result.exitCode !== 0) {
     throw new Error(
@@ -272,6 +276,7 @@ function spawnWithInputAndTimeout(
   input: string,
   timeoutMs: number,
   env?: NodeJS.ProcessEnv,
+  timeoutMessage = `commandcode prompt timed out after ${Math.round(timeoutMs / 1000)}s`,
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -302,7 +307,7 @@ function spawnWithInputAndTimeout(
           }
         }, KILL_GRACE_MS).unref();
       }
-      reject(new Error(`commandcode prompt timed out after ${Math.round(timeoutMs / 1000)}s`));
+      reject(new Error(timeoutMessage));
     }, timeoutMs);
     timer.unref();
 
@@ -333,6 +338,16 @@ function spawnWithInputAndTimeout(
       resolve({ stdout, stderr, exitCode });
     });
   });
+}
+
+export function formatCommandCodePromptTimeoutMessage(
+  label: string,
+  model: string,
+  timeoutMs: number,
+): string {
+  return `commandcode ${label} prompt timed out after ${Math.round(
+    timeoutMs / 1000,
+  )}s (model=${model})`;
 }
 
 export function commandCodeEnvForHome(home: string | undefined): NodeJS.ProcessEnv | undefined {
