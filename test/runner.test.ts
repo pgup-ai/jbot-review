@@ -129,6 +129,9 @@ describe('renderReviewMetadataBlock', () => {
       reasoning: 30,
       cacheRead: 40,
       cacheWrite: 50,
+      costUsd: 1.23456,
+      creditCost: 2.5,
+      acuCost: 3,
     }).join('\n');
 
     assert.match(block, /^<details>/m);
@@ -140,6 +143,9 @@ describe('renderReviewMetadataBlock', () => {
     assert.match(block, /reasoning=30/);
     assert.match(block, /cache read=40/);
     assert.match(block, /cache write=50/);
+    assert.match(block, /cost usd=1\.2346/);
+    assert.match(block, /credit cost=2\.5000/);
+    assert.match(block, /acu cost=3/);
   });
 
   it('labels aggregate totals with every model that contributed usage', () => {

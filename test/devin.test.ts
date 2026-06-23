@@ -9,6 +9,7 @@ import {
   buildDevinReadOnlyConfig,
   devinCredentialsPath,
   isDevinProvider,
+  parseDevinAtifUsage,
   writeDevinCredentials,
 } from '../src/shared/devin.ts';
 import { truncateUtf8WithNotice } from '../src/shared/prompt.ts';
@@ -108,6 +109,73 @@ describe('Devin CLI provider helpers', () => {
         deny: ['edit', 'write', 'Write(**)', 'Write(/**)'],
       },
     });
+  });
+
+  it('extracts token and cost usage from Devin ATIF records', () => {
+    const parsed = parseDevinAtifUsage(
+      JSON.stringify({
+        version: 'atif/v1',
+        messages: [
+          {
+            role: 'assistant',
+            telemetry: {
+              total_input_tokens: 10,
+              output_tokens: 2,
+              reasoning_tokens: 3,
+              cache_read_tokens: 4,
+              cache_creation_tokens: 5,
+              cost_usd: 0.125,
+              committed_credit_cost: 0.5,
+              committed_acu_cost: 1.25,
+              generation_model: 'codex',
+            },
+          },
+          {
+            role: 'assistant',
+            telemetry: {
+              totalInputTokens: '7',
+              outputTokens: 1,
+              generationModel: 'codex',
+            },
+          },
+        ],
+      }),
+      'devin/default',
+    );
+
+    assert.deepEqual(parsed, {
+      usage: {
+        input: 17,
+        output: 3,
+        reasoning: 3,
+        cacheRead: 4,
+        cacheWrite: 5,
+        costUsd: 0.125,
+        creditCost: 0.5,
+        acuCost: 1.25,
+      },
+      model: 'devin/codex',
+      records: 2,
+    });
+  });
+
+  it('falls back to the selected Devin model when ATIF models are mixed', () => {
+    const parsed = parseDevinAtifUsage(
+      JSON.stringify([
+        { total_input_tokens: 1, output_tokens: 2, generation_model: 'codex' },
+        { total_input_tokens: 3, output_tokens: 4, generation_model: 'sonnet' },
+      ]),
+      'devin/default',
+    );
+
+    assert.equal(parsed?.model, 'devin/default');
+  });
+
+  it('returns undefined when Devin ATIF has no recognized usage records', () => {
+    assert.equal(
+      parseDevinAtifUsage(JSON.stringify({ messages: [{ role: 'assistant' }] })),
+      undefined,
+    );
   });
 
   it('truncates repair context by bytes with an omission notice', () => {

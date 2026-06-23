@@ -128,6 +128,9 @@ export interface PromptTokenUsage {
   reasoning: number;
   cacheRead: number;
   cacheWrite: number;
+  costUsd?: number;
+  creditCost?: number;
+  acuCost?: number;
 }
 
 export type TokenUsageRecorder = (usage: PromptTokenUsage, model: string) => void;
@@ -142,6 +145,7 @@ export function extractPromptTokenUsage(info: TokenUsageInfo): PromptTokenUsage 
     reasoning: tokens.reasoning ?? 0,
     cacheRead: cache.read ?? 0,
     cacheWrite: cache.write ?? 0,
+    ...(typeof info.cost === 'number' ? { costUsd: info.cost } : {}),
   };
 }
 

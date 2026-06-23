@@ -1609,6 +1609,9 @@ export interface ReviewTokenUsage {
   reasoning: number;
   cacheRead: number;
   cacheWrite: number;
+  costUsd?: number;
+  creditCost?: number;
+  acuCost?: number;
 }
 
 function createReviewTokenUsageAccumulator(): {
@@ -1626,6 +1629,11 @@ function createReviewTokenUsageAccumulator(): {
       total.reasoning += usage.reasoning;
       total.cacheRead += usage.cacheRead;
       total.cacheWrite += usage.cacheWrite;
+      if (typeof usage.costUsd === 'number') total.costUsd = (total.costUsd ?? 0) + usage.costUsd;
+      if (typeof usage.creditCost === 'number') {
+        total.creditCost = (total.creditCost ?? 0) + usage.creditCost;
+      }
+      if (typeof usage.acuCost === 'number') total.acuCost = (total.acuCost ?? 0) + usage.acuCost;
     },
     snapshot: () => (total ? { ...total, models: [...models] } : undefined),
   };
@@ -1959,6 +1967,15 @@ export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewToke
     `reasoning=${tokenUsage.reasoning}`,
     `cache read=${tokenUsage.cacheRead}`,
     `cache write=${tokenUsage.cacheWrite}`,
+    ...(typeof tokenUsage.costUsd === 'number'
+      ? [`cost usd=${tokenUsage.costUsd.toFixed(4)}`]
+      : []),
+    ...(typeof tokenUsage.creditCost === 'number'
+      ? [`credit cost=${formatUsageCost(tokenUsage.creditCost)}`]
+      : []),
+    ...(typeof tokenUsage.acuCost === 'number'
+      ? [`acu cost=${formatUsageCost(tokenUsage.acuCost)}`]
+      : []),
     '```',
     '',
     '</details>',
@@ -1977,6 +1994,10 @@ export function formatReviewedWith(model: string, tokenUsage?: ReviewTokenUsage)
 
 function uniqueModels(primary: string, others: string[]): string[] {
   return [...new Set([primary, ...others])];
+}
+
+function formatUsageCost(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(4);
 }
 
 function getMergeGuidance(findings: Pick<Finding, 'severity'>[]): {
