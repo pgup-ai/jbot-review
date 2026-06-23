@@ -703,6 +703,7 @@ export async function runPrReview(params: {
   if (needsOpencode) {
     const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
     if (!opencodeApiKey) {
+      cleanupCommandCodeHome();
       throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
     }
     log('Starting opencode server');
