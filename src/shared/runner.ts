@@ -95,6 +95,7 @@ import {
 } from './github.ts';
 import type { Octokit, PriorJbotThread } from './github.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
+import { formatUsageCost, isFiniteNumber } from './text.ts';
 import type {
   AddressedPriorComment,
   Finding,
@@ -1609,6 +1610,9 @@ export interface ReviewTokenUsage {
   reasoning: number;
   cacheRead: number;
   cacheWrite: number;
+  costUsd?: number;
+  creditCost?: number;
+  acuCost?: number;
 }
 
 function createReviewTokenUsageAccumulator(): {
@@ -1626,6 +1630,13 @@ function createReviewTokenUsageAccumulator(): {
       total.reasoning += usage.reasoning;
       total.cacheRead += usage.cacheRead;
       total.cacheWrite += usage.cacheWrite;
+      if (isFiniteNumber(usage.costUsd)) {
+        total.costUsd = (total.costUsd ?? 0) + usage.costUsd;
+      }
+      if (isFiniteNumber(usage.creditCost)) {
+        total.creditCost = (total.creditCost ?? 0) + usage.creditCost;
+      }
+      if (isFiniteNumber(usage.acuCost)) total.acuCost = (total.acuCost ?? 0) + usage.acuCost;
     },
     snapshot: () => (total ? { ...total, models: [...models] } : undefined),
   };
@@ -1959,6 +1970,13 @@ export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewToke
     `reasoning=${tokenUsage.reasoning}`,
     `cache read=${tokenUsage.cacheRead}`,
     `cache write=${tokenUsage.cacheWrite}`,
+    ...(isFiniteNumber(tokenUsage.costUsd) ? [`cost usd=${tokenUsage.costUsd.toFixed(4)}`] : []),
+    ...(isFiniteNumber(tokenUsage.creditCost)
+      ? [`credit cost=${formatUsageCost(tokenUsage.creditCost)}`]
+      : []),
+    ...(isFiniteNumber(tokenUsage.acuCost)
+      ? [`acu cost=${formatUsageCost(tokenUsage.acuCost)}`]
+      : []),
     '```',
     '',
     '</details>',

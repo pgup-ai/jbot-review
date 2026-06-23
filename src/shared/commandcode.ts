@@ -29,6 +29,8 @@ export const COMMANDCODE_PROVIDER_ID = 'commandcode';
 // Use the long alias so Windows local runs do not accidentally invoke cmd.exe.
 export const COMMANDCODE_CLI_BIN = 'command-code';
 
+export type CommandCodePromptFailureKind = 'rate_limit' | 'usage_exceeded';
+
 export function isCommandCodeProvider(providerID: string): boolean {
   return providerID === COMMANDCODE_PROVIDER_ID;
 }
@@ -235,6 +237,33 @@ export function parseCommandCodeModelList(output: string): string[] {
   return models;
 }
 
+export function classifyCommandCodePromptFailure(
+  output: string,
+): CommandCodePromptFailureKind | undefined {
+  const normalized = output.toLowerCase();
+  if (
+    /\brate[\s_-]?limit(?:ed|s|ing)?(?:[\s_-]?(?:exceeded|error|hit|reached))?\b/.test(
+      normalized,
+    ) ||
+    /\b429\b/.test(normalized) ||
+    /\bthrottl(?:e|ed|ing)\b/.test(normalized) ||
+    normalized.includes('too many requests') ||
+    normalized.includes('retry-after')
+  ) {
+    return 'rate_limit';
+  }
+  if (
+    /\busage[\s_-]exceeded\b/.test(normalized) ||
+    normalized.includes('usage limit') ||
+    normalized.includes('credits exhausted') ||
+    normalized.includes('insufficient credits') ||
+    /\bquota[\s_-]exceeded\b/.test(normalized)
+  ) {
+    return 'usage_exceeded';
+  }
+  return undefined;
+}
+
 async function runCommandCodePrompt(
   workspace: string,
   model: string,
@@ -257,16 +286,23 @@ async function runCommandCodePrompt(
   );
   if (result.exitCode !== 0) {
     throw new Error(
-      `commandcode ${label} exited ${result.exitCode}: ${truncateForLog(
-        result.stderr || result.stdout,
-        1000,
-      )}`,
+      formatCommandCodePromptFailure(label, result.exitCode, result.stderr || result.stdout),
     );
   }
   log(
     `${label} prompt complete via commandcode: stdout=${result.stdout.length} chars stderr=${result.stderr.length} chars`,
   );
   return result.stdout;
+}
+
+function formatCommandCodePromptFailure(
+  label: string,
+  exitCode: number | null,
+  output: string,
+): string {
+  const kind = classifyCommandCodePromptFailure(output);
+  const suffix = kind ? ` (${kind.replace('_', ' ')})` : '';
+  return `commandcode ${label} exited ${exitCode}${suffix}: ${truncateForLog(output, 1000)}`;
 }
 
 function spawnWithInputAndTimeout(

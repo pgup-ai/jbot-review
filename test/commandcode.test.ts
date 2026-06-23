@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 
 import {
   buildCommandCodeCliArgs,
+  classifyCommandCodePromptFailure,
   commandCodeEnvForHome,
   commandCodeAuthPath,
   formatCommandCodePromptTimeoutMessage,
@@ -113,6 +114,28 @@ describe('CommandCode CLI provider helpers', () => {
       ),
       ['zai-org/GLM-5.2', 'Qwen/Qwen3.7-Max', 'gpt-5.5'],
     );
+  });
+
+  it('classifies CommandCode rate-limit failures from CLI output', () => {
+    assert.equal(
+      classifyCommandCodePromptFailure('HTTP 429 Too Many Requests. Retry-After: 30'),
+      'rate_limit',
+    );
+    assert.equal(classifyCommandCodePromptFailure('provider rate limit exceeded'), 'rate_limit');
+    assert.equal(classifyCommandCodePromptFailure('rate_limit_exceeded'), 'rate_limit');
+    assert.equal(classifyCommandCodePromptFailure('request throttled'), 'rate_limit');
+  });
+
+  it('classifies CommandCode usage and quota failures from CLI output', () => {
+    assert.equal(
+      classifyCommandCodePromptFailure('Usage exceeded for this workspace'),
+      'usage_exceeded',
+    );
+    assert.equal(classifyCommandCodePromptFailure('quota_exceeded'), 'usage_exceeded');
+  });
+
+  it('does not classify unrelated CommandCode failures', () => {
+    assert.equal(classifyCommandCodePromptFailure('model id not found'), undefined);
   });
 
   it('truncates repair context by bytes with an omission notice', () => {

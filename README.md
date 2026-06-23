@@ -290,6 +290,15 @@ See [models.dev](https://models.dev/) for opencode-backed model catalogs. CLI
 backends such as Devin and CommandCode expose model lists through their own
 tools/accounts.
 
+Review metadata reports backend usage counters when they are available.
+OpenCode-backed sessions report token counters and cost from assistant message
+metadata; Devin CLI sessions also contribute usage when the ATIF export includes
+token or cost records. CommandCode CLI does not expose machine-readable
+per-session usage today, so CommandCode sessions may be absent from the metadata
+block. These counters are observability only: they do not identify API keys,
+accounts, organizations, quota buckets, remaining quota, or reset times, so
+jbot-review does not use them for smart key rotation.
+
 | `provider`        | Default model                       | Action key input         | Secret/env var           |
 | ----------------- | ----------------------------------- | ------------------------ | ------------------------ |
 | `opencode`        | `opencode/deepseek-v4-flash-free`   | `opencode-api-key`       | `OPENCODE_API_KEY`       |

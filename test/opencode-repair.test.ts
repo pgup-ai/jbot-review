@@ -4,6 +4,7 @@ import { afterEach, describe, it } from 'node:test';
 import {
   Semaphore,
   buildConfig,
+  extractPromptTokenUsage,
   formatTokenUsage,
   parsePortEnv,
   runReview,
@@ -303,5 +304,19 @@ describe('formatTokenUsage', () => {
       formatTokenUsage({ tokens: { input: 5 } }),
       'tokens: input=5 output=0 reasoning=0 cache(read=0 write=0)',
     );
+  });
+
+  it('omits non-finite cost values from logs and usage records', () => {
+    assert.equal(
+      formatTokenUsage({ cost: Infinity, tokens: { input: 5 } }),
+      'tokens: input=5 output=0 reasoning=0 cache(read=0 write=0)',
+    );
+    assert.deepEqual(extractPromptTokenUsage({ cost: Infinity, tokens: { input: 5 } }), {
+      input: 5,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
   });
 });

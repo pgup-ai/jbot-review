@@ -15,6 +15,7 @@ import {
   assembleReviewPrompt,
   buildJsonRepairPrompt,
 } from './prompt.ts';
+import { isFiniteNumber } from './text.ts';
 import type {
   AddressedPriorComment,
   Finding,
@@ -128,6 +129,9 @@ export interface PromptTokenUsage {
   reasoning: number;
   cacheRead: number;
   cacheWrite: number;
+  costUsd?: number;
+  creditCost?: number;
+  acuCost?: number;
 }
 
 export type TokenUsageRecorder = (usage: PromptTokenUsage, model: string) => void;
@@ -142,6 +146,7 @@ export function extractPromptTokenUsage(info: TokenUsageInfo): PromptTokenUsage 
     reasoning: tokens.reasoning ?? 0,
     cacheRead: cache.read ?? 0,
     cacheWrite: cache.write ?? 0,
+    ...(isFiniteNumber(info.cost) ? { costUsd: info.cost } : {}),
   };
 }
 
@@ -161,7 +166,7 @@ export function formatTokenUsage(info: TokenUsageInfo): string {
     `reasoning=${tokens.reasoning ?? 0}`,
     `cache(read=${cache.read ?? 0} write=${cache.write ?? 0})`,
   ];
-  if (typeof info.cost === 'number') parts.push(`cost=$${info.cost.toFixed(4)}`);
+  if (isFiniteNumber(info.cost)) parts.push(`cost=$${info.cost.toFixed(4)}`);
   return `tokens: ${parts.join(' ')}`;
 }
 
