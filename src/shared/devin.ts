@@ -9,10 +9,11 @@ import {
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
-  buildJsonRepairPrompt,
+  buildJsonRepairFollowupPrompt,
   type VerifiableFinding,
 } from './prompt.ts';
 import { parseFindingVerdicts, parseReview, type TokenUsageRecorder } from './opencode.ts';
+import { truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
@@ -116,16 +117,13 @@ export async function runDevinReview(
     const repaired = await runDevinPrompt(
       workspace,
       model,
-      [
-        truncateUtf8WithNotice(prompt, DEVIN_REPAIR_PROMPT_BUDGET_BYTES, 'Original review prompt'),
-        '## Previous invalid response',
-        truncateUtf8WithNotice(
-          raw,
-          DEVIN_REPAIR_RESPONSE_BUDGET_BYTES,
-          'Previous invalid response',
-        ),
-        buildJsonRepairPrompt(message),
-      ].join('\n\n'),
+      buildJsonRepairFollowupPrompt({
+        originalPrompt: prompt,
+        invalidResponse: raw,
+        parseError: message,
+        promptBudgetBytes: DEVIN_REPAIR_PROMPT_BUDGET_BYTES,
+        responseBudgetBytes: DEVIN_REPAIR_RESPONSE_BUDGET_BYTES,
+      }),
       `${label}-repair`,
       log,
       options.timeoutMs,
@@ -295,11 +293,6 @@ function tomlString(value: string): string {
   return JSON.stringify(value);
 }
 
-function truncateForLog(value: string, maxChars: number): string {
-  if (value.length <= maxChars) return value;
-  return `${value.slice(0, maxChars)}... [truncated]`;
-}
-
 export function buildDevinReadOnlyConfig(): DevinCliConfig {
   return {
     permissions: {
@@ -331,19 +324,4 @@ function writeDevinReadOnlyConfig(dir: string): string {
     /* best effort on filesystems that do not support chmod */
   }
   return path;
-}
-
-export function truncateUtf8WithNotice(value: string, maxBytes: number, label: string): string {
-  const totalBytes = Buffer.byteLength(value, 'utf8');
-  if (totalBytes <= maxBytes) return value;
-
-  let end = Math.min(value.length, maxBytes);
-  while (end > 0 && Buffer.byteLength(value.slice(0, end), 'utf8') > maxBytes) end -= 1;
-  const truncated = value.slice(0, end);
-  const keptBytes = Buffer.byteLength(truncated, 'utf8');
-  return [
-    truncated,
-    '',
-    `[${label} truncated to ${keptBytes} bytes; omitted ${totalBytes - keptBytes} bytes.]`,
-  ].join('\n');
 }

@@ -8,9 +8,10 @@ import {
   buildCommandCodeCliArgs,
   commandCodeAuthPath,
   isCommandCodeProvider,
-  truncateUtf8WithNotice,
+  parseCommandCodeModelList,
   writeCommandCodeAuth,
 } from '../src/shared/commandcode.ts';
+import { truncateUtf8WithNotice } from '../src/shared/prompt.ts';
 
 describe('CommandCode CLI provider helpers', () => {
   it('matches only the explicit commandcode provider id', () => {
@@ -39,8 +40,6 @@ describe('CommandCode CLI provider helpers', () => {
       '--skip-onboarding',
       '--permission-mode',
       'plan',
-      '--max-turns',
-      '10',
     ]);
   });
 
@@ -51,11 +50,32 @@ describe('CommandCode CLI provider helpers', () => {
       '--skip-onboarding',
       '--permission-mode',
       'plan',
-      '--max-turns',
-      '10',
       '--model',
       'Qwen/Qwen3.7-Max',
     ]);
+  });
+
+  it('parses model ids from CommandCode list output', () => {
+    assert.deepEqual(
+      parseCommandCodeModelList(
+        [
+          'Available models  ·  3 models',
+          '',
+          'Open Source',
+          '',
+          'zai-org/GLM-5.2                      powerful coding with 1M context',
+          'Qwen/Qwen3.7-Max                     frontier coding',
+          '',
+          'OpenAI',
+          '',
+          'gpt-5.5                              latest frontier model',
+          '',
+          'Pass the full id, or just the short name after the last "/":',
+          'cmd --model qwen3.7-max',
+        ].join('\n'),
+      ),
+      ['zai-org/GLM-5.2', 'Qwen/Qwen3.7-Max', 'gpt-5.5'],
+    );
   });
 
   it('truncates repair context by bytes with an omission notice', () => {

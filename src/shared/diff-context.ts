@@ -151,6 +151,12 @@ export interface DiffHunksOptions {
   perFileBudgetBytes?: number;
 }
 
+export interface DiffHunksBlockResult {
+  text: string;
+  truncatedFiles: string[];
+  omittedFiles: string[];
+}
+
 /**
  * Renders the '## Diff hunks' prompt section. Returns '' when no file has a
  * patch. Truncation is per-file (a single huge file cannot starve the rest)
@@ -158,18 +164,28 @@ export interface DiffHunksOptions {
  * fences, not just the raw patch bytes.
  */
 export function buildDiffHunksBlock(files: PrFile[], options: DiffHunksOptions = {}): string {
+  return buildDiffHunksBlockWithMetadata(files, options).text;
+}
+
+export function buildDiffHunksBlockWithMetadata(
+  files: PrFile[],
+  options: DiffHunksOptions = {},
+): DiffHunksBlockResult {
   const totalBudget = options.totalBudgetBytes ?? MAX_TOTAL_DIFF_BYTES;
   const perFileBudget = options.perFileBudgetBytes ?? MAX_FILE_DIFF_BYTES;
 
   const withPatch = files.filter((file) => file.patch);
-  if (withPatch.length === 0) return '';
+  if (withPatch.length === 0) {
+    return { text: '', truncatedFiles: [], omittedFiles: [] };
+  }
 
   const ranked = [...withPatch].sort(
     (a, b) => diffRiskScore(b) - diffRiskScore(a) || a.filename.localeCompare(b.filename),
   );
 
   const sections: string[] = [];
-  const notEmbedded: string[] = [];
+  const truncatedFiles: string[] = [];
+  const omittedFiles: string[] = [];
   let remaining = totalBudget;
 
   for (const file of ranked) {
@@ -185,17 +201,18 @@ export function buildDiffHunksBlock(files: PrFile[], options: DiffHunksOptions =
     );
     const { text, truncated } = truncateAtLineBoundary(patch, patchBudget);
     if (!text) {
-      notEmbedded.push(file.filename);
+      omittedFiles.push(file.filename);
       continue;
     }
     const section = renderDiffSection(file.filename, text, truncated, truncationNotice);
     const sectionBytes = sectionSeparatorBytes + Buffer.byteLength(section, 'utf8');
     if (sectionBytes > remaining) {
-      notEmbedded.push(file.filename);
+      omittedFiles.push(file.filename);
       continue;
     }
     remaining -= sectionBytes;
     sections.push(section);
+    if (truncated) truncatedFiles.push(file.filename);
   }
 
   const lines = [
@@ -206,20 +223,20 @@ export function buildDiffHunksBlock(files: PrFile[], options: DiffHunksOptions =
     sections.join('\n\n'),
   ];
 
-  if (notEmbedded.length > 0) {
-    const listed = notEmbedded.slice(0, MAX_NOT_EMBEDDED_LISTED);
+  if (omittedFiles.length > 0) {
+    const listed = omittedFiles.slice(0, MAX_NOT_EMBEDDED_LISTED);
     lines.push(
       '',
       '### Hunks not embedded (diff budget reached)',
       'Read these with the git diff command before concluding the review:',
       ...listed.map((filename) => `- ${filename}`),
     );
-    if (notEmbedded.length > listed.length) {
-      lines.push(`- …and ${notEmbedded.length - listed.length} more changed files`);
+    if (omittedFiles.length > listed.length) {
+      lines.push(`- …and ${omittedFiles.length - listed.length} more changed files`);
     }
   }
 
-  return lines.join('\n');
+  return { text: lines.join('\n'), truncatedFiles, omittedFiles };
 }
 
 function renderDiffSection(

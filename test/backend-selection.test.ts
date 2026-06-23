@@ -129,6 +129,29 @@ describe('selectReviewBackends', () => {
     );
   });
 
+  it('skips OpenCode when both main and aux sessions use CommandCode', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'commandcode',
+        modelID: 'default',
+        apiKey: 'commandcode-key',
+        auxProviderID: 'commandcode',
+        auxModelID: 'Qwen/Qwen3.7-Max',
+      }),
+      {
+        mainCliBackend: 'commandcode',
+        auxCliBackend: 'commandcode',
+        needsOpencode: false,
+        devinApiKey: '',
+        commandCodeAccessKey: 'commandcode-key',
+        opencodeProviderID: 'commandcode',
+        opencodeModelID: 'Qwen/Qwen3.7-Max',
+        opencodeApiKey: '',
+      },
+    );
+  });
+
   it('skips OpenCode when main and aux sessions use different CLI backends', () => {
     assert.deepEqual(
       selectReviewBackends({

@@ -123,8 +123,9 @@ support `provider: devin` or `aux-provider: devin`; the action writes Devin
 credentials only when a Devin-backed run is selected.
 CommandCode is a separate CLI backend: pass `COMMANDCODE_ACCESS_KEY` when you
 want to support `provider: commandcode` or `aux-provider: commandcode`; the
-action writes `~/.commandcode/auth.json` only when a CommandCode-backed run is
-selected.
+action writes `.commandcode/auth.json` under an isolated temporary HOME only
+when a CommandCode-backed run is selected, then removes that temp HOME after the
+run.
 Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
 framework, CLI, cloud-service, or workflow changes.
 
@@ -314,8 +315,9 @@ the Devin CLI, but credentials are written only when the main or active
 auxiliary provider is `devin`.
 Use `provider: commandcode` with `commandcode-access-key` /
 `COMMANDCODE_ACCESS_KEY` for the CommandCode CLI backend. The Docker image
-includes the CommandCode CLI, but `~/.commandcode/auth.json` is written only
-when the main or active auxiliary provider is `commandcode`.
+includes the CommandCode CLI, but `.commandcode/auth.json` is written under an
+isolated temporary HOME only when the main or active auxiliary provider is
+`commandcode`, then removed after the run.
 
 Set the `provider` and `model` inputs to override the defaults. For automatic
 PR reviews without editing workflow YAML on every provider or model change,

@@ -9,18 +9,23 @@ import {
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
-  buildJsonRepairPrompt,
+  buildJsonRepairFollowupPrompt,
   type VerifiableFinding,
 } from './prompt.ts';
 import { parseFindingVerdicts, parseReview, type TokenUsageRecorder } from './opencode.ts';
+import { truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const KILL_GRACE_MS = 2_000;
 const COMMANDCODE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
+const COMMANDCODE_MODEL_LIST_TIMEOUT_MS = 60_000;
 
 export const COMMANDCODE_PROVIDER_ID = 'commandcode';
+// The command-code npm package exposes cmd, cmdc, commandcode, and command-code.
+// Use the long alias so Windows local runs do not accidentally invoke cmd.exe.
+export const COMMANDCODE_CLI_BIN = 'command-code';
 
 export function isCommandCodeProvider(providerID: string): boolean {
   return providerID === COMMANDCODE_PROVIDER_ID;
@@ -60,12 +65,12 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
   const { modelID } = parseModelName(input.model);
   const args = [
     '-p',
+    // Trust only skips the project-trust prompt for headless runs; plan mode
+    // keeps the session read-only.
     '--trust',
     '--skip-onboarding',
     '--permission-mode',
     'plan',
-    '--max-turns',
-    '10',
   ];
   if (modelID !== 'default') args.push('--model', modelID);
   return args;
@@ -82,6 +87,7 @@ export async function runCommandCodeReview(
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
+    home?: string;
   } = {},
 ): Promise<ReviewResult> {
   void options.onTokenUsage;
@@ -90,7 +96,15 @@ export async function runCommandCodeReview(
   log(
     `Prompt assembled (${label}, commandcode): ${prompt.length} chars, guidelines=${!!guidelines}`,
   );
-  const raw = await runCommandCodePrompt(workspace, model, prompt, label, log, options.timeoutMs);
+  const raw = await runCommandCodePrompt(
+    workspace,
+    model,
+    prompt,
+    label,
+    log,
+    options.timeoutMs,
+    options.home,
+  );
   try {
     return parseReview(raw, label, log, { strict: true });
   } catch (error) {
@@ -101,23 +115,17 @@ export async function runCommandCodeReview(
     const repaired = await runCommandCodePrompt(
       workspace,
       model,
-      [
-        truncateUtf8WithNotice(
-          prompt,
-          COMMANDCODE_REPAIR_PROMPT_BUDGET_BYTES,
-          'Original review prompt',
-        ),
-        '## Previous invalid response',
-        truncateUtf8WithNotice(
-          raw,
-          COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES,
-          'Previous invalid response',
-        ),
-        buildJsonRepairPrompt(message),
-      ].join('\n\n'),
+      buildJsonRepairFollowupPrompt({
+        originalPrompt: prompt,
+        invalidResponse: raw,
+        parseError: message,
+        promptBudgetBytes: COMMANDCODE_REPAIR_PROMPT_BUDGET_BYTES,
+        responseBudgetBytes: COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES,
+      }),
       `${label}-repair`,
       log,
       options.timeoutMs,
+      options.home,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
@@ -130,6 +138,7 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  home?: string,
 ): Promise<AddressedPriorComment[]> {
   void onTokenUsage;
   const raw = await runCommandCodePrompt(
@@ -139,6 +148,7 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
     'addressed-prior-comments',
     log,
     timeoutMs,
+    home,
   );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
 }
@@ -151,6 +161,7 @@ export async function runCommandCodeGuidelineComplianceCheck(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  home?: string,
 ): Promise<Finding[]> {
   void onTokenUsage;
   const raw = await runCommandCodePrompt(
@@ -160,6 +171,7 @@ export async function runCommandCodeGuidelineComplianceCheck(
     'guideline-compliance',
     log,
     timeoutMs,
+    home,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
 }
@@ -172,6 +184,7 @@ export async function runCommandCodeFindingVerification(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  home?: string,
 ): Promise<FindingVerdict[] | undefined> {
   void onTokenUsage;
   const raw = await runCommandCodePrompt(
@@ -181,8 +194,38 @@ export async function runCommandCodeFindingVerification(
     'finding-verification',
     log,
     timeoutMs,
+    home,
   );
   return parseFindingVerdicts(raw, findings.length, log);
+}
+
+export async function listCommandCodeModels(workspace: string, home?: string): Promise<string[]> {
+  const result = await spawnWithInputAndTimeout(
+    COMMANDCODE_CLI_BIN,
+    ['--list-models'],
+    workspace,
+    '',
+    COMMANDCODE_MODEL_LIST_TIMEOUT_MS,
+    envForHome(home),
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `commandcode model listing exited ${result.exitCode}: ${truncateForLog(
+        result.stderr || result.stdout,
+        1000,
+      )}`,
+    );
+  }
+  return parseCommandCodeModelList(result.stdout);
+}
+
+export function parseCommandCodeModelList(output: string): string[] {
+  const models: string[] = [];
+  for (const line of output.split('\n')) {
+    const match = line.trim().match(/^([A-Za-z0-9._/-]+)\s{2,}\S/);
+    if (match) models.push(match[1]);
+  }
+  return models;
 }
 
 async function runCommandCodePrompt(
@@ -192,10 +235,18 @@ async function runCommandCodePrompt(
   label: string,
   log: (msg: string) => void,
   timeoutMs = COMMANDCODE_PROMPT_TIMEOUT_MS,
+  home?: string,
 ): Promise<string> {
   const args = buildCommandCodeCliArgs({ model });
   log(`Calling ${label} prompt (agent=commandcode-cli, model=${model})`);
-  const result = await spawnWithInputAndTimeout('cmd', args, workspace, prompt, timeoutMs);
+  const result = await spawnWithInputAndTimeout(
+    COMMANDCODE_CLI_BIN,
+    args,
+    workspace,
+    prompt,
+    timeoutMs,
+    envForHome(home),
+  );
   if (result.exitCode !== 0) {
     throw new Error(
       `commandcode ${label} exited ${result.exitCode}: ${truncateForLog(
@@ -216,12 +267,14 @@ function spawnWithInputAndTimeout(
   cwd: string,
   input: string,
   timeoutMs: number,
+  env?: NodeJS.ProcessEnv,
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
       detached: process.platform !== 'win32',
       stdio: ['pipe', 'pipe', 'pipe'],
+      env,
     });
     let stdout = '';
     let stderr = '';
@@ -257,8 +310,10 @@ function spawnWithInputAndTimeout(
     child.stderr?.on('data', (chunk: string) => {
       stderr += chunk;
     });
-    child.stdin?.on('error', () => {
-      // The CLI may exit before consuming stdin; close/stderr will carry the failure.
+    child.stdin?.on('error', (error: Error) => {
+      // The CLI may exit before consuming stdin; include it in diagnostics
+      // without racing the child close/error path.
+      stderr += `\n[stdin error: ${error.message}]`;
     });
     child.stdin?.end(input);
     child.on('error', (error) => {
@@ -276,22 +331,6 @@ function spawnWithInputAndTimeout(
   });
 }
 
-function truncateForLog(value: string, maxChars: number): string {
-  if (value.length <= maxChars) return value;
-  return `${value.slice(0, maxChars)}... [truncated]`;
-}
-
-export function truncateUtf8WithNotice(value: string, maxBytes: number, label: string): string {
-  const totalBytes = Buffer.byteLength(value, 'utf8');
-  if (totalBytes <= maxBytes) return value;
-
-  let end = Math.min(value.length, maxBytes);
-  while (end > 0 && Buffer.byteLength(value.slice(0, end), 'utf8') > maxBytes) end -= 1;
-  const truncated = value.slice(0, end);
-  const keptBytes = Buffer.byteLength(truncated, 'utf8');
-  return [
-    truncated,
-    '',
-    `[${label} truncated to ${keptBytes} bytes; omitted ${totalBytes - keptBytes} bytes.]`,
-  ].join('\n');
+function envForHome(home: string | undefined): NodeJS.ProcessEnv | undefined {
+  return home ? { ...process.env, HOME: home } : undefined;
 }

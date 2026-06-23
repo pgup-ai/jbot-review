@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import {
   SEVERITY_RANK,
   applyFindingVerdicts,
@@ -10,11 +14,12 @@ import {
   shouldPostReviewComment,
   suppressPreviouslyReported,
 } from './filter.ts';
-import { selectReviewBackends } from './backend-selection.ts';
+import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   PATH_PATTERNS,
   buildDiffHunksBlock,
+  buildDiffHunksBlockWithMetadata,
   isDocOnlyChange,
   shardFilesForReview,
 } from './diff-context.ts';
@@ -54,6 +59,7 @@ import {
 } from './devin.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
+  listCommandCodeModels,
   runCommandCodeAddressedPriorCommentsCheck,
   runCommandCodeFindingVerification,
   runCommandCodeGuidelineComplianceCheck,
@@ -214,11 +220,14 @@ function createDevinBackend(workspace: string): ReviewBackend {
   };
 }
 
-function createCommandCodeBackend(workspace: string): ReviewBackend {
+function createCommandCodeBackend(workspace: string, home: string): ReviewBackend {
   return {
     name: COMMANDCODE_PROVIDER_ID,
     runReview: (model, prContext, guidelines, log, options) =>
-      runCommandCodeReview(workspace, model, prContext, guidelines, log, options),
+      runCommandCodeReview(workspace, model, prContext, guidelines, log, {
+        ...options,
+        home,
+      }),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
       runCommandCodeAddressedPriorCommentsCheck(
         workspace,
@@ -227,6 +236,7 @@ function createCommandCodeBackend(workspace: string): ReviewBackend {
         log,
         timeoutMs,
         onTokenUsage,
+        home,
       ),
     runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
       runCommandCodeGuidelineComplianceCheck(
@@ -237,6 +247,7 @@ function createCommandCodeBackend(workspace: string): ReviewBackend {
         log,
         timeoutMs,
         onTokenUsage,
+        home,
       ),
     runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
       runCommandCodeFindingVerification(
@@ -247,6 +258,7 @@ function createCommandCodeBackend(workspace: string): ReviewBackend {
         log,
         timeoutMs,
         onTokenUsage,
+        home,
       ),
   };
 }
@@ -273,6 +285,27 @@ function limitBackendConcurrency(
       withSlot(() => backend.runGuidelineComplianceCheck(...args)),
     runFindingVerification: (...args) => withSlot(() => backend.runFindingVerification(...args)),
   };
+}
+
+function requireCliBackend(
+  backends: Record<CliBackendID, ReviewBackend | undefined>,
+  backendID: CliBackendID,
+): ReviewBackend {
+  const backend = backends[backendID];
+  if (!backend) {
+    throw new Error(`CLI backend "${backendID}" was selected but was not initialized.`);
+  }
+  return backend;
+}
+
+function requireOpencodeBackend(
+  backend: ReviewBackend | undefined,
+  role: 'main' | 'aux',
+): ReviewBackend {
+  if (!backend) {
+    throw new Error(`OpenCode backend was selected for ${role} sessions but was not initialized.`);
+  }
+  return backend;
 }
 
 export interface ReviewRunOptions {
@@ -415,6 +448,15 @@ export async function runPrReview(params: {
   const { providerID, modelID } = parseModelName(model);
   const auxModel = options.auxModel || model;
   const { providerID: auxProviderID, modelID: auxModelID } = parseModelName(auxModel);
+  const backendSelection = selectReviewBackends({
+    providerID,
+    modelID,
+    apiKey,
+    auxProviderID,
+    auxModelID,
+    auxApiKey: options.auxApiKey,
+  });
+  const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
   const promptCachePolicy = resolvePromptCachePolicy({
     promptCache: options.promptCache,
     mainModel: model,
@@ -586,19 +628,16 @@ export async function runPrReview(params: {
     log(`Model session concurrency capped at ${options.maxConcurrentSessions}.`);
   }
 
-  const backendSelection = selectReviewBackends({
-    providerID,
-    modelID,
-    apiKey,
-    auxProviderID,
-    auxModelID,
-    auxApiKey: options.auxApiKey,
-  });
-  const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
   let opencodeRuntime: Awaited<ReturnType<typeof startOpencode>> | undefined;
   let opencodeBackend: ReviewBackend | undefined;
   let devinBackend: ReviewBackend | undefined;
   let commandCodeBackend: ReviewBackend | undefined;
+  let commandCodeHome: string | undefined;
+  const cleanupCommandCodeHome = (): void => {
+    if (!commandCodeHome) return;
+    rmSync(commandCodeHome, { recursive: true, force: true });
+    commandCodeHome = undefined;
+  };
 
   if (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID) {
     const devinApiKey = backendSelection.devinApiKey;
@@ -615,9 +654,20 @@ export async function runPrReview(params: {
     if (!commandCodeAccessKey) {
       throw new Error(`Missing access key for ${COMMANDCODE_PROVIDER_ID} provider.`);
     }
-    const authPath = writeCommandCodeAuth(commandCodeAccessKey);
+    let authPath: string;
+    try {
+      commandCodeHome = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
+      authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
+    } catch (error) {
+      cleanupCommandCodeHome();
+      throw error;
+    }
     log(`CommandCode CLI auth configured at ${authPath}.`);
-    commandCodeBackend = limitBackendConcurrency(createCommandCodeBackend(workspace), sessionSlots);
+    log('CommandCode CLI token usage is unavailable; review metadata may omit those sessions.');
+    commandCodeBackend = limitBackendConcurrency(
+      createCommandCodeBackend(workspace, commandCodeHome),
+      sessionSlots,
+    );
   }
 
   if (needsOpencode) {
@@ -626,44 +676,66 @@ export async function runPrReview(params: {
       throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
     }
     log('Starting opencode server');
-    opencodeRuntime = await startOpencode(
-      workspace,
-      opencodeProviderID,
-      opencodeModelID,
-      opencodeApiKey,
-      log,
-      {
-        modelOptions: mainCliBackend ? undefined : options.modelOptions,
-        promptCache: mainCliBackend
-          ? promptCachePolicy.auxProviderPromptCache
-          : promptCachePolicy.providerPromptCache,
-        port: options.opencodePort > 0 ? options.opencodePort : undefined,
-        additionalProviderKeys:
-          !mainCliBackend && !auxCliBackend && auxProviderID !== providerID
-            ? [
-                {
-                  providerID: auxProviderID,
-                  apiKey: options.auxApiKey || apiKey,
-                  promptCache: promptCachePolicy.auxProviderPromptCache,
-                },
-              ]
-            : undefined,
-      },
-    );
+    try {
+      opencodeRuntime = await startOpencode(
+        workspace,
+        opencodeProviderID,
+        opencodeModelID,
+        opencodeApiKey,
+        log,
+        {
+          modelOptions: mainCliBackend ? undefined : options.modelOptions,
+          promptCache: mainCliBackend
+            ? promptCachePolicy.auxProviderPromptCache
+            : promptCachePolicy.providerPromptCache,
+          port: options.opencodePort > 0 ? options.opencodePort : undefined,
+          additionalProviderKeys:
+            !mainCliBackend && !auxCliBackend && auxProviderID !== providerID
+              ? [
+                  {
+                    providerID: auxProviderID,
+                    apiKey: options.auxApiKey || apiKey,
+                    promptCache: promptCachePolicy.auxProviderPromptCache,
+                  },
+                ]
+              : undefined,
+        },
+      );
+    } catch (error) {
+      cleanupCommandCodeHome();
+      throw error;
+    }
     opencodeBackend = limitBackendConcurrency(
       createOpencodeBackend(opencodeRuntime.client),
       sessionSlots,
     );
   }
 
-  const cliBackends = {
+  const cliBackends: Record<CliBackendID, ReviewBackend | undefined> = {
     [DEVIN_PROVIDER_ID]: devinBackend,
     [COMMANDCODE_PROVIDER_ID]: commandCodeBackend,
   };
-  const mainBackend = mainCliBackend ? cliBackends[mainCliBackend]! : opencodeBackend!;
-  const auxBackend = auxCliBackend ? cliBackends[auxCliBackend]! : opencodeBackend!;
+  const mainBackend = mainCliBackend
+    ? requireCliBackend(cliBackends, mainCliBackend)
+    : requireOpencodeBackend(opencodeBackend, 'main');
+  const auxBackend = auxCliBackend
+    ? requireCliBackend(cliBackends, auxCliBackend)
+    : requireOpencodeBackend(opencodeBackend, 'aux');
   const stop = opencodeRuntime?.stop ?? (() => undefined);
   try {
+    if (commandCodeBackend) {
+      try {
+        const models = await listCommandCodeModels(workspace, commandCodeHome);
+        log(
+          models.length > 0
+            ? `Available models for ${COMMANDCODE_PROVIDER_ID} using supplied CLI auth:\n${models.join('\n')}`
+            : `Available models for ${COMMANDCODE_PROVIDER_ID} using supplied CLI auth: none returned`,
+        );
+      } catch (e) {
+        log(`(skipped CommandCode model listing: ${(e as Error).message})`);
+      }
+    }
+
     if (opencodeRuntime && !mainCliBackend) {
       try {
         const modelListCacheKey = `${providerID}:${modelID}`;
@@ -682,7 +754,7 @@ export async function runPrReview(params: {
         log(`(skipped provider model listing: ${(e as Error).message})`);
       }
     } else if (mainCliBackend) {
-      log(`Provider model listing skipped: main review uses ${mainBackend.name} CLI.`);
+      log(`OpenCode provider model listing skipped: main review uses ${mainBackend.name} CLI.`);
     }
 
     const context7 = decideContext7Mode({
@@ -701,6 +773,15 @@ export async function runPrReview(params: {
     } else {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }
+
+    const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
+    const shardPlans = buildShardPlans({
+      coreContext,
+      fullDiffBlock: diffHunksBlock,
+      context7Block,
+      shards,
+      requireCompleteEmbeddedDiff: mainCliBackend === COMMANDCODE_PROVIDER_ID,
+    });
 
     const addressedPriorCheck = startAddressedPriorCommentsCheck({
       backend: auxBackend,
@@ -740,13 +821,6 @@ export async function runPrReview(params: {
       onTokenUsage: recordTokenUsage,
     });
 
-    const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
-    const shardPlans = buildShardPlans({
-      coreContext,
-      fullDiffBlock: diffHunksBlock,
-      context7Block,
-      shards,
-    });
     log(`Running review (${shardPlans.length} shard(s))`);
     const { summary, findings } = await runShardedReview({
       backend: mainBackend,
@@ -923,6 +997,7 @@ export async function runPrReview(params: {
     }
   } finally {
     stop();
+    cleanupCommandCodeHome();
   }
 }
 
@@ -1235,10 +1310,23 @@ function buildShardPlans(params: {
   fullDiffBlock: string;
   context7Block: string;
   shards: ReturnType<typeof shardFilesForReview>;
+  requireCompleteEmbeddedDiff?: boolean;
 }): ShardPlan[] {
-  const { coreContext, fullDiffBlock, context7Block, shards } = params;
+  const {
+    coreContext,
+    fullDiffBlock,
+    context7Block,
+    shards,
+    requireCompleteEmbeddedDiff = false,
+  } = params;
   if (shards.length <= 1) {
-    const baseContext = joinContext(coreContext, fullDiffBlock);
+    const diffResult = requireCompleteEmbeddedDiff
+      ? buildDiffHunksBlockWithMetadata(shards[0] ?? [])
+      : { text: fullDiffBlock, truncatedFiles: [], omittedFiles: [] };
+    if (requireCompleteEmbeddedDiff) {
+      assertCompleteEmbeddedDiff(diffResult, 'review');
+    }
+    const baseContext = joinContext(coreContext, diffResult.text);
     return [
       {
         label: 'review',
@@ -1251,14 +1339,31 @@ function buildShardPlans(params: {
   return shards.map((shard, index) => {
     const assignedFiles = shard.map((file) => file.filename);
     const assignment = buildShardAssignmentBlock(assignedFiles, index, shards.length);
-    const shardDiff = buildDiffHunksBlock(shard);
+    const diffResult = buildDiffHunksBlockWithMetadata(shard);
+    if (requireCompleteEmbeddedDiff) {
+      assertCompleteEmbeddedDiff(diffResult, `review-shard-${index + 1}`);
+    }
     return {
       label: `review-shard-${index + 1}`,
-      context: joinContext(coreContext, context7Block, assignment, shardDiff),
-      baseContext: joinContext(coreContext, assignment, shardDiff),
+      context: joinContext(coreContext, context7Block, assignment, diffResult.text),
+      baseContext: joinContext(coreContext, assignment, diffResult.text),
       assignedFiles,
     };
   });
+}
+
+function assertCompleteEmbeddedDiff(
+  result: ReturnType<typeof buildDiffHunksBlockWithMetadata>,
+  label: string,
+): void {
+  const incomplete = [...result.truncatedFiles, ...result.omittedFiles];
+  if (incomplete.length === 0) return;
+  const listed = incomplete.slice(0, 10).join(', ');
+  const remainder = incomplete.length > 10 ? `, and ${incomplete.length - 10} more` : '';
+  throw new Error(
+    `CommandCode ${label} would receive an incomplete embedded diff (${listed}${remainder}). ` +
+      'Refusing partial review coverage because CommandCode plan mode is read-only; use more shards or another provider for this PR.',
+  );
 }
 
 /**
