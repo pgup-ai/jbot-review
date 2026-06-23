@@ -56,7 +56,7 @@ function isCategoryHeader(line: string): boolean {
 }
 
 function splitCategoryLeadIn(line: string): { header: string; rest: string } | undefined {
-  const match = line.match(/^\s*(\*\*[^*]+\*\*)\s*(?:—|-|:)\s*(.+)$/);
+  const match = line.match(/^\s*(\*\*[^*]+\*\*)\s*(?:—|–|-|:)\s*(.+)$/);
   if (!match) return undefined;
   return { header: match[1], rest: match[2].trim() };
 }
@@ -111,7 +111,7 @@ function formatPlainSummarySegment(segment: string): string {
     part.replace(
       /(^|[^\w`])([a-z_$][\w$]*(?:(?:[A-Z][a-z0-9]+)|(?:[a-z0-9][A-Z]))[\w$]*(?:\(\))?)(?=$|[^\w`])/g,
       (match, prefix, token) =>
-        COMMON_CAMELCASE_WORDS.has(token) ? match : `${prefix}\`${token}\``,
+        PROPER_NOUN_EXCEPTIONS.has(token) ? match : `${prefix}\`${token}\``,
     ),
   );
   out = formatOutsideCodeSpans(out, (part) =>
@@ -156,12 +156,12 @@ const COMMON_UPPERCASE_WORDS = new Set([
   'YAML',
 ]);
 
-const COMMON_CAMELCASE_WORDS = new Set(['eBay', 'iPad', 'iPhone', 'iOS', 'macOS']);
+const PROPER_NOUN_EXCEPTIONS = new Set(['eBay', 'iPad', 'iPhone', 'iOS', 'macOS']);
 
 /**
  * Merge per-shard summaries into one public block. Lines under matching bold
- * category headers are grouped together, duplicate content is removed, and
- * code-like tokens get conservative markdown formatting for readability.
+ * category headers are grouped together and duplicate content is removed.
+ * Markdown token formatting is applied later by `formatSummaryMarkdown`.
  */
 export function condenseSummary(
   parts: string[],
@@ -210,7 +210,7 @@ export function condenseSummary(
         const key = `${currentKey}:${summaryLineKey(leadIn.rest)}`;
         if (!seen.has(key)) {
           seen.add(key);
-          sections.get(currentKey)!.lines.push(formatSummaryLine(leadIn.rest));
+          sections.get(currentKey)!.lines.push(leadIn.rest);
         }
         continue;
       }
@@ -223,7 +223,7 @@ export function condenseSummary(
       seen.add(key);
 
       if (currentKey) {
-        sections.get(currentKey)!.lines.push(formatSummaryLine(line));
+        sections.get(currentKey)!.lines.push(line);
       } else {
         let topBlock: string[];
         const previousBlock = blocks[blocks.length - 1];
@@ -233,7 +233,7 @@ export function condenseSummary(
           topBlock = [];
           blocks.push({ type: 'top', lines: topBlock });
         }
-        topBlock.push(formatSummaryLine(line));
+        topBlock.push(line);
       }
     }
   }

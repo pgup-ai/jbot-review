@@ -61,6 +61,16 @@ test('condenseSummary collapses blank runs and trims trailing blanks', () => {
   assert.equal(out, '- a\n- b');
 });
 
+test('condenseSummary returns empty output for empty inputs and empty categories', () => {
+  assert.equal(condenseSummary([]), '');
+  assert.equal(condenseSummary(['']), '');
+  assert.equal(condenseSummary(['**Bugs**']), '');
+});
+
+test('formatSummaryMarkdown returns empty output for empty input', () => {
+  assert.equal(formatSummaryMarkdown(''), '');
+});
+
 test('condenseSummary preserves distinct per-file observations', () => {
   const out = condenseSummary(['- `foo.ts` looks correct', '- `bar.ts` looks correct']);
   assert.equal(out.split('\n').length, 2);
@@ -106,6 +116,11 @@ test('condenseSummary groups bold lead-in summary lines with matching headers', 
     out,
     '**Changes**\nTwo minimal changes in assigned files:\n- A\n- B\n\n**No bugs found**\nBoth changes are correct.',
   );
+});
+
+test('condenseSummary groups bold lead-in summary lines with en dash separators', () => {
+  const out = condenseSummary(['**Changes** – Two minimal changes in assigned files:\n- A']);
+  assert.equal(out, '**Changes**\nTwo minimal changes in assigned files:\n- A');
 });
 
 test('condenseSummary suppresses no-finding shard verdicts when findings exist', () => {
@@ -192,17 +207,19 @@ test('condenseSummary prunes a category header left empty by cross-shard dedup',
   assert.doesNotMatch(out, /\*\*Changes\*\*\s*$/);
 });
 
-test('condenseSummary formats code-like tokens in grouped summaries', () => {
-  const out = condenseSummary([
-    [
-      '**Changes**',
-      '- Adds integration tests for non-draft REVENUE (INVOICE_SENT) and EXPENSE (BILL_RECEIVED) orders',
-      '- Fixes write-business-event.repository.ts to return { version } from updateStageAndEntryStatus',
-      '- Uses { entryStatus, invoiceId } for INVOICE_SENT orders',
-      '- Makes updateStageAndEntryStatus return { version: version + 1 } instead of void',
-      '- Re-enables the skipped test in business-event-object-matches.api-spec.ts',
-    ].join('\n'),
-  ]);
+test('formatSummaryMarkdown formats code-like tokens in grouped summaries', () => {
+  const out = formatSummaryMarkdown(
+    condenseSummary([
+      [
+        '**Changes**',
+        '- Adds integration tests for non-draft REVENUE (INVOICE_SENT) and EXPENSE (BILL_RECEIVED) orders',
+        '- Fixes write-business-event.repository.ts to return { version } from updateStageAndEntryStatus',
+        '- Uses { entryStatus, invoiceId } for INVOICE_SENT orders',
+        '- Makes updateStageAndEntryStatus return { version: version + 1 } instead of void',
+        '- Re-enables the skipped test in business-event-object-matches.api-spec.ts',
+      ].join('\n'),
+    ]),
+  );
   assert.match(out, /`REVENUE` \(`INVOICE_SENT`\)/);
   assert.match(out, /`EXPENSE` \(`BILL_RECEIVED`\)/);
   assert.match(out, /`write-business-event\.repository\.ts`/);
@@ -218,10 +235,12 @@ test('formatSummaryMarkdown does not add nested code spans inside formatted file
   assert.equal(out, '- Updates `src/FMS-123.ts` for `INVOICE_SENT`');
 });
 
-test('condenseSummary formats dotted member expressions as a single code span', () => {
-  const out = condenseSummary([
-    '- Uses the version from updateOne rather than reloading updatedEvent.version',
-  ]);
+test('formatSummaryMarkdown formats dotted member expressions as a single code span', () => {
+  const out = formatSummaryMarkdown(
+    condenseSummary([
+      '- Uses the version from updateOne rather than reloading updatedEvent.version',
+    ]),
+  );
   assert.equal(
     out,
     '- Uses the version from `updateOne` rather than reloading `updatedEvent.version`',
@@ -238,11 +257,13 @@ test('formatSummaryMarkdown does not code-span product and protocol proper nouns
   );
 });
 
-test('condenseSummary dedups raw and already-formatted code-like summary lines', () => {
-  const out = condenseSummary([
-    '- Fixes write-business-event.repository.ts to return { version }',
-    '- Fixes `write-business-event.repository.ts` to return `{ version }`',
-  ]);
+test('condenseSummary dedups raw and already-formatted code-like summary lines before formatting', () => {
+  const out = formatSummaryMarkdown(
+    condenseSummary([
+      '- Fixes write-business-event.repository.ts to return { version }',
+      '- Fixes `write-business-event.repository.ts` to return `{ version }`',
+    ]),
+  );
   assert.equal(out, '- Fixes `write-business-event.repository.ts` to return `{ version }`');
 });
 
