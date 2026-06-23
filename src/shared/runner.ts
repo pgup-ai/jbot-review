@@ -17,6 +17,7 @@ import {
 import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
+  type DiffHunksOptions,
   PATH_PATTERNS,
   buildDiffHunksBlock,
   buildDiffHunksBlockWithMetadata,
@@ -104,6 +105,10 @@ import type {
 
 /** Blocking findings verified per run; the rest pass through unverified. */
 const MAX_VERIFIED_FINDINGS = 10;
+const COMMANDCODE_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
+  totalBudgetBytes: 512 * 1024,
+  perFileBudgetBytes: 512 * 1024,
+};
 
 interface ReviewBackend {
   name: string;
@@ -555,6 +560,16 @@ export async function runPrReview(params: {
   const reviewFocusBlock = buildReviewFocusBlock(changedFiles);
   const diffHunksBlock = buildDiffHunksBlock(files);
   if (diffHunksBlock) log(`Embedded diff hunks block: ${diffHunksBlock.length} chars.`);
+  const commandCodeDiffHunks =
+    mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID
+      ? buildDiffHunksBlockWithMetadata(files, COMMANDCODE_DIFF_HUNKS_OPTIONS)
+      : undefined;
+  const commandCodeIncompleteDiffFiles = commandCodeDiffHunks
+    ? incompleteDiffFiles(commandCodeDiffHunks)
+    : [];
+  if (commandCodeDiffHunks?.text) {
+    log(`CommandCode embedded diff hunks block: ${commandCodeDiffHunks.text.length} chars.`);
+  }
   const blastRadiusBlock = options.enhancedContext
     ? await buildBlastRadiusBlock(workspace, files)
     : '';
@@ -617,6 +632,21 @@ export async function runPrReview(params: {
       .join('\n');
   }
   const basePrContext = joinContext(coreContext, diffHunksBlock);
+  const auxCommandCodeHasCompleteDiff =
+    auxCliBackend !== COMMANDCODE_PROVIDER_ID || commandCodeIncompleteDiffFiles.length === 0;
+  if (!auxCommandCodeHasCompleteDiff) {
+    log(
+      `Skipping CommandCode auxiliary sessions: embedded diff exceeds the CommandCode hard budget (${formatIncompleteDiffFiles(
+        commandCodeIncompleteDiffFiles,
+      )}). Main review continues without aux findings or verification.`,
+    );
+  }
+  const auxPrContext =
+    auxCliBackend === COMMANDCODE_PROVIDER_ID &&
+    commandCodeDiffHunks &&
+    auxCommandCodeHasCompleteDiff
+      ? joinContext(coreContext, commandCodeDiffHunks.text)
+      : basePrContext;
 
   // Use a per-run limiter around every backend so mixed Devin/OpenCode runs
   // honor one global cap. Disable opencode's older process-global limiter to
@@ -781,13 +811,15 @@ export async function runPrReview(params: {
       context7Block,
       shards,
       requireCompleteEmbeddedDiff: mainCliBackend === COMMANDCODE_PROVIDER_ID,
+      diffHunksOptions:
+        mainCliBackend === COMMANDCODE_PROVIDER_ID ? COMMANDCODE_DIFF_HUNKS_OPTIONS : undefined,
     });
 
     const addressedPriorCheck = startAddressedPriorCommentsCheck({
       backend: auxBackend,
       model: auxModel,
-      prContext: basePrContext,
-      priorJbotThreads,
+      prContext: auxPrContext,
+      priorJbotThreads: auxCommandCodeHasCompleteDiff ? priorJbotThreads : [],
       timeoutMs: finderTimeoutMs,
       log,
       onTokenUsage: recordTokenUsage,
@@ -796,26 +828,26 @@ export async function runPrReview(params: {
     const guidelineComplianceCheck = startGuidelineComplianceCheck({
       backend: auxBackend,
       model: auxModel,
-      prContext: basePrContext,
+      prContext: auxPrContext,
       guidelinesForPrompt: guidelines,
       hasGuidelines: Boolean(guidelines),
-      enabled: options.guidelinePass,
+      enabled: options.guidelinePass && auxCommandCodeHasCompleteDiff,
       timeoutMs: finderTimeoutMs,
       log,
       onTokenUsage: recordTokenUsage,
     });
 
     // Lens passes run on the aux model (recall supplement, not the deep
-    // pass) and use the base context (no Context7 block): they have no
+    // pass) and use the aux context (no Context7 block): they have no
     // Context7 retry path, so a Context7 hiccup must not be able to zero a
     // pass's findings.
     const lensPasses = startLensPasses({
       backend: auxBackend,
       model: auxModel,
-      prContext: basePrContext,
+      prContext: auxPrContext,
       guidelinesForPrompt,
       changedFiles,
-      passes: options.reviewPasses,
+      passes: auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,
       timeoutMs: finderTimeoutMs,
       log,
       onTokenUsage: recordTokenUsage,
@@ -873,10 +905,10 @@ export async function runPrReview(params: {
     const verifiedFindings = await verifyBlockingFindings({
       backend: auxBackend,
       model: auxModel,
-      prContext: basePrContext,
+      prContext: auxPrContext,
       timeoutMs: computeVerificationTimeoutMs(options.timeBudgetMinutes, Date.now() - runStartedAt),
       findings: suppression.findings,
-      enabled: options.verifyFindings,
+      enabled: options.verifyFindings && auxCommandCodeHasCompleteDiff,
       log,
       onTokenUsage: recordTokenUsage,
     });
@@ -1311,6 +1343,7 @@ function buildShardPlans(params: {
   context7Block: string;
   shards: ReturnType<typeof shardFilesForReview>;
   requireCompleteEmbeddedDiff?: boolean;
+  diffHunksOptions?: DiffHunksOptions;
 }): ShardPlan[] {
   const {
     coreContext,
@@ -1318,10 +1351,11 @@ function buildShardPlans(params: {
     context7Block,
     shards,
     requireCompleteEmbeddedDiff = false,
+    diffHunksOptions,
   } = params;
   if (shards.length <= 1) {
     const diffResult = requireCompleteEmbeddedDiff
-      ? buildDiffHunksBlockWithMetadata(shards[0] ?? [])
+      ? buildDiffHunksBlockWithMetadata(shards[0] ?? [], diffHunksOptions)
       : { text: fullDiffBlock, truncatedFiles: [], omittedFiles: [] };
     if (requireCompleteEmbeddedDiff) {
       assertCompleteEmbeddedDiff(diffResult, 'review');
@@ -1339,7 +1373,7 @@ function buildShardPlans(params: {
   return shards.map((shard, index) => {
     const assignedFiles = shard.map((file) => file.filename);
     const assignment = buildShardAssignmentBlock(assignedFiles, index, shards.length);
-    const diffResult = buildDiffHunksBlockWithMetadata(shard);
+    const diffResult = buildDiffHunksBlockWithMetadata(shard, diffHunksOptions);
     if (requireCompleteEmbeddedDiff) {
       assertCompleteEmbeddedDiff(diffResult, `review-shard-${index + 1}`);
     }
@@ -1356,14 +1390,24 @@ function assertCompleteEmbeddedDiff(
   result: ReturnType<typeof buildDiffHunksBlockWithMetadata>,
   label: string,
 ): void {
-  const incomplete = [...result.truncatedFiles, ...result.omittedFiles];
+  const incomplete = incompleteDiffFiles(result);
   if (incomplete.length === 0) return;
-  const listed = incomplete.slice(0, 10).join(', ');
-  const remainder = incomplete.length > 10 ? `, and ${incomplete.length - 10} more` : '';
   throw new Error(
-    `CommandCode ${label} would receive an incomplete embedded diff (${listed}${remainder}). ` +
+    `CommandCode ${label} would receive an incomplete embedded diff (${formatIncompleteDiffFiles(
+      incomplete,
+    )}). ` +
       'Refusing partial review coverage because CommandCode plan mode is read-only; use more shards or another provider for this PR.',
   );
+}
+
+function incompleteDiffFiles(result: ReturnType<typeof buildDiffHunksBlockWithMetadata>): string[] {
+  return [...new Set([...result.truncatedFiles, ...result.omittedFiles])];
+}
+
+function formatIncompleteDiffFiles(files: string[]): string {
+  const listed = files.slice(0, 10).join(', ');
+  const remainder = files.length > 10 ? `, and ${files.length - 10} more` : '';
+  return `${listed}${remainder}`;
 }
 
 /**
