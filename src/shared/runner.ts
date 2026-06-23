@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import {
   SEVERITY_RANK,
   applyFindingVerdicts,
@@ -10,11 +14,13 @@ import {
   shouldPostReviewComment,
   suppressPreviouslyReported,
 } from './filter.ts';
-import { selectReviewBackends } from './backend-selection.ts';
+import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
+  type DiffHunksOptions,
   PATH_PATTERNS,
   buildDiffHunksBlock,
+  buildDiffHunksBlockWithMetadata,
   isDocOnlyChange,
   shardFilesForReview,
 } from './diff-context.ts';
@@ -53,6 +59,15 @@ import {
   writeDevinCredentials,
 } from './devin.ts';
 import {
+  COMMANDCODE_PROVIDER_ID,
+  listCommandCodeModels,
+  runCommandCodeAddressedPriorCommentsCheck,
+  runCommandCodeFindingVerification,
+  runCommandCodeGuidelineComplianceCheck,
+  runCommandCodeReview,
+  writeCommandCodeAuth,
+} from './commandcode.ts';
+import {
   buildReviewContext,
   discoverGuidelineDocs,
   formatGuidelines,
@@ -90,6 +105,10 @@ import type {
 
 /** Blocking findings verified per run; the rest pass through unverified. */
 const MAX_VERIFIED_FINDINGS = 10;
+const COMMANDCODE_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
+  totalBudgetBytes: 512 * 1024,
+  perFileBudgetBytes: 512 * 1024,
+};
 
 interface ReviewBackend {
   name: string;
@@ -206,6 +225,49 @@ function createDevinBackend(workspace: string): ReviewBackend {
   };
 }
 
+function createCommandCodeBackend(workspace: string, home: string): ReviewBackend {
+  return {
+    name: COMMANDCODE_PROVIDER_ID,
+    runReview: (model, prContext, guidelines, log, options) =>
+      runCommandCodeReview(workspace, model, prContext, guidelines, log, {
+        ...options,
+        home,
+      }),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runCommandCodeAddressedPriorCommentsCheck(
+        workspace,
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        home,
+      ),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runCommandCodeGuidelineComplianceCheck(
+        workspace,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        home,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runCommandCodeFindingVerification(
+        workspace,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        home,
+      ),
+  };
+}
+
 function limitBackendConcurrency(
   backend: ReviewBackend,
   slots: Semaphore | undefined,
@@ -228,6 +290,27 @@ function limitBackendConcurrency(
       withSlot(() => backend.runGuidelineComplianceCheck(...args)),
     runFindingVerification: (...args) => withSlot(() => backend.runFindingVerification(...args)),
   };
+}
+
+function requireCliBackend(
+  backends: Record<CliBackendID, ReviewBackend | undefined>,
+  backendID: CliBackendID,
+): ReviewBackend {
+  const backend = backends[backendID];
+  if (!backend) {
+    throw new Error(`CLI backend "${backendID}" was selected but was not initialized.`);
+  }
+  return backend;
+}
+
+function requireOpencodeBackend(
+  backend: ReviewBackend | undefined,
+  role: 'main' | 'aux',
+): ReviewBackend {
+  if (!backend) {
+    throw new Error(`OpenCode backend was selected for ${role} sessions but was not initialized.`);
+  }
+  return backend;
 }
 
 export interface ReviewRunOptions {
@@ -370,6 +453,15 @@ export async function runPrReview(params: {
   const { providerID, modelID } = parseModelName(model);
   const auxModel = options.auxModel || model;
   const { providerID: auxProviderID, modelID: auxModelID } = parseModelName(auxModel);
+  const backendSelection = selectReviewBackends({
+    providerID,
+    modelID,
+    apiKey,
+    auxProviderID,
+    auxModelID,
+    auxApiKey: options.auxApiKey,
+  });
+  const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
   const promptCachePolicy = resolvePromptCachePolicy({
     promptCache: options.promptCache,
     mainModel: model,
@@ -468,6 +560,16 @@ export async function runPrReview(params: {
   const reviewFocusBlock = buildReviewFocusBlock(changedFiles);
   const diffHunksBlock = buildDiffHunksBlock(files);
   if (diffHunksBlock) log(`Embedded diff hunks block: ${diffHunksBlock.length} chars.`);
+  const commandCodeDiffHunks =
+    mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID
+      ? buildDiffHunksBlockWithMetadata(files, COMMANDCODE_DIFF_HUNKS_OPTIONS)
+      : undefined;
+  const commandCodeIncompleteDiffFiles = commandCodeDiffHunks
+    ? incompleteDiffFiles(commandCodeDiffHunks)
+    : [];
+  if (commandCodeDiffHunks?.text) {
+    log(`CommandCode embedded diff hunks block: ${commandCodeDiffHunks.text.length} chars.`);
+  }
   const blastRadiusBlock = options.enhancedContext
     ? await buildBlastRadiusBlock(workspace, files)
     : '';
@@ -530,6 +632,21 @@ export async function runPrReview(params: {
       .join('\n');
   }
   const basePrContext = joinContext(coreContext, diffHunksBlock);
+  const auxCommandCodeHasCompleteDiff =
+    auxCliBackend !== COMMANDCODE_PROVIDER_ID || commandCodeIncompleteDiffFiles.length === 0;
+  if (!auxCommandCodeHasCompleteDiff) {
+    log(
+      `Skipping CommandCode auxiliary sessions: embedded diff exceeds the CommandCode hard budget (${formatIncompleteDiffFiles(
+        commandCodeIncompleteDiffFiles,
+      )}). Main review continues without aux findings or verification.`,
+    );
+  }
+  const auxPrContext =
+    auxCliBackend === COMMANDCODE_PROVIDER_ID &&
+    commandCodeDiffHunks &&
+    auxCommandCodeHasCompleteDiff
+      ? joinContext(coreContext, commandCodeDiffHunks.text)
+      : basePrContext;
 
   // Use a per-run limiter around every backend so mixed Devin/OpenCode runs
   // honor one global cap. Disable opencode's older process-global limiter to
@@ -541,20 +658,18 @@ export async function runPrReview(params: {
     log(`Model session concurrency capped at ${options.maxConcurrentSessions}.`);
   }
 
-  const backendSelection = selectReviewBackends({
-    providerID,
-    modelID,
-    apiKey,
-    auxProviderID,
-    auxModelID,
-    auxApiKey: options.auxApiKey,
-  });
-  const { mainUsesDevin, auxUsesDevin, needsOpencode } = backendSelection;
   let opencodeRuntime: Awaited<ReturnType<typeof startOpencode>> | undefined;
   let opencodeBackend: ReviewBackend | undefined;
   let devinBackend: ReviewBackend | undefined;
+  let commandCodeBackend: ReviewBackend | undefined;
+  let commandCodeHome: string | undefined;
+  const cleanupCommandCodeHome = (): void => {
+    if (!commandCodeHome) return;
+    rmSync(commandCodeHome, { recursive: true, force: true });
+    commandCodeHome = undefined;
+  };
 
-  if (mainUsesDevin || auxUsesDevin) {
+  if (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID) {
     const devinApiKey = backendSelection.devinApiKey;
     if (!devinApiKey) {
       throw new Error(`Missing API key for ${DEVIN_PROVIDER_ID} provider.`);
@@ -564,47 +679,95 @@ export async function runPrReview(params: {
     devinBackend = limitBackendConcurrency(createDevinBackend(workspace), sessionSlots);
   }
 
+  if (mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID) {
+    const commandCodeAccessKey = backendSelection.commandCodeAccessKey;
+    if (!commandCodeAccessKey) {
+      throw new Error(`Missing access key for ${COMMANDCODE_PROVIDER_ID} provider.`);
+    }
+    let authPath: string;
+    try {
+      commandCodeHome = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
+      authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
+    } catch (error) {
+      cleanupCommandCodeHome();
+      throw error;
+    }
+    log(`CommandCode CLI auth configured at ${authPath}.`);
+    log('CommandCode CLI token usage is unavailable; review metadata may omit those sessions.');
+    commandCodeBackend = limitBackendConcurrency(
+      createCommandCodeBackend(workspace, commandCodeHome),
+      sessionSlots,
+    );
+  }
+
   if (needsOpencode) {
     const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
     if (!opencodeApiKey) {
+      cleanupCommandCodeHome();
       throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
     }
     log('Starting opencode server');
-    opencodeRuntime = await startOpencode(
-      workspace,
-      opencodeProviderID,
-      opencodeModelID,
-      opencodeApiKey,
-      log,
-      {
-        modelOptions: mainUsesDevin ? undefined : options.modelOptions,
-        promptCache: mainUsesDevin
-          ? promptCachePolicy.auxProviderPromptCache
-          : promptCachePolicy.providerPromptCache,
-        port: options.opencodePort > 0 ? options.opencodePort : undefined,
-        additionalProviderKeys:
-          !mainUsesDevin && !auxUsesDevin && auxProviderID !== providerID
-            ? [
-                {
-                  providerID: auxProviderID,
-                  apiKey: options.auxApiKey || apiKey,
-                  promptCache: promptCachePolicy.auxProviderPromptCache,
-                },
-              ]
-            : undefined,
-      },
-    );
+    try {
+      opencodeRuntime = await startOpencode(
+        workspace,
+        opencodeProviderID,
+        opencodeModelID,
+        opencodeApiKey,
+        log,
+        {
+          modelOptions: mainCliBackend ? undefined : options.modelOptions,
+          promptCache: mainCliBackend
+            ? promptCachePolicy.auxProviderPromptCache
+            : promptCachePolicy.providerPromptCache,
+          port: options.opencodePort > 0 ? options.opencodePort : undefined,
+          additionalProviderKeys:
+            !mainCliBackend && !auxCliBackend && auxProviderID !== providerID
+              ? [
+                  {
+                    providerID: auxProviderID,
+                    apiKey: options.auxApiKey || apiKey,
+                    promptCache: promptCachePolicy.auxProviderPromptCache,
+                  },
+                ]
+              : undefined,
+        },
+      );
+    } catch (error) {
+      cleanupCommandCodeHome();
+      throw error;
+    }
     opencodeBackend = limitBackendConcurrency(
       createOpencodeBackend(opencodeRuntime.client),
       sessionSlots,
     );
   }
 
-  const mainBackend = mainUsesDevin ? devinBackend! : opencodeBackend!;
-  const auxBackend = auxUsesDevin ? devinBackend! : opencodeBackend!;
+  const cliBackends: Record<CliBackendID, ReviewBackend | undefined> = {
+    [DEVIN_PROVIDER_ID]: devinBackend,
+    [COMMANDCODE_PROVIDER_ID]: commandCodeBackend,
+  };
+  const mainBackend = mainCliBackend
+    ? requireCliBackend(cliBackends, mainCliBackend)
+    : requireOpencodeBackend(opencodeBackend, 'main');
+  const auxBackend = auxCliBackend
+    ? requireCliBackend(cliBackends, auxCliBackend)
+    : requireOpencodeBackend(opencodeBackend, 'aux');
   const stop = opencodeRuntime?.stop ?? (() => undefined);
   try {
-    if (opencodeRuntime && !mainUsesDevin) {
+    if (commandCodeBackend) {
+      try {
+        const models = await listCommandCodeModels(workspace, commandCodeHome);
+        log(
+          models.length > 0
+            ? `Available models for ${COMMANDCODE_PROVIDER_ID} using supplied CLI auth:\n${models.join('\n')}`
+            : `Available models for ${COMMANDCODE_PROVIDER_ID} using supplied CLI auth: none returned`,
+        );
+      } catch (e) {
+        log(`(skipped CommandCode model listing: ${(e as Error).message})`);
+      }
+    }
+
+    if (opencodeRuntime && !mainCliBackend) {
       try {
         const modelListCacheKey = `${providerID}:${modelID}`;
         let models = providerModelListCache.get(modelListCacheKey);
@@ -621,8 +784,8 @@ export async function runPrReview(params: {
       } catch (e) {
         log(`(skipped provider model listing: ${(e as Error).message})`);
       }
-    } else if (mainUsesDevin) {
-      log('Provider model listing skipped: main review uses Devin CLI.');
+    } else if (mainCliBackend) {
+      log(`OpenCode provider model listing skipped: main review uses ${mainBackend.name} CLI.`);
     }
 
     const context7 = decideContext7Mode({
@@ -632,53 +795,15 @@ export async function runPrReview(params: {
     });
     let context7Active = false;
     let context7Block = '';
-    if (context7.enabled && opencodeRuntime && !mainUsesDevin) {
+    if (context7.enabled && opencodeRuntime && !mainCliBackend) {
       log(`Context7 MCP requested: ${context7.reason}`);
       context7Active = await enableContext7Mcp(opencodeRuntime.client, options.context7ApiKey, log);
       if (context7Active) context7Block = buildContext7PromptBlock(context7.reason);
-    } else if (context7.enabled && mainUsesDevin) {
-      log(`Context7 MCP skipped: main review uses Devin CLI (${context7.reason}).`);
+    } else if (context7.enabled && mainCliBackend) {
+      log(`Context7 MCP skipped: main review uses ${mainBackend.name} CLI (${context7.reason}).`);
     } else {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }
-
-    const addressedPriorCheck = startAddressedPriorCommentsCheck({
-      backend: auxBackend,
-      model: auxModel,
-      prContext: basePrContext,
-      priorJbotThreads,
-      timeoutMs: finderTimeoutMs,
-      log,
-      onTokenUsage: recordTokenUsage,
-    });
-
-    const guidelineComplianceCheck = startGuidelineComplianceCheck({
-      backend: auxBackend,
-      model: auxModel,
-      prContext: basePrContext,
-      guidelinesForPrompt: guidelines,
-      hasGuidelines: Boolean(guidelines),
-      enabled: options.guidelinePass,
-      timeoutMs: finderTimeoutMs,
-      log,
-      onTokenUsage: recordTokenUsage,
-    });
-
-    // Lens passes run on the aux model (recall supplement, not the deep
-    // pass) and use the base context (no Context7 block): they have no
-    // Context7 retry path, so a Context7 hiccup must not be able to zero a
-    // pass's findings.
-    const lensPasses = startLensPasses({
-      backend: auxBackend,
-      model: auxModel,
-      prContext: basePrContext,
-      guidelinesForPrompt,
-      changedFiles,
-      passes: options.reviewPasses,
-      timeoutMs: finderTimeoutMs,
-      log,
-      onTokenUsage: recordTokenUsage,
-    });
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
     const shardPlans = buildShardPlans({
@@ -686,7 +811,62 @@ export async function runPrReview(params: {
       fullDiffBlock: diffHunksBlock,
       context7Block,
       shards,
+      requireCompleteEmbeddedDiff: mainCliBackend === COMMANDCODE_PROVIDER_ID,
+      diffHunksOptions:
+        mainCliBackend === COMMANDCODE_PROVIDER_ID ? COMMANDCODE_DIFF_HUNKS_OPTIONS : undefined,
     });
+
+    const addressedPriorCheck = trackAuxiliarySession(
+      'addressed-prior-comments',
+      startAddressedPriorCommentsCheck({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: auxPrContext,
+        priorJbotThreads: auxCommandCodeHasCompleteDiff ? priorJbotThreads : [],
+        timeoutMs: finderTimeoutMs,
+        log,
+        onTokenUsage: recordTokenUsage,
+      }),
+    );
+
+    const guidelineComplianceCheck = trackAuxiliarySession(
+      'guideline-compliance',
+      startGuidelineComplianceCheck({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: auxPrContext,
+        guidelinesForPrompt: guidelines,
+        hasGuidelines: Boolean(guidelines),
+        enabled: options.guidelinePass && auxCommandCodeHasCompleteDiff,
+        timeoutMs: finderTimeoutMs,
+        log,
+        onTokenUsage: recordTokenUsage,
+      }),
+    );
+
+    // Lens passes run on the aux model (recall supplement, not the deep
+    // pass) and use the aux context (no Context7 block): they have no
+    // Context7 retry path, so a Context7 hiccup must not be able to zero a
+    // pass's findings.
+    const lensPassCount = selectLensKeys(
+      auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,
+      changedFiles,
+    ).length;
+    const lensPasses = trackAuxiliarySession(
+      `${lensPassCount} lens pass(es)`,
+      startLensPasses({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: auxPrContext,
+        guidelinesForPrompt,
+        changedFiles,
+        passes: auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,
+        timeoutMs: finderTimeoutMs,
+        log,
+        onTokenUsage: recordTokenUsage,
+      }),
+    );
+
     log(`Running review (${shardPlans.length} shard(s))`);
     const { summary, findings } = await runShardedReview({
       backend: mainBackend,
@@ -704,11 +884,23 @@ export async function runPrReview(params: {
       log,
       onTokenUsage: recordTokenUsage,
     });
-    const lensFindingLists = await lensPasses;
+    const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
+      lensPasses,
+      addressedPriorCheck,
+      guidelineComplianceCheck,
+    ]);
+    if (auxiliaryWaitLabels.length > 0) {
+      log(
+        `Main review shards complete; waiting for auxiliary session(s) to settle: ${auxiliaryWaitLabels.join(
+          ', ',
+        )}.`,
+      );
+    }
+    const lensFindingLists = await lensPasses.promise;
     // The dedicated parallel session is the single owner of addressed-thread
     // verification; the main review no longer reports them.
-    const verifiedAddressedPriorComments = await addressedPriorCheck;
-    const complianceFindings = await guidelineComplianceCheck;
+    const verifiedAddressedPriorComments = await addressedPriorCheck.promise;
+    const complianceFindings = await guidelineComplianceCheck.promise;
     // Gate confidence BEFORE deduping so each finding carries its effective
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
@@ -739,10 +931,10 @@ export async function runPrReview(params: {
     const verifiedFindings = await verifyBlockingFindings({
       backend: auxBackend,
       model: auxModel,
-      prContext: basePrContext,
+      prContext: auxPrContext,
       timeoutMs: computeVerificationTimeoutMs(options.timeBudgetMinutes, Date.now() - runStartedAt),
       findings: suppression.findings,
-      enabled: options.verifyFindings,
+      enabled: options.verifyFindings && auxCommandCodeHasCompleteDiff,
       log,
       onTokenUsage: recordTokenUsage,
     });
@@ -863,6 +1055,7 @@ export async function runPrReview(params: {
     }
   } finally {
     stop();
+    cleanupCommandCodeHome();
   }
 }
 
@@ -1060,6 +1253,29 @@ function startLensPasses(params: {
   );
 }
 
+interface AuxiliarySession<T> {
+  label: string;
+  promise: Promise<T>;
+  isSettled: () => boolean;
+}
+
+function trackAuxiliarySession<T>(label: string, promise: Promise<T>): AuxiliarySession<T> {
+  let settled = false;
+  return {
+    label,
+    promise: promise.finally(() => {
+      settled = true;
+    }),
+    isSettled: () => settled,
+  };
+}
+
+function pendingAuxiliarySessionLabels(
+  sessions: { label: string; isSettled: () => boolean }[],
+): string[] {
+  return sessions.filter((session) => !session.isSettled()).map((session) => session.label);
+}
+
 /**
  * Adversarial precision gate: blocking findings are re-checked by a verifier
  * session prompted to refute them. Refuted findings are dropped, uncertain
@@ -1175,10 +1391,25 @@ function buildShardPlans(params: {
   fullDiffBlock: string;
   context7Block: string;
   shards: ReturnType<typeof shardFilesForReview>;
+  requireCompleteEmbeddedDiff?: boolean;
+  diffHunksOptions?: DiffHunksOptions;
 }): ShardPlan[] {
-  const { coreContext, fullDiffBlock, context7Block, shards } = params;
+  const {
+    coreContext,
+    fullDiffBlock,
+    context7Block,
+    shards,
+    requireCompleteEmbeddedDiff = false,
+    diffHunksOptions,
+  } = params;
   if (shards.length <= 1) {
-    const baseContext = joinContext(coreContext, fullDiffBlock);
+    const diffResult = requireCompleteEmbeddedDiff
+      ? buildDiffHunksBlockWithMetadata(shards[0] ?? [], diffHunksOptions)
+      : { text: fullDiffBlock, truncatedFiles: [], omittedFiles: [] };
+    if (requireCompleteEmbeddedDiff) {
+      assertCompleteEmbeddedDiff(diffResult, 'review');
+    }
+    const baseContext = joinContext(coreContext, diffResult.text);
     return [
       {
         label: 'review',
@@ -1191,14 +1422,41 @@ function buildShardPlans(params: {
   return shards.map((shard, index) => {
     const assignedFiles = shard.map((file) => file.filename);
     const assignment = buildShardAssignmentBlock(assignedFiles, index, shards.length);
-    const shardDiff = buildDiffHunksBlock(shard);
+    const diffResult = buildDiffHunksBlockWithMetadata(shard, diffHunksOptions);
+    if (requireCompleteEmbeddedDiff) {
+      assertCompleteEmbeddedDiff(diffResult, `review-shard-${index + 1}`);
+    }
     return {
       label: `review-shard-${index + 1}`,
-      context: joinContext(coreContext, context7Block, assignment, shardDiff),
-      baseContext: joinContext(coreContext, assignment, shardDiff),
+      context: joinContext(coreContext, context7Block, assignment, diffResult.text),
+      baseContext: joinContext(coreContext, assignment, diffResult.text),
       assignedFiles,
     };
   });
+}
+
+function assertCompleteEmbeddedDiff(
+  result: ReturnType<typeof buildDiffHunksBlockWithMetadata>,
+  label: string,
+): void {
+  const incomplete = incompleteDiffFiles(result);
+  if (incomplete.length === 0) return;
+  throw new Error(
+    `CommandCode ${label} would receive an incomplete embedded diff (${formatIncompleteDiffFiles(
+      incomplete,
+    )}). ` +
+      'Refusing partial review coverage because CommandCode plan mode is read-only; use more shards or another provider for this PR.',
+  );
+}
+
+function incompleteDiffFiles(result: ReturnType<typeof buildDiffHunksBlockWithMetadata>): string[] {
+  return [...new Set([...result.truncatedFiles, ...result.omittedFiles])];
+}
+
+function formatIncompleteDiffFiles(files: string[]): string {
+  const listed = files.slice(0, 10).join(', ');
+  const remainder = files.length > 10 ? `, and ${files.length - 10} more` : '';
+  return `${listed}${remainder}`;
 }
 
 /**

@@ -15,10 +15,9 @@ describe('selectReviewBackends', () => {
 
   it('uses only opencode for default main and aux providers', () => {
     assert.deepEqual(selectReviewBackends(base), {
-      mainUsesDevin: false,
-      auxUsesDevin: false,
       needsOpencode: true,
       devinApiKey: '',
+      commandCodeAccessKey: '',
       opencodeProviderID: 'opencode',
       opencodeModelID: 'deepseek-v4-flash-free',
       opencodeApiKey: 'main-key',
@@ -35,10 +34,10 @@ describe('selectReviewBackends', () => {
         auxApiKey: 'opencode-key',
       }),
       {
-        mainUsesDevin: true,
-        auxUsesDevin: false,
+        mainCliBackend: 'devin',
         needsOpencode: true,
         devinApiKey: 'devin-key',
+        commandCodeAccessKey: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
         opencodeApiKey: 'opencode-key',
@@ -55,10 +54,10 @@ describe('selectReviewBackends', () => {
         auxApiKey: 'devin-key',
       }),
       {
-        mainUsesDevin: false,
-        auxUsesDevin: true,
+        auxCliBackend: 'devin',
         needsOpencode: true,
         devinApiKey: 'devin-key',
+        commandCodeAccessKey: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
         opencodeApiKey: 'main-key',
@@ -77,13 +76,102 @@ describe('selectReviewBackends', () => {
         auxModelID: 'codex',
       }),
       {
-        mainUsesDevin: true,
-        auxUsesDevin: true,
+        mainCliBackend: 'devin',
+        auxCliBackend: 'devin',
         needsOpencode: false,
         devinApiKey: 'devin-key',
+        commandCodeAccessKey: '',
         opencodeProviderID: 'devin',
         opencodeModelID: 'codex',
         opencodeApiKey: '',
+      },
+    );
+  });
+
+  it('uses CommandCode for main review and OpenCode for aux sessions', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'commandcode',
+        modelID: 'default',
+        apiKey: 'commandcode-key',
+        auxApiKey: 'opencode-key',
+      }),
+      {
+        mainCliBackend: 'commandcode',
+        needsOpencode: true,
+        devinApiKey: '',
+        commandCodeAccessKey: 'commandcode-key',
+        opencodeProviderID: 'opencode',
+        opencodeModelID: 'deepseek-v4-flash-free',
+        opencodeApiKey: 'opencode-key',
+      },
+    );
+  });
+
+  it('uses OpenCode for main review and CommandCode for aux sessions', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        auxProviderID: 'commandcode',
+        auxModelID: 'default',
+        auxApiKey: 'commandcode-key',
+      }),
+      {
+        auxCliBackend: 'commandcode',
+        needsOpencode: true,
+        devinApiKey: '',
+        commandCodeAccessKey: 'commandcode-key',
+        opencodeProviderID: 'opencode',
+        opencodeModelID: 'deepseek-v4-flash-free',
+        opencodeApiKey: 'main-key',
+      },
+    );
+  });
+
+  it('skips OpenCode when both main and aux sessions use CommandCode', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'commandcode',
+        modelID: 'default',
+        apiKey: 'commandcode-key',
+        auxProviderID: 'commandcode',
+        auxModelID: 'Qwen/Qwen3.7-Max',
+      }),
+      {
+        mainCliBackend: 'commandcode',
+        auxCliBackend: 'commandcode',
+        needsOpencode: false,
+        devinApiKey: '',
+        commandCodeAccessKey: 'commandcode-key',
+        opencodeProviderID: 'commandcode',
+        opencodeModelID: 'Qwen/Qwen3.7-Max',
+        opencodeApiKey: '',
+      },
+    );
+  });
+
+  it('skips OpenCode when main and aux sessions use different CLI backends', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'devin',
+        modelID: 'glm-5.2',
+        apiKey: 'devin-key',
+        auxProviderID: 'commandcode',
+        auxModelID: 'default',
+        auxApiKey: 'commandcode-key',
+      }),
+      {
+        mainCliBackend: 'devin',
+        auxCliBackend: 'commandcode',
+        needsOpencode: false,
+        devinApiKey: 'devin-key',
+        commandCodeAccessKey: 'commandcode-key',
+        opencodeProviderID: 'commandcode',
+        opencodeModelID: 'default',
+        opencodeApiKey: 'commandcode-key',
       },
     );
   });

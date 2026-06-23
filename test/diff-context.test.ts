@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   PATH_PATTERNS,
   buildDiffHunksBlock,
+  buildDiffHunksBlockWithMetadata,
   diffRiskScore,
   isDocFile,
   isDocOnlyChange,
@@ -96,6 +97,20 @@ describe('buildDiffHunksBlock', () => {
     assert.match(block, /### Hunks not embedded \(diff budget reached\)/);
     assert.match(block, /- docs\/b\.md/);
     assert.match(block, /### src\/auth\/a\.ts/);
+  });
+
+  it('reports which files were truncated or omitted by the diff budget', () => {
+    const result = buildDiffHunksBlockWithMetadata(
+      [
+        { filename: 'src/auth/a.ts', patch: makePatch(100, 'a') },
+        { filename: 'docs/b.md', patch: makePatch(50, 'b') },
+      ],
+      { totalBudgetBytes: 300, perFileBudgetBytes: 220 },
+    );
+
+    assert.match(result.text, /### src\/auth\/a\.ts/);
+    assert.deepEqual(result.truncatedFiles, ['src/auth/a.ts']);
+    assert.deepEqual(result.omittedFiles, ['docs/b.md']);
   });
 });
 

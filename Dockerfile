@@ -9,7 +9,8 @@ RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-maxtimeout 120000
 
 # Use the latest opencode-ai for access to the most current model catalog.
-RUN npm install -g opencode-ai@latest
+# CommandCode is available for the optional commandcode provider path.
+RUN npm install -g opencode-ai@latest command-code@latest
 
 # Devin CLI is available for the optional devin provider path. Credentials are
 # written at runtime only when that provider is selected.

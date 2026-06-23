@@ -51,6 +51,13 @@ describe('resolveModelName', () => {
     });
   });
 
+  it('resolves CommandCode CLI model ids against the commandcode provider', () => {
+    assert.deepEqual(resolveModelName('commandcode', 'Qwen/Qwen3.7-Max'), {
+      providerID: 'commandcode',
+      modelID: 'Qwen/Qwen3.7-Max',
+    });
+  });
+
   it('formats resolved models into the canonical provider/model id string', () => {
     assert.equal(
       formatModelName(resolveModelName('nvidia', 'moonshotai/kimi-k2.6')),
@@ -100,6 +107,17 @@ describe('resolveModelName', () => {
     });
   });
 
+  it('configures CommandCode with the CLI access-key surface', () => {
+    assert.deepEqual(PROVIDERS.commandcode, {
+      defaultModel: 'commandcode/default',
+      keyEnv: 'COMMANDCODE_ACCESS_KEY',
+      keyInput: 'commandcode-access-key',
+      models: {
+        default: { promptCache: false },
+      },
+    });
+  });
+
   it('rejects an empty selected-provider-prefixed model id', () => {
     assert.throws(() => resolveModelName('opencode', 'opencode/'), /expected a non-empty model id/);
   });
@@ -128,6 +146,8 @@ describe('modelSupportsPromptCache', () => {
     assert.equal(modelSupportsPromptCache('opencode-go', 'qwen3.6-plus'), true);
     assert.equal(modelSupportsPromptCache('devin', 'default'), false);
     assert.equal(modelSupportsPromptCache('devin', 'codex'), false);
+    assert.equal(modelSupportsPromptCache('commandcode', 'default'), false);
+    assert.equal(modelSupportsPromptCache('commandcode', 'Qwen/Qwen3.7-Max'), false);
     assert.equal(modelSupportsPromptCache('unknown-provider', 'unknown-model'), true);
   });
 });

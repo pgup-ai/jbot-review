@@ -804,3 +804,41 @@ export function buildJsonRepairPrompt(parseError: string): string {
     'inside string values as \\n.',
   ].join('\n');
 }
+
+export function buildJsonRepairFollowupPrompt(params: {
+  originalPrompt: string;
+  invalidResponse: string;
+  parseError: string;
+  promptBudgetBytes: number;
+  responseBudgetBytes: number;
+}): string {
+  return [
+    truncateUtf8WithNotice(
+      params.originalPrompt,
+      params.promptBudgetBytes,
+      'Original review prompt',
+    ),
+    '## Previous invalid response',
+    truncateUtf8WithNotice(
+      params.invalidResponse,
+      params.responseBudgetBytes,
+      'Previous invalid response',
+    ),
+    buildJsonRepairPrompt(params.parseError),
+  ].join('\n\n');
+}
+
+export function truncateUtf8WithNotice(value: string, maxBytes: number, label: string): string {
+  const totalBytes = Buffer.byteLength(value, 'utf8');
+  if (totalBytes <= maxBytes) return value;
+
+  let end = Math.min(value.length, maxBytes);
+  while (end > 0 && Buffer.byteLength(value.slice(0, end), 'utf8') > maxBytes) end -= 1;
+  const truncated = value.slice(0, end);
+  const keptBytes = Buffer.byteLength(truncated, 'utf8');
+  return [
+    truncated,
+    '',
+    `[${label} truncated to ${keptBytes} bytes; omitted ${totalBytes - keptBytes} bytes.]`,
+  ].join('\n');
+}

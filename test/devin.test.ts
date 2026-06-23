@@ -9,9 +9,9 @@ import {
   buildDevinReadOnlyConfig,
   devinCredentialsPath,
   isDevinProvider,
-  truncateUtf8WithNotice,
   writeDevinCredentials,
 } from '../src/shared/devin.ts';
+import { truncateUtf8WithNotice } from '../src/shared/prompt.ts';
 
 describe('Devin CLI provider helpers', () => {
   it('matches only the explicit devin provider id', () => {
