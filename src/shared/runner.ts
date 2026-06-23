@@ -95,7 +95,7 @@ import {
 } from './github.ts';
 import type { Octokit, PriorJbotThread } from './github.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
-import { isFiniteNumber } from './text.ts';
+import { formatUsageCost, isFiniteNumber } from './text.ts';
 import type {
   AddressedPriorComment,
   Finding,
@@ -1995,11 +1995,6 @@ export function formatReviewedWith(model: string, tokenUsage?: ReviewTokenUsage)
 
 function uniqueModels(primary: string, others: string[]): string[] {
   return [...new Set([primary, ...others])];
-}
-
-function formatUsageCost(value: number): string {
-  if (!Number.isFinite(value)) return String(value);
-  return Number.isInteger(value) ? String(value) : value.toFixed(4);
 }
 
 function getMergeGuidance(findings: Pick<Finding, 'severity'>[]): {
