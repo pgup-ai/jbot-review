@@ -79,7 +79,7 @@ import {
   isJbotReviewBody,
 } from './github.ts';
 import type { Octokit, PriorJbotThread } from './github.ts';
-import { condenseSummary, renderOrphanedSection } from './report.ts';
+import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import type {
   AddressedPriorComment,
   Finding,
@@ -1657,7 +1657,14 @@ function buildBody(
   tokenUsage?: ReviewTokenUsage,
 ): string {
   const total = all.length;
-  const lines = ['## J-Bot Code Review', '', summary || 'No summary provided.', ''];
+  const lines = [
+    '## J-Bot Code Review',
+    '',
+    summary
+      ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: total > 0 })
+      : 'No summary provided.',
+    '',
+  ];
   const guidance = getMergeGuidance(all);
   lines.push(`**Review state:** ${guidance.state}`, '');
   lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`, '');
