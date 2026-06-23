@@ -86,9 +86,14 @@ test('condenseSummary groups category headers with colon variants', () => {
   assert.equal(out, '**Changes:**\n- A\n- B');
 });
 
-test('condenseSummary keeps flat shard continuations under the prior category', () => {
+test('condenseSummary keeps flat shard summaries independent from prior categories', () => {
   const out = condenseSummary(['**Changes**\n- A', '- B']);
-  assert.equal(out, '**Changes**\n- A\n- B');
+  assert.equal(out, '**Changes**\n- A\n\n- B');
+});
+
+test('condenseSummary does not carry category state across shard summaries', () => {
+  const out = condenseSummary(['**Bugs**\n- P1 found', '- Updates docs']);
+  assert.equal(out, '**Bugs**\n- P1 found\n\n- Updates docs');
 });
 
 test('condenseSummary groups bold lead-in summary lines with matching headers', () => {

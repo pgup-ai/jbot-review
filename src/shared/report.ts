@@ -147,18 +147,21 @@ const COMMON_UPPERCASE_WORDS = new Set([
  */
 export function condenseSummary(parts: string[]): string {
   const seen = new Set<string>();
-  const topLevel: string[] = [];
   const sections = new Map<string, { header: string; lines: string[] }>();
-  let currentKey = '';
+  const blocks: Array<{ type: 'section'; key: string } | { type: 'top'; lines: string[] }> = [];
 
   for (const part of parts) {
+    let currentKey = '';
     for (const raw of part.split('\n')) {
       const line = raw.replace(/\s+$/, '');
       if (!line.trim()) continue;
 
       if (isCategoryHeader(line)) {
         currentKey = categoryKey(line);
-        if (!sections.has(currentKey)) sections.set(currentKey, { header: line.trim(), lines: [] });
+        if (!sections.has(currentKey)) {
+          sections.set(currentKey, { header: line.trim(), lines: [] });
+          blocks.push({ type: 'section', key: currentKey });
+        }
         continue;
       }
 
@@ -167,6 +170,7 @@ export function condenseSummary(parts: string[]): string {
         currentKey = categoryKey(leadIn.header);
         if (!sections.has(currentKey)) {
           sections.set(currentKey, { header: leadIn.header, lines: [] });
+          blocks.push({ type: 'section', key: currentKey });
         }
         const key = `${currentKey}:${summaryLineKey(leadIn.rest)}`;
         if (!seen.has(key)) {
@@ -183,18 +187,28 @@ export function condenseSummary(parts: string[]): string {
       if (currentKey) {
         sections.get(currentKey)!.lines.push(formatSummaryLine(line));
       } else {
-        topLevel.push(formatSummaryLine(line));
+        let topBlock: string[];
+        const previousBlock = blocks[blocks.length - 1];
+        if (previousBlock?.type === 'top') {
+          topBlock = previousBlock.lines;
+        } else {
+          topBlock = [];
+          blocks.push({ type: 'top', lines: topBlock });
+        }
+        topBlock.push(formatSummaryLine(line));
       }
     }
   }
 
   const out: string[] = [];
-  if (topLevel.length > 0) out.push(...topLevel);
-
-  for (const section of sections.values()) {
-    if (section.lines.length === 0) continue;
+  for (const block of blocks) {
+    const lines =
+      block.type === 'top'
+        ? block.lines
+        : [sections.get(block.key)!.header, ...sections.get(block.key)!.lines];
+    if (lines.length === 0 || (block.type === 'section' && lines.length === 1)) continue;
     if (out.length > 0) out.push('');
-    out.push(section.header, ...section.lines);
+    out.push(...lines);
   }
 
   for (let i = out.length - 1; i >= 0; i--) {
