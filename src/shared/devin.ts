@@ -26,7 +26,7 @@ import {
   type PromptTokenUsage,
   type TokenUsageRecorder,
 } from './opencode.ts';
-import { truncateForLog } from './text.ts';
+import { formatUsageCost, truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
@@ -486,13 +486,9 @@ function formatDevinUsage(usage: PromptTokenUsage): string {
   ];
   if (typeof usage.costUsd === 'number') parts.push(`cost=$${usage.costUsd.toFixed(4)}`);
   if (typeof usage.creditCost === 'number')
-    parts.push(`creditCost=${formatCost(usage.creditCost)}`);
-  if (typeof usage.acuCost === 'number') parts.push(`acuCost=${formatCost(usage.acuCost)}`);
+    parts.push(`creditCost=${formatUsageCost(usage.creditCost)}`);
+  if (typeof usage.acuCost === 'number') parts.push(`acuCost=${formatUsageCost(usage.acuCost)}`);
   return `usage: ${parts.join(' ')}`;
-}
-
-function formatCost(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(4);
 }
 
 function spawnWithTimeout(
