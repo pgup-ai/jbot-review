@@ -47,9 +47,7 @@ function isNoFindingVerdict(line: string): boolean {
 }
 
 function isNoFindingKey(key: string): boolean {
-  return /^(no (?:new |blocking )?(?:bugs?|findings?|issues?) found|no (?:bugs?|findings?|issues?))\b/.test(
-    key,
-  );
+  return /^no (?:new |blocking )?(?:bugs?|findings?|issues?) (?:were )?found\b/.test(key);
 }
 
 /** A line that is only a bold category header, e.g. `**Bugs**` or `**Bugs**:`. */
@@ -264,24 +262,47 @@ export function formatSummaryMarkdown(
 ): string {
   const out: string[] = [];
   let suppressingNoFindingSection = false;
+  let pendingHeader = '';
+
+  const pushFormattedLine = (line: string): void => {
+    if (pendingHeader) {
+      out.push(formatSummaryLine(pendingHeader));
+      pendingHeader = '';
+    }
+    out.push(formatSummaryLine(line));
+  };
+
   for (const raw of summary.split('\n')) {
     const line = raw.replace(/\s+$/, '');
     if (!line.trim()) {
+      if (pendingHeader) continue;
       if (out.length > 0 && out[out.length - 1] !== '') out.push('');
       continue;
     }
     if (isCategoryHeader(line)) {
       if (options.suppressNoFindingVerdicts && isNoFindingVerdict(line)) {
+        pendingHeader = '';
         suppressingNoFindingSection = true;
+        continue;
+      }
+      if (options.suppressNoFindingVerdicts) {
+        if (pendingHeader) out.push(formatSummaryLine(pendingHeader));
+        pendingHeader = line;
+        suppressingNoFindingSection = false;
         continue;
       }
       suppressingNoFindingSection = false;
     } else if (suppressingNoFindingSection) {
       continue;
     }
-    if (options.suppressNoFindingVerdicts && isNoFindingVerdict(line)) continue;
-    out.push(formatSummaryLine(line));
+    if (options.suppressNoFindingVerdicts && isNoFindingVerdict(line)) {
+      pendingHeader = '';
+      suppressingNoFindingSection = true;
+      continue;
+    }
+    pushFormattedLine(line);
   }
+  if (pendingHeader) out.push(formatSummaryLine(pendingHeader));
   while (out.length > 0 && out[out.length - 1] === '') out.pop();
   return out.join('\n');
 }

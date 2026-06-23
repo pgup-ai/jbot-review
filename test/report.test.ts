@@ -154,6 +154,33 @@ test('formatSummaryMarkdown suppresses no-finding sections when findings exist',
   );
 });
 
+test('formatSummaryMarkdown does not suppress contextual no-bug prose', () => {
+  const out = formatSummaryMarkdown('- No bugs were fixed by this documentation-only change.', {
+    suppressNoFindingVerdicts: true,
+  });
+  assert.equal(out, '- No bugs were fixed by this documentation-only change.');
+});
+
+test('formatSummaryMarkdown drops review headers left empty by no-finding verdict suppression', () => {
+  const out = formatSummaryMarkdown(
+    [
+      '**Changes**',
+      '- Updates account pinning',
+      '',
+      '**Review**',
+      'No bugs found in assigned files.',
+      '',
+      '**Bugs**',
+      '- Draft completion skips v3 checks',
+    ].join('\n'),
+    { suppressNoFindingVerdicts: true },
+  );
+  assert.equal(
+    out,
+    '**Changes**\n- Updates account pinning\n\n**Bugs**\n- Draft completion skips v3 checks',
+  );
+});
+
 test('condenseSummary prunes a category header left empty by cross-shard dedup', () => {
   // Shard 2 repeats the same `- A` under **Changes**; the bullet is deduped,
   // which would otherwise leave shard 2's **Changes** header with nothing below.
