@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   const apiKey = getInputOrEnv(cfg.keyInput, cfg.keyEnv);
   if (!apiKey) {
     throw new Error(
-      `Missing API key for provider "${provider}". Pass it via the "${cfg.keyInput}" input or ${cfg.keyEnv} env var.`,
+      `Missing key for provider "${provider}". Pass it via the "${cfg.keyInput}" input or ${cfg.keyEnv} env var.`,
     );
   }
 

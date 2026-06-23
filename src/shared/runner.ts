@@ -53,6 +53,14 @@ import {
   writeDevinCredentials,
 } from './devin.ts';
 import {
+  COMMANDCODE_PROVIDER_ID,
+  runCommandCodeAddressedPriorCommentsCheck,
+  runCommandCodeFindingVerification,
+  runCommandCodeGuidelineComplianceCheck,
+  runCommandCodeReview,
+  writeCommandCodeAuth,
+} from './commandcode.ts';
+import {
   buildReviewContext,
   discoverGuidelineDocs,
   formatGuidelines,
@@ -195,6 +203,43 @@ function createDevinBackend(workspace: string): ReviewBackend {
       ),
     runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
       runDevinFindingVerification(
+        workspace,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+  };
+}
+
+function createCommandCodeBackend(workspace: string): ReviewBackend {
+  return {
+    name: COMMANDCODE_PROVIDER_ID,
+    runReview: (model, prContext, guidelines, log, options) =>
+      runCommandCodeReview(workspace, model, prContext, guidelines, log, options),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runCommandCodeAddressedPriorCommentsCheck(
+        workspace,
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runCommandCodeGuidelineComplianceCheck(
+        workspace,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runCommandCodeFindingVerification(
         workspace,
         model,
         prContext,
@@ -549,12 +594,13 @@ export async function runPrReview(params: {
     auxModelID,
     auxApiKey: options.auxApiKey,
   });
-  const { mainUsesDevin, auxUsesDevin, needsOpencode } = backendSelection;
+  const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
   let opencodeRuntime: Awaited<ReturnType<typeof startOpencode>> | undefined;
   let opencodeBackend: ReviewBackend | undefined;
   let devinBackend: ReviewBackend | undefined;
+  let commandCodeBackend: ReviewBackend | undefined;
 
-  if (mainUsesDevin || auxUsesDevin) {
+  if (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID) {
     const devinApiKey = backendSelection.devinApiKey;
     if (!devinApiKey) {
       throw new Error(`Missing API key for ${DEVIN_PROVIDER_ID} provider.`);
@@ -562,6 +608,16 @@ export async function runPrReview(params: {
     const credentialsPath = writeDevinCredentials(devinApiKey);
     log(`Devin CLI credentials configured at ${credentialsPath}.`);
     devinBackend = limitBackendConcurrency(createDevinBackend(workspace), sessionSlots);
+  }
+
+  if (mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID) {
+    const commandCodeAccessKey = backendSelection.commandCodeAccessKey;
+    if (!commandCodeAccessKey) {
+      throw new Error(`Missing access key for ${COMMANDCODE_PROVIDER_ID} provider.`);
+    }
+    const authPath = writeCommandCodeAuth(commandCodeAccessKey);
+    log(`CommandCode CLI auth configured at ${authPath}.`);
+    commandCodeBackend = limitBackendConcurrency(createCommandCodeBackend(workspace), sessionSlots);
   }
 
   if (needsOpencode) {
@@ -577,13 +633,13 @@ export async function runPrReview(params: {
       opencodeApiKey,
       log,
       {
-        modelOptions: mainUsesDevin ? undefined : options.modelOptions,
-        promptCache: mainUsesDevin
+        modelOptions: mainCliBackend ? undefined : options.modelOptions,
+        promptCache: mainCliBackend
           ? promptCachePolicy.auxProviderPromptCache
           : promptCachePolicy.providerPromptCache,
         port: options.opencodePort > 0 ? options.opencodePort : undefined,
         additionalProviderKeys:
-          !mainUsesDevin && !auxUsesDevin && auxProviderID !== providerID
+          !mainCliBackend && !auxCliBackend && auxProviderID !== providerID
             ? [
                 {
                   providerID: auxProviderID,
@@ -600,11 +656,15 @@ export async function runPrReview(params: {
     );
   }
 
-  const mainBackend = mainUsesDevin ? devinBackend! : opencodeBackend!;
-  const auxBackend = auxUsesDevin ? devinBackend! : opencodeBackend!;
+  const cliBackends = {
+    [DEVIN_PROVIDER_ID]: devinBackend,
+    [COMMANDCODE_PROVIDER_ID]: commandCodeBackend,
+  };
+  const mainBackend = mainCliBackend ? cliBackends[mainCliBackend]! : opencodeBackend!;
+  const auxBackend = auxCliBackend ? cliBackends[auxCliBackend]! : opencodeBackend!;
   const stop = opencodeRuntime?.stop ?? (() => undefined);
   try {
-    if (opencodeRuntime && !mainUsesDevin) {
+    if (opencodeRuntime && !mainCliBackend) {
       try {
         const modelListCacheKey = `${providerID}:${modelID}`;
         let models = providerModelListCache.get(modelListCacheKey);
@@ -621,8 +681,8 @@ export async function runPrReview(params: {
       } catch (e) {
         log(`(skipped provider model listing: ${(e as Error).message})`);
       }
-    } else if (mainUsesDevin) {
-      log('Provider model listing skipped: main review uses Devin CLI.');
+    } else if (mainCliBackend) {
+      log(`Provider model listing skipped: main review uses ${mainBackend.name} CLI.`);
     }
 
     const context7 = decideContext7Mode({
@@ -632,12 +692,12 @@ export async function runPrReview(params: {
     });
     let context7Active = false;
     let context7Block = '';
-    if (context7.enabled && opencodeRuntime && !mainUsesDevin) {
+    if (context7.enabled && opencodeRuntime && !mainCliBackend) {
       log(`Context7 MCP requested: ${context7.reason}`);
       context7Active = await enableContext7Mcp(opencodeRuntime.client, options.context7ApiKey, log);
       if (context7Active) context7Block = buildContext7PromptBlock(context7.reason);
-    } else if (context7.enabled && mainUsesDevin) {
-      log(`Context7 MCP skipped: main review uses Devin CLI (${context7.reason}).`);
+    } else if (context7.enabled && mainCliBackend) {
+      log(`Context7 MCP skipped: main review uses ${mainBackend.name} CLI (${context7.reason}).`);
     } else {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }

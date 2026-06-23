@@ -1,4 +1,7 @@
-import { isDevinProvider } from './devin.ts';
+import { COMMANDCODE_PROVIDER_ID, isCommandCodeProvider } from './commandcode.ts';
+import { DEVIN_PROVIDER_ID, isDevinProvider } from './devin.ts';
+
+export type CliBackendID = typeof DEVIN_PROVIDER_ID | typeof COMMANDCODE_PROVIDER_ID;
 
 export interface ReviewBackendSelectionInput {
   providerID: string;
@@ -10,25 +13,43 @@ export interface ReviewBackendSelectionInput {
 }
 
 export interface ReviewBackendSelection {
-  mainUsesDevin: boolean;
-  auxUsesDevin: boolean;
+  mainCliBackend?: CliBackendID;
+  auxCliBackend?: CliBackendID;
   needsOpencode: boolean;
   devinApiKey: string;
+  commandCodeAccessKey: string;
   opencodeProviderID: string;
   opencodeModelID: string;
   opencodeApiKey: string;
 }
 
 export function selectReviewBackends(input: ReviewBackendSelectionInput): ReviewBackendSelection {
-  const mainUsesDevin = isDevinProvider(input.providerID);
-  const auxUsesDevin = isDevinProvider(input.auxProviderID);
+  const mainCliBackend = cliBackendForProvider(input.providerID);
+  const auxCliBackend = cliBackendForProvider(input.auxProviderID);
   return {
-    mainUsesDevin,
-    auxUsesDevin,
-    needsOpencode: !mainUsesDevin || !auxUsesDevin,
-    devinApiKey: mainUsesDevin ? input.apiKey : input.auxApiKey,
-    opencodeProviderID: mainUsesDevin ? input.auxProviderID : input.providerID,
-    opencodeModelID: mainUsesDevin ? input.auxModelID : input.modelID,
-    opencodeApiKey: mainUsesDevin ? input.auxApiKey : input.apiKey,
+    ...(mainCliBackend ? { mainCliBackend } : {}),
+    ...(auxCliBackend ? { auxCliBackend } : {}),
+    needsOpencode: !mainCliBackend || !auxCliBackend,
+    devinApiKey:
+      mainCliBackend === DEVIN_PROVIDER_ID
+        ? input.apiKey
+        : auxCliBackend === DEVIN_PROVIDER_ID
+          ? input.auxApiKey
+          : '',
+    commandCodeAccessKey:
+      mainCliBackend === COMMANDCODE_PROVIDER_ID
+        ? input.apiKey
+        : auxCliBackend === COMMANDCODE_PROVIDER_ID
+          ? input.auxApiKey
+          : '',
+    opencodeProviderID: mainCliBackend ? input.auxProviderID : input.providerID,
+    opencodeModelID: mainCliBackend ? input.auxModelID : input.modelID,
+    opencodeApiKey: mainCliBackend ? input.auxApiKey : input.apiKey,
   };
+}
+
+function cliBackendForProvider(providerID: string): CliBackendID | undefined {
+  if (isDevinProvider(providerID)) return DEVIN_PROVIDER_ID;
+  if (isCommandCodeProvider(providerID)) return COMMANDCODE_PROVIDER_ID;
+  return undefined;
 }
