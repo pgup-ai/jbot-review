@@ -1629,14 +1629,20 @@ function createReviewTokenUsageAccumulator(): {
       total.reasoning += usage.reasoning;
       total.cacheRead += usage.cacheRead;
       total.cacheWrite += usage.cacheWrite;
-      if (typeof usage.costUsd === 'number') total.costUsd = (total.costUsd ?? 0) + usage.costUsd;
-      if (typeof usage.creditCost === 'number') {
+      if (isFiniteNumber(usage.costUsd)) {
+        total.costUsd = (total.costUsd ?? 0) + usage.costUsd;
+      }
+      if (isFiniteNumber(usage.creditCost)) {
         total.creditCost = (total.creditCost ?? 0) + usage.creditCost;
       }
-      if (typeof usage.acuCost === 'number') total.acuCost = (total.acuCost ?? 0) + usage.acuCost;
+      if (isFiniteNumber(usage.acuCost)) total.acuCost = (total.acuCost ?? 0) + usage.acuCost;
     },
     snapshot: () => (total ? { ...total, models: [...models] } : undefined),
   };
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 /**
@@ -1967,13 +1973,11 @@ export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewToke
     `reasoning=${tokenUsage.reasoning}`,
     `cache read=${tokenUsage.cacheRead}`,
     `cache write=${tokenUsage.cacheWrite}`,
-    ...(typeof tokenUsage.costUsd === 'number'
-      ? [`cost usd=${tokenUsage.costUsd.toFixed(4)}`]
-      : []),
-    ...(typeof tokenUsage.creditCost === 'number'
+    ...(isFiniteNumber(tokenUsage.costUsd) ? [`cost usd=${tokenUsage.costUsd.toFixed(4)}`] : []),
+    ...(isFiniteNumber(tokenUsage.creditCost)
       ? [`credit cost=${formatUsageCost(tokenUsage.creditCost)}`]
       : []),
-    ...(typeof tokenUsage.acuCost === 'number'
+    ...(isFiniteNumber(tokenUsage.acuCost)
       ? [`acu cost=${formatUsageCost(tokenUsage.acuCost)}`]
       : []),
     '```',
@@ -1997,6 +2001,7 @@ function uniqueModels(primary: string, others: string[]): string[] {
 }
 
 function formatUsageCost(value: number): string {
+  if (!Number.isFinite(value)) return String(value);
   return Number.isInteger(value) ? String(value) : value.toFixed(4);
 }
 

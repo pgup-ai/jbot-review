@@ -137,12 +137,38 @@ export function buildDevinCliArgs(input: DevinCliArgsInput): string[] {
 }
 
 export function isDevinFirstRunSetupOutput(output: string): boolean {
+  const lines = output
+    .split(/\r?\n/)
+    .map((line) => stripAnsiControlSequences(line).trim())
+    .filter(Boolean);
   return (
-    output.includes('Welcome to Devin CLI') &&
-    output.includes("You're all set") &&
-    output.includes('Run') &&
-    output.includes('devin')
+    lines[0] === 'Welcome to Devin CLI!' &&
+    lines.some((line) => line.startsWith('Logged in as ')) &&
+    lines.includes("You're all set. Run devin to get started.")
   );
+}
+
+function stripAnsiControlSequences(value: string): string {
+  let result = '';
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) !== 0x1b || value[index + 1] !== '[') {
+      result += value[index];
+      continue;
+    }
+
+    let end = index + 2;
+    while (end < value.length) {
+      const code = value.charCodeAt(end);
+      if (code >= 0x40 && code <= 0x7e) break;
+      end += 1;
+    }
+    if (end >= value.length) {
+      result += value[index];
+      continue;
+    }
+    index = end;
+  }
+  return result;
 }
 
 export async function runDevinReview(
@@ -392,13 +418,22 @@ export function parseDevinAtifUsage(
 }
 
 function* walkObjects(value: unknown): Iterable<Record<string, unknown>> {
-  if (Array.isArray(value)) {
-    for (const item of value) yield* walkObjects(item);
-    return;
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (Array.isArray(current)) {
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        stack.push(current[index]);
+      }
+      continue;
+    }
+    if (!isRecord(current)) continue;
+    yield current;
+    const values = Object.values(current);
+    for (let index = values.length - 1; index >= 0; index -= 1) {
+      stack.push(values[index]);
+    }
   }
-  if (!isRecord(value)) return;
-  yield value;
-  for (const item of Object.values(value)) yield* walkObjects(item);
 }
 
 function hasDevinUsageField(record: Record<string, unknown>): boolean {

@@ -107,6 +107,20 @@ describe('Devin CLI provider helpers', () => {
       isDevinFirstRunSetupOutput('{"summary":"ok","findings":[],"addressedPriorComments":[]}'),
       false,
     );
+    assert.equal(
+      isDevinFirstRunSetupOutput(
+        JSON.stringify({
+          summary: [
+            'Welcome to Devin CLI!',
+            'Logged in as user@example.com.',
+            "You're all set. Run devin to get started.",
+          ].join('\n'),
+          findings: [],
+          addressedPriorComments: [],
+        }),
+      ),
+      false,
+    );
   });
 
   it('pins Devin sessions to read-only review permissions', () => {
@@ -189,6 +203,20 @@ describe('Devin CLI provider helpers', () => {
     );
 
     assert.equal(parsed?.model, 'devin/default');
+  });
+
+  it('parses deeply nested Devin ATIF usage without recursive traversal', () => {
+    const depth = 5_000;
+    const content =
+      '{"child":'.repeat(depth) +
+      '{"total_input_tokens":1,"output_tokens":2,"generation_model":"codex"}' +
+      '}'.repeat(depth);
+
+    const parsed = parseDevinAtifUsage(content, 'devin/default');
+
+    assert.equal(parsed?.usage.input, 1);
+    assert.equal(parsed?.usage.output, 2);
+    assert.equal(parsed?.model, 'devin/codex');
   });
 
   it('returns undefined when Devin ATIF has no recognized usage records', () => {

@@ -175,6 +175,25 @@ describe('renderReviewMetadataBlock', () => {
     assert.match(block, /models=devin\/glm-5\.2, opencode\/deepseek-v4-flash-free/);
   });
 
+  it('omits non-finite cost totals from review metadata', () => {
+    const block = renderReviewMetadataBlock('opencode/deepseek-v4-flash-free', {
+      models: ['opencode/deepseek-v4-flash-free'],
+      input: 100,
+      output: 20,
+      reasoning: 30,
+      cacheRead: 40,
+      cacheWrite: 50,
+      costUsd: Infinity,
+      creditCost: NaN,
+      acuCost: -Infinity,
+    }).join('\n');
+
+    assert.match(block, /input=100/);
+    assert.doesNotMatch(block, /cost usd=/);
+    assert.doesNotMatch(block, /credit cost=/);
+    assert.doesNotMatch(block, /acu cost=/);
+  });
+
   it('omits the block when token usage was unavailable', () => {
     assert.deepEqual(renderReviewMetadataBlock('opencode/deepseek-v4-flash-free'), []);
   });

@@ -46,6 +46,10 @@ const VALID_FINDING_KINDS = new Set<FindingKind>([
 ]);
 const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 export interface ProviderKeyConfig {
   providerID: string;
   apiKey: string;
@@ -145,7 +149,7 @@ export function extractPromptTokenUsage(info: TokenUsageInfo): PromptTokenUsage 
     reasoning: tokens.reasoning ?? 0,
     cacheRead: cache.read ?? 0,
     cacheWrite: cache.write ?? 0,
-    ...(typeof info.cost === 'number' ? { costUsd: info.cost } : {}),
+    ...(isFiniteNumber(info.cost) ? { costUsd: info.cost } : {}),
   };
 }
 
@@ -165,7 +169,7 @@ export function formatTokenUsage(info: TokenUsageInfo): string {
     `reasoning=${tokens.reasoning ?? 0}`,
     `cache(read=${cache.read ?? 0} write=${cache.write ?? 0})`,
   ];
-  if (typeof info.cost === 'number') parts.push(`cost=$${info.cost.toFixed(4)}`);
+  if (isFiniteNumber(info.cost)) parts.push(`cost=$${info.cost.toFixed(4)}`);
   return `tokens: ${parts.join(' ')}`;
 }
 
