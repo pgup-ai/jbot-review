@@ -289,7 +289,6 @@ export function formatSummaryMarkdown(
         continue;
       }
       if (options.suppressNoFindingVerdicts) {
-        if (pendingHeader) out.push(formatSummaryLine(pendingHeader));
         pendingHeader = line;
         suppressingNoFindingSection = false;
         continue;
@@ -299,13 +298,13 @@ export function formatSummaryMarkdown(
       continue;
     }
     if (options.suppressNoFindingVerdicts && isNoFindingVerdict(line)) {
-      pendingHeader = '';
       suppressingNoFindingSection = false;
       continue;
     }
     pushFormattedLine(line);
   }
-  if (pendingHeader) out.push(formatSummaryLine(pendingHeader));
+  if (pendingHeader && !options.suppressNoFindingVerdicts)
+    out.push(formatSummaryLine(pendingHeader));
   while (out.length > 0 && out[out.length - 1] === '') out.pop();
   return out.join('\n');
 }

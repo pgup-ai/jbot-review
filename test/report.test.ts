@@ -201,6 +201,14 @@ test('formatSummaryMarkdown only suppresses standalone no-finding verdict lines'
   assert.equal(out, '- Real finding summary follows.');
 });
 
+test('formatSummaryMarkdown preserves category headers around suppressed verdict bullets', () => {
+  const out = formatSummaryMarkdown(
+    ['**Bugs**', '- No bugs found in webhook dispatcher', '- Race in queue.ts'].join('\n'),
+    { suppressNoFindingVerdicts: true },
+  );
+  assert.equal(out, '**Bugs**\n- Race in `queue.ts`');
+});
+
 test('formatSummaryMarkdown drops review headers left empty by no-finding verdict suppression', () => {
   const out = formatSummaryMarkdown(
     [
