@@ -210,7 +210,7 @@ export async function listCommandCodeModels(workspace: string, home?: string): P
     workspace,
     '',
     COMMANDCODE_MODEL_LIST_TIMEOUT_MS,
-    envForHome(home),
+    commandCodeEnvForHome(home),
   );
   if (result.exitCode !== 0) {
     throw new Error(
@@ -249,7 +249,7 @@ async function runCommandCodePrompt(
     workspace,
     prompt,
     timeoutMs,
-    envForHome(home),
+    commandCodeEnvForHome(home),
   );
   if (result.exitCode !== 0) {
     throw new Error(
@@ -335,6 +335,12 @@ function spawnWithInputAndTimeout(
   });
 }
 
-function envForHome(home: string | undefined): NodeJS.ProcessEnv | undefined {
-  return home ? { ...process.env, HOME: home } : undefined;
+export function commandCodeEnvForHome(home: string | undefined): NodeJS.ProcessEnv | undefined {
+  if (!home) return undefined;
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+  // CommandCode gives this env var precedence over ~/.commandcode/auth.json.
+  // The action input writes temp auth.json, so prevent ambient CI/local state
+  // from overriding the selected credential.
+  delete env.COMMAND_CODE_API_KEY;
+  return env;
 }

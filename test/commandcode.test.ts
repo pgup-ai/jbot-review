@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 
 import {
   buildCommandCodeCliArgs,
+  commandCodeEnvForHome,
   commandCodeAuthPath,
   isCommandCodeProvider,
   parseCommandCodeModelList,
@@ -57,6 +58,26 @@ describe('CommandCode CLI provider helpers', () => {
       '--model',
       'Qwen/Qwen3.7-Max',
     ]);
+  });
+
+  it('keeps ambient API-key auth from overriding the temp auth file', () => {
+    const previousApiKey = process.env.COMMAND_CODE_API_KEY;
+    const previousHome = process.env.HOME;
+    try {
+      process.env.COMMAND_CODE_API_KEY = 'stale-api-key';
+      process.env.HOME = '/ambient-home';
+
+      const env = commandCodeEnvForHome('/tmp/jbot-commandcode-home-test');
+
+      assert.equal(env?.HOME, '/tmp/jbot-commandcode-home-test');
+      assert.equal(env?.COMMAND_CODE_API_KEY, undefined);
+      assert.equal(process.env.COMMAND_CODE_API_KEY, 'stale-api-key');
+    } finally {
+      if (previousApiKey === undefined) delete process.env.COMMAND_CODE_API_KEY;
+      else process.env.COMMAND_CODE_API_KEY = previousApiKey;
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+    }
   });
 
   it('parses model ids from CommandCode list output', () => {
