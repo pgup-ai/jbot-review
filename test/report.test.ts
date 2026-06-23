@@ -134,7 +134,7 @@ test('condenseSummary suppresses no-finding shard verdicts when findings exist',
         '- Draft completion skips v3 agreement checks',
       ].join('\n'),
       '**Review** No bugs found in assigned files.',
-      'No bugs found in the assigned files. The functions handle edge cases consistently.',
+      'No bugs found in the assigned files.',
     ],
     { suppressNoFindingVerdicts: true },
   );
@@ -174,6 +174,31 @@ test('formatSummaryMarkdown does not suppress contextual no-bug prose', () => {
     suppressNoFindingVerdicts: true,
   });
   assert.equal(out, '- No bugs were fixed by this documentation-only change.');
+});
+
+test('formatSummaryMarkdown does not suppress no-finding phrases with contrasting content', () => {
+  const out = formatSummaryMarkdown(
+    [
+      '- No bugs found in the auth shard, but a P1 regression in billing.',
+      '**Review** No issues found in module X; config drift detected elsewhere.',
+    ].join('\n'),
+    { suppressNoFindingVerdicts: true },
+  );
+  assert.equal(
+    out,
+    [
+      '- No bugs found in the auth shard, but a P1 regression in billing.',
+      '**Review** No issues found in module X; config drift detected elsewhere.',
+    ].join('\n'),
+  );
+});
+
+test('formatSummaryMarkdown only suppresses standalone no-finding verdict lines', () => {
+  const out = formatSummaryMarkdown(
+    ['No bugs found in assigned files.', '- Real finding summary follows.'].join('\n'),
+    { suppressNoFindingVerdicts: true },
+  );
+  assert.equal(out, '- Real finding summary follows.');
 });
 
 test('formatSummaryMarkdown drops review headers left empty by no-finding verdict suppression', () => {

@@ -47,7 +47,10 @@ function isNoFindingVerdict(line: string): boolean {
 }
 
 function isNoFindingKey(key: string): boolean {
-  return /^no (?:new |blocking )?(?:bugs?|findings?|issues?) (?:were )?found\b/.test(key);
+  if (/[;,]|\.\s+\S|\b(?:although|but|except|however|though|yet)\b/.test(key)) return false;
+  return /^no (?:new |blocking )?(?:bugs?|findings?|issues?) (?:were )?found(?: (?:in|within) [a-z0-9_./ -]{1,80})?\.?$/.test(
+    key,
+  );
 }
 
 /** A line that is only a bold category header, e.g. `**Bugs**` or `**Bugs**:`. */
@@ -297,7 +300,7 @@ export function formatSummaryMarkdown(
     }
     if (options.suppressNoFindingVerdicts && isNoFindingVerdict(line)) {
       pendingHeader = '';
-      suppressingNoFindingSection = true;
+      suppressingNoFindingSection = false;
       continue;
     }
     pushFormattedLine(line);
