@@ -43,6 +43,7 @@ import {
   runAddressedPriorCommentsCheck as runOpencodeAddressedPriorCommentsCheck,
   runFindingVerification as runOpencodeFindingVerification,
   runGuidelineComplianceCheck as runOpencodeGuidelineComplianceCheck,
+  runChangesSinceLastReview as runOpencodeChangesSinceLastReview,
   listProviderModels,
   enableContext7Mcp,
   disableContext7Mcp,
@@ -55,6 +56,7 @@ import {
   runDevinAddressedPriorCommentsCheck,
   runDevinFindingVerification,
   runDevinGuidelineComplianceCheck,
+  runDevinChangesSinceLastReview,
   runDevinReview,
   writeDevinCredentials,
 } from './devin.ts';
@@ -64,6 +66,7 @@ import {
   runCommandCodeAddressedPriorCommentsCheck,
   runCommandCodeFindingVerification,
   runCommandCodeGuidelineComplianceCheck,
+  runCommandCodeChangesSinceLastReview,
   runCommandCodeReview,
   writeCommandCodeAuth,
 } from './commandcode.ts';
@@ -148,6 +151,14 @@ interface ReviewBackend {
     timeoutMs?: number,
     onTokenUsage?: TokenUsageRecorder,
   ): Promise<FindingVerdict[] | undefined>;
+  runChangesSinceLastReview(
+    model: string,
+    prContext: string,
+    deltaContext: string,
+    log: (msg: string) => void,
+    timeoutMs?: number,
+    onTokenUsage?: TokenUsageRecorder,
+  ): Promise<string>;
 }
 
 function createOpencodeBackend(
@@ -186,6 +197,16 @@ function createOpencodeBackend(
         timeoutMs,
         onTokenUsage,
       ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runOpencodeChangesSinceLastReview(
+        client,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
   };
 }
 
@@ -219,6 +240,16 @@ function createDevinBackend(workspace: string): ReviewBackend {
         model,
         prContext,
         findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runDevinChangesSinceLastReview(
+        workspace,
+        model,
+        prContext,
+        deltaContext,
         log,
         timeoutMs,
         onTokenUsage,
@@ -266,6 +297,17 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
         onTokenUsage,
         home,
       ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runCommandCodeChangesSinceLastReview(
+        workspace,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        home,
+      ),
   };
 }
 
@@ -290,6 +332,8 @@ function limitBackendConcurrency(
     runGuidelineComplianceCheck: (...args) =>
       withSlot(() => backend.runGuidelineComplianceCheck(...args)),
     runFindingVerification: (...args) => withSlot(() => backend.runFindingVerification(...args)),
+    runChangesSinceLastReview: (...args) =>
+      withSlot(() => backend.runChangesSinceLastReview(...args)),
   };
 }
 

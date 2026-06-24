@@ -10,6 +10,7 @@ import {
 import { parseModelName } from './model.ts';
 import {
   assembleAddressedPriorCommentsPrompt,
+  assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
@@ -543,6 +544,28 @@ export async function runGuidelineComplianceCheck(
     onTokenUsage,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
+}
+
+export async function runChangesSinceLastReview(
+  client: OpencodeClient,
+  model: string,
+  prContext: string,
+  deltaContext: string,
+  log: (msg: string) => void,
+  timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
+): Promise<string> {
+  const prompt = assembleChangesSinceLastReviewPrompt(prContext, deltaContext);
+  const { raw } = await promptPlanAgent(
+    client,
+    model,
+    prompt,
+    'changes-since-last-review',
+    log,
+    timeoutMs,
+    onTokenUsage,
+  );
+  return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
 }
 
 /**
