@@ -959,6 +959,7 @@ export async function runPrReview(params: {
 
     if (options.dryRun) {
       const body = buildBody(
+        '',
         summary,
         filteredFindings,
         orphaned,
@@ -1016,6 +1017,7 @@ export async function runPrReview(params: {
       }
 
       const body = buildBody(
+        '',
         summary,
         filteredFindings,
         orphaned,
@@ -1867,7 +1869,8 @@ function isResourceNotAccessibleByIntegration(message: string): boolean {
   return message.toLowerCase().includes('resource not accessible by integration');
 }
 
-function buildBody(
+export function buildBody(
+  changesSinceLastReview: string,
   summary: string,
   all: Finding[],
   orphaned: Finding[],
@@ -1878,14 +1881,16 @@ function buildBody(
   tokenUsage?: ReviewTokenUsage,
 ): string {
   const total = all.length;
-  const lines = [
-    '## J-Bot Code Review',
-    '',
+  const lines = ['## J-Bot Code Review', ''];
+  if (changesSinceLastReview.trim()) {
+    lines.push('**Changes since last review**', '', changesSinceLastReview.trim(), '');
+  }
+  lines.push(
     summary
       ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: total > 0 })
       : 'No summary provided.',
     '',
-  ];
+  );
   const guidance = getMergeGuidance(all);
   lines.push(`**Review state:** ${guidance.state}`, '');
   lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`, '');

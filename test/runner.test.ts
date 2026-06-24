@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  buildBody,
   buildSummaryScopeBlock,
   shouldSummarizeChangesSinceLastReview,
   buildMainShardFailureMessage,
@@ -57,6 +58,23 @@ describe('shouldSummarizeChangesSinceLastReview', () => {
 
   it('is true on a re-review with a real delta', () => {
     assert.equal(shouldSummarizeChangesSinceLastReview([PRIOR_JBOT_REVIEW], 'fffeeeddd111'), true);
+  });
+});
+
+describe('buildBody changes-since-last-review block', () => {
+  it('renders the block above the summary when present', () => {
+    const body = buildBody('- Reworked archive path.', '- Verdict looks good.', [], [], 'm', 'o', 'r');
+    assert.match(body, /## J-Bot Code Review/);
+    assert.match(body, /\*\*Changes since last review\*\*/);
+    assert.ok(
+      body.indexOf('Changes since last review') < body.indexOf('Verdict looks good'),
+      'block must precede the summary',
+    );
+  });
+
+  it('omits the block (and its header) when the text is empty', () => {
+    const body = buildBody('', '- Verdict looks good.', [], [], 'm', 'o', 'r');
+    assert.doesNotMatch(body, /Changes since last review/);
   });
 });
 
