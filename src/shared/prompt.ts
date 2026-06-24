@@ -641,6 +641,36 @@ The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}
   return lines.join('\n');
 }
 
+export const CHANGES_SINCE_LAST_REVIEW_PROMPT = `You are writing a short "what changed since the last review" note for a pull request that a prior automated review already covered. A separate reviewer reports bugs; your ONLY job is to describe the delta since the last reviewed head.
+
+## How to work
+
+- The "Changes since last review" section below gives the last reviewed head, the current head, and the commits added between them. The full repository is checked out on the PR branch and git is available — run the \`git diff\` command shown there to see exactly what those commits changed.
+- Summarize ONLY what changed between the last reviewed head and the current head. Do not restate the whole PR or re-describe unchanged code.
+- Be concise and scannable: a few Markdown bullet points, one per meaningful change. Collapse trivial churn (formatting, rebases, merges) into a single bullet.
+- Describe changes factually. Do not list bugs or review findings, and do not pass judgement on correctness — findings are produced separately.
+
+## Output
+
+Respond with a SINGLE raw JSON object and NOTHING else — no text before or after it, and no markdown fences. Markdown is allowed only inside the JSON string value; escape newlines inside the string as \\n.
+
+{
+  "summary": "- Reworked the archive path from a bespoke flag to the global soft-delete filter.\\n- Renamed the audit action constant and updated both call sites.\\n- Rebased and reformatted (no behavioral change)."
+}`;
+
+export const CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER = `## Final output reminder
+
+Respond now with one raw JSON object with the single top-level key "summary", a Markdown string describing only what changed since the last reviewed head. No text before or after the JSON, no markdown fences, and escape newlines inside the string as \\n. Do not include findings, questions, or a completion note.`;
+
+export function assembleChangesSinceLastReviewPrompt(prContext: string, deltaContext: string): string {
+  return [
+    CHANGES_SINCE_LAST_REVIEW_PROMPT,
+    deltaContext,
+    prContext,
+    CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
+  ].join('\n\n');
+}
+
 /**
  * Assembles the full review prompt. The output reminder is deliberately LAST:
  * small models weight recent instructions most heavily, and tens of KB of PR

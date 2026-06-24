@@ -4,6 +4,8 @@ import { describe, it } from 'node:test';
 import {
   ADDRESSED_PRIOR_COMMENTS_PROMPT,
   CHANGES_SINCE_CONTEXT_BUDGET,
+  CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
+  CHANGES_SINCE_LAST_REVIEW_PROMPT,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
@@ -12,6 +14,7 @@ import {
   REVIEW_PROMPT,
   VERIFICATION_OUTPUT_REMINDER,
   assembleAddressedPriorCommentsPrompt,
+  assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
@@ -44,6 +47,22 @@ describe('buildChangesSinceContextBlock', () => {
     const block = buildChangesSinceContextBlock('abc1234', 'def5678', subjects);
     assert.ok(block.length <= CHANGES_SINCE_CONTEXT_BUDGET + 200);
     assert.match(block, /and \d+ more commit\(s\); use the git command above\./);
+  });
+});
+
+describe('CHANGES_SINCE_LAST_REVIEW_PROMPT', () => {
+  it('summarizes only the delta and forbids findings, with a concrete summary schema', () => {
+    assert.match(CHANGES_SINCE_LAST_REVIEW_PROMPT, /since the last reviewed head/i);
+    assert.match(CHANGES_SINCE_LAST_REVIEW_PROMPT, /do not list bugs or review findings/i);
+    assert.match(CHANGES_SINCE_LAST_REVIEW_PROMPT, /"summary":/);
+    assert.doesNotMatch(CHANGES_SINCE_LAST_REVIEW_PROMPT, /"findings"/);
+  });
+
+  it('puts the output reminder last and asks for a single summary key', () => {
+    const out = assembleChangesSinceLastReviewPrompt('PR-CONTEXT', 'DELTA-CONTEXT');
+    assert.ok(out.indexOf('DELTA-CONTEXT') < out.indexOf(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER));
+    assert.ok(out.endsWith(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER));
+    assert.match(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER, /single top-level key\s+"summary"/);
   });
 });
 
