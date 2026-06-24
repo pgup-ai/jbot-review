@@ -34,11 +34,14 @@ const BACKEND_DATA_PATTERNS = [
 ];
 
 const FRONTEND_WORKFLOW_PATTERNS = [
-  // `app`/`ui` cover the Next.js App-Router root and shared component dirs,
-  // where plain `.ts` files (server actions, route data, theme) are still
-  // frontend. `apps?/web` stays for the monorepo `apps/web` case (which bare
-  // `app` does not match). `apps/` for non-web packages does NOT match `app`.
-  /(^|\/)(apps?\/web|app|ui|frontend|client|components?|pages?|views?|hooks?|stores?)\//i,
+  // `ui` covers shared component/design-system dirs where even plain `.ts`
+  // files (theme, tokens) are frontend. Bare `app` is deliberately NOT here:
+  // it is too ambiguous — `src/app/` is a backend entry in this repo and many
+  // Express/Nest apps, and even a Next.js `app/` route handler (`route.ts`) or
+  // server action is backend-shaped. Real UI files under `app/` already match
+  // by `.tsx`/`.jsx` extension below, so bare `app` would mostly add backend
+  // false positives. `apps?/web` stays for the monorepo `apps/web` case.
+  /(^|\/)(apps?\/web|ui|frontend|client|components?|pages?|views?|hooks?|stores?)\//i,
   /(^|\/)[^/]*(component|hook|form|dialog|modal|page|view)[^/]*\.[cm]?[jt]sx?$/i,
   /\.(tsx|jsx|vue|svelte)$/i,
 ];

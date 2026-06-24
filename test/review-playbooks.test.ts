@@ -104,13 +104,17 @@ describe('selectReviewPlaybookIds with change shape', () => {
     assert.ok(selectReviewPlaybookIds(['infra/main.tf']).includes('infra-ops'));
   });
 
-  it('treats bare app/ and ui/ directories as frontend (Next.js app-router, ui dirs)', () => {
-    // A plain .ts file under app//ui is frontend in Next.js/Nuxt/SvelteKit
-    // layouts (server actions, route data, theme), so it gets the frontend
-    // playbook rather than core-only.
-    assert.ok(selectReviewPlaybookIds(['src/app/actions.ts']).includes('frontend-workflow'));
+  it('treats ui/ dirs as frontend but not ambiguous bare app/ .ts files', () => {
+    // `ui/` is a reliable frontend signal even for a plain .ts (theme, tokens).
     assert.ok(selectReviewPlaybookIds(['src/ui/theme.ts']).includes('frontend-workflow'));
-    // ...but a non-web `apps/<pkg>` path is not auto-frontend.
+    // Bare `app/` is ambiguous: a plain .ts there is often backend (route
+    // handlers, server actions, this repo's webhook app), so it falls back to
+    // core. Real UI under app/ still matches by extension/name.
+    assert.ok(!selectReviewPlaybookIds(['src/app/auth.ts']).includes('frontend-workflow'));
+    assert.ok(
+      selectReviewPlaybookIds(['src/app/dashboard/page.tsx']).includes('frontend-workflow'),
+    );
+    // A non-web `apps/<pkg>` path is not auto-frontend either.
     assert.ok(!selectReviewPlaybookIds(['apps/api/src/server.ts']).includes('frontend-workflow'));
   });
 });
