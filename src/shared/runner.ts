@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import {
   SEVERITY_RANK,
@@ -31,6 +33,7 @@ import { parseAddedLines } from './patch.ts';
 import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
+  buildChangesSinceContextBlock,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
   selectLensKeys,
@@ -890,6 +893,24 @@ export async function runPrReview(params: {
       }),
     );
 
+    const changesSinceLastReview = trackAuxiliarySession(
+      'changes-since-last-review',
+      startChangesSinceLastReviewSummary({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: auxPrContext,
+        workspace,
+        reviewedHead: findLatestReviewedHead(priorComments.filter(isJbotReviewBody)),
+        headSha,
+        enabled:
+          shouldSummarizeChangesSinceLastReview(priorComments, headSha) &&
+          auxCommandCodeHasCompleteDiff,
+        timeoutMs: finderTimeoutMs,
+        log,
+        onTokenUsage: recordTokenUsage,
+      }),
+    );
+
     // Lens passes run on the aux model (recall supplement, not the deep
     // pass) and use the aux context (no Context7 block): they have no
     // Context7 retry path, so a Context7 hiccup must not be able to zero a
@@ -936,6 +957,7 @@ export async function runPrReview(params: {
       lensPasses,
       addressedPriorCheck,
       guidelineComplianceCheck,
+      changesSinceLastReview,
     ]);
     if (auxiliaryWaitLabels.length > 0) {
       log(
@@ -949,6 +971,7 @@ export async function runPrReview(params: {
     // verification; the main review no longer reports them.
     const verifiedAddressedPriorComments = await addressedPriorCheck.promise;
     const complianceFindings = await guidelineComplianceCheck.promise;
+    const changesSinceText = await changesSinceLastReview.promise;
     // Gate confidence BEFORE deduping so each finding carries its effective
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
@@ -1003,7 +1026,7 @@ export async function runPrReview(params: {
 
     if (options.dryRun) {
       const body = buildBody(
-        '',
+        changesSinceText,
         summary,
         filteredFindings,
         orphaned,
@@ -1061,7 +1084,7 @@ export async function runPrReview(params: {
       }
 
       const body = buildBody(
-        '',
+        changesSinceText,
         summary,
         filteredFindings,
         orphaned,
@@ -1796,6 +1819,74 @@ function startAddressedPriorCommentsCheck(params: {
         })`,
       );
       return [];
+    });
+}
+
+const execFileAsync = promisify(execFile);
+const GIT_LOG_TIMEOUT_MS = 15_000;
+
+/** Commit subjects (`<short-sha> <subject>`) added between two revisions, in the checkout. */
+async function collectCommitSubjects(
+  workspace: string,
+  fromSha: string,
+  toSha: string,
+): Promise<string[]> {
+  const { stdout } = await execFileAsync(
+    'git',
+    ['log', '--no-merges', '--format=%h %s', `${fromSha}..${toSha}`],
+    { cwd: workspace, timeout: GIT_LOG_TIMEOUT_MS, maxBuffer: 1024 * 1024 },
+  );
+  return stdout.split('\n').filter(Boolean);
+}
+
+/**
+ * Summarizes the reviewed..head delta once for the whole PR (non-finder pass).
+ * Fail-open: any failure (git, backend, parse) resolves to '' so the block is
+ * simply omitted. Enabled only on a re-review with a real delta.
+ */
+function startChangesSinceLastReviewSummary(params: {
+  backend: ReviewBackend;
+  model: string;
+  prContext: string;
+  workspace: string;
+  reviewedHead?: string;
+  headSha?: string;
+  enabled: boolean;
+  timeoutMs?: number;
+  log: (msg: string) => void;
+  onTokenUsage?: TokenUsageRecorder;
+}): Promise<string> {
+  if (!params.enabled || !params.reviewedHead || !params.headSha) return Promise.resolve('');
+  const reviewedHead = params.reviewedHead;
+  const headSha = params.headSha;
+  params.log('Starting changes-since-last-review summary in parallel.');
+  return (async () => {
+    const subjects = await collectCommitSubjects(params.workspace, reviewedHead, headSha);
+    if (subjects.length === 0) {
+      params.log('changes-since-last-review skipped: no commits since last reviewed head.');
+      return '';
+    }
+    const deltaContext = buildChangesSinceContextBlock(reviewedHead, headSha, subjects);
+    return params.backend.runChangesSinceLastReview(
+      params.model,
+      params.prContext,
+      deltaContext,
+      params.log,
+      params.timeoutMs,
+      params.onTokenUsage,
+    );
+  })()
+    .then((text) => {
+      params.log(`changes-since-last-review summary complete: ${text.length} chars`);
+      return text;
+    })
+    .catch((error) => {
+      params.log(
+        `(skipped changes-since-last-review summary: ${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      );
+      return '';
     });
 }
 
