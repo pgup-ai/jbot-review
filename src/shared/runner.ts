@@ -557,7 +557,7 @@ export async function runPrReview(params: {
   const priorJbotThreads = options.includePriorComments ? allPriorJbotThreads : [];
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
-  const summaryScopeBlock = buildSummaryScopeBlock(priorComments, headSha);
+  const summaryScopeBlock = buildSummaryScopeBlock();
   const changeShape = classifyChangeShape(files);
   const reviewFocusBlock = buildReviewFocusBlock(changedFiles, changeShape);
   const diffHunksBlock = buildDiffHunksBlock(files);
@@ -1668,32 +1668,13 @@ export function shouldSummarizeChangesSinceLastReview(
  * behavior on small models, which then reviewed only the delta and missed
  * cross-commit bugs — the single biggest recall gap versus competitor bots.
  */
-export function buildSummaryScopeBlock(priorComments: string[], headSha?: string): string {
-  const priorJbotReviews = priorComments.filter(isJbotReviewBody);
-  const lines = [
+export function buildSummaryScopeBlock(): string {
+  return [
     '## Summary instructions',
     '- These instructions affect ONLY the text of the "summary" field. They never change what you review: findings always come from the complete PR diff.',
     '- Prefer concise Markdown bullet points in the "summary" field when they make the review easier to scan.',
-  ];
-
-  if (priorJbotReviews.length === 0) {
-    lines.push(
-      '- This is the first visible jbot-review run for this PR, so summarize the overall PR change.',
-    );
-    return lines.join('\n');
-  }
-
-  const latestReviewedHead = findLatestReviewedHead(priorJbotReviews);
-  lines.push(
-    '- This PR already has prior jbot-review runs, so the summary TEXT should describe what changed since the latest prior reviewed head instead of restating the full PR summary. Your review and findings still cover the full PR diff.',
-  );
-  if (latestReviewedHead && headSha && latestReviewedHead !== headSha) {
-    lines.push(`- Latest prior reviewed head: ${latestReviewedHead}. Current head: ${headSha}.`);
-  } else if (latestReviewedHead) {
-    lines.push(`- Latest prior reviewed head: ${latestReviewedHead}.`);
-  }
-
-  return lines.join('\n');
+    '- Summarize your review conclusions for the changes you examined. Do not restate the overall PR; a separate "Changes since last review" note covers what changed.',
+  ].join('\n');
 }
 
 function buildContext7PromptBlock(reason: string): string {

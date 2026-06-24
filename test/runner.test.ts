@@ -20,34 +20,29 @@ const PRIOR_JBOT_REVIEW = [
 ].join('\n');
 
 describe('buildSummaryScopeBlock', () => {
-  it('always declares itself summary-only and never narrows review scope', () => {
-    for (const block of [
-      buildSummaryScopeBlock([], 'fffeeeddd111'),
-      buildSummaryScopeBlock([PRIOR_JBOT_REVIEW], 'fffeeeddd111'),
-    ]) {
-      assert.match(block, /affect ONLY the text of the "summary" field/);
-      assert.match(block, /findings always come from the complete PR diff/);
-    }
+  it('no longer instructs shards to describe changes since the reviewed head', () => {
+    const block = buildSummaryScopeBlock();
+    assert.doesNotMatch(block, /reviewed head/i);
+    assert.doesNotMatch(block, /Latest prior reviewed head/i);
   });
 
-  it('on re-review, scopes the summary TEXT to the delta without delta-review instructions', () => {
-    const block = buildSummaryScopeBlock([PRIOR_JBOT_REVIEW], 'fffeeeddd111');
+  it('keeps the scope guardrail and asks for conclusions only', () => {
+    const block = buildSummaryScopeBlock();
+    assert.match(block, /affect ONLY the text of the "summary" field/);
+    assert.match(block, /findings always come from the complete PR diff/);
+    assert.match(block, /review conclusions/i);
+  });
 
-    assert.match(block, /Latest prior reviewed head: abc123def456\. Current head: fffeeeddd111\./);
-    assert.match(block, /still cover the full PR diff/);
-    // Regression pins for the wording that originally leaked into review
-    // scope on small models (the headline recall gap): never tell the model
-    // to diff or review only the prior..head delta.
+  // Regression pins for the wording that originally leaked into review scope on
+  // small models (the headline recall gap): never tell the model to diff or
+  // review only the prior..head delta. The delta narrative now lives in a
+  // separate non-finder pass, so the finder shards never see this framing.
+  it('never tells the model to diff or review only the delta', () => {
+    const block = buildSummaryScopeBlock();
     assert.doesNotMatch(block, /git log/i);
     assert.doesNotMatch(block, /git diff/i);
     assert.doesNotMatch(block, /summarize only/i);
     assert.doesNotMatch(block, /review only/i);
-  });
-
-  it('asks for a whole-PR summary on the first run', () => {
-    const block = buildSummaryScopeBlock([], 'fffeeeddd111');
-
-    assert.match(block, /first visible jbot-review run/);
   });
 });
 
