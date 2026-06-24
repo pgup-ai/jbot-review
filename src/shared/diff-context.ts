@@ -137,6 +137,17 @@ const LARGE_DELETION_MIN_REMOVED = 40;
 /** ...and must outweigh additions by this factor, so a move/refactor does not qualify. */
 const LARGE_DELETION_DOMINANCE = 3;
 
+/**
+ * Stricter than `PATH_PATTERNS.tests` for the `testOnly` SUPPRESSION signal.
+ * A bare `spec/` directory is ambiguous — RSpec tests live there, but so do
+ * OpenAPI/contract specs (`spec/openapi.yaml`) that are real API surface — so
+ * testOnly requires an UNAMBIGUOUS marker: a `test`/`tests`/`__tests__`
+ * directory or a `.test`/`.spec` code-file suffix. This keeps a spec-only PR
+ * out of the suppressed path so contract-api review still fires. Erring toward
+ * over-review here is safe; under-reviewing a contract is not.
+ */
+const TEST_ONLY_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
+
 export function classifyChangeShape(files: PrFile[]): ChangeShape {
   const filenames = files.map((file) => file.filename);
   let removed = 0;
@@ -147,7 +158,7 @@ export function classifyChangeShape(files: PrFile[]): ChangeShape {
     removed += counts.removed;
   }
   return {
-    testOnly: filenames.length > 0 && filenames.every((file) => PATH_PATTERNS.tests.test(file)),
+    testOnly: filenames.length > 0 && filenames.every((file) => TEST_ONLY_FILE.test(file)),
     largeDeletion:
       removed >= LARGE_DELETION_MIN_REMOVED && removed >= added * LARGE_DELETION_DOMINANCE,
     dependencyManifestChange: filenames.some((file) => DEPENDENCY_MANIFEST.test(file)),

@@ -247,6 +247,22 @@ describe('classifyChangeShape', () => {
     assert.equal(shape.testOnly, false);
   });
 
+  it('does not treat a bare spec/ directory (API/contract specs) as test-only', () => {
+    // spec/openapi.yaml is contract surface, not a test; suppressing
+    // contract-api review for it would under-review the change.
+    assert.equal(
+      classifyChangeShape([{ filename: 'spec/openapi.yaml', patch: '@@ -1 +1 @@\n+paths:' }])
+        .testOnly,
+      false,
+    );
+    // A real test under spec/ still counts via its .spec code-file suffix.
+    assert.equal(
+      classifyChangeShape([{ filename: 'spec/user.spec.ts', patch: '@@ -1 +1 @@\n+it();' }])
+        .testOnly,
+      true,
+    );
+  });
+
   it('flags a large deletion when removals dominate', () => {
     const shape = classifyChangeShape([
       { filename: 'src/legacy.ts', patch: `@@ -1,60 +1,1 @@\n${removals(60)}\n+keep();` },
