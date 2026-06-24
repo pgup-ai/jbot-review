@@ -169,12 +169,17 @@ is the correct home for cross-reviewer rules:**
   and do not title your summary with shard/assignment language ("Review of
   assigned files", "reviewer N") — it is merged into one shared review comment.
 
-Because `shardFilesForReview` partitions changed files **disjointly** (invariant
-#1), scoping each verdict to its own files makes verdicts non-overlapping **by
-construction** — a shard can only vouch for files no other shard owns. This
-removes overlap at the source rather than trying to dedupe synonyms after the
-fact (which pure-text code cannot do reliably), and it kills the
-`Review of assigned files` vocab leak in the same stroke.
+`shardFilesForReview` partitions changed files **disjointly** (invariant #1), so
+a shard that follows this instruction vouches only for files no other shard owns
+and compliant verdicts don't overlap. Be precise about the strength of this
+guarantee: the disjoint partition is enforced **in code** for *findings
+anchoring*, but the summary-text scoping is **prompt-level** — it relies on the
+shard obeying the instruction, not on a code constraint. So this removes overlap
+at the common source (and kills the `Review of assigned files` vocab leak)
+rather than making overlap impossible — it is weaker than the structural
+guarantee the finding partition gives. Pure-text dedup of synonym verdicts after
+the fact is unreliable, which is why the fix targets the source; the residual is
+below.
 
 **Backstops (not the primary mechanism).** `condenseSummary` still dedupes
 verbatim-identical lines, and `buildBody` passes
@@ -183,8 +188,8 @@ verbatim-identical lines, and `buildBody` passes
 disjoint-scope fix:
 
 - Identical lines, or bare boilerplate with findings present → removed.
-- Substantive verdicts → non-overlapping by file partition, kept as distinct,
-  useful content.
+- Substantive verdicts → non-overlapping when shards comply with the own-files
+  scoping (disjoint files), kept as distinct, useful content.
 - **Residual:** two shards independently describing a shared cross-file symbol
   in different words can both survive. Accepted as rare. If dogfooding shows it
   matters, the escalation is a post-shard verdict-consolidation pass — a
@@ -220,8 +225,8 @@ Pure logic, pinned with `node:test` + `node:assert/strict`:
   stays generic (no cross-reviewer language that would be false single-shard).
 - `buildShardAssignmentBlock`: output scopes the summary verdict to the shard's
   own files and forbids shard/assignment vocab ("Review of assigned files") and
-  PR-wide restatement — the disjoint-scope fix that makes verdicts
-  non-overlapping by construction.
+  PR-wide restatement — the disjoint-scope fix that removes the common source of
+  verdict overlap (a prompt-level scoping, not a code-enforced guarantee).
 - `buildChangesSinceLastReviewPrompt` / context: contains the load-bearing
   phrases (summarize the delta since last review; concise; not findings) and the
   delta context respects the byte budget and lists what it omitted.
