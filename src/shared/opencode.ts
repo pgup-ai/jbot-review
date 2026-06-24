@@ -1036,7 +1036,9 @@ export function parseChangesSinceLastReviewSummary(
     return typeof obj.summary === 'string' ? obj.summary.trim() : '';
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    log(`${label} response was not valid JSON; omitting the changes-since-last-review block: ${message}`);
+    log(
+      `${label} response was not valid JSON; omitting the changes-since-last-review block: ${message}`,
+    );
     return '';
   }
 }

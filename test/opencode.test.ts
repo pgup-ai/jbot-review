@@ -7,7 +7,11 @@ const noop = () => {};
 
 describe('parseChangesSinceLastReviewSummary', () => {
   it('extracts the summary string from a valid object', () => {
-    const out = parseChangesSinceLastReviewSummary('{"summary":"- did a thing"}', 'changes-since', noop);
+    const out = parseChangesSinceLastReviewSummary(
+      '{"summary":"- did a thing"}',
+      'changes-since',
+      noop,
+    );
     assert.equal(out, '- did a thing');
   });
 

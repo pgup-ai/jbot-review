@@ -663,7 +663,10 @@ export const CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER = `## Final output remind
 
 Respond now with one raw JSON object with the single top-level key "summary", a Markdown string describing only what changed since the last reviewed head. No text before or after the JSON, no markdown fences, and escape newlines inside the string as \\n. Do not include findings, questions, or a completion note.`;
 
-export function assembleChangesSinceLastReviewPrompt(prContext: string, deltaContext: string): string {
+export function assembleChangesSinceLastReviewPrompt(
+  prContext: string,
+  deltaContext: string,
+): string {
   return [
     CHANGES_SINCE_LAST_REVIEW_PROMPT,
     deltaContext,

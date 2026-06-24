@@ -63,7 +63,15 @@ describe('shouldSummarizeChangesSinceLastReview', () => {
 
 describe('buildBody changes-since-last-review block', () => {
   it('renders the block above the summary when present', () => {
-    const body = buildBody('- Reworked archive path.', '- Verdict looks good.', [], [], 'm', 'o', 'r');
+    const body = buildBody(
+      '- Reworked archive path.',
+      '- Verdict looks good.',
+      [],
+      [],
+      'm',
+      'o',
+      'r',
+    );
     assert.match(body, /## J-Bot Code Review/);
     assert.match(body, /\*\*Changes since last review\*\*/);
     assert.ok(

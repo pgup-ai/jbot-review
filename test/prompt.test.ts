@@ -60,7 +60,9 @@ describe('CHANGES_SINCE_LAST_REVIEW_PROMPT', () => {
 
   it('puts the output reminder last and asks for a single summary key', () => {
     const out = assembleChangesSinceLastReviewPrompt('PR-CONTEXT', 'DELTA-CONTEXT');
-    assert.ok(out.indexOf('DELTA-CONTEXT') < out.indexOf(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER));
+    assert.ok(
+      out.indexOf('DELTA-CONTEXT') < out.indexOf(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER),
+    );
     assert.ok(out.endsWith(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER));
     assert.match(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER, /single top-level key\s+"summary"/);
   });
