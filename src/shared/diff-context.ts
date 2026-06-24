@@ -128,8 +128,12 @@ export function classifyChangeShape(files: PrFile[]): ChangeShape {
   for (const file of files) {
     if (!file.patch) continue;
     for (const line of file.patch.split('\n')) {
-      if (line.startsWith('+') && !line.startsWith('+++')) added += 1;
-      else if (line.startsWith('-') && !line.startsWith('---')) removed += 1;
+      // Exclude only true unified-diff file headers ('+++ '/'--- ', trailing
+      // space). A bare '+++'/'---' prefix would also drop real content lines
+      // like '+++i;' (added '++i;') or '---i;' (removed '--i;').
+      if (line.startsWith('+++ ') || line.startsWith('--- ')) continue;
+      if (line.startsWith('+')) added += 1;
+      else if (line.startsWith('-')) removed += 1;
     }
   }
   return {

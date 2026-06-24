@@ -17,6 +17,7 @@ import {
 import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
+  type ChangeShape,
   type DiffHunksOptions,
   buildDiffHunksBlock,
   buildDiffHunksBlockWithMetadata,
@@ -557,7 +558,8 @@ export async function runPrReview(params: {
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
   const summaryScopeBlock = buildSummaryScopeBlock(priorComments, headSha);
-  const reviewFocusBlock = buildReviewFocusBlock(changedFiles, classifyChangeShape(files));
+  const changeShape = classifyChangeShape(files);
+  const reviewFocusBlock = buildReviewFocusBlock(changedFiles, changeShape);
   const diffHunksBlock = buildDiffHunksBlock(files);
   if (diffHunksBlock) log(`Embedded diff hunks block: ${diffHunksBlock.length} chars.`);
   const commandCodeDiffHunks =
@@ -851,6 +853,7 @@ export async function runPrReview(params: {
     const lensPassCount = selectLensKeys(
       auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,
       changedFiles,
+      changeShape,
     ).length;
     const lensPasses = trackAuxiliarySession(
       `${lensPassCount} lens pass(es)`,
@@ -860,6 +863,7 @@ export async function runPrReview(params: {
         prContext: auxPrContext,
         guidelinesForPrompt,
         changedFiles,
+        shape: changeShape,
         passes: auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,
         timeoutMs: finderTimeoutMs,
         log,
@@ -1221,12 +1225,13 @@ function startLensPasses(params: {
   prContext: string;
   guidelinesForPrompt: string;
   changedFiles: string[];
+  shape?: ChangeShape;
   passes: number;
   timeoutMs?: number;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
 }): Promise<Finding[][]> {
-  const lensKeys = selectLensKeys(params.passes, params.changedFiles);
+  const lensKeys = selectLensKeys(params.passes, params.changedFiles, params.shape);
   if (lensKeys.length === 0) return Promise.resolve([]);
 
   params.log(`Starting ${lensKeys.length} lens pass(es) in parallel: ${lensKeys.join(', ')}.`);

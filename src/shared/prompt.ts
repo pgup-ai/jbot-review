@@ -566,12 +566,22 @@ const FRONTEND_LENS_KEY = 'frontend';
  * ADDITION to the rationed lenses, never displacing integrity. It is gated on
  * lenses being enabled at all (passes >= 2), so passes=1 stays a single read.
  * A frontend PR therefore runs one more lens session than `passes` implies.
+ *
+ * A test-only change suppresses the frontend lens too, mirroring the
+ * frontend-workflow playbook suppression (selectReviewPlaybookIds): a PR of
+ * only `.test.tsx` files has no render/state surface for that lens to add.
  */
-export function selectLensKeys(passes: number, changedFiles: string[] = []): string[] {
+export function selectLensKeys(
+  passes: number,
+  changedFiles: string[] = [],
+  shape?: ChangeShape,
+): string[] {
   const extraPasses = Math.max(0, passes - 1);
   if (extraPasses === 0) return [];
   const lenses: string[] = COUNTED_LENS_KEYS.slice(0, extraPasses);
-  if (changedFilesIncludeFrontend(changedFiles)) lenses.push(FRONTEND_LENS_KEY);
+  if (!shape?.testOnly && changedFilesIncludeFrontend(changedFiles)) {
+    lenses.push(FRONTEND_LENS_KEY);
+  }
   return lenses;
 }
 

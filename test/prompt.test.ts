@@ -189,6 +189,21 @@ describe('selectLensKeys', () => {
     assert.deepEqual(selectLensKeys(99), ['interactions', 'integrity']);
     assert.deepEqual(selectLensKeys(99, ['a.tsx']), ['interactions', 'integrity', 'frontend']);
   });
+
+  it('suppresses the frontend lens for a test-only change', () => {
+    // Mirrors the playbook suppression: a `.test.tsx`-only PR has no
+    // render/state surface for the frontend lens to add.
+    const testShape = { testOnly: true, largeDeletion: false, dependencyManifestChange: false };
+    assert.deepEqual(selectLensKeys(3, ['src/components/Invoice.test.tsx'], testShape), [
+      'interactions',
+      'integrity',
+    ]);
+    // Without the test-only shape the same file still triggers the lens.
+    assert.deepEqual(selectLensKeys(2, ['src/components/Invoice.test.tsx']), [
+      'interactions',
+      'frontend',
+    ]);
+  });
 });
 
 describe('FINDING_VERIFICATION_PROMPT', () => {

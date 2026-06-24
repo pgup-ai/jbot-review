@@ -288,6 +288,28 @@ describe('classifyChangeShape', () => {
     assert.equal(classifyChangeShape([ratio(14)]).largeDeletion, false);
   });
 
+  it('counts content lines beginning with ++ or -- (not just diff headers)', () => {
+    // A removed line of code `--i;` renders in the patch as `---i;`; it must
+    // count as a removal, not be mistaken for a `---` file header.
+    const decrements = Array.from({ length: 40 }, () => '---i;').join('\n');
+    const shape = classifyChangeShape([
+      { filename: 'src/counter.ts', patch: `@@ -1,40 +0,0 @@\n${decrements}` },
+    ]);
+    assert.equal(shape.largeDeletion, true);
+  });
+
+  it('does not count true unified-diff file headers as changed lines', () => {
+    // 39 real removals plus '--- '/'+++ ' headers must stay below the 40 floor.
+    const removed39 = Array.from({ length: 39 }, (_, i) => `-line${i}`).join('\n');
+    const shape = classifyChangeShape([
+      {
+        filename: 'src/x.ts',
+        patch: `--- a/src/x.ts\n+++ b/src/x.ts\n@@ -1,39 +0,0 @@\n${removed39}`,
+      },
+    ]);
+    assert.equal(shape.largeDeletion, false);
+  });
+
   it('flags a dependency manifest change', () => {
     const shape = classifyChangeShape([
       {
