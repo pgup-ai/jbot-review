@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   buildSummaryScopeBlock,
+  shouldSummarizeChangesSinceLastReview,
   buildMainShardFailureMessage,
   computeFinderTimeoutMs,
   computeRetryTimeoutMs,
@@ -47,6 +48,20 @@ describe('buildSummaryScopeBlock', () => {
     const block = buildSummaryScopeBlock([], 'fffeeeddd111');
 
     assert.match(block, /first visible jbot-review run/);
+  });
+});
+
+describe('shouldSummarizeChangesSinceLastReview', () => {
+  it('is false on the first review (no prior jbot reviews)', () => {
+    assert.equal(shouldSummarizeChangesSinceLastReview([], 'fffeeeddd111'), false);
+  });
+
+  it('is false when the head is unchanged since the last review', () => {
+    assert.equal(shouldSummarizeChangesSinceLastReview([PRIOR_JBOT_REVIEW], 'abc123def456'), false);
+  });
+
+  it('is true on a re-review with a real delta', () => {
+    assert.equal(shouldSummarizeChangesSinceLastReview([PRIOR_JBOT_REVIEW], 'fffeeeddd111'), true);
   });
 });
 

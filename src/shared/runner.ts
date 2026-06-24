@@ -1647,6 +1647,21 @@ function createReviewTokenUsageAccumulator(): {
 }
 
 /**
+ * The changes-since-last-review pass runs only on a re-review with a real
+ * delta: prior jbot reviews exist AND the latest reviewed head differs from the
+ * current head. First review or unchanged head → skip (block omitted).
+ */
+export function shouldSummarizeChangesSinceLastReview(
+  priorComments: string[],
+  headSha?: string,
+): boolean {
+  const priorJbotReviews = priorComments.filter(isJbotReviewBody);
+  if (priorJbotReviews.length === 0) return false;
+  const latestReviewedHead = findLatestReviewedHead(priorJbotReviews);
+  return Boolean(latestReviewedHead && headSha && latestReviewedHead !== headSha);
+}
+
+/**
  * Summary-field instructions ONLY. This block must never narrow review
  * scope: an earlier wording ("summarize only what changed since the latest
  * reviewed head... use git log/diff for prior..head") leaked into review
