@@ -17,7 +17,8 @@
  * passes, and the pure assembly functions that place a final output reminder
  * last (recency bias for small models).
  */
-import { changedFilesIncludeFrontend } from './review-playbooks.ts';
+import { PATH_PATTERNS, type ChangeShape } from './diff-context.ts';
+import { changedFilesIncludeFrontend, selectReviewPlaybookIds } from './review-playbooks.ts';
 
 export const REVIEW_PROMPT = `You are a rigorous, pragmatic code reviewer. Your goal is to find real bugs
 that would ship to production — and to stay silent otherwise. A missed bug
@@ -495,6 +496,57 @@ function formatPlaybook(playbook: ReviewPlaybook): string {
     `When relevant: ${playbook.triggers.join('; ')}.`,
     ...playbook.checks.map((check) => `- ${check}`),
   ].join('\n');
+}
+
+/**
+ * The per-run review focus block: the selected built-in playbooks plus a
+ * compact focus checklist. The checklist carries only what no DEDICATED
+ * path-keyed playbook already details — security and tests — so it does not
+ * restate the playbooks, which cover API/data/integration/infra and most
+ * frontend paths (apps/web plus component- and hook-shaped files; bare app//ui
+ * dirs fall back to code-review-core only). Change-shape signals add one
+ * focused emphasis line (large deletion, dependency manifest) when present.
+ *
+ * It narrows ATTENTION, not scope: every session still reviews the full
+ * base...head diff (invariant #1).
+ */
+export function buildReviewFocusBlock(changedFiles: string[], shape?: ChangeShape): string {
+  const focusItems = new Set<string>();
+
+  for (const file of changedFiles) {
+    if (PATH_PATTERNS.security.test(file)) {
+      focusItems.add('Security: privilege, tokens, tenant isolation, unsafe input boundaries.');
+    }
+    if (PATH_PATTERNS.tests.test(file)) {
+      focusItems.add('Tests: assertions cover changed behavior and do not mask failures.');
+    }
+  }
+
+  if (shape?.largeDeletion) {
+    focusItems.add(
+      'Large deletion: confirm removed code has no remaining callers or references and that nothing relied on the deleted behavior.',
+    );
+  }
+  if (shape?.dependencyManifestChange) {
+    focusItems.add(
+      'Dependency manifest: scrutinize added/updated dependencies and any install scripts for supply-chain risk; verify version compatibility and lockfile integrity.',
+    );
+  }
+
+  if (focusItems.size === 0) {
+    focusItems.add(
+      'General correctness: trace behavior through callers, error paths, contracts, and tests.',
+    );
+  }
+
+  const focusBlock = [
+    '## Relevant review focus',
+    'Use only as relevant checklists; do not invent findings.',
+    ...[...focusItems].map((item) => `- ${item}`),
+  ].join('\n');
+  return [buildReviewPlaybookBlock(selectReviewPlaybookIds(changedFiles, shape)), focusBlock].join(
+    '\n\n',
+  );
 }
 
 // Count-rationed recall lenses, in marginal-value order: each extra review pass

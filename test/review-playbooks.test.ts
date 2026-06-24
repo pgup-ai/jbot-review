@@ -77,6 +77,42 @@ describe('selectReviewPlaybookIds', () => {
   });
 });
 
+describe('selectReviewPlaybookIds with change shape', () => {
+  it('suppresses non-core playbooks for a test-only change', () => {
+    const ids = selectReviewPlaybookIds(
+      ['src/components/Invoice.test.tsx', 'apps/api/src/routes/router.test.ts'],
+      { testOnly: true, largeDeletion: false, dependencyManifestChange: false },
+    );
+
+    assert.deepEqual(ids, ['code-review-core']);
+  });
+
+  it('keeps path-based selection when the change is not test-only', () => {
+    // largeDeletion/dependencyManifestChange are not read by this function
+    // (they only drive focus-block emphasis), so they are left false here.
+    const ids = selectReviewPlaybookIds(['apps/api/src/routes/router.ts'], {
+      testOnly: false,
+      largeDeletion: false,
+      dependencyManifestChange: false,
+    });
+
+    assert.ok(ids.includes('contract-api'));
+  });
+
+  it('is unchanged when no shape is provided (back-compat)', () => {
+    assert.deepEqual(selectReviewPlaybookIds(['docs/readme.txt']), ['code-review-core']);
+    assert.ok(selectReviewPlaybookIds(['infra/main.tf']).includes('infra-ops'));
+  });
+
+  it('does not treat bare app/ or ui/ directories as frontend', () => {
+    // The frontend-workflow playbook keys on apps/web + component/hook-shaped
+    // paths, not bare app//ui dirs (which often hold backend code), so a plain
+    // .ts file there falls back to core only — pins the dedup parity decision.
+    assert.deepEqual(selectReviewPlaybookIds(['src/app/main.ts']), ['code-review-core']);
+    assert.deepEqual(selectReviewPlaybookIds(['src/ui/theme.ts']), ['code-review-core']);
+  });
+});
+
 describe('buildReviewPlaybookBlock', () => {
   it('renders selected built-in review skills as bounded prompt checklists', () => {
     const block = buildReviewPlaybookBlock([

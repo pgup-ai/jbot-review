@@ -18,9 +18,9 @@ import { selectReviewBackends, type CliBackendID } from './backend-selection.ts'
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   type DiffHunksOptions,
-  PATH_PATTERNS,
   buildDiffHunksBlock,
   buildDiffHunksBlockWithMetadata,
+  classifyChangeShape,
   isDocOnlyChange,
   shardFilesForReview,
 } from './diff-context.ts';
@@ -30,11 +30,10 @@ import { parseAddedLines } from './patch.ts';
 import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
-  buildReviewPlaybookBlock,
+  buildReviewFocusBlock,
   buildShardAssignmentBlock,
   selectLensKeys,
 } from './prompt.ts';
-import { selectReviewPlaybookIds } from './review-playbooks.ts';
 import { ensureGitSafeDirectory } from './git.ts';
 import {
   startOpencode,
@@ -558,7 +557,7 @@ export async function runPrReview(params: {
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
   const summaryScopeBlock = buildSummaryScopeBlock(priorComments, headSha);
-  const reviewFocusBlock = buildReviewFocusBlock(changedFiles);
+  const reviewFocusBlock = buildReviewFocusBlock(changedFiles, classifyChangeShape(files));
   const diffHunksBlock = buildDiffHunksBlock(files);
   if (diffHunksBlock) log(`Embedded diff hunks block: ${diffHunksBlock.length} chars.`);
   const commandCodeDiffHunks =
@@ -1684,54 +1683,6 @@ function buildContext7PromptBlock(reason: string): string {
     'Use Context7 only to verify changed external API, SDK, framework, CLI, cloud-service, or GitHub Actions usage. Do not use it for ordinary business-logic review.',
     'If Context7 is unavailable or does not return relevant documentation, continue the review from the repository diff and local evidence.',
   ].join('\n');
-}
-
-function buildReviewFocusBlock(changedFiles: string[]): string {
-  const focusItems = new Set<string>();
-
-  for (const file of changedFiles) {
-    if (PATH_PATTERNS.tooling.test(file)) {
-      focusItems.add('External/tooling: inputs, permissions, auth, versions, failure modes.');
-    }
-    if (PATH_PATTERNS.api.test(file)) {
-      focusItems.add('API/server: validation, auth/authz, idempotency, response contracts.');
-    }
-    if (PATH_PATTERNS.data.test(file)) {
-      focusItems.add('Data: compatibility, migration order, defaults, nullability, indexes.');
-    }
-    if (PATH_PATTERNS.security.test(file)) {
-      focusItems.add('Security: privilege, tokens, tenant isolation, unsafe input boundaries.');
-    }
-    if (PATH_PATTERNS.infra.test(file)) {
-      focusItems.add(
-        'Infra/ops: least privilege, exposure, pinned versions, rollout/rollback safety.',
-      );
-    }
-    if (
-      /\.(tsx|jsx|vue|svelte)$/i.test(file) ||
-      /(^|\/)(components?|pages?|app|frontend|ui)\//i.test(file)
-    ) {
-      focusItems.add(
-        'Frontend: loading/error states, stale async state, accessibility, API assumptions.',
-      );
-    }
-    if (PATH_PATTERNS.tests.test(file)) {
-      focusItems.add('Tests: assertions cover changed behavior and do not mask failures.');
-    }
-  }
-
-  if (focusItems.size === 0) {
-    focusItems.add(
-      'General correctness: trace behavior through callers, error paths, contracts, and tests.',
-    );
-  }
-
-  const focusBlock = [
-    '## Relevant review focus',
-    'Use only as relevant checklists; do not invent findings.',
-    ...[...focusItems].map((item) => `- ${item}`),
-  ].join('\n');
-  return [buildReviewPlaybookBlock(selectReviewPlaybookIds(changedFiles)), focusBlock].join('\n\n');
 }
 
 function findLatestReviewedHead(priorJbotReviews: string[]): string | undefined {

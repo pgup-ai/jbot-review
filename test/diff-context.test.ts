@@ -5,6 +5,7 @@ import {
   PATH_PATTERNS,
   buildDiffHunksBlock,
   buildDiffHunksBlockWithMetadata,
+  classifyChangeShape,
   diffRiskScore,
   isDocFile,
   isDocOnlyChange,
@@ -219,6 +220,97 @@ describe('diffRiskScore infra weighting', () => {
     const doc = { filename: 'docs/guide.md', patch: '+ words' };
     assert.ok(diffRiskScore(infra) > diffRiskScore(genericYaml));
     assert.ok(diffRiskScore(genericYaml) > diffRiskScore(doc));
+  });
+});
+
+describe('classifyChangeShape', () => {
+  function removals(count: number): string {
+    return Array.from({ length: count }, (_, i) => `-const removed${i} = ${i};`).join('\n');
+  }
+  function additions(count: number): string {
+    return Array.from({ length: count }, (_, i) => `+const added${i} = ${i};`).join('\n');
+  }
+
+  it('flags a test-only change', () => {
+    const shape = classifyChangeShape([
+      { filename: 'src/components/Invoice.test.tsx', patch: '@@ -1 +1 @@\n+expect(x).toBe(1);' },
+      { filename: 'test/runner.test.ts', patch: '@@ -1 +1 @@\n+ok(y);' },
+    ]);
+    assert.equal(shape.testOnly, true);
+  });
+
+  it('is not test-only when a source file changes alongside tests', () => {
+    const shape = classifyChangeShape([
+      { filename: 'src/runner.ts', patch: '@@ -1 +1 @@\n+const a = 1;' },
+      { filename: 'test/runner.test.ts', patch: '@@ -1 +1 @@\n+expect(a);' },
+    ]);
+    assert.equal(shape.testOnly, false);
+  });
+
+  it('flags a large deletion when removals dominate', () => {
+    const shape = classifyChangeShape([
+      { filename: 'src/legacy.ts', patch: `@@ -1,60 +1,1 @@\n${removals(60)}\n+keep();` },
+    ]);
+    assert.equal(shape.largeDeletion, true);
+  });
+
+  it('does not flag a balanced move/refactor as a large deletion', () => {
+    const shape = classifyChangeShape([
+      { filename: 'src/move.ts', patch: `@@ -1,50 +1,50 @@\n${removals(50)}\n${additions(50)}` },
+    ]);
+    assert.equal(shape.largeDeletion, false);
+  });
+
+  it('does not flag a small deletion as a large deletion', () => {
+    const shape = classifyChangeShape([
+      { filename: 'src/x.ts', patch: '@@ -1,2 +1,1 @@\n-a();\n-b();\n+c();' },
+    ]);
+    assert.equal(shape.largeDeletion, false);
+  });
+
+  it('pins the large-deletion removal-count threshold at 40', () => {
+    const pureDeletion = (count: number): PrFile => ({
+      filename: 'src/a.ts',
+      patch: `@@ -1,${count} +0,0 @@\n${removals(count)}`,
+    });
+    assert.equal(classifyChangeShape([pureDeletion(40)]).largeDeletion, true);
+    assert.equal(classifyChangeShape([pureDeletion(39)]).largeDeletion, false);
+  });
+
+  it('pins the large-deletion 3x dominance threshold', () => {
+    const ratio = (added: number): PrFile => ({
+      filename: 'src/a.ts',
+      patch: `@@ -1,40 +1,${added} @@\n${removals(40)}\n${additions(added)}`,
+    });
+    // 40 removed, 13 added: 40 >= 13*3 (39) → still dominant.
+    assert.equal(classifyChangeShape([ratio(13)]).largeDeletion, true);
+    // 40 removed, 14 added: 40 < 14*3 (42) → dominance lost.
+    assert.equal(classifyChangeShape([ratio(14)]).largeDeletion, false);
+  });
+
+  it('flags a dependency manifest change', () => {
+    const shape = classifyChangeShape([
+      {
+        filename: 'package.json',
+        patch: '@@ -1 +1 @@\n-  "left-pad": "1.0.0"\n+  "left-pad": "1.3.0"',
+      },
+    ]);
+    assert.equal(shape.dependencyManifestChange, true);
+  });
+
+  it('does not treat arbitrary json as a dependency manifest', () => {
+    const shape = classifyChangeShape([
+      { filename: 'src/data/config.json', patch: '@@ -1 +1 @@\n+{ "k": 1 }' },
+    ]);
+    assert.equal(shape.dependencyManifestChange, false);
+  });
+
+  it('returns all-false for an empty change set', () => {
+    assert.deepEqual(classifyChangeShape([]), {
+      testOnly: false,
+      largeDeletion: false,
+      dependencyManifestChange: false,
+    });
   });
 });
 
