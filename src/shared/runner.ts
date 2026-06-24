@@ -1466,7 +1466,7 @@ interface ShardPlan {
  * assignment block and diff slice, so every shard can reason across the
  * whole PR but anchors only in its files.
  */
-function buildShardPlans(params: {
+export function buildShardPlans(params: {
   coreContext: string;
   fullDiffBlock: string;
   context7Block: string;
