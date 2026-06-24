@@ -900,10 +900,16 @@ export async function runPrReview(params: {
         model: auxModel,
         prContext: auxPrContext,
         workspace,
-        reviewedHead: findLatestReviewedHead(priorComments.filter(isJbotReviewBody)),
+        // Use allPriorReviewComments (always fetched), NOT the
+        // includePriorComments-gated priorComments: whether to summarize the
+        // delta is a re-review decision, independent of whether prior comments
+        // are injected into the finder CONTEXT. Same rule as priorJbotReviewCount
+        // (see the comment above its definition). Gating on priorComments here
+        // silently disables the block whenever include-prior-comments is false.
+        reviewedHead: findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody)),
         headSha,
         enabled:
-          shouldSummarizeChangesSinceLastReview(priorComments, headSha) &&
+          shouldSummarizeChangesSinceLastReview(allPriorReviewComments, headSha) &&
           auxCommandCodeHasCompleteDiff,
         timeoutMs: finderTimeoutMs,
         log,
