@@ -77,6 +77,48 @@ describe('selectReviewPlaybookIds', () => {
   });
 });
 
+describe('selectReviewPlaybookIds with change shape', () => {
+  it('suppresses non-core playbooks for a test-only change', () => {
+    const ids = selectReviewPlaybookIds(
+      ['src/components/Invoice.test.tsx', 'apps/api/src/routes/router.test.ts'],
+      { testOnly: true, largeDeletion: false, dependencyManifestChange: false },
+    );
+
+    assert.deepEqual(ids, ['code-review-core']);
+  });
+
+  it('keeps path-based selection when the change is not test-only', () => {
+    // largeDeletion/dependencyManifestChange are not read by this function
+    // (they only drive focus-block emphasis), so they are left false here.
+    const ids = selectReviewPlaybookIds(['apps/api/src/routes/router.ts'], {
+      testOnly: false,
+      largeDeletion: false,
+      dependencyManifestChange: false,
+    });
+
+    assert.ok(ids.includes('contract-api'));
+  });
+
+  it('is unchanged when no shape is provided (back-compat)', () => {
+    assert.deepEqual(selectReviewPlaybookIds(['docs/readme.txt']), ['code-review-core']);
+    assert.ok(selectReviewPlaybookIds(['infra/main.tf']).includes('infra-ops'));
+  });
+
+  it('treats ui/ dirs as frontend but not ambiguous bare app/ .ts files', () => {
+    // `ui/` is a reliable frontend signal even for a plain .ts (theme, tokens).
+    assert.ok(selectReviewPlaybookIds(['src/ui/theme.ts']).includes('frontend-workflow'));
+    // Bare `app/` is ambiguous: a plain .ts there is often backend (route
+    // handlers, server actions, this repo's webhook app), so it falls back to
+    // core. Real UI under app/ still matches by extension/name.
+    assert.ok(!selectReviewPlaybookIds(['src/app/auth.ts']).includes('frontend-workflow'));
+    assert.ok(
+      selectReviewPlaybookIds(['src/app/dashboard/page.tsx']).includes('frontend-workflow'),
+    );
+    // A non-web `apps/<pkg>` path is not auto-frontend either.
+    assert.ok(!selectReviewPlaybookIds(['apps/api/src/server.ts']).includes('frontend-workflow'));
+  });
+});
+
 describe('buildReviewPlaybookBlock', () => {
   it('renders selected built-in review skills as bounded prompt checklists', () => {
     const block = buildReviewPlaybookBlock([

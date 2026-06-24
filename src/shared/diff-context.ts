@@ -13,8 +13,9 @@ import type { PrFile } from './github.ts';
  */
 
 /**
- * Path classifiers shared between diff risk ranking here and the review
- * focus checklist in runner.ts — one taxonomy, two consumers, no drift.
+ * Path classifiers shared between diff risk ranking here, playbook routing in
+ * review-playbooks.ts, and the review focus block in prompt.ts — one taxonomy,
+ * several consumers, no drift.
  */
 export const PATH_PATTERNS = {
   security: /(^|\/)(auth|security|permissions?|policies)\//i,
@@ -78,6 +79,24 @@ const RISK_RULES: RiskRule[] = [
   { pattern: /\.(md|mdx|txt|rst)$/i, weight: -25 },
 ];
 
+/**
+ * Added/removed line counts for one patch. Skips only true unified-diff file
+ * headers ('+++ '/'--- ', trailing space) so real content lines like '+++i;'
+ * (added '++i;') or '---i;' (removed '--i;') still count. Shared so
+ * diffRiskScore and classifyChangeShape agree on what a changed line is.
+ */
+function countPatchLines(patch: string | undefined): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  if (!patch) return { added, removed };
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('+++ ') || line.startsWith('--- ')) continue;
+    if (line.startsWith('+')) added += 1;
+    else if (line.startsWith('-')) removed += 1;
+  }
+  return { added, removed };
+}
+
 export function diffRiskScore(file: PrFile): number {
   let score = 0;
   for (const rule of RISK_RULES) {
@@ -85,10 +104,65 @@ export function diffRiskScore(file: PrFile): number {
   }
   // Churn tiebreaker: more added lines, more surface for bugs. Capped so a
   // giant generated-looking patch cannot outrank a small auth change.
-  const addedLines = file.patch
-    ? file.patch.split('\n').filter((line) => line.startsWith('+')).length
-    : 0;
+  const addedLines = countPatchLines(file.patch).added;
   return score + Math.min(addedLines, 400) / 100;
+}
+
+/**
+ * Coarse, deterministic shape of a diff, derived only from the changed files
+ * and their patches. It REFINES which review playbooks/checklists are
+ * emphasized — it never narrows review scope (full base...head scope is
+ * invariant #1). Pure: a function of (filename, patch) only, so it stays unit
+ * testable and auditable like the rest of the routing taxonomy.
+ */
+export interface ChangeShape {
+  /** Every changed file is a test file — the non-core playbooks do not apply. */
+  testOnly: boolean;
+  /** Removals dominate the diff — emphasize removal safety (dead refs, lost behavior). */
+  largeDeletion: boolean;
+  /** A dependency manifest changed — emphasize supply-chain scrutiny. */
+  dependencyManifestChange: boolean;
+}
+
+/**
+ * Human-edited dependency manifests. Lockfiles are deliberately absent: they
+ * are dropped upstream by `isNoiseFile` before review, so they never reach
+ * shape classification — the manifest beside them is the reviewable signal.
+ */
+const DEPENDENCY_MANIFEST =
+  /(^|\/)(package\.json|go\.mod|Cargo\.toml|requirements\.(?:txt|in)|setup\.(?:py|cfg)|pyproject\.toml|Gemfile|build\.gradle(?:\.kts)?|pom\.xml|composer\.json|deno\.jsonc?)$/i;
+
+/** Removed lines must clear this floor before a diff counts as a large deletion. */
+const LARGE_DELETION_MIN_REMOVED = 40;
+/** ...and must outweigh additions by this factor, so a move/refactor does not qualify. */
+const LARGE_DELETION_DOMINANCE = 3;
+
+/**
+ * Stricter than `PATH_PATTERNS.tests` for the `testOnly` SUPPRESSION signal.
+ * A bare `spec/` directory is ambiguous — RSpec tests live there, but so do
+ * OpenAPI/contract specs (`spec/openapi.yaml`) that are real API surface — so
+ * testOnly requires an UNAMBIGUOUS marker: a `test`/`tests`/`__tests__`
+ * directory or a `.test`/`.spec` code-file suffix. This keeps a spec-only PR
+ * out of the suppressed path so contract-api review still fires. Erring toward
+ * over-review here is safe; under-reviewing a contract is not.
+ */
+const TEST_ONLY_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
+
+export function classifyChangeShape(files: PrFile[]): ChangeShape {
+  const filenames = files.map((file) => file.filename);
+  let removed = 0;
+  let added = 0;
+  for (const file of files) {
+    const counts = countPatchLines(file.patch);
+    added += counts.added;
+    removed += counts.removed;
+  }
+  return {
+    testOnly: filenames.length > 0 && filenames.every((file) => TEST_ONLY_FILE.test(file)),
+    largeDeletion:
+      removed >= LARGE_DELETION_MIN_REMOVED && removed >= added * LARGE_DELETION_DOMINANCE,
+    dependencyManifestChange: filenames.some((file) => DEPENDENCY_MANIFEST.test(file)),
+  };
 }
 
 /**

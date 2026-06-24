@@ -17,7 +17,8 @@
  * passes, and the pure assembly functions that place a final output reminder
  * last (recency bias for small models).
  */
-import { changedFilesIncludeFrontend } from './review-playbooks.ts';
+import { PATH_PATTERNS, type ChangeShape } from './diff-context.ts';
+import { changedFilesIncludeFrontend, selectReviewPlaybookIds } from './review-playbooks.ts';
 
 export const REVIEW_PROMPT = `You are a rigorous, pragmatic code reviewer. Your goal is to find real bugs
 that would ship to production — and to stay silent otherwise. A missed bug
@@ -497,6 +498,57 @@ function formatPlaybook(playbook: ReviewPlaybook): string {
   ].join('\n');
 }
 
+/**
+ * The per-run review focus block: the selected built-in playbooks plus a
+ * compact focus checklist. The checklist carries only what no DEDICATED
+ * path-keyed playbook already details — security and tests — so it does not
+ * restate the playbooks, which cover API/data/integration/infra and frontend
+ * paths (apps/web, ui dirs, and component/hook-shaped files). Change-shape
+ * signals add one focused emphasis line (large deletion, dependency manifest)
+ * when present.
+ *
+ * It narrows ATTENTION, not scope: every session still reviews the full
+ * base...head diff (invariant #1).
+ */
+export function buildReviewFocusBlock(changedFiles: string[], shape?: ChangeShape): string {
+  const focusItems = new Set<string>();
+
+  for (const file of changedFiles) {
+    if (PATH_PATTERNS.security.test(file)) {
+      focusItems.add('Security: privilege, tokens, tenant isolation, unsafe input boundaries.');
+    }
+    if (PATH_PATTERNS.tests.test(file)) {
+      focusItems.add('Tests: assertions cover changed behavior and do not mask failures.');
+    }
+  }
+
+  if (shape?.largeDeletion) {
+    focusItems.add(
+      'Large deletion: confirm removed code has no remaining callers or references and that nothing relied on the deleted behavior.',
+    );
+  }
+  if (shape?.dependencyManifestChange) {
+    focusItems.add(
+      'Dependency manifest: scrutinize added/updated dependencies and any install scripts for supply-chain risk; verify version compatibility and lockfile integrity.',
+    );
+  }
+
+  if (focusItems.size === 0) {
+    focusItems.add(
+      'General correctness: trace behavior through callers, error paths, contracts, and tests.',
+    );
+  }
+
+  const focusBlock = [
+    '## Relevant review focus',
+    'Use only as relevant checklists; do not invent findings.',
+    ...[...focusItems].map((item) => `- ${item}`),
+  ].join('\n');
+  return [buildReviewPlaybookBlock(selectReviewPlaybookIds(changedFiles, shape)), focusBlock].join(
+    '\n\n',
+  );
+}
+
 // Count-rationed recall lenses, in marginal-value order: each extra review pass
 // adds the next one. The maximum useful pass count is 1 (general) + this length.
 export const COUNTED_LENS_KEYS = ['interactions', 'integrity'] as const;
@@ -514,12 +566,22 @@ const FRONTEND_LENS_KEY = 'frontend';
  * ADDITION to the rationed lenses, never displacing integrity. It is gated on
  * lenses being enabled at all (passes >= 2), so passes=1 stays a single read.
  * A frontend PR therefore runs one more lens session than `passes` implies.
+ *
+ * A test-only change suppresses the frontend lens too, mirroring the
+ * frontend-workflow playbook suppression (selectReviewPlaybookIds): a PR of
+ * only `.test.tsx` files has no render/state surface for that lens to add.
  */
-export function selectLensKeys(passes: number, changedFiles: string[] = []): string[] {
+export function selectLensKeys(
+  passes: number,
+  changedFiles: string[] = [],
+  shape?: ChangeShape,
+): string[] {
   const extraPasses = Math.max(0, passes - 1);
   if (extraPasses === 0) return [];
   const lenses: string[] = COUNTED_LENS_KEYS.slice(0, extraPasses);
-  if (changedFilesIncludeFrontend(changedFiles)) lenses.push(FRONTEND_LENS_KEY);
+  if (!shape?.testOnly && changedFilesIncludeFrontend(changedFiles)) {
+    lenses.push(FRONTEND_LENS_KEY);
+  }
   return lenses;
 }
 

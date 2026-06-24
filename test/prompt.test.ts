@@ -14,6 +14,7 @@ import {
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
+  buildReviewFocusBlock,
   buildShardAssignmentBlock,
   formatFindingsForVerification,
   selectLensKeys,
@@ -188,6 +189,21 @@ describe('selectLensKeys', () => {
     assert.deepEqual(selectLensKeys(99), ['interactions', 'integrity']);
     assert.deepEqual(selectLensKeys(99, ['a.tsx']), ['interactions', 'integrity', 'frontend']);
   });
+
+  it('suppresses the frontend lens for a test-only change', () => {
+    // Mirrors the playbook suppression: a `.test.tsx`-only PR has no
+    // render/state surface for the frontend lens to add.
+    const testShape = { testOnly: true, largeDeletion: false, dependencyManifestChange: false };
+    assert.deepEqual(selectLensKeys(3, ['src/components/Invoice.test.tsx'], testShape), [
+      'interactions',
+      'integrity',
+    ]);
+    // Without the test-only shape the same file still triggers the lens.
+    assert.deepEqual(selectLensKeys(2, ['src/components/Invoice.test.tsx']), [
+      'interactions',
+      'frontend',
+    ]);
+  });
 });
 
 describe('FINDING_VERIFICATION_PROMPT', () => {
@@ -314,5 +330,78 @@ describe('buildShardAssignmentBlock', () => {
     assert.match(block, /Anchor findings ONLY in your assigned files/);
     assert.match(block, /interactions with unchanged code and with OTHER changed files/);
     assert.match(block, /full checkout and the complete changed-file list are available/);
+  });
+});
+
+describe('buildReviewFocusBlock', () => {
+  it('does not restate playbook-covered concerns in the focus checklist', () => {
+    const block = buildReviewFocusBlock([
+      'apps/api/src/routes/router.ts',
+      'src/db/migrations/001_add_index.sql',
+      'src/components/Invoice.tsx',
+      'infra/main.tf',
+      '.github/workflows/ci.yml',
+    ]);
+
+    // The path-keyed playbooks are selected for these files...
+    assert.match(block, /### Contract\/API review \(contract-api\)/);
+    assert.match(block, /### Persistence\/data review \(backend-data\)/);
+    assert.match(block, /### Frontend\/workflow review \(frontend-workflow\)/);
+    assert.match(block, /### Infra\/ops review \(infra-ops\)/);
+    // ...so the focus checklist must not restate the items those playbooks
+    // already cover (every dropped item, not just API/server).
+    for (const dropped of [
+      /API\/server:/,
+      /Data:/,
+      /Infra\/ops:/,
+      /Frontend:/,
+      /External\/tooling:/,
+    ]) {
+      assert.doesNotMatch(block, dropped);
+    }
+  });
+
+  it('keeps the security focus item, which no playbook covers', () => {
+    const block = buildReviewFocusBlock(['src/auth/session.ts']);
+
+    assert.match(block, /## Relevant review focus/);
+    assert.match(block, /Security: privilege/);
+  });
+
+  it('emphasizes removal safety for a large deletion', () => {
+    const block = buildReviewFocusBlock(['src/legacy.ts'], {
+      testOnly: false,
+      largeDeletion: true,
+      dependencyManifestChange: false,
+    });
+
+    assert.match(block, /Large deletion:/);
+  });
+
+  it('emphasizes supply-chain scrutiny for a dependency manifest change', () => {
+    const block = buildReviewFocusBlock(['package.json'], {
+      testOnly: false,
+      largeDeletion: false,
+      dependencyManifestChange: true,
+    });
+
+    assert.match(block, /Dependency manifest:/);
+  });
+
+  it('suppresses non-core playbooks for a test-only change', () => {
+    const block = buildReviewFocusBlock(['src/components/Invoice.test.tsx'], {
+      testOnly: true,
+      largeDeletion: false,
+      dependencyManifestChange: false,
+    });
+
+    assert.match(block, /### Code review core \(code-review-core\)/);
+    assert.doesNotMatch(block, /frontend-workflow/);
+  });
+
+  it('falls back to a general focus item when nothing specific applies', () => {
+    const block = buildReviewFocusBlock(['src/util/helpers.ts']);
+
+    assert.match(block, /General correctness:/);
   });
 });

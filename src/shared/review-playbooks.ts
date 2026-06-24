@@ -1,4 +1,4 @@
-import { PATH_PATTERNS } from './diff-context.ts';
+import { PATH_PATTERNS, type ChangeShape } from './diff-context.ts';
 import type { ReviewPlaybookId } from './prompt.ts';
 
 const CODE_REVIEW_CORE: ReviewPlaybookId = 'code-review-core';
@@ -34,7 +34,14 @@ const BACKEND_DATA_PATTERNS = [
 ];
 
 const FRONTEND_WORKFLOW_PATTERNS = [
-  /(^|\/)(apps?\/web|frontend|client|components?|pages?|views?|hooks?|stores?)\//i,
+  // `ui` covers shared component/design-system dirs where even plain `.ts`
+  // files (theme, tokens) are frontend. Bare `app` is deliberately NOT here:
+  // it is too ambiguous — `src/app/` is a backend entry in this repo and many
+  // Express/Nest apps, and even a Next.js `app/` route handler (`route.ts`) or
+  // server action is backend-shaped. Real UI files under `app/` already match
+  // by `.tsx`/`.jsx` extension below, so bare `app` would mostly add backend
+  // false positives. `apps?/web` stays for the monorepo `apps/web` case.
+  /(^|\/)(apps?\/web|ui|frontend|client|components?|pages?|views?|hooks?|stores?)\//i,
   /(^|\/)[^/]*(component|hook|form|dialog|modal|page|view)[^/]*\.[cm]?[jt]sx?$/i,
   /\.(tsx|jsx|vue|svelte)$/i,
 ];
@@ -60,7 +67,16 @@ export function changedFilesIncludeFrontend(changedFiles: string[]): boolean {
   return matchesAny(changedFiles, FRONTEND_WORKFLOW_PATTERNS);
 }
 
-export function selectReviewPlaybookIds(changedFiles: string[]): ReviewPlaybookId[] {
+export function selectReviewPlaybookIds(
+  changedFiles: string[],
+  shape?: ChangeShape,
+): ReviewPlaybookId[] {
+  // A test-only change touches no API/data/frontend/integration/infra
+  // contract, so only the core checklist (plus the Tests focus item) applies.
+  // Suppressing the rest cuts prompt dilution without narrowing scope — the
+  // full diff is still reviewed. Core review is never suppressed.
+  if (shape?.testOnly) return [CODE_REVIEW_CORE];
+
   const selected = new Set<ReviewPlaybookId>([CODE_REVIEW_CORE]);
 
   if (matchesAny(changedFiles, CONTRACT_API_PATTERNS)) selected.add(CONTRACT_API);
