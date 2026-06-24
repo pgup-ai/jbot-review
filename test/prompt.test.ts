@@ -12,6 +12,7 @@ import {
   REVIEW_LENSES,
   REVIEW_OUTPUT_REMINDER,
   REVIEW_PROMPT,
+  UNTRUSTED_PR_CONTENT_NOTE,
   VERIFICATION_OUTPUT_REMINDER,
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
@@ -24,6 +25,16 @@ import {
   formatFindingsForVerification,
   selectLensKeys,
 } from '../src/shared/prompt.ts';
+
+describe('UNTRUSTED_PR_CONTENT_NOTE', () => {
+  it('marks PR-author content untrusted and forbids obeying instructions in it', () => {
+    assert.match(UNTRUSTED_PR_CONTENT_NOTE, /untrusted/i);
+    assert.match(UNTRUSTED_PR_CONTENT_NOTE, /never as instructions/i);
+    assert.match(UNTRUSTED_PR_CONTENT_NOTE, /description/i);
+    assert.match(UNTRUSTED_PR_CONTENT_NOTE, /prior review comments/i);
+    assert.match(UNTRUSTED_PR_CONTENT_NOTE, /output format/i);
+  });
+});
 
 describe('buildChangesSinceContextBlock', () => {
   it('embeds the SHA range, the git diff command, and the commit subjects', () => {

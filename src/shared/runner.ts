@@ -33,6 +33,7 @@ import { parseAddedLines } from './patch.ts';
 import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
+  UNTRUSTED_PR_CONTENT_NOTE,
   buildChangesSinceContextBlock,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
@@ -681,6 +682,10 @@ export async function runPrReview(params: {
       .filter(Boolean)
       .join('\n');
   }
+  // PR-author prose (title/description/commits/prior comments) is untrusted;
+  // mark it once here so every session derived from coreContext (main + aux)
+  // carries the guard. Static text, so it stays in the cache-stable prefix.
+  coreContext = joinContext(UNTRUSTED_PR_CONTENT_NOTE, coreContext);
   const basePrContext = joinContext(coreContext, diffHunksBlock);
   const auxCommandCodeHasCompleteDiff =
     auxCliBackend !== COMMANDCODE_PROVIDER_ID || commandCodeIncompleteDiffFiles.length === 0;
