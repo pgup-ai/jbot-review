@@ -320,6 +320,27 @@ describe('classifyChangeShape', () => {
     assert.equal(shape.dependencyManifestChange, true);
   });
 
+  it('recognizes dependency manifests across ecosystems', () => {
+    for (const f of [
+      'package.json',
+      'go.mod',
+      'Cargo.toml',
+      'pyproject.toml',
+      'setup.py',
+      'setup.cfg',
+      'requirements.in',
+      'build.gradle.kts',
+      'deno.jsonc',
+      'composer.json',
+    ]) {
+      assert.equal(
+        classifyChangeShape([{ filename: f, patch: '@@ -1 +1 @@\n+x' }]).dependencyManifestChange,
+        true,
+        f,
+      );
+    }
+  });
+
   it('does not treat arbitrary json as a dependency manifest', () => {
     const shape = classifyChangeShape([
       { filename: 'src/data/config.json', patch: '@@ -1 +1 @@\n+{ "k": 1 }' },

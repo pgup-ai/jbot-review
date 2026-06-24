@@ -34,7 +34,11 @@ const BACKEND_DATA_PATTERNS = [
 ];
 
 const FRONTEND_WORKFLOW_PATTERNS = [
-  /(^|\/)(apps?\/web|frontend|client|components?|pages?|views?|hooks?|stores?)\//i,
+  // `app`/`ui` cover the Next.js App-Router root and shared component dirs,
+  // where plain `.ts` files (server actions, route data, theme) are still
+  // frontend. `apps?/web` stays for the monorepo `apps/web` case (which bare
+  // `app` does not match). `apps/` for non-web packages does NOT match `app`.
+  /(^|\/)(apps?\/web|app|ui|frontend|client|components?|pages?|views?|hooks?|stores?)\//i,
   /(^|\/)[^/]*(component|hook|form|dialog|modal|page|view)[^/]*\.[cm]?[jt]sx?$/i,
   /\.(tsx|jsx|vue|svelte)$/i,
 ];

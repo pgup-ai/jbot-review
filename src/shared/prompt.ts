@@ -502,10 +502,10 @@ function formatPlaybook(playbook: ReviewPlaybook): string {
  * The per-run review focus block: the selected built-in playbooks plus a
  * compact focus checklist. The checklist carries only what no DEDICATED
  * path-keyed playbook already details — security and tests — so it does not
- * restate the playbooks, which cover API/data/integration/infra and most
- * frontend paths (apps/web plus component- and hook-shaped files; bare app//ui
- * dirs fall back to code-review-core only). Change-shape signals add one
- * focused emphasis line (large deletion, dependency manifest) when present.
+ * restate the playbooks, which cover API/data/integration/infra and frontend
+ * paths (apps/web, app//ui dirs, and component/hook-shaped files). Change-shape
+ * signals add one focused emphasis line (large deletion, dependency manifest)
+ * when present.
  *
  * It narrows ATTENTION, not scope: every session still reviews the full
  * base...head diff (invariant #1).

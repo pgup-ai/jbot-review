@@ -104,12 +104,14 @@ describe('selectReviewPlaybookIds with change shape', () => {
     assert.ok(selectReviewPlaybookIds(['infra/main.tf']).includes('infra-ops'));
   });
 
-  it('does not treat bare app/ or ui/ directories as frontend', () => {
-    // The frontend-workflow playbook keys on apps/web + component/hook-shaped
-    // paths, not bare app//ui dirs (which often hold backend code), so a plain
-    // .ts file there falls back to core only — pins the dedup parity decision.
-    assert.deepEqual(selectReviewPlaybookIds(['src/app/main.ts']), ['code-review-core']);
-    assert.deepEqual(selectReviewPlaybookIds(['src/ui/theme.ts']), ['code-review-core']);
+  it('treats bare app/ and ui/ directories as frontend (Next.js app-router, ui dirs)', () => {
+    // A plain .ts file under app//ui is frontend in Next.js/Nuxt/SvelteKit
+    // layouts (server actions, route data, theme), so it gets the frontend
+    // playbook rather than core-only.
+    assert.ok(selectReviewPlaybookIds(['src/app/actions.ts']).includes('frontend-workflow'));
+    assert.ok(selectReviewPlaybookIds(['src/ui/theme.ts']).includes('frontend-workflow'));
+    // ...but a non-web `apps/<pkg>` path is not auto-frontend.
+    assert.ok(!selectReviewPlaybookIds(['apps/api/src/server.ts']).includes('frontend-workflow'));
   });
 });
 

@@ -79,6 +79,24 @@ const RISK_RULES: RiskRule[] = [
   { pattern: /\.(md|mdx|txt|rst)$/i, weight: -25 },
 ];
 
+/**
+ * Added/removed line counts for one patch. Skips only true unified-diff file
+ * headers ('+++ '/'--- ', trailing space) so real content lines like '+++i;'
+ * (added '++i;') or '---i;' (removed '--i;') still count. Shared so
+ * diffRiskScore and classifyChangeShape agree on what a changed line is.
+ */
+function countPatchLines(patch: string | undefined): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  if (!patch) return { added, removed };
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('+++ ') || line.startsWith('--- ')) continue;
+    if (line.startsWith('+')) added += 1;
+    else if (line.startsWith('-')) removed += 1;
+  }
+  return { added, removed };
+}
+
 export function diffRiskScore(file: PrFile): number {
   let score = 0;
   for (const rule of RISK_RULES) {
@@ -86,9 +104,7 @@ export function diffRiskScore(file: PrFile): number {
   }
   // Churn tiebreaker: more added lines, more surface for bugs. Capped so a
   // giant generated-looking patch cannot outrank a small auth change.
-  const addedLines = file.patch
-    ? file.patch.split('\n').filter((line) => line.startsWith('+')).length
-    : 0;
+  const addedLines = countPatchLines(file.patch).added;
   return score + Math.min(addedLines, 400) / 100;
 }
 
@@ -114,7 +130,7 @@ export interface ChangeShape {
  * shape classification — the manifest beside them is the reviewable signal.
  */
 const DEPENDENCY_MANIFEST =
-  /(^|\/)(package\.json|go\.mod|Cargo\.toml|requirements\.txt|pyproject\.toml|Gemfile|build\.gradle|pom\.xml|composer\.json)$/i;
+  /(^|\/)(package\.json|go\.mod|Cargo\.toml|requirements\.(?:txt|in)|setup\.(?:py|cfg)|pyproject\.toml|Gemfile|build\.gradle(?:\.kts)?|pom\.xml|composer\.json|deno\.jsonc?)$/i;
 
 /** Removed lines must clear this floor before a diff counts as a large deletion. */
 const LARGE_DELETION_MIN_REMOVED = 40;
@@ -126,15 +142,9 @@ export function classifyChangeShape(files: PrFile[]): ChangeShape {
   let removed = 0;
   let added = 0;
   for (const file of files) {
-    if (!file.patch) continue;
-    for (const line of file.patch.split('\n')) {
-      // Exclude only true unified-diff file headers ('+++ '/'--- ', trailing
-      // space). A bare '+++'/'---' prefix would also drop real content lines
-      // like '+++i;' (added '++i;') or '---i;' (removed '--i;').
-      if (line.startsWith('+++ ') || line.startsWith('--- ')) continue;
-      if (line.startsWith('+')) added += 1;
-      else if (line.startsWith('-')) removed += 1;
-    }
+    const counts = countPatchLines(file.patch);
+    added += counts.added;
+    removed += counts.removed;
   }
   return {
     testOnly: filenames.length > 0 && filenames.every((file) => PATH_PATTERNS.tests.test(file)),

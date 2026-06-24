@@ -9,7 +9,7 @@ in this repo; `CLAUDE.md` just points here.
 
 - `npm test` — all tests (node:test via tsx); single file: `node --import tsx --test test/<file>.test.ts`
 - `npm run typecheck` / `npm run lint` / `npm run format` — tsc, oxlint (deny-warnings), prettier (owns formatting)
-- `npm run build` — esbuild bundles to `dist/` (committed; rebuild when src changes)
+- `npm run build` — esbuild bundles to `dist/` (gitignored build artifact, not committed; `build.yml` rebuilds it in CI before the Docker image `COPY`s it — run locally to verify the bundle compiles)
 - `npm run replay` — render the review context from `fixtures/replay/` without posting
 - `npm run eval` — score review quality against `fixtures/golden/` (see its README)
 
