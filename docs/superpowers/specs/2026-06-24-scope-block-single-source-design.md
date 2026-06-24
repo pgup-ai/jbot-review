@@ -147,26 +147,48 @@ receives only finished text. Both `buildBody` call sites
 
 ### Shard summary changes
 
-`buildSummaryScopeBlock` (`src/shared/runner.ts`) is simplified:
+Keep the substantive per-shard verdict (e.g. "design note claims verify against
+implementation: …") — it adds real information — but remove the duplication at
+its source. Two prompt sites change.
+
+**`buildSummaryScopeBlock` (`src/shared/runner.ts`) — feeds every session, so it
+stays generic (accurate for one reviewer or many):**
 
 - **Remove** the re-review branch that tells shards to "describe what changed
   since the latest prior reviewed head" and the "Latest prior reviewed head: …"
-  lines. The new pass owns that narrative.
-- **Keep** the substantive per-shard verdict summary (e.g. "design note claims
-  verify against implementation: …") — it adds real information.
-- **Add** one instruction: the summary is merged with other reviewers' summaries
-  into one shared review comment, so write review **conclusions** for the changes
-  examined; do not restate the overall PR, and do not reference shards, reviewer
-  numbers, or "assigned files." This removes the `Review of assigned files`
-  vocab leak at the source and gives `condenseSummary` a clean, header-free set
-  of verdict bullets to merge.
+  lines. The new pass owns that narrative. What remains: the summary affects only
+  the summary field, prefer concise Markdown bullets, write review conclusions,
+  do not restate the whole PR.
 
-No `report.ts` code backstop for synonym verdicts is added (YAGNI): headerless
-verdict bullets already merge and line-dedupe via `condenseSummary`, and
-`buildBody` already passes `suppressNoFindingVerdicts: total > 0`
-(`src/shared/runner.ts`), which drops "no bugs" boilerplate whenever real
-findings exist. If dogfooding still shows synonym verdict survival, a code-level
-canonicalization is a follow-up, not part of this spec.
+**`buildShardAssignmentBlock` (`src/shared/prompt.ts`) — multi-shard only, so it
+is the correct home for cross-reviewer rules:**
+
+- **Add** verdict scoping beside the existing "Anchor findings ONLY in your
+  assigned files" rule: your summary verdict covers **only your assigned files**;
+  another reviewer summarizes the rest, so do not restate PR-wide observations,
+  and do not title your summary with shard/assignment language ("Review of
+  assigned files", "reviewer N") — it is merged into one shared review comment.
+
+Because `shardFilesForReview` partitions changed files **disjointly** (invariant
+#1), scoping each verdict to its own files makes verdicts non-overlapping **by
+construction** — a shard can only vouch for files no other shard owns. This
+removes overlap at the source rather than trying to dedupe synonyms after the
+fact (which pure-text code cannot do reliably), and it kills the
+`Review of assigned files` vocab leak in the same stroke.
+
+**Backstops (not the primary mechanism).** `condenseSummary` still dedupes
+verbatim-identical lines, and `buildBody` passes
+`suppressNoFindingVerdicts: total > 0` (`src/shared/runner.ts`) to drop bare
+"no X found" boilerplate when findings exist. Honest coverage after the
+disjoint-scope fix:
+
+- Identical lines, or bare boilerplate with findings present → removed.
+- Substantive verdicts → non-overlapping by file partition, kept as distinct,
+  useful content.
+- **Residual:** two shards independently describing a shared cross-file symbol
+  in different words can both survive. Accepted as rare. If dogfooding shows it
+  matters, the escalation is a post-shard verdict-consolidation pass — a
+  follow-up, not this spec.
 
 ## Invariants honored
 
@@ -193,10 +215,13 @@ Pure logic, pinned with `node:test` + `node:assert/strict`:
   `## J-Bot Code Review` header and above the summary; empty → no block and no
   orphan header.
 - `buildSummaryScopeBlock` **regression pin:** output no longer contains the
-  delta-narrative instruction ("changed since the latest prior reviewed head"),
-  and **does** contain the "merged with other reviewers / do not reference
-  shards or assigned files" guidance. This directly guards the recall leak the
-  in-code comment warns about.
+  delta-narrative instruction ("changed since the latest prior reviewed head").
+  This directly guards the recall leak the in-code comment warns about, and it
+  stays generic (no cross-reviewer language that would be false single-shard).
+- `buildShardAssignmentBlock`: output scopes the summary verdict to the shard's
+  own files and forbids shard/assignment vocab ("Review of assigned files") and
+  PR-wide restatement — the disjoint-scope fix that makes verdicts
+  non-overlapping by construction.
 - `buildChangesSinceLastReviewPrompt` / context: contains the load-bearing
   phrases (summarize the delta since last review; concise; not findings) and the
   delta context respects the byte budget and lists what it omitted.
@@ -210,8 +235,8 @@ Pure logic, pinned with `node:test` + `node:assert/strict`:
   `buildSummaryScopeBlock` simplification.
 - `src/shared/opencode.ts`, `src/shared/devin.ts`, `src/shared/commandcode.ts` —
   one `run*ChangesSinceLastReview` each.
-- `src/shared/prompt.ts` — new prompt + delta-context builder; simplified scope
-  block text.
+- `src/shared/prompt.ts` — new pass prompt + delta-context builder;
+  `buildShardAssignmentBlock` verdict-scoping + anti-vocab-leak rule.
 - `test/…` — the cases above.
 
 No new dependencies. No change to markers, posting paths, or finder review scope.
