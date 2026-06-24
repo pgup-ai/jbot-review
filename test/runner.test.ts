@@ -13,6 +13,7 @@ import {
   formatReviewedWith,
   renderReviewMetadataBlock,
 } from '../src/shared/runner.ts';
+import type { Finding } from '../src/shared/types.ts';
 
 const PRIOR_JBOT_REVIEW = [
   '## J-Bot Code Review',
@@ -61,12 +62,14 @@ describe('shouldSummarizeChangesSinceLastReview', () => {
   });
 });
 
-describe('buildBody changes-since-last-review block', () => {
-  it('renders the block above the summary when present', () => {
+describe('buildBody', () => {
+  const finding: Finding = { path: 'a.ts', line: 1, severity: 'P2', title: 't', body: 'b' };
+
+  it('renders the changes-since block above the summary when findings are present', () => {
     const body = buildBody(
       '- Reworked archive path.',
       '- Verdict looks good.',
-      [],
+      [finding],
       [],
       'm',
       'o',
@@ -80,9 +83,43 @@ describe('buildBody changes-since-last-review block', () => {
     );
   });
 
-  it('omits the block (and its header) when the text is empty', () => {
-    const body = buildBody('', '- Verdict looks good.', [], [], 'm', 'o', 'r');
+  it('omits the changes-since block (and header) when the text is empty', () => {
+    const body = buildBody('', '- Verdict looks good.', [finding], [], 'm', 'o', 'r');
     assert.doesNotMatch(body, /Changes since last review/);
+  });
+
+  it('drops the per-shard verification narrative on a zero-findings review', () => {
+    const body = buildBody(
+      '',
+      '- I verified the auth path and it is sound.',
+      [],
+      [],
+      'm',
+      'o',
+      'r',
+    );
+    assert.doesNotMatch(body, /I verified the auth path/);
+    assert.match(body, /No new findings/);
+  });
+
+  it('keeps the summary when there are findings to contextualize', () => {
+    const body = buildBody('', '- Grouped finding summary.', [finding], [], 'm', 'o', 'r');
+    assert.match(body, /Grouped finding summary/);
+  });
+
+  it('keeps the changes-since block on a clean re-review even when the summary is dropped', () => {
+    const body = buildBody(
+      '- Rebased onto main.',
+      '- low-value verification narrative.',
+      [],
+      [],
+      'm',
+      'o',
+      'r',
+    );
+    assert.match(body, /\*\*Changes since last review\*\*/);
+    assert.match(body, /Rebased onto main/);
+    assert.doesNotMatch(body, /low-value verification narrative/);
   });
 });
 
