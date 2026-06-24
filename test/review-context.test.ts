@@ -8,11 +8,27 @@ import {
   buildReviewContext,
   discoverGuidelineDocs,
   discoverGuidelines,
+  formatContextBudget,
   formatDiffScope,
   formatFinderGuidelines,
   formatGuidelines,
   MAX_FINDER_GUIDELINE_BYTES,
 } from '../src/shared/review-context.ts';
+
+describe('formatContextBudget', () => {
+  it('reports per-fragment bytes largest-first with a total, dropping empties', () => {
+    const line = formatContextBudget([
+      { name: 'guidelines', text: 'x'.repeat(100) },
+      { name: 'diff', text: 'y'.repeat(250) },
+      { name: 'context7', text: '' },
+    ]);
+    assert.equal(line, 'Context budget (bytes): diff=250 guidelines=100 total=350');
+  });
+
+  it('measures UTF-8 bytes, not code units', () => {
+    assert.match(formatContextBudget([{ name: 'core', text: '日' }]), /core=3 total=3/);
+  });
+});
 
 async function withTempRepo(run: (repo: string) => Promise<void>): Promise<void> {
   const repo = await mkdtemp(join(tmpdir(), 'jbot-review-guidelines-'));

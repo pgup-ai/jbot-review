@@ -79,6 +79,7 @@ import {
   formatGuidelines,
   formatFinderGuidelines,
   formatDiffScope,
+  formatContextBudget,
 } from './review-context.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
@@ -942,6 +943,14 @@ export async function runPrReview(params: {
       }),
     );
 
+    log(
+      formatContextBudget([
+        { name: 'guidelines', text: guidelinesForPrompt },
+        { name: 'core', text: coreContext },
+        { name: 'diff', text: diffHunksBlock },
+        { name: 'context7', text: context7Block },
+      ]),
+    );
     log(`Running review (${shardPlans.length} shard(s))`);
     const { summary, findings } = await runShardedReview({
       backend: mainBackend,
