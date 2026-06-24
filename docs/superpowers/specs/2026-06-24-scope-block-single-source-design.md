@@ -172,8 +172,8 @@ is the correct home for cross-reviewer rules:**
 `shardFilesForReview` partitions changed files **disjointly** (invariant #1), so
 a shard that follows this instruction vouches only for files no other shard owns
 and compliant verdicts don't overlap. Be precise about the strength of this
-guarantee: the disjoint partition is enforced **in code** for *findings
-anchoring*, but the summary-text scoping is **prompt-level** — it relies on the
+guarantee: the disjoint partition is enforced **in code** for _findings
+anchoring_, but the summary-text scoping is **prompt-level** — it relies on the
 shard obeying the instruction, not on a code constraint. So this removes overlap
 at the common source (and kills the `Review of assigned files` vocab leak)
 rather than making overlap impossible — it is weaker than the structural
