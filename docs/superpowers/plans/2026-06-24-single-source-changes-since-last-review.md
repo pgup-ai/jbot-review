@@ -30,6 +30,7 @@ Order: leaf units first (builder, prompt, parser, predicate, prompt-block edits,
 ## Task 1: Pure delta-context builder
 
 **Files:**
+
 - Modify: `src/shared/prompt.ts` (add near the other `build*Block` helpers)
 - Test: `test/prompt.test.ts`
 
@@ -53,7 +54,10 @@ describe('buildChangesSinceContextBlock', () => {
   });
 
   it('budgets the commit list and names what it omitted', () => {
-    const subjects = Array.from({ length: 500 }, (_, i) => `${i}aaaaaa commit subject number ${i} with padding`);
+    const subjects = Array.from(
+      { length: 500 },
+      (_, i) => `${i}aaaaaa commit subject number ${i} with padding`,
+    );
     const block = buildChangesSinceContextBlock('abc1234', 'def5678', subjects);
     assert.ok(block.length <= CHANGES_SINCE_CONTEXT_BUDGET + 200);
     assert.match(block, /and \d+ more commit\(s\); use the git command above\./);
@@ -119,6 +123,7 @@ git commit -m "Add pure delta-context builder for changes-since-last-review pass
 ## Task 2: The pass prompt
 
 **Files:**
+
 - Modify: `src/shared/prompt.ts` (add after the guideline-compliance prompt block)
 - Test: `test/prompt.test.ts`
 
@@ -137,7 +142,9 @@ describe('CHANGES_SINCE_LAST_REVIEW_PROMPT', () => {
 
   it('puts the output reminder last and asks for a single summary key', () => {
     const out = assembleChangesSinceLastReviewPrompt('PR-CONTEXT', 'DELTA-CONTEXT');
-    assert.ok(out.indexOf('DELTA-CONTEXT') < out.indexOf(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER));
+    assert.ok(
+      out.indexOf('DELTA-CONTEXT') < out.indexOf(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER),
+    );
     assert.ok(out.endsWith(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER));
     assert.match(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER, /single top-level key\s+"summary"/);
   });
@@ -175,7 +182,10 @@ export const CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER = `## Final output remind
 
 Respond now with one raw JSON object with the single top-level key "summary", a Markdown string describing only what changed since the last reviewed head. No text before or after the JSON, no markdown fences, and escape newlines inside the string as \\n. Do not include findings, questions, or a completion note.`;
 
-export function assembleChangesSinceLastReviewPrompt(prContext: string, deltaContext: string): string {
+export function assembleChangesSinceLastReviewPrompt(
+  prContext: string,
+  deltaContext: string,
+): string {
   return [
     CHANGES_SINCE_LAST_REVIEW_PROMPT,
     deltaContext,
@@ -202,6 +212,7 @@ git commit -m "Add changes-since-last-review pass prompt"
 ## Task 3: Fail-open summary parser
 
 **Files:**
+
 - Modify: `src/shared/opencode.ts` (add next to `parseReview`)
 - Test: `test/opencode.test.ts` (create if absent)
 
@@ -219,7 +230,11 @@ const noop = () => {};
 
 describe('parseChangesSinceLastReviewSummary', () => {
   it('extracts the summary string from a valid object', () => {
-    const out = parseChangesSinceLastReviewSummary('{"summary":"- did a thing"}', 'changes-since', noop);
+    const out = parseChangesSinceLastReviewSummary(
+      '{"summary":"- did a thing"}',
+      'changes-since',
+      noop,
+    );
     assert.equal(out, '- did a thing');
   });
 
@@ -260,7 +275,9 @@ export function parseChangesSinceLastReviewSummary(
     return typeof obj.summary === 'string' ? obj.summary.trim() : '';
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    log(`${label} response was not valid JSON; omitting the changes-since-last-review block: ${message}`);
+    log(
+      `${label} response was not valid JSON; omitting the changes-since-last-review block: ${message}`,
+    );
     return '';
   }
 }
@@ -283,6 +300,7 @@ git commit -m "Add fail-open parser for changes-since-last-review summary"
 ## Task 4: Enable predicate
 
 **Files:**
+
 - Modify: `src/shared/runner.ts` (add near `buildSummaryScopeBlock`/`findLatestReviewedHead`)
 - Test: `test/runner.test.ts`
 
@@ -356,6 +374,7 @@ git commit -m "Add enable predicate for changes-since-last-review pass"
 ## Task 5: Simplify buildSummaryScopeBlock (remove the delta instruction)
 
 **Files:**
+
 - Modify: `src/shared/runner.ts` — `buildSummaryScopeBlock` (body) and its call site (`const summaryScopeBlock = buildSummaryScopeBlock(priorComments, headSha);`)
 - Test: `test/runner.test.ts`
 
@@ -422,6 +441,7 @@ git commit -m "Drop per-shard delta instruction from buildSummaryScopeBlock"
 ## Task 6: Verdict-scoping rule in buildShardAssignmentBlock
 
 **Files:**
+
 - Modify: `src/shared/prompt.ts` — `buildShardAssignmentBlock`
 - Test: `test/prompt.test.ts` (extend the existing `describe('buildShardAssignmentBlock', …)`)
 
@@ -468,6 +488,7 @@ git commit -m "Scope per-shard verdicts to own files to remove overlap at the so
 ## Task 7: Render the block in buildBody (and export it)
 
 **Files:**
+
 - Modify: `src/shared/runner.ts` — `buildBody` (add first param + render; add `export`)
 - Test: `test/runner.test.ts`
 
@@ -478,7 +499,15 @@ Add to `test/runner.test.ts` (add `buildBody` to the import):
 ```ts
 describe('buildBody changes-since-last-review block', () => {
   it('renders the block above the summary when present', () => {
-    const body = buildBody('- Reworked archive path.', '- Verdict looks good.', [], [], 'm', 'o', 'r');
+    const body = buildBody(
+      '- Reworked archive path.',
+      '- Verdict looks good.',
+      [],
+      [],
+      'm',
+      'o',
+      'r',
+    );
     assert.match(body, /## J-Bot Code Review/);
     assert.match(body, /\*\*Changes since last review\*\*/);
     assert.ok(
@@ -549,6 +578,7 @@ git commit -m "Render Changes-since-last-review block at the top of the review b
 This task is mechanical and integration-level; it is verified by `npm run typecheck` and the full suite (no regressions). The parse/prompt behavior it relies on is already unit-tested (Tasks 2–3).
 
 **Files:**
+
 - Modify: `src/shared/opencode.ts`, `src/shared/devin.ts`, `src/shared/commandcode.ts`, `src/shared/runner.ts`
 
 - [ ] **Step 1: opencode implementation** — add to `src/shared/opencode.ts`:
@@ -685,6 +715,7 @@ git commit -m "Add runChangesSinceLastReview backend method across all three bac
 This is the integration step that activates the pass. Verified by `npm run typecheck` + full suite + a manual dry run.
 
 **Files:**
+
 - Modify: `src/shared/runner.ts`
 
 - [ ] **Step 1: Add the git helper + the spawn helper**
@@ -768,21 +799,23 @@ Add `buildChangesSinceContextBlock` to the existing import from `./prompt.ts`.
 In `runPrReview`, right after the `guidelineComplianceCheck` block (around the `startGuidelineComplianceCheck({...})` call), add:
 
 ```ts
-    const changesSinceLastReview = trackAuxiliarySession(
-      'changes-since-last-review',
-      startChangesSinceLastReviewSummary({
-        backend: auxBackend,
-        model: auxModel,
-        prContext: auxPrContext,
-        workspace,
-        reviewedHead: findLatestReviewedHead(priorComments.filter(isJbotReviewBody)),
-        headSha,
-        enabled: shouldSummarizeChangesSinceLastReview(priorComments, headSha) && auxCommandCodeHasCompleteDiff,
-        timeoutMs: finderTimeoutMs,
-        log,
-        onTokenUsage: recordTokenUsage,
-      }),
-    );
+const changesSinceLastReview = trackAuxiliarySession(
+  'changes-since-last-review',
+  startChangesSinceLastReviewSummary({
+    backend: auxBackend,
+    model: auxModel,
+    prContext: auxPrContext,
+    workspace,
+    reviewedHead: findLatestReviewedHead(priorComments.filter(isJbotReviewBody)),
+    headSha,
+    enabled:
+      shouldSummarizeChangesSinceLastReview(priorComments, headSha) &&
+      auxCommandCodeHasCompleteDiff,
+    timeoutMs: finderTimeoutMs,
+    log,
+    onTokenUsage: recordTokenUsage,
+  }),
+);
 ```
 
 - [ ] **Step 3: Await it with the other aux sessions**
@@ -790,7 +823,7 @@ In `runPrReview`, right after the `guidelineComplianceCheck` block (around the `
 Add `changesSinceLastReview` to the `pendingAuxiliarySessionLabels([...])` array, and await its text alongside the others (near `const complianceFindings = await guidelineComplianceCheck.promise;`):
 
 ```ts
-    const changesSinceText = await changesSinceLastReview.promise;
+const changesSinceText = await changesSinceLastReview.promise;
 ```
 
 - [ ] **Step 4: Thread the text into both `buildBody` calls**
@@ -798,17 +831,17 @@ Add `changesSinceLastReview` to the `pendingAuxiliarySessionLabels([...])` array
 Both call sites (the `options.dryRun` branch and the posting branch) gain `changesSinceText` as the new first argument:
 
 ```ts
-      const body = buildBody(
-        changesSinceText,
-        summary,
-        filteredFindings,
-        orphaned,
-        model,
-        owner,
-        repo,
-        headSha,
-        tokenUsage.snapshot(),
-      );
+const body = buildBody(
+  changesSinceText,
+  summary,
+  filteredFindings,
+  orphaned,
+  model,
+  owner,
+  repo,
+  headSha,
+  tokenUsage.snapshot(),
+);
 ```
 
 - [ ] **Step 5: Verify typecheck, lint, full suite, build**
@@ -853,6 +886,7 @@ git commit -m "Finalize single-source changes-since-last-review block"
 ## Self-Review
 
 **Spec coverage:**
+
 - New single non-finder pass → Tasks 2, 3, 8, 9. ✓
 - Fail open → omit on failure → Task 3 (parser → `''`) + Task 9 (spawn `.catch` → `''`) + Task 7 (omit when empty). ✓
 - Full backend parity (3 backends) → Task 8. ✓
