@@ -608,6 +608,7 @@ export function buildShardAssignmentBlock(
     '- Review every assigned file in full depth, including its interactions with unchanged code and with OTHER changed files (the full checkout and the complete changed-file list are available — follow symbols wherever they lead).',
     '- Anchor findings ONLY in your assigned files. Issues you notice that anchor in another changed file are owned by a parallel reviewer; do not report them.',
     '- The diff hunks below cover your assigned files; use the git diff command for anything else you need to read.',
+    '- In the "summary" field, describe only your own review conclusions for your assigned files; another reviewer covers the rest. Do not restate PR-wide observations, and do not title your summary with shard or assignment wording (e.g. "Review of assigned files", "reviewer 1") — all summaries are merged into one shared review comment.',
   ].join('\n');
 }
 

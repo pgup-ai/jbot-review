@@ -377,6 +377,13 @@ describe('buildShardAssignmentBlock', () => {
     assert.match(block, /interactions with unchanged code and with OTHER changed files/);
     assert.match(block, /full checkout and the complete changed-file list are available/);
   });
+
+  it('scopes the summary verdict to own files and forbids shard/assignment vocab', () => {
+    assert.match(block, /describe only your own review conclusions for your assigned files/i);
+    assert.match(block, /do not restate PR-wide observations/i);
+    assert.match(block, /Review of assigned files/); // named as a banned title
+    assert.match(block, /merged into one shared review comment/i);
+  });
 });
 
 describe('buildReviewFocusBlock', () => {
