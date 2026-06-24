@@ -998,6 +998,26 @@ export function parseFindingVerdicts(
   return verdicts;
 }
 
+/**
+ * Parses the "changes since last review" pass output. Unlike parseReview, an
+ * unparseable or summary-less response yields '' (not a placeholder string) so
+ * the caller OMITS the block — the pass fails open.
+ */
+export function parseChangesSinceLastReviewSummary(
+  raw: string,
+  label: string,
+  log: (msg: string) => void,
+): string {
+  try {
+    const obj = parseJsonObject(raw) as Record<string, unknown>;
+    return typeof obj.summary === 'string' ? obj.summary.trim() : '';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(`${label} response was not valid JSON; omitting the changes-since-last-review block: ${message}`);
+    return '';
+  }
+}
+
 function parseJsonObject(raw: string): unknown {
   const trimmed = raw.trim();
   if (!trimmed) throw new Error('empty response');
