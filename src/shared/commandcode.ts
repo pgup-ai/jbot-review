@@ -6,13 +6,19 @@ import { join } from 'node:path';
 import { parseModelName } from './model.ts';
 import {
   assembleAddressedPriorCommentsPrompt,
+  assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
   type VerifiableFinding,
 } from './prompt.ts';
-import { parseFindingVerdicts, parseReview, type TokenUsageRecorder } from './opencode.ts';
+import {
+  parseChangesSinceLastReviewSummary,
+  parseFindingVerdicts,
+  parseReview,
+  type TokenUsageRecorder,
+} from './opencode.ts';
 import { truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
@@ -180,6 +186,29 @@ export async function runCommandCodeGuidelineComplianceCheck(
     home,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
+}
+
+export async function runCommandCodeChangesSinceLastReview(
+  workspace: string,
+  model: string,
+  prContext: string,
+  deltaContext: string,
+  log: (msg: string) => void,
+  timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
+  home?: string,
+): Promise<string> {
+  void onTokenUsage;
+  const raw = await runCommandCodePrompt(
+    workspace,
+    model,
+    assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+    'changes-since-last-review',
+    log,
+    timeoutMs,
+    home,
+  );
+  return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
 }
 
 export async function runCommandCodeFindingVerification(

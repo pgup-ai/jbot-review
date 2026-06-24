@@ -608,7 +608,74 @@ export function buildShardAssignmentBlock(
     '- Review every assigned file in full depth, including its interactions with unchanged code and with OTHER changed files (the full checkout and the complete changed-file list are available — follow symbols wherever they lead).',
     '- Anchor findings ONLY in your assigned files. Issues you notice that anchor in another changed file are owned by a parallel reviewer; do not report them.',
     '- The diff hunks below cover your assigned files; use the git diff command for anything else you need to read.',
+    '- In the "summary" field, describe only your own review conclusions for your assigned files; another reviewer covers the rest. Do not restate PR-wide observations, and do not title your summary with shard or assignment wording (e.g. "Review of assigned files", "reviewer 1") — all summaries are merged into one shared review comment.',
   ].join('\n');
+}
+
+/** Hard byte budget for the embedded commit list in the delta-context block. */
+export const CHANGES_SINCE_CONTEXT_BUDGET = 4000;
+
+/**
+ * Pure builder for the "changes since last review" delta context: the SHA
+ * range, the git command to inspect it, and the budgeted commit-subject list.
+ * The IO that produces `commitSubjects` (a `git log` call) lives in runner.ts.
+ */
+export function buildChangesSinceContextBlock(
+  reviewedHead: string,
+  headSha: string,
+  commitSubjects: string[],
+): string {
+  const header = `## Changes since last review
+
+The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}\`. Inspect exactly what changed with \`git diff ${reviewedHead}..${headSha}\`. Commits added since the last review:`;
+  const kept: string[] = [];
+  // Measure in UTF-8 bytes (not String.length code units) so the cap holds for
+  // non-ASCII commit subjects — matches the byte budgets in diff-context.ts.
+  let used = Buffer.byteLength(header, 'utf8');
+  for (const subject of commitSubjects) {
+    const line = `- ${subject}`;
+    const lineBytes = Buffer.byteLength(line, 'utf8') + 1; // +1 for the joining newline
+    if (used + lineBytes > CHANGES_SINCE_CONTEXT_BUDGET) break;
+    kept.push(line);
+    used += lineBytes;
+  }
+  const omitted = commitSubjects.length - kept.length;
+  const lines = [header, ...kept];
+  if (omitted > 0) lines.push(`- _…and ${omitted} more commit(s); use the git command above._`);
+  return lines.join('\n');
+}
+
+export const CHANGES_SINCE_LAST_REVIEW_PROMPT = `You are writing a short "what changed since the last review" note for a pull request that a prior automated review already covered. A separate reviewer reports bugs; your ONLY job is to describe the delta since the last reviewed head.
+
+## How to work
+
+- The "Changes since last review" section below gives the last reviewed head, the current head, and the commits added between them. The full repository is checked out on the PR branch and git is available — run the \`git diff\` command shown there to see exactly what those commits changed.
+- Summarize ONLY what changed between the last reviewed head and the current head. Do not restate the whole PR or re-describe unchanged code.
+- Be concise and scannable: a few Markdown bullet points, one per meaningful change. Collapse trivial churn (formatting, rebases, merges) into a single bullet.
+- Describe changes factually. Do not list bugs or review findings, and do not pass judgement on correctness — findings are produced separately.
+
+## Output
+
+Respond with a SINGLE raw JSON object and NOTHING else — no text before or after it, and no markdown fences. Markdown is allowed only inside the JSON string value; escape newlines inside the string as \\n.
+
+{
+  "summary": "- Reworked the archive path from a bespoke flag to the global soft-delete filter.\\n- Renamed the audit action constant and updated both call sites.\\n- Rebased and reformatted (no behavioral change)."
+}`;
+
+export const CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER = `## Final output reminder
+
+Respond now with one raw JSON object with the single top-level key "summary", a Markdown string describing only what changed since the last reviewed head. No text before or after the JSON, no markdown fences, and escape newlines inside the string as \\n. Do not include findings, questions, or a completion note.`;
+
+export function assembleChangesSinceLastReviewPrompt(
+  prContext: string,
+  deltaContext: string,
+): string {
+  return [
+    CHANGES_SINCE_LAST_REVIEW_PROMPT,
+    deltaContext,
+    prContext,
+    CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
+  ].join('\n\n');
 }
 
 /**

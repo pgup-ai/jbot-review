@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  buildBody,
   buildSummaryScopeBlock,
+  shouldSummarizeChangesSinceLastReview,
   buildMainShardFailureMessage,
   computeFinderTimeoutMs,
   computeRetryTimeoutMs,
@@ -11,6 +13,7 @@ import {
   formatReviewedWith,
   renderReviewMetadataBlock,
 } from '../src/shared/runner.ts';
+import type { Finding } from '../src/shared/types.ts';
 
 const PRIOR_JBOT_REVIEW = [
   '## J-Bot Code Review',
@@ -19,34 +22,104 @@ const PRIOR_JBOT_REVIEW = [
 ].join('\n');
 
 describe('buildSummaryScopeBlock', () => {
-  it('always declares itself summary-only and never narrows review scope', () => {
-    for (const block of [
-      buildSummaryScopeBlock([], 'fffeeeddd111'),
-      buildSummaryScopeBlock([PRIOR_JBOT_REVIEW], 'fffeeeddd111'),
-    ]) {
-      assert.match(block, /affect ONLY the text of the "summary" field/);
-      assert.match(block, /findings always come from the complete PR diff/);
-    }
+  it('no longer instructs shards to describe changes since the reviewed head', () => {
+    const block = buildSummaryScopeBlock();
+    assert.doesNotMatch(block, /reviewed head/i);
+    assert.doesNotMatch(block, /Latest prior reviewed head/i);
   });
 
-  it('on re-review, scopes the summary TEXT to the delta without delta-review instructions', () => {
-    const block = buildSummaryScopeBlock([PRIOR_JBOT_REVIEW], 'fffeeeddd111');
+  it('keeps the scope guardrail and asks for conclusions only', () => {
+    const block = buildSummaryScopeBlock();
+    assert.match(block, /affect ONLY the text of the "summary" field/);
+    assert.match(block, /findings always come from the complete PR diff/);
+    assert.match(block, /review conclusions/i);
+  });
 
-    assert.match(block, /Latest prior reviewed head: abc123def456\. Current head: fffeeeddd111\./);
-    assert.match(block, /still cover the full PR diff/);
-    // Regression pins for the wording that originally leaked into review
-    // scope on small models (the headline recall gap): never tell the model
-    // to diff or review only the prior..head delta.
+  // Regression pins for the wording that originally leaked into review scope on
+  // small models (the headline recall gap): never tell the model to diff or
+  // review only the prior..head delta. The delta narrative now lives in a
+  // separate non-finder pass, so the finder shards never see this framing.
+  it('never tells the model to diff or review only the delta', () => {
+    const block = buildSummaryScopeBlock();
     assert.doesNotMatch(block, /git log/i);
     assert.doesNotMatch(block, /git diff/i);
     assert.doesNotMatch(block, /summarize only/i);
     assert.doesNotMatch(block, /review only/i);
   });
+});
 
-  it('asks for a whole-PR summary on the first run', () => {
-    const block = buildSummaryScopeBlock([], 'fffeeeddd111');
+describe('shouldSummarizeChangesSinceLastReview', () => {
+  it('is false on the first review (no prior jbot reviews)', () => {
+    assert.equal(shouldSummarizeChangesSinceLastReview([], 'fffeeeddd111'), false);
+  });
 
-    assert.match(block, /first visible jbot-review run/);
+  it('is false when the head is unchanged since the last review', () => {
+    assert.equal(shouldSummarizeChangesSinceLastReview([PRIOR_JBOT_REVIEW], 'abc123def456'), false);
+  });
+
+  it('is true on a re-review with a real delta', () => {
+    assert.equal(shouldSummarizeChangesSinceLastReview([PRIOR_JBOT_REVIEW], 'fffeeeddd111'), true);
+  });
+});
+
+describe('buildBody', () => {
+  const finding: Finding = { path: 'a.ts', line: 1, severity: 'P2', title: 't', body: 'b' };
+
+  it('renders the changes-since block above the summary when findings are present', () => {
+    const body = buildBody(
+      '- Reworked archive path.',
+      '- Verdict looks good.',
+      [finding],
+      [],
+      'm',
+      'o',
+      'r',
+    );
+    assert.match(body, /## J-Bot Code Review/);
+    assert.match(body, /\*\*Changes since last review\*\*/);
+    assert.ok(
+      body.indexOf('Changes since last review') < body.indexOf('Verdict looks good'),
+      'block must precede the summary',
+    );
+  });
+
+  it('omits the changes-since block (and header) when the text is empty', () => {
+    const body = buildBody('', '- Verdict looks good.', [finding], [], 'm', 'o', 'r');
+    assert.doesNotMatch(body, /Changes since last review/);
+  });
+
+  it('drops the per-shard verification narrative on a zero-findings review', () => {
+    const body = buildBody(
+      '',
+      '- I verified the auth path and it is sound.',
+      [],
+      [],
+      'm',
+      'o',
+      'r',
+    );
+    assert.doesNotMatch(body, /I verified the auth path/);
+    assert.match(body, /No new findings/);
+  });
+
+  it('keeps the summary when there are findings to contextualize', () => {
+    const body = buildBody('', '- Grouped finding summary.', [finding], [], 'm', 'o', 'r');
+    assert.match(body, /Grouped finding summary/);
+  });
+
+  it('keeps the changes-since block on a clean re-review even when the summary is dropped', () => {
+    const body = buildBody(
+      '- Rebased onto main.',
+      '- low-value verification narrative.',
+      [],
+      [],
+      'm',
+      'o',
+      'r',
+    );
+    assert.match(body, /\*\*Changes since last review\*\*/);
+    assert.match(body, /Rebased onto main/);
+    assert.doesNotMatch(body, /low-value verification narrative/);
   });
 });
 

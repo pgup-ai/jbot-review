@@ -3,6 +3,9 @@ import { describe, it } from 'node:test';
 
 import {
   ADDRESSED_PRIOR_COMMENTS_PROMPT,
+  CHANGES_SINCE_CONTEXT_BUDGET,
+  CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
+  CHANGES_SINCE_LAST_REVIEW_PROMPT,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
@@ -11,14 +14,70 @@ import {
   REVIEW_PROMPT,
   VERIFICATION_OUTPUT_REMINDER,
   assembleAddressedPriorCommentsPrompt,
+  assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
+  buildChangesSinceContextBlock,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
   formatFindingsForVerification,
   selectLensKeys,
 } from '../src/shared/prompt.ts';
+
+describe('buildChangesSinceContextBlock', () => {
+  it('embeds the SHA range, the git diff command, and the commit subjects', () => {
+    const block = buildChangesSinceContextBlock('abc1234', 'def5678', [
+      '111aaaa refactor: soft-delete',
+      '222bbbb chore: format',
+    ]);
+    assert.match(block, /## Changes since last review/);
+    assert.match(block, /`abc1234`/);
+    assert.match(block, /`def5678`/);
+    assert.match(block, /git diff abc1234\.\.def5678/);
+    assert.match(block, /- 111aaaa refactor: soft-delete/);
+    assert.match(block, /- 222bbbb chore: format/);
+  });
+
+  it('budgets the commit list and names what it omitted', () => {
+    const subjects = Array.from(
+      { length: 500 },
+      (_, i) => `${i}aaaaaa commit subject number ${i} with padding`,
+    );
+    const block = buildChangesSinceContextBlock('abc1234', 'def5678', subjects);
+    assert.ok(block.length <= CHANGES_SINCE_CONTEXT_BUDGET + 200);
+    assert.match(block, /and \d+ more commit\(s\); use the git command above\./);
+  });
+
+  it('measures the budget in UTF-8 bytes, not code units', () => {
+    // Multi-byte subjects: char count << byte count, so a .length-based budget
+    // would overshoot the byte cap (invariant #4; matches diff-context.ts).
+    const subjects = Array.from(
+      { length: 500 },
+      (_, i) => `${i}aaaa 日本語のコミットメッセージ ${i}`,
+    );
+    const block = buildChangesSinceContextBlock('abc1234', 'def5678', subjects);
+    assert.ok(Buffer.byteLength(block, 'utf8') <= CHANGES_SINCE_CONTEXT_BUDGET + 200);
+  });
+});
+
+describe('CHANGES_SINCE_LAST_REVIEW_PROMPT', () => {
+  it('summarizes only the delta and forbids findings, with a concrete summary schema', () => {
+    assert.match(CHANGES_SINCE_LAST_REVIEW_PROMPT, /since the last reviewed head/i);
+    assert.match(CHANGES_SINCE_LAST_REVIEW_PROMPT, /do not list bugs or review findings/i);
+    assert.match(CHANGES_SINCE_LAST_REVIEW_PROMPT, /"summary":/);
+    assert.doesNotMatch(CHANGES_SINCE_LAST_REVIEW_PROMPT, /"findings"/);
+  });
+
+  it('puts the output reminder last and asks for a single summary key', () => {
+    const out = assembleChangesSinceLastReviewPrompt('PR-CONTEXT', 'DELTA-CONTEXT');
+    assert.ok(
+      out.indexOf('DELTA-CONTEXT') < out.indexOf(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER),
+    );
+    assert.ok(out.endsWith(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER));
+    assert.match(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER, /single top-level key\s+"summary"/);
+  });
+});
 
 describe('REVIEW_PROMPT', () => {
   it('uses a concrete example instead of union syntax in the schema', () => {
@@ -330,6 +389,13 @@ describe('buildShardAssignmentBlock', () => {
     assert.match(block, /Anchor findings ONLY in your assigned files/);
     assert.match(block, /interactions with unchanged code and with OTHER changed files/);
     assert.match(block, /full checkout and the complete changed-file list are available/);
+  });
+
+  it('scopes the summary verdict to own files and forbids shard/assignment vocab', () => {
+    assert.match(block, /describe only your own review conclusions for your assigned files/i);
+    assert.match(block, /do not restate PR-wide observations/i);
+    assert.match(block, /Review of assigned files/); // named as a banned title
+    assert.match(block, /merged into one shared review comment/i);
   });
 });
 

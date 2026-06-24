@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import {
   SEVERITY_RANK,
@@ -31,6 +33,7 @@ import { parseAddedLines } from './patch.ts';
 import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
+  buildChangesSinceContextBlock,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
   selectLensKeys,
@@ -43,6 +46,7 @@ import {
   runAddressedPriorCommentsCheck as runOpencodeAddressedPriorCommentsCheck,
   runFindingVerification as runOpencodeFindingVerification,
   runGuidelineComplianceCheck as runOpencodeGuidelineComplianceCheck,
+  runChangesSinceLastReview as runOpencodeChangesSinceLastReview,
   listProviderModels,
   enableContext7Mcp,
   disableContext7Mcp,
@@ -55,6 +59,7 @@ import {
   runDevinAddressedPriorCommentsCheck,
   runDevinFindingVerification,
   runDevinGuidelineComplianceCheck,
+  runDevinChangesSinceLastReview,
   runDevinReview,
   writeDevinCredentials,
 } from './devin.ts';
@@ -64,6 +69,7 @@ import {
   runCommandCodeAddressedPriorCommentsCheck,
   runCommandCodeFindingVerification,
   runCommandCodeGuidelineComplianceCheck,
+  runCommandCodeChangesSinceLastReview,
   runCommandCodeReview,
   writeCommandCodeAuth,
 } from './commandcode.ts';
@@ -148,6 +154,14 @@ interface ReviewBackend {
     timeoutMs?: number,
     onTokenUsage?: TokenUsageRecorder,
   ): Promise<FindingVerdict[] | undefined>;
+  runChangesSinceLastReview(
+    model: string,
+    prContext: string,
+    deltaContext: string,
+    log: (msg: string) => void,
+    timeoutMs?: number,
+    onTokenUsage?: TokenUsageRecorder,
+  ): Promise<string>;
 }
 
 function createOpencodeBackend(
@@ -186,6 +200,16 @@ function createOpencodeBackend(
         timeoutMs,
         onTokenUsage,
       ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runOpencodeChangesSinceLastReview(
+        client,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
   };
 }
 
@@ -219,6 +243,16 @@ function createDevinBackend(workspace: string): ReviewBackend {
         model,
         prContext,
         findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runDevinChangesSinceLastReview(
+        workspace,
+        model,
+        prContext,
+        deltaContext,
         log,
         timeoutMs,
         onTokenUsage,
@@ -266,6 +300,17 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
         onTokenUsage,
         home,
       ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runCommandCodeChangesSinceLastReview(
+        workspace,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        home,
+      ),
   };
 }
 
@@ -290,6 +335,8 @@ function limitBackendConcurrency(
     runGuidelineComplianceCheck: (...args) =>
       withSlot(() => backend.runGuidelineComplianceCheck(...args)),
     runFindingVerification: (...args) => withSlot(() => backend.runFindingVerification(...args)),
+    runChangesSinceLastReview: (...args) =>
+      withSlot(() => backend.runChangesSinceLastReview(...args)),
   };
 }
 
@@ -557,7 +604,7 @@ export async function runPrReview(params: {
   const priorJbotThreads = options.includePriorComments ? allPriorJbotThreads : [];
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
-  const summaryScopeBlock = buildSummaryScopeBlock(priorComments, headSha);
+  const summaryScopeBlock = buildSummaryScopeBlock();
   const changeShape = classifyChangeShape(files);
   const reviewFocusBlock = buildReviewFocusBlock(changedFiles, changeShape);
   const diffHunksBlock = buildDiffHunksBlock(files);
@@ -846,6 +893,30 @@ export async function runPrReview(params: {
       }),
     );
 
+    const changesSinceLastReview = trackAuxiliarySession(
+      'changes-since-last-review',
+      startChangesSinceLastReviewSummary({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: auxPrContext,
+        workspace,
+        // Use allPriorReviewComments (always fetched), NOT the
+        // includePriorComments-gated priorComments: whether to summarize the
+        // delta is a re-review decision, independent of whether prior comments
+        // are injected into the finder CONTEXT. Same rule as priorJbotReviewCount
+        // (see the comment above its definition). Gating on priorComments here
+        // silently disables the block whenever include-prior-comments is false.
+        reviewedHead: findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody)),
+        headSha,
+        enabled:
+          shouldSummarizeChangesSinceLastReview(allPriorReviewComments, headSha) &&
+          auxCommandCodeHasCompleteDiff,
+        timeoutMs: finderTimeoutMs,
+        log,
+        onTokenUsage: recordTokenUsage,
+      }),
+    );
+
     // Lens passes run on the aux model (recall supplement, not the deep
     // pass) and use the aux context (no Context7 block): they have no
     // Context7 retry path, so a Context7 hiccup must not be able to zero a
@@ -892,6 +963,7 @@ export async function runPrReview(params: {
       lensPasses,
       addressedPriorCheck,
       guidelineComplianceCheck,
+      changesSinceLastReview,
     ]);
     if (auxiliaryWaitLabels.length > 0) {
       log(
@@ -905,6 +977,7 @@ export async function runPrReview(params: {
     // verification; the main review no longer reports them.
     const verifiedAddressedPriorComments = await addressedPriorCheck.promise;
     const complianceFindings = await guidelineComplianceCheck.promise;
+    const changesSinceText = await changesSinceLastReview.promise;
     // Gate confidence BEFORE deduping so each finding carries its effective
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
@@ -959,6 +1032,7 @@ export async function runPrReview(params: {
 
     if (options.dryRun) {
       const body = buildBody(
+        changesSinceText,
         summary,
         filteredFindings,
         orphaned,
@@ -1016,6 +1090,7 @@ export async function runPrReview(params: {
       }
 
       const body = buildBody(
+        changesSinceText,
         summary,
         filteredFindings,
         orphaned,
@@ -1647,38 +1722,34 @@ function createReviewTokenUsageAccumulator(): {
 }
 
 /**
+ * The changes-since-last-review pass runs only on a re-review with a real
+ * delta: prior jbot reviews exist AND the latest reviewed head differs from the
+ * current head. First review or unchanged head → skip (block omitted).
+ */
+export function shouldSummarizeChangesSinceLastReview(
+  priorComments: string[],
+  headSha?: string,
+): boolean {
+  const priorJbotReviews = priorComments.filter(isJbotReviewBody);
+  if (priorJbotReviews.length === 0) return false;
+  const latestReviewedHead = findLatestReviewedHead(priorJbotReviews);
+  return Boolean(latestReviewedHead && headSha && latestReviewedHead !== headSha);
+}
+
+/**
  * Summary-field instructions ONLY. This block must never narrow review
  * scope: an earlier wording ("summarize only what changed since the latest
  * reviewed head... use git log/diff for prior..head") leaked into review
  * behavior on small models, which then reviewed only the delta and missed
  * cross-commit bugs — the single biggest recall gap versus competitor bots.
  */
-export function buildSummaryScopeBlock(priorComments: string[], headSha?: string): string {
-  const priorJbotReviews = priorComments.filter(isJbotReviewBody);
-  const lines = [
+export function buildSummaryScopeBlock(): string {
+  return [
     '## Summary instructions',
     '- These instructions affect ONLY the text of the "summary" field. They never change what you review: findings always come from the complete PR diff.',
     '- Prefer concise Markdown bullet points in the "summary" field when they make the review easier to scan.',
-  ];
-
-  if (priorJbotReviews.length === 0) {
-    lines.push(
-      '- This is the first visible jbot-review run for this PR, so summarize the overall PR change.',
-    );
-    return lines.join('\n');
-  }
-
-  const latestReviewedHead = findLatestReviewedHead(priorJbotReviews);
-  lines.push(
-    '- This PR already has prior jbot-review runs, so the summary TEXT should describe what changed since the latest prior reviewed head instead of restating the full PR summary. Your review and findings still cover the full PR diff.',
-  );
-  if (latestReviewedHead && headSha && latestReviewedHead !== headSha) {
-    lines.push(`- Latest prior reviewed head: ${latestReviewedHead}. Current head: ${headSha}.`);
-  } else if (latestReviewedHead) {
-    lines.push(`- Latest prior reviewed head: ${latestReviewedHead}.`);
-  }
-
-  return lines.join('\n');
+    '- Summarize your review conclusions for the changes you examined. Do not restate the overall PR; a separate "Changes since last review" note covers what changed.',
+  ].join('\n');
 }
 
 function buildContext7PromptBlock(reason: string): string {
@@ -1754,6 +1825,74 @@ function startAddressedPriorCommentsCheck(params: {
         })`,
       );
       return [];
+    });
+}
+
+const execFileAsync = promisify(execFile);
+const GIT_LOG_TIMEOUT_MS = 15_000;
+
+/** Commit subjects (`<short-sha> <subject>`) added between two revisions, in the checkout. */
+async function collectCommitSubjects(
+  workspace: string,
+  fromSha: string,
+  toSha: string,
+): Promise<string[]> {
+  const { stdout } = await execFileAsync(
+    'git',
+    ['log', '--no-merges', '--format=%h %s', `${fromSha}..${toSha}`],
+    { cwd: workspace, timeout: GIT_LOG_TIMEOUT_MS, maxBuffer: 1024 * 1024 },
+  );
+  return stdout.split('\n').filter(Boolean);
+}
+
+/**
+ * Summarizes the reviewed..head delta once for the whole PR (non-finder pass).
+ * Fail-open: any failure (git, backend, parse) resolves to '' so the block is
+ * simply omitted. Enabled only on a re-review with a real delta.
+ */
+function startChangesSinceLastReviewSummary(params: {
+  backend: ReviewBackend;
+  model: string;
+  prContext: string;
+  workspace: string;
+  reviewedHead?: string;
+  headSha?: string;
+  enabled: boolean;
+  timeoutMs?: number;
+  log: (msg: string) => void;
+  onTokenUsage?: TokenUsageRecorder;
+}): Promise<string> {
+  if (!params.enabled || !params.reviewedHead || !params.headSha) return Promise.resolve('');
+  const reviewedHead = params.reviewedHead;
+  const headSha = params.headSha;
+  params.log('Starting changes-since-last-review summary in parallel.');
+  return (async () => {
+    const subjects = await collectCommitSubjects(params.workspace, reviewedHead, headSha);
+    if (subjects.length === 0) {
+      params.log('changes-since-last-review skipped: no commits since last reviewed head.');
+      return '';
+    }
+    const deltaContext = buildChangesSinceContextBlock(reviewedHead, headSha, subjects);
+    return params.backend.runChangesSinceLastReview(
+      params.model,
+      params.prContext,
+      deltaContext,
+      params.log,
+      params.timeoutMs,
+      params.onTokenUsage,
+    );
+  })()
+    .then((text) => {
+      params.log(`changes-since-last-review summary complete: ${text.length} chars`);
+      return text;
+    })
+    .catch((error) => {
+      params.log(
+        `(skipped changes-since-last-review summary: ${
+          error instanceof Error ? error.message : String(error)
+        })`,
+      );
+      return '';
     });
 }
 
@@ -1871,7 +2010,8 @@ function isResourceNotAccessibleByIntegration(message: string): boolean {
   return message.toLowerCase().includes('resource not accessible by integration');
 }
 
-function buildBody(
+export function buildBody(
+  changesSinceLastReview: string,
   summary: string,
   all: Finding[],
   orphaned: Finding[],
@@ -1882,14 +2022,24 @@ function buildBody(
   tokenUsage?: ReviewTokenUsage,
 ): string {
   const total = all.length;
-  const lines = [
-    '## J-Bot Code Review',
-    '',
-    summary
-      ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: total > 0 })
-      : 'No summary provided.',
-    '',
-  ];
+  const lines = ['## J-Bot Code Review', ''];
+  if (changesSinceLastReview.trim()) {
+    lines.push('**Changes since last review**', '', changesSinceLastReview.trim(), '');
+  }
+  // A clean review's per-shard verification narrative is low-value restatement:
+  // the verdict lines and "No new findings" below already convey "clean", and on
+  // multi-shard runs that narrative overlaps across shards (the dogfood verbosity
+  // we are cutting). Render the grouped summary only when findings exist to
+  // contextualize. The "Changes since last review" block above is independent and
+  // still renders on re-reviews.
+  if (total > 0) {
+    lines.push(
+      summary
+        ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: true })
+        : 'No summary provided.',
+      '',
+    );
+  }
   const guidance = getMergeGuidance(all);
   lines.push(`**Review state:** ${guidance.state}`, '');
   lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`, '');

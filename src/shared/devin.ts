@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { parseModelName } from './model.ts';
 import {
   assembleAddressedPriorCommentsPrompt,
+  assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
@@ -21,6 +22,7 @@ import {
   type VerifiableFinding,
 } from './prompt.ts';
 import {
+  parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,
   parseReview,
   type PromptTokenUsage,
@@ -259,6 +261,27 @@ export async function runDevinGuidelineComplianceCheck(
     onTokenUsage,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
+}
+
+export async function runDevinChangesSinceLastReview(
+  workspace: string,
+  model: string,
+  prContext: string,
+  deltaContext: string,
+  log: (msg: string) => void,
+  timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
+): Promise<string> {
+  const raw = await runDevinPrompt(
+    workspace,
+    model,
+    assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+    'changes-since-last-review',
+    log,
+    timeoutMs,
+    onTokenUsage,
+  );
+  return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
 }
 
 export async function runDevinFindingVerification(
