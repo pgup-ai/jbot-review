@@ -395,13 +395,6 @@ describe('shouldPostReviewComment', () => {
     assert.equal(shouldPostReviewComment(2, 0), false);
     assert.equal(shouldPostReviewComment(2, 1), true);
   });
-
-  it('posts a clean re-run when there is a changes-since delta to show', () => {
-    // Otherwise the "Changes since last review" block — whose main case is a
-    // clean re-review — would be silently dropped by the all-clear skip.
-    assert.equal(shouldPostReviewComment(2, 0, false), false);
-    assert.equal(shouldPostReviewComment(2, 0, true), true);
-  });
 });
 
 describe('isPrCleanAfterRun', () => {

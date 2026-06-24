@@ -261,16 +261,13 @@ export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
 /**
  * Whether to post a review comment this run. The first visible run always
  * posts (sets a baseline) and any run with findings posts; a clean re-run
- * posts nothing — the "review done" reaction signals it instead — EXCEPT when
- * there is a "Changes since last review" delta to show, which is that block's
- * main case (a clean re-review of newly pushed commits).
+ * posts nothing — the "review done" reaction signals it instead.
  */
 export function shouldPostReviewComment(
   priorJbotReviewCount: number,
   findingCount: number,
-  hasChangesSinceDelta = false,
 ): boolean {
-  return priorJbotReviewCount === 0 || findingCount > 0 || hasChangesSinceDelta;
+  return priorJbotReviewCount === 0 || findingCount > 0;
 }
 
 /** Minimal review-thread shape for the reaction gate (no GitHub-layer import). */
