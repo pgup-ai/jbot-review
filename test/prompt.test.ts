@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   ADDRESSED_PRIOR_COMMENTS_PROMPT,
+  CHANGES_SINCE_CONTEXT_BUDGET,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
@@ -14,11 +15,37 @@ import {
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
+  buildChangesSinceContextBlock,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
   formatFindingsForVerification,
   selectLensKeys,
 } from '../src/shared/prompt.ts';
+
+describe('buildChangesSinceContextBlock', () => {
+  it('embeds the SHA range, the git diff command, and the commit subjects', () => {
+    const block = buildChangesSinceContextBlock('abc1234', 'def5678', [
+      '111aaaa refactor: soft-delete',
+      '222bbbb chore: format',
+    ]);
+    assert.match(block, /## Changes since last review/);
+    assert.match(block, /`abc1234`/);
+    assert.match(block, /`def5678`/);
+    assert.match(block, /git diff abc1234\.\.def5678/);
+    assert.match(block, /- 111aaaa refactor: soft-delete/);
+    assert.match(block, /- 222bbbb chore: format/);
+  });
+
+  it('budgets the commit list and names what it omitted', () => {
+    const subjects = Array.from(
+      { length: 500 },
+      (_, i) => `${i}aaaaaa commit subject number ${i} with padding`,
+    );
+    const block = buildChangesSinceContextBlock('abc1234', 'def5678', subjects);
+    assert.ok(block.length <= CHANGES_SINCE_CONTEXT_BUDGET + 200);
+    assert.match(block, /and \d+ more commit\(s\); use the git command above\./);
+  });
+});
 
 describe('REVIEW_PROMPT', () => {
   it('uses a concrete example instead of union syntax in the schema', () => {

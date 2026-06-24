@@ -611,6 +611,36 @@ export function buildShardAssignmentBlock(
   ].join('\n');
 }
 
+/** Hard byte budget for the embedded commit list in the delta-context block. */
+export const CHANGES_SINCE_CONTEXT_BUDGET = 4000;
+
+/**
+ * Pure builder for the "changes since last review" delta context: the SHA
+ * range, the git command to inspect it, and the budgeted commit-subject list.
+ * The IO that produces `commitSubjects` (a `git log` call) lives in runner.ts.
+ */
+export function buildChangesSinceContextBlock(
+  reviewedHead: string,
+  headSha: string,
+  commitSubjects: string[],
+): string {
+  const header = `## Changes since last review
+
+The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}\`. Inspect exactly what changed with \`git diff ${reviewedHead}..${headSha}\`. Commits added since the last review:`;
+  const kept: string[] = [];
+  let used = header.length;
+  for (const subject of commitSubjects) {
+    const line = `- ${subject}`;
+    if (used + line.length + 1 > CHANGES_SINCE_CONTEXT_BUDGET) break;
+    kept.push(line);
+    used += line.length + 1;
+  }
+  const omitted = commitSubjects.length - kept.length;
+  const lines = [header, ...kept];
+  if (omitted > 0) lines.push(`- _…and ${omitted} more commit(s); use the git command above._`);
+  return lines.join('\n');
+}
+
 /**
  * Assembles the full review prompt. The output reminder is deliberately LAST:
  * small models weight recent instructions most heavily, and tens of KB of PR
