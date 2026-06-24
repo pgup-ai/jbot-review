@@ -1070,9 +1070,17 @@ export async function runPrReview(params: {
     // Don't post a redundant "all clear" comment on a re-run; a clean re-run
     // is signaled by the reaction instead. `priorJbotReviewCount` is computed
     // up front (independent of includePriorComments). Addressed-thread replies
-    // (below) still run regardless.
+    // (below) still run regardless. Exception: a clean re-review that has a
+    // "Changes since last review" delta still posts (a terse delta + verdict),
+    // since showing that delta is the block's main purpose.
     const findingCount = inline.length + fileLevel.length + orphaned.length;
-    if (shouldPostReviewComment(priorJbotReviewCount, findingCount)) {
+    if (
+      shouldPostReviewComment(
+        priorJbotReviewCount,
+        findingCount,
+        changesSinceText.trim().length > 0,
+      )
+    ) {
       // File-level comments go first so a posting failure can still fall back
       // into the review body, which is built afterwards.
       for (const finding of fileLevel) {
