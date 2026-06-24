@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   buildBody,
+  buildShardPlans,
   buildSummaryScopeBlock,
   shouldSummarizeChangesSinceLastReview,
   buildMainShardFailureMessage,
@@ -20,6 +21,37 @@ const PRIOR_JBOT_REVIEW = [
   '- earlier summary',
   '**Reviewed head:** `abc123def456`',
 ].join('\n');
+
+/** Longest common leading substring — the region a provider can cache. */
+function commonPrefix(a: string, b: string): string {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return a.slice(0, i);
+}
+
+describe('buildShardPlans cache-stable prefix', () => {
+  it('keeps the shared context as a byte-identical prefix across shards', () => {
+    const coreContext = '## Pull request\nTitle: T\nDescription: shared core context';
+    const context7Block = '## Context7 docs\nSHARED_CONTEXT7';
+    const plans = buildShardPlans({
+      coreContext,
+      fullDiffBlock: '',
+      context7Block,
+      shards: [[{ filename: 'src/a.ts' }], [{ filename: 'src/b.ts' }]],
+    });
+
+    assert.equal(plans.length, 2);
+    assert.notEqual(plans[0].context, plans[1].context);
+
+    const prefix = commonPrefix(plans[0].context, plans[1].context);
+    // The cacheable region carries the expensive shared content...
+    assert.ok(prefix.includes(coreContext), 'coreContext must be in the shared prefix');
+    assert.ok(prefix.includes('SHARED_CONTEXT7'), 'context7 must be in the shared prefix');
+    // ...and none of the per-shard assignment (which is what diverges).
+    assert.doesNotMatch(prefix, /reviewer 1\b/);
+    assert.doesNotMatch(prefix, /reviewer 2\b/);
+  });
+});
 
 describe('buildSummaryScopeBlock', () => {
   it('no longer instructs shards to describe changes since the reviewed head', () => {

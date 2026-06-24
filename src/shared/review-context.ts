@@ -67,6 +67,21 @@ export function formatDiffScope(scope: DiffScope): string {
   return lines.join('\n');
 }
 
+/**
+ * One-line UTF-8 byte report of the assembled context fragments, largest first,
+ * for spotting prompt-bloat / dilution regressions in run logs. Dev-facing
+ * observability only — never added to a model-visible prompt.
+ */
+export function formatContextBudget(fragments: Array<{ name: string; text: string }>): string {
+  const sized = fragments
+    .map(({ name, text }) => ({ name, bytes: Buffer.byteLength(text, 'utf8') }))
+    .filter(({ bytes }) => bytes > 0)
+    .sort((a, b) => b.bytes - a.bytes);
+  const total = sized.reduce((sum, { bytes }) => sum + bytes, 0);
+  const parts = sized.map(({ name, bytes }) => `${name}=${bytes}`).join(' ');
+  return `Context budget (bytes): ${parts} total=${total}`;
+}
+
 export interface BuildReviewContextParams {
   pullTitle: string;
   pullBody: string;

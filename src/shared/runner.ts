@@ -33,6 +33,7 @@ import { parseAddedLines } from './patch.ts';
 import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
+  UNTRUSTED_PR_CONTENT_NOTE,
   buildChangesSinceContextBlock,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
@@ -79,6 +80,7 @@ import {
   formatGuidelines,
   formatFinderGuidelines,
   formatDiffScope,
+  formatContextBudget,
 } from './review-context.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
@@ -680,6 +682,10 @@ export async function runPrReview(params: {
       .filter(Boolean)
       .join('\n');
   }
+  // PR-author prose (title/description/commits/prior comments) is untrusted;
+  // mark it once here so every session derived from coreContext (main + aux)
+  // carries the guard. Static text, so it stays in the cache-stable prefix.
+  coreContext = joinContext(UNTRUSTED_PR_CONTENT_NOTE, coreContext);
   const basePrContext = joinContext(coreContext, diffHunksBlock);
   const auxCommandCodeHasCompleteDiff =
     auxCliBackend !== COMMANDCODE_PROVIDER_ID || commandCodeIncompleteDiffFiles.length === 0;
@@ -942,6 +948,14 @@ export async function runPrReview(params: {
       }),
     );
 
+    log(
+      formatContextBudget([
+        { name: 'guidelines', text: guidelinesForPrompt },
+        { name: 'core', text: coreContext },
+        { name: 'diff', text: diffHunksBlock },
+        { name: 'context7', text: context7Block },
+      ]),
+    );
     log(`Running review (${shardPlans.length} shard(s))`);
     const { summary, findings } = await runShardedReview({
       backend: mainBackend,
@@ -1466,7 +1480,7 @@ interface ShardPlan {
  * assignment block and diff slice, so every shard can reason across the
  * whole PR but anchors only in its files.
  */
-function buildShardPlans(params: {
+export function buildShardPlans(params: {
   coreContext: string;
   fullDiffBlock: string;
   context7Block: string;
