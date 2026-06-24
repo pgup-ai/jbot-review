@@ -629,12 +629,15 @@ export function buildChangesSinceContextBlock(
 
 The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}\`. Inspect exactly what changed with \`git diff ${reviewedHead}..${headSha}\`. Commits added since the last review:`;
   const kept: string[] = [];
-  let used = header.length;
+  // Measure in UTF-8 bytes (not String.length code units) so the cap holds for
+  // non-ASCII commit subjects — matches the byte budgets in diff-context.ts.
+  let used = Buffer.byteLength(header, 'utf8');
   for (const subject of commitSubjects) {
     const line = `- ${subject}`;
-    if (used + line.length + 1 > CHANGES_SINCE_CONTEXT_BUDGET) break;
+    const lineBytes = Buffer.byteLength(line, 'utf8') + 1; // +1 for the joining newline
+    if (used + lineBytes > CHANGES_SINCE_CONTEXT_BUDGET) break;
     kept.push(line);
-    used += line.length + 1;
+    used += lineBytes;
   }
   const omitted = commitSubjects.length - kept.length;
   const lines = [header, ...kept];

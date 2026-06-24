@@ -48,6 +48,17 @@ describe('buildChangesSinceContextBlock', () => {
     assert.ok(block.length <= CHANGES_SINCE_CONTEXT_BUDGET + 200);
     assert.match(block, /and \d+ more commit\(s\); use the git command above\./);
   });
+
+  it('measures the budget in UTF-8 bytes, not code units', () => {
+    // Multi-byte subjects: char count << byte count, so a .length-based budget
+    // would overshoot the byte cap (invariant #4; matches diff-context.ts).
+    const subjects = Array.from(
+      { length: 500 },
+      (_, i) => `${i}aaaa 日本語のコミットメッセージ ${i}`,
+    );
+    const block = buildChangesSinceContextBlock('abc1234', 'def5678', subjects);
+    assert.ok(Buffer.byteLength(block, 'utf8') <= CHANGES_SINCE_CONTEXT_BUDGET + 200);
+  });
 });
 
 describe('CHANGES_SINCE_LAST_REVIEW_PROMPT', () => {
