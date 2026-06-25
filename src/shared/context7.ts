@@ -84,7 +84,9 @@ function isExternalContractChange(file: PrFile): boolean {
 export function isContext7QuotaError(message: string): boolean {
   const normalized = message.toLowerCase();
   return (
-    /\b(402|429)\b/.test(normalized) ||
+    // HTTP 402/429 only in an HTTP/status context, so a bare number such as a
+    // "429 ms" duration or "402 bytes" is not misread as quota exhaustion.
+    /\b(?:http|status|code|error|response)\b[^0-9]{0,16}(?:402|429)\b/.test(normalized) ||
     normalized.includes('payment required') ||
     normalized.includes('too many requests') ||
     normalized.includes('rate limit') ||

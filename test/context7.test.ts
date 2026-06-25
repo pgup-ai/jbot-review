@@ -123,6 +123,7 @@ describe('isContext7QuotaError', () => {
     for (const msg of [
       'HTTP 402 Payment Required',
       'Error 429: too many requests',
+      'Request failed with status code 429',
       'insufficient credits remaining',
       'Context7 quota exceeded',
       'rate limit reached, retry-after 60',
@@ -133,7 +134,13 @@ describe('isContext7QuotaError', () => {
   });
 
   it('does not flag transient or connection faults', () => {
-    for (const msg of ['Disconnected', 'network error: ECONNRESET', 'timeout after 30s']) {
+    for (const msg of [
+      'Disconnected',
+      'network error: ECONNRESET',
+      'timeout after 30s',
+      'connect timeout after 429 ms', // 429 as a duration, not an HTTP status
+      'read 402 bytes before reset',
+    ]) {
       assert.equal(isContext7QuotaError(msg), false, msg);
     }
   });
