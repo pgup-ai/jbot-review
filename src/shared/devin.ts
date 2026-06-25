@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import {
   existsSync,
   mkdtempSync,
@@ -28,11 +27,11 @@ import {
   type PromptTokenUsage,
   type TokenUsageRecorder,
 } from './opencode.ts';
+import { spawnWithTimeout } from './cli-process.ts';
 import { formatUsageCost, truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
-const KILL_GRACE_MS = 2_000;
 const DEVIN_SETUP_OUTPUT_RETRY_LIMIT = 1;
 const DEVIN_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const DEVIN_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
@@ -323,7 +322,11 @@ async function runDevinPrompt(
   log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
   try {
     for (let attempt = 0; ; attempt += 1) {
-      const result = await spawnWithTimeout('devin', args, workspace, timeoutMs);
+      const result = await spawnWithTimeout('devin', args, {
+        cwd: workspace,
+        timeoutMs,
+        timeoutMessage: `devin prompt timed out after ${Math.round(timeoutMs / 1000)}s`,
+      });
       if (result.exitCode !== 0) {
         throw new Error(
           `devin ${label} exited ${result.exitCode}: ${truncateForLog(
@@ -512,67 +515,6 @@ function formatDevinUsage(usage: PromptTokenUsage): string {
     parts.push(`creditCost=${formatUsageCost(usage.creditCost)}`);
   if (typeof usage.acuCost === 'number') parts.push(`acuCost=${formatUsageCost(usage.acuCost)}`);
   return `usage: ${parts.join(' ')}`;
-}
-
-function spawnWithTimeout(
-  command: string,
-  args: string[],
-  cwd: string,
-  timeoutMs: number,
-): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd,
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      const pid = child.pid;
-      if (pid !== undefined) {
-        const target = process.platform === 'win32' ? pid : -pid;
-        try {
-          process.kill(target, 'SIGTERM');
-        } catch {
-          /* best effort */
-        }
-        setTimeout(() => {
-          try {
-            process.kill(target, 'SIGKILL');
-          } catch {
-            /* best effort */
-          }
-        }, KILL_GRACE_MS).unref();
-      }
-      reject(new Error(`devin prompt timed out after ${Math.round(timeoutMs / 1000)}s`));
-    }, timeoutMs);
-    timer.unref();
-
-    child.stdout?.setEncoding('utf8');
-    child.stderr?.setEncoding('utf8');
-    child.stdout?.on('data', (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr?.on('data', (chunk: string) => {
-      stderr += chunk;
-    });
-    child.on('error', (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on('close', (exitCode) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ stdout, stderr, exitCode });
-    });
-  });
 }
 
 function tomlString(value: string): string {

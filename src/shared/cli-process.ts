@@ -1,0 +1,121 @@
+import { spawn } from 'node:child_process';
+
+const DEFAULT_KILL_GRACE_MS = 2_000;
+
+export interface CliProcessResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+export interface CliProcessOptions {
+  cwd: string;
+  timeoutMs: number;
+  /** Rejection message used when the wall-clock timeout fires. */
+  timeoutMessage: string;
+  /**
+   * When provided, this is written to the child's stdin (stdin = 'pipe', then
+   * closed). When omitted, stdin is ignored — a CLI that takes its prompt from
+   * a file or argv needs no stdin stream.
+   */
+  input?: string;
+  /** Child environment; defaults to inheriting the parent process env. */
+  env?: NodeJS.ProcessEnv;
+  killGraceMs?: number;
+}
+
+/**
+ * Spawns a CLI under a hard wall-clock timeout, collecting stdout/stderr as
+ * UTF-8. On timeout the whole process group is signalled SIGTERM, then SIGKILL
+ * after a grace period, so a wedged agent can never outlive the review. Shared
+ * by every CLI review backend (devin/commandcode/cursor) so the timeout-and-kill
+ * contract lives in exactly one place.
+ */
+export function spawnWithTimeout(
+  command: string,
+  args: string[],
+  options: CliProcessOptions,
+): Promise<CliProcessResult> {
+  const {
+    cwd,
+    timeoutMs,
+    timeoutMessage,
+    input,
+    env,
+    killGraceMs = DEFAULT_KILL_GRACE_MS,
+  } = options;
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      // A process group (detached) lets the timeout kill the agent AND any
+      // child it spawned; Windows has no process groups, so target the pid.
+      detached: process.platform !== 'win32',
+      stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      env,
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const pid = child.pid;
+      if (pid !== undefined) {
+        const target = process.platform === 'win32' ? pid : -pid;
+        try {
+          process.kill(target, 'SIGTERM');
+        } catch {
+          /* best effort */
+        }
+        // Escalate to SIGKILL only if the child is still alive after the grace
+        // period; the close/error handlers clear this timer the instant it
+        // exits, so a late SIGKILL can never land on a reused pid.
+        killTimer = setTimeout(() => {
+          if (child.exitCode !== null) return;
+          try {
+            process.kill(target, 'SIGKILL');
+          } catch {
+            /* best effort */
+          }
+        }, killGraceMs);
+        killTimer.unref();
+      }
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+    timer.unref();
+    const clearTimers = () => {
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+    };
+
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr?.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    if (input !== undefined) {
+      child.stdin?.on('error', (error: Error) => {
+        // The CLI may exit before consuming stdin; record it in diagnostics
+        // without racing the child close/error path.
+        stderr += `\n[stdin error: ${error.message}]`;
+      });
+      child.stdin?.end(input);
+    }
+    child.on('error', (error) => {
+      clearTimers();
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+    child.on('close', (exitCode) => {
+      clearTimers();
+      if (settled) return;
+      settled = true;
+      resolve({ stdout, stderr, exitCode });
+    });
+  });
+}

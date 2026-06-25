@@ -1,7 +1,11 @@
 import { COMMANDCODE_PROVIDER_ID, isCommandCodeProvider } from './commandcode.ts';
+import { CURSOR_PROVIDER_ID, isCursorProvider } from './cursor.ts';
 import { DEVIN_PROVIDER_ID, isDevinProvider } from './devin.ts';
 
-export type CliBackendID = typeof DEVIN_PROVIDER_ID | typeof COMMANDCODE_PROVIDER_ID;
+export type CliBackendID =
+  | typeof DEVIN_PROVIDER_ID
+  | typeof COMMANDCODE_PROVIDER_ID
+  | typeof CURSOR_PROVIDER_ID;
 
 export interface ReviewBackendSelectionInput {
   providerID: string;
@@ -18,6 +22,7 @@ export interface ReviewBackendSelection {
   needsOpencode: boolean;
   devinApiKey: string;
   commandCodeAccessKey: string;
+  cursorApiKey: string;
   opencodeProviderID: string;
   opencodeModelID: string;
   opencodeApiKey: string;
@@ -26,22 +31,20 @@ export interface ReviewBackendSelection {
 export function selectReviewBackends(input: ReviewBackendSelectionInput): ReviewBackendSelection {
   const mainCliBackend = cliBackendForProvider(input.providerID);
   const auxCliBackend = cliBackendForProvider(input.auxProviderID);
+  // A CLI backend's key is whichever role selected it: main wins, else aux,
+  // else empty. One closure keeps that rule in a single place as backends grow.
+  const keyFor = (backendID: CliBackendID): string => {
+    if (mainCliBackend === backendID) return input.apiKey;
+    if (auxCliBackend === backendID) return input.auxApiKey;
+    return '';
+  };
   return {
     ...(mainCliBackend ? { mainCliBackend } : {}),
     ...(auxCliBackend ? { auxCliBackend } : {}),
     needsOpencode: !mainCliBackend || !auxCliBackend,
-    devinApiKey:
-      mainCliBackend === DEVIN_PROVIDER_ID
-        ? input.apiKey
-        : auxCliBackend === DEVIN_PROVIDER_ID
-          ? input.auxApiKey
-          : '',
-    commandCodeAccessKey:
-      mainCliBackend === COMMANDCODE_PROVIDER_ID
-        ? input.apiKey
-        : auxCliBackend === COMMANDCODE_PROVIDER_ID
-          ? input.auxApiKey
-          : '',
+    devinApiKey: keyFor(DEVIN_PROVIDER_ID),
+    commandCodeAccessKey: keyFor(COMMANDCODE_PROVIDER_ID),
+    cursorApiKey: keyFor(CURSOR_PROVIDER_ID),
     opencodeProviderID: mainCliBackend ? input.auxProviderID : input.providerID,
     opencodeModelID: mainCliBackend ? input.auxModelID : input.modelID,
     opencodeApiKey: mainCliBackend ? input.auxApiKey : input.apiKey,
@@ -51,5 +54,6 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
 function cliBackendForProvider(providerID: string): CliBackendID | undefined {
   if (isDevinProvider(providerID)) return DEVIN_PROVIDER_ID;
   if (isCommandCodeProvider(providerID)) return COMMANDCODE_PROVIDER_ID;
+  if (isCursorProvider(providerID)) return CURSOR_PROVIDER_ID;
   return undefined;
 }

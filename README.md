@@ -103,6 +103,7 @@ jobs:
           xai-api-key: ${{ secrets.XAI_API_KEY }}
           devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
           commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
+          cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
           enable-context7: auto
           context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -113,8 +114,8 @@ jobs:
 and variables → Actions → New repository secret. Add the keys for the providers
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
-`XAI_API_KEY`, `DEVIN_WINDSURF_API_KEY`, `COMMANDCODE_ACCESS_KEY`, or
-`ANTHROPIC_API_KEY`.
+`XAI_API_KEY`, `DEVIN_WINDSURF_API_KEY`, `COMMANDCODE_ACCESS_KEY`,
+`CURSOR_API_KEY`, or `ANTHROPIC_API_KEY`.
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
 no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
@@ -126,6 +127,10 @@ want to support `provider: commandcode` or `aux-provider: commandcode`; the
 action writes `.commandcode/auth.json` under an isolated temporary HOME only
 when a CommandCode-backed run is selected, then removes that temp HOME after the
 run.
+Cursor is a separate CLI backend: pass `CURSOR_API_KEY` when you want to support
+`provider: cursor` or `aux-provider: cursor`; the `cursor-agent` CLI reads the
+key straight from the environment (no credential file) and runs read-only via
+`--mode plan` only when a Cursor-backed run is selected.
 Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
 framework, CLI, cloud-service, or workflow changes.
 
@@ -210,6 +215,7 @@ without editing the workflow.
     xai-api-key: ${{ secrets.XAI_API_KEY }}
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
+    cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
     enable-context7: auto
     context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -287,15 +293,15 @@ npm run eval
 ### Provider configuration (in-repo)
 
 See [models.dev](https://models.dev/) for opencode-backed model catalogs. CLI
-backends such as Devin and CommandCode expose model lists through their own
-tools/accounts.
+backends such as Devin, CommandCode, and Cursor expose model lists through their
+own tools/accounts.
 
 Review metadata reports backend usage counters when they are available.
 OpenCode-backed sessions report token counters and cost from assistant message
 metadata; Devin CLI sessions also contribute usage when the ATIF export includes
-token or cost records. CommandCode CLI does not expose machine-readable
-per-session usage today, so CommandCode sessions may be absent from the metadata
-block. These counters are observability only: they do not identify API keys,
+token or cost records. The CommandCode and Cursor CLIs do not expose
+machine-readable per-session usage today, so those sessions may be absent from
+the metadata block. These counters are observability only: they do not identify API keys,
 accounts, organizations, quota buckets, remaining quota, or reset times, so
 jbot-review does not use them for smart key rotation.
 
@@ -313,6 +319,7 @@ jbot-review does not use them for smart key rotation.
 | `xai`             | `xai/grok-4.3`                      | `xai-api-key`            | `XAI_API_KEY`            |
 | `devin`           | `devin/default`                     | `devin-windsurf-api-key` | `DEVIN_WINDSURF_API_KEY` |
 | `commandcode`     | `commandcode/default`               | `commandcode-access-key` | `COMMANDCODE_ACCESS_KEY` |
+| `cursor`          | `cursor/default`                    | `cursor-api-key`         | `CURSOR_API_KEY`         |
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
@@ -327,6 +334,10 @@ Use `provider: commandcode` with `commandcode-access-key` /
 includes the CommandCode CLI, but `.commandcode/auth.json` is written under an
 isolated temporary HOME only when the main or active auxiliary provider is
 `commandcode`, then removed after the run.
+Use `provider: cursor` with `cursor-api-key` / `CURSOR_API_KEY` for the Cursor
+CLI backend. The Docker image includes the Cursor CLI (`cursor-agent`), which
+reads the key from the environment — no credential file — and runs read-only via
+`--mode plan`.
 
 Set the `provider` and `model` inputs to override the defaults. For automatic
 PR reviews without editing workflow YAML on every provider or model change,
@@ -353,6 +364,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     xai-api-key: ${{ secrets.XAI_API_KEY }}
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
+    cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
     enable-context7: auto
     context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -418,6 +430,7 @@ documentation lookup.
 | `xai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `xai`                            |
 | `devin-windsurf-api-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `devin`                   |
 | `commandcode-access-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `commandcode`             |
+| `cursor-api-key`          | No       | —                     | Used when `provider` or active `aux-provider` is `cursor`                  |
 | `enable-context7`         | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false` |
 | `context7-api-key`        | No       | —                     | Optional Context7 key for reliable CI docs lookup                          |
 | `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                                           |
@@ -507,7 +520,9 @@ active provider with `PROVIDER` and optional `MODEL`. Pass
 `DEVIN_WINDSURF_API_KEY` when `PROVIDER=devin` or when `JBOT_AUX_PROVIDER=devin`
 with an active `JBOT_REVIEW_AUX_MODEL`. Pass `COMMANDCODE_ACCESS_KEY` when
 `PROVIDER=commandcode` or when `JBOT_AUX_PROVIDER=commandcode` with an active
-`JBOT_REVIEW_AUX_MODEL`. Future dashboard BYOK should store encrypted
+`JBOT_REVIEW_AUX_MODEL`. Pass `CURSOR_API_KEY` when `PROVIDER=cursor` or when
+`JBOT_AUX_PROVIDER=cursor` with an active `JBOT_REVIEW_AUX_MODEL`. Future
+dashboard BYOK should store encrypted
 per-user/per-installation keys in the dashboard database and resolve them per
 review job, not through Fly/Cloud Run app secrets.
 
@@ -563,6 +578,7 @@ during checkout.
 | `XAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=xai             |
 | `DEVIN_WINDSURF_API_KEY` | Conditional | —                | Operator key used when PROVIDER=devin           |
 | `COMMANDCODE_ACCESS_KEY` | Conditional | —                | Operator key used when PROVIDER=commandcode     |
+| `CURSOR_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=cursor          |
 | `MODEL`                  | No          | Provider default | Provider model id, optionally prefixed          |
 | `JBOT_REVIEW_AUX_MODEL`  | No          | Main model       | Aux model id, optionally prefixed               |
 | `PORT`                   | No          | `3000`           | HTTP listen port                                |
@@ -590,6 +606,7 @@ ZAI_API_KEY=zai-...
 XAI_API_KEY=xai-...
 DEVIN_WINDSURF_API_KEY=devin-...
 COMMANDCODE_ACCESS_KEY=cmd-...
+CURSOR_API_KEY=cursor-...
 MODEL=deepseek/deepseek-v4-flash
 ```
 
