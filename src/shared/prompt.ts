@@ -739,10 +739,19 @@ export function assembleReviewPrompt(
  * asserting it from priors (see "Claims about external framework behavior" in
  * REVIEW_PROMPT). Kept here so all prompt text lives in this module.
  */
+const CONTEXT7_REASON_BUDGET = 200;
+
 export function buildContext7PromptBlock(reason: string): string {
+  // `reason` is the only variable part (it can carry a changed-file path), so
+  // cap it to keep this injected block under a hard byte budget (invariant #4).
+  let end = Math.min(reason.length, CONTEXT7_REASON_BUDGET);
+  while (end > 0 && Buffer.byteLength(reason.slice(0, end), 'utf8') > CONTEXT7_REASON_BUDGET) {
+    end -= 1;
+  }
+  const safeReason = end < reason.length ? `${reason.slice(0, end)}…` : reason;
   return [
     '## Context7 documentation lookup',
-    `A Context7 documentation tool is available for this run because ${reason}.`,
+    `A Context7 documentation tool is available for this run because ${safeReason}.`,
     'Use it to verify how a changed external API, SDK, framework, ORM, CLI, or cloud service actually behaves — especially before asserting framework-internal behavior a finding depends on (whether an ORM method applies global filters, whether a call retries, what a default option does). Confirm such behavior in the docs rather than from memory.',
     'Do not use it for ordinary business-logic review.',
     'If a Context7 lookup fails, errors, is out of credit, is rate-limited, or returns nothing relevant, do not retry it repeatedly and do not fall back to memory: treat the behavior as unconfirmed and apply the framework-behavior rule — downgrade the finding to "investigate"/advisory and phrase it as a question.',

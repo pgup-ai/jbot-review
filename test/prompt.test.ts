@@ -326,6 +326,19 @@ describe('buildContext7PromptBlock', () => {
     assert.match(block, /out of credit/);
     assert.match(block, /do not retry it repeatedly/);
   });
+
+  it('caps the interpolated reason so the block stays within a hard byte budget', () => {
+    const huge = `external contract change detected in ${'nested/'.repeat(5000)}file.ts`;
+    const block = buildContext7PromptBlock(huge);
+    // invariant #4: the only variable part (reason) is bounded, so the block cannot grow unbounded
+    assert.ok(
+      Buffer.byteLength(block, 'utf8') < 1500,
+      `block was ${Buffer.byteLength(block, 'utf8')} bytes`,
+    );
+    assert.match(block, /…/);
+    // a normal short reason passes through untouched
+    assert.doesNotMatch(buildContext7PromptBlock('enabled by configuration'), /…/);
+  });
 });
 
 describe('assembleFindingVerificationPrompt', () => {
