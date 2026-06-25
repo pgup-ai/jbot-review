@@ -6,6 +6,7 @@ import {
   CHANGES_SINCE_CONTEXT_BUDGET,
   CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
   CHANGES_SINCE_LAST_REVIEW_PROMPT,
+  CONTEXT7_REASON_BUDGET,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
@@ -327,15 +328,16 @@ describe('buildContext7PromptBlock', () => {
     assert.match(block, /do not retry it repeatedly/);
   });
 
-  it('caps the interpolated reason so the block stays within a hard byte budget', () => {
+  it('caps the interpolated reason within the byte budget, ellipsis included', () => {
     const huge = `external contract change detected in ${'nested/'.repeat(5000)}file.ts`;
     const block = buildContext7PromptBlock(huge);
-    // invariant #4: the only variable part (reason) is bounded, so the block cannot grow unbounded
+    const reason = block.match(/because (.+)\.\nUse it to verify/)?.[1] ?? '';
+    assert.ok(reason.endsWith('…'), 'a truncated reason should end with the ellipsis');
+    // invariant #4: the interpolated reason — ellipsis included — stays within the cap
     assert.ok(
-      Buffer.byteLength(block, 'utf8') < 1500,
-      `block was ${Buffer.byteLength(block, 'utf8')} bytes`,
+      Buffer.byteLength(reason, 'utf8') <= CONTEXT7_REASON_BUDGET,
+      `reason was ${Buffer.byteLength(reason, 'utf8')} bytes`,
     );
-    assert.match(block, /…/);
     // a normal short reason passes through untouched
     assert.doesNotMatch(buildContext7PromptBlock('enabled by configuration'), /…/);
   });

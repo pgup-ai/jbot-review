@@ -739,16 +739,22 @@ export function assembleReviewPrompt(
  * asserting it from priors (see "Claims about external framework behavior" in
  * REVIEW_PROMPT). Kept here so all prompt text lives in this module.
  */
-const CONTEXT7_REASON_BUDGET = 200;
+export const CONTEXT7_REASON_BUDGET = 200;
+const CONTEXT7_REASON_ELLIPSIS = '…';
 
 export function buildContext7PromptBlock(reason: string): string {
   // `reason` is the only variable part (it can carry a changed-file path), so
-  // cap it to keep this injected block under a hard byte budget (invariant #4).
-  let end = Math.min(reason.length, CONTEXT7_REASON_BUDGET);
-  while (end > 0 && Buffer.byteLength(reason.slice(0, end), 'utf8') > CONTEXT7_REASON_BUDGET) {
-    end -= 1;
+  // cap it to keep this injected block within a hard byte budget (invariant #4).
+  // Reserve room for the ellipsis so the truncated result still fits the cap.
+  let safeReason = reason;
+  if (Buffer.byteLength(reason, 'utf8') > CONTEXT7_REASON_BUDGET) {
+    const limit = CONTEXT7_REASON_BUDGET - Buffer.byteLength(CONTEXT7_REASON_ELLIPSIS, 'utf8');
+    let end = Math.min(reason.length, limit);
+    while (end > 0 && Buffer.byteLength(reason.slice(0, end), 'utf8') > limit) {
+      end -= 1;
+    }
+    safeReason = `${reason.slice(0, end)}${CONTEXT7_REASON_ELLIPSIS}`;
   }
-  const safeReason = end < reason.length ? `${reason.slice(0, end)}…` : reason;
   return [
     '## Context7 documentation lookup',
     `A Context7 documentation tool is available for this run because ${safeReason}.`,
