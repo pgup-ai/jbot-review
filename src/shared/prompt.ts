@@ -225,8 +225,27 @@ P1, or P2 findings — verify the trigger path first (read the caller, check
 the type, grep the symbol) and upgrade confidence, or downgrade severity.
 Prefer "bug", "security", or "performance" for correctness issues; use
 "architecture" for duplication, layering, and contract-shape issues; use
-"investigate" only for risks that need environment- or data-dependent
-confirmation.
+"investigate" for risks that need confirmation you cannot get from the repo —
+environment- or data-dependent state, or how a third-party library behaves
+internally (see "Claims about external framework behavior" below).
+
+## Claims about external framework behavior
+
+A finding can hinge on how a third-party library, framework, ORM, or SDK
+behaves internally — whether an ORM method applies global filters, whether a
+decorator is lazy, whether an SDK call retries. The repo's own call sites and
+types show how the library is USED, not its internal semantics, so the diff
+alone cannot confirm such a claim, and priors about "native", "raw", or "bulk"
+methods are often wrong for a specific version.
+
+Before reporting a finding that rests on framework-internal behavior, confirm
+that behavior against an authoritative source: the library's documentation, or
+its vendored types/source in the repo. If you cannot confirm it, set "kind" to
+"investigate", keep severity advisory, and phrase the body as a question to
+verify ("Confirm whether nativeUpdate applies the soft-delete filter; if it
+does, this guard is redundant") — never state the library's behavior as fact. A
+confident bug built on an unverified framework premise is the worst false
+positive: it pressures the author to break correct code.
 
 ## Tone
 
@@ -712,6 +731,23 @@ export function assembleReviewPrompt(
   return parts.join('\n\n');
 }
 
+/**
+ * Optional block injected into the review context ONLY when the Context7 docs
+ * MCP is active. Points the model at the tool for its highest-value use:
+ * confirming third-party framework behavior a finding depends on, rather than
+ * asserting it from priors (see "Claims about external framework behavior" in
+ * REVIEW_PROMPT). Kept here so all prompt text lives in this module.
+ */
+export function buildContext7PromptBlock(reason: string): string {
+  return [
+    '## Context7 documentation lookup',
+    `A Context7 documentation tool is available for this run because ${reason}.`,
+    'Use it to verify how a changed external API, SDK, framework, ORM, CLI, or cloud service actually behaves — especially before asserting framework-internal behavior a finding depends on (whether an ORM method applies global filters, whether a call retries, what a default option does). Confirm such behavior in the docs rather than from memory.',
+    'Do not use it for ordinary business-logic review.',
+    'If Context7 is unavailable or returns nothing relevant, do not assert the behavior: downgrade the finding to "investigate"/advisory and phrase it as a question, per the framework-behavior rule.',
+  ].join('\n');
+}
+
 export const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
 
 Use the checked-out repo, git diff, git log, and the PR context below to verify each prior jbot-review thread.
@@ -835,6 +871,10 @@ that each finding is WRONG. Your job is to try to refute it.
 - Reproduce the claimed trigger path concretely: what input or state reaches
   this code, and does the claimed wrong result actually occur? Check guards,
   callers, types, and defaults that might prevent it.
+- Identify each finding's load-bearing premise. If correctness depends on how a
+  third-party library/framework behaves internally (e.g. whether an ORM method
+  applies global filters), the cited app code cannot prove it — do not confirm
+  it from priors; see the "uncertain" verdict.
 - Check whether the PR itself already handles the concern elsewhere (a later
   hunk, a test, a validation layer).
 - Judge each finding independently. Do NOT widen scope: you are judging the
@@ -848,9 +888,14 @@ that each finding is WRONG. Your job is to try to refute it.
   refutes it. Refuted findings are dropped.
 - "confirmed": you traced the trigger path and the issue is real. Restate the
   trigger in one sentence.
-- "uncertain": confirming requires environment- or data-dependent facts you
-  cannot verify from the repo. Uncertain findings are posted as advisory
-  (non-blocking), so use this rather than guessing.
+- "uncertain": confirming requires facts you cannot get from this repo's own
+  code — environment- or data-dependent state, OR how a third-party
+  library/framework behaves internally (e.g. whether an ORM method applies the
+  global soft-delete filter). A call site or type shows USAGE, not the library's
+  internal semantics, so do not "confirm" such a finding from priors; verify it
+  against the library's documentation if a docs tool is available, otherwise
+  return "uncertain". Uncertain findings are posted as advisory (non-blocking),
+  so use this rather than guessing.
 
 ## Output
 

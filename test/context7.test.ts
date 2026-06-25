@@ -82,6 +82,26 @@ describe('decideContext7Mode', () => {
     assert.match(decision.reason, /src\/review\.ts/);
   });
 
+  it('enables for ORM filter-behavior usage in auto mode', () => {
+    // Regression: integral-xyz/fms#3133 used em.nativeUpdate, whose filter
+    // behavior jbot got wrong 5x. The auto heuristic must turn docs lookup on
+    // for ORM usage, not just dependency-manifest or SaaS-SDK changes.
+    const decision = decideContext7Mode({
+      mode: 'auto',
+      apiKey,
+      files: [
+        {
+          filename: 'libs/modules/src/reconciliation/bank/repository/write.repository.ts',
+          patch:
+            '+    await this.em.nativeUpdate(BankReconciliation, { id }, { deletedAt: new Date() });',
+        },
+      ],
+    });
+
+    assert.equal(decision.enabled, true);
+    assert.match(decision.reason, /write\.repository\.ts/);
+  });
+
   it('skips ordinary business logic in auto mode', () => {
     const decision = decideContext7Mode({
       mode: 'auto',

@@ -18,6 +18,12 @@ const CONTEXT7_PATCH_PATTERNS = [
   /\b(@actions\/github|@actions\/core|@octokit\/|@aws-sdk\/|googleapis|@google-cloud\/)\b/i,
   /\b(github\.rest|graphql\(|fetch\(|axios\.|undici|authorization|bearer|api[_-]?key)\b/i,
   /\b(webhook|pagination|rate[- ]?limit|streaming|tool[- ]?call|retry)\b/i,
+  // ORM / data-layer frameworks: their filter, hook, and query-method behavior
+  // is version-specific and a frequent source of confidently-wrong review
+  // claims (e.g. whether nativeUpdate applies global filters — integral-xyz/fms#3133).
+  // Trigger a docs lookup when a diff imports one or calls its behavior-laden methods.
+  /\b(mikro-?orm|typeorm|sequelize|prisma|drizzle|knex|objection|mongoose)\b/i,
+  /\b(nativeUpdate|nativeDelete|createQueryBuilder|getRepository|addFilter|applyFilters)\b/i,
 ];
 
 export function parseContext7Mode(value: string): Context7Mode {

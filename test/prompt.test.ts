@@ -20,6 +20,7 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildChangesSinceContextBlock,
+  buildContext7PromptBlock,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
   formatFindingsForVerification,
@@ -96,6 +97,14 @@ describe('REVIEW_PROMPT', () => {
     assert.doesNotMatch(REVIEW_PROMPT, /"high" \| "medium"/);
     assert.match(REVIEW_PROMPT, /Field constraints:/);
     assert.match(REVIEW_PROMPT, /"severity": "P1"/);
+  });
+
+  it('treats third-party framework-behavior claims as not repo-verifiable', () => {
+    assert.match(REVIEW_PROMPT, /## Claims about external framework behavior/);
+    assert.match(REVIEW_PROMPT, /how the library is USED, not its internal semantics/);
+    assert.match(REVIEW_PROMPT, /never state the library's behavior as fact/);
+    // unconfirmable framework claims route to investigate/advisory, not a confident bug
+    assert.match(REVIEW_PROMPT, /"investigate", keep severity advisory/);
   });
 
   it('does not ask the main review for addressed prior comments', () => {
@@ -290,6 +299,22 @@ describe('FINDING_VERIFICATION_PROMPT', () => {
 
   it('routes uncertain verdicts to advisory severity, not silence', () => {
     assert.match(FINDING_VERIFICATION_PROMPT, /posted as advisory/);
+  });
+
+  it('abstains on unverifiable third-party framework-internal premises', () => {
+    assert.match(FINDING_VERIFICATION_PROMPT, /load-bearing premise/);
+    assert.match(FINDING_VERIFICATION_PROMPT, /library\/framework behaves internally/);
+    assert.match(FINDING_VERIFICATION_PROMPT, /do not "confirm" such a finding from priors/);
+  });
+});
+
+describe('buildContext7PromptBlock', () => {
+  it('aims the docs tool at framework-behavior verification, with abstention fallback', () => {
+    const block = buildContext7PromptBlock('external contract change detected in src/db.ts');
+    assert.match(block, /## Context7 documentation lookup/);
+    assert.match(block, /external contract change detected in src\/db\.ts/);
+    assert.match(block, /before asserting framework-internal behavior/);
+    assert.match(block, /downgrade the finding to "investigate"\/advisory/);
   });
 });
 

@@ -35,6 +35,7 @@ import {
   REVIEW_LENSES,
   UNTRUSTED_PR_CONTENT_NOTE,
   buildChangesSinceContextBlock,
+  buildContext7PromptBlock,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
   selectLensKeys,
@@ -1857,15 +1858,6 @@ export function buildSummaryScopeBlock(): string {
     '- These instructions affect ONLY the text of the "summary" field. They never change what you review: findings always come from the complete PR diff.',
     '- Prefer concise Markdown bullet points in the "summary" field when they make the review easier to scan.',
     '- Summarize your review conclusions for the changes you examined. Do not restate the overall PR; a separate "Changes since last review" note covers what changed.',
-  ].join('\n');
-}
-
-function buildContext7PromptBlock(reason: string): string {
-  return [
-    '## Context7 documentation lookup',
-    `Context7 MCP is available for this run because ${reason}.`,
-    'Use Context7 only to verify changed external API, SDK, framework, CLI, cloud-service, or GitHub Actions usage. Do not use it for ordinary business-logic review.',
-    'If Context7 is unavailable or does not return relevant documentation, continue the review from the repository diff and local evidence.',
   ].join('\n');
 }
 
