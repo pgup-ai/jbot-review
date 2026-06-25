@@ -6,6 +6,7 @@ import {
   cursorEnvForKey,
   formatCursorPromptTimeoutMessage,
   isCursorProvider,
+  parseCursorModelList,
 } from '../src/shared/cursor.ts';
 
 describe('Cursor CLI provider helpers', () => {
@@ -92,6 +93,31 @@ describe('Cursor CLI provider helpers', () => {
     assert.equal(
       formatCursorPromptTimeoutMessage('finding-verification', 'cursor/gpt-5', 1200_000),
       'cursor finding-verification prompt timed out after 1200s (model=cursor/gpt-5)',
+    );
+  });
+
+  it('parses model ids from cursor-agent models output', () => {
+    assert.deepEqual(
+      parseCursorModelList(
+        [
+          'Available models',
+          '',
+          'auto - Auto',
+          'composer-2.5 - Composer 2.5',
+          'gpt-5.2-codex-high - Codex 5.2 High',
+          'claude-opus-4-8-thinking-high - Opus 4.8 1M Thinking',
+          'composer-2.5-fast - Composer 2.5 Fast (default)',
+          '',
+          'Tip: use --model <id> (or /model <id> in interactive mode) to switch.',
+        ].join('\n'),
+      ),
+      [
+        'auto',
+        'composer-2.5',
+        'gpt-5.2-codex-high',
+        'claude-opus-4-8-thinking-high',
+        'composer-2.5-fast',
+      ],
     );
   });
 });

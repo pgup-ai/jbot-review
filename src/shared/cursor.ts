@@ -19,6 +19,7 @@ import { truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const CURSOR_PROMPT_TIMEOUT_MS = 20 * 60_000;
+const CURSOR_MODEL_LIST_TIMEOUT_MS = 60_000;
 const CURSOR_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const CURSOR_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 
@@ -81,6 +82,45 @@ export function formatCursorPromptTimeoutMessage(
   timeoutMs: number,
 ): string {
   return `cursor ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s (model=${model})`;
+}
+
+/**
+ * Lists the models the supplied key can use via `cursor-agent models`, for the
+ * startup observability log (mirrors listCommandCodeModels and opencode's
+ * listProviderModels). Best-effort: the runner logs and continues on failure.
+ */
+export async function listCursorModels(workspace: string, apiKey: string): Promise<string[]> {
+  const result = await spawnWithTimeout(CURSOR_CLI_BIN, ['models'], {
+    cwd: workspace,
+    env: cursorEnvForKey(apiKey),
+    timeoutMs: CURSOR_MODEL_LIST_TIMEOUT_MS,
+    timeoutMessage: `cursor model listing timed out after ${Math.round(
+      CURSOR_MODEL_LIST_TIMEOUT_MS / 1000,
+    )}s`,
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `cursor model listing exited ${result.exitCode}: ${truncateForLog(
+        result.stderr || result.stdout,
+        1000,
+      )}`,
+    );
+  }
+  return parseCursorModelList(result.stdout);
+}
+
+/**
+ * Parses `cursor-agent models` output. Each model line is `<id> - <displayName>`;
+ * the `Available models` header, blank lines, and the trailing `Tip:` line have
+ * no ` - ` separator and are skipped. Exported for unit testing (pure).
+ */
+export function parseCursorModelList(output: string): string[] {
+  const models: string[] = [];
+  for (const line of output.split('\n')) {
+    const match = line.trim().match(/^([A-Za-z0-9][A-Za-z0-9._-]*) - \S/);
+    if (match) models.push(match[1]);
+  }
+  return models;
 }
 
 export async function runCursorReview(

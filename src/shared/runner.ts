@@ -76,6 +76,7 @@ import {
 } from './commandcode.ts';
 import {
   CURSOR_PROVIDER_ID,
+  listCursorModels,
   runCursorAddressedPriorCommentsCheck,
   runCursorFindingVerification,
   runCursorGuidelineComplianceCheck,
@@ -899,6 +900,19 @@ export async function runPrReview(params: {
         );
       } catch (e) {
         log(`(skipped CommandCode model listing: ${(e as Error).message})`);
+      }
+    }
+
+    if (cursorBackend) {
+      try {
+        const models = await listCursorModels(workspace, backendSelection.cursorApiKey);
+        log(
+          models.length > 0
+            ? `Available models for ${CURSOR_PROVIDER_ID} using supplied CLI auth:\n${models.join('\n')}`
+            : `Available models for ${CURSOR_PROVIDER_ID} using supplied CLI auth: none returned`,
+        );
+      } catch (e) {
+        log(`(skipped Cursor model listing: ${(e as Error).message})`);
       }
     }
 

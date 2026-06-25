@@ -56,6 +56,7 @@ export function spawnWithTimeout(
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let killTimer: NodeJS.Timeout | undefined;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -67,17 +68,26 @@ export function spawnWithTimeout(
         } catch {
           /* best effort */
         }
-        setTimeout(() => {
+        // Escalate to SIGKILL only if the child is still alive after the grace
+        // period; the close/error handlers clear this timer the instant it
+        // exits, so a late SIGKILL can never land on a reused pid.
+        killTimer = setTimeout(() => {
+          if (child.exitCode !== null) return;
           try {
             process.kill(target, 'SIGKILL');
           } catch {
             /* best effort */
           }
-        }, killGraceMs).unref();
+        }, killGraceMs);
+        killTimer.unref();
       }
       reject(new Error(timeoutMessage));
     }, timeoutMs);
     timer.unref();
+    const clearTimers = () => {
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+    };
 
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
@@ -96,15 +106,15 @@ export function spawnWithTimeout(
       child.stdin?.end(input);
     }
     child.on('error', (error) => {
+      clearTimers();
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       reject(error);
     });
     child.on('close', (exitCode) => {
+      clearTimers();
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
       resolve({ stdout, stderr, exitCode });
     });
   });
