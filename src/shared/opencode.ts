@@ -7,6 +7,7 @@ import {
   type SessionStatus,
 } from '@opencode-ai/sdk';
 
+import { isContext7QuotaError } from './context7.ts';
 import { parseModelName } from './model.ts';
 import {
   assembleAddressedPriorCommentsPrompt,
@@ -378,9 +379,11 @@ export async function enableContext7Mcp(
     return true;
   } catch (error) {
     if (added) await disableContext7Mcp(client, log);
-    log(
-      `Context7 MCP unavailable; continuing without it: ${formatContext7Error(error, trimmedKey)}`,
-    );
+    const detail = formatContext7Error(error, trimmedKey);
+    const note = isContext7QuotaError(detail)
+      ? 'Context7 out of credit or rate-limited; review continues with the framework-behavior abstention fallback (refill credit or rotate CONTEXT7_API_KEY to re-enable docs checks)'
+      : 'Context7 MCP unavailable; continuing without it';
+    log(`${note}: ${detail}`);
     return false;
   }
 }

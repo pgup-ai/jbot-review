@@ -744,7 +744,7 @@ export function buildContext7PromptBlock(reason: string): string {
     `A Context7 documentation tool is available for this run because ${reason}.`,
     'Use it to verify how a changed external API, SDK, framework, ORM, CLI, or cloud service actually behaves — especially before asserting framework-internal behavior a finding depends on (whether an ORM method applies global filters, whether a call retries, what a default option does). Confirm such behavior in the docs rather than from memory.',
     'Do not use it for ordinary business-logic review.',
-    'If Context7 is unavailable or returns nothing relevant, do not assert the behavior: downgrade the finding to "investigate"/advisory and phrase it as a question, per the framework-behavior rule.',
+    'If a Context7 lookup fails, errors, is out of credit, is rate-limited, or returns nothing relevant, do not retry it repeatedly and do not fall back to memory: treat the behavior as unconfirmed and apply the framework-behavior rule — downgrade the finding to "investigate"/advisory and phrase it as a question.',
   ].join('\n');
 }
 
@@ -893,8 +893,9 @@ that each finding is WRONG. Your job is to try to refute it.
   library/framework behaves internally (e.g. whether an ORM method applies the
   global soft-delete filter). A call site or type shows USAGE, not the library's
   internal semantics, so do not "confirm" such a finding from priors; verify it
-  against the library's documentation if a docs tool is available, otherwise
-  return "uncertain". Uncertain findings are posted as advisory (non-blocking),
+  against the library's documentation if a docs lookup succeeds, otherwise
+  return "uncertain" (a failed or out-of-credit lookup does not count as
+  confirmation). Uncertain findings are posted as advisory (non-blocking),
   so use this rather than guessing.
 
 ## Output

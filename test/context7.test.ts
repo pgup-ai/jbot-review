@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { decideContext7Mode, parseContext7Mode } from '../src/shared/context7.ts';
+import {
+  decideContext7Mode,
+  isContext7QuotaError,
+  parseContext7Mode,
+} from '../src/shared/context7.ts';
 import { enableContext7Mcp, formatContext7Error } from '../src/shared/opencode.ts';
 
 describe('parseContext7Mode', () => {
@@ -111,6 +115,27 @@ describe('decideContext7Mode', () => {
 
     assert.equal(decision.enabled, false);
     assert.match(decision.reason, /no external API/);
+  });
+});
+
+describe('isContext7QuotaError', () => {
+  it('flags out-of-credit / rate-limit / quota responses', () => {
+    for (const msg of [
+      'HTTP 402 Payment Required',
+      'Error 429: too many requests',
+      'insufficient credits remaining',
+      'Context7 quota exceeded',
+      'rate limit reached, retry-after 60',
+      'usage limit hit',
+    ]) {
+      assert.equal(isContext7QuotaError(msg), true, msg);
+    }
+  });
+
+  it('does not flag transient or connection faults', () => {
+    for (const msg of ['Disconnected', 'network error: ECONNRESET', 'timeout after 30s']) {
+      assert.equal(isContext7QuotaError(msg), false, msg);
+    }
   });
 });
 

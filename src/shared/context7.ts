@@ -73,3 +73,25 @@ function isExternalContractChange(file: PrFile): boolean {
   const patch = file.patch ?? '';
   return CONTEXT7_PATCH_PATTERNS.some((pattern) => pattern.test(patch));
 }
+
+/**
+ * True when a Context7 failure means quota is gone (out of credit, rate
+ * limited, payment required) rather than a transient or connection fault. Lets
+ * setup log an actionable message while still failing open. Runtime lookups
+ * that hit this mid-session are handled model-side by the framework-behavior
+ * abstention rule, since the runner cannot observe in-session tool calls.
+ */
+export function isContext7QuotaError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    /\b(402|429)\b/.test(normalized) ||
+    normalized.includes('payment required') ||
+    normalized.includes('too many requests') ||
+    normalized.includes('rate limit') ||
+    normalized.includes('quota') ||
+    normalized.includes('out of credit') ||
+    normalized.includes('credits exhausted') ||
+    normalized.includes('insufficient credit') ||
+    normalized.includes('usage limit')
+  );
+}

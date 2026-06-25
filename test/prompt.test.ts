@@ -315,6 +315,9 @@ describe('buildContext7PromptBlock', () => {
     assert.match(block, /external contract change detected in src\/db\.ts/);
     assert.match(block, /before asserting framework-internal behavior/);
     assert.match(block, /downgrade the finding to "investigate"\/advisory/);
+    // credit-exhaustion / error fallback: no retry loop, no asserting from memory
+    assert.match(block, /out of credit/);
+    assert.match(block, /do not retry it repeatedly/);
   });
 });
 
