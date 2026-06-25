@@ -75,6 +75,14 @@ import {
   writeCommandCodeAuth,
 } from './commandcode.ts';
 import {
+  CURSOR_PROVIDER_ID,
+  runCursorAddressedPriorCommentsCheck,
+  runCursorFindingVerification,
+  runCursorGuidelineComplianceCheck,
+  runCursorChangesSinceLastReview,
+  runCursorReview,
+} from './cursor.ts';
+import {
   buildReviewContext,
   discoverGuidelineDocs,
   formatGuidelines,
@@ -312,6 +320,60 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
         timeoutMs,
         onTokenUsage,
         home,
+      ),
+  };
+}
+
+function createCursorBackend(workspace: string, apiKey: string): ReviewBackend {
+  return {
+    name: CURSOR_PROVIDER_ID,
+    runReview: (model, prContext, guidelines, log, options) =>
+      runCursorReview(workspace, model, prContext, guidelines, log, {
+        ...options,
+        apiKey,
+      }),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runCursorAddressedPriorCommentsCheck(
+        workspace,
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        apiKey,
+      ),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runCursorGuidelineComplianceCheck(
+        workspace,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        apiKey,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runCursorFindingVerification(
+        workspace,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        apiKey,
+      ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runCursorChangesSinceLastReview(
+        workspace,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        apiKey,
       ),
   };
 }
@@ -717,6 +779,7 @@ export async function runPrReview(params: {
   let opencodeBackend: ReviewBackend | undefined;
   let devinBackend: ReviewBackend | undefined;
   let commandCodeBackend: ReviewBackend | undefined;
+  let cursorBackend: ReviewBackend | undefined;
   let commandCodeHome: string | undefined;
   const cleanupCommandCodeHome = (): void => {
     if (!commandCodeHome) return;
@@ -732,6 +795,22 @@ export async function runPrReview(params: {
     const credentialsPath = writeDevinCredentials(devinApiKey);
     log(`Devin CLI credentials configured at ${credentialsPath}.`);
     devinBackend = limitBackendConcurrency(createDevinBackend(workspace), sessionSlots);
+  }
+
+  if (mainCliBackend === CURSOR_PROVIDER_ID || auxCliBackend === CURSOR_PROVIDER_ID) {
+    const cursorApiKey = backendSelection.cursorApiKey;
+    if (!cursorApiKey) {
+      throw new Error(`Missing API key for ${CURSOR_PROVIDER_ID} provider.`);
+    }
+    // Cursor authenticates from CURSOR_API_KEY in each spawn's env — no
+    // credential file and no temp HOME to write or clean up.
+    log(
+      'Cursor CLI authenticated via CURSOR_API_KEY; token usage is unavailable for those sessions.',
+    );
+    cursorBackend = limitBackendConcurrency(
+      createCursorBackend(workspace, cursorApiKey),
+      sessionSlots,
+    );
   }
 
   if (mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID) {
@@ -800,6 +879,7 @@ export async function runPrReview(params: {
   const cliBackends: Record<CliBackendID, ReviewBackend | undefined> = {
     [DEVIN_PROVIDER_ID]: devinBackend,
     [COMMANDCODE_PROVIDER_ID]: commandCodeBackend,
+    [CURSOR_PROVIDER_ID]: cursorBackend,
   };
   const mainBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)

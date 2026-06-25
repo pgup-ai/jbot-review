@@ -18,6 +18,7 @@ describe('selectReviewBackends', () => {
       needsOpencode: true,
       devinApiKey: '',
       commandCodeAccessKey: '',
+      cursorApiKey: '',
       opencodeProviderID: 'opencode',
       opencodeModelID: 'deepseek-v4-flash-free',
       opencodeApiKey: 'main-key',
@@ -38,6 +39,7 @@ describe('selectReviewBackends', () => {
         needsOpencode: true,
         devinApiKey: 'devin-key',
         commandCodeAccessKey: '',
+        cursorApiKey: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
         opencodeApiKey: 'opencode-key',
@@ -58,6 +60,7 @@ describe('selectReviewBackends', () => {
         needsOpencode: true,
         devinApiKey: 'devin-key',
         commandCodeAccessKey: '',
+        cursorApiKey: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
         opencodeApiKey: 'main-key',
@@ -81,6 +84,7 @@ describe('selectReviewBackends', () => {
         needsOpencode: false,
         devinApiKey: 'devin-key',
         commandCodeAccessKey: '',
+        cursorApiKey: '',
         opencodeProviderID: 'devin',
         opencodeModelID: 'codex',
         opencodeApiKey: '',
@@ -102,6 +106,7 @@ describe('selectReviewBackends', () => {
         needsOpencode: true,
         devinApiKey: '',
         commandCodeAccessKey: 'commandcode-key',
+        cursorApiKey: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
         opencodeApiKey: 'opencode-key',
@@ -122,6 +127,7 @@ describe('selectReviewBackends', () => {
         needsOpencode: true,
         devinApiKey: '',
         commandCodeAccessKey: 'commandcode-key',
+        cursorApiKey: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
         opencodeApiKey: 'main-key',
@@ -145,9 +151,102 @@ describe('selectReviewBackends', () => {
         needsOpencode: false,
         devinApiKey: '',
         commandCodeAccessKey: 'commandcode-key',
+        cursorApiKey: '',
         opencodeProviderID: 'commandcode',
         opencodeModelID: 'Qwen/Qwen3.7-Max',
         opencodeApiKey: '',
+      },
+    );
+  });
+
+  it('uses Cursor for main review and OpenCode for aux sessions', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'cursor',
+        modelID: 'gpt-5',
+        apiKey: 'cursor-key',
+        auxApiKey: 'opencode-key',
+      }),
+      {
+        mainCliBackend: 'cursor',
+        needsOpencode: true,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: 'cursor-key',
+        opencodeProviderID: 'opencode',
+        opencodeModelID: 'deepseek-v4-flash-free',
+        opencodeApiKey: 'opencode-key',
+      },
+    );
+  });
+
+  it('uses OpenCode for main review and Cursor for aux sessions', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        auxProviderID: 'cursor',
+        auxModelID: 'gpt-5',
+        auxApiKey: 'cursor-key',
+      }),
+      {
+        auxCliBackend: 'cursor',
+        needsOpencode: true,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: 'cursor-key',
+        opencodeProviderID: 'opencode',
+        opencodeModelID: 'deepseek-v4-flash-free',
+        opencodeApiKey: 'main-key',
+      },
+    );
+  });
+
+  it('skips OpenCode when both main and aux sessions use Cursor', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'cursor',
+        modelID: 'gpt-5',
+        apiKey: 'cursor-key',
+        auxProviderID: 'cursor',
+        auxModelID: 'sonnet-4-thinking',
+      }),
+      {
+        mainCliBackend: 'cursor',
+        auxCliBackend: 'cursor',
+        needsOpencode: false,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: 'cursor-key',
+        opencodeProviderID: 'cursor',
+        opencodeModelID: 'sonnet-4-thinking',
+        opencodeApiKey: '',
+      },
+    );
+  });
+
+  it('routes keys when main and aux sessions use different CLI backends', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'cursor',
+        modelID: 'gpt-5',
+        apiKey: 'cursor-key',
+        auxProviderID: 'commandcode',
+        auxModelID: 'default',
+        auxApiKey: 'commandcode-key',
+      }),
+      {
+        mainCliBackend: 'cursor',
+        auxCliBackend: 'commandcode',
+        needsOpencode: false,
+        devinApiKey: '',
+        commandCodeAccessKey: 'commandcode-key',
+        cursorApiKey: 'cursor-key',
+        opencodeProviderID: 'commandcode',
+        opencodeModelID: 'default',
+        opencodeApiKey: 'commandcode-key',
       },
     );
   });
@@ -169,6 +268,7 @@ describe('selectReviewBackends', () => {
         needsOpencode: false,
         devinApiKey: 'devin-key',
         commandCodeAccessKey: 'commandcode-key',
+        cursorApiKey: '',
         opencodeProviderID: 'commandcode',
         opencodeModelID: 'default',
         opencodeApiKey: 'commandcode-key',

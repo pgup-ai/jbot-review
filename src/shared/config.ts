@@ -20,7 +20,7 @@ const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
 } satisfies Record<string, ModelConfig>;
 
 // See https://models.dev/ for opencode-backed model catalogs. CLI backends
-// such as Devin and CommandCode expose their own model lists.
+// such as Devin, CommandCode, and Cursor expose their own model lists.
 export const PROVIDERS: Record<string, ProviderConfig> = {
   opencode: {
     defaultModel: 'opencode/deepseek-v4-flash-free',
@@ -94,10 +94,20 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
+  cursor: {
+    defaultModel: 'cursor/default',
+    keyEnv: 'CURSOR_API_KEY',
+    keyInput: 'cursor-api-key',
+    models: {
+      // Cursor CLI is not driven through opencode, so prompt-cache options do not apply.
+      default: { promptCache: false },
+    },
+  },
 };
 
 export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {
-  if (providerID === 'devin' || providerID === 'commandcode') return false;
+  if (providerID === 'devin' || providerID === 'commandcode' || providerID === 'cursor')
+    return false;
   return PROVIDERS[providerID]?.models?.[modelID]?.promptCache !== false;
 }
 

@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -19,11 +18,11 @@ import {
   parseReview,
   type TokenUsageRecorder,
 } from './opencode.ts';
+import { spawnWithTimeout } from './cli-process.ts';
 import { truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
-const KILL_GRACE_MS = 2_000;
 const COMMANDCODE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 const COMMANDCODE_MODEL_LIST_TIMEOUT_MS = 60_000;
@@ -235,17 +234,15 @@ export async function runCommandCodeFindingVerification(
 }
 
 export async function listCommandCodeModels(workspace: string, home?: string): Promise<string[]> {
-  const result = await spawnWithInputAndTimeout(
-    COMMANDCODE_CLI_BIN,
-    ['--list-models'],
-    workspace,
-    '',
-    COMMANDCODE_MODEL_LIST_TIMEOUT_MS,
-    commandCodeEnvForHome(home),
-    `commandcode model listing timed out after ${Math.round(
+  const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, ['--list-models'], {
+    cwd: workspace,
+    input: '',
+    env: commandCodeEnvForHome(home),
+    timeoutMs: COMMANDCODE_MODEL_LIST_TIMEOUT_MS,
+    timeoutMessage: `commandcode model listing timed out after ${Math.round(
       COMMANDCODE_MODEL_LIST_TIMEOUT_MS / 1000,
     )}s`,
-  );
+  });
   if (result.exitCode !== 0) {
     throw new Error(
       `commandcode model listing exited ${result.exitCode}: ${truncateForLog(
@@ -304,15 +301,13 @@ async function runCommandCodePrompt(
 ): Promise<string> {
   const args = buildCommandCodeCliArgs({ model });
   log(`Calling ${label} prompt (agent=commandcode-cli, model=${model})`);
-  const result = await spawnWithInputAndTimeout(
-    COMMANDCODE_CLI_BIN,
-    args,
-    workspace,
-    prompt,
+  const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, args, {
+    cwd: workspace,
+    input: prompt,
+    env: commandCodeEnvForHome(home),
     timeoutMs,
-    commandCodeEnvForHome(home),
-    formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
-  );
+    timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
+  });
   if (result.exitCode !== 0) {
     throw new Error(
       formatCommandCodePromptFailure(label, result.exitCode, result.stderr || result.stdout),
@@ -332,77 +327,6 @@ function formatCommandCodePromptFailure(
   const kind = classifyCommandCodePromptFailure(output);
   const suffix = kind ? ` (${kind.replace('_', ' ')})` : '';
   return `commandcode ${label} exited ${exitCode}${suffix}: ${truncateForLog(output, 1000)}`;
-}
-
-function spawnWithInputAndTimeout(
-  command: string,
-  args: string[],
-  cwd: string,
-  input: string,
-  timeoutMs: number,
-  env?: NodeJS.ProcessEnv,
-  timeoutMessage = `commandcode prompt timed out after ${Math.round(timeoutMs / 1000)}s`,
-): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd,
-      detached: process.platform !== 'win32',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env,
-    });
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      const pid = child.pid;
-      if (pid !== undefined) {
-        const target = process.platform === 'win32' ? pid : -pid;
-        try {
-          process.kill(target, 'SIGTERM');
-        } catch {
-          /* best effort */
-        }
-        setTimeout(() => {
-          try {
-            process.kill(target, 'SIGKILL');
-          } catch {
-            /* best effort */
-          }
-        }, KILL_GRACE_MS).unref();
-      }
-      reject(new Error(timeoutMessage));
-    }, timeoutMs);
-    timer.unref();
-
-    child.stdout?.setEncoding('utf8');
-    child.stderr?.setEncoding('utf8');
-    child.stdout?.on('data', (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr?.on('data', (chunk: string) => {
-      stderr += chunk;
-    });
-    child.stdin?.on('error', (error: Error) => {
-      // The CLI may exit before consuming stdin; include it in diagnostics
-      // without racing the child close/error path.
-      stderr += `\n[stdin error: ${error.message}]`;
-    });
-    child.stdin?.end(input);
-    child.on('error', (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on('close', (exitCode) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ stdout, stderr, exitCode });
-    });
-  });
 }
 
 export function formatCommandCodePromptTimeoutMessage(

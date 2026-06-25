@@ -21,6 +21,12 @@ RUN curl -fsSL https://cli.devin.ai/install.sh -o /tmp/devin-install.sh \
   && bash /tmp/devin-install-no-setup.sh \
   && test -x /root/.local/bin/devin \
   && rm -f /tmp/devin-install.sh /tmp/devin-install-no-setup.sh
+
+# Cursor CLI is available for the optional cursor provider path. The installer
+# downloads the cursor-agent binary and symlinks it into ~/.local/bin; auth is
+# read at runtime from CURSOR_API_KEY, so no credential file is written.
+RUN curl https://cursor.com/install -fsS | bash \
+  && test -x /root/.local/bin/cursor-agent
 ENV PATH="/root/.local/bin:${PATH}"
 
 WORKDIR /app
