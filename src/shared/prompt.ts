@@ -252,7 +252,7 @@ The object has exactly two top-level keys, shaped like this example:
       "severity": "P1",
       "kind": "bug",
       "confidence": "high",
-      "title": "Refund amount uses pre-tax subtotal",
+      "title": "\`refund()\` uses pre-tax \`subtotal\`",
       "body": "\`refund()\` subtracts \`subtotal\` instead of \`total\`, so tax is never refunded. Trigger: any taxed order. Consider using \`order.total\` here."
     }
   ]
@@ -276,7 +276,8 @@ Field constraints:
 - "kind": exactly one of "bug", "security", "performance", "maintainability",
   "architecture", "test", "docs", "investigate".
 - "confidence": exactly one of "high", "medium", "low".
-- "title": imperative headline.
+- "title": imperative headline; wrap code identifiers (function, variable,
+  type, and file names) in backticks, like the body.
 - "body": the concrete trigger (input/state), the wrong result, why it is
   wrong, and a focused fix. Findings without a trigger path do not belong in
   the output.

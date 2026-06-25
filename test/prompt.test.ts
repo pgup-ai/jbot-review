@@ -98,6 +98,13 @@ describe('REVIEW_PROMPT', () => {
     assert.match(REVIEW_PROMPT, /"severity": "P1"/);
   });
 
+  it('instructs titles to wrap code identifiers in backticks', () => {
+    assert.match(REVIEW_PROMPT, /headline; wrap code identifiers/);
+    assert.match(REVIEW_PROMPT, /in backticks, like the body/);
+    // the example title must demonstrate the convention, not just state it
+    assert.match(REVIEW_PROMPT, /"title": "`refund\(\)`/);
+  });
+
   it('does not ask the main review for addressed prior comments', () => {
     assert.doesNotMatch(REVIEW_PROMPT, /addressedPriorComments/);
     assert.doesNotMatch(REVIEW_PROMPT, /addressed_by_commit/);
