@@ -793,8 +793,8 @@ JSON string values; escape newlines inside string values as \\n.
       "severity": "P2",
       "kind": "maintainability",
       "confidence": "high",
-      "title": "Floating promise violates TECHNICAL_STANDARDS.md",
-      "body": "TECHNICAL_STANDARDS.md says \\"every promise must be awaited or explicitly voided\\". \`sendReceipt()\` on this line is neither."
+      "title": "Floating promise violates \`TECHNICAL_STANDARDS.md\`",
+      "body": "\`TECHNICAL_STANDARDS.md\` says \\"every promise must be awaited or explicitly voided\\". \`sendReceipt()\` on this line is neither."
     }
   ]
 }

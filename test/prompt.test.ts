@@ -364,6 +364,10 @@ describe('GUIDELINE_COMPLIANCE_PROMPT', () => {
     assert.match(GUIDELINE_COMPLIANCE_PROMPT, /MUST name or quote the specific written rule/);
   });
 
+  it('backticks the document name in the example finding title, per the shared title rule', () => {
+    assert.match(GUIDELINE_COMPLIANCE_PROMPT, /violates `TECHNICAL_STANDARDS\.md`/);
+  });
+
   it('forbids P0 and nit severities for compliance findings', () => {
     assert.match(GUIDELINE_COMPLIANCE_PROMPT, /Do not use "P0" or "nit"/);
   });
