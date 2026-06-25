@@ -6,6 +6,7 @@ import {
   CHANGES_SINCE_CONTEXT_BUDGET,
   CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
   CHANGES_SINCE_LAST_REVIEW_PROMPT,
+  CONTEXT7_REASON_BUDGET,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
@@ -20,6 +21,7 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildChangesSinceContextBlock,
+  buildContext7PromptBlock,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
   formatFindingsForVerification,
@@ -96,6 +98,14 @@ describe('REVIEW_PROMPT', () => {
     assert.doesNotMatch(REVIEW_PROMPT, /"high" \| "medium"/);
     assert.match(REVIEW_PROMPT, /Field constraints:/);
     assert.match(REVIEW_PROMPT, /"severity": "P1"/);
+  });
+
+  it('treats third-party framework-behavior claims as not repo-verifiable', () => {
+    assert.match(REVIEW_PROMPT, /## Claims about external framework behavior/);
+    assert.match(REVIEW_PROMPT, /how the library is USED, not its internal semantics/);
+    assert.match(REVIEW_PROMPT, /never state the library's behavior as fact/);
+    // unconfirmable framework claims route to investigate/advisory, not a confident bug
+    assert.match(REVIEW_PROMPT, /"investigate", keep severity advisory/);
   });
 
   it('instructs titles to wrap code identifiers in backticks', () => {
@@ -297,6 +307,39 @@ describe('FINDING_VERIFICATION_PROMPT', () => {
 
   it('routes uncertain verdicts to advisory severity, not silence', () => {
     assert.match(FINDING_VERIFICATION_PROMPT, /posted as advisory/);
+  });
+
+  it('abstains on unverifiable third-party framework-internal premises', () => {
+    assert.match(FINDING_VERIFICATION_PROMPT, /load-bearing premise/);
+    assert.match(FINDING_VERIFICATION_PROMPT, /library\/framework behaves internally/);
+    assert.match(FINDING_VERIFICATION_PROMPT, /do not "confirm" such a finding from priors/);
+  });
+});
+
+describe('buildContext7PromptBlock', () => {
+  it('aims the docs tool at framework-behavior verification, with abstention fallback', () => {
+    const block = buildContext7PromptBlock('external contract change detected in src/db.ts');
+    assert.match(block, /## Context7 documentation lookup/);
+    assert.match(block, /external contract change detected in src\/db\.ts/);
+    assert.match(block, /before asserting framework-internal behavior/);
+    assert.match(block, /downgrade the finding to "investigate"\/advisory/);
+    // credit-exhaustion / error fallback: no retry loop, no asserting from memory
+    assert.match(block, /out of credit/);
+    assert.match(block, /do not retry it repeatedly/);
+  });
+
+  it('caps the interpolated reason within the byte budget, ellipsis included', () => {
+    const huge = `external contract change detected in ${'nested/'.repeat(5000)}file.ts`;
+    const block = buildContext7PromptBlock(huge);
+    const reason = block.match(/because (.+)\.\nUse it to verify/)?.[1] ?? '';
+    assert.ok(reason.endsWith('…'), 'a truncated reason should end with the ellipsis');
+    // invariant #4: the interpolated reason — ellipsis included — stays within the cap
+    assert.ok(
+      Buffer.byteLength(reason, 'utf8') <= CONTEXT7_REASON_BUDGET,
+      `reason was ${Buffer.byteLength(reason, 'utf8')} bytes`,
+    );
+    // a normal short reason passes through untouched
+    assert.doesNotMatch(buildContext7PromptBlock('enabled by configuration'), /…/);
   });
 });
 

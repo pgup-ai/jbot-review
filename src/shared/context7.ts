@@ -18,6 +18,12 @@ const CONTEXT7_PATCH_PATTERNS = [
   /\b(@actions\/github|@actions\/core|@octokit\/|@aws-sdk\/|googleapis|@google-cloud\/)\b/i,
   /\b(github\.rest|graphql\(|fetch\(|axios\.|undici|authorization|bearer|api[_-]?key)\b/i,
   /\b(webhook|pagination|rate[- ]?limit|streaming|tool[- ]?call|retry)\b/i,
+  // ORM / data-layer frameworks: their filter, hook, and query-method behavior
+  // is version-specific and a frequent source of confidently-wrong review
+  // claims (e.g. whether nativeUpdate applies global filters — integral-xyz/fms#3133).
+  // Trigger a docs lookup when a diff imports one or calls its behavior-laden methods.
+  /\b(mikro-?orm|typeorm|sequelize|prisma|drizzle|knex|objection|mongoose)\b/i,
+  /\b(nativeUpdate|nativeDelete|createQueryBuilder|getRepository|addFilter|applyFilters)\b/i,
 ];
 
 export function parseContext7Mode(value: string): Context7Mode {
@@ -66,4 +72,28 @@ function isExternalContractChange(file: PrFile): boolean {
   if (CONTEXT7_PATH_PATTERNS.some((pattern) => pattern.test(file.filename))) return true;
   const patch = file.patch ?? '';
   return CONTEXT7_PATCH_PATTERNS.some((pattern) => pattern.test(patch));
+}
+
+/**
+ * True when a Context7 failure means quota is gone (out of credit, rate
+ * limited, payment required) rather than a transient or connection fault. Lets
+ * setup log an actionable message while still failing open. Runtime lookups
+ * that hit this mid-session are handled model-side by the framework-behavior
+ * abstention rule, since the runner cannot observe in-session tool calls.
+ */
+export function isContext7QuotaError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    // HTTP 402/429 only in an HTTP/status context, so a bare number such as a
+    // "429 ms" duration or "402 bytes" is not misread as quota exhaustion.
+    /\b(?:http|status|code|error|response)\b[^0-9]{0,16}(?:402|429)\b/.test(normalized) ||
+    normalized.includes('payment required') ||
+    normalized.includes('too many requests') ||
+    normalized.includes('rate limit') ||
+    normalized.includes('quota') ||
+    normalized.includes('out of credit') ||
+    normalized.includes('credits exhausted') ||
+    normalized.includes('insufficient credit') ||
+    normalized.includes('usage limit')
+  );
 }

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { decideContext7Mode, parseContext7Mode } from '../src/shared/context7.ts';
+import {
+  decideContext7Mode,
+  isContext7QuotaError,
+  parseContext7Mode,
+} from '../src/shared/context7.ts';
 import { enableContext7Mcp, formatContext7Error } from '../src/shared/opencode.ts';
 
 describe('parseContext7Mode', () => {
@@ -82,6 +86,26 @@ describe('decideContext7Mode', () => {
     assert.match(decision.reason, /src\/review\.ts/);
   });
 
+  it('enables for ORM filter-behavior usage in auto mode', () => {
+    // Regression: integral-xyz/fms#3133 used em.nativeUpdate, whose filter
+    // behavior jbot got wrong 5x. The auto heuristic must turn docs lookup on
+    // for ORM usage, not just dependency-manifest or SaaS-SDK changes.
+    const decision = decideContext7Mode({
+      mode: 'auto',
+      apiKey,
+      files: [
+        {
+          filename: 'libs/modules/src/reconciliation/bank/repository/write.repository.ts',
+          patch:
+            '+    await this.em.nativeUpdate(BankReconciliation, { id }, { deletedAt: new Date() });',
+        },
+      ],
+    });
+
+    assert.equal(decision.enabled, true);
+    assert.match(decision.reason, /write\.repository\.ts/);
+  });
+
   it('skips ordinary business logic in auto mode', () => {
     const decision = decideContext7Mode({
       mode: 'auto',
@@ -91,6 +115,34 @@ describe('decideContext7Mode', () => {
 
     assert.equal(decision.enabled, false);
     assert.match(decision.reason, /no external API/);
+  });
+});
+
+describe('isContext7QuotaError', () => {
+  it('flags out-of-credit / rate-limit / quota responses', () => {
+    for (const msg of [
+      'HTTP 402 Payment Required',
+      'Error 429: too many requests',
+      'Request failed with status code 429',
+      'insufficient credits remaining',
+      'Context7 quota exceeded',
+      'rate limit reached, retry-after 60',
+      'usage limit hit',
+    ]) {
+      assert.equal(isContext7QuotaError(msg), true, msg);
+    }
+  });
+
+  it('does not flag transient or connection faults', () => {
+    for (const msg of [
+      'Disconnected',
+      'network error: ECONNRESET',
+      'timeout after 30s',
+      'connect timeout after 429 ms', // 429 as a duration, not an HTTP status
+      'read 402 bytes before reset',
+    ]) {
+      assert.equal(isContext7QuotaError(msg), false, msg);
+    }
   });
 });
 
