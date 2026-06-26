@@ -1,5 +1,12 @@
 # Deploying the jbot-review worker (Part 3)
 
+> **Fast path (after first setup):** `cp deploy/jbot-review-worker.env.local{.example,}`,
+> fill it in once, then run **`./deploy/ship-worker.sh`** — it builds, ships,
+> writes the VPS env, and (re)starts the service in one idempotent command, and
+> creates the `jbot-worker` user if missing. The manual steps below explain what
+> the script does and cover the GitHub-App webhook repoint (the one part it can't
+> automate).
+
 Step-by-step runbook to deploy the polling **worker** to a VPS as a **native Node
 process** (Model 1). The worker pulls one review job at a time from the
 **control plane** (`jbot-review-app`), runs `runPrReview`, and reports status
