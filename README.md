@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" width="72" alt="J-Bot Review" />
+</p>
+
 # J-Bot Code Review
 
 An agentic PR reviewer built on OpenCode. Two deployment modes, one review engine:
