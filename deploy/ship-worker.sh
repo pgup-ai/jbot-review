@@ -32,10 +32,14 @@ source "${ENV_LOCAL}"; set +a
 for v in CONTROL_PLANE_URL WORKER_SHARED_SECRET; do
   [ -n "${!v:-}" ] || { echo "ERROR: ${ENV_LOCAL} is missing ${v}" >&2; exit 1; }
 done
+# http:// allowed ONLY when the host is exactly localhost/127.0.0.1 (followed by
+# a port, path, or end) — mirrors the worker's URL().hostname check and blocks
+# userinfo/subdomain tricks like http://localhost@evil.com or http://localhost.evil.com.
 case "${CONTROL_PLANE_URL}" in
   https://*) ;;
-  http://localhost*|http://127.0.0.1*) ;;
-  *) echo "ERROR: CONTROL_PLANE_URL must be https:// (localhost allowed) — got '${CONTROL_PLANE_URL}'" >&2; exit 1;;
+  http://localhost|http://localhost:*|http://localhost/*) ;;
+  http://127.0.0.1|http://127.0.0.1:*|http://127.0.0.1/*) ;;
+  *) echo "ERROR: CONTROL_PLANE_URL must be https:// (or http://localhost) — got '${CONTROL_PLANE_URL}'" >&2; exit 1;;
 esac
 [ "${#WORKER_SHARED_SECRET}" -ge 32 ] || { echo "ERROR: WORKER_SHARED_SECRET must be >=32 chars" >&2; exit 1; }
 
@@ -67,7 +71,9 @@ echo "==> 4/6 write /etc/jbot-review-worker.env"
 printf 'CONTROL_PLANE_URL=%s\nWORKER_SHARED_SECRET=%s\nWORKER_POLL_MS=%s\n' \
   "${CONTROL_PLANE_URL}" "${WORKER_SHARED_SECRET}" "${WORKER_POLL_MS}" \
   | ssh "${VPS_HOST}" 'umask 077; cat > /etc/jbot-review-worker.env && chmod 600 /etc/jbot-review-worker.env'
-if [ "$(ssh "${VPS_HOST}" 'grep -ci API_KEY /etc/jbot-review-worker.env')" != "0" ]; then
+# Match a provider key by VARIABLE NAME (e.g. OPENAI_API_KEY=), anchored at line
+# start — so a value that merely contains "api_key" can't trigger a false abort.
+if [ "$(ssh "${VPS_HOST}" "grep -ciE '^[A-Za-z0-9_]*API_KEY=' /etc/jbot-review-worker.env")" != "0" ]; then
   echo "SECURITY ABORT: a provider *_API_KEY appeared in the worker env" >&2; exit 1
 fi
 
