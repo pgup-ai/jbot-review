@@ -76,6 +76,13 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyEnv: 'XAI_API_KEY',
     keyInput: 'xai-api-key',
   },
+  'fireworks-ai': {
+    defaultModel: 'fireworks-ai/accounts/fireworks/models/deepseek-v4-flash',
+    keyEnv: 'FIREWORKS_API_KEY',
+    keyInput: 'fireworks-api-key',
+    // No per-model promptCache override: Fireworks rejects promptCacheKey for every
+    // model, so it is disabled provider-wide in modelSupportsPromptCache below.
+  },
   devin: {
     defaultModel: 'devin/default',
     keyEnv: 'DEVIN_WINDSURF_API_KEY',
@@ -108,6 +115,10 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
 export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {
   if (providerID === 'devin' || providerID === 'commandcode' || providerID === 'cursor')
     return false;
+  // Fireworks' OpenAI-compatible endpoint strictly rejects unknown request fields, so
+  // the promptCacheKey opencode sends with setCacheKey returns a non-retryable 400 for
+  // every Fireworks model. Disable provider-wide rather than per-model.
+  if (providerID === 'fireworks-ai') return false;
   return PROVIDERS[providerID]?.models?.[modelID]?.promptCache !== false;
 }
 
