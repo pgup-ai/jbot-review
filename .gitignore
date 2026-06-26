@@ -2,6 +2,8 @@ node_modules/
 dist/
 *.log
 .env
+# Worker deploy config — real copy gitignored; commit only the .example
+deploy/jbot-review-worker.env.local
 .DS_Store
 .idea/
 .tmp/
