@@ -148,6 +148,15 @@ describe('modelSupportsPromptCache', () => {
     assert.equal(modelSupportsPromptCache('devin', 'codex'), false);
     assert.equal(modelSupportsPromptCache('commandcode', 'default'), false);
     assert.equal(modelSupportsPromptCache('commandcode', 'Qwen/Qwen3.7-Max'), false);
+    assert.equal(
+      modelSupportsPromptCache('fireworks-ai', 'accounts/fireworks/models/deepseek-v4-flash'),
+      false,
+    );
+    // Provider-wide: any Fireworks model rejects promptCacheKey, even ones not pre-listed.
+    assert.equal(
+      modelSupportsPromptCache('fireworks-ai', 'accounts/fireworks/models/glm-5p2'),
+      false,
+    );
     assert.equal(modelSupportsPromptCache('unknown-provider', 'unknown-model'), true);
   });
 });
