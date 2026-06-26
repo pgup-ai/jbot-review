@@ -76,6 +76,11 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyEnv: 'XAI_API_KEY',
     keyInput: 'xai-api-key',
   },
+  'fireworks-ai': {
+    defaultModel: 'fireworks-ai/accounts/fireworks/models/deepseek-v4-flash',
+    keyEnv: 'FIREWORKS_API_KEY',
+    keyInput: 'fireworks-api-key',
+  },
   devin: {
     defaultModel: 'devin/default',
     keyEnv: 'DEVIN_WINDSURF_API_KEY',

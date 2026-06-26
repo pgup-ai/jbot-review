@@ -101,6 +101,7 @@ jobs:
           nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
           zai-api-key: ${{ secrets.ZAI_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
+          fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
           devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
           commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
           cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
@@ -114,8 +115,8 @@ jobs:
 and variables → Actions → New repository secret. Add the keys for the providers
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
-`XAI_API_KEY`, `DEVIN_WINDSURF_API_KEY`, `COMMANDCODE_ACCESS_KEY`,
-`CURSOR_API_KEY`, or `ANTHROPIC_API_KEY`.
+`XAI_API_KEY`, `FIREWORKS_API_KEY`, `DEVIN_WINDSURF_API_KEY`,
+`COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, or `ANTHROPIC_API_KEY`.
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
 no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
@@ -213,6 +214,7 @@ without editing the workflow.
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     zai-api-key: ${{ secrets.ZAI_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
+    fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
@@ -305,21 +307,22 @@ the metadata block. These counters are observability only: they do not identify 
 accounts, organizations, quota buckets, remaining quota, or reset times, so
 jbot-review does not use them for smart key rotation.
 
-| `provider`        | Default model                       | Action key input         | Secret/env var           |
-| ----------------- | ----------------------------------- | ------------------------ | ------------------------ |
-| `opencode`        | `opencode/deepseek-v4-flash-free`   | `opencode-api-key`       | `OPENCODE_API_KEY`       |
-| `opencode-go`     | `opencode-go/deepseek-v4-flash`     | `opencode-api-key`       | `OPENCODE_API_KEY`       |
-| `deepseek`        | `deepseek/deepseek-v4-flash`        | `deepseek-api-key`       | `DEEPSEEK_API_KEY`       |
-| `openai`          | `openai/gpt-5.4-nano`               | `openai-api-key`         | `OPENAI_API_KEY`         |
-| `anthropic`       | `anthropic/claude-sonnet-4-6`       | `anthropic-api-key`      | `ANTHROPIC_API_KEY`      |
-| `google`          | `google/gemini-2.5-flash`           | `gemini-api-key`         | `GEMINI_API_KEY`         |
-| `openrouter`      | `openrouter/openai/gpt-4o-mini`     | `openrouter-api-key`     | `OPENROUTER_API_KEY`     |
-| `nvidia`          | `nvidia/nemotron-3-ultra-550b-a55b` | `nvidia-api-key`         | `NVIDIA_API_KEY`         |
-| `zai-coding-plan` | `zai-coding-plan/glm-5.2`           | `zai-api-key`            | `ZAI_API_KEY`            |
-| `xai`             | `xai/grok-4.3`                      | `xai-api-key`            | `XAI_API_KEY`            |
-| `devin`           | `devin/default`                     | `devin-windsurf-api-key` | `DEVIN_WINDSURF_API_KEY` |
-| `commandcode`     | `commandcode/default`               | `commandcode-access-key` | `COMMANDCODE_ACCESS_KEY` |
-| `cursor`          | `cursor/default`                    | `cursor-api-key`         | `CURSOR_API_KEY`         |
+| `provider`        | Default model                                              | Action key input         | Secret/env var           |
+| ----------------- | ---------------------------------------------------------- | ------------------------ | ------------------------ |
+| `opencode`        | `opencode/deepseek-v4-flash-free`                          | `opencode-api-key`       | `OPENCODE_API_KEY`       |
+| `opencode-go`     | `opencode-go/deepseek-v4-flash`                            | `opencode-api-key`       | `OPENCODE_API_KEY`       |
+| `deepseek`        | `deepseek/deepseek-v4-flash`                               | `deepseek-api-key`       | `DEEPSEEK_API_KEY`       |
+| `openai`          | `openai/gpt-5.4-nano`                                      | `openai-api-key`         | `OPENAI_API_KEY`         |
+| `anthropic`       | `anthropic/claude-sonnet-4-6`                              | `anthropic-api-key`      | `ANTHROPIC_API_KEY`      |
+| `google`          | `google/gemini-2.5-flash`                                  | `gemini-api-key`         | `GEMINI_API_KEY`         |
+| `openrouter`      | `openrouter/openai/gpt-4o-mini`                            | `openrouter-api-key`     | `OPENROUTER_API_KEY`     |
+| `nvidia`          | `nvidia/nemotron-3-ultra-550b-a55b`                        | `nvidia-api-key`         | `NVIDIA_API_KEY`         |
+| `zai-coding-plan` | `zai-coding-plan/glm-5.2`                                  | `zai-api-key`            | `ZAI_API_KEY`            |
+| `xai`             | `xai/grok-4.3`                                             | `xai-api-key`            | `XAI_API_KEY`            |
+| `fireworks-ai`    | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` | `fireworks-api-key`      | `FIREWORKS_API_KEY`      |
+| `devin`           | `devin/default`                                            | `devin-windsurf-api-key` | `DEVIN_WINDSURF_API_KEY` |
+| `commandcode`     | `commandcode/default`                                      | `commandcode-access-key` | `COMMANDCODE_ACCESS_KEY` |
+| `cursor`          | `cursor/default`                                           | `cursor-api-key`         | `CURSOR_API_KEY`         |
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
@@ -362,6 +365,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     zai-api-key: ${{ secrets.ZAI_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
+    fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
@@ -385,8 +389,9 @@ model from either action inputs or environment variables: `provider` or
 the main model, `aux-provider` or `JBOT_AUX_PROVIDER` for the auxiliary
 provider, and `aux-model` or `JBOT_REVIEW_AUX_MODEL` for the auxiliary model.
 Provider API keys can also be supplied through their standard env vars, such as
-`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, or `ZAI_API_KEY`. This
-convenience pattern exposes every configured provider key to the action runtime.
+`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`, or
+`FIREWORKS_API_KEY`. This convenience pattern exposes every configured provider
+key to the action runtime.
 For the smallest secret surface area, pass only the review provider key, plus an
 aux provider key only when it must be different.
 If `model` is set, it is interpreted as a model id for the selected `provider`.
@@ -428,6 +433,7 @@ documentation lookup.
 | `nvidia-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `nvidia`                         |
 | `zai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `zai-coding-plan`                |
 | `xai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `xai`                            |
+| `fireworks-api-key`       | No       | —                     | Used when `provider` or `aux-provider` is `fireworks-ai`                   |
 | `devin-windsurf-api-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `devin`                   |
 | `commandcode-access-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `commandcode`             |
 | `cursor-api-key`          | No       | —                     | Used when `provider` or active `aux-provider` is `cursor`                  |
@@ -576,6 +582,7 @@ during checkout.
 | `NVIDIA_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=nvidia          |
 | `ZAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=zai-coding-plan |
 | `XAI_API_KEY`            | Conditional | —                | Operator key used when PROVIDER=xai             |
+| `FIREWORKS_API_KEY`      | Conditional | —                | Operator key used when PROVIDER=fireworks-ai    |
 | `DEVIN_WINDSURF_API_KEY` | Conditional | —                | Operator key used when PROVIDER=devin           |
 | `COMMANDCODE_ACCESS_KEY` | Conditional | —                | Operator key used when PROVIDER=commandcode     |
 | `CURSOR_API_KEY`         | Conditional | —                | Operator key used when PROVIDER=cursor          |
@@ -604,6 +611,7 @@ OPENROUTER_API_KEY=sk-or-...
 NVIDIA_API_KEY=nvapi-...
 ZAI_API_KEY=zai-...
 XAI_API_KEY=xai-...
+FIREWORKS_API_KEY=fw-...
 DEVIN_WINDSURF_API_KEY=devin-...
 COMMANDCODE_ACCESS_KEY=cmd-...
 CURSOR_API_KEY=cursor-...
