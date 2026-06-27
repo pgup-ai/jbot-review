@@ -279,14 +279,18 @@ The object has exactly two top-level keys, shaped like this example:
 
 Field constraints:
 
-- "summary": brief assessment of the change. Group the bullets under short
-  bold category headers you choose to fit this change (for example **Changes**,
-  **Bugs**, or **Architecture notes** — these are only examples; pick whatever
+- "summary": focus on issues and material risks only. Do NOT narrate files that
+  are fine or restate that code is correct, consistent, matches the schema, or
+  has "no drift" — affirmations of clean code add no value; omit them. A brief
+  one-line note of what changed is allowed for context, but if your assigned
+  files have no issues to report, return an empty string. Group the bullets under
+  short bold category headers you choose to fit this change (for example
+  **Bugs** or **Architecture notes** — these are only examples; pick whatever
   names fit) whenever the summary covers more than one theme; use a flat list
-  of 2-4 bullets only for a genuinely single-theme change. Include a header
-  only when it has something to report: omit empty categories, and never emit a
-  header whose only content is "None". Keep each group's bullets tight. Follow
-  the "Summary instructions" section below when present.
+  of 2-4 bullets only for a genuinely single-theme change; omit empty
+  categories, and never emit a header whose only content is "None". Keep each
+  group's bullets tight. Follow the "Summary instructions" section below when
+  present.
 - "path": exact file path as it appears in the diff.
 - "line": integer line number on the NEW side of the file. The line must have
   been ADDED by this PR (it starts with '+' in the diff), or 0 for a
@@ -639,7 +643,7 @@ export function buildShardAssignmentBlock(
     '- Review every assigned file in full depth, including its interactions with unchanged code and with OTHER changed files (the full checkout and the complete changed-file list are available — follow symbols wherever they lead).',
     '- Anchor findings ONLY in your assigned files. Issues you notice that anchor in another changed file are owned by a parallel reviewer; do not report them.',
     '- The diff hunks below cover your assigned files; use the git diff command for anything else you need to read.',
-    '- In the "summary" field, describe only your own review conclusions for your assigned files; another reviewer covers the rest. Do not restate PR-wide observations, and do not title your summary with shard or assignment wording (e.g. "Review of assigned files", "reviewer 1") — all summaries are merged into one shared review comment.',
+    '- In the "summary" field, report only issues you found in your assigned files — return an empty string if you found none; another reviewer covers the rest. Do not narrate clean files, do not restate PR-wide observations, and do not title your summary with shard or assignment wording (e.g. "Review of assigned files", "reviewer 1") — all summaries are merged into one shared review comment.',
   ].join('\n');
 }
 

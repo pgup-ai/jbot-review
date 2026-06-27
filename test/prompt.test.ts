@@ -161,6 +161,13 @@ describe('REVIEW_PROMPT', () => {
     assert.match(flat, /omit empty categories/);
   });
 
+  it('focuses the summary on issues and forbids narrating clean code', () => {
+    const flat = REVIEW_PROMPT.replace(/\s+/g, ' ');
+    assert.match(flat, /focus on issues and material risks only/i);
+    assert.match(flat, /Do NOT narrate files that are fine/i);
+    assert.match(flat, /return an empty string/i);
+  });
+
   it('demands full-PR scope on every run, never delta-only review', () => {
     assert.match(REVIEW_PROMPT, /ALWAYS review the COMPLETE pull request/);
     assert.match(REVIEW_PROMPT, /Never limit your\s+review to the most recent commit/);
@@ -457,7 +464,9 @@ describe('buildShardAssignmentBlock', () => {
   });
 
   it('scopes the summary verdict to own files and forbids shard/assignment vocab', () => {
-    assert.match(block, /describe only your own review conclusions for your assigned files/i);
+    assert.match(block, /report only issues you found in your assigned files/i);
+    assert.match(block, /return an empty string if you found none/i);
+    assert.match(block, /do not narrate clean files/i);
     assert.match(block, /do not restate PR-wide observations/i);
     assert.match(block, /Review of assigned files/); // named as a banned title
     assert.match(block, /merged into one shared review comment/i);

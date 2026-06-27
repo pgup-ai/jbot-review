@@ -139,6 +139,25 @@ describe('buildBody', () => {
     assert.match(body, /Grouped finding summary/);
   });
 
+  it('omits the summary block (no filler) when findings exist but the summary is empty', () => {
+    const body = buildBody('', '', [finding], [], 'm', 'o', 'r');
+    assert.doesNotMatch(body, /No summary provided/);
+  });
+
+  it('omits the summary block when every summary line is an all-clear verdict', () => {
+    const body = buildBody(
+      '',
+      'No blocking findings in the assigned files.',
+      [finding],
+      [],
+      'm',
+      'o',
+      'r',
+    );
+    assert.doesNotMatch(body, /No summary provided/);
+    assert.doesNotMatch(body, /No blocking findings/);
+  });
+
   it('keeps the changes-since block on a clean re-review even when the summary is dropped', () => {
     const body = buildBody(
       '- Rebased onto main.',

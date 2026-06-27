@@ -2129,16 +2129,16 @@ export function buildBody(
   // A clean review's per-shard verification narrative is low-value restatement:
   // the verdict lines and "No new findings" below already convey "clean", and on
   // multi-shard runs that narrative overlaps across shards (the dogfood verbosity
-  // we are cutting). Render the grouped summary only when findings exist to
-  // contextualize. The "Changes since last review" block above is independent and
-  // still renders on re-reviews.
-  if (total > 0) {
-    lines.push(
-      summary
-        ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: true })
-        : 'No summary provided.',
-      '',
-    );
+  // we are cutting). Render the grouped summary only when findings exist AND the
+  // summary survives all-clear suppression — a single trivial finding must not
+  // unlock a wall of "looks correct" prose, and an empty/fully-suppressed summary
+  // renders nothing rather than a filler placeholder. The "Changes since last
+  // review" block above is independent and still renders on re-reviews.
+  const renderedSummary = summary.trim()
+    ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: true })
+    : '';
+  if (total > 0 && renderedSummary.trim()) {
+    lines.push(renderedSummary, '');
   }
   const guidance = getMergeGuidance(all);
   lines.push(`**Review state:** ${guidance.state}`, '');
