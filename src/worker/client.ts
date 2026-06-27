@@ -21,7 +21,15 @@ export function makeClient(cfg: WorkerConfig, fetchImpl: typeof fetch = fetch): 
       });
       if (res.status === 204) return null;
       if (!res.ok) throw new Error(`claim -> ${res.status}`);
-      return (await res.json()) as ClaimedJob;
+      const job = (await res.json()) as ClaimedJob;
+      // The claim_token fence is load-bearing: every JobUpdate must echo it or the
+      // control plane rejects the PATCH and the job stalls non-terminal. Fail fast
+      // and loud if it's absent (e.g. a control plane deployed without the fence)
+      // instead of silently sending un-fenced updates.
+      if (typeof job.claimToken !== 'string' || job.claimToken.length === 0) {
+        throw new Error('claim -> malformed response: missing claimToken');
+      }
+      return job;
     },
     async update(jobId, patch) {
       const res = await fetchImpl(`${cfg.controlPlaneUrl}/internal/jobs/${jobId}`, {
