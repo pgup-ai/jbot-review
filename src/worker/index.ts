@@ -31,7 +31,8 @@ async function main(): Promise<void> {
       log(`job ${job.jobId} -> ${result.status}`);
     } catch (err) {
       // A failed/unreachable update leaves a 'running' orphan on the control
-      // plane; a reaper (known gap) requeues it. Keep polling.
+      // plane; the control plane's claim-time reaper requeues it (a fresh claim
+      // re-stamps the fence). Keep polling.
       log(`update ${job.jobId} error: ${String(err)}`);
     }
   }
