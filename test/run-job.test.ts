@@ -18,8 +18,11 @@ test('runJob returns failed (never throws) on a malformed repoFullName', async (
       apiKey: 'k',
       auxApiKey: null,
       installationToken: 't',
+      claimToken: 'fence-uuid',
     },
     () => {},
   );
   assert.equal(result.status, 'failed');
+  // The fence token must be echoed back on every update, terminal ones included.
+  assert.equal(result.claimToken, 'fence-uuid');
 });

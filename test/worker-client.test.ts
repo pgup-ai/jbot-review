@@ -19,6 +19,7 @@ test('claim returns the job on 200', async () => {
     auxModel: null,
     apiKey: 'k',
     installationToken: 't',
+    claimToken: 'fence-uuid',
   };
   const fetchImpl = async () =>
     new Response(JSON.stringify(job), {
@@ -38,5 +39,16 @@ test('claim throws on a non-204 error status', async () => {
 test('update throws on non-2xx', async () => {
   const fetchImpl = async () => new Response('nope', { status: 404 });
   const c = makeClient(cfg, fetchImpl as typeof fetch);
-  await assert.rejects(() => c.update('1', { status: 'success' }), /404/);
+  await assert.rejects(() => c.update('1', { claimToken: 'f', status: 'success' }), /404/);
+});
+
+test('update PATCHes the claimToken fence in the body', async () => {
+  let sentBody: unknown;
+  const fetchImpl = async (_url: string, init: RequestInit) => {
+    sentBody = JSON.parse(init.body as string);
+    return new Response(null, { status: 204 });
+  };
+  const c = makeClient(cfg, fetchImpl as unknown as typeof fetch);
+  await c.update('1', { claimToken: 'fence-uuid', status: 'success' });
+  assert.deepEqual(sentBody, { claimToken: 'fence-uuid', status: 'success' });
 });

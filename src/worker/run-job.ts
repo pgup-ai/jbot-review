@@ -28,7 +28,7 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
     const parts = job.repoFullName.split('/');
     if (parts.length !== 2 || !parts[0] || !parts[1]) {
       log(`job ${job.jobId}: malformed repoFullName "${job.repoFullName}"`);
-      return { status: 'failed', durationMs: Date.now() - startedAt };
+      return { claimToken: job.claimToken, status: 'failed', durationMs: Date.now() - startedAt };
     }
     const [owner, repo] = parts;
     const octokit = octokitForToken(job.installationToken);
@@ -68,10 +68,10 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
       },
       log,
     });
-    return { status: 'success', durationMs: Date.now() - startedAt };
+    return { claimToken: job.claimToken, status: 'success', durationMs: Date.now() - startedAt };
   } catch (err) {
     log(`job ${job.jobId} failed: ${String(err)}`);
-    return { status: 'failed', durationMs: Date.now() - startedAt };
+    return { claimToken: job.claimToken, status: 'failed', durationMs: Date.now() - startedAt };
   } finally {
     cleanup?.();
   }
