@@ -48,9 +48,26 @@ function isNoFindingVerdict(line: string): boolean {
 
 function isNoFindingKey(key: string): boolean {
   if (/[;,]|\.\s+\S|\b(?:although|but|except|however|though|yet)\b/.test(key)) return false;
-  return /^no (?:new |blocking )?(?:bugs?|findings?|issues?) (?:were )?found(?: (?:in|within) [a-z0-9_./ -]{1,80})?\.?$/.test(
-    key,
-  );
+  // Qualifier cluster the model stacks before the noun, e.g. "blocking",
+  // "blocking or advisory", "new actionable".
+  const quals =
+    '(?:(?:new|blocking|actionable|advisory|major|critical|significant)\\s+(?:or\\s+)?)*';
+  const nouns = '(?:bugs?|findings?|issues?|concerns?|problems?)';
+  // (a) verb form: "no <noun> [were] found [in <scope>]". The "found" verb keeps
+  // this from matching change-prose like "no bugs were fixed by this change".
+  if (
+    new RegExp(
+      `^no ${quals}${nouns} (?:were )?found(?: (?:in|within) [a-z0-9_./ -]{1,80})?\\.?$`,
+    ).test(key)
+  ) {
+    return true;
+  }
+  // (b) noun form without an explicit verb, anchored to a review scope:
+  // "no blocking findings in the assigned files". Requiring the scope noun
+  // (files/shard/diff/...) keeps this from eating real findings.
+  return new RegExp(
+    `^no ${quals}${nouns} (?:in|within|across|for) (?:the |my |these |this |your )*(?:assigned |changed )*(?:files?|shard|diff|pr|hunks?|changes?)\\.?$`,
+  ).test(key);
 }
 
 /** A line that is only a bold category header, e.g. `**Bugs**` or `**Bugs**:`. */

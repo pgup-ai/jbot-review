@@ -169,6 +169,23 @@ test('formatSummaryMarkdown suppresses no-finding sections when findings exist',
   );
 });
 
+test('formatSummaryMarkdown suppresses noun-form all-clear verdicts that omit "found"', () => {
+  // Phrasings observed in dogfood reviews: the model writes "No blocking findings
+  // in the assigned files" (no "found" verb), which the verb-only regex missed.
+  const out = formatSummaryMarkdown(
+    [
+      '**Bugs**',
+      '- Draft completion skips v3 checks',
+      'No blocking findings in the assigned files.',
+      'No actionable findings in these files.',
+      'No actionable findings in my assigned files.',
+      'No blocking or advisory findings in the assigned files.',
+    ].join('\n'),
+    { suppressNoFindingVerdicts: true },
+  );
+  assert.equal(out, '**Bugs**\n- Draft completion skips v3 checks');
+});
+
 test('formatSummaryMarkdown does not suppress contextual no-bug prose', () => {
   const out = formatSummaryMarkdown('- No bugs were fixed by this documentation-only change.', {
     suppressNoFindingVerdicts: true,
