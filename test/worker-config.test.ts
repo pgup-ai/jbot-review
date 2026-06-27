@@ -31,6 +31,22 @@ test('WORKER_POLL_MS: only an explicit positive number is honored; else 5000', (
   }
 });
 
+test('WORKER_ONESHOT: only the literal "1" enables one-shot; else false', () => {
+  const cases: Array<[string | undefined, boolean]> = [
+    [undefined, false],
+    ['1', true],
+    ['0', false],
+    ['true', false],
+    ['2', false],
+    ['', false],
+  ];
+  for (const [val, expected] of cases) {
+    withEnv({ WORKER_ONESHOT: val }, () => {
+      assert.equal(loadWorkerConfig().oneShot, expected, `WORKER_ONESHOT=${val}`);
+    });
+  }
+});
+
 test('CONTROL_PLANE_URL: non-https is rejected (localhost allowed)', () => {
   withEnv({ CONTROL_PLANE_URL: 'http://evil.com' }, () => {
     assert.throws(() => loadWorkerConfig(), /https/);
