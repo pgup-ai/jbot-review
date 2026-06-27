@@ -9,6 +9,8 @@ export interface WorkerConfig {
   controlPlaneUrl: string;
   sharedSecret: string;
   pollMs: number;
+  /** Run exactly one job then exit (ephemeral GH Actions / sandbox runner). */
+  oneShot: boolean;
 }
 
 export function loadWorkerConfig(): WorkerConfig {
@@ -33,5 +35,7 @@ export function loadWorkerConfig(): WorkerConfig {
     controlPlaneUrl,
     sharedSecret: must('WORKER_SHARED_SECRET'),
     pollMs: Number.isFinite(pollMs) && pollMs > 0 ? pollMs : 5000,
+    // Only the literal '1' enables one-shot; anything else = legacy long-poll loop.
+    oneShot: process.env.WORKER_ONESHOT === '1',
   };
 }
