@@ -59,6 +59,17 @@ The Dockerfile uses `node:20-slim` and runs the bundled JS from `dist/`.
 The `v0` action reference is a moving major-version tag; pin to an immutable
 release tag if you need fully stable action behavior.
 
+> **One image, three independent entrypoints.** The build produces separate
+> bundles — `dist/workflow/index.js` (this Action), `dist/worker/index.js` (the
+> hosted control-plane queue worker), and `dist/app/server.js` (the hosted API).
+> `action.yml` overrides the entrypoint to `dist/workflow/index.js`, so the Action
+> never runs the worker code. The two bundles share no imports: the worker's
+> claim/update queue contract (`src/shared/worker-contract.ts`, `src/worker/*`) is
+> invisible to `src/workflow/`. Changes to the hosted queue (claim-token fence,
+> reaper, etc.) therefore cannot affect `review.yml` users — keep the two paths
+> decoupled. (Not to be confused with the ephemeral-runner `review.yml`, which is
+> a separate repo that intentionally runs `dist/worker/index.js`.)
+
 ### For the user (repo owner who wants reviews)
 
 **Step 1 — Add the workflow file.** Copy the full example from the

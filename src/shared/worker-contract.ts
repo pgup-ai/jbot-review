@@ -9,9 +9,11 @@ export interface ClaimedJob {
   apiKey: string; // DECRYPTED provider key for the model's provider
   auxApiKey: string | null; // aux model's provider key when it differs; else null
   installationToken: string; // short-lived (~1h) GitHub installation token
+  claimToken: string; // per-claim fence (uuid); the worker echoes it on every PATCH
 }
 
 export interface JobUpdate {
+  claimToken: string; // echoes the claim's fence token; required on every update
   status: 'running' | 'success' | 'failed' | 'blocked';
   durationMs?: number;
   costUsd?: number;
