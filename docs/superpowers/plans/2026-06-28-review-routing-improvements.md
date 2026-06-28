@@ -23,26 +23,26 @@
 
 **Phase timeline (action step `21:04:18 → 21:11:52` = 454 s):**
 
-| Phase | Seconds | % | Critical path |
-| --- | --- | --- | --- |
-| Boot → opencode server listening | ~8 | 1.8% | yes |
-| Parallel finder phase (3 shards + 3 lenses + addressed + guideline + changes-since) | 425 | 93.6% | yes |
-| Verification tail (1 finding, aux) | 18 | 4.0% | yes |
-| Post review + 2 addressed replies | 3 | 0.7% | yes |
+| Phase                                                                               | Seconds | %     | Critical path |
+| ----------------------------------------------------------------------------------- | ------- | ----- | ------------- |
+| Boot → opencode server listening                                                    | ~8      | 1.8%  | yes           |
+| Parallel finder phase (3 shards + 3 lenses + addressed + guideline + changes-since) | 425     | 93.6% | yes           |
+| Verification tail (1 finding, aux)                                                  | 18      | 4.0%  | yes           |
+| Post review + 2 addressed replies                                                   | 3       | 0.7%  | yes           |
 
 Within the 425 s parallel phase, wall-clock = the single slowest session (all start ~`21:04:26`):
 
-| Session | Model | Duration | Findings |
-| --- | --- | --- | --- |
-| changes-since | aux (deepseek-v4-flash-free) | 15 s | summary |
-| shard-1 / shard-3 | main (glm-5.2) | 49 s / 74 s | 0 / 0 (near-empty) |
-| shard-2 | main (glm-5.2) | 274 s | 0 (filtered) |
-| guideline-compliance | aux | 281 s | 0 |
-| addressed-prior | aux | 309 s | 2 addressed |
-| integrity lens | aux | 312 s | 0 |
-| frontend lens | aux | 362 s | **1** |
-| interactions lens + repair | aux | 90 s + 334 s = **425 s** | 0 |
-| verification | aux | 18 s | — |
+| Session                    | Model                        | Duration                 | Findings           |
+| -------------------------- | ---------------------------- | ------------------------ | ------------------ |
+| changes-since              | aux (deepseek-v4-flash-free) | 15 s                     | summary            |
+| shard-1 / shard-3          | main (glm-5.2)               | 49 s / 74 s              | 0 / 0 (near-empty) |
+| shard-2                    | main (glm-5.2)               | 274 s                    | 0 (filtered)       |
+| guideline-compliance       | aux                          | 281 s                    | 0                  |
+| addressed-prior            | aux                          | 309 s                    | 2 addressed        |
+| integrity lens             | aux                          | 312 s                    | 0                  |
+| frontend lens              | aux                          | 362 s                    | **1**              |
+| interactions lens + repair | aux                          | 90 s + 334 s = **425 s** | 0                  |
+| verification               | aux                          | 18 s                     | —                  |
 
 **Root causes, ranked by attributed wall-clock:**
 
@@ -56,13 +56,13 @@ Within the 425 s parallel phase, wall-clock = the single slowest session (all st
 
 **Recommendations → where each lands:**
 
-| Rec | Expected saving | Home |
-| --- | --- | --- |
-| Move `auxModel` off the free tier (paid low-latency endpoint) | 3–5× on the aux tail (the floor) | **Ops/config** — set `JBOT_REVIEW_AUX_MODEL`; no code |
-| Dynamic fan-out by diff shape/size (gate `reviewPasses`/`guidelinePass`) | skip 2–3 lens sessions × ~300 s on small PRs | **Phase D (this plan)** |
-| Make the parse-repair a single-shot reformat, not a full re-review | 334 s → seconds | **Separate plan** (opencode repair path in `opencode.ts`) |
-| Lower main `reasoningEffort` / `shards=1` for small diffs | main 274 s → ~100 s | Ops (`modelOptions`, `reviewShards`); a later fan-out extension |
-| Emit per-phase elapsed-ms; set `maxConcurrentSessions` to real provider concurrency | observability; avoid self-contention | **Observability follow-up** (code logs no per-phase timing today) |
+| Rec                                                                                 | Expected saving                              | Home                                                              |
+| ----------------------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------- |
+| Move `auxModel` off the free tier (paid low-latency endpoint)                       | 3–5× on the aux tail (the floor)             | **Ops/config** — set `JBOT_REVIEW_AUX_MODEL`; no code             |
+| Dynamic fan-out by diff shape/size (gate `reviewPasses`/`guidelinePass`)            | skip 2–3 lens sessions × ~300 s on small PRs | **Phase D (this plan)**                                           |
+| Make the parse-repair a single-shot reformat, not a full re-review                  | 334 s → seconds                              | **Separate plan** (opencode repair path in `opencode.ts`)         |
+| Lower main `reasoningEffort` / `shards=1` for small diffs                           | main 274 s → ~100 s                          | Ops (`modelOptions`, `reviewShards`); a later fan-out extension   |
+| Emit per-phase elapsed-ms; set `maxConcurrentSessions` to real provider concurrency | observability; avoid self-contention         | **Observability follow-up** (code logs no per-phase timing today) |
 
 ---
 
@@ -87,17 +87,17 @@ Within the 425 s parallel phase, wall-clock = the single slowest session (all st
 
 ## File Structure
 
-| File                             | Change | Responsibility                                                                                                                                                                           |
-| -------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/shared/diff-context.ts`     | Modify | Add `PATH_PATTERNS.infra`; add an infra `RISK_RULES` weight so infra hunks get embedded.                                                                                                 |
-| `test/diff-context.test.ts`      | Modify | Cover the infra pattern + risk weight.                                                                                                                                                   |
-| `src/shared/prompt.ts`           | Modify | Add `'infra-ops'` to `ReviewPlaybookId`; add the `INFRA_OPS` playbook to `REVIEW_PLAYBOOKS`.                                                                                             |
-| `test/prompt.test.ts`            | Modify | Cover the infra playbook id is unioned-in (via review-playbooks) — see Task A3.                                                                                                          |
-| `src/shared/review-playbooks.ts` | Modify | Add `INFRA_OPS` selection + ordering; broaden `EXTERNAL_INTEGRATION_PATTERNS` to catch fetch/download scripts.                                                                           |
-| `test/review-playbooks.test.ts`  | Modify | Cover infra selection + the `fetch-logos.mjs` supply-chain trigger.                                                                                                                      |
-| `src/shared/review-context.ts`   | Modify | Add `DESIGN.md`/`DECISIONS.md` to discovery lists; introduce structured `discoverGuidelineDocs` + `formatGuidelines` + `formatFinderGuidelines`; keep `discoverGuidelines` as a wrapper. |
-| `test/review-context.test.ts`    | Modify | Cover DESIGN.md discovery, structured docs, finder cap + scoped-first ranking, full render unchanged.                                                                                    |
-| `src/shared/runner.ts`           | Modify | Wire finders/lenses to the finder render and the compliance session to the full render; add infra focus bullet. **(D)** Gate effective `reviewPasses`/`guidelinePass` via `planReviewFanout`; new files `src/shared/fanout.ts` + `test/fanout.test.ts`, plus the `dynamic-fanout` escape hatch in `src/workflow/index.ts` + `src/app/app.ts` + `action.yml` (authoritative file lists are in each Phase D task).                                                                          |
+| File                             | Change | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/shared/diff-context.ts`     | Modify | Add `PATH_PATTERNS.infra`; add an infra `RISK_RULES` weight so infra hunks get embedded.                                                                                                                                                                                                                                                                                                                         |
+| `test/diff-context.test.ts`      | Modify | Cover the infra pattern + risk weight.                                                                                                                                                                                                                                                                                                                                                                           |
+| `src/shared/prompt.ts`           | Modify | Add `'infra-ops'` to `ReviewPlaybookId`; add the `INFRA_OPS` playbook to `REVIEW_PLAYBOOKS`.                                                                                                                                                                                                                                                                                                                     |
+| `test/prompt.test.ts`            | Modify | Cover the infra playbook id is unioned-in (via review-playbooks) — see Task A3.                                                                                                                                                                                                                                                                                                                                  |
+| `src/shared/review-playbooks.ts` | Modify | Add `INFRA_OPS` selection + ordering; broaden `EXTERNAL_INTEGRATION_PATTERNS` to catch fetch/download scripts.                                                                                                                                                                                                                                                                                                   |
+| `test/review-playbooks.test.ts`  | Modify | Cover infra selection + the `fetch-logos.mjs` supply-chain trigger.                                                                                                                                                                                                                                                                                                                                              |
+| `src/shared/review-context.ts`   | Modify | Add `DESIGN.md`/`DECISIONS.md` to discovery lists; introduce structured `discoverGuidelineDocs` + `formatGuidelines` + `formatFinderGuidelines`; keep `discoverGuidelines` as a wrapper.                                                                                                                                                                                                                         |
+| `test/review-context.test.ts`    | Modify | Cover DESIGN.md discovery, structured docs, finder cap + scoped-first ranking, full render unchanged.                                                                                                                                                                                                                                                                                                            |
+| `src/shared/runner.ts`           | Modify | Wire finders/lenses to the finder render and the compliance session to the full render; add infra focus bullet. **(D)** Gate effective `reviewPasses`/`guidelinePass` via `planReviewFanout`; new files `src/shared/fanout.ts` + `test/fanout.test.ts`, plus the `dynamic-fanout` escape hatch in `src/workflow/index.ts` + `src/app/app.ts` + `action.yml` (authoritative file lists are in each Phase D task). |
 
 ---
 
@@ -1246,7 +1246,12 @@ export function planReviewFanout(input: {
     added <= MINIMAL_FANOUT_MAX_ADDED_LINES;
 
   if (!lowRisk) {
-    return { reviewPasses: requestedPasses, guidelinePass: requestedGuidelinePass, tier: 'full', reason: '' };
+    return {
+      reviewPasses: requestedPasses,
+      guidelinePass: requestedGuidelinePass,
+      tier: 'full',
+      reason: '',
+    };
   }
   return {
     reviewPasses: Math.min(requestedPasses, 1),
@@ -1333,25 +1338,24 @@ import { planReviewFanout } from './fanout.ts';
 - [ ] **Step 2: Compute the effective fan-out** — immediately after `const changeShape = classifyChangeShape(files);` and its `reviewFocusBlock` line, insert:
 
 ```ts
-  const fanout = options.dynamicFanout
-    ? planReviewFanout({
-        requestedPasses: options.reviewPasses,
-        requestedGuidelinePass: options.guidelinePass,
-        files,
-        shape: changeShape,
-      })
-    : null;
-  const effectiveReviewPasses = fanout?.reviewPasses ?? options.reviewPasses;
-  const effectiveGuidelinePass = fanout?.guidelinePass ?? options.guidelinePass;
-  if (fanout?.tier === 'minimal') {
-    log(
-      `Dynamic fan-out: ${fanout.reason}; reviewPasses ${options.reviewPasses}→${effectiveReviewPasses}, guidelinePass ${options.guidelinePass}→${effectiveGuidelinePass} (main review + verify unchanged).`,
-    );
-  }
+const fanout = options.dynamicFanout
+  ? planReviewFanout({
+      requestedPasses: options.reviewPasses,
+      requestedGuidelinePass: options.guidelinePass,
+      files,
+      shape: changeShape,
+    })
+  : null;
+const effectiveReviewPasses = fanout?.reviewPasses ?? options.reviewPasses;
+const effectiveGuidelinePass = fanout?.guidelinePass ?? options.guidelinePass;
+if (fanout?.tier === 'minimal') {
+  log(
+    `Dynamic fan-out: ${fanout.reason}; reviewPasses ${options.reviewPasses}→${effectiveReviewPasses}, guidelinePass ${options.guidelinePass}→${effectiveGuidelinePass} (main review + verify unchanged).`,
+  );
+}
 ```
 
-- [ ] **Step 3: Swap the three consumers.** Replace exactly:
-
+- [ ] **Step 3: Swap the four consumers.** Replace exactly:
   1. Guideline-compliance enablement —
      `enabled: options.guidelinePass && auxCommandCodeHasCompleteDiff,`
      → `enabled: effectiveGuidelinePass && auxCommandCodeHasCompleteDiff,`
@@ -1361,6 +1365,10 @@ import { planReviewFanout } from './fanout.ts';
   3. Lens-pass execution —
      `passes: auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,`
      → `passes: auxCommandCodeHasCompleteDiff ? effectiveReviewPasses : 1,`
+  4. Finder guideline slice (MUST track the compliance toggle) —
+     `const guidelinesForPrompt = options.guidelinePass ? finderGuidelines : guidelines;`
+     → `const guidelinesForPrompt = effectiveGuidelinePass ? finderGuidelines : guidelines;`
+     Rationale: finders get the capped slice ONLY because the compliance pass audits the full set in parallel (see the existing comment above that line). When minimal-tier turns the compliance pass OFF (consumer 1), finders must fall back to the FULL guidelines or the omitted docs are seen by no session at all — the coverage hole that comment warns about. `effectiveGuidelinePass` equals `options.guidelinePass` in every non-minimal case, so full-tier behavior is unchanged.
 
 (Leave `verifyFindings` and the main `runShardedReview` untouched — never gated.)
 
@@ -1401,10 +1409,10 @@ git commit -m "feat(runner): gate lens passes + guideline pass via dynamic fan-o
 - [ ] **Step 3: Declare the Action input** — add to `action.yml` under `inputs:`
 
 ```yaml
-  dynamic-fanout:
-    description: 'Scale recall-supplement fan-out (extra lenses + guideline pass) to diff risk/size; false forces full fan-out.'
-    required: false
-    default: 'true'
+dynamic-fanout:
+  description: 'Scale recall-supplement fan-out (extra lenses + guideline pass) to diff risk/size; false forces full fan-out.'
+  required: false
+  default: 'true'
 ```
 
 - [ ] **Step 4: Typecheck + commit**
