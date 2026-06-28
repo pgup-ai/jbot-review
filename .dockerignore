@@ -1,13 +1,9 @@
-node_modules/
-.git/
-.github/
-src/
-scripts/
-*.log
-.env
-.DS_Store
-.idea/
-*.md
-tsconfig.json
-dockerignore
-
+# Keep the build context minimal: ignore everything, then re-include only the
+# files the image actually COPYs (the package manifests + the prebuilt dist
+# bundle). Anything else in the repo — local .tmp/ worktrees, node_modules,
+# .env secrets, tests, docs — is excluded by default, so the context can't
+# silently bloat as the project grows.
+*
+!package.json
+!package-lock.json
+!dist

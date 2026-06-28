@@ -1,6 +1,11 @@
 FROM node:20-slim
 
-RUN apt-get update && apt-get install -y ca-certificates curl git && rm -rf /var/lib/apt/lists/*
+# git + ca-certificates are runtime needs (git diff/log/grep in review sessions;
+# CA roots for TLS); curl is used by the provider installers further down.
+# --no-install-recommends keeps apt from pulling in suggested-but-unused packages.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl git \
+  && rm -rf /var/lib/apt/lists/*
 
 # Survive transient npm-registry blips (observed ECONNRESET on fetch) instead
 # of failing the whole image build on a single dropped connection.
@@ -9,8 +14,11 @@ RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-maxtimeout 120000
 
 # Use the latest opencode-ai for access to the most current model catalog.
-# CommandCode is available for the optional commandcode provider path.
-RUN npm install -g opencode-ai@latest command-code@latest
+# CommandCode is available for the optional commandcode provider path. Clean the
+# npm download cache in the SAME layer so its cached tarballs (~386MB) never land
+# in the image.
+RUN npm install -g opencode-ai@latest command-code@latest \
+  && npm cache clean --force
 
 # Devin CLI is available for the optional devin provider path. Credentials are
 # written at runtime only when that provider is selected.
@@ -36,7 +44,7 @@ ENV PATH="/root/.local/bin:${PATH}"
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 COPY dist/ ./dist/
 
