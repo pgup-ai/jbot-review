@@ -92,6 +92,7 @@ import {
   formatDiffScope,
   formatContextBudget,
 } from './review-context.ts';
+import { planReviewFanout } from './fanout.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
   listPrFiles,
@@ -500,6 +501,8 @@ export interface ReviewRunOptions {
    * the whole model cost) and leaves the review reaction unchanged.
    */
   skipDocOnly?: boolean;
+  /** Scale recall-supplement fan-out down for low-risk diffs (see `fanout.ts`); default true. Never gates the main review or verify; false forces full fan-out. */
+  dynamicFanout?: boolean;
   /**
    * Max model sessions in flight at once (0 = unlimited). Throttled provider
    * tiers serialize one key's concurrent requests upstream; capping on our
@@ -674,6 +677,21 @@ export async function runPrReview(params: {
   const summaryScopeBlock = buildSummaryScopeBlock();
   const changeShape = classifyChangeShape(files);
   const reviewFocusBlock = buildReviewFocusBlock(changedFiles, changeShape);
+  const fanout = options.dynamicFanout
+    ? planReviewFanout({
+        requestedPasses: options.reviewPasses,
+        requestedGuidelinePass: options.guidelinePass,
+        files,
+        shape: changeShape,
+      })
+    : null;
+  const effectiveReviewPasses = fanout?.reviewPasses ?? options.reviewPasses;
+  const effectiveGuidelinePass = fanout?.guidelinePass ?? options.guidelinePass;
+  if (fanout?.tier === 'minimal') {
+    log(
+      `Dynamic fan-out: ${fanout.reason}; reviewPasses ${options.reviewPasses}→${effectiveReviewPasses}, guidelinePass ${options.guidelinePass}→${effectiveGuidelinePass} (main review + verify unchanged).`,
+    );
+  }
   const diffHunksBlock = buildDiffHunksBlock(files);
   if (diffHunksBlock) log(`Embedded diff hunks block: ${diffHunksBlock.length} chars.`);
   const commandCodeDiffHunks =
@@ -988,7 +1006,7 @@ export async function runPrReview(params: {
         prContext: auxPrContext,
         guidelinesForPrompt: guidelines,
         hasGuidelines: Boolean(guidelines),
-        enabled: options.guidelinePass && auxCommandCodeHasCompleteDiff,
+        enabled: effectiveGuidelinePass && auxCommandCodeHasCompleteDiff,
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -1024,7 +1042,7 @@ export async function runPrReview(params: {
     // Context7 retry path, so a Context7 hiccup must not be able to zero a
     // pass's findings.
     const lensPassCount = selectLensKeys(
-      auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,
+      auxCommandCodeHasCompleteDiff ? effectiveReviewPasses : 1,
       changedFiles,
       changeShape,
     ).length;
@@ -1037,7 +1055,7 @@ export async function runPrReview(params: {
         guidelinesForPrompt,
         changedFiles,
         shape: changeShape,
-        passes: auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,
+        passes: auxCommandCodeHasCompleteDiff ? effectiveReviewPasses : 1,
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -1332,6 +1350,7 @@ function normalizeOptions(options: ReviewRunOptions | undefined): NormalizedRevi
     modelOptions: options?.modelOptions ?? {},
     promptCache: options?.promptCache ?? true,
     skipDocOnly: options?.skipDocOnly ?? true,
+    dynamicFanout: options?.dynamicFanout ?? true,
     maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 0, 0),
     opencodePort: Math.max(options?.opencodePort ?? 0, 0),
     onReviewResult: options?.onReviewResult,
