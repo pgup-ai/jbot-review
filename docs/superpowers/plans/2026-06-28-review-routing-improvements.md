@@ -2,11 +2,67 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make jbot-review's guideline/playbook routing relevance-aware — close the infra coverage hole, load DESIGN/ADR docs, and stop diluting bug-finder sessions with the full guideline corpus while the dedicated compliance session keeps it.
+**Goal:** Make jbot-review's guideline/playbook routing relevance-aware — close the infra coverage hole, load DESIGN/ADR docs, and stop diluting bug-finder sessions with the full guideline corpus while the dedicated compliance session keeps it. A separate, independent axis — **latency** — is addressed by **Phase D**, which scales recall-supplement fan-out (extra lenses + the guideline pass) to a diff's risk and size (see the Latency evidence section).
 
-**Architecture:** Three independent, separately-shippable changes on the existing pure-module seams. (A) extend the shared `PATH_PATTERNS` taxonomy + playbook registry with an `infra` category and broaden the external-integration trigger; (B) add `DESIGN.md`/`DECISIONS.md` to the guideline discovery lists; (C) split guideline discovery into a structured pass (`discoverGuidelineDocs`) plus two pure renderers — `formatGuidelines` (full, for the compliance session) and `formatFinderGuidelines` (relevance-ranked, capped, for finder shards + lenses). `discoverGuidelines` stays as a thin string-returning wrapper so existing callers/tests are untouched.
+**Architecture:** Three independent, separately-shippable changes on the existing pure-module seams. (A) extend the shared `PATH_PATTERNS` taxonomy + playbook registry with an `infra` category and broaden the external-integration trigger; (B) add `DESIGN.md`/`DECISIONS.md` to the guideline discovery lists; (C) split guideline discovery into a structured pass (`discoverGuidelineDocs`) plus two pure renderers — `formatGuidelines` (full, for the compliance session) and `formatFinderGuidelines` (relevance-ranked, capped, for finder shards + lenses). `discoverGuidelines` stays as a thin string-returning wrapper so existing callers/tests are untouched. (D) adds a pure `fanout.ts` policy (`planReviewFanout`) that scales `reviewPasses`/`guidelinePass` down for provably-low-risk diffs, wired in `runner.ts` only — independent of A/B/C and separately shippable.
 
 **Tech Stack:** TypeScript ESM (`.ts` import specifiers, run via tsx), node:test + `node:assert/strict`, oxlint, prettier. No new dependencies.
+
+---
+
+## Latency evidence (GHA run 28335921783, 2026-06-28)
+
+> Added 2026-06-28. Motivates **Phase D**. Source: the `review` job log of
+> `pgup-ai/jbot-review-app` run 28335921783 — 7m34s wall-clock for the review
+> action, reconstructed from log-line timestamps (the code emits no per-phase
+> elapsed-ms; see the observability follow-up below).
+
+**Run config (NOT the defaults — this run was tuned up):** `provider=zai-coding-plan model=glm-5.2` (main), `auxModel=opencode/deepseek-v4-flash-free`, `reviewPasses=3`, `reviewShards=3`, `verifyFindings=true`, `guidelinePass=true`, `timeBudget=30m`, `reasoningEffort=medium`. 34 reviewable files; 96 KB injected context (diff 42 KB + core 30 KB + guidelines 25 KB; prompt cache disabled for GLM).
+
+**Outcome:** the entire 7m34s produced **1 posted finding (outside-diff) + 2 addressed-thread replies.**
+
+**Phase timeline (action step `21:04:18 → 21:11:52` = 454 s):**
+
+| Phase | Seconds | % | Critical path |
+| --- | --- | --- | --- |
+| Boot → opencode server listening | ~8 | 1.8% | yes |
+| Parallel finder phase (3 shards + 3 lenses + addressed + guideline + changes-since) | 425 | 93.6% | yes |
+| Verification tail (1 finding, aux) | 18 | 4.0% | yes |
+| Post review + 2 addressed replies | 3 | 0.7% | yes |
+
+Within the 425 s parallel phase, wall-clock = the single slowest session (all start ~`21:04:26`):
+
+| Session | Model | Duration | Findings |
+| --- | --- | --- | --- |
+| changes-since | aux (deepseek-v4-flash-free) | 15 s | summary |
+| shard-1 / shard-3 | main (glm-5.2) | 49 s / 74 s | 0 / 0 (near-empty) |
+| shard-2 | main (glm-5.2) | 274 s | 0 (filtered) |
+| guideline-compliance | aux | 281 s | 0 |
+| addressed-prior | aux | 309 s | 2 addressed |
+| integrity lens | aux | 312 s | 0 |
+| frontend lens | aux | 362 s | **1** |
+| interactions lens + repair | aux | 90 s + 334 s = **425 s** | 0 |
+| verification | aux | 18 s | — |
+
+**Root causes, ranked by attributed wall-clock:**
+
+1. **Free-tier aux model is the floor (~360–425 s).** Seven of the ten sessions ran on `deepseek-v4-flash-free`; the same model returns in 15–18 s for short sessions but 280–425 s for multi-round-trip agentic loops — the signature of free-tier queueing under concurrency × many `git`/`grep`/`read` round-trips per session. The paid `glm-5.2` main model was NOT the long pole.
+2. **A parse-repair re-ran a whole agentic session (334 s → 0 findings).** The interactions lens returned an unparseable response (`parts=3`, no text part), triggering a full agentic re-review instead of a cheap reformat.
+3. **Over-provisioned fan-out for the outcome.** `reviewPasses=3` + `guidelinePass=true` ran 3 lenses + a compliance pass — ~10 heavy sessions → 1 finding. **This is what Phase D targets.**
+4. **`glm-5.2 @ reasoningEffort=medium` main pass: 274 s** for the one non-empty shard (the floor if aux were fast).
+5. **96 KB context, minor here:** GLM prompt cache is disabled, but zai does implicit server-side prefix caching (`cache read=82 K` on shard-2), so prefill was not dominant this run.
+
+**Apples-to-apples vs Cursor / Gemini / Qodo:** they run one hosted frontier model on dedicated low-queue infra, fewer agentic round-trips, often a single pass. jbot deliberately does more (multi-pass recall + guideline audit + addressed-thread tracking + verification) on cheaper/slower infra. ~150–200 s is inherent (one good agentic pass); ~250 s was recoverable waste (free-tier aux queueing + the repair re-run + 3 passes on a PR that needed ~1).
+
+**Recommendations → where each lands:**
+
+| Rec | Expected saving | Home |
+| --- | --- | --- |
+| Move `auxModel` off the free tier (paid low-latency endpoint) | 3–5× on the aux tail (the floor) | **Ops/config** — set `JBOT_REVIEW_AUX_MODEL`; no code |
+| Dynamic fan-out by diff shape/size (gate `reviewPasses`/`guidelinePass`) | skip 2–3 lens sessions × ~300 s on small PRs | **Phase D (this plan)** |
+| Make the parse-repair a single-shot reformat, not a full re-review | 334 s → seconds | **Separate plan** (opencode repair path in `opencode.ts`) |
+| Lower main `reasoningEffort` / `shards=1` for small diffs | main 274 s → ~100 s | Ops (`modelOptions`, `reviewShards`); a later fan-out extension |
+| Emit per-phase elapsed-ms; set `maxConcurrentSessions` to real provider concurrency | observability; avoid self-contention | **Observability follow-up** (code logs no per-phase timing today) |
 
 ---
 
@@ -17,6 +73,7 @@
 - **#4 Every injected context block has a hard byte budget and lists what it omitted.** The new finder render is capped and appends an omission notice (no silent truncation).
 - **#5 Prompt assembly order unchanged.** Guidelines still land in the early prompt slot via `assembleReviewPrompt`; only the _content_ attached to finders changes.
 - **#10 Extract pure logic for tests; `runner.ts` only wires.** All routing/budget decisions live in `diff-context.ts`, `review-playbooks.ts`, `prompt.ts`, and `review-context.ts` as pure, unit-tested functions. `runner.ts` changes are wiring only.
+- **Phase D fan-out scales recall supplements only.** Dynamic fan-out reduces the COUNT of extra lens passes and the guideline-compliance pass for low-risk diffs; it never gates the main full-diff review (invariant #1) or the verification precision gate, and the static config is the ceiling (a reduction is a deliberate recall trade — invariant #3). A pure function decides it; `runner.ts` only wires (invariant #10).
 
 **Out of scope (deliberate, YAGNI):**
 
@@ -40,7 +97,7 @@
 | `test/review-playbooks.test.ts`  | Modify | Cover infra selection + the `fetch-logos.mjs` supply-chain trigger.                                                                                                                      |
 | `src/shared/review-context.ts`   | Modify | Add `DESIGN.md`/`DECISIONS.md` to discovery lists; introduce structured `discoverGuidelineDocs` + `formatGuidelines` + `formatFinderGuidelines`; keep `discoverGuidelines` as a wrapper. |
 | `test/review-context.test.ts`    | Modify | Cover DESIGN.md discovery, structured docs, finder cap + scoped-first ranking, full render unchanged.                                                                                    |
-| `src/shared/runner.ts`           | Modify | Wire finders/lenses to the finder render and the compliance session to the full render; add infra focus bullet.                                                                          |
+| `src/shared/runner.ts`           | Modify | Wire finders/lenses to the finder render and the compliance session to the full render; add infra focus bullet. **(D)** Gate effective `reviewPasses`/`guidelinePass` via `planReviewFanout`; new files `src/shared/fanout.ts` + `test/fanout.test.ts`, plus the `dynamic-fanout` escape hatch in `src/workflow/index.ts` + `src/app/app.ts` + `action.yml` (authoritative file lists are in each Phase D task).                                                                          |
 
 ---
 
@@ -1029,6 +1086,360 @@ git commit -m "chore(review-context): tune finder guideline budget against pr11 
 
 ---
 
+## Phase D — Dynamic fan-out by change shape (Item 5, latency)
+
+**Why:** the Latency evidence section shows a 7m34s run that fired ~10 agentic sessions to produce 1 finding, because `reviewPasses=3` + `guidelinePass=true` ran three lens passes and a compliance pass — each a full agentic loop on the throttled aux model (~280–425 s). Phase D scales those **recall supplements** to the diff: a small, low-risk change runs the general pass only; sensitive/large/dependency changes keep the full requested fan-out. The static config stays the ceiling; the gate only reduces. The main full-diff review and the verification pass are never gated (invariants #1, #3).
+
+**Design:** one pure function, `planReviewFanout(files, shape, requested) → { reviewPasses, guidelinePass, tier, reason }`. A diff is **minimal-tier** only when ALL hold: no sensitive path (`PATH_PATTERNS.security|data|api|infra|tooling`), no dependency-manifest change, not a large deletion, ≤ 3 changed files, ≤ 60 added lines. Minimal ⇒ `reviewPasses = min(requested, 1)` (no counted lenses) and `guidelinePass = false`. Everything else ⇒ the requested values unchanged. An operator escape hatch (`dynamic-fanout` / `JBOT_DYNAMIC_FANOUT`, default on) forces full fan-out when off — keeps the pr11 golden case reproducible.
+
+> **Note (this is a latency phase, not a recall phase):** the frontend lens stays content-triggered and the verification pass stays on. Phase D never touches diff scope — it only changes how many recall-supplement SESSIONS spin up.
+
+### Task D1: Pure `planReviewFanout` + `diffLineCounts` helper
+
+**Files:**
+
+- Create: `src/shared/fanout.ts`
+- Modify: `src/shared/diff-context.ts` (export `diffLineCounts`, reusing the private `countPatchLines`)
+- Create: `test/fanout.test.ts`
+- Modify: `test/diff-context.test.ts` (cover `diffLineCounts`)
+
+- [ ] **Step 1: Write the failing test** — `test/fanout.test.ts`
+
+```ts
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import { classifyChangeShape } from '../src/shared/diff-context.ts';
+import { planReviewFanout } from '../src/shared/fanout.ts';
+import type { PrFile } from '../src/shared/github.ts';
+
+function added(lines: number, name = 'src/util/calc.ts'): PrFile {
+  const body = Array.from({ length: lines }, (_, i) => `+const x${i} = ${i};`).join('\n');
+  return { filename: name, patch: `@@ -0,0 +1,${lines} @@\n${body}` };
+}
+
+function plan(files: PrFile[], requestedPasses = 3, requestedGuidelinePass = true) {
+  return planReviewFanout({
+    requestedPasses,
+    requestedGuidelinePass,
+    files,
+    shape: classifyChangeShape(files),
+  });
+}
+
+describe('planReviewFanout', () => {
+  it('drops to minimal fan-out for a small low-risk diff', () => {
+    const result = plan([added(10), added(15, 'src/util/format.ts')]);
+    assert.equal(result.tier, 'minimal');
+    assert.equal(result.reviewPasses, 1);
+    assert.equal(result.guidelinePass, false);
+  });
+
+  it('keeps the requested ceiling for a sensitive path', () => {
+    const result = plan([added(10, 'src/auth/session.ts')]);
+    assert.equal(result.tier, 'full');
+    assert.equal(result.reviewPasses, 3);
+    assert.equal(result.guidelinePass, true);
+  });
+
+  it('keeps full fan-out when a dependency manifest changes', () => {
+    const result = plan([
+      { filename: 'go.mod', patch: '@@ -1 +1 @@\n+\trequire example.com/x v1.2.3' },
+    ]);
+    assert.equal(result.tier, 'full');
+  });
+
+  it('keeps full fan-out for a large deletion', () => {
+    const removed = Array.from({ length: 60 }, (_, i) => `-const y${i} = ${i};`).join('\n');
+    const removal: PrFile = { filename: 'src/util/old.ts', patch: `@@ -1,60 +0,0 @@\n${removed}` };
+    assert.equal(plan([removal]).tier, 'full');
+  });
+
+  it('keeps full fan-out past the file-count ceiling', () => {
+    const files = [added(2), added(2, 'src/a.ts'), added(2, 'src/b.ts'), added(2, 'src/c.ts')];
+    assert.equal(plan(files).tier, 'full');
+  });
+
+  it('keeps full fan-out past the added-line ceiling', () => {
+    assert.equal(plan([added(61)]).tier, 'full');
+  });
+
+  it('never raises fan-out above the requested values', () => {
+    const result = plan([added(10)], 1, false);
+    assert.equal(result.reviewPasses, 1);
+    assert.equal(result.guidelinePass, false);
+    assert.equal(result.tier, 'minimal');
+  });
+});
+```
+
+- [ ] **Step 2: Run it, verify it fails**
+
+Run: `node --import tsx --test test/fanout.test.ts`
+Expected: FAIL — `Cannot find module '../src/shared/fanout.ts'`.
+
+- [ ] **Step 3: Export `diffLineCounts` from `diff-context.ts`**
+
+Add directly after the `countPatchLines` function (so it can call that private helper):
+
+```ts
+/** Total added/removed lines across all patches (shared `countPatchLines`), for fan-out sizing. */
+export function diffLineCounts(files: PrFile[]): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  for (const file of files) {
+    const counts = countPatchLines(file.patch);
+    added += counts.added;
+    removed += counts.removed;
+  }
+  return { added, removed };
+}
+```
+
+- [ ] **Step 4: Implement `src/shared/fanout.ts`**
+
+```ts
+import { PATH_PATTERNS, diffLineCounts } from './diff-context.ts';
+import type { ChangeShape } from './diff-context.ts';
+import type { PrFile } from './github.ts';
+
+// Scale recall-supplement fan-out (extra lenses + the guideline pass) to a
+// diff's risk and size. The requested config is the ceiling: this only reduces
+// it for provably-low-risk diffs, and never the main review or verification
+// (invariants #1/#3). Pure — runner.ts only wires it (invariant #10).
+
+const SENSITIVE_PATTERNS = [
+  PATH_PATTERNS.security,
+  PATH_PATTERNS.data,
+  PATH_PATTERNS.api,
+  PATH_PATTERNS.infra,
+  PATH_PATTERNS.tooling,
+];
+
+const MINIMAL_FANOUT_MAX_FILES = 3;
+const MINIMAL_FANOUT_MAX_ADDED_LINES = 60;
+
+export interface FanoutPlan {
+  reviewPasses: number;
+  guidelinePass: boolean;
+  tier: 'minimal' | 'full';
+  /** Why fan-out was reduced (for the run log); '' when unchanged. */
+  reason: string;
+}
+
+export function planReviewFanout(input: {
+  requestedPasses: number;
+  requestedGuidelinePass: boolean;
+  files: PrFile[];
+  shape: ChangeShape;
+}): FanoutPlan {
+  const { requestedPasses, requestedGuidelinePass, files, shape } = input;
+  const added = diffLineCounts(files).added;
+  const sensitive = files.some((file) =>
+    SENSITIVE_PATTERNS.some((pattern) => pattern.test(file.filename)),
+  );
+  const lowRisk =
+    !sensitive &&
+    !shape.dependencyManifestChange &&
+    !shape.largeDeletion &&
+    files.length <= MINIMAL_FANOUT_MAX_FILES &&
+    added <= MINIMAL_FANOUT_MAX_ADDED_LINES;
+
+  if (!lowRisk) {
+    return { reviewPasses: requestedPasses, guidelinePass: requestedGuidelinePass, tier: 'full', reason: '' };
+  }
+  return {
+    reviewPasses: Math.min(requestedPasses, 1),
+    guidelinePass: false,
+    tier: 'minimal',
+    reason: `low-risk diff (${files.length} files, +${added} lines, no sensitive paths)`,
+  };
+}
+```
+
+- [ ] **Step 5: Add the `diffLineCounts` test** — append to `test/diff-context.test.ts` (and add `diffLineCounts` to the existing import from `../src/shared/diff-context.ts`)
+
+```ts
+describe('diffLineCounts', () => {
+  it('sums added and removed across patches, ignoring file headers', () => {
+    const counts = diffLineCounts([
+      { filename: 'a.ts', patch: '@@ -1,2 +1,2 @@\n+added one\n-removed one' },
+      { filename: 'b.ts', patch: '@@ -0,0 +1 @@\n+added two' },
+    ]);
+    assert.deepEqual(counts, { added: 2, removed: 1 });
+  });
+});
+```
+
+- [ ] **Step 6: Run tests, verify they pass**
+
+Run: `node --import tsx --test test/fanout.test.ts test/diff-context.test.ts`
+Expected: PASS (all `planReviewFanout` cases + `diffLineCounts`).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/shared/fanout.ts src/shared/diff-context.ts test/fanout.test.ts test/diff-context.test.ts
+git commit -m "feat(fanout): pure planReviewFanout scales recall supplements to diff shape"
+```
+
+### Task D2: Add the `dynamicFanout` run option (default on)
+
+**Files:**
+
+- Modify: `src/shared/runner.ts` (`ReviewRunOptions` + `normalizeOptions`)
+
+- [ ] **Step 1: Add the option field** to the `ReviewRunOptions` interface (next to `skipDocOnly`)
+
+```ts
+  /** Scale recall-supplement fan-out down for low-risk diffs (see `fanout.ts`); default true. Never gates the main review or verify; false forces full fan-out. */
+  dynamicFanout?: boolean;
+```
+
+- [ ] **Step 2: Default it in `normalizeOptions`** — add to the returned object (next to `skipDocOnly: options?.skipDocOnly ?? true,`)
+
+```ts
+    dynamicFanout: options?.dynamicFanout ?? true,
+```
+
+(`NormalizedReviewRunOptions` is `Required<Omit<…, 'onReviewResult'>>`, so the field becomes required automatically and this line satisfies it.)
+
+- [ ] **Step 3: Typecheck**
+
+Run: `npm run typecheck`
+Expected: PASS (no missing-property error on `NormalizedReviewRunOptions`).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/shared/runner.ts
+git commit -m "feat(runner): add dynamicFanout option (default on)"
+```
+
+### Task D3: Wire effective passes/guideline into the runner (wiring only)
+
+**Files:**
+
+- Modify: `src/shared/runner.ts`
+
+No new unit test: the decision logic is tested in D1 (invariant #10 — `runner.ts` only wires). Verified by typecheck + the existing runner suite.
+
+- [ ] **Step 1: Import the pure function** — add near the other `./` shared imports
+
+```ts
+import { planReviewFanout } from './fanout.ts';
+```
+
+- [ ] **Step 2: Compute the effective fan-out** — immediately after `const changeShape = classifyChangeShape(files);` and its `reviewFocusBlock` line, insert:
+
+```ts
+  const fanout = options.dynamicFanout
+    ? planReviewFanout({
+        requestedPasses: options.reviewPasses,
+        requestedGuidelinePass: options.guidelinePass,
+        files,
+        shape: changeShape,
+      })
+    : null;
+  const effectiveReviewPasses = fanout?.reviewPasses ?? options.reviewPasses;
+  const effectiveGuidelinePass = fanout?.guidelinePass ?? options.guidelinePass;
+  if (fanout?.tier === 'minimal') {
+    log(
+      `Dynamic fan-out: ${fanout.reason}; reviewPasses ${options.reviewPasses}→${effectiveReviewPasses}, guidelinePass ${options.guidelinePass}→${effectiveGuidelinePass} (main review + verify unchanged).`,
+    );
+  }
+```
+
+- [ ] **Step 3: Swap the three consumers.** Replace exactly:
+
+  1. Guideline-compliance enablement —
+     `enabled: options.guidelinePass && auxCommandCodeHasCompleteDiff,`
+     → `enabled: effectiveGuidelinePass && auxCommandCodeHasCompleteDiff,`
+  2. Lens-pass count — inside `selectLensKeys(`, replace
+     `auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,`
+     → `auxCommandCodeHasCompleteDiff ? effectiveReviewPasses : 1,`
+  3. Lens-pass execution —
+     `passes: auxCommandCodeHasCompleteDiff ? options.reviewPasses : 1,`
+     → `passes: auxCommandCodeHasCompleteDiff ? effectiveReviewPasses : 1,`
+
+(Leave `verifyFindings` and the main `runShardedReview` untouched — never gated.)
+
+- [ ] **Step 4: Typecheck + existing runner tests**
+
+Run: `npm run typecheck && node --import tsx --test test/runner.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/shared/runner.ts
+git commit -m "feat(runner): gate lens passes + guideline pass via dynamic fan-out"
+```
+
+### Task D4: Plumb the escape hatch through the entry points
+
+**Files:**
+
+- Modify: `src/workflow/index.ts` (GitHub Action input)
+- Modify: `src/app/app.ts` (webhook-app env)
+- Modify: `action.yml` (declare the input)
+
+- [ ] **Step 1: Workflow input** — in `src/workflow/index.ts`, add to the `options` object after `reviewShards: parseNumberInput('review-shards', 1),`:
+
+```ts
+    dynamicFanout: parseBooleanInput('dynamic-fanout', true),
+```
+
+…and append to the `Options:` log template literal: ` dynamicFanout=${options.dynamicFanout}`.
+
+- [ ] **Step 2: Webhook-app env** — in `src/app/app.ts`, add to the options object after `reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),`:
+
+```ts
+          dynamicFanout: parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),
+```
+
+- [ ] **Step 3: Declare the Action input** — add to `action.yml` under `inputs:`
+
+```yaml
+  dynamic-fanout:
+    description: 'Scale recall-supplement fan-out (extra lenses + guideline pass) to diff risk/size; false forces full fan-out.'
+    required: false
+    default: 'true'
+```
+
+- [ ] **Step 4: Typecheck + commit**
+
+Run: `npm run typecheck`
+Expected: PASS.
+
+```bash
+git add src/workflow/index.ts src/app/app.ts action.yml
+git commit -m "feat: expose dynamic-fanout escape hatch (default on)"
+```
+
+### Task D5: Validate (no recall regression, fewer sessions on small PRs)
+
+- [ ] **Step 1: Full gates**
+
+Run: `npm test && npm run typecheck && npm run lint`
+Expected: PASS.
+
+- [ ] **Step 2: Golden set unchanged** — the eval PRs are non-trivial (multi-file/sensitive), so they stay full-tier and recall must not move.
+
+Run: `npm run eval`
+Expected: recall/precision unchanged vs the pre-Phase-D baseline (full tier for every golden PR).
+
+- [ ] **Step 3: Manual dogfood** — re-run the review on a 1–2 file, <60-line PR and confirm the log shows the `Dynamic fan-out: low-risk diff …` line and that NO `interactions`/`integrity` lens or `guideline-compliance` session is created. Confirm a sensitive PR (touches `src/auth/**` or `package.json`) logs no fan-out line and still runs those sessions (full tier is silent by design).
+
+- [ ] **Step 4: Commit any fixture/docs touch-ups**
+
+```bash
+git add -A
+git commit -m "test(fanout): validate minimal vs full tiers end-to-end"
+```
+
+---
+
 ## Self-Review (writing-plans checklist)
 
 **1. Spec coverage:**
@@ -1038,6 +1449,7 @@ git commit -m "chore(review-context): tune finder guideline budget against pr11 
 - Item 3 (per-role guideline budget, fix positional eviction): Tasks C1–C4. ✓
 - Item 4 (DESIGN.md/ADRs, one-hop following kept): Task B1; deeper following explicitly out-of-scope. ✓
 - Measurement (eval/replay): Task C4 + each task's test commands. ✓
+- Item 5 (latency / dynamic fan-out): Tasks D1–D5 (pure `planReviewFanout` + ceiling/escalation tests, the `dynamicFanout` option, runner wiring, the entry-point escape hatch, validation). Motivated by the Latency evidence section. ✓
 
 **2. Placeholder scan:** No "TBD"/"add error handling"/"similar to Task N". Every code step shows complete code; every test step shows full assertions. ✓
 
@@ -1048,3 +1460,4 @@ git commit -m "chore(review-context): tune finder guideline budget against pr11 
 - `MAX_FINDER_GUIDELINE_BYTES` defined in C2, used by default in C2 + runner C3. ✓
 - `infra-ops` id consistent across `prompt.ts` (A2), `review-playbooks.ts` (A3), test assertions. ✓
 - `PATH_PATTERNS.infra` defined in A1, reused (not re-declared) in `review-playbooks.ts` A3 and `runner.ts` A4. ✓
+- `planReviewFanout` → `FanoutPlan` (`reviewPasses`/`guidelinePass`/`tier`/`reason`) defined in D1, consumed in runner D3; `diffLineCounts` defined in `diff-context.ts` D1 (reuses the private `countPatchLines`), used by `fanout.ts` D1; `dynamicFanout` option added in D2, read in D3, plumbed in D4. ✓
