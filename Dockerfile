@@ -1,27 +1,23 @@
-FROM node:20-slim
+# node 24 matches cursor-agent's bundled Node major, so it shares the system node (see cursor stage).
+FROM node:24-slim
 
-# git + ca-certificates are runtime needs (git diff/log/grep in review sessions;
-# CA roots for TLS); curl is used by the provider installers further down.
-# --no-install-recommends keeps apt from pulling in suggested-but-unused packages.
+# git: review shells out to it. curl: used by the provider installers below.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl git \
   && rm -rf /var/lib/apt/lists/*
 
-# Survive transient npm-registry blips (observed ECONNRESET on fetch) instead
-# of failing the whole image build on a single dropped connection.
+# Retry npm fetches so a transient registry ECONNRESET doesn't fail the build.
 RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000
 
-# Use the latest opencode-ai for access to the most current model catalog.
-# CommandCode is available for the optional commandcode provider path. Clean the
-# npm download cache in the SAME layer so its cached tarballs (~386MB) never land
-# in the image.
+# Engine + optional commandcode provider; --version verifies both run on Node 24.
 RUN npm install -g opencode-ai@latest command-code@latest \
-  && npm cache clean --force
+  && npm cache clean --force \
+  && opencode --version \
+  && command-code --version
 
-# Devin CLI is available for the optional devin provider path. Credentials are
-# written at runtime only when that provider is selected.
+# Devin CLI (optional devin provider); strip the installer's interactive setup step.
 RUN curl -fsSL https://cli.devin.ai/install.sh -o /tmp/devin-install.sh \
   && grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install.sh \
   && sed '/"\$VERSION_DIR\/bin\/\$COMPILED_BIN_NAME" setup/d' /tmp/devin-install.sh > /tmp/devin-install-no-setup.sh \
@@ -30,15 +26,24 @@ RUN curl -fsSL https://cli.devin.ai/install.sh -o /tmp/devin-install.sh \
   && test -x /root/.local/bin/devin \
   && rm -f /tmp/devin-install.sh /tmp/devin-install-no-setup.sh
 
-# Cursor CLI is available for the optional cursor provider path. Download the
-# installer to disk first (redirect-safe -fsSL, no curl|bash pipeline) so a
-# fetch failure surfaces clearly and the script is auditable; it installs the
-# cursor-agent binary into ~/.local/bin. Auth is read at runtime from
-# CURSOR_API_KEY, so no credential file is written.
-RUN curl -fsSL https://cursor.com/install -o /tmp/cursor-install.sh \
-  && bash /tmp/cursor-install.sh \
-  && test -x /root/.local/bin/cursor-agent \
-  && rm -f /tmp/cursor-install.sh
+# Cursor CLI (optional cursor provider); installer saved to disk, not piped to bash
+# (auditable). Dedup: cursor bundles its own Node — when majors match, symlink it to
+# the system node; fail the build if a future cursor bundles a different major.
+RUN set -eux; \
+  curl -fsSL https://cursor.com/install -o /tmp/cursor-install.sh; \
+  bash /tmp/cursor-install.sh; \
+  test -x /root/.local/bin/cursor-agent; \
+  cnode="$(ls -d /root/.local/share/cursor-agent/versions/*/node)"; \
+  cmaj="$("$cnode" --version | sed 's/^v//; s/\..*//')"; \
+  smaj="$(node --version | sed 's/^v//; s/\..*//')"; \
+  if [ "$cmaj" != "$smaj" ]; then \
+    echo "ERROR: cursor bundles Node $cmaj but the base image is Node $smaj; bump the base to node:$cmaj-slim or drop this dedup" >&2; \
+    exit 1; \
+  fi; \
+  rm -f "$cnode"; \
+  ln -s /usr/local/bin/node "$cnode"; \
+  /root/.local/bin/cursor-agent --help >/dev/null; \
+  rm -f /tmp/cursor-install.sh
 ENV PATH="/root/.local/bin:${PATH}"
 
 WORKDIR /app
