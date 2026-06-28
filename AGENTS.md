@@ -15,20 +15,21 @@ in this repo; `CLAUDE.md` just points here.
 
 ## Architecture
 
-| Module                         | Responsibility                                                                                  |
-| ------------------------------ | ----------------------------------------------------------------------------------------------- |
-| `src/workflow/index.ts`        | GitHub Action entry: parse inputs → `runPrReview`                                               |
-| `src/app/*`                    | Webhook-app entry: auth, clone, queue → `runPrReview`                                           |
-| `src/shared/runner.ts`         | Orchestrator: context assembly → parallel sessions → finding pipeline → post. Keep it THIN.     |
-| `src/shared/prompt.ts`         | ALL prompt text + pure assembly functions. No prompt strings anywhere else.                     |
-| `src/shared/opencode.ts`       | opencode server lifecycle, sessions, response parsing (strict + repair)                         |
-| `src/shared/review-context.ts` | PR metadata context + budgeted guideline discovery/preloading                                   |
-| `src/shared/diff-context.ts`   | Budgeted diff-hunk embedding + the shared path-risk taxonomy (`PATH_PATTERNS`)                  |
-| `src/shared/blast-radius.ts`   | Call sites of changed exported symbols (git grep, best-effort)                                  |
-| `src/shared/filter.ts`         | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts |
-| `src/shared/report.ts`         | Pure review-body layout: outside-the-diff findings section + multi-shard summary dedupe         |
-| `src/shared/github.ts`         | GitHub REST/GraphQL: listing, posting, markers, thread resolution                               |
-| `src/shared/eval.ts`           | Golden-set scoring (recall/precision/noise) for `scripts/eval-review.ts`                        |
+| Module                         | Responsibility                                                                                                                       |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/workflow/index.ts`        | GitHub Action entry: parse inputs → `runPrReview`                                                                                    |
+| `src/app/*`                    | Webhook-app entry: auth, clone, queue → `runPrReview`                                                                                |
+| `src/shared/runner.ts`         | Orchestrator: context assembly → parallel sessions → finding pipeline → post. Keep it THIN.                                          |
+| `src/shared/prompt.ts`         | ALL prompt text + pure assembly functions. No prompt strings anywhere else.                                                          |
+| `src/shared/opencode.ts`       | opencode server lifecycle, sessions, response parsing (strict + repair)                                                              |
+| `src/shared/review-context.ts` | PR metadata context + budgeted guideline discovery/preloading                                                                        |
+| `src/shared/diff-context.ts`   | Budgeted diff-hunk embedding + the shared path-risk taxonomy (`PATH_PATTERNS`)                                                       |
+| `src/shared/fanout.ts`         | Pure dynamic fan-out: scale recall-supplement sessions (lenses, guideline pass) to diff shape; never gates the main review or verify |
+| `src/shared/blast-radius.ts`   | Call sites of changed exported symbols (git grep, best-effort)                                                                       |
+| `src/shared/filter.ts`         | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts                                      |
+| `src/shared/report.ts`         | Pure review-body layout: outside-the-diff findings section + multi-shard summary dedupe                                              |
+| `src/shared/github.ts`         | GitHub REST/GraphQL: listing, posting, markers, thread resolution                                                                    |
+| `src/shared/eval.ts`           | Golden-set scoring (recall/precision/noise) for `scripts/eval-review.ts`                                                             |
 
 ## Invariants — do not break these
 
@@ -39,6 +40,9 @@ in this repo; `CLAUDE.md` just points here.
    since the last run" applies to the summary TEXT only
    (`buildSummaryScopeBlock`). Repeat-comment noise is handled downstream by
    `suppressPreviouslyReported`, not by narrowing the model's input.
+   Dynamic fan-out (`fanout.ts`) scales only the NUMBER of recall-supplement
+   sessions (lens passes, guideline pass) by diff shape — it never narrows the
+   diff or gates the main review or verification.
 2. **Trust-boundary rules live in code, not prompts.** Confidence gating,
    duplicate suppression, verdict application, and severity filtering are
    enforced in `filter.ts`; the prompt versions are guidance only.

@@ -72,6 +72,7 @@ async function main(): Promise<void> {
     verifyFindings: parseBooleanInput('verify-findings', true),
     timeBudgetMinutes: parseNumberInput('time-budget-minutes', 30),
     reviewShards: parseNumberInput('review-shards', 1),
+    dynamicFanout: parseBooleanInput('dynamic-fanout', true),
     modelOptions: parseJsonObjectInput('model-options', DEFAULT_MODEL_OPTIONS),
     promptCache: parseBooleanInput('prompt-cache', true),
     skipDocOnly: parseBooleanInput('skip-doc-only', true),
@@ -80,7 +81,7 @@ async function main(): Promise<void> {
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${model}`);
   core.info(
-    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModel || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} modelOptions=${JSON.stringify(options.modelOptions)} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly}`,
+    `Options: dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModel || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} modelOptions=${JSON.stringify(options.modelOptions)} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,
   );
 
   const octokit = github.getOctokit(token) as unknown as Octokit;
