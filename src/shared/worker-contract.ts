@@ -1,5 +1,7 @@
 // Mirror of jbot-review-app's apps/api/src/modules/worker/worker.types.ts.
 // The two repos don't share a package — keep these two in sync by hand.
+import type { Severity } from './types.ts';
+
 export interface ClaimedJob {
   jobId: string;
   repoFullName: string; // "owner/repo"
@@ -19,4 +21,6 @@ export interface JobUpdate {
   costUsd?: number;
   tokensInput?: number;
   tokensOutput?: number;
+  // Per-severity finding counts for the control plane's check-run gate.
+  findingsBySeverity?: Partial<Record<Severity, number>>;
 }

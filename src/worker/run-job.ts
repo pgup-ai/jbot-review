@@ -4,6 +4,7 @@ import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 import type { Octokit } from '../shared/github.ts';
 import { clonePr } from '../app/clone.ts';
 import { runPrReview } from '../shared/runner.ts';
+import type { Severity } from '../shared/types.ts';
 import type { ClaimedJob, JobUpdate } from '../shared/worker-contract.ts';
 
 const TokenOctokit = CoreOctokit.plugin(paginateRest, restEndpointMethods);
@@ -21,6 +22,9 @@ export function octokitForToken(token: string): Octokit {
 export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise<JobUpdate> {
   const startedAt = Date.now();
   let cleanup: (() => void) | null = null;
+  // Captured from runPrReview's onReviewResult hook → forwarded so the control plane's
+  // check-run can gate on real per-severity counts.
+  let findingsBySeverity: Partial<Record<Severity, number>> | undefined;
   try {
     // Exactly "owner/repo" — reject empty segments AND extra slashes (e.g. "a/b/c").
     // Parsing lives inside the try so a malformed/absent repoFullName fails the
@@ -63,12 +67,22 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         reviewShards: 1,
         timeBudgetMinutes: 30,
         modelOptions: { reasoningEffort: 'medium' },
+        onReviewResult: (r) => {
+          const counts: Partial<Record<Severity, number>> = {};
+          for (const f of r.findings) counts[f.severity] = (counts[f.severity] ?? 0) + 1;
+          findingsBySeverity = counts;
+        },
         ...(job.auxModel ? { auxModel: job.auxModel } : {}),
         ...(job.auxApiKey ? { auxApiKey: job.auxApiKey } : {}),
       },
       log,
     });
-    return { claimToken: job.claimToken, status: 'success', durationMs: Date.now() - startedAt };
+    return {
+      claimToken: job.claimToken,
+      status: 'success',
+      durationMs: Date.now() - startedAt,
+      ...(findingsBySeverity ? { findingsBySeverity } : {}),
+    };
   } catch (err) {
     log(`job ${job.jobId} failed: ${String(err)}`);
     return { claimToken: job.claimToken, status: 'failed', durationMs: Date.now() - startedAt };
