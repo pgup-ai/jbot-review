@@ -62,7 +62,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs['pr-number']) }}
       - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
       - run: npm ci
       - run: npm run build
       - run: docker build -t ghcr.io/pgup-ai/jbot-review:latest .

@@ -55,7 +55,7 @@ git tag -f v0
 git push origin v0 --force
 ```
 
-The Dockerfile uses `node:20-slim` and runs the bundled JS from `dist/`.
+The Dockerfile uses `node:24-slim` and runs the bundled JS from `dist/`.
 The `v0` action reference is a moving major-version tag; pin to an immutable
 release tag if you need fully stable action behavior.
 
@@ -204,7 +204,7 @@ without editing the workflow.
     ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs['pr-number']) }}
 - uses: actions/setup-node@v6
   with:
-    node-version: '20'
+    node-version: '24'
 - run: npm ci
 - run: npm run build
 - run: docker build -t ghcr.io/pgup-ai/jbot-review:latest .
@@ -638,7 +638,7 @@ configured.
 
 ## Deploying the hosted App
 
-The Dockerfile is vendor-agnostic — `FROM node:20-slim`, installs git plus the
+The Dockerfile is vendor-agnostic — `FROM node:24-slim`, installs git plus the
 configured review CLIs, and exposes port 3000. Pick any provider below. All
 follow the same three steps:
 
