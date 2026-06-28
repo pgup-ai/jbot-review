@@ -1142,11 +1142,16 @@ export async function runPrReview(params: {
 
     // Report the final filtered findings + summary on EVERY completed review (dry-run or
     // real post), so a caller can forward per-severity counts (the worker → check-run gate).
-    options.onReviewResult?.({
-      summary,
-      findings: filteredFindings,
-      addressedPriorComments: verifiedAddressedPriorComments,
-    });
+    // Isolated: this is a side-channel hook and must not abort the actual review post below.
+    try {
+      options.onReviewResult?.({
+        summary,
+        findings: filteredFindings,
+        addressedPriorComments: verifiedAddressedPriorComments,
+      });
+    } catch (err) {
+      log(`onReviewResult hook threw (ignored): ${String(err)}`);
+    }
 
     if (options.dryRun) {
       const body = buildBody(
