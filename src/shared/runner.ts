@@ -721,7 +721,7 @@ export async function runPrReview(params: {
   // parallel. With compliance off, finders fall back to the full set so no
   // guideline coverage is silently dropped — otherwise the omitted docs would
   // be seen by no session at all.
-  const guidelinesForPrompt = options.guidelinePass ? finderGuidelines : guidelines;
+  const guidelinesForPrompt = effectiveGuidelinePass ? finderGuidelines : guidelines;
   if (options.enhancedContext) {
     const commits = await listPrCommits(octokit, owner, repo, pullNumber);
     const checkSummary = headSha
