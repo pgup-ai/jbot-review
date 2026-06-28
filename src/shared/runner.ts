@@ -513,8 +513,9 @@ export interface ReviewRunOptions {
    */
   opencodePort?: number;
   /**
-   * Local harness hook: receives the same filtered findings that dry-run would
-   * post. Not exposed through the GitHub Action input surface.
+   * Fires when a review completes (dry-run OR a real post) with the final filtered
+   * findings + summary. Used by the dry-run harness and by the worker (to forward
+   * per-severity counts to the control plane). Not a GitHub Action input.
    */
   onReviewResult?: (result: {
     summary: string;
@@ -1139,6 +1140,14 @@ export async function runPrReview(params: {
     }
     const verdict = decideVerdict(filteredFindings);
 
+    // Report the final filtered findings + summary on EVERY completed review (dry-run or
+    // real post), so a caller can forward per-severity counts (the worker → check-run gate).
+    options.onReviewResult?.({
+      summary,
+      findings: filteredFindings,
+      addressedPriorComments: verifiedAddressedPriorComments,
+    });
+
     if (options.dryRun) {
       const body = buildBody(
         changesSinceText,
@@ -1151,11 +1160,6 @@ export async function runPrReview(params: {
         headSha,
         tokenUsage.snapshot(),
       );
-      options.onReviewResult?.({
-        summary,
-        findings: filteredFindings,
-        addressedPriorComments: verifiedAddressedPriorComments,
-      });
       log(
         `Dry run enabled; would post verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
       );
