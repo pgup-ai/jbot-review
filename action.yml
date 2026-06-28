@@ -192,6 +192,7 @@ runs:
     INPUT_VERIFY-FINDINGS: ${{ inputs.verify-findings }}
     INPUT_TIME-BUDGET-MINUTES: ${{ inputs.time-budget-minutes }}
     INPUT_REVIEW-SHARDS: ${{ inputs.review-shards }}
+    INPUT_DYNAMIC-FANOUT: ${{ inputs.dynamic-fanout }}
     INPUT_MODEL-OPTIONS: ${{ inputs.model-options }}
     INPUT_PROMPT-CACHE: ${{ inputs.prompt-cache }}
     INPUT_SKIP-DOC-ONLY: ${{ inputs.skip-doc-only }}

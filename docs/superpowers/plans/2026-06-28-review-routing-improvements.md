@@ -1094,7 +1094,7 @@ git commit -m "chore(review-context): tune finder guideline budget against pr11 
 
 **Design:** one pure function, `planReviewFanout(files, shape, requested) → { reviewPasses, guidelinePass, tier, reason }`. A diff is **minimal-tier** only when ALL hold: no sensitive path (`PATH_PATTERNS.security|data|api|infra|tooling`), no dependency-manifest change, not a large deletion, ≤ 3 changed files, ≤ 60 added lines. Minimal ⇒ `reviewPasses = min(requested, 1)` (no counted lenses) and `guidelinePass = false`. Everything else ⇒ the requested values unchanged. An operator escape hatch (`dynamic-fanout` / `JBOT_DYNAMIC_FANOUT`, default on) forces full fan-out when off — keeps the pr11 golden case reproducible.
 
-> **Note (this is a latency phase, not a recall phase):** the frontend lens stays content-triggered and the verification pass stays on. Phase D never touches diff scope — it only changes how many recall-supplement SESSIONS spin up.
+> **Note (latency phase, not a recall phase):** Phase D only scales the pass count + guideline toggle fed to the existing selectors; it never touches diff scope, the lens-selection logic, or verification. In minimal tier `reviewPasses=1`, so `selectLensKeys(1)` returns no lenses at all — including the content-triggered frontend lens, which needs `passes>=2`. Full tier is unchanged.
 
 ### Task D1: Pure `planReviewFanout` + `diffLineCounts` helper
 

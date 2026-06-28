@@ -162,13 +162,7 @@ const TEST_ONLY_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]s
 
 export function classifyChangeShape(files: PrFile[]): ChangeShape {
   const filenames = files.map((file) => file.filename);
-  let removed = 0;
-  let added = 0;
-  for (const file of files) {
-    const counts = countPatchLines(file.patch);
-    added += counts.added;
-    removed += counts.removed;
-  }
+  const { added, removed } = diffLineCounts(files);
   return {
     testOnly: filenames.length > 0 && filenames.every((file) => TEST_ONLY_FILE.test(file)),
     largeDeletion:
