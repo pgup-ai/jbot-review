@@ -2,10 +2,9 @@ import { PATH_PATTERNS, diffLineCounts } from './diff-context.ts';
 import type { ChangeShape } from './diff-context.ts';
 import type { PrFile } from './github.ts';
 
-// Scale recall-supplement fan-out (extra lenses + the guideline pass) to a
-// diff's risk and size. The requested config is the ceiling: this only reduces
-// it for provably-low-risk diffs, and never the main review or verification
-// (invariants #1/#3). Pure — runner.ts only wires it (invariant #10).
+// Scale recall-supplement fan-out (extra lenses + guideline pass) to diff risk/size.
+// The requested config is the ceiling — only ever reduced, never the main review or
+// verify (invariants #1/#3). Pure; runner.ts only wires it (#10).
 
 const SENSITIVE_PATTERNS = [
   PATH_PATTERNS.security,

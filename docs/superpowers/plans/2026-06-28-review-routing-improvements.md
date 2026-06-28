@@ -1088,6 +1088,8 @@ git commit -m "chore(review-context): tune finder guideline budget against pr11 
 
 ## Phase D — Dynamic fan-out by change shape (Item 5, latency)
 
+> **Status (2026-06-28):** Implemented on `feat/dynamic-fanout` (PR #63). Tasks D1–D5 complete; 401/401 tests green. `src/shared/fanout.ts` + the four runner swaps + the `dynamic-fanout` escape hatch shipped; `npm run eval` golden validation still pending (provider tokens).
+
 **Why:** the Latency evidence section shows a 7m34s run that fired ~10 agentic sessions to produce 1 finding, because `reviewPasses=3` + `guidelinePass=true` ran three lens passes and a compliance pass — each a full agentic loop on the throttled aux model (~280–425 s). Phase D scales those **recall supplements** to the diff: a small, low-risk change runs the general pass only; sensitive/large/dependency changes keep the full requested fan-out. The static config stays the ceiling; the gate only reduces. The main full-diff review and the verification pass are never gated (invariants #1, #3).
 
 **Design:** one pure function, `planReviewFanout(files, shape, requested) → { reviewPasses, guidelinePass, tier, reason }`. A diff is **minimal-tier** only when ALL hold: no sensitive path (`PATH_PATTERNS.security|data|api|infra|tooling`), no dependency-manifest change, not a large deletion, ≤ 3 changed files, ≤ 60 added lines. Minimal ⇒ `reviewPasses = min(requested, 1)` (no counted lenses) and `guidelinePass = false`. Everything else ⇒ the requested values unchanged. An operator escape hatch (`dynamic-fanout` / `JBOT_DYNAMIC_FANOUT`, default on) forces full fan-out when off — keeps the pr11 golden case reproducible.
