@@ -34,6 +34,7 @@ RUN set -eux; \
   bash /tmp/cursor-install.sh; \
   test -x /root/.local/bin/cursor-agent; \
   cnode="$(ls -d /root/.local/share/cursor-agent/versions/*/node)"; \
+  [ -f "$cnode" ] || { echo "ERROR: expected exactly one cursor node binary, got: $cnode" >&2; exit 1; }; \
   cmaj="$("$cnode" --version | sed 's/^v//; s/\..*//')"; \
   smaj="$(node --version | sed 's/^v//; s/\..*//')"; \
   if [ "$cmaj" != "$smaj" ]; then \
