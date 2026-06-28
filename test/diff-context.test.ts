@@ -6,6 +6,7 @@ import {
   buildDiffHunksBlock,
   buildDiffHunksBlockWithMetadata,
   classifyChangeShape,
+  diffLineCounts,
   diffRiskScore,
   isDocFile,
   isDocOnlyChange,
@@ -416,5 +417,15 @@ describe('isDocOnlyChange', () => {
 
   it('is not doc-only for an empty change set (nothing to skip)', () => {
     assert.equal(isDocOnlyChange([]), false);
+  });
+});
+
+describe('diffLineCounts', () => {
+  it('sums added and removed across patches, ignoring file headers', () => {
+    const counts = diffLineCounts([
+      { filename: 'a.ts', patch: '@@ -1,2 +1,2 @@\n+added one\n-removed one' },
+      { filename: 'b.ts', patch: '@@ -0,0 +1 @@\n+added two' },
+    ]);
+    assert.deepEqual(counts, { added: 2, removed: 1 });
   });
 });

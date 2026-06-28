@@ -97,6 +97,18 @@ function countPatchLines(patch: string | undefined): { added: number; removed: n
   return { added, removed };
 }
 
+/** Total added/removed lines across all patches (shared `countPatchLines`), for fan-out sizing. */
+export function diffLineCounts(files: PrFile[]): { added: number; removed: number } {
+  let added = 0;
+  let removed = 0;
+  for (const file of files) {
+    const counts = countPatchLines(file.patch);
+    added += counts.added;
+    removed += counts.removed;
+  }
+  return { added, removed };
+}
+
 export function diffRiskScore(file: PrFile): number {
   let score = 0;
   for (const rule of RISK_RULES) {
