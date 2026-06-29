@@ -70,10 +70,11 @@ export function planReviewFanout(input: {
 // a path class — the always-full main pass backstops it.
 const INTEGRITY_PATTERNS = [PATH_PATTERNS.security, PATH_PATTERNS.data, PATH_PATTERNS.api];
 
-// `export *` re-exports (`export * from`, `export * as ns from`) change the
-// exported surface but carry no symbol name, so the name-based extractor skips
-// them — match the diff line directly. `export\s+\*` is re-export-only syntax.
-const EXPORT_STAR_LINE = /^[+-]\s*export\s+\*/m;
+// `export *` re-exports (`export * from`, `export * as ns from`, `export type *`)
+// change the exported surface but carry no symbol name, so the name-based
+// extractor skips them — match the diff line directly. `export [type] *` is
+// re-export-only syntax.
+const EXPORT_STAR_LINE = /^[+-]\s*export\s+(?:type\s+)?\*/m;
 
 /**
  * Whether the incremental delta touches the EXPORTED surface — the signal the
@@ -83,7 +84,8 @@ const EXPORT_STAR_LINE = /^[+-]\s*export\s+\*/m;
  */
 function deltaTouchesExportSurface(files: PrFile[]): boolean {
   // GitHub omits patches for large/binary diffs — content unknown, so fail open.
-  if (files.some((file) => file.patch === undefined)) return true;
+  // `!patch` covers missing, null, and empty alike.
+  if (files.some((file) => !file.patch)) return true;
   if (extractChangedExportedSymbols(files, { includeRemoved: true }).length > 0) return true;
   return files.some((file) => EXPORT_STAR_LINE.test(file.patch ?? ''));
 }

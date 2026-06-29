@@ -101,6 +101,15 @@ describe('planIncrementalLenses', () => {
   it('runs interactions when a delta file has no patch (content unknown → fail open)', () => {
     // GitHub omits patches for large/binary diffs; we can't see its exports.
     assert.ok(gate([{ filename: 'src/big.ts' }]).lensKeys.includes('interactions'));
+    assert.ok(gate([{ filename: 'src/big.ts', patch: '' }]).lensKeys.includes('interactions'));
+  });
+
+  it('runs interactions when the delta adds/removes an `export type *` re-export', () => {
+    const typeReexport: PrFile = {
+      filename: 'src/types.ts',
+      patch: "@@ -0,0 +1 @@\n+export type * from './model.ts';",
+    };
+    assert.ok(gate([typeReexport]).lensKeys.includes('interactions'));
   });
 
   it('runs integrity only when the delta touches security/data/api paths', () => {
