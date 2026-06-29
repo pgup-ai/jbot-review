@@ -111,18 +111,21 @@ export function planIncrementalLenses(input: {
   if (deltaFiles === null) return { lensKeys: candidateLensKeys, guidelinePass };
 
   const filenames = deltaFiles.map((file) => file.filename);
+  const shape = classifyChangeShape(deltaFiles);
   // The ONLY place a lens's incremental trigger is defined; each reuses the
   // shared taxonomy/helpers, never re-declares a path regex.
   const lensTriggered: Record<string, boolean> = {
     interactions: deltaTouchesExportSurface(deltaFiles),
     integrity: filenames.some((name) => INTEGRITY_PATTERNS.some((pattern) => pattern.test(name))),
-    frontend: changedFilesIncludeFrontend(filenames),
+    // Mirror selectLensKeys: a test-only delta has no render/state surface for
+    // the frontend lens, even when a `.test.tsx` matches the frontend patterns.
+    frontend: !shape.testOnly && changedFilesIncludeFrontend(filenames),
   };
   // Unknown (future) lens keys are kept — fail toward coverage.
   const lensKeys = candidateLensKeys.filter((key) => lensTriggered[key] ?? true);
 
   // Written standards can apply to almost any code, so only a test-only or
   // docs-only delta skips the guideline pass; never re-enable one the caller off'd.
-  const trivial = classifyChangeShape(deltaFiles).testOnly || isDocOnlyChange(filenames);
+  const trivial = shape.testOnly || isDocOnlyChange(filenames);
   return { lensKeys, guidelinePass: guidelinePass && !trivial };
 }

@@ -123,6 +123,10 @@ describe('planIncrementalLenses', () => {
     assert.ok(!gate([added(3, 'src/util/calc.ts')]).lensKeys.includes('frontend'));
   });
 
+  it('skips frontend on a test-only delta even if a .test.tsx matches (mirrors selectLensKeys)', () => {
+    assert.ok(!gate([added(3, 'src/components/Widget.test.tsx')]).lensKeys.includes('frontend'));
+  });
+
   it('skips the guideline pass on a test-only or docs-only delta, keeps it on code', () => {
     assert.equal(gate([added(3, 'src/x.test.ts')]).guidelinePass, false);
     assert.equal(gate([added(3, 'README.md')]).guidelinePass, false);
