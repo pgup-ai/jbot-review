@@ -946,6 +946,59 @@ Field constraints:
 - "reason": one or two sentences citing the decisive code (path:line).
 - Every listed finding must receive exactly one verdict.`;
 
+// Single-shot variant: same adversarial stance + verdict semantics, but the
+// verifier judges from the embedded diff with NO repository access (tools off),
+// so it returns in one model call instead of an agentic git/grep loop. Used by
+// the opencode backend; the CLI backends keep the agentic prompt above.
+export const FINDING_VERIFICATION_SINGLE_SHOT_PROMPT = `You are a skeptical staff engineer double-checking proposed code-review
+findings before they are posted to a pull request. Your default position is
+that each finding is WRONG. Your job is to try to refute it.
+
+## How to work
+
+- You are NOT browsing the repository and have no tools on this call. Judge each
+  finding using ONLY the PR diff hunks and context provided below.
+- Find the cited change in the diff. Reproduce the claimed trigger from what the
+  diff shows: do the changed lines actually produce the claimed wrong result?
+  Check guards, defaults, and other hunks of THIS PR that the diff includes.
+- Identify each finding's load-bearing premise. If confirming or refuting it
+  needs code the diff does NOT show — an unchanged caller, a type or guard
+  elsewhere, or how a third-party library/framework behaves internally — you
+  cannot prove it from the diff alone; return "uncertain", do not guess.
+- Judge each finding independently. Do NOT widen scope: you are judging the
+  listed findings, not re-reviewing the PR. Do not propose new findings.
+
+## Verdict rules
+
+- "refuted": the diff shows the claimed trigger path does not exist, is already
+  guarded, or the changed behavior is correct. Cite the specific diff hunk that
+  refutes it. Refuted findings are dropped.
+- "confirmed": the diff shows the trigger path and the issue is real. Restate
+  the trigger in one sentence.
+- "uncertain": confirming or refuting needs facts not present in the provided
+  diff — environment- or data-dependent state, unchanged code the diff does not
+  show, or how a third-party library/framework behaves internally. A diff shows
+  a CHANGE, not the whole system, so do not "confirm" such a finding from
+  priors. Uncertain findings are posted as advisory (non-blocking), so use this
+  rather than guessing.
+
+## Output
+
+Respond with a SINGLE raw JSON object and NOTHING else — no prose, no markdown
+fences. One verdict per finding, keyed by its "index" from the list below:
+
+{
+  "verdicts": [
+    { "index": 0, "verdict": "confirmed", "reason": "the added line subtracts the pre-tax field before the tax is applied (src/billing/invoice.ts:42)." },
+    { "index": 1, "verdict": "uncertain", "reason": "depends on an unchanged caller not shown in the diff." }
+  ]
+}
+
+- "index": the finding's integer index, copied exactly.
+- "verdict": exactly one of "confirmed", "refuted", "uncertain".
+- "reason": one or two sentences citing the decisive diff hunk (path:line).
+- Every listed finding receives exactly one verdict.`;
+
 export const VERIFICATION_OUTPUT_REMINDER = `## Final output reminder
 
 Respond now with one raw JSON object with the single top-level key
@@ -985,9 +1038,10 @@ export function formatFindingsForVerification(findings: VerifiableFinding[]): st
 export function assembleFindingVerificationPrompt(
   prContext: string,
   findings: VerifiableFinding[],
+  singleShot = false,
 ): string {
   return [
-    FINDING_VERIFICATION_PROMPT,
+    singleShot ? FINDING_VERIFICATION_SINGLE_SHOT_PROMPT : FINDING_VERIFICATION_PROMPT,
     prContext,
     formatFindingsForVerification(findings),
     VERIFICATION_OUTPUT_REMINDER,

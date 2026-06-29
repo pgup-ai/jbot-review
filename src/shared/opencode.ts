@@ -595,7 +595,10 @@ export async function runFindingVerification(
       title: finding.title,
       body: finding.body,
     })),
+    true,
   );
+  // Single-shot: exploration tools off, so the verifier judges from the embedded
+  // diff in one model call instead of an agentic git/grep loop.
   const { raw } = await promptPlanAgent(
     client,
     model,
@@ -604,9 +607,27 @@ export async function runFindingVerification(
     log,
     timeoutMs,
     onTokenUsage,
+    SINGLE_SHOT_TOOLS,
   );
   return parseFindingVerdicts(raw, findings.length, log);
 }
+
+// Defense-in-depth tool sets for every review prompt. Default: mutating tools
+// off, exploration (bash/read/grep) on. Single-shot also turns exploration off,
+// forcing ONE model call with no agentic round-trips (used by finding-verification,
+// which judges from the embedded diff).
+const READONLY_TOOLS = { write: false, edit: false, patch: false } as const;
+const SINGLE_SHOT_TOOLS = {
+  write: false,
+  edit: false,
+  patch: false,
+  bash: false,
+  read: false,
+  grep: false,
+  glob: false,
+  list: false,
+  webfetch: false,
+} as const;
 
 async function promptPlanAgent(
   client: OpencodeClient,
@@ -616,6 +637,7 @@ async function promptPlanAgent(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  tools?: Record<string, boolean>,
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
   // The title makes parallel sessions distinguishable in opencode's own
@@ -637,6 +659,7 @@ async function promptPlanAgent(
     log,
     timeoutMs,
     onTokenUsage,
+    tools,
   );
   return { raw, sessionID: session.id };
 }
@@ -650,6 +673,7 @@ async function promptPlanAgentInSession(
   log: (msg: string) => void,
   timeoutMs = PROMPT_TIMEOUT_MS,
   onTokenUsage?: TokenUsageRecorder,
+  tools?: Record<string, boolean>,
 ): Promise<string> {
   const release = sessionSlots ? await sessionSlots.acquire() : undefined;
   try {
@@ -662,6 +686,7 @@ async function promptPlanAgentInSession(
       log,
       timeoutMs,
       onTokenUsage,
+      tools,
     );
   } finally {
     release?.();
@@ -677,6 +702,7 @@ async function promptInSessionHoldingSlot(
   log: (msg: string) => void,
   timeoutMs: number,
   onTokenUsage?: TokenUsageRecorder,
+  tools: Record<string, boolean> = READONLY_TOOLS,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
 
@@ -693,9 +719,10 @@ async function promptInSessionHoldingSlot(
       model: { providerID, modelID },
       agent: 'plan',
       // Defense-in-depth alongside the plan agent and the config-level
-      // permission.edit deny: mutating tools are off for every prompt.
-      // Bash stays on — the review needs git diff/log/grep.
-      tools: { write: false, edit: false, patch: false },
+      // permission.edit deny: mutating tools are always off. Default keeps
+      // bash/read on (the review needs git diff/log/grep); single-shot callers
+      // pass SINGLE_SHOT_TOOLS to turn exploration off for a one-call response.
+      tools,
       parts: [{ type: 'text', text: prompt }],
     },
   });

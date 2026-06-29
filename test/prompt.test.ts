@@ -372,6 +372,24 @@ describe('assembleFindingVerificationPrompt', () => {
     assert.match(block, /Location: src\/a\.ts:12/);
     assert.match(block, /Location: src\/b\.ts\n/);
   });
+
+  it('defaults to the agentic prompt that reads the actual code', () => {
+    assert.match(assembleFindingVerificationPrompt('CTX', findings), /read\s+the actual code/);
+  });
+
+  it('single-shot mode judges from the diff and forbids browsing, keeping discipline', () => {
+    const prompt = assembleFindingVerificationPrompt('CTX', findings, true);
+
+    assert.match(prompt, /NOT browsing the repository/);
+    assert.doesNotMatch(prompt, /read\s+the actual code/);
+    // preserves the adversarial refute-by-default + framework-abstention discipline
+    assert.match(prompt, /each finding is WRONG/);
+    assert.match(prompt, /library\/framework behaves internally/);
+    assert.match(prompt, /posted as advisory/);
+    // still lists findings and ends with the recency reminder
+    assert.match(prompt, /### Finding 0/);
+    assert.ok(prompt.endsWith(VERIFICATION_OUTPUT_REMINDER));
+  });
 });
 
 describe('assembleReviewPrompt', () => {
