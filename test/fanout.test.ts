@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { classifyChangeShape } from '../src/shared/diff-context.ts';
-import { planReviewFanout } from '../src/shared/fanout.ts';
+import { planReviewFanout, planIncrementalLenses } from '../src/shared/fanout.ts';
 import type { PrFile } from '../src/shared/github.ts';
 
 function added(lines: number, name = 'src/util/calc.ts'): PrFile {
@@ -61,5 +61,94 @@ describe('planReviewFanout', () => {
     assert.equal(result.reviewPasses, 1);
     assert.equal(result.guidelinePass, false);
     assert.equal(result.tier, 'minimal');
+  });
+});
+
+describe('planIncrementalLenses', () => {
+  const ALL = ['interactions', 'integrity', 'frontend'];
+  const gate = (deltaFiles: PrFile[] | null, candidateLensKeys = ALL, guidelinePass = true) =>
+    planIncrementalLenses({ candidateLensKeys, guidelinePass, deltaFiles });
+
+  const exportAdd: PrFile = {
+    filename: 'src/x.ts',
+    patch: '@@ -0,0 +1 @@\n+export const foo = 1;',
+  };
+  const exportRemove: PrFile = {
+    filename: 'src/x.ts',
+    patch: '@@ -1 +0,0 @@\n-export function gone() {}',
+  };
+
+  it('does not gate when there is no prior delta', () => {
+    const result = gate(null);
+    assert.deepEqual(result.lensKeys, ALL);
+    assert.equal(result.guidelinePass, true);
+  });
+
+  it('runs interactions only when the delta adds or removes an exported symbol', () => {
+    assert.ok(gate([exportAdd]).lensKeys.includes('interactions'));
+    assert.ok(gate([exportRemove]).lensKeys.includes('interactions'));
+    assert.ok(!gate([added(5, 'src/util/calc.ts')]).lensKeys.includes('interactions'));
+  });
+
+  it('runs interactions when the delta re-exports via `export * from`', () => {
+    const reexport: PrFile = {
+      filename: 'src/index.ts',
+      patch: "@@ -0,0 +1 @@\n+export * from './widget.ts';",
+    };
+    assert.ok(gate([reexport]).lensKeys.includes('interactions'));
+  });
+
+  it('runs interactions when a delta file has no patch (content unknown → fail open)', () => {
+    // GitHub omits patches for large/binary diffs; we can't see its exports.
+    assert.ok(gate([{ filename: 'src/big.ts' }]).lensKeys.includes('interactions'));
+    assert.ok(gate([{ filename: 'src/big.ts', patch: '' }]).lensKeys.includes('interactions'));
+  });
+
+  it('runs interactions when the delta adds/removes an `export type *` re-export', () => {
+    const typeReexport: PrFile = {
+      filename: 'src/types.ts',
+      patch: "@@ -0,0 +1 @@\n+export type * from './model.ts';",
+    };
+    assert.ok(gate([typeReexport]).lensKeys.includes('interactions'));
+  });
+
+  it('runs integrity only when the delta touches security/data/api paths', () => {
+    assert.ok(gate([added(3, 'src/auth/session.ts')]).lensKeys.includes('integrity'));
+    assert.ok(gate([added(3, 'src/db/migrations/001.ts')]).lensKeys.includes('integrity'));
+    assert.ok(!gate([added(3, 'src/util/calc.ts')]).lensKeys.includes('integrity'));
+  });
+
+  it('runs frontend only when the delta touches frontend files', () => {
+    assert.ok(gate([added(3, 'apps/web/src/pages/Config.tsx')]).lensKeys.includes('frontend'));
+    assert.ok(!gate([added(3, 'src/util/calc.ts')]).lensKeys.includes('frontend'));
+  });
+
+  it('skips frontend on a test-only delta even if a .test.tsx matches (mirrors selectLensKeys)', () => {
+    assert.ok(!gate([added(3, 'src/components/Widget.test.tsx')]).lensKeys.includes('frontend'));
+  });
+
+  it('skips the guideline pass on a test-only or docs-only delta, keeps it on code', () => {
+    assert.equal(gate([added(3, 'src/x.test.ts')]).guidelinePass, false);
+    assert.equal(gate([added(3, 'README.md')]).guidelinePass, false);
+    assert.equal(gate([added(3, 'src/util/calc.ts')]).guidelinePass, true);
+  });
+
+  it('never re-enables a guideline pass the caller already disabled', () => {
+    assert.equal(gate([added(3, 'src/auth/session.ts')], ALL, false).guidelinePass, false);
+  });
+
+  it('keeps an unknown candidate lens (fails toward coverage)', () => {
+    assert.deepEqual(gate([added(3, 'src/util/calc.ts')], ['future-lens']).lensKeys, [
+      'future-lens',
+    ]);
+  });
+
+  it('keeps all candidates for a delta that touches every class', () => {
+    const broad = [
+      exportAdd,
+      added(3, 'src/auth/session.ts'),
+      added(3, 'apps/web/src/pages/Config.tsx'),
+    ];
+    assert.deepEqual(gate(broad).lensKeys, ALL);
   });
 });

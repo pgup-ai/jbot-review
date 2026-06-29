@@ -19,29 +19,48 @@ export const MAX_CALLSITE_FILES_PER_SYMBOL = 8;
 const execFileAsync = promisify(execFile);
 const GIT_GREP_TIMEOUT_MS = 10_000;
 
-/**
- * Pulls exported top-level symbol names from a patch's ADDED lines. Touching
- * an export's declaration line is the cheap, language-light signal that its
- * contract may have changed.
- */
-const EXPORT_DECLARATION = new RegExp(
-  String.raw`^\+\s*export\s+(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?` +
-    String.raw`(?:function\s*\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)`,
-);
-const NAMED_EXPORTS = /^\+\s*export\s+(?:type\s+)?\{([^}]+)\}/;
+// Touching an export's declaration line is the cheap, language-light signal
+// that its contract may have changed. Same body for added (`+`) and removed
+// (`-`) lines; only the diff sign differs.
+const EXPORT_BODY =
+  String.raw`\s*export\s+(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?` +
+  String.raw`(?:function\s*\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)`;
+const ADDED_EXPORT_DECLARATION = new RegExp(String.raw`^\+` + EXPORT_BODY);
+const REMOVED_EXPORT_DECLARATION = new RegExp(String.raw`^-` + EXPORT_BODY);
+const ADDED_NAMED_EXPORTS = /^\+\s*export\s+(?:type\s+)?\{([^}]+)\}/;
+const REMOVED_NAMED_EXPORTS = /^-\s*export\s+(?:type\s+)?\{([^}]+)\}/;
 
-export function extractChangedExportedSymbols(files: PrFile[]): string[] {
+function collectExportsFromLine(
+  line: string,
+  declaration: RegExp,
+  named: RegExp,
+  out: Set<string>,
+): void {
+  const declarationMatch = line.match(declaration);
+  if (declarationMatch) out.add(declarationMatch[1]);
+  const namedMatch = line.match(named);
+  if (namedMatch) {
+    for (const symbol of exportedNamesFromList(namedMatch[1])) out.add(symbol);
+  }
+}
+
+/**
+ * Pulls exported top-level symbol names from a patch's ADDED lines. With
+ * `includeRemoved`, also scans REMOVED lines — a deleted or renamed export is
+ * the canonical "breaks an unchanged caller" case, which the incremental-lens
+ * gate keys on (see `planIncrementalLenses`).
+ */
+export function extractChangedExportedSymbols(
+  files: PrFile[],
+  options: { includeRemoved?: boolean } = {},
+): string[] {
   const symbols = new Set<string>();
   for (const file of files) {
     if (!file.patch) continue;
     for (const line of file.patch.split('\n')) {
-      const match = line.match(EXPORT_DECLARATION);
-      if (match) symbols.add(match[1]);
-      const namedExportMatch = line.match(NAMED_EXPORTS);
-      if (namedExportMatch) {
-        for (const symbol of exportedNamesFromList(namedExportMatch[1])) {
-          symbols.add(symbol);
-        }
+      collectExportsFromLine(line, ADDED_EXPORT_DECLARATION, ADDED_NAMED_EXPORTS, symbols);
+      if (options.includeRemoved) {
+        collectExportsFromLine(line, REMOVED_EXPORT_DECLARATION, REMOVED_NAMED_EXPORTS, symbols);
       }
     }
   }

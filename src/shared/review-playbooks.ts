@@ -42,7 +42,13 @@ const FRONTEND_WORKFLOW_PATTERNS = [
   // by `.tsx`/`.jsx` extension below, so bare `app` would mostly add backend
   // false positives. `apps?/web` stays for the monorepo `apps/web` case.
   /(^|\/)(apps?\/web|ui|frontend|client|components?|pages?|views?|hooks?|stores?)\//i,
-  /(^|\/)[^/]*(component|hook|form|dialog|modal|page|view)[^/]*\.[cm]?[jt]sx?$/i,
+  // Frontend-named .ts/.tsx file. The keyword must sit at a token boundary
+  // (start, path slash, `.`, `-`, `_`) so a substring inside a larger word —
+  // `re`+`view`, `web`+`hook` — does NOT false-match in a backend repo.
+  /(^|[/._-])(component|hook|form|dialog|modal|page|view)[^/]*\.[cm]?[jt]sx?$/i,
+  // React hook convention: a `useX` file is frontend even as plain `.ts`. Not
+  // case-insensitive — `use[A-Z]` must stay uppercase so `user.ts` is excluded.
+  /(^|\/)use[A-Z][^/]*\.[cm]?[jt]sx?$/,
   /\.(tsx|jsx|vue|svelte)$/i,
 ];
 

@@ -19,7 +19,6 @@ import {
 import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
-  type ChangeShape,
   type DiffHunksOptions,
   buildDiffHunksBlock,
   buildDiffHunksBlockWithMetadata,
@@ -92,10 +91,11 @@ import {
   formatDiffScope,
   formatContextBudget,
 } from './review-context.ts';
-import { planReviewFanout } from './fanout.ts';
+import { planReviewFanout, planIncrementalLenses } from './fanout.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
   listPrFiles,
+  compareCommitFiles,
   listPrComments,
   listPrCommits,
   getCheckStatusSummary,
@@ -998,6 +998,47 @@ export async function runPrReview(params: {
       }),
     );
 
+    // On a re-review, drop the recall supplements whose trigger class the
+    // incremental delta (since the last reviewed head) doesn't touch. Best-effort
+    // and dynamic-fanout-gated; a null delta (first review, fetch failure, or
+    // escape hatch off) leaves the full set. Main review + verify are never gated.
+    const reviewedHead = findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody));
+    const incrementalDeltaFiles =
+      options.dynamicFanout && reviewedHead && headSha
+        ? await compareCommitFiles(octokit, owner, repo, reviewedHead, headSha).catch((error) => {
+            log(
+              `Incremental delta unavailable; running full lenses: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            return null;
+          })
+        : null;
+    const guidelineCandidate = effectiveGuidelinePass && auxCommandCodeHasCompleteDiff;
+    const candidateLensKeys = selectLensKeys(
+      auxCommandCodeHasCompleteDiff ? effectiveReviewPasses : 1,
+      changedFiles,
+      changeShape,
+    );
+    const incrementalLenses = planIncrementalLenses({
+      candidateLensKeys,
+      guidelinePass: guidelineCandidate,
+      deltaFiles: incrementalDeltaFiles,
+    });
+    if (incrementalDeltaFiles && reviewedHead) {
+      const skipped = [
+        ...candidateLensKeys.filter((key) => !incrementalLenses.lensKeys.includes(key)),
+        ...(guidelineCandidate && !incrementalLenses.guidelinePass ? ['guideline-compliance'] : []),
+      ];
+      if (skipped.length > 0) {
+        log(
+          `Incremental lenses since ${reviewedHead.slice(0, 7)}: running ${
+            incrementalLenses.lensKeys.join(', ') || 'none'
+          }; skipping ${skipped.join(', ')} (main review + verify unchanged).`,
+        );
+      }
+    }
+
     const guidelineComplianceCheck = trackAuxiliarySession(
       'guideline-compliance',
       startGuidelineComplianceCheck({
@@ -1006,7 +1047,7 @@ export async function runPrReview(params: {
         prContext: auxPrContext,
         guidelinesForPrompt: guidelines,
         hasGuidelines: Boolean(guidelines),
-        enabled: effectiveGuidelinePass && auxCommandCodeHasCompleteDiff,
+        enabled: incrementalLenses.guidelinePass,
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -1026,7 +1067,7 @@ export async function runPrReview(params: {
         // are injected into the finder CONTEXT. Same rule as priorJbotReviewCount
         // (see the comment above its definition). Gating on priorComments here
         // silently disables the block whenever include-prior-comments is false.
-        reviewedHead: findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody)),
+        reviewedHead,
         headSha,
         enabled:
           shouldSummarizeChangesSinceLastReview(allPriorReviewComments, headSha) &&
@@ -1041,21 +1082,14 @@ export async function runPrReview(params: {
     // pass) and use the aux context (no Context7 block): they have no
     // Context7 retry path, so a Context7 hiccup must not be able to zero a
     // pass's findings.
-    const lensPassCount = selectLensKeys(
-      auxCommandCodeHasCompleteDiff ? effectiveReviewPasses : 1,
-      changedFiles,
-      changeShape,
-    ).length;
     const lensPasses = trackAuxiliarySession(
-      `${lensPassCount} lens pass(es)`,
+      `${incrementalLenses.lensKeys.length} lens pass(es)`,
       startLensPasses({
         backend: auxBackend,
         model: auxModel,
         prContext: auxPrContext,
         guidelinesForPrompt,
-        changedFiles,
-        shape: changeShape,
-        passes: auxCommandCodeHasCompleteDiff ? effectiveReviewPasses : 1,
+        lensKeys: incrementalLenses.lensKeys,
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -1436,14 +1470,12 @@ function startLensPasses(params: {
   model: string;
   prContext: string;
   guidelinesForPrompt: string;
-  changedFiles: string[];
-  shape?: ChangeShape;
-  passes: number;
+  lensKeys: string[];
   timeoutMs?: number;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
 }): Promise<Finding[][]> {
-  const lensKeys = selectLensKeys(params.passes, params.changedFiles, params.shape);
+  const { lensKeys } = params;
   if (lensKeys.length === 0) return Promise.resolve([]);
 
   params.log(`Starting ${lensKeys.length} lens pass(es) in parallel: ${lensKeys.join(', ')}.`);

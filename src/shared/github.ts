@@ -55,6 +55,37 @@ export async function listPrFiles(
   return files.map((f) => ({ filename: f.filename, patch: f.patch }));
 }
 
+// GitHub's compare endpoint returns at most 300 files with no pagination.
+const COMPARE_FILES_CAP = 300;
+
+/**
+ * Changed files (with patches) between two commits — the incremental delta for a
+ * re-review. Three-dot/merge-base semantics (invariant #7). A response at the
+ * `COMPARE_FILES_CAP` is a TRUNCATED (incomplete) delta — a trigger could sit in
+ * an omitted file — so throw rather than return partial evidence; the caller
+ * fails open to full lenses.
+ */
+export async function compareCommitFiles(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  base: string,
+  head: string,
+): Promise<PrFile[]> {
+  const res = await octokit.rest.repos.compareCommitsWithBasehead({
+    owner,
+    repo,
+    basehead: `${base}...${head}`,
+  });
+  const files = res.data.files ?? [];
+  if (files.length >= COMPARE_FILES_CAP) {
+    throw new Error(
+      `compare returned ${files.length} files (capped); incremental delta incomplete`,
+    );
+  }
+  return files.map((f) => ({ filename: f.filename, patch: f.patch }));
+}
+
 export async function listPrCommits(
   octokit: Octokit,
   owner: string,
