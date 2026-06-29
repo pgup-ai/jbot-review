@@ -1007,7 +1007,7 @@ export async function runPrReview(params: {
       options.dynamicFanout && reviewedHead && headSha
         ? await compareCommitFiles(octokit, owner, repo, reviewedHead, headSha).catch((error) => {
             log(
-              `Incremental delta fetch failed; running full lenses: ${
+              `Incremental delta unavailable; running full lenses: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             );

@@ -70,6 +70,24 @@ export function planReviewFanout(input: {
 // a path class — the always-full main pass backstops it.
 const INTEGRITY_PATTERNS = [PATH_PATTERNS.security, PATH_PATTERNS.data, PATH_PATTERNS.api];
 
+// `export *` re-exports (`export * from`, `export * as ns from`) change the
+// exported surface but carry no symbol name, so the name-based extractor skips
+// them — match the diff line directly. `export\s+\*` is re-export-only syntax.
+const EXPORT_STAR_LINE = /^[+-]\s*export\s+\*/m;
+
+/**
+ * Whether the incremental delta touches the EXPORTED surface — the signal the
+ * interactions lens (changed code breaking unchanged callers) keys on. Broader
+ * than a plain name extraction: a re-export or a patchless file can change the
+ * surface invisibly, so both fail open toward running interactions.
+ */
+function deltaTouchesExportSurface(files: PrFile[]): boolean {
+  // GitHub omits patches for large/binary diffs — content unknown, so fail open.
+  if (files.some((file) => file.patch === undefined)) return true;
+  if (extractChangedExportedSymbols(files, { includeRemoved: true }).length > 0) return true;
+  return files.some((file) => EXPORT_STAR_LINE.test(file.patch ?? ''));
+}
+
 export interface IncrementalLensPlan {
   lensKeys: string[];
   guidelinePass: boolean;
@@ -94,7 +112,7 @@ export function planIncrementalLenses(input: {
   // The ONLY place a lens's incremental trigger is defined; each reuses the
   // shared taxonomy/helpers, never re-declares a path regex.
   const lensTriggered: Record<string, boolean> = {
-    interactions: extractChangedExportedSymbols(deltaFiles, { includeRemoved: true }).length > 0,
+    interactions: deltaTouchesExportSurface(deltaFiles),
     integrity: filenames.some((name) => INTEGRITY_PATTERNS.some((pattern) => pattern.test(name))),
     frontend: changedFilesIncludeFrontend(filenames),
   };
