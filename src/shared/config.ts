@@ -110,10 +110,24 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
+  codex: {
+    defaultModel: 'codex/default',
+    keyEnv: 'CODEX_AUTH_JSON',
+    keyInput: 'codex-auth',
+    models: {
+      // Codex CLI is not driven through opencode, so prompt-cache options do not apply.
+      default: { promptCache: false },
+    },
+  },
 };
 
 export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {
-  if (providerID === 'devin' || providerID === 'commandcode' || providerID === 'cursor')
+  if (
+    providerID === 'devin' ||
+    providerID === 'commandcode' ||
+    providerID === 'cursor' ||
+    providerID === 'codex'
+  )
     return false;
   // Fireworks' OpenAI-compatible endpoint strictly rejects unknown request fields, so
   // the promptCacheKey opencode sends with setCacheKey returns a non-retryable 400 for

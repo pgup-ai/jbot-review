@@ -84,6 +84,15 @@ import {
   runCursorReview,
 } from './cursor.ts';
 import {
+  CODEX_PROVIDER_ID,
+  runCodexAddressedPriorCommentsCheck,
+  runCodexChangesSinceLastReview,
+  runCodexFindingVerification,
+  runCodexGuidelineComplianceCheck,
+  runCodexReview,
+  writeCodexAuth,
+} from './codex.ts';
+import {
   buildReviewContext,
   discoverGuidelineDocs,
   formatGuidelines,
@@ -377,6 +386,60 @@ function createCursorBackend(workspace: string, apiKey: string): ReviewBackend {
         timeoutMs,
         onTokenUsage,
         apiKey,
+      ),
+  };
+}
+
+function createCodexBackend(workspace: string, codexHome: string): ReviewBackend {
+  return {
+    name: CODEX_PROVIDER_ID,
+    runReview: (model, prContext, guidelines, log, options) =>
+      runCodexReview(workspace, model, prContext, guidelines, log, {
+        ...options,
+        home: codexHome,
+      }),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runCodexAddressedPriorCommentsCheck(
+        workspace,
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        codexHome,
+      ),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runCodexGuidelineComplianceCheck(
+        workspace,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        codexHome,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runCodexFindingVerification(
+        workspace,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        codexHome,
+      ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runCodexChangesSinceLastReview(
+        workspace,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        codexHome,
       ),
   };
 }
@@ -801,11 +864,24 @@ export async function runPrReview(params: {
   let devinBackend: ReviewBackend | undefined;
   let commandCodeBackend: ReviewBackend | undefined;
   let cursorBackend: ReviewBackend | undefined;
+  let codexBackend: ReviewBackend | undefined;
   let commandCodeHome: string | undefined;
   const cleanupCommandCodeHome = (): void => {
     if (!commandCodeHome) return;
     rmSync(commandCodeHome, { recursive: true, force: true });
     commandCodeHome = undefined;
+  };
+  let codexHome: string | undefined;
+  const cleanupCodexHome = (): void => {
+    if (!codexHome) return;
+    rmSync(codexHome, { recursive: true, force: true });
+    codexHome = undefined;
+  };
+  // Both CLI homes can be live at once (e.g. main=codex, aux=commandcode), so
+  // clean both at every downstream failure/exit point.
+  const cleanupCliHomes = (): void => {
+    cleanupCommandCodeHome();
+    cleanupCodexHome();
   };
 
   if (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID) {
@@ -855,10 +931,29 @@ export async function runPrReview(params: {
     );
   }
 
+  if (mainCliBackend === CODEX_PROVIDER_ID || auxCliBackend === CODEX_PROVIDER_ID) {
+    const codexAuth = backendSelection.codexAuth;
+    if (!codexAuth) {
+      cleanupCliHomes();
+      throw new Error(`Missing auth for ${CODEX_PROVIDER_ID} provider.`);
+    }
+    let authPath: string;
+    try {
+      codexHome = mkdtempSync(join(tmpdir(), 'jbot-codex-home-'));
+      authPath = writeCodexAuth(codexAuth, codexHome);
+    } catch (error) {
+      cleanupCliHomes();
+      throw error;
+    }
+    log(`Codex CLI auth configured at ${authPath}.`);
+    log('Codex CLI token usage is unavailable; review metadata may omit those sessions.');
+    codexBackend = limitBackendConcurrency(createCodexBackend(workspace, codexHome), sessionSlots);
+  }
+
   if (needsOpencode) {
     const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
     if (!opencodeApiKey) {
-      cleanupCommandCodeHome();
+      cleanupCliHomes();
       throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
     }
     log('Starting opencode server');
@@ -888,7 +983,7 @@ export async function runPrReview(params: {
         },
       );
     } catch (error) {
-      cleanupCommandCodeHome();
+      cleanupCliHomes();
       throw error;
     }
     opencodeBackend = limitBackendConcurrency(
@@ -901,6 +996,7 @@ export async function runPrReview(params: {
     [DEVIN_PROVIDER_ID]: devinBackend,
     [COMMANDCODE_PROVIDER_ID]: commandCodeBackend,
     [CURSOR_PROVIDER_ID]: cursorBackend,
+    [CODEX_PROVIDER_ID]: codexBackend,
   };
   const mainBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)
@@ -1304,7 +1400,7 @@ export async function runPrReview(params: {
     }
   } finally {
     stop();
-    cleanupCommandCodeHome();
+    cleanupCliHomes();
   }
 }
 
