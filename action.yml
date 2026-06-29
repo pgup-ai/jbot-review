@@ -67,7 +67,7 @@ inputs:
     required: false
     default: ''
   codex-auth:
-    description: 'Codex CLI auth: base64 of ~/.codex/auth.json. Used when provider or active aux-provider is codex.'
+    description: 'Codex CLI auth: the contents of ~/.codex/auth.json. Used when provider or active aux-provider is codex.'
     required: false
     default: ''
   enable-context7:

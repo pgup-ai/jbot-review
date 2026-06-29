@@ -48,11 +48,11 @@ describe('Codex CLI provider helpers', () => {
     }
   });
 
-  it('writes auth.json from the base64 secret with 0600 perms', () => {
+  it('writes auth.json from the raw JSON secret with 0600 perms', () => {
     const home = mkdtempSync(join(tmpdir(), 'jbot-codex-home-'));
     try {
-      const auth = JSON.stringify({ tokens: { access_token: 'a' }, auth_mode: 'chatgpt' });
-      const path = writeCodexAuth(Buffer.from(auth).toString('base64'), home);
+      const auth = JSON.stringify({ tokens: { access_token: 'a' }, auth_mode: 'chatgpt' }, null, 2);
+      const path = writeCodexAuth(auth, home);
 
       assert.equal(path, codexAuthPath(home));
       assert.equal(statSync(path).mode & 0o777, 0o600);
@@ -62,12 +62,9 @@ describe('Codex CLI provider helpers', () => {
     }
   });
 
-  it('rejects a blank or non-base64-JSON Codex secret', () => {
+  it('rejects a blank or non-JSON Codex secret', () => {
     assert.throws(() => writeCodexAuth('   ', '/tmp/x'), /Missing Codex auth/);
-    assert.throws(
-      () => writeCodexAuth(Buffer.from('not json').toString('base64'), '/tmp/x'),
-      /Invalid CODEX_AUTH_JSON/,
-    );
+    assert.throws(() => writeCodexAuth('not json', '/tmp/x'), /Invalid CODEX_AUTH_JSON/);
   });
 
   it('sets CODEX_HOME and strips ambient api-key envs so subscription auth wins', () => {

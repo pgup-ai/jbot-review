@@ -71,10 +71,11 @@ exactly this. Each backend is one module plus six mechanical wiring points:
 
 - **Source:** `~/.codex/auth.json` after a local `codex login` (the `tokens` block plus
   `account_id` / `auth_mode: "chatgpt"`).
-- **Secret:** `CODEX_AUTH_JSON` = base64 of the whole `auth.json`. Base64 avoids
-  multiline/JSON-escaping issues in GitHub secrets, and carrying the full file
-  preserves `account_id` + `auth_mode` so Codex selects subscription mode.
-- **Seed once:** `base64 -i ~/.codex/auth.json | gh secret set CODEX_AUTH_JSON`.
+- **Secret:** `CODEX_AUTH_JSON` = the raw contents of `~/.codex/auth.json` (paste the
+  file as-is — multi-line is fine, and every other credential is stored raw too).
+  Carrying the full file preserves `account_id` + `auth_mode` so Codex selects
+  subscription mode.
+- **Seed once:** `gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json`.
 - **Re-seed:** only when a run errors `invalid_grant` (token finally expired/revoked).
   Expected cadence: weeks. Not per-run, not per-10-days.
 
@@ -88,9 +89,9 @@ codex-specific change in `workflow/index.ts`.
 Mirror `commandcode.ts` structure (stdin prompt, `home` isolation, fail-open parsing):
 
 - `export const CODEX_PROVIDER_ID = 'codex'`; `isCodexProvider(id)`.
-- `writeCodexAuth(authB64, codexHome)` — decode base64, write `${codexHome}/auth.json`
+- `writeCodexAuth(auth, codexHome)` — `JSON.parse`-validate, write `${codexHome}/auth.json`
   with mode `0600` (mkdir the temp `codexHome` `0700`). Throw a clear error if the
-  secret is empty or not valid base64/JSON. `codexHome` is the temp dir passed as
+  secret is empty or not valid JSON. `codexHome` is the temp dir passed as
   `CODEX_HOME` (it replaces `~/.codex`), so `auth.json` lives at its root.
 - `buildCodexCliArgs({ model, lastMessageFile, workspace })` →
   `['exec', '--sandbox', 'read-only', '--ephemeral', '--skip-git-repo-check',
@@ -149,7 +150,7 @@ false } } }`; add `'codex'` to the early-return in `modelSupportsPromptCache`.
 
 ## Operational runbook
 
-- **Seed:** `base64 -i ~/.codex/auth.json | gh secret set CODEX_AUTH_JSON` (repo or org).
+- **Seed:** `gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json` (repo or org).
 - **Select:** set repo var `JBOT_REVIEW_PROVIDER=codex` (and/or `JBOT_AUX_PROVIDER=codex`),
   optionally `JBOT_REVIEW_MODEL=codex/<model>`.
 - **Re-seed trigger:** a run logs a Codex auth failure (`invalid_grant`/login required).
@@ -170,7 +171,7 @@ false } } }`; add `'codex'` to the early-return in `modelSupportsPromptCache`.
 Pure-unit, no network:
 
 - `buildCodexCliArgs` — flags present, `-m` omitted on `default`, stdin marker `-`.
-- `writeCodexAuth` — writes `${home}/.codex/auth.json`, mode `0600`, base64 decoded;
+- `writeCodexAuth` — writes `${codexHome}/auth.json`, mode `0600`, from raw JSON;
   errors on empty/invalid input.
 - `codexEnvForHome` — sets `CODEX_HOME`, strips the three ambient auth env vars.
 - `classifyCodexPromptFailure` — rate-limit / usage-exceeded classification.

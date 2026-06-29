@@ -38,26 +38,24 @@ export function codexAuthPath(codexHome: string): string {
 }
 
 /**
- * Decodes the base64 `CODEX_AUTH_JSON` secret into `$CODEX_HOME/auth.json`. The
- * whole auth.json is carried (not just a token) so Codex keeps subscription mode
- * and its refresh_token; JSON-validated up front so a bad secret fails fast.
+ * Writes the `CODEX_AUTH_JSON` secret — the raw contents of `~/.codex/auth.json`
+ * — to `$CODEX_HOME/auth.json`. The whole file is carried so Codex keeps
+ * subscription mode and its refresh_token; JSON-validated so a bad secret fails fast.
  */
-export function writeCodexAuth(authB64: string, codexHome: string): string {
-  const encoded = authB64.trim();
-  if (!encoded) {
+export function writeCodexAuth(auth: string, codexHome: string): string {
+  const content = auth.trim();
+  if (!content) {
     throw new Error('Missing Codex auth. Set codex-auth or CODEX_AUTH_JSON.');
   }
-  let decoded: string;
   try {
-    decoded = Buffer.from(encoded, 'base64').toString('utf8');
-    JSON.parse(decoded);
+    JSON.parse(content);
   } catch {
-    throw new Error('Invalid CODEX_AUTH_JSON: expected base64-encoded auth.json.');
+    throw new Error('Invalid CODEX_AUTH_JSON: expected the JSON contents of ~/.codex/auth.json.');
   }
 
   mkdirSync(codexHome, { recursive: true, mode: 0o700 });
   const path = codexAuthPath(codexHome);
-  writeFileSync(path, decoded.endsWith('\n') ? decoded : `${decoded}\n`, { mode: 0o600 });
+  writeFileSync(path, `${content}\n`, { mode: 0o600 });
   try {
     chmodSync(path, 0o600);
   } catch {
