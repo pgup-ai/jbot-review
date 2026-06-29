@@ -50,6 +50,37 @@ describe('selectReviewPlaybookIds', () => {
     assert.ok(!ids.includes('frontend-workflow'));
   });
 
+  it('does not match frontend keywords buried inside a larger word', () => {
+    // This repo's own files: "reVIEW" and "webHOOK" must not look frontend.
+    for (const file of [
+      'apps/api/src/entities/review-config.entity.ts',
+      'apps/api/src/entities/review-job.entity.ts',
+      'apps/api/src/modules/config/dto/update-review-config.dto.ts',
+      'apps/api/src/modules/webhook/webhook.service.ts',
+      'apps/api/src/modules/webhook/webhook.controller.ts',
+      'apps/api/test/webhook-dedup.test.ts',
+    ]) {
+      assert.ok(
+        !selectReviewPlaybookIds([file]).includes('frontend-workflow'),
+        `false positive: ${file}`,
+      );
+    }
+  });
+
+  it('still matches genuine frontend files (boundary keywords, hooks, .tsx)', () => {
+    for (const file of [
+      'src/Config.tsx',
+      'src/UserForm.tsx',
+      'src/ProfilePage.tsx',
+      'src/LoginModal.tsx',
+      'src/hooks/useAuth.ts',
+      'src/useThing.ts',
+      'src/login-form.ts',
+    ]) {
+      assert.ok(selectReviewPlaybookIds([file]).includes('frontend-workflow'), `missed: ${file}`);
+    }
+  });
+
   it('does not treat application workflow directories as external integrations', () => {
     const ids = selectReviewPlaybookIds(['apps/billing/src/workflows/reconcile.ts']);
 

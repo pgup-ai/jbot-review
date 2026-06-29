@@ -262,9 +262,8 @@ only), so invariant #1 holds by construction.
   (`addressed-prior-comments`, `changes-since-last-review`).
 - Any change to the LLM-judge alternative (option B) — deterministic only.
 
-**Follow-up (separate change, not this one):** tighten
-`FRONTEND_WORKFLOW_PATTERNS` in `review-playbooks.ts` so the filename-substring
-rule uses word boundaries — today `review*`→`view` and `webhook*`→`hook`
-false-match, which over-triggers the `frontend` gate in this repo. It improves
-this gate's precision but is an independent bug fix; keeping it out keeps this
-change focused.
+**Follow-up — done (separate commit `fix(review): match frontend keywords at
+word boundaries`):** `FRONTEND_WORKFLOW_PATTERNS` in `review-playbooks.ts` now
+requires the keyword at a token boundary, so `review*`→`view` and
+`webhook*`→`hook` no longer false-match (they previously over-triggered the
+`frontend` gate in this repo). Also added the `useX` hook convention.
