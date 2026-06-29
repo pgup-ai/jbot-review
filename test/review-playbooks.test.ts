@@ -59,6 +59,9 @@ describe('selectReviewPlaybookIds', () => {
       'apps/api/src/modules/webhook/webhook.service.ts',
       'apps/api/src/modules/webhook/webhook.controller.ts',
       'apps/api/test/webhook-dedup.test.ts',
+      // `use` + lowercase is not a hook — guards the case-sensitive `use[A-Z]`.
+      'apps/api/src/user.ts',
+      'apps/api/src/userService.ts',
     ]) {
       assert.ok(
         !selectReviewPlaybookIds([file]).includes('frontend-workflow'),

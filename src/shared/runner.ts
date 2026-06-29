@@ -1005,8 +1005,16 @@ export async function runPrReview(params: {
     const reviewedHead = findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody));
     const incrementalDeltaFiles =
       options.dynamicFanout && reviewedHead && headSha
-        ? await compareCommitFiles(octokit, owner, repo, reviewedHead, headSha).catch(() => null)
+        ? await compareCommitFiles(octokit, owner, repo, reviewedHead, headSha).catch((error) => {
+            log(
+              `Incremental delta fetch failed; running full lenses: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            return null;
+          })
         : null;
+    const guidelineCandidate = effectiveGuidelinePass && auxCommandCodeHasCompleteDiff;
     const candidateLensKeys = selectLensKeys(
       auxCommandCodeHasCompleteDiff ? effectiveReviewPasses : 1,
       changedFiles,
@@ -1014,17 +1022,13 @@ export async function runPrReview(params: {
     );
     const incrementalLenses = planIncrementalLenses({
       candidateLensKeys,
-      guidelinePass: effectiveGuidelinePass && auxCommandCodeHasCompleteDiff,
+      guidelinePass: guidelineCandidate,
       deltaFiles: incrementalDeltaFiles,
     });
     if (incrementalDeltaFiles && reviewedHead) {
       const skipped = [
         ...candidateLensKeys.filter((key) => !incrementalLenses.lensKeys.includes(key)),
-        ...(effectiveGuidelinePass &&
-        auxCommandCodeHasCompleteDiff &&
-        !incrementalLenses.guidelinePass
-          ? ['guideline-compliance']
-          : []),
+        ...(guidelineCandidate && !incrementalLenses.guidelinePass ? ['guideline-compliance'] : []),
       ];
       if (skipped.length > 0) {
         log(
