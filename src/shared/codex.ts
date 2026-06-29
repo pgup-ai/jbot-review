@@ -38,11 +38,9 @@ export function codexAuthPath(codexHome: string): string {
 }
 
 /**
- * Decodes the base64 `CODEX_AUTH_JSON` secret into `$CODEX_HOME/auth.json`.
- * The secret carries the whole `auth.json` (not just a token) so Codex keeps its
- * ChatGPT-subscription mode and `refresh_token` and silently refreshes the
- * 10-day access token. JSON-validated up front so a bad secret fails the run
- * fast instead of mid-review.
+ * Decodes the base64 `CODEX_AUTH_JSON` secret into `$CODEX_HOME/auth.json`. The
+ * whole auth.json is carried (not just a token) so Codex keeps subscription mode
+ * and its refresh_token; JSON-validated up front so a bad secret fails fast.
  */
 export function writeCodexAuth(authB64: string, codexHome: string): string {
   const encoded = authB64.trim();
@@ -73,11 +71,9 @@ export interface CodexCliArgsInput {
 }
 
 /**
- * Builds the static `codex exec` argv. Read-only is enforced in layers
- * (invariant #8): `--sandbox read-only` is a kernel-enforced sandbox,
- * `--ignore-user-config` stops a stray `config.toml` from loosening it, and
- * `--dangerously-bypass-approvals-and-sandbox` is NEVER emitted. The prompt and
- * `--output-last-message` file are appended per call in runCodexPrompt.
+ * Static `codex exec` argv. Read-only is enforced here (invariant #8):
+ * `--sandbox read-only` + `--ignore-user-config`, and the bypass flag is never
+ * emitted. The prompt and output file are appended per call in runCodexPrompt.
  */
 export function buildCodexCliArgs(input: CodexCliArgsInput): string[] {
   const { modelID } = parseModelName(input.model);
@@ -94,13 +90,12 @@ export function buildCodexCliArgs(input: CodexCliArgsInput): string[] {
 }
 
 /**
- * Child environment carrying the temp `CODEX_HOME` (where auth.json was written).
- * The api-key/access-token env vars are stripped because Codex ranks them ABOVE
- * auth.json — an ambient `OPENAI_API_KEY` would silently switch the run to
- * per-token API billing and defeat the subscription path.
+ * Child env with the temp `CODEX_HOME`. The api-key/access-token envs are stripped
+ * because Codex ranks them ABOVE auth.json — an ambient `OPENAI_API_KEY` would
+ * silently switch the run to per-token API billing instead of the subscription.
  */
-export function codexEnvForHome(codexHome: string): NodeJS.ProcessEnv {
-  const home = codexHome.trim();
+export function codexEnvForHome(codexHome: string | undefined): NodeJS.ProcessEnv {
+  const home = codexHome?.trim();
   if (!home) {
     throw new Error('Missing Codex home. A temp CODEX_HOME is required for auth.');
   }
@@ -271,8 +266,8 @@ async function runCodexPrompt(
   home: string | undefined,
   timeoutMs = CODEX_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
-  // codex exec streams its transcript to stdout; the clean final message is
-  // written to --output-last-message, so capture it from a temp file.
+  // Prompt goes on stdin (the `-` arg); the clean final message lands in the
+  // --output-last-message file (stdout carries the full transcript), so read it.
   const dir = mkdtempSync(join(tmpdir(), 'jbot-codex-'));
   const outputFile = join(dir, 'last-message.txt');
   const args = [...buildCodexCliArgs({ model }), '--output-last-message', outputFile, '-'];
@@ -281,7 +276,7 @@ async function runCodexPrompt(
     const result = await spawnWithTimeout(CODEX_CLI_BIN, args, {
       cwd: workspace,
       input: prompt,
-      env: codexEnvForHome(home ?? ''),
+      env: codexEnvForHome(home),
       timeoutMs,
       timeoutMessage: formatCodexPromptTimeoutMessage(label, model, timeoutMs),
     });
