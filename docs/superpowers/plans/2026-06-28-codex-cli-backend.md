@@ -15,10 +15,12 @@
 ## Task 1: `codex.ts` module + unit tests (TDD)
 
 **Files:**
+
 - Create: `src/shared/codex.ts`
 - Create: `test/codex.test.ts`
 
 Mirror `src/shared/commandcode.ts` structure exactly, swapping in Codex specifics:
+
 - `CODEX_PROVIDER_ID = 'codex'`, `CODEX_CLI_BIN = 'codex'`, `isCodexProvider`.
 - `codexAuthPath(codexHome)` → `join(codexHome, 'auth.json')`.
 - `writeCodexAuth(authB64, codexHome)` → base64-decode, `JSON.parse` to validate, `mkdirSync(codexHome,{mode:0o700})`, write `auth.json` `0o600`. Throw on blank/invalid.
@@ -96,7 +98,10 @@ describe('Codex CLI provider helpers', () => {
 
   it('rejects a blank or non-base64-JSON secret', () => {
     assert.throws(() => writeCodexAuth('   ', '/tmp/x'), /Missing Codex auth/);
-    assert.throws(() => writeCodexAuth(Buffer.from('not json').toString('base64'), '/tmp/x'), /Invalid CODEX_AUTH_JSON/);
+    assert.throws(
+      () => writeCodexAuth(Buffer.from('not json').toString('base64'), '/tmp/x'),
+      /Invalid CODEX_AUTH_JSON/,
+    );
   });
 
   it('sets CODEX_HOME and strips ambient api-key envs so subscription auth wins', () => {
@@ -136,6 +141,7 @@ describe('Codex CLI provider helpers', () => {
 ## Task 2: Wire backend-selection + config
 
 **Files:**
+
 - Modify: `src/shared/backend-selection.ts`
 - Modify: `src/shared/config.ts`
 - Modify: `test/backend-selection.test.ts`
@@ -165,6 +171,7 @@ and add `|| providerID === 'codex'` to the first `if` in `modelSupportsPromptCac
 ## Task 3: Wire runner
 
 **Files:**
+
 - Modify: `src/shared/runner.ts`
 
 - [ ] **Step 1:** Add the codex import block (after the cursor import): `CODEX_PROVIDER_ID, runCodexAddressedPriorCommentsCheck, runCodexChangesSinceLastReview, runCodexFindingVerification, runCodexGuidelineComplianceCheck, runCodexReview, writeCodexAuth` from `./codex.ts`.
@@ -176,6 +183,7 @@ and add `|| providerID === 'codex'` to the first `if` in `modelSupportsPromptCac
 ## Task 4: Wire CI (action, workflow, Dockerfile) + docs
 
 **Files:**
+
 - Modify: `action.yml`, `.github/workflows/jbot-review.yml`, `Dockerfile`, `AGENTS.md`, the spec doc.
 
 - [ ] **Step 1:** `action.yml` — add a `codex-auth` input after `cursor-api-key` and `INPUT_CODEX-AUTH: ${{ inputs.codex-auth }}` after `INPUT_CURSOR-API-KEY`.
