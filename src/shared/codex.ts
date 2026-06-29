@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -271,10 +279,13 @@ async function runCodexPrompt(
   const args = [...buildCodexCliArgs({ model }), '--output-last-message', outputFile, '-'];
   log(`Calling ${label} prompt (agent=codex-cli, model=${model})`);
   try {
+    // Per-process CODEX_HOME: copy auth.json so concurrent sessions don't race on the
+    // file codex rewrites when it refreshes the subscription token.
+    copyFileSync(codexAuthPath(home ?? ''), codexAuthPath(dir));
     const result = await spawnWithTimeout(CODEX_CLI_BIN, args, {
       cwd: workspace,
       input: prompt,
-      env: codexEnvForHome(home),
+      env: codexEnvForHome(dir),
       timeoutMs,
       timeoutMessage: formatCodexPromptTimeoutMessage(label, model, timeoutMs),
     });
