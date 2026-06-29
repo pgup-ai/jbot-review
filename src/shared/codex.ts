@@ -286,11 +286,20 @@ async function runCodexPrompt(
         )}`,
       );
     }
-    const lastMessage = readCodexLastMessage(outputFile);
+    const lastMessage = readCodexLastMessage(outputFile).trim();
     log(
       `${label} prompt complete via codex: stdout=${result.stdout.length} chars last-message=${lastMessage.length} chars`,
     );
-    return lastMessage || result.stdout;
+    // Empty file = no final message; fail loud rather than parse the noisy stdout transcript.
+    if (!lastMessage) {
+      throw new Error(
+        `codex ${label} produced an empty --output-last-message; stderr: ${truncateForLog(
+          result.stderr || result.stdout,
+          1000,
+        )}`,
+      );
+    }
+    return lastMessage;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
