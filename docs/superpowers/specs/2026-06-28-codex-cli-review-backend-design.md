@@ -71,10 +71,11 @@ exactly this. Each backend is one module plus six mechanical wiring points:
 
 - **Source:** `~/.codex/auth.json` after a local `codex login` (the `tokens` block plus
   `account_id` / `auth_mode: "chatgpt"`).
-- **Secret:** `CODEX_AUTH_JSON` = base64 of the whole `auth.json`. Base64 avoids
-  multiline/JSON-escaping issues in GitHub secrets, and carrying the full file
-  preserves `account_id` + `auth_mode` so Codex selects subscription mode.
-- **Seed once:** `base64 -i ~/.codex/auth.json | gh secret set CODEX_AUTH_JSON`.
+- **Secret:** `CODEX_AUTH_JSON` = the raw contents of `~/.codex/auth.json` (paste the
+  file as-is — multi-line is fine, and every other credential is stored raw too).
+  Carrying the full file preserves `account_id` + `auth_mode` so Codex selects
+  subscription mode.
+- **Seed once:** `gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json`.
 - **Re-seed:** only when a run errors `invalid_grant` (token finally expired/revoked).
   Expected cadence: weeks. Not per-run, not per-10-days.
 
@@ -88,14 +89,15 @@ codex-specific change in `workflow/index.ts`.
 Mirror `commandcode.ts` structure (stdin prompt, `home` isolation, fail-open parsing):
 
 - `export const CODEX_PROVIDER_ID = 'codex'`; `isCodexProvider(id)`.
-- `writeCodexAuth(authB64, codexHome)` — decode base64, write `${codexHome}/auth.json`
+- `writeCodexAuth(auth, codexHome)` — `JSON.parse`-validate, write `${codexHome}/auth.json`
   with mode `0600` (mkdir the temp `codexHome` `0700`). Throw a clear error if the
-  secret is empty or not valid base64/JSON. `codexHome` is the temp dir passed as
+  secret is empty or not valid JSON. `codexHome` is the temp dir passed as
   `CODEX_HOME` (it replaces `~/.codex`), so `auth.json` lives at its root.
-- `buildCodexCliArgs({ model, lastMessageFile, workspace })` →
-  `['exec', '--sandbox', 'read-only', '--ephemeral', '--skip-git-repo-check',
-'--ignore-user-config', '-C', workspace, '-o', lastMessageFile, '-m', modelID, '-']`
-  (omit `-m` when `modelID === 'default'`). Prompt is fed on **stdin** (`-`).
+- `buildCodexCliArgs({ model })` → `['exec', '--sandbox', 'read-only',
+'--skip-git-repo-check', '--ephemeral', '--ignore-user-config', '--model', modelID]`
+  (omit `--model` when `modelID === 'default'`). `runCodexPrompt` appends
+  `--output-last-message <file>` and the stdin marker `-`; the workspace is the spawn
+  `cwd`, not a flag.
 - `runCodexPrompt(...)` — `mkdtemp`, spawn `codex` with those args and
   `env = codexEnvForHome(home)`, write the prompt to stdin, wait, then read the
   `-o` last-message file as the model response. Reuse `parseReview` /
@@ -103,8 +105,6 @@ Mirror `commandcode.ts` structure (stdin prompt, `home` isolation, fail-open par
 - Public entry points: `runCodexReview`, `runCodexAddressedPriorCommentsCheck`,
   `runCodexGuidelineComplianceCheck`, `runCodexFindingVerification` — identical
   signatures to the Devin/CommandCode equivalents so `runner.ts` wiring is symmetric.
-- `classifyCodexPromptFailure(output)` — detect plan rate-limit / weekly-cap /
-  usage-exceeded for clean degradation (mirror `classifyCommandCodePromptFailure`).
 - `codexEnvForHome(codexHome)` — **critical correctness point.** Returns
   `{ ...process.env, CODEX_HOME: codexHome }` **with `OPENAI_API_KEY`,
   `CODEX_API_KEY`, and `CODEX_ACCESS_TOKEN` deleted.** Codex's auth precedence puts
@@ -149,7 +149,7 @@ false } } }`; add `'codex'` to the early-return in `modelSupportsPromptCache`.
 
 ## Operational runbook
 
-- **Seed:** `base64 -i ~/.codex/auth.json | gh secret set CODEX_AUTH_JSON` (repo or org).
+- **Seed:** `gh secret set CODEX_AUTH_JSON < ~/.codex/auth.json` (repo or org).
 - **Select:** set repo var `JBOT_REVIEW_PROVIDER=codex` (and/or `JBOT_AUX_PROVIDER=codex`),
   optionally `JBOT_REVIEW_MODEL=codex/<model>`.
 - **Re-seed trigger:** a run logs a Codex auth failure (`invalid_grant`/login required).
@@ -157,23 +157,22 @@ false } } }`; add `'codex'` to the early-return in `modelSupportsPromptCache`.
 
 ## Risks & mitigations
 
-| Risk                                                            | Mitigation                                                                                                                                                            |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **ToS** — personal ChatGPT plan powering an automated bot       | Accepted by the operator; documented. Subscription/enterprise plans are the lower-risk fit.                                                                           |
-| Refresh token eventually expires/revoked                        | Run fails clean with an auth error; re-seed (weeks cadence). Documented runbook.                                                                                      |
-| Ambient `OPENAI_API_KEY` silently switches Codex to API billing | `codexEnvForHome` strips `OPENAI_API_KEY`/`CODEX_API_KEY`/`CODEX_ACCESS_TOKEN`; unit-tested.                                                                          |
-| Subscription weekly rate caps                                   | `classifyCodexPromptFailure` + fail-open aux sessions; a main shard that exhausts the cap aborts rather than posting partial coverage (matches time-budget behavior). |
-| `defaultModel` guess (`gpt-5.1-codex`) may be wrong/renamed     | Overridable via the `model` input / `JBOT_REVIEW_MODEL`; verify during implementation.                                                                                |
+| Risk                                                            | Mitigation                                                                                                                             |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **ToS** — personal ChatGPT plan powering an automated bot       | Accepted by the operator; documented. Subscription/enterprise plans are the lower-risk fit.                                            |
+| Refresh token eventually expires/revoked                        | Run fails clean with an auth error; re-seed (weeks cadence). Documented runbook.                                                       |
+| Ambient `OPENAI_API_KEY` silently switches Codex to API billing | `codexEnvForHome` strips `OPENAI_API_KEY`/`CODEX_API_KEY`/`CODEX_ACCESS_TOKEN`; unit-tested.                                           |
+| Subscription weekly rate caps                                   | Fail-open aux sessions; a main shard that exhausts the cap aborts rather than posting partial coverage (matches time-budget behavior). |
+| `defaultModel` guess (`gpt-5.1-codex`) may be wrong/renamed     | Overridable via the `model` input / `JBOT_REVIEW_MODEL`; verify during implementation.                                                 |
 
 ## Testing (invariant #10)
 
 Pure-unit, no network:
 
-- `buildCodexCliArgs` — flags present, `-m` omitted on `default`, stdin marker `-`.
-- `writeCodexAuth` — writes `${home}/.codex/auth.json`, mode `0600`, base64 decoded;
+- `buildCodexCliArgs` — read-only flags present, `--model` omitted on `default`.
+- `writeCodexAuth` — writes `${codexHome}/auth.json`, mode `0600`, from raw JSON;
   errors on empty/invalid input.
 - `codexEnvForHome` — sets `CODEX_HOME`, strips the three ambient auth env vars.
-- `classifyCodexPromptFailure` — rate-limit / usage-exceeded classification.
 - `selectReviewBackends` — `provider=codex` (and aux=codex) routes `codexAuth` and sets
   `needsOpencode` correctly.
 

@@ -1,3 +1,4 @@
+import { CODEX_PROVIDER_ID, isCodexProvider } from './codex.ts';
 import { COMMANDCODE_PROVIDER_ID, isCommandCodeProvider } from './commandcode.ts';
 import { CURSOR_PROVIDER_ID, isCursorProvider } from './cursor.ts';
 import { DEVIN_PROVIDER_ID, isDevinProvider } from './devin.ts';
@@ -5,7 +6,8 @@ import { DEVIN_PROVIDER_ID, isDevinProvider } from './devin.ts';
 export type CliBackendID =
   | typeof DEVIN_PROVIDER_ID
   | typeof COMMANDCODE_PROVIDER_ID
-  | typeof CURSOR_PROVIDER_ID;
+  | typeof CURSOR_PROVIDER_ID
+  | typeof CODEX_PROVIDER_ID;
 
 export interface ReviewBackendSelectionInput {
   providerID: string;
@@ -23,6 +25,7 @@ export interface ReviewBackendSelection {
   devinApiKey: string;
   commandCodeAccessKey: string;
   cursorApiKey: string;
+  codexAuth: string;
   opencodeProviderID: string;
   opencodeModelID: string;
   opencodeApiKey: string;
@@ -45,6 +48,7 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
     devinApiKey: keyFor(DEVIN_PROVIDER_ID),
     commandCodeAccessKey: keyFor(COMMANDCODE_PROVIDER_ID),
     cursorApiKey: keyFor(CURSOR_PROVIDER_ID),
+    codexAuth: keyFor(CODEX_PROVIDER_ID),
     opencodeProviderID: mainCliBackend ? input.auxProviderID : input.providerID,
     opencodeModelID: mainCliBackend ? input.auxModelID : input.modelID,
     opencodeApiKey: mainCliBackend ? input.auxApiKey : input.apiKey,
@@ -55,5 +59,6 @@ function cliBackendForProvider(providerID: string): CliBackendID | undefined {
   if (isDevinProvider(providerID)) return DEVIN_PROVIDER_ID;
   if (isCommandCodeProvider(providerID)) return COMMANDCODE_PROVIDER_ID;
   if (isCursorProvider(providerID)) return CURSOR_PROVIDER_ID;
+  if (isCodexProvider(providerID)) return CODEX_PROVIDER_ID;
   return undefined;
 }

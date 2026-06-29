@@ -11,11 +11,12 @@ RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000
 
-# Engine + optional commandcode provider; --version verifies both run on Node 24.
-RUN npm install -g opencode-ai@latest command-code@latest \
+# Engine + optional commandcode/codex providers; --version verifies they run on Node 24.
+RUN npm install -g opencode-ai@latest command-code@latest @openai/codex@latest \
   && npm cache clean --force \
   && opencode --version \
-  && command-code --version
+  && command-code --version \
+  && codex --version
 
 # Devin CLI (optional devin provider); strip the installer's interactive setup step.
 RUN curl -fsSL https://cli.devin.ai/install.sh -o /tmp/devin-install.sh \

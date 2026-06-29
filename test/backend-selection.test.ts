@@ -19,6 +19,7 @@ describe('selectReviewBackends', () => {
       devinApiKey: '',
       commandCodeAccessKey: '',
       cursorApiKey: '',
+      codexAuth: '',
       opencodeProviderID: 'opencode',
       opencodeModelID: 'deepseek-v4-flash-free',
       opencodeApiKey: 'main-key',
@@ -40,6 +41,7 @@ describe('selectReviewBackends', () => {
         devinApiKey: 'devin-key',
         commandCodeAccessKey: '',
         cursorApiKey: '',
+        codexAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
         opencodeApiKey: 'opencode-key',
@@ -61,6 +63,7 @@ describe('selectReviewBackends', () => {
         devinApiKey: 'devin-key',
         commandCodeAccessKey: '',
         cursorApiKey: '',
+        codexAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
         opencodeApiKey: 'main-key',
@@ -85,6 +88,7 @@ describe('selectReviewBackends', () => {
         devinApiKey: 'devin-key',
         commandCodeAccessKey: '',
         cursorApiKey: '',
+        codexAuth: '',
         opencodeProviderID: 'devin',
         opencodeModelID: 'codex',
         opencodeApiKey: '',
@@ -107,6 +111,7 @@ describe('selectReviewBackends', () => {
         devinApiKey: '',
         commandCodeAccessKey: 'commandcode-key',
         cursorApiKey: '',
+        codexAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
         opencodeApiKey: 'opencode-key',
@@ -128,6 +133,7 @@ describe('selectReviewBackends', () => {
         devinApiKey: '',
         commandCodeAccessKey: 'commandcode-key',
         cursorApiKey: '',
+        codexAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
         opencodeApiKey: 'main-key',
@@ -152,6 +158,7 @@ describe('selectReviewBackends', () => {
         devinApiKey: '',
         commandCodeAccessKey: 'commandcode-key',
         cursorApiKey: '',
+        codexAuth: '',
         opencodeProviderID: 'commandcode',
         opencodeModelID: 'Qwen/Qwen3.7-Max',
         opencodeApiKey: '',
@@ -174,6 +181,7 @@ describe('selectReviewBackends', () => {
         devinApiKey: '',
         commandCodeAccessKey: '',
         cursorApiKey: 'cursor-key',
+        codexAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
         opencodeApiKey: 'opencode-key',
@@ -195,6 +203,7 @@ describe('selectReviewBackends', () => {
         devinApiKey: '',
         commandCodeAccessKey: '',
         cursorApiKey: 'cursor-key',
+        codexAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
         opencodeApiKey: 'main-key',
@@ -219,6 +228,7 @@ describe('selectReviewBackends', () => {
         devinApiKey: '',
         commandCodeAccessKey: '',
         cursorApiKey: 'cursor-key',
+        codexAuth: '',
         opencodeProviderID: 'cursor',
         opencodeModelID: 'sonnet-4-thinking',
         opencodeApiKey: '',
@@ -244,6 +254,7 @@ describe('selectReviewBackends', () => {
         devinApiKey: '',
         commandCodeAccessKey: 'commandcode-key',
         cursorApiKey: 'cursor-key',
+        codexAuth: '',
         opencodeProviderID: 'commandcode',
         opencodeModelID: 'default',
         opencodeApiKey: 'commandcode-key',
@@ -269,9 +280,80 @@ describe('selectReviewBackends', () => {
         devinApiKey: 'devin-key',
         commandCodeAccessKey: 'commandcode-key',
         cursorApiKey: '',
+        codexAuth: '',
         opencodeProviderID: 'commandcode',
         opencodeModelID: 'default',
         opencodeApiKey: 'commandcode-key',
+      },
+    );
+  });
+
+  it('uses Codex for main review and OpenCode for aux sessions', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'codex',
+        modelID: 'default',
+        apiKey: 'codex-auth',
+        auxApiKey: 'opencode-key',
+      }),
+      {
+        mainCliBackend: 'codex',
+        needsOpencode: true,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: '',
+        codexAuth: 'codex-auth',
+        opencodeProviderID: 'opencode',
+        opencodeModelID: 'deepseek-v4-flash-free',
+        opencodeApiKey: 'opencode-key',
+      },
+    );
+  });
+
+  it('uses OpenCode for main review and Codex for aux sessions', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        auxProviderID: 'codex',
+        auxModelID: 'default',
+        auxApiKey: 'codex-auth',
+      }),
+      {
+        auxCliBackend: 'codex',
+        needsOpencode: true,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: '',
+        codexAuth: 'codex-auth',
+        opencodeProviderID: 'opencode',
+        opencodeModelID: 'deepseek-v4-flash-free',
+        opencodeApiKey: 'main-key',
+      },
+    );
+  });
+
+  it('skips OpenCode when both main and aux sessions use Codex', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'codex',
+        modelID: 'default',
+        apiKey: 'codex-auth',
+        auxProviderID: 'codex',
+        auxModelID: 'gpt-5.1-codex',
+      }),
+      {
+        mainCliBackend: 'codex',
+        auxCliBackend: 'codex',
+        needsOpencode: false,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: '',
+        codexAuth: 'codex-auth',
+        opencodeProviderID: 'codex',
+        opencodeModelID: 'gpt-5.1-codex',
+        opencodeApiKey: '',
       },
     );
   });
