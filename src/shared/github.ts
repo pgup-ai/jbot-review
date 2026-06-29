@@ -55,6 +55,27 @@ export async function listPrFiles(
   return files.map((f) => ({ filename: f.filename, patch: f.patch }));
 }
 
+/**
+ * Changed files (with patches) between two commits — the incremental delta for a
+ * re-review. Three-dot/merge-base semantics (invariant #7). GitHub caps `files`
+ * at ~300, which is fine: a delta that large isn't the small/safe case gating
+ * targets and keeps its lenses via path-class matching anyway.
+ */
+export async function compareCommitFiles(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  base: string,
+  head: string,
+): Promise<PrFile[]> {
+  const res = await octokit.rest.repos.compareCommitsWithBasehead({
+    owner,
+    repo,
+    basehead: `${base}...${head}`,
+  });
+  return (res.data.files ?? []).map((f) => ({ filename: f.filename, patch: f.patch }));
+}
+
 export async function listPrCommits(
   octokit: Octokit,
   owner: string,
