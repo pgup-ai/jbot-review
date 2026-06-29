@@ -79,6 +79,12 @@ jobs:
           # Reuse the code-independent layers main published to :buildcache;
           # only COPY dist/ rebuilds. No cache-to — PRs read, don't write.
           cache-from: type=registry,ref=ghcr.io/pgup-ai/jbot-review:buildcache
+      # TEMP diagnostic (remove after measuring): sample host CPU during the
+      # review. CPU-bound (load >> 2, low idle, high steal) → a bigger runner
+      # helps; API-wait (load < 2, high idle) → it won't. The backgrounded
+      # vmstat keeps running on the host through the dockerized review step.
+      - name: Start CPU monitor
+        run: nohup vmstat 15 > /tmp/vmstat.log 2>&1 &
       - uses: ./
         with:
           provider: ${{ inputs.provider || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
@@ -116,3 +122,10 @@ jobs:
           context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
+      # TEMP diagnostic (remove after measuring).
+      - name: CPU load during review
+        if: always()
+        run: |
+          echo "cores: $(nproc)"; uptime
+          echo "--- vmstat: r=runqueue  us+sy=busy%  id=idle%  wa=io-wait  st=cpu-steal ---"
+          cat /tmp/vmstat.log || echo "(no vmstat output — monitor did not run)"
