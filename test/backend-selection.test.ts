@@ -469,4 +469,53 @@ describe('selectReviewBackends', () => {
       },
     );
   });
+
+  it('routes Cline-pass as the aux backend with the aux auth', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        auxProviderID: 'cline-pass',
+        auxModelID: 'default',
+        auxApiKey: 'cline-auth',
+      }),
+      {
+        auxCliBackend: 'cline',
+        needsOpencode: true,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: '',
+        codexAuth: '',
+        clineAuth: 'cline-auth',
+        opencodeProviderID: 'opencode',
+        opencodeModelID: 'deepseek-v4-flash-free',
+        opencodeApiKey: 'main-key',
+      },
+    );
+  });
+
+  it('routes cline (main) + cline-pass (aux) to the shared backend; main auth wins', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'cline',
+        modelID: 'default',
+        apiKey: 'cline-auth',
+        auxProviderID: 'cline-pass',
+        auxModelID: 'default',
+      }),
+      {
+        mainCliBackend: 'cline',
+        auxCliBackend: 'cline',
+        needsOpencode: false,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: '',
+        codexAuth: '',
+        clineAuth: 'cline-auth',
+        opencodeProviderID: 'cline-pass',
+        opencodeModelID: 'default',
+        opencodeApiKey: '',
+      },
+    );
+  });
 });

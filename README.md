@@ -471,7 +471,7 @@ documentation lookup.
 | `commandcode-access-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `commandcode`             |
 | `cursor-api-key`          | No       | —                     | Used when `provider` or active `aux-provider` is `cursor`                  |
 | `codex-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `codex`                   |
-| `cline-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `cline`                   |
+| `cline-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `cline` / `cline-pass`    |
 | `enable-context7`         | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false` |
 | `context7-api-key`        | No       | —                     | Optional Context7 key for reliable CI docs lookup                          |
 | `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                                           |
