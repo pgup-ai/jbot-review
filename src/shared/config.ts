@@ -119,6 +119,8 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
+  // Cline pay-as-you-go. JBOT_REVIEW_MODEL: `cline/default`, or `cline/<type>/<model>`
+  // (cline models carry their own type), e.g. `cline/deepseek/deepseek-v4-flash`.
   cline: {
     defaultModel: 'cline/default',
     keyEnv: 'CLINE_AUTH_JSON',
@@ -128,7 +130,8 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
-  // Cline subscription billing mode: same CLINE_AUTH_JSON, runs `--provider cline-pass`.
+  // Cline subscription (same CLINE_AUTH_JSON, runs `--provider cline-pass`). JBOT_REVIEW_MODEL:
+  // `cline-pass/default`, or `cline-pass/<model>` (namespaced under the mode), e.g. `cline-pass/glm-5.2`.
   'cline-pass': {
     defaultModel: 'cline-pass/default',
     keyEnv: 'CLINE_AUTH_JSON',

@@ -97,11 +97,14 @@ where cline's behavior forces it (argv prompt, NDJSON response, guideline cap):
   token-only), mkdir the nested settings dir `0700`, write `providers.json` `0600`. Throw
   on empty/invalid input.
 - `buildClineCliArgs({ model })` → `['--json', '--plan', '--auto-approve', 'false',
-'--provider', providerID]`, plus `['--model', modelID]` when `modelID !== 'default'`.
-  `--provider` is the billing mode = the model's provider prefix (`cline` / `cline-pass`);
-  cline's `-P` defaults to `cline` and ignores lastUsedProvider, so jbot sets it explicitly.
-  The bypass flags (`--auto-approve true`, `--yolo`) are never emitted. The prompt is the
-  final positional arg in `runClinePrompt`; cwd is the spawn `cwd`.
+'--provider', providerID]`, plus `--model` when not `default`. `--provider` is the billing
+  mode = the model's provider prefix (`cline` / `cline-pass`); cline's `-P` defaults to
+  `cline` and ignores lastUsedProvider, so jbot sets it explicitly. cline requires
+  `--model` as `modelType/model`: cline-pass models are namespaced under the mode
+  (`cline-pass/glm-5.2`) so jbot prepends the provider; pay-as-you-go `cline` models already
+  carry their type (`deepseek/deepseek-v4-flash`). Hence the GitHub-setting refs:
+  `cline/<type>/<model>` and `cline-pass/<model>`. Bypass flags never emitted; the prompt
+  is the final positional arg in `runClinePrompt`; cwd is the spawn `cwd`.
 - `clineEnvForHome(clineHome)` — `{ ...process.env, HOME: clineHome }` with every
   supported-provider api-key env (`CLINE_STRIPPED_ENV_KEYS`) deleted so the carried
   `providers.json` wins deterministically and an ambient key can't silently switch

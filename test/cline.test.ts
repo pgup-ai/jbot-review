@@ -39,10 +39,16 @@ describe('Cline CLI provider helpers', () => {
     ]);
   });
 
-  it('passes an explicit model id after the provider', () => {
+  it('builds --model as modelType/model per mode', () => {
+    // cline-pass models are namespaced under the provider.
     assert.deepEqual(buildClineCliArgs({ model: 'cline-pass/glm-5.2' }).slice(-2), [
       '--model',
-      'glm-5.2',
+      'cline-pass/glm-5.2',
+    ]);
+    // pay-as-you-go cline models already carry their type.
+    assert.deepEqual(buildClineCliArgs({ model: 'cline/deepseek/deepseek-v4-flash' }).slice(-2), [
+      '--model',
+      'deepseek/deepseek-v4-flash',
     ]);
   });
 

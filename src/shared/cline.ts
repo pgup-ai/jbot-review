@@ -107,7 +107,13 @@ export interface ClineCliArgsInput {
 export function buildClineCliArgs(input: ClineCliArgsInput): string[] {
   const { providerID, modelID } = parseModelName(input.model);
   const args = ['--json', '--plan', '--auto-approve', 'false', '--provider', providerID];
-  if (modelID !== 'default') args.push('--model', modelID);
+  if (modelID !== 'default') {
+    // cline requires --model as `modelType/model`. cline-pass models are namespaced under
+    // the provider (e.g. `cline-pass/glm-5.2`); pay-as-you-go `cline` models already carry
+    // their type (e.g. `deepseek/deepseek-v4-flash`).
+    const model = providerID === CLINE_PASS_PROVIDER_ID ? `${providerID}/${modelID}` : modelID;
+    args.push('--model', model);
+  }
   return args;
 }
 
