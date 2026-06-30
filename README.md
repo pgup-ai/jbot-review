@@ -120,6 +120,8 @@ jobs:
           devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
           commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
           cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+          codex-auth: ${{ secrets.CODEX_AUTH_JSON }}
+          cline-auth: ${{ secrets.CLINE_AUTH_JSON }}
           enable-context7: auto
           context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -131,7 +133,8 @@ and variables → Actions → New repository secret. Add the keys for the provid
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
 `XAI_API_KEY`, `FIREWORKS_API_KEY`, `DEVIN_WINDSURF_API_KEY`,
-`COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, or `ANTHROPIC_API_KEY`.
+`COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, `CODEX_AUTH_JSON`,
+`CLINE_AUTH_JSON`, or `ANTHROPIC_API_KEY`.
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
 no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
@@ -147,6 +150,17 @@ Cursor is a separate CLI backend: pass `CURSOR_API_KEY` when you want to support
 `provider: cursor` or `aux-provider: cursor`; the `cursor-agent` CLI reads the
 key straight from the environment (no credential file) and runs read-only via
 `--mode plan` only when a Cursor-backed run is selected.
+Codex is a separate CLI backend: pass `CODEX_AUTH_JSON` (the contents of
+`~/.codex/auth.json` from a local `codex login`) to support `provider: codex` or
+`aux-provider: codex`; it runs read-only via `codex exec --sandbox read-only` on the
+ChatGPT subscription only when a Codex-backed run is selected.
+Cline is a separate CLI backend: pass `CLINE_AUTH_JSON` (the contents of
+`~/.cline/data/settings/providers.json` from a local `cline auth`) to support
+`provider: cline`/`cline-pass` (or the matching `aux-provider`); it runs read-only via
+`cline --plan --auto-approve false` on your local Cline token only when a Cline-backed
+run is selected. Only the auth token is used (the file's `model`/`reasoning` are
+stripped). The two billing modes are separate providers sharing the one secret:
+`cline` (pay-as-you-go) and `cline-pass` (Cline subscription).
 Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
 framework, CLI, cloud-service, or workflow changes.
 
@@ -339,6 +353,9 @@ jbot-review does not use them for smart key rotation.
 | `devin`           | `devin/default`                                            | `devin-windsurf-api-key` | `DEVIN_WINDSURF_API_KEY` |
 | `commandcode`     | `commandcode/default`                                      | `commandcode-access-key` | `COMMANDCODE_ACCESS_KEY` |
 | `cursor`          | `cursor/default`                                           | `cursor-api-key`         | `CURSOR_API_KEY`         |
+| `codex`           | `codex/default`                                            | `codex-auth`             | `CODEX_AUTH_JSON`        |
+| `cline`           | `cline/default`                                            | `cline-auth`             | `CLINE_AUTH_JSON`        |
+| `cline-pass`      | `cline-pass/default`                                       | `cline-auth`             | `CLINE_AUTH_JSON`        |
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
@@ -453,6 +470,8 @@ documentation lookup.
 | `devin-windsurf-api-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `devin`                   |
 | `commandcode-access-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `commandcode`             |
 | `cursor-api-key`          | No       | —                     | Used when `provider` or active `aux-provider` is `cursor`                  |
+| `codex-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `codex`                   |
+| `cline-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `cline` / `cline-pass`    |
 | `enable-context7`         | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false` |
 | `context7-api-key`        | No       | —                     | Optional Context7 key for reliable CI docs lookup                          |
 | `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                                           |

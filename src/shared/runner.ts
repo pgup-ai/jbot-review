@@ -93,6 +93,15 @@ import {
   writeCodexAuth,
 } from './codex.ts';
 import {
+  CLINE_PROVIDER_ID,
+  runClineAddressedPriorCommentsCheck,
+  runClineChangesSinceLastReview,
+  runClineFindingVerification,
+  runClineGuidelineComplianceCheck,
+  runClineReview,
+  writeClineAuth,
+} from './cline.ts';
+import {
   buildReviewContext,
   discoverGuidelineDocs,
   formatGuidelines,
@@ -440,6 +449,60 @@ function createCodexBackend(workspace: string, codexHome: string): ReviewBackend
         timeoutMs,
         onTokenUsage,
         codexHome,
+      ),
+  };
+}
+
+function createClineBackend(workspace: string, clineHome: string): ReviewBackend {
+  return {
+    name: CLINE_PROVIDER_ID,
+    runReview: (model, prContext, guidelines, log, options) =>
+      runClineReview(workspace, model, prContext, guidelines, log, {
+        ...options,
+        home: clineHome,
+      }),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runClineAddressedPriorCommentsCheck(
+        workspace,
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        clineHome,
+      ),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runClineGuidelineComplianceCheck(
+        workspace,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        clineHome,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runClineFindingVerification(
+        workspace,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        clineHome,
+      ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runClineChangesSinceLastReview(
+        workspace,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        clineHome,
       ),
   };
 }
@@ -865,6 +928,7 @@ export async function runPrReview(params: {
   let commandCodeBackend: ReviewBackend | undefined;
   let cursorBackend: ReviewBackend | undefined;
   let codexBackend: ReviewBackend | undefined;
+  let clineBackend: ReviewBackend | undefined;
   let commandCodeHome: string | undefined;
   const cleanupCommandCodeHome = (): void => {
     if (!commandCodeHome) return;
@@ -877,11 +941,18 @@ export async function runPrReview(params: {
     rmSync(codexHome, { recursive: true, force: true });
     codexHome = undefined;
   };
-  // Both CLI homes can be live at once (e.g. main=codex, aux=commandcode), so
-  // clean both at every downstream failure/exit point.
+  let clineHome: string | undefined;
+  const cleanupClineHome = (): void => {
+    if (!clineHome) return;
+    rmSync(clineHome, { recursive: true, force: true });
+    clineHome = undefined;
+  };
+  // Multiple CLI homes can be live at once (e.g. main=codex, aux=commandcode), so
+  // clean every one at every downstream failure/exit point.
   const cleanupCliHomes = (): void => {
     cleanupCommandCodeHome();
     cleanupCodexHome();
+    cleanupClineHome();
   };
 
   if (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID) {
@@ -950,6 +1021,25 @@ export async function runPrReview(params: {
     codexBackend = limitBackendConcurrency(createCodexBackend(workspace, codexHome), sessionSlots);
   }
 
+  if (mainCliBackend === CLINE_PROVIDER_ID || auxCliBackend === CLINE_PROVIDER_ID) {
+    const clineAuth = backendSelection.clineAuth;
+    if (!clineAuth) {
+      cleanupCliHomes();
+      throw new Error(`Missing auth for ${CLINE_PROVIDER_ID} provider.`);
+    }
+    let authPath: string;
+    try {
+      clineHome = mkdtempSync(join(tmpdir(), 'jbot-cline-home-'));
+      authPath = writeClineAuth(clineAuth, clineHome);
+    } catch (error) {
+      cleanupCliHomes();
+      throw error;
+    }
+    log(`Cline CLI auth configured at ${authPath}.`);
+    log('Cline CLI token usage is unavailable; review metadata may omit those sessions.');
+    clineBackend = limitBackendConcurrency(createClineBackend(workspace, clineHome), sessionSlots);
+  }
+
   if (needsOpencode) {
     const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
     if (!opencodeApiKey) {
@@ -997,6 +1087,7 @@ export async function runPrReview(params: {
     [COMMANDCODE_PROVIDER_ID]: commandCodeBackend,
     [CURSOR_PROVIDER_ID]: cursorBackend,
     [CODEX_PROVIDER_ID]: codexBackend,
+    [CLINE_PROVIDER_ID]: clineBackend,
   };
   const mainBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)

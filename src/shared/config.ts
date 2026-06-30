@@ -119,6 +119,27 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
+  // Cline pay-as-you-go. JBOT_REVIEW_MODEL: `cline/default`, or `cline/<type>/<model>`
+  // (cline models carry their own type), e.g. `cline/deepseek/deepseek-v4-flash`.
+  cline: {
+    defaultModel: 'cline/default',
+    keyEnv: 'CLINE_AUTH_JSON',
+    keyInput: 'cline-auth',
+    models: {
+      // Cline CLI is not driven through opencode, so prompt-cache options do not apply.
+      default: { promptCache: false },
+    },
+  },
+  // Cline subscription (same CLINE_AUTH_JSON, runs `--provider cline-pass`). JBOT_REVIEW_MODEL:
+  // `cline-pass/default`, or `cline-pass/<model>` (namespaced under the mode), e.g. `cline-pass/glm-5.2`.
+  'cline-pass': {
+    defaultModel: 'cline-pass/default',
+    keyEnv: 'CLINE_AUTH_JSON',
+    keyInput: 'cline-auth',
+    models: {
+      default: { promptCache: false },
+    },
+  },
 };
 
 export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {
@@ -126,7 +147,9 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     providerID === 'devin' ||
     providerID === 'commandcode' ||
     providerID === 'cursor' ||
-    providerID === 'codex'
+    providerID === 'codex' ||
+    providerID === 'cline' ||
+    providerID === 'cline-pass'
   )
     return false;
   // Fireworks' OpenAI-compatible endpoint strictly rejects unknown request fields, so
