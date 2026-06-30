@@ -156,11 +156,11 @@ Codex is a separate CLI backend: pass `CODEX_AUTH_JSON` (the contents of
 ChatGPT subscription only when a Codex-backed run is selected.
 Cline is a separate CLI backend: pass `CLINE_AUTH_JSON` (the contents of
 `~/.cline/data/settings/providers.json` from a local `cline auth`) to support
-`provider: cline` or `aux-provider: cline`; it runs read-only via
+`provider: cline`/`cline-pass` (or the matching `aux-provider`); it runs read-only via
 `cline --plan --auto-approve false` on your local Cline token only when a Cline-backed
 run is selected. Only the auth token is used (the file's `model`/`reasoning` are
-stripped), and the billing mode follows the file's `lastUsedProvider` — both pay-as-you-go
-(`cline`) and the Cline subscription (`cline-pass`) are supported.
+stripped). The two billing modes are separate providers sharing the one secret:
+`cline` (pay-as-you-go) and `cline-pass` (Cline subscription).
 Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
 framework, CLI, cloud-service, or workflow changes.
 
@@ -355,6 +355,7 @@ jbot-review does not use them for smart key rotation.
 | `cursor`          | `cursor/default`                                           | `cursor-api-key`         | `CURSOR_API_KEY`         |
 | `codex`           | `codex/default`                                            | `codex-auth`             | `CODEX_AUTH_JSON`        |
 | `cline`           | `cline/default`                                            | `cline-auth`             | `CLINE_AUTH_JSON`        |
+| `cline-pass`      | `cline-pass/default`                                       | `cline-auth`             | `CLINE_AUTH_JSON`        |
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.

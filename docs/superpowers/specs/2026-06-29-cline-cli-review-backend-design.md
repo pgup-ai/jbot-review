@@ -18,11 +18,13 @@ read-only review prompts.
 
 - No change to the review pipeline, prompts, finding contracts, or markers.
 - No dynamic Cline model listing — use cline's default model for the mode (the local
-  `model`/`reasoning` are stripped; override with `JBOT_REVIEW_MODEL=cline/<model>`).
-- No billing-mode selection from jbot config: the mode (`cline` / `cline-pass`) is read
-  from the carried `lastUsedProvider`, so the operator picks it via their local
-  `cline auth`.
+  `model`/`reasoning` are stripped; override with `JBOT_REVIEW_MODEL=<mode>/<model>`).
 - No `--hooks-dir` read-approval policy (see Prompt delivery — argv, not a hook).
+
+The two billing modes are **two jbot providers** — `cline` (pay-as-you-go) and
+`cline-pass` (subscription) — sharing one backend and the `CLINE_AUTH_JSON` secret,
+differing only by `--provider` (= the provider id) and their model namespace. The
+operator selects the mode via `JBOT_REVIEW_PROVIDER`.
 
 ## Background — two POC findings that shape the design
 
@@ -73,8 +75,8 @@ wiring points:
 - **Secret:** `CLINE_AUTH_JSON` = the raw contents of `providers.json` (paste as-is). On
   write jbot keeps only each provider's `auth` token (strips `model`/`reasoning`), so the
   review uses cline's default model for the mode, not the operator's local prefs.
-  `lastUsedProvider` selects the **billing mode** — `cline` (pay-as-you-go) or
-  `cline-pass` (subscription); both supported, picked by whichever was last used locally.
+  The **billing mode** is the jbot provider (`cline` pay-as-you-go / `cline-pass`
+  subscription) — both read this same secret and differ only by `--provider`.
 - **Seed once:** `gh secret set CLINE_AUTH_JSON < ~/.cline/data/settings/providers.json`.
 - **Re-seed:** only when a run errors auth/`Unauthorized` (token expired/revoked). For
   OAuth providers Cline refreshes the access token transparently from the stored
@@ -88,17 +90,18 @@ to a new `clineAuth` field; the runner hands it to `writeClineAuth`.
 Mirrors `codex.ts` (per-process `HOME` isolation, fail-open parsing), diverging only
 where cline's behavior forces it (argv prompt, NDJSON response, guideline cap):
 
-- `CLINE_PROVIDER_ID = 'cline'`; `isClineProvider(id)`.
+- `CLINE_PROVIDER_ID = 'cline'`, `CLINE_PASS_PROVIDER_ID = 'cline-pass'`; `isClineProvider`
+  matches both (one backend, two billing modes).
 - `clineProvidersPath(home)` → `<home>/.cline/data/settings/providers.json`.
 - `writeClineAuth(auth, clineHome)` — strip `model`/`reasoning` (`stripClineModelReasoning`,
   token-only), mkdir the nested settings dir `0700`, write `providers.json` `0600`. Throw
   on empty/invalid input.
-- `buildClineCliArgs({ model, provider })` → `['--json', '--plan', '--auto-approve',
-'false', '--provider', provider]`, plus `['--model', modelID]` when `modelID !== 'default'`.
-  `--provider` is the billing mode from `clineProviderFromConfig` (lastUsedProvider) —
-  cline's `-P` defaults to `cline` and ignores it, so jbot passes it explicitly. The bypass
-  flags (`--auto-approve true`, `--yolo`) are never emitted. The prompt is the final
-  positional arg in `runClinePrompt`; cwd is the spawn `cwd`.
+- `buildClineCliArgs({ model })` → `['--json', '--plan', '--auto-approve', 'false',
+'--provider', providerID]`, plus `['--model', modelID]` when `modelID !== 'default'`.
+  `--provider` is the billing mode = the model's provider prefix (`cline` / `cline-pass`);
+  cline's `-P` defaults to `cline` and ignores lastUsedProvider, so jbot sets it explicitly.
+  The bypass flags (`--auto-approve true`, `--yolo`) are never emitted. The prompt is the
+  final positional arg in `runClinePrompt`; cwd is the spawn `cwd`.
 - `clineEnvForHome(clineHome)` — `{ ...process.env, HOME: clineHome }` with every
   supported-provider api-key env (`CLINE_STRIPPED_ENV_KEYS`) deleted so the carried
   `providers.json` wins deterministically and an ambient key can't silently switch
@@ -144,9 +147,9 @@ the guideline cap proves too tight.
 1. `src/shared/backend-selection.ts`: add `CLINE_PROVIDER_ID` to `CliBackendID`, a
    branch in `cliBackendForProvider`, and a `clineAuth` field in
    `ReviewBackendSelection` routed like `codexAuth`.
-2. `src/shared/config.ts`: `PROVIDERS.cline = { defaultModel: 'cline/default',
-keyEnv: 'CLINE_AUTH_JSON', keyInput: 'cline-auth', models: { default: { promptCache:
-false } } }`; add `'cline'` to the early-return in `modelSupportsPromptCache`.
+2. `src/shared/config.ts`: `PROVIDERS.cline` and `PROVIDERS['cline-pass']` (defaultModel
+   `<mode>/default`, both `keyEnv: 'CLINE_AUTH_JSON'`, `keyInput: 'cline-auth'`,
+   `promptCache: false`); add `'cline'` and `'cline-pass'` to `modelSupportsPromptCache`.
 3. `src/shared/runner.ts`: a `writeClineAuth` block beside the codex credential write
    (allocate a temp `clineHome`, add it to `cleanupCliHomes`); register `cline` in the
    `cliBackends` record and wire `createClineBackend`.
@@ -187,12 +190,13 @@ false } } }`; add `'cline'` to the early-return in `modelSupportsPromptCache`.
 
 Pure-unit, no network:
 
-- `buildClineCliArgs` — read-only flags present, `--provider` set to the mode, `--model`
-  omitted on `default`, bypass flags never present.
+- `buildClineCliArgs` — read-only flags present, `--provider` = the model's mode prefix,
+  `--model` omitted on `default`, bypass flags never present.
+- `isClineProvider` — matches both `cline` and `cline-pass`.
 - `stripClineModelReasoning` — drops `model`/`reasoning`, keeps the `auth` token.
-- `clineProviderFromConfig` — returns `lastUsedProvider`, falls back to `cline`.
 - `writeClineAuth` — writes `<home>/.cline/data/settings/providers.json`, mode `0600`,
   token-only (model/reasoning stripped); errors on empty/invalid input.
+- `selectReviewBackends` — `provider=cline-pass` routes through the shared cline backend.
 - `clineEnvForHome` — sets `HOME`, strips the ambient api-key envs, leaves
   `process.env` untouched.
 - `parseClineFinalMessage` — returns `run_result.text`; empty on missing/garbage.

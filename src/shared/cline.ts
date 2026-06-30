@@ -1,12 +1,4 @@
-import {
-  chmodSync,
-  copyFileSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -40,10 +32,12 @@ const CLINE_GUIDELINE_BUDGET_BYTES = 24 * 1024;
 const CLINE_MAX_ARGV_BYTES = 120 * 1024;
 
 export const CLINE_PROVIDER_ID = 'cline';
+/** Cline subscription billing mode; same backend as `cline`, different `--provider`. */
+export const CLINE_PASS_PROVIDER_ID = 'cline-pass';
 export const CLINE_CLI_BIN = 'cline';
 
 export function isClineProvider(providerID: string): boolean {
-  return providerID === CLINE_PROVIDER_ID;
+  return providerID === CLINE_PROVIDER_ID || providerID === CLINE_PASS_PROVIDER_ID;
 }
 
 export function clineProvidersPath(clineHome: string): string {
@@ -66,16 +60,6 @@ export function stripClineModelReasoning(providersJson: string): string {
     }
   }
   return JSON.stringify(parsed, null, 2);
-}
-
-/** The cline-internal provider (billing mode) to run as — `lastUsedProvider`, else `cline`. */
-export function clineProviderFromConfig(providersJson: string): string {
-  try {
-    const last = (JSON.parse(providersJson) as { lastUsedProvider?: unknown }).lastUsedProvider;
-    return typeof last === 'string' && last.length > 0 ? last : CLINE_PROVIDER_ID;
-  } catch {
-    return CLINE_PROVIDER_ID;
-  }
 }
 
 /**
@@ -110,21 +94,19 @@ export function writeClineAuth(auth: string, clineHome: string): string {
 
 export interface ClineCliArgsInput {
   model: string;
-  /** cline-internal provider = the billing mode (`cline` pay-as-you-go / `cline-pass`). */
-  provider: string;
 }
 
 /**
  * Static `cline` argv. Read-only is enforced here (invariant #8): `--auto-approve
  * false` denies every tool call headless (POC-proven), `--plan` is the secondary
  * behavioral layer, and the bypass flags (`--auto-approve true`, `--yolo`) are never
- * emitted. `--provider` selects the billing mode explicitly (cline's default is `cline`
- * and ignores lastUsedProvider). `--json` yields the NDJSON we parse; prompt appended
- * per call.
+ * emitted. `--provider` is the billing mode = the jbot provider id (`cline` /
+ * `cline-pass`); cline's `-P` defaults to `cline` and ignores lastUsedProvider, so jbot
+ * sets it explicitly. `--json` yields the NDJSON we parse; prompt appended per call.
  */
 export function buildClineCliArgs(input: ClineCliArgsInput): string[] {
-  const { modelID } = parseModelName(input.model);
-  const args = ['--json', '--plan', '--auto-approve', 'false', '--provider', input.provider];
+  const { providerID, modelID } = parseModelName(input.model);
+  const args = ['--json', '--plan', '--auto-approve', 'false', '--provider', providerID];
   if (modelID !== 'default') args.push('--model', modelID);
   return args;
 }
@@ -364,9 +346,7 @@ async function runClinePrompt(
     const providers = clineProvidersPath(dir);
     mkdirSync(dirname(providers), { recursive: true, mode: 0o700 });
     copyFileSync(clineProvidersPath(home ?? ''), providers);
-    // Run as the carried lastUsedProvider — the billing mode (cline / cline-pass).
-    const provider = clineProviderFromConfig(readFileSync(providers, 'utf8'));
-    const args = [...buildClineCliArgs({ model, provider }), prompt];
+    const args = [...buildClineCliArgs({ model }), prompt];
     const result = await spawnWithTimeout(CLINE_CLI_BIN, args, {
       cwd: workspace,
       env: clineEnvForHome(dir),

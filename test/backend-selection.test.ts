@@ -445,4 +445,28 @@ describe('selectReviewBackends', () => {
       },
     );
   });
+
+  it('routes Cline-pass (subscription mode) through the shared cline backend', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'cline-pass',
+        modelID: 'default',
+        apiKey: 'cline-auth',
+        auxApiKey: 'opencode-key',
+      }),
+      {
+        mainCliBackend: 'cline',
+        needsOpencode: true,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: '',
+        codexAuth: '',
+        clineAuth: 'cline-auth',
+        opencodeProviderID: 'opencode',
+        opencodeModelID: 'deepseek-v4-flash-free',
+        opencodeApiKey: 'opencode-key',
+      },
+    );
+  });
 });

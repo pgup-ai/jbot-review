@@ -8,7 +8,6 @@ import {
   buildClineCliArgs,
   CLINE_STRIPPED_ENV_KEYS,
   clineEnvForHome,
-  clineProviderFromConfig,
   clineProvidersPath,
   formatClinePromptTimeoutMessage,
   isClineProvider,
@@ -18,14 +17,15 @@ import {
 } from '../src/shared/cline.ts';
 
 describe('Cline CLI provider helpers', () => {
-  it('matches only the explicit cline provider id', () => {
+  it('matches both cline billing-mode provider ids', () => {
     assert.equal(isClineProvider('cline'), true);
+    assert.equal(isClineProvider('cline-pass'), true);
     assert.equal(isClineProvider('Cline'), false);
     assert.equal(isClineProvider(' cline '), false);
   });
 
-  it('selects the billing mode via --provider and omits --model for default', () => {
-    assert.deepEqual(buildClineCliArgs({ model: 'cline/default', provider: 'cline-pass' }), [
+  it('sets --provider to the billing mode and omits --model for default', () => {
+    assert.deepEqual(buildClineCliArgs({ model: 'cline-pass/default' }), [
       '--json',
       '--plan',
       '--auto-approve',
@@ -33,30 +33,27 @@ describe('Cline CLI provider helpers', () => {
       '--provider',
       'cline-pass',
     ]);
+    assert.deepEqual(buildClineCliArgs({ model: 'cline/default' }).slice(-2), [
+      '--provider',
+      'cline',
+    ]);
   });
 
-  it('passes explicit Cline model ids without the provider prefix', () => {
-    assert.deepEqual(
-      buildClineCliArgs({ model: 'cline/deepseek-v4-flash', provider: 'cline' }).slice(-2),
-      ['--model', 'deepseek-v4-flash'],
-    );
+  it('passes an explicit model id after the provider', () => {
+    assert.deepEqual(buildClineCliArgs({ model: 'cline-pass/glm-5.2' }).slice(-2), [
+      '--model',
+      'glm-5.2',
+    ]);
   });
 
   it('never auto-approves tools or enables yolo (invariant #8)', () => {
-    for (const model of ['cline/default', 'cline/deepseek-v4-flash']) {
-      const args = buildClineCliArgs({ model, provider: 'cline-pass' });
+    for (const model of ['cline/default', 'cline-pass/glm-5.2']) {
+      const args = buildClineCliArgs({ model });
       assert.equal(args.includes('--yolo'), false);
       const approveIndex = args.indexOf('--auto-approve');
       assert.notEqual(approveIndex, -1);
       assert.equal(args[approveIndex + 1], 'false');
     }
-  });
-
-  it('derives the billing mode from lastUsedProvider, falling back to cline', () => {
-    assert.equal(clineProviderFromConfig('{"lastUsedProvider":"cline-pass"}'), 'cline-pass');
-    assert.equal(clineProviderFromConfig('{"lastUsedProvider":"cline"}'), 'cline');
-    assert.equal(clineProviderFromConfig('{"providers":{}}'), 'cline');
-    assert.equal(clineProviderFromConfig('not json'), 'cline');
   });
 
   it('strips model/reasoning but keeps the auth token', () => {

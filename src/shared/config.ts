@@ -128,6 +128,15 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
+  // Cline subscription billing mode: same CLINE_AUTH_JSON, runs `--provider cline-pass`.
+  'cline-pass': {
+    defaultModel: 'cline-pass/default',
+    keyEnv: 'CLINE_AUTH_JSON',
+    keyInput: 'cline-auth',
+    models: {
+      default: { promptCache: false },
+    },
+  },
 };
 
 export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {
@@ -136,7 +145,8 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     providerID === 'commandcode' ||
     providerID === 'cursor' ||
     providerID === 'codex' ||
-    providerID === 'cline'
+    providerID === 'cline' ||
+    providerID === 'cline-pass'
   )
     return false;
   // Fireworks' OpenAI-compatible endpoint strictly rejects unknown request fields, so
