@@ -7,6 +7,7 @@ import { describe, it } from 'node:test';
 import {
   buildClineCliArgs,
   clampGuidelinesForArgv,
+  CLINE_STRIPPED_ENV_KEYS,
   clineEnvForHome,
   clineProvidersPath,
   formatClinePromptTimeoutMessage,
@@ -67,27 +68,21 @@ describe('Cline CLI provider helpers', () => {
     assert.throws(() => writeClineAuth('not json', '/tmp/x'), /Invalid CLINE_AUTH_JSON/);
   });
 
-  it('sets HOME and strips ambient api-key envs so carried auth wins', () => {
-    const previous = {
-      CLINE_API_KEY: process.env.CLINE_API_KEY,
-      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-      OPENAI_API_KEY: process.env.OPENAI_API_KEY,
-    };
+  it('sets HOME and strips every provider api-key env so carried auth wins', () => {
+    const previous = new Map(CLINE_STRIPPED_ENV_KEYS.map((k) => [k, process.env[k]] as const));
     try {
-      process.env.CLINE_API_KEY = 'ck-ambient';
-      process.env.ANTHROPIC_API_KEY = 'sk-ant-ambient';
-      process.env.OPENAI_API_KEY = 'sk-ambient';
+      for (const key of CLINE_STRIPPED_ENV_KEYS) process.env[key] = `ambient-${key}`;
 
       const env = clineEnvForHome('/tmp/jbot-cline-home-test');
 
       assert.equal(env.HOME, '/tmp/jbot-cline-home-test');
-      assert.equal(env.CLINE_API_KEY, undefined);
-      assert.equal(env.ANTHROPIC_API_KEY, undefined);
-      assert.equal(env.OPENAI_API_KEY, undefined);
-      // The ambient process env must be left untouched.
-      assert.equal(process.env.CLINE_API_KEY, 'ck-ambient');
+      for (const key of CLINE_STRIPPED_ENV_KEYS) {
+        assert.equal(env[key], undefined, `${key} must be stripped from the child env`);
+        // The ambient process env must be left untouched.
+        assert.equal(process.env[key], `ambient-${key}`, `${key} ambient env must be intact`);
+      }
     } finally {
-      for (const [key, value] of Object.entries(previous)) {
+      for (const [key, value] of previous) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }

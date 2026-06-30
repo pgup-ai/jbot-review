@@ -25,10 +25,8 @@ import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } fro
 const CLINE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const CLINE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const CLINE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
-// Cline is argv-only when headless (it ignores piped stdin under --json), and Linux
-// caps a single argv string at 128KB. Cap guidelines to the finder budget so the
-// assembled prompt (≤~40KB diff + 24KB guidelines + instructions) stays argv-safe;
-// the byte guard is defense-in-depth and should never fire after the cap.
+// Cline is argv-only headless (ignores piped stdin) and Linux caps one arg at 128KB;
+// cap guidelines to the finder budget so the prompt stays argv-safe. Guard is a backstop.
 const CLINE_GUIDELINE_BUDGET_BYTES = 24 * 1024;
 const CLINE_MAX_ARGV_BYTES = 120 * 1024;
 
@@ -90,21 +88,29 @@ export function buildClineCliArgs(input: ClineCliArgsInput): string[] {
   return args;
 }
 
-/**
- * Child env with the temp `HOME` (Cline reads `~/.cline`). The api-key envs are
- * stripped so an ambient key can't silently switch Cline's provider/billing away from
- * the carried `providers.json` (analogous to `codexEnvForHome`).
- */
+// Provider api-key envs Cline could read above the carried providers.json; stripped so an
+// ambient key can't silently redirect billing (Cline is multi-provider, unlike codex).
+export const CLINE_STRIPPED_ENV_KEYS = [
+  'CLINE_API_KEY',
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'OPENROUTER_API_KEY',
+  'GEMINI_API_KEY',
+  'GOOGLE_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'XAI_API_KEY',
+  'GROQ_API_KEY',
+  'CEREBRAS_API_KEY',
+] as const;
+
+/** Child env with the temp `HOME` (Cline reads `~/.cline`); provider api-key envs stripped. */
 export function clineEnvForHome(clineHome: string | undefined): NodeJS.ProcessEnv {
   const home = clineHome?.trim();
   if (!home) {
     throw new Error('Missing Cline home. A temp HOME is required for auth.');
   }
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
-  delete env.CLINE_API_KEY;
-  delete env.ANTHROPIC_API_KEY;
-  delete env.OPENAI_API_KEY;
-  delete env.OPENROUTER_API_KEY;
+  for (const key of CLINE_STRIPPED_ENV_KEYS) delete env[key];
   return env;
 }
 
