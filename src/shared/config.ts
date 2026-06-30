@@ -119,6 +119,15 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
+  cline: {
+    defaultModel: 'cline/default',
+    keyEnv: 'CLINE_AUTH_JSON',
+    keyInput: 'cline-auth',
+    models: {
+      // Cline CLI is not driven through opencode, so prompt-cache options do not apply.
+      default: { promptCache: false },
+    },
+  },
 };
 
 export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {
@@ -126,7 +135,8 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     providerID === 'devin' ||
     providerID === 'commandcode' ||
     providerID === 'cursor' ||
-    providerID === 'codex'
+    providerID === 'codex' ||
+    providerID === 'cline'
   )
     return false;
   // Fireworks' OpenAI-compatible endpoint strictly rejects unknown request fields, so
