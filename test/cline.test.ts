@@ -6,7 +6,6 @@ import { describe, it } from 'node:test';
 
 import {
   buildClineCliArgs,
-  clampGuidelinesForArgv,
   CLINE_STRIPPED_ENV_KEYS,
   clineEnvForHome,
   clineProvidersPath,
@@ -107,16 +106,6 @@ describe('Cline CLI provider helpers', () => {
     assert.equal(parseClineFinalMessage('{"type":"agent_event","event":{}}'), '');
     assert.equal(parseClineFinalMessage('garbage\nlines'), '');
     assert.equal(parseClineFinalMessage('{"type":"run_result","text":""}'), '');
-  });
-
-  it('passes short guidelines through and caps long ones with an omission note', () => {
-    assert.equal(clampGuidelinesForArgv('short rules', 1000), 'short rules');
-    assert.equal(clampGuidelinesForArgv('', 1000), '');
-
-    const long = Array.from({ length: 500 }, (_, i) => `guideline line ${i}`).join('\n');
-    const capped = clampGuidelinesForArgv(long, 1024);
-    assert.ok(Buffer.byteLength(capped, 'utf8') <= 1024);
-    assert.match(capped, /omitted to fit/i);
   });
 
   it('labels prompt timeouts with the session and model', () => {

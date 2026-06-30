@@ -118,8 +118,8 @@ Because cline is argv-only headless and Linux caps a single arg at 128KB:
 
 - **Guideline cap.** `runClineReview` / `runClineGuidelineComplianceCheck` clamp the
   incoming `guidelines` string to `CLINE_GUIDELINE_BUDGET_BYTES = 24 * 1024` (matching
-  the finder budget) before `assembleReviewPrompt`, appending an omission note
-  (invariant #4). With prContext ≤ ~40KB (diff budget) + 24KB guidelines + ~10KB
+  the finder budget) before `assembleReviewPrompt` via the shared, UTF-8-safe
+  `truncateUtf8WithNotice` (invariant #4 omission note). With prContext ≤ ~40KB (diff budget) + 24KB guidelines + ~10KB
   instructions, the prompt lands ~74KB — comfortably argv-safe. This trades some
   guideline context in cline's main pass; acceptable, and the routing work is already
   shrinking that corpus.

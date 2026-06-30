@@ -10,6 +10,7 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
+  truncateUtf8WithNotice,
   type VerifiableFinding,
 } from './prompt.ts';
 import {
@@ -114,17 +115,6 @@ export function clineEnvForHome(clineHome: string | undefined): NodeJS.ProcessEn
   return env;
 }
 
-/** Clamp guidelines to a byte budget at a line boundary, noting the omission. */
-export function clampGuidelinesForArgv(guidelines: string, maxBytes: number): string {
-  if (Buffer.byteLength(guidelines, 'utf8') <= maxBytes) return guidelines;
-  const note = '\n\n[Guideline content omitted to fit the cline prompt budget.]';
-  const budget = Math.max(0, maxBytes - Buffer.byteLength(note, 'utf8'));
-  let slice = Buffer.from(guidelines, 'utf8').subarray(0, budget).toString('utf8');
-  const lastNewline = slice.lastIndexOf('\n');
-  if (lastNewline > 0) slice = slice.slice(0, lastNewline);
-  return `${slice}${note}`;
-}
-
 /** The clean final message is the `run_result` event's `text` (NDJSON stdout). */
 export function parseClineFinalMessage(stdout: string): string {
   let text = '';
@@ -174,7 +164,11 @@ export async function runClineReview(
   // Cline run_result carries usage, but mirror the other CLI backends and skip it.
   void options.onTokenUsage;
   const label = options.label ?? 'review';
-  const guidelinesForArgv = clampGuidelinesForArgv(guidelines, CLINE_GUIDELINE_BUDGET_BYTES);
+  const guidelinesForArgv = truncateUtf8WithNotice(
+    guidelines,
+    CLINE_GUIDELINE_BUDGET_BYTES,
+    'Guidelines',
+  );
   const prompt = assembleReviewPrompt(prContext, guidelinesForArgv, options.lensAddendum ?? '');
   log(`Prompt assembled (${label}, cline): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const raw = await runClinePrompt(
@@ -243,7 +237,11 @@ export async function runClineGuidelineComplianceCheck(
   home?: string,
 ): Promise<Finding[]> {
   void onTokenUsage;
-  const guidelinesForArgv = clampGuidelinesForArgv(guidelines, CLINE_GUIDELINE_BUDGET_BYTES);
+  const guidelinesForArgv = truncateUtf8WithNotice(
+    guidelines,
+    CLINE_GUIDELINE_BUDGET_BYTES,
+    'Guidelines',
+  );
   const raw = await runClinePrompt(
     workspace,
     model,

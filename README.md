@@ -351,6 +351,8 @@ jbot-review does not use them for smart key rotation.
 | `devin`           | `devin/default`                                            | `devin-windsurf-api-key` | `DEVIN_WINDSURF_API_KEY` |
 | `commandcode`     | `commandcode/default`                                      | `commandcode-access-key` | `COMMANDCODE_ACCESS_KEY` |
 | `cursor`          | `cursor/default`                                           | `cursor-api-key`         | `CURSOR_API_KEY`         |
+| `codex`           | `codex/default`                                            | `codex-auth`             | `CODEX_AUTH_JSON`        |
+| `cline`           | `cline/default`                                            | `cline-auth`             | `CLINE_AUTH_JSON`        |
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
@@ -465,6 +467,8 @@ documentation lookup.
 | `devin-windsurf-api-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `devin`                   |
 | `commandcode-access-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `commandcode`             |
 | `cursor-api-key`          | No       | —                     | Used when `provider` or active `aux-provider` is `cursor`                  |
+| `codex-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `codex`                   |
+| `cline-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `cline`                   |
 | `enable-context7`         | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false` |
 | `context7-api-key`        | No       | —                     | Optional Context7 key for reliable CI docs lookup                          |
 | `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                                           |
