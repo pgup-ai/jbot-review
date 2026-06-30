@@ -93,10 +93,10 @@ where cline's behavior forces it (argv prompt, NDJSON response, guideline cap):
   plus `['--model', modelID]` when `modelID !== 'default'`. The bypass flags
   (`--auto-approve true`, `--yolo`) are never emitted. The prompt is appended as the
   final positional arg in `runClinePrompt`; cwd is the spawn `cwd`, not a flag.
-- `clineEnvForHome(clineHome)` — `{ ...process.env, HOME: clineHome }` with
-  `CLINE_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY` deleted
-  so the carried `providers.json` wins deterministically and an ambient key can't
-  silently switch provider/billing (analogous to `codexEnvForHome`).
+- `clineEnvForHome(clineHome)` — `{ ...process.env, HOME: clineHome }` with every
+  supported-provider api-key env (`CLINE_STRIPPED_ENV_KEYS`) deleted so the carried
+  `providers.json` wins deterministically and an ambient key can't silently switch
+  provider/billing. Cline is multi-provider, so the set is broader than codex's.
 - `runClinePrompt(...)` — per-process `mkdtemp` home, `copyFileSync` `providers.json`
   into it (concurrent sessions must not race on the file Cline rewrites when it
   refreshes the token), spawn `cline` with the argv prompt and
