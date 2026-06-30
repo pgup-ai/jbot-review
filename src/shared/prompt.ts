@@ -316,6 +316,17 @@ allowed only inside JSON string values; escape newlines inside string values
 as \\n. Do not write a session recap, completion note, question, or "what would
 you like next" message.`;
 
+// Prepended for prompt-bound backends (cline) whose read-only mode denies every tool
+// call: without it they stall asking to run the git/grep steps the base prompt assumes.
+export const NO_TOOLS_REVIEW_DIRECTIVE = `## Tool use disabled
+
+Use no tools for this review: do not read files, search the repository, or run
+git or shell commands. Everything you need is embedded below. Where later
+instructions mention exploring the repo, running the git diff command, or
+grepping for callers, treat it as already done and review only the diff hunks
+and context in this prompt. Respond with the required JSON computed directly
+from that embedded context.`;
+
 /**
  * Marks PR-author-controlled prose (title, description, commit messages, prior
  * review comments) as untrusted so an injected instruction cannot steer the

@@ -165,6 +165,14 @@ the guideline cap proves too tight.
 - **Invariant #8 (read-only):** `--auto-approve false` denies every tool call in
   headless mode (POC-proven); `--plan` adds a behavioral layer. No bypass flags. Cline
   cannot edit the workspace.
+- **No-tools directive (prompt-bound review):** because `--auto-approve false` denies
+  *reads* too, cline stalls (emits prose, not JSON) when the base prompt tells it to run
+  the git diff / grep steps. `NO_TOOLS_REVIEW_DIRECTIVE` (prepended in `buildClinePromptArg`)
+  overrides those steps so cline reviews only the embedded diff/context. Tradeoff: cline is
+  prompt-bound — no exploration of omitted files or caller cross-referencing the exploring
+  backends do — bought for zero read/write/exec on untrusted PR code. The diff budget +
+  sharding cover typical PRs. Verified e2e: glm-5.2 and deepseek-v4-flash both return valid
+  findings against an embedded diff with an empty workspace.
 - **Invariant #3 (aux sessions fail open):** unchanged; a cline lens/guideline/verify
   failure (incl. an over-budget guard throw) degrades only that session.
 - **Invariants #1/#2/#10:** unaffected — cline is just another session driver; decision

@@ -10,6 +10,7 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
+  NO_TOOLS_REVIEW_DIRECTIVE,
   truncateUtf8WithNotice,
   type VerifiableFinding,
 } from './prompt.ts';
@@ -115,6 +116,12 @@ export function buildClineCliArgs(input: ClineCliArgsInput): string[] {
     args.push('--model', model);
   }
   return args;
+}
+
+/** Prompt argv: the no-tools directive (read-only cline can't run the base prompt's
+ * git/grep steps) prepended so the model reviews the embedded context, not stalls. */
+export function buildClinePromptArg(prompt: string): string {
+  return `${NO_TOOLS_REVIEW_DIRECTIVE}\n\n${prompt}`;
 }
 
 // Provider api-key envs Cline could read above the carried providers.json; stripped so an
@@ -338,7 +345,8 @@ async function runClinePrompt(
   timeoutMs = CLINE_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
   // Cline takes the prompt as a positional arg (it ignores piped stdin headlessly).
-  const promptBytes = Buffer.byteLength(prompt, 'utf8');
+  const fullPrompt = buildClinePromptArg(prompt);
+  const promptBytes = Buffer.byteLength(fullPrompt, 'utf8');
   if (promptBytes > CLINE_MAX_ARGV_BYTES) {
     throw new Error(
       `cline ${label} prompt is ${promptBytes} bytes, over the ${CLINE_MAX_ARGV_BYTES}-byte argv limit`,
@@ -352,7 +360,7 @@ async function runClinePrompt(
     const providers = clineProvidersPath(dir);
     mkdirSync(dirname(providers), { recursive: true, mode: 0o700 });
     copyFileSync(clineProvidersPath(home ?? ''), providers);
-    const args = [...buildClineCliArgs({ model }), prompt];
+    const args = [...buildClineCliArgs({ model }), fullPrompt];
     const result = await spawnWithTimeout(CLINE_CLI_BIN, args, {
       cwd: workspace,
       env: clineEnvForHome(dir),
