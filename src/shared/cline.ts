@@ -1,4 +1,12 @@
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -43,18 +51,46 @@ export function clineProvidersPath(clineHome: string): string {
 }
 
 /**
- * Writes the `CLINE_AUTH_JSON` secret — the raw contents of
- * `~/.cline/data/settings/providers.json` — under a temp `HOME`. The whole file is
- * carried so Cline keeps `lastUsedProvider` and its refresh token; JSON-validated so a
- * bad secret fails fast.
+ * Drop each provider's `model`/`reasoning` so the review uses only the auth token, not
+ * the operator's local model/effort prefs. Throws on non-JSON (the caller maps it to a
+ * clear error).
+ */
+export function stripClineModelReasoning(providersJson: string): string {
+  const parsed = JSON.parse(providersJson) as {
+    providers?: Record<string, { settings?: Record<string, unknown> }>;
+  };
+  for (const entry of Object.values(parsed.providers ?? {})) {
+    if (entry?.settings) {
+      delete entry.settings.model;
+      delete entry.settings.reasoning;
+    }
+  }
+  return JSON.stringify(parsed, null, 2);
+}
+
+/** The cline-internal provider (billing mode) to run as — `lastUsedProvider`, else `cline`. */
+export function clineProviderFromConfig(providersJson: string): string {
+  try {
+    const last = (JSON.parse(providersJson) as { lastUsedProvider?: unknown }).lastUsedProvider;
+    return typeof last === 'string' && last.length > 0 ? last : CLINE_PROVIDER_ID;
+  } catch {
+    return CLINE_PROVIDER_ID;
+  }
+}
+
+/**
+ * Writes the `CLINE_AUTH_JSON` secret (the contents of
+ * `~/.cline/data/settings/providers.json`) under a temp `HOME`, keeping only the auth
+ * token per provider (model/reasoning stripped). Invalid JSON fails fast.
  */
 export function writeClineAuth(auth: string, clineHome: string): string {
   const content = auth.trim();
   if (!content) {
     throw new Error('Missing Cline auth. Set cline-auth or CLINE_AUTH_JSON.');
   }
+  let tokenOnly: string;
   try {
-    JSON.parse(content);
+    tokenOnly = stripClineModelReasoning(content);
   } catch {
     throw new Error(
       'Invalid CLINE_AUTH_JSON: expected the JSON contents of ~/.cline/data/settings/providers.json.',
@@ -63,7 +99,7 @@ export function writeClineAuth(auth: string, clineHome: string): string {
 
   const path = clineProvidersPath(clineHome);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${content}\n`, { mode: 0o600 });
+  writeFileSync(path, `${tokenOnly}\n`, { mode: 0o600 });
   try {
     chmodSync(path, 0o600);
   } catch {
@@ -74,17 +110,21 @@ export function writeClineAuth(auth: string, clineHome: string): string {
 
 export interface ClineCliArgsInput {
   model: string;
+  /** cline-internal provider = the billing mode (`cline` pay-as-you-go / `cline-pass`). */
+  provider: string;
 }
 
 /**
  * Static `cline` argv. Read-only is enforced here (invariant #8): `--auto-approve
  * false` denies every tool call headless (POC-proven), `--plan` is the secondary
  * behavioral layer, and the bypass flags (`--auto-approve true`, `--yolo`) are never
- * emitted. `--json` yields the NDJSON we parse. The prompt is appended per call.
+ * emitted. `--provider` selects the billing mode explicitly (cline's default is `cline`
+ * and ignores lastUsedProvider). `--json` yields the NDJSON we parse; prompt appended
+ * per call.
  */
 export function buildClineCliArgs(input: ClineCliArgsInput): string[] {
   const { modelID } = parseModelName(input.model);
-  const args = ['--json', '--plan', '--auto-approve', 'false'];
+  const args = ['--json', '--plan', '--auto-approve', 'false', '--provider', input.provider];
   if (modelID !== 'default') args.push('--model', modelID);
   return args;
 }
@@ -317,7 +357,6 @@ async function runClinePrompt(
     );
   }
   const dir = mkdtempSync(join(tmpdir(), 'jbot-cline-'));
-  const args = [...buildClineCliArgs({ model }), prompt];
   log(`Calling ${label} prompt (agent=cline-cli, model=${model})`);
   try {
     // Per-process HOME: copy providers.json so concurrent sessions don't race on the
@@ -325,6 +364,9 @@ async function runClinePrompt(
     const providers = clineProvidersPath(dir);
     mkdirSync(dirname(providers), { recursive: true, mode: 0o700 });
     copyFileSync(clineProvidersPath(home ?? ''), providers);
+    // Run as the carried lastUsedProvider — the billing mode (cline / cline-pass).
+    const provider = clineProviderFromConfig(readFileSync(providers, 'utf8'));
+    const args = [...buildClineCliArgs({ model, provider }), prompt];
     const result = await spawnWithTimeout(CLINE_CLI_BIN, args, {
       cwd: workspace,
       env: clineEnvForHome(dir),

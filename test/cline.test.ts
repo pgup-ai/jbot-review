@@ -8,10 +8,12 @@ import {
   buildClineCliArgs,
   CLINE_STRIPPED_ENV_KEYS,
   clineEnvForHome,
+  clineProviderFromConfig,
   clineProvidersPath,
   formatClinePromptTimeoutMessage,
   isClineProvider,
   parseClineFinalMessage,
+  stripClineModelReasoning,
   writeClineAuth,
 } from '../src/shared/cline.ts';
 
@@ -22,25 +24,27 @@ describe('Cline CLI provider helpers', () => {
     assert.equal(isClineProvider(' cline '), false);
   });
 
-  it('omits --model for the default Cline model and runs read-only', () => {
-    assert.deepEqual(buildClineCliArgs({ model: 'cline/default' }), [
+  it('selects the billing mode via --provider and omits --model for default', () => {
+    assert.deepEqual(buildClineCliArgs({ model: 'cline/default', provider: 'cline-pass' }), [
       '--json',
       '--plan',
       '--auto-approve',
       'false',
+      '--provider',
+      'cline-pass',
     ]);
   });
 
   it('passes explicit Cline model ids without the provider prefix', () => {
-    assert.deepEqual(buildClineCliArgs({ model: 'cline/deepseek-v4-flash' }).slice(-2), [
-      '--model',
-      'deepseek-v4-flash',
-    ]);
+    assert.deepEqual(
+      buildClineCliArgs({ model: 'cline/deepseek-v4-flash', provider: 'cline' }).slice(-2),
+      ['--model', 'deepseek-v4-flash'],
+    );
   });
 
   it('never auto-approves tools or enables yolo (invariant #8)', () => {
     for (const model of ['cline/default', 'cline/deepseek-v4-flash']) {
-      const args = buildClineCliArgs({ model });
+      const args = buildClineCliArgs({ model, provider: 'cline-pass' });
       assert.equal(args.includes('--yolo'), false);
       const approveIndex = args.indexOf('--auto-approve');
       assert.notEqual(approveIndex, -1);
@@ -48,15 +52,51 @@ describe('Cline CLI provider helpers', () => {
     }
   });
 
-  it('writes providers.json from the raw JSON secret with 0600 perms', () => {
+  it('derives the billing mode from lastUsedProvider, falling back to cline', () => {
+    assert.equal(clineProviderFromConfig('{"lastUsedProvider":"cline-pass"}'), 'cline-pass');
+    assert.equal(clineProviderFromConfig('{"lastUsedProvider":"cline"}'), 'cline');
+    assert.equal(clineProviderFromConfig('{"providers":{}}'), 'cline');
+    assert.equal(clineProviderFromConfig('not json'), 'cline');
+  });
+
+  it('strips model/reasoning but keeps the auth token', () => {
+    const src = JSON.stringify({
+      lastUsedProvider: 'cline-pass',
+      providers: {
+        'cline-pass': {
+          settings: {
+            provider: 'cline-pass',
+            auth: { accessToken: 'tok' },
+            model: 'x',
+            reasoning: { effort: 'high' },
+          },
+        },
+      },
+    });
+    const stripped = JSON.parse(stripClineModelReasoning(src));
+    assert.equal(stripped.providers['cline-pass'].settings.model, undefined);
+    assert.equal(stripped.providers['cline-pass'].settings.reasoning, undefined);
+    assert.deepEqual(stripped.providers['cline-pass'].settings.auth, { accessToken: 'tok' });
+    assert.equal(stripped.lastUsedProvider, 'cline-pass');
+  });
+
+  it('writes providers.json with 0600 perms, stripped to the auth token', () => {
     const home = mkdtempSync(join(tmpdir(), 'jbot-cline-home-'));
     try {
-      const auth = JSON.stringify({ lastUsedProvider: 'cline', providers: {} }, null, 2);
+      const auth = JSON.stringify({
+        lastUsedProvider: 'cline-pass',
+        providers: {
+          'cline-pass': { settings: { auth: { accessToken: 'tok' }, model: 'x', reasoning: {} } },
+        },
+      });
       const path = writeClineAuth(auth, home);
 
       assert.equal(path, clineProvidersPath(home));
       assert.equal(statSync(path).mode & 0o777, 0o600);
-      assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), JSON.parse(auth));
+      const written = JSON.parse(readFileSync(path, 'utf8'));
+      assert.equal(written.providers['cline-pass'].settings.model, undefined);
+      assert.equal(written.providers['cline-pass'].settings.reasoning, undefined);
+      assert.deepEqual(written.providers['cline-pass'].settings.auth, { accessToken: 'tok' });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

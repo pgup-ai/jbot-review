@@ -158,7 +158,9 @@ Cline is a separate CLI backend: pass `CLINE_AUTH_JSON` (the contents of
 `~/.cline/data/settings/providers.json` from a local `cline auth`) to support
 `provider: cline` or `aux-provider: cline`; it runs read-only via
 `cline --plan --auto-approve false` on your local Cline token only when a Cline-backed
-run is selected.
+run is selected. Only the auth token is used (the file's `model`/`reasoning` are
+stripped), and the billing mode follows the file's `lastUsedProvider` — both pay-as-you-go
+(`cline`) and the Cline subscription (`cline-pass`) are supported.
 Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
 framework, CLI, cloud-service, or workflow changes.
 

@@ -17,10 +17,11 @@ read-only review prompts.
 ### Non-goals
 
 - No change to the review pipeline, prompts, finding contracts, or markers.
-- No dynamic Cline model listing (use the configured/default model directly).
-- No Cline provider selection from jbot: the operator picks the provider in
-  `cline auth`; jbot uses whatever `lastUsedProvider` the carried `providers.json`
-  records (override the model only, via `JBOT_REVIEW_MODEL=cline/<model>`).
+- No dynamic Cline model listing — use cline's default model for the mode (the local
+  `model`/`reasoning` are stripped; override with `JBOT_REVIEW_MODEL=cline/<model>`).
+- No billing-mode selection from jbot config: the mode (`cline` / `cline-pass`) is read
+  from the carried `lastUsedProvider`, so the operator picks it via their local
+  `cline auth`.
 - No `--hooks-dir` read-approval policy (see Prompt delivery — argv, not a hook).
 
 ## Background — two POC findings that shape the design
@@ -69,9 +70,11 @@ wiring points:
 - **Source:** `~/.cline/data/settings/providers.json` after a local `cline auth`. The
   OAuth token (`settings.auth.{accessToken,refreshToken,accountId,expiresAt}`) lives in
   this file in plaintext, carryable like codex's `auth.json`.
-- **Secret:** `CLINE_AUTH_JSON` = the raw contents of `providers.json` (paste as-is —
-  multi-line is fine, like every other credential). Carrying the whole file preserves
-  `lastUsedProvider` so Cline selects the same provider it used locally.
+- **Secret:** `CLINE_AUTH_JSON` = the raw contents of `providers.json` (paste as-is). On
+  write jbot keeps only each provider's `auth` token (strips `model`/`reasoning`), so the
+  review uses cline's default model for the mode, not the operator's local prefs.
+  `lastUsedProvider` selects the **billing mode** — `cline` (pay-as-you-go) or
+  `cline-pass` (subscription); both supported, picked by whichever was last used locally.
 - **Seed once:** `gh secret set CLINE_AUTH_JSON < ~/.cline/data/settings/providers.json`.
 - **Re-seed:** only when a run errors auth/`Unauthorized` (token expired/revoked). For
   OAuth providers Cline refreshes the access token transparently from the stored
@@ -87,12 +90,15 @@ where cline's behavior forces it (argv prompt, NDJSON response, guideline cap):
 
 - `CLINE_PROVIDER_ID = 'cline'`; `isClineProvider(id)`.
 - `clineProvidersPath(home)` → `<home>/.cline/data/settings/providers.json`.
-- `writeClineAuth(auth, clineHome)` — `JSON.parse`-validate, mkdir the nested settings
-  dir `0700`, write `providers.json` `0600`. Throw on empty/invalid input.
-- `buildClineCliArgs({ model })` → `['--json', '--plan', '--auto-approve', 'false']`,
-  plus `['--model', modelID]` when `modelID !== 'default'`. The bypass flags
-  (`--auto-approve true`, `--yolo`) are never emitted. The prompt is appended as the
-  final positional arg in `runClinePrompt`; cwd is the spawn `cwd`, not a flag.
+- `writeClineAuth(auth, clineHome)` — strip `model`/`reasoning` (`stripClineModelReasoning`,
+  token-only), mkdir the nested settings dir `0700`, write `providers.json` `0600`. Throw
+  on empty/invalid input.
+- `buildClineCliArgs({ model, provider })` → `['--json', '--plan', '--auto-approve',
+'false', '--provider', provider]`, plus `['--model', modelID]` when `modelID !== 'default'`.
+  `--provider` is the billing mode from `clineProviderFromConfig` (lastUsedProvider) —
+  cline's `-P` defaults to `cline` and ignores it, so jbot passes it explicitly. The bypass
+  flags (`--auto-approve true`, `--yolo`) are never emitted. The prompt is the final
+  positional arg in `runClinePrompt`; cwd is the spawn `cwd`.
 - `clineEnvForHome(clineHome)` — `{ ...process.env, HOME: clineHome }` with every
   supported-provider api-key env (`CLINE_STRIPPED_ENV_KEYS`) deleted so the carried
   `providers.json` wins deterministically and an ambient key can't silently switch
@@ -181,10 +187,12 @@ false } } }`; add `'cline'` to the early-return in `modelSupportsPromptCache`.
 
 Pure-unit, no network:
 
-- `buildClineCliArgs` — read-only flags present, `--model` omitted on `default`, bypass
-  flags never present.
+- `buildClineCliArgs` — read-only flags present, `--provider` set to the mode, `--model`
+  omitted on `default`, bypass flags never present.
+- `stripClineModelReasoning` — drops `model`/`reasoning`, keeps the `auth` token.
+- `clineProviderFromConfig` — returns `lastUsedProvider`, falls back to `cline`.
 - `writeClineAuth` — writes `<home>/.cline/data/settings/providers.json`, mode `0600`,
-  from raw JSON; errors on empty/invalid input.
+  token-only (model/reasoning stripped); errors on empty/invalid input.
 - `clineEnvForHome` — sets `HOME`, strips the ambient api-key envs, leaves
   `process.env` untouched.
 - `parseClineFinalMessage` — returns `run_result.text`; empty on missing/garbage.
