@@ -166,7 +166,7 @@ the guideline cap proves too tight.
   headless mode (POC-proven); `--plan` adds a behavioral layer. No bypass flags. Cline
   cannot edit the workspace.
 - **No-tools directive (prompt-bound review):** because `--auto-approve false` denies
-  *reads* too, cline stalls (emits prose, not JSON) when the base prompt tells it to run
+  _reads_ too, cline stalls (emits prose, not JSON) when the base prompt tells it to run
   the git diff / grep steps. `NO_TOOLS_REVIEW_DIRECTIVE` (prepended in `buildClinePromptArg`)
   overrides those steps so cline reviews only the embedded diff/context. Tradeoff: cline is
   prompt-bound — no exploration of omitted files or caller cross-referencing the exploring
