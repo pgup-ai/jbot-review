@@ -7,3 +7,6 @@ deploy/jbot-review-worker.env.local
 .DS_Store
 .idea/
 .tmp/
+
+# Internal planning/spec docs — local-only, kept out of the public repo
+docs/superpowers/
