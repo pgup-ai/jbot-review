@@ -485,7 +485,7 @@ or request-changes review. The review body includes advisory merge guidance:
 
 ## Project guidelines
 
-Both modes automatically discover repo-level guidance from the checked-out workspace:
+The action automatically discovers repo-level guidance from the checked-out workspace:
 
 - `AGENTS.md` — conventions and rules
 - `REVIEW.md` — review-specific instructions
@@ -530,7 +530,7 @@ the complete PR diff and must report only concrete, code-grounded findings.
 ```
 src/
   shared/
-    runner.ts       # shared orchestration (both paths call this)
+    runner.ts       # shared orchestration (all entrypoints call this)
     opencode.ts     # opencode serve + SDK review
     github.ts       # list files, post review, verdict
     prompt.ts       # system prompt
