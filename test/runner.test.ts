@@ -13,7 +13,9 @@ import {
   computeVerificationTimeoutMs,
   formatReviewedWith,
   renderReviewMetadataBlock,
+  runPrReview,
 } from '../src/shared/runner.ts';
+import type { Octokit } from '../src/shared/github.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 const PRIOR_JBOT_REVIEW = [
@@ -335,6 +337,75 @@ describe('formatReviewedWith', () => {
         cacheWrite: 50,
       }),
       'Reviewed with `devin/glm-5.2`; auxiliary sessions used `opencode/deepseek-v4-flash-free`.',
+    );
+  });
+});
+
+describe('runPrReview local mode (localDiff)', () => {
+  // Blank workspace skips ensureGitSafeDirectory, so tests never touch the
+  // developer's global git config.
+  const base = {
+    owner: 'local',
+    repo: 'local',
+    pullNumber: 0,
+    pullTitle: 'local review',
+    pullBody: '',
+    workspace: '',
+    model: 'opencode/test-model',
+    apiKey: 'test-key',
+  };
+
+  it('throws when localDiff is provided without dryRun', async () => {
+    await assert.rejects(
+      runPrReview({
+        ...base,
+        localDiff: { files: [], commits: [] },
+        options: {},
+        log: () => {},
+      }),
+      /dryRun/,
+    );
+  });
+
+  // No `octokit` at all: the runner's internal landmine Proxy throws on ANY
+  // property access, so completing proves local mode performs zero GitHub
+  // calls on this path — structurally, not by mock bookkeeping.
+  it('completes a doc-only local dry run with no octokit and no GitHub access', async () => {
+    const logs: string[] = [];
+    await runPrReview({
+      ...base,
+      localDiff: {
+        files: [{ filename: 'README.md', patch: '@@ -1 +1 @@\n-a\n+b' }],
+        commits: [],
+      },
+      options: { dryRun: true },
+      log: (msg) => logs.push(msg),
+    });
+    assert.ok(logs.some((msg) => /doc-only/i.test(msg)));
+  });
+
+  it('completes with zero reviewable local files with no octokit', async () => {
+    const logs: string[] = [];
+    await runPrReview({
+      ...base,
+      localDiff: { files: [{ filename: 'img.png' }], commits: [] },
+      options: { dryRun: true },
+      log: (msg) => logs.push(msg),
+    });
+    assert.ok(logs.some((msg) => /no reviewable files/i.test(msg)));
+  });
+
+  // Pins the production seam: without localDiff, the diff still comes from
+  // listPrFiles (octokit.paginate), byte-identical to the pre-seam behavior.
+  it('still sources the diff from GitHub when localDiff is absent', async () => {
+    const sentinel = new Error('listPrFiles reached');
+    const fake = {
+      rest: { pulls: { listFiles: {} } },
+      paginate: () => Promise.reject(sentinel),
+    } as unknown as Octokit;
+    await assert.rejects(
+      runPrReview({ ...base, octokit: fake, options: { dryRun: true }, log: () => {} }),
+      (error: unknown) => error === sentinel,
     );
   });
 });

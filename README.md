@@ -477,6 +477,34 @@ or request-changes review. The review body includes advisory merge guidance:
 - `Mergeable with non-blocking comments` when only `P3` or `nit` findings are present.
 - `Good to go from jbot-review` when no new findings are found.
 
+## Local review
+
+Review the current branch before pushing — no PR, no GitHub token, no GitHub
+API call, no `git fetch`:
+
+```bash
+npm run review:local
+```
+
+- **Diff scope:** merge-base of the branch and `origin/HEAD` (falls back to
+  `origin/main`; override with `JBOT_LOCAL_BASE=<ref>`) → the **working
+  tree** — uncommitted changes are reviewed; untracked files are listed but
+  not reviewed. On a clean tree this equals `base...HEAD`; with no changes it
+  prints "nothing to review" and exits 0.
+- **Auth:** only the model provider credential — `PROVIDER` plus its key env
+  var (same keys as [Provider configuration](#provider-configuration-in-repo);
+  full list in `src/shared/config.ts`). A `.env` in the repo root is loaded by
+  this command only. No GitHub credential is read, and nothing is posted
+  anywhere — dry-run is enforced in code.
+- **Output:** findings print to the terminal; set `JBOT_LOCAL_REPORT=true` to
+  also write `.jbot-review/last-run.md` (gitignored).
+- **Knobs:** the same env knobs as the hosted app apply — `JBOT_REVIEW_PASSES`,
+  `JBOT_VERIFY_FINDINGS`, `JBOT_TIME_BUDGET_MINUTES`, `JBOT_REVIEW_SHARDS`,
+  `JBOT_DYNAMIC_FANOUT`, `JBOT_MODEL_OPTIONS`, `JBOT_PROMPT_CACHE`,
+  `JBOT_SKIP_DOC_ONLY`, `JBOT_MAX_CONCURRENT_SESSIONS`,
+  `JBOT_REVIEW_AUX_MODEL` (+ `JBOT_AUX_PROVIDER`). The opencode server uses a
+  free ephemeral port automatically; `JBOT_OPENCODE_PORT` pins one instead.
+
 ## Project guidelines
 
 The action automatically discovers repo-level guidance from the checked-out workspace:

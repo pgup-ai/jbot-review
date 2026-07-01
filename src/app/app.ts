@@ -21,7 +21,7 @@ export interface AppConfig {
 // an "in" check before accessing the installation field.
 type PullRequestEvent = EmitterWebhookEvent<'pull_request'>;
 
-function parseEnvJsonObject(
+export function parseEnvJsonObject(
   name: string,
   defaultValue: Record<string, unknown>,
 ): Record<string, unknown> {

@@ -17,6 +17,7 @@ in this repo; `CLAUDE.md` just points here.
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `src/workflow/index.ts`        | GitHub Action entry: parse inputs → `runPrReview`                                                                                    |
 | `src/app/*`                    | Webhook-app entry: auth, clone, queue → `runPrReview`                                                                                |
+| `src/local/*`                  | `npm run review:local` entry: merge-base→worktree git diff → `PrFile[]` → `runPrReview` dry-run; zero GitHub                         |
 | `src/shared/runner.ts`         | Orchestrator: context assembly → parallel sessions → finding pipeline → post. Keep it THIN.                                          |
 | `src/shared/prompt.ts`         | ALL prompt text + pure assembly functions. No prompt strings anywhere else.                                                          |
 | `src/shared/opencode.ts`       | opencode server lifecycle, sessions, response parsing (strict + repair)                                                              |
