@@ -112,6 +112,7 @@ jobs:
           cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
           codex-auth: ${{ secrets.CODEX_AUTH_JSON }}
           cline-auth: ${{ secrets.CLINE_AUTH_JSON }}
+          kilo-auth: ${{ secrets.KILO_AUTH_CONTENT }}
           enable-context7: auto
           context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -124,7 +125,7 @@ you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
 `XAI_API_KEY`, `FIREWORKS_API_KEY`, `DEVIN_WINDSURF_API_KEY`,
 `COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, `CODEX_AUTH_JSON`,
-`CLINE_AUTH_JSON`, or `ANTHROPIC_API_KEY`.
+`CLINE_AUTH_JSON`, `KILO_AUTH_CONTENT`, or `ANTHROPIC_API_KEY`.
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
 no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
@@ -141,6 +142,7 @@ no digging a field out of a JSON.
 | **Cursor**       | Create a key at [cursor.com/dashboard/integrations](https://cursor.com/dashboard/integrations) → paste it (`crsr_…`)                                    | `CURSOR_API_KEY` (`cursor-api-key`)                 |
 | **Devin**        | `devin auth login` → copy `windsurf_api_key` (`devin-session-token$…`) from `~/.local/share/devin/credentials.toml` ([docs](https://docs.devin.ai/cli)) | `DEVIN_WINDSURF_API_KEY` (`devin-windsurf-api-key`) |
 | **Command Code** | Create an access key at [commandcode.ai](https://commandcode.ai/docs/quickstart) (`user_…`; the `apiKey` in `~/.commandcode/auth.json`) → paste it      | `COMMANDCODE_ACCESS_KEY` (`commandcode-access-key`) |
+| **Kilo**         | `kilo auth login` → paste the whole `~/.local/share/kilo/auth.json`                                                                                     | `KILO_AUTH_CONTENT` (`kilo-auth`)                   |
 
 Each CLI backend runs **read-only** and only when it's the selected
 `provider`/`aux-provider`. Cline and Command Code write their credential into an
@@ -149,7 +151,10 @@ after the run; Cursor reads its key straight from the env (no file); Devin write
 `~/.local/share/devin/credentials.toml` under the process `HOME`. Cline uses only
 the auth token — the file's `model`/`reasoning` are stripped — and has two billing
 modes sharing one secret: `cline` (pay-as-you-go) and `cline-pass` (Cline
-subscription).
+subscription). Kilo reads its credential from the `KILO_AUTH_CONTENT` env var (no
+file written) with an isolated temporary `HOME`/`XDG_DATA_HOME` per session,
+removed after the run; it defaults to the free `kilo/kilo-auto/free` gateway
+model.
 
 Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
 framework, CLI, cloud-service, or workflow changes.
@@ -237,6 +242,7 @@ without editing the workflow.
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+    kilo-auth: ${{ secrets.KILO_AUTH_CONTENT }}
     enable-context7: auto
     context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -346,6 +352,7 @@ jbot-review does not use them for smart key rotation.
 | `codex`           | `codex/default`                                            | `codex-auth`             | `CODEX_AUTH_JSON`        |
 | `cline`           | `cline/default`                                            | `cline-auth`             | `CLINE_AUTH_JSON`        |
 | `cline-pass`      | `cline-pass/default`                                       | `cline-auth`             | `CLINE_AUTH_JSON`        |
+| `kilo`            | `kilo/kilo-auto/free`                                      | `kilo-auth`              | `KILO_AUTH_CONTENT`      |
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
