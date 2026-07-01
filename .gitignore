@@ -8,5 +8,5 @@ deploy/jbot-review-worker.env.local
 .idea/
 .tmp/
 
-# Golden-set eval: actual findings are produced per run, never committed
-fixtures/golden/**/actual-findings.json
+# Internal planning/spec docs — local-only, kept out of the public repo
+docs/superpowers/

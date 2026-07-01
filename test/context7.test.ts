@@ -87,8 +87,8 @@ describe('decideContext7Mode', () => {
   });
 
   it('enables for ORM filter-behavior usage in auto mode', () => {
-    // Regression: integral-xyz/fms#3133 used em.nativeUpdate, whose filter
-    // behavior jbot got wrong 5x. The auto heuristic must turn docs lookup on
+    // Regression: a real-world PR used em.nativeUpdate, whose filter behavior
+    // jbot got wrong 5x. The auto heuristic must turn docs lookup on
     // for ORM usage, not just dependency-manifest or SaaS-SDK changes.
     const decision = decideContext7Mode({
       mode: 'auto',

@@ -12,12 +12,7 @@
     "format:check": "prettier --check .",
     "lint": "oxlint --deny-warnings",
     "dev": "tsx src/app/server.ts",
-    "start": "npx tsx src/app/server.ts",
-    "replay": "tsx scripts/replay-review.ts",
-    "bench:golden": "tsx scripts/bench-golden.ts",
-    "bench:golden:case": "tsx scripts/bench-golden.ts --case fms-3064-ai-chat-duplicate-review --model opencode/deepseek-v4-flash-free",
-    "bench:golden:all": "tsx scripts/bench-golden.ts --all --model opencode/deepseek-v4-flash-free",
-    "eval": "tsx scripts/eval-review.ts"
+    "start": "npx tsx src/app/server.ts"
   },
   "dependencies": {
     "@actions/core": "^3.0.1",

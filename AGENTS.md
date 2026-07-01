@@ -10,8 +10,6 @@ in this repo; `CLAUDE.md` just points here.
 - `npm test` — all tests (node:test via tsx); single file: `node --import tsx --test test/<file>.test.ts`
 - `npm run typecheck` / `npm run lint` / `npm run format` — tsc, oxlint (deny-warnings), prettier (owns formatting)
 - `npm run build` — esbuild bundles to `dist/` (gitignored build artifact, not committed; `build.yml` rebuilds it in CI before the Docker image `COPY`s it — run locally to verify the bundle compiles)
-- `npm run replay` — render the review context from `fixtures/replay/` without posting
-- `npm run eval` — score review quality against `fixtures/golden/` (see its README)
 
 ## Architecture
 
@@ -29,7 +27,6 @@ in this repo; `CLAUDE.md` just points here.
 | `src/shared/filter.ts`         | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts                                      |
 | `src/shared/report.ts`         | Pure review-body layout: outside-the-diff findings section + multi-shard summary dedupe                                              |
 | `src/shared/github.ts`         | GitHub REST/GraphQL: listing, posting, markers, thread resolution                                                                    |
-| `src/shared/eval.ts`           | Golden-set scoring (recall/precision/noise) for `scripts/eval-review.ts`                                                             |
 
 ## Invariants — do not break these
 
@@ -70,7 +67,7 @@ in this repo; `CLAUDE.md` just points here.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal.
 10. **Extract pure logic for tests.** New decision logic goes in a pure
-    module (like `filter.ts`/`eval.ts`), unit-tested; `runner.ts` only wires.
+    module (like `filter.ts`), unit-tested; `runner.ts` only wires.
 
 ## Conventions
 
@@ -80,8 +77,6 @@ in this repo; `CLAUDE.md` just points here.
   prose (prompt tests assert structure and load-bearing phrases only).
 - Prompt constants are template literals: escape backticks as `` \` `` and
   write `\\n` for a literal `\n` the model should see.
-- Eval golden set: `fixtures/golden/`; `actual-findings.json` is gitignored —
-  never commit run artifacts, they make the gate trivially green.
 
 <!-- context7 -->
 

@@ -12,24 +12,24 @@ describe('formatPriorJbotThreadsForPrompt', () => {
     const thread: PriorJbotThread = {
       id: 'PRRT_example',
       isResolved: false,
-      replyToCommentId: 3376207111,
-      path: 'src/components/agreements/new-agreement/utils.ts',
+      replyToCommentId: 1001,
+      path: 'src/example/order-line.ts',
       line: 207,
       body: [
-        '**P3** - Safe access pattern on chartAccount',
+        '**P3** - Safe access pattern on config',
         '',
-        'Consider using `line.chartAccount?.id ?? ""`.',
+        'Consider using `line.config?.id ?? ""`.',
         '',
         '<!-- jbot-review:finding -->',
       ].join('\n'),
-      url: 'https://github.com/integral-xyz/fms-frontend/pull/1748#discussion_r3376207111',
+      url: 'https://github.com/example/repo/pull/1#discussion_r1001',
       replies: [
         {
           author: 'jingbof',
           body: [
-            'Not applied: `chartAccount` is required on `OrderLineDto`, and the backend contract test covers it.',
+            'Not applied: `config` is required on `LineDto`, and the backend contract test covers it.',
           ].join('\n'),
-          url: 'https://github.com/integral-xyz/fms-frontend/pull/1748#discussion_r3376239403',
+          url: 'https://github.com/example/repo/pull/1#discussion_r1002',
         },
       ],
     };
@@ -38,7 +38,7 @@ describe('formatPriorJbotThreadsForPrompt', () => {
 
     assert.match(prompt, /Thread replies:/);
     assert.match(prompt, /jingbof:/);
-    assert.match(prompt, /Not applied: `chartAccount` is required/);
+    assert.match(prompt, /Not applied: `config` is required/);
     assert.match(prompt, /do not re-post it and do not mark it addressed/);
     assert.doesNotMatch(prompt, /jbot-review:finding/);
     assert.match(prompt, /Canonical rules for these threads:/);
@@ -50,7 +50,7 @@ describe('formatPriorJbotThreadsForPrompt', () => {
     const thread: PriorJbotThread = {
       id: 'PRRT_example',
       isResolved: false,
-      replyToCommentId: 3376207111,
+      replyToCommentId: 1001,
       path: 'src/example.ts',
       line: 42,
       body: 'Original finding',
