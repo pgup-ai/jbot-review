@@ -243,13 +243,6 @@ without editing the workflow.
     thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
 ```
 
-To replay the prompt context locally from fixtures without posting to GitHub:
-
-```bash
-npm run replay
-npm run replay -- fixtures/replay
-```
-
 ### Review quality controls
 
 Every run reviews the complete base...head diff (never just the latest
@@ -304,13 +297,6 @@ posting partial coverage (auxiliary sessions fail open and degrade only their
 own coverage). On free/throttled tiers the shards serialize on one key, so the
 default single session is both simpler and no slower — leave `review-shards` at
 `1` there.
-
-To score review quality against the golden set of labeled PRs (see
-[fixtures/golden/README.md](fixtures/golden/README.md)):
-
-```bash
-npm run eval
-```
 
 ### Provider configuration (in-repo)
 
