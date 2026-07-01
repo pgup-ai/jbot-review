@@ -140,6 +140,17 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
+  // Kilo CLI (opencode fork). Auth via KILO_AUTH_CONTENT; default is the free gateway
+  // smart-router. JBOT_REVIEW_MODEL: `kilo/kilo-auto/free` or `kilo/<vendor>/<model>`.
+  kilo: {
+    defaultModel: 'kilo/kilo-auto/free',
+    keyEnv: 'KILO_AUTH_CONTENT',
+    keyInput: 'kilo-auth',
+    models: {
+      // Kilo CLI is not driven through opencode, so prompt-cache options do not apply.
+      default: { promptCache: false },
+    },
+  },
 };
 
 export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {
@@ -149,7 +160,8 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     providerID === 'cursor' ||
     providerID === 'codex' ||
     providerID === 'cline' ||
-    providerID === 'cline-pass'
+    providerID === 'cline-pass' ||
+    providerID === 'kilo'
   )
     return false;
   // Fireworks' OpenAI-compatible endpoint strictly rejects unknown request fields, so
