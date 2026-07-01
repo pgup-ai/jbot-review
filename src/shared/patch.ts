@@ -25,6 +25,8 @@ export function parseAddedLines(patch: string | undefined): Set<number> {
       newLine += 1;
     } else if (marker === '-') {
       // Removed line: present only on the old side.
+    } else if (marker === '\\') {
+      // "\ No newline at end of file": annotates the preceding line, on neither side.
     } else {
       newLine += 1;
     }
