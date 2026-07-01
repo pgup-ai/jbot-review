@@ -346,6 +346,17 @@ describe('formatDiffScope', () => {
   it('returns an empty string when no scope data is available', () => {
     assert.equal(formatDiffScope({}), '');
   });
+
+  it('emits a two-dot worktree diff command in local mode', () => {
+    const baseSha = 'd'.repeat(40);
+    const text = formatDiffScope({ baseSha, worktree: true });
+
+    // Two-dot against the working tree (no ...HEAD), and it must say so.
+    assert.match(text, new RegExp(`git diff ${baseSha}(?!\\.)`));
+    assert.doesNotMatch(text, /\.\.\./);
+    assert.match(text, /working tree/i);
+    assert.match(text, /uncommitted/i);
+  });
 });
 
 describe('buildReviewContext', () => {

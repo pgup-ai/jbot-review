@@ -782,6 +782,11 @@ export async function runPrReview(params: {
   if (localDiff && !options.dryRun) {
     throw new Error('localDiff requires dryRun: true; local mode must never post to GitHub.');
   }
+  // A GitHub-backed run needs a real client; fail with the accurate reason
+  // rather than letting a later read hit the local-mode Proxy and mislead.
+  if (!localDiff && !params.octokit) {
+    throw new Error('runPrReview requires an octokit client unless localDiff is provided.');
+  }
   const runStartedAt = Date.now();
   const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes);
   if (finderTimeoutMs) {
@@ -947,7 +952,7 @@ export async function runPrReview(params: {
     : '';
   if (blastRadiusBlock) log('Embedded changed-symbol usage block.');
 
-  const diffScope = { baseRef, baseSha, headSha };
+  const diffScope = { baseRef, baseSha, headSha, worktree: !!localDiff };
 
   // The diff hunks deliberately stay OUT of the core context: each main
   // review shard appends its own slice, and the lens/aux sessions append the

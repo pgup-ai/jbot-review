@@ -12,6 +12,7 @@ import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandc
 import { PROVIDERS } from '../shared/config.ts';
 import { CURSOR_CLI_BIN, CURSOR_PROVIDER_ID } from '../shared/cursor.ts';
 import { DEVIN_PROVIDER_ID } from '../shared/devin.ts';
+import { isNoiseFile } from '../shared/filter.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID } from '../shared/kilo.ts';
 import {
   formatModelName,
@@ -172,8 +173,15 @@ async function main(): Promise<void> {
   // gitconfig pins that keep the output parseable.
   const diffText = await git([...GIT_DIFF_ARGS, mergeBase]);
   const files = parseGitDiff(diffText);
-  if (files.length === 0) {
-    log(`Nothing to review vs ${baseRef} (merge-base ${shortBase}).`);
+  // Exit before requiring credentials when nothing the runner would review is
+  // present: parseGitDiff yields patchless entries for binary/mode-only/pure-
+  // rename sections that the runner drops (same `patch && !isNoiseFile` gate),
+  // so keying off files.length alone would demand a key and boot the server
+  // only to bail with "no reviewable files".
+  const reviewable = files.filter((f) => f.patch && !isNoiseFile(f.filename));
+  if (reviewable.length === 0) {
+    const detail = files.length > 0 ? ' (only binary/mode-only/noise changes)' : '';
+    log(`Nothing to review vs ${baseRef} (merge-base ${shortBase})${detail}.`);
     return;
   }
 
@@ -240,7 +248,7 @@ async function main(): Promise<void> {
   const { owner, repo } = parseOwnerRepo(remoteUrl) ?? { owner: 'local', repo: 'local' };
   const commits = await localCommits(mergeBase);
 
-  log(`Reviewing ${files.length} changed file(s) on ${branch} with ${model}.`);
+  log(`Reviewing ${reviewable.length} changed file(s) on ${branch} with ${model}.`);
 
   const opencodePort = await pickOpencodePort();
   let reviewResult: ReviewResult | undefined;

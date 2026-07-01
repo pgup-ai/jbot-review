@@ -367,6 +367,15 @@ describe('runPrReview local mode (localDiff)', () => {
     );
   });
 
+  // A GitHub-backed run with no client fails with the accurate reason, not the
+  // local-mode Proxy's misleading message.
+  it('throws a clear error when neither octokit nor localDiff is provided', async () => {
+    await assert.rejects(
+      runPrReview({ ...base, options: { dryRun: true }, log: () => {} }),
+      /octokit client unless localDiff/,
+    );
+  });
+
   // No `octokit` at all: the runner's internal landmine Proxy throws on ANY
   // property access, so completing proves local mode performs zero GitHub
   // calls on this path — structurally, not by mock bookkeeping.
