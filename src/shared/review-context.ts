@@ -65,10 +65,13 @@ export function formatDiffScope(scope: DiffScope): string {
   const base = scope.baseSha ?? (scope.baseRef ? `origin/${scope.baseRef}` : undefined);
   if (base && scope.worktree) {
     // Two-dot against the working tree: matches the merge-base→worktree diff the
-    // local run was built from, uncommitted changes included.
+    // local run was built from, uncommitted changes included. The flags mirror
+    // the ones that shaped the embedded hunks so a re-run sees the same content
+    // (raw hunks, renames coalesced); the `-c` prefix pins are omitted because
+    // they only affect the parser, not what a reader sees.
     lines.push(
       'To see exactly what this review covers (merge-base → working tree, includes uncommitted changes), run:',
-      `    git diff ${base}`,
+      `    git diff --no-ext-diff --no-textconv --find-renames ${base}`,
       'Only review changes within this diff.',
     );
   } else if (base) {

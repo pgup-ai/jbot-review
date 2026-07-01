@@ -60,6 +60,22 @@ describe('parseOwnerRepo', () => {
     });
   });
 
+  it('parses GitHub Enterprise / self-hosted hosts (last two path segments win)', () => {
+    // The $-anchored regex selects the trailing owner/repo, not the host.
+    assert.deepEqual(parseOwnerRepo('https://github.example.com/owner/repo'), {
+      owner: 'owner',
+      repo: 'repo',
+    });
+    assert.deepEqual(parseOwnerRepo('https://github.example.com/owner/repo.git'), {
+      owner: 'owner',
+      repo: 'repo',
+    });
+    assert.deepEqual(parseOwnerRepo('git@github.example.com:owner/repo.git'), {
+      owner: 'owner',
+      repo: 'repo',
+    });
+  });
+
   it('returns null for non-remote strings', () => {
     assert.equal(parseOwnerRepo(''), null);
     assert.equal(parseOwnerRepo('not a url'), null);

@@ -351,8 +351,12 @@ describe('formatDiffScope', () => {
     const baseSha = 'd'.repeat(40);
     const text = formatDiffScope({ baseSha, worktree: true });
 
-    // Two-dot against the working tree (no ...HEAD), and it must say so.
-    assert.match(text, new RegExp(`git diff ${baseSha}(?!\\.)`));
+    // Two-dot against the working tree (no ...HEAD), with the content-shaping
+    // flags that match the embedded hunks, and it must say so.
+    assert.match(
+      text,
+      new RegExp(`git diff --no-ext-diff --no-textconv --find-renames ${baseSha}`),
+    );
     assert.doesNotMatch(text, /\.\.\./);
     assert.match(text, /working tree/i);
     assert.match(text, /uncommitted/i);

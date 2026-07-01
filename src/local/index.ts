@@ -118,13 +118,20 @@ async function pickOpencodePort(): Promise<number | undefined> {
   });
 }
 
-/** ENOENT means the binary is missing; any other outcome (even exit 1) means it exists. */
-async function binaryExists(bin: string): Promise<boolean> {
+/**
+ * Whether `bin` is present and runnable. ENOENT (not on PATH) and EACCES
+ * (present but not executable) are unambiguous "can't run it" states that get
+ * a clear preflight failure. Any other outcome — notably a CLI that exits
+ * non-zero on `--version` — is treated as usable, so we never false-block a
+ * working install over a non-standard version command.
+ */
+async function binaryUsable(bin: string): Promise<boolean> {
   try {
     await execFileAsync(bin, ['--version'], { timeout: 10_000 });
     return true;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ENOENT';
+    const code = (error as NodeJS.ErrnoException).code;
+    return code !== 'ENOENT' && code !== 'EACCES';
   }
 }
 
@@ -235,9 +242,11 @@ async function main(): Promise<void> {
   if (selection.mainCliBackend) requiredBins.add(CLI_BINS[selection.mainCliBackend]);
   if (selection.auxCliBackend) requiredBins.add(CLI_BINS[selection.auxCliBackend]);
   for (const bin of requiredBins) {
-    if (!(await binaryExists(bin))) {
+    if (!(await binaryUsable(bin))) {
       const hint = INSTALL_HINTS[bin] ? ` Install: \`${INSTALL_HINTS[bin]}\`.` : '';
-      throw new Error(`Required CLI "${bin}" not found on PATH for provider "${provider}".${hint}`);
+      throw new Error(
+        `Required CLI "${bin}" not found or not executable on PATH for provider "${provider}".${hint}`,
+      );
     }
   }
 
