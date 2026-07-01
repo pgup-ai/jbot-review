@@ -55,16 +55,10 @@ The Dockerfile uses `node:24-slim` and runs the bundled JS from `dist/`.
 The `v0` action reference is a moving major-version tag; pin to an immutable
 release tag if you need fully stable action behavior.
 
-> **One image, three independent entrypoints.** The build produces separate
-> bundles — `dist/workflow/index.js` (this Action), `dist/worker/index.js` (the
-> hosted control-plane queue worker), and `dist/app/server.js` (the hosted API).
-> `action.yml` overrides the entrypoint to `dist/workflow/index.js`, so the Action
-> never runs the worker code. The two bundles share no imports: the worker's
-> claim/update queue contract (`src/shared/worker-contract.ts`, `src/worker/*`) is
-> invisible to `src/workflow/`. Changes to the hosted queue (claim-token fence,
-> reaper, etc.) therefore cannot affect `review.yml` users — keep the two paths
-> decoupled. (Not to be confused with the ephemeral-runner `review.yml`, which is
-> a separate repo that intentionally runs `dist/worker/index.js`.)
+> **The Action is one of several build entrypoints.** `scripts/build.ts` also
+> bundles `src/worker/` and `src/app/` (for the separately-deployed control plane),
+> but the Action runs only `dist/workflow/index.js`, and those paths share no
+> imports — so worker/server changes can't affect Action users.
 
 ### For the user (repo owner who wants reviews)
 
@@ -488,34 +482,6 @@ or request-changes review. The review body includes advisory merge guidance:
 - `Needs changes before approval` when any `P0`, `P1`, or `P2` finding is present.
 - `Mergeable with non-blocking comments` when only `P3` or `nit` findings are present.
 - `Good to go from jbot-review` when no new findings are found.
-
-## Provider cost comparison
-
-| Provider                  | Idle cost                       | Per review (est.)         | Auto scale-to-zero  |
-| ------------------------- | ------------------------------- | ------------------------- | ------------------- |
-| Cloud Run (free tier)     | $0                              | ~$0.01                    | Yes                 |
-| Cloudflare Containers     | $5/mo                           | Usage-based               | Yes                 |
-| Fly.io (hobby)            | ~$0                             | ~$0.01                    | Yes                 |
-| Render (free tier)        | $0                              | ~$0                       | Sleeps after 15 min |
-| Railway (Free)            | $0 trial + small monthly credit | Usage-based beyond credit | Yes                 |
-| Koyeb (free tier)         | $0                              | ~$0                       | Yes                 |
-| AWS App Runner            | ~$5/mo                          | Usage-based               | No                  |
-| Azure Container Apps      | $0                              | Usage-based               | Yes                 |
-| Northflank Sandbox        | $0                              | $0                        | No                  |
-| CloudCone VPS             | ~$1/mo                          | $0                        | No                  |
-| Hetzner CX22              | $4/mo                           | $0                        | No                  |
-| Vultr (1 vCPU)            | $6/mo                           | $0                        | No                  |
-| DigitalOcean App Platform | $5/mo                           | $0                        | No                  |
-| Oracle Free Tier          | $0                              | $0                        | No                  |
-
-Prices are approximate and tier-dependent; check each provider's current limits
-before choosing a host.
-
-Cloudflare is a good fit if the app is split into a Worker/Queue control plane
-with containerized review workers, unlike the simple Docker web service model of
-Cloud Run, Fly.io, or Render. CloudCone is the cheapest VPS-style option here,
-but it means self-managing the VM, deploys, process supervisor, TLS/reverse
-proxy, and security updates.
 
 ## Project guidelines
 
