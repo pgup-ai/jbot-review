@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 import { parseModelName } from './model.ts';
 import { NO_TOOLS_REVIEW_DIRECTIVE } from './prompt.ts';
 
@@ -31,4 +33,62 @@ export function buildKiloCliArgs(input: { model: string }): string[] {
  * text — POC) prepended so the model reviews the embedded context instead of stalling. */
 export function buildKiloPromptInput(prompt: string): string {
   return `${NO_TOOLS_REVIEW_DIRECTIVE}\n\n${prompt}`;
+}
+
+// Provider api-key envs Kilo could read above the injected KILO_AUTH_CONTENT; stripped so
+// an ambient key can't silently redirect provider/billing (Kilo is multi-provider).
+export const KILO_STRIPPED_ENV_KEYS = [
+  'KILO_API_KEY',
+  'OPENAI_API_KEY',
+  'ANTHROPIC_API_KEY',
+  'OPENROUTER_API_KEY',
+  'GEMINI_API_KEY',
+  'GOOGLE_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'XAI_API_KEY',
+  'GROQ_API_KEY',
+  'CEREBRAS_API_KEY',
+] as const;
+
+/**
+ * Validates the `KILO_AUTH_CONTENT` secret — the contents of
+ * `~/.local/share/kilo/auth.json` — is present and JSON, returning the trimmed content.
+ * Throws a clear error so a bad secret fails fast at startup.
+ */
+export function assertValidKiloAuth(auth: string): string {
+  const content = auth.trim();
+  if (!content) {
+    throw new Error('Missing Kilo auth. Set kilo-auth or KILO_AUTH_CONTENT.');
+  }
+  try {
+    JSON.parse(content);
+  } catch {
+    throw new Error(
+      'Invalid KILO_AUTH_CONTENT: expected the JSON contents of ~/.local/share/kilo/auth.json.',
+    );
+  }
+  return content;
+}
+
+/**
+ * Child env carrying the Kilo credential via `KILO_AUTH_CONTENT` (env-injected, no file
+ * written). `HOME`/`XDG_DATA_HOME` point at a per-process temp dir so concurrent
+ * sessions don't race kilo's SQLite data dir (every invocation opens/migrates
+ * ~/.local/share/kilo/kilo.db) or any token-refresh writeback. Ambient provider api-key
+ * envs are stripped so the carried auth wins.
+ */
+export function kiloEnvForAuth(auth: string, home: string): NodeJS.ProcessEnv {
+  const content = assertValidKiloAuth(auth);
+  const h = home?.trim();
+  if (!h) {
+    throw new Error('Missing Kilo home. A temp HOME is required for the kilo data dir.');
+  }
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    KILO_AUTH_CONTENT: content,
+    HOME: h,
+    XDG_DATA_HOME: join(h, '.local/share'),
+  };
+  for (const key of KILO_STRIPPED_ENV_KEYS) delete env[key];
+  return env;
 }
