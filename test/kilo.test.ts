@@ -9,6 +9,7 @@ import {
   isKiloProvider,
   KILO_STRIPPED_ENV_KEYS,
   kiloEnvForAuth,
+  parseKiloErrorMessage,
   parseKiloFinalMessage,
   parseKiloModelList,
 } from '../src/shared/kilo.ts';
@@ -124,6 +125,20 @@ describe('Kilo CLI output parsing', () => {
     assert.equal(parseKiloFinalMessage('{"type":"error","error":{"data":{"message":"boom"}}}'), '');
     assert.equal(parseKiloFinalMessage('garbage\nlines'), '');
     assert.equal(parseKiloFinalMessage('{"type":"text","part":{"text":""}}'), '');
+  });
+
+  it('extracts the last type:error event error.data.message', () => {
+    const ndjson = [
+      '{"type":"text","part":{"type":"text","text":"partial"}}',
+      '{"type":"error","error":{"data":{"message":"gateway timeout"}}}',
+    ].join('\n');
+    assert.equal(parseKiloErrorMessage(ndjson), 'gateway timeout');
+  });
+
+  it('returns empty when no usable error event is present', () => {
+    assert.equal(parseKiloErrorMessage('{"type":"text","part":{"text":"ok"}}'), '');
+    assert.equal(parseKiloErrorMessage('garbage\nlines'), '');
+    assert.equal(parseKiloErrorMessage('{"type":"error","error":{}}'), '');
   });
 
   it('extracts provider/model lines and skips log/header lines', () => {

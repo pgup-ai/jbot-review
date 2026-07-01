@@ -143,6 +143,30 @@ export function parseKiloFinalMessage(stdout: string): string {
 }
 
 /**
+ * The last `type:"error"` event's `error.data.message` (NDJSON stdout), or '' if none.
+ * Kilo can emit an error event (even trailing valid text, exit 0); surfacing this message
+ * makes a failed review diagnosable instead of a generic "produced no text event".
+ */
+export function parseKiloErrorMessage(stdout: string): string {
+  let message = '';
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (event && typeof event === 'object' && (event as { type?: unknown }).type === 'error') {
+      const msg = (event as { error?: { data?: { message?: unknown } } }).error?.data?.message;
+      if (typeof msg === 'string' && msg) message = msg;
+    }
+  }
+  return message;
+}
+
+/**
  * Parses `kilo models` output. Each model line is a bare `provider/model-id` token; the
  * CLI's INFO log lines (which contain spaces) and headers/blanks are skipped. Pure.
  */
@@ -366,12 +390,20 @@ async function runKiloPrompt(
       );
     }
     const finalMessage = parseKiloFinalMessage(result.stdout).trim();
+    const errorMessage = parseKiloErrorMessage(result.stdout);
     log(
       `${label} prompt complete via kilo: stdout=${result.stdout.length} chars last-message=${finalMessage.length} chars`,
     );
+    // A type:"error" event can trail valid text on an exit-0 run; surface it so a
+    // truncated/partial review is diagnosable rather than silently trusted.
+    if (errorMessage) {
+      log(`${label} kilo emitted an error event: ${truncateForLog(errorMessage, 500)}`);
+    }
     if (!finalMessage) {
       throw new Error(
-        `kilo ${label} produced no text event; stderr: ${truncateForLog(result.stderr || result.stdout, 1000)}`,
+        errorMessage
+          ? `kilo ${label} failed: ${truncateForLog(errorMessage, 1000)}`
+          : `kilo ${label} produced no text event; stderr: ${truncateForLog(result.stderr || result.stdout, 1000)}`,
       );
     }
     return finalMessage;
