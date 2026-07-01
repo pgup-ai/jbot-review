@@ -363,7 +363,7 @@ async function runKiloPrompt(
     );
     if (!finalMessage) {
       throw new Error(
-        `kilo ${label} produced no text event; stdout: ${truncateForLog(result.stdout, 1000)}`,
+        `kilo ${label} produced no text event; stderr: ${truncateForLog(result.stderr || result.stdout, 1000)}`,
       );
     }
     return finalMessage;
