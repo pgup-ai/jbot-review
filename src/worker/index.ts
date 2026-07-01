@@ -42,6 +42,8 @@ async function processOne(client: WorkerClient, log: (m: string) => void): Promi
 }
 
 async function main(): Promise<void> {
+  maskGitHubActionsValue(process.env.CONTROL_PLANE_URL);
+  maskGitHubActionsValue(process.env.WORKER_SHARED_SECRET);
   const cfg = loadWorkerConfig();
   const client = makeClient(cfg);
   const log = (m: string) => console.log(`[worker] ${m}`);
