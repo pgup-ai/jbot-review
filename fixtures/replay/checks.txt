@@ -1,3 +1,0 @@
-2 check run(s): 1 passed, 1 pending, 0 failed, 0 skipped.
-- typecheck: completed/success
-- build: in_progress
