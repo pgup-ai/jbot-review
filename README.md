@@ -153,9 +153,9 @@ no digging a field out of a JSON.
 | **Command Code** | Create an access key at [commandcode.ai](https://commandcode.ai/docs/quickstart) (`user_…`; the `apiKey` in `~/.commandcode/auth.json`) → paste it      | `COMMANDCODE_ACCESS_KEY` (`commandcode-access-key`) |
 
 Each CLI backend runs **read-only** and only when it's the selected
-`provider`/`aux-provider`. Codex, Cline, and Command Code write their credential to
-an isolated temporary `HOME` that's removed after the run; Cursor reads its key
-straight from the env (no file); Devin writes
+`provider`/`aux-provider`. Cline and Command Code write their credential into an
+isolated temporary `HOME`, and Codex into a temporary `CODEX_HOME`, each removed
+after the run; Cursor reads its key straight from the env (no file); Devin writes
 `~/.local/share/devin/credentials.toml` under the process `HOME`. Cline uses only
 the auth token — the file's `model`/`reasoning` are stripped — and has two billing
 modes sharing one secret: `cline` (pay-as-you-go) and `cline-pass` (Cline
