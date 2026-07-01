@@ -66,7 +66,10 @@ describe('Kilo CLI provider helpers', () => {
 
 describe('Kilo CLI auth env', () => {
   it('accepts valid JSON and returns trimmed content', () => {
-    assert.equal(assertValidKiloAuth('  {"kilo":{"type":"api","key":"k"}}  '), '{"kilo":{"type":"api","key":"k"}}');
+    assert.equal(
+      assertValidKiloAuth('  {"kilo":{"type":"api","key":"k"}}  '),
+      '{"kilo":{"type":"api","key":"k"}}',
+    );
   });
 
   it('rejects a blank or non-JSON Kilo secret', () => {

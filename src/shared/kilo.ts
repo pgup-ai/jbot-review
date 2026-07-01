@@ -181,7 +181,15 @@ export async function runKiloReview(
   const label = options.label ?? 'review';
   const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
   log(`Prompt assembled (${label}, kilo): ${prompt.length} chars, guidelines=${!!guidelines}`);
-  const raw = await runKiloPrompt(workspace, model, prompt, label, log, options.auth, options.timeoutMs);
+  const raw = await runKiloPrompt(
+    workspace,
+    model,
+    prompt,
+    label,
+    log,
+    options.auth,
+    options.timeoutMs,
+  );
   try {
     return parseReview(raw, label, log, { strict: true });
   } catch (error) {

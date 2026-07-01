@@ -47,7 +47,7 @@ settled everything below:
    anyway.
 
 2. **Machine-readable output is `--format json` → NDJSON events.** `kilo run --format
-   json` (choices: `default` | `json`) streams one JSON object per line:
+json` (choices: `default` | `json`) streams one JSON object per line:
    `{"type":..., "timestamp":..., "sessionID":..., ...}`. The final assistant text is
    carried in events of `type:"text"`; failures surface as `type:"error"` with
    `error.data.message`. POC: the assistant text lives at **`event.part.text`** (not a
@@ -92,7 +92,7 @@ settled everything below:
 - **A — CLI-spawn backend (chosen).** New `src/shared/kilo.ts` modeled on
   `cursor.ts`/`codex.ts`: spawn `kilo run --format json` with the prompt on stdin.
   Follows the mandated CLI pattern; treats Kilo as one more CLI.
-- **B — reuse jbot's opencode server via `kilo serve` (rejected).** Since Kilo *is*
+- **B — reuse jbot's opencode server via `kilo serve` (rejected).** Since Kilo _is_
   opencode, point jbot's `opencode.ts` client at a `kilo serve` process. Rejected:
   contradicts the "follow the CLI pattern" instruction, couples to Kilo's server API +
   in-server gateway auth, and carries version-drift risk.
@@ -101,20 +101,20 @@ settled everything below:
 
 Kilo is the sixth CLI tenant. One module plus the mechanical wiring points:
 
-| Layer                      | Cursor / Codex reference        | Kilo (new)                                       |
-| -------------------------- | ------------------------------- | ------------------------------------------------ |
-| Backend module             | `src/shared/{cursor,codex}.ts`  | `src/shared/kilo.ts`                             |
-| Dispatch predicate         | `isCursorProvider`              | `isKiloProvider`                                |
-| Credential (runtime)       | `cursorEnvForKey` (env, no file)| `kiloEnvForAuth` (**env `KILO_AUTH_CONTENT`**, no file) + isolated HOME/XDG |
-| Provider entry             | `PROVIDERS.cursor`              | `PROVIDERS.kilo`                                |
-| Action input               | `cursor-api-key`                | `kilo-auth`                                      |
-| Workflow secret            | `CURSOR_API_KEY`                | `KILO_AUTH_CONTENT`                             |
-| CLI binary                 | `curl cursor.com/install`       | `npm i -g @kilocode/cli`                         |
-| Prompt delivery            | stdin                           | **stdin** (POC-confirmed)                        |
-| Read-only                  | `--mode plan`                   | `--agent plan` + no-tools directive              |
-| Model response             | stdout text                     | **`type:"text"` events** from `--format json`    |
-| Model listing              | `listCursorModels`              | `listKiloModels` (`kilo models`)                 |
-| Model default              | CLI default                     | **`kilo/kilo-auto/free`** (deterministic)        |
+| Layer                | Cursor / Codex reference         | Kilo (new)                                                                  |
+| -------------------- | -------------------------------- | --------------------------------------------------------------------------- |
+| Backend module       | `src/shared/{cursor,codex}.ts`   | `src/shared/kilo.ts`                                                        |
+| Dispatch predicate   | `isCursorProvider`               | `isKiloProvider`                                                            |
+| Credential (runtime) | `cursorEnvForKey` (env, no file) | `kiloEnvForAuth` (**env `KILO_AUTH_CONTENT`**, no file) + isolated HOME/XDG |
+| Provider entry       | `PROVIDERS.cursor`               | `PROVIDERS.kilo`                                                            |
+| Action input         | `cursor-api-key`                 | `kilo-auth`                                                                 |
+| Workflow secret      | `CURSOR_API_KEY`                 | `KILO_AUTH_CONTENT`                                                         |
+| CLI binary           | `curl cursor.com/install`        | `npm i -g @kilocode/cli`                                                    |
+| Prompt delivery      | stdin                            | **stdin** (POC-confirmed)                                                   |
+| Read-only            | `--mode plan`                    | `--agent plan` + no-tools directive                                         |
+| Model response       | stdout text                      | **`type:"text"` events** from `--format json`                               |
+| Model listing        | `listCursorModels`               | `listKiloModels` (`kilo models`)                                            |
+| Model default        | CLI default                      | **`kilo/kilo-auto/free`** (deterministic)                                   |
 
 ## Detailed design
 
@@ -122,7 +122,7 @@ Kilo is the sixth CLI tenant. One module plus the mechanical wiring points:
 
 - **Source:** `~/.local/share/kilo/auth.json` after a local `kilo auth login`. It's a
   map `provider → {type:"oauth", refresh, access, expires, ...} | {type:"api", key} |
-  {type:"wellknown", key, token}`. It natively carries either an OAuth subscription
+{type:"wellknown", key, token}`. It natively carries either an OAuth subscription
   (with a **refresh token that survives CI**) or a plain API key — satisfying "reuse the
   local oauth (json or api key)".
 - **Secret:** `KILO_AUTH_CONTENT` = the raw contents of `auth.json` (paste as-is), the
@@ -145,9 +145,9 @@ diverging where Kilo's behavior requires it (isolated HOME for the DB, NDJSON pa
 gateway-prefixed model, no-tools directive):
 
 - `KILO_PROVIDER_ID = 'kilo'`, `KILO_CLI_BIN = 'kilo'`, `KILO_GATEWAY_MODEL =
-  'kilo-auto/free'`; `isKiloProvider(id)` exact-matches `kilo`.
+'kilo-auto/free'`; `isKiloProvider(id)` exact-matches `kilo`.
 - `buildKiloCliArgs({ model })` → `['run', '--format', 'json', '--agent', 'plan',
-  '--model', <kiloModel>]`, where `<kiloModel>` re-adds the gateway prefix stripped by
+'--model', <kiloModel>]`, where `<kiloModel>` re-adds the gateway prefix stripped by
   `parseModelName`: `kilo/${modelID}`, with `modelID === 'default'` mapped to
   `kilo/kilo-auto/free`. Bypass flags (`--auto`, `--dangerously-skip-permissions`)
   never emitted. **[learning-mode contribution: the model-mapping + read-only args.]**
@@ -157,7 +157,7 @@ gateway-prefixed model, no-tools directive):
   delivery.)
 - `kiloEnvForAuth(auth, home)` — validate `auth` is non-empty JSON (fail fast, like
   codex), return `{ ...process.env, KILO_AUTH_CONTENT: auth, HOME: home, XDG_DATA_HOME:
-  join(home, '.local/share') }` with ambient provider keys stripped
+join(home, '.local/share') }` with ambient provider keys stripped
   (`KILO_STRIPPED_ENV_KEYS`: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `KILO_API_KEY`,
   `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, …) so the carried auth wins.
 - `parseKiloFinalMessage(stdout)` — split lines, `JSON.parse` each (skip non-JSON log
@@ -217,7 +217,7 @@ by the non-JSON-tolerant parser.
    like `codexAuth`.
 2. `src/shared/config.ts`: `PROVIDERS.kilo` (`defaultModel: 'kilo/kilo-auto/free'`,
    `keyEnv: 'KILO_AUTH_CONTENT'`, `keyInput: 'kilo-auth'`, `models.default.promptCache:
-   false`); add `'kilo'` to `modelSupportsPromptCache`'s early-return set.
+false`); add `'kilo'` to `modelSupportsPromptCache`'s early-return set.
 3. `src/shared/runner.ts`: import Kilo fns; add `createKiloBackend`; a startup block
    (allocate temp `kiloHome`, `cleanupKiloHome`, add to `cleanupCliHomes`) that reads
    `backendSelection.kiloAuth` (throw if missing), builds the backend; register `kilo`
@@ -227,7 +227,7 @@ by the non-JSON-tolerant parser.
 6. `Dockerfile`: append `@kilocode/cli@latest` to the `npm install -g` line + a
    `kilo --version` check.
 7. `README.md`: credential-table row (`kilo auth login` → paste `~/.local/share/kilo/
-   auth.json`), provider-table row (`kilo` / `kilo/kilo-auto/free` / `kilo-auth` /
+auth.json`), provider-table row (`kilo` / `kilo/kilo-auto/free` / `kilo-auth` /
    `KILO_AUTH_CONTENT`), env-var list, and the "how auth is materialized" paragraph
    (env-injected, isolated HOME/XDG, removed after run).
 
@@ -252,15 +252,15 @@ site at implementation time, not guessed), `credentialFormat: 'json'`,
 
 ## Risks & mitigations
 
-| Risk                                                      | Mitigation                                                                                          |
-| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Denied tool under `--agent plan` yields empty output      | POC: does not hang, auto-denies; `NO_TOOLS_REVIEW_DIRECTIVE` keeps output JSON-shaped; never emit `--auto`. |
-| Bare model id 404s (`kilo-auto/free` vs `kilo/kilo-auto/free`) | `buildKiloCliArgs` preserves the `kilo/` gateway prefix; unit-tested; POC-observed.            |
-| Free auto-router unavailable without a Kilo account       | Secret required; docs say run needs a valid `KILO_AUTH_CONTENT`; clear error when missing.          |
-| Concurrent sessions race on `kilo.db`/auth               | Per-process temp `HOME`+`XDG_DATA_HOME`; POC-confirmed the data dir relocates.                       |
-| Ambient provider key overrides carried auth               | `kiloEnvForAuth` strips the common api-key envs; carried `KILO_AUTH_CONTENT` wins. Unit-tested.      |
-| Stray INFO log lines on stdout corrupt JSON parse         | Line-by-line `JSON.parse` skips non-JSON, like `parseClineFinalMessage`.                             |
-| **ToS** — personal subscription powering an automated bot | Accepted/documented by the operator; same posture as codex/cline.                                   |
+| Risk                                                           | Mitigation                                                                                                  |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Denied tool under `--agent plan` yields empty output           | POC: does not hang, auto-denies; `NO_TOOLS_REVIEW_DIRECTIVE` keeps output JSON-shaped; never emit `--auto`. |
+| Bare model id 404s (`kilo-auto/free` vs `kilo/kilo-auto/free`) | `buildKiloCliArgs` preserves the `kilo/` gateway prefix; unit-tested; POC-observed.                         |
+| Free auto-router unavailable without a Kilo account            | Secret required; docs say run needs a valid `KILO_AUTH_CONTENT`; clear error when missing.                  |
+| Concurrent sessions race on `kilo.db`/auth                     | Per-process temp `HOME`+`XDG_DATA_HOME`; POC-confirmed the data dir relocates.                              |
+| Ambient provider key overrides carried auth                    | `kiloEnvForAuth` strips the common api-key envs; carried `KILO_AUTH_CONTENT` wins. Unit-tested.             |
+| Stray INFO log lines on stdout corrupt JSON parse              | Line-by-line `JSON.parse` skips non-JSON, like `parseClineFinalMessage`.                                    |
+| **ToS** — personal subscription powering an automated bot      | Accepted/documented by the operator; same posture as codex/cline.                                           |
 
 ## Testing (invariant #10) — pure-unit, no network
 

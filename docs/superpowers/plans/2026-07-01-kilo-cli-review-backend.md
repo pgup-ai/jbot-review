@@ -16,25 +16,26 @@
 
 ## File Structure
 
-| File | Responsibility | Action |
-| ---- | -------------- | ------ |
-| `src/shared/kilo.ts` | Kilo backend: provider id, arg builder, auth env, NDJSON/model parsers, 5 review fns, spawn | Create |
-| `test/kilo.test.ts` | Pure-unit tests for the above | Create |
-| `src/shared/backend-selection.ts` | Register `kilo` in the CLI-backend union + key routing | Modify |
-| `test/backend-selection.test.ts` | Assert `kilo` routing | Modify |
-| `src/shared/config.ts` | `PROVIDERS.kilo` + `modelSupportsPromptCache` | Modify |
-| `src/shared/runner.ts` | Import, `createKiloBackend`, startup block, `cliBackends`, model-list log | Modify |
-| `action.yml` | `kilo-auth` input + `INPUT_KILO-AUTH` env | Modify |
-| `.github/workflows/jbot-review.yml` | `kilo-auth` secret passthrough | Modify |
-| `Dockerfile` | Install `@kilocode/cli@latest` + `kilo --version` | Modify |
-| `README.md` | Credential-table + provider-table + env-list + auth paragraph rows | Modify |
-| `../jbot-review-app/packages/shared/src/index.ts` | `Provider` union + model list + `PROVIDER_CATALOG.kilo` | Modify (sibling repo) |
+| File                                              | Responsibility                                                                              | Action                |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------- | --------------------- |
+| `src/shared/kilo.ts`                              | Kilo backend: provider id, arg builder, auth env, NDJSON/model parsers, 5 review fns, spawn | Create                |
+| `test/kilo.test.ts`                               | Pure-unit tests for the above                                                               | Create                |
+| `src/shared/backend-selection.ts`                 | Register `kilo` in the CLI-backend union + key routing                                      | Modify                |
+| `test/backend-selection.test.ts`                  | Assert `kilo` routing                                                                       | Modify                |
+| `src/shared/config.ts`                            | `PROVIDERS.kilo` + `modelSupportsPromptCache`                                               | Modify                |
+| `src/shared/runner.ts`                            | Import, `createKiloBackend`, startup block, `cliBackends`, model-list log                   | Modify                |
+| `action.yml`                                      | `kilo-auth` input + `INPUT_KILO-AUTH` env                                                   | Modify                |
+| `.github/workflows/jbot-review.yml`               | `kilo-auth` secret passthrough                                                              | Modify                |
+| `Dockerfile`                                      | Install `@kilocode/cli@latest` + `kilo --version`                                           | Modify                |
+| `README.md`                                       | Credential-table + provider-table + env-list + auth paragraph rows                          | Modify                |
+| `../jbot-review-app/packages/shared/src/index.ts` | `Provider` union + model list + `PROVIDER_CATALOG.kilo`                                     | Modify (sibling repo) |
 
 ---
 
 ## Task 1: `kilo.ts` — provider id, arg builder, prompt input
 
 **Files:**
+
 - Create: `src/shared/kilo.ts`
 - Test: `test/kilo.test.ts`
 
@@ -46,11 +47,7 @@ Create `test/kilo.test.ts`:
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  buildKiloCliArgs,
-  buildKiloPromptInput,
-  isKiloProvider,
-} from '../src/shared/kilo.ts';
+import { buildKiloCliArgs, buildKiloPromptInput, isKiloProvider } from '../src/shared/kilo.ts';
 
 describe('Kilo CLI provider helpers', () => {
   it('matches only the kilo provider id', () => {
@@ -166,6 +163,7 @@ git commit -m "feat(kilo): provider id, read-only arg builder, prompt input"
 ## Task 2: `kilo.ts` — credential validation + env injection
 
 **Files:**
+
 - Modify: `src/shared/kilo.ts`
 - Test: `test/kilo.test.ts`
 
@@ -176,7 +174,10 @@ Add to `test/kilo.test.ts` imports: `assertValidKiloAuth, kiloEnvForAuth, KILO_S
 ```ts
 describe('Kilo CLI auth env', () => {
   it('accepts valid JSON and returns trimmed content', () => {
-    assert.equal(assertValidKiloAuth('  {"kilo":{"type":"api","key":"k"}}  '), '{"kilo":{"type":"api","key":"k"}}');
+    assert.equal(
+      assertValidKiloAuth('  {"kilo":{"type":"api","key":"k"}}  '),
+      '{"kilo":{"type":"api","key":"k"}}',
+    );
   });
 
   it('rejects a blank or non-JSON Kilo secret', () => {
@@ -302,6 +303,7 @@ git commit -m "feat(kilo): KILO_AUTH_CONTENT env injection with isolated HOME/XD
 ## Task 3: `kilo.ts` — NDJSON + model-list parsers
 
 **Files:**
+
 - Modify: `src/shared/kilo.ts`
 - Test: `test/kilo.test.ts`
 
@@ -434,6 +436,7 @@ git commit -m "feat(kilo): NDJSON final-message + model-list parsers"
 No new unit tests (the spawn path hits the CLI; matches how `cursor.ts`/`cline.ts` leave `run*Prompt` untested). Verified by `typecheck` + the Task 11 e2e.
 
 **Files:**
+
 - Modify: `src/shared/kilo.ts`
 
 - [ ] **Step 1: Extend imports**
@@ -499,7 +502,15 @@ export async function runKiloReview(
   const label = options.label ?? 'review';
   const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
   log(`Prompt assembled (${label}, kilo): ${prompt.length} chars, guidelines=${!!guidelines}`);
-  const raw = await runKiloPrompt(workspace, model, prompt, label, log, options.auth, options.timeoutMs);
+  const raw = await runKiloPrompt(
+    workspace,
+    model,
+    prompt,
+    label,
+    log,
+    options.auth,
+    options.timeoutMs,
+  );
   try {
     return parseReview(raw, label, log, { strict: true });
   } catch (error) {
@@ -710,6 +721,7 @@ git commit -m "feat(kilo): stdin spawn, 5 review entrypoints, model listing"
 ## Task 5: `config.ts` — provider entry + prompt-cache
 
 **Files:**
+
 - Modify: `src/shared/config.ts`
 
 - [ ] **Step 1: Write the failing test**
@@ -761,16 +773,16 @@ In `src/shared/config.ts`, add to the `PROVIDERS` object (after the `cline-pass`
 In `src/shared/config.ts`, in `modelSupportsPromptCache`, add `providerID === 'kilo'` to the CLI-backend early-return condition:
 
 ```ts
-  if (
-    providerID === 'devin' ||
-    providerID === 'commandcode' ||
-    providerID === 'cursor' ||
-    providerID === 'codex' ||
-    providerID === 'cline' ||
-    providerID === 'cline-pass' ||
-    providerID === 'kilo'
-  )
-    return false;
+if (
+  providerID === 'devin' ||
+  providerID === 'commandcode' ||
+  providerID === 'cursor' ||
+  providerID === 'codex' ||
+  providerID === 'cline' ||
+  providerID === 'cline-pass' ||
+  providerID === 'kilo'
+)
+  return false;
 ```
 
 - [ ] **Step 5: Run test to verify it passes**
@@ -790,6 +802,7 @@ git commit -m "feat(kilo): config provider entry + prompt-cache disable"
 ## Task 6: `backend-selection.ts` — register kilo routing
 
 **Files:**
+
 - Modify: `src/shared/backend-selection.ts`
 - Test: `test/backend-selection.test.ts`
 
@@ -823,29 +836,34 @@ Expected: FAIL — `sel.kiloAuth` undefined / `mainCliBackend` not `'kilo'`.
 In `src/shared/backend-selection.ts`:
 
 (a) Add the import:
+
 ```ts
 import { KILO_PROVIDER_ID, isKiloProvider } from './kilo.ts';
 ```
 
 (b) Extend the `CliBackendID` union:
+
 ```ts
   | typeof CLINE_PROVIDER_ID
   | typeof KILO_PROVIDER_ID;
 ```
 
 (c) Add to the `ReviewBackendSelection` interface:
+
 ```ts
-  kiloAuth: string;
+kiloAuth: string;
 ```
 
 (d) In `selectReviewBackends`'s returned object, next to `clineAuth`:
+
 ```ts
     kiloAuth: keyFor(KILO_PROVIDER_ID),
 ```
 
 (e) In `cliBackendForProvider`, before `return undefined;`:
+
 ```ts
-  if (isKiloProvider(providerID)) return KILO_PROVIDER_ID;
+if (isKiloProvider(providerID)) return KILO_PROVIDER_ID;
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -867,6 +885,7 @@ git commit -m "feat(kilo): register kilo in backend selection + key routing"
 No unit test (integration wiring; verified by `typecheck` + Task 11). Read `runner.ts` around the Cursor/Codex backends first (`createCursorBackend`, the `if (mainCliBackend === CURSOR_PROVIDER_ID …)` startup block, the `cliBackends` record, and the `if (commandCodeBackend) { … listCommandCodeModels … }` log block).
 
 **Files:**
+
 - Modify: `src/shared/runner.ts`
 
 - [ ] **Step 1: Add imports**
@@ -900,13 +919,48 @@ function createKiloBackend(workspace: string, auth: string): ReviewBackend {
     runReview: (model, prContext, guidelines, log, options) =>
       runKiloReview(workspace, model, prContext, guidelines, log, { ...options, auth }),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
-      runKiloAddressedPriorCommentsCheck(workspace, model, prContext, log, timeoutMs, onTokenUsage, auth),
+      runKiloAddressedPriorCommentsCheck(
+        workspace,
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        auth,
+      ),
     runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
-      runKiloGuidelineComplianceCheck(workspace, model, prContext, guidelines, log, timeoutMs, onTokenUsage, auth),
+      runKiloGuidelineComplianceCheck(
+        workspace,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        auth,
+      ),
     runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      runKiloFindingVerification(workspace, model, prContext, findings, log, timeoutMs, onTokenUsage, auth),
+      runKiloFindingVerification(
+        workspace,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        auth,
+      ),
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runKiloChangesSinceLastReview(workspace, model, prContext, deltaContext, log, timeoutMs, onTokenUsage, auth),
+      runKiloChangesSinceLastReview(
+        workspace,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        auth,
+      ),
   };
 }
 ```
@@ -916,7 +970,7 @@ function createKiloBackend(workspace: string, auth: string): ReviewBackend {
 Next to `let clineBackend: ReviewBackend | undefined;` add:
 
 ```ts
-  let kiloBackend: ReviewBackend | undefined;
+let kiloBackend: ReviewBackend | undefined;
 ```
 
 - [ ] **Step 4: Add the startup materialization block**
@@ -924,24 +978,24 @@ Next to `let clineBackend: ReviewBackend | undefined;` add:
 After the Cline `if (mainCliBackend === CLINE_PROVIDER_ID …)` block, add:
 
 ```ts
-  if (mainCliBackend === KILO_PROVIDER_ID || auxCliBackend === KILO_PROVIDER_ID) {
-    const kiloAuth = backendSelection.kiloAuth;
-    if (!kiloAuth) {
-      cleanupCliHomes();
-      throw new Error(`Missing auth for ${KILO_PROVIDER_ID} provider.`);
-    }
-    try {
-      assertValidKiloAuth(kiloAuth); // fail fast on a malformed secret
-    } catch (error) {
-      cleanupCliHomes();
-      throw error;
-    }
-    // No credential file/home to allocate: KILO_AUTH_CONTENT is env-injected and each
-    // session self-manages a temp HOME/XDG for kilo's SQLite data dir.
-    log('Kilo CLI auth configured via KILO_AUTH_CONTENT (env-injected; per-session temp HOME).');
-    log('Kilo CLI token usage is unavailable; review metadata may omit those sessions.');
-    kiloBackend = limitBackendConcurrency(createKiloBackend(workspace, kiloAuth), sessionSlots);
+if (mainCliBackend === KILO_PROVIDER_ID || auxCliBackend === KILO_PROVIDER_ID) {
+  const kiloAuth = backendSelection.kiloAuth;
+  if (!kiloAuth) {
+    cleanupCliHomes();
+    throw new Error(`Missing auth for ${KILO_PROVIDER_ID} provider.`);
   }
+  try {
+    assertValidKiloAuth(kiloAuth); // fail fast on a malformed secret
+  } catch (error) {
+    cleanupCliHomes();
+    throw error;
+  }
+  // No credential file/home to allocate: KILO_AUTH_CONTENT is env-injected and each
+  // session self-manages a temp HOME/XDG for kilo's SQLite data dir.
+  log('Kilo CLI auth configured via KILO_AUTH_CONTENT (env-injected; per-session temp HOME).');
+  log('Kilo CLI token usage is unavailable; review metadata may omit those sessions.');
+  kiloBackend = limitBackendConcurrency(createKiloBackend(workspace, kiloAuth), sessionSlots);
+}
 ```
 
 - [ ] **Step 5: Register in the `cliBackends` record**
@@ -959,18 +1013,20 @@ Add the entry:
 Beside the `if (commandCodeBackend) { … listCommandCodeModels … }` block, add:
 
 ```ts
-    if (kiloBackend) {
-      try {
-        const models = await listKiloModels(workspace, backendSelection.kiloAuth);
-        log(
-          models.length > 0
-            ? `Kilo models available (${models.length}): ${models.slice(0, 40).join(', ')}${models.length > 40 ? ', …' : ''}`
-            : 'Kilo model listing returned no models.',
-        );
-      } catch (error) {
-        log(`Kilo model listing failed (continuing): ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
+if (kiloBackend) {
+  try {
+    const models = await listKiloModels(workspace, backendSelection.kiloAuth);
+    log(
+      models.length > 0
+        ? `Kilo models available (${models.length}): ${models.slice(0, 40).join(', ')}${models.length > 40 ? ', …' : ''}`
+        : 'Kilo model listing returned no models.',
+    );
+  } catch (error) {
+    log(
+      `Kilo model listing failed (continuing): ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
 ```
 
 - [ ] **Step 7: Typecheck + full test suite**
@@ -990,6 +1046,7 @@ git commit -m "feat(kilo): wire kilo backend into the runner"
 ## Task 8: Infra — Dockerfile, action.yml, workflow
 
 **Files:**
+
 - Modify: `Dockerfile`, `action.yml`, `.github/workflows/jbot-review.yml`
 
 - [ ] **Step 1: Install the CLI in the image**
@@ -1012,16 +1069,16 @@ and add to the `&& …--version` verify chain:
 In `action.yml`, after the `cline-auth` input block, add:
 
 ```yaml
-  kilo-auth:
-    description: 'Kilo CLI auth: the contents of ~/.local/share/kilo/auth.json. Used when provider or active aux-provider is kilo.'
-    required: false
-    default: ''
+kilo-auth:
+  description: 'Kilo CLI auth: the contents of ~/.local/share/kilo/auth.json. Used when provider or active aux-provider is kilo.'
+  required: false
+  default: ''
 ```
 
 and in the `env:` block, after `INPUT_CLINE-AUTH`:
 
 ```yaml
-    INPUT_KILO-AUTH: ${{ inputs.kilo-auth }}
+INPUT_KILO-AUTH: ${{ inputs.kilo-auth }}
 ```
 
 - [ ] **Step 3: Pass the secret through the workflow**
@@ -1029,7 +1086,7 @@ and in the `env:` block, after `INPUT_CLINE-AUTH`:
 In `.github/workflows/jbot-review.yml`, in the action's `with:` block after `cline-auth`:
 
 ```yaml
-          kilo-auth: ${{ secrets.KILO_AUTH_CONTENT }}
+kilo-auth: ${{ secrets.KILO_AUTH_CONTENT }}
 ```
 
 - [ ] **Step 4: Build the bundle (verifies Docker COPY input compiles)**
@@ -1049,6 +1106,7 @@ git commit -m "feat(kilo): install CLI in image, add action input + workflow sec
 ## Task 9: README — credential + provider tables
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: Read the surrounding rows**
@@ -1060,7 +1118,7 @@ Read `README.md` around the credential table (lines ~134–151), the provider ta
 After the `**Command Code**` row:
 
 ```markdown
-| **Kilo**         | `kilo auth login` → paste the whole `~/.local/share/kilo/auth.json`                                                                                     | `KILO_AUTH_CONTENT` (`kilo-auth`)                  |
+| **Kilo** | `kilo auth login` → paste the whole `~/.local/share/kilo/auth.json` | `KILO_AUTH_CONTENT` (`kilo-auth`) |
 ```
 
 - [ ] **Step 3: Add the provider-table row**
@@ -1068,7 +1126,7 @@ After the `**Command Code**` row:
 After the `cline-pass` row:
 
 ```markdown
-| `kilo`            | `kilo/kilo-auto/free`                                       | `kilo-auth`              | `KILO_AUTH_CONTENT`      |
+| `kilo` | `kilo/kilo-auto/free` | `kilo-auth` | `KILO_AUTH_CONTENT` |
 ```
 
 - [ ] **Step 4: Extend the env-var list and workflow examples**
@@ -1093,6 +1151,7 @@ git commit -m "docs(readme): Kilo CLI backend credential + provider rows"
 ## Task 10: App catalog — `jbot-review-app`
 
 **Files:**
+
 - Modify: `../jbot-review-app/packages/shared/src/index.ts`
 
 - [ ] **Step 1: Verify the Kilo credential-source URL (don't guess)**
@@ -1173,7 +1232,7 @@ Expected: all green.
 
 Confirm a real review path end-to-end using the operator's local auth. Run:
 
-```bash
+````bash
 node --import tsx -e '
 import { runKiloReview } from "./src/shared/kilo.ts";
 import { readFileSync } from "node:fs";
@@ -1182,7 +1241,7 @@ const pr = "PR CONTEXT:\n```diff\n+ const x = 1 / 0;\n```\nReview this one-line 
 const res = await runKiloReview(process.cwd(), "kilo/kilo-auto/free", pr, "", (m)=>console.error("[log]", m), { auth });
 console.log("findings:", JSON.stringify(res.findings?.length ?? res, null, 2));
 '
-```
+````
 
 Expected: logs show `agent=kilo-cli`, a non-empty final message, and `parseReview` yields a `ReviewResult` (findings array). No files written to the workspace.
 

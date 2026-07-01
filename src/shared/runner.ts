@@ -1215,7 +1215,9 @@ export async function runPrReview(params: {
             : 'Kilo model listing returned no models.',
         );
       } catch (error) {
-        log(`Kilo model listing failed (continuing): ${error instanceof Error ? error.message : String(error)}`);
+        log(
+          `Kilo model listing failed (continuing): ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 
