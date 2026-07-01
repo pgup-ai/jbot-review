@@ -5,9 +5,12 @@ import {
   assertValidKiloAuth,
   buildKiloCliArgs,
   buildKiloPromptInput,
+  formatKiloPromptTimeoutMessage,
   isKiloProvider,
   KILO_STRIPPED_ENV_KEYS,
   kiloEnvForAuth,
+  parseKiloFinalMessage,
+  parseKiloModelList,
 } from '../src/shared/kilo.ts';
 
 describe('Kilo CLI provider helpers', () => {
@@ -92,5 +95,53 @@ describe('Kilo CLI auth env', () => {
 
   it('rejects a blank Kilo home', () => {
     assert.throws(() => kiloEnvForAuth('{"kilo":{}}', '   '), /Missing Kilo home/);
+  });
+});
+
+describe('Kilo CLI output parsing', () => {
+  it('returns the LAST type:text event part.text (cumulative — never concat)', () => {
+    const ndjson = [
+      '{"type":"step_start"}',
+      'INFO 2026-07-01 service=db opening database',
+      '{"type":"text","part":{"type":"text","text":"PONG"}}',
+      '{"type":"text","part":{"type":"text","text":"PONG"}}',
+      '{"type":"step_finish"}',
+    ].join('\n');
+    // Two identical cumulative snapshots must yield "PONG", not "PONGPONG".
+    assert.equal(parseKiloFinalMessage(ndjson), 'PONG');
+  });
+
+  it('returns the full text from a single cumulative event', () => {
+    const ndjson = '{"type":"text","part":{"type":"text","text":"ALPHA\\nBRAVO"}}';
+    assert.equal(parseKiloFinalMessage(ndjson), 'ALPHA\nBRAVO');
+  });
+
+  it('returns empty when no text event is present', () => {
+    assert.equal(parseKiloFinalMessage('{"type":"error","error":{"data":{"message":"boom"}}}'), '');
+    assert.equal(parseKiloFinalMessage('garbage\nlines'), '');
+    assert.equal(parseKiloFinalMessage('{"type":"text","part":{"text":""}}'), '');
+  });
+
+  it('extracts provider/model lines and skips log/header lines', () => {
+    const out = [
+      'kilo/kilo-auto/free',
+      'kilo/anthropic/claude-opus-4.8',
+      'kilo/stepfun/step-3.7-flash:free',
+      '',
+      'INFO 2026-07-01 service=db opening database',
+      'Available models:',
+    ].join('\n');
+    assert.deepEqual(parseKiloModelList(out), [
+      'kilo/kilo-auto/free',
+      'kilo/anthropic/claude-opus-4.8',
+      'kilo/stepfun/step-3.7-flash:free',
+    ]);
+  });
+
+  it('labels prompt timeouts with the session and model', () => {
+    assert.equal(
+      formatKiloPromptTimeoutMessage('finding-verification', 'kilo/kilo-auto/free', 1200_000),
+      'kilo finding-verification prompt timed out after 1200s (model=kilo/kilo-auto/free)',
+    );
   });
 });

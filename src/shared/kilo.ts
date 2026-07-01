@@ -92,3 +92,48 @@ export function kiloEnvForAuth(auth: string, home: string): NodeJS.ProcessEnv {
   for (const key of KILO_STRIPPED_ENV_KEYS) delete env[key];
   return env;
 }
+
+/**
+ * The clean final message is the LAST `type:"text"` event's `part.text` (NDJSON stdout).
+ * POC: text lives at part.text and events are cumulative snapshots, so take-last
+ * (concatenating would double-count). Non-JSON log lines are skipped.
+ */
+export function parseKiloFinalMessage(stdout: string): string {
+  let text = '';
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (event && typeof event === 'object' && (event as { type?: unknown }).type === 'text') {
+      const part = (event as { part?: { text?: unknown } }).part;
+      if (part && typeof part.text === 'string') text = part.text;
+    }
+  }
+  return text;
+}
+
+/**
+ * Parses `kilo models` output. Each model line is a bare `provider/model-id` token; the
+ * CLI's INFO log lines (which contain spaces) and headers/blanks are skipped. Pure.
+ */
+export function parseKiloModelList(output: string): string[] {
+  const models: string[] = [];
+  for (const line of output.split('\n')) {
+    const trimmed = line.trim();
+    if (/^[A-Za-z0-9~][^\s]*\/[^\s]+$/.test(trimmed)) models.push(trimmed);
+  }
+  return models;
+}
+
+export function formatKiloPromptTimeoutMessage(
+  label: string,
+  model: string,
+  timeoutMs: number,
+): string {
+  return `kilo ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s (model=${model})`;
+}
