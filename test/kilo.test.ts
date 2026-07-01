@@ -12,6 +12,7 @@ import {
   parseKiloFinalMessage,
   parseKiloModelList,
 } from '../src/shared/kilo.ts';
+import { modelSupportsPromptCache, PROVIDERS } from '../src/shared/config.ts';
 
 describe('Kilo CLI provider helpers', () => {
   it('matches only the kilo provider id', () => {
@@ -143,5 +144,18 @@ describe('Kilo CLI output parsing', () => {
       formatKiloPromptTimeoutMessage('finding-verification', 'kilo/kilo-auto/free', 1200_000),
       'kilo finding-verification prompt timed out after 1200s (model=kilo/kilo-auto/free)',
     );
+  });
+});
+
+describe('Kilo config registration', () => {
+  it('registers the kilo provider with the free-gateway default', () => {
+    assert.equal(PROVIDERS.kilo?.defaultModel, 'kilo/kilo-auto/free');
+    assert.equal(PROVIDERS.kilo?.keyEnv, 'KILO_AUTH_CONTENT');
+    assert.equal(PROVIDERS.kilo?.keyInput, 'kilo-auth');
+  });
+
+  it('disables prompt cache for kilo (not opencode-driven)', () => {
+    assert.equal(modelSupportsPromptCache('kilo', 'kilo-auto/free'), false);
+    assert.equal(modelSupportsPromptCache('kilo', 'default'), false);
   });
 });
