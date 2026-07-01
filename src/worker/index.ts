@@ -4,6 +4,19 @@ import type { WorkerClient } from './client.ts';
 import { runJob } from './run-job.ts';
 import type { ClaimedJob } from '../shared/worker-contract.ts';
 
+function maskGitHubActionsValue(value: string | null | undefined): void {
+  if (process.env.GITHUB_ACTIONS !== 'true' || !value) return;
+  const escaped = value.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+  console.log(`::add-mask::${escaped}`);
+}
+
+function maskClaimSecrets(job: ClaimedJob): void {
+  maskGitHubActionsValue(job.apiKey);
+  maskGitHubActionsValue(job.auxApiKey);
+  maskGitHubActionsValue(job.installationToken);
+  maskGitHubActionsValue(job.claimToken);
+}
+
 /** Claim + run + report one job. Returns false if the queue was empty (no job claimed). */
 async function processOne(client: WorkerClient, log: (m: string) => void): Promise<boolean> {
   let job: ClaimedJob | null;
@@ -14,6 +27,7 @@ async function processOne(client: WorkerClient, log: (m: string) => void): Promi
     return false; // treat as "nothing claimed"; caller decides whether to retry or exit
   }
   if (!job) return false;
+  maskClaimSecrets(job);
   log(`claimed ${job.jobId} (${job.repoFullName}#${job.prNumber}, ${job.model})`);
   const result = await runJob(job, log); // already carries claimToken
   try {
@@ -31,6 +45,8 @@ async function main(): Promise<void> {
   const cfg = loadWorkerConfig();
   const client = makeClient(cfg);
   const log = (m: string) => console.log(`[worker] ${m}`);
+  maskGitHubActionsValue(cfg.controlPlaneUrl);
+  maskGitHubActionsValue(cfg.sharedSecret);
 
   if (cfg.oneShot) {
     // ONE untrusted review per worker, then the runner/sandbox is destroyed. Never claim
