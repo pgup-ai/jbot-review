@@ -1,6 +1,6 @@
 # Kilo CLI review backend (local-auth reuse, free-gateway default) — design
 
-- **Status:** approved (design + full credentialed POC), implementing
+- **Status:** implemented (all gates green; live e2e on `kilo/kilo-auto/free` flagged the seeded div-by-zero bug, workspace untouched)
 - **Date:** 2026-07-01
 - **Scope:** add the Kilo CLI (`@kilocode/cli`, binary `kilo`) as a pluggable CLI
   review backend, authenticated by a local `kilo auth login` credential carried into
