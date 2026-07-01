@@ -138,29 +138,29 @@ you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
 no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
-Devin is a separate CLI backend: pass `DEVIN_WINDSURF_API_KEY` when you want to
-support `provider: devin` or `aux-provider: devin`; the action writes Devin
-credentials only when a Devin-backed run is selected.
-CommandCode is a separate CLI backend: pass `COMMANDCODE_ACCESS_KEY` when you
-want to support `provider: commandcode` or `aux-provider: commandcode`; the
-action writes `.commandcode/auth.json` under an isolated temporary HOME only
-when a CommandCode-backed run is selected, then removes that temp HOME after the
-run.
-Cursor is a separate CLI backend: pass `CURSOR_API_KEY` when you want to support
-`provider: cursor` or `aux-provider: cursor`; the `cursor-agent` CLI reads the
-key straight from the environment (no credential file) and runs read-only via
-`--mode plan` only when a Cursor-backed run is selected.
-Codex is a separate CLI backend: pass `CODEX_AUTH_JSON` (the contents of
-`~/.codex/auth.json` from a local `codex login`) to support `provider: codex` or
-`aux-provider: codex`; it runs read-only via `codex exec --sandbox read-only` on the
-ChatGPT subscription only when a Codex-backed run is selected.
-Cline is a separate CLI backend: pass `CLINE_AUTH_JSON` (the contents of
-`~/.cline/data/settings/providers.json` from a local `cline auth`) to support
-`provider: cline`/`cline-pass` (or the matching `aux-provider`); it runs read-only via
-`cline --plan --auto-approve false` on your local Cline token only when a Cline-backed
-run is selected. Only the auth token is used (the file's `model`/`reasoning` are
-stripped). The two billing modes are separate providers sharing the one secret:
-`cline` (pay-as-you-go) and `cline-pass` (Cline subscription).
+
+**CLI-backend credentials — where to get each one.** Unlike the model-provider keys
+above, these authenticate with a local CLI login or a dashboard key. You paste the
+**whole file** (Codex, Cline) or the **key value** (Cursor, Devin, Command Code) —
+no digging a field out of a JSON.
+
+| Backend          | Get the credential                                                                                                                                      | Secret (Action input)                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| **Codex CLI**    | `codex login` (ChatGPT Plus/Pro) → paste the whole `~/.codex/auth.json`                                                                                 | `CODEX_AUTH_JSON` (`codex-auth`)                    |
+| **Cline**        | `cline auth` → paste the whole `~/.cline/data/settings/providers.json`                                                                                  | `CLINE_AUTH_JSON` (`cline-auth`)                    |
+| **Cursor**       | Create a key at [cursor.com/dashboard/integrations](https://cursor.com/dashboard/integrations) → paste it (`crsr_…`)                                    | `CURSOR_API_KEY` (`cursor-api-key`)                 |
+| **Devin**        | `devin auth login` → copy `windsurf_api_key` (`devin-session-token$…`) from `~/.local/share/devin/credentials.toml` ([docs](https://docs.devin.ai/cli)) | `DEVIN_WINDSURF_API_KEY` (`devin-windsurf-api-key`) |
+| **Command Code** | Create an access key at [commandcode.ai](https://commandcode.ai/docs/quickstart) (`user_…`; the `apiKey` in `~/.commandcode/auth.json`) → paste it      | `COMMANDCODE_ACCESS_KEY` (`commandcode-access-key`) |
+
+Each CLI backend runs **read-only** and only when it's the selected
+`provider`/`aux-provider`. Cline and Command Code write their credential into an
+isolated temporary `HOME`, and Codex into a temporary `CODEX_HOME`, each removed
+after the run; Cursor reads its key straight from the env (no file); Devin writes
+`~/.local/share/devin/credentials.toml` under the process `HOME`. Cline uses only
+the auth token — the file's `model`/`reasoning` are stripped — and has two billing
+modes sharing one secret: `cline` (pay-as-you-go) and `cline-pass` (Cline
+subscription).
+
 Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
 framework, CLI, cloud-service, or workflow changes.
 
