@@ -1,6 +1,6 @@
 # Kilo CLI review backend (local-auth reuse, free-gateway default) — design
 
-- **Status:** approved (design + partial POC), implementing
+- **Status:** approved (design + full credentialed POC), implementing
 - **Date:** 2026-07-01
 - **Scope:** add the Kilo CLI (`@kilocode/cli`, binary `kilo`) as a pluggable CLI
   review backend, authenticated by a local `kilo auth login` credential carried into
@@ -35,8 +35,9 @@ Kilo is modeled as **one jbot provider** — `kilo` — with the secret **requir
 
 `@kilocode/cli` (v7.3.54) is a fork of `sst/opencode` — the exact engine jbot already
 runs (`src/shared/opencode.ts`). Its `run`/`models`/`serve` commands, `auth.json`
-shape, and agent modes inherit opencode semantics. A live POC against the installed
-`kilo` (v7.3.54) settled four things and left two for a credentialed Phase-0 POC:
+shape, and agent modes inherit opencode semantics. A live credentialed POC against the
+installed `kilo` (v7.3.54), using the operator's local login and the free model,
+settled everything below:
 
 1. **Prompt delivery is stdin — no argv cap.** `kilo run` accepted a prompt piped on
    stdin (it created a session and only failed at the model step, never the Cline error
@@ -49,8 +50,11 @@ shape, and agent modes inherit opencode semantics. A live POC against the instal
    json` (choices: `default` | `json`) streams one JSON object per line:
    `{"type":..., "timestamp":..., "sessionID":..., ...}`. The final assistant text is
    carried in events of `type:"text"`; failures surface as `type:"error"` with
-   `error.data.message`. Robust parse = read lines, `JSON.parse` each (skip non-JSON
-   log lines), keep the last `type:"text"` text; empty ⇒ fail loud.
+   `error.data.message`. POC: the assistant text lives at **`event.part.text`** (not a
+   top-level `.text`), and text events are **cumulative snapshots** (a 5-line reply came
+   as one event with the full text). Robust parse = read lines, `JSON.parse` each (skip
+   non-JSON log lines), keep the **last** `type:"text"` event's `part.text` (never
+   concat); empty ⇒ fail loud.
 
 3. **Read-only agent + the bypass flags to avoid.** `--agent plan` is a valid agent
    (accepted headless, no error) and is the same read-only layer jbot's opencode
@@ -75,12 +79,13 @@ shape, and agent modes inherit opencode semantics. A live POC against the instal
    (`kilo`), `parseModelName` strips it; `buildKiloCliArgs` must re-add it (the
    `cline-pass/<model>` pattern).
 
-**Remaining Phase-0 POC (needs a real `KILO_AUTH_CONTENT`):** (a) an authenticated
-`kilo/kilo-auto/free` run completes and returns a `type:"text"` message; (b) headless
-`--agent plan` **auto-denies** disallowed tools rather than hanging on an approval
-prompt (Cline hung → needed `NO_TOOLS_REVIEW_DIRECTIVE`). The design assumes the
-Cline-proven mitigation (prepend the no-tools directive) and the POC confirms whether
-it's necessary.
+6. **Credentialed run + read-only + large-stdin all confirmed.** Env-injected
+   `KILO_AUTH_CONTENT` (738-char auth.json) ran `kilo/kilo-auto/free` successfully
+   (EXIT 0, `part.text` returned). A **150KB** stdin prompt was ingested fine (no
+   argv/stdin cap — Kilo's edge over Cline). `--agent plan` without `--auto`
+   **auto-denies** a write tool (file never created) and does **not** hang — but a
+   denied tool yields near-empty text, so `NO_TOOLS_REVIEW_DIRECTIVE` is **required**
+   (not merely precautionary) to keep the review prompt-bound and JSON-emitting.
 
 ## Approaches considered
 
@@ -156,9 +161,10 @@ gateway-prefixed model, no-tools directive):
   (`KILO_STRIPPED_ENV_KEYS`: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `KILO_API_KEY`,
   `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, …) so the carried auth wins.
 - `parseKiloFinalMessage(stdout)` — split lines, `JSON.parse` each (skip non-JSON log
-  lines), return the last `type:"text"` event's text; if a `type:"error"` event is the
-  terminal state, surface `error.data.message`; empty ⇒ caller throws (fail loud).
-  **[learning-mode contribution: the event-selection logic.]**
+  lines), return the **last** `type:"text"` event's **`part.text`** (POC: text lives at
+  `part.text`; events are cumulative ⇒ take-last, never concat); if a `type:"error"`
+  event is the terminal state, surface `error.data.message`; empty ⇒ caller throws
+  (fail loud). **[learning-mode contribution: the event-selection logic.]**
 - `listKiloModels(home)` / `parseKiloModelList(output)` — run `kilo models` for the
   startup observability log (mirrors `listCursorModels`); pure parser splits
   `provider/model-id` lines. Best-effort: runner logs and continues on failure.
@@ -186,8 +192,9 @@ by the non-JSON-tolerant parser.
   is prompt-bound (reviews the embedded diff/context; no exploration), avoiding a
   read-only stall. Tradeoff identical to Cline's: no file exploration/caller
   cross-ref, bought for zero read/write/exec on untrusted PR code; diff budget +
-  sharding cover typical PRs. **Phase-0 POC confirms whether the directive is required
-  or `--agent plan` already auto-denies cleanly.**
+  sharding cover typical PRs. **POC-confirmed required**: `--agent plan` auto-denies
+  tools without hanging, but a denied tool yields near-empty output, so the directive
+  keeps the review prompt-bound and JSON-emitting.
 - **Invariant #3 (aux fail-open):** a Kilo lens/guideline/verify failure degrades only
   that session.
 - **Invariants #1/#2/#10:** unaffected — Kilo is another session driver; decision logic
@@ -247,7 +254,7 @@ site at implementation time, not guessed), `credentialFormat: 'json'`,
 
 | Risk                                                      | Mitigation                                                                                          |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `--agent plan` hangs on a tool-approval prompt headless   | Prepend `NO_TOOLS_REVIEW_DIRECTIVE` (Cline-proven); Phase-0 POC confirms; never emit `--auto`.      |
+| Denied tool under `--agent plan` yields empty output      | POC: does not hang, auto-denies; `NO_TOOLS_REVIEW_DIRECTIVE` keeps output JSON-shaped; never emit `--auto`. |
 | Bare model id 404s (`kilo-auto/free` vs `kilo/kilo-auto/free`) | `buildKiloCliArgs` preserves the `kilo/` gateway prefix; unit-tested; POC-observed.            |
 | Free auto-router unavailable without a Kilo account       | Secret required; docs say run needs a valid `KILO_AUTH_CONTENT`; clear error when missing.          |
 | Concurrent sessions race on `kilo.db`/auth               | Per-process temp `HOME`+`XDG_DATA_HOME`; POC-confirmed the data dir relocates.                       |
