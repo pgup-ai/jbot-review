@@ -1,7 +1,32 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { parseModelName } from './model.ts';
-import { NO_TOOLS_REVIEW_DIRECTIVE } from './prompt.ts';
+import {
+  assembleAddressedPriorCommentsPrompt,
+  assembleChangesSinceLastReviewPrompt,
+  assembleFindingVerificationPrompt,
+  assembleGuidelineCompliancePrompt,
+  assembleReviewPrompt,
+  buildJsonRepairFollowupPrompt,
+  NO_TOOLS_REVIEW_DIRECTIVE,
+  type VerifiableFinding,
+} from './prompt.ts';
+import {
+  parseChangesSinceLastReviewSummary,
+  parseFindingVerdicts,
+  parseReview,
+  type TokenUsageRecorder,
+} from './opencode.ts';
+import { spawnWithTimeout } from './cli-process.ts';
+import { truncateForLog } from './text.ts';
+import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
+
+const KILO_PROMPT_TIMEOUT_MS = 20 * 60_000;
+const KILO_MODEL_LIST_TIMEOUT_MS = 60_000;
+const KILO_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
+const KILO_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 
 export const KILO_PROVIDER_ID = 'kilo';
 export const KILO_CLI_BIN = 'kilo';
@@ -136,4 +161,213 @@ export function formatKiloPromptTimeoutMessage(
   timeoutMs: number,
 ): string {
   return `kilo ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s (model=${model})`;
+}
+
+export async function runKiloReview(
+  workspace: string,
+  model: string,
+  prContext: string,
+  guidelines: string,
+  log: (msg: string) => void,
+  options: {
+    lensAddendum?: string;
+    label?: string;
+    timeoutMs?: number;
+    onTokenUsage?: TokenUsageRecorder;
+    auth?: string;
+  } = {},
+): Promise<ReviewResult> {
+  void options.onTokenUsage; // kilo --format json usage not wired; mirror the other CLI backends.
+  const label = options.label ?? 'review';
+  const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
+  log(`Prompt assembled (${label}, kilo): ${prompt.length} chars, guidelines=${!!guidelines}`);
+  const raw = await runKiloPrompt(workspace, model, prompt, label, log, options.auth, options.timeoutMs);
+  try {
+    return parseReview(raw, label, log, { strict: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(`${label} response unparseable; sending one JSON repair prompt via kilo: ${message}`);
+    const repaired = await runKiloPrompt(
+      workspace,
+      model,
+      buildJsonRepairFollowupPrompt({
+        originalPrompt: prompt,
+        invalidResponse: raw,
+        parseError: message,
+        promptBudgetBytes: KILO_REPAIR_PROMPT_BUDGET_BYTES,
+        responseBudgetBytes: KILO_REPAIR_RESPONSE_BUDGET_BYTES,
+      }),
+      `${label}-repair`,
+      log,
+      options.auth,
+      options.timeoutMs,
+    );
+    return parseReview(repaired, `${label}-repair`, log, { strict: true });
+  }
+}
+
+export async function runKiloAddressedPriorCommentsCheck(
+  workspace: string,
+  model: string,
+  prContext: string,
+  log: (msg: string) => void,
+  timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
+  auth?: string,
+): Promise<AddressedPriorComment[]> {
+  void onTokenUsage;
+  const raw = await runKiloPrompt(
+    workspace,
+    model,
+    assembleAddressedPriorCommentsPrompt(prContext),
+    'addressed-prior-comments',
+    log,
+    auth,
+    timeoutMs,
+  );
+  return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
+}
+
+export async function runKiloGuidelineComplianceCheck(
+  workspace: string,
+  model: string,
+  prContext: string,
+  guidelines: string,
+  log: (msg: string) => void,
+  timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
+  auth?: string,
+): Promise<Finding[]> {
+  void onTokenUsage;
+  const raw = await runKiloPrompt(
+    workspace,
+    model,
+    assembleGuidelineCompliancePrompt(prContext, guidelines),
+    'guideline-compliance',
+    log,
+    auth,
+    timeoutMs,
+  );
+  return parseReview(raw, 'guideline-compliance', log).findings;
+}
+
+export async function runKiloChangesSinceLastReview(
+  workspace: string,
+  model: string,
+  prContext: string,
+  deltaContext: string,
+  log: (msg: string) => void,
+  timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
+  auth?: string,
+): Promise<string> {
+  void onTokenUsage;
+  const raw = await runKiloPrompt(
+    workspace,
+    model,
+    assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+    'changes-since-last-review',
+    log,
+    auth,
+    timeoutMs,
+  );
+  return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
+}
+
+export async function runKiloFindingVerification(
+  workspace: string,
+  model: string,
+  prContext: string,
+  findings: VerifiableFinding[],
+  log: (msg: string) => void,
+  timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
+  auth?: string,
+): Promise<FindingVerdict[] | undefined> {
+  void onTokenUsage;
+  const raw = await runKiloPrompt(
+    workspace,
+    model,
+    assembleFindingVerificationPrompt(prContext, findings),
+    'finding-verification',
+    log,
+    auth,
+    timeoutMs,
+  );
+  return parseFindingVerdicts(raw, findings.length, log);
+}
+
+/**
+ * Lists the models the auth can use via `kilo models`, for the startup observability log
+ * (mirrors listCursorModels). Best-effort: the runner logs and continues on failure.
+ */
+export async function listKiloModels(workspace: string, auth: string): Promise<string[]> {
+  const dir = mkdtempSync(join(tmpdir(), 'jbot-kilo-'));
+  try {
+    const result = await spawnWithTimeout(KILO_CLI_BIN, ['models'], {
+      cwd: workspace,
+      env: kiloEnvForAuth(auth, dir),
+      timeoutMs: KILO_MODEL_LIST_TIMEOUT_MS,
+      timeoutMessage: `kilo model listing timed out after ${Math.round(
+        KILO_MODEL_LIST_TIMEOUT_MS / 1000,
+      )}s`,
+    });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `kilo model listing exited ${result.exitCode}: ${truncateForLog(
+          result.stderr || result.stdout,
+          1000,
+        )}`,
+      );
+    }
+    return parseKiloModelList(result.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+async function runKiloPrompt(
+  workspace: string,
+  model: string,
+  prompt: string,
+  label: string,
+  log: (msg: string) => void,
+  auth: string | undefined,
+  timeoutMs = KILO_PROMPT_TIMEOUT_MS,
+): Promise<string> {
+  const args = buildKiloCliArgs({ model });
+  const input = buildKiloPromptInput(prompt);
+  log(`Calling ${label} prompt (agent=kilo-cli, model=${model})`);
+  // Per-process HOME/XDG so concurrent sessions don't race kilo's SQLite data dir or any
+  // token-refresh writeback; the prompt goes on stdin (no argv size limit).
+  const dir = mkdtempSync(join(tmpdir(), 'jbot-kilo-'));
+  try {
+    const result = await spawnWithTimeout(KILO_CLI_BIN, args, {
+      cwd: workspace,
+      input,
+      env: kiloEnvForAuth(auth ?? '', dir),
+      timeoutMs,
+      timeoutMessage: formatKiloPromptTimeoutMessage(label, model, timeoutMs),
+    });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `kilo ${label} exited ${result.exitCode}: ${truncateForLog(
+          result.stderr || result.stdout,
+          1000,
+        )}`,
+      );
+    }
+    const finalMessage = parseKiloFinalMessage(result.stdout).trim();
+    log(
+      `${label} prompt complete via kilo: stdout=${result.stdout.length} chars last-message=${finalMessage.length} chars`,
+    );
+    if (!finalMessage) {
+      throw new Error(
+        `kilo ${label} produced no text event; stdout: ${truncateForLog(result.stdout, 1000)}`,
+      );
+    }
+    return finalMessage;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
