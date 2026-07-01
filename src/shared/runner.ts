@@ -1208,6 +1208,7 @@ export async function runPrReview(params: {
     if (kiloBackend) {
       try {
         const models = await listKiloModels(workspace, backendSelection.kiloAuth);
+        // Kilo's gateway catalog runs ~250 models; cap the inline log (unlike Cursor's full join).
         log(
           models.length > 0
             ? `Kilo models available (${models.length}): ${models.slice(0, 40).join(', ')}${models.length > 40 ? ', …' : ''}`
