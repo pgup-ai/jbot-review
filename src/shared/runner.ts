@@ -102,6 +102,16 @@ import {
   writeClineAuth,
 } from './cline.ts';
 import {
+  KILO_PROVIDER_ID,
+  assertValidKiloAuth,
+  listKiloModels,
+  runKiloAddressedPriorCommentsCheck,
+  runKiloChangesSinceLastReview,
+  runKiloFindingVerification,
+  runKiloGuidelineComplianceCheck,
+  runKiloReview,
+} from './kilo.ts';
+import {
   buildReviewContext,
   discoverGuidelineDocs,
   formatGuidelines,
@@ -503,6 +513,57 @@ function createClineBackend(workspace: string, clineHome: string): ReviewBackend
         timeoutMs,
         onTokenUsage,
         clineHome,
+      ),
+  };
+}
+
+function createKiloBackend(workspace: string, auth: string): ReviewBackend {
+  return {
+    name: KILO_PROVIDER_ID,
+    runReview: (model, prContext, guidelines, log, options) =>
+      runKiloReview(workspace, model, prContext, guidelines, log, { ...options, auth }),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runKiloAddressedPriorCommentsCheck(
+        workspace,
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        auth,
+      ),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runKiloGuidelineComplianceCheck(
+        workspace,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        auth,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runKiloFindingVerification(
+        workspace,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        auth,
+      ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runKiloChangesSinceLastReview(
+        workspace,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        auth,
       ),
   };
 }
@@ -929,6 +990,7 @@ export async function runPrReview(params: {
   let cursorBackend: ReviewBackend | undefined;
   let codexBackend: ReviewBackend | undefined;
   let clineBackend: ReviewBackend | undefined;
+  let kiloBackend: ReviewBackend | undefined;
   let commandCodeHome: string | undefined;
   const cleanupCommandCodeHome = (): void => {
     if (!commandCodeHome) return;
@@ -1040,6 +1102,25 @@ export async function runPrReview(params: {
     clineBackend = limitBackendConcurrency(createClineBackend(workspace, clineHome), sessionSlots);
   }
 
+  if (mainCliBackend === KILO_PROVIDER_ID || auxCliBackend === KILO_PROVIDER_ID) {
+    const kiloAuth = backendSelection.kiloAuth;
+    if (!kiloAuth) {
+      cleanupCliHomes();
+      throw new Error(`Missing auth for ${KILO_PROVIDER_ID} provider.`);
+    }
+    try {
+      assertValidKiloAuth(kiloAuth); // fail fast on a malformed secret
+    } catch (error) {
+      cleanupCliHomes();
+      throw error;
+    }
+    // No credential file/home to allocate: KILO_AUTH_CONTENT is env-injected and each
+    // session self-manages a temp HOME/XDG for kilo's SQLite data dir.
+    log('Kilo CLI auth configured via KILO_AUTH_CONTENT (env-injected; per-session temp HOME).');
+    log('Kilo CLI token usage is unavailable; review metadata may omit those sessions.');
+    kiloBackend = limitBackendConcurrency(createKiloBackend(workspace, kiloAuth), sessionSlots);
+  }
+
   if (needsOpencode) {
     const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
     if (!opencodeApiKey) {
@@ -1088,6 +1169,7 @@ export async function runPrReview(params: {
     [CURSOR_PROVIDER_ID]: cursorBackend,
     [CODEX_PROVIDER_ID]: codexBackend,
     [CLINE_PROVIDER_ID]: clineBackend,
+    [KILO_PROVIDER_ID]: kiloBackend,
   };
   const mainBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)
@@ -1120,6 +1202,19 @@ export async function runPrReview(params: {
         );
       } catch (e) {
         log(`(skipped Cursor model listing: ${(e as Error).message})`);
+      }
+    }
+
+    if (kiloBackend) {
+      try {
+        const models = await listKiloModels(workspace, backendSelection.kiloAuth);
+        log(
+          models.length > 0
+            ? `Kilo models available (${models.length}): ${models.slice(0, 40).join(', ')}${models.length > 40 ? ', …' : ''}`
+            : 'Kilo model listing returned no models.',
+        );
+      } catch (error) {
+        log(`Kilo model listing failed (continuing): ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
