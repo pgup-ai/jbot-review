@@ -735,6 +735,13 @@ export interface ReviewRunOptions {
 export async function runPrReview(params: {
   /** Required for the GitHub-backed paths; optional when `localDiff` is provided. */
   octokit?: Octokit;
+  /**
+   * Deliberately NOT proxy-defaulted like `octokit`: its undefined-ness is
+   * load-bearing. The only consumer falls back `?? octokit` (in local mode
+   * that IS the landmine proxy, so no bare-undefined access exists), and the
+   * missing-token error hint keys off `!threadResolutionOctokit` — a proxy
+   * default would break both on GitHub runs without a resolution token.
+   */
   threadResolutionOctokit?: Octokit;
   owner: string;
   repo: string;
