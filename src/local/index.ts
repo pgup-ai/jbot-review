@@ -119,19 +119,22 @@ async function pickOpencodePort(): Promise<number | undefined> {
 }
 
 /**
- * Whether `bin` is present and runnable. ENOENT (not on PATH) and EACCES
- * (present but not executable) are unambiguous "can't run it" states that get
- * a clear preflight failure. Any other outcome — notably a CLI that exits
- * non-zero on `--version` — is treated as usable, so we never false-block a
- * working install over a non-standard version command.
+ * Whether `bin` is present and runnable. A failure to *spawn* — ENOENT (not on
+ * PATH), EACCES (not executable), ENOEXEC (wrong architecture), etc. — surfaces
+ * as a string errno in `error.code` and means the binary can't run, so the
+ * preflight fails clearly. A binary that *did* run but exited non-zero on
+ * `--version` reports a numeric exit code; that's treated as usable, since some
+ * CLIs exit non-zero on `--version` and false-blocking a working install is
+ * worse than a later, self-explanatory invocation error.
  */
 async function binaryUsable(bin: string): Promise<boolean> {
   try {
     await execFileAsync(bin, ['--version'], { timeout: 10_000 });
     return true;
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code !== 'ENOENT' && code !== 'EACCES';
+    // execFile sets a string `code` (errno) only when the process never
+    // spawned; a numeric code means it ran and exited non-zero.
+    return typeof (error as { code?: unknown }).code !== 'string';
   }
 }
 
