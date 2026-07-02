@@ -118,6 +118,7 @@ import {
   formatFinderGuidelines,
   formatDiffScope,
   formatContextBudget,
+  type ReviewCommit,
 } from './review-context.ts';
 import { planReviewFanout, planIncrementalLenses } from './fanout.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
@@ -140,7 +141,7 @@ import {
   resolveReviewThread,
   isJbotReviewBody,
 } from './github.ts';
-import type { Octokit, PriorJbotThread } from './github.ts';
+import type { Octokit, PrFile, PriorJbotThread } from './github.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import { formatUsageCost, isFiniteNumber } from './text.ts';
 import type {
@@ -615,6 +616,23 @@ function requireOpencodeBackend(
   return backend;
 }
 
+/**
+ * Stand-in client for local mode (no token, no Octokit): any property access
+ * throws. Reads are short-circuited on `localDiff`, writes are unreachable
+ * (localDiff forces dryRun), so a throw here means a GitHub call site the
+ * local-mode seam missed — fail loudly rather than corrupt the run.
+ */
+function missingOctokit(): Octokit {
+  return new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        throw new Error(`GitHub client not available in local mode (octokit.${String(prop)})`);
+      },
+    },
+  ) as unknown as Octokit;
+}
+
 export interface ReviewRunOptions {
   enhancedContext?: boolean;
   dryRun?: boolean;
@@ -715,7 +733,15 @@ export interface ReviewRunOptions {
 }
 
 export async function runPrReview(params: {
-  octokit: Octokit;
+  /** Required for the GitHub-backed paths; optional when `localDiff` is provided. */
+  octokit?: Octokit;
+  /**
+   * Deliberately NOT proxy-defaulted like `octokit`: its undefined-ness is
+   * load-bearing. The only consumer falls back `?? octokit` (in local mode
+   * that IS the landmine proxy, so no bare-undefined access exists), and the
+   * missing-token error hint keys off `!threadResolutionOctokit` — a proxy
+   * default would break both on GitHub runs without a resolution token.
+   */
   threadResolutionOctokit?: Octokit;
   owner: string;
   repo: string;
@@ -728,11 +754,17 @@ export async function runPrReview(params: {
   headSha?: string;
   baseRef?: string;
   baseSha?: string;
+  /**
+   * Local-mode diff source (`npm run review:local`): the COMPLETE
+   * merge-base-relative diff (invariant #1) plus the local commit log.
+   * Replaces every GitHub read and forces dryRun, so a run with it set
+   * performs no GitHub API call at all.
+   */
+  localDiff?: { files: PrFile[]; commits: ReviewCommit[] };
   options?: ReviewRunOptions;
   log: (msg: string) => void;
 }): Promise<void> {
   const {
-    octokit,
     owner,
     repo,
     pullNumber,
@@ -744,9 +776,24 @@ export async function runPrReview(params: {
     headSha,
     baseRef,
     baseSha,
+    localDiff,
     log,
   } = params;
+  // Local mode passes no client; the landmine default keeps the write sites
+  // type-clean and turns any GitHub call the localDiff short-circuits missed
+  // into a loud failure instead of a silent one.
+  const octokit = params.octokit ?? missingOctokit();
   const options = normalizeOptions(params.options);
+  // Trust boundary in code (invariant #2): a local diff must never reach the
+  // posting paths, so local mode is only usable as a dry run.
+  if (localDiff && !options.dryRun) {
+    throw new Error('localDiff requires dryRun: true; local mode must never post to GitHub.');
+  }
+  // A GitHub-backed run needs a real client; fail with the accurate reason
+  // rather than letting a later read hit the local-mode Proxy and mislead.
+  if (!localDiff && !params.octokit) {
+    throw new Error('runPrReview requires an octokit client unless localDiff is provided.');
+  }
   const runStartedAt = Date.now();
   const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes);
   if (finderTimeoutMs) {
@@ -790,10 +837,20 @@ export async function runPrReview(params: {
   const recordTokenUsage: TokenUsageRecorder = (usage, usageModel) =>
     tokenUsage.add(usage, usageModel);
 
-  await ensureGitSafeDirectory(workspace, log);
+  // Local checkouts are owned by the invoking user — dubious-ownership can't
+  // trigger — so never touch the developer's global gitconfig from local mode.
+  if (!localDiff) {
+    await ensureGitSafeDirectory(workspace, log);
+  }
 
-  log(`Listing PR files for ${owner}/${repo}#${pullNumber}`);
-  const rawFiles = await listPrFiles(octokit, owner, repo, pullNumber);
+  log(
+    localDiff
+      ? `Using local diff for ${owner}/${repo} (${localDiff.files.length} files)`
+      : `Listing PR files for ${owner}/${repo}#${pullNumber}`,
+  );
+  const rawFiles = localDiff
+    ? localDiff.files
+    : await listPrFiles(octokit, owner, repo, pullNumber);
   log(`Files in PR: ${rawFiles.length} total`);
   const files = rawFiles.filter((f) => f.patch && !isNoiseFile(f.filename));
   // The "review done" 🚀 reaction means "the PR has no open jbot findings".
@@ -846,7 +903,11 @@ export async function runPrReview(params: {
   // injected into the review CONTEXT. includePriorComments gates the context
   // use below; it must NOT gate the count, or quiet-clean re-runs break for
   // include-prior-comments: false (every run would look like a first run).
-  const allPriorReviewComments = await listPrComments(octokit, owner, repo, pullNumber);
+  // Local mode has no PR, so no prior bot output; the empty list also keeps
+  // the incremental-delta compare below unreachable (no reviewedHead marker).
+  const allPriorReviewComments = localDiff
+    ? []
+    : await listPrComments(octokit, owner, repo, pullNumber);
   const priorJbotReviewCount = allPriorReviewComments.filter(isJbotReviewBody).length;
   const priorComments = options.includePriorComments ? allPriorReviewComments : [];
   if (!options.includePriorComments) {
@@ -857,7 +918,9 @@ export async function runPrReview(params: {
   // CONTEXT and the addressed-reply posting). Otherwise a still-open finding
   // is invisible to the gate and the 🚀 lies — the same bug class as the
   // priorJbotReviewCount fetch above. safeListPriorJbotThreads is fail-open.
-  const allPriorJbotThreads = await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
+  const allPriorJbotThreads = localDiff
+    ? []
+    : await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
   const priorJbotThreads = options.includePriorComments ? allPriorJbotThreads : [];
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
@@ -896,7 +959,7 @@ export async function runPrReview(params: {
     : '';
   if (blastRadiusBlock) log('Embedded changed-symbol usage block.');
 
-  const diffScope = { baseRef, baseSha, headSha };
+  const diffScope = { baseRef, baseSha, headSha, worktree: !!localDiff };
 
   // The diff hunks deliberately stay OUT of the core context: each main
   // review shard appends its own slice, and the lens/aux sessions append the
@@ -910,10 +973,15 @@ export async function runPrReview(params: {
   // be seen by no session at all.
   const guidelinesForPrompt = effectiveGuidelinePass ? finderGuidelines : guidelines;
   if (options.enhancedContext) {
-    const commits = await listPrCommits(octokit, owner, repo, pullNumber);
-    const checkSummary = headSha
-      ? await getCheckStatusSummary(octokit, owner, repo, headSha)
-      : 'Check status unavailable: PR head SHA was not provided.';
+    const commits = localDiff
+      ? localDiff.commits
+      : await listPrCommits(octokit, owner, repo, pullNumber);
+    // Belt-and-braces: local mode never reaches GitHub for checks (the local
+    // driver also passes no headSha, so the fallback text stays literally true).
+    const checkSummary =
+      headSha && !localDiff
+        ? await getCheckStatusSummary(octokit, owner, repo, headSha)
+        : 'Check status unavailable: PR head SHA was not provided.';
     coreContext = buildReviewContext({
       pullTitle,
       pullBody,
@@ -1287,6 +1355,7 @@ export async function runPrReview(params: {
     // incremental delta (since the last reviewed head) doesn't touch. Best-effort
     // and dynamic-fanout-gated; a null delta (first review, fetch failure, or
     // escape hatch off) leaves the full set. Main review + verify are never gated.
+    // Local mode never gets here: empty prior comments mean no reviewedHead.
     const reviewedHead = findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody));
     const incrementalDeltaFiles =
       options.dynamicFanout && reviewedHead && headSha

@@ -11,6 +11,13 @@ export interface DiffScope {
   baseRef?: string;
   baseSha?: string;
   headSha?: string;
+  /**
+   * Local mode: the right side is the WORKING TREE (merge-base→worktree), so
+   * the reproduction command is a two-dot `git diff <base>` that includes
+   * uncommitted changes — not the three-dot `<base>...HEAD`, which stops at the
+   * last commit and would hide the very edits under review on a dirty tree.
+   */
+  worktree?: boolean;
 }
 
 /** Relevance tiers for finder-pass guideline ranking; higher = kept first. */
@@ -56,7 +63,18 @@ export function formatDiffScope(scope: DiffScope): string {
   if (scope.headSha) lines.push(`Head: ${scope.headSha}`);
 
   const base = scope.baseSha ?? (scope.baseRef ? `origin/${scope.baseRef}` : undefined);
-  if (base) {
+  if (base && scope.worktree) {
+    // Two-dot against the working tree: matches the merge-base→worktree diff the
+    // local run was built from, uncommitted changes included. The flags mirror
+    // the ones that shaped the embedded hunks so a re-run sees the same content
+    // (raw hunks, renames coalesced); the `-c` prefix pins are omitted because
+    // they only affect the parser, not what a reader sees.
+    lines.push(
+      'To see exactly what this review covers (merge-base → working tree, includes uncommitted changes), run:',
+      `    git diff --no-ext-diff --no-textconv --find-renames ${base}`,
+      'Only review changes within this diff.',
+    );
+  } else if (base) {
     const head = scope.headSha ?? 'HEAD';
     lines.push(
       'To see exactly what this PR changes, run:',

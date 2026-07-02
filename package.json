@@ -12,6 +12,8 @@
     "format:check": "prettier --check .",
     "lint": "oxlint --deny-warnings",
     "dev": "tsx src/app/server.ts",
+    "review:local": "tsx src/local/index.ts",
+    "env:minify-auth": "tsx scripts/minify-env-auth.ts",
     "start": "npx tsx src/app/server.ts"
   },
   "dependencies": {

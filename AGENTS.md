@@ -10,6 +10,7 @@ in this repo; `CLAUDE.md` just points here.
 - `npm test` — all tests (node:test via tsx); single file: `node --import tsx --test test/<file>.test.ts`
 - `npm run typecheck` / `npm run lint` / `npm run format` — tsc, oxlint (deny-warnings), prettier (owns formatting)
 - `npm run build` — esbuild bundles to `dist/` (gitignored build artifact, not committed; `build.yml` rebuilds it in CI before the Docker image `COPY`s it — run locally to verify the bundle compiles)
+- `npm run review:local` — dogfood the real review pipeline on the current branch's committed + uncommitted changes with no GitHub/PR/token (needs only a provider key; see README “Local review”)
 
 ## Architecture
 
@@ -17,6 +18,7 @@ in this repo; `CLAUDE.md` just points here.
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `src/workflow/index.ts`        | GitHub Action entry: parse inputs → `runPrReview`                                                                                    |
 | `src/app/*`                    | Webhook-app entry: auth, clone, queue → `runPrReview`                                                                                |
+| `src/local/*`                  | `npm run review:local` entry: merge-base→worktree git diff → `PrFile[]` → `runPrReview` dry-run; zero GitHub                         |
 | `src/shared/runner.ts`         | Orchestrator: context assembly → parallel sessions → finding pipeline → post. Keep it THIN.                                          |
 | `src/shared/prompt.ts`         | ALL prompt text + pure assembly functions. No prompt strings anywhere else.                                                          |
 | `src/shared/opencode.ts`       | opencode server lifecycle, sessions, response parsing (strict + repair)                                                              |
@@ -58,12 +60,19 @@ in this repo; `CLAUDE.md` just points here.
    `ADDRESSED_MARKER` in `github.ts` are how prior runs recognize their own
    output; every posting path must include them (use the shared body
    builder).
-7. **Three-dot diff only** (`base...head`): GitHub patches — which anchors
-   are validated against — are merge-base-relative.
+7. **Three-dot diff only** (`base...head`) on GitHub-posting paths: GitHub
+   patches — which anchors are validated against — are merge-base-relative.
+   Local mode (`src/local/*`) is the one sanctioned exception: it diffs
+   merge-base→**working tree** (two-dot `git diff <merge-base>`) to include
+   uncommitted changes, but keeps the merge-base as the left side and never
+   posts, so anchor validity is unaffected.
 8. **Read-only enforced in three layers** for every opencode session: the
    `plan` agent, config-level `permission.edit/external_directory: deny`,
-   and per-prompt `tools: { write/edit/patch: false }`. The review must
+   and per-prompt `tools: { write/edit/patch: false }`. The sessions must
    never mutate the workspace; bash stays allowed for git diff/log/grep.
+   Scope is the model sessions — the local driver's opt-in, gitignored
+   `.jbot-review/last-run.md` report is post-review output, not a session
+   write.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal.
 10. **Extract pure logic for tests.** New decision logic goes in a pure
