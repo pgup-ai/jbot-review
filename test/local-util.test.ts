@@ -42,6 +42,35 @@ describe('loadDotEnv', () => {
     assert.equal(loadDotEnv('/nonexistent/.env', env), false);
     assert.deepEqual(env, {});
   });
+
+  it('strips inline comments per dotenv/shell rules (whitespace before #)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-env-'));
+    const path = join(dir, '.env');
+    try {
+      writeFileSync(
+        path,
+        [
+          // The exact stash-the-old-model pattern that surfaced this.
+          'MODEL=kilo/stepfun/step-3.7-flash:free #opencode/deepseek-v4-flash-free',
+          'ANCHOR=a#b',
+          'QUOTED_HASH="keep # this" # drop this',
+          "SINGLE_TRAIL='v' # drop",
+          'EMPTY= # nothing before the comment',
+          "UNTERMINATED='abc",
+        ].join('\n'),
+      );
+      const env: NodeJS.ProcessEnv = {};
+      loadDotEnv(path, env);
+      assert.equal(env.MODEL, 'kilo/stepfun/step-3.7-flash:free');
+      assert.equal(env.ANCHOR, 'a#b'); // no whitespace → not a comment
+      assert.equal(env.QUOTED_HASH, 'keep # this'); // quotes protect the #
+      assert.equal(env.SINGLE_TRAIL, 'v');
+      assert.equal(env.EMPTY, '');
+      assert.equal(env.UNTERMINATED, "'abc"); // unterminated quote kept raw
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('parseOwnerRepo', () => {

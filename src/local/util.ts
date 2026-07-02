@@ -4,7 +4,8 @@ import type { ReviewResult } from '../shared/types.ts';
 
 /**
  * Minimal `.env` loader for the local entry only (production entries stay
- * env-driven; no dotenv dependency). Real environment always wins. Returns
+ * env-driven; no dotenv dependency). Real environment always wins. Value
+ * semantics follow dotenv/shell-sourcing — see `parseEnvValue`. Returns
  * whether a file was loaded.
  */
 export function loadDotEnv(path = '.env', env: NodeJS.ProcessEnv = process.env): boolean {
@@ -17,17 +18,31 @@ export function loadDotEnv(path = '.env', env: NodeJS.ProcessEnv = process.env):
     const eq = line.indexOf('=');
     if (eq <= 0) continue;
     const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    if (
-      value.length >= 2 &&
-      ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'")))
-    ) {
-      value = value.slice(1, -1);
-    }
-    env[key] ??= value;
+    env[key] ??= parseEnvValue(line.slice(eq + 1));
   }
   return true;
+}
+
+/**
+ * dotenv/shell-sourcing value semantics: a quoted value runs to its closing
+ * quote (protecting any `#` inside; anything after the close — e.g. an inline
+ * comment — is ignored), and in an unquoted value a `#` preceded by
+ * whitespace starts an inline comment, so `MODEL=kilo/x #stashed/alternative`
+ * resolves to `kilo/x` while `a#b` stays intact. Wrap the value in quotes
+ * when it legitimately contains ` #`.
+ */
+function parseEnvValue(raw: string): string {
+  const value = raw.trim();
+  const first = value[0];
+  if (first === '"' || first === "'") {
+    const close = value.indexOf(first, 1);
+    // Unterminated quote: keep the raw value rather than guessing.
+    return close > 0 ? value.slice(1, close) : value;
+  }
+  // `KEY= # comment` — nothing before the comment means an empty value.
+  if (value.startsWith('#')) return '';
+  const comment = value.search(/\s#/);
+  return comment >= 0 ? value.slice(0, comment).trimEnd() : value;
 }
 
 /** owner/repo from a git remote URL (https or ssh); null when it doesn't look like one. */
