@@ -23,6 +23,22 @@ describe('selectReviewPlaybookIds', () => {
     assert.ok(ids.includes('contract-api'));
   });
 
+  it('selects contract review for schema-definition files', () => {
+    for (const file of ['src/graphql/schema.graphql', 'proto/service.proto', 'events/user.avsc']) {
+      assert.ok(selectReviewPlaybookIds([file]).includes('contract-api'), `missed: ${file}`);
+    }
+  });
+
+  it('does not treat schema-keyword code files as schema definitions', () => {
+    for (const file of ['src/protocol.ts', 'lib/prototype.ts', 'src/graphql-utils.ts']) {
+      assert.deepEqual(
+        selectReviewPlaybookIds([file]),
+        ['code-review-core'],
+        `false positive: ${file}`,
+      );
+    }
+  });
+
   it('selects persistence/data review for database and repository changes', () => {
     const ids = selectReviewPlaybookIds([
       'apps/core-ledger/src/orders/orders.repository.ts',
@@ -187,6 +203,11 @@ describe('buildReviewPlaybookBlock', () => {
 
     assert.ok(Buffer.byteLength(block, 'utf8') <= 800);
     assert.match(block, /contract-api, backend-data, frontend-workflow, external-integration/);
+  });
+
+  it('names keyboard/focus states in the frontend workflow checks', () => {
+    const block = buildReviewPlaybookBlock(['frontend-workflow']);
+    assert.match(block, /keyboard\/focus/);
   });
 
   it('renders the infra-ops playbook when infra files change', () => {

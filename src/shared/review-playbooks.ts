@@ -24,6 +24,7 @@ const CONTRACT_API_PATTERNS = [
   /(^|\/)(package\.json|README\.md|AGENTS\.md|REVIEW\.md|TECHNICAL_STANDARDS\.md|ARCHITECTURE\.md)$/i,
   /(^|\/)\.env[^/]*$/i,
   /\.(ya?ml|json|toml|env|md|mdx)$/i,
+  /\.(graphql|gql|proto|avsc|thrift)$/i,
 ];
 
 const BACKEND_DATA_PATTERNS = [

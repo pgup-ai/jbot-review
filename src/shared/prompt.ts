@@ -455,7 +455,7 @@ const FRONTEND_WORKFLOW: ReviewPlaybook = {
   title: 'Frontend/workflow review',
   triggers: ['React, UI component, route, frontend state, form, or client workflow changes'],
   checks: [
-    'Check loading, error, empty, disabled, permission-denied, and retry states for each changed workflow.',
+    'Check loading, error, empty, disabled, permission-denied, retry, and keyboard/focus states for each changed workflow.',
     'Verify React hook dependencies, stale closures, async cancellation, optimistic updates, and derived state consistency.',
     'Look for lost user input, double-submit paths, stale data after mutations, and controls enabled before prerequisites are ready.',
   ],
