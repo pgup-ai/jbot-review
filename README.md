@@ -119,6 +119,13 @@ jobs:
           thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
 ```
 
+The minimal version reviews every push. The full example also supports
+**one-off reviews** — comment `/jbot [--provider=<id>] [--model=<id>]` on a PR
+(repo owners/members/collaborators only) to re-run the review once with
+overrides, e.g. a stronger model as a final sign-off. Semantics — fallbacks,
+fork policy, `workflow_dispatch` parity — are documented in
+[`pgup-ai/jbot-review-action`](https://github.com/pgup-ai/jbot-review-action#one-off-reviews-jbot).
+
 **Step 2 — Add provider API keys as secrets.** In the repo: Settings → Secrets
 and variables → Actions → New repository secret. Add the keys for the providers
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
