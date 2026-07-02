@@ -543,6 +543,8 @@ reviews stay deterministic and bounded.
 - `frontend-workflow` is selected for React/UI/client workflow changes.
 - `external-integration` is selected for SDK/API clients, webhooks, auth,
   GitHub Actions, workflow, package, and provider/version changes.
+- `infra-ops` is selected for IaC, container, Kubernetes/Helm, and
+  deployment-config changes.
 
 The playbooks narrow attention, not scope: every selected reviewer still covers
 the complete PR diff and must report only concrete, code-grounded findings.
