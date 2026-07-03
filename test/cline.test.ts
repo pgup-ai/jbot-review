@@ -6,7 +6,7 @@ import { describe, it } from 'node:test';
 
 import {
   buildClineCliArgs,
-  buildClinePromptArg,
+  buildClinePromptInput,
   CLINE_STRIPPED_ENV_KEYS,
   clineEnvForHome,
   clineProvidersPath,
@@ -53,13 +53,13 @@ describe('Cline CLI provider helpers', () => {
     ]);
   });
 
-  it('prepends the no-tools directive to the prompt arg (avoids read-only stall)', () => {
-    const arg = buildClinePromptArg('REVIEW BODY');
+  it('prepends the no-tools directive to the stdin prompt input', () => {
+    const input = buildClinePromptInput('REVIEW BODY');
     // Load-bearing override phrases: cline must not attempt tool calls it cannot approve.
-    assert.match(arg, /Use no tools for this review/);
-    assert.match(arg, /running the git diff command/);
+    assert.match(input, /Use no tools for this review/);
+    assert.match(input, /running the git diff command/);
     // The full review prompt is preserved verbatim after the directive.
-    assert.ok(arg.endsWith('\n\nREVIEW BODY'));
+    assert.ok(input.endsWith('\n\nREVIEW BODY'));
   });
 
   it('never auto-approves tools or enables yolo (invariant #8)', () => {
