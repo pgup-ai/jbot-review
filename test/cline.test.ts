@@ -5,8 +5,10 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
+  assertClinePromptInputWithinBudget,
   buildClineCliArgs,
-  buildClinePromptArg,
+  buildClinePromptInput,
+  CLINE_MAX_STDIN_PROMPT_BYTES,
   CLINE_STRIPPED_ENV_KEYS,
   clineEnvForHome,
   clineProvidersPath,
@@ -53,13 +55,24 @@ describe('Cline CLI provider helpers', () => {
     ]);
   });
 
-  it('prepends the no-tools directive to the prompt arg (avoids read-only stall)', () => {
-    const arg = buildClinePromptArg('REVIEW BODY');
+  it('prepends the no-tools directive to the stdin prompt input', () => {
+    const input = buildClinePromptInput('REVIEW BODY');
     // Load-bearing override phrases: cline must not attempt tool calls it cannot approve.
-    assert.match(arg, /Use no tools for this review/);
-    assert.match(arg, /running the git diff command/);
+    assert.match(input, /Use no tools for this review/);
+    assert.match(input, /running the git diff command/);
     // The full review prompt is preserved verbatim after the directive.
-    assert.ok(arg.endsWith('\n\nREVIEW BODY'));
+    assert.ok(input.endsWith('\n\nREVIEW BODY'));
+  });
+
+  it('guards stdin prompt input with a clear backend cap', () => {
+    assert.doesNotThrow(() =>
+      assertClinePromptInputWithinBudget('review', 'x'.repeat(CLINE_MAX_STDIN_PROMPT_BYTES)),
+    );
+    assert.throws(
+      () =>
+        assertClinePromptInputWithinBudget('review', 'x'.repeat(CLINE_MAX_STDIN_PROMPT_BYTES + 1)),
+      /cline review prompt is \d+ bytes, over the \d+-byte stdin prompt limit/,
+    );
   });
 
   it('never auto-approves tools or enables yolo (invariant #8)', () => {
