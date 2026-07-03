@@ -392,6 +392,33 @@ describe('buildReviewContext', () => {
     assert.doesNotMatch(context, /git diff/);
     assert.doesNotMatch(context, /Base:/);
   });
+
+  it('bounds an oversized PR description at the byte budget and discloses the truncation', () => {
+    const context = buildReviewContext({
+      ...baseParams,
+      pullBody: `${'x'.repeat(8000)}TAIL_SENTINEL`,
+    });
+
+    assert.match(
+      context,
+      /\[PR description truncated after \d+ bytes to keep the review prompt bounded\.\]/,
+    );
+    assert.doesNotMatch(context, /TAIL_SENTINEL/);
+  });
+
+  it('keeps a small PR description intact without a truncation notice', () => {
+    const context = buildReviewContext({ ...baseParams, pullBody: 'Fixes the retry backoff.' });
+
+    assert.match(context, /Fixes the retry backoff\./);
+    assert.doesNotMatch(context, /PR description truncated/);
+  });
+
+  it('truncates the PR description on a UTF-8 boundary, never mid-character', () => {
+    const context = buildReviewContext({ ...baseParams, pullBody: '€'.repeat(3000) });
+
+    assert.match(context, /PR description truncated/);
+    assert.ok(!context.includes('�'), 'truncation split a multi-byte character');
+  });
 });
 
 describe('discoverGuidelineDocs', () => {

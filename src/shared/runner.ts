@@ -118,6 +118,7 @@ import {
   formatFinderGuidelines,
   formatDiffScope,
   formatContextBudget,
+  truncatePrBody,
   type ReviewCommit,
 } from './review-context.ts';
 import { planReviewFanout, planIncrementalLenses } from './fanout.ts';
@@ -1009,7 +1010,7 @@ export async function runPrReview(params: {
     coreContext = [
       '## Pull request',
       pullTitle && `Title: ${pullTitle}`,
-      pullBody && `Description: ${pullBody}`,
+      pullBody && `Description: ${truncatePrBody(pullBody)}`,
       formatDiffScope(diffScope),
       `Changed files: ${changedFiles.join(', ')}`,
       summaryScopeBlock,
