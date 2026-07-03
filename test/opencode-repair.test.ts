@@ -7,6 +7,8 @@ import {
   extractPromptTokenUsage,
   formatTokenUsage,
   parsePortEnv,
+  runAddressedPriorCommentsCheck,
+  runGuidelineComplianceCheck,
   runReview,
 } from '../src/shared/opencode.ts';
 import type { OpencodeClient } from '@opencode-ai/sdk';
@@ -164,6 +166,66 @@ describe('runReview JSON repair loop', () => {
       /unparseable JSON/,
     );
     assert.equal(prompts.length, 2);
+  });
+});
+
+const VALID_ADDRESSED = JSON.stringify({
+  summary: '',
+  findings: [],
+  addressedPriorComments: [{ id: 'PRRT_abc', addressedByCommit: 'abc1234' }],
+});
+
+describe('runGuidelineComplianceCheck JSON repair loop', () => {
+  it('repairs a malformed compliance response with one same-session re-prompt', async () => {
+    const { client, prompts } = makeFakeClient(['prose, not json', VALID_REVIEW]);
+
+    const findings = await runGuidelineComplianceCheck(
+      client,
+      'prov/model',
+      'CTX',
+      'guides',
+      noLog,
+    );
+
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /could not be parsed as JSON/);
+    assert.equal(findings.length, 1);
+  });
+
+  it('fails open to zero findings when the repair response is also unparseable', async () => {
+    const { client, prompts } = makeFakeClient(['prose one', 'prose two']);
+
+    const findings = await runGuidelineComplianceCheck(
+      client,
+      'prov/model',
+      'CTX',
+      'guides',
+      noLog,
+    );
+
+    assert.equal(prompts.length, 2, 'exactly one repair attempt before failing open');
+    assert.deepEqual(findings, []);
+  });
+});
+
+describe('runAddressedPriorCommentsCheck JSON repair loop', () => {
+  it('repairs a malformed addressed-check response with one same-session re-prompt', async () => {
+    const { client, prompts } = makeFakeClient(['prose, not json', VALID_ADDRESSED]);
+
+    const addressed = await runAddressedPriorCommentsCheck(client, 'prov/model', 'CTX', noLog);
+
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /could not be parsed as JSON/);
+    assert.deepEqual(addressed, [{ id: 'PRRT_abc', addressedByCommit: 'abc1234' }]);
+  });
+
+  it('does not send a repair prompt when the response parses', async () => {
+    const { client, prompts } = makeFakeClient([VALID_ADDRESSED]);
+
+    const addressed = await runAddressedPriorCommentsCheck(client, 'prov/model', 'CTX', noLog);
+
+    assert.equal(prompts.length, 1);
+    assert.equal(addressed.length, 1);
   });
 });
 

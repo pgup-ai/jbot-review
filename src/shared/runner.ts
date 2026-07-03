@@ -1739,7 +1739,10 @@ function normalizeOptions(options: ReviewRunOptions | undefined): NormalizedRevi
     promptCache: options?.promptCache ?? true,
     skipDocOnly: options?.skipDocOnly ?? true,
     dynamicFanout: options?.dynamicFanout ?? true,
-    maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 0, 0),
+    // Capped by default: throttled tiers serialize upstream anyway, and an
+    // uncapped burst turns session deadlines into queue-time measurements
+    // (see the flash-tier note in opencode.ts). Explicit 0 = unlimited.
+    maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 4, 0),
     opencodePort: Math.max(options?.opencodePort ?? 0, 0),
     onReviewResult: options?.onReviewResult,
   };

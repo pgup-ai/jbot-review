@@ -291,7 +291,7 @@ async function main(): Promise<void> {
       modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'medium' }),
       promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),
       skipDocOnly: parseEnvBoolean('JBOT_SKIP_DOC_ONLY', true),
-      maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 0),
+      maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 4),
       ...(opencodePort ? { opencodePort } : {}),
       onReviewResult: (result) => {
         reviewResult = result;

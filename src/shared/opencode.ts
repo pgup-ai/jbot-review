@@ -490,20 +490,43 @@ export async function runReview(
   try {
     return parseReview(raw, label, log, { strict: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
-    const repaired = await promptPlanAgentInSession(
+    const repaired = await repromptForJson(
       client,
       model,
       sessionID,
-      buildJsonRepairPrompt(message),
-      `${label}-repair`,
+      error,
+      label,
       log,
       options.timeoutMs,
       options.onTokenUsage,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
+}
+
+/** One same-session JSON repair re-prompt, shared by the main and auxiliary sessions. */
+async function repromptForJson(
+  client: OpencodeClient,
+  model: string,
+  sessionID: string,
+  parseError: unknown,
+  label: string,
+  log: (msg: string) => void,
+  timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
+): Promise<string> {
+  const message = parseError instanceof Error ? parseError.message : String(parseError);
+  log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
+  return promptPlanAgentInSession(
+    client,
+    model,
+    sessionID,
+    buildJsonRepairPrompt(message),
+    `${label}-repair`,
+    log,
+    timeoutMs,
+    onTokenUsage,
+  );
 }
 
 export async function runAddressedPriorCommentsCheck(
@@ -515,7 +538,7 @@ export async function runAddressedPriorCommentsCheck(
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<AddressedPriorComment[]> {
   const prompt = assembleAddressedPriorCommentsPrompt(prContext);
-  const { raw } = await promptPlanAgent(
+  const { raw, sessionID } = await promptPlanAgent(
     client,
     model,
     prompt,
@@ -524,7 +547,23 @@ export async function runAddressedPriorCommentsCheck(
     timeoutMs,
     onTokenUsage,
   );
-  return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
+  try {
+    return parseReview(raw, 'addressed-prior-comments', log, { strict: true })
+      .addressedPriorComments;
+  } catch (error) {
+    const repaired = await repromptForJson(
+      client,
+      model,
+      sessionID,
+      error,
+      'addressed-prior-comments',
+      log,
+      timeoutMs,
+      onTokenUsage,
+    );
+    // Still best-effort after the one repair: unparseable falls back to none.
+    return parseReview(repaired, 'addressed-prior-comments-repair', log).addressedPriorComments;
+  }
 }
 
 export async function runGuidelineComplianceCheck(
@@ -537,7 +576,7 @@ export async function runGuidelineComplianceCheck(
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<Finding[]> {
   const prompt = assembleGuidelineCompliancePrompt(prContext, guidelines);
-  const { raw } = await promptPlanAgent(
+  const { raw, sessionID } = await promptPlanAgent(
     client,
     model,
     prompt,
@@ -546,7 +585,22 @@ export async function runGuidelineComplianceCheck(
     timeoutMs,
     onTokenUsage,
   );
-  return parseReview(raw, 'guideline-compliance', log).findings;
+  try {
+    return parseReview(raw, 'guideline-compliance', log, { strict: true }).findings;
+  } catch (error) {
+    const repaired = await repromptForJson(
+      client,
+      model,
+      sessionID,
+      error,
+      'guideline-compliance',
+      log,
+      timeoutMs,
+      onTokenUsage,
+    );
+    // Still best-effort after the one repair: unparseable falls back to none.
+    return parseReview(repaired, 'guideline-compliance-repair', log).findings;
+  }
 }
 
 export async function runChangesSinceLastReview(
@@ -916,7 +970,8 @@ const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3',
 /**
  * Defensively parses the agent's JSON. Main review output is strict so we
  * don't post a misleading "good to go" review when the reviewer response is
- * malformed; auxiliary checks stay best-effort. Exported for direct test coverage.
+ * malformed; auxiliary checks send one repair prompt, then stay best-effort.
+ * Exported for direct test coverage.
  */
 export function parseReview(
   raw: string,
