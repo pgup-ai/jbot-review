@@ -5,8 +5,10 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
+  assertClinePromptInputWithinBudget,
   buildClineCliArgs,
   buildClinePromptInput,
+  CLINE_MAX_STDIN_PROMPT_BYTES,
   CLINE_STRIPPED_ENV_KEYS,
   clineEnvForHome,
   clineProvidersPath,
@@ -60,6 +62,17 @@ describe('Cline CLI provider helpers', () => {
     assert.match(input, /running the git diff command/);
     // The full review prompt is preserved verbatim after the directive.
     assert.ok(input.endsWith('\n\nREVIEW BODY'));
+  });
+
+  it('guards stdin prompt input with a clear backend cap', () => {
+    assert.doesNotThrow(() =>
+      assertClinePromptInputWithinBudget('review', 'x'.repeat(CLINE_MAX_STDIN_PROMPT_BYTES)),
+    );
+    assert.throws(
+      () =>
+        assertClinePromptInputWithinBudget('review', 'x'.repeat(CLINE_MAX_STDIN_PROMPT_BYTES + 1)),
+      /cline review prompt is \d+ bytes, over the \d+-byte stdin prompt limit/,
+    );
   });
 
   it('never auto-approves tools or enables yolo (invariant #8)', () => {

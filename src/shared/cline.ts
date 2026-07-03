@@ -30,6 +30,7 @@ const CLINE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 // Keep Cline sessions bounded and focused on the diff. The prompt itself is delivered
 // through stdin, so large review prompts do not hit Linux's single-argv limit.
 const CLINE_GUIDELINE_BUDGET_BYTES = 24 * 1024;
+export const CLINE_MAX_STDIN_PROMPT_BYTES = 512 * 1024;
 
 export const CLINE_PROVIDER_ID = 'cline';
 /** Cline subscription billing mode; same backend as `cline`, different `--provider`. */
@@ -121,6 +122,15 @@ export function buildClineCliArgs(input: ClineCliArgsInput): string[] {
  * git/grep steps) prepended so the model reviews the embedded context, not stalls. */
 export function buildClinePromptInput(prompt: string): string {
   return `${NO_TOOLS_REVIEW_DIRECTIVE}\n\n${prompt}`;
+}
+
+export function assertClinePromptInputWithinBudget(label: string, prompt: string): void {
+  const promptBytes = Buffer.byteLength(prompt, 'utf8');
+  if (promptBytes > CLINE_MAX_STDIN_PROMPT_BYTES) {
+    throw new Error(
+      `cline ${label} prompt is ${promptBytes} bytes, over the ${CLINE_MAX_STDIN_PROMPT_BYTES}-byte stdin prompt limit`,
+    );
+  }
 }
 
 // Provider api-key envs Cline could read above the carried providers.json; stripped so an
@@ -344,6 +354,7 @@ async function runClinePrompt(
   timeoutMs = CLINE_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
   const fullPrompt = buildClinePromptInput(prompt);
+  assertClinePromptInputWithinBudget(label, fullPrompt);
   const dir = mkdtempSync(join(tmpdir(), 'jbot-cline-'));
   log(`Calling ${label} prompt (agent=cline-cli, model=${model})`);
   try {
