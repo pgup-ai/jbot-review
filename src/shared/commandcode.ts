@@ -95,6 +95,7 @@ export async function runCommandCodeReview(
   log: (msg: string) => void,
   options: {
     lensAddendum?: string;
+    evidenceQuotes?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
@@ -103,7 +104,12 @@ export async function runCommandCodeReview(
 ): Promise<ReviewResult> {
   void options.onTokenUsage;
   const label = options.label ?? 'review';
-  const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
+  const prompt = assembleReviewPrompt(
+    prContext,
+    guidelines,
+    options.lensAddendum ?? '',
+    options.evidenceQuotes ?? false,
+  );
   log(
     `Prompt assembled (${label}, commandcode): ${prompt.length} chars, guidelines=${!!guidelines}`,
   );

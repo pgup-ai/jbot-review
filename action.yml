@@ -166,6 +166,10 @@ inputs:
     description: 'Emit per-finding disposition + per-session telemetry to .jbot-review/telemetry.jsonl (default true). Near-zero overhead: in-memory tagging plus one post-review write. Set false to disable.'
     required: false
     default: 'true'
+  evidence-quotes:
+    description: 'Ask each finding to carry a verbatim quote of the changed line it flags (default true). Grounds finding verification and lets a would-be-orphaned finding be re-anchored. Set false to keep the pre-F12 prompt.'
+    required: false
+    default: 'true'
   fail-on-error:
     description: 'Fail the workflow when the review cannot complete.'
     required: false
@@ -217,4 +221,5 @@ runs:
     INPUT_SKIP-DOC-ONLY: ${{ inputs.skip-doc-only }}
     INPUT_MAX-CONCURRENT-SESSIONS: ${{ inputs.max-concurrent-sessions }}
     INPUT_REVIEW-TELEMETRY: ${{ inputs.review-telemetry }}
+    INPUT_EVIDENCE-QUOTES: ${{ inputs.evidence-quotes }}
     INPUT_FAIL-ON-ERROR: ${{ inputs.fail-on-error }}

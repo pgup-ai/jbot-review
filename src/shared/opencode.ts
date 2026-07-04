@@ -469,13 +469,19 @@ export async function runReview(
   log: (msg: string) => void,
   options: {
     lensAddendum?: string;
+    evidenceQuotes?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
-  const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
+  const prompt = assembleReviewPrompt(
+    prContext,
+    guidelines,
+    options.lensAddendum ?? '',
+    options.evidenceQuotes ?? false,
+  );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
 
   const { raw, sessionID } = await promptPlanAgent(
@@ -667,17 +673,11 @@ export async function runFindingVerification(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<FindingVerdict[] | undefined> {
-  const prompt = assembleFindingVerificationPrompt(
-    prContext,
-    findings.map((finding) => ({
-      path: finding.path,
-      line: finding.line,
-      severity: finding.severity,
-      title: finding.title,
-      body: finding.body,
-    })),
-    true,
-  );
+  // Pass findings straight through: Finding is a structural VerifiableFinding,
+  // so the formatter reads what it needs and ignores the rest. Do NOT project to
+  // a field subset here — an earlier projection dropped `evidence`, silently
+  // defeating F12 verifier grounding on this (primary) backend.
+  const prompt = assembleFindingVerificationPrompt(prContext, findings, true);
   // Single-shot: exploration tools off, so the verifier judges from the embedded
   // diff in one model call instead of an agentic git/grep loop.
   const { raw } = await promptPlanAgent(
@@ -993,6 +993,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
+// F12: accepted from any backend (optional), capped so a runaway quote can't
+// bloat the finding. Parsing it is always safe; the prompt only asks for it
+// when evidenceQuotes is on.
+const EVIDENCE_MAX_CHARS = 200;
 
 /**
  * Defensively parses the agent's JSON. Main review output is strict so we
@@ -1056,6 +1060,9 @@ export function parseReview(
             : undefined,
         title: f.title,
         body: f.body,
+        ...(typeof f.evidence === 'string' && f.evidence.trim()
+          ? { evidence: f.evidence.trim().slice(0, EVIDENCE_MAX_CHARS) }
+          : {}),
       });
     }
   }

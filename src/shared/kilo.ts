@@ -195,6 +195,7 @@ export async function runKiloReview(
   log: (msg: string) => void,
   options: {
     lensAddendum?: string;
+    evidenceQuotes?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
@@ -203,7 +204,12 @@ export async function runKiloReview(
 ): Promise<ReviewResult> {
   void options.onTokenUsage; // kilo --format json usage not wired; mirror the other CLI backends.
   const label = options.label ?? 'review';
-  const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
+  const prompt = assembleReviewPrompt(
+    prContext,
+    guidelines,
+    options.lensAddendum ?? '',
+    options.evidenceQuotes ?? false,
+  );
   log(`Prompt assembled (${label}, kilo): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const raw = await runKiloPrompt(
     workspace,

@@ -156,6 +156,41 @@ describe('parseReview line anchors', () => {
   });
 });
 
+describe('parseReview evidence field (F12)', () => {
+  function rawWithEvidence(evidence: unknown): string {
+    return JSON.stringify({
+      summary: 'ok',
+      findings: [{ path: 'src/a.ts', line: 3, severity: 'P2', title: 'T', body: 'B', evidence }],
+    });
+  }
+
+  it('keeps a verbatim evidence quote when present', () => {
+    const result = parseReview(rawWithEvidence('const total = subtotal;'), 'test', noLog);
+    assert.equal(result.findings[0].evidence, 'const total = subtotal;');
+  });
+
+  it('leaves evidence undefined when absent (backward compatible)', () => {
+    const raw = JSON.stringify({
+      summary: 'ok',
+      findings: [{ path: 'src/a.ts', line: 3, severity: 'P2', title: 'T', body: 'B' }],
+    });
+    assert.equal(parseReview(raw, 'test', noLog).findings[0].evidence, undefined);
+  });
+
+  it('truncates an oversized evidence quote to the cap', () => {
+    const result = parseReview(rawWithEvidence('x'.repeat(500)), 'test', noLog);
+    assert.equal(result.findings[0].evidence?.length, 200);
+  });
+
+  it('ignores a blank or non-string evidence value', () => {
+    assert.equal(
+      parseReview(rawWithEvidence('   '), 'test', noLog).findings[0].evidence,
+      undefined,
+    );
+    assert.equal(parseReview(rawWithEvidence(42), 'test', noLog).findings[0].evidence, undefined);
+  });
+});
+
 describe('parseFindingVerdicts', () => {
   it('parses valid verdicts keyed by finding index', () => {
     const raw = JSON.stringify({

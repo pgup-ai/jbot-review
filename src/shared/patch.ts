@@ -6,9 +6,8 @@
  */
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
-export function parseAddedLines(patch: string | undefined): Set<number> {
-  const added = new Set<number>();
-  if (!patch) return added;
+/** Walks a patch, yielding each ADDED line's new-side number and content (sans '+'). */
+function* addedLines(patch: string): Generator<{ line: number; content: string }> {
   let newLine = 0;
   let insideHunk = false;
   for (const raw of patch.split('\n')) {
@@ -21,7 +20,7 @@ export function parseAddedLines(patch: string | undefined): Set<number> {
     if (!insideHunk) continue;
     const marker = raw[0];
     if (marker === '+') {
-      added.add(newLine);
+      yield { line: newLine, content: raw.slice(1) };
       newLine += 1;
     } else if (marker === '-') {
       // Removed line: present only on the old side.
@@ -31,5 +30,30 @@ export function parseAddedLines(patch: string | undefined): Set<number> {
       newLine += 1;
     }
   }
+}
+
+export function parseAddedLines(patch: string | undefined): Set<number> {
+  const added = new Set<number>();
+  if (patch) for (const { line } of addedLines(patch)) added.add(line);
   return added;
+}
+
+/**
+ * F12 orphan rescue: when a finding's anchor line is not a valid added line but
+ * it carries a verbatim `evidence` quote, locate the added line that contains
+ * the quote and return its new-side number. Returns undefined unless EXACTLY one
+ * added line matches, so an absent or ambiguous quote leaves the finding
+ * orphaned rather than re-anchoring it to the wrong line.
+ */
+export function rescueAnchorByEvidence(
+  patch: string | undefined,
+  evidence: string,
+): number | undefined {
+  const needle = evidence.trim();
+  if (!patch || !needle) return undefined;
+  const matches: number[] = [];
+  for (const { line, content } of addedLines(patch)) {
+    if (content.trim().includes(needle)) matches.push(line);
+  }
+  return matches.length === 1 ? matches[0] : undefined;
 }

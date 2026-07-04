@@ -29,7 +29,7 @@ import {
 } from './diff-context.ts';
 import { resolvePromptCachePolicy } from './config.ts';
 import { parseModelName } from './model.ts';
-import { parseAddedLines } from './patch.ts';
+import { parseAddedLines, rescueAnchorByEvidence } from './patch.ts';
 import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
@@ -173,6 +173,7 @@ interface ReviewBackend {
       label?: string;
       timeoutMs?: number;
       onTokenUsage?: TokenUsageRecorder;
+      evidenceQuotes?: boolean;
     },
   ): Promise<ReviewResult>;
   runAddressedPriorCommentsCheck(
@@ -730,6 +731,13 @@ export interface ReviewRunOptions {
    */
   reviewTelemetry?: boolean;
   /**
+   * Ask each finding to carry a verbatim `evidence` quote of the changed line
+   * it hangs on (F12). Default true — small cost (a short quote per finding),
+   * grounds the verifier, and lets a would-be-orphaned finding be re-anchored.
+   * Off keeps the prompt byte-identical to the pre-F12 review.
+   */
+  evidenceQuotes?: boolean;
+  /**
    * Fires when a review completes (dry-run OR a real post) with the final filtered
    * findings + summary. Used by the dry-run harness and by the worker (to forward
    * per-severity counts to the control plane). Not a GitHub Action input.
@@ -888,9 +896,11 @@ export async function runPrReview(params: {
   log(`Reviewable files: ${files.length} (noise filtered: ${rawFiles.length - files.length})`);
 
   const addable = new Map<string, Set<number>>();
+  const patchByPath = new Map<string, string>();
   const changedFiles: string[] = [];
   for (const f of files) {
     addable.set(f.filename, parseAddedLines(f.patch));
+    if (f.patch) patchByPath.set(f.filename, f.patch);
     changedFiles.push(f.filename);
   }
 
@@ -1469,6 +1479,7 @@ export async function runPrReview(params: {
         guidelinesForPrompt,
         lensKeys: incrementalLenses.lensKeys,
         timeoutMs: finderTimeoutMs,
+        evidenceQuotes: options.evidenceQuotes,
         log,
         onTokenUsage: recordTokenUsage,
       }),
@@ -1496,6 +1507,7 @@ export async function runPrReview(params: {
       disableContext7: opencodeRuntime
         ? () => disableContext7Mcp(opencodeRuntime!.client, log)
         : undefined,
+      evidenceQuotes: options.evidenceQuotes,
       log,
       onTokenUsage: recordTokenUsage,
     });
@@ -1579,12 +1591,30 @@ export async function runPrReview(params: {
     const inline: Finding[] = [];
     const fileLevel: Finding[] = [];
     const orphaned: Finding[] = [];
+    const rescued: Finding[] = [];
     for (const f of filteredFindings) {
       if (f.line === 0 && headSha && addable.has(f.path)) fileLevel.push(f);
       else if (addable.get(f.path)?.has(f.line)) inline.push(f);
-      else orphaned.push(f);
+      else {
+        // F12 orphan rescue: a would-be-orphaned finding with an evidence quote
+        // gets re-anchored to the unique added line that contains the quote.
+        // Inert without evidence, so it does nothing when evidenceQuotes is off.
+        const rescuedLine = f.evidence
+          ? rescueAnchorByEvidence(patchByPath.get(f.path), f.evidence)
+          : undefined;
+        if (rescuedLine !== undefined && addable.get(f.path)?.has(rescuedLine)) {
+          const reanchored = { ...f, line: rescuedLine };
+          inline.push(reanchored);
+          rescued.push(reanchored);
+        } else {
+          orphaned.push(f);
+        }
+      }
     }
-    telemetry.route({ inline, fileLevel, orphaned, rescued: [] });
+    if (rescued.length > 0) {
+      log(`Rescued ${rescued.length} orphaned finding(s) by re-anchoring to their evidence quote.`);
+    }
+    telemetry.route({ inline, fileLevel, orphaned, rescued });
     const verdict = decideVerdict(filteredFindings);
 
     // Report the final filtered findings + summary on EVERY completed review (dry-run or
@@ -1792,6 +1822,7 @@ export function normalizeOptions(
     maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 3, 0),
     opencodePort: Math.max(options?.opencodePort ?? 0, 0),
     reviewTelemetry: options?.reviewTelemetry ?? true,
+    evidenceQuotes: options?.evidenceQuotes ?? true,
     onReviewResult: options?.onReviewResult,
   };
 }
@@ -1905,6 +1936,7 @@ function startLensPasses(params: {
   guidelinesForPrompt: string;
   lensKeys: string[];
   timeoutMs?: number;
+  evidenceQuotes?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
 }): Promise<Finding[][]> {
@@ -1920,6 +1952,7 @@ function startLensPasses(params: {
           label: `review-${key}`,
           timeoutMs: params.timeoutMs,
           onTokenUsage: params.onTokenUsage,
+          evidenceQuotes: params.evidenceQuotes,
         })
         .then((result) => {
           params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
@@ -2161,6 +2194,7 @@ async function runShardedReview(params: {
   context7Active: boolean;
   context7ApiKey: string;
   disableContext7?: () => Promise<void>;
+  evidenceQuotes?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
 }): Promise<{ summary: string; findings: Finding[] }> {
@@ -2182,6 +2216,7 @@ async function runShardedReview(params: {
           label: plan.label,
           timeoutMs,
           onTokenUsage: params.onTokenUsage,
+          evidenceQuotes: params.evidenceQuotes,
         });
         return { plan, result };
       } catch (error) {
@@ -2216,6 +2251,7 @@ async function runShardedReview(params: {
               label: `${plan.label}-retry`,
               timeoutMs: retryTimeoutMs,
               onTokenUsage: params.onTokenUsage,
+              evidenceQuotes: params.evidenceQuotes,
             },
           );
           return { plan, result };
