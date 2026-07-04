@@ -113,18 +113,25 @@ export interface BuildReviewContextParams {
 
 // PR descriptions are author-controlled and unbounded upstream; cap them like
 // every other injected block (invariant #4).
-const MAX_PR_BODY_BYTES = 4 * 1024;
+export const MAX_PR_BODY_BYTES = 4 * 1024;
+
+const prBodyTruncationNotice = (bytes: number): string =>
+  `\n\n[PR description truncated after ${bytes} bytes to keep the review prompt bounded.]`;
 
 /** Shared by the enhanced (buildReviewContext) and basic (runner) PR-context paths. */
 export function truncatePrBody(body: string): string {
   const buffer = Buffer.from(body, 'utf8');
   if (buffer.length <= MAX_PR_BODY_BYTES) return body;
-  const includedBytes = findUtf8Boundary(buffer, MAX_PR_BODY_BYTES);
-  return [
-    buffer.toString('utf8', 0, includedBytes),
+  // Reserve room for the notice BEFORE slicing so body + notice stays within
+  // the hard cap (invariant #4). Size the reserve with MAX_PR_BODY_BYTES as the
+  // byte count: its digit width is >= the actual (smaller) includedBytes, so
+  // the real notice can only be shorter than what we reserved.
+  const reservedBytes = Buffer.byteLength(prBodyTruncationNotice(MAX_PR_BODY_BYTES), 'utf8');
+  const contentBudget = Math.max(0, MAX_PR_BODY_BYTES - reservedBytes);
+  const includedBytes = findUtf8Boundary(buffer, contentBudget);
+  return [buffer.toString('utf8', 0, includedBytes), prBodyTruncationNotice(includedBytes)].join(
     '',
-    `[PR description truncated after ${includedBytes} bytes to keep the review prompt bounded.]`,
-  ].join('\n');
+  );
 }
 
 export function buildReviewContext(params: BuildReviewContextParams): string {

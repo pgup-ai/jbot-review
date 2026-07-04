@@ -12,7 +12,9 @@ import {
   formatDiffScope,
   formatFinderGuidelines,
   formatGuidelines,
+  truncatePrBody,
   MAX_FINDER_GUIDELINE_BYTES,
+  MAX_PR_BODY_BYTES,
 } from '../src/shared/review-context.ts';
 
 describe('formatContextBudget', () => {
@@ -411,6 +413,17 @@ describe('buildReviewContext', () => {
 
     assert.match(context, /Fixes the retry backoff\./);
     assert.doesNotMatch(context, /PR description truncated/);
+  });
+
+  it('keeps the truncated output within the byte budget INCLUDING the disclosure notice', () => {
+    // The cap is a hard budget (invariant #4): body slice + appended notice
+    // together must not exceed it, or the "bounded" block still bloats.
+    const out = truncatePrBody('x'.repeat(8000));
+    assert.ok(
+      Buffer.byteLength(out, 'utf8') <= MAX_PR_BODY_BYTES,
+      `truncated body ${Buffer.byteLength(out, 'utf8')} bytes exceeds the ${MAX_PR_BODY_BYTES} cap`,
+    );
+    assert.match(out, /PR description truncated/);
   });
 
   it('truncates the PR description on a UTF-8 boundary, never mid-character', () => {
