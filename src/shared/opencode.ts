@@ -55,6 +55,31 @@ export interface ProviderKeyConfig {
   promptCache?: boolean;
 }
 
+type ProviderEntry = NonNullable<NonNullable<ServerOptions['config']>['provider']>[string];
+
+/**
+ * One provider entry: the API key, an optional prompt-cache toggle, and (for the
+ * main model) any per-model reasoning options. Every provider is Models.dev-known,
+ * so opencode already has its base URL and model catalog.
+ */
+function buildProviderEntry(params: {
+  apiKey: string;
+  promptCache: boolean;
+  modelID: string;
+  modelOptions?: Record<string, unknown>;
+}): ProviderEntry {
+  const { apiKey, promptCache, modelID, modelOptions } = params;
+  const hasModelOptions = Boolean(modelOptions && Object.keys(modelOptions).length > 0);
+  const options = {
+    apiKey,
+    ...(promptCache ? { setCacheKey: true } : {}),
+  };
+  return {
+    options,
+    ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
+  };
+}
+
 /**
  * Builds the opencode config object that embeds the API key for the selected
  * provider, plus any secondary providers needed by aux-model sessions. This is
@@ -81,31 +106,6 @@ export interface ProviderKeyConfig {
  * providers that reject unknown option keys, so it must not send the key at
  * all. Exported for unit testing (pure).
  */
-type ProviderEntry = NonNullable<NonNullable<ServerOptions['config']>['provider']>[string];
-
-/**
- * One provider entry: the API key, an optional prompt-cache toggle, and (for the
- * main model) any per-model reasoning options. Every provider is Models.dev-known,
- * so opencode already has its base URL and model catalog.
- */
-function buildProviderEntry(params: {
-  apiKey: string;
-  promptCache: boolean;
-  modelID: string;
-  modelOptions?: Record<string, unknown>;
-}): ProviderEntry {
-  const { apiKey, promptCache, modelID, modelOptions } = params;
-  const hasModelOptions = Boolean(modelOptions && Object.keys(modelOptions).length > 0);
-  const options = {
-    apiKey,
-    ...(promptCache ? { setCacheKey: true } : {}),
-  };
-  return {
-    options,
-    ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
-  };
-}
-
 export function buildConfig(
   providerID: string,
   modelID: string,
@@ -127,7 +127,8 @@ export function buildConfig(
     providerConfig[providerKey.providerID] = buildProviderEntry({
       apiKey: providerKey.apiKey,
       promptCache: providerKey.promptCache ?? promptCache,
-      // Aux modelID/options aren't threaded here.
+      // modelOptions is main-model-only (see above); an aux entry carries just
+      // the key + its already-resolved promptCache boolean.
       modelID: '',
     });
   }
