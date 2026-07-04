@@ -1236,9 +1236,11 @@ export async function runPrReview(params: {
             ? promptCachePolicy.auxProviderPromptCache
             : promptCachePolicy.providerPromptCache,
           port: options.opencodePort > 0 ? options.opencodePort : undefined,
-          // Custom providers (not in Models.dev, e.g. mimo) ship their full
-          // definition — base URL, model catalog, auth header — to opencode.
-          customProvider: mainCliBackend ? undefined : PROVIDERS[opencodeProviderID]?.custom,
+          // Ship a custom provider's full definition (base URL, model catalog)
+          // to opencode. opencodeProviderID is the AUX provider when the main
+          // backend is a CLI, so key off the provider opencode actually runs —
+          // gating on mainCliBackend would drop a custom aux provider (mimo).
+          customProvider: PROVIDERS[opencodeProviderID]?.custom,
           additionalProviderKeys:
             !mainCliBackend && !auxCliBackend && auxProviderID !== providerID
               ? [
