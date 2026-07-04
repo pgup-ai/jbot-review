@@ -100,12 +100,11 @@ without losing behavior, it should not have been written.
   or "flexibility" nobody asked for.
 - **No defensive cruft.** No null checks for values a caller already guards, no
   `catch` that only rethrows, no fallbacks for states that cannot occur.
-  Validate once at the trust boundary and let real bugs throw. The one
-  sanctioned exception is auxiliary-session fail-open (invariant #3) — that is
-  required, not cruft.
+  Validate once at the trust boundary and let real bugs throw. (The required
+  auxiliary-session fail-open — see the Invariants — is the one exception, not
+  cruft.)
 - **Reuse before adding.** Search for an existing helper before writing one;
-  extend it rather than fork a parallel copy. New decision logic goes in a pure
-  module (invariant #10), not inlined into `runner.ts`.
+  extend it rather than fork a parallel copy.
 - **Match the surrounding code** — its density, naming, and idiom. No ceremony,
   no names spelled longer than their neighbours.
 
