@@ -77,6 +77,8 @@ async function main(): Promise<void> {
     promptCache: parseBooleanInput('prompt-cache', true),
     skipDocOnly: parseBooleanInput('skip-doc-only', true),
     maxConcurrentSessions: parseNumberInput('max-concurrent-sessions', 3),
+    reviewTelemetry: parseBooleanInput('review-telemetry', true),
+    evidenceQuotes: parseBooleanInput('evidence-quotes', true),
   };
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${model}`);

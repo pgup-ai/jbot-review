@@ -199,6 +199,8 @@ jobs:
           prompt-cache: ${{ vars.JBOT_PROMPT_CACHE || 'true' }}
           skip-doc-only: ${{ vars.JBOT_SKIP_DOC_ONLY || 'true' }}
           max-concurrent-sessions: ${{ vars.JBOT_MAX_CONCURRENT_SESSIONS || '0' }}
+          review-telemetry: ${{ vars.JBOT_REVIEW_TELEMETRY || 'true' }}
+          evidence-quotes: ${{ vars.JBOT_EVIDENCE_QUOTES || 'true' }}
           enable-context7: ${{ inputs['enable-context7'] || 'auto' }}
           fail-on-error: ${{ inputs['fail-on-error'] || 'true' }}
           opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
@@ -220,3 +222,13 @@ jobs:
           context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
+      - name: Upload review telemetry
+        if: always()
+        # Telemetry is fail-open end to end: an upload error must not fail the review job.
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: jbot-review-telemetry
+          path: .jbot-review/telemetry.jsonl
+          if-no-files-found: ignore
+          retention-days: 14

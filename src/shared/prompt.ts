@@ -316,6 +316,16 @@ allowed only inside JSON string values; escape newlines inside string values
 as \\n. Do not write a session recap, completion note, question, or "what would
 you like next" message.`;
 
+// evidenceQuotes addendum, appended before the output reminder (invariant #5:
+// reminder stays last); absent when the flag is off so that prompt is unchanged.
+export const EVIDENCE_INSTRUCTION = `## Evidence field
+
+For each finding, ALSO include an "evidence" field alongside the others: a short
+verbatim quote (at most 200 characters) copied EXACTLY from the changed line your
+finding is about — the same characters as in the diff, no paraphrase. It anchors
+the finding to a real added line. If you cannot quote a specific changed line,
+the finding likely lacks a concrete trigger; reconsider whether it belongs.`;
+
 // Prepended for prompt-bound backends (cline) whose read-only mode denies every tool
 // call: without it they stall asking to run the git/grep steps the base prompt assumes.
 export const NO_TOOLS_REVIEW_DIRECTIVE = `## Tool use disabled
@@ -736,6 +746,7 @@ export function assembleReviewPrompt(
   prContext: string,
   guidelines: string,
   lensAddendum = '',
+  evidenceQuotes = false,
 ): string {
   const parts = [REVIEW_PROMPT];
   if (guidelines) {
@@ -743,6 +754,7 @@ export function assembleReviewPrompt(
   }
   parts.push(prContext);
   if (lensAddendum) parts.push(lensAddendum);
+  if (evidenceQuotes) parts.push(EVIDENCE_INSTRUCTION);
   parts.push(REVIEW_OUTPUT_REMINDER);
   return parts.join('\n\n');
 }
@@ -1023,6 +1035,8 @@ export interface VerifiableFinding {
   severity: string;
   title: string;
   body: string;
+  /** F12: the verbatim line the finding hangs on, when the model quoted one. */
+  evidence?: string;
 }
 
 /**
@@ -1040,6 +1054,9 @@ export function formatFindingsForVerification(findings: VerifiableFinding[]): st
         `Severity: ${finding.severity}`,
         `Title: ${finding.title}`,
         `Claim: ${finding.body}`,
+        // The finding's load-bearing premise: no such line in the diff → the
+        // claim rests on code that isn't there.
+        ...(finding.evidence ? [`Cited line: ${finding.evidence}`] : []),
       ].join('\n'),
     );
   });

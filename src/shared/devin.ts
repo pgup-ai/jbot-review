@@ -180,13 +180,19 @@ export async function runDevinReview(
   log: (msg: string) => void,
   options: {
     lensAddendum?: string;
+    evidenceQuotes?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
-  const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
+  const prompt = assembleReviewPrompt(
+    prContext,
+    guidelines,
+    options.lensAddendum ?? '',
+    options.evidenceQuotes ?? false,
+  );
   log(`Prompt assembled (${label}, devin): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const raw = await runDevinPrompt(
     workspace,
@@ -375,7 +381,7 @@ function recordDevinAtifUsage(
       return;
     }
     log(`${label} devin ${formatDevinUsage(parsed.usage)} records=${parsed.records}`);
-    onTokenUsage(parsed.usage, parsed.model ?? fallbackModel);
+    onTokenUsage(parsed.usage, parsed.model ?? fallbackModel, label);
   } catch (error) {
     log(
       `${label} devin usage unavailable: ${error instanceof Error ? error.message : String(error)}`,

@@ -19,6 +19,10 @@ export interface Finding {
   confidence?: FindingConfidence;
   title: string;
   body: string;
+  /** Verbatim quote of the changed line the finding hangs on (evidenceQuotes); grounds the verifier and enables orphan re-anchoring. Models may omit it. */
+  evidence?: string;
+  /** Stable per-run id for disposition tracing (reviewTelemetry); absent when telemetry is off, never posted. */
+  id?: string;
 }
 
 export interface AddressedPriorComment {

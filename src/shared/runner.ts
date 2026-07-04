@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import {
   SEVERITY_RANK,
   applyFindingVerdicts,
+  anchorFindings,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
@@ -16,6 +17,7 @@ import {
   shouldPostReviewComment,
   suppressPreviouslyReported,
 } from './filter.ts';
+import { createTelemetryRecorder, type TelemetryRecorder } from './telemetry.ts';
 import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
@@ -172,6 +174,7 @@ interface ReviewBackend {
       label?: string;
       timeoutMs?: number;
       onTokenUsage?: TokenUsageRecorder;
+      evidenceQuotes?: boolean;
     },
   ): Promise<ReviewResult>;
   runAddressedPriorCommentsCheck(
@@ -721,6 +724,14 @@ export interface ReviewRunOptions {
    * this to run isolated snapshots concurrently.
    */
   opencodePort?: number;
+  /** Emit per-finding disposition + per-session telemetry. Default true; off is fully inert. */
+  reviewTelemetry?: boolean;
+  /**
+   * Ask each finding for a verbatim `evidence` quote of the flagged line:
+   * grounds verification and enables orphan re-anchoring. Default true; off
+   * keeps the prompt byte-identical to the pre-evidence review.
+   */
+  evidenceQuotes?: boolean;
   /**
    * Fires when a review completes (dry-run OR a real post) with the final filtered
    * findings + summary. Used by the dry-run harness and by the worker (to forward
@@ -730,6 +741,8 @@ export interface ReviewRunOptions {
     summary: string;
     findings: Finding[];
     addressedPriorComments: AddressedPriorComment[];
+    /** JSONL telemetry (finding + session rows); present when reviewTelemetry is on. */
+    telemetry?: string;
   }) => void;
 }
 
@@ -835,8 +848,19 @@ export async function runPrReview(params: {
     );
   }
   const tokenUsage = createReviewTokenUsageAccumulator();
-  const recordTokenUsage: TokenUsageRecorder = (usage, usageModel) =>
+  const telemetry = createTelemetryRecorder(options.reviewTelemetry);
+  const recordTokenUsage: TokenUsageRecorder = (usage, usageModel, label) => {
     tokenUsage.add(usage, usageModel);
+    telemetry.recordSession({
+      session: label ?? usageModel,
+      model: usageModel,
+      inputTokens: usage.input,
+      outputTokens: usage.output,
+      reasoningTokens: usage.reasoning,
+      cacheReadTokens: usage.cacheRead,
+      ...(isFiniteNumber(usage.costUsd) ? { costUsd: usage.costUsd } : {}),
+    });
+  };
 
   // Local checkouts are owned by the invoking user — dubious-ownership can't
   // trigger — so never touch the developer's global gitconfig from local mode.
@@ -865,9 +889,11 @@ export async function runPrReview(params: {
   log(`Reviewable files: ${files.length} (noise filtered: ${rawFiles.length - files.length})`);
 
   const addable = new Map<string, Set<number>>();
+  const patchByPath = new Map<string, string>();
   const changedFiles: string[] = [];
   for (const f of files) {
     addable.set(f.filename, parseAddedLines(f.patch));
+    if (f.patch) patchByPath.set(f.filename, f.patch);
     changedFiles.push(f.filename);
   }
 
@@ -1446,6 +1472,7 @@ export async function runPrReview(params: {
         guidelinesForPrompt,
         lensKeys: incrementalLenses.lensKeys,
         timeoutMs: finderTimeoutMs,
+        evidenceQuotes: options.evidenceQuotes,
         log,
         onTokenUsage: recordTokenUsage,
       }),
@@ -1473,6 +1500,7 @@ export async function runPrReview(params: {
       disableContext7: opencodeRuntime
         ? () => disableContext7Mcp(opencodeRuntime!.client, log)
         : undefined,
+      evidenceQuotes: options.evidenceQuotes,
       log,
       onTokenUsage: recordTokenUsage,
     });
@@ -1499,8 +1527,19 @@ export async function runPrReview(params: {
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
     // dropping a stronger compliance finding at the same location.
-    const gatedLists = [findings, ...lensFindingLists, complianceFindings].map(
-      demoteLowConfidenceBlockingFindings,
+    // Tag findings with telemetry ids per source session; a disabled recorder
+    // returns the lists untouched.
+    const producedLists = [
+      telemetry.produced('main-review', findings),
+      ...lensFindingLists.map((list, i) =>
+        telemetry.produced(`review-${incrementalLenses.lensKeys[i]}`, list),
+      ),
+      telemetry.produced('guideline-compliance', complianceFindings),
+    ];
+    const gatedLists = producedLists.map(demoteLowConfidenceBlockingFindings);
+    telemetry.snapshot(
+      'gated',
+      gatedLists.flatMap((gated) => gated.findings),
     );
     const demotedCount = gatedLists.reduce((sum, gated) => sum + gated.demotedCount, 0);
     if (demotedCount > 0) {
@@ -1509,6 +1548,7 @@ export async function runPrReview(params: {
     // Main review first: on equal-strength path:line collisions its richer
     // general context wins over lens and compliance findings.
     const combinedFindings = dedupeFindings(...gatedLists.map((gated) => gated.findings));
+    telemetry.snapshot('deduped', combinedFindings);
     const dedupeDropped =
       gatedLists.reduce((sum, gated) => sum + gated.findings.length, 0) - combinedFindings.length;
     if (dedupeDropped > 0) {
@@ -1517,6 +1557,7 @@ export async function runPrReview(params: {
     // Full-diff re-review means repeats are possible by design; this is the
     // in-code backstop that drops findings prior jbot threads already cover.
     const suppression = suppressPreviouslyReported(combinedFindings, priorJbotThreads);
+    telemetry.snapshot('suppressed', suppression.findings);
     if (suppression.suppressedCount > 0) {
       log(
         `Suppressed ${suppression.suppressedCount} finding(s) already covered by prior jbot-review threads.`,
@@ -1532,29 +1573,36 @@ export async function runPrReview(params: {
       log,
       onTokenUsage: recordTokenUsage,
     });
+    telemetry.snapshot('verified', verifiedFindings);
     const filteredFindings = filterFindings(verifiedFindings, options);
+    telemetry.snapshot('filtered', filteredFindings);
     log(
       `Review complete: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
-    const inline: Finding[] = [];
-    const fileLevel: Finding[] = [];
-    const orphaned: Finding[] = [];
-    for (const f of filteredFindings) {
-      if (f.line === 0 && headSha && addable.has(f.path)) fileLevel.push(f);
-      else if (addable.get(f.path)?.has(f.line)) inline.push(f);
-      else orphaned.push(f);
+    const { inline, fileLevel, orphaned, rescued } = anchorFindings(
+      filteredFindings,
+      addable,
+      patchByPath,
+      !!headSha,
+      options.evidenceQuotes,
+    );
+    if (rescued.length > 0) {
+      log(`Rescued ${rescued.length} orphaned finding(s) by re-anchoring to their evidence quote.`);
     }
+    telemetry.route({ inline, fileLevel, orphaned, rescued });
     const verdict = decideVerdict(filteredFindings);
 
     // Report the final filtered findings + summary on EVERY completed review (dry-run or
     // real post), so a caller can forward per-severity counts (the worker → check-run gate).
     // Isolated: this is a side-channel hook and must not abort the actual review post below.
+    emitReviewTelemetry(telemetry, workspace, log);
     try {
       options.onReviewResult?.({
         summary,
         findings: filteredFindings,
         addressedPriorComments: verifiedAddressedPriorComments,
+        ...(telemetry.enabled ? { telemetry: telemetry.toJsonl() } : {}),
       });
     } catch (err) {
       log(`onReviewResult hook threw (ignored): ${String(err)}`);
@@ -1749,8 +1797,37 @@ export function normalizeOptions(
     // cap; explicit 0 = unlimited.
     maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 3, 0),
     opencodePort: Math.max(options?.opencodePort ?? 0, 0),
+    reviewTelemetry: options?.reviewTelemetry ?? true,
+    evidenceQuotes: options?.evidenceQuotes ?? true,
     onReviewResult: options?.onReviewResult,
   };
+}
+
+/**
+ * Post-review telemetry sink: disposition summary log line + JSONL under
+ * `.jbot-review/` (CI uploads it). Fail-open; no-op when disabled.
+ */
+export function emitReviewTelemetry(
+  telemetry: TelemetryRecorder,
+  workspace: string,
+  log: (msg: string) => void,
+): void {
+  if (!telemetry.enabled) return;
+  const rows = telemetry.findingRows();
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(row.disposition, (counts.get(row.disposition) ?? 0) + 1);
+  const breakdown = [...counts.entries()]
+    .map(([disposition, n]) => `${n} ${disposition}`)
+    .join(', ');
+  log(`Telemetry: ${rows.length} finding(s) produced${breakdown ? ` (${breakdown})` : ''}.`);
+  try {
+    const dir = join(workspace, '.jbot-review');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'telemetry.jsonl'), `${telemetry.toJsonl()}\n`);
+    log('Telemetry written to .jbot-review/telemetry.jsonl');
+  } catch (err) {
+    log(`(telemetry write skipped: ${err instanceof Error ? err.message : String(err)})`);
+  }
 }
 
 const providerModelListCache = new Map<string, string[]>();
@@ -1834,6 +1911,7 @@ function startLensPasses(params: {
   guidelinesForPrompt: string;
   lensKeys: string[];
   timeoutMs?: number;
+  evidenceQuotes?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
 }): Promise<Finding[][]> {
@@ -1849,6 +1927,7 @@ function startLensPasses(params: {
           label: `review-${key}`,
           timeoutMs: params.timeoutMs,
           onTokenUsage: params.onTokenUsage,
+          evidenceQuotes: params.evidenceQuotes,
         })
         .then((result) => {
           params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
@@ -2090,6 +2169,7 @@ async function runShardedReview(params: {
   context7Active: boolean;
   context7ApiKey: string;
   disableContext7?: () => Promise<void>;
+  evidenceQuotes?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
 }): Promise<{ summary: string; findings: Finding[] }> {
@@ -2111,6 +2191,7 @@ async function runShardedReview(params: {
           label: plan.label,
           timeoutMs,
           onTokenUsage: params.onTokenUsage,
+          evidenceQuotes: params.evidenceQuotes,
         });
         return { plan, result };
       } catch (error) {
@@ -2145,6 +2226,7 @@ async function runShardedReview(params: {
               label: `${plan.label}-retry`,
               timeoutMs: retryTimeoutMs,
               onTokenUsage: params.onTokenUsage,
+              evidenceQuotes: params.evidenceQuotes,
             },
           );
           return { plan, result };

@@ -128,6 +128,7 @@ export async function runCodexReview(
   log: (msg: string) => void,
   options: {
     lensAddendum?: string;
+    evidenceQuotes?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
@@ -137,7 +138,12 @@ export async function runCodexReview(
   // Codex exec output carries no token usage; mirror CommandCode/Cursor and skip it.
   void options.onTokenUsage;
   const label = options.label ?? 'review';
-  const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
+  const prompt = assembleReviewPrompt(
+    prContext,
+    guidelines,
+    options.lensAddendum ?? '',
+    options.evidenceQuotes ?? false,
+  );
   log(`Prompt assembled (${label}, codex): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const raw = await runCodexPrompt(
     workspace,

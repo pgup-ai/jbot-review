@@ -136,7 +136,7 @@ export interface PromptTokenUsage {
   acuCost?: number;
 }
 
-export type TokenUsageRecorder = (usage: PromptTokenUsage, model: string) => void;
+export type TokenUsageRecorder = (usage: PromptTokenUsage, model: string, label?: string) => void;
 
 export function extractPromptTokenUsage(info: TokenUsageInfo): PromptTokenUsage | undefined {
   const tokens = info.tokens;
@@ -469,13 +469,19 @@ export async function runReview(
   log: (msg: string) => void,
   options: {
     lensAddendum?: string;
+    evidenceQuotes?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
-  const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
+  const prompt = assembleReviewPrompt(
+    prContext,
+    guidelines,
+    options.lensAddendum ?? '',
+    options.evidenceQuotes ?? false,
+  );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
 
   const { raw, sessionID } = await promptPlanAgent(
@@ -667,17 +673,10 @@ export async function runFindingVerification(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<FindingVerdict[] | undefined> {
-  const prompt = assembleFindingVerificationPrompt(
-    prContext,
-    findings.map((finding) => ({
-      path: finding.path,
-      line: finding.line,
-      severity: finding.severity,
-      title: finding.title,
-      body: finding.body,
-    })),
-    true,
-  );
+  // Pass findings through unprojected: Finding is structurally a VerifiableFinding.
+  // An earlier field-subset projection here silently dropped `evidence` and
+  // defeated verifier grounding on this (primary) backend — don't reintroduce one.
+  const prompt = assembleFindingVerificationPrompt(prContext, findings, true);
   // Single-shot: exploration tools off, so the verifier judges from the embedded
   // diff in one model call instead of an agentic git/grep loop.
   const { raw } = await promptPlanAgent(
@@ -833,7 +832,7 @@ async function promptInSessionHoldingSlot(
   );
   log(`${label} ${formatTokenUsage(data.info)}`);
   const usage = extractPromptTokenUsage(data.info);
-  if (usage) onTokenUsage?.(usage, model);
+  if (usage) onTokenUsage?.(usage, model, label);
 
   const textParts = parts.filter((p) => p.type === 'text' && p.text);
   // No text part (e.g. the model exhausted its budget on reasoning) must
@@ -993,6 +992,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
+// Evidence quotes parse from any backend regardless of the prompt flag; the cap
+// defends against runaway quotes.
+const EVIDENCE_MAX_CHARS = 200;
 
 /**
  * Defensively parses the agent's JSON. Main review output is strict so we
@@ -1056,6 +1058,9 @@ export function parseReview(
             : undefined,
         title: f.title,
         body: f.body,
+        ...(typeof f.evidence === 'string' && f.evidence.trim()
+          ? { evidence: f.evidence.trim().slice(0, EVIDENCE_MAX_CHARS) }
+          : {}),
       });
     }
   }

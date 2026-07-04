@@ -131,6 +131,7 @@ export async function runCursorReview(
   log: (msg: string) => void,
   options: {
     lensAddendum?: string;
+    evidenceQuotes?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
@@ -140,7 +141,12 @@ export async function runCursorReview(
   // Cursor's text output carries no token usage; mirror CommandCode and skip it.
   void options.onTokenUsage;
   const label = options.label ?? 'review';
-  const prompt = assembleReviewPrompt(prContext, guidelines, options.lensAddendum ?? '');
+  const prompt = assembleReviewPrompt(
+    prContext,
+    guidelines,
+    options.lensAddendum ?? '',
+    options.evidenceQuotes ?? false,
+  );
   log(`Prompt assembled (${label}, cursor): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const raw = await runCursorPrompt(
     workspace,

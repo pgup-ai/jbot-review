@@ -1,3 +1,4 @@
+import { rescueAnchorByEvidence } from './patch.ts';
 import type { Finding, FindingConfidence, FindingVerdict, Severity } from './types.ts';
 
 /** Drops noise files (lockfiles, generated, minified) before the agent sees them. */
@@ -256,6 +257,51 @@ export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
     return finding;
   });
   return { findings: result, demotedCount };
+}
+
+export interface AnchoredFindings {
+  /** Postable at a specific added line. */
+  inline: Finding[];
+  /** Line 0 on a changed file — a file-level comment. */
+  fileLevel: Finding[];
+  /** Anchor not in the diff; rendered in the review body's outside-the-diff section. */
+  orphaned: Finding[];
+  /** A subset of `inline`: findings re-anchored from an orphan via their evidence quote. */
+  rescued: Finding[];
+}
+
+/**
+ * Splits final findings by where their anchor lands in the diff. A would-be
+ * orphan whose evidence quote uniquely matches an added line is re-anchored to
+ * it IN PLACE (so the review body, telemetry, and posting agree on the line);
+ * that only runs when `evidenceQuotes` is on, so the opt-out is fully inert.
+ */
+export function anchorFindings(
+  findings: Finding[],
+  addable: Map<string, Set<number>>,
+  patchByPath: Map<string, string>,
+  hasHeadSha: boolean,
+  evidenceQuotes: boolean,
+): AnchoredFindings {
+  const result: AnchoredFindings = { inline: [], fileLevel: [], orphaned: [], rescued: [] };
+  for (const f of findings) {
+    if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
+    else if (addable.get(f.path)?.has(f.line)) result.inline.push(f);
+    else {
+      const line =
+        evidenceQuotes && f.evidence
+          ? rescueAnchorByEvidence(patchByPath.get(f.path), f.evidence)
+          : undefined;
+      if (line !== undefined) {
+        f.line = line;
+        result.inline.push(f);
+        result.rescued.push(f);
+      } else {
+        result.orphaned.push(f);
+      }
+    }
+  }
+  return result;
 }
 
 /**

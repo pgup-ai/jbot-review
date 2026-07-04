@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { parseAddedLines } from '../src/shared/patch.ts';
+import { parseAddedLines, rescueAnchorByEvidence } from '../src/shared/patch.ts';
 
 describe('parseAddedLines', () => {
   it('collects added new-side lines across hunks', () => {
@@ -61,5 +61,56 @@ describe('parseAddedLines', () => {
       '\\ No newline at end of file',
     ].join('\n');
     assert.deepEqual(parseAddedLines(patch), new Set([2]));
+  });
+});
+
+describe('rescueAnchorByEvidence (F12 orphan rescue)', () => {
+  const patch = [
+    '@@ -1,3 +1,5 @@',
+    ' function refund(order) {',
+    '-  return order.subtotal;',
+    '+  return order.subtotal; // BUG: pre-tax',
+    '+  const tax = order.tax;',
+    ' }',
+  ].join('\n');
+
+  it('re-anchors to the added line whose trimmed content starts with the quote', () => {
+    // Model quoted the added line verbatim (whitespace-trimmed); rescue finds its new-side number.
+    assert.equal(rescueAnchorByEvidence(patch, 'return order.subtotal; // BUG: pre-tax'), 2);
+    assert.equal(rescueAnchorByEvidence(patch, 'const tax = order.tax;'), 3);
+  });
+
+  it('re-anchors a long line quoted to a truncated prefix', () => {
+    // On a line longer than the evidence cap the model can only quote its
+    // start; a prefix match still finds it (a plain equality check would not).
+    const long = 'const result = compute(alpha, beta, gamma, delta, epsilon, zeta, eta);';
+    const p = ['@@ -1,0 +1,1 @@', `+  ${long}`].join('\n');
+    assert.equal(rescueAnchorByEvidence(p, 'const result = compute(alpha, beta'), 1);
+  });
+
+  it('does not rescue when the quote is absent from any added line', () => {
+    assert.equal(rescueAnchorByEvidence(patch, 'order.total'), undefined);
+  });
+
+  it('does not re-anchor on a mid-line substring — a partial quote must not mis-anchor', () => {
+    // These appear inside a unique added line but are not its start; matching
+    // them would post the comment on the wrong (unrelated) place.
+    assert.equal(rescueAnchorByEvidence(patch, 'order.subtotal; // BUG: pre-tax'), undefined);
+    assert.equal(rescueAnchorByEvidence(patch, 'order.tax;'), undefined);
+  });
+
+  it('does not rescue an ambiguous quote that matches multiple added lines', () => {
+    const dup = ['@@ -1,0 +1,2 @@', '+  x = 1;', '+  x = 1;'].join('\n');
+    assert.equal(rescueAnchorByEvidence(dup, 'x = 1;'), undefined);
+  });
+
+  it('ignores a blank quote or missing patch', () => {
+    assert.equal(rescueAnchorByEvidence(patch, '   '), undefined);
+    assert.equal(rescueAnchorByEvidence(undefined, 'anything'), undefined);
+  });
+
+  it('only matches added lines, never context or removed lines', () => {
+    // "function refund" is a context line and "order.subtotal;" (bare) is removed.
+    assert.equal(rescueAnchorByEvidence(patch, 'function refund(order) {'), undefined);
   });
 });

@@ -111,6 +111,8 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),
           skipDocOnly: parseEnvBoolean('JBOT_SKIP_DOC_ONLY', true),
           maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),
+          reviewTelemetry: parseEnvBoolean('JBOT_REVIEW_TELEMETRY', true),
+          evidenceQuotes: parseEnvBoolean('JBOT_EVIDENCE_QUOTES', true),
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });

@@ -373,6 +373,20 @@ describe('assembleFindingVerificationPrompt', () => {
     assert.match(block, /Location: src\/b\.ts\n/);
   });
 
+  it('cites the evidence quote to the verifier when a finding carries one, and omits it otherwise', () => {
+    const block = formatFindingsForVerification([
+      { path: 'a.ts', line: 1, severity: 'P1', title: 'T', body: 'B', evidence: 'return x - tax;' },
+      { path: 'b.ts', line: 2, severity: 'P2', title: 'T2', body: 'B2' },
+    ]);
+
+    assert.match(block, /Cited line: return x - tax;/);
+    assert.equal(
+      block.match(/Cited line:/g)?.length,
+      1,
+      'only the finding with evidence cites a line',
+    );
+  });
+
   it('defaults to the agentic prompt that reads the actual code', () => {
     assert.match(assembleFindingVerificationPrompt('CTX', findings), /read\s+the actual code/);
   });
@@ -406,6 +420,24 @@ describe('assembleReviewPrompt', () => {
     const prompt = assembleReviewPrompt('PR_CONTEXT_SENTINEL', '');
 
     assert.doesNotMatch(prompt, /## Repository review guidelines/);
+  });
+
+  it('omits the evidence instruction by default — byte-identical to the pre-F12 prompt', () => {
+    const withoutFlag = assembleReviewPrompt('PR', 'G', 'LENS');
+    const explicitlyOff = assembleReviewPrompt('PR', 'G', 'LENS', false);
+
+    assert.equal(withoutFlag, explicitlyOff, 'default equals evidenceQuotes=false');
+    assert.doesNotMatch(withoutFlag, /## Evidence field/);
+  });
+
+  it('appends the evidence instruction before the output reminder when enabled', () => {
+    const prompt = assembleReviewPrompt('PR_CONTEXT_SENTINEL', '', 'LENS', true);
+
+    assert.match(prompt, /## Evidence field/);
+    // Evidence instruction sits after the lens but before the reminder (invariant #5).
+    assert.ok(prompt.indexOf('LENS') < prompt.indexOf('## Evidence field'));
+    assert.ok(prompt.indexOf('## Evidence field') < prompt.indexOf('## Final output reminder'));
+    assert.ok(prompt.endsWith(REVIEW_OUTPUT_REMINDER));
   });
 });
 

@@ -199,6 +199,7 @@ export async function runClineReview(
   log: (msg: string) => void,
   options: {
     lensAddendum?: string;
+    evidenceQuotes?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
@@ -213,7 +214,12 @@ export async function runClineReview(
     CLINE_GUIDELINE_BUDGET_BYTES,
     'Guidelines',
   );
-  const prompt = assembleReviewPrompt(prContext, guidelinesForArgv, options.lensAddendum ?? '');
+  const prompt = assembleReviewPrompt(
+    prContext,
+    guidelinesForArgv,
+    options.lensAddendum ?? '',
+    options.evidenceQuotes ?? false,
+  );
   log(`Prompt assembled (${label}, cline): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const raw = await runClinePrompt(
     workspace,
