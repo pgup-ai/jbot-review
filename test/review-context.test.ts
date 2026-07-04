@@ -401,10 +401,7 @@ describe('buildReviewContext', () => {
       pullBody: `${'x'.repeat(8000)}TAIL_SENTINEL`,
     });
 
-    assert.match(
-      context,
-      /\[PR description truncated after \d+ bytes to keep the review prompt bounded\.\]/,
-    );
+    assert.match(context, /\[PR description truncated to keep the review prompt bounded\.\]/);
     assert.doesNotMatch(context, /TAIL_SENTINEL/);
   });
 
