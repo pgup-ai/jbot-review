@@ -76,6 +76,17 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyEnv: 'XAI_API_KEY',
     keyInput: 'xai-api-key',
   },
+  // Xiaomi MiMo Token Plan (Singapore). Models.dev defines this provider —
+  // baseURL, model catalog, and the reasoning-model metadata opencode needs to
+  // drive mimo-v2.5-pro — so it needs only the key, no custom def. Keys are
+  // region-locked: cn/sgp/ams are separate Models.dev providers.
+  // promptCache off: the endpoint is unverified for opencode's promptCacheKey.
+  'xiaomi-token-plan-sgp': {
+    defaultModel: 'xiaomi-token-plan-sgp/mimo-v2.5-pro',
+    keyEnv: 'MIMO_API_KEY',
+    keyInput: 'mimo-api-key',
+    models: { 'mimo-v2.5-pro': { promptCache: false } },
+  },
   'fireworks-ai': {
     defaultModel: 'fireworks-ai/accounts/fireworks/models/deepseek-v4-flash',
     keyEnv: 'FIREWORKS_API_KEY',
