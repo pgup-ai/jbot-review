@@ -551,18 +551,28 @@ export async function runAddressedPriorCommentsCheck(
     return parseReview(raw, 'addressed-prior-comments', log, { strict: true })
       .addressedPriorComments;
   } catch (error) {
-    const repaired = await repromptForJson(
-      client,
-      model,
-      sessionID,
-      error,
-      'addressed-prior-comments',
-      log,
-      timeoutMs,
-      onTokenUsage,
-    );
-    // Still best-effort after the one repair: unparseable falls back to none.
-    return parseReview(repaired, 'addressed-prior-comments-repair', log).addressedPriorComments;
+    try {
+      const repaired = await repromptForJson(
+        client,
+        model,
+        sessionID,
+        error,
+        'addressed-prior-comments',
+        log,
+        timeoutMs,
+        onTokenUsage,
+      );
+      // Still best-effort after the one repair: unparseable falls back to none.
+      return parseReview(repaired, 'addressed-prior-comments-repair', log).addressedPriorComments;
+    } catch (repairError) {
+      // The repair round-trip itself can die (timeout, transport); stay fail-open.
+      log(
+        `(addressed-prior-comments repair failed; keeping empty results: ${
+          repairError instanceof Error ? repairError.message : String(repairError)
+        })`,
+      );
+      return [];
+    }
   }
 }
 
@@ -588,18 +598,28 @@ export async function runGuidelineComplianceCheck(
   try {
     return parseReview(raw, 'guideline-compliance', log, { strict: true }).findings;
   } catch (error) {
-    const repaired = await repromptForJson(
-      client,
-      model,
-      sessionID,
-      error,
-      'guideline-compliance',
-      log,
-      timeoutMs,
-      onTokenUsage,
-    );
-    // Still best-effort after the one repair: unparseable falls back to none.
-    return parseReview(repaired, 'guideline-compliance-repair', log).findings;
+    try {
+      const repaired = await repromptForJson(
+        client,
+        model,
+        sessionID,
+        error,
+        'guideline-compliance',
+        log,
+        timeoutMs,
+        onTokenUsage,
+      );
+      // Still best-effort after the one repair: unparseable falls back to none.
+      return parseReview(repaired, 'guideline-compliance-repair', log).findings;
+    } catch (repairError) {
+      // The repair round-trip itself can die (timeout, transport); stay fail-open.
+      log(
+        `(guideline-compliance repair failed; keeping empty results: ${
+          repairError instanceof Error ? repairError.message : String(repairError)
+        })`,
+      );
+      return [];
+    }
   }
 }
 

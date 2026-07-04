@@ -1715,7 +1715,10 @@ function describeReactionError(error: unknown): string {
 type NormalizedReviewRunOptions = Required<Omit<ReviewRunOptions, 'onReviewResult'>> &
   Pick<ReviewRunOptions, 'onReviewResult'>;
 
-function normalizeOptions(options: ReviewRunOptions | undefined): NormalizedReviewRunOptions {
+/** Exported for defaults tests; runPrReview is the only production caller. */
+export function normalizeOptions(
+  options: ReviewRunOptions | undefined,
+): NormalizedReviewRunOptions {
   // Only the count-rationed lenses scale with passes; the frontend lens is
   // content-triggered and added on top (see selectLensKeys), so it does not
   // raise the useful pass ceiling.

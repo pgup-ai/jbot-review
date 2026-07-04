@@ -34,10 +34,11 @@ interface FakeMessage {
  * Minimal fake of the opencode client surface runReview touches. Each
  * promptAsync call appends the next scripted assistant response, mimicking a
  * session that answers every prompt immediately. A null response scripts a
- * reasoning-only message with no text part.
+ * reasoning-only message with no text part; an Error scripts a transport
+ * failure (the promptAsync call rejects).
  */
 function makeFakeClient(
-  responses: Array<string | string[] | null>,
+  responses: Array<string | string[] | null | Error>,
   tokenUsages: FakeMessage['info']['tokens'][] = [],
 ): {
   client: OpencodeClient;
@@ -55,6 +56,7 @@ function makeFakeClient(
         // must not fall back to '{}'.
         const index = prompts.length - 1;
         const text = index < responses.length ? responses[index] : '{}';
+        if (text instanceof Error) throw text;
         const parts = Array.isArray(text)
           ? text.map((part) => ({ type: 'text' as const, text: part }))
           : text === null
@@ -192,6 +194,21 @@ describe('runGuidelineComplianceCheck JSON repair loop', () => {
     assert.equal(findings.length, 1);
   });
 
+  it('fails open to zero findings when the repair re-prompt itself fails', async () => {
+    const { client, prompts } = makeFakeClient(['prose', new Error('socket hang up')]);
+
+    const findings = await runGuidelineComplianceCheck(
+      client,
+      'prov/model',
+      'CTX',
+      'guides',
+      noLog,
+    );
+
+    assert.equal(prompts.length, 2);
+    assert.deepEqual(findings, [], 'a repair transport failure must not escape the aux check');
+  });
+
   it('fails open to zero findings when the repair response is also unparseable', async () => {
     const { client, prompts } = makeFakeClient(['prose one', 'prose two']);
 
@@ -226,6 +243,24 @@ describe('runAddressedPriorCommentsCheck JSON repair loop', () => {
 
     assert.equal(prompts.length, 1);
     assert.equal(addressed.length, 1);
+  });
+
+  it('fails open to no addressed comments when the repair response is also unparseable', async () => {
+    const { client, prompts } = makeFakeClient(['prose one', 'prose two']);
+
+    const addressed = await runAddressedPriorCommentsCheck(client, 'prov/model', 'CTX', noLog);
+
+    assert.equal(prompts.length, 2, 'exactly one repair attempt before failing open');
+    assert.deepEqual(addressed, []);
+  });
+
+  it('fails open to no addressed comments when the repair re-prompt itself fails', async () => {
+    const { client, prompts } = makeFakeClient(['prose', new Error('socket hang up')]);
+
+    const addressed = await runAddressedPriorCommentsCheck(client, 'prov/model', 'CTX', noLog);
+
+    assert.equal(prompts.length, 2);
+    assert.deepEqual(addressed, [], 'a repair transport failure must not escape the aux check');
   });
 });
 
