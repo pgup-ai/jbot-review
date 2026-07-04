@@ -508,9 +508,11 @@ npm run review:local
 - **Knobs:** the same env knobs as the hosted app apply — `JBOT_REVIEW_PASSES`,
   `JBOT_VERIFY_FINDINGS`, `JBOT_TIME_BUDGET_MINUTES`, `JBOT_REVIEW_SHARDS`,
   `JBOT_DYNAMIC_FANOUT`, `JBOT_MODEL_OPTIONS`, `JBOT_PROMPT_CACHE`,
-  `JBOT_SKIP_DOC_ONLY`, `JBOT_MAX_CONCURRENT_SESSIONS`,
+  `JBOT_SKIP_DOC_ONLY`, `JBOT_MAX_CONCURRENT_SESSIONS`, `JBOT_REVIEW_TELEMETRY`,
   `JBOT_REVIEW_AUX_MODEL` (+ `JBOT_AUX_PROVIDER`). The opencode server uses a
   free ephemeral port automatically; `JBOT_OPENCODE_PORT` pins one instead.
+  `JBOT_REVIEW_TELEMETRY` (default true) writes per-finding dispositions +
+  per-session token rows to the gitignored `.jbot-review/telemetry.jsonl`.
 
 ## Project guidelines
 

@@ -162,6 +162,10 @@ inputs:
     description: 'Max model sessions in flight at once (default 3; 0 = unlimited). Throttled provider tiers serialize concurrent requests on one key upstream; capping on our side keeps session deadlines measuring model time, not queue time. Set 2 on tight free tiers, or 0 for unlimited on paid concurrent tiers.'
     required: false
     default: '3'
+  review-telemetry:
+    description: 'Emit per-finding disposition + per-session telemetry to .jbot-review/telemetry.jsonl (default true). Near-zero overhead: in-memory tagging plus one post-review write. Set false to disable.'
+    required: false
+    default: 'true'
   fail-on-error:
     description: 'Fail the workflow when the review cannot complete.'
     required: false
@@ -212,4 +216,5 @@ runs:
     INPUT_PROMPT-CACHE: ${{ inputs.prompt-cache }}
     INPUT_SKIP-DOC-ONLY: ${{ inputs.skip-doc-only }}
     INPUT_MAX-CONCURRENT-SESSIONS: ${{ inputs.max-concurrent-sessions }}
+    INPUT_REVIEW-TELEMETRY: ${{ inputs.review-telemetry }}
     INPUT_FAIL-ON-ERROR: ${{ inputs.fail-on-error }}

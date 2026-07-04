@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -11,11 +14,13 @@ import {
   computeRetryTimeoutMs,
   computeRunDeadline,
   computeVerificationTimeoutMs,
+  emitReviewTelemetry,
   formatReviewedWith,
   normalizeOptions,
   renderReviewMetadataBlock,
   runPrReview,
 } from '../src/shared/runner.ts';
+import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import type { Octokit } from '../src/shared/github.ts';
 import type { Finding } from '../src/shared/types.ts';
 
@@ -417,6 +422,60 @@ describe('runPrReview local mode (localDiff)', () => {
       runPrReview({ ...base, octokit: fake, options: { dryRun: true }, log: () => {} }),
       (error: unknown) => error === sentinel,
     );
+  });
+});
+
+describe('emitReviewTelemetry sink', () => {
+  const finding: Finding = { path: 'a.ts', line: 1, severity: 'P1', title: 't', body: 'b' };
+
+  it('does nothing when telemetry is disabled', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-tel-off-'));
+    try {
+      const logs: string[] = [];
+      emitReviewTelemetry(createTelemetryRecorder(false), dir, (m) => logs.push(m));
+      assert.equal(logs.length, 0, 'no log line when disabled');
+      assert.throws(() => readFileSync(join(dir, '.jbot-review', 'telemetry.jsonl')));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes a JSONL file and logs a disposition summary when enabled', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-tel-on-'));
+    try {
+      const rec = createTelemetryRecorder(true);
+      const [f] = rec.produced('review', [finding]);
+      for (const stage of ['gated', 'deduped', 'suppressed', 'verified', 'filtered'] as const) {
+        rec.snapshot(stage, [f]);
+      }
+      rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [] });
+
+      const logs: string[] = [];
+      emitReviewTelemetry(rec, dir, (m) => logs.push(m));
+
+      assert.ok(logs.some((l) => /Telemetry: 1 finding\(s\).*posted-inline/.test(l)));
+      const written = readFileSync(join(dir, '.jbot-review', 'telemetry.jsonl'), 'utf8');
+      assert.match(written, /"disposition":"posted-inline"/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails open (logs, does not throw) when the file cannot be written', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-tel-bad-'));
+    try {
+      // Make a workspace path whose parent is a FILE, so mkdir hits ENOTDIR.
+      writeFileSync(join(dir, 'blocker'), 'x');
+      const rec = createTelemetryRecorder(true);
+      rec.produced('review', [finding]);
+      const logs: string[] = [];
+      assert.doesNotThrow(() =>
+        emitReviewTelemetry(rec, join(dir, 'blocker'), (m) => logs.push(m)),
+      );
+      assert.ok(logs.some((l) => /telemetry write skipped/.test(l)));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

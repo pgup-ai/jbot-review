@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -16,6 +16,7 @@ import {
   shouldPostReviewComment,
   suppressPreviouslyReported,
 } from './filter.ts';
+import { createTelemetryRecorder, type TelemetryRecorder } from './telemetry.ts';
 import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
@@ -722,6 +723,13 @@ export interface ReviewRunOptions {
    */
   opencodePort?: number;
   /**
+   * Emit per-finding disposition + per-session telemetry (F3). Default true —
+   * a near-zero-cost measurement layer (in-memory tagging + one post-review
+   * JSONL write). Off assigns no ids, takes no snapshots, and writes nothing,
+   * so the review runs exactly as it does without this feature.
+   */
+  reviewTelemetry?: boolean;
+  /**
    * Fires when a review completes (dry-run OR a real post) with the final filtered
    * findings + summary. Used by the dry-run harness and by the worker (to forward
    * per-severity counts to the control plane). Not a GitHub Action input.
@@ -730,6 +738,8 @@ export interface ReviewRunOptions {
     summary: string;
     findings: Finding[];
     addressedPriorComments: AddressedPriorComment[];
+    /** JSONL telemetry (finding + session rows); present when reviewTelemetry is on. */
+    telemetry?: string;
   }) => void;
 }
 
@@ -835,8 +845,21 @@ export async function runPrReview(params: {
     );
   }
   const tokenUsage = createReviewTokenUsageAccumulator();
-  const recordTokenUsage: TokenUsageRecorder = (usage, usageModel) =>
+  const telemetry = createTelemetryRecorder(options.reviewTelemetry);
+  const recordTokenUsage: TokenUsageRecorder = (usage, usageModel) => {
     tokenUsage.add(usage, usageModel);
+    // Per-session-completion token row (labeled by model — the semantic session
+    // label isn't threaded here). No-op when telemetry is off.
+    telemetry.recordSession({
+      session: usageModel,
+      model: usageModel,
+      inputTokens: usage.input,
+      outputTokens: usage.output,
+      reasoningTokens: usage.reasoning,
+      cacheReadTokens: usage.cacheRead,
+      ...(isFiniteNumber(usage.costUsd) ? { costUsd: usage.costUsd } : {}),
+    });
+  };
 
   // Local checkouts are owned by the invoking user — dubious-ownership can't
   // trigger — so never touch the developer's global gitconfig from local mode.
@@ -1499,8 +1522,20 @@ export async function runPrReview(params: {
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
     // dropping a stronger compliance finding at the same location.
-    const gatedLists = [findings, ...lensFindingLists, complianceFindings].map(
-      demoteLowConfidenceBlockingFindings,
+    // Tag each session's findings so telemetry can trace them by id through the
+    // pipeline. When telemetry is off, `produced` returns the lists untouched,
+    // so this is byte-identical to `[findings, ...lensFindingLists, compliance]`.
+    const producedLists = [
+      telemetry.produced('main-review', findings),
+      ...lensFindingLists.map((list, i) =>
+        telemetry.produced(`review-${incrementalLenses.lensKeys[i] ?? `lens-${i}`}`, list),
+      ),
+      telemetry.produced('guideline-compliance', complianceFindings),
+    ];
+    const gatedLists = producedLists.map(demoteLowConfidenceBlockingFindings);
+    telemetry.snapshot(
+      'gated',
+      gatedLists.flatMap((gated) => gated.findings),
     );
     const demotedCount = gatedLists.reduce((sum, gated) => sum + gated.demotedCount, 0);
     if (demotedCount > 0) {
@@ -1509,6 +1544,7 @@ export async function runPrReview(params: {
     // Main review first: on equal-strength path:line collisions its richer
     // general context wins over lens and compliance findings.
     const combinedFindings = dedupeFindings(...gatedLists.map((gated) => gated.findings));
+    telemetry.snapshot('deduped', combinedFindings);
     const dedupeDropped =
       gatedLists.reduce((sum, gated) => sum + gated.findings.length, 0) - combinedFindings.length;
     if (dedupeDropped > 0) {
@@ -1517,6 +1553,7 @@ export async function runPrReview(params: {
     // Full-diff re-review means repeats are possible by design; this is the
     // in-code backstop that drops findings prior jbot threads already cover.
     const suppression = suppressPreviouslyReported(combinedFindings, priorJbotThreads);
+    telemetry.snapshot('suppressed', suppression.findings);
     if (suppression.suppressedCount > 0) {
       log(
         `Suppressed ${suppression.suppressedCount} finding(s) already covered by prior jbot-review threads.`,
@@ -1532,7 +1569,9 @@ export async function runPrReview(params: {
       log,
       onTokenUsage: recordTokenUsage,
     });
+    telemetry.snapshot('verified', verifiedFindings);
     const filteredFindings = filterFindings(verifiedFindings, options);
+    telemetry.snapshot('filtered', filteredFindings);
     log(
       `Review complete: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
@@ -1545,16 +1584,19 @@ export async function runPrReview(params: {
       else if (addable.get(f.path)?.has(f.line)) inline.push(f);
       else orphaned.push(f);
     }
+    telemetry.route({ inline, fileLevel, orphaned, rescued: [] });
     const verdict = decideVerdict(filteredFindings);
 
     // Report the final filtered findings + summary on EVERY completed review (dry-run or
     // real post), so a caller can forward per-severity counts (the worker → check-run gate).
     // Isolated: this is a side-channel hook and must not abort the actual review post below.
+    emitReviewTelemetry(telemetry, workspace, log);
     try {
       options.onReviewResult?.({
         summary,
         findings: filteredFindings,
         addressedPriorComments: verifiedAddressedPriorComments,
+        ...(telemetry.enabled ? { telemetry: telemetry.toJsonl() } : {}),
       });
     } catch (err) {
       log(`onReviewResult hook threw (ignored): ${String(err)}`);
@@ -1749,8 +1791,37 @@ export function normalizeOptions(
     // cap; explicit 0 = unlimited.
     maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 3, 0),
     opencodePort: Math.max(options?.opencodePort ?? 0, 0),
+    reviewTelemetry: options?.reviewTelemetry ?? true,
     onReviewResult: options?.onReviewResult,
   };
+}
+
+/**
+ * Post-review telemetry sink (F3): a compact disposition summary log line plus
+ * a JSONL file under `.jbot-review/` (CI uploads it as an artifact). Fail-open
+ * and no-op when disabled — never affects the review outcome.
+ */
+export function emitReviewTelemetry(
+  telemetry: TelemetryRecorder,
+  workspace: string,
+  log: (msg: string) => void,
+): void {
+  if (!telemetry.enabled) return;
+  const rows = telemetry.findingRows();
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(row.disposition, (counts.get(row.disposition) ?? 0) + 1);
+  const breakdown = [...counts.entries()]
+    .map(([disposition, n]) => `${n} ${disposition}`)
+    .join(', ');
+  log(`Telemetry: ${rows.length} finding(s) produced${breakdown ? ` (${breakdown})` : ''}.`);
+  try {
+    const dir = join(workspace, '.jbot-review');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'telemetry.jsonl'), `${telemetry.toJsonl()}\n`);
+    log('Telemetry written to .jbot-review/telemetry.jsonl');
+  } catch (err) {
+    log(`(telemetry write skipped: ${err instanceof Error ? err.message : String(err)})`);
+  }
 }
 
 const providerModelListCache = new Map<string, string[]>();
