@@ -74,14 +74,21 @@ describe('rescueAnchorByEvidence (F12 orphan rescue)', () => {
     ' }',
   ].join('\n');
 
-  it('re-anchors to the unique added line whose content contains the quote', () => {
-    // Model quoted the added line (whitespace-trimmed); rescue finds its new-side number.
+  it('re-anchors to the added line whose trimmed content equals the quote', () => {
+    // Model quoted the added line verbatim (whitespace-trimmed); rescue finds its new-side number.
     assert.equal(rescueAnchorByEvidence(patch, 'return order.subtotal; // BUG: pre-tax'), 2);
     assert.equal(rescueAnchorByEvidence(patch, 'const tax = order.tax;'), 3);
   });
 
   it('does not rescue when the quote is absent from any added line', () => {
     assert.equal(rescueAnchorByEvidence(patch, 'order.total'), undefined);
+  });
+
+  it('does not re-anchor on a substring of a line — a partial quote must not mis-anchor', () => {
+    // `order.subtotal` appears inside a unique added line but is not that whole
+    // line; matching it would post the comment on the wrong (unrelated) place.
+    assert.equal(rescueAnchorByEvidence(patch, 'order.subtotal'), undefined);
+    assert.equal(rescueAnchorByEvidence(patch, 'const tax'), undefined);
   });
 
   it('does not rescue an ambiguous quote that matches multiple added lines', () => {

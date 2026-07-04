@@ -182,6 +182,9 @@ function deriveRow(
 
   // Stages only drop findings, so presence is a prefix of STAGE_ORDER: the
   // finding was dropped entering the stage after the last one it appears in.
+  // This assumes every stage is snapshotted (the runner always does); with a
+  // stage omitted, a *dropped* finding's stage is inherently ambiguous —
+  // survivors still classify by routing.
   const present = STAGE_ORDER.filter((stage) => stageSeverity.get(stage)?.has(id));
   const last = present[present.length - 1];
   let disposition: FindingDisposition;

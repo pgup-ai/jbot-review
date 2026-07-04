@@ -42,6 +42,10 @@ export function parseAddedLines(patch: string | undefined): Set<number> {
  * Orphan rescue: the new-side number of the added line containing a finding's
  * verbatim `evidence` quote. Undefined unless EXACTLY one line matches — an
  * absent or ambiguous quote must leave the finding orphaned, not mis-anchored.
+ *
+ * The match is whole-line (trimmed) equality, not substring: the prompt asks
+ * the model to quote the changed line exactly, and a substring like
+ * `return true` would otherwise re-anchor onto an unrelated `if (x) return true;`.
  */
 export function rescueAnchorByEvidence(
   patch: string | undefined,
@@ -51,7 +55,7 @@ export function rescueAnchorByEvidence(
   if (!patch || !needle) return undefined;
   const matches: number[] = [];
   for (const { line, content } of addedLines(patch)) {
-    if (content.trim().includes(needle)) matches.push(line);
+    if (content.trim() === needle) matches.push(line);
   }
   return matches.length === 1 ? matches[0] : undefined;
 }
