@@ -12,6 +12,7 @@ import {
   computeRunDeadline,
   computeVerificationTimeoutMs,
   formatReviewedWith,
+  normalizeOptions,
   renderReviewMetadataBlock,
   runPrReview,
 } from '../src/shared/runner.ts';
@@ -416,5 +417,14 @@ describe('runPrReview local mode (localDiff)', () => {
       runPrReview({ ...base, octokit: fake, options: { dryRun: true }, log: () => {} }),
       (error: unknown) => error === sentinel,
     );
+  });
+});
+
+describe('normalizeOptions session concurrency', () => {
+  it('caps sessions at 3 by default and keeps explicit 0 as the unlimited escape hatch', () => {
+    assert.equal(normalizeOptions(undefined).maxConcurrentSessions, 3);
+    assert.equal(normalizeOptions({}).maxConcurrentSessions, 3);
+    assert.equal(normalizeOptions({ maxConcurrentSessions: 0 }).maxConcurrentSessions, 0);
+    assert.equal(normalizeOptions({ maxConcurrentSessions: 5 }).maxConcurrentSessions, 5);
   });
 });

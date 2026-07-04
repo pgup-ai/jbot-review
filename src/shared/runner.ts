@@ -1716,7 +1716,10 @@ function describeReactionError(error: unknown): string {
 type NormalizedReviewRunOptions = Required<Omit<ReviewRunOptions, 'onReviewResult'>> &
   Pick<ReviewRunOptions, 'onReviewResult'>;
 
-function normalizeOptions(options: ReviewRunOptions | undefined): NormalizedReviewRunOptions {
+/** Exported for defaults tests; runPrReview is the only production caller. */
+export function normalizeOptions(
+  options: ReviewRunOptions | undefined,
+): NormalizedReviewRunOptions {
   // Only the count-rationed lenses scale with passes; the frontend lens is
   // content-triggered and added on top (see selectLensKeys), so it does not
   // raise the useful pass ceiling.
@@ -1740,7 +1743,11 @@ function normalizeOptions(options: ReviewRunOptions | undefined): NormalizedRevi
     promptCache: options?.promptCache ?? true,
     skipDocOnly: options?.skipDocOnly ?? true,
     dynamicFanout: options?.dynamicFanout ?? true,
-    maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 0, 0),
+    // Capped by default: throttled tiers serialize upstream anyway, and an
+    // uncapped burst turns session deadlines into queue-time measurements
+    // (see the flash-tier note in opencode.ts). 3 matches the dogfood-proven
+    // cap; explicit 0 = unlimited.
+    maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 3, 0),
     opencodePort: Math.max(options?.opencodePort ?? 0, 0),
     onReviewResult: options?.onReviewResult,
   };

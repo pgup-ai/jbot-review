@@ -76,7 +76,7 @@ async function main(): Promise<void> {
     modelOptions: parseJsonObjectInput('model-options', DEFAULT_MODEL_OPTIONS),
     promptCache: parseBooleanInput('prompt-cache', true),
     skipDocOnly: parseBooleanInput('skip-doc-only', true),
-    maxConcurrentSessions: parseNumberInput('max-concurrent-sessions', 0),
+    maxConcurrentSessions: parseNumberInput('max-concurrent-sessions', 3),
   };
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${model}`);

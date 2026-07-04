@@ -490,19 +490,85 @@ export async function runReview(
   try {
     return parseReview(raw, label, log, { strict: true });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
-    const repaired = await promptPlanAgentInSession(
+    const repaired = await repromptForJson(
       client,
       model,
       sessionID,
-      buildJsonRepairPrompt(message),
-      `${label}-repair`,
+      error,
+      label,
       log,
       options.timeoutMs,
       options.onTokenUsage,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
+  }
+}
+
+/** One same-session JSON repair re-prompt, shared by the main and auxiliary sessions. */
+async function repromptForJson(
+  client: OpencodeClient,
+  model: string,
+  sessionID: string,
+  parseError: unknown,
+  label: string,
+  log: (msg: string) => void,
+  timeoutMs?: number,
+  onTokenUsage?: TokenUsageRecorder,
+): Promise<string> {
+  const message = parseError instanceof Error ? parseError.message : String(parseError);
+  log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
+  return promptPlanAgentInSession(
+    client,
+    model,
+    sessionID,
+    buildJsonRepairPrompt(message),
+    `${label}-repair`,
+    log,
+    timeoutMs,
+    onTokenUsage,
+  );
+}
+
+/**
+ * Runs an aux session's output through a strict parse, one same-session JSON
+ * repair on failure, then a lenient parse — failing open to the empty selection
+ * if the repair is unparseable or its round-trip dies. Aux checks never fail the
+ * run (invariant #3).
+ */
+async function parseAuxSessionWithRepair<T>(
+  session: {
+    client: OpencodeClient;
+    model: string;
+    sessionID: string;
+    raw: string;
+    label: string;
+    log: (msg: string) => void;
+    timeoutMs?: number;
+    onTokenUsage?: TokenUsageRecorder;
+  },
+  select: (result: ReviewResult) => T,
+): Promise<T> {
+  const { client, model, sessionID, raw, label, log, timeoutMs, onTokenUsage } = session;
+  try {
+    return select(parseReview(raw, label, log, { strict: true }));
+  } catch (error) {
+    try {
+      const repaired = await repromptForJson(
+        client,
+        model,
+        sessionID,
+        error,
+        label,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      );
+      return select(parseReview(repaired, `${label}-repair`, log));
+    } catch (repairError) {
+      const message = repairError instanceof Error ? repairError.message : String(repairError);
+      log(`(${label} repair failed; keeping empty results: ${message})`);
+      return select({ summary: '', findings: [], addressedPriorComments: [] });
+    }
   }
 }
 
@@ -515,7 +581,7 @@ export async function runAddressedPriorCommentsCheck(
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<AddressedPriorComment[]> {
   const prompt = assembleAddressedPriorCommentsPrompt(prContext);
-  const { raw } = await promptPlanAgent(
+  const { raw, sessionID } = await promptPlanAgent(
     client,
     model,
     prompt,
@@ -524,7 +590,19 @@ export async function runAddressedPriorCommentsCheck(
     timeoutMs,
     onTokenUsage,
   );
-  return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
+  return parseAuxSessionWithRepair(
+    {
+      client,
+      model,
+      sessionID,
+      raw,
+      label: 'addressed-prior-comments',
+      log,
+      timeoutMs,
+      onTokenUsage,
+    },
+    (result) => result.addressedPriorComments,
+  );
 }
 
 export async function runGuidelineComplianceCheck(
@@ -537,7 +615,7 @@ export async function runGuidelineComplianceCheck(
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<Finding[]> {
   const prompt = assembleGuidelineCompliancePrompt(prContext, guidelines);
-  const { raw } = await promptPlanAgent(
+  const { raw, sessionID } = await promptPlanAgent(
     client,
     model,
     prompt,
@@ -546,7 +624,10 @@ export async function runGuidelineComplianceCheck(
     timeoutMs,
     onTokenUsage,
   );
-  return parseReview(raw, 'guideline-compliance', log).findings;
+  return parseAuxSessionWithRepair(
+    { client, model, sessionID, raw, label: 'guideline-compliance', log, timeoutMs, onTokenUsage },
+    (result) => result.findings,
+  );
 }
 
 export async function runChangesSinceLastReview(
@@ -916,7 +997,8 @@ const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3',
 /**
  * Defensively parses the agent's JSON. Main review output is strict so we
  * don't post a misleading "good to go" review when the reviewer response is
- * malformed; auxiliary checks stay best-effort. Exported for direct test coverage.
+ * malformed; auxiliary checks send one repair prompt, then stay best-effort.
+ * Exported for direct test coverage.
  */
 export function parseReview(
   raw: string,
