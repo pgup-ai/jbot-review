@@ -91,17 +91,23 @@ describe('createTelemetryRecorder finding dispositions', () => {
     assert.equal(row.disposition, 'orphaned');
   });
 
-  it('flags a rescued finding distinctly from an orphaned one', () => {
+  it('flags a rescued finding distinctly and reports the re-anchored (posted) line', () => {
     const rec = createTelemetryRecorder(true);
-    const [f] = rec.produced('review', [finding('a.ts', 9, 'P1', { evidence: 'const x = 1;' })]);
+    const [f] = rec.produced('review', [finding('a.ts', 99, 'P1', { evidence: 'const x = 1;' })]);
     for (const stage of ['gated', 'deduped', 'suppressed', 'verified', 'filtered'] as const) {
       rec.snapshot(stage, [f]);
     }
-    rec.route({ inline: [], fileLevel: [], orphaned: [], rescued: [f] });
+    f.line = 2; // rescue re-anchors the model's bad line 99 to the real added line
+    rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [f] });
 
     const row = rec.findingRows()[0];
     assert.equal(row.disposition, 'rescued');
     assert.equal(row.hasEvidence, true);
+    assert.equal(
+      row.line,
+      2,
+      'telemetry line matches where the finding was posted, not the bad one',
+    );
   });
 
   it('serializes one JSONL line per finding row plus session rows', () => {

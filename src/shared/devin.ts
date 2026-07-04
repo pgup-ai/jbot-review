@@ -381,7 +381,7 @@ function recordDevinAtifUsage(
       return;
     }
     log(`${label} devin ${formatDevinUsage(parsed.usage)} records=${parsed.records}`);
-    onTokenUsage(parsed.usage, parsed.model ?? fallbackModel);
+    onTokenUsage(parsed.usage, parsed.model ?? fallbackModel, label);
   } catch (error) {
     log(
       `${label} devin usage unavailable: ${error instanceof Error ? error.message : String(error)}`,

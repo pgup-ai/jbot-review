@@ -132,7 +132,14 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
       for (const id of idsOf(routes.inline)) routing.inline.add(id);
       for (const id of idsOf(routes.fileLevel)) routing.fileLevel.add(id);
       for (const id of idsOf(routes.orphaned)) routing.orphaned.add(id);
-      for (const id of idsOf(routes.rescued)) routing.rescued.add(id);
+      for (const f of routes.rescued) {
+        if (!f.id) continue;
+        routing.rescued.add(f.id);
+        // Rescue re-anchored f.line AFTER produced() captured the model's
+        // original (orphaned) line; report the line the finding was posted at.
+        const captured = meta.get(f.id);
+        if (captured) captured.line = f.line;
+      }
     },
     recordSession(row) {
       sessions.push({ kind: 'session', ...row });

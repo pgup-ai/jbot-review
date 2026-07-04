@@ -849,11 +849,10 @@ export async function runPrReview(params: {
   }
   const tokenUsage = createReviewTokenUsageAccumulator();
   const telemetry = createTelemetryRecorder(options.reviewTelemetry);
-  const recordTokenUsage: TokenUsageRecorder = (usage, usageModel) => {
+  const recordTokenUsage: TokenUsageRecorder = (usage, usageModel, label) => {
     tokenUsage.add(usage, usageModel);
-    // Session rows key by model: the semantic session label isn't threaded here.
     telemetry.recordSession({
-      session: usageModel,
+      session: label ?? usageModel,
       model: usageModel,
       inputTokens: usage.input,
       outputTokens: usage.output,
