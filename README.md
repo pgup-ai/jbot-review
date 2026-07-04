@@ -107,6 +107,7 @@ jobs:
           zai-api-key: ${{ secrets.ZAI_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
           fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
+          mimo-api-key: ${{ secrets.MIMO_API_KEY }}
           devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
           commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
           cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
@@ -130,7 +131,7 @@ fork policy, `workflow_dispatch` parity — are documented in
 and variables → Actions → New repository secret. Add the keys for the providers
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
-`XAI_API_KEY`, `FIREWORKS_API_KEY`, `DEVIN_WINDSURF_API_KEY`,
+`XAI_API_KEY`, `FIREWORKS_API_KEY`, `MIMO_API_KEY`, `DEVIN_WINDSURF_API_KEY`,
 `COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, `CODEX_AUTH_JSON`,
 `CLINE_AUTH_JSON`, `KILO_AUTH_CONTENT`, or `ANTHROPIC_API_KEY`.
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
@@ -246,6 +247,7 @@ without editing the workflow.
     zai-api-key: ${{ secrets.ZAI_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
     fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
+    mimo-api-key: ${{ secrets.MIMO_API_KEY }}
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
@@ -341,6 +343,7 @@ jbot-review does not use them for smart key rotation.
 | `zai-coding-plan` | `zai-coding-plan/glm-5.2`                                  | `zai-api-key`            | `ZAI_API_KEY`            |
 | `xai`             | `xai/grok-4.3`                                             | `xai-api-key`            | `XAI_API_KEY`            |
 | `fireworks-ai`    | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` | `fireworks-api-key`      | `FIREWORKS_API_KEY`      |
+| `mimo`            | `mimo/mimo-v2.5-pro`                                       | `mimo-api-key`           | `MIMO_API_KEY`           |
 | `devin`           | `devin/default`                                            | `devin-windsurf-api-key` | `DEVIN_WINDSURF_API_KEY` |
 | `commandcode`     | `commandcode/default`                                      | `commandcode-access-key` | `COMMANDCODE_ACCESS_KEY` |
 | `cursor`          | `cursor/default`                                           | `cursor-api-key`         | `CURSOR_API_KEY`         |
@@ -391,6 +394,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     zai-api-key: ${{ secrets.ZAI_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
     fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
+    mimo-api-key: ${{ secrets.MIMO_API_KEY }}
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}

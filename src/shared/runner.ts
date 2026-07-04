@@ -28,7 +28,7 @@ import {
   isDocOnlyChange,
   shardFilesForReview,
 } from './diff-context.ts';
-import { resolvePromptCachePolicy } from './config.ts';
+import { PROVIDERS, resolvePromptCachePolicy } from './config.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -1236,6 +1236,9 @@ export async function runPrReview(params: {
             ? promptCachePolicy.auxProviderPromptCache
             : promptCachePolicy.providerPromptCache,
           port: options.opencodePort > 0 ? options.opencodePort : undefined,
+          // Custom providers (not in Models.dev, e.g. mimo) ship their full
+          // definition — base URL, model catalog, auth header — to opencode.
+          customProvider: mainCliBackend ? undefined : PROVIDERS[opencodeProviderID]?.custom,
           additionalProviderKeys:
             !mainCliBackend && !auxCliBackend && auxProviderID !== providerID
               ? [
@@ -1243,6 +1246,7 @@ export async function runPrReview(params: {
                     providerID: auxProviderID,
                     apiKey: options.auxApiKey || apiKey,
                     promptCache: promptCachePolicy.auxProviderPromptCache,
+                    custom: PROVIDERS[auxProviderID]?.custom,
                   },
                 ]
               : undefined,

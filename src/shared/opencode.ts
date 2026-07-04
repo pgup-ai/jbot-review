@@ -7,6 +7,7 @@ import {
   type SessionStatus,
 } from '@opencode-ai/sdk';
 
+import type { CustomProviderConfig } from './config.ts';
 import { isContext7QuotaError } from './context7.ts';
 import { parseModelName } from './model.ts';
 import {
@@ -53,6 +54,8 @@ export interface ProviderKeyConfig {
   providerID: string;
   apiKey: string;
   promptCache?: boolean;
+  /** Full definition when this provider isn't in Models.dev (see buildConfig). */
+  custom?: CustomProviderConfig;
 }
 
 /**
@@ -81,6 +84,43 @@ export interface ProviderKeyConfig {
  * providers that reject unknown option keys, so it must not send the key at
  * all. Exported for unit testing (pure).
  */
+type ProviderEntry = NonNullable<NonNullable<ServerOptions['config']>['provider']>[string];
+
+/**
+ * One provider entry. A Models.dev provider just carries its key (+ optional
+ * per-model reasoning options); a `custom` provider is defined in full — SDK
+ * package, base URL, model catalog, and (when set) a non-standard auth header.
+ */
+function buildProviderEntry(params: {
+  apiKey: string;
+  promptCache: boolean;
+  modelID: string;
+  modelOptions?: Record<string, unknown>;
+  custom?: CustomProviderConfig;
+}): ProviderEntry {
+  const { apiKey, promptCache, modelID, modelOptions, custom } = params;
+  const hasModelOptions = Boolean(modelOptions && Object.keys(modelOptions).length > 0);
+  const options = {
+    ...(custom ? { baseURL: custom.baseURL } : {}),
+    apiKey,
+    ...(custom?.apiKeyHeader ? { headers: { [custom.apiKeyHeader]: apiKey } } : {}),
+    ...(promptCache ? { setCacheKey: true } : {}),
+  };
+  if (custom) {
+    const models = Object.fromEntries(
+      Object.entries(custom.models).map(([id, def]) => [
+        id,
+        id === modelID && hasModelOptions ? { ...def, options: modelOptions } : def,
+      ]),
+    );
+    return { npm: custom.npm, name: custom.name, models, options };
+  }
+  return {
+    options,
+    ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
+  };
+}
+
 export function buildConfig(
   providerID: string,
   modelID: string,
@@ -88,23 +128,27 @@ export function buildConfig(
   modelOptions?: Record<string, unknown>,
   promptCache = true,
   additionalProviderKeys: ProviderKeyConfig[] = [],
+  customProvider?: CustomProviderConfig,
 ): ServerOptions['config'] {
-  const hasModelOptions = modelOptions && Object.keys(modelOptions).length > 0;
   const providerConfig: NonNullable<ServerOptions['config']>['provider'] = {
-    [providerID]: {
-      options: { apiKey, ...(promptCache ? { setCacheKey: true } : {}) },
-      ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
-    },
+    [providerID]: buildProviderEntry({
+      apiKey,
+      promptCache,
+      modelID,
+      modelOptions,
+      custom: customProvider,
+    }),
   };
   for (const providerKey of additionalProviderKeys) {
     if (!providerKey.providerID || providerKey.providerID === providerID) continue;
-    const providerPromptCache = providerKey.promptCache ?? promptCache;
-    providerConfig[providerKey.providerID] = {
-      options: {
-        apiKey: providerKey.apiKey,
-        ...(providerPromptCache ? { setCacheKey: true } : {}),
-      },
-    };
+    providerConfig[providerKey.providerID] = buildProviderEntry({
+      apiKey: providerKey.apiKey,
+      promptCache: providerKey.promptCache ?? promptCache,
+      // Aux modelID/options aren't threaded here; a custom aux provider still
+      // gets its full definition (base URL, model catalog, auth header).
+      modelID: '',
+      custom: providerKey.custom,
+    });
   }
   return {
     provider: providerConfig,
@@ -246,6 +290,7 @@ export async function startOpencode(
     port?: number;
     promptCache?: boolean;
     additionalProviderKeys?: ProviderKeyConfig[];
+    customProvider?: CustomProviderConfig;
   } = {},
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
   // Serialize against other startOpencode calls so the chdir → spawn → restore
@@ -297,6 +342,7 @@ export async function startOpencode(
       options.modelOptions,
       options.promptCache ?? true,
       options.additionalProviderKeys,
+      options.customProvider,
     );
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',

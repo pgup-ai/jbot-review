@@ -409,6 +409,45 @@ describe('buildConfig prompt caching', () => {
   });
 });
 
+describe('buildConfig custom provider', () => {
+  const mimoCustom = {
+    npm: '@ai-sdk/openai-compatible',
+    name: 'MiMo',
+    baseURL: 'https://token-plan-ams.xiaomimimo.com/v1',
+    apiKeyHeader: 'api-key',
+    models: { 'mimo-v2.5-pro': { name: 'MiMo V2.5 Pro' } },
+  };
+  const providerOf = (config: ReturnType<typeof buildConfig>, id: string) =>
+    (config as { provider: Record<string, Record<string, unknown>> }).provider[id];
+
+  it('defines a full provider (npm, baseURL, api-key header, model) for one not in models.dev', () => {
+    const mimo = providerOf(
+      buildConfig('mimo', 'mimo-v2.5-pro', 'tp-abc', undefined, false, [], mimoCustom),
+      'mimo',
+    );
+    assert.equal(mimo.npm, '@ai-sdk/openai-compatible');
+    assert.equal(mimo.name, 'MiMo');
+    const options = mimo.options as Record<string, unknown>;
+    assert.equal(options.baseURL, 'https://token-plan-ams.xiaomimimo.com/v1');
+    assert.equal(options.apiKey, 'tp-abc');
+    assert.deepEqual(options.headers, { 'api-key': 'tp-abc' });
+    assert.equal('setCacheKey' in options, false, 'prompt cache off for the custom provider');
+    assert.ok((mimo.models as Record<string, unknown>)['mimo-v2.5-pro']);
+  });
+
+  it('defines a custom provider supplied as a secondary (aux) key', () => {
+    const mimo = providerOf(
+      buildConfig('openai', 'gpt-5', 'openai-key', undefined, true, [
+        { providerID: 'mimo', apiKey: 'tp-xyz', promptCache: false, custom: mimoCustom },
+      ]),
+      'mimo',
+    );
+    const options = mimo.options as Record<string, unknown>;
+    assert.equal(options.baseURL, 'https://token-plan-ams.xiaomimimo.com/v1');
+    assert.deepEqual(options.headers, { 'api-key': 'tp-xyz' });
+  });
+});
+
 describe('formatTokenUsage', () => {
   it('summarizes input/output/reasoning/cache/cost', () => {
     const line = formatTokenUsage({
