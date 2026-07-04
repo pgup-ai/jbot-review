@@ -111,13 +111,27 @@ export interface BuildReviewContextParams {
   diffScope?: DiffScope;
 }
 
+// Author-controlled and unbounded upstream; cap like every injected block (invariant #4).
+export const MAX_PR_BODY_BYTES = 4 * 1024;
+const PR_BODY_TRUNCATION_NOTICE =
+  '\n\n[PR description truncated to keep the review prompt bounded.]';
+
+/** Shared by the enhanced (buildReviewContext) and basic (runner) PR-context paths. */
+export function truncatePrBody(body: string): string {
+  const buffer = Buffer.from(body, 'utf8');
+  if (buffer.length <= MAX_PR_BODY_BYTES) return body;
+  // Reserve the notice's bytes so body + notice together stay within the cap.
+  const budget = MAX_PR_BODY_BYTES - Buffer.byteLength(PR_BODY_TRUNCATION_NOTICE, 'utf8');
+  return buffer.toString('utf8', 0, findUtf8Boundary(buffer, budget)) + PR_BODY_TRUNCATION_NOTICE;
+}
+
 export function buildReviewContext(params: BuildReviewContextParams): string {
   const sections: string[] = [];
 
   const pullRequestLines = [
     '## Pull request',
     `Title: ${params.pullTitle || '(untitled)'}`,
-    params.pullBody ? `Description:\n${params.pullBody}` : 'Description: (none)',
+    params.pullBody ? `Description:\n${truncatePrBody(params.pullBody)}` : 'Description: (none)',
   ];
   const diffScopeText = params.diffScope ? formatDiffScope(params.diffScope) : '';
   if (diffScopeText) pullRequestLines.push(diffScopeText);
