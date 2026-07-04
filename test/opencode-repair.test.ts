@@ -413,14 +413,13 @@ describe('buildConfig custom provider', () => {
   const mimoCustom = {
     npm: '@ai-sdk/openai-compatible',
     name: 'MiMo',
-    baseURL: 'https://token-plan-ams.xiaomimimo.com/v1',
-    apiKeyHeader: 'api-key',
+    baseURL: 'https://token-plan-sgp.xiaomimimo.com/v1',
     models: { 'mimo-v2.5-pro': { name: 'MiMo V2.5 Pro' } },
   };
   const providerOf = (config: ReturnType<typeof buildConfig>, id: string) =>
     (config as { provider: Record<string, Record<string, unknown>> }).provider[id];
 
-  it('defines a full provider (npm, baseURL, api-key header, model) for one not in models.dev', () => {
+  it('defines a full provider (npm, baseURL, apiKey, model) for one not in models.dev', () => {
     const mimo = providerOf(
       buildConfig('mimo', 'mimo-v2.5-pro', 'tp-abc', undefined, false, [], mimoCustom),
       'mimo',
@@ -428,9 +427,11 @@ describe('buildConfig custom provider', () => {
     assert.equal(mimo.npm, '@ai-sdk/openai-compatible');
     assert.equal(mimo.name, 'MiMo');
     const options = mimo.options as Record<string, unknown>;
-    assert.equal(options.baseURL, 'https://token-plan-ams.xiaomimimo.com/v1');
+    assert.equal(options.baseURL, 'https://token-plan-sgp.xiaomimimo.com/v1');
     assert.equal(options.apiKey, 'tp-abc');
-    assert.deepEqual(options.headers, { 'api-key': 'tp-abc' });
+    // MiMo authenticates via Authorization: Bearer (opencode's apiKey option), so
+    // no custom header — an extra api-key header 401s against the MiFE gateway.
+    assert.equal('headers' in options, false);
     assert.equal('setCacheKey' in options, false, 'prompt cache off for the custom provider');
     assert.ok((mimo.models as Record<string, unknown>)['mimo-v2.5-pro']);
   });
@@ -443,8 +444,9 @@ describe('buildConfig custom provider', () => {
       'mimo',
     );
     const options = mimo.options as Record<string, unknown>;
-    assert.equal(options.baseURL, 'https://token-plan-ams.xiaomimimo.com/v1');
-    assert.deepEqual(options.headers, { 'api-key': 'tp-xyz' });
+    assert.equal(options.baseURL, 'https://token-plan-sgp.xiaomimimo.com/v1');
+    assert.equal(options.apiKey, 'tp-xyz');
+    assert.equal('headers' in options, false);
   });
 });
 

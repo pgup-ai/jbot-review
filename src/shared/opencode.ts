@@ -89,7 +89,7 @@ type ProviderEntry = NonNullable<NonNullable<ServerOptions['config']>['provider'
 /**
  * One provider entry. A Models.dev provider just carries its key (+ optional
  * per-model reasoning options); a `custom` provider is defined in full — SDK
- * package, base URL, model catalog, and (when set) a non-standard auth header.
+ * package, base URL, and model catalog.
  */
 function buildProviderEntry(params: {
   apiKey: string;
@@ -103,7 +103,6 @@ function buildProviderEntry(params: {
   const options = {
     ...(custom ? { baseURL: custom.baseURL } : {}),
     apiKey,
-    ...(custom?.apiKeyHeader ? { headers: { [custom.apiKeyHeader]: apiKey } } : {}),
     ...(promptCache ? { setCacheKey: true } : {}),
   };
   if (custom) {
@@ -145,7 +144,7 @@ export function buildConfig(
       apiKey: providerKey.apiKey,
       promptCache: providerKey.promptCache ?? promptCache,
       // Aux modelID/options aren't threaded here; a custom aux provider still
-      // gets its full definition (base URL, model catalog, auth header).
+      // gets its full definition (base URL, model catalog).
       modelID: '',
       custom: providerKey.custom,
     });

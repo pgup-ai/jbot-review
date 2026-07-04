@@ -22,10 +22,8 @@ export interface CustomProviderConfig {
   /** SDK package opencode loads for the provider (e.g. `@ai-sdk/openai-compatible`). */
   npm: string;
   name: string;
-  /** OpenAI-compatible endpoint (mimo: the Europe Token Plan cluster). */
+  /** OpenAI-compatible endpoint (mimo: the Singapore Token Plan cluster). */
   baseURL: string;
-  /** Non-standard auth header the key is sent in; omit for `Authorization: Bearer`. */
-  apiKeyHeader?: string;
   /** Model catalog opencode cannot learn from Models.dev. */
   models: Record<string, { name: string }>;
 }
@@ -94,8 +92,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyInput: 'xai-api-key',
   },
   // Xiaomi MiMo Token Plan — a direct OpenAI-compatible provider Models.dev
-  // doesn't list, so it's defined in full. Europe (Amsterdam) cluster; the key
-  // (tp-… / sk-…) goes in an `api-key` header, not `Authorization: Bearer`.
+  // doesn't list, so it's defined in full. Keys are region-locked to one of
+  // cn/sgp/ams; this baseURL must match the key's region (here: Singapore).
+  // Auth is Authorization: Bearer (opencode's apiKey), no custom header.
   mimo: {
     defaultModel: 'mimo/mimo-v2.5-pro',
     keyEnv: 'MIMO_API_KEY',
@@ -103,8 +102,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     custom: {
       npm: '@ai-sdk/openai-compatible',
       name: 'MiMo',
-      baseURL: 'https://token-plan-ams.xiaomimimo.com/v1',
-      apiKeyHeader: 'api-key',
+      baseURL: 'https://token-plan-sgp.xiaomimimo.com/v1',
       models: { 'mimo-v2.5-pro': { name: 'MiMo V2.5 Pro' } },
     },
   },
