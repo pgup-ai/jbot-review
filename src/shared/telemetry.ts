@@ -101,6 +101,9 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     orphaned: new Set<string>(),
     rescued: new Set<string>(),
   };
+  // Final posted line for rescued findings (re-anchored after produced()); keeps
+  // `meta` honest as the model's original output rather than mutating it.
+  const routedLine = new Map<string, number>();
   const sessions: SessionTelemetryRow[] = [];
 
   const idsOf = (findings: Finding[]): Set<string> =>
@@ -135,17 +138,18 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
       for (const f of routes.rescued) {
         if (!f.id) continue;
         routing.rescued.add(f.id);
-        // Rescue re-anchored f.line AFTER produced() captured the model's
-        // original (orphaned) line; report the line the finding was posted at.
-        const captured = meta.get(f.id);
-        if (captured) captured.line = f.line;
+        routedLine.set(f.id, f.line);
       }
     },
     recordSession(row) {
       sessions.push({ kind: 'session', ...row });
     },
     findingRows() {
-      return order.map((id) => deriveRow(id, meta.get(id)!, stageSeverity, routing));
+      return order.map((id) => {
+        const row = deriveRow(id, meta.get(id)!, stageSeverity, routing);
+        const posted = routedLine.get(id);
+        return posted === undefined ? row : { ...row, line: posted };
+      });
     },
     toJsonl() {
       const lines = [...this.findingRows(), ...sessions];

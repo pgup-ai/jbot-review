@@ -77,6 +77,19 @@ describe('createTelemetryRecorder finding dispositions', () => {
     assert.equal(byId.get('f5'), 'posted-inline');
   });
 
+  it('classifies a survivor correctly when an intermediate stage snapshot is omitted', () => {
+    // The recorder is a general module: a caller may snapshot a subset of
+    // stages. A finding present in the snapshots taken must still classify by
+    // its last-present stage, not by a stage that was never recorded.
+    const rec = createTelemetryRecorder(true);
+    const [f] = rec.produced('review', [finding('a.ts', 1, 'P1')]);
+    rec.snapshot('gated', [f]);
+    rec.snapshot('filtered', [f]); // 'deduped'/'suppressed'/'verified' omitted
+    rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [] });
+
+    assert.equal(rec.findingRows()[0].disposition, 'posted-inline');
+  });
+
   it('records the demote modifier when the low-confidence gate lowers severity', () => {
     const rec = createTelemetryRecorder(true);
     const [f] = rec.produced('review', [finding('a.ts', 1, 'P1', { confidence: 'low' })]);
