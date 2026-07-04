@@ -55,7 +55,7 @@ inputs:
     required: false
     default: ''
   mimo-api-key:
-    description: 'Xiaomi MiMo Token Plan API key (tp-… / sk-…). Used when provider or aux-provider is mimo.'
+    description: 'Xiaomi MiMo Token Plan API key (tp-… / sk-…). Used when provider or aux-provider is xiaomi-token-plan-sgp.'
     required: false
     default: ''
   devin-windsurf-api-key:

@@ -4,39 +4,36 @@ import { describe, it } from 'node:test';
 import { PROVIDERS, modelSupportsPromptCache } from '../src/shared/config.ts';
 import { buildConfig } from '../src/shared/opencode.ts';
 
-describe('mimo custom provider', () => {
-  it('registers the Singapore Token Plan cluster and the model', () => {
-    const mimo = PROVIDERS.mimo;
-    assert.equal(mimo.defaultModel, 'mimo/mimo-v2.5-pro');
-    assert.equal(mimo.keyEnv, 'MIMO_API_KEY');
-    assert.equal(mimo.keyInput, 'mimo-api-key');
-    assert.equal(mimo.custom?.npm, '@ai-sdk/openai-compatible');
-    assert.equal(mimo.custom?.baseURL, 'https://token-plan-sgp.xiaomimimo.com/v1');
-    assert.ok(mimo.custom?.models['mimo-v2.5-pro']);
+describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
+  it('registers the Singapore Token Plan provider with no custom def', () => {
+    const p = PROVIDERS['xiaomi-token-plan-sgp'];
+    assert.equal(p.defaultModel, 'xiaomi-token-plan-sgp/mimo-v2.5-pro');
+    assert.equal(p.keyEnv, 'MIMO_API_KEY');
+    assert.equal(p.keyInput, 'mimo-api-key');
+    // Models.dev supplies the base URL + model catalog; we pin only the key.
+    assert.equal('custom' in p, false);
   });
 
-  // Regression: the SHIPPING config, not a fixture. MiMo's MiFE gateway 401s on an
-  // extra api-key header; it wants Authorization: Bearer (opencode's apiKey option).
-  it('emits Bearer-only auth (apiKey, no custom header) from the real registry', () => {
+  it('emits only the key — opencode resolves base URL/models from Models.dev', () => {
     const config = buildConfig(
-      'mimo',
+      'xiaomi-token-plan-sgp',
       'mimo-v2.5-pro',
       'tp-abc',
       undefined,
       false,
-      [],
-      PROVIDERS.mimo.custom,
     );
-    const { options } = (
-      config as { provider: Record<string, { options: Record<string, unknown> }> }
-    ).provider.mimo;
+    const entry = (config as { provider: Record<string, Record<string, unknown>> }).provider[
+      'xiaomi-token-plan-sgp'
+    ];
+    const options = entry.options as Record<string, unknown>;
     assert.equal(options.apiKey, 'tp-abc');
-    assert.equal('headers' in options, false);
+    assert.equal('baseURL' in options, false);
+    assert.equal('npm' in entry, false);
+    assert.equal('setCacheKey' in options, false, 'prompt cache off for this model');
   });
 
-  it('disables prompt caching for custom providers, keeps it for Models.dev ones', () => {
-    // Custom OpenAI-compatible endpoints are unverified for promptCacheKey, so off.
-    assert.equal(modelSupportsPromptCache('mimo', 'mimo-v2.5-pro'), false);
+  it('disables prompt caching for mimo (unverified endpoint), keeps it for other providers', () => {
+    assert.equal(modelSupportsPromptCache('xiaomi-token-plan-sgp', 'mimo-v2.5-pro'), false);
     assert.equal(modelSupportsPromptCache('openai', 'gpt-5.4-nano'), true);
   });
 });

@@ -3,11 +3,6 @@ export interface ProviderConfig {
   keyEnv: string;
   keyInput: string;
   models?: Record<string, ModelConfig>;
-  /**
-   * Full definition for a provider Models.dev doesn't know: opencode is given
-   * the SDK package, base URL, models, and auth header directly (see mimo).
-   */
-  custom?: CustomProviderConfig;
 }
 
 export interface ModelConfig {
@@ -16,16 +11,6 @@ export interface ModelConfig {
    * when omitted; false entries are seeded from Models.dev family metadata.
    */
   promptCache?: boolean;
-}
-
-export interface CustomProviderConfig {
-  /** SDK package opencode loads for the provider (e.g. `@ai-sdk/openai-compatible`). */
-  npm: string;
-  name: string;
-  /** OpenAI-compatible endpoint (mimo: the Singapore Token Plan cluster). */
-  baseURL: string;
-  /** Model catalog opencode cannot learn from Models.dev. */
-  models: Record<string, { name: string }>;
 }
 
 const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
@@ -91,20 +76,16 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyEnv: 'XAI_API_KEY',
     keyInput: 'xai-api-key',
   },
-  // Xiaomi MiMo Token Plan — a direct OpenAI-compatible provider Models.dev
-  // doesn't list, so it's defined in full. Keys are region-locked to one of
-  // cn/sgp/ams; this baseURL must match the key's region (here: Singapore).
-  // Auth is Authorization: Bearer (opencode's apiKey), no custom header.
-  mimo: {
-    defaultModel: 'mimo/mimo-v2.5-pro',
+  // Xiaomi MiMo Token Plan (Singapore). Models.dev defines this provider —
+  // baseURL, model catalog, and the reasoning-model metadata opencode needs to
+  // drive mimo-v2.5-pro — so it needs only the key, no custom def. Keys are
+  // region-locked: cn/sgp/ams are separate Models.dev providers.
+  // promptCache off: the endpoint is unverified for opencode's promptCacheKey.
+  'xiaomi-token-plan-sgp': {
+    defaultModel: 'xiaomi-token-plan-sgp/mimo-v2.5-pro',
     keyEnv: 'MIMO_API_KEY',
     keyInput: 'mimo-api-key',
-    custom: {
-      npm: '@ai-sdk/openai-compatible',
-      name: 'MiMo',
-      baseURL: 'https://token-plan-sgp.xiaomimimo.com/v1',
-      models: { 'mimo-v2.5-pro': { name: 'MiMo V2.5 Pro' } },
-    },
+    models: { 'mimo-v2.5-pro': { promptCache: false } },
   },
   'fireworks-ai': {
     defaultModel: 'fireworks-ai/accounts/fireworks/models/deepseek-v4-flash',
@@ -198,9 +179,6 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
   // the promptCacheKey opencode sends with setCacheKey returns a non-retryable 400 for
   // every Fireworks model. Disable provider-wide rather than per-model.
   if (providerID === 'fireworks-ai') return false;
-  // Custom providers are OpenAI-compatible endpoints whose promptCacheKey handling
-  // is unverified; default off (like Fireworks) until dogfooding proves otherwise.
-  if (PROVIDERS[providerID]?.custom) return false;
   return PROVIDERS[providerID]?.models?.[modelID]?.promptCache !== false;
 }
 

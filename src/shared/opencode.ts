@@ -7,7 +7,6 @@ import {
   type SessionStatus,
 } from '@opencode-ai/sdk';
 
-import type { CustomProviderConfig } from './config.ts';
 import { isContext7QuotaError } from './context7.ts';
 import { parseModelName } from './model.ts';
 import {
@@ -54,8 +53,6 @@ export interface ProviderKeyConfig {
   providerID: string;
   apiKey: string;
   promptCache?: boolean;
-  /** Full definition when this provider isn't in Models.dev (see buildConfig). */
-  custom?: CustomProviderConfig;
 }
 
 /**
@@ -87,33 +84,22 @@ export interface ProviderKeyConfig {
 type ProviderEntry = NonNullable<NonNullable<ServerOptions['config']>['provider']>[string];
 
 /**
- * One provider entry. A Models.dev provider just carries its key (+ optional
- * per-model reasoning options); a `custom` provider is defined in full — SDK
- * package, base URL, and model catalog.
+ * One provider entry: the API key, an optional prompt-cache toggle, and (for the
+ * main model) any per-model reasoning options. Every provider is Models.dev-known,
+ * so opencode already has its base URL and model catalog.
  */
 function buildProviderEntry(params: {
   apiKey: string;
   promptCache: boolean;
   modelID: string;
   modelOptions?: Record<string, unknown>;
-  custom?: CustomProviderConfig;
 }): ProviderEntry {
-  const { apiKey, promptCache, modelID, modelOptions, custom } = params;
+  const { apiKey, promptCache, modelID, modelOptions } = params;
   const hasModelOptions = Boolean(modelOptions && Object.keys(modelOptions).length > 0);
   const options = {
-    ...(custom ? { baseURL: custom.baseURL } : {}),
     apiKey,
     ...(promptCache ? { setCacheKey: true } : {}),
   };
-  if (custom) {
-    const models = Object.fromEntries(
-      Object.entries(custom.models).map(([id, def]) => [
-        id,
-        id === modelID && hasModelOptions ? { ...def, options: modelOptions } : def,
-      ]),
-    );
-    return { npm: custom.npm, name: custom.name, models, options };
-  }
   return {
     options,
     ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
@@ -127,7 +113,6 @@ export function buildConfig(
   modelOptions?: Record<string, unknown>,
   promptCache = true,
   additionalProviderKeys: ProviderKeyConfig[] = [],
-  customProvider?: CustomProviderConfig,
 ): ServerOptions['config'] {
   const providerConfig: NonNullable<ServerOptions['config']>['provider'] = {
     [providerID]: buildProviderEntry({
@@ -135,7 +120,6 @@ export function buildConfig(
       promptCache,
       modelID,
       modelOptions,
-      custom: customProvider,
     }),
   };
   for (const providerKey of additionalProviderKeys) {
@@ -143,10 +127,8 @@ export function buildConfig(
     providerConfig[providerKey.providerID] = buildProviderEntry({
       apiKey: providerKey.apiKey,
       promptCache: providerKey.promptCache ?? promptCache,
-      // Aux modelID/options aren't threaded here; a custom aux provider still
-      // gets its full definition (base URL, model catalog).
+      // Aux modelID/options aren't threaded here.
       modelID: '',
-      custom: providerKey.custom,
     });
   }
   return {
@@ -289,7 +271,6 @@ export async function startOpencode(
     port?: number;
     promptCache?: boolean;
     additionalProviderKeys?: ProviderKeyConfig[];
-    customProvider?: CustomProviderConfig;
   } = {},
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
   // Serialize against other startOpencode calls so the chdir → spawn → restore
@@ -341,7 +322,6 @@ export async function startOpencode(
       options.modelOptions,
       options.promptCache ?? true,
       options.additionalProviderKeys,
-      options.customProvider,
     );
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',

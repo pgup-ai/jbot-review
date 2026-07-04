@@ -28,7 +28,7 @@ import {
   isDocOnlyChange,
   shardFilesForReview,
 } from './diff-context.ts';
-import { PROVIDERS, resolvePromptCachePolicy } from './config.ts';
+import { resolvePromptCachePolicy } from './config.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -1236,11 +1236,6 @@ export async function runPrReview(params: {
             ? promptCachePolicy.auxProviderPromptCache
             : promptCachePolicy.providerPromptCache,
           port: options.opencodePort > 0 ? options.opencodePort : undefined,
-          // Ship a custom provider's full definition (base URL, model catalog)
-          // to opencode. opencodeProviderID is the AUX provider when the main
-          // backend is a CLI, so key off the provider opencode actually runs —
-          // gating on mainCliBackend would drop a custom aux provider (mimo).
-          customProvider: PROVIDERS[opencodeProviderID]?.custom,
           additionalProviderKeys:
             !mainCliBackend && !auxCliBackend && auxProviderID !== providerID
               ? [
@@ -1248,7 +1243,6 @@ export async function runPrReview(params: {
                     providerID: auxProviderID,
                     apiKey: options.auxApiKey || apiKey,
                     promptCache: promptCachePolicy.auxProviderPromptCache,
-                    custom: PROVIDERS[auxProviderID]?.custom,
                   },
                 ]
               : undefined,

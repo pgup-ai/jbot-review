@@ -330,27 +330,27 @@ the metadata block. These counters are observability only: they do not identify 
 accounts, organizations, quota buckets, remaining quota, or reset times, so
 jbot-review does not use them for smart key rotation.
 
-| `provider`        | Default model                                              | Action key input         | Secret/env var           |
-| ----------------- | ---------------------------------------------------------- | ------------------------ | ------------------------ |
-| `opencode`        | `opencode/deepseek-v4-flash-free`                          | `opencode-api-key`       | `OPENCODE_API_KEY`       |
-| `opencode-go`     | `opencode-go/deepseek-v4-flash`                            | `opencode-api-key`       | `OPENCODE_API_KEY`       |
-| `deepseek`        | `deepseek/deepseek-v4-flash`                               | `deepseek-api-key`       | `DEEPSEEK_API_KEY`       |
-| `openai`          | `openai/gpt-5.4-nano`                                      | `openai-api-key`         | `OPENAI_API_KEY`         |
-| `anthropic`       | `anthropic/claude-sonnet-4-6`                              | `anthropic-api-key`      | `ANTHROPIC_API_KEY`      |
-| `google`          | `google/gemini-2.5-flash`                                  | `gemini-api-key`         | `GEMINI_API_KEY`         |
-| `openrouter`      | `openrouter/openai/gpt-4o-mini`                            | `openrouter-api-key`     | `OPENROUTER_API_KEY`     |
-| `nvidia`          | `nvidia/nemotron-3-ultra-550b-a55b`                        | `nvidia-api-key`         | `NVIDIA_API_KEY`         |
-| `zai-coding-plan` | `zai-coding-plan/glm-5.2`                                  | `zai-api-key`            | `ZAI_API_KEY`            |
-| `xai`             | `xai/grok-4.3`                                             | `xai-api-key`            | `XAI_API_KEY`            |
-| `fireworks-ai`    | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` | `fireworks-api-key`      | `FIREWORKS_API_KEY`      |
-| `mimo`            | `mimo/mimo-v2.5-pro`                                       | `mimo-api-key`           | `MIMO_API_KEY`           |
-| `devin`           | `devin/default`                                            | `devin-windsurf-api-key` | `DEVIN_WINDSURF_API_KEY` |
-| `commandcode`     | `commandcode/default`                                      | `commandcode-access-key` | `COMMANDCODE_ACCESS_KEY` |
-| `cursor`          | `cursor/default`                                           | `cursor-api-key`         | `CURSOR_API_KEY`         |
-| `codex`           | `codex/default`                                            | `codex-auth`             | `CODEX_AUTH_JSON`        |
-| `cline`           | `cline/default`                                            | `cline-auth`             | `CLINE_AUTH_JSON`        |
-| `cline-pass`      | `cline-pass/default`                                       | `cline-auth`             | `CLINE_AUTH_JSON`        |
-| `kilo`            | `kilo/kilo-auto/free`                                      | `kilo-auth`              | `KILO_AUTH_CONTENT`      |
+| `provider`              | Default model                                              | Action key input         | Secret/env var           |
+| ----------------------- | ---------------------------------------------------------- | ------------------------ | ------------------------ |
+| `opencode`              | `opencode/deepseek-v4-flash-free`                          | `opencode-api-key`       | `OPENCODE_API_KEY`       |
+| `opencode-go`           | `opencode-go/deepseek-v4-flash`                            | `opencode-api-key`       | `OPENCODE_API_KEY`       |
+| `deepseek`              | `deepseek/deepseek-v4-flash`                               | `deepseek-api-key`       | `DEEPSEEK_API_KEY`       |
+| `openai`                | `openai/gpt-5.4-nano`                                      | `openai-api-key`         | `OPENAI_API_KEY`         |
+| `anthropic`             | `anthropic/claude-sonnet-4-6`                              | `anthropic-api-key`      | `ANTHROPIC_API_KEY`      |
+| `google`                | `google/gemini-2.5-flash`                                  | `gemini-api-key`         | `GEMINI_API_KEY`         |
+| `openrouter`            | `openrouter/openai/gpt-4o-mini`                            | `openrouter-api-key`     | `OPENROUTER_API_KEY`     |
+| `nvidia`                | `nvidia/nemotron-3-ultra-550b-a55b`                        | `nvidia-api-key`         | `NVIDIA_API_KEY`         |
+| `zai-coding-plan`       | `zai-coding-plan/glm-5.2`                                  | `zai-api-key`            | `ZAI_API_KEY`            |
+| `xai`                   | `xai/grok-4.3`                                             | `xai-api-key`            | `XAI_API_KEY`            |
+| `fireworks-ai`          | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` | `fireworks-api-key`      | `FIREWORKS_API_KEY`      |
+| `xiaomi-token-plan-sgp` | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                      | `mimo-api-key`           | `MIMO_API_KEY`           |
+| `devin`                 | `devin/default`                                            | `devin-windsurf-api-key` | `DEVIN_WINDSURF_API_KEY` |
+| `commandcode`           | `commandcode/default`                                      | `commandcode-access-key` | `COMMANDCODE_ACCESS_KEY` |
+| `cursor`                | `cursor/default`                                           | `cursor-api-key`         | `CURSOR_API_KEY`         |
+| `codex`                 | `codex/default`                                            | `codex-auth`             | `CODEX_AUTH_JSON`        |
+| `cline`                 | `cline/default`                                            | `cline-auth`             | `CLINE_AUTH_JSON`        |
+| `cline-pass`            | `cline-pass/default`                                       | `cline-auth`             | `CLINE_AUTH_JSON`        |
+| `kilo`                  | `kilo/kilo-auto/free`                                      | `kilo-auth`              | `KILO_AUTH_CONTENT`      |
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
