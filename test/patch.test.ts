@@ -74,21 +74,29 @@ describe('rescueAnchorByEvidence (F12 orphan rescue)', () => {
     ' }',
   ].join('\n');
 
-  it('re-anchors to the added line whose trimmed content equals the quote', () => {
+  it('re-anchors to the added line whose trimmed content starts with the quote', () => {
     // Model quoted the added line verbatim (whitespace-trimmed); rescue finds its new-side number.
     assert.equal(rescueAnchorByEvidence(patch, 'return order.subtotal; // BUG: pre-tax'), 2);
     assert.equal(rescueAnchorByEvidence(patch, 'const tax = order.tax;'), 3);
+  });
+
+  it('re-anchors a long line quoted to a truncated prefix', () => {
+    // On a line longer than the evidence cap the model can only quote its
+    // start; a prefix match still finds it (a plain equality check would not).
+    const long = 'const result = compute(alpha, beta, gamma, delta, epsilon, zeta, eta);';
+    const p = ['@@ -1,0 +1,1 @@', `+  ${long}`].join('\n');
+    assert.equal(rescueAnchorByEvidence(p, 'const result = compute(alpha, beta'), 1);
   });
 
   it('does not rescue when the quote is absent from any added line', () => {
     assert.equal(rescueAnchorByEvidence(patch, 'order.total'), undefined);
   });
 
-  it('does not re-anchor on a substring of a line — a partial quote must not mis-anchor', () => {
-    // `order.subtotal` appears inside a unique added line but is not that whole
-    // line; matching it would post the comment on the wrong (unrelated) place.
-    assert.equal(rescueAnchorByEvidence(patch, 'order.subtotal'), undefined);
-    assert.equal(rescueAnchorByEvidence(patch, 'const tax'), undefined);
+  it('does not re-anchor on a mid-line substring — a partial quote must not mis-anchor', () => {
+    // These appear inside a unique added line but are not its start; matching
+    // them would post the comment on the wrong (unrelated) place.
+    assert.equal(rescueAnchorByEvidence(patch, 'order.subtotal; // BUG: pre-tax'), undefined);
+    assert.equal(rescueAnchorByEvidence(patch, 'order.tax;'), undefined);
   });
 
   it('does not rescue an ambiguous quote that matches multiple added lines', () => {

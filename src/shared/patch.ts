@@ -43,9 +43,11 @@ export function parseAddedLines(patch: string | undefined): Set<number> {
  * verbatim `evidence` quote. Undefined unless EXACTLY one line matches — an
  * absent or ambiguous quote must leave the finding orphaned, not mis-anchored.
  *
- * The match is whole-line (trimmed) equality, not substring: the prompt asks
- * the model to quote the changed line exactly, and a substring like
- * `return true` would otherwise re-anchor onto an unrelated `if (x) return true;`.
+ * The match is a line-PREFIX (trimmed), not a free substring: the model quotes
+ * the line from its start, and the quote may be truncated to the evidence cap
+ * on a long line — so a prefix matches both the whole line and a truncated
+ * one, while still rejecting a mid-line substring like `order.subtotal` inside
+ * `return order.subtotal;` that a plain `includes` would wrongly re-anchor.
  */
 export function rescueAnchorByEvidence(
   patch: string | undefined,
@@ -55,7 +57,7 @@ export function rescueAnchorByEvidence(
   if (!patch || !needle) return undefined;
   const matches: number[] = [];
   for (const { line, content } of addedLines(patch)) {
-    if (content.trim() === needle) matches.push(line);
+    if (content.trim().startsWith(needle)) matches.push(line);
   }
   return matches.length === 1 ? matches[0] : undefined;
 }
