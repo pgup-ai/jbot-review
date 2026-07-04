@@ -529,6 +529,49 @@ async function repromptForJson(
   );
 }
 
+/**
+ * Runs an aux session's output through a strict parse, one same-session JSON
+ * repair on failure, then a lenient parse — failing open to the empty selection
+ * if the repair is unparseable or its round-trip dies. Aux checks never fail the
+ * run (invariant #3).
+ */
+async function parseAuxSessionWithRepair<T>(
+  session: {
+    client: OpencodeClient;
+    model: string;
+    sessionID: string;
+    raw: string;
+    label: string;
+    log: (msg: string) => void;
+    timeoutMs?: number;
+    onTokenUsage?: TokenUsageRecorder;
+  },
+  select: (result: ReviewResult) => T,
+): Promise<T> {
+  const { client, model, sessionID, raw, label, log, timeoutMs, onTokenUsage } = session;
+  try {
+    return select(parseReview(raw, label, log, { strict: true }));
+  } catch (error) {
+    try {
+      const repaired = await repromptForJson(
+        client,
+        model,
+        sessionID,
+        error,
+        label,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      );
+      return select(parseReview(repaired, `${label}-repair`, log));
+    } catch (repairError) {
+      const message = repairError instanceof Error ? repairError.message : String(repairError);
+      log(`(${label} repair failed; keeping empty results: ${message})`);
+      return select({ summary: '', findings: [], addressedPriorComments: [] });
+    }
+  }
+}
+
 export async function runAddressedPriorCommentsCheck(
   client: OpencodeClient,
   model: string,
@@ -547,33 +590,19 @@ export async function runAddressedPriorCommentsCheck(
     timeoutMs,
     onTokenUsage,
   );
-  try {
-    return parseReview(raw, 'addressed-prior-comments', log, { strict: true })
-      .addressedPriorComments;
-  } catch (error) {
-    try {
-      const repaired = await repromptForJson(
-        client,
-        model,
-        sessionID,
-        error,
-        'addressed-prior-comments',
-        log,
-        timeoutMs,
-        onTokenUsage,
-      );
-      // Still best-effort after the one repair: unparseable falls back to none.
-      return parseReview(repaired, 'addressed-prior-comments-repair', log).addressedPriorComments;
-    } catch (repairError) {
-      // The repair round-trip itself can die (timeout, transport); stay fail-open.
-      log(
-        `(addressed-prior-comments repair failed; keeping empty results: ${
-          repairError instanceof Error ? repairError.message : String(repairError)
-        })`,
-      );
-      return [];
-    }
-  }
+  return parseAuxSessionWithRepair(
+    {
+      client,
+      model,
+      sessionID,
+      raw,
+      label: 'addressed-prior-comments',
+      log,
+      timeoutMs,
+      onTokenUsage,
+    },
+    (result) => result.addressedPriorComments,
+  );
 }
 
 export async function runGuidelineComplianceCheck(
@@ -595,32 +624,10 @@ export async function runGuidelineComplianceCheck(
     timeoutMs,
     onTokenUsage,
   );
-  try {
-    return parseReview(raw, 'guideline-compliance', log, { strict: true }).findings;
-  } catch (error) {
-    try {
-      const repaired = await repromptForJson(
-        client,
-        model,
-        sessionID,
-        error,
-        'guideline-compliance',
-        log,
-        timeoutMs,
-        onTokenUsage,
-      );
-      // Still best-effort after the one repair: unparseable falls back to none.
-      return parseReview(repaired, 'guideline-compliance-repair', log).findings;
-    } catch (repairError) {
-      // The repair round-trip itself can die (timeout, transport); stay fail-open.
-      log(
-        `(guideline-compliance repair failed; keeping empty results: ${
-          repairError instanceof Error ? repairError.message : String(repairError)
-        })`,
-      );
-      return [];
-    }
-  }
+  return parseAuxSessionWithRepair(
+    { client, model, sessionID, raw, label: 'guideline-compliance', log, timeoutMs, onTokenUsage },
+    (result) => result.findings,
+  );
 }
 
 export async function runChangesSinceLastReview(
