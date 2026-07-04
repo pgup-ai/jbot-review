@@ -289,6 +289,8 @@ the review itself is unaffected._
 | `model-options`           | `{"reasoningEffort":"medium"}` | JSON object of provider options for the main model, passed through opencode to the provider SDK. Medium balances depth and latency; set `{"reasoningEffort":"high"}` on paid heavy tiers for maximum depth, or pass `{}` to send no options (e.g. for providers that reject unknown keys).                                                                                                                                                                                                                                                                                                                                                                  |
 | `prompt-cache`            | `true`                         | Enable opencode prompt caching (provider `setCacheKey`). Parallel shards and re-reviews of the same PR share a byte-identical prompt prefix, so caching cuts input-token cost on models that honor it; models marked unsupported by capability metadata omit the cache key entirely. Each session logs a `tokens: …` line with `cache(read=… write=…)` — `read > 0` on a later shard or re-review confirms a hit. Mostly matters on paid tiers.                                                                                                                                                                                                             |
 | `skip-doc-only`           | `true`                         | Skip the full review (no model call) when the entire PR diff is documentation, prose, or diagram assets (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, `.pdf`, `.svg`, `.drawio`, `.dio`, `.excalidraw`, `.mmd`, `.puml`, `.plantuml`); the reaction is left unchanged (a docs push doesn't change the verdict). Evaluated on the **reviewable** file set (noise like lockfiles and patchless/binary files are excluded — the bot never reviews those anyway, so the skip never drops review coverage); any reviewable code/config file forces a full review. Set `false` to always review, e.g. for docs with embedded code samples you care about. |
+| `review-telemetry`        | `true`                         | Write per-finding disposition + per-session token telemetry to the gitignored `.jbot-review/telemetry.jsonl` (uploaded as a CI artifact by the dogfood workflow). Near-zero overhead; `false` disables.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `evidence-quotes`         | `true`                         | Ask each finding for a verbatim quote of the changed line it flags. Grounds finding verification and lets a finding whose line anchor missed the diff be re-anchored to its quoted line instead of dropped. `false` restores the pre-evidence prompt byte-for-byte.                                                                                                                                                                                                                                                                                                                                                                                         |
 
 **Heavy-model recipe** (deep reviews from GPT‑5.x / Opus-class models with
 longer timeout headroom): set the main `model` to the heavy tier, then
@@ -509,10 +511,9 @@ npm run review:local
   `JBOT_VERIFY_FINDINGS`, `JBOT_TIME_BUDGET_MINUTES`, `JBOT_REVIEW_SHARDS`,
   `JBOT_DYNAMIC_FANOUT`, `JBOT_MODEL_OPTIONS`, `JBOT_PROMPT_CACHE`,
   `JBOT_SKIP_DOC_ONLY`, `JBOT_MAX_CONCURRENT_SESSIONS`, `JBOT_REVIEW_TELEMETRY`,
-  `JBOT_REVIEW_AUX_MODEL` (+ `JBOT_AUX_PROVIDER`). The opencode server uses a
-  free ephemeral port automatically; `JBOT_OPENCODE_PORT` pins one instead.
-  `JBOT_REVIEW_TELEMETRY` (default true) writes per-finding dispositions +
-  per-session token rows to the gitignored `.jbot-review/telemetry.jsonl`.
+  `JBOT_EVIDENCE_QUOTES`, `JBOT_REVIEW_AUX_MODEL` (+ `JBOT_AUX_PROVIDER`). The
+  opencode server uses a free ephemeral port automatically;
+  `JBOT_OPENCODE_PORT` pins one instead.
 
 ## Project guidelines
 

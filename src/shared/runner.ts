@@ -723,18 +723,12 @@ export interface ReviewRunOptions {
    * this to run isolated snapshots concurrently.
    */
   opencodePort?: number;
-  /**
-   * Emit per-finding disposition + per-session telemetry (F3). Default true —
-   * a near-zero-cost measurement layer (in-memory tagging + one post-review
-   * JSONL write). Off assigns no ids, takes no snapshots, and writes nothing,
-   * so the review runs exactly as it does without this feature.
-   */
+  /** Emit per-finding disposition + per-session telemetry. Default true; off is fully inert. */
   reviewTelemetry?: boolean;
   /**
-   * Ask each finding to carry a verbatim `evidence` quote of the changed line
-   * it hangs on (F12). Default true — small cost (a short quote per finding),
-   * grounds the verifier, and lets a would-be-orphaned finding be re-anchored.
-   * Off keeps the prompt byte-identical to the pre-F12 review.
+   * Ask each finding for a verbatim `evidence` quote of the flagged line:
+   * grounds verification and enables orphan re-anchoring. Default true; off
+   * keeps the prompt byte-identical to the pre-evidence review.
    */
   evidenceQuotes?: boolean;
   /**
@@ -856,8 +850,7 @@ export async function runPrReview(params: {
   const telemetry = createTelemetryRecorder(options.reviewTelemetry);
   const recordTokenUsage: TokenUsageRecorder = (usage, usageModel) => {
     tokenUsage.add(usage, usageModel);
-    // Per-session-completion token row (labeled by model — the semantic session
-    // label isn't threaded here). No-op when telemetry is off.
+    // Session rows key by model: the semantic session label isn't threaded here.
     telemetry.recordSession({
       session: usageModel,
       model: usageModel,
@@ -1534,13 +1527,12 @@ export async function runPrReview(params: {
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
     // dropping a stronger compliance finding at the same location.
-    // Tag each session's findings so telemetry can trace them by id through the
-    // pipeline. When telemetry is off, `produced` returns the lists untouched,
-    // so this is byte-identical to `[findings, ...lensFindingLists, compliance]`.
+    // Tag findings with telemetry ids per source session; a disabled recorder
+    // returns the lists untouched.
     const producedLists = [
       telemetry.produced('main-review', findings),
       ...lensFindingLists.map((list, i) =>
-        telemetry.produced(`review-${incrementalLenses.lensKeys[i] ?? `lens-${i}`}`, list),
+        telemetry.produced(`review-${incrementalLenses.lensKeys[i]}`, list),
       ),
       telemetry.produced('guideline-compliance', complianceFindings),
     ];
@@ -1596,13 +1588,12 @@ export async function runPrReview(params: {
       if (f.line === 0 && headSha && addable.has(f.path)) fileLevel.push(f);
       else if (addable.get(f.path)?.has(f.line)) inline.push(f);
       else {
-        // F12 orphan rescue: a would-be-orphaned finding with an evidence quote
-        // gets re-anchored to the unique added line that contains the quote.
-        // Inert without evidence, so it does nothing when evidenceQuotes is off.
+        // Orphan rescue: re-anchor to the unique added line containing the
+        // finding's evidence quote; without evidence (flag off) nothing changes.
         const rescuedLine = f.evidence
           ? rescueAnchorByEvidence(patchByPath.get(f.path), f.evidence)
           : undefined;
-        if (rescuedLine !== undefined && addable.get(f.path)?.has(rescuedLine)) {
+        if (rescuedLine !== undefined) {
           const reanchored = { ...f, line: rescuedLine };
           inline.push(reanchored);
           rescued.push(reanchored);
@@ -1828,9 +1819,8 @@ export function normalizeOptions(
 }
 
 /**
- * Post-review telemetry sink (F3): a compact disposition summary log line plus
- * a JSONL file under `.jbot-review/` (CI uploads it as an artifact). Fail-open
- * and no-op when disabled — never affects the review outcome.
+ * Post-review telemetry sink: disposition summary log line + JSONL under
+ * `.jbot-review/` (CI uploads it). Fail-open; no-op when disabled.
  */
 export function emitReviewTelemetry(
   telemetry: TelemetryRecorder,

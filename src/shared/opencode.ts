@@ -673,10 +673,9 @@ export async function runFindingVerification(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<FindingVerdict[] | undefined> {
-  // Pass findings straight through: Finding is a structural VerifiableFinding,
-  // so the formatter reads what it needs and ignores the rest. Do NOT project to
-  // a field subset here — an earlier projection dropped `evidence`, silently
-  // defeating F12 verifier grounding on this (primary) backend.
+  // Pass findings through unprojected: Finding is structurally a VerifiableFinding.
+  // An earlier field-subset projection here silently dropped `evidence` and
+  // defeated verifier grounding on this (primary) backend — don't reintroduce one.
   const prompt = assembleFindingVerificationPrompt(prContext, findings, true);
   // Single-shot: exploration tools off, so the verifier judges from the embedded
   // diff in one model call instead of an agentic git/grep loop.
@@ -993,9 +992,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
-// F12: accepted from any backend (optional), capped so a runaway quote can't
-// bloat the finding. Parsing it is always safe; the prompt only asks for it
-// when evidenceQuotes is on.
+// Evidence quotes parse from any backend regardless of the prompt flag; the cap
+// defends against runaway quotes.
 const EVIDENCE_MAX_CHARS = 200;
 
 /**

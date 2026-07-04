@@ -19,16 +19,9 @@ export interface Finding {
   confidence?: FindingConfidence;
   title: string;
   body: string;
-  /**
-   * F12 (opt-in `evidenceQuotes`): a short verbatim quote of the changed line
-   * the finding hangs on. Grounds the verifier and lets a would-be-orphaned
-   * finding be re-anchored. Optional at parse — a model may omit it.
-   */
+  /** Verbatim quote of the changed line the finding hangs on (evidenceQuotes); grounds the verifier and enables orphan re-anchoring. Models may omit it. */
   evidence?: string;
-  /**
-   * F3 (opt-in `reviewTelemetry`): stable per-run id used to trace the finding's
-   * disposition through the pipeline. Absent when telemetry is off; never posted.
-   */
+  /** Stable per-run id for disposition tracing (reviewTelemetry); absent when telemetry is off, never posted. */
   id?: string;
 }
 

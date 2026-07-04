@@ -316,10 +316,8 @@ allowed only inside JSON string values; escape newlines inside string values
 as \\n. Do not write a session recap, completion note, question, or "what would
 you like next" message.`;
 
-// Opt-in (evidenceQuotes) addendum: asks each finding to carry a verbatim quote
-// of the line it hangs on. Grounds the verifier and lets a would-be-orphaned
-// finding be re-anchored to the quoted line. Appended before the output reminder
-// so the reminder stays last (invariant #5); absent entirely when the flag is off.
+// evidenceQuotes addendum, appended before the output reminder (invariant #5:
+// reminder stays last); absent when the flag is off so that prompt is unchanged.
 export const EVIDENCE_INSTRUCTION = `## Evidence field
 
 For each finding, ALSO include an "evidence" field alongside the others: a short
@@ -1056,8 +1054,8 @@ export function formatFindingsForVerification(findings: VerifiableFinding[]): st
         `Severity: ${finding.severity}`,
         `Title: ${finding.title}`,
         `Claim: ${finding.body}`,
-        // The quoted line is the finding's load-bearing premise: if the diff
-        // contains no such line, the claim rests on code that isn't there.
+        // The finding's load-bearing premise: no such line in the diff → the
+        // claim rests on code that isn't there.
         ...(finding.evidence ? [`Cited line: ${finding.evidence}`] : []),
       ].join('\n'),
     );

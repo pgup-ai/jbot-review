@@ -42,7 +42,6 @@ export interface SessionTelemetryRow {
   reasoningTokens?: number;
   cacheReadTokens?: number;
   costUsd?: number;
-  durationMs?: number;
 }
 
 export interface FindingRouting {
@@ -67,7 +66,6 @@ export interface TelemetryRecorder {
   route(routing: FindingRouting): void;
   recordSession(row: SessionTelemetryRow): void;
   findingRows(): FindingTelemetryRow[];
-  sessionRows(): SessionTelemetryRow[];
   toJsonl(): string;
 }
 
@@ -78,7 +76,6 @@ const DISABLED: TelemetryRecorder = {
   route: () => undefined,
   recordSession: () => undefined,
   findingRows: () => [],
-  sessionRows: () => [],
   toJsonl: () => '',
 };
 
@@ -143,9 +140,6 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     findingRows() {
       return order.map((id) => deriveRow(id, meta.get(id)!, stageSeverity, routing));
     },
-    sessionRows() {
-      return sessions;
-    },
     toJsonl() {
       const lines = [...this.findingRows(), ...sessions];
       return lines.map((l) => JSON.stringify(l)).join('\n');
@@ -166,18 +160,20 @@ function deriveRow(
 ): FindingTelemetryRow {
   const severityAt = (stage: TelemetryStage): Severity | undefined =>
     stageSeverity.get(stage)?.get(id);
-  const presentIn = (stage: TelemetryStage): boolean => stageSeverity.get(stage)?.has(id) ?? false;
-  const snapshotted = STAGE_ORDER.filter((s) => stageSeverity.has(s));
 
   const gated = severityAt('gated');
   const demoted = gated !== undefined && gated !== m.severity;
-  const preVerify = severityAt('suppressed') ?? severityAt('deduped') ?? severityAt('gated');
+  // A finding present at 'verified' was necessarily present at 'suppressed'
+  // (stages only drop, never re-add), so that is the pre-verify severity.
+  const preVerify = severityAt('suppressed');
   const verifyUncertain =
     severityAt('verified') === 'P3' && preVerify !== undefined && BLOCKING.has(preVerify);
 
-  let disposition: FindingDisposition;
-  const present = snapshotted.filter(presentIn);
+  // Stages only drop findings, so presence is a prefix of STAGE_ORDER: the
+  // finding was dropped entering the stage after the last one it appears in.
+  const present = STAGE_ORDER.filter((stage) => stageSeverity.get(stage)?.has(id));
   const last = present[present.length - 1];
+  let disposition: FindingDisposition;
   if (last === 'filtered') {
     disposition = routing.rescued.has(id)
       ? 'rescued'
@@ -187,8 +183,7 @@ function deriveRow(
           ? 'posted-file-level'
           : 'orphaned';
   } else {
-    // Dropped entering the stage after the last one it was present in.
-    const droppedEntering = last ? STAGE_ORDER[STAGE_ORDER.indexOf(last) + 1] : snapshotted[0];
+    const droppedEntering = last ? STAGE_ORDER[STAGE_ORDER.indexOf(last) + 1] : 'deduped';
     disposition =
       droppedEntering === 'suppressed'
         ? 'suppressed'

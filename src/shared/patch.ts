@@ -39,11 +39,9 @@ export function parseAddedLines(patch: string | undefined): Set<number> {
 }
 
 /**
- * F12 orphan rescue: when a finding's anchor line is not a valid added line but
- * it carries a verbatim `evidence` quote, locate the added line that contains
- * the quote and return its new-side number. Returns undefined unless EXACTLY one
- * added line matches, so an absent or ambiguous quote leaves the finding
- * orphaned rather than re-anchoring it to the wrong line.
+ * Orphan rescue: the new-side number of the added line containing a finding's
+ * verbatim `evidence` quote. Undefined unless EXACTLY one line matches — an
+ * absent or ambiguous quote must leave the finding orphaned, not mis-anchored.
  */
 export function rescueAnchorByEvidence(
   patch: string | undefined,

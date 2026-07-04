@@ -479,11 +479,18 @@ describe('emitReviewTelemetry sink', () => {
   });
 });
 
-describe('normalizeOptions session concurrency', () => {
+describe('normalizeOptions defaults', () => {
   it('caps sessions at 3 by default and keeps explicit 0 as the unlimited escape hatch', () => {
     assert.equal(normalizeOptions(undefined).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({}).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({ maxConcurrentSessions: 0 }).maxConcurrentSessions, 0);
     assert.equal(normalizeOptions({ maxConcurrentSessions: 5 }).maxConcurrentSessions, 5);
+  });
+
+  it('defaults the measurement-loop flags on, with working opt-outs', () => {
+    assert.equal(normalizeOptions(undefined).reviewTelemetry, true);
+    assert.equal(normalizeOptions(undefined).evidenceQuotes, true);
+    assert.equal(normalizeOptions({ reviewTelemetry: false }).reviewTelemetry, false);
+    assert.equal(normalizeOptions({ evidenceQuotes: false }).evidenceQuotes, false);
   });
 });

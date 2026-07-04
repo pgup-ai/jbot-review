@@ -224,9 +224,11 @@ jobs:
           thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
       - name: Upload review telemetry
         if: always()
+        # Telemetry is fail-open end to end: an upload error must not fail the review job.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: jbot-review-telemetry-${{ github.run_id }}
+          name: jbot-review-telemetry
           path: .jbot-review/telemetry.jsonl
           if-no-files-found: ignore
           retention-days: 14
