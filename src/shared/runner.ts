@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import {
   SEVERITY_RANK,
   applyFindingVerdicts,
+  anchorFindings,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
@@ -29,7 +30,7 @@ import {
 } from './diff-context.ts';
 import { resolvePromptCachePolicy } from './config.ts';
 import { parseModelName } from './model.ts';
-import { parseAddedLines, rescueAnchorByEvidence } from './patch.ts';
+import { parseAddedLines } from './patch.ts';
 import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
@@ -1580,28 +1581,13 @@ export async function runPrReview(params: {
       `Review complete: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
-    const inline: Finding[] = [];
-    const fileLevel: Finding[] = [];
-    const orphaned: Finding[] = [];
-    const rescued: Finding[] = [];
-    for (const f of filteredFindings) {
-      if (f.line === 0 && headSha && addable.has(f.path)) fileLevel.push(f);
-      else if (addable.get(f.path)?.has(f.line)) inline.push(f);
-      else {
-        // Orphan rescue: re-anchor to the unique added line containing the
-        // finding's evidence quote; without evidence (flag off) nothing changes.
-        const rescuedLine = f.evidence
-          ? rescueAnchorByEvidence(patchByPath.get(f.path), f.evidence)
-          : undefined;
-        if (rescuedLine !== undefined) {
-          const reanchored = { ...f, line: rescuedLine };
-          inline.push(reanchored);
-          rescued.push(reanchored);
-        } else {
-          orphaned.push(f);
-        }
-      }
-    }
+    const { inline, fileLevel, orphaned, rescued } = anchorFindings(
+      filteredFindings,
+      addable,
+      patchByPath,
+      !!headSha,
+      options.evidenceQuotes,
+    );
     if (rescued.length > 0) {
       log(`Rescued ${rescued.length} orphaned finding(s) by re-anchoring to their evidence quote.`);
     }

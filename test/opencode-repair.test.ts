@@ -8,6 +8,7 @@ import {
   formatTokenUsage,
   parsePortEnv,
   runAddressedPriorCommentsCheck,
+  runFindingVerification,
   runGuidelineComplianceCheck,
   runReview,
 } from '../src/shared/opencode.ts';
@@ -261,6 +262,35 @@ describe('runAddressedPriorCommentsCheck JSON repair loop', () => {
 
     assert.equal(prompts.length, 2);
     assert.deepEqual(addressed, [], 'a repair transport failure must not escape the aux check');
+  });
+});
+
+describe('runFindingVerification evidence grounding', () => {
+  // Regression guard: a field-subset projection here once dropped `evidence`,
+  // silently defeating verifier grounding on this backend. Keep it passing through.
+  it('cites each finding’s evidence quote in the verifier prompt', async () => {
+    const { client, prompts } = makeFakeClient([
+      '{"verdicts":[{"index":0,"verdict":"confirmed"}]}',
+    ]);
+
+    await runFindingVerification(
+      client,
+      'prov/model',
+      'CTX',
+      [
+        {
+          path: 'a.ts',
+          line: 3,
+          severity: 'P1',
+          title: 'T',
+          body: 'B',
+          evidence: 'return x - tax;',
+        },
+      ],
+      noLog,
+    );
+
+    assert.match(prompts[0], /Cited line: return x - tax;/);
   });
 });
 

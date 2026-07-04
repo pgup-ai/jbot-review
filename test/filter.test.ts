@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  anchorFindings,
   applyFindingVerdicts,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
@@ -426,5 +427,50 @@ describe('openFindingThreadIds', () => {
 
   it('treats an already-resolved thread as closed regardless of this run', () => {
     assert.deepEqual(openFindingThreadIds([{ id: 't1', isResolved: true }], []), []);
+  });
+});
+
+describe('anchorFindings', () => {
+  const patch = ['@@ -1,0 +1,2 @@', '+  const total = order.total;', '+  return total;'].join('\n');
+  const addable = new Map([['a.ts', new Set([1, 2])]]);
+  const patchByPath = new Map([['a.ts', patch]]);
+
+  it('splits findings into inline, file-level, and orphaned buckets', () => {
+    const out = anchorFindings(
+      [
+        finding({ path: 'a.ts', line: 1 }),
+        finding({ path: 'a.ts', line: 0 }),
+        finding({ path: 'a.ts', line: 99 }),
+      ],
+      addable,
+      patchByPath,
+      true,
+      false,
+    );
+    assert.deepEqual([out.inline.length, out.fileLevel.length, out.orphaned.length], [1, 1, 1]);
+  });
+
+  it('re-anchors an orphan to its evidence line IN PLACE so every consumer agrees', () => {
+    const f = finding({ path: 'a.ts', line: 99, evidence: 'return total;' });
+    const out = anchorFindings([f], addable, patchByPath, true, true);
+
+    assert.deepEqual(out.orphaned, []);
+    assert.equal(out.rescued[0], out.inline[0], 'rescued findings are a subset of inline');
+    assert.equal(f.line, 2, 'the original object is re-anchored, not a copy');
+  });
+
+  it('does not consume evidence when evidenceQuotes is off (opt-out fully inert)', () => {
+    const f = finding({ path: 'a.ts', line: 99, evidence: 'return total;' });
+    const out = anchorFindings([f], addable, patchByPath, true, false);
+
+    assert.deepEqual(out.rescued, []);
+    assert.equal(out.orphaned[0], f);
+    assert.equal(f.line, 99, 'line untouched when the flag is off');
+  });
+
+  it('leaves an orphan orphaned when its evidence quote matches no unique added line', () => {
+    const f = finding({ path: 'a.ts', line: 99, evidence: 'nonexistent code' });
+    const out = anchorFindings([f], addable, patchByPath, true, true);
+    assert.equal(out.orphaned[0], f);
   });
 });
