@@ -1744,8 +1744,9 @@ export function normalizeOptions(
     dynamicFanout: options?.dynamicFanout ?? true,
     // Capped by default: throttled tiers serialize upstream anyway, and an
     // uncapped burst turns session deadlines into queue-time measurements
-    // (see the flash-tier note in opencode.ts). Explicit 0 = unlimited.
-    maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 4, 0),
+    // (see the flash-tier note in opencode.ts). 3 matches the dogfood-proven
+    // cap; explicit 0 = unlimited.
+    maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 3, 0),
     opencodePort: Math.max(options?.opencodePort ?? 0, 0),
     onReviewResult: options?.onReviewResult,
   };

@@ -421,10 +421,10 @@ describe('runPrReview local mode (localDiff)', () => {
 });
 
 describe('normalizeOptions session concurrency', () => {
-  it('caps sessions at 4 by default and keeps explicit 0 as the unlimited escape hatch', () => {
-    assert.equal(normalizeOptions(undefined).maxConcurrentSessions, 4);
-    assert.equal(normalizeOptions({}).maxConcurrentSessions, 4);
+  it('caps sessions at 3 by default and keeps explicit 0 as the unlimited escape hatch', () => {
+    assert.equal(normalizeOptions(undefined).maxConcurrentSessions, 3);
+    assert.equal(normalizeOptions({}).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({ maxConcurrentSessions: 0 }).maxConcurrentSessions, 0);
-    assert.equal(normalizeOptions({ maxConcurrentSessions: 2 }).maxConcurrentSessions, 2);
+    assert.equal(normalizeOptions({ maxConcurrentSessions: 5 }).maxConcurrentSessions, 5);
   });
 });
