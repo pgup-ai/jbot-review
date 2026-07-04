@@ -58,9 +58,8 @@ export interface ProviderKeyConfig {
 type ProviderEntry = NonNullable<NonNullable<ServerOptions['config']>['provider']>[string];
 
 /**
- * One provider entry: the API key, an optional prompt-cache toggle, and (for the
- * main model) any per-model reasoning options. Every provider is Models.dev-known,
- * so opencode already has its base URL and model catalog.
+ * Every provider is Models.dev-known, so opencode already has its base URL and
+ * model catalog — this entry only needs the key (+ options).
  */
 function buildProviderEntry(params: {
   apiKey: string;
