@@ -87,6 +87,28 @@ in this repo; `CLAUDE.md` just points here.
 - Prompt constants are template literals: escape backticks as `` \` `` and
   write `\\n` for a literal `\n` the model should see.
 
+## Code hygiene
+
+Ship the smallest change that does the job. If a reviewer can delete a line
+without losing behavior, it should not have been written.
+
+- **Comments earn their place** by explaining the non-obvious WHY. Delete any
+  comment that restates the code; one line beats three. Don't narrate the
+  size/layer of a change.
+- **No dead surface.** No field, parameter, option, generic, or exported helper
+  without a caller. Inline a helper used once; don't add speculative generality
+  or "flexibility" nobody asked for.
+- **No defensive cruft.** No null checks for values a caller already guards, no
+  `catch` that only rethrows, no fallbacks for states that cannot occur.
+  Validate once at the trust boundary and let real bugs throw. The one
+  sanctioned exception is auxiliary-session fail-open (invariant #3) — that is
+  required, not cruft.
+- **Reuse before adding.** Search for an existing helper before writing one;
+  extend it rather than fork a parallel copy. New decision logic goes in a pure
+  module (invariant #10), not inlined into `runner.ts`.
+- **Match the surrounding code** — its density, naming, and idiom. No ceremony,
+  no names spelled longer than their neighbours.
+
 <!-- context7 -->
 
 Use the `ctx7` CLI to fetch current documentation whenever the user asks about a library, framework, SDK, API, CLI tool, or cloud service -- even well-known ones like React, Next.js, Prisma, Express, Tailwind, Django, or Spring Boot. This includes API syntax, configuration, version migration, library-specific debugging, setup instructions, and CLI tool usage. Use even when you think you know the answer -- your training data may not reflect recent changes. Prefer this over web search for library docs.
