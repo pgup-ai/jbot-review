@@ -1010,7 +1010,7 @@ export async function runPrReview(params: {
     coreContext = [
       '## Pull request',
       pullTitle && `Title: ${pullTitle}`,
-      pullBody && `Description: ${truncatePrBody(pullBody)}`,
+      pullBody && `Description:\n${truncatePrBody(pullBody)}`,
       formatDiffScope(diffScope),
       `Changed files: ${changedFiles.join(', ')}`,
       summaryScopeBlock,
