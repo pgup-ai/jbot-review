@@ -106,7 +106,8 @@ export interface ClineCliArgsInput {
  * emitted. `--provider` is the billing mode = the jbot provider id (`cline` /
  * `cline-pass`); cline's `-P` defaults to `cline` and ignores lastUsedProvider, so jbot
  * sets it explicitly. `--json` yields the NDJSON we parse; the prompt is the final
- * positional arg (cline ignores piped stdin headless).
+ * positional arg (cline ignores piped stdin headless) and carries only PR content —
+ * credentials ride the per-session providers.json HOME file, never argv.
  */
 export function buildClineCliArgs(input: ClineCliArgsInput): string[] {
   const { providerID, modelID } = parseModelName(input.model);
