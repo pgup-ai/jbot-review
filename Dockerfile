@@ -11,8 +11,10 @@ RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000
 
-# Engine + optional commandcode/codex/cline/kilo providers; --version verifies they run on Node 24.
-RUN npm install -g opencode-ai@latest command-code@latest @openai/codex@latest cline@latest @kilocode/cli@latest \
+# Engine + optional commandcode/codex/cline/kilo providers; --version verifies they run
+# on Node 24. Pinned exactly: with @latest the buildx layer cache froze whatever version
+# the last cache bust happened to grab — bump versions here deliberately instead.
+RUN npm install -g opencode-ai@1.17.13 command-code@0.40.17 @openai/codex@0.142.5 cline@3.0.34 @kilocode/cli@7.3.54 \
   && npm cache clean --force \
   && opencode --version \
   && command-code --version \

@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
-  assertClinePromptInputWithinBudget,
+  assertClinePromptArgWithinBudget,
   buildClineCliArgs,
-  buildClinePromptInput,
-  CLINE_MAX_STDIN_PROMPT_BYTES,
+  buildClinePromptArg,
+  CLINE_MAX_ARGV_BYTES,
   CLINE_STRIPPED_ENV_KEYS,
   clineEnvForHome,
   clineProvidersPath,
@@ -28,56 +28,65 @@ describe('Cline CLI provider helpers', () => {
   });
 
   it('sets --provider to the billing mode and omits --model for default', () => {
-    assert.deepEqual(buildClineCliArgs({ model: 'cline-pass/default' }), [
+    assert.deepEqual(buildClineCliArgs({ model: 'cline-pass/default', promptArg: 'P' }), [
       '--json',
       '--plan',
       '--auto-approve',
       'false',
       '--provider',
       'cline-pass',
+      'P',
     ]);
-    assert.deepEqual(buildClineCliArgs({ model: 'cline/default' }).slice(-2), [
+    assert.deepEqual(buildClineCliArgs({ model: 'cline/default', promptArg: 'P' }).slice(-3), [
       '--provider',
       'cline',
+      'P',
     ]);
   });
 
   it('builds --model as modelType/model per mode', () => {
     // cline-pass models are namespaced under the provider.
-    assert.deepEqual(buildClineCliArgs({ model: 'cline-pass/glm-5.2' }).slice(-2), [
+    assert.deepEqual(buildClineCliArgs({ model: 'cline-pass/glm-5.2', promptArg: 'P' }).slice(-3), [
       '--model',
       'cline-pass/glm-5.2',
+      'P',
     ]);
     // pay-as-you-go cline models already carry their type.
-    assert.deepEqual(buildClineCliArgs({ model: 'cline/deepseek/deepseek-v4-flash' }).slice(-2), [
-      '--model',
-      'deepseek/deepseek-v4-flash',
-    ]);
+    assert.deepEqual(
+      buildClineCliArgs({ model: 'cline/deepseek/deepseek-v4-flash', promptArg: 'P' }).slice(-3),
+      ['--model', 'deepseek/deepseek-v4-flash', 'P'],
+    );
   });
 
-  it('prepends the no-tools directive to the stdin prompt input', () => {
-    const input = buildClinePromptInput('REVIEW BODY');
+  it('delivers the prompt as the final positional arg (cline ignores piped stdin headless)', () => {
+    // Regression pin for PR #79: stdin delivery fails every session with
+    // "JSON output mode requires a prompt argument or piped stdin".
+    const promptArg = buildClinePromptArg('REVIEW BODY');
+    assert.equal(buildClineCliArgs({ model: 'cline-pass/glm-5.2', promptArg }).at(-1), promptArg);
+  });
+
+  it('prepends the no-tools directive to the prompt argv', () => {
+    const arg = buildClinePromptArg('REVIEW BODY');
     // Load-bearing override phrases: cline must not attempt tool calls it cannot approve.
-    assert.match(input, /Use no tools for this review/);
-    assert.match(input, /running the git diff command/);
+    assert.match(arg, /Use no tools for this review/);
+    assert.match(arg, /running the git diff command/);
     // The full review prompt is preserved verbatim after the directive.
-    assert.ok(input.endsWith('\n\nREVIEW BODY'));
+    assert.ok(arg.endsWith('\n\nREVIEW BODY'));
   });
 
-  it('guards stdin prompt input with a clear backend cap', () => {
+  it('guards the argv prompt with a clear backend cap', () => {
     assert.doesNotThrow(() =>
-      assertClinePromptInputWithinBudget('review', 'x'.repeat(CLINE_MAX_STDIN_PROMPT_BYTES)),
+      assertClinePromptArgWithinBudget('review', 'x'.repeat(CLINE_MAX_ARGV_BYTES)),
     );
     assert.throws(
-      () =>
-        assertClinePromptInputWithinBudget('review', 'x'.repeat(CLINE_MAX_STDIN_PROMPT_BYTES + 1)),
-      /cline review prompt is \d+ bytes, over the \d+-byte stdin prompt limit/,
+      () => assertClinePromptArgWithinBudget('review', 'x'.repeat(CLINE_MAX_ARGV_BYTES + 1)),
+      /cline review prompt is \d+ bytes, over the \d+-byte argv limit/,
     );
   });
 
   it('never auto-approves tools or enables yolo (invariant #8)', () => {
     for (const model of ['cline/default', 'cline-pass/glm-5.2']) {
-      const args = buildClineCliArgs({ model });
+      const args = buildClineCliArgs({ model, promptArg: 'P' });
       assert.equal(args.includes('--yolo'), false);
       const approveIndex = args.indexOf('--auto-approve');
       assert.notEqual(approveIndex, -1);
