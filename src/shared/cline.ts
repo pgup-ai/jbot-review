@@ -27,10 +27,11 @@ import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } fro
 const CLINE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const CLINE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const CLINE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
-// Keep Cline sessions bounded and focused on the diff. The prompt itself is delivered
-// through stdin, so large review prompts do not hit Linux's single-argv limit.
+// Cline is argv-only headless — piped stdin is ignored under --json (verified through
+// 3.0.38) — and Linux caps one arg at 128KB. Summed context budgets (24KB guidelines,
+// 40KB diff, bounded PR context) keep prompts well under the guard; it is a backstop.
 const CLINE_GUIDELINE_BUDGET_BYTES = 24 * 1024;
-export const CLINE_MAX_STDIN_PROMPT_BYTES = 512 * 1024;
+export const CLINE_MAX_ARGV_BYTES = 120 * 1024;
 
 export const CLINE_PROVIDER_ID = 'cline';
 /** Cline subscription billing mode; same backend as `cline`, different `--provider`. */
@@ -95,15 +96,17 @@ export function writeClineAuth(auth: string, clineHome: string): string {
 
 export interface ClineCliArgsInput {
   model: string;
+  promptArg: string;
 }
 
 /**
- * Static `cline` argv. Read-only is enforced here (invariant #8): `--auto-approve
+ * Complete `cline` argv. Read-only is enforced here (invariant #8): `--auto-approve
  * false` denies every tool call headless (POC-proven), `--plan` is the secondary
  * behavioral layer, and the bypass flags (`--auto-approve true`, `--yolo`) are never
  * emitted. `--provider` is the billing mode = the jbot provider id (`cline` /
  * `cline-pass`); cline's `-P` defaults to `cline` and ignores lastUsedProvider, so jbot
- * sets it explicitly. `--json` yields the NDJSON we parse; prompt input is piped per call.
+ * sets it explicitly. `--json` yields the NDJSON we parse; the prompt is the final
+ * positional arg (cline ignores piped stdin headless).
  */
 export function buildClineCliArgs(input: ClineCliArgsInput): string[] {
   const { providerID, modelID } = parseModelName(input.model);
@@ -115,20 +118,21 @@ export function buildClineCliArgs(input: ClineCliArgsInput): string[] {
     const model = providerID === CLINE_PASS_PROVIDER_ID ? `${providerID}/${modelID}` : modelID;
     args.push('--model', model);
   }
+  args.push(input.promptArg);
   return args;
 }
 
-/** Prompt input: the no-tools directive (read-only cline can't run the base prompt's
+/** Prompt argv: the no-tools directive (read-only cline can't run the base prompt's
  * git/grep steps) prepended so the model reviews the embedded context, not stalls. */
-export function buildClinePromptInput(prompt: string): string {
+export function buildClinePromptArg(prompt: string): string {
   return `${NO_TOOLS_REVIEW_DIRECTIVE}\n\n${prompt}`;
 }
 
-export function assertClinePromptInputWithinBudget(label: string, prompt: string): void {
+export function assertClinePromptArgWithinBudget(label: string, prompt: string): void {
   const promptBytes = Buffer.byteLength(prompt, 'utf8');
-  if (promptBytes > CLINE_MAX_STDIN_PROMPT_BYTES) {
+  if (promptBytes > CLINE_MAX_ARGV_BYTES) {
     throw new Error(
-      `cline ${label} prompt is ${promptBytes} bytes, over the ${CLINE_MAX_STDIN_PROMPT_BYTES}-byte stdin prompt limit`,
+      `cline ${label} prompt is ${promptBytes} bytes, over the ${CLINE_MAX_ARGV_BYTES}-byte argv limit`,
     );
   }
 }
@@ -359,8 +363,8 @@ async function runClinePrompt(
   home: string | undefined,
   timeoutMs = CLINE_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
-  const fullPrompt = buildClinePromptInput(prompt);
-  assertClinePromptInputWithinBudget(label, fullPrompt);
+  const fullPrompt = buildClinePromptArg(prompt);
+  assertClinePromptArgWithinBudget(label, fullPrompt);
   const dir = mkdtempSync(join(tmpdir(), 'jbot-cline-'));
   log(`Calling ${label} prompt (agent=cline-cli, model=${model})`);
   try {
@@ -369,13 +373,12 @@ async function runClinePrompt(
     const providers = clineProvidersPath(dir);
     mkdirSync(dirname(providers), { recursive: true, mode: 0o700 });
     copyFileSync(clineProvidersPath(home ?? ''), providers);
-    const args = buildClineCliArgs({ model });
+    const args = buildClineCliArgs({ model, promptArg: fullPrompt });
     const result = await spawnWithTimeout(CLINE_CLI_BIN, args, {
       cwd: workspace,
       env: clineEnvForHome(dir),
       timeoutMs,
       timeoutMessage: formatClinePromptTimeoutMessage(label, model, timeoutMs),
-      input: fullPrompt,
     });
     if (result.exitCode !== 0) {
       throw new Error(
