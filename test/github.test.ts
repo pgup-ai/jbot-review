@@ -2,10 +2,22 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  classifyPriorJbotThread,
   formatPriorJbotThreadsForPrompt,
   postAddressedThreadReply,
   type PriorJbotThread,
 } from '../src/shared/github.ts';
+
+describe('classifyPriorJbotThread', () => {
+  it('sends an addressed-but-unresolved thread to resolve-only, else context or skip', () => {
+    assert.equal(
+      classifyPriorJbotThread({ addressed: false, isResolved: false }),
+      'review-context',
+    );
+    assert.equal(classifyPriorJbotThread({ addressed: true, isResolved: false }), 'resolve-only');
+    assert.equal(classifyPriorJbotThread({ addressed: true, isResolved: true }), 'skip');
+  });
+});
 
 describe('formatPriorJbotThreadsForPrompt', () => {
   it('includes human thread replies so declined suggestions are not re-raised', () => {

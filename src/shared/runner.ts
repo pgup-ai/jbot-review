@@ -154,7 +154,7 @@ import {
   resolveReviewThread,
   isJbotReviewBody,
 } from './github.ts';
-import type { Octokit, PrFile, PriorJbotThread } from './github.ts';
+import type { Octokit, PrFile, PriorJbotThread, PriorJbotThreads } from './github.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import { formatUsageCost, isFiniteNumber } from './text.ts';
 import type {
@@ -1000,8 +1000,8 @@ export async function runPrReview(params: {
   // CONTEXT and the addressed-reply posting). Otherwise a still-open finding
   // is invisible to the gate and the 🚀 lies — the same bug class as the
   // priorJbotReviewCount fetch above. safeListPriorJbotThreads is fail-open.
-  const allPriorJbotThreads = localDiff
-    ? []
+  const { threads: allPriorJbotThreads, unresolvedAddressedThreadIds } = localDiff
+    ? { threads: [], unresolvedAddressedThreadIds: [] }
     : await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
   const priorJbotThreads = options.includePriorComments ? allPriorJbotThreads : [];
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
@@ -1824,6 +1824,17 @@ export async function runPrReview(params: {
       addressedPriorComments: verifiedAddressedPriorComments,
       log,
     });
+    // Retry-close threads jbot already marked addressed whose resolve never
+    // landed (e.g. a past run lacked the permission it now has).
+    if (unresolvedAddressedThreadIds.length > 0) {
+      const reResolved = await resolveUnresolvedAddressedThreads({
+        octokit,
+        threadResolutionOctokit: params.threadResolutionOctokit,
+        threadIds: unresolvedAddressedThreadIds,
+        log,
+      });
+      resolvedThisRun.push(...reResolved);
+    }
     // React 🚀 only when the PR has NO open jbot findings after this run.
     // Open = threads that are not already resolved AND were not resolved this
     // run (a model-claimed "addressed" whose reply/resolve failed stays open,
@@ -2514,7 +2525,7 @@ async function safeListPriorJbotThreads(
   repo: string,
   pullNumber: number,
   log: (msg: string) => void,
-): Promise<PriorJbotThread[]> {
+): Promise<PriorJbotThreads> {
   try {
     return await listPriorJbotThreads(octokit, owner, repo, pullNumber);
   } catch (error) {
@@ -2523,7 +2534,7 @@ async function safeListPriorJbotThreads(
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    return [];
+    return { threads: [], unresolvedAddressedThreadIds: [] };
   }
 }
 
@@ -2716,29 +2727,58 @@ async function acknowledgeAddressedPriorComments(params: {
       });
       params.log(`Posted addressed reply for prior thread ${thread.id}`);
     } catch (error) {
+      // The reply is a courtesy; a failure must not block the resolve — always
+      // try to close an addressed thread.
       params.log(
         `Failed to reply to addressed prior thread ${thread.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      continue;
     }
 
     if (thread.isResolved) continue;
-    try {
-      await resolveReviewThread(params.threadResolutionOctokit ?? params.octokit, thread.id);
-      resolved.push(thread.id);
-      params.log(`Resolved prior jbot-review thread ${thread.id}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const hint =
-        !params.threadResolutionOctokit && isResourceNotAccessibleByIntegration(message)
-          ? ' Set the thread-resolution-token input to a token that can resolve review threads.'
-          : '';
-      params.log(`Failed to resolve prior jbot-review thread ${thread.id}: ${message}${hint}`);
-    }
+    if (await resolveThreadBestEffort(params, thread.id)) resolved.push(thread.id);
   }
   return resolved;
+}
+
+/**
+ * Resolves threads jbot already replied to as addressed but that never closed
+ * (e.g. a prior run's resolve failed). Reply-free — the addressed marker is
+ * already on the thread — so it just retries the resolve. Best-effort; returns
+ * the ids actually resolved this run.
+ */
+async function resolveUnresolvedAddressedThreads(params: {
+  octokit: Octokit;
+  threadResolutionOctokit?: Octokit;
+  threadIds: string[];
+  log: (msg: string) => void;
+}): Promise<string[]> {
+  const resolved: string[] = [];
+  for (const threadId of params.threadIds) {
+    if (await resolveThreadBestEffort(params, threadId)) resolved.push(threadId);
+  }
+  return resolved;
+}
+
+/** Shared resolve with the permission hint. Returns whether it resolved. */
+async function resolveThreadBestEffort(
+  params: { octokit: Octokit; threadResolutionOctokit?: Octokit; log: (msg: string) => void },
+  threadId: string,
+): Promise<boolean> {
+  try {
+    await resolveReviewThread(params.threadResolutionOctokit ?? params.octokit, threadId);
+    params.log(`Resolved prior jbot-review thread ${threadId}`);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const hint =
+      !params.threadResolutionOctokit && isResourceNotAccessibleByIntegration(message)
+        ? ' Set the thread-resolution-token input to a token that can resolve review threads.'
+        : '';
+    params.log(`Failed to resolve prior jbot-review thread ${threadId}: ${message}${hint}`);
+    return false;
+  }
 }
 
 function isResourceNotAccessibleByIntegration(message: string): boolean {

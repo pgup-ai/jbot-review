@@ -213,12 +213,37 @@ interface JbotReviewCommentState {
  * Threads already acknowledged as addressed are omitted to avoid duplicate
  * replies on later review runs.
  */
+export interface PriorJbotThreads {
+  /** Open jbot finding threads — review context + duplicate-suppression input. */
+  threads: PriorJbotThread[];
+  /**
+   * Threads jbot already replied to as addressed (marker present) but that are
+   * still unresolved — e.g. a prior run's resolve call failed. They need a
+   * mechanical resolve retry, no re-reply.
+   */
+  unresolvedAddressedThreadIds: string[];
+}
+
+/**
+ * Disposition of a prior jbot finding thread: feed it to the reviewer as
+ * context, resolve-only (already addressed but the thread never closed), or
+ * skip (already addressed AND resolved). Pure — the traversal supplies the two
+ * booleans.
+ */
+export function classifyPriorJbotThread(input: {
+  addressed: boolean;
+  isResolved: boolean;
+}): 'review-context' | 'resolve-only' | 'skip' {
+  if (!input.addressed) return 'review-context';
+  return input.isResolved ? 'skip' : 'resolve-only';
+}
+
 export async function listPriorJbotThreads(
   octokit: Octokit,
   owner: string,
   repo: string,
   pullNumber: number,
-): Promise<PriorJbotThread[]> {
+): Promise<PriorJbotThreads> {
   const query = `
     query JbotReviewThreads($owner: String!, $repo: String!, $number: Int!, $after: String) {
       viewer {
@@ -255,6 +280,7 @@ export async function listPriorJbotThreads(
   `;
 
   const threads: PriorJbotThread[] = [];
+  const unresolvedAddressedThreadIds: string[] = [];
   let commentState: JbotReviewCommentState | undefined;
   let after: string | null = null;
   do {
@@ -266,7 +292,7 @@ export async function listPriorJbotThreads(
     })) as ReviewThreadsResponse;
     const viewerLogin = response.viewer.login;
     const page = response.repository?.pullRequest?.reviewThreads;
-    if (!page) return threads;
+    if (!page) return { threads, unresolvedAddressedThreadIds };
     commentState ??= await listJbotReviewCommentState(
       octokit,
       owner,
@@ -290,11 +316,15 @@ export async function listPriorJbotThreads(
         )
       )
         continue;
-      const alreadyAcknowledged = comments.some((comment) =>
-        hasInternalMarker(comment?.body, ADDRESSED_MARKER),
-      );
-      if (alreadyAcknowledged || commentState.addressedTopLevelIds.has(topLevel.databaseId))
+      const addressed =
+        comments.some((comment) => hasInternalMarker(comment?.body, ADDRESSED_MARKER)) ||
+        commentState.addressedTopLevelIds.has(topLevel.databaseId);
+      const disposition = classifyPriorJbotThread({ addressed, isResolved: thread.isResolved });
+      if (disposition === 'skip') continue;
+      if (disposition === 'resolve-only') {
+        unresolvedAddressedThreadIds.push(thread.id);
         continue;
+      }
 
       const replies = comments
         .slice(1)
@@ -330,7 +360,7 @@ export async function listPriorJbotThreads(
     }
   } while (after);
 
-  return threads;
+  return { threads, unresolvedAddressedThreadIds };
 }
 
 async function listJbotReviewCommentState(
