@@ -210,6 +210,13 @@ export interface PiDiffScope {
   base: string;
   /** Local mode diffs merge-base → working tree; GitHub paths are three-dot. */
   worktree: boolean;
+  /**
+   * PR head sha for GitHub paths. The checkout HEAD may be a synthetic merge
+   * ref (actions/checkout pull_request default), so diff to the head sha the
+   * embedded diff and anchors use — not the checkout's HEAD. Absent in local
+   * mode (working tree) and as a defensive fallback.
+   */
+  head?: string;
 }
 
 /**
@@ -218,7 +225,8 @@ export interface PiDiffScope {
  * textconv or external diff driver can run.
  */
 export function piGitDiffArgs(scope: PiDiffScope, path?: string): string[] {
-  const args = [...GIT_DIFF_ARGS, scope.worktree ? scope.base : `${scope.base}...HEAD`];
+  const rev = scope.worktree ? scope.base : `${scope.base}...${scope.head ?? 'HEAD'}`;
+  const args = [...GIT_DIFF_ARGS, rev];
   // `--` pins the model-supplied path as a pathspec; a flag-shaped value can
   // never become a git option.
   const trimmed = path?.trim();

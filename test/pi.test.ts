@@ -312,6 +312,13 @@ describe('piGitDiffArgs', () => {
     ]);
   });
 
+  it('diffs against the PR head sha (not HEAD) when supplied — checkout HEAD may be a merge ref', () => {
+    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: false, head: 'deadbeef' }), [
+      ...GIT_DIFF_ARGS,
+      'abc123...deadbeef',
+    ]);
+  });
+
   it('diffs merge-base to the working tree in local mode (invariant 7 exception)', () => {
     assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: true }), [
       ...GIT_DIFF_ARGS,

@@ -1308,7 +1308,9 @@ export async function runPrReview(params: {
           // Shell-less pi sessions recover omitted/truncated hunks through the
           // read-only git_diff tool (invariant 1); base and diff form mirror
           // the run's diff scope.
-          diffScope: baseSha ? { base: baseSha, worktree: !!localDiff } : undefined,
+          diffScope: baseSha
+            ? { base: baseSha, worktree: !!localDiff, ...(headSha ? { head: headSha } : {}) }
+            : undefined,
         },
       );
       if (!baseSha) {
@@ -1388,12 +1390,20 @@ export async function runPrReview(params: {
     [auxModel]: auxBackend.name,
     [model]: mainBackend.name,
   };
-  // Independent cleanups: a fault in one must not strand the other's temp dir.
+  // Best-effort teardown: stop() runs inside a finally, so it must never throw
+  // (that would mask the real error and skip cleanupCliHomes). Each cleanup is
+  // independent — a fault in one neither strands the other's temp dir nor hides
+  // its error.
   const stop = () => {
     try {
       opencodeRuntime?.stop();
-    } finally {
+    } catch (error) {
+      log(`opencode teardown failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
       piRuntime?.stop();
+    } catch (error) {
+      log(`pi teardown failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
   try {
