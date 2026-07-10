@@ -20,6 +20,7 @@ import {
   resolveAuxModelName,
   resolveModelName,
 } from '../shared/model.ts';
+import { resolvePiEngine } from '../shared/pi.ts';
 import type { ReviewCommit } from '../shared/review-context.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { ReviewResult } from '../shared/types.ts';
@@ -232,6 +233,9 @@ async function main(): Promise<void> {
   // backends bring their own binary.
   const { providerID, modelID } = parseModelName(model);
   const aux = parseModelName(auxModel || model);
+  // Preflight-only resolution (the runner re-resolves for its own routing):
+  // roles served by the in-process pi engine need no opencode binary.
+  const piEngine = resolvePiEngine(process.env, process.version);
   const selection = selectReviewBackends({
     providerID,
     modelID,
@@ -239,6 +243,7 @@ async function main(): Promise<void> {
     auxProviderID: aux.providerID,
     auxModelID: aux.modelID,
     auxApiKey: auxApiKey ?? '',
+    piEnabled: piEngine.enabled,
   });
   const requiredBins = new Set<string>();
   if (selection.needsOpencode) requiredBins.add('opencode');

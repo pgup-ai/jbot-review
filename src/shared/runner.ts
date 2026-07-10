@@ -19,6 +19,16 @@ import {
 } from './filter.ts';
 import { createTelemetryRecorder, type TelemetryRecorder } from './telemetry.ts';
 import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
+import {
+  resolvePiEngine,
+  runPiAddressedPriorCommentsCheck,
+  runPiChangesSinceLastReview,
+  runPiFindingVerification,
+  runPiGuidelineComplianceCheck,
+  runPiReview,
+  startPi,
+  type PiRuntime,
+} from './pi.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   type DiffHunksOptions,
@@ -249,6 +259,38 @@ function createOpencodeBackend(
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
       runOpencodeChangesSinceLastReview(
         client,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+  };
+}
+
+function createPiBackend(runtime: PiRuntime): ReviewBackend {
+  return {
+    name: 'pi',
+    runReview: (model, prContext, guidelines, log, options) =>
+      runPiReview(runtime, model, prContext, guidelines, log, options),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runPiAddressedPriorCommentsCheck(runtime, model, prContext, log, timeoutMs, onTokenUsage),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runPiGuidelineComplianceCheck(
+        runtime,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runPiFindingVerification(runtime, model, prContext, findings, log, timeoutMs, onTokenUsage),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runPiChangesSinceLastReview(
+        runtime,
         model,
         prContext,
         deltaContext,
@@ -610,12 +652,13 @@ function requireCliBackend(
   return backend;
 }
 
-function requireOpencodeBackend(
+function requireSdkBackend(
   backend: ReviewBackend | undefined,
+  engine: 'opencode' | 'pi',
   role: 'main' | 'aux',
 ): ReviewBackend {
   if (!backend) {
-    throw new Error(`OpenCode backend was selected for ${role} sessions but was not initialized.`);
+    throw new Error(`${engine} backend was selected for ${role} sessions but was not initialized.`);
   }
   return backend;
 }
@@ -819,6 +862,8 @@ export async function runPrReview(params: {
   const { providerID, modelID } = parseModelName(model);
   const auxModel = options.auxModel || model;
   const { providerID: auxProviderID, modelID: auxModelID } = parseModelName(auxModel);
+  const piEngine = resolvePiEngine(process.env, process.version);
+  if (!piEngine.enabled && piEngine.reason) log(`pi engine disabled: ${piEngine.reason}`);
   const backendSelection = selectReviewBackends({
     providerID,
     modelID,
@@ -826,8 +871,18 @@ export async function runPrReview(params: {
     auxProviderID,
     auxModelID,
     auxApiKey: options.auxApiKey,
+    piEnabled: piEngine.enabled,
   });
   const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
+  const mainOnPi = backendSelection.mainSdkEngine === 'pi';
+  const auxOnPi = backendSelection.auxSdkEngine === 'pi';
+  const mainOnOpencode = !mainCliBackend && !mainOnPi;
+  const auxOnOpencode = !auxCliBackend && !auxOnPi;
+  if (mainOnPi || auxOnPi) {
+    log(
+      `SDK engine routing: main=${mainCliBackend ?? (mainOnPi ? 'pi' : 'opencode')} aux=${auxCliBackend ?? (auxOnPi ? 'pi' : 'opencode')}`,
+    );
+  }
   const promptCachePolicy = resolvePromptCachePolicy({
     promptCache: options.promptCache,
     mainModel: model,
@@ -1216,9 +1271,43 @@ export async function runPrReview(params: {
     kiloBackend = limitBackendConcurrency(createKiloBackend(workspace, kiloAuth), sessionSlots);
   }
 
+  let piRuntime: Awaited<ReturnType<typeof startPi>> | undefined;
+  let piBackend: ReviewBackend | undefined;
+  if (backendSelection.pi) {
+    const piConfig = backendSelection.pi;
+    if (!piConfig.apiKey) {
+      cleanupCliHomes();
+      throw new Error(`Missing API key for provider "${piConfig.providerID}".`);
+    }
+    log('Starting pi engine');
+    try {
+      piRuntime = await startPi(
+        workspace,
+        piConfig.providerID,
+        piConfig.modelID,
+        piConfig.apiKey,
+        log,
+        {
+          modelOptions: mainOnPi ? options.modelOptions : undefined,
+          // pi's prompt caching is provider-managed (no setCacheKey knob);
+          // resolvePromptCachePolicy applies to the opencode server only.
+          additionalProviderKeys:
+            mainOnPi && auxOnPi && auxProviderID !== providerID
+              ? [{ providerID: auxProviderID, apiKey: options.auxApiKey || apiKey }]
+              : undefined,
+        },
+      );
+    } catch (error) {
+      cleanupCliHomes();
+      throw error;
+    }
+    piBackend = limitBackendConcurrency(createPiBackend(piRuntime.runtime), sessionSlots);
+  }
+
   if (needsOpencode) {
     const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
     if (!opencodeApiKey) {
+      piRuntime?.stop();
       cleanupCliHomes();
       throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
     }
@@ -1231,13 +1320,13 @@ export async function runPrReview(params: {
         opencodeApiKey,
         log,
         {
-          modelOptions: mainCliBackend ? undefined : options.modelOptions,
-          promptCache: mainCliBackend
-            ? promptCachePolicy.auxProviderPromptCache
-            : promptCachePolicy.providerPromptCache,
+          modelOptions: mainOnOpencode ? options.modelOptions : undefined,
+          promptCache: mainOnOpencode
+            ? promptCachePolicy.providerPromptCache
+            : promptCachePolicy.auxProviderPromptCache,
           port: options.opencodePort > 0 ? options.opencodePort : undefined,
           additionalProviderKeys:
-            !mainCliBackend && !auxCliBackend && auxProviderID !== providerID
+            mainOnOpencode && auxOnOpencode && auxProviderID !== providerID
               ? [
                   {
                     providerID: auxProviderID,
@@ -1249,6 +1338,7 @@ export async function runPrReview(params: {
         },
       );
     } catch (error) {
+      piRuntime?.stop();
       cleanupCliHomes();
       throw error;
     }
@@ -1268,11 +1358,18 @@ export async function runPrReview(params: {
   };
   const mainBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)
-    : requireOpencodeBackend(opencodeBackend, 'main');
+    : mainOnPi
+      ? requireSdkBackend(piBackend, 'pi', 'main')
+      : requireSdkBackend(opencodeBackend, 'opencode', 'main');
   const auxBackend = auxCliBackend
     ? requireCliBackend(cliBackends, auxCliBackend)
-    : requireOpencodeBackend(opencodeBackend, 'aux');
-  const stop = opencodeRuntime?.stop ?? (() => undefined);
+    : auxOnPi
+      ? requireSdkBackend(piBackend, 'pi', 'aux')
+      : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
+  const stop = () => {
+    opencodeRuntime?.stop();
+    piRuntime?.stop();
+  };
   try {
     if (commandCodeBackend) {
       try {
@@ -1316,7 +1413,7 @@ export async function runPrReview(params: {
       }
     }
 
-    if (opencodeRuntime && !mainCliBackend) {
+    if (opencodeRuntime && mainBackend.name === 'opencode') {
       try {
         const modelListCacheKey = `${providerID}:${modelID}`;
         let models = providerModelListCache.get(modelListCacheKey);
@@ -1333,8 +1430,10 @@ export async function runPrReview(params: {
       } catch (e) {
         log(`(skipped provider model listing: ${(e as Error).message})`);
       }
-    } else if (mainCliBackend) {
-      log(`OpenCode provider model listing skipped: main review uses ${mainBackend.name} CLI.`);
+    } else if (mainBackend.name !== 'opencode') {
+      log(
+        `OpenCode provider model listing skipped: main review uses the ${mainBackend.name} backend.`,
+      );
     }
 
     const context7 = decideContext7Mode({
@@ -1344,12 +1443,16 @@ export async function runPrReview(params: {
     });
     let context7Active = false;
     let context7Block = '';
-    if (context7.enabled && opencodeRuntime && !mainCliBackend) {
+    if (context7.enabled && opencodeRuntime && mainBackend.name === 'opencode') {
       log(`Context7 MCP requested: ${context7.reason}`);
       context7Active = await enableContext7Mcp(opencodeRuntime.client, options.context7ApiKey, log);
       if (context7Active) context7Block = buildContext7PromptBlock(context7.reason);
-    } else if (context7.enabled && mainCliBackend) {
-      log(`Context7 MCP skipped: main review uses ${mainBackend.name} CLI (${context7.reason}).`);
+    } else if (context7.enabled) {
+      // pi has no MCP support; framework-behavior claims fall back to the
+      // abstention discipline. CLI backends likewise run without Context7.
+      log(
+        `Context7 MCP skipped: main review uses the ${mainBackend.name} backend (${context7.reason}).`,
+      );
     } else {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }

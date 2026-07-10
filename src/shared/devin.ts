@@ -28,7 +28,7 @@ import {
   type TokenUsageRecorder,
 } from './opencode.ts';
 import { spawnWithTimeout } from './cli-process.ts';
-import { formatUsageCost, truncateForLog } from './text.ts';
+import { formatUsageCost, isRecord, truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
@@ -499,10 +499,6 @@ function firstString(
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
   return undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 function formatDevinUsageModel(model: string): string {

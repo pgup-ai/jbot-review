@@ -321,6 +321,20 @@ See [models.dev](https://models.dev/) for opencode-backed model catalogs. CLI
 backends such as Devin, CommandCode, and Cursor expose model lists through their
 own tools/accounts.
 
+**SDK engines.** Non-CLI providers run on one of two in-repo SDK engines,
+chosen automatically per session role: the in-process
+[pi SDK](https://pi.dev/docs/latest/sdk) for providers on its verified
+allowlist (`anthropic`, `openai`, `google`, `deepseek`, `xai`, `openrouter`,
+`fireworks-ai`, `zai-coding-plan`, `xiaomi-token-plan-sgp`), and the opencode
+server for everything else (including the `opencode`/`opencode-go` gateways
+and `nvidia`). Set `JBOT_SDK_ENGINE=opencode` to pin every SDK session to
+opencode — the one-line rollback if pi misbehaves. The pi engine requires
+Node >= 22.19 (the published Docker image runs Node 24); on older runtimes it
+disables itself and logs why. pi sessions run hermetically (no user-level pi
+config, skills, or prompt templates are loaded) and manage provider prompt
+caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions
+only.
+
 Review metadata reports backend usage counters when they are available.
 OpenCode-backed sessions report token counters and cost from assistant message
 metadata; Devin CLI sessions also contribute usage when the ATIF export includes
@@ -515,7 +529,9 @@ npm run review:local
   `JBOT_VERIFY_FINDINGS`, `JBOT_TIME_BUDGET_MINUTES`, `JBOT_REVIEW_SHARDS`,
   `JBOT_DYNAMIC_FANOUT`, `JBOT_MODEL_OPTIONS`, `JBOT_PROMPT_CACHE`,
   `JBOT_SKIP_DOC_ONLY`, `JBOT_MAX_CONCURRENT_SESSIONS`, `JBOT_REVIEW_TELEMETRY`,
-  `JBOT_EVIDENCE_QUOTES`, `JBOT_REVIEW_AUX_MODEL` (+ `JBOT_AUX_PROVIDER`). The
+  `JBOT_EVIDENCE_QUOTES`, `JBOT_REVIEW_AUX_MODEL` (+ `JBOT_AUX_PROVIDER`),
+  `JBOT_SDK_ENGINE` (see
+  [Provider configuration](#provider-configuration-in-repo)). The
   opencode server uses a free ephemeral port automatically;
   `JBOT_OPENCODE_PORT` pins one instead.
 

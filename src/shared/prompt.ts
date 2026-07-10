@@ -338,6 +338,16 @@ and context in this prompt. Respond with the required JSON computed directly
 from that embedded context.`;
 
 /**
+ * System prompt for pi-engine sessions, standing in for the opencode plan
+ * agent's read-only conduct. Task instructions and output schema live in the
+ * per-session user prompts (assemble*); this only pins workspace safety.
+ */
+export const PI_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer operating inside a checked-out git repository.
+You may inspect the repository with your tools (read, grep, find, ls, and bash for commands like git diff, git log, git grep).
+You must never modify the workspace: no file writes or edits, no package installs, no network calls, and no git commands that mutate state (commit, checkout, reset, clean, stash).
+Follow the task instructions in the user message exactly; reply with only the requested output.`;
+
+/**
  * Marks PR-author-controlled prose (title, description, commit messages, prior
  * review comments) as untrusted so an injected instruction cannot steer the
  * review. Prepended once to the shared context (seen by main + aux sessions).

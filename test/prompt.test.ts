@@ -595,3 +595,12 @@ describe('buildReviewFocusBlock', () => {
     assert.match(block, /General correctness:/);
   });
 });
+
+describe('PI_REVIEW_SYSTEM_PROMPT', () => {
+  it('pins read-only conduct with bash-based git inspection allowed', async () => {
+    const { PI_REVIEW_SYSTEM_PROMPT } = await import('../src/shared/prompt.ts');
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /never modify the workspace/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /bash/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /git diff/);
+  });
+});

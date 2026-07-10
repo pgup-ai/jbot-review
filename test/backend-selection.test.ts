@@ -614,3 +614,112 @@ describe('selectReviewBackends', () => {
     });
   });
 });
+
+describe('selectReviewBackends pi engine routing', () => {
+  const noCliKeys = {
+    devinApiKey: '',
+    commandCodeAccessKey: '',
+    cursorApiKey: '',
+    codexAuth: '',
+    clineAuth: '',
+    kiloAuth: '',
+  };
+  const google = {
+    providerID: 'google',
+    modelID: 'gemini-2.5-flash',
+    apiKey: 'google-key',
+    auxProviderID: 'google',
+    auxModelID: 'gemini-2.5-flash',
+    auxApiKey: '',
+  };
+
+  it('routes both SDK roles to pi for an allowlisted provider', () => {
+    assert.deepEqual(selectReviewBackends({ ...google, piEnabled: true }), {
+      mainSdkEngine: 'pi',
+      auxSdkEngine: 'pi',
+      needsOpencode: false,
+      ...noCliKeys,
+      opencodeProviderID: 'google',
+      opencodeModelID: 'gemini-2.5-flash',
+      opencodeApiKey: '',
+      pi: { providerID: 'google', modelID: 'gemini-2.5-flash', apiKey: 'google-key' },
+    });
+  });
+
+  it('leaves the selection byte-identical to today when piEnabled is omitted', () => {
+    assert.deepEqual(selectReviewBackends(google), {
+      needsOpencode: true,
+      ...noCliKeys,
+      opencodeProviderID: 'google',
+      opencodeModelID: 'gemini-2.5-flash',
+      opencodeApiKey: 'google-key',
+    });
+  });
+
+  it('splits engines: pi main with an opencode-gateway aux', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...google,
+        auxProviderID: 'opencode-go',
+        auxModelID: 'deepseek-v4-flash',
+        auxApiKey: 'gateway-key',
+        piEnabled: true,
+      }),
+      {
+        mainSdkEngine: 'pi',
+        needsOpencode: true,
+        ...noCliKeys,
+        opencodeProviderID: 'opencode-go',
+        opencodeModelID: 'deepseek-v4-flash',
+        opencodeApiKey: 'gateway-key',
+        pi: { providerID: 'google', modelID: 'gemini-2.5-flash', apiKey: 'google-key' },
+      },
+    );
+  });
+
+  it('routes a pi-capable aux behind a CLI main and skips opencode entirely', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        providerID: 'kilo',
+        modelID: 'kilo-auto/free',
+        apiKey: 'kilo-auth',
+        auxProviderID: 'google',
+        auxModelID: 'gemini-2.5-flash',
+        auxApiKey: 'google-key',
+        piEnabled: true,
+      }),
+      {
+        mainCliBackend: 'kilo',
+        auxSdkEngine: 'pi',
+        needsOpencode: false,
+        ...noCliKeys,
+        kiloAuth: 'kilo-auth',
+        opencodeProviderID: 'google',
+        opencodeModelID: 'gemini-2.5-flash',
+        opencodeApiKey: 'google-key',
+        pi: { providerID: 'google', modelID: 'gemini-2.5-flash', apiKey: 'google-key' },
+      },
+    );
+  });
+
+  it('keeps a non-allowlisted provider on opencode even with piEnabled', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        providerID: 'nvidia',
+        modelID: 'nemotron-3-ultra-550b-a55b',
+        apiKey: 'nvidia-key',
+        auxProviderID: 'nvidia',
+        auxModelID: 'nemotron-3-ultra-550b-a55b',
+        auxApiKey: '',
+        piEnabled: true,
+      }),
+      {
+        needsOpencode: true,
+        ...noCliKeys,
+        opencodeProviderID: 'nvidia',
+        opencodeModelID: 'nemotron-3-ultra-550b-a55b',
+        opencodeApiKey: 'nvidia-key',
+      },
+    );
+  });
+});

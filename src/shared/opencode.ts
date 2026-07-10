@@ -17,7 +17,7 @@ import {
   assembleReviewPrompt,
   buildJsonRepairPrompt,
 } from './prompt.ts';
-import { isFiniteNumber } from './text.ts';
+import { isFiniteNumber, isRecord } from './text.ts';
 import type {
   AddressedPriorComment,
   Finding,
@@ -433,10 +433,6 @@ function isProviderListData(value: unknown): value is {
   );
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 export function formatContext7Error(error: unknown, secret = ''): string {
   const message = error instanceof Error ? error.message : String(error);
   const redacted = secret
@@ -456,7 +452,12 @@ export function parsePortEnv(name: string, defaultValue: number): number {
   return Number.isInteger(value) && value >= 1 && value <= 65535 ? value : defaultValue;
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+/** Shared by the pi engine (pi.ts); a timeout rejection never leaks an unhandled rejection. */
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   // If the timeout wins, keep any later rejection from the original operation
   // from surfacing as an unhandled rejection.

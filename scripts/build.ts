@@ -8,6 +8,7 @@ const shared: esbuild.BuildOptions = {
   external: [
     '@actions/core',
     '@actions/github',
+    '@earendil-works/pi-coding-agent',
     '@opencode-ai/sdk',
     '@octokit/auth-app',
     '@octokit/plugin-paginate-rest',
