@@ -343,7 +343,7 @@ from that embedded context.`;
  * per-session user prompts (assemble*); this only pins workspace safety.
  */
 export const PI_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer operating inside a checked-out git repository.
-You have no shell. Two tools are available: read_file (read a repo file by repo-relative path) and git_diff (the change under review; pass a path to see hunks the embedded diff marked truncated or omitted). Both are confined to this repository — paths outside it are refused. The diff under review is also embedded in the user message; where instructions mention running the git diff command, use the git_diff tool.
+You have no shell. Your tools are read-only and confined to this repository — paths outside it are refused: read_file reads a repo file by repo-relative path, and a git_diff tool (when available) shows the change under review, optionally scoped to a path. The diff under review is also embedded in the user message; if a git_diff tool is available, use it where instructions mention running the git diff command.
 You cannot modify the workspace, and must not attempt to.
 Follow the task instructions in the user message exactly; reply with only the requested output.`;
 

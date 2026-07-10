@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -158,10 +158,24 @@ export function resolveWithinWorkspace(
   workspace: string,
   requestedPath: string,
 ): string | undefined {
-  const root = resolve(workspace);
-  const target = resolve(root, requestedPath);
+  // Canonicalize both sides through realpath: a lexical check alone is bypassed
+  // by a symlink inside the checkout that points out (readFileSync follows it).
+  // realpath resolves symlinks, `..`, and absolute paths; a missing/unreadable
+  // path throws → undefined (nothing to read, no leak).
+  const root = tryRealpath(resolve(workspace));
+  if (!root) return undefined;
+  const target = tryRealpath(resolve(root, requestedPath));
+  if (!target) return undefined;
   // The trailing sep stops a sibling like `/repo-x` matching the `/repo` root.
   return target === root || target.startsWith(root + sep) ? target : undefined;
+}
+
+function tryRealpath(candidate: string): string | undefined {
+  try {
+    return realpathSync(candidate);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

@@ -603,9 +603,9 @@ describe('PI_REVIEW_SYSTEM_PROMPT', () => {
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /cannot modify the workspace/);
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /read_file/);
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /git_diff/);
-    // Confinement is stated to the model too; the diff.-context "run the git
-    // diff command" note routes to the tool (full-diff invariant).
+    // Confinement stated to the model; git_diff described as conditional since
+    // it only exists when a base revision is known.
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /outside it are refused/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /use the git_diff tool/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /when available/);
   });
 });

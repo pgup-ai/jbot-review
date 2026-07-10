@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -152,16 +155,25 @@ describe('piThinkingLevel', () => {
 });
 
 describe('resolveWithinWorkspace', () => {
-  // Security boundary: pi's built-in read tools accept absolute/.. paths and
-  // have no sandbox, so file access is confined to the repo through this.
-  it('allows repo-relative paths and refuses any escape', () => {
-    const ws = '/repo';
-    assert.equal(resolveWithinWorkspace(ws, 'src/a.ts'), '/repo/src/a.ts');
-    assert.equal(resolveWithinWorkspace(ws, './x'), '/repo/x');
-    assert.equal(resolveWithinWorkspace(ws, '.'), '/repo');
-    assert.equal(resolveWithinWorkspace(ws, '../etc/passwd'), undefined);
-    assert.equal(resolveWithinWorkspace(ws, '/etc/passwd'), undefined);
-    assert.equal(resolveWithinWorkspace(ws, '/repo-sibling/x'), undefined); // prefix, not child
+  // Security boundary: pi's built-in read tools are unsandboxed, so file access
+  // is confined to the repo here. Must follow symlinks (a link inside the
+  // checkout can point out), so this is exercised against a real filesystem.
+  it('confines to the real workspace and refuses symlink + lexical escapes', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'ws-')));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'out-')));
+    writeFileSync(join(root, 'inside.txt'), 'x');
+    writeFileSync(join(outside, 'secret.txt'), 'SECRET');
+    symlinkSync(join(outside, 'secret.txt'), join(root, 'evil')); // escapes the repo
+    try {
+      assert.equal(resolveWithinWorkspace(root, 'inside.txt'), join(root, 'inside.txt'));
+      assert.equal(resolveWithinWorkspace(root, 'evil'), undefined); // P0: symlink escape
+      assert.equal(resolveWithinWorkspace(root, '/etc/hosts'), undefined); // absolute
+      assert.equal(resolveWithinWorkspace(root, '../../etc/hosts'), undefined); // ..
+      assert.equal(resolveWithinWorkspace(root, 'missing.txt'), undefined); // non-existent
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });
 
