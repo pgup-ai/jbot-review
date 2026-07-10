@@ -10,6 +10,7 @@ import {
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
+  PI_REVIEW_SYSTEM_PROMPT,
   REVIEW_LENSES,
   REVIEW_OUTPUT_REMINDER,
   REVIEW_PROMPT,
@@ -597,15 +598,13 @@ describe('buildReviewFocusBlock', () => {
 });
 
 describe('PI_REVIEW_SYSTEM_PROMPT', () => {
-  it('tells the model it has no shell and cannot modify the workspace', async () => {
-    const { PI_REVIEW_SYSTEM_PROMPT } = await import('../src/shared/prompt.ts');
+  it('tells the model it has no shell and cannot modify the workspace', () => {
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /no shell/);
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /cannot modify the workspace/);
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /read, grep, find, and ls/);
   });
 
-  it('routes "run the git diff command" instructions to the git_diff tool', async () => {
-    const { PI_REVIEW_SYSTEM_PROMPT } = await import('../src/shared/prompt.ts');
+  it('routes "run the git diff command" instructions to the git_diff tool', () => {
     // The omitted-hunks notes in diff-context.ts say "run the git diff
     // command"; without this mapping a shell-less session cannot recover
     // truncated hunks (full-diff invariant).

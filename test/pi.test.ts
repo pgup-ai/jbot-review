@@ -13,6 +13,7 @@ import {
   piSupportsProvider,
   piThinkingLevel,
   sumPiUsage,
+  piTurnUsageSince,
   resolvePiEngine,
 } from '../src/shared/pi.ts';
 import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
@@ -210,6 +211,49 @@ describe('sumPiUsage', () => {
     assert.equal(sumPiUsage([{ role: 'user', content: 'x' }]), undefined);
     assert.equal(sumPiUsage([]), undefined);
     assert.equal(sumPiUsage(undefined), undefined);
+  });
+});
+
+describe('piTurnUsageSince', () => {
+  it('bills only the turns appended after the snapshot (JSON-repair reuse)', () => {
+    // A reused session: [original prompt+turn], then a repair prompt+turn.
+    // priorTurns snapshots the length before the repair; only the repair turn
+    // is billed here — the original was billed on its own prompt call.
+    const messages = [
+      { role: 'user', content: 'review' },
+      { role: 'assistant', content: 'bad json', usage: { input: 100, output: 40 } },
+      { role: 'user', content: 'repair' },
+      { role: 'assistant', content: '{}', usage: { input: 10, output: 4, cost: { total: 0.2 } } },
+    ];
+    assert.deepEqual(piTurnUsageSince(messages, 2), {
+      input: 10,
+      output: 4,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      costUsd: 0.2,
+    });
+  });
+
+  it('bills every new turn when the prompt spanned tool calls', () => {
+    const messages = [
+      { role: 'assistant', content: [], usage: { input: 7, output: 1 } },
+      { role: 'tool', content: 'r' },
+      { role: 'assistant', content: 'done', usage: { input: 3, output: 2 } },
+    ];
+    assert.deepEqual(piTurnUsageSince(messages, 0), {
+      input: 10,
+      output: 3,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
+  });
+
+  it('returns undefined when the snapshot leaves no new assistant turn', () => {
+    const messages = [{ role: 'assistant', content: 'x', usage: { input: 5 } }];
+    assert.equal(piTurnUsageSince(messages, 1), undefined);
+    assert.equal(piTurnUsageSince(undefined, 0), undefined);
   });
 });
 

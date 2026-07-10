@@ -231,6 +231,18 @@ export function sumPiUsage(messages: unknown): PromptTokenUsage | undefined {
   return { ...total, ...(isFiniteNumber(cost) ? { costUsd: cost } : {}) };
 }
 
+/**
+ * Usage for the turns appended after `priorTurns` messages. A session is reused
+ * across a prompt and its JSON-repair re-prompt, so each prompt bills only the
+ * turns it produced — never the earlier prompt's or the repair's twice.
+ */
+export function piTurnUsageSince(
+  messages: unknown,
+  priorTurns: number,
+): PromptTokenUsage | undefined {
+  return sumPiUsage(Array.isArray(messages) ? messages.slice(priorTurns) : []);
+}
+
 function lastAssistantMessage(messages: unknown): PiMessageLike | undefined {
   if (!Array.isArray(messages)) return undefined;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -553,10 +565,12 @@ async function promptPiSession(
     await abortPiSessionBestEffort(session, label, log);
     throw error;
   }
-  const messages = piSessionMessages(session).slice(priorTurns);
+  const allMessages = piSessionMessages(session);
+  const messages = allMessages.slice(priorTurns);
   const raw = extractPiFinalText(messages);
-  // A tool-using prompt spans several assistant turns; bill them all.
-  const usage = sumPiUsage(messages);
+  // Bill every assistant turn this prompt produced (a tool-using prompt spans
+  // several), and only this prompt's — see piTurnUsageSince.
+  const usage = piTurnUsageSince(allMessages, priorTurns);
   if (usage) {
     log(
       `${label} ${formatTokenUsage({
