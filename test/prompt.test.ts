@@ -603,4 +603,13 @@ describe('PI_REVIEW_SYSTEM_PROMPT', () => {
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /cannot modify the workspace/);
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /read, grep, find, and ls/);
   });
+
+  it('routes "run the git diff command" instructions to the git_diff tool', async () => {
+    const { PI_REVIEW_SYSTEM_PROMPT } = await import('../src/shared/prompt.ts');
+    // The omitted-hunks notes in diff-context.ts say "run the git diff
+    // command"; without this mapping a shell-less session cannot recover
+    // truncated hunks (full-diff invariant).
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /git_diff tool/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /truncated or omitted/);
+  });
 });

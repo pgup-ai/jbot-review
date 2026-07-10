@@ -3,6 +3,8 @@ import { describe, it } from 'node:test';
 
 import {
   PI_MIN_NODE_VERSION,
+  capPiDiffOutput,
+  piGitDiffArgs,
   PI_SESSION_TOOLS,
   extractPiFinalText,
   mapPiUsage,
@@ -242,5 +244,55 @@ describe('extractPiFinalText', () => {
       extractPiFinalText([{ role: 'assistant', content: [{ type: 'thinking', thinking: 'x' }] }]),
       '',
     );
+  });
+});
+
+describe('piGitDiffArgs', () => {
+  it('uses the three-dot merge-base form on GitHub-backed reviews', () => {
+    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: false }), ['diff', 'abc123...HEAD']);
+  });
+
+  it('diffs merge-base to the working tree in local mode (invariant 7 exception)', () => {
+    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: true }), ['diff', 'abc123']);
+  });
+
+  it('scopes to a path behind -- so a flag-shaped path cannot become an option', () => {
+    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: false }, '--exec=x'), [
+      'diff',
+      'abc123...HEAD',
+      '--',
+      '--exec=x',
+    ]);
+  });
+
+  it('ignores an empty path', () => {
+    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: true }, '  '), ['diff', 'abc123']);
+  });
+});
+
+describe('capPiDiffOutput', () => {
+  it('passes short output through untouched', () => {
+    assert.equal(capPiDiffOutput('diff --git a b', 100), 'diff --git a b');
+  });
+
+  it('truncates long output and tells the model to narrow by path', () => {
+    const capped = capPiDiffOutput('x'.repeat(200), 100);
+    assert.ok(capped.startsWith('x'.repeat(100)));
+    assert.match(capped, /truncated/);
+    assert.match(capped, /path/);
+  });
+
+  it('caps by bytes, not characters, for multi-byte content', () => {
+    // 100 two-byte chars = 200 bytes; a 100-byte cap keeps exactly 50 chars.
+    const capped = capPiDiffOutput('\u00e9'.repeat(100), 100);
+    assert.ok(capped.startsWith('\u00e9'.repeat(50)));
+    assert.ok(!capped.startsWith('\u00e9'.repeat(51)));
+  });
+
+  it('drops a multi-byte char split at the byte boundary instead of emitting garbage', () => {
+    // 'a' + 49 x 2-byte chars = 99 bytes; byte 100 splits the 50th char.
+    const capped = capPiDiffOutput('a' + '\u00e9'.repeat(100), 100);
+    assert.ok(capped.startsWith('a' + '\u00e9'.repeat(49) + '\n'));
+    assert.ok(!capped.includes('\uFFFD'));
   });
 });

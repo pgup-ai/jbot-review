@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import { parseModelName } from './model.ts';
 import {
@@ -131,10 +133,10 @@ export function piThinkingLevel(modelOptions?: Record<string, unknown>): string 
  * wrappers (`sh -c`) defeat any command filter. The toolset IS the enforcement,
  * so bash is withheld entirely and mutation is impossible by construction.
  *
- * The review does not need a shell: the full diff is embedded in the prompt
- * (diff-context.ts) and blast-radius runs git grep in the runner, outside the
- * session — the same posture the cline backend already reviews under.
- * Single-shot sessions disable even these tools.
+ * The review does not need a shell: the diff is embedded in the prompt
+ * (diff-context.ts), hunks past the embed budget come through the read-only
+ * git_diff custom tool (full-diff invariant), and blast-radius runs git grep
+ * in the runner, outside the session. Single-shot sessions disable even these.
  */
 export const PI_SESSION_TOOLS: readonly string[] = ['read', 'grep', 'find', 'ls'];
 
@@ -159,6 +161,34 @@ export function mapPiUsage(usage: unknown): PromptTokenUsage | undefined {
     cacheWrite: count(u.cacheWrite, u.cacheWriteTokens),
     ...(isFiniteNumber(cost) ? { costUsd: cost } : {}),
   };
+}
+
+const execFileAsync = promisify(execFile);
+const PI_DIFF_TOOL_MAX_BYTES = 48 * 1024;
+const PI_DIFF_TOOL_TIMEOUT_MS = 30_000;
+
+export interface PiDiffScope {
+  /** Merge-base (local mode) or PR base sha (GitHub paths). */
+  base: string;
+  /** Local mode diffs merge-base → working tree; GitHub paths are three-dot. */
+  worktree: boolean;
+}
+
+export function piGitDiffArgs(scope: PiDiffScope, path?: string): string[] {
+  const args = ['diff', scope.worktree ? scope.base : `${scope.base}...HEAD`];
+  // `--` pins the model-supplied path as a pathspec; a flag-shaped value can
+  // never become a git option.
+  const trimmed = path?.trim();
+  if (trimmed) args.push('--', trimmed);
+  return args;
+}
+
+export function capPiDiffOutput(text: string, maxBytes = PI_DIFF_TOOL_MAX_BYTES): string {
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
+  // Truncate on the byte budget (chars would overshoot up to 4x on multi-byte
+  // content); decoding a split sequence yields trailing U+FFFD — drop it.
+  const capped = Buffer.from(text, 'utf8').toString('utf8', 0, maxBytes).replace(/�+$/, '');
+  return `${capped}\n\n_[diff truncated; call git_diff again with a specific \`path\` for the rest]_`;
 }
 
 type PiMessageLike = { role?: unknown; content?: unknown; usage?: unknown };
@@ -252,6 +282,48 @@ interface PiSdkLike {
   DefaultResourceLoader: new (options: Record<string, unknown>) => PiResourceLoaderLike;
   SessionManager: { inMemory(): unknown };
   SettingsManager: { inMemory(settings: Record<string, unknown>): unknown };
+  defineTool(definition: Record<string, unknown>): unknown;
+}
+
+/**
+ * Read-only replacement for the shell the pi engine deliberately lacks: the
+ * omitted-hunks notes tell the model to "run the git diff command" when the
+ * embedded diff overflows its byte budget, and without this tool a pi session
+ * could never see removals or unembedded hunks (invariant 1). The base ref and
+ * diff form are runner-supplied — the model only chooses an optional pathspec.
+ */
+function createPiGitDiffTool(sdk: PiSdkLike, workspace: string, scope: PiDiffScope): unknown {
+  return sdk.defineTool({
+    name: 'git_diff',
+    description:
+      'Show the change under review (git diff against the PR base). Pass `path` to scope the diff to one file — do that whenever the full output is truncated.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Repo-relative file path to diff; omit for the whole change.',
+        },
+      },
+    },
+    execute: async (_id: unknown, params: unknown) => {
+      const path = isRecord(params) && typeof params.path === 'string' ? params.path : undefined;
+      let text: string;
+      try {
+        const { stdout } = await execFileAsync('git', piGitDiffArgs(scope, path), {
+          cwd: workspace,
+          maxBuffer: 64 * 1024 * 1024,
+          timeout: PI_DIFF_TOOL_TIMEOUT_MS,
+        });
+        text = stdout.trim() ? capPiDiffOutput(stdout) : '(no changes for this path)';
+      } catch (error) {
+        // Surface the failure as tool output the model can react to; a throw
+        // here would fail the whole session over a bad pathspec.
+        text = `git diff failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      return { content: [{ type: 'text', text }], details: {} };
+    },
+  });
 }
 
 /**
@@ -284,6 +356,7 @@ export interface PiRuntime {
   /** Full `provider/model` — a bare model ID collides across providers. */
   mainModel: string;
   thinkingLevel?: string;
+  gitDiffTool?: unknown;
 }
 
 function requirePiProvider(providerID: string): string {
@@ -325,6 +398,7 @@ export async function startPi(
   options: {
     modelOptions?: Record<string, unknown>;
     additionalProviderKeys?: ProviderKeyConfig[];
+    diffScope?: PiDiffScope;
   } = {},
 ): Promise<{ runtime: PiRuntime; stop: () => void }> {
   const piID = requirePiProvider(providerID);
@@ -396,6 +470,9 @@ export async function startPi(
       workspace,
       mainModel: `${providerID}/${modelID}`,
       ...(thinkingLevel ? { thinkingLevel } : {}),
+      ...(options.diffScope
+        ? { gitDiffTool: createPiGitDiffTool(sdk, workspace, options.diffScope) }
+        : {}),
     },
     stop: removeIsolationDir,
   };
@@ -415,7 +492,15 @@ async function createPiSession(
     // (write/edit absent; single-shot disables all tools), the hermetic
     // loader blocks ambient skills/extensions from adding any, and the
     // system prompt pins read-only conduct.
-    ...(singleShot ? { noTools: 'all' } : { tools: [...PI_SESSION_TOOLS] }),
+    ...(singleShot
+      ? { noTools: 'all' }
+      : {
+          // `tools` is the session's complete allowlist: a custom tool only
+          // reaches the model when its name is listed here too (verified live —
+          // customTools alone registers nothing).
+          tools: [...PI_SESSION_TOOLS, ...(runtime.gitDiffTool ? ['git_diff'] : [])],
+          ...(runtime.gitDiffTool ? { customTools: [runtime.gitDiffTool] } : {}),
+        }),
     authStorage: runtime.authStorage,
     modelRegistry: runtime.registry,
     resourceLoader: runtime.loader,

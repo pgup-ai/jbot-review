@@ -1305,8 +1305,15 @@ export async function runPrReview(params: {
           additionalProviderKeys: auxNeedsOwnKey
             ? [{ providerID: auxProviderID, apiKey: options.auxApiKey }]
             : undefined,
+          // Shell-less pi sessions recover omitted/truncated hunks through the
+          // read-only git_diff tool (invariant 1); base and diff form mirror
+          // the run's diff scope.
+          diffScope: baseSha ? { base: baseSha, worktree: !!localDiff } : undefined,
         },
       );
+      if (!baseSha) {
+        log('pi git_diff tool unavailable (no base sha); large diffs may be reviewed truncated.');
+      }
     } catch (error) {
       cleanupCliHomes();
       throw error;
