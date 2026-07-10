@@ -317,8 +317,9 @@ export async function listPriorJbotThreads(
       )
         continue;
       const addressed =
-        comments.some((comment) => hasInternalMarker(comment?.body, ADDRESSED_MARKER)) ||
-        commentState.addressedTopLevelIds.has(topLevel.databaseId);
+        comments.some((comment) =>
+          isBotAddressedReply(comment?.author?.login, comment?.body, viewerLogin),
+        ) || commentState.addressedTopLevelIds.has(topLevel.databaseId);
       const disposition = classifyPriorJbotThread({ addressed, isResolved: thread.isResolved });
       if (disposition === 'skip') continue;
       if (disposition === 'resolve-only') {
@@ -407,7 +408,7 @@ async function listJbotReviewCommentState(
     comments
       .filter(
         (comment) =>
-          comment.body.includes(ADDRESSED_MARKER) &&
+          isBotAddressedReply(comment.user?.login, comment.body, viewerLogin) &&
           comment.in_reply_to_id !== null &&
           comment.in_reply_to_id !== undefined,
       )
@@ -684,6 +685,20 @@ function isJbotFinding(
 
 function hasInternalMarker(body: string | undefined, marker: string): boolean {
   return body?.includes(marker) ?? false;
+}
+
+/**
+ * True only when the ADDRESSED marker was posted by the bot/viewer itself. The
+ * marker is jbot's own "I addressed this" signal — a PR author who copies the
+ * hidden marker into a reply must not be able to close (or resolve) an open
+ * finding they never fixed.
+ */
+export function isBotAddressedReply(
+  authorLogin: string | undefined,
+  body: string | undefined,
+  viewerLogin: string,
+): boolean {
+  return authorLogin === viewerLogin && hasInternalMarker(body, ADDRESSED_MARKER);
 }
 
 function isGithubActionsAlias(authorLogin: string | undefined, viewerLogin: string): boolean {
