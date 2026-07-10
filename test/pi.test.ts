@@ -172,12 +172,14 @@ describe('sumPiUsage', () => {
   it('sums usage across every assistant turn of a tool-using prompt', () => {
     const messages = [
       { role: 'user', content: 'go' },
-      { role: 'assistant', content: [], usage: { input: 10, output: 2, cost: { total: 0.1 } } },
+      // Costs are exactly representable in binary, so the summed assertion
+      // stays strict without pinning a floating-point artifact.
+      { role: 'assistant', content: [], usage: { input: 10, output: 2, cost: { total: 0.25 } } },
       { role: 'tool', content: 'result' },
       {
         role: 'assistant',
         content: 'done',
-        usage: { input: 5, cacheRead: 3, cost: { total: 0.2 } },
+        usage: { input: 5, cacheRead: 3, cost: { total: 0.5 } },
       },
     ];
     assert.deepEqual(sumPiUsage(messages), {
@@ -186,7 +188,7 @@ describe('sumPiUsage', () => {
       reasoning: 0,
       cacheRead: 3,
       cacheWrite: 0,
-      costUsd: 0.30000000000000004,
+      costUsd: 0.75,
     });
   });
 
