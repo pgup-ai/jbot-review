@@ -1382,6 +1382,12 @@ export async function runPrReview(params: {
     : auxOnPi
       ? requireSdkBackend(piBackend, 'pi', 'aux')
       : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
+  // Which engine each model ran on, for the review footer (main wins on
+  // collision — same model ⇒ same engine anyway).
+  const engineByModel: Record<string, string> = {
+    [auxModel]: auxBackend.name,
+    [model]: mainBackend.name,
+  };
   // Independent cleanups: a fault in one must not strand the other's temp dir.
   const stop = () => {
     try {
@@ -1742,6 +1748,7 @@ export async function runPrReview(params: {
         repo,
         headSha,
         tokenUsage.snapshot(),
+        engineByModel,
       );
       log(
         `Dry run enabled; would post verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
@@ -1795,6 +1802,7 @@ export async function runPrReview(params: {
         repo,
         headSha,
         tokenUsage.snapshot(),
+        engineByModel,
       );
       log(
         `Posting review: verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
@@ -2747,6 +2755,7 @@ export function buildBody(
   repo: string,
   headSha?: string,
   tokenUsage?: ReviewTokenUsage,
+  engineByModel?: Record<string, string>,
 ): string {
   const total = all.length;
   const lines = ['## J-Bot Code Review', ''];
@@ -2784,7 +2793,7 @@ export function buildBody(
   const orphanedSection = renderOrphanedSection(orphaned);
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
   lines.push(...renderReviewMetadataBlock(model, tokenUsage));
-  lines.push('', `<sup>${formatReviewedWith(model, tokenUsage)}</sup>`);
+  lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
   return lines.join('\n');
 }
 
@@ -2816,13 +2825,23 @@ export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewToke
   ];
 }
 
-export function formatReviewedWith(model: string, tokenUsage?: ReviewTokenUsage): string {
+export function formatReviewedWith(
+  model: string,
+  tokenUsage?: ReviewTokenUsage,
+  // Model → SDK engine / CLI ('pi', 'opencode', 'kilo', …). The model prefix no
+  // longer implies the engine (opencode/… can run on pi), so name it explicitly.
+  engineByModel?: Record<string, string>,
+): string {
+  const withEngine = (usageModel: string): string => {
+    const engine = engineByModel?.[usageModel];
+    return engine ? `\`${usageModel}\` via ${engine}` : `\`${usageModel}\``;
+  };
   const auxiliaryModels = uniqueModels(model, tokenUsage?.models ?? []).filter(
     (usageModel) => usageModel !== model,
   );
-  if (auxiliaryModels.length === 0) return `Reviewed with \`${model}\`.`;
-  return `Reviewed with \`${model}\`; auxiliary sessions used ${auxiliaryModels
-    .map((usageModel) => `\`${usageModel}\``)
+  if (auxiliaryModels.length === 0) return `Reviewed with ${withEngine(model)}.`;
+  return `Reviewed with ${withEngine(model)}; auxiliary sessions used ${auxiliaryModels
+    .map(withEngine)
     .join(', ')}.`;
 }
 

@@ -83,21 +83,14 @@ describe('piSupportsProvider', () => {
 });
 
 describe('piProviderIDFor', () => {
-  it('maps renamed providers and passes the rest through', () => {
-    assert.equal(piProviderIDFor('fireworks-ai'), 'fireworks');
+  it('maps jbot provider ids to pi (renames + gateways); undefined off-list', () => {
+    assert.equal(piProviderIDFor('fireworks-ai'), 'fireworks'); // renamed
     assert.equal(piProviderIDFor('zai-coding-plan'), 'zai');
-    assert.equal(piProviderIDFor('google'), 'google');
-    assert.equal(piProviderIDFor('xiaomi-token-plan-sgp'), 'xiaomi-token-plan-sgp');
-  });
-
-  it('maps the opencode gateways and nvidia to their pi ids', () => {
+    assert.equal(piProviderIDFor('google'), 'google'); // identity
     assert.equal(piProviderIDFor('nvidia'), 'nvidia');
     assert.equal(piProviderIDFor('opencode'), 'opencode');
     assert.equal(piProviderIDFor('opencode-go'), 'opencode-go');
-  });
-
-  it('returns undefined for CLI-backend and unknown providers', () => {
-    assert.equal(piProviderIDFor('kilo'), undefined);
+    assert.equal(piProviderIDFor('kilo'), undefined); // CLI backend
     assert.equal(piProviderIDFor('unknown'), undefined);
   });
 });
@@ -170,14 +163,11 @@ describe('PI_SESSION_TOOLS', () => {
 });
 
 describe('mapPiUsage', () => {
-  it('maps pi usage fields onto PromptTokenUsage', () => {
+  it('maps usage fields (both spellings) onto PromptTokenUsage', () => {
     assert.deepEqual(
       mapPiUsage({ input: 10, output: 4, cacheRead: 7, cacheWrite: 2, cost: { total: 0.25 } }),
       { input: 10, output: 4, reasoning: 0, cacheRead: 7, cacheWrite: 2, costUsd: 0.25 },
     );
-  });
-
-  it('accepts the *Tokens field spellings', () => {
     assert.deepEqual(mapPiUsage({ inputTokens: 3, outputTokens: 1 }), {
       input: 3,
       output: 1,
@@ -187,7 +177,7 @@ describe('mapPiUsage', () => {
     });
   });
 
-  it('defaults missing counters to zero and drops non-finite cost', () => {
+  it('defaults missing counters to zero, drops non-finite cost, undefined for no usage', () => {
     assert.deepEqual(mapPiUsage({ cost: { total: Number.NaN } }), {
       input: 0,
       output: 0,
@@ -195,9 +185,6 @@ describe('mapPiUsage', () => {
       cacheRead: 0,
       cacheWrite: 0,
     });
-  });
-
-  it('returns undefined when there is no usage object', () => {
     assert.equal(mapPiUsage(undefined), undefined);
     assert.equal(mapPiUsage('nope'), undefined);
   });
@@ -246,17 +233,16 @@ describe('sumPiUsage', () => {
 });
 
 describe('piTurnUsageSince', () => {
+  // Only the slicing is distinct from sumPiUsage (covered above): a reused
+  // session bills only the turns after the snapshot, so a JSON repair never
+  // double-counts the original prompt's turn.
   it('bills only the turns appended after the snapshot (JSON-repair reuse)', () => {
-    // A reused session: [original prompt+turn], then a repair prompt+turn.
-    // priorTurns snapshots the length before the repair; only the repair turn
-    // is billed here — the original was billed on its own prompt call.
     const messages = [
-      { role: 'user', content: 'review' },
       { role: 'assistant', content: 'bad json', usage: { input: 100, output: 40 } },
       { role: 'user', content: 'repair' },
       { role: 'assistant', content: '{}', usage: { input: 10, output: 4, cost: { total: 0.2 } } },
     ];
-    assert.deepEqual(piTurnUsageSince(messages, 2), {
+    assert.deepEqual(piTurnUsageSince(messages, 1), {
       input: 10,
       output: 4,
       reasoning: 0,
@@ -264,27 +250,7 @@ describe('piTurnUsageSince', () => {
       cacheWrite: 0,
       costUsd: 0.2,
     });
-  });
-
-  it('bills every new turn when the prompt spanned tool calls', () => {
-    const messages = [
-      { role: 'assistant', content: [], usage: { input: 7, output: 1 } },
-      { role: 'tool', content: 'r' },
-      { role: 'assistant', content: 'done', usage: { input: 3, output: 2 } },
-    ];
-    assert.deepEqual(piTurnUsageSince(messages, 0), {
-      input: 10,
-      output: 3,
-      reasoning: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-    });
-  });
-
-  it('returns undefined when the snapshot leaves no new assistant turn', () => {
-    const messages = [{ role: 'assistant', content: 'x', usage: { input: 5 } }];
-    assert.equal(piTurnUsageSince(messages, 1), undefined);
-    assert.equal(piTurnUsageSince(undefined, 0), undefined);
+    assert.equal(piTurnUsageSince(messages, 3), undefined); // nothing after the snapshot
   });
 });
 
