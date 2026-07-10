@@ -10,6 +10,7 @@ import {
   piRuntimeSupported,
   piSupportsProvider,
   piThinkingLevel,
+  sumPiUsage,
   resolvePiEngine,
 } from '../src/shared/pi.ts';
 
@@ -164,6 +165,46 @@ describe('mapPiUsage', () => {
   it('returns undefined when there is no usage object', () => {
     assert.equal(mapPiUsage(undefined), undefined);
     assert.equal(mapPiUsage('nope'), undefined);
+  });
+});
+
+describe('sumPiUsage', () => {
+  it('sums usage across every assistant turn of a tool-using prompt', () => {
+    const messages = [
+      { role: 'user', content: 'go' },
+      { role: 'assistant', content: [], usage: { input: 10, output: 2, cost: { total: 0.1 } } },
+      { role: 'tool', content: 'result' },
+      {
+        role: 'assistant',
+        content: 'done',
+        usage: { input: 5, cacheRead: 3, cost: { total: 0.2 } },
+      },
+    ];
+    assert.deepEqual(sumPiUsage(messages), {
+      input: 15,
+      output: 2,
+      reasoning: 0,
+      cacheRead: 3,
+      cacheWrite: 0,
+      costUsd: 0.30000000000000004,
+    });
+  });
+
+  it('omits cost when no assistant turn reported one', () => {
+    assert.deepEqual(sumPiUsage([{ role: 'assistant', content: '', usage: { input: 4 } }]), {
+      input: 4,
+      output: 0,
+      reasoning: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    });
+  });
+
+  it('returns undefined when no assistant turn carries usage', () => {
+    assert.equal(sumPiUsage([{ role: 'assistant', content: 'x' }]), undefined);
+    assert.equal(sumPiUsage([{ role: 'user', content: 'x' }]), undefined);
+    assert.equal(sumPiUsage([]), undefined);
+    assert.equal(sumPiUsage(undefined), undefined);
   });
 });
 

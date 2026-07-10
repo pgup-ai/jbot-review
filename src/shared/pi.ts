@@ -163,6 +163,38 @@ export function mapPiUsage(usage: unknown): PromptTokenUsage | undefined {
 
 type PiMessageLike = { role?: unknown; content?: unknown; usage?: unknown };
 
+/**
+ * Totals usage across EVERY assistant turn in `messages`. A tool-using prompt
+ * yields one assistant message per turn, so reading only the last one would
+ * bill the final turn and silently drop the rest.
+ */
+export function sumPiUsage(messages: unknown): PromptTokenUsage | undefined {
+  if (!Array.isArray(messages)) return undefined;
+  const total: PromptTokenUsage = {
+    input: 0,
+    output: 0,
+    reasoning: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+  };
+  let seen = false;
+  let cost: number | undefined;
+  for (const message of messages) {
+    if (!isRecord(message) || message.role !== 'assistant') continue;
+    const usage = mapPiUsage((message as PiMessageLike).usage);
+    if (!usage) continue;
+    seen = true;
+    total.input += usage.input;
+    total.output += usage.output;
+    total.reasoning += usage.reasoning;
+    total.cacheRead += usage.cacheRead;
+    total.cacheWrite += usage.cacheWrite;
+    if (isFiniteNumber(usage.costUsd)) cost = (cost ?? 0) + usage.costUsd;
+  }
+  if (!seen) return undefined;
+  return { ...total, ...(isFiniteNumber(cost) ? { costUsd: cost } : {}) };
+}
+
 function lastAssistantMessage(messages: unknown): PiMessageLike | undefined {
   if (!Array.isArray(messages)) return undefined;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -398,6 +430,11 @@ async function createPiSession(
   return session;
 }
 
+function piSessionMessages(session: PiAgentSessionLike): unknown[] {
+  const messages = session.agent?.state?.messages ?? session.messages;
+  return Array.isArray(messages) ? messages : [];
+}
+
 async function promptPiSession(
   session: PiAgentSessionLike,
   model: string,
@@ -409,6 +446,9 @@ async function promptPiSession(
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
   log(`Calling ${label} prompt (engine=pi, provider=${providerID} model=${modelID})`);
+  // Sessions outlive a single prompt (the JSON repair re-prompts in place), so
+  // only the turns appended by THIS prompt may be read or billed.
+  const priorTurns = piSessionMessages(session).length;
   try {
     // prompt() resolves when the full agent turn completes — no polling.
     // Template expansion stays off: prompts embed arbitrary diff text that
@@ -422,9 +462,10 @@ async function promptPiSession(
     await abortPiSessionBestEffort(session, label, log);
     throw error;
   }
-  const messages = session.agent?.state?.messages ?? session.messages;
+  const messages = piSessionMessages(session).slice(priorTurns);
   const raw = extractPiFinalText(messages);
-  const usage = mapPiUsage(lastAssistantMessage(messages)?.usage);
+  // A tool-using prompt spans several assistant turns; bill them all.
+  const usage = sumPiUsage(messages);
   if (usage) {
     log(
       `${label} ${formatTokenUsage({
