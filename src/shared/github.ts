@@ -698,7 +698,12 @@ export function isBotAddressedReply(
   body: string | undefined,
   viewerLogin: string,
 ): boolean {
-  return authorLogin === viewerLogin && hasInternalMarker(body, ADDRESSED_MARKER);
+  // Match the bot's own identity like isJbotFinding/removeOwnPrReaction do: on
+  // GitHub Actions the viewer is `github-actions` but replies are authored as
+  // `github-actions[bot]`. The alias only matches the bot's Actions identity,
+  // never a human, so marker forgery by a PR author is still rejected.
+  const isBot = authorLogin === viewerLogin || isGithubActionsAlias(authorLogin, viewerLogin);
+  return isBot && hasInternalMarker(body, ADDRESSED_MARKER);
 }
 
 function isGithubActionsAlias(authorLogin: string | undefined, viewerLogin: string): boolean {

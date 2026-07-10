@@ -205,7 +205,7 @@ const execFileAsync = promisify(execFile);
 const PI_DIFF_TOOL_MAX_BYTES = 48 * 1024;
 const PI_DIFF_TOOL_TIMEOUT_MS = 30_000;
 
-export interface PiDiffScope {
+interface PiDiffScope {
   /** Merge-base (local mode) or PR base sha (GitHub paths). */
   base: string;
   /** Local mode diffs merge-base → working tree; GitHub paths are three-dot. */
