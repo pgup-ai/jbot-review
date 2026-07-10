@@ -1840,8 +1840,14 @@ export async function runPrReview(params: {
     // run (a model-claimed "addressed" whose reply/resolve failed stays open,
     // and a human-resolved thread counts as closed). Uses allPriorJbotThreads,
     // not the includePriorComments-gated list, so the gate is honest even when
-    // prior context is disabled.
-    const openThreadCount = openFindingThreadIds(allPriorJbotThreads, resolvedThisRun).length;
+    // prior context is disabled. An addressed thread whose resolve retry failed
+    // (permission/error) is still visibly open, so it counts too — else 🚀
+    // would claim "clean" over an open thread.
+    const failedAddressedResolves = unresolvedAddressedThreadIds.filter(
+      (id) => !resolvedThisRun.includes(id),
+    ).length;
+    const openThreadCount =
+      openFindingThreadIds(allPriorJbotThreads, resolvedThisRun).length + failedAddressedResolves;
     if (isPrCleanAfterRun(findingCount, openThreadCount)) {
       await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
     } else {

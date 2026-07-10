@@ -5,7 +5,7 @@ import {
   PI_MIN_NODE_VERSION,
   capPiDiffOutput,
   piGitDiffArgs,
-  PI_SESSION_TOOLS,
+  resolveWithinWorkspace,
   extractPiFinalText,
   mapPiUsage,
   piModelCandidates,
@@ -151,14 +151,17 @@ describe('piThinkingLevel', () => {
   });
 });
 
-describe('PI_SESSION_TOOLS', () => {
-  // pi has no sandbox or permission layer, so a shell is an unenforceable
-  // boundary: the toolset itself is the enforcement.
-  it('grants read-only inspection tools only — no shell, no mutation', () => {
-    assert.deepEqual([...PI_SESSION_TOOLS], ['read', 'grep', 'find', 'ls']);
-    for (const forbidden of ['bash', 'write', 'edit', 'patch', 'webfetch']) {
-      assert.ok(!PI_SESSION_TOOLS.includes(forbidden), `must not grant ${forbidden}`);
-    }
+describe('resolveWithinWorkspace', () => {
+  // Security boundary: pi's built-in read tools accept absolute/.. paths and
+  // have no sandbox, so file access is confined to the repo through this.
+  it('allows repo-relative paths and refuses any escape', () => {
+    const ws = '/repo';
+    assert.equal(resolveWithinWorkspace(ws, 'src/a.ts'), '/repo/src/a.ts');
+    assert.equal(resolveWithinWorkspace(ws, './x'), '/repo/x');
+    assert.equal(resolveWithinWorkspace(ws, '.'), '/repo');
+    assert.equal(resolveWithinWorkspace(ws, '../etc/passwd'), undefined);
+    assert.equal(resolveWithinWorkspace(ws, '/etc/passwd'), undefined);
+    assert.equal(resolveWithinWorkspace(ws, '/repo-sibling/x'), undefined); // prefix, not child
   });
 });
 
@@ -335,11 +338,10 @@ describe('capPiDiffOutput', () => {
     assert.equal(capPiDiffOutput('diff --git a b', 100), 'diff --git a b');
   });
 
-  it('truncates long output and tells the model to narrow by path', () => {
+  it('truncates long output with a size note', () => {
     const capped = capPiDiffOutput('x'.repeat(200), 100);
     assert.ok(capped.startsWith('x'.repeat(100)));
     assert.match(capped, /truncated/);
-    assert.match(capped, /path/);
   });
 
   it('caps by bytes, not characters, for multi-byte content', () => {

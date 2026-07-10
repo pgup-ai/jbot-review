@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 import { GIT_DIFF_ARGS } from './git.ts';
@@ -146,18 +146,23 @@ export function piThinkingLevel(modelOptions?: Record<string, unknown>): string 
 }
 
 /**
- * Read-only toolset (invariant 8). Unlike opencode, pi ships no sandbox and no
- * permission layer — "Pi does not include a built-in sandbox" — so a shell here
- * could not be constrained by config or prompt: redirection (`echo x > f`) and
- * wrappers (`sh -c`) defeat any command filter. The toolset IS the enforcement,
- * so bash is withheld entirely and mutation is impossible by construction.
- *
- * The review does not need a shell: the diff is embedded in the prompt
- * (diff-context.ts), hunks past the embed budget come through the read-only
- * git_diff custom tool (full-diff invariant), and blast-radius runs git grep
- * in the runner, outside the session. Single-shot sessions disable even these.
+ * Read-only, workspace-confined access (invariant 8). pi ships no sandbox, and
+ * its built-in read/grep/find/ls accept absolute or `..` paths, so a
+ * prompt-injected diff could make the model read host files (runner secrets)
+ * and echo them in the review. So the built-ins are NEVER enabled — the session
+ * gets only our custom tools: `read_file` (confined by resolveWithinWorkspace)
+ * and `git_diff` (repo-scoped via git). blast-radius runs git grep in the
+ * runner, outside the session. Single-shot sessions get no tools at all.
  */
-export const PI_SESSION_TOOLS: readonly string[] = ['read', 'grep', 'find', 'ls'];
+export function resolveWithinWorkspace(
+  workspace: string,
+  requestedPath: string,
+): string | undefined {
+  const root = resolve(workspace);
+  const target = resolve(root, requestedPath);
+  // The trailing sep stops a sibling like `/repo-x` matching the `/repo` root.
+  return target === root || target.startsWith(root + sep) ? target : undefined;
+}
 
 /**
  * Maps a pi assistant-message usage object onto PromptTokenUsage. Defensive
@@ -212,7 +217,7 @@ export function capPiDiffOutput(text: string, maxBytes = PI_DIFF_TOOL_MAX_BYTES)
   // Truncate on the byte budget (chars would overshoot up to 4x on multi-byte
   // content); decoding a split sequence yields trailing U+FFFD — drop it.
   const capped = Buffer.from(text, 'utf8').toString('utf8', 0, maxBytes).replace(/�+$/, '');
-  return `${capped}\n\n_[diff truncated; call git_diff again with a specific \`path\` for the rest]_`;
+  return `${capped}\n\n_[output truncated at ${Math.floor(maxBytes / 1024)}KB]_`;
 }
 
 type PiMessageLike = { role?: unknown; content?: unknown; usage?: unknown };
@@ -363,6 +368,41 @@ function createPiGitDiffTool(sdk: PiSdkLike, workspace: string, scope: PiDiffSco
 }
 
 /**
+ * Repo-confined replacement for pi's built-in `read` (which accepts absolute
+ * and `..` paths with no sandbox). Refuses anything resolving outside the
+ * workspace, so a prompt-injected diff cannot read host files.
+ */
+function createPiReadTool(sdk: PiSdkLike, workspace: string): unknown {
+  return sdk.defineTool({
+    name: 'read_file',
+    description:
+      'Read a UTF-8 file from the repository under review. `path` is repo-relative; paths outside the repo are refused.',
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string', description: 'Repo-relative file path.' } },
+      required: ['path'],
+    },
+    execute: async (_id: unknown, params: unknown) => {
+      const requested = isRecord(params) && typeof params.path === 'string' ? params.path : '';
+      const target = resolveWithinWorkspace(workspace, requested);
+      if (!target) {
+        return {
+          content: [{ type: 'text', text: `Refused: "${requested}" is outside the repository.` }],
+          details: {},
+        };
+      }
+      let text: string;
+      try {
+        text = capPiDiffOutput(readFileSync(target, 'utf8'));
+      } catch (error) {
+        text = `read failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      return { content: [{ type: 'text', text }], details: {} };
+    },
+  });
+}
+
+/**
  * Lazy singleton import: environments that never route to pi (old Node,
  * kill switch, no allowlisted provider) must not even load the package —
  * its bundled undici throws at import time below Node 22.19.
@@ -393,6 +433,7 @@ export interface PiRuntime {
   mainModel: string;
   thinkingLevel?: string;
   gitDiffTool?: unknown;
+  readTool: unknown;
 }
 
 function requirePiProvider(providerID: string): string {
@@ -512,6 +553,7 @@ export async function startPi(
       loader,
       workspace,
       mainModel: `${providerID}/${modelID}`,
+      readTool: createPiReadTool(sdk, workspace),
       ...(thinkingLevel ? { thinkingLevel } : {}),
       ...(options.diffScope
         ? { gitDiffTool: createPiGitDiffTool(sdk, workspace, options.diffScope) }
@@ -519,6 +561,18 @@ export async function startPi(
     },
     stop: removeIsolationDir,
   };
+}
+
+/** The session's tool allowlist + custom tools — only our confined tools. */
+function piCustomToolConfig(runtime: PiRuntime): {
+  tools: string[];
+  customTools: unknown[];
+} {
+  const entries: Array<{ name: string; tool: unknown }> = [
+    { name: 'read_file', tool: runtime.readTool },
+    ...(runtime.gitDiffTool ? [{ name: 'git_diff', tool: runtime.gitDiffTool }] : []),
+  ];
+  return { tools: entries.map((e) => e.name), customTools: entries.map((e) => e.tool) };
 }
 
 async function createPiSession(
@@ -531,19 +585,11 @@ async function createPiSession(
   const { session } = await runtime.sdk.createAgentSession({
     model: modelRef,
     cwd: runtime.workspace,
-    // Layered read-only (invariant 8): mutating tools are never enabled
-    // (write/edit absent; single-shot disables all tools), the hermetic
-    // loader blocks ambient skills/extensions from adding any, and the
-    // system prompt pins read-only conduct.
-    ...(singleShot
-      ? { noTools: 'all' }
-      : {
-          // `tools` is the session's complete allowlist: a custom tool only
-          // reaches the model when its name is listed here too (verified live —
-          // customTools alone registers nothing).
-          tools: [...PI_SESSION_TOOLS, ...(runtime.gitDiffTool ? ['git_diff'] : [])],
-          ...(runtime.gitDiffTool ? { customTools: [runtime.gitDiffTool] } : {}),
-        }),
+    // Read-only (invariant 8): NO pi built-in tools (they're unsandboxed and
+    // escape the workspace). The session sees only our confined custom tools —
+    // `read_file` and `git_diff` — and `tools` must name each one or it never
+    // registers (verified live). Single-shot sessions get no tools at all.
+    ...(singleShot ? { noTools: 'all' } : piCustomToolConfig(runtime)),
     authStorage: runtime.authStorage,
     modelRegistry: runtime.registry,
     resourceLoader: runtime.loader,
@@ -843,7 +889,11 @@ export async function runPiChangesSinceLastReview(
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<string> {
   const label = 'changes-since-last-review';
-  const session = await createPiSession(runtime, model, false);
+  // Single-shot (no tools): this pass wants the reviewedHead..head DELTA, but
+  // git_diff only serves the full base...HEAD diff — offering it would let the
+  // model describe old PR changes as new. The commit list is embedded in the
+  // prompt, so it summarizes from that.
+  const session = await createPiSession(runtime, model, true);
   try {
     const raw = await promptPiSession(
       session,

@@ -598,17 +598,14 @@ describe('buildReviewFocusBlock', () => {
 });
 
 describe('PI_REVIEW_SYSTEM_PROMPT', () => {
-  it('tells the model it has no shell and cannot modify the workspace', () => {
+  it('pins no-shell, read-only, the two confined tools, and git-diff routing', () => {
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /no shell/);
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /cannot modify the workspace/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /read, grep, find, and ls/);
-  });
-
-  it('routes "run the git diff command" instructions to the git_diff tool', () => {
-    // The omitted-hunks notes in diff-context.ts say "run the git diff
-    // command"; without this mapping a shell-less session cannot recover
-    // truncated hunks (full-diff invariant).
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /git_diff tool/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /truncated or omitted/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /read_file/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /git_diff/);
+    // Confinement is stated to the model too; the diff.-context "run the git
+    // diff command" note routes to the tool (full-diff invariant).
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /outside it are refused/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /use the git_diff tool/);
   });
 });
