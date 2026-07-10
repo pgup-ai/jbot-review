@@ -24,7 +24,8 @@ import { resolvePiEngine } from '../shared/pi.ts';
 import type { ReviewCommit } from '../shared/review-context.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { ReviewResult } from '../shared/types.ts';
-import { GIT_DIFF_ARGS, parseGitDiff } from './git-diff.ts';
+import { GIT_DIFF_ARGS } from '../shared/git.ts';
+import { parseGitDiff } from './git-diff.ts';
 import { loadDotEnv, parseOwnerRepo, renderReport } from './util.ts';
 
 /**

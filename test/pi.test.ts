@@ -15,6 +15,7 @@ import {
   sumPiUsage,
   resolvePiEngine,
 } from '../src/shared/pi.ts';
+import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
 
 describe('piSupportsProvider', () => {
   it('accepts every provider in the verified allowlist', () => {
@@ -249,16 +250,22 @@ describe('extractPiFinalText', () => {
 
 describe('piGitDiffArgs', () => {
   it('uses the three-dot merge-base form on GitHub-backed reviews', () => {
-    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: false }), ['diff', 'abc123...HEAD']);
+    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: false }), [
+      ...GIT_DIFF_ARGS,
+      'abc123...HEAD',
+    ]);
   });
 
   it('diffs merge-base to the working tree in local mode (invariant 7 exception)', () => {
-    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: true }), ['diff', 'abc123']);
+    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: true }), [
+      ...GIT_DIFF_ARGS,
+      'abc123',
+    ]);
   });
 
   it('scopes to a path behind -- so a flag-shaped path cannot become an option', () => {
     assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: false }, '--exec=x'), [
-      'diff',
+      ...GIT_DIFF_ARGS,
       'abc123...HEAD',
       '--',
       '--exec=x',
@@ -266,7 +273,19 @@ describe('piGitDiffArgs', () => {
   });
 
   it('ignores an empty path', () => {
-    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: true }, '  '), ['diff', 'abc123']);
+    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: true }, '  '), [
+      ...GIT_DIFF_ARGS,
+      'abc123',
+    ]);
+  });
+
+  it('carries the canonical pins so hunks match the embedded diff and no diff driver runs', () => {
+    const args = piGitDiffArgs({ base: 'abc123', worktree: false });
+    for (const flag of ['--no-color', '--no-ext-diff', '--no-textconv', '--find-renames']) {
+      assert.ok(args.includes(flag), `missing ${flag}`);
+    }
+    // `-c` config pins must precede the `diff` subcommand.
+    assert.ok(args.indexOf('-c') < args.indexOf('diff'));
   });
 });
 

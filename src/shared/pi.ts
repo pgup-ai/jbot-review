@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
+import { GIT_DIFF_ARGS } from './git.ts';
 import { parseModelName } from './model.ts';
 import {
   formatTokenUsage,
@@ -174,8 +175,13 @@ export interface PiDiffScope {
   worktree: boolean;
 }
 
+/**
+ * Reuses the pipeline's canonical GIT_DIFF_ARGS so this tool's hunks match the
+ * embedded diff the model anchors findings against, and so no `.gitattributes`
+ * textconv or external diff driver can run.
+ */
 export function piGitDiffArgs(scope: PiDiffScope, path?: string): string[] {
-  const args = ['diff', scope.worktree ? scope.base : `${scope.base}...HEAD`];
+  const args = [...GIT_DIFF_ARGS, scope.worktree ? scope.base : `${scope.base}...HEAD`];
   // `--` pins the model-supplied path as a pathspec; a flag-shaped value can
   // never become a git option.
   const trimmed = path?.trim();

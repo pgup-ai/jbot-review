@@ -23,37 +23,6 @@ import type { PrFile } from '../shared/github.ts';
  * GitHub, so worktree-relative line numbers are safe; on a clean tree this
  * is byte-identical to `merge-base...HEAD`.
  */
-/**
- * The exact `git` invocation the local driver uses (exported so tests can run
- * REAL git against hostile config). The `-c` pins neutralize user gitconfig
- * that changes the output shape this parser depends on: `diff.noprefix`,
- * `diff.mnemonicPrefix`, and (git ≥2.45) `diff.srcPrefix`/`dstPrefix` all
- * rewrite the `a/`/`b/` path prefixes; `core.quotePath` escapes non-ASCII
- * paths. `--no-ext-diff` and `--no-textconv` keep hunks raw: GitHub's `patch`
- * field applies neither an external diff driver nor a `.gitattributes`
- * textconv, so the parser input must not either. Older gits ignore unknown
- * `-c` keys. Append the merge-base SHA (and nothing else) for the
- * merge-base→worktree diff.
- */
-export const GIT_DIFF_ARGS = [
-  '-c',
-  'diff.noprefix=false',
-  '-c',
-  'diff.mnemonicPrefix=false',
-  '-c',
-  'diff.srcPrefix=a/',
-  '-c',
-  'diff.dstPrefix=b/',
-  '-c',
-  'core.quotePath=false',
-  'diff',
-  '--no-color',
-  '--no-ext-diff',
-  '--no-textconv',
-  '--find-renames',
-  '--unified=3',
-];
-
 export function parseGitDiff(diffText: string): PrFile[] {
   const files: PrFile[] = [];
   let section: string[] | null = null;

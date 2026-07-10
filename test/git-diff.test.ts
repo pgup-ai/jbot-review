@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { GIT_DIFF_ARGS, parseGitDiff } from '../src/local/git-diff.ts';
+import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
+import { parseGitDiff } from '../src/local/git-diff.ts';
 import { parseAddedLines } from '../src/shared/patch.ts';
 
 describe('parseGitDiff', () => {
