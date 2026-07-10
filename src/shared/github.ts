@@ -213,12 +213,37 @@ interface JbotReviewCommentState {
  * Threads already acknowledged as addressed are omitted to avoid duplicate
  * replies on later review runs.
  */
+export interface PriorJbotThreads {
+  /** Open jbot finding threads — review context + duplicate-suppression input. */
+  threads: PriorJbotThread[];
+  /**
+   * Threads jbot already replied to as addressed (marker present) but that are
+   * still unresolved — e.g. a prior run's resolve call failed. They need a
+   * mechanical resolve retry, no re-reply.
+   */
+  unresolvedAddressedThreadIds: string[];
+}
+
+/**
+ * Disposition of a prior jbot finding thread: feed it to the reviewer as
+ * context, resolve-only (already addressed but the thread never closed), or
+ * skip (already addressed AND resolved). Pure — the traversal supplies the two
+ * booleans.
+ */
+export function classifyPriorJbotThread(input: {
+  addressed: boolean;
+  isResolved: boolean;
+}): 'review-context' | 'resolve-only' | 'skip' {
+  if (!input.addressed) return 'review-context';
+  return input.isResolved ? 'skip' : 'resolve-only';
+}
+
 export async function listPriorJbotThreads(
   octokit: Octokit,
   owner: string,
   repo: string,
   pullNumber: number,
-): Promise<PriorJbotThread[]> {
+): Promise<PriorJbotThreads> {
   const query = `
     query JbotReviewThreads($owner: String!, $repo: String!, $number: Int!, $after: String) {
       viewer {
@@ -255,6 +280,7 @@ export async function listPriorJbotThreads(
   `;
 
   const threads: PriorJbotThread[] = [];
+  const unresolvedAddressedThreadIds: string[] = [];
   let commentState: JbotReviewCommentState | undefined;
   let after: string | null = null;
   do {
@@ -266,7 +292,7 @@ export async function listPriorJbotThreads(
     })) as ReviewThreadsResponse;
     const viewerLogin = response.viewer.login;
     const page = response.repository?.pullRequest?.reviewThreads;
-    if (!page) return threads;
+    if (!page) return { threads, unresolvedAddressedThreadIds };
     commentState ??= await listJbotReviewCommentState(
       octokit,
       owner,
@@ -290,11 +316,16 @@ export async function listPriorJbotThreads(
         )
       )
         continue;
-      const alreadyAcknowledged = comments.some((comment) =>
-        hasInternalMarker(comment?.body, ADDRESSED_MARKER),
-      );
-      if (alreadyAcknowledged || commentState.addressedTopLevelIds.has(topLevel.databaseId))
+      const addressed =
+        comments.some((comment) =>
+          isBotAddressedReply(comment?.author?.login, comment?.body, viewerLogin),
+        ) || commentState.addressedTopLevelIds.has(topLevel.databaseId);
+      const disposition = classifyPriorJbotThread({ addressed, isResolved: thread.isResolved });
+      if (disposition === 'skip') continue;
+      if (disposition === 'resolve-only') {
+        unresolvedAddressedThreadIds.push(thread.id);
         continue;
+      }
 
       const replies = comments
         .slice(1)
@@ -330,7 +361,7 @@ export async function listPriorJbotThreads(
     }
   } while (after);
 
-  return threads;
+  return { threads, unresolvedAddressedThreadIds };
 }
 
 async function listJbotReviewCommentState(
@@ -377,7 +408,7 @@ async function listJbotReviewCommentState(
     comments
       .filter(
         (comment) =>
-          comment.body.includes(ADDRESSED_MARKER) &&
+          isBotAddressedReply(comment.user?.login, comment.body, viewerLogin) &&
           comment.in_reply_to_id !== null &&
           comment.in_reply_to_id !== undefined,
       )
@@ -654,6 +685,25 @@ function isJbotFinding(
 
 function hasInternalMarker(body: string | undefined, marker: string): boolean {
   return body?.includes(marker) ?? false;
+}
+
+/**
+ * True only when the ADDRESSED marker was posted by the bot/viewer itself. The
+ * marker is jbot's own "I addressed this" signal — a PR author who copies the
+ * hidden marker into a reply must not be able to close (or resolve) an open
+ * finding they never fixed.
+ */
+export function isBotAddressedReply(
+  authorLogin: string | undefined,
+  body: string | undefined,
+  viewerLogin: string,
+): boolean {
+  // Match the bot's own identity like isJbotFinding/removeOwnPrReaction do: on
+  // GitHub Actions the viewer is `github-actions` but replies are authored as
+  // `github-actions[bot]`. The alias only matches the bot's Actions identity,
+  // never a human, so marker forgery by a PR author is still rejected.
+  const isBot = authorLogin === viewerLogin || isGithubActionsAlias(authorLogin, viewerLogin);
+  return isBot && hasInternalMarker(body, ADDRESSED_MARKER);
 }
 
 function isGithubActionsAlias(authorLogin: string | undefined, viewerLogin: string): boolean {

@@ -19,6 +19,7 @@
   "dependencies": {
     "@actions/core": "^3.0.1",
     "@actions/github": "^9.1.1",
+    "@earendil-works/pi-coding-agent": "^0.80.6",
     "@octokit/auth-app": "^8.2.0",
     "@octokit/plugin-paginate-rest": "^14.0.0",
     "@octokit/plugin-rest-endpoint-methods": "^17.0.0",

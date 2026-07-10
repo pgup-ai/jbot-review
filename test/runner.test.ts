@@ -345,6 +345,25 @@ describe('formatReviewedWith', () => {
       'Reviewed with `devin/glm-5.2`; auxiliary sessions used `opencode/deepseek-v4-flash-free`.',
     );
   });
+
+  it('names the engine per model when the map is supplied (mixed engines)', () => {
+    // The model prefix no longer implies the engine — opencode/… runs on pi.
+    assert.equal(
+      formatReviewedWith(
+        'devin/glm-5.2',
+        {
+          models: ['opencode/deepseek-v4-flash-free'],
+          input: 1,
+          output: 1,
+          reasoning: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+        },
+        { 'devin/glm-5.2': 'devin', 'opencode/deepseek-v4-flash-free': 'pi' },
+      ),
+      'Reviewed with `devin/glm-5.2` via devin; auxiliary sessions used `opencode/deepseek-v4-flash-free` via pi.',
+    );
+  });
 });
 
 describe('runPrReview local mode (localDiff)', () => {

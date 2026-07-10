@@ -17,7 +17,7 @@ import {
   assembleReviewPrompt,
   buildJsonRepairPrompt,
 } from './prompt.ts';
-import { isFiniteNumber } from './text.ts';
+import { isFiniteNumber, isRecord } from './text.ts';
 import type {
   AddressedPriorComment,
   Finding,
@@ -80,6 +80,33 @@ function buildProviderEntry(params: {
 }
 
 /**
+ * Bash guardrail — an ACCIDENT filter, NOT a security boundary. Measured
+ * (2026-07-09, opencode 1.17): the literal forms are blocked, but one-step
+ * rewrites walk straight through — `git -c core.pager=cat commit` evades
+ * `git commit*`, `sh -c "rm x"` evades `rm*`, and `echo x > f` needs no denied
+ * command name at all. So this stops a well-behaved model that reaches for
+ * `git stash`/`git checkout` to orient itself (the real, observed failure mode,
+ * and the one that would clobber a developer's uncommitted work in local mode).
+ * It does NOT stop an injected one. Isolation — the ephemeral CI container and
+ * the app's temp clone — remains the actual boundary; never relax another layer
+ * because this exists.
+ *
+ * The `*: allow` catch-all is load-bearing: opencode defaults UNMATCHED commands
+ * to "ask" once a rule map exists, which would hang a headless run.
+ */
+const BASH_PERMISSIONS = {
+  '*': 'allow',
+  'git commit*': 'deny',
+  'git push*': 'deny',
+  'git checkout*': 'deny',
+  'git reset*': 'deny',
+  'git clean*': 'deny',
+  'git stash*': 'deny',
+  'git restore*': 'deny',
+  'rm*': 'deny',
+} as const;
+
+/**
  * Builds the opencode config object that embeds the API key for the selected
  * provider, plus any secondary providers needed by aux-model sessions. This is
  * the official way to authenticate opencode (replaces the old "set env var"
@@ -88,7 +115,8 @@ function buildProviderEntry(params: {
  * Permissions enforce read-only at the CONFIG level, not just via the plan
  * agent: edits are denied outright (never "ask" — an interactive prompt
  * would hang a headless run), and file access outside the workspace is
- * denied. Bash stays allowed: the review needs git diff/log/grep.
+ * denied. Bash stays allowed: the review needs git diff/log/grep, filtered
+ * by BASH_PERMISSIONS below.
  *
  * `modelOptions` pass through opencode to the provider SDK for the MAIN
  * model only — the lever for capping reasoning spend on heavy models (e.g.
@@ -136,6 +164,7 @@ export function buildConfig(
     permission: {
       edit: 'deny',
       external_directory: 'deny',
+      bash: { ...BASH_PERMISSIONS },
     },
   };
 }
@@ -433,10 +462,6 @@ function isProviderListData(value: unknown): value is {
   );
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 export function formatContext7Error(error: unknown, secret = ''): string {
   const message = error instanceof Error ? error.message : String(error);
   const redacted = secret
@@ -456,7 +481,12 @@ export function parsePortEnv(name: string, defaultValue: number): number {
   return Number.isInteger(value) && value >= 1 && value <= 65535 ? value : defaultValue;
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+/** Shared by the pi engine (pi.ts); a timeout rejection never leaks an unhandled rejection. */
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   // If the timeout wins, keep any later rejection from the original operation
   // from surfacing as an unhandled rejection.

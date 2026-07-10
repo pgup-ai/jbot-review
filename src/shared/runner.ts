@@ -19,6 +19,16 @@ import {
 } from './filter.ts';
 import { createTelemetryRecorder, type TelemetryRecorder } from './telemetry.ts';
 import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
+import {
+  resolvePiEngine,
+  runPiAddressedPriorCommentsCheck,
+  runPiChangesSinceLastReview,
+  runPiFindingVerification,
+  runPiGuidelineComplianceCheck,
+  runPiReview,
+  startPi,
+  type PiRuntime,
+} from './pi.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   type DiffHunksOptions,
@@ -144,7 +154,7 @@ import {
   resolveReviewThread,
   isJbotReviewBody,
 } from './github.ts';
-import type { Octokit, PrFile, PriorJbotThread } from './github.ts';
+import type { Octokit, PrFile, PriorJbotThread, PriorJbotThreads } from './github.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import { formatUsageCost, isFiniteNumber } from './text.ts';
 import type {
@@ -249,6 +259,38 @@ function createOpencodeBackend(
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
       runOpencodeChangesSinceLastReview(
         client,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+  };
+}
+
+function createPiBackend(runtime: PiRuntime): ReviewBackend {
+  return {
+    name: 'pi',
+    runReview: (model, prContext, guidelines, log, options) =>
+      runPiReview(runtime, model, prContext, guidelines, log, options),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runPiAddressedPriorCommentsCheck(runtime, model, prContext, log, timeoutMs, onTokenUsage),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runPiGuidelineComplianceCheck(
+        runtime,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runPiFindingVerification(runtime, model, prContext, findings, log, timeoutMs, onTokenUsage),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runPiChangesSinceLastReview(
+        runtime,
         model,
         prContext,
         deltaContext,
@@ -610,12 +652,13 @@ function requireCliBackend(
   return backend;
 }
 
-function requireOpencodeBackend(
+function requireSdkBackend(
   backend: ReviewBackend | undefined,
+  engine: 'opencode' | 'pi',
   role: 'main' | 'aux',
 ): ReviewBackend {
   if (!backend) {
-    throw new Error(`OpenCode backend was selected for ${role} sessions but was not initialized.`);
+    throw new Error(`${engine} backend was selected for ${role} sessions but was not initialized.`);
   }
   return backend;
 }
@@ -819,6 +862,8 @@ export async function runPrReview(params: {
   const { providerID, modelID } = parseModelName(model);
   const auxModel = options.auxModel || model;
   const { providerID: auxProviderID, modelID: auxModelID } = parseModelName(auxModel);
+  const piEngine = resolvePiEngine(process.env, process.version);
+  if (!piEngine.enabled && piEngine.reason) log(`pi engine disabled: ${piEngine.reason}`);
   const backendSelection = selectReviewBackends({
     providerID,
     modelID,
@@ -826,8 +871,18 @@ export async function runPrReview(params: {
     auxProviderID,
     auxModelID,
     auxApiKey: options.auxApiKey,
+    piEnabled: piEngine.enabled,
   });
   const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
+  const mainOnPi = backendSelection.mainSdkEngine === 'pi';
+  const auxOnPi = backendSelection.auxSdkEngine === 'pi';
+  const mainOnOpencode = !mainCliBackend && !mainOnPi;
+  const auxOnOpencode = !auxCliBackend && !auxOnPi;
+  if (mainOnPi || auxOnPi) {
+    log(
+      `SDK engine routing: main=${mainCliBackend ?? (mainOnPi ? 'pi' : 'opencode')} aux=${auxCliBackend ?? (auxOnPi ? 'pi' : 'opencode')}`,
+    );
+  }
   const promptCachePolicy = resolvePromptCachePolicy({
     promptCache: options.promptCache,
     mainModel: model,
@@ -945,8 +1000,8 @@ export async function runPrReview(params: {
   // CONTEXT and the addressed-reply posting). Otherwise a still-open finding
   // is invisible to the gate and the 🚀 lies — the same bug class as the
   // priorJbotReviewCount fetch above. safeListPriorJbotThreads is fail-open.
-  const allPriorJbotThreads = localDiff
-    ? []
+  const { threads: allPriorJbotThreads, unresolvedAddressedThreadIds } = localDiff
+    ? { threads: [], unresolvedAddressedThreadIds: [] }
     : await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
   const priorJbotThreads = options.includePriorComments ? allPriorJbotThreads : [];
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
@@ -1216,9 +1271,62 @@ export async function runPrReview(params: {
     kiloBackend = limitBackendConcurrency(createKiloBackend(workspace, kiloAuth), sessionSlots);
   }
 
+  // Both SDK roles on one engine but different providers: the aux provider gets
+  // its own entry in that engine's credential map, so it MUST have its own key.
+  // Falling back to the main key would hand the main provider's secret to a
+  // different vendor's endpoint (and fail auth there anyway).
+  const auxNeedsOwnKey =
+    auxProviderID !== providerID && ((mainOnPi && auxOnPi) || (mainOnOpencode && auxOnOpencode));
+  if (auxNeedsOwnKey && !options.auxApiKey) {
+    cleanupCliHomes();
+    throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
+  }
+
+  let piRuntime: Awaited<ReturnType<typeof startPi>> | undefined;
+  let piBackend: ReviewBackend | undefined;
+  if (backendSelection.pi) {
+    const piConfig = backendSelection.pi;
+    if (!piConfig.apiKey) {
+      cleanupCliHomes();
+      throw new Error(`Missing API key for provider "${piConfig.providerID}".`);
+    }
+    log('Starting pi engine');
+    try {
+      piRuntime = await startPi(
+        workspace,
+        piConfig.providerID,
+        piConfig.modelID,
+        piConfig.apiKey,
+        log,
+        {
+          modelOptions: mainOnPi ? options.modelOptions : undefined,
+          // pi's prompt caching is provider-managed (no setCacheKey knob);
+          // resolvePromptCachePolicy applies to the opencode server only.
+          additionalProviderKeys: auxNeedsOwnKey
+            ? [{ providerID: auxProviderID, apiKey: options.auxApiKey }]
+            : undefined,
+          // Shell-less pi sessions recover omitted/truncated hunks through the
+          // read-only git_diff tool (invariant 1); base and diff form mirror
+          // the run's diff scope.
+          diffScope: baseSha
+            ? { base: baseSha, worktree: !!localDiff, ...(headSha ? { head: headSha } : {}) }
+            : undefined,
+        },
+      );
+      if (!baseSha) {
+        log('pi git_diff tool unavailable (no base sha); large diffs may be reviewed truncated.');
+      }
+    } catch (error) {
+      cleanupCliHomes();
+      throw error;
+    }
+    piBackend = limitBackendConcurrency(createPiBackend(piRuntime.runtime), sessionSlots);
+  }
+
   if (needsOpencode) {
     const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
     if (!opencodeApiKey) {
+      piRuntime?.stop();
       cleanupCliHomes();
       throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
     }
@@ -1231,24 +1339,24 @@ export async function runPrReview(params: {
         opencodeApiKey,
         log,
         {
-          modelOptions: mainCliBackend ? undefined : options.modelOptions,
-          promptCache: mainCliBackend
-            ? promptCachePolicy.auxProviderPromptCache
-            : promptCachePolicy.providerPromptCache,
+          modelOptions: mainOnOpencode ? options.modelOptions : undefined,
+          promptCache: mainOnOpencode
+            ? promptCachePolicy.providerPromptCache
+            : promptCachePolicy.auxProviderPromptCache,
           port: options.opencodePort > 0 ? options.opencodePort : undefined,
-          additionalProviderKeys:
-            !mainCliBackend && !auxCliBackend && auxProviderID !== providerID
-              ? [
-                  {
-                    providerID: auxProviderID,
-                    apiKey: options.auxApiKey || apiKey,
-                    promptCache: promptCachePolicy.auxProviderPromptCache,
-                  },
-                ]
-              : undefined,
+          additionalProviderKeys: auxNeedsOwnKey
+            ? [
+                {
+                  providerID: auxProviderID,
+                  apiKey: options.auxApiKey,
+                  promptCache: promptCachePolicy.auxProviderPromptCache,
+                },
+              ]
+            : undefined,
         },
       );
     } catch (error) {
+      piRuntime?.stop();
       cleanupCliHomes();
       throw error;
     }
@@ -1268,11 +1376,36 @@ export async function runPrReview(params: {
   };
   const mainBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)
-    : requireOpencodeBackend(opencodeBackend, 'main');
+    : mainOnPi
+      ? requireSdkBackend(piBackend, 'pi', 'main')
+      : requireSdkBackend(opencodeBackend, 'opencode', 'main');
   const auxBackend = auxCliBackend
     ? requireCliBackend(cliBackends, auxCliBackend)
-    : requireOpencodeBackend(opencodeBackend, 'aux');
-  const stop = opencodeRuntime?.stop ?? (() => undefined);
+    : auxOnPi
+      ? requireSdkBackend(piBackend, 'pi', 'aux')
+      : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
+  // Which engine each model ran on, for the review footer (main wins on
+  // collision — same model ⇒ same engine anyway).
+  const engineByModel: Record<string, string> = {
+    [auxModel]: auxBackend.name,
+    [model]: mainBackend.name,
+  };
+  // Best-effort teardown: stop() runs inside a finally, so it must never throw
+  // (that would mask the real error and skip cleanupCliHomes). Each cleanup is
+  // independent — a fault in one neither strands the other's temp dir nor hides
+  // its error.
+  const stop = () => {
+    try {
+      opencodeRuntime?.stop();
+    } catch (error) {
+      log(`opencode teardown failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      piRuntime?.stop();
+    } catch (error) {
+      log(`pi teardown failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
   try {
     if (commandCodeBackend) {
       try {
@@ -1316,7 +1449,7 @@ export async function runPrReview(params: {
       }
     }
 
-    if (opencodeRuntime && !mainCliBackend) {
+    if (opencodeRuntime && mainBackend.name === 'opencode') {
       try {
         const modelListCacheKey = `${providerID}:${modelID}`;
         let models = providerModelListCache.get(modelListCacheKey);
@@ -1333,8 +1466,10 @@ export async function runPrReview(params: {
       } catch (e) {
         log(`(skipped provider model listing: ${(e as Error).message})`);
       }
-    } else if (mainCliBackend) {
-      log(`OpenCode provider model listing skipped: main review uses ${mainBackend.name} CLI.`);
+    } else if (mainBackend.name !== 'opencode') {
+      log(
+        `OpenCode provider model listing skipped: main review uses the ${mainBackend.name} backend.`,
+      );
     }
 
     const context7 = decideContext7Mode({
@@ -1344,12 +1479,16 @@ export async function runPrReview(params: {
     });
     let context7Active = false;
     let context7Block = '';
-    if (context7.enabled && opencodeRuntime && !mainCliBackend) {
+    if (context7.enabled && opencodeRuntime && mainBackend.name === 'opencode') {
       log(`Context7 MCP requested: ${context7.reason}`);
       context7Active = await enableContext7Mcp(opencodeRuntime.client, options.context7ApiKey, log);
       if (context7Active) context7Block = buildContext7PromptBlock(context7.reason);
-    } else if (context7.enabled && mainCliBackend) {
-      log(`Context7 MCP skipped: main review uses ${mainBackend.name} CLI (${context7.reason}).`);
+    } else if (context7.enabled) {
+      // pi has no MCP support; framework-behavior claims fall back to the
+      // abstention discipline. CLI backends likewise run without Context7.
+      log(
+        `Context7 MCP skipped: main review uses the ${mainBackend.name} backend (${context7.reason}).`,
+      );
     } else {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }
@@ -1619,6 +1758,7 @@ export async function runPrReview(params: {
         repo,
         headSha,
         tokenUsage.snapshot(),
+        engineByModel,
       );
       log(
         `Dry run enabled; would post verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
@@ -1672,6 +1812,7 @@ export async function runPrReview(params: {
         repo,
         headSha,
         tokenUsage.snapshot(),
+        engineByModel,
       );
       log(
         `Posting review: verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
@@ -1693,13 +1834,30 @@ export async function runPrReview(params: {
       addressedPriorComments: verifiedAddressedPriorComments,
       log,
     });
+    // Retry-close threads jbot already marked addressed whose resolve never
+    // landed (e.g. a past run lacked the permission it now has).
+    if (unresolvedAddressedThreadIds.length > 0) {
+      const reResolved = await resolveUnresolvedAddressedThreads({
+        octokit,
+        threadResolutionOctokit: params.threadResolutionOctokit,
+        threadIds: unresolvedAddressedThreadIds,
+        log,
+      });
+      resolvedThisRun.push(...reResolved);
+    }
     // React 🚀 only when the PR has NO open jbot findings after this run.
     // Open = threads that are not already resolved AND were not resolved this
     // run (a model-claimed "addressed" whose reply/resolve failed stays open,
     // and a human-resolved thread counts as closed). Uses allPriorJbotThreads,
     // not the includePriorComments-gated list, so the gate is honest even when
-    // prior context is disabled.
-    const openThreadCount = openFindingThreadIds(allPriorJbotThreads, resolvedThisRun).length;
+    // prior context is disabled. An addressed thread whose resolve retry failed
+    // (permission/error) is still visibly open, so it counts too — else 🚀
+    // would claim "clean" over an open thread.
+    const failedAddressedResolves = unresolvedAddressedThreadIds.filter(
+      (id) => !resolvedThisRun.includes(id),
+    ).length;
+    const openThreadCount =
+      openFindingThreadIds(allPriorJbotThreads, resolvedThisRun).length + failedAddressedResolves;
     if (isPrCleanAfterRun(findingCount, openThreadCount)) {
       await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
     } else {
@@ -2383,7 +2541,7 @@ async function safeListPriorJbotThreads(
   repo: string,
   pullNumber: number,
   log: (msg: string) => void,
-): Promise<PriorJbotThread[]> {
+): Promise<PriorJbotThreads> {
   try {
     return await listPriorJbotThreads(octokit, owner, repo, pullNumber);
   } catch (error) {
@@ -2392,7 +2550,7 @@ async function safeListPriorJbotThreads(
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    return [];
+    return { threads: [], unresolvedAddressedThreadIds: [] };
   }
 }
 
@@ -2585,29 +2743,58 @@ async function acknowledgeAddressedPriorComments(params: {
       });
       params.log(`Posted addressed reply for prior thread ${thread.id}`);
     } catch (error) {
+      // The reply is a courtesy; a failure must not block the resolve — always
+      // try to close an addressed thread.
       params.log(
         `Failed to reply to addressed prior thread ${thread.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      continue;
     }
 
     if (thread.isResolved) continue;
-    try {
-      await resolveReviewThread(params.threadResolutionOctokit ?? params.octokit, thread.id);
-      resolved.push(thread.id);
-      params.log(`Resolved prior jbot-review thread ${thread.id}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const hint =
-        !params.threadResolutionOctokit && isResourceNotAccessibleByIntegration(message)
-          ? ' Set the thread-resolution-token input to a token that can resolve review threads.'
-          : '';
-      params.log(`Failed to resolve prior jbot-review thread ${thread.id}: ${message}${hint}`);
-    }
+    if (await resolveThreadBestEffort(params, thread.id)) resolved.push(thread.id);
   }
   return resolved;
+}
+
+/**
+ * Resolves threads jbot already replied to as addressed but that never closed
+ * (e.g. a prior run's resolve failed). Reply-free — the addressed marker is
+ * already on the thread — so it just retries the resolve. Best-effort; returns
+ * the ids actually resolved this run.
+ */
+async function resolveUnresolvedAddressedThreads(params: {
+  octokit: Octokit;
+  threadResolutionOctokit?: Octokit;
+  threadIds: string[];
+  log: (msg: string) => void;
+}): Promise<string[]> {
+  const resolved: string[] = [];
+  for (const threadId of params.threadIds) {
+    if (await resolveThreadBestEffort(params, threadId)) resolved.push(threadId);
+  }
+  return resolved;
+}
+
+/** Shared resolve with the permission hint. Returns whether it resolved. */
+async function resolveThreadBestEffort(
+  params: { octokit: Octokit; threadResolutionOctokit?: Octokit; log: (msg: string) => void },
+  threadId: string,
+): Promise<boolean> {
+  try {
+    await resolveReviewThread(params.threadResolutionOctokit ?? params.octokit, threadId);
+    params.log(`Resolved prior jbot-review thread ${threadId}`);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const hint =
+      !params.threadResolutionOctokit && isResourceNotAccessibleByIntegration(message)
+        ? ' Set the thread-resolution-token input to a token that can resolve review threads.'
+        : '';
+    params.log(`Failed to resolve prior jbot-review thread ${threadId}: ${message}${hint}`);
+    return false;
+  }
 }
 
 function isResourceNotAccessibleByIntegration(message: string): boolean {
@@ -2624,6 +2811,7 @@ export function buildBody(
   repo: string,
   headSha?: string,
   tokenUsage?: ReviewTokenUsage,
+  engineByModel?: Record<string, string>,
 ): string {
   const total = all.length;
   const lines = ['## J-Bot Code Review', ''];
@@ -2661,7 +2849,7 @@ export function buildBody(
   const orphanedSection = renderOrphanedSection(orphaned);
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
   lines.push(...renderReviewMetadataBlock(model, tokenUsage));
-  lines.push('', `<sup>${formatReviewedWith(model, tokenUsage)}</sup>`);
+  lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
   return lines.join('\n');
 }
 
@@ -2693,13 +2881,23 @@ export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewToke
   ];
 }
 
-export function formatReviewedWith(model: string, tokenUsage?: ReviewTokenUsage): string {
+export function formatReviewedWith(
+  model: string,
+  tokenUsage?: ReviewTokenUsage,
+  // Model → SDK engine / CLI ('pi', 'opencode', 'kilo', …). The model prefix no
+  // longer implies the engine (opencode/… can run on pi), so name it explicitly.
+  engineByModel?: Record<string, string>,
+): string {
+  const withEngine = (usageModel: string): string => {
+    const engine = engineByModel?.[usageModel];
+    return engine ? `\`${usageModel}\` via ${engine}` : `\`${usageModel}\``;
+  };
   const auxiliaryModels = uniqueModels(model, tokenUsage?.models ?? []).filter(
     (usageModel) => usageModel !== model,
   );
-  if (auxiliaryModels.length === 0) return `Reviewed with \`${model}\`.`;
-  return `Reviewed with \`${model}\`; auxiliary sessions used ${auxiliaryModels
-    .map((usageModel) => `\`${usageModel}\``)
+  if (auxiliaryModels.length === 0) return `Reviewed with ${withEngine(model)}.`;
+  return `Reviewed with ${withEngine(model)}; auxiliary sessions used ${auxiliaryModels
+    .map(withEngine)
     .join(', ')}.`;
 }
 

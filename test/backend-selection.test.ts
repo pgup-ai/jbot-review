@@ -614,3 +614,155 @@ describe('selectReviewBackends', () => {
     });
   });
 });
+
+describe('selectReviewBackends pi engine routing', () => {
+  const noCliKeys = {
+    devinApiKey: '',
+    commandCodeAccessKey: '',
+    cursorApiKey: '',
+    codexAuth: '',
+    clineAuth: '',
+    kiloAuth: '',
+  };
+  const google = {
+    providerID: 'google',
+    modelID: 'gemini-2.5-flash',
+    apiKey: 'google-key',
+    auxProviderID: 'google',
+    auxModelID: 'gemini-2.5-flash',
+    auxApiKey: '',
+  };
+
+  it('routes both SDK roles to pi for an allowlisted provider', () => {
+    assert.deepEqual(selectReviewBackends({ ...google, piEnabled: true }), {
+      mainSdkEngine: 'pi',
+      auxSdkEngine: 'pi',
+      needsOpencode: false,
+      ...noCliKeys,
+      opencodeProviderID: 'google',
+      opencodeModelID: 'gemini-2.5-flash',
+      opencodeApiKey: '',
+      pi: { providerID: 'google', modelID: 'gemini-2.5-flash', apiKey: 'google-key' },
+    });
+  });
+
+  it('leaves the selection byte-identical to today when piEnabled is omitted', () => {
+    assert.deepEqual(selectReviewBackends(google), {
+      needsOpencode: true,
+      ...noCliKeys,
+      opencodeProviderID: 'google',
+      opencodeModelID: 'gemini-2.5-flash',
+      opencodeApiKey: 'google-key',
+    });
+  });
+
+  it('splits engines: pi main with an aux pi cannot serve on opencode', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        ...google,
+        auxProviderID: 'some-unsupported-provider',
+        auxModelID: 'm',
+        auxApiKey: 'aux-key',
+        piEnabled: true,
+      }),
+      {
+        mainSdkEngine: 'pi',
+        needsOpencode: true,
+        ...noCliKeys,
+        opencodeProviderID: 'some-unsupported-provider',
+        opencodeModelID: 'm',
+        opencodeApiKey: 'aux-key',
+        pi: { providerID: 'google', modelID: 'gemini-2.5-flash', apiKey: 'google-key' },
+      },
+    );
+  });
+
+  it('routes a pi-capable aux behind a CLI main and skips opencode entirely', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        providerID: 'kilo',
+        modelID: 'kilo-auto/free',
+        apiKey: 'kilo-auth',
+        auxProviderID: 'google',
+        auxModelID: 'gemini-2.5-flash',
+        auxApiKey: 'google-key',
+        piEnabled: true,
+      }),
+      {
+        mainCliBackend: 'kilo',
+        auxSdkEngine: 'pi',
+        needsOpencode: false,
+        ...noCliKeys,
+        kiloAuth: 'kilo-auth',
+        opencodeProviderID: 'google',
+        opencodeModelID: 'gemini-2.5-flash',
+        opencodeApiKey: 'google-key',
+        pi: { providerID: 'google', modelID: 'gemini-2.5-flash', apiKey: 'google-key' },
+      },
+    );
+  });
+
+  it('routes nvidia to pi (supported by both → pi first)', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        providerID: 'nvidia',
+        modelID: 'nemotron-3-ultra-550b-a55b',
+        apiKey: 'nvidia-key',
+        auxProviderID: 'nvidia',
+        auxModelID: 'nemotron-3-ultra-550b-a55b',
+        auxApiKey: '',
+        piEnabled: true,
+      }),
+      {
+        mainSdkEngine: 'pi',
+        auxSdkEngine: 'pi',
+        needsOpencode: false,
+        ...noCliKeys,
+        opencodeProviderID: 'nvidia',
+        opencodeModelID: 'nemotron-3-ultra-550b-a55b',
+        opencodeApiKey: '',
+        pi: { providerID: 'nvidia', modelID: 'nemotron-3-ultra-550b-a55b', apiKey: 'nvidia-key' },
+      },
+    );
+  });
+
+  it('routes the opencode Zen gateway to pi when enabled', () => {
+    const sel = selectReviewBackends({
+      providerID: 'opencode',
+      modelID: 'deepseek-v4-flash-free',
+      apiKey: 'zen-key',
+      auxProviderID: 'opencode',
+      auxModelID: 'deepseek-v4-flash-free',
+      auxApiKey: '',
+      piEnabled: true,
+    });
+    assert.equal(sel.mainSdkEngine, 'pi');
+    assert.equal(sel.needsOpencode, false);
+    assert.deepEqual(sel.pi, {
+      providerID: 'opencode',
+      modelID: 'deepseek-v4-flash-free',
+      apiKey: 'zen-key',
+    });
+  });
+
+  it('keeps a provider pi cannot serve on opencode even with piEnabled', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        providerID: 'some-unsupported-provider',
+        modelID: 'm',
+        apiKey: 'k',
+        auxProviderID: 'some-unsupported-provider',
+        auxModelID: 'm',
+        auxApiKey: '',
+        piEnabled: true,
+      }),
+      {
+        needsOpencode: true,
+        ...noCliKeys,
+        opencodeProviderID: 'some-unsupported-provider',
+        opencodeModelID: 'm',
+        opencodeApiKey: 'k',
+      },
+    );
+  });
+});

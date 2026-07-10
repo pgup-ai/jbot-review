@@ -10,6 +10,7 @@ import {
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
+  PI_REVIEW_SYSTEM_PROMPT,
   REVIEW_LENSES,
   REVIEW_OUTPUT_REMINDER,
   REVIEW_PROMPT,
@@ -593,5 +594,18 @@ describe('buildReviewFocusBlock', () => {
     const block = buildReviewFocusBlock(['src/util/helpers.ts']);
 
     assert.match(block, /General correctness:/);
+  });
+});
+
+describe('PI_REVIEW_SYSTEM_PROMPT', () => {
+  it('pins no-shell, read-only, the two confined tools, and git-diff routing', () => {
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /no shell/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /cannot modify the workspace/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /read_file/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /git_diff/);
+    // Confinement stated to the model; git_diff described as conditional since
+    // it only exists when a base revision is known.
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /outside it are refused/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /when available/);
   });
 });

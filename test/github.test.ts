@@ -2,10 +2,38 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  classifyPriorJbotThread,
   formatPriorJbotThreadsForPrompt,
+  isBotAddressedReply,
   postAddressedThreadReply,
   type PriorJbotThread,
 } from '../src/shared/github.ts';
+
+describe('isBotAddressedReply', () => {
+  it('counts the addressed marker only from the bot itself', () => {
+    const marker = 'done\n\n<!-- jbot-review:addressed -->';
+    assert.equal(isBotAddressedReply('jbot', marker, 'jbot'), true);
+    // On GitHub Actions the viewer is `github-actions` but replies are authored
+    // as `github-actions[bot]` — the bot must still recognize its own marker.
+    assert.equal(isBotAddressedReply('github-actions[bot]', marker, 'github-actions'), true);
+    // A PR author copying the hidden marker must NOT close the finding.
+    assert.equal(isBotAddressedReply('attacker', marker, 'github-actions'), false);
+    assert.equal(isBotAddressedReply('attacker', marker, 'jbot'), false);
+    assert.equal(isBotAddressedReply('jbot', 'no marker here', 'jbot'), false);
+    assert.equal(isBotAddressedReply(undefined, marker, 'jbot'), false);
+  });
+});
+
+describe('classifyPriorJbotThread', () => {
+  it('sends an addressed-but-unresolved thread to resolve-only, else context or skip', () => {
+    assert.equal(
+      classifyPriorJbotThread({ addressed: false, isResolved: false }),
+      'review-context',
+    );
+    assert.equal(classifyPriorJbotThread({ addressed: true, isResolved: false }), 'resolve-only');
+    assert.equal(classifyPriorJbotThread({ addressed: true, isResolved: true }), 'skip');
+  });
+});
 
 describe('formatPriorJbotThreadsForPrompt', () => {
   it('includes human thread replies so declined suggestions are not re-raised', () => {
