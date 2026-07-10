@@ -656,22 +656,22 @@ describe('selectReviewBackends pi engine routing', () => {
     });
   });
 
-  it('splits engines: pi main with an opencode-gateway aux', () => {
+  it('splits engines: pi main with an aux pi cannot serve on opencode', () => {
     assert.deepEqual(
       selectReviewBackends({
         ...google,
-        auxProviderID: 'opencode-go',
-        auxModelID: 'deepseek-v4-flash',
-        auxApiKey: 'gateway-key',
+        auxProviderID: 'some-unsupported-provider',
+        auxModelID: 'm',
+        auxApiKey: 'aux-key',
         piEnabled: true,
       }),
       {
         mainSdkEngine: 'pi',
         needsOpencode: true,
         ...noCliKeys,
-        opencodeProviderID: 'opencode-go',
-        opencodeModelID: 'deepseek-v4-flash',
-        opencodeApiKey: 'gateway-key',
+        opencodeProviderID: 'some-unsupported-provider',
+        opencodeModelID: 'm',
+        opencodeApiKey: 'aux-key',
         pi: { providerID: 'google', modelID: 'gemini-2.5-flash', apiKey: 'google-key' },
       },
     );
@@ -702,7 +702,7 @@ describe('selectReviewBackends pi engine routing', () => {
     );
   });
 
-  it('keeps a non-allowlisted provider on opencode even with piEnabled', () => {
+  it('routes nvidia to pi (supported by both → pi first)', () => {
     assert.deepEqual(
       selectReviewBackends({
         providerID: 'nvidia',
@@ -714,11 +714,54 @@ describe('selectReviewBackends pi engine routing', () => {
         piEnabled: true,
       }),
       {
-        needsOpencode: true,
+        mainSdkEngine: 'pi',
+        auxSdkEngine: 'pi',
+        needsOpencode: false,
         ...noCliKeys,
         opencodeProviderID: 'nvidia',
         opencodeModelID: 'nemotron-3-ultra-550b-a55b',
-        opencodeApiKey: 'nvidia-key',
+        opencodeApiKey: '',
+        pi: { providerID: 'nvidia', modelID: 'nemotron-3-ultra-550b-a55b', apiKey: 'nvidia-key' },
+      },
+    );
+  });
+
+  it('routes the opencode Zen gateway to pi when enabled', () => {
+    const sel = selectReviewBackends({
+      providerID: 'opencode',
+      modelID: 'deepseek-v4-flash-free',
+      apiKey: 'zen-key',
+      auxProviderID: 'opencode',
+      auxModelID: 'deepseek-v4-flash-free',
+      auxApiKey: '',
+      piEnabled: true,
+    });
+    assert.equal(sel.mainSdkEngine, 'pi');
+    assert.equal(sel.needsOpencode, false);
+    assert.deepEqual(sel.pi, {
+      providerID: 'opencode',
+      modelID: 'deepseek-v4-flash-free',
+      apiKey: 'zen-key',
+    });
+  });
+
+  it('keeps a provider pi cannot serve on opencode even with piEnabled', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        providerID: 'some-unsupported-provider',
+        modelID: 'm',
+        apiKey: 'k',
+        auxProviderID: 'some-unsupported-provider',
+        auxModelID: 'm',
+        auxApiKey: '',
+        piEnabled: true,
+      }),
+      {
+        needsOpencode: true,
+        ...noCliKeys,
+        opencodeProviderID: 'some-unsupported-provider',
+        opencodeModelID: 'm',
+        opencodeApiKey: 'k',
       },
     );
   });

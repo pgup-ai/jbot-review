@@ -42,11 +42,14 @@ const PI_MODEL_LIST_LOG_CAP = 40;
 export const PI_MIN_NODE_VERSION = '22.19.0';
 
 /**
- * Static capability allowlist (never probe-and-see), mapped to pi's provider
- * IDs. Every entry was verified against pi 0.80's model catalog: provider id,
- * runtime key injection, and the repo default model id all resolve. nvidia is
- * deliberately absent (its default model is missing from pi's catalog);
- * opencode/opencode-go are opencode's own gateways.
+ * Static capability allowlist (never probe-and-see), mapping jbot provider IDs
+ * to pi's. Rule: every non-CLI provider pi can also serve routes to pi first;
+ * only a jbot provider pi's catalog lacks stays off this map. Every entry is
+ * verified against pi's model catalog — provider id, runtime key injection, and
+ * the repo default model resolve (nvidia resolves via the vendor-namespaced id;
+ * see piModelCandidates). opencode/opencode-go are opencode's own Zen gateways;
+ * on pi they're reached over the gateway's HTTP endpoint directly rather than
+ * through the opencode server.
  */
 const PI_PROVIDER_IDS: Record<string, string> = {
   anthropic: 'anthropic',
@@ -58,10 +61,25 @@ const PI_PROVIDER_IDS: Record<string, string> = {
   'fireworks-ai': 'fireworks',
   'zai-coding-plan': 'zai',
   'xiaomi-token-plan-sgp': 'xiaomi-token-plan-sgp',
+  nvidia: 'nvidia',
+  opencode: 'opencode',
+  'opencode-go': 'opencode-go',
 };
 
 export function piSupportsProvider(providerID: string): boolean {
   return Object.hasOwn(PI_PROVIDER_IDS, providerID);
+}
+
+/**
+ * Model IDs to try against pi's registry, in order. jbot's config IDs come from
+ * models.dev (bare stems, e.g. `nemotron-3-ultra-550b-a55b`), but multi-vendor
+ * gateways like NVIDIA NIM namespace the same model with a vendor prefix
+ * (`nvidia/nemotron-...`). So a bare ID also gets a provider-prefixed candidate;
+ * an already-slashed ID is used as-is. Deterministic (two forms), not probing.
+ */
+export function piModelCandidates(providerID: string, modelID: string): string[] {
+  const piID = piProviderIDFor(providerID);
+  return piID && !modelID.includes('/') ? [modelID, `${piID}/${modelID}`] : [modelID];
 }
 
 export function piProviderIDFor(providerID: string): string | undefined {
@@ -390,7 +408,12 @@ function requirePiModel(
   providerID: string,
   modelID: string,
 ): unknown {
-  const model = registry.find(requirePiProvider(providerID), modelID);
+  const piID = requirePiProvider(providerID);
+  let model: unknown;
+  for (const candidate of piModelCandidates(providerID, modelID)) {
+    model = registry.find(piID, candidate);
+    if (model) break;
+  }
   if (!model) {
     throw new Error(
       `pi's model catalog has no ${providerID}/${modelID}; set JBOT_SDK_ENGINE=opencode to use the opencode engine instead.`,
@@ -466,7 +489,9 @@ export async function startPi(
     const models = registry
       .getAll()
       .filter((m) => m.provider === piID && typeof m.id === 'string')
-      .map((m) => `${providerID}/${m.id}`)
+      // pi already namespaces NIM ids (nvidia/nemotron-…); don't double the
+      // provider prefix in the jbot-form listing.
+      .map((m) => (m.id!.startsWith(`${piID}/`) ? m.id! : `${providerID}/${m.id!}`))
       .sort();
     if (models.length > 0) {
       log(

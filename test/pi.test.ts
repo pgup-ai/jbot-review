@@ -8,6 +8,7 @@ import {
   PI_SESSION_TOOLS,
   extractPiFinalText,
   mapPiUsage,
+  piModelCandidates,
   piProviderIDFor,
   piRuntimeSupported,
   piSupportsProvider,
@@ -19,7 +20,7 @@ import {
 import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
 
 describe('piSupportsProvider', () => {
-  it('accepts every provider in the verified allowlist', () => {
+  it('accepts every non-CLI jbot provider pi can also serve', () => {
     for (const providerID of [
       'anthropic',
       'openai',
@@ -30,18 +31,17 @@ describe('piSupportsProvider', () => {
       'fireworks-ai',
       'zai-coding-plan',
       'xiaomi-token-plan-sgp',
+      'nvidia',
+      'opencode',
+      'opencode-go',
     ]) {
       assert.equal(piSupportsProvider(providerID), true, providerID);
     }
   });
 
-  it('rejects providers pi cannot serve', () => {
-    // nvidia: our default model is absent from pi's catalog; opencode/opencode-go
-    // are opencode's own gateways; CLI backends never route through SDK engines.
+  it('rejects CLI-backend and unknown providers', () => {
+    // CLI backends never route through an SDK engine; unknowns fail closed.
     for (const providerID of [
-      'nvidia',
-      'opencode',
-      'opencode-go',
       'kilo',
       'cline',
       'cline-pass',
@@ -55,6 +55,31 @@ describe('piSupportsProvider', () => {
       assert.equal(piSupportsProvider(providerID), false, providerID);
     }
   });
+
+  it('lists model candidates: bare id then provider-prefixed (NIM namespacing)', () => {
+    // jbot config 'nvidia/nemotron-...' parses to the bare stem, but pi's NIM
+    // catalog stores it namespaced as 'nvidia/nemotron-...'.
+    assert.deepEqual(piModelCandidates('nvidia', 'nemotron-3-ultra-550b-a55b'), [
+      'nemotron-3-ultra-550b-a55b',
+      'nvidia/nemotron-3-ultra-550b-a55b',
+    ]);
+    // Already-namespaced or same-named-catalog ids resolve directly (no prefix).
+    assert.deepEqual(piModelCandidates('nvidia', 'nvidia/nemotron-3-ultra-550b-a55b'), [
+      'nvidia/nemotron-3-ultra-550b-a55b',
+    ]);
+    assert.deepEqual(piModelCandidates('fireworks-ai', 'accounts/fireworks/models/x'), [
+      'accounts/fireworks/models/x',
+    ]);
+    // A bare id on any allowlisted provider gets the prefixed fallback too; it
+    // simply won't match for providers whose catalog uses bare ids (opencode),
+    // where the direct candidate resolves first — harmless, never tried.
+    assert.deepEqual(piModelCandidates('opencode', 'deepseek-v4-flash-free'), [
+      'deepseek-v4-flash-free',
+      'opencode/deepseek-v4-flash-free',
+    ]);
+    // Off-allowlist: no pi id, so no prefixed candidate.
+    assert.deepEqual(piModelCandidates('unknown', 'model'), ['model']);
+  });
 });
 
 describe('piProviderIDFor', () => {
@@ -65,9 +90,15 @@ describe('piProviderIDFor', () => {
     assert.equal(piProviderIDFor('xiaomi-token-plan-sgp'), 'xiaomi-token-plan-sgp');
   });
 
-  it('returns undefined for unsupported providers', () => {
-    assert.equal(piProviderIDFor('nvidia'), undefined);
-    assert.equal(piProviderIDFor('opencode'), undefined);
+  it('maps the opencode gateways and nvidia to their pi ids', () => {
+    assert.equal(piProviderIDFor('nvidia'), 'nvidia');
+    assert.equal(piProviderIDFor('opencode'), 'opencode');
+    assert.equal(piProviderIDFor('opencode-go'), 'opencode-go');
+  });
+
+  it('returns undefined for CLI-backend and unknown providers', () => {
+    assert.equal(piProviderIDFor('kilo'), undefined);
+    assert.equal(piProviderIDFor('unknown'), undefined);
   });
 });
 

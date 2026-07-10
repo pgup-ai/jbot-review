@@ -322,13 +322,15 @@ backends such as Devin, CommandCode, and Cursor expose model lists through their
 own tools/accounts.
 
 **SDK engines.** Non-CLI providers run on one of two in-repo SDK engines,
-chosen automatically per session role: the in-process
-[pi SDK](https://pi.dev/docs/latest/sdk) for providers on its verified
-allowlist (`anthropic`, `openai`, `google`, `deepseek`, `xai`, `openrouter`,
-`fireworks-ai`, `zai-coding-plan`, `xiaomi-token-plan-sgp`), and the opencode
-server for everything else (including the `opencode`/`opencode-go` gateways
-and `nvidia`). Set `JBOT_SDK_ENGINE=opencode` to pin every SDK session to
-opencode — the one-line rollback if pi misbehaves. The pi engine requires
+chosen automatically per session role. The rule: a provider pi can also serve
+routes to the in-process [pi SDK](https://pi.dev/docs/latest/sdk) first; the
+opencode server serves the rest. pi's allowlist currently covers every non-CLI
+provider — `anthropic`, `openai`, `google`, `deepseek`, `xai`, `openrouter`,
+`fireworks-ai`, `zai-coding-plan`, `xiaomi-token-plan-sgp`, `nvidia`, and the
+`opencode`/`opencode-go` Zen gateways (which pi reaches over their HTTP
+endpoint directly, not through the opencode server). Set
+`JBOT_SDK_ENGINE=opencode` to pin every SDK session to opencode — the one-line
+rollback if pi misbehaves, and the path CLI backends' aux sessions still use. The pi engine requires
 Node >= 22.19 (the published Docker image runs Node 24); on older runtimes it
 disables itself and logs why. pi sessions run hermetically (no user-level pi
 config, skills, or prompt templates are loaded), get no shell (pi ships no
