@@ -331,7 +331,9 @@ and `nvidia`). Set `JBOT_SDK_ENGINE=opencode` to pin every SDK session to
 opencode — the one-line rollback if pi misbehaves. The pi engine requires
 Node >= 22.19 (the published Docker image runs Node 24); on older runtimes it
 disables itself and logs why. pi sessions run hermetically (no user-level pi
-config, skills, or prompt templates are loaded) and manage provider prompt
+config, skills, or prompt templates are loaded), get no shell (pi ships no
+sandbox, so read-only is enforced by withholding `bash` rather than by
+filtering it — the diff is embedded in the prompt), and manage provider prompt
 caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions
 only.
 

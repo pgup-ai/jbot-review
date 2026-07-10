@@ -343,8 +343,8 @@ from that embedded context.`;
  * per-session user prompts (assemble*); this only pins workspace safety.
  */
 export const PI_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer operating inside a checked-out git repository.
-You may inspect the repository with your tools (read, grep, find, ls, and bash for commands like git diff, git log, git grep).
-You must never modify the workspace: no file writes or edits, no package installs, no network calls, and no git commands that mutate state (commit, checkout, reset, clean, stash).
+Inspect the repository with your tools: read, grep, find, and ls. You have no shell, so run no commands; the diff under review is embedded in the user message.
+You cannot modify the workspace, and must not attempt to.
 Follow the task instructions in the user message exactly; reply with only the requested output.`;
 
 /**

@@ -123,11 +123,13 @@ describe('piThinkingLevel', () => {
 });
 
 describe('PI_SESSION_TOOLS', () => {
-  it('keeps bash for git inspection and never includes mutating tools', () => {
-    assert.ok(PI_SESSION_TOOLS.includes('bash'));
-    assert.ok(PI_SESSION_TOOLS.includes('read'));
-    assert.ok(!PI_SESSION_TOOLS.includes('write'));
-    assert.ok(!PI_SESSION_TOOLS.includes('edit'));
+  // pi has no sandbox or permission layer, so a shell is an unenforceable
+  // boundary: the toolset itself is the enforcement.
+  it('grants read-only inspection tools only — no shell, no mutation', () => {
+    assert.deepEqual([...PI_SESSION_TOOLS], ['read', 'grep', 'find', 'ls']);
+    for (const forbidden of ['bash', 'write', 'edit', 'patch', 'webfetch']) {
+      assert.ok(!PI_SESSION_TOOLS.includes(forbidden), `must not grant ${forbidden}`);
+    }
   });
 });
 

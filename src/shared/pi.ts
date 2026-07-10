@@ -125,10 +125,18 @@ export function piThinkingLevel(modelOptions?: Record<string, unknown>): string 
 }
 
 /**
- * Read-only agentic toolset (invariant 8): bash stays for git diff/log/grep;
- * write/edit are never enabled. Single-shot sessions disable even these.
+ * Read-only toolset (invariant 8). Unlike opencode, pi ships no sandbox and no
+ * permission layer — "Pi does not include a built-in sandbox" — so a shell here
+ * could not be constrained by config or prompt: redirection (`echo x > f`) and
+ * wrappers (`sh -c`) defeat any command filter. The toolset IS the enforcement,
+ * so bash is withheld entirely and mutation is impossible by construction.
+ *
+ * The review does not need a shell: the full diff is embedded in the prompt
+ * (diff-context.ts) and blast-radius runs git grep in the runner, outside the
+ * session — the same posture the cline backend already reviews under.
+ * Single-shot sessions disable even these tools.
  */
-export const PI_SESSION_TOOLS: readonly string[] = ['read', 'grep', 'find', 'ls', 'bash'];
+export const PI_SESSION_TOOLS: readonly string[] = ['read', 'grep', 'find', 'ls'];
 
 /**
  * Maps a pi assistant-message usage object onto PromptTokenUsage. Defensive
@@ -241,7 +249,8 @@ export interface PiRuntime {
   registry: PiModelRegistryLike;
   loader: PiResourceLoaderLike;
   workspace: string;
-  mainModelID: string;
+  /** Full `provider/model` — a bare model ID collides across providers. */
+  mainModel: string;
   thinkingLevel?: string;
 }
 
@@ -353,7 +362,7 @@ export async function startPi(
       registry,
       loader,
       workspace,
-      mainModelID: modelID,
+      mainModel: `${providerID}/${modelID}`,
       ...(thinkingLevel ? { thinkingLevel } : {}),
     },
     stop: removeIsolationDir,
@@ -380,8 +389,9 @@ async function createPiSession(
     resourceLoader: runtime.loader,
     sessionManager: runtime.sdk.SessionManager.inMemory(),
     settingsManager: runtime.sdk.SettingsManager.inMemory({}),
-    // modelOptions are main-model-only, matching the opencode engine.
-    ...(modelID === runtime.mainModelID && runtime.thinkingLevel
+    // modelOptions are main-model-only, matching the opencode engine. Compare
+    // the full provider/model: bare model IDs repeat across providers.
+    ...(model === runtime.mainModel && runtime.thinkingLevel
       ? { thinkingLevel: runtime.thinkingLevel }
       : {}),
   });
@@ -457,12 +467,16 @@ function disposePiSession(
   label: string,
   log: (msg: string) => void,
 ): void {
-  try {
-    void session.dispose?.();
-  } catch (error) {
+  const failed = (error: unknown) =>
     log(
       `(pi ${label} session dispose failed: ${error instanceof Error ? error.message : String(error)})`,
     );
+  try {
+    // dispose() may be sync or async: a rejected promise left unhandled would
+    // take down the long-running webhook process, not just skip a cleanup.
+    void Promise.resolve(session.dispose?.()).catch(failed);
+  } catch (error) {
+    failed(error);
   }
 }
 

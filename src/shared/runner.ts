@@ -1271,6 +1271,17 @@ export async function runPrReview(params: {
     kiloBackend = limitBackendConcurrency(createKiloBackend(workspace, kiloAuth), sessionSlots);
   }
 
+  // Both SDK roles on one engine but different providers: the aux provider gets
+  // its own entry in that engine's credential map, so it MUST have its own key.
+  // Falling back to the main key would hand the main provider's secret to a
+  // different vendor's endpoint (and fail auth there anyway).
+  const auxNeedsOwnKey =
+    auxProviderID !== providerID && ((mainOnPi && auxOnPi) || (mainOnOpencode && auxOnOpencode));
+  if (auxNeedsOwnKey && !options.auxApiKey) {
+    cleanupCliHomes();
+    throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
+  }
+
   let piRuntime: Awaited<ReturnType<typeof startPi>> | undefined;
   let piBackend: ReviewBackend | undefined;
   if (backendSelection.pi) {
@@ -1291,10 +1302,9 @@ export async function runPrReview(params: {
           modelOptions: mainOnPi ? options.modelOptions : undefined,
           // pi's prompt caching is provider-managed (no setCacheKey knob);
           // resolvePromptCachePolicy applies to the opencode server only.
-          additionalProviderKeys:
-            mainOnPi && auxOnPi && auxProviderID !== providerID
-              ? [{ providerID: auxProviderID, apiKey: options.auxApiKey || apiKey }]
-              : undefined,
+          additionalProviderKeys: auxNeedsOwnKey
+            ? [{ providerID: auxProviderID, apiKey: options.auxApiKey }]
+            : undefined,
         },
       );
     } catch (error) {
@@ -1325,16 +1335,15 @@ export async function runPrReview(params: {
             ? promptCachePolicy.providerPromptCache
             : promptCachePolicy.auxProviderPromptCache,
           port: options.opencodePort > 0 ? options.opencodePort : undefined,
-          additionalProviderKeys:
-            mainOnOpencode && auxOnOpencode && auxProviderID !== providerID
-              ? [
-                  {
-                    providerID: auxProviderID,
-                    apiKey: options.auxApiKey || apiKey,
-                    promptCache: promptCachePolicy.auxProviderPromptCache,
-                  },
-                ]
-              : undefined,
+          additionalProviderKeys: auxNeedsOwnKey
+            ? [
+                {
+                  providerID: auxProviderID,
+                  apiKey: options.auxApiKey,
+                  promptCache: promptCachePolicy.auxProviderPromptCache,
+                },
+              ]
+            : undefined,
         },
       );
     } catch (error) {
@@ -1366,9 +1375,13 @@ export async function runPrReview(params: {
     : auxOnPi
       ? requireSdkBackend(piBackend, 'pi', 'aux')
       : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
+  // Independent cleanups: a fault in one must not strand the other's temp dir.
   const stop = () => {
-    opencodeRuntime?.stop();
-    piRuntime?.stop();
+    try {
+      opencodeRuntime?.stop();
+    } finally {
+      piRuntime?.stop();
+    }
   };
   try {
     if (commandCodeBackend) {

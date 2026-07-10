@@ -21,7 +21,7 @@ export interface ReviewBackendSelectionInput {
   auxProviderID: string;
   auxModelID: string;
   auxApiKey: string;
-  /** Kill switch ∧ runtime support, resolved by the caller via resolvePiEngine. */
+  /** Whether the pi engine may be used at all (see resolvePiEngine). */
   piEnabled?: boolean;
 }
 
