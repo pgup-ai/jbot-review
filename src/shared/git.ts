@@ -123,7 +123,6 @@ export function parseGitDiff(diffText: string): PrFile[] {
 }
 
 function parseDiffSection(lines: string[]): PrFile {
-  let renameFrom = '';
   let renameTo = '';
   let newPath = '';
   let oldPath = '';
@@ -134,23 +133,19 @@ function parseDiffSection(lines: string[]): PrFile {
       hunkStart = i;
       break;
     }
-    if (line.startsWith('rename from '))
-      renameFrom = parseDiffPath(line.slice('rename from '.length));
-    else if (line.startsWith('rename to '))
-      renameTo = parseDiffPath(line.slice('rename to '.length));
+    if (line.startsWith('rename to ')) renameTo = parseDiffPath(line.slice('rename to '.length));
     else if (line.startsWith('+++ ')) newPath = parseDiffPath(line.slice(4), 'b/');
     else if (line.startsWith('--- ')) oldPath = parseDiffPath(line.slice(4), 'a/');
   }
   // The new side names GitHub's file; deletions fall back to the old side,
   // while non-hunk sections fall through to the diff header.
   const filename = renameTo || newPath || oldPath || pathFromDiffGitLine(lines[0]);
-  const rename = renameFrom ? { previousFilename: renameFrom } : {};
 
-  if (hunkStart < 0) return { filename, ...rename };
+  if (hunkStart < 0) return { filename };
   const hunkLines = lines.slice(hunkStart);
   // A complete git diff ends with one empty split element, not a patch line.
   if (hunkLines[hunkLines.length - 1] === '') hunkLines.pop();
-  return { filename, patch: hunkLines.join('\n'), ...rename };
+  return { filename, patch: hunkLines.join('\n') };
 }
 
 function parseDiffPath(raw: string, prefix?: 'a/' | 'b/'): string {
@@ -220,12 +215,7 @@ export async function hydratePrFilePatches(
   ]);
   const checkoutDiff = parseGitDiff(diffText);
   const checkoutFiles = new Map(checkoutDiff.map((file) => [file.filename, file]));
-  const checkoutSources = new Set(
-    checkoutDiff.flatMap((file) => (file.previousFilename ? [file.previousFilename] : [])),
-  );
-  const unmatched = missing.filter(
-    (file) => !checkoutFiles.has(file.filename) && !checkoutSources.has(file.filename),
-  );
+  const unmatched = missing.filter((file) => !checkoutFiles.has(file.filename));
   if (unmatched.length > 0) {
     throw new Error(
       `Checkout diff did not contain ${formatFileList(unmatched.map((file) => file.filename))}; refusing incomplete PR coverage.`,

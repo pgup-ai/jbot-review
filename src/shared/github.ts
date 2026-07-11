@@ -19,7 +19,6 @@ export interface PrFile {
   filename: string;
   patch?: string;
   changes?: number;
-  previousFilename?: string;
 }
 
 export interface PriorJbotThread {

@@ -54,11 +54,7 @@ describe('parseGitDiff', () => {
       '',
     ].join('\n');
     assert.deepEqual(parseGitDiff(diff), [
-      {
-        filename: 'src/new.ts',
-        patch: '@@ -1 +1 @@\n-a\n+b',
-        previousFilename: 'src/old.ts',
-      },
+      { filename: 'src/new.ts', patch: '@@ -1 +1 @@\n-a\n+b' },
     ]);
   });
 
@@ -70,9 +66,7 @@ describe('parseGitDiff', () => {
       'rename to "src/new\\tname.ts"',
       '',
     ].join('\n');
-    assert.deepEqual(parseGitDiff(diff), [
-      { filename: 'src/new\tname.ts', previousFilename: 'src/old\tname.ts' },
-    ]);
+    assert.deepEqual(parseGitDiff(diff), [{ filename: 'src/new\tname.ts' }]);
   });
 
   it('yields a patchless entry for a pure rename (no hunks)', () => {
@@ -83,9 +77,7 @@ describe('parseGitDiff', () => {
       'rename to src/new.ts',
       '',
     ].join('\n');
-    assert.deepEqual(parseGitDiff(diff), [
-      { filename: 'src/new.ts', previousFilename: 'src/old.ts' },
-    ]);
+    assert.deepEqual(parseGitDiff(diff), [{ filename: 'src/new.ts' }]);
   });
 
   it('keeps the old path for deletions, matching GitHub', () => {
@@ -268,6 +260,31 @@ describe('hydratePrFilePatches', () => {
         baseSha: 'base',
         headSha: 'head',
         runGitDiff: async () => checkoutDiff,
+      }),
+      /refusing incomplete PR coverage/,
+    );
+  });
+
+  it('fails closed when a missing API path is only a checkout rename source', async () => {
+    const renamedDiff = [
+      'diff --git a/src/old.ts b/src/new.ts',
+      'similarity index 80%',
+      'rename from src/old.ts',
+      'rename to src/new.ts',
+      '--- a/src/old.ts',
+      '+++ b/src/new.ts',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      '',
+    ].join('\n');
+
+    await assert.rejects(
+      hydratePrFilePatches([{ filename: 'src/old.ts', changes: 2 }], {
+        workspace: '/repo',
+        baseSha: 'base',
+        headSha: 'head',
+        runGitDiff: async () => renamedDiff,
       }),
       /refusing incomplete PR coverage/,
     );

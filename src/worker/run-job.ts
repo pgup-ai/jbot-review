@@ -40,13 +40,15 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
     // Clone the contributor's fork when present; clonePr fetches the upstream
     // base separately so the checkout always has both sides of a three-dot diff.
     const headCloneUrl = pr.data.head.repo?.clone_url ?? pr.data.base.repo.clone_url;
-    const cloned = clonePr(
+    const cloned = clonePr({
       headCloneUrl,
-      pr.data.head.ref,
-      pr.data.base.repo.clone_url,
-      pr.data.base.ref,
-      job.installationToken,
-    );
+      headRef: pr.data.head.ref,
+      headSha: pr.data.head.sha,
+      baseCloneUrl: pr.data.base.repo.clone_url,
+      baseRef: pr.data.base.ref,
+      baseSha: pr.data.base.sha,
+      token: job.installationToken,
+    });
     cleanup = cloned.cleanup;
     await runPrReview({
       octokit,
