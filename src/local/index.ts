@@ -13,6 +13,7 @@ import { PROVIDERS } from '../shared/config.ts';
 import { CURSOR_CLI_BIN, CURSOR_PROVIDER_ID } from '../shared/cursor.ts';
 import { DEVIN_PROVIDER_ID } from '../shared/devin.ts';
 import { isNoiseFile } from '../shared/filter.ts';
+import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID } from '../shared/kilo.ts';
 import {
   formatModelName,
@@ -147,6 +148,7 @@ const CLI_BINS: Record<string, string> = {
   [CURSOR_PROVIDER_ID]: CURSOR_CLI_BIN,
   [CODEX_PROVIDER_ID]: CODEX_CLI_BIN,
   [CLINE_PROVIDER_ID]: CLINE_CLI_BIN,
+  [GROK_PROVIDER_ID]: GROK_CLI_BIN,
   [KILO_PROVIDER_ID]: KILO_CLI_BIN,
 };
 
@@ -157,6 +159,7 @@ const INSTALL_HINTS: Record<string, string> = {
   [COMMANDCODE_CLI_BIN]: 'npm i -g command-code',
   [CODEX_CLI_BIN]: 'npm i -g @openai/codex',
   [CLINE_CLI_BIN]: 'npm i -g cline',
+  [GROK_CLI_BIN]: 'npm i -g @xai-official/grok',
   [KILO_CLI_BIN]: 'npm i -g @kilocode/cli',
   [CURSOR_CLI_BIN]: 'curl -fsSL https://cursor.com/install | sh',
   devin: 'curl -fsSL https://cli.devin.ai/install.sh | sh',

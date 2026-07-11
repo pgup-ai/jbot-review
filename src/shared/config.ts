@@ -130,6 +130,16 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
+  // Grok Build CLI account auth. Kept separate from xai, which remains the
+  // direct API provider routed through the SDK engines with XAI_API_KEY.
+  grok: {
+    defaultModel: 'grok/default',
+    keyEnv: 'GROK_AUTH_JSON',
+    keyInput: 'grok-auth',
+    models: {
+      default: { promptCache: false },
+    },
+  },
   // Cline pay-as-you-go. JBOT_REVIEW_MODEL: `cline/default`, or `cline/<type>/<model>`
   // (cline models carry their own type), e.g. `cline/deepseek/deepseek-v4-flash`.
   cline: {
@@ -172,6 +182,7 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     providerID === 'codex' ||
     providerID === 'cline' ||
     providerID === 'cline-pass' ||
+    providerID === 'grok' ||
     providerID === 'kilo'
   )
     return false;

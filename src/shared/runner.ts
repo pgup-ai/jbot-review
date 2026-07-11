@@ -114,6 +114,16 @@ import {
   writeClineAuth,
 } from './cline.ts';
 import {
+  GROK_PROVIDER_ID,
+  assertGrokAuthenticated,
+  runGrokAddressedPriorCommentsCheck,
+  runGrokChangesSinceLastReview,
+  runGrokFindingVerification,
+  runGrokGuidelineComplianceCheck,
+  runGrokReview,
+  writeGrokHome,
+} from './grok.ts';
+import {
   KILO_PROVIDER_ID,
   assertValidKiloAuth,
   listKiloModels,
@@ -167,7 +177,7 @@ import type {
 
 /** Blocking findings verified per run; the rest pass through unverified. */
 const MAX_VERIFIED_FINDINGS = 10;
-const COMMANDCODE_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
+const EMBEDDED_ONLY_CLI_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
   totalBudgetBytes: 512 * 1024,
   perFileBudgetBytes: 512 * 1024,
 };
@@ -560,6 +570,49 @@ function createClineBackend(workspace: string, clineHome: string): ReviewBackend
         timeoutMs,
         onTokenUsage,
         clineHome,
+      ),
+  };
+}
+
+function createGrokBackend(grokHome: string): ReviewBackend {
+  return {
+    name: GROK_PROVIDER_ID,
+    runReview: (model, prContext, guidelines, log, options) =>
+      runGrokReview(model, prContext, guidelines, log, {
+        ...options,
+        home: grokHome,
+      }),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runGrokAddressedPriorCommentsCheck(model, prContext, log, timeoutMs, onTokenUsage, grokHome),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runGrokGuidelineComplianceCheck(
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        grokHome,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runGrokFindingVerification(
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        grokHome,
+      ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runGrokChangesSinceLastReview(
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        grokHome,
       ),
   };
 }
@@ -1026,15 +1079,19 @@ export async function runPrReview(params: {
   }
   const diffHunksBlock = buildDiffHunksBlock(files);
   if (diffHunksBlock) log(`Embedded diff hunks block: ${diffHunksBlock.length} chars.`);
-  const commandCodeDiffHunks =
-    mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID
-      ? buildDiffHunksBlockWithMetadata(files, COMMANDCODE_DIFF_HUNKS_OPTIONS)
-      : undefined;
-  const commandCodeIncompleteDiffFiles = commandCodeDiffHunks
-    ? incompleteDiffFiles(commandCodeDiffHunks)
+  const mainRequiresCompleteEmbeddedDiff =
+    mainCliBackend === COMMANDCODE_PROVIDER_ID || mainCliBackend === GROK_PROVIDER_ID;
+  const auxRequiresCompleteEmbeddedDiff =
+    auxCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === GROK_PROVIDER_ID;
+  const embeddedOnlyCli = mainRequiresCompleteEmbeddedDiff || auxRequiresCompleteEmbeddedDiff;
+  const embeddedOnlyCliDiffHunks = embeddedOnlyCli
+    ? buildDiffHunksBlockWithMetadata(files, EMBEDDED_ONLY_CLI_DIFF_HUNKS_OPTIONS)
+    : undefined;
+  const embeddedOnlyCliIncompleteDiffFiles = embeddedOnlyCliDiffHunks
+    ? incompleteDiffFiles(embeddedOnlyCliDiffHunks)
     : [];
-  if (commandCodeDiffHunks?.text) {
-    log(`CommandCode embedded diff hunks block: ${commandCodeDiffHunks.text.length} chars.`);
+  if (embeddedOnlyCliDiffHunks?.text) {
+    log(`CLI-safe embedded diff hunks block: ${embeddedOnlyCliDiffHunks.text.length} chars.`);
   }
   const blastRadiusBlock = options.enhancedContext
     ? await buildBlastRadiusBlock(workspace, files)
@@ -1107,20 +1164,18 @@ export async function runPrReview(params: {
   // carries the guard. Static text, so it stays in the cache-stable prefix.
   coreContext = joinContext(UNTRUSTED_PR_CONTENT_NOTE, coreContext);
   const basePrContext = joinContext(coreContext, diffHunksBlock);
-  const auxCommandCodeHasCompleteDiff =
-    auxCliBackend !== COMMANDCODE_PROVIDER_ID || commandCodeIncompleteDiffFiles.length === 0;
-  if (!auxCommandCodeHasCompleteDiff) {
+  const auxHasCompleteEmbeddedDiff =
+    !auxRequiresCompleteEmbeddedDiff || embeddedOnlyCliIncompleteDiffFiles.length === 0;
+  if (!auxHasCompleteEmbeddedDiff) {
     log(
-      `Skipping CommandCode auxiliary sessions: embedded diff exceeds the CommandCode hard budget (${formatIncompleteDiffFiles(
-        commandCodeIncompleteDiffFiles,
+      `Skipping ${auxCliBackend} auxiliary sessions: embedded diff exceeds the CLI hard budget (${formatIncompleteDiffFiles(
+        embeddedOnlyCliIncompleteDiffFiles,
       )}). Main review continues without aux findings or verification.`,
     );
   }
   const auxPrContext =
-    auxCliBackend === COMMANDCODE_PROVIDER_ID &&
-    commandCodeDiffHunks &&
-    auxCommandCodeHasCompleteDiff
-      ? joinContext(coreContext, commandCodeDiffHunks.text)
+    auxRequiresCompleteEmbeddedDiff && embeddedOnlyCliDiffHunks && auxHasCompleteEmbeddedDiff
+      ? joinContext(coreContext, embeddedOnlyCliDiffHunks.text)
       : basePrContext;
 
   // Use a per-run limiter around every backend so mixed Devin/OpenCode runs
@@ -1140,6 +1195,7 @@ export async function runPrReview(params: {
   let cursorBackend: ReviewBackend | undefined;
   let codexBackend: ReviewBackend | undefined;
   let clineBackend: ReviewBackend | undefined;
+  let grokBackend: ReviewBackend | undefined;
   let kiloBackend: ReviewBackend | undefined;
   let commandCodeHome: string | undefined;
   const cleanupCommandCodeHome = (): void => {
@@ -1159,12 +1215,19 @@ export async function runPrReview(params: {
     rmSync(clineHome, { recursive: true, force: true });
     clineHome = undefined;
   };
+  let grokHome: string | undefined;
+  const cleanupGrokHome = (): void => {
+    if (!grokHome) return;
+    rmSync(grokHome, { recursive: true, force: true });
+    grokHome = undefined;
+  };
   // Multiple CLI homes can be live at once (e.g. main=codex, aux=commandcode), so
   // clean every one at every downstream failure/exit point.
   const cleanupCliHomes = (): void => {
     cleanupCommandCodeHome();
     cleanupCodexHome();
     cleanupClineHome();
+    cleanupGrokHome();
   };
 
   if (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID) {
@@ -1250,6 +1313,33 @@ export async function runPrReview(params: {
     log(`Cline CLI auth configured at ${authPath}.`);
     log('Cline CLI token usage is unavailable; review metadata may omit those sessions.');
     clineBackend = limitBackendConcurrency(createClineBackend(workspace, clineHome), sessionSlots);
+  }
+
+  if (mainCliBackend === GROK_PROVIDER_ID || auxCliBackend === GROK_PROVIDER_ID) {
+    const grokAuth = backendSelection.grokAuth;
+    if (!grokAuth) {
+      cleanupCliHomes();
+      throw new Error(`Missing auth for ${GROK_PROVIDER_ID} provider.`);
+    }
+    let authPath: string;
+    try {
+      grokHome = mkdtempSync(join(tmpdir(), 'jbot-grok-home-'));
+      authPath = writeGrokHome(grokAuth, grokHome);
+      await assertGrokAuthenticated(grokHome);
+    } catch (error) {
+      cleanupCliHomes();
+      throw error;
+    }
+    log(`Grok Build CLI auth configured at ${authPath}.`);
+    log(
+      'Grok Build CLI runs against an empty read-only workspace; token usage is unavailable for those sessions.',
+    );
+    // Grok rotates auth in place. Acquire its serial slot before the shared
+    // limiter so queued Grok calls neither race auth.json nor hold global slots.
+    grokBackend = limitBackendConcurrency(
+      limitBackendConcurrency(createGrokBackend(grokHome), sessionSlots),
+      new Semaphore(1),
+    );
   }
 
   if (mainCliBackend === KILO_PROVIDER_ID || auxCliBackend === KILO_PROVIDER_ID) {
@@ -1372,6 +1462,7 @@ export async function runPrReview(params: {
     [CURSOR_PROVIDER_ID]: cursorBackend,
     [CODEX_PROVIDER_ID]: codexBackend,
     [CLINE_PROVIDER_ID]: clineBackend,
+    [GROK_PROVIDER_ID]: grokBackend,
     [KILO_PROVIDER_ID]: kiloBackend,
   };
   const mainBackend = mainCliBackend
@@ -1499,9 +1590,10 @@ export async function runPrReview(params: {
       fullDiffBlock: diffHunksBlock,
       context7Block,
       shards,
-      requireCompleteEmbeddedDiff: mainCliBackend === COMMANDCODE_PROVIDER_ID,
-      diffHunksOptions:
-        mainCliBackend === COMMANDCODE_PROVIDER_ID ? COMMANDCODE_DIFF_HUNKS_OPTIONS : undefined,
+      requireCompleteEmbeddedDiff: mainRequiresCompleteEmbeddedDiff,
+      diffHunksOptions: mainRequiresCompleteEmbeddedDiff
+        ? EMBEDDED_ONLY_CLI_DIFF_HUNKS_OPTIONS
+        : undefined,
     });
 
     const addressedPriorCheck = trackAuxiliarySession(
@@ -1510,7 +1602,7 @@ export async function runPrReview(params: {
         backend: auxBackend,
         model: auxModel,
         prContext: auxPrContext,
-        priorJbotThreads: auxCommandCodeHasCompleteDiff ? priorJbotThreads : [],
+        priorJbotThreads: auxHasCompleteEmbeddedDiff ? priorJbotThreads : [],
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -1534,9 +1626,9 @@ export async function runPrReview(params: {
             return null;
           })
         : null;
-    const guidelineCandidate = effectiveGuidelinePass && auxCommandCodeHasCompleteDiff;
+    const guidelineCandidate = effectiveGuidelinePass && auxHasCompleteEmbeddedDiff;
     const candidateLensKeys = selectLensKeys(
-      auxCommandCodeHasCompleteDiff ? effectiveReviewPasses : 1,
+      auxHasCompleteEmbeddedDiff ? effectiveReviewPasses : 1,
       changedFiles,
       changeShape,
     );
@@ -1591,7 +1683,7 @@ export async function runPrReview(params: {
         headSha,
         enabled:
           shouldSummarizeChangesSinceLastReview(allPriorReviewComments, headSha) &&
-          auxCommandCodeHasCompleteDiff,
+          auxHasCompleteEmbeddedDiff,
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -1708,7 +1800,7 @@ export async function runPrReview(params: {
       prContext: auxPrContext,
       timeoutMs: computeVerificationTimeoutMs(options.timeBudgetMinutes, Date.now() - runStartedAt),
       findings: suppression.findings,
-      enabled: options.verifyFindings && auxCommandCodeHasCompleteDiff,
+      enabled: options.verifyFindings && auxHasCompleteEmbeddedDiff,
       log,
       onTokenUsage: recordTokenUsage,
     });
@@ -2290,10 +2382,10 @@ function assertCompleteEmbeddedDiff(
   const incomplete = incompleteDiffFiles(result);
   if (incomplete.length === 0) return;
   throw new Error(
-    `CommandCode ${label} would receive an incomplete embedded diff (${formatIncompleteDiffFiles(
+    `Embedded-only CLI ${label} would receive an incomplete embedded diff (${formatIncompleteDiffFiles(
       incomplete,
     )}). ` +
-      'Refusing partial review coverage because CommandCode plan mode is read-only; use more shards or another provider for this PR.',
+      'Refusing partial review coverage because the provider cannot read the checkout; use more shards or another provider for this PR.',
   );
 }
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: 'J-Bot Review De-Slop'
+  short_description: 'Delete unnecessary J-Bot branch complexity'
+  default_prompt: 'Use $jbot-review-de-slop to run a deletion-biased cleanup pass before pushing.'
