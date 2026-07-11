@@ -857,6 +857,7 @@ export async function runPrReview(params: {
   headSha?: string;
   baseRef?: string;
   baseSha?: string;
+  preparePatchRecovery?: () => Promise<void> | void;
   /**
    * Local-mode diff source (`npm run review:local`): the COMPLETE
    * merge-base-relative diff (invariant #1) plus the local commit log.
@@ -983,6 +984,7 @@ export async function runPrReview(params: {
         workspace,
         baseSha,
         headSha,
+        prepareDiff: params.preparePatchRecovery,
       },
     );
     const hydratedByPath = new Map(hydrated.files.map((file) => [file.filename, file]));

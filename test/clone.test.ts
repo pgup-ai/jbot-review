@@ -35,8 +35,9 @@ it('clones complete fork head and upstream base histories', () => {
       return parent;
     };
     const headSha = commitChain('head');
+    const headTip = run(source, ['commit-tree', tree, '-p', headSha, '-m', 'newer head']);
     const baseSha = commitChain('base');
-    run(source, ['update-ref', 'refs/heads/feature', headSha]);
+    run(source, ['update-ref', 'refs/heads/feature', headTip]);
     run(source, ['update-ref', 'refs/heads/main', baseSha]);
     const mergeBase = run(source, ['merge-base', 'main', 'feature']);
 
@@ -52,12 +53,14 @@ it('clones complete fork head and upstream base histories', () => {
       headRef: 'feature',
       headSha,
       baseCloneUrl: baseUrl,
-      baseRef: 'main',
       baseSha,
       token: 'unused',
     });
     cleanup = cloned.cleanup;
 
+    assert.equal(run(cloned.dir, ['rev-parse', 'HEAD']), headSha);
+    assert.throws(() => run(cloned.dir, ['merge-base', baseSha, headSha]));
+    cloned.prepareDiff();
     assert.equal(run(cloned.dir, ['merge-base', baseSha, headSha]), mergeBase);
     assert.equal(run(cloned.dir, ['remote', 'get-url', 'origin']), headUrl);
     assert.equal(run(cloned.dir, ['remote']), 'origin');

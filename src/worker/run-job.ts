@@ -45,7 +45,6 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
       headRef: pr.data.head.ref,
       headSha: pr.data.head.sha,
       baseCloneUrl: pr.data.base.repo.clone_url,
-      baseRef: pr.data.base.ref,
       baseSha: pr.data.base.sha,
       token: job.installationToken,
     });
@@ -63,6 +62,7 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
       headSha: pr.data.head.sha,
       baseRef: pr.data.base.ref,
       baseSha: pr.data.base.sha,
+      preparePatchRecovery: cloned.prepareDiff,
       options: {
         enhancedContext: true,
         reviewPasses: 1,

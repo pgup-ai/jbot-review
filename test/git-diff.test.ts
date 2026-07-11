@@ -220,6 +220,7 @@ describe('hydratePrFilePatches', () => {
 
   it('recovers omitted text patches and preserves API patches verbatim', async () => {
     const apiPatch = '@@ -3 +3 @@\n-api\n+authoritative';
+    let prepared = false;
     const result = await hydratePrFilePatches(
       [
         { filename: 'src/from-api.ts', patch: apiPatch },
@@ -230,7 +231,11 @@ describe('hydratePrFilePatches', () => {
         workspace: '/repo',
         baseSha: 'base',
         headSha: 'head',
+        prepareDiff: () => {
+          prepared = true;
+        },
         runGitDiff: async (_workspace, args) => {
+          assert.equal(prepared, true);
           assert.deepEqual(args, [...GIT_DIFF_ARGS, 'base...head']);
           return checkoutDiff;
         },
@@ -247,6 +252,7 @@ describe('hydratePrFilePatches', () => {
     const files = [{ filename: 'src/a.ts', patch: '@@ -1 +1 @@\n-a\n+b' }];
     const result = await hydratePrFilePatches(files, {
       workspace: '/repo',
+      prepareDiff: async () => assert.fail('diff preparation should not run'),
       runGitDiff: async () => assert.fail('git diff should not run'),
     });
 

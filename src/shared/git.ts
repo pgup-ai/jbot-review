@@ -197,6 +197,7 @@ export async function hydratePrFilePatches(
     workspace: string;
     baseSha?: string;
     headSha?: string;
+    prepareDiff?: () => Promise<void> | void;
     runGitDiff?: (workspace: string, args: string[]) => Promise<string>;
   },
 ): Promise<{ files: PrFile[]; recovered: string[] }> {
@@ -208,6 +209,7 @@ export async function hydratePrFilePatches(
     throw new Error('Cannot recover GitHub-omitted patches without the PR base and head SHAs.');
   }
 
+  await options.prepareDiff?.();
   const runGitDiff = options.runGitDiff ?? runGitDiffCommand;
   const diffText = await runGitDiff(options.workspace, [
     ...GIT_DIFF_ARGS,
