@@ -149,7 +149,7 @@ function parseDiffSection(lines: string[]): PrFile {
 }
 
 function parseDiffPath(raw: string, prefix?: 'a/' | 'b/'): string {
-  const path = decodeGitQuotedPath(raw);
+  const path = decodeGitQuotedPath(raw.endsWith('\t') ? raw.slice(0, -1) : raw);
   if (path === '/dev/null') return '';
   return prefix && path.startsWith(prefix) ? path.slice(prefix.length) : path;
 }

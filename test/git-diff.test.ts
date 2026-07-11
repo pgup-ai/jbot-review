@@ -114,6 +114,23 @@ describe('parseGitDiff', () => {
     ]);
   });
 
+  it('strips the header separator tab from paths with spaces', () => {
+    const diff = [
+      'diff --git a/src/my file.ts b/src/my file.ts',
+      'index 1111111..2222222 100644',
+      '--- a/src/my file.ts\t',
+      '+++ b/src/my file.ts\t',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      '',
+    ].join('\n');
+
+    assert.deepEqual(parseGitDiff(diff), [
+      { filename: 'src/my file.ts', patch: '@@ -1 +1 @@\n-old\n+new' },
+    ]);
+  });
+
   it('yields patchless entries for binary files (name from the diff --git line)', () => {
     const diff = [
       'diff --git a/img/logo.png b/img/logo.png',
