@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
-import { parseGitDiff } from '../src/local/git-diff.ts';
+import { GIT_DIFF_ARGS, hydratePrFilePatches, parseGitDiff } from '../src/shared/git.ts';
 import { parseAddedLines } from '../src/shared/patch.ts';
 
 describe('parseGitDiff', () => {
@@ -59,6 +58,17 @@ describe('parseGitDiff', () => {
     ]);
   });
 
+  it('normalizes quoted rename paths', () => {
+    const diff = [
+      'diff --git "a/src/old\\tname.ts" "b/src/new\\tname.ts"',
+      'similarity index 100%',
+      'rename from "src/old\\tname.ts"',
+      'rename to "src/new\\tname.ts"',
+      '',
+    ].join('\n');
+    assert.deepEqual(parseGitDiff(diff), [{ filename: 'src/new\tname.ts' }]);
+  });
+
   it('yields a patchless entry for a pure rename (no hunks)', () => {
     const diff = [
       'diff --git a/src/old.ts b/src/new.ts',
@@ -101,6 +111,23 @@ describe('parseGitDiff', () => {
     ].join('\n');
     assert.deepEqual(parseGitDiff(diff), [
       { filename: 'src/new.ts', patch: '@@ -0,0 +1,2 @@\n+a\n+b' },
+    ]);
+  });
+
+  it('strips the header separator tab from paths with spaces', () => {
+    const diff = [
+      'diff --git a/src/my file.ts b/src/my file.ts',
+      'index 1111111..2222222 100644',
+      '--- a/src/my file.ts\t',
+      '+++ b/src/my file.ts\t',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      '',
+    ].join('\n');
+
+    assert.deepEqual(parseGitDiff(diff), [
+      { filename: 'src/my file.ts', patch: '@@ -1 +1 @@\n-old\n+new' },
     ]);
   });
 
@@ -190,6 +217,128 @@ describe('parseGitDiff', () => {
       '',
     ].join('\n');
     assert.deepEqual(parseAddedLines(parseGitDiff(diff)[0].patch), new Set([2, 12, 13]));
+  });
+});
+
+describe('hydratePrFilePatches', () => {
+  const checkoutDiff = [
+    'diff --git a/src/large.ts b/src/large.ts',
+    'index 1111111..2222222 100644',
+    '--- a/src/large.ts',
+    '+++ b/src/large.ts',
+    '@@ -1 +1 @@',
+    '-old',
+    '+new',
+    'diff --git a/img/logo.png b/img/logo.png',
+    'index 1111111..2222222 100644',
+    'Binary files a/img/logo.png and b/img/logo.png differ',
+    '',
+  ].join('\n');
+
+  it('recovers omitted text patches and preserves API patches verbatim', async () => {
+    const apiPatch = '@@ -3 +3 @@\n-api\n+authoritative';
+    const result = await hydratePrFilePatches(
+      [
+        { filename: 'src/from-api.ts', patch: apiPatch },
+        { filename: 'src/large.ts', changes: 2 },
+        { filename: 'img/logo.png', changes: 0 },
+      ],
+      {
+        workspace: '/repo',
+        baseSha: 'base',
+        headSha: 'head',
+        runGitDiff: async (_workspace, args) => {
+          assert.deepEqual(args, [...GIT_DIFF_ARGS, 'base...head']);
+          return checkoutDiff;
+        },
+      },
+    );
+
+    assert.equal(result.files[0].patch, apiPatch);
+    assert.equal(result.files[1].patch, '@@ -1 +1 @@\n-old\n+new');
+    assert.equal(result.files[2].patch, undefined);
+    assert.deepEqual(result.recovered, ['src/large.ts']);
+  });
+
+  it('does not run git when every API file already has a patch', async () => {
+    const files = [{ filename: 'src/a.ts', patch: '@@ -1 +1 @@\n-a\n+b' }];
+    const result = await hydratePrFilePatches(files, {
+      workspace: '/repo',
+      runGitDiff: async () => assert.fail('git diff should not run'),
+    });
+
+    assert.equal(result.files, files);
+  });
+
+  it('fails closed when the checkout diff cannot account for an omitted patch', async () => {
+    await assert.rejects(
+      hydratePrFilePatches([{ filename: 'src/missing.ts', changes: 1 }], {
+        workspace: '/repo',
+        baseSha: 'base',
+        headSha: 'head',
+        runGitDiff: async () => checkoutDiff,
+      }),
+      /refusing incomplete PR coverage/,
+    );
+  });
+
+  it('fails closed when a missing API path is only a checkout rename source', async () => {
+    const renamedDiff = [
+      'diff --git a/src/old.ts b/src/new.ts',
+      'similarity index 80%',
+      'rename from src/old.ts',
+      'rename to src/new.ts',
+      '--- a/src/old.ts',
+      '+++ b/src/new.ts',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      '',
+    ].join('\n');
+
+    await assert.rejects(
+      hydratePrFilePatches([{ filename: 'src/old.ts', changes: 2 }], {
+        workspace: '/repo',
+        baseSha: 'base',
+        headSha: 'head',
+        runGitDiff: async () => renamedDiff,
+      }),
+      /refusing incomplete PR coverage/,
+    );
+  });
+
+  it('recovers real text patches and leaves pure renames patchless', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-hydrate-'));
+    try {
+      const run = (args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
+      run(['init', '-q', '-b', 'main']);
+      run(['config', 'user.email', 't@t.local']);
+      run(['config', 'user.name', 't']);
+      writeFileSync(join(dir, 'large.txt'), 'old\n');
+      writeFileSync(join(dir, 'before.txt'), 'same\n');
+      run(['add', '.']);
+      run(['-c', 'commit.gpgsign=false', 'commit', '-qm', 'base']);
+      const baseSha = run(['rev-parse', 'HEAD']).trim();
+      writeFileSync(join(dir, 'large.txt'), 'new\n');
+      renameSync(join(dir, 'before.txt'), join(dir, 'after.txt'));
+      run(['add', '.']);
+      run(['-c', 'commit.gpgsign=false', 'commit', '-qm', 'head']);
+      const headSha = run(['rev-parse', 'HEAD']).trim();
+
+      const result = await hydratePrFilePatches(
+        [
+          { filename: 'large.txt', changes: 2 },
+          { filename: 'after.txt', changes: 0 },
+        ],
+        { workspace: dir, baseSha, headSha },
+      );
+
+      assert.equal(result.files[0].patch, '@@ -1 +1 @@\n-old\n+new');
+      assert.equal(result.files[1].patch, undefined);
+      assert.deepEqual(result.recovered, ['large.txt']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -7,6 +7,12 @@ export function formatUsageCost(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(4);
 }
 
+export function formatFileList(files: string[]): string {
+  const listed = files.slice(0, 10).join(', ');
+  const remainder = files.length > 10 ? `, and ${files.length - 10} more` : '';
+  return `${listed}${remainder}`;
+}
+
 export function truncateForLog(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
   return `${value.slice(0, maxChars)}... [truncated]`;

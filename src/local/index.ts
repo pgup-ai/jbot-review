@@ -29,14 +29,13 @@ import { resolvePiEngine } from '../shared/pi.ts';
 import type { ReviewCommit } from '../shared/review-context.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { ReviewResult } from '../shared/types.ts';
-import { GIT_DIFF_ARGS } from '../shared/git.ts';
-import { parseGitDiff } from './git-diff.ts';
+import { GIT_DIFF_ARGS, parseGitDiff } from '../shared/git.ts';
 import { loadDotEnv, parseOwnerRepo, renderReport } from './util.ts';
 
 /**
  * Local review driver (`npm run review:local`): runs the real review pipeline
  * against merge-base→worktree changes with zero GitHub dependency — no token,
- * no PR, no API call, no fetch. See git-diff.ts for the diff-side semantics
+ * no PR, no API call, no fetch. See shared/git.ts for the diff-side semantics
  * (invariant #7).
  */
 

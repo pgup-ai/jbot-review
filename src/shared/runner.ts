@@ -51,7 +51,7 @@ import {
   buildShardAssignmentBlock,
   selectLensKeys,
 } from './prompt.ts';
-import { ensureGitSafeDirectory } from './git.ts';
+import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
 import {
   startOpencode,
   configureSessionConcurrency,
@@ -167,7 +167,7 @@ import {
 } from './github.ts';
 import type { Octokit, PrFile, PriorJbotThread, PriorJbotThreads } from './github.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
-import { formatUsageCost, isFiniteNumber } from './text.ts';
+import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type {
   AddressedPriorComment,
   Finding,
@@ -857,6 +857,7 @@ export async function runPrReview(params: {
   headSha?: string;
   baseRef?: string;
   baseSha?: string;
+  preparePatchRecovery?: () => Promise<void> | void;
   /**
    * Local-mode diff source (`npm run review:local`): the COMPLETE
    * merge-base-relative diff (invariant #1) plus the local commit log.
@@ -974,10 +975,26 @@ export async function runPrReview(params: {
       ? `Using local diff for ${owner}/${repo} (${localDiff.files.length} files)`
       : `Listing PR files for ${owner}/${repo}#${pullNumber}`,
   );
-  const rawFiles = localDiff
-    ? localDiff.files
-    : await listPrFiles(octokit, owner, repo, pullNumber);
+  let rawFiles = localDiff ? localDiff.files : await listPrFiles(octokit, owner, repo, pullNumber);
   log(`Files in PR: ${rawFiles.length} total`);
+  if (!localDiff) {
+    await params.preparePatchRecovery?.();
+    const hydrated = await hydratePrFilePatches(
+      rawFiles.filter((file) => !isNoiseFile(file.filename)),
+      {
+        workspace,
+        baseSha,
+        headSha,
+      },
+    );
+    const hydratedByPath = new Map(hydrated.files.map((file) => [file.filename, file]));
+    rawFiles = rawFiles.map((file) => hydratedByPath.get(file.filename) ?? file);
+    if (hydrated.recovered.length > 0) {
+      log(
+        `Recovered ${hydrated.recovered.length} GitHub-omitted text patch(es) from the checkout diff: ${formatFileList(hydrated.recovered)}`,
+      );
+    }
+  }
   const files = rawFiles.filter((f) => f.patch && !isNoiseFile(f.filename));
   // The "review done" 🚀 reaction means "the PR has no open jbot findings".
   // Skip paths below do NOT touch it: a no-reviewable-files or docs-only push
@@ -987,7 +1004,13 @@ export async function runPrReview(params: {
     log('No reviewable files after filtering; leaving the review reaction unchanged.');
     return;
   }
-  log(`Reviewable files: ${files.length} (noise filtered: ${rawFiles.length - files.length})`);
+  const noiseCount = rawFiles.filter((file) => isNoiseFile(file.filename)).length;
+  const patchlessCount = rawFiles.filter(
+    (file) => !file.patch && !isNoiseFile(file.filename),
+  ).length;
+  log(
+    `Reviewable files: ${files.length} (noise filtered: ${noiseCount}, patchless excluded: ${patchlessCount})`,
+  );
 
   const addable = new Map<string, Set<number>>();
   const patchByPath = new Map<string, string>();
@@ -1161,7 +1184,7 @@ export async function runPrReview(params: {
     !auxRequiresCompleteEmbeddedDiff || embeddedOnlyCliIncompleteDiffFiles.length === 0;
   if (!auxHasCompleteEmbeddedDiff) {
     log(
-      `Skipping ${auxCliBackend} auxiliary sessions: embedded diff exceeds the CLI hard budget (${formatIncompleteDiffFiles(
+      `Skipping ${auxCliBackend} auxiliary sessions: embedded diff exceeds the CLI hard budget (${formatFileList(
         embeddedOnlyCliIncompleteDiffFiles,
       )}). Main review continues without aux findings or verification.`,
     );
@@ -2379,7 +2402,7 @@ function assertCompleteEmbeddedDiff(
   const incomplete = incompleteDiffFiles(result);
   if (incomplete.length === 0) return;
   throw new Error(
-    `Embedded-only CLI ${label} would receive an incomplete embedded diff (${formatIncompleteDiffFiles(
+    `Embedded-only CLI ${label} would receive an incomplete embedded diff (${formatFileList(
       incomplete,
     )}). ` +
       'Refusing partial review coverage because the provider cannot read the checkout; use more shards or another provider for this PR.',
@@ -2388,12 +2411,6 @@ function assertCompleteEmbeddedDiff(
 
 function incompleteDiffFiles(result: ReturnType<typeof buildDiffHunksBlockWithMetadata>): string[] {
   return [...new Set([...result.truncatedFiles, ...result.omittedFiles])];
-}
-
-function formatIncompleteDiffFiles(files: string[]): string {
-  const listed = files.slice(0, 10).join(', ');
-  const remainder = files.length > 10 ? `, and ${files.length - 10} more` : '';
-  return `${listed}${remainder}`;
 }
 
 /**

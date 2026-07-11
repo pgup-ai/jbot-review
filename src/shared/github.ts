@@ -18,6 +18,7 @@ const MAX_PRIOR_JBOT_REPLY_CHARS = 800;
 export interface PrFile {
   filename: string;
   patch?: string;
+  changes?: number;
 }
 
 export interface PriorJbotThread {
@@ -52,7 +53,11 @@ export async function listPrFiles(
     pull_number: pullNumber,
     per_page: 100,
   });
-  return files.map((f) => ({ filename: f.filename, patch: f.patch }));
+  return files.map((f) => ({
+    filename: f.filename,
+    patch: f.patch,
+    changes: f.changes,
+  }));
 }
 
 // GitHub's compare endpoint returns at most 300 files with no pagination.

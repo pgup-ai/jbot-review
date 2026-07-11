@@ -72,11 +72,19 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
   const installationId = payload.installation.id;
 
   enqueue(async () => {
-    const octokit = createAppOctokit(cfg.appId, cfg.privateKey, installationId);
-    const authRes = (await octokit.auth()) as InstallationAccessTokenAuthentication;
-    const { dir, cleanup } = clonePr(repoInfo.clone_url, pr.head.ref, pr.base.ref, authRes.token);
-
+    let cleanup: (() => void) | undefined;
     try {
+      const octokit = createAppOctokit(cfg.appId, cfg.privateKey, installationId);
+      const authRes = (await octokit.auth()) as InstallationAccessTokenAuthentication;
+      const cloned = clonePr({
+        headCloneUrl: pr.head.repo?.clone_url ?? repoInfo.clone_url,
+        headRef: pr.head.ref,
+        headSha: pr.head.sha,
+        baseCloneUrl: repoInfo.clone_url,
+        baseSha: pr.base.sha,
+        token: authRes.token,
+      });
+      cleanup = cloned.cleanup;
       const { providerID } = parseModelName(cfg.model);
       const auxModel = resolveAuxModelName(
         providerID,
@@ -90,12 +98,13 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         pullNumber: pr.number,
         pullTitle: pr.title,
         pullBody: pr.body ?? '',
-        workspace: dir,
+        workspace: cloned.dir,
         model: cfg.model,
         apiKey: cfg.apiKey,
         headSha: pr.head.sha,
         baseRef: pr.base.ref,
         baseSha: pr.base.sha,
+        preparePatchRecovery: cloned.prepareDiff,
         // The multi-pass/verification defaults cost ~3x a single session;
         // the webhook app has no per-run inputs, so expose env knobs.
         options: {
@@ -121,7 +130,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         `[jbot-review] Review failed for ${owner}/${repoName}#${pr.number}: ${(error as Error).message}`,
       );
     } finally {
-      cleanup();
+      cleanup?.();
     }
   });
 }
