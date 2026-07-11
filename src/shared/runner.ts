@@ -978,13 +978,13 @@ export async function runPrReview(params: {
   let rawFiles = localDiff ? localDiff.files : await listPrFiles(octokit, owner, repo, pullNumber);
   log(`Files in PR: ${rawFiles.length} total`);
   if (!localDiff) {
+    await params.preparePatchRecovery?.();
     const hydrated = await hydratePrFilePatches(
       rawFiles.filter((file) => !isNoiseFile(file.filename)),
       {
         workspace,
         baseSha,
         headSha,
-        prepareDiff: params.preparePatchRecovery,
       },
     );
     const hydratedByPath = new Map(hydrated.files.map((file) => [file.filename, file]));
