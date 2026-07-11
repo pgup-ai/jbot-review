@@ -54,7 +54,24 @@ describe('parseGitDiff', () => {
       '',
     ].join('\n');
     assert.deepEqual(parseGitDiff(diff), [
-      { filename: 'src/new.ts', patch: '@@ -1 +1 @@\n-a\n+b' },
+      {
+        filename: 'src/new.ts',
+        patch: '@@ -1 +1 @@\n-a\n+b',
+        previousFilename: 'src/old.ts',
+      },
+    ]);
+  });
+
+  it('normalizes quoted rename paths', () => {
+    const diff = [
+      'diff --git "a/src/old\\tname.ts" "b/src/new\\tname.ts"',
+      'similarity index 100%',
+      'rename from "src/old\\tname.ts"',
+      'rename to "src/new\\tname.ts"',
+      '',
+    ].join('\n');
+    assert.deepEqual(parseGitDiff(diff), [
+      { filename: 'src/new\tname.ts', previousFilename: 'src/old\tname.ts' },
     ]);
   });
 
@@ -66,7 +83,9 @@ describe('parseGitDiff', () => {
       'rename to src/new.ts',
       '',
     ].join('\n');
-    assert.deepEqual(parseGitDiff(diff), [{ filename: 'src/new.ts' }]);
+    assert.deepEqual(parseGitDiff(diff), [
+      { filename: 'src/new.ts', previousFilename: 'src/old.ts' },
+    ]);
   });
 
   it('keeps the old path for deletions, matching GitHub', () => {
@@ -212,8 +231,8 @@ describe('hydratePrFilePatches', () => {
     const result = await hydratePrFilePatches(
       [
         { filename: 'src/from-api.ts', patch: apiPatch },
-        { filename: 'src/large.ts' },
-        { filename: 'img/logo.png' },
+        { filename: 'src/large.ts', changes: 2 },
+        { filename: 'img/logo.png', changes: 0 },
       ],
       {
         workspace: '/repo',
@@ -244,7 +263,7 @@ describe('hydratePrFilePatches', () => {
 
   it('fails closed when the checkout diff cannot account for an omitted patch', async () => {
     await assert.rejects(
-      hydratePrFilePatches([{ filename: 'src/missing.ts' }], {
+      hydratePrFilePatches([{ filename: 'src/missing.ts', changes: 1 }], {
         workspace: '/repo',
         baseSha: 'base',
         headSha: 'head',
@@ -273,7 +292,10 @@ describe('hydratePrFilePatches', () => {
       const headSha = run(['rev-parse', 'HEAD']).trim();
 
       const result = await hydratePrFilePatches(
-        [{ filename: 'large.txt' }, { filename: 'after.txt' }],
+        [
+          { filename: 'large.txt', changes: 2 },
+          { filename: 'after.txt', changes: 0 },
+        ],
         { workspace: dir, baseSha, headSha },
       );
 

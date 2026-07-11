@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import type { PrFile } from './github.ts';
+import { formatFileList } from './text.ts';
 
 const execFileAsync = promisify(execFile);
 const GIT_CONFIG_TIMEOUT_MS = 5_000;
@@ -122,6 +123,7 @@ export function parseGitDiff(diffText: string): PrFile[] {
 }
 
 function parseDiffSection(lines: string[]): PrFile {
+  let renameFrom = '';
   let renameTo = '';
   let newPath = '';
   let oldPath = '';
@@ -132,26 +134,55 @@ function parseDiffSection(lines: string[]): PrFile {
       hunkStart = i;
       break;
     }
-    if (line.startsWith('rename to ')) renameTo = line.slice('rename to '.length);
-    else if (line.startsWith('+++ ')) newPath = stripPathPrefix(line.slice(4), 'b/');
-    else if (line.startsWith('--- ')) oldPath = stripPathPrefix(line.slice(4), 'a/');
+    if (line.startsWith('rename from '))
+      renameFrom = parseDiffPath(line.slice('rename from '.length));
+    else if (line.startsWith('rename to '))
+      renameTo = parseDiffPath(line.slice('rename to '.length));
+    else if (line.startsWith('+++ ')) newPath = parseDiffPath(line.slice(4), 'b/');
+    else if (line.startsWith('--- ')) oldPath = parseDiffPath(line.slice(4), 'a/');
   }
+  // The new side names GitHub's file; deletions fall back to the old side,
+  // while non-hunk sections fall through to the diff header.
   const filename = renameTo || newPath || oldPath || pathFromDiffGitLine(lines[0]);
+  const rename = renameFrom ? { previousFilename: renameFrom } : {};
 
-  if (hunkStart < 0) return { filename };
+  if (hunkStart < 0) return { filename, ...rename };
   const hunkLines = lines.slice(hunkStart);
+  // A complete git diff ends with one empty split element, not a patch line.
   if (hunkLines[hunkLines.length - 1] === '') hunkLines.pop();
-  return { filename, patch: hunkLines.join('\n') };
+  return { filename, patch: hunkLines.join('\n'), ...rename };
 }
 
-function stripPathPrefix(raw: string, prefix: 'a/' | 'b/'): string {
-  let path = raw;
-  if (path.endsWith('\t')) path = path.slice(0, -1);
-  if (path.length >= 2 && path.startsWith('"') && path.endsWith('"')) path = path.slice(1, -1);
+function parseDiffPath(raw: string, prefix?: 'a/' | 'b/'): string {
+  const path = decodeGitQuotedPath(raw);
   if (path === '/dev/null') return '';
-  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+  return prefix && path.startsWith(prefix) ? path.slice(prefix.length) : path;
 }
 
+// core.quotePath=false keeps UTF-8 readable, but Git still C-quotes control
+// characters, quotes, and backslashes in rename and file headers.
+function decodeGitQuotedPath(path: string): string {
+  if (!(path.startsWith('"') && path.endsWith('"'))) return path;
+  const body = path.slice(1, -1);
+  const escapes: Record<string, string> = {
+    a: '\x07',
+    b: '\b',
+    f: '\f',
+    n: '\n',
+    r: '\r',
+    t: '\t',
+    v: '\v',
+    '\\': '\\',
+    '"': '"',
+  };
+  return body.replace(/\\([0-7]{1,3}|.)/g, (_match, escaped: string) => {
+    if (/^[0-7]/.test(escaped)) return String.fromCharCode(Number.parseInt(escaped, 8));
+    return escapes[escaped] ?? escaped;
+  });
+}
+
+// Header-less binary/mode-only sections reach this last-resort heuristic;
+// hunk-bearing sections always have exact ---/+++ paths above.
 function pathFromDiffGitLine(header: string): string {
   const rest = header.slice('diff --git '.length);
   const quoted = rest.lastIndexOf(' "b/');
@@ -174,7 +205,9 @@ export async function hydratePrFilePatches(
     runGitDiff?: (workspace: string, args: string[]) => Promise<string>;
   },
 ): Promise<{ files: PrFile[]; recovered: string[] }> {
-  const missing = files.filter((file) => !file.patch);
+  // GitHub reports zero changed lines for binary, mode-only, and pure-rename
+  // entries; those have no text hunks to recover and must stay patchless.
+  const missing = files.filter((file) => !file.patch && file.changes !== 0);
   if (missing.length === 0) return { files, recovered: [] };
   if (!options.baseSha || !options.headSha) {
     throw new Error('Cannot recover GitHub-omitted patches without the PR base and head SHAs.');
@@ -185,14 +218,17 @@ export async function hydratePrFilePatches(
     ...GIT_DIFF_ARGS,
     `${options.baseSha}...${options.headSha}`,
   ]);
-  const checkoutFiles = new Map(parseGitDiff(diffText).map((file) => [file.filename, file]));
-  const unmatched = missing.filter((file) => !checkoutFiles.has(file.filename));
+  const checkoutDiff = parseGitDiff(diffText);
+  const checkoutFiles = new Map(checkoutDiff.map((file) => [file.filename, file]));
+  const checkoutSources = new Set(
+    checkoutDiff.flatMap((file) => (file.previousFilename ? [file.previousFilename] : [])),
+  );
+  const unmatched = missing.filter(
+    (file) => !checkoutFiles.has(file.filename) && !checkoutSources.has(file.filename),
+  );
   if (unmatched.length > 0) {
-    const paths = unmatched.map((file) => file.filename);
-    const listed = paths.slice(0, 10).join(', ');
-    const remainder = paths.length > 10 ? `, and ${paths.length - 10} more file(s)` : '';
     throw new Error(
-      `Checkout diff did not contain ${listed}${remainder}; refusing incomplete PR coverage.`,
+      `Checkout diff did not contain ${formatFileList(unmatched.map((file) => file.filename))}; refusing incomplete PR coverage.`,
     );
   }
 

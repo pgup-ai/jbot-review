@@ -167,7 +167,7 @@ import {
 } from './github.ts';
 import type { Octokit, PrFile, PriorJbotThread, PriorJbotThreads } from './github.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
-import { formatUsageCost, isFiniteNumber } from './text.ts';
+import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type {
   AddressedPriorComment,
   Finding,
@@ -2409,12 +2409,6 @@ function assertCompleteEmbeddedDiff(
 
 function incompleteDiffFiles(result: ReturnType<typeof buildDiffHunksBlockWithMetadata>): string[] {
   return [...new Set([...result.truncatedFiles, ...result.omittedFiles])];
-}
-
-function formatFileList(files: string[]): string {
-  const listed = files.slice(0, 10).join(', ');
-  const remainder = files.length > 10 ? `, and ${files.length - 10} more` : '';
-  return `${listed}${remainder}`;
 }
 
 /**
