@@ -507,14 +507,14 @@ documentation lookup.
 | `openrouter-api-key`      | No       | —                     | Used when `provider` or `aux-provider` is `openrouter`                     |
 | `nvidia-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `nvidia`                         |
 | `zai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `zai-coding-plan`                |
-| `xai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `xai`                            |
+| `xai-api-key`             | No       | —                     | Used by `xai`, or by `grok` when `grok-auth` is empty                      |
 | `fireworks-api-key`       | No       | —                     | Used when `provider` or `aux-provider` is `fireworks-ai`                   |
 | `devin-windsurf-api-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `devin`                   |
 | `commandcode-access-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `commandcode`             |
 | `cursor-api-key`          | No       | —                     | Used when `provider` or active `aux-provider` is `cursor`                  |
 | `codex-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `codex`                   |
 | `cline-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `cline` / `cline-pass`    |
-| `grok-auth`               | No       | —                     | Used when `provider` or active `aux-provider` is `grok`                    |
+| `grok-auth`               | No       | —                     | Grok account auth; preferred over `xai-api-key` when `grok` is selected    |
 | `kilo-auth`               | No       | —                     | Used when `provider` or active `aux-provider` is `kilo`                    |
 | `enable-context7`         | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false` |
 | `context7-api-key`        | No       | —                     | Optional Context7 key for reliable CI docs lookup                          |
