@@ -123,6 +123,7 @@ describe('resolveModelName', () => {
       defaultModel: 'grok/default',
       keyEnv: 'GROK_AUTH_JSON',
       keyInput: 'grok-auth',
+      fallbackKey: { env: 'XAI_API_KEY', input: 'xai-api-key' },
       models: {
         default: { promptCache: false },
       },

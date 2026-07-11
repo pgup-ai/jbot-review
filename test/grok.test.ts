@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -9,12 +9,12 @@ import {
   assertGrokPromptWithinBudget,
   buildGrokCliArgs,
   buildGrokPrompt,
+  configureGrokHome,
   formatGrokPromptTimeoutMessage,
   grokAuthPath,
   grokEnvForHome,
   isGrokModelsAuthenticated,
   isGrokProvider,
-  writeGrokHome,
 } from '../src/shared/grok.ts';
 
 describe('Grok Build CLI provider helpers', () => {
@@ -28,11 +28,16 @@ describe('Grok Build CLI provider helpers', () => {
     const home = mkdtempSync(join(tmpdir(), 'jbot-grok-test-'));
     try {
       const auth = '{"https://auth.x.ai":{"key":"token"}}';
-      const path = writeGrokHome(auth, home);
-      assert.equal(path, grokAuthPath(home));
-      assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), JSON.parse(auth));
+      const runtime = configureGrokHome(auth, home);
+      assert.deepEqual(runtime, {
+        home,
+        authMode: 'account',
+        authPath: grokAuthPath(home),
+      });
+      assert.equal(runtime.authMode, 'account');
+      assert.deepEqual(JSON.parse(readFileSync(runtime.authPath, 'utf8')), JSON.parse(auth));
       assert.equal(statSync(join(home, '.grok')).mode & 0o777, 0o700);
-      assert.equal(statSync(path).mode & 0o777, 0o600);
+      assert.equal(statSync(runtime.authPath).mode & 0o777, 0o600);
       assert.equal(
         readFileSync(join(home, '.grok', 'config.toml'), 'utf8'),
         '[cli]\nauto_update = false\n',
@@ -43,10 +48,34 @@ describe('Grok Build CLI provider helpers', () => {
     }
   });
 
-  it('rejects missing or malformed auth JSON', () => {
-    assert.throws(() => writeGrokHome('', '/tmp/x'), /Missing Grok auth/);
-    assert.throws(() => writeGrokHome('not json', '/tmp/x'), /Invalid GROK_AUTH_JSON/);
-    assert.throws(() => writeGrokHome('[]', '/tmp/x'), /expected a JSON object/);
+  it('configures API-key auth without writing the key to disk', () => {
+    const home = mkdtempSync(join(tmpdir(), 'jbot-grok-test-'));
+    try {
+      assert.deepEqual(configureGrokHome(' xai-test ', home), {
+        home,
+        authMode: 'api-key',
+        apiKey: 'xai-test',
+      });
+      assert.equal(existsSync(grokAuthPath(home)), false);
+      assert.equal(
+        readFileSync(join(home, '.grok', 'config.toml'), 'utf8'),
+        '[cli]\nauto_update = false\n',
+      );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects missing or malformed account auth JSON', () => {
+    const home = mkdtempSync(join(tmpdir(), 'jbot-grok-test-'));
+    try {
+      assert.throws(() => configureGrokHome('', home), /Missing Grok credential/);
+      assert.throws(() => configureGrokHome('{not json', home), /Invalid GROK_AUTH_JSON/);
+      assert.throws(() => configureGrokHome('[]', home), /expected a JSON object/);
+      assert.equal(existsSync(join(home, '.grok')), false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('builds a hermetic no-write headless invocation', () => {
@@ -96,6 +125,7 @@ describe('Grok Build CLI provider helpers', () => {
       assert.equal(env.XAI_API_KEY, undefined);
       assert.equal(env.GITHUB_TOKEN, undefined);
       assert.equal(env.GROK_SANDBOX, undefined);
+      assert.equal(grokEnvForHome('/tmp/grok-home', 'explicit-key').XAI_API_KEY, 'explicit-key');
     } finally {
       for (const [key, value] of Object.entries(previous)) {
         if (value === undefined) delete process.env[key];

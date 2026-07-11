@@ -116,12 +116,13 @@ import {
 import {
   GROK_PROVIDER_ID,
   assertGrokAuthenticated,
+  configureGrokHome,
   runGrokAddressedPriorCommentsCheck,
   runGrokChangesSinceLastReview,
   runGrokFindingVerification,
   runGrokGuidelineComplianceCheck,
   runGrokReview,
-  writeGrokHome,
+  type GrokRuntime,
 } from './grok.ts';
 import {
   KILO_PROVIDER_ID,
@@ -574,16 +575,16 @@ function createClineBackend(workspace: string, clineHome: string): ReviewBackend
   };
 }
 
-function createGrokBackend(grokHome: string): ReviewBackend {
+function createGrokBackend(runtime: GrokRuntime): ReviewBackend {
   return {
     name: GROK_PROVIDER_ID,
     runReview: (model, prContext, guidelines, log, options) =>
       runGrokReview(model, prContext, guidelines, log, {
         ...options,
-        home: grokHome,
+        runtime,
       }),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
-      runGrokAddressedPriorCommentsCheck(model, prContext, log, timeoutMs, onTokenUsage, grokHome),
+      runGrokAddressedPriorCommentsCheck(model, prContext, log, timeoutMs, onTokenUsage, runtime),
     runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
       runGrokGuidelineComplianceCheck(
         model,
@@ -592,18 +593,10 @@ function createGrokBackend(grokHome: string): ReviewBackend {
         log,
         timeoutMs,
         onTokenUsage,
-        grokHome,
+        runtime,
       ),
     runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      runGrokFindingVerification(
-        model,
-        prContext,
-        findings,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        grokHome,
-      ),
+      runGrokFindingVerification(model, prContext, findings, log, timeoutMs, onTokenUsage, runtime),
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
       runGrokChangesSinceLastReview(
         model,
@@ -612,7 +605,7 @@ function createGrokBackend(grokHome: string): ReviewBackend {
         log,
         timeoutMs,
         onTokenUsage,
-        grokHome,
+        runtime,
       ),
   };
 }
@@ -1316,28 +1309,32 @@ export async function runPrReview(params: {
   }
 
   if (mainCliBackend === GROK_PROVIDER_ID || auxCliBackend === GROK_PROVIDER_ID) {
-    const grokAuth = backendSelection.grokAuth;
-    if (!grokAuth) {
+    const grokCredential = backendSelection.grokAuth;
+    if (!grokCredential) {
       cleanupCliHomes();
-      throw new Error(`Missing auth for ${GROK_PROVIDER_ID} provider.`);
+      throw new Error(`Missing credential for ${GROK_PROVIDER_ID} provider.`);
     }
-    let authPath: string;
+    let runtime: GrokRuntime;
     try {
       grokHome = mkdtempSync(join(tmpdir(), 'jbot-grok-home-'));
-      authPath = writeGrokHome(grokAuth, grokHome);
-      await assertGrokAuthenticated(grokHome);
+      runtime = configureGrokHome(grokCredential, grokHome);
+      await assertGrokAuthenticated(runtime);
     } catch (error) {
       cleanupCliHomes();
       throw error;
     }
-    log(`Grok Build CLI auth configured at ${authPath}.`);
+    log(
+      runtime.authMode === 'account'
+        ? `Grok Build CLI account auth configured at ${runtime.authPath}.`
+        : 'Grok Build CLI API-key auth configured.',
+    );
     log(
       'Grok Build CLI runs against an empty read-only workspace; token usage is unavailable for those sessions.',
     );
-    // Grok rotates auth in place. Acquire its serial slot before the shared
-    // limiter so queued Grok calls neither race auth.json nor hold global slots.
+    // Grok shares mutable per-run state, including rotated account auth. Acquire
+    // its serial slot before the shared limiter so queued calls hold no global slot.
     grokBackend = limitBackendConcurrency(
-      limitBackendConcurrency(createGrokBackend(grokHome), sessionSlots),
+      limitBackendConcurrency(createGrokBackend(runtime), sessionSlots),
       new Semaphore(1),
     );
   }

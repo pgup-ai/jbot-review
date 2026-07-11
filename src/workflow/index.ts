@@ -1,7 +1,11 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 
-import { PROVIDERS } from '../shared/config.ts';
+import {
+  PROVIDERS,
+  providerCredentialSources,
+  resolveProviderCredential,
+} from '../shared/config.ts';
 import { parseContext7Mode } from '../shared/context7.ts';
 import {
   formatModelName,
@@ -32,10 +36,11 @@ async function main(): Promise<void> {
     );
   }
 
-  const apiKey = getInputOrEnv(cfg.keyInput, cfg.keyEnv);
+  const apiKey = resolveProviderCredential(cfg, ({ input, env }) => getInputOrEnv(input, env));
   if (!apiKey) {
+    const sources = providerCredentialSources(cfg);
     throw new Error(
-      `Missing key for provider "${provider}". Pass it via the "${cfg.keyInput}" input or ${cfg.keyEnv} env var.`,
+      `Missing key for provider "${provider}". Pass ${sources.map(({ input, env }) => `"${input}" or ${env}`).join(', then fallback to ')}.`,
     );
   }
 
@@ -55,7 +60,7 @@ async function main(): Promise<void> {
   const auxProviderID = auxModel ? parseModelName(auxModel).providerID : provider;
   let auxApiKey = '';
   if (auxModel && auxProviderID !== provider) {
-    auxApiKey = getInputOrEnv(auxCfg!.keyInput, auxCfg!.keyEnv);
+    auxApiKey = resolveProviderCredential(auxCfg!, ({ input, env }) => getInputOrEnv(input, env));
   }
   const options = {
     enhancedContext: true,

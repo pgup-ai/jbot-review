@@ -28,7 +28,7 @@ For each meaningful finding, report the file and issue, why it was slop, and whe
 
 ```text
 Cut: <removed or simplified surface>
-Net line delta: <git diff --numstat summary>
+Net line delta: <tracked git diff --numstat; list untracked files separately with line counts or binary>
 Validation: <commands>
 Residual risk: <none or concrete gap>
 ```

@@ -9,7 +9,11 @@ import { selectReviewBackends } from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_CLI_BIN, CODEX_PROVIDER_ID } from '../shared/codex.ts';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
-import { PROVIDERS } from '../shared/config.ts';
+import {
+  PROVIDERS,
+  providerCredentialSources,
+  resolveProviderCredential,
+} from '../shared/config.ts';
 import { CURSOR_CLI_BIN, CURSOR_PROVIDER_ID } from '../shared/cursor.ts';
 import { DEVIN_PROVIDER_ID } from '../shared/devin.ts';
 import { isNoiseFile } from '../shared/filter.ts';
@@ -209,10 +213,13 @@ async function main(): Promise<void> {
       `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
     );
   }
-  const apiKey = process.env[providerCfg.keyEnv]?.trim();
+  const apiKey = resolveProviderCredential(providerCfg, ({ env }) => process.env[env]);
   if (!apiKey) {
+    const envNames = providerCredentialSources(providerCfg)
+      .map(({ env }) => env)
+      .join(' or ');
     throw new Error(
-      `Missing ${providerCfg.keyEnv} for provider "${provider}". Local review needs only the ` +
+      `Missing ${envNames} for provider "${provider}". Local review needs only the ` +
         'model provider credential — no GitHub token. Set it in the environment or in .env.',
     );
   }
@@ -229,7 +236,7 @@ async function main(): Promise<void> {
   }
   const auxApiKey =
     auxModelInput && auxProvider !== provider && auxCfg
-      ? process.env[auxCfg.keyEnv]?.trim()
+      ? resolveProviderCredential(auxCfg, ({ env }) => process.env[env])
       : undefined;
   const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
 

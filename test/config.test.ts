@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { PROVIDERS, modelSupportsPromptCache } from '../src/shared/config.ts';
+import {
+  PROVIDERS,
+  modelSupportsPromptCache,
+  providerCredentialSources,
+  resolveProviderCredential,
+} from '../src/shared/config.ts';
 import { buildConfig } from '../src/shared/opencode.ts';
 
 describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
@@ -35,5 +40,25 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
   it('disables prompt caching for mimo (unverified endpoint), keeps it for other providers', () => {
     assert.equal(modelSupportsPromptCache('xiaomi-token-plan-sgp', 'mimo-v2.5-pro'), false);
     assert.equal(modelSupportsPromptCache('openai', 'gpt-5.4-nano'), true);
+  });
+});
+
+describe('provider credentials', () => {
+  it('prefers Grok account auth and falls back to the xAI API key', () => {
+    const grok = PROVIDERS.grok;
+    assert.deepEqual(providerCredentialSources(grok), [
+      { env: 'GROK_AUTH_JSON', input: 'grok-auth' },
+      { env: 'XAI_API_KEY', input: 'xai-api-key' },
+    ]);
+    assert.equal(
+      resolveProviderCredential(grok, ({ env }) =>
+        env === 'GROK_AUTH_JSON' ? 'account-auth' : 'api-key',
+      ),
+      'account-auth',
+    );
+    assert.equal(
+      resolveProviderCredential(grok, ({ env }) => (env === 'GROK_AUTH_JSON' ? ' ' : 'api-key')),
+      'api-key',
+    );
   });
 });

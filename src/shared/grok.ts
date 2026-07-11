@@ -34,6 +34,10 @@ export const GROK_MAX_PROMPT_BYTES = 1024 * 1024;
 export const GROK_PROVIDER_ID = 'grok';
 export const GROK_CLI_BIN = 'grok';
 
+export type GrokRuntime =
+  | { home: string; authMode: 'account'; authPath: string }
+  | { home: string; authMode: 'api-key'; apiKey: string };
+
 export function isGrokProvider(providerID: string): boolean {
   return providerID === GROK_PROVIDER_ID;
 }
@@ -42,31 +46,39 @@ export function grokAuthPath(home: string): string {
   return join(home, '.grok', 'auth.json');
 }
 
-export function writeGrokHome(auth: string, home: string): string {
-  const content = auth.trim();
+export function configureGrokHome(credential: string, home: string): GrokRuntime {
+  const content = credential.trim();
   if (!content) {
-    throw new Error('Missing Grok auth. Set grok-auth or GROK_AUTH_JSON.');
+    throw new Error(
+      'Missing Grok credential. Set grok-auth/GROK_AUTH_JSON or xai-api-key/XAI_API_KEY.',
+    );
   }
+  const accountAuth = content.startsWith('{') || content.startsWith('[');
   let parsed: unknown;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    throw new Error('Invalid GROK_AUTH_JSON: expected the JSON contents of ~/.grok/auth.json.');
-  }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error('Invalid GROK_AUTH_JSON: expected a JSON object.');
+  if (accountAuth) {
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      throw new Error('Invalid GROK_AUTH_JSON: expected the JSON contents of ~/.grok/auth.json.');
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('Invalid GROK_AUTH_JSON: expected a JSON object.');
+    }
   }
 
+  const dir = join(home, '.grok');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, 'config.toml'), GROK_CONFIG, { mode: 0o600 });
+  if (!accountAuth) return { home, authMode: 'api-key', apiKey: content };
+
   const path = grokAuthPath(home);
-  mkdirSync(join(home, '.grok'), { recursive: true, mode: 0o700 });
   writeFileSync(path, `${JSON.stringify(parsed)}\n`, { mode: 0o600 });
-  writeFileSync(join(home, '.grok', 'config.toml'), GROK_CONFIG, { mode: 0o600 });
   try {
     chmodSync(path, 0o600);
   } catch {
     /* best effort on filesystems that do not support chmod */
   }
-  return path;
+  return { home, authMode: 'account', authPath: path };
 }
 
 export interface GrokCliArgsInput {
@@ -119,7 +131,7 @@ const GROK_ENV_KEYS = [
   'CI',
 ] as const;
 
-export function grokEnvForHome(home: string | undefined): NodeJS.ProcessEnv {
+export function grokEnvForHome(home: string | undefined, apiKey?: string): NodeJS.ProcessEnv {
   const value = home?.trim();
   if (!value) {
     throw new Error('Missing Grok home. A temp HOME is required for auth.');
@@ -130,6 +142,7 @@ export function grokEnvForHome(home: string | undefined): NodeJS.ProcessEnv {
   }
   env.HOME = value;
   env.GROK_HOME = join(value, '.grok');
+  if (apiKey) env.XAI_API_KEY = apiKey;
   return env;
 }
 
@@ -158,12 +171,15 @@ export function isGrokModelsAuthenticated(output: string): boolean {
   return !/\bnot authenticated\b/i.test(output);
 }
 
-export async function assertGrokAuthenticated(home: string): Promise<void> {
+export async function assertGrokAuthenticated(runtime: GrokRuntime): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'jbot-grok-auth-check-'));
   try {
     const result = await spawnWithTimeout(GROK_CLI_BIN, ['--sandbox', 'strict', 'models'], {
       cwd: dir,
-      env: grokEnvForHome(home),
+      env: grokEnvForHome(
+        runtime.home,
+        runtime.authMode === 'api-key' ? runtime.apiKey : undefined,
+      ),
       timeoutMs: GROK_AUTH_CHECK_TIMEOUT_MS,
       timeoutMessage: 'Grok authentication check timed out after 30s.',
     });
@@ -173,7 +189,9 @@ export async function assertGrokAuthenticated(home: string): Promise<void> {
     }
     if (!isGrokModelsAuthenticated(output)) {
       throw new Error(
-        'Grok authentication is invalid or expired. Run `grok login --device-auth`, then refresh GROK_AUTH_JSON.',
+        runtime.authMode === 'account'
+          ? 'Grok authentication is invalid or expired. Run `grok login --device-auth`, then refresh GROK_AUTH_JSON.'
+          : 'Grok API-key authentication failed. Check XAI_API_KEY or xai-api-key.',
       );
     }
   } finally {
@@ -192,7 +210,7 @@ export async function runGrokReview(
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
-    home?: string;
+    runtime?: GrokRuntime;
   } = {},
 ): Promise<ReviewResult> {
   void options.onTokenUsage;
@@ -204,7 +222,7 @@ export async function runGrokReview(
     options.evidenceQuotes ?? false,
   );
   log(`Prompt assembled (${label}, grok): ${prompt.length} chars, guidelines=${!!guidelines}`);
-  const raw = await runGrokPrompt(model, prompt, label, log, options.home, options.timeoutMs);
+  const raw = await runGrokPrompt(model, prompt, label, log, options.runtime, options.timeoutMs);
   try {
     return parseReview(raw, label, log, { strict: true });
   } catch (error) {
@@ -221,7 +239,7 @@ export async function runGrokReview(
       }),
       `${label}-repair`,
       log,
-      options.home,
+      options.runtime,
       options.timeoutMs,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
@@ -234,7 +252,7 @@ export async function runGrokAddressedPriorCommentsCheck(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: GrokRuntime,
 ): Promise<AddressedPriorComment[]> {
   void onTokenUsage;
   const raw = await runGrokPrompt(
@@ -242,7 +260,7 @@ export async function runGrokAddressedPriorCommentsCheck(
     assembleAddressedPriorCommentsPrompt(prContext),
     'addressed-prior-comments',
     log,
-    home,
+    runtime,
     timeoutMs,
   );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
@@ -255,7 +273,7 @@ export async function runGrokGuidelineComplianceCheck(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: GrokRuntime,
 ): Promise<Finding[]> {
   void onTokenUsage;
   const raw = await runGrokPrompt(
@@ -263,7 +281,7 @@ export async function runGrokGuidelineComplianceCheck(
     assembleGuidelineCompliancePrompt(prContext, guidelines),
     'guideline-compliance',
     log,
-    home,
+    runtime,
     timeoutMs,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
@@ -276,7 +294,7 @@ export async function runGrokChangesSinceLastReview(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: GrokRuntime,
 ): Promise<string> {
   void onTokenUsage;
   const raw = await runGrokPrompt(
@@ -284,7 +302,7 @@ export async function runGrokChangesSinceLastReview(
     assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
     'changes-since-last-review',
     log,
-    home,
+    runtime,
     timeoutMs,
   );
   return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
@@ -297,15 +315,15 @@ export async function runGrokFindingVerification(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: GrokRuntime,
 ): Promise<FindingVerdict[] | undefined> {
   void onTokenUsage;
   const raw = await runGrokPrompt(
     model,
-    assembleFindingVerificationPrompt(prContext, findings),
+    assembleFindingVerificationPrompt(prContext, findings, true),
     'finding-verification',
     log,
-    home,
+    runtime,
     timeoutMs,
   );
   return parseFindingVerdicts(raw, findings.length, log);
@@ -316,17 +334,21 @@ async function runGrokPrompt(
   prompt: string,
   label: string,
   log: (msg: string) => void,
-  home: string | undefined,
+  runtime: GrokRuntime | undefined,
   timeoutMs = GROK_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
   const fullPrompt = buildGrokPrompt(prompt);
   assertGrokPromptWithinBudget(label, fullPrompt);
-  const env = grokEnvForHome(home);
+  const env = grokEnvForHome(
+    runtime?.home,
+    runtime?.authMode === 'api-key' ? runtime.apiKey : undefined,
+  );
   const dir = mkdtempSync(join(tmpdir(), 'jbot-grok-'));
   const reviewWorkspace = join(dir, 'workspace');
-  const promptFile = join(dir, 'prompt.txt');
-  mkdirSync(reviewWorkspace, { mode: 0o500 });
-  writeFileSync(promptFile, fullPrompt, { mode: 0o600 });
+  const promptFile = join(reviewWorkspace, 'prompt.txt');
+  mkdirSync(reviewWorkspace, { mode: 0o700 });
+  writeFileSync(promptFile, fullPrompt, { mode: 0o400 });
+  chmodSync(reviewWorkspace, 0o500);
   log(`Calling ${label} prompt (agent=grok-cli, model=${model})`);
   try {
     const result = await spawnWithTimeout(GROK_CLI_BIN, buildGrokCliArgs({ model, promptFile }), {
