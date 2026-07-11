@@ -21,6 +21,7 @@ describe('selectReviewBackends', () => {
       cursorApiKey: '',
       codexAuth: '',
       clineAuth: '',
+      grokAuth: '',
       kiloAuth: '',
       opencodeProviderID: 'opencode',
       opencodeModelID: 'deepseek-v4-flash-free',
@@ -45,6 +46,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -69,6 +71,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -96,6 +99,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'devin',
         opencodeModelID: 'codex',
@@ -121,6 +125,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -145,6 +150,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -172,6 +178,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'commandcode',
         opencodeModelID: 'Qwen/Qwen3.7-Max',
@@ -197,6 +204,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: 'cursor-key',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -221,6 +229,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: 'cursor-key',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -248,6 +257,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: 'cursor-key',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'cursor',
         opencodeModelID: 'sonnet-4-thinking',
@@ -276,6 +286,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: 'cursor-key',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'commandcode',
         opencodeModelID: 'default',
@@ -304,6 +315,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'commandcode',
         opencodeModelID: 'default',
@@ -329,6 +341,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: 'codex-auth',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -353,6 +366,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: 'codex-auth',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -380,12 +394,66 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: 'codex-auth',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'codex',
         opencodeModelID: 'gpt-5.1-codex',
         opencodeApiKey: '',
       },
     );
+  });
+
+  it('routes Grok Build independently from the xAI API provider', () => {
+    const mainGrok = selectReviewBackends({
+      ...base,
+      providerID: 'grok',
+      modelID: 'default',
+      apiKey: 'grok-auth',
+      auxApiKey: 'opencode-key',
+    });
+    assert.equal(mainGrok.mainCliBackend, 'grok');
+    assert.equal(mainGrok.needsOpencode, true);
+    assert.equal(mainGrok.grokAuth, 'grok-auth');
+    assert.equal(mainGrok.opencodeApiKey, 'opencode-key');
+
+    const auxGrok = selectReviewBackends({
+      ...base,
+      auxProviderID: 'grok',
+      auxModelID: 'default',
+      auxApiKey: 'grok-auth',
+    });
+    assert.equal(auxGrok.auxCliBackend, 'grok');
+    assert.equal(auxGrok.needsOpencode, true);
+    assert.equal(auxGrok.grokAuth, 'grok-auth');
+    assert.equal(auxGrok.opencodeApiKey, 'main-key');
+
+    assert.deepEqual(
+      selectReviewBackends({
+        ...base,
+        providerID: 'grok',
+        modelID: 'default',
+        apiKey: 'grok-auth',
+        auxProviderID: 'grok',
+        auxModelID: 'default',
+      }),
+      {
+        mainCliBackend: 'grok',
+        auxCliBackend: 'grok',
+        needsOpencode: false,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: '',
+        codexAuth: '',
+        clineAuth: '',
+        grokAuth: 'grok-auth',
+        kiloAuth: '',
+        opencodeProviderID: 'grok',
+        opencodeModelID: 'default',
+        opencodeApiKey: '',
+      },
+    );
+
+    assert.equal(selectReviewBackends({ ...base, providerID: 'xai' }).mainCliBackend, undefined);
   });
 
   it('uses Cline for main review and OpenCode for aux sessions', () => {
@@ -405,6 +473,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: 'cline-auth',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -429,6 +498,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: 'cline-auth',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -456,6 +526,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: 'cline-auth',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'cline',
         opencodeModelID: 'deepseek-v4-flash',
@@ -481,6 +552,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: 'cline-auth',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -505,6 +577,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: 'cline-auth',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -532,6 +605,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: 'cline-auth',
+        grokAuth: '',
         kiloAuth: '',
         opencodeProviderID: 'cline-pass',
         opencodeModelID: 'default',
@@ -557,6 +631,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: 'kilo-auth',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -581,6 +656,7 @@ describe('selectReviewBackends', () => {
         cursorApiKey: '',
         codexAuth: '',
         clineAuth: '',
+        grokAuth: '',
         kiloAuth: 'kilo-auth',
         opencodeProviderID: 'opencode',
         opencodeModelID: 'deepseek-v4-flash-free',
@@ -607,6 +683,7 @@ describe('selectReviewBackends', () => {
       cursorApiKey: '',
       codexAuth: '',
       clineAuth: '',
+      grokAuth: '',
       kiloAuth: 'AUTH_JSON',
       opencodeProviderID: 'kilo',
       opencodeModelID: 'kilo-auto/free',
@@ -622,6 +699,7 @@ describe('selectReviewBackends pi engine routing', () => {
     cursorApiKey: '',
     codexAuth: '',
     clineAuth: '',
+    grokAuth: '',
     kiloAuth: '',
   };
   const google = {

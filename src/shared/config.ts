@@ -2,7 +2,31 @@ export interface ProviderConfig {
   defaultModel: string;
   keyEnv: string;
   keyInput: string;
+  fallbackKey?: { env: string; input: string };
   models?: Record<string, ModelConfig>;
+}
+
+export interface ProviderCredentialSource {
+  env: string;
+  input: string;
+}
+
+export function providerCredentialSources(config: ProviderConfig): ProviderCredentialSource[] {
+  return [
+    { env: config.keyEnv, input: config.keyInput },
+    ...(config.fallbackKey ? [config.fallbackKey] : []),
+  ];
+}
+
+export function resolveProviderCredential(
+  config: ProviderConfig,
+  read: (source: ProviderCredentialSource) => string | undefined,
+): string {
+  for (const source of providerCredentialSources(config)) {
+    const value = read(source)?.trim();
+    if (value) return value;
+  }
+  return '';
 }
 
 export interface ModelConfig {
@@ -130,6 +154,17 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
+  // Grok Build CLI. Kept separate from xai, which remains the direct API
+  // provider routed through the SDK engines with XAI_API_KEY.
+  grok: {
+    defaultModel: 'grok/default',
+    keyEnv: 'GROK_AUTH_JSON',
+    keyInput: 'grok-auth',
+    fallbackKey: { env: 'XAI_API_KEY', input: 'xai-api-key' },
+    models: {
+      default: { promptCache: false },
+    },
+  },
   // Cline pay-as-you-go. JBOT_REVIEW_MODEL: `cline/default`, or `cline/<type>/<model>`
   // (cline models carry their own type), e.g. `cline/deepseek/deepseek-v4-flash`.
   cline: {
@@ -172,6 +207,7 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     providerID === 'codex' ||
     providerID === 'cline' ||
     providerID === 'cline-pass' ||
+    providerID === 'grok' ||
     providerID === 'kilo'
   )
     return false;

@@ -52,6 +52,7 @@ describe('piSupportsProvider', () => {
       'cursor',
       'devin',
       'commandcode',
+      'grok',
       'unknown',
       '',
     ]) {

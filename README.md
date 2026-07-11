@@ -113,6 +113,7 @@ jobs:
           cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
           codex-auth: ${{ secrets.CODEX_AUTH_JSON }}
           cline-auth: ${{ secrets.CLINE_AUTH_JSON }}
+          grok-auth: ${{ secrets.GROK_AUTH_JSON }}
           kilo-auth: ${{ secrets.KILO_AUTH_CONTENT }}
           enable-context7: auto
           context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
@@ -133,24 +134,25 @@ you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
 `XAI_API_KEY`, `FIREWORKS_API_KEY`, `MIMO_API_KEY`, `DEVIN_WINDSURF_API_KEY`,
 `COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, `CODEX_AUTH_JSON`,
-`CLINE_AUTH_JSON`, `KILO_AUTH_CONTENT`, or `ANTHROPIC_API_KEY`.
+`CLINE_AUTH_JSON`, `GROK_AUTH_JSON`, `KILO_AUTH_CONTENT`, or `ANTHROPIC_API_KEY`.
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
 no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
 
 **CLI-backend credentials — where to get each one.** Unlike the model-provider keys
 above, these authenticate with a local CLI login or a dashboard key. You paste the
-**whole file** (Codex, Cline) or the **key value** (Cursor, Devin, Command Code) —
-no digging a field out of a JSON.
+**whole file** (Codex, Cline, Grok Build) or the **key value** (Cursor, Devin,
+Command Code) — no digging a field out of a JSON.
 
-| Backend          | Get the credential                                                                                                                                      | Secret (Action input)                               |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| **Codex CLI**    | `codex login` (ChatGPT Plus/Pro) → paste the whole `~/.codex/auth.json`                                                                                 | `CODEX_AUTH_JSON` (`codex-auth`)                    |
-| **Cline**        | `cline auth` → paste the whole `~/.cline/data/settings/providers.json`                                                                                  | `CLINE_AUTH_JSON` (`cline-auth`)                    |
-| **Cursor**       | Create a key at [cursor.com/dashboard/integrations](https://cursor.com/dashboard/integrations) → paste it (`crsr_…`)                                    | `CURSOR_API_KEY` (`cursor-api-key`)                 |
-| **Devin**        | `devin auth login` → copy `windsurf_api_key` (`devin-session-token$…`) from `~/.local/share/devin/credentials.toml` ([docs](https://docs.devin.ai/cli)) | `DEVIN_WINDSURF_API_KEY` (`devin-windsurf-api-key`) |
-| **Command Code** | Create an access key at [commandcode.ai](https://commandcode.ai/docs/quickstart) (`user_…`; the `apiKey` in `~/.commandcode/auth.json`) → paste it      | `COMMANDCODE_ACCESS_KEY` (`commandcode-access-key`) |
-| **Kilo**         | `kilo auth login` → paste the whole `~/.local/share/kilo/auth.json`                                                                                     | `KILO_AUTH_CONTENT` (`kilo-auth`)                   |
+| Backend          | Get the credential                                                                                                                                      | Secret (Action input)                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| **Codex CLI**    | `codex login` (ChatGPT Plus/Pro) → paste the whole `~/.codex/auth.json`                                                                                 | `CODEX_AUTH_JSON` (`codex-auth`)                                 |
+| **Cline**        | `cline auth` → paste the whole `~/.cline/data/settings/providers.json`                                                                                  | `CLINE_AUTH_JSON` (`cline-auth`)                                 |
+| **Grok Build**   | `grok login --device-auth` → paste `~/.grok/auth.json`; alternatively create an xAI API key                                                             | `GROK_AUTH_JSON` (`grok-auth`), or `XAI_API_KEY` (`xai-api-key`) |
+| **Cursor**       | Create a key at [cursor.com/dashboard/integrations](https://cursor.com/dashboard/integrations) → paste it (`crsr_…`)                                    | `CURSOR_API_KEY` (`cursor-api-key`)                              |
+| **Devin**        | `devin auth login` → copy `windsurf_api_key` (`devin-session-token$…`) from `~/.local/share/devin/credentials.toml` ([docs](https://docs.devin.ai/cli)) | `DEVIN_WINDSURF_API_KEY` (`devin-windsurf-api-key`)              |
+| **Command Code** | Create an access key at [commandcode.ai](https://commandcode.ai/docs/quickstart) (`user_…`; the `apiKey` in `~/.commandcode/auth.json`) → paste it      | `COMMANDCODE_ACCESS_KEY` (`commandcode-access-key`)              |
+| **Kilo**         | `kilo auth login` → paste the whole `~/.local/share/kilo/auth.json`                                                                                     | `KILO_AUTH_CONTENT` (`kilo-auth`)                                |
 
 Each CLI backend runs **read-only** and only when it's the selected
 `provider`/`aux-provider`. Cline and Command Code write their credential into an
@@ -163,6 +165,28 @@ subscription). Kilo reads its credential from the `KILO_AUTH_CONTENT` env var (n
 file written) with an isolated temporary `HOME`/`XDG_DATA_HOME` per session,
 removed after the run; it defaults to the free `kilo/kilo-auto/free` gateway
 model.
+
+`grok` is an opt-in Grok Build CLI backend and is intentionally separate from
+`xai`: existing `provider: xai` configurations continue using `XAI_API_KEY`
+through the SDK engine unchanged. For `provider: grok`, account auth is preferred
+when both credentials are configured; the API key is passed only when account
+auth is absent, so an expired login cannot silently switch to paid API usage.
+Grok Build runs headlessly with edits, shell,
+MCP, web access, memory, and subagents disabled. It receives the budgeted review
+prompt in an empty read-only temporary workspace, so repository Grok config,
+plugins, and hooks cannot execute. To preserve full-diff coverage without checkout
+access, jbot-review embeds up to 512 KiB per shard and refuses a main review (or
+skips fail-open auxiliary sessions) if that still cannot carry the complete diff.
+Sessions are serialized through one per-run temporary Grok home, removed after
+the run. With account auth, this lets credential rotations persist without
+concurrent writes. Whether a rotated refresh token from one ephemeral
+GitHub-hosted run can be reused from the original `GROK_AUTH_JSON` secret on the
+next run is not yet a documented xAI contract. Treat repeated hosted-run auth as
+unresolved during dogfood; jbot-review never logs or exports the rotated
+credential.
+The CLI account's availability, quota, and acceptable-use terms remain controlled
+by xAI; dogfood with `provider: grok`, `model: grok/default`, and conservative
+concurrency before wider use.
 
 Add `CONTEXT7_API_KEY` only if you want docs lookup for external API, SDK,
 framework, CLI, cloud-service, or workflow changes.
@@ -251,6 +275,7 @@ without editing the workflow.
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+    grok-auth: ${{ secrets.GROK_AUTH_JSON }}
     kilo-auth: ${{ secrets.KILO_AUTH_CONTENT }}
     enable-context7: auto
     context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
@@ -343,33 +368,34 @@ only.
 Review metadata reports backend usage counters when they are available.
 OpenCode-backed sessions report token counters and cost from assistant message
 metadata; Devin CLI sessions also contribute usage when the ATIF export includes
-token or cost records. The CommandCode and Cursor CLIs do not expose
-machine-readable per-session usage today, so those sessions may be absent from
-the metadata block. These counters are observability only: they do not identify API keys,
+token or cost records. Other CLI backends do not expose machine-readable
+per-session usage today, so those sessions may be absent from the metadata block.
+These counters are observability only: they do not identify API keys,
 accounts, organizations, quota buckets, remaining quota, or reset times, so
 jbot-review does not use them for smart key rotation.
 
-| `provider`              | Default model                                              | Action key input         | Secret/env var           |
-| ----------------------- | ---------------------------------------------------------- | ------------------------ | ------------------------ |
-| `opencode`              | `opencode/deepseek-v4-flash-free`                          | `opencode-api-key`       | `OPENCODE_API_KEY`       |
-| `opencode-go`           | `opencode-go/deepseek-v4-flash`                            | `opencode-api-key`       | `OPENCODE_API_KEY`       |
-| `deepseek`              | `deepseek/deepseek-v4-flash`                               | `deepseek-api-key`       | `DEEPSEEK_API_KEY`       |
-| `openai`                | `openai/gpt-5.4-nano`                                      | `openai-api-key`         | `OPENAI_API_KEY`         |
-| `anthropic`             | `anthropic/claude-sonnet-4-6`                              | `anthropic-api-key`      | `ANTHROPIC_API_KEY`      |
-| `google`                | `google/gemini-2.5-flash`                                  | `gemini-api-key`         | `GEMINI_API_KEY`         |
-| `openrouter`            | `openrouter/openai/gpt-4o-mini`                            | `openrouter-api-key`     | `OPENROUTER_API_KEY`     |
-| `nvidia`                | `nvidia/nemotron-3-ultra-550b-a55b`                        | `nvidia-api-key`         | `NVIDIA_API_KEY`         |
-| `zai-coding-plan`       | `zai-coding-plan/glm-5.2`                                  | `zai-api-key`            | `ZAI_API_KEY`            |
-| `xai`                   | `xai/grok-4.3`                                             | `xai-api-key`            | `XAI_API_KEY`            |
-| `fireworks-ai`          | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` | `fireworks-api-key`      | `FIREWORKS_API_KEY`      |
-| `xiaomi-token-plan-sgp` | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                      | `mimo-api-key`           | `MIMO_API_KEY`           |
-| `devin`                 | `devin/default`                                            | `devin-windsurf-api-key` | `DEVIN_WINDSURF_API_KEY` |
-| `commandcode`           | `commandcode/default`                                      | `commandcode-access-key` | `COMMANDCODE_ACCESS_KEY` |
-| `cursor`                | `cursor/default`                                           | `cursor-api-key`         | `CURSOR_API_KEY`         |
-| `codex`                 | `codex/default`                                            | `codex-auth`             | `CODEX_AUTH_JSON`        |
-| `cline`                 | `cline/default`                                            | `cline-auth`             | `CLINE_AUTH_JSON`        |
-| `cline-pass`            | `cline-pass/default`                                       | `cline-auth`             | `CLINE_AUTH_JSON`        |
-| `kilo`                  | `kilo/kilo-auto/free`                                      | `kilo-auth`              | `KILO_AUTH_CONTENT`      |
+| `provider`              | Default model                                              | Action key input                | Secret/env var                       |
+| ----------------------- | ---------------------------------------------------------- | ------------------------------- | ------------------------------------ |
+| `opencode`              | `opencode/deepseek-v4-flash-free`                          | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
+| `opencode-go`           | `opencode-go/deepseek-v4-flash`                            | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
+| `deepseek`              | `deepseek/deepseek-v4-flash`                               | `deepseek-api-key`              | `DEEPSEEK_API_KEY`                   |
+| `openai`                | `openai/gpt-5.4-nano`                                      | `openai-api-key`                | `OPENAI_API_KEY`                     |
+| `anthropic`             | `anthropic/claude-sonnet-4-6`                              | `anthropic-api-key`             | `ANTHROPIC_API_KEY`                  |
+| `google`                | `google/gemini-2.5-flash`                                  | `gemini-api-key`                | `GEMINI_API_KEY`                     |
+| `openrouter`            | `openrouter/openai/gpt-4o-mini`                            | `openrouter-api-key`            | `OPENROUTER_API_KEY`                 |
+| `nvidia`                | `nvidia/nemotron-3-ultra-550b-a55b`                        | `nvidia-api-key`                | `NVIDIA_API_KEY`                     |
+| `zai-coding-plan`       | `zai-coding-plan/glm-5.2`                                  | `zai-api-key`                   | `ZAI_API_KEY`                        |
+| `xai`                   | `xai/grok-4.3`                                             | `xai-api-key`                   | `XAI_API_KEY`                        |
+| `fireworks-ai`          | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` | `fireworks-api-key`             | `FIREWORKS_API_KEY`                  |
+| `xiaomi-token-plan-sgp` | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                      | `mimo-api-key`                  | `MIMO_API_KEY`                       |
+| `devin`                 | `devin/default`                                            | `devin-windsurf-api-key`        | `DEVIN_WINDSURF_API_KEY`             |
+| `commandcode`           | `commandcode/default`                                      | `commandcode-access-key`        | `COMMANDCODE_ACCESS_KEY`             |
+| `cursor`                | `cursor/default`                                           | `cursor-api-key`                | `CURSOR_API_KEY`                     |
+| `codex`                 | `codex/default`                                            | `codex-auth`                    | `CODEX_AUTH_JSON`                    |
+| `cline`                 | `cline/default`                                            | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
+| `cline-pass`            | `cline-pass/default`                                       | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
+| `grok`                  | `grok/default`                                             | `grok-auth`, then `xai-api-key` | `GROK_AUTH_JSON`, then `XAI_API_KEY` |
+| `kilo`                  | `kilo/kilo-auto/free`                                      | `kilo-auth`                     | `KILO_AUTH_CONTENT`                  |
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
@@ -417,6 +443,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+    grok-auth: ${{ secrets.GROK_AUTH_JSON }}
     enable-context7: auto
     context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
     github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -480,13 +507,14 @@ documentation lookup.
 | `openrouter-api-key`      | No       | —                     | Used when `provider` or `aux-provider` is `openrouter`                     |
 | `nvidia-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `nvidia`                         |
 | `zai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `zai-coding-plan`                |
-| `xai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `xai`                            |
+| `xai-api-key`             | No       | —                     | Used by `xai`, or by `grok` when `grok-auth` is empty                      |
 | `fireworks-api-key`       | No       | —                     | Used when `provider` or `aux-provider` is `fireworks-ai`                   |
 | `devin-windsurf-api-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `devin`                   |
 | `commandcode-access-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `commandcode`             |
 | `cursor-api-key`          | No       | —                     | Used when `provider` or active `aux-provider` is `cursor`                  |
 | `codex-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `codex`                   |
 | `cline-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `cline` / `cline-pass`    |
+| `grok-auth`               | No       | —                     | Grok account auth; preferred over `xai-api-key` when `grok` is selected    |
 | `kilo-auth`               | No       | —                     | Used when `provider` or active `aux-provider` is `kilo`                    |
 | `enable-context7`         | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false` |
 | `context7-api-key`        | No       | —                     | Optional Context7 key for reliable CI docs lookup                          |

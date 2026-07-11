@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 
 import { minifyEnvAuth } from '../src/local/env-auth.ts';
 
-const KEYS = new Set(['CODEX_AUTH_JSON', 'CLINE_AUTH_JSON', 'KILO_AUTH_CONTENT']);
+const KEYS = new Set(['CODEX_AUTH_JSON', 'CLINE_AUTH_JSON', 'GROK_AUTH_JSON', 'KILO_AUTH_CONTENT']);
 
 describe('minifyEnvAuth', () => {
   it('re-joins a pretty-printed blob spilled across lines and minifies it', () => {

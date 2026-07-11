@@ -1,0 +1,4 @@
+interface:
+  display_name: 'J-Bot Review PR Self-Review'
+  short_description: 'Audit J-Bot branches before PR publication'
+  default_prompt: 'Use $jbot-review-pr-self-review to audit this branch before pushing or opening a PR.'

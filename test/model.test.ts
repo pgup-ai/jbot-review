@@ -118,6 +118,20 @@ describe('resolveModelName', () => {
     });
   });
 
+  it('configures Grok Build separately from the xAI API provider', () => {
+    assert.deepEqual(PROVIDERS.grok, {
+      defaultModel: 'grok/default',
+      keyEnv: 'GROK_AUTH_JSON',
+      keyInput: 'grok-auth',
+      fallbackKey: { env: 'XAI_API_KEY', input: 'xai-api-key' },
+      models: {
+        default: { promptCache: false },
+      },
+    });
+    assert.equal(PROVIDERS.xai.keyEnv, 'XAI_API_KEY');
+    assert.equal(PROVIDERS.xai.keyInput, 'xai-api-key');
+  });
+
   it('rejects an empty selected-provider-prefixed model id', () => {
     assert.throws(() => resolveModelName('opencode', 'opencode/'), /expected a non-empty model id/);
   });
@@ -148,6 +162,7 @@ describe('modelSupportsPromptCache', () => {
     assert.equal(modelSupportsPromptCache('devin', 'codex'), false);
     assert.equal(modelSupportsPromptCache('commandcode', 'default'), false);
     assert.equal(modelSupportsPromptCache('commandcode', 'Qwen/Qwen3.7-Max'), false);
+    assert.equal(modelSupportsPromptCache('grok', 'default'), false);
     assert.equal(
       modelSupportsPromptCache('fireworks-ai', 'accounts/fireworks/models/deepseek-v4-flash'),
       false,

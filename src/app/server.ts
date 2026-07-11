@@ -1,7 +1,11 @@
 import { createServer } from 'node:http';
 import { Webhooks, createNodeMiddleware } from '@octokit/webhooks';
 
-import { PROVIDERS } from '../shared/config.ts';
+import {
+  PROVIDERS,
+  providerCredentialSources,
+  resolveProviderCredential,
+} from '../shared/config.ts';
 import { formatModelName, resolveModelName } from '../shared/model.ts';
 import { handlePrEvent } from './app.ts';
 import type { AppConfig } from './app.ts';
@@ -28,10 +32,17 @@ if (auxModelInput && !auxCfg) {
     `Unknown aux provider "${auxProvider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
   );
 }
-const apiKey = mustEnv(cfg.keyEnv);
+const apiKey = resolveProviderCredential(cfg, ({ env }) => process.env[env]);
+if (!apiKey) {
+  throw new Error(
+    `Missing provider credential: ${providerCredentialSources(cfg)
+      .map(({ env }) => env)
+      .join(' or ')}`,
+  );
+}
 const auxApiKey =
   auxModelInput && auxProvider !== provider && auxCfg
-    ? process.env[auxCfg.keyEnv]?.trim()
+    ? resolveProviderCredential(auxCfg, ({ env }) => process.env[env])
     : undefined;
 
 const appCfg: AppConfig = {
