@@ -88,7 +88,7 @@ jobs:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: pgup-ai/jbot-review-action@v0 # moving v0 tag; pin a release tag for stability
@@ -239,7 +239,7 @@ and `JBOT_AUX_PROVIDER` / `JBOT_REVIEW_AUX_MODEL` can switch auxiliary providers
 without editing the workflow.
 
 ```yaml
-- uses: actions/checkout@v6
+- uses: actions/checkout@v7
   with:
     fetch-depth: 0
     ref: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs['pr-number']) }}
