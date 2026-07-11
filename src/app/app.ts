@@ -74,7 +74,14 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
   enqueue(async () => {
     const octokit = createAppOctokit(cfg.appId, cfg.privateKey, installationId);
     const authRes = (await octokit.auth()) as InstallationAccessTokenAuthentication;
-    const { dir, cleanup } = clonePr(repoInfo.clone_url, pr.head.ref, pr.base.ref, authRes.token);
+    const headCloneUrl = pr.head.repo?.clone_url ?? repoInfo.clone_url;
+    const { dir, cleanup } = clonePr(
+      headCloneUrl,
+      pr.head.ref,
+      repoInfo.clone_url,
+      pr.base.ref,
+      authRes.token,
+    );
 
     try {
       const { providerID } = parseModelName(cfg.model);

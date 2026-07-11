@@ -37,11 +37,16 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
     const [owner, repo] = parts;
     const octokit = octokitForToken(job.installationToken);
     const pr = await octokit.rest.pulls.get({ owner, repo, pull_number: job.prNumber });
-    // Clone the PR HEAD repo (the contributor's fork, for fork PRs) so head.ref
-    // exists there; fall back to the base repo if the head repo is gone. The
-    // base ref is fetched separately inside clonePr for the three-dot diff.
-    const cloneUrl = pr.data.head.repo?.clone_url ?? pr.data.base.repo.clone_url;
-    const cloned = clonePr(cloneUrl, pr.data.head.ref, pr.data.base.ref, job.installationToken);
+    // Clone the contributor's fork when present; clonePr fetches the upstream
+    // base separately so the checkout always has both sides of a three-dot diff.
+    const headCloneUrl = pr.data.head.repo?.clone_url ?? pr.data.base.repo.clone_url;
+    const cloned = clonePr(
+      headCloneUrl,
+      pr.data.head.ref,
+      pr.data.base.repo.clone_url,
+      pr.data.base.ref,
+      job.installationToken,
+    );
     cleanup = cloned.cleanup;
     await runPrReview({
       octokit,

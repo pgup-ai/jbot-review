@@ -4,37 +4,62 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export function clonePr(
-  cloneUrl: string,
+  headCloneUrl: string,
   headRef: string,
+  baseCloneUrl: string,
   baseRef: string,
   token: string,
 ): { dir: string; cleanup: () => void } {
-  const authUrl = cloneUrl.replace('https://', `https://x-access-token:${token}@`);
+  const authHeadUrl = authenticateUrl(headCloneUrl, token);
+  const authBaseUrl = authenticateUrl(baseCloneUrl, token);
   const dir = mkdtempSync(join(tmpdir(), 'jbot-'));
 
   // Use spawnSync with an argv array (not a shell command) to avoid any
   // interpretation of the user-supplied branch names.
-  const cloneRes = spawnSync('git', ['clone', '--depth=50', authUrl, '--branch', headRef, dir], {
-    stdio: 'pipe',
-  });
+  const cloneRes = spawnSync(
+    'git',
+    ['clone', '--no-tags', '--single-branch', '--branch', headRef, authHeadUrl, dir],
+    { stdio: 'pipe' },
+  );
   if (cloneRes.status !== 0) {
     safeRm(dir);
-    // Scrub the credential — git echoes the auth URL (x-access-token:<token>@…)
-    // in its stderr on failure, which would otherwise leak into logs.
-    const stderr = (cloneRes.stderr?.toString().trim() ?? 'unknown error').replace(
-      /x-access-token:[^@]+@/g,
-      'x-access-token:***@',
-    );
-    throw new Error(`Failed to clone PR branch: ${stderr}`);
+    throw new Error(`Failed to clone PR branch: ${scrubCredential(cloneRes.stderr?.toString())}`);
   }
 
-  // base ref may not be fetchable; non-fatal.
-  spawnSync('git', ['fetch', 'origin', `${baseRef}:${baseRef}`, '--depth=50'], {
+  const fetchBaseRes = spawnSync(
+    'git',
+    ['fetch', '--no-tags', authBaseUrl, `refs/heads/${baseRef}:refs/remotes/base/${baseRef}`],
+    { cwd: dir, stdio: 'pipe' },
+  );
+  if (fetchBaseRes.status !== 0) {
+    safeRm(dir);
+    throw new Error(
+      `Failed to fetch PR base branch: ${scrubCredential(fetchBaseRes.stderr?.toString())}`,
+    );
+  }
+
+  // Model sessions need the histories, never the installation credential.
+  const sanitizeRes = spawnSync('git', ['remote', 'set-url', 'origin', headCloneUrl], {
     cwd: dir,
     stdio: 'pipe',
   });
+  if (sanitizeRes.status !== 0) {
+    safeRm(dir);
+    throw new Error('Failed to remove credentials from the origin remote');
+  }
 
   return { dir, cleanup: () => safeRm(dir) };
+}
+
+function authenticateUrl(url: string, token: string): string {
+  return url.replace('https://', `https://x-access-token:${token}@`);
+}
+
+function scrubCredential(stderr?: string): string {
+  return (stderr?.trim() || 'unknown error').replace(
+    /x-access-token:[^@]+@/g,
+    'x-access-token:***@',
+  );
 }
 
 function safeRm(path: string): void {
