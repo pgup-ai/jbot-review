@@ -21,6 +21,7 @@ import {
   type TokenUsageRecorder,
 } from './opencode.ts';
 import {
+  QODER_REVIEW_SYSTEM_PROMPT,
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
@@ -93,13 +94,11 @@ export function assertQoderToken(token: string): string {
 }
 
 export function qoderEnvForHome(home: string): NodeJS.ProcessEnv {
-  const value = home.trim();
-  if (!value) throw new Error('Missing Qoder home. A temp HOME is required for isolation.');
   const env: NodeJS.ProcessEnv = {};
   for (const key of QODER_ENV_KEYS) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
-  env.HOME = value;
+  env.HOME = home;
   env.QODER_MEMORY = '0';
   env.QODER_MEMORY_USER = '0';
   return env;
@@ -126,8 +125,7 @@ export function buildQoderOptions(
     systemPrompt: {
       type: 'preset',
       preset: 'qodercli',
-      append:
-        'You are a read-only code reviewer. Never modify files, execute shell commands, use the network, invoke subagents, or load repository-provided agent customizations.',
+      append: QODER_REVIEW_SYSTEM_PROMPT,
     },
     settings: {
       disableAllHooks: true,
@@ -345,9 +343,11 @@ async function runQoderPrompt(
         if (message.type === 'result') result = message;
       }
     } catch (error) {
-      if (!result || result.subtype === 'success') throw error;
+      if (!result) throw error;
     }
-    if (timedOut) throw new Error(formatQoderPromptTimeoutMessage(label, model, timeoutMs));
+    if (timedOut && result?.subtype !== 'success') {
+      throw new Error(formatQoderPromptTimeoutMessage(label, model, timeoutMs));
+    }
     if (!result) throw new Error(`qoder ${label} produced no result event`);
     if (result.subtype !== 'success') {
       throw new Error(

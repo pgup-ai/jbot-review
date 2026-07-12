@@ -11,6 +11,7 @@ import {
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
   PI_REVIEW_SYSTEM_PROMPT,
+  QODER_REVIEW_SYSTEM_PROMPT,
   REVIEW_LENSES,
   REVIEW_OUTPUT_REMINDER,
   REVIEW_PROMPT,
@@ -28,6 +29,16 @@ import {
   formatFindingsForVerification,
   selectLensKeys,
 } from '../src/shared/prompt.ts';
+
+describe('QODER_REVIEW_SYSTEM_PROMPT', () => {
+  it('pins Qoder sessions to read-only repository review', () => {
+    assert.match(QODER_REVIEW_SYSTEM_PROMPT, /read-only code reviewer/);
+    assert.match(QODER_REVIEW_SYSTEM_PROMPT, /Never modify files/);
+    assert.match(QODER_REVIEW_SYSTEM_PROMPT, /execute shell commands/);
+    assert.match(QODER_REVIEW_SYSTEM_PROMPT, /use the network/);
+    assert.match(QODER_REVIEW_SYSTEM_PROMPT, /invoke subagents/);
+  });
+});
 
 describe('UNTRUSTED_PR_CONTENT_NOTE', () => {
   it('marks PR-author content untrusted and forbids obeying instructions in it', () => {
