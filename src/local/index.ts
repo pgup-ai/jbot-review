@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { parseEnvBoolean, parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
-import { selectReviewBackends } from '../shared/backend-selection.ts';
+import { selectReviewBackends, type CliBackendID } from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_CLI_BIN, CODEX_PROVIDER_ID } from '../shared/codex.ts';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
@@ -26,6 +26,7 @@ import {
   resolveModelName,
 } from '../shared/model.ts';
 import { resolvePiEngine } from '../shared/pi.ts';
+import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import type { ReviewCommit } from '../shared/review-context.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { ReviewResult } from '../shared/types.ts';
@@ -145,7 +146,7 @@ async function binaryUsable(bin: string): Promise<boolean> {
 }
 
 // devin.ts spawns the literal 'devin' (no exported BIN constant).
-const CLI_BINS: Record<string, string> = {
+const CLI_BINS: Record<CliBackendID, string | null> = {
   [DEVIN_PROVIDER_ID]: 'devin',
   [COMMANDCODE_PROVIDER_ID]: COMMANDCODE_CLI_BIN,
   [CURSOR_PROVIDER_ID]: CURSOR_CLI_BIN,
@@ -153,6 +154,8 @@ const CLI_BINS: Record<string, string> = {
   [CLINE_PROVIDER_ID]: CLINE_CLI_BIN,
   [GROK_PROVIDER_ID]: GROK_CLI_BIN,
   [KILO_PROVIDER_ID]: KILO_CLI_BIN,
+  // The Agent SDK resolves its bundled, overridden, or global runtime itself.
+  [QODER_PROVIDER_ID]: null,
 };
 
 // Install hints mirror the Dockerfile's installer lines — the source of truth
@@ -257,8 +260,13 @@ async function main(): Promise<void> {
   });
   const requiredBins = new Set<string>();
   if (selection.needsOpencode) requiredBins.add('opencode');
-  if (selection.mainCliBackend) requiredBins.add(CLI_BINS[selection.mainCliBackend]);
-  if (selection.auxCliBackend) requiredBins.add(CLI_BINS[selection.auxCliBackend]);
+  const addCliBin = (backend: CliBackendID | undefined): void => {
+    if (!backend) return;
+    const bin = CLI_BINS[backend];
+    if (bin) requiredBins.add(bin);
+  };
+  addCliBin(selection.mainCliBackend);
+  addCliBin(selection.auxCliBackend);
   for (const bin of requiredBins) {
     if (!(await binaryUsable(bin))) {
       const hint = INSTALL_HINTS[bin] ? ` Install: \`${INSTALL_HINTS[bin]}\`.` : '';
