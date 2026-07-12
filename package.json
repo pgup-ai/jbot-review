@@ -24,7 +24,8 @@
     "@octokit/plugin-paginate-rest": "^14.0.0",
     "@octokit/plugin-rest-endpoint-methods": "^17.0.0",
     "@octokit/webhooks": "^14.2.0",
-    "@opencode-ai/sdk": "^1.17.13"
+    "@opencode-ai/sdk": "^1.17.13",
+    "@qoder-ai/qoder-agent-sdk": "^1.0.13"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

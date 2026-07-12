@@ -690,6 +690,47 @@ describe('selectReviewBackends', () => {
       opencodeApiKey: '',
     });
   });
+
+  it('routes Qoder main and aux sessions through one PAT-backed CLI backend', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        providerID: 'qoder',
+        modelID: 'auto',
+        apiKey: 'qoder-token',
+        auxProviderID: 'qoder',
+        auxModelID: 'efficient',
+        auxApiKey: '',
+      }),
+      {
+        mainCliBackend: 'qoder',
+        auxCliBackend: 'qoder',
+        needsOpencode: false,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: '',
+        codexAuth: '',
+        clineAuth: '',
+        grokAuth: '',
+        kiloAuth: '',
+        qoderToken: 'qoder-token',
+        opencodeProviderID: 'qoder',
+        opencodeModelID: 'efficient',
+        opencodeApiKey: '',
+      },
+    );
+  });
+
+  it('uses the auxiliary PAT when only aux sessions run on Qoder', () => {
+    const selection = selectReviewBackends({
+      ...base,
+      auxProviderID: 'qoder',
+      auxModelID: 'efficient',
+      auxApiKey: 'aux-qoder-token',
+    });
+    assert.equal(selection.auxCliBackend, 'qoder');
+    assert.equal(selection.qoderToken, 'aux-qoder-token');
+    assert.equal(selection.needsOpencode, true);
+  });
 });
 
 describe('selectReviewBackends pi engine routing', () => {

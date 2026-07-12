@@ -118,6 +118,17 @@ describe('resolveModelName', () => {
     });
   });
 
+  it('configures Qoder with its PAT and automatic model tier', () => {
+    assert.deepEqual(PROVIDERS.qoder, {
+      defaultModel: 'qoder/auto',
+      keyEnv: 'QODER_PERSONAL_ACCESS_TOKEN',
+      keyInput: 'qoder-token',
+      models: {
+        auto: { promptCache: false },
+      },
+    });
+  });
+
   it('configures Grok Build separately from the xAI API provider', () => {
     assert.deepEqual(PROVIDERS.grok, {
       defaultModel: 'grok/default',
@@ -162,6 +173,7 @@ describe('modelSupportsPromptCache', () => {
     assert.equal(modelSupportsPromptCache('devin', 'codex'), false);
     assert.equal(modelSupportsPromptCache('commandcode', 'default'), false);
     assert.equal(modelSupportsPromptCache('commandcode', 'Qwen/Qwen3.7-Max'), false);
+    assert.equal(modelSupportsPromptCache('qoder', 'ultimate'), false);
     assert.equal(modelSupportsPromptCache('grok', 'default'), false);
     assert.equal(
       modelSupportsPromptCache('fireworks-ai', 'accounts/fireworks/models/deepseek-v4-flash'),
