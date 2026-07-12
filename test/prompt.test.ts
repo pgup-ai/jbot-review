@@ -37,6 +37,7 @@ describe('QODER_REVIEW_SYSTEM_PROMPT', () => {
     assert.match(QODER_REVIEW_SYSTEM_PROMPT, /execute shell commands/);
     assert.match(QODER_REVIEW_SYSTEM_PROMPT, /use the network/);
     assert.match(QODER_REVIEW_SYSTEM_PROMPT, /invoke subagents/);
+    assert.match(QODER_REVIEW_SYSTEM_PROMPT, /load repository-provided agent customizations/);
   });
 });
 
