@@ -23,6 +23,12 @@ RUN npm install -g opencode-ai@1.17.13 command-code@0.40.17 @openai/codex@0.142.
   && grok --version \
   && kilo --version
 
+# Keep Qoder in its own layer: its package is large enough to push the combined
+# multi-CLI npm install over common Docker Desktop memory limits.
+RUN npm install -g @qoder-ai/qodercli@1.0.43 \
+  && npm cache clean --force \
+  && qodercli --version
+
 # Devin CLI (optional devin provider); strip the installer's interactive setup step.
 RUN curl -fsSL https://cli.devin.ai/install.sh -o /tmp/devin-install.sh \
   && grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install.sh \

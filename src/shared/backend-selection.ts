@@ -6,6 +6,7 @@ import { DEVIN_PROVIDER_ID, isDevinProvider } from './devin.ts';
 import { GROK_PROVIDER_ID, isGrokProvider } from './grok.ts';
 import { KILO_PROVIDER_ID, isKiloProvider } from './kilo.ts';
 import { piSupportsProvider } from './pi.ts';
+import { QODER_PROVIDER_ID, isQoderProvider } from './qoder.ts';
 
 export type CliBackendID =
   | typeof DEVIN_PROVIDER_ID
@@ -14,7 +15,8 @@ export type CliBackendID =
   | typeof CODEX_PROVIDER_ID
   | typeof CLINE_PROVIDER_ID
   | typeof GROK_PROVIDER_ID
-  | typeof KILO_PROVIDER_ID;
+  | typeof KILO_PROVIDER_ID
+  | typeof QODER_PROVIDER_ID;
 
 export interface ReviewBackendSelectionInput {
   providerID: string;
@@ -47,6 +49,7 @@ export interface ReviewBackendSelection {
   clineAuth: string;
   grokAuth: string;
   kiloAuth: string;
+  qoderToken?: string;
   opencodeProviderID: string;
   opencodeModelID: string;
   opencodeApiKey: string;
@@ -82,6 +85,9 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
     clineAuth: keyFor(CLINE_PROVIDER_ID),
     grokAuth: keyFor(GROK_PROVIDER_ID),
     kiloAuth: keyFor(KILO_PROVIDER_ID),
+    ...(mainCliBackend === QODER_PROVIDER_ID || auxCliBackend === QODER_PROVIDER_ID
+      ? { qoderToken: keyFor(QODER_PROVIDER_ID) }
+      : {}),
     // The opencode server boots with the config of the role it serves: main
     // when main is on opencode, else aux (a CLI or pi main defers to aux).
     opencodeProviderID: mainOpencode ? input.providerID : input.auxProviderID,
@@ -107,5 +113,6 @@ function cliBackendForProvider(providerID: string): CliBackendID | undefined {
   if (isClineProvider(providerID)) return CLINE_PROVIDER_ID;
   if (isGrokProvider(providerID)) return GROK_PROVIDER_ID;
   if (isKiloProvider(providerID)) return KILO_PROVIDER_ID;
+  if (isQoderProvider(providerID)) return QODER_PROVIDER_ID;
   return undefined;
 }

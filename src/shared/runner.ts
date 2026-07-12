@@ -135,6 +135,14 @@ import {
   runKiloReview,
 } from './kilo.ts';
 import {
+  QODER_PROVIDER_ID,
+  runQoderAddressedPriorCommentsCheck,
+  runQoderChangesSinceLastReview,
+  runQoderFindingVerification,
+  runQoderGuidelineComplianceCheck,
+  runQoderReview,
+} from './qoder.ts';
+import {
   buildReviewContext,
   discoverGuidelineDocs,
   formatGuidelines,
@@ -661,6 +669,57 @@ function createKiloBackend(workspace: string, auth: string): ReviewBackend {
   };
 }
 
+function createQoderBackend(workspace: string, token: string): ReviewBackend {
+  return {
+    name: QODER_PROVIDER_ID,
+    runReview: (model, prContext, guidelines, log, options) =>
+      runQoderReview(workspace, model, prContext, guidelines, log, { ...options, token }),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runQoderAddressedPriorCommentsCheck(
+        workspace,
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        token,
+      ),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runQoderGuidelineComplianceCheck(
+        workspace,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        token,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runQoderFindingVerification(
+        workspace,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        token,
+      ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runQoderChangesSinceLastReview(
+        workspace,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        token,
+      ),
+  };
+}
+
 function limitBackendConcurrency(
   backend: ReviewBackend,
   slots: Semaphore | undefined,
@@ -1096,9 +1155,13 @@ export async function runPrReview(params: {
   const diffHunksBlock = buildDiffHunksBlock(files);
   if (diffHunksBlock) log(`Embedded diff hunks block: ${diffHunksBlock.length} chars.`);
   const mainRequiresCompleteEmbeddedDiff =
-    mainCliBackend === COMMANDCODE_PROVIDER_ID || mainCliBackend === GROK_PROVIDER_ID;
+    mainCliBackend === COMMANDCODE_PROVIDER_ID ||
+    mainCliBackend === GROK_PROVIDER_ID ||
+    mainCliBackend === QODER_PROVIDER_ID;
   const auxRequiresCompleteEmbeddedDiff =
-    auxCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === GROK_PROVIDER_ID;
+    auxCliBackend === COMMANDCODE_PROVIDER_ID ||
+    auxCliBackend === GROK_PROVIDER_ID ||
+    auxCliBackend === QODER_PROVIDER_ID;
   const embeddedOnlyCli = mainRequiresCompleteEmbeddedDiff || auxRequiresCompleteEmbeddedDiff;
   const embeddedOnlyCliDiffHunks = embeddedOnlyCli
     ? buildDiffHunksBlockWithMetadata(files, EMBEDDED_ONLY_CLI_DIFF_HUNKS_OPTIONS)
@@ -1213,6 +1276,7 @@ export async function runPrReview(params: {
   let clineBackend: ReviewBackend | undefined;
   let grokBackend: ReviewBackend | undefined;
   let kiloBackend: ReviewBackend | undefined;
+  let qoderBackend: ReviewBackend | undefined;
   let commandCodeHome: string | undefined;
   const cleanupCommandCodeHome = (): void => {
     if (!commandCodeHome) return;
@@ -1381,6 +1445,18 @@ export async function runPrReview(params: {
     kiloBackend = limitBackendConcurrency(createKiloBackend(workspace, kiloAuth), sessionSlots);
   }
 
+  if (mainCliBackend === QODER_PROVIDER_ID || auxCliBackend === QODER_PROVIDER_ID) {
+    const qoderToken = backendSelection.qoderToken;
+    if (!qoderToken) {
+      cleanupCliHomes();
+      throw new Error(`Missing personal access token for ${QODER_PROVIDER_ID} provider.`);
+    }
+    log(
+      'Qoder CLI authenticated via a per-session PAT payload; user/project settings, hooks, MCP, writes, shell, web, and subagents are disabled.',
+    );
+    qoderBackend = limitBackendConcurrency(createQoderBackend(workspace, qoderToken), sessionSlots);
+  }
+
   // Both SDK roles on one engine but different providers: the aux provider gets
   // its own entry in that engine's credential map, so it MUST have its own key.
   // Falling back to the main key would hand the main provider's secret to a
@@ -1484,6 +1560,7 @@ export async function runPrReview(params: {
     [CLINE_PROVIDER_ID]: clineBackend,
     [GROK_PROVIDER_ID]: grokBackend,
     [KILO_PROVIDER_ID]: kiloBackend,
+    [QODER_PROVIDER_ID]: qoderBackend,
   };
   const mainBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)

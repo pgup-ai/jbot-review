@@ -111,6 +111,7 @@ jobs:
           devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
           commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
           cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+          qoder-token: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
           codex-auth: ${{ secrets.CODEX_AUTH_JSON }}
           cline-auth: ${{ secrets.CLINE_AUTH_JSON }}
           grok-auth: ${{ secrets.GROK_AUTH_JSON }}
@@ -133,7 +134,7 @@ and variables → Actions → New repository secret. Add the keys for the provid
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
 `XAI_API_KEY`, `FIREWORKS_API_KEY`, `MIMO_API_KEY`, `DEVIN_WINDSURF_API_KEY`,
-`COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, `CODEX_AUTH_JSON`,
+`COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, `QODER_PERSONAL_ACCESS_TOKEN`, `CODEX_AUTH_JSON`,
 `CLINE_AUTH_JSON`, `GROK_AUTH_JSON`, `KILO_AUTH_CONTENT`, or `ANTHROPIC_API_KEY`.
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
 no key for the selected aux provider, it reuses the review provider API key.
@@ -150,14 +151,16 @@ Command Code) — no digging a field out of a JSON.
 | **Cline**        | `cline auth` → paste the whole `~/.cline/data/settings/providers.json`                                                                                  | `CLINE_AUTH_JSON` (`cline-auth`)                                 |
 | **Grok Build**   | `grok login --device-auth` → paste `~/.grok/auth.json`; alternatively create an xAI API key                                                             | `GROK_AUTH_JSON` (`grok-auth`), or `XAI_API_KEY` (`xai-api-key`) |
 | **Cursor**       | Create a key at [cursor.com/dashboard/integrations](https://cursor.com/dashboard/integrations) → paste it (`crsr_…`)                                    | `CURSOR_API_KEY` (`cursor-api-key`)                              |
+| **Qoder CLI**    | Create a Personal Access Token under [Qoder Integrations](https://qoder.com/account/integrations)                                                       | `QODER_PERSONAL_ACCESS_TOKEN` (`qoder-token`)                    |
 | **Devin**        | `devin auth login` → copy `windsurf_api_key` (`devin-session-token$…`) from `~/.local/share/devin/credentials.toml` ([docs](https://docs.devin.ai/cli)) | `DEVIN_WINDSURF_API_KEY` (`devin-windsurf-api-key`)              |
 | **Command Code** | Create an access key at [commandcode.ai](https://commandcode.ai/docs/quickstart) (`user_…`; the `apiKey` in `~/.commandcode/auth.json`) → paste it      | `COMMANDCODE_ACCESS_KEY` (`commandcode-access-key`)              |
 | **Kilo**         | `kilo auth login` → paste the whole `~/.local/share/kilo/auth.json`                                                                                     | `KILO_AUTH_CONTENT` (`kilo-auth`)                                |
 
 Each CLI backend runs **read-only** and only when it's the selected
 `provider`/`aux-provider`. Cline and Command Code write their credential into an
-isolated temporary `HOME`, and Codex into a temporary `CODEX_HOME`, each removed
-after the run; Cursor reads its key straight from the env (no file); Devin writes
+isolated temporary `HOME`, Codex into a temporary `CODEX_HOME`, and Qoder carries
+its PAT through a one-time SDK auth payload while using a temporary `HOME`; each is
+removed after the run. Cursor reads its key straight from the env (no file); Devin writes
 `~/.local/share/devin/credentials.toml` under the process `HOME`. Cline uses only
 the auth token — the file's `model`/`reasoning` are stripped — and has two billing
 modes sharing one secret: `cline` (pay-as-you-go) and `cline-pass` (Cline
@@ -165,6 +168,12 @@ subscription). Kilo reads its credential from the `KILO_AUTH_CONTENT` env var (n
 file written) with an isolated temporary `HOME`/`XDG_DATA_HOME` per session,
 removed after the run; it defaults to the free `kilo/kilo-auto/free` gateway
 model.
+
+Qoder can read and search the checkout but receives no shell or write-capable tool.
+Its user/project settings, hooks, MCP servers, skills, memory, web access, and
+subagents are disabled. The complete diff is embedded with the same 512 KiB
+per-shard ceiling used by other shell-free backends; an oversized main review
+fails before calling the model, while oversized auxiliary sessions fail open.
 
 `grok` is an opt-in Grok Build CLI backend and is intentionally separate from
 `xai`: existing `provider: xai` configurations continue using `XAI_API_KEY`
@@ -275,6 +284,7 @@ without editing the workflow.
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+    qoder-token: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
     grok-auth: ${{ secrets.GROK_AUTH_JSON }}
     kilo-auth: ${{ secrets.KILO_AUTH_CONTENT }}
     enable-context7: auto
@@ -366,7 +376,7 @@ caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions
 only.
 
 Review metadata reports backend usage counters when they are available.
-OpenCode-backed sessions report token counters and cost from assistant message
+OpenCode-backed and Qoder sessions report token counters and cost from result
 metadata; Devin CLI sessions also contribute usage when the ATIF export includes
 token or cost records. Other CLI backends do not expose machine-readable
 per-session usage today, so those sessions may be absent from the metadata block.
@@ -391,6 +401,7 @@ jbot-review does not use them for smart key rotation.
 | `devin`                 | `devin/default`                                            | `devin-windsurf-api-key`        | `DEVIN_WINDSURF_API_KEY`             |
 | `commandcode`           | `commandcode/default`                                      | `commandcode-access-key`        | `COMMANDCODE_ACCESS_KEY`             |
 | `cursor`                | `cursor/default`                                           | `cursor-api-key`                | `CURSOR_API_KEY`                     |
+| `qoder`                 | `qoder/auto`                                               | `qoder-token`                   | `QODER_PERSONAL_ACCESS_TOKEN`        |
 | `codex`                 | `codex/default`                                            | `codex-auth`                    | `CODEX_AUTH_JSON`                    |
 | `cline`                 | `cline/default`                                            | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
 | `cline-pass`            | `cline-pass/default`                                       | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
@@ -414,6 +425,11 @@ Use `provider: cursor` with `cursor-api-key` / `CURSOR_API_KEY` for the Cursor
 CLI backend. The Docker image includes the Cursor CLI (`cursor-agent`), which
 reads the key from the environment — no credential file — and runs read-only via
 `--mode plan`.
+Use `provider: qoder` with `qoder-token` /
+`QODER_PERSONAL_ACCESS_TOKEN` for the Qoder CLI backend. It accepts `auto`,
+`ultimate`, `performance`, `efficient`, and `lite` model tiers. Each session uses
+an isolated temporary home and the Agent SDK's streaming protocol; project/user
+settings, hooks, MCP, writes, shell, web access, and subagents are disabled.
 
 Set the `provider` and `model` inputs to override the defaults. For automatic
 PR reviews without editing workflow YAML on every provider or model change,
@@ -443,6 +459,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+    qoder-token: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
     grok-auth: ${{ secrets.GROK_AUTH_JSON }}
     enable-context7: auto
     context7-api-key: ${{ secrets.CONTEXT7_API_KEY }}
@@ -512,6 +529,7 @@ documentation lookup.
 | `devin-windsurf-api-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `devin`                   |
 | `commandcode-access-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `commandcode`             |
 | `cursor-api-key`          | No       | —                     | Used when `provider` or active `aux-provider` is `cursor`                  |
+| `qoder-token`             | No       | —                     | Used when `provider` or active `aux-provider` is `qoder`                   |
 | `codex-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `codex`                   |
 | `cline-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `cline` / `cline-pass`    |
 | `grok-auth`               | No       | —                     | Grok account auth; preferred over `xai-api-key` when `grok` is selected    |

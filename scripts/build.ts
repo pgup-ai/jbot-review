@@ -10,6 +10,7 @@ const shared: esbuild.BuildOptions = {
     '@actions/github',
     '@earendil-works/pi-coding-agent',
     '@opencode-ai/sdk',
+    '@qoder-ai/qoder-agent-sdk',
     '@octokit/auth-app',
     '@octokit/plugin-paginate-rest',
     '@octokit/plugin-rest-endpoint-methods',

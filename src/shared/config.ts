@@ -145,6 +145,15 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
+  qoder: {
+    defaultModel: 'qoder/auto',
+    keyEnv: 'QODER_PERSONAL_ACCESS_TOKEN',
+    keyInput: 'qoder-token',
+    models: {
+      // Qoder sessions run through its CLI/Agent SDK, not an opencode provider.
+      auto: { promptCache: false },
+    },
+  },
   codex: {
     defaultModel: 'codex/default',
     keyEnv: 'CODEX_AUTH_JSON',
@@ -204,6 +213,7 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     providerID === 'devin' ||
     providerID === 'commandcode' ||
     providerID === 'cursor' ||
+    providerID === 'qoder' ||
     providerID === 'codex' ||
     providerID === 'cline' ||
     providerID === 'cline-pass' ||
