@@ -231,33 +231,42 @@ export function formatTokenUsage(info: TokenUsageInfo): string {
  * concurrent requests on one API key upstream anyway — observed as a
  * flash-tier session taking 7+ minutes while queued behind parallel shards.
  * Capping concurrency on OUR side keeps each session's deadline measuring
- * model time, not queue time. 0 = unlimited.
+ * model time, not queue time. High-priority waiters wake first; each priority
+ * remains FIFO. 0 = unlimited.
  */
+export type SemaphorePriority = 'high' | 'normal';
+
 export class Semaphore {
-  private queue: Array<() => void> = [];
+  private highPriorityQueue: Array<() => void> = [];
+  private normalPriorityQueue: Array<() => void> = [];
   private active = 0;
 
   constructor(private readonly limit: number) {}
 
-  async acquire(): Promise<() => void> {
+  async acquire(priority: SemaphorePriority = 'normal'): Promise<() => void> {
     if (this.active < this.limit) {
       this.active += 1;
     } else {
-      await new Promise<void>((resolve) => this.queue.push(resolve));
-      this.active += 1;
+      const queue = priority === 'high' ? this.highPriorityQueue : this.normalPriorityQueue;
+      await new Promise<void>((resolve) => queue.push(resolve));
     }
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      this.active -= 1;
-      const next = this.queue.shift();
-      if (next) next();
+      const next = this.highPriorityQueue.shift() ?? this.normalPriorityQueue.shift();
+      if (next) {
+        next();
+      } else {
+        this.active -= 1;
+      }
     };
   }
 
   isBusy(): boolean {
-    return this.active > 0 || this.queue.length > 0;
+    return (
+      this.active > 0 || this.highPriorityQueue.length > 0 || this.normalPriorityQueue.length > 0
+    );
   }
 }
 
