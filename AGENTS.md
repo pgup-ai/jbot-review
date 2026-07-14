@@ -14,21 +14,22 @@ in this repo; `CLAUDE.md` just points here.
 
 ## Architecture
 
-| Module                         | Responsibility                                                                                                                       |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/workflow/index.ts`        | GitHub Action entry: parse inputs → `runPrReview`                                                                                    |
-| `src/app/*`                    | Webhook-app entry: auth, clone, queue → `runPrReview`                                                                                |
-| `src/local/*`                  | `npm run review:local` entry: merge-base→worktree git diff → `PrFile[]` → `runPrReview` dry-run; zero GitHub                         |
-| `src/shared/runner.ts`         | Orchestrator: context assembly → parallel sessions → finding pipeline → post. Keep it THIN.                                          |
-| `src/shared/prompt.ts`         | ALL prompt text + pure assembly functions. No prompt strings anywhere else.                                                          |
-| `src/shared/opencode.ts`       | opencode server lifecycle, sessions, response parsing (strict + repair)                                                              |
-| `src/shared/review-context.ts` | PR metadata context + budgeted guideline discovery/preloading                                                                        |
-| `src/shared/diff-context.ts`   | Budgeted diff-hunk embedding + the shared path-risk taxonomy (`PATH_PATTERNS`)                                                       |
-| `src/shared/fanout.ts`         | Pure dynamic fan-out: scale recall-supplement sessions (lenses, guideline pass) to diff shape; never gates the main review or verify |
-| `src/shared/blast-radius.ts`   | Call sites of changed exported symbols (git grep, best-effort)                                                                       |
-| `src/shared/filter.ts`         | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts                                      |
-| `src/shared/report.ts`         | Pure review-body layout: outside-the-diff findings section + multi-shard summary dedupe                                              |
-| `src/shared/github.ts`         | GitHub REST/GraphQL: listing, posting, markers, thread resolution                                                                    |
+| Module                              | Responsibility                                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/workflow/index.ts`             | GitHub Action entry: parse inputs → `runPrReview`                                                                                    |
+| `src/app/*`                         | Webhook-app entry: auth, clone, queue → `runPrReview`                                                                                |
+| `src/local/*`                       | `npm run review:local` entry: merge-base→worktree git diff → `PrFile[]` → `runPrReview` dry-run; zero GitHub                         |
+| `src/shared/runner.ts`              | Orchestrator: context assembly → parallel sessions → finding pipeline → post. Keep it THIN.                                          |
+| `src/shared/prompt.ts`              | ALL prompt text + pure assembly functions. No prompt strings anywhere else.                                                          |
+| `src/shared/opencode.ts`            | opencode server lifecycle, sessions, response parsing (strict + repair)                                                              |
+| `src/shared/session-concurrency.ts` | Priority-aware global and provider-local session limiting                                                                            |
+| `src/shared/review-context.ts`      | PR metadata context + budgeted guideline discovery/preloading                                                                        |
+| `src/shared/diff-context.ts`        | Budgeted diff-hunk embedding + the shared path-risk taxonomy (`PATH_PATTERNS`)                                                       |
+| `src/shared/fanout.ts`              | Pure dynamic fan-out: scale recall-supplement sessions (lenses, guideline pass) to diff shape; never gates the main review or verify |
+| `src/shared/blast-radius.ts`        | Call sites of changed exported symbols (git grep, best-effort)                                                                       |
+| `src/shared/filter.ts`              | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts                                      |
+| `src/shared/report.ts`              | Pure review-body layout: outside-the-diff findings section + multi-shard summary dedupe                                              |
+| `src/shared/github.ts`              | GitHub REST/GraphQL: listing, posting, markers, thread resolution                                                                    |
 
 ## Invariants — do not break these
 

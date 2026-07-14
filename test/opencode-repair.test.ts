@@ -11,6 +11,7 @@ import {
   runFindingVerification,
   runGuidelineComplianceCheck,
   runReview,
+  type SemaphorePriority,
 } from '../src/shared/opencode.ts';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 
@@ -295,6 +296,20 @@ describe('runFindingVerification evidence grounding', () => {
 });
 
 describe('Semaphore', () => {
+  it('treats zero as unlimited without tracking slots', async () => {
+    const semaphore = new Semaphore(0);
+    const acquired = await Promise.race([
+      semaphore.acquire().then((release) => {
+        release();
+        return true;
+      }),
+      new Promise<boolean>((resolve) => setImmediate(() => resolve(false))),
+    ]);
+
+    assert.equal(acquired, true);
+    assert.equal(semaphore.isBusy(), false);
+  });
+
   it('never exceeds the limit and wakes waiters in order', async () => {
     const semaphore = new Semaphore(2);
     let active = 0;
@@ -314,7 +329,48 @@ describe('Semaphore', () => {
     );
 
     assert.equal(peak, 2);
-    assert.equal(order.length, 6);
+    assert.deepEqual(order, [0, 1, 2, 3, 4, 5]);
+  });
+
+  it('wakes high-priority waiters first and preserves FIFO within each priority', async () => {
+    const semaphore = new Semaphore(1);
+    const first = await semaphore.acquire();
+    const order: string[] = [];
+    const queue = (label: string, priority: SemaphorePriority) =>
+      semaphore.acquire(priority).then((release) => {
+        order.push(label);
+        release();
+      });
+
+    const normal1 = queue('normal-1', 'normal');
+    const high1 = queue('high-1', 'high');
+    const normal2 = queue('normal-2', 'normal');
+    const high2 = queue('high-2', 'high');
+
+    first();
+    await Promise.all([normal1, high1, normal2, high2]);
+
+    assert.deepEqual(order, ['high-1', 'high-2', 'normal-1', 'normal-2']);
+  });
+
+  it('transfers a released slot without letting a new arrival bypass the selected waiter', async () => {
+    const semaphore = new Semaphore(1);
+    const first = await semaphore.acquire();
+    const order: string[] = [];
+    const queued = semaphore.acquire().then((release) => {
+      order.push('queued');
+      release();
+    });
+
+    first();
+    const newcomer = semaphore.acquire('high').then((release) => {
+      order.push('newcomer');
+      release();
+    });
+    await Promise.all([queued, newcomer]);
+
+    assert.deepEqual(order, ['queued', 'newcomer']);
+    assert.equal(semaphore.isBusy(), false);
   });
 
   it('tolerates double release without freeing an extra slot', async () => {

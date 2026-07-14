@@ -19,6 +19,7 @@ import {
 } from './filter.ts';
 import { createTelemetryRecorder, type TelemetryRecorder } from './telemetry.ts';
 import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
+import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
 import {
   resolvePiEngine,
   runPiAddressedPriorCommentsCheck,
@@ -176,13 +177,7 @@ import {
 import type { Octokit, PrFile, PriorJbotThread, PriorJbotThreads } from './github.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
-import type {
-  AddressedPriorComment,
-  Finding,
-  FindingVerdict,
-  ReviewResult,
-  Severity,
-} from './types.ts';
+import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
 /** Blocking findings verified per run; the rest pass through unverified. */
 const MAX_VERIFIED_FINDINGS = 10;
@@ -190,54 +185,6 @@ const EMBEDDED_ONLY_CLI_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
   totalBudgetBytes: 512 * 1024,
   perFileBudgetBytes: 512 * 1024,
 };
-
-interface ReviewBackend {
-  name: string;
-  runReview(
-    model: string,
-    prContext: string,
-    guidelines: string,
-    log: (msg: string) => void,
-    options?: {
-      lensAddendum?: string;
-      label?: string;
-      timeoutMs?: number;
-      onTokenUsage?: TokenUsageRecorder;
-      evidenceQuotes?: boolean;
-    },
-  ): Promise<ReviewResult>;
-  runAddressedPriorCommentsCheck(
-    model: string,
-    prContext: string,
-    log: (msg: string) => void,
-    timeoutMs?: number,
-    onTokenUsage?: TokenUsageRecorder,
-  ): Promise<AddressedPriorComment[]>;
-  runGuidelineComplianceCheck(
-    model: string,
-    prContext: string,
-    guidelines: string,
-    log: (msg: string) => void,
-    timeoutMs?: number,
-    onTokenUsage?: TokenUsageRecorder,
-  ): Promise<Finding[]>;
-  runFindingVerification(
-    model: string,
-    prContext: string,
-    findings: Finding[],
-    log: (msg: string) => void,
-    timeoutMs?: number,
-    onTokenUsage?: TokenUsageRecorder,
-  ): Promise<FindingVerdict[] | undefined>;
-  runChangesSinceLastReview(
-    model: string,
-    prContext: string,
-    deltaContext: string,
-    log: (msg: string) => void,
-    timeoutMs?: number,
-    onTokenUsage?: TokenUsageRecorder,
-  ): Promise<string>;
-}
 
 function createOpencodeBackend(
   client: Awaited<ReturnType<typeof startOpencode>>['client'],
@@ -717,32 +664,6 @@ function createQoderBackend(workspace: string, token: string): ReviewBackend {
         onTokenUsage,
         token,
       ),
-  };
-}
-
-function limitBackendConcurrency(
-  backend: ReviewBackend,
-  slots: Semaphore | undefined,
-): ReviewBackend {
-  if (!slots) return backend;
-  const withSlot = async <T>(run: () => Promise<T>): Promise<T> => {
-    const release = await slots.acquire();
-    try {
-      return await run();
-    } finally {
-      release();
-    }
-  };
-  return {
-    name: backend.name,
-    runReview: (...args) => withSlot(() => backend.runReview(...args)),
-    runAddressedPriorCommentsCheck: (...args) =>
-      withSlot(() => backend.runAddressedPriorCommentsCheck(...args)),
-    runGuidelineComplianceCheck: (...args) =>
-      withSlot(() => backend.runGuidelineComplianceCheck(...args)),
-    runFindingVerification: (...args) => withSlot(() => backend.runFindingVerification(...args)),
-    runChangesSinceLastReview: (...args) =>
-      withSlot(() => backend.runChangesSinceLastReview(...args)),
   };
 }
 
@@ -1275,6 +1196,7 @@ export async function runPrReview(params: {
   let codexBackend: ReviewBackend | undefined;
   let clineBackend: ReviewBackend | undefined;
   let grokBackend: ReviewBackend | undefined;
+  let grokSessionSlots: Semaphore | undefined;
   let kiloBackend: ReviewBackend | undefined;
   let qoderBackend: ReviewBackend | undefined;
   let commandCodeHome: string | undefined;
@@ -1317,7 +1239,7 @@ export async function runPrReview(params: {
     }
     const credentialsPath = writeDevinCredentials(devinApiKey);
     log(`Devin CLI credentials configured at ${credentialsPath}.`);
-    devinBackend = limitBackendConcurrency(createDevinBackend(workspace), sessionSlots);
+    devinBackend = createDevinBackend(workspace);
   }
 
   if (mainCliBackend === CURSOR_PROVIDER_ID || auxCliBackend === CURSOR_PROVIDER_ID) {
@@ -1330,10 +1252,7 @@ export async function runPrReview(params: {
     log(
       'Cursor CLI authenticated via CURSOR_API_KEY; token usage is unavailable for those sessions.',
     );
-    cursorBackend = limitBackendConcurrency(
-      createCursorBackend(workspace, cursorApiKey),
-      sessionSlots,
-    );
+    cursorBackend = createCursorBackend(workspace, cursorApiKey);
   }
 
   if (mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID) {
@@ -1351,10 +1270,7 @@ export async function runPrReview(params: {
     }
     log(`CommandCode CLI auth configured at ${authPath}.`);
     log('CommandCode CLI token usage is unavailable; review metadata may omit those sessions.');
-    commandCodeBackend = limitBackendConcurrency(
-      createCommandCodeBackend(workspace, commandCodeHome),
-      sessionSlots,
-    );
+    commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome);
   }
 
   if (mainCliBackend === CODEX_PROVIDER_ID || auxCliBackend === CODEX_PROVIDER_ID) {
@@ -1373,7 +1289,7 @@ export async function runPrReview(params: {
     }
     log(`Codex CLI auth configured at ${authPath}.`);
     log('Codex CLI token usage is unavailable; review metadata may omit those sessions.');
-    codexBackend = limitBackendConcurrency(createCodexBackend(workspace, codexHome), sessionSlots);
+    codexBackend = createCodexBackend(workspace, codexHome);
   }
 
   if (mainCliBackend === CLINE_PROVIDER_ID || auxCliBackend === CLINE_PROVIDER_ID) {
@@ -1392,7 +1308,7 @@ export async function runPrReview(params: {
     }
     log(`Cline CLI auth configured at ${authPath}.`);
     log('Cline CLI token usage is unavailable; review metadata may omit those sessions.');
-    clineBackend = limitBackendConcurrency(createClineBackend(workspace, clineHome), sessionSlots);
+    clineBackend = createClineBackend(workspace, clineHome);
   }
 
   if (mainCliBackend === GROK_PROVIDER_ID || auxCliBackend === GROK_PROVIDER_ID) {
@@ -1418,12 +1334,9 @@ export async function runPrReview(params: {
     log(
       'Grok Build CLI runs against an empty read-only workspace; token usage is unavailable for those sessions.',
     );
-    // Grok shares mutable per-run state, including rotated account auth. Acquire
-    // its serial slot before the shared limiter so queued calls hold no global slot.
-    grokBackend = limitBackendConcurrency(
-      limitBackendConcurrency(createGrokBackend(runtime), sessionSlots),
-      new Semaphore(1),
-    );
+    grokBackend = createGrokBackend(runtime);
+    // Grok mutates shared auth state, so its sessions cannot overlap.
+    grokSessionSlots = new Semaphore(1);
   }
 
   if (mainCliBackend === KILO_PROVIDER_ID || auxCliBackend === KILO_PROVIDER_ID) {
@@ -1442,7 +1355,7 @@ export async function runPrReview(params: {
     // session self-manages a temp HOME/XDG for kilo's SQLite data dir.
     log('Kilo CLI auth configured via KILO_AUTH_CONTENT (env-injected; per-session temp HOME).');
     log('Kilo CLI token usage is unavailable; review metadata may omit those sessions.');
-    kiloBackend = limitBackendConcurrency(createKiloBackend(workspace, kiloAuth), sessionSlots);
+    kiloBackend = createKiloBackend(workspace, kiloAuth);
   }
 
   if (mainCliBackend === QODER_PROVIDER_ID || auxCliBackend === QODER_PROVIDER_ID) {
@@ -1454,7 +1367,7 @@ export async function runPrReview(params: {
     log(
       'Qoder CLI authenticated via a per-session PAT payload; user/project settings, hooks, MCP, writes, shell, web, and subagents are disabled.',
     );
-    qoderBackend = limitBackendConcurrency(createQoderBackend(workspace, qoderToken), sessionSlots);
+    qoderBackend = createQoderBackend(workspace, qoderToken);
   }
 
   // Both SDK roles on one engine but different providers: the aux provider gets
@@ -1506,7 +1419,7 @@ export async function runPrReview(params: {
       cleanupCliHomes();
       throw error;
     }
-    piBackend = limitBackendConcurrency(createPiBackend(piRuntime.runtime), sessionSlots);
+    piBackend = createPiBackend(piRuntime.runtime);
   }
 
   if (needsOpencode) {
@@ -1546,10 +1459,7 @@ export async function runPrReview(params: {
       cleanupCliHomes();
       throw error;
     }
-    opencodeBackend = limitBackendConcurrency(
-      createOpencodeBackend(opencodeRuntime.client),
-      sessionSlots,
-    );
+    opencodeBackend = createOpencodeBackend(opencodeRuntime.client);
   }
 
   const cliBackends: Record<CliBackendID, ReviewBackend | undefined> = {
@@ -1562,16 +1472,28 @@ export async function runPrReview(params: {
     [KILO_PROVIDER_ID]: kiloBackend,
     [QODER_PROVIDER_ID]: qoderBackend,
   };
-  const mainBackend = mainCliBackend
+  const mainBaseBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)
     : mainOnPi
       ? requireSdkBackend(piBackend, 'pi', 'main')
       : requireSdkBackend(opencodeBackend, 'opencode', 'main');
-  const auxBackend = auxCliBackend
+  const auxBaseBackend = auxCliBackend
     ? requireCliBackend(cliBackends, auxCliBackend)
     : auxOnPi
       ? requireSdkBackend(piBackend, 'pi', 'aux')
       : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
+  const mainBackend = limitReviewBackendSessions(
+    mainBaseBackend,
+    'main',
+    sessionSlots,
+    mainBaseBackend === grokBackend ? grokSessionSlots : undefined,
+  );
+  const auxBackend = limitReviewBackendSessions(
+    auxBaseBackend,
+    'aux',
+    sessionSlots,
+    auxBaseBackend === grokBackend ? grokSessionSlots : undefined,
+  );
   // Which engine each model ran on, for the review footer (main wins on
   // collision — same model ⇒ same engine anyway).
   const engineByModel: Record<string, string> = {
@@ -1693,19 +1615,6 @@ export async function runPrReview(params: {
         : undefined,
     });
 
-    const addressedPriorCheck = trackAuxiliarySession(
-      'addressed-prior-comments',
-      startAddressedPriorCommentsCheck({
-        backend: auxBackend,
-        model: auxModel,
-        prContext: auxPrContext,
-        priorJbotThreads: auxHasCompleteEmbeddedDiff ? priorJbotThreads : [],
-        timeoutMs: finderTimeoutMs,
-        log,
-        onTokenUsage: recordTokenUsage,
-      }),
-    );
-
     // On a re-review, drop the recall supplements whose trigger class the
     // incremental delta (since the last reviewed head) doesn't touch. Best-effort
     // and dynamic-fanout-gated; a null delta (first review, fetch failure, or
@@ -1747,6 +1656,48 @@ export async function runPrReview(params: {
         );
       }
     }
+
+    log(
+      formatContextBudget([
+        { name: 'guidelines', text: guidelinesForPrompt },
+        { name: 'core', text: coreContext },
+        { name: 'diff', text: diffHunksBlock },
+        { name: 'context7', text: context7Block },
+      ]),
+    );
+    log(`Running review (${shardPlans.length} shard(s))`);
+    // Submit every main shard before auxiliary work. Priority ordering also
+    // keeps a later main-shard retry ahead of queued auxiliary sessions.
+    const mainReview = runShardedReview({
+      backend: mainBackend,
+      model,
+      guidelinesForPrompt,
+      shardPlans,
+      changedFiles,
+      timeoutMs: finderTimeoutMs,
+      deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt),
+      context7Active,
+      context7ApiKey: options.context7ApiKey,
+      disableContext7: opencodeRuntime
+        ? () => disableContext7Mcp(opencodeRuntime!.client, log)
+        : undefined,
+      evidenceQuotes: options.evidenceQuotes,
+      log,
+      onTokenUsage: recordTokenUsage,
+    });
+
+    const addressedPriorCheck = trackAuxiliarySession(
+      'addressed-prior-comments',
+      startAddressedPriorCommentsCheck({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: auxPrContext,
+        priorJbotThreads: auxHasCompleteEmbeddedDiff ? priorJbotThreads : [],
+        timeoutMs: finderTimeoutMs,
+        log,
+        onTokenUsage: recordTokenUsage,
+      }),
+    );
 
     const guidelineComplianceCheck = trackAuxiliarySession(
       'guideline-compliance',
@@ -1806,32 +1757,7 @@ export async function runPrReview(params: {
       }),
     );
 
-    log(
-      formatContextBudget([
-        { name: 'guidelines', text: guidelinesForPrompt },
-        { name: 'core', text: coreContext },
-        { name: 'diff', text: diffHunksBlock },
-        { name: 'context7', text: context7Block },
-      ]),
-    );
-    log(`Running review (${shardPlans.length} shard(s))`);
-    const { summary, findings } = await runShardedReview({
-      backend: mainBackend,
-      model,
-      guidelinesForPrompt,
-      shardPlans,
-      changedFiles,
-      timeoutMs: finderTimeoutMs,
-      deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt),
-      context7Active,
-      context7ApiKey: options.context7ApiKey,
-      disableContext7: opencodeRuntime
-        ? () => disableContext7Mcp(opencodeRuntime!.client, log)
-        : undefined,
-      evidenceQuotes: options.evidenceQuotes,
-      log,
-      onTokenUsage: recordTokenUsage,
-    });
+    const { summary, findings } = await mainReview;
     const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
       lensPasses,
       addressedPriorCheck,
