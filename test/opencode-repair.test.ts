@@ -296,6 +296,20 @@ describe('runFindingVerification evidence grounding', () => {
 });
 
 describe('Semaphore', () => {
+  it('treats zero as unlimited without tracking slots', async () => {
+    const semaphore = new Semaphore(0);
+    const acquired = await Promise.race([
+      semaphore.acquire().then((release) => {
+        release();
+        return true;
+      }),
+      new Promise<boolean>((resolve) => setImmediate(() => resolve(false))),
+    ]);
+
+    assert.equal(acquired, true);
+    assert.equal(semaphore.isBusy(), false);
+  });
+
   it('never exceeds the limit and wakes waiters in order', async () => {
     const semaphore = new Semaphore(2);
     let active = 0;
@@ -356,6 +370,7 @@ describe('Semaphore', () => {
     await Promise.all([queued, newcomer]);
 
     assert.deepEqual(order, ['queued', 'newcomer']);
+    assert.equal(semaphore.isBusy(), false);
   });
 
   it('tolerates double release without freeing an extra slot', async () => {

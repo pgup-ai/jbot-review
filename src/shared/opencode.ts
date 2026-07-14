@@ -244,6 +244,7 @@ export class Semaphore {
   constructor(private readonly limit: number) {}
 
   async acquire(priority: SemaphorePriority = 'normal'): Promise<() => void> {
+    if (this.limit === 0) return () => undefined;
     if (this.active < this.limit) {
       this.active += 1;
     } else {
