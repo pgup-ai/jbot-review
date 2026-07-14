@@ -19,6 +19,7 @@ import {
 } from './filter.ts';
 import { createTelemetryRecorder, type TelemetryRecorder } from './telemetry.ts';
 import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
+import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
 import {
   resolvePiEngine,
   runPiAddressedPriorCommentsCheck,
@@ -66,7 +67,7 @@ import {
   formatContext7Error,
   Semaphore,
 } from './opencode.ts';
-import type { PromptTokenUsage, SemaphorePriority, TokenUsageRecorder } from './opencode.ts';
+import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
 import {
   DEVIN_PROVIDER_ID,
   runDevinAddressedPriorCommentsCheck,
@@ -176,13 +177,7 @@ import {
 import type { Octokit, PrFile, PriorJbotThread, PriorJbotThreads } from './github.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
-import type {
-  AddressedPriorComment,
-  Finding,
-  FindingVerdict,
-  ReviewResult,
-  Severity,
-} from './types.ts';
+import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
 /** Blocking findings verified per run; the rest pass through unverified. */
 const MAX_VERIFIED_FINDINGS = 10;
@@ -190,54 +185,6 @@ const EMBEDDED_ONLY_CLI_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
   totalBudgetBytes: 512 * 1024,
   perFileBudgetBytes: 512 * 1024,
 };
-
-interface ReviewBackend {
-  name: string;
-  runReview(
-    model: string,
-    prContext: string,
-    guidelines: string,
-    log: (msg: string) => void,
-    options?: {
-      lensAddendum?: string;
-      label?: string;
-      timeoutMs?: number;
-      onTokenUsage?: TokenUsageRecorder;
-      evidenceQuotes?: boolean;
-    },
-  ): Promise<ReviewResult>;
-  runAddressedPriorCommentsCheck(
-    model: string,
-    prContext: string,
-    log: (msg: string) => void,
-    timeoutMs?: number,
-    onTokenUsage?: TokenUsageRecorder,
-  ): Promise<AddressedPriorComment[]>;
-  runGuidelineComplianceCheck(
-    model: string,
-    prContext: string,
-    guidelines: string,
-    log: (msg: string) => void,
-    timeoutMs?: number,
-    onTokenUsage?: TokenUsageRecorder,
-  ): Promise<Finding[]>;
-  runFindingVerification(
-    model: string,
-    prContext: string,
-    findings: Finding[],
-    log: (msg: string) => void,
-    timeoutMs?: number,
-    onTokenUsage?: TokenUsageRecorder,
-  ): Promise<FindingVerdict[] | undefined>;
-  runChangesSinceLastReview(
-    model: string,
-    prContext: string,
-    deltaContext: string,
-    log: (msg: string) => void,
-    timeoutMs?: number,
-    onTokenUsage?: TokenUsageRecorder,
-  ): Promise<string>;
-}
 
 function createOpencodeBackend(
   client: Awaited<ReturnType<typeof startOpencode>>['client'],
@@ -717,33 +664,6 @@ function createQoderBackend(workspace: string, token: string): ReviewBackend {
         onTokenUsage,
         token,
       ),
-  };
-}
-
-function limitBackendConcurrency(
-  backend: ReviewBackend,
-  slots: Semaphore | undefined,
-  priority: SemaphorePriority = 'normal',
-): ReviewBackend {
-  if (!slots) return backend;
-  const withSlot = async <T>(run: () => Promise<T>): Promise<T> => {
-    const release = await slots.acquire(priority);
-    try {
-      return await run();
-    } finally {
-      release();
-    }
-  };
-  return {
-    name: backend.name,
-    runReview: (...args) => withSlot(() => backend.runReview(...args)),
-    runAddressedPriorCommentsCheck: (...args) =>
-      withSlot(() => backend.runAddressedPriorCommentsCheck(...args)),
-    runGuidelineComplianceCheck: (...args) =>
-      withSlot(() => backend.runGuidelineComplianceCheck(...args)),
-    runFindingVerification: (...args) => withSlot(() => backend.runFindingVerification(...args)),
-    runChangesSinceLastReview: (...args) =>
-      withSlot(() => backend.runChangesSinceLastReview(...args)),
   };
 }
 
@@ -1415,6 +1335,7 @@ export async function runPrReview(params: {
       'Grok Build CLI runs against an empty read-only workspace; token usage is unavailable for those sessions.',
     );
     grokBackend = createGrokBackend(runtime);
+    // Grok mutates shared auth state, so its sessions cannot overlap.
     grokSessionSlots = new Semaphore(1);
   }
 
@@ -1561,19 +1482,18 @@ export async function runPrReview(params: {
     : auxOnPi
       ? requireSdkBackend(piBackend, 'pi', 'aux')
       : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
-  const applySessionLimits = (
-    backend: ReviewBackend,
-    priority: SemaphorePriority,
-  ): ReviewBackend => {
-    const globallyLimited = limitBackendConcurrency(backend, sessionSlots, priority);
-    // Grok's mutable auth state is serial. Take that provider-local slot first
-    // so a queued Grok call never occupies a global model-session slot.
-    return backend === grokBackend && grokSessionSlots
-      ? limitBackendConcurrency(globallyLimited, grokSessionSlots, priority)
-      : globallyLimited;
-  };
-  const mainBackend = applySessionLimits(mainBaseBackend, 'high');
-  const auxBackend = applySessionLimits(auxBaseBackend, 'normal');
+  const mainBackend = limitReviewBackendSessions(
+    mainBaseBackend,
+    'main',
+    sessionSlots,
+    mainBaseBackend === grokBackend ? grokSessionSlots : undefined,
+  );
+  const auxBackend = limitReviewBackendSessions(
+    auxBaseBackend,
+    'aux',
+    sessionSlots,
+    auxBaseBackend === grokBackend ? grokSessionSlots : undefined,
+  );
   // Which engine each model ran on, for the review footer (main wins on
   // collision — same model ⇒ same engine anyway).
   const engineByModel: Record<string, string> = {
