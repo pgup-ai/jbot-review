@@ -3,6 +3,7 @@ import * as github from '@actions/github';
 
 import {
   PROVIDERS,
+  defaultModelOptions,
   providerCredentialSources,
   resolveProviderBaseURL,
   resolveProviderCredential,
@@ -20,11 +21,6 @@ import type { Octokit } from '../shared/github.ts';
 import type { Severity } from '../shared/types.ts';
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
-
-// Medium effort by default: on throttled tiers, "high" produced 2.5-15min
-// session variance that no budget can absorb. Raise it per-repo for paid
-// heavy tiers; pass '{}' to send no options at all.
-const DEFAULT_MODEL_OPTIONS: Record<string, unknown> = { reasoningEffort: 'medium' };
 
 async function main(): Promise<void> {
   const failOnError = parseBooleanInput('fail-on-error', true);
@@ -94,7 +90,7 @@ async function main(): Promise<void> {
     timeBudgetMinutes: parseNumberInput('time-budget-minutes', 30),
     reviewShards: parseNumberInput('review-shards', 1),
     dynamicFanout: parseBooleanInput('dynamic-fanout', true),
-    modelOptions: parseJsonObjectInput('model-options', DEFAULT_MODEL_OPTIONS),
+    modelOptions: parseJsonObjectInput('model-options', defaultModelOptions(provider)),
     promptCache: parseBooleanInput('prompt-cache', true),
     skipDocOnly: parseBooleanInput('skip-doc-only', true),
     maxConcurrentSessions: parseNumberInput('max-concurrent-sessions', 3),

@@ -11,6 +11,7 @@ import { CODEX_CLI_BIN, CODEX_PROVIDER_ID } from '../shared/codex.ts';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
 import {
   PROVIDERS,
+  defaultModelOptions,
   providerCredentialSources,
   resolveProviderBaseURL,
   resolveProviderCredential,
@@ -320,7 +321,7 @@ async function main(): Promise<void> {
       timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
       reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
       dynamicFanout: parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),
-      modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'medium' }),
+      modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', defaultModelOptions(provider)),
       promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),
       skipDocOnly: parseEnvBoolean('JBOT_SKIP_DOC_ONLY', true),
       maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),

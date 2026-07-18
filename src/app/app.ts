@@ -4,6 +4,7 @@ import type { InstallationAccessTokenAuthentication } from '@octokit/auth-app';
 import { createAppOctokit } from './auth.ts';
 import { clonePr } from './clone.ts';
 import { runPrReview } from '../shared/runner.ts';
+import { defaultModelOptions } from '../shared/config.ts';
 import { parseModelName, resolveAuxModelName } from '../shared/model.ts';
 import { enqueue } from './queue.ts';
 
@@ -120,7 +121,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
           reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
           dynamicFanout: parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),
-          modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'medium' }),
+          modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', defaultModelOptions(providerID)),
           promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),
           skipDocOnly: parseEnvBoolean('JBOT_SKIP_DOC_ONLY', true),
           maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),

@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import {
   PROVIDERS,
+  defaultModelOptions,
   modelSupportsPromptCache,
+  needsAuxOpencodeConfig,
   providerCredentialSources,
   resolveProviderBaseURL,
   resolveProviderCredential,
@@ -70,6 +73,40 @@ describe('provider credentials', () => {
   });
 });
 
+describe('provider configuration resolution', () => {
+  it('uses a provider default when the model input is blank', () => {
+    assert.equal(resolveProviderModel('openai', PROVIDERS.openai, '  '), 'openai/gpt-5.4-nano');
+  });
+
+  it('rejects malformed base URLs as non-absolute', () => {
+    assert.throws(
+      () => resolveProviderBaseURL('openai-compatible', PROVIDERS['openai-compatible'], () => 'x'),
+      /expected an absolute URL/,
+    );
+  });
+
+  it('leaves Action model options unset for provider-aware defaults', () => {
+    const action = readFileSync(new URL('../action.yml', import.meta.url), 'utf8');
+    const input = action.split('\n  model-options:\n')[1]?.split('\n  prompt-cache:\n')[0];
+
+    assert.ok(input);
+    assert.doesNotMatch(input, /^\s+default:/m);
+  });
+
+  it('registers cross-provider config and distinct models on a shared custom provider', () => {
+    assert.equal(needsAuxOpencodeConfig('openai', 'gpt-5', 'openrouter', 'gpt-5'), true);
+    assert.equal(
+      needsAuxOpencodeConfig('openai-compatible', 'main', 'openai-compatible', 'aux'),
+      true,
+    );
+    assert.equal(needsAuxOpencodeConfig('openai', 'gpt-5', 'openai', 'gpt-5-mini'), false);
+    assert.equal(
+      needsAuxOpencodeConfig('openai-compatible', 'main', 'openai-compatible', 'main'),
+      false,
+    );
+  });
+});
+
 describe('kimi-for-coding (native Models.dev provider)', () => {
   it('uses the direct Kimi key surface and current K3 default', () => {
     assert.deepEqual(PROVIDERS['kimi-for-coding'], {
@@ -111,6 +148,8 @@ describe('openai-compatible custom provider', () => {
     assert.equal(PROVIDERS.openai.keyEnv, 'OPENAI_API_KEY');
     assert.equal(PROVIDERS.openai.keyInput, 'openai-api-key');
     assert.equal('custom' in PROVIDERS.openai, false);
+    assert.deepEqual(defaultModelOptions('openai-compatible'), {});
+    assert.deepEqual(defaultModelOptions('openai'), { reasoningEffort: 'medium' });
     assert.throws(
       () => resolveProviderModel('openai-compatible', provider, ''),
       /Missing model for provider "openai-compatible"/,
@@ -187,6 +226,32 @@ describe('openai-compatible custom provider', () => {
     assert.equal(options.baseURL, 'https://aux.example/v1');
     assert.equal('setCacheKey' in options, false);
     assert.deepEqual(entry.models, { 'aux-model': { name: 'aux-model' } });
+  });
+
+  it('registers distinct main and auxiliary models on the same custom endpoint', () => {
+    const config = buildConfig(
+      'openai-compatible',
+      'main-model',
+      'proxy-key',
+      { temperature: 0 },
+      false,
+      [
+        {
+          providerID: 'openai-compatible',
+          modelID: 'aux-model',
+          apiKey: 'proxy-key',
+          baseURL: 'https://proxy.example/v1',
+          promptCache: false,
+        },
+      ],
+      'https://proxy.example/v1',
+    );
+    const entry = providerEntry(config, 'openai-compatible');
+
+    assert.deepEqual(entry.models, {
+      'main-model': { name: 'main-model', options: { temperature: 0 } },
+      'aux-model': { name: 'aux-model' },
+    });
   });
 
   it('rejects incomplete custom entries before starting OpenCode', () => {

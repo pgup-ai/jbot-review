@@ -49,6 +49,23 @@ export function resolveProviderModel(
   return model;
 }
 
+export function defaultModelOptions(providerID: string): Record<string, unknown> {
+  // Arbitrary custom endpoints may reject provider-specific options.
+  return PROVIDERS[providerID]?.custom ? {} : { reasoningEffort: 'medium' };
+}
+
+export function needsAuxOpencodeConfig(
+  providerID: string,
+  modelID: string,
+  auxProviderID: string,
+  auxModelID: string,
+): boolean {
+  return (
+    auxProviderID !== providerID ||
+    (auxModelID !== modelID && Boolean(PROVIDERS[providerID]?.custom))
+  );
+}
+
 export function resolveProviderBaseURL(
   providerID: string,
   config: ProviderConfig,
@@ -181,7 +198,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'fireworks-ai/accounts/fireworks/models/deepseek-v4-flash',
     keyEnv: 'FIREWORKS_API_KEY',
     keyInput: 'fireworks-api-key',
-    // Fireworks rejects promptCacheKey for every model.
+    // Fireworks rejects opencode's promptCacheKey with a non-retryable 400 for every model.
     promptCache: false,
   },
   devin: {

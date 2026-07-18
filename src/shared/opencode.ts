@@ -177,7 +177,17 @@ export function buildConfig(
     }),
   };
   for (const providerKey of additionalProviderKeys) {
-    if (!providerKey.providerID || providerKey.providerID === providerID) continue;
+    if (!providerKey.providerID) continue;
+    if (providerKey.providerID === providerID) {
+      const custom = PROVIDERS[providerID]?.custom;
+      if (!custom || !providerKey.modelID || providerKey.modelID === modelID) continue;
+      const entry = providerConfig[providerID];
+      entry.models = {
+        ...entry.models,
+        [providerKey.modelID]: { name: providerKey.modelID },
+      };
+      continue;
+    }
     providerConfig[providerKey.providerID] = buildProviderEntry({
       providerID: providerKey.providerID,
       apiKey: providerKey.apiKey,

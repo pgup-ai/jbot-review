@@ -39,7 +39,7 @@ import {
   isDocOnlyChange,
   shardFilesForReview,
 } from './diff-context.ts';
-import { resolvePromptCachePolicy } from './config.ts';
+import { needsAuxOpencodeConfig, resolvePromptCachePolicy } from './config.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -1381,6 +1381,10 @@ export async function runPrReview(params: {
   // different vendor's endpoint (and fail auth there anyway).
   const auxNeedsOwnKey =
     auxProviderID !== providerID && ((mainOnPi && auxOnPi) || (mainOnOpencode && auxOnOpencode));
+  const auxNeedsOpencodeConfig =
+    mainOnOpencode &&
+    auxOnOpencode &&
+    needsAuxOpencodeConfig(providerID, modelID, auxProviderID, auxModelID);
   if (auxNeedsOwnKey && !options.auxApiKey) {
     cleanupCliHomes();
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
@@ -1449,13 +1453,13 @@ export async function runPrReview(params: {
             ? promptCachePolicy.providerPromptCache
             : promptCachePolicy.auxProviderPromptCache,
           port: options.opencodePort > 0 ? options.opencodePort : undefined,
-          additionalProviderKeys: auxNeedsOwnKey
+          additionalProviderKeys: auxNeedsOpencodeConfig
             ? [
                 {
                   providerID: auxProviderID,
-                  apiKey: options.auxApiKey,
+                  apiKey: auxNeedsOwnKey ? options.auxApiKey : opencodeApiKey,
                   modelID: auxModelID,
-                  baseURL: options.auxBaseURL,
+                  baseURL: auxNeedsOwnKey ? options.auxBaseURL : baseURL,
                   promptCache: promptCachePolicy.auxProviderPromptCache,
                 },
               ]
