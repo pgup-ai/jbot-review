@@ -66,9 +66,10 @@ function run(command: string, args: string[], label: string): string {
       timeout: COMMAND_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-  } catch {
+  } catch (cause) {
     throw new Error(
       `Failed to refresh ${label}. Install/authenticate that CLI, then rerun npm run models:update.`,
+      { cause },
     );
   }
 }
