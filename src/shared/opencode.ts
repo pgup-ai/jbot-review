@@ -8,6 +8,7 @@ import {
 } from '@opencode-ai/sdk';
 
 import { isContext7QuotaError } from './context7.ts';
+import { PROVIDERS } from './config.ts';
 import { parseModelName } from './model.ts';
 import {
   assembleAddressedPriorCommentsPrompt,
@@ -52,27 +53,50 @@ const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
 export interface ProviderKeyConfig {
   providerID: string;
   apiKey: string;
+}
+
+export interface OpencodeProviderConfig extends ProviderKeyConfig {
+  modelID?: string;
+  baseURL?: string;
   promptCache?: boolean;
 }
 
 type ProviderEntry = NonNullable<NonNullable<ServerOptions['config']>['provider']>[string];
 
 /**
- * Every provider is Models.dev-known, so opencode already has its base URL and
- * model catalog — this entry only needs the key (+ options).
+ * Models.dev-known providers need only their key and options. Custom providers
+ * also carry the SDK package, endpoint, and selected model required by opencode.
  */
 function buildProviderEntry(params: {
+  providerID: string;
   apiKey: string;
+  baseURL?: string;
   promptCache: boolean;
   modelID: string;
   modelOptions?: Record<string, unknown>;
 }): ProviderEntry {
-  const { apiKey, promptCache, modelID, modelOptions } = params;
+  const { providerID, apiKey, baseURL, promptCache, modelID, modelOptions } = params;
   const hasModelOptions = Boolean(modelOptions && Object.keys(modelOptions).length > 0);
   const options = {
     apiKey,
     ...(promptCache ? { setCacheKey: true } : {}),
   };
+  const custom = PROVIDERS[providerID]?.custom;
+  if (custom) {
+    if (!baseURL) throw new Error(`Missing base URL for custom provider "${providerID}".`);
+    if (!modelID) throw new Error(`Missing model for custom provider "${providerID}".`);
+    return {
+      name: custom.name,
+      npm: custom.npm,
+      options: { ...options, baseURL },
+      models: {
+        [modelID]: {
+          name: modelID,
+          ...(hasModelOptions ? { options: modelOptions } : {}),
+        },
+      },
+    };
+  }
   return {
     options,
     ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
@@ -139,11 +163,14 @@ export function buildConfig(
   apiKey: string,
   modelOptions?: Record<string, unknown>,
   promptCache = true,
-  additionalProviderKeys: ProviderKeyConfig[] = [],
+  additionalProviderKeys: OpencodeProviderConfig[] = [],
+  baseURL?: string,
 ): ServerOptions['config'] {
   const providerConfig: NonNullable<ServerOptions['config']>['provider'] = {
     [providerID]: buildProviderEntry({
+      providerID,
       apiKey,
+      baseURL,
       promptCache,
       modelID,
       modelOptions,
@@ -152,11 +179,13 @@ export function buildConfig(
   for (const providerKey of additionalProviderKeys) {
     if (!providerKey.providerID || providerKey.providerID === providerID) continue;
     providerConfig[providerKey.providerID] = buildProviderEntry({
+      providerID: providerKey.providerID,
       apiKey: providerKey.apiKey,
+      baseURL: providerKey.baseURL,
       promptCache: providerKey.promptCache ?? promptCache,
       // modelOptions is main-model-only (see above); an aux entry carries just
       // the key + its already-resolved promptCache boolean.
-      modelID: '',
+      modelID: providerKey.modelID ?? '',
     });
   }
   return {
@@ -309,7 +338,8 @@ export async function startOpencode(
     modelOptions?: Record<string, unknown>;
     port?: number;
     promptCache?: boolean;
-    additionalProviderKeys?: ProviderKeyConfig[];
+    baseURL?: string;
+    additionalProviderKeys?: OpencodeProviderConfig[];
   } = {},
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
   // Serialize against other startOpencode calls so the chdir → spawn → restore
@@ -361,6 +391,7 @@ export async function startOpencode(
       options.modelOptions,
       options.promptCache ?? true,
       options.additionalProviderKeys,
+      options.baseURL,
     );
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',

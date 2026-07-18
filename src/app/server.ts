@@ -4,7 +4,9 @@ import { Webhooks, createNodeMiddleware } from '@octokit/webhooks';
 import {
   PROVIDERS,
   providerCredentialSources,
+  resolveProviderBaseURL,
   resolveProviderCredential,
+  resolveProviderModel,
 } from '../shared/config.ts';
 import { formatModelName, resolveModelName } from '../shared/model.ts';
 import { handlePrEvent } from './app.ts';
@@ -40,18 +42,27 @@ if (!apiKey) {
       .join(' or ')}`,
   );
 }
+const baseURL = resolveProviderBaseURL(provider, cfg, ({ env }) => process.env[env]);
 const auxApiKey =
   auxModelInput && auxProvider !== provider && auxCfg
     ? resolveProviderCredential(auxCfg, ({ env }) => process.env[env])
+    : undefined;
+const auxBaseURL =
+  auxModelInput && auxProvider !== provider && auxCfg
+    ? resolveProviderBaseURL(auxProvider, auxCfg, ({ env }) => process.env[env])
     : undefined;
 
 const appCfg: AppConfig = {
   appId: mustEnv('GITHUB_APP_ID'),
   privateKey: mustEnv('GITHUB_APP_PRIVATE_KEY').replace(/\\n/g, '\n'),
   apiKey,
-  model: formatModelName(resolveModelName(provider, process.env.MODEL || cfg.defaultModel)),
+  model: formatModelName(
+    resolveModelName(provider, resolveProviderModel(provider, cfg, process.env.MODEL)),
+  ),
+  ...(baseURL ? { baseURL } : {}),
   auxProvider,
   ...(auxApiKey ? { auxApiKey } : {}),
+  ...(auxBaseURL ? { auxBaseURL } : {}),
 };
 
 const webhooks = new Webhooks({ secret: mustEnv('GITHUB_WEBHOOK_SECRET') });

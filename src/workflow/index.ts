@@ -4,7 +4,9 @@ import * as github from '@actions/github';
 import {
   PROVIDERS,
   providerCredentialSources,
+  resolveProviderBaseURL,
   resolveProviderCredential,
+  resolveProviderModel,
 } from '../shared/config.ts';
 import { parseContext7Mode } from '../shared/context7.ts';
 import {
@@ -44,7 +46,14 @@ async function main(): Promise<void> {
     );
   }
 
-  const modelInput = getInputOrEnv('model', 'JBOT_REVIEW_MODEL') || cfg.defaultModel;
+  const baseURL = resolveProviderBaseURL(provider, cfg, ({ input, env }) =>
+    getInputOrEnv(input, env),
+  );
+  const modelInput = resolveProviderModel(
+    provider,
+    cfg,
+    getInputOrEnv('model', 'JBOT_REVIEW_MODEL'),
+  );
   const model = formatModelName(resolveModelName(provider, modelInput));
   const auxModelInput = getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL');
   const auxProvider = auxModelInput
@@ -62,6 +71,12 @@ async function main(): Promise<void> {
   if (auxModel && auxProviderID !== provider) {
     auxApiKey = resolveProviderCredential(auxCfg!, ({ input, env }) => getInputOrEnv(input, env));
   }
+  const auxBaseURL =
+    auxModel && auxProviderID !== provider
+      ? resolveProviderBaseURL(auxProviderID, auxCfg!, ({ input, env }) =>
+          getInputOrEnv(input, env),
+        )
+      : undefined;
   const options = {
     enhancedContext: true,
     dryRun: parseBooleanInput('dry-run', false),
@@ -73,6 +88,7 @@ async function main(): Promise<void> {
     guidelinePass: parseBooleanInput('enable-guideline-pass', true),
     auxModel,
     auxApiKey,
+    auxBaseURL,
     reviewPasses: parseNumberInput('review-passes', 1),
     verifyFindings: parseBooleanInput('verify-findings', true),
     timeBudgetMinutes: parseNumberInput('time-budget-minutes', 30),
@@ -114,6 +130,7 @@ async function main(): Promise<void> {
       workspace: process.env.GITHUB_WORKSPACE ?? process.cwd(),
       model,
       apiKey,
+      baseURL,
       headSha: pull.head.sha,
       baseRef: pull.base.ref,
       baseSha: pull.base.sha,

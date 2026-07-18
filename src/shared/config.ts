@@ -1,8 +1,14 @@
 export interface ProviderConfig {
-  defaultModel: string;
+  defaultModel?: string;
   keyEnv: string;
   keyInput: string;
   fallbackKey?: { env: string; input: string };
+  custom?: {
+    name: string;
+    npm: string;
+    baseURL: { env: string; input: string };
+  };
+  promptCache?: boolean;
   models?: Record<string, ModelConfig>;
 }
 
@@ -27,6 +33,45 @@ export function resolveProviderCredential(
     if (value) return value;
   }
   return '';
+}
+
+export function resolveProviderModel(
+  providerID: string,
+  config: ProviderConfig,
+  value?: string,
+): string {
+  const model = value?.trim() || config.defaultModel;
+  if (!model) {
+    throw new Error(
+      `Missing model for provider "${providerID}". Pass model/JBOT_REVIEW_MODEL (MODEL outside the Action).`,
+    );
+  }
+  return model;
+}
+
+export function resolveProviderBaseURL(
+  providerID: string,
+  config: ProviderConfig,
+  read: (source: { env: string; input: string }) => string | undefined,
+): string | undefined {
+  const source = config.custom?.baseURL;
+  if (!source) return undefined;
+  const value = read(source)?.trim();
+  if (!value) {
+    throw new Error(
+      `Missing base URL for provider "${providerID}". Pass "${source.input}" or ${source.env}.`,
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`Invalid base URL for provider "${providerID}": expected an absolute URL.`);
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(`Invalid base URL for provider "${providerID}": expected http:// or https://.`);
+  }
+  return value;
 }
 
 export interface ModelConfig {
@@ -69,6 +114,20 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyEnv: 'OPENAI_API_KEY',
     keyInput: 'openai-api-key',
   },
+  'openai-compatible': {
+    keyEnv: 'JBOT_OPENAI_COMPATIBLE_API_KEY',
+    keyInput: 'openai-compatible-api-key',
+    custom: {
+      name: 'OpenAI Compatible',
+      npm: '@ai-sdk/openai-compatible',
+      baseURL: {
+        env: 'JBOT_OPENAI_COMPATIBLE_BASE_URL',
+        input: 'openai-compatible-base-url',
+      },
+    },
+    // Arbitrary OpenAI-compatible endpoints may reject opencode's promptCacheKey.
+    promptCache: false,
+  },
   anthropic: {
     defaultModel: 'anthropic/claude-sonnet-4-6',
     keyEnv: 'ANTHROPIC_API_KEY',
@@ -95,6 +154,13 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyInput: 'zai-api-key',
     models: GLM_PROMPT_CACHE_UNSUPPORTED_MODELS,
   },
+  'kimi-for-coding': {
+    defaultModel: 'kimi-for-coding/k3',
+    keyEnv: 'KIMI_API_KEY',
+    keyInput: 'kimi-api-key',
+    // Models.dev does not advertise support for opencode's promptCacheKey.
+    promptCache: false,
+  },
   xai: {
     defaultModel: 'xai/grok-4.3',
     keyEnv: 'XAI_API_KEY',
@@ -115,8 +181,8 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'fireworks-ai/accounts/fireworks/models/deepseek-v4-flash',
     keyEnv: 'FIREWORKS_API_KEY',
     keyInput: 'fireworks-api-key',
-    // No per-model promptCache override: Fireworks rejects promptCacheKey for every
-    // model, so it is disabled provider-wide in modelSupportsPromptCache below.
+    // Fireworks rejects promptCacheKey for every model.
+    promptCache: false,
   },
   devin: {
     defaultModel: 'devin/default',
@@ -221,10 +287,7 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     providerID === 'kilo'
   )
     return false;
-  // Fireworks' OpenAI-compatible endpoint strictly rejects unknown request fields, so
-  // the promptCacheKey opencode sends with setCacheKey returns a non-retryable 400 for
-  // every Fireworks model. Disable provider-wide rather than per-model.
-  if (providerID === 'fireworks-ai') return false;
+  if (PROVIDERS[providerID]?.promptCache === false) return false;
   return PROVIDERS[providerID]?.models?.[modelID]?.promptCache !== false;
 }
 
