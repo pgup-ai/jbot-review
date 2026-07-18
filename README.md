@@ -59,6 +59,10 @@ release tag if you need fully stable action behavior.
 > bundles `src/worker/` and `src/app/` (for the separately-deployed control plane),
 > but the Action runs only `dist/workflow/index.js`, and those paths share no
 > imports — so worker/server changes can't affect Action users.
+>
+> The standalone worker's mirrored control-plane payload carries models and
+> keys, but no custom base URL, so it does not support `openai-compatible` yet.
+> Native providers, including `kimi-for-coding`, work there unchanged.
 
 ### For the user (repo owner who wants reviews)
 
@@ -100,11 +104,14 @@ jobs:
           opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
           deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          openai-compatible-api-key: ${{ secrets.JBOT_OPENAI_COMPATIBLE_API_KEY }}
+          openai-compatible-base-url: ${{ vars.JBOT_OPENAI_COMPATIBLE_BASE_URL }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
           nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
           zai-api-key: ${{ secrets.ZAI_API_KEY }}
+          kimi-api-key: ${{ secrets.KIMI_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
           fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
           mimo-api-key: ${{ secrets.MIMO_API_KEY }}
@@ -131,11 +138,13 @@ fork policy, `workflow_dispatch` parity — are documented in
 
 **Step 2 — Add provider API keys as secrets.** In the repo: Settings → Secrets
 and variables → Actions → New repository secret. Add the keys for the providers
-you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`,
-`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
+you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
+`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`, `KIMI_API_KEY`,
 `XAI_API_KEY`, `FIREWORKS_API_KEY`, `MIMO_API_KEY`, `DEVIN_WINDSURF_API_KEY`,
 `COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, `QODER_PERSONAL_ACCESS_TOKEN`, `CODEX_AUTH_JSON`,
-`CLINE_AUTH_JSON`, `GROK_AUTH_JSON`, `KILO_AUTH_CONTENT`, or `ANTHROPIC_API_KEY`.
+`CLINE_AUTH_JSON`, `GROK_AUTH_JSON`, `KILO_AUTH_CONTENT`, `ANTHROPIC_API_KEY`, or
+`JBOT_OPENAI_COMPATIBLE_API_KEY`. Configure `JBOT_OPENAI_COMPATIBLE_BASE_URL`
+as an Actions variable when using the generic `openai-compatible` provider.
 Empty provider key inputs are ignored; if a cross-provider auxiliary model has
 no key for the selected aux provider, it reuses the review provider API key.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
@@ -273,11 +282,14 @@ without editing the workflow.
     opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
     deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
     openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+    openai-compatible-api-key: ${{ secrets.JBOT_OPENAI_COMPATIBLE_API_KEY }}
+    openai-compatible-base-url: ${{ vars.JBOT_OPENAI_COMPATIBLE_BASE_URL }}
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     zai-api-key: ${{ secrets.ZAI_API_KEY }}
+    kimi-api-key: ${{ secrets.KIMI_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
     fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
     mimo-api-key: ${{ secrets.MIMO_API_KEY }}
@@ -313,21 +325,21 @@ neither earns nor loses the 🚀). _Reactions are best-effort: if they don't
 appear, grant the workflow `issues: write` (PR reactions use the issues API);
 the review itself is unaffected._
 
-| Input                     | Default                        | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `review-passes`           | `1`                            | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `dynamic-fanout`          | `true`                         | Scale the recall-supplement fan-out (extra lens passes + the guideline-compliance pass) to the diff's risk and size: a small, low-risk change (≤3 files, ≤60 added lines, no security/data/API/infra path or build/CI tooling like `package.json`/`action.yml`/workflows, no dependency-manifest change, no large deletion) runs the general pass only and skips the guideline pass; everything else runs the full requested fan-out. The requested config is the ceiling — this only ever reduces it, and never gates the main full-diff review or `verify-findings`. Set `false` to force the full requested fan-out on every PR.                         |
-| `verify-findings`         | `true`                         | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `aux-model`               | unset                          | Model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification). Resolves against `aux-provider`/`JBOT_AUX_PROVIDER` when set, otherwise the main provider. Lets the main review run on a stronger tier while supporting checks stay cheap and fast.                                                                                                                                                                                                                                                                                                                                                             |
-| `aux-provider`            | main provider                  | Optional provider for `aux-model`; can come from `JBOT_AUX_PROVIDER`. If the aux provider's key input/env var is supplied, aux sessions use it; otherwise they reuse the review provider API key.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `review-shards`           | `1`                            | Parallel shards for the main review. `1` = no sharding, one full-diff session (default). `0` = auto from diff size, capped at 4. `N` = pin N shards. Sharding only speeds review up on providers that serve concurrent sessions; on free/throttled tiers the shards serialize on one key (see `max-concurrent-sessions`), so single-session is the better default. Either way the review covers the complete diff; raise it on paid concurrent tiers, or for very large PRs where smaller per-shard context helps depth.                                                                                                                                    |
-| `time-budget-minutes`     | `30`                           | Wall-clock target (`0` = no budget). Finder sessions get the full budget (minus a 30s posting reserve) as their deadline; shard retries and verification use whatever remains, or are skipped (fail-open). An auxiliary session (lens, addressed-thread, guideline, verification) over its deadline is aborted and fails open — degrading only its own coverage, never the run. A main review shard that still fails after its retry aborts the run rather than posting partial coverage.                                                                                                                                                                   |
-| `max-concurrent-sessions` | `3`                            | Max model sessions in flight (`0` = unlimited). Free/throttled tiers serialize one key's requests upstream — observed as a flash session queued 7+ minutes behind parallel shards. The capped default keeps each session's deadline measuring model time, not queue time; drop to `2` on tight free tiers, or set `0` on paid tiers with real concurrency.                                                                                                                                                                                                                                                                                                  |
-| `model-options`           | `{"reasoningEffort":"medium"}` | JSON object of provider options for the main model, passed through opencode to the provider SDK. Medium balances depth and latency; set `{"reasoningEffort":"high"}` on paid heavy tiers for maximum depth, or pass `{}` to send no options (e.g. for providers that reject unknown keys).                                                                                                                                                                                                                                                                                                                                                                  |
-| `prompt-cache`            | `true`                         | Enable opencode prompt caching (provider `setCacheKey`). Parallel shards and re-reviews of the same PR share a byte-identical prompt prefix, so caching cuts input-token cost on models that honor it; models marked unsupported by capability metadata omit the cache key entirely. Each session logs a `tokens: …` line with `cache(read=… write=…)` — `read > 0` on a later shard or re-review confirms a hit. Mostly matters on paid tiers.                                                                                                                                                                                                             |
-| `skip-doc-only`           | `true`                         | Skip the full review (no model call) when the entire PR diff is documentation, prose, or diagram assets (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, `.pdf`, `.svg`, `.drawio`, `.dio`, `.excalidraw`, `.mmd`, `.puml`, `.plantuml`); the reaction is left unchanged (a docs push doesn't change the verdict). Evaluated on the **reviewable** file set (noise like lockfiles and patchless/binary files are excluded — the bot never reviews those anyway, so the skip never drops review coverage); any reviewable code/config file forces a full review. Set `false` to always review, e.g. for docs with embedded code samples you care about. |
-| `review-telemetry`        | `true`                         | Write per-finding disposition + per-session token telemetry to the gitignored `.jbot-review/telemetry.jsonl` (uploaded as a CI artifact by the dogfood workflow). Near-zero overhead; `false` disables.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `evidence-quotes`         | `true`                         | Ask each finding for a verbatim quote of the changed line it flags. Grounds finding verification and lets a finding whose line anchor missed the diff be re-anchored to its quoted line instead of dropped. `false` restores the pre-evidence prompt byte-for-byte.                                                                                                                                                                                                                                                                                                                                                                                         |
+| Input                     | Default            | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `review-passes`           | `1`                | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `dynamic-fanout`          | `true`             | Scale the recall-supplement fan-out (extra lens passes + the guideline-compliance pass) to the diff's risk and size: a small, low-risk change (≤3 files, ≤60 added lines, no security/data/API/infra path or build/CI tooling like `package.json`/`action.yml`/workflows, no dependency-manifest change, no large deletion) runs the general pass only and skips the guideline pass; everything else runs the full requested fan-out. The requested config is the ceiling — this only ever reduces it, and never gates the main full-diff review or `verify-findings`. Set `false` to force the full requested fan-out on every PR.                         |
+| `verify-findings`         | `true`             | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `aux-model`               | unset              | Model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification). Resolves against `aux-provider`/`JBOT_AUX_PROVIDER` when set, otherwise the main provider. Lets the main review run on a stronger tier while supporting checks stay cheap and fast.                                                                                                                                                                                                                                                                                                                                                             |
+| `aux-provider`            | main provider      | Optional provider for `aux-model`; can come from `JBOT_AUX_PROVIDER`. If the aux provider's key input/env var is supplied, aux sessions use it; otherwise they reuse the review provider API key.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `review-shards`           | `1`                | Parallel shards for the main review. `1` = no sharding, one full-diff session (default). `0` = auto from diff size, capped at 4. `N` = pin N shards. Sharding only speeds review up on providers that serve concurrent sessions; on free/throttled tiers the shards serialize on one key (see `max-concurrent-sessions`), so single-session is the better default. Either way the review covers the complete diff; raise it on paid concurrent tiers, or for very large PRs where smaller per-shard context helps depth.                                                                                                                                    |
+| `time-budget-minutes`     | `30`               | Wall-clock target (`0` = no budget). Finder sessions get the full budget (minus a 30s posting reserve) as their deadline; shard retries and verification use whatever remains, or are skipped (fail-open). An auxiliary session (lens, addressed-thread, guideline, verification) over its deadline is aborted and fails open — degrading only its own coverage, never the run. A main review shard that still fails after its retry aborts the run rather than posting partial coverage.                                                                                                                                                                   |
+| `max-concurrent-sessions` | `3`                | Max model sessions in flight (`0` = unlimited). Free/throttled tiers serialize one key's requests upstream — observed as a flash session queued 7+ minutes behind parallel shards. The capped default keeps each session's deadline measuring model time, not queue time; drop to `2` on tight free tiers, or set `0` on paid tiers with real concurrency.                                                                                                                                                                                                                                                                                                  |
+| `model-options`           | provider-dependent | JSON object of provider options for the main model, passed through opencode to the provider SDK. Native providers default to `{"reasoningEffort":"medium"}`; custom providers default to `{}` because arbitrary endpoints may reject unknown options. Explicit values are preserved.                                                                                                                                                                                                                                                                                                                                                                        |
+| `prompt-cache`            | `true`             | Enable opencode prompt caching (provider `setCacheKey`). Parallel shards and re-reviews of the same PR share a byte-identical prompt prefix, so caching cuts input-token cost on models that honor it; models marked unsupported by capability metadata omit the cache key entirely. Each session logs a `tokens: …` line with `cache(read=… write=…)` — `read > 0` on a later shard or re-review confirms a hit. Mostly matters on paid tiers.                                                                                                                                                                                                             |
+| `skip-doc-only`           | `true`             | Skip the full review (no model call) when the entire PR diff is documentation, prose, or diagram assets (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, `.pdf`, `.svg`, `.drawio`, `.dio`, `.excalidraw`, `.mmd`, `.puml`, `.plantuml`); the reaction is left unchanged (a docs push doesn't change the verdict). Evaluated on the **reviewable** file set (noise like lockfiles and patchless/binary files are excluded — the bot never reviews those anyway, so the skip never drops review coverage); any reviewable code/config file forces a full review. Set `false` to always review, e.g. for docs with embedded code samples you care about. |
+| `review-telemetry`        | `true`             | Write per-finding disposition + per-session token telemetry to the gitignored `.jbot-review/telemetry.jsonl` (uploaded as a CI artifact by the dogfood workflow). Near-zero overhead; `false` disables.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `evidence-quotes`         | `true`             | Ask each finding for a verbatim quote of the changed line it flags. Grounds finding verification and lets a finding whose line anchor missed the diff be re-anchored to its quoted line instead of dropped. `false` restores the pre-evidence prompt byte-for-byte.                                                                                                                                                                                                                                                                                                                                                                                         |
 
 **Heavy-model recipe** (deep reviews from GPT‑5.x / Opus-class models with
 longer timeout headroom): set the main `model` to the heavy tier, then
@@ -352,21 +364,25 @@ default single session is both simpler and no slower — leave `review-shards` a
 
 ### Provider configuration (in-repo)
 
-See [models.dev](https://models.dev/) for opencode-backed model catalogs. CLI
-backends such as Devin, CommandCode, and Cursor expose model lists through their
-own tools/accounts.
+See the generated [model ID catalog](./MODEL_CATALOG.md) for every current
+Models.dev ID and the model IDs exposed by each supported CLI. Refresh it with
+`npm run models:update`; account-scoped CLI sections require those CLIs to be
+authenticated locally. The generator uses the npm versions pinned in the
+Docker image; Cursor comes from its vendor-installed binary, while Devin has no
+enumerable catalog command and is documented as that explicit boundary.
 
 **SDK engines.** Non-CLI providers run on one of two in-repo SDK engines,
 chosen automatically per session role. The rule: a provider pi can also serve
 routes to the in-process [pi SDK](https://pi.dev/docs/latest/sdk) first; the
-opencode server serves the rest. pi's allowlist currently covers every non-CLI
-provider — `anthropic`, `openai`, `google`, `deepseek`, `xai`, `openrouter`,
+opencode server serves the rest. pi's allowlist covers `anthropic`, `openai`,
+`google`, `deepseek`, `xai`, `openrouter`,
 `fireworks-ai`, `zai-coding-plan`, `xiaomi-token-plan-sgp`, `nvidia`, and the
 `opencode`/`opencode-go` Zen gateways (which pi reaches over their HTTP
-endpoint directly, not through the opencode server). Set
+endpoint directly, not through the opencode server). `kimi-for-coding` and
+`openai-compatible` stay on opencode. Set
 `JBOT_SDK_ENGINE=opencode` to pin every SDK session to opencode — the one-line
-rollback if pi misbehaves, and the path CLI backends' aux sessions still use. The pi engine requires
-Node >= 22.19 (the published Docker image runs Node 24); on older runtimes it
+rollback if pi misbehaves, and the path CLI backends' aux sessions still use.
+The pi engine requires Node >= 22.19 (the published Docker image runs Node 24); on older runtimes it
 disables itself and logs why. pi sessions run hermetically (no user-level pi
 config, skills, or prompt templates are loaded), get no shell (pi ships no
 sandbox, so read-only is enforced by withholding `bash` rather than by
@@ -390,11 +406,13 @@ jbot-review does not use them for smart key rotation.
 | `opencode-go`           | `opencode-go/deepseek-v4-flash`                            | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
 | `deepseek`              | `deepseek/deepseek-v4-flash`                               | `deepseek-api-key`              | `DEEPSEEK_API_KEY`                   |
 | `openai`                | `openai/gpt-5.4-nano`                                      | `openai-api-key`                | `OPENAI_API_KEY`                     |
+| `openai-compatible`     | required                                                   | `openai-compatible-api-key`     | `JBOT_OPENAI_COMPATIBLE_API_KEY`     |
 | `anthropic`             | `anthropic/claude-sonnet-4-6`                              | `anthropic-api-key`             | `ANTHROPIC_API_KEY`                  |
 | `google`                | `google/gemini-2.5-flash`                                  | `gemini-api-key`                | `GEMINI_API_KEY`                     |
 | `openrouter`            | `openrouter/openai/gpt-4o-mini`                            | `openrouter-api-key`            | `OPENROUTER_API_KEY`                 |
 | `nvidia`                | `nvidia/nemotron-3-ultra-550b-a55b`                        | `nvidia-api-key`                | `NVIDIA_API_KEY`                     |
 | `zai-coding-plan`       | `zai-coding-plan/glm-5.2`                                  | `zai-api-key`                   | `ZAI_API_KEY`                        |
+| `kimi-for-coding`       | `kimi-for-coding/k3`                                       | `kimi-api-key`                  | `KIMI_API_KEY`                       |
 | `xai`                   | `xai/grok-4.3`                                             | `xai-api-key`                   | `XAI_API_KEY`                        |
 | `fireworks-ai`          | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` | `fireworks-api-key`             | `FIREWORKS_API_KEY`                  |
 | `xiaomi-token-plan-sgp` | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                      | `mimo-api-key`                  | `MIMO_API_KEY`                       |
@@ -410,6 +428,39 @@ jbot-review does not use them for smart key rotation.
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
+Use `provider: kimi-for-coding` with `kimi-api-key` / `KIMI_API_KEY` for the
+native Models.dev Kimi Coding Plan provider. Its current default is Kimi K3.
+
+```yaml
+provider: kimi-for-coding
+kimi-api-key: ${{ secrets.KIMI_API_KEY }}
+```
+
+For an arbitrary OpenAI-compatible endpoint, set all three explicit values:
+
+```yaml
+provider: openai-compatible
+model: openai-compatible/my-served-model
+openai-compatible-api-key: ${{ secrets.JBOT_OPENAI_COMPATIBLE_API_KEY }}
+openai-compatible-base-url: ${{ vars.JBOT_OPENAI_COMPATIBLE_BASE_URL }}
+```
+
+These namespaced settings never fall back to `OPENAI_API_KEY` or
+`OPENAI_BASE_URL`, so the direct `openai` provider remains isolated. The model
+is required because a generic endpoint has no safe provider-wide default.
+For local review or the webhook app, the equivalent environment is:
+
+```dotenv
+PROVIDER=openai-compatible
+MODEL=openai-compatible/my-served-model
+JBOT_OPENAI_COMPATIBLE_API_KEY=sk-example
+JBOT_OPENAI_COMPATIBLE_BASE_URL=https://proxy.example/v1
+```
+
+J-Bot omits its `setCacheKey` option for both `kimi-for-coding` and
+`openai-compatible`: the live catalog does not advertise it for Kimi, and a
+generic endpoint may reject the extra request field.
+
 Use `provider: google` with `gemini-api-key` / `GEMINI_API_KEY` for direct
 Gemini API key auth.
 Use `provider: devin` with `devin-windsurf-api-key` /
@@ -436,7 +487,8 @@ PR reviews without editing workflow YAML on every provider or model change,
 define Actions configuration variables named `JBOT_REVIEW_PROVIDER` and
 `JBOT_REVIEW_MODEL` at the repository or organization level and pass them
 through the workflow. Leave `JBOT_REVIEW_PROVIDER` unset to use `opencode`, and
-leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
+leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model
+(`openai-compatible` is the exception and requires it):
 
 ```yaml
 - uses: pgup-ai/jbot-review-action@v0
@@ -448,11 +500,14 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model:
     opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
     deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
     openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+    openai-compatible-api-key: ${{ secrets.JBOT_OPENAI_COMPATIBLE_API_KEY }}
+    openai-compatible-base-url: ${{ vars.JBOT_OPENAI_COMPATIBLE_BASE_URL }}
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
     gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
     nvidia-api-key: ${{ secrets.NVIDIA_API_KEY }}
     zai-api-key: ${{ secrets.ZAI_API_KEY }}
+    kimi-api-key: ${{ secrets.KIMI_API_KEY }}
     xai-api-key: ${{ secrets.XAI_API_KEY }}
     fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
     mimo-api-key: ${{ secrets.MIMO_API_KEY }}
@@ -481,9 +536,12 @@ model from either action inputs or environment variables: `provider` or
 the main model, `aux-provider` or `JBOT_AUX_PROVIDER` for the auxiliary
 provider, and `aux-model` or `JBOT_REVIEW_AUX_MODEL` for the auxiliary model.
 Provider API keys can also be supplied through their standard env vars, such as
-`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`, or
-`FIREWORKS_API_KEY`. This convenience pattern exposes every configured provider
-key to the action runtime.
+`GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
+`KIMI_API_KEY`, `JBOT_OPENAI_COMPATIBLE_API_KEY`, or `FIREWORKS_API_KEY`. The
+custom endpoint also reads `JBOT_OPENAI_COMPATIBLE_BASE_URL`. This convenience
+pattern exposes every configured provider key to the action runtime.
+When `openai-compatible` is the auxiliary provider, pass its namespaced key and
+base URL alongside `aux-provider` / `aux-model`.
 For the smallest secret surface area, pass only the review provider key, plus an
 aux provider key only when it must be different.
 If `model` is set, it is interpreted as a model id for the selected `provider`.
@@ -510,41 +568,44 @@ documentation lookup.
 
 ### Input reference
 
-| Input                     | Required | Default               | Description                                                                |
-| ------------------------- | -------- | --------------------- | -------------------------------------------------------------------------- |
-| `provider`                | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`                     |
-| `model`                   | No       | Provider default      | Provider model id; can come from `JBOT_REVIEW_MODEL`                       |
-| `aux-provider`            | No       | Main provider         | Auxiliary model provider; can come from `JBOT_AUX_PROVIDER`                |
-| `aux-model`               | No       | Main model            | Auxiliary model id; can come from `JBOT_REVIEW_AUX_MODEL`                  |
-| `opencode-api-key`        | No       | —                     | Used when `provider` or `aux-provider` is `opencode`/`opencode-go`         |
-| `deepseek-api-key`        | No       | —                     | Used when `provider` or `aux-provider` is `deepseek`                       |
-| `openai-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `openai`                         |
-| `anthropic-api-key`       | No       | —                     | Used when `provider` or `aux-provider` is `anthropic`                      |
-| `gemini-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `google`                         |
-| `openrouter-api-key`      | No       | —                     | Used when `provider` or `aux-provider` is `openrouter`                     |
-| `nvidia-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `nvidia`                         |
-| `zai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `zai-coding-plan`                |
-| `xai-api-key`             | No       | —                     | Used by `xai`, or by `grok` when `grok-auth` is empty                      |
-| `fireworks-api-key`       | No       | —                     | Used when `provider` or `aux-provider` is `fireworks-ai`                   |
-| `devin-windsurf-api-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `devin`                   |
-| `commandcode-access-key`  | No       | —                     | Used when `provider` or active `aux-provider` is `commandcode`             |
-| `cursor-api-key`          | No       | —                     | Used when `provider` or active `aux-provider` is `cursor`                  |
-| `qoder-token`             | No       | —                     | Used when `provider` or active `aux-provider` is `qoder`                   |
-| `codex-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `codex`                   |
-| `cline-auth`              | No       | —                     | Used when `provider` or active `aux-provider` is `cline` / `cline-pass`    |
-| `grok-auth`               | No       | —                     | Grok account auth; preferred over `xai-api-key` when `grok` is selected    |
-| `kilo-auth`               | No       | —                     | Used when `provider` or active `aux-provider` is `kilo`                    |
-| `enable-context7`         | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false` |
-| `context7-api-key`        | No       | —                     | Optional Context7 key for reliable CI docs lookup                          |
-| `github-token`            | Yes      | `${{ github.token }}` | Token to read PR and post review                                           |
-| `thread-resolution-token` | No       | —                     | Optional token used only to resolve addressed review threads               |
-| `pr-number`               | No       | —                     | PR number for manual `workflow_dispatch` reviews                           |
-| `dry-run`                 | No       | `false`               | Log review output without posting to GitHub                                |
-| `max-findings`            | No       | `0`                   | Cap findings; `0` means no limit                                           |
-| `min-severity`            | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                                   |
-| `include-prior-comments`  | No       | `true`                | Include existing PR review comments in context                             |
-| `enable-guideline-pass`   | No       | `true`                | Run a dedicated guideline-compliance session when repo guidelines exist    |
-| `fail-on-error`           | No       | `true`                | Fail the workflow if the review cannot complete                            |
+| Input                        | Required | Default               | Description                                                                            |
+| ---------------------------- | -------- | --------------------- | -------------------------------------------------------------------------------------- |
+| `provider`                   | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`                                 |
+| `model`                      | No       | Provider default      | Provider model id; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL` |
+| `aux-provider`               | No       | Main provider         | Auxiliary model provider; can come from `JBOT_AUX_PROVIDER`                            |
+| `aux-model`                  | No       | Main model            | Auxiliary model id; can come from `JBOT_REVIEW_AUX_MODEL`                              |
+| `opencode-api-key`           | No       | —                     | Used when `provider` or `aux-provider` is `opencode`/`opencode-go`                     |
+| `deepseek-api-key`           | No       | —                     | Used when `provider` or `aux-provider` is `deepseek`                                   |
+| `openai-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `openai`                                     |
+| `openai-compatible-api-key`  | No       | —                     | Namespaced key for `openai-compatible`                                                 |
+| `openai-compatible-base-url` | No       | —                     | Required endpoint URL for `openai-compatible`                                          |
+| `anthropic-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `anthropic`                                  |
+| `gemini-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `google`                                     |
+| `openrouter-api-key`         | No       | —                     | Used when `provider` or `aux-provider` is `openrouter`                                 |
+| `nvidia-api-key`             | No       | —                     | Used when `provider` or `aux-provider` is `nvidia`                                     |
+| `zai-api-key`                | No       | —                     | Used when `provider` or `aux-provider` is `zai-coding-plan`                            |
+| `kimi-api-key`               | No       | —                     | Used when `provider` or `aux-provider` is `kimi-for-coding`                            |
+| `xai-api-key`                | No       | —                     | Used by `xai`, or by `grok` when `grok-auth` is empty                                  |
+| `fireworks-api-key`          | No       | —                     | Used when `provider` or `aux-provider` is `fireworks-ai`                               |
+| `devin-windsurf-api-key`     | No       | —                     | Used when `provider` or active `aux-provider` is `devin`                               |
+| `commandcode-access-key`     | No       | —                     | Used when `provider` or active `aux-provider` is `commandcode`                         |
+| `cursor-api-key`             | No       | —                     | Used when `provider` or active `aux-provider` is `cursor`                              |
+| `qoder-token`                | No       | —                     | Used when `provider` or active `aux-provider` is `qoder`                               |
+| `codex-auth`                 | No       | —                     | Used when `provider` or active `aux-provider` is `codex`                               |
+| `cline-auth`                 | No       | —                     | Used when `provider` or active `aux-provider` is `cline` / `cline-pass`                |
+| `grok-auth`                  | No       | —                     | Grok account auth; preferred over `xai-api-key` when `grok` is selected                |
+| `kilo-auth`                  | No       | —                     | Used when `provider` or active `aux-provider` is `kilo`                                |
+| `enable-context7`            | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false`             |
+| `context7-api-key`           | No       | —                     | Optional Context7 key for reliable CI docs lookup                                      |
+| `github-token`               | Yes      | `${{ github.token }}` | Token to read PR and post review                                                       |
+| `thread-resolution-token`    | No       | —                     | Optional token used only to resolve addressed review threads                           |
+| `pr-number`                  | No       | —                     | PR number for manual `workflow_dispatch` reviews                                       |
+| `dry-run`                    | No       | `false`               | Log review output without posting to GitHub                                            |
+| `max-findings`               | No       | `0`                   | Cap findings; `0` means no limit                                                       |
+| `min-severity`               | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                                               |
+| `include-prior-comments`     | No       | `true`                | Include existing PR review comments in context                                         |
+| `enable-guideline-pass`      | No       | `true`                | Run a dedicated guideline-compliance session when repo guidelines exist                |
+| `fail-on-error`              | No       | `true`                | Fail the workflow if the review cannot complete                                        |
 
 ### Review output
 
@@ -571,9 +632,10 @@ npm run review:local
   prints "nothing to review" and exits 0.
 - **Auth:** only the model provider credential — `PROVIDER` plus its key env
   var (same keys as [Provider configuration](#provider-configuration-in-repo);
-  full list in `src/shared/config.ts`). A `.env` in the repo root is loaded by
-  this command only. No GitHub credential is read, and nothing is posted
-  anywhere — dry-run is enforced in code.
+  full list in `src/shared/config.ts`), plus the namespaced base URL for
+  `openai-compatible`. A `.env` in the repo root is loaded by this command only.
+  No GitHub credential is read, and nothing is posted anywhere — dry-run is
+  enforced in code.
 - **Output:** findings print to the terminal; set `JBOT_LOCAL_REPORT=true` to
   also write `.jbot-review/last-run.md` (gitignored).
 - **Knobs:** the same env knobs as the hosted app apply — `JBOT_REVIEW_PASSES`,

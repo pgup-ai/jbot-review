@@ -4,6 +4,7 @@ import type { InstallationAccessTokenAuthentication } from '@octokit/auth-app';
 import { createAppOctokit } from './auth.ts';
 import { clonePr } from './clone.ts';
 import { runPrReview } from '../shared/runner.ts';
+import { defaultModelOptions } from '../shared/config.ts';
 import { parseModelName, resolveAuxModelName } from '../shared/model.ts';
 import { enqueue } from './queue.ts';
 
@@ -12,8 +13,10 @@ export interface AppConfig {
   privateKey: string;
   apiKey: string;
   model: string;
+  baseURL?: string;
   auxProvider?: string;
   auxApiKey?: string;
+  auxBaseURL?: string;
 }
 
 // The pull_request webhook event is a union of action-specific payload types.
@@ -101,6 +104,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         workspace: cloned.dir,
         model: cfg.model,
         apiKey: cfg.apiKey,
+        baseURL: cfg.baseURL,
         headSha: pr.head.sha,
         baseRef: pr.base.ref,
         baseSha: pr.base.sha,
@@ -113,10 +117,11 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
           auxModel,
           ...(cfg.auxApiKey ? { auxApiKey: cfg.auxApiKey } : {}),
+          ...(cfg.auxBaseURL ? { auxBaseURL: cfg.auxBaseURL } : {}),
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
           reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
           dynamicFanout: parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),
-          modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'medium' }),
+          modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', defaultModelOptions(providerID)),
           promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),
           skipDocOnly: parseEnvBoolean('JBOT_SKIP_DOC_ONLY', true),
           maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),

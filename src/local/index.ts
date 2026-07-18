@@ -11,8 +11,11 @@ import { CODEX_CLI_BIN, CODEX_PROVIDER_ID } from '../shared/codex.ts';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
 import {
   PROVIDERS,
+  defaultModelOptions,
   providerCredentialSources,
+  resolveProviderBaseURL,
   resolveProviderCredential,
+  resolveProviderModel,
 } from '../shared/config.ts';
 import { CURSOR_CLI_BIN, CURSOR_PROVIDER_ID } from '../shared/cursor.ts';
 import { DEVIN_PROVIDER_ID } from '../shared/devin.ts';
@@ -222,11 +225,12 @@ async function main(): Promise<void> {
       .join(' or ');
     throw new Error(
       `Missing ${envNames} for provider "${provider}". Local review needs only the ` +
-        'model provider credential — no GitHub token. Set it in the environment or in .env.',
+        'provider configuration — no GitHub token. Set it in the environment or in .env.',
     );
   }
+  const baseURL = resolveProviderBaseURL(provider, providerCfg, ({ env }) => process.env[env]);
   const model = formatModelName(
-    resolveModelName(provider, process.env.MODEL || providerCfg.defaultModel),
+    resolveModelName(provider, resolveProviderModel(provider, providerCfg, process.env.MODEL)),
   );
   const auxModelInput = process.env.JBOT_REVIEW_AUX_MODEL?.trim();
   const auxProvider = auxModelInput ? process.env.JBOT_AUX_PROVIDER?.trim() || provider : provider;
@@ -241,6 +245,10 @@ async function main(): Promise<void> {
       ? resolveProviderCredential(auxCfg, ({ env }) => process.env[env])
       : undefined;
   const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
+  const auxBaseURL =
+    auxModelInput && auxProvider !== provider && auxCfg
+      ? resolveProviderBaseURL(auxProvider, auxCfg, ({ env }) => process.env[env])
+      : undefined;
 
   // Backend-aware preflight: opencode only when the selection needs it; CLI
   // backends bring their own binary.
@@ -298,6 +306,7 @@ async function main(): Promise<void> {
     workspace: process.cwd(),
     model,
     apiKey,
+    baseURL,
     baseRef,
     baseSha: mergeBase,
     localDiff: { files, commits },
@@ -308,10 +317,11 @@ async function main(): Promise<void> {
       verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
       auxModel,
       ...(auxApiKey ? { auxApiKey } : {}),
+      ...(auxBaseURL ? { auxBaseURL } : {}),
       timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
       reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
       dynamicFanout: parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),
-      modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', { reasoningEffort: 'medium' }),
+      modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', defaultModelOptions(provider)),
       promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),
       skipDocOnly: parseEnvBoolean('JBOT_SKIP_DOC_ONLY', true),
       maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),

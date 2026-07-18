@@ -884,4 +884,33 @@ describe('selectReviewBackends pi engine routing', () => {
       },
     );
   });
+
+  it('keeps Kimi and generic OpenAI-compatible main and aux roles on opencode', () => {
+    for (const providerID of ['kimi-for-coding', 'openai-compatible']) {
+      const main = selectReviewBackends({
+        providerID,
+        modelID: 'model',
+        apiKey: 'main-key',
+        auxProviderID: providerID,
+        auxModelID: 'model',
+        auxApiKey: '',
+        piEnabled: true,
+      });
+      assert.equal(main.needsOpencode, true);
+      assert.equal(main.opencodeProviderID, providerID);
+      assert.equal(main.opencodeApiKey, 'main-key');
+
+      const aux = selectReviewBackends({
+        ...google,
+        auxProviderID: providerID,
+        auxModelID: 'model',
+        auxApiKey: 'aux-key',
+        piEnabled: true,
+      });
+      assert.equal(aux.mainSdkEngine, 'pi');
+      assert.equal(aux.needsOpencode, true);
+      assert.equal(aux.opencodeProviderID, providerID);
+      assert.equal(aux.opencodeApiKey, 'aux-key');
+    }
+  });
 });

@@ -67,6 +67,7 @@ describe('resolveModelName', () => {
 
   it('normalizes every configured provider default without changing provider selection', () => {
     for (const [providerID, cfg] of Object.entries(PROVIDERS)) {
+      if (!cfg.defaultModel) continue;
       const resolved = resolveModelName(providerID, cfg.defaultModel);
 
       assert.equal(resolved.providerID, providerID);
@@ -162,9 +163,11 @@ describe('resolveAuxModelName', () => {
 });
 
 describe('modelSupportsPromptCache', () => {
-  it('disables prompt caching only for models explicitly marked unsupported', () => {
+  it('disables prompt caching for models and providers marked unsupported', () => {
     assert.equal(modelSupportsPromptCache('opencode-go', 'glm-5.2'), false);
     assert.equal(modelSupportsPromptCache('zai-coding-plan', 'glm-5.2'), false);
+    assert.equal(modelSupportsPromptCache('kimi-for-coding', 'k3'), false);
+    assert.equal(modelSupportsPromptCache('openai-compatible', 'any-model'), false);
     assert.equal(modelSupportsPromptCache('opencode-go', 'deepseek-v4-flash'), true);
     assert.equal(modelSupportsPromptCache('opencode-go', 'kimi-k2.6'), true);
     assert.equal(modelSupportsPromptCache('opencode-go', 'minimax-m3'), true);

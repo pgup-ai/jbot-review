@@ -3,8 +3,11 @@ import * as github from '@actions/github';
 
 import {
   PROVIDERS,
+  defaultModelOptions,
   providerCredentialSources,
+  resolveProviderBaseURL,
   resolveProviderCredential,
+  resolveProviderModel,
 } from '../shared/config.ts';
 import { parseContext7Mode } from '../shared/context7.ts';
 import {
@@ -18,11 +21,6 @@ import type { Octokit } from '../shared/github.ts';
 import type { Severity } from '../shared/types.ts';
 
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
-
-// Medium effort by default: on throttled tiers, "high" produced 2.5-15min
-// session variance that no budget can absorb. Raise it per-repo for paid
-// heavy tiers; pass '{}' to send no options at all.
-const DEFAULT_MODEL_OPTIONS: Record<string, unknown> = { reasoningEffort: 'medium' };
 
 async function main(): Promise<void> {
   const failOnError = parseBooleanInput('fail-on-error', true);
@@ -44,7 +42,14 @@ async function main(): Promise<void> {
     );
   }
 
-  const modelInput = getInputOrEnv('model', 'JBOT_REVIEW_MODEL') || cfg.defaultModel;
+  const baseURL = resolveProviderBaseURL(provider, cfg, ({ input, env }) =>
+    getInputOrEnv(input, env),
+  );
+  const modelInput = resolveProviderModel(
+    provider,
+    cfg,
+    getInputOrEnv('model', 'JBOT_REVIEW_MODEL'),
+  );
   const model = formatModelName(resolveModelName(provider, modelInput));
   const auxModelInput = getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL');
   const auxProvider = auxModelInput
@@ -62,6 +67,12 @@ async function main(): Promise<void> {
   if (auxModel && auxProviderID !== provider) {
     auxApiKey = resolveProviderCredential(auxCfg!, ({ input, env }) => getInputOrEnv(input, env));
   }
+  const auxBaseURL =
+    auxModel && auxProviderID !== provider
+      ? resolveProviderBaseURL(auxProviderID, auxCfg!, ({ input, env }) =>
+          getInputOrEnv(input, env),
+        )
+      : undefined;
   const options = {
     enhancedContext: true,
     dryRun: parseBooleanInput('dry-run', false),
@@ -73,12 +84,13 @@ async function main(): Promise<void> {
     guidelinePass: parseBooleanInput('enable-guideline-pass', true),
     auxModel,
     auxApiKey,
+    auxBaseURL,
     reviewPasses: parseNumberInput('review-passes', 1),
     verifyFindings: parseBooleanInput('verify-findings', true),
     timeBudgetMinutes: parseNumberInput('time-budget-minutes', 30),
     reviewShards: parseNumberInput('review-shards', 1),
     dynamicFanout: parseBooleanInput('dynamic-fanout', true),
-    modelOptions: parseJsonObjectInput('model-options', DEFAULT_MODEL_OPTIONS),
+    modelOptions: parseJsonObjectInput('model-options', defaultModelOptions(provider)),
     promptCache: parseBooleanInput('prompt-cache', true),
     skipDocOnly: parseBooleanInput('skip-doc-only', true),
     maxConcurrentSessions: parseNumberInput('max-concurrent-sessions', 3),
@@ -114,6 +126,7 @@ async function main(): Promise<void> {
       workspace: process.env.GITHUB_WORKSPACE ?? process.cwd(),
       model,
       apiKey,
+      baseURL,
       headSha: pull.head.sha,
       baseRef: pull.base.ref,
       baseSha: pull.base.sha,

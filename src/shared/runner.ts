@@ -39,7 +39,7 @@ import {
   isDocOnlyChange,
   shardFilesForReview,
 } from './diff-context.ts';
-import { resolvePromptCachePolicy } from './config.ts';
+import { needsAuxOpencodeConfig, resolvePromptCachePolicy } from './config.ts';
 import { parseModelName } from './model.ts';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -726,6 +726,8 @@ export interface ReviewRunOptions {
    * main model provider. Empty = reuse the main review API key.
    */
   auxApiKey?: string;
+  /** Base URL for an auxiliary custom provider when it differs from the main provider. */
+  auxBaseURL?: string;
   /**
    * Total review passes: 1 = the general pass only; each extra pass adds the
    * next count-rationed recall lens (interactions, then integrity) in parallel.
@@ -834,6 +836,8 @@ export async function runPrReview(params: {
   workspace: string;
   model: string;
   apiKey: string;
+  /** Base URL for a custom main provider. Native Models.dev providers leave this unset. */
+  baseURL?: string;
   headSha?: string;
   baseRef?: string;
   baseSha?: string;
@@ -857,6 +861,7 @@ export async function runPrReview(params: {
     workspace,
     model,
     apiKey,
+    baseURL,
     headSha,
     baseRef,
     baseSha,
@@ -1376,6 +1381,10 @@ export async function runPrReview(params: {
   // different vendor's endpoint (and fail auth there anyway).
   const auxNeedsOwnKey =
     auxProviderID !== providerID && ((mainOnPi && auxOnPi) || (mainOnOpencode && auxOnOpencode));
+  const auxNeedsOpencodeConfig =
+    mainOnOpencode &&
+    auxOnOpencode &&
+    needsAuxOpencodeConfig(providerID, modelID, auxProviderID, auxModelID);
   if (auxNeedsOwnKey && !options.auxApiKey) {
     cleanupCliHomes();
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
@@ -1439,15 +1448,18 @@ export async function runPrReview(params: {
         log,
         {
           modelOptions: mainOnOpencode ? options.modelOptions : undefined,
+          baseURL: mainOnOpencode ? baseURL : options.auxBaseURL,
           promptCache: mainOnOpencode
             ? promptCachePolicy.providerPromptCache
             : promptCachePolicy.auxProviderPromptCache,
           port: options.opencodePort > 0 ? options.opencodePort : undefined,
-          additionalProviderKeys: auxNeedsOwnKey
+          additionalProviderKeys: auxNeedsOpencodeConfig
             ? [
                 {
                   providerID: auxProviderID,
-                  apiKey: options.auxApiKey,
+                  apiKey: auxNeedsOwnKey ? options.auxApiKey : opencodeApiKey,
+                  modelID: auxModelID,
+                  baseURL: auxNeedsOwnKey ? options.auxBaseURL : baseURL,
                   promptCache: promptCachePolicy.auxProviderPromptCache,
                 },
               ]
@@ -2056,6 +2068,7 @@ export function normalizeOptions(
     guidelinePass: options?.guidelinePass ?? true,
     auxModel: options?.auxModel ?? '',
     auxApiKey: options?.auxApiKey ?? '',
+    auxBaseURL: options?.auxBaseURL ?? '',
     reviewPasses: Math.min(Math.max(options?.reviewPasses ?? 1, 1), maxPasses),
     verifyFindings: options?.verifyFindings ?? true,
     timeBudgetMinutes: Math.max(options?.timeBudgetMinutes ?? 0, 0),
