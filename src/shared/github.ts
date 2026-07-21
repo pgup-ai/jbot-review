@@ -10,6 +10,7 @@ export type Octokit = InstanceType<typeof Review>;
 const REVIEW_MARKER = '<!-- jbot-review:review -->';
 const FINDING_MARKER = '<!-- jbot-review:finding -->';
 const ADDRESSED_MARKER = '<!-- jbot-review:addressed -->';
+const COMPACTED_REVIEW_MARKER = '<!-- jbot-review:compacted -->';
 const MAX_PRIOR_JBOT_THREADS_FOR_PROMPT = 25;
 const MAX_PRIOR_JBOT_COMMENT_CHARS = 1000;
 const MAX_PRIOR_JBOT_REPLIES_FOR_PROMPT = 5;
@@ -36,6 +37,14 @@ export interface PriorJbotThreadReply {
   author: string;
   body: string;
   url: string;
+}
+
+export interface JbotReviewGroup {
+  id: number;
+  nodeId: string;
+  body: string;
+  isMinimized: boolean;
+  threads: Array<{ id: string; isResolved: boolean }>;
 }
 
 export type Verdict = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
@@ -200,6 +209,9 @@ interface ReviewThreadsResponse {
               author?: {
                 login: string;
               } | null;
+              pullRequestReview?: {
+                isMinimized: boolean;
+              } | null;
             } | null> | null;
           };
         } | null>;
@@ -209,18 +221,21 @@ interface ReviewThreadsResponse {
 }
 
 interface JbotReviewCommentState {
-  ownedTopLevelIds: ReadonlySet<number>;
   addressedTopLevelIds: ReadonlySet<number>;
+  reviewIdByTopLevelId: ReadonlyMap<number, number>;
+  reviewGroupsById: ReadonlyMap<number, JbotReviewGroup>;
 }
 
 /**
  * Lists prior inline review threads created by the authenticated jbot actor.
- * Threads already acknowledged as addressed are omitted to avoid duplicate
- * replies on later review runs.
+ * Prompt context omits threads already acknowledged as addressed; review
+ * groups retain them so fully resolved reviews can be compacted and minimized.
  */
 export interface PriorJbotThreads {
   /** Open jbot finding threads — review context + duplicate-suppression input. */
   threads: PriorJbotThread[];
+  /** Jbot reviews with their finding threads, including resolved threads. */
+  reviewGroups: JbotReviewGroup[];
   /**
    * Threads jbot already replied to as addressed (marker present) but that are
    * still unresolved — e.g. a prior run's resolve call failed. They need a
@@ -275,6 +290,9 @@ export async function listPriorJbotThreads(
                   author {
                     login
                   }
+                  pullRequestReview {
+                    isMinimized
+                  }
                 }
               }
             }
@@ -297,7 +315,7 @@ export async function listPriorJbotThreads(
     })) as ReviewThreadsResponse;
     const viewerLogin = response.viewer.login;
     const page = response.repository?.pullRequest?.reviewThreads;
-    if (!page) return { threads, unresolvedAddressedThreadIds };
+    if (!page) return { threads, reviewGroups: [], unresolvedAddressedThreadIds };
     commentState ??= await listJbotReviewCommentState(
       octokit,
       owner,
@@ -305,26 +323,44 @@ export async function listPriorJbotThreads(
       pullNumber,
       viewerLogin,
     );
+    const state = commentState;
 
     for (const thread of page.nodes) {
       if (!thread) continue;
-      const comments = thread.comments.nodes ?? [];
-      const topLevel = comments[0];
+      const comments = (thread.comments.nodes ?? []).filter(
+        (comment): comment is NonNullable<typeof comment> => Boolean(comment),
+      );
+      const topLevel =
+        comments.find(
+          (comment) =>
+            comment.databaseId !== null &&
+            comment.databaseId !== undefined &&
+            state.reviewIdByTopLevelId.has(comment.databaseId),
+        ) ?? comments[0];
       if (!topLevel?.databaseId) continue;
       if (
         !isJbotFinding(
           topLevel.body,
           topLevel.author?.login,
           viewerLogin,
-          commentState.ownedTopLevelIds,
+          state.reviewIdByTopLevelId,
           topLevel.databaseId,
         )
       )
         continue;
+      const reviewId = state.reviewIdByTopLevelId.get(topLevel.databaseId);
+      if (reviewId !== undefined) {
+        const review = state.reviewGroupsById.get(reviewId)!;
+        review.isMinimized = topLevel.pullRequestReview?.isMinimized ?? review.isMinimized;
+        review.threads.push({
+          id: thread.id,
+          isResolved: thread.isResolved,
+        });
+      }
       const addressed =
         comments.some((comment) =>
-          isBotAddressedReply(comment?.author?.login, comment?.body, viewerLogin),
-        ) || commentState.addressedTopLevelIds.has(topLevel.databaseId);
+          isBotAddressedReply(comment.author?.login, comment.body, viewerLogin),
+        ) || state.addressedTopLevelIds.has(topLevel.databaseId);
       const disposition = classifyPriorJbotThread({ addressed, isResolved: thread.isResolved });
       if (disposition === 'skip') continue;
       if (disposition === 'resolve-only') {
@@ -333,8 +369,7 @@ export async function listPriorJbotThreads(
       }
 
       const replies = comments
-        .slice(1)
-        .filter((comment): comment is NonNullable<typeof comment> => Boolean(comment?.body))
+        .filter((comment) => comment !== topLevel)
         .map((comment) => ({
           author: comment.author?.login ?? 'unknown',
           body: comment.body,
@@ -366,7 +401,10 @@ export async function listPriorJbotThreads(
     }
   } while (after);
 
-  return { threads, unresolvedAddressedThreadIds };
+  const reviewGroups = commentState
+    ? [...commentState.reviewGroupsById.values()].filter((review) => review.threads.length > 0)
+    : [];
+  return { threads, reviewGroups, unresolvedAddressedThreadIds };
 }
 
 async function listJbotReviewCommentState(
@@ -382,10 +420,22 @@ async function listJbotReviewCommentState(
     pull_number: pullNumber,
     per_page: 100,
   });
-  const jbotReviewIds = new Set(
-    reviews
-      .filter((review) => review.user?.login === viewerLogin && isJbotReviewBody(review.body ?? ''))
-      .map((review) => review.id),
+  const jbotReviews = reviews.filter(
+    (review) =>
+      isViewerActor(review.user?.login, viewerLogin) && isJbotReviewBody(review.body ?? ''),
+  );
+  const jbotReviewIds = new Set(jbotReviews.map((review) => review.id));
+  const reviewGroupsById = new Map(
+    jbotReviews.map((review) => [
+      review.id,
+      {
+        id: review.id,
+        nodeId: review.node_id,
+        body: review.body ?? '',
+        isMinimized: false,
+        threads: [],
+      } satisfies JbotReviewGroup,
+    ]),
   );
 
   const comments = await octokit.paginate(octokit.rest.pulls.listReviewComments, {
@@ -395,20 +445,19 @@ async function listJbotReviewCommentState(
     per_page: 100,
   });
 
-  const ownedTopLevelIds = new Set(
-    comments
-      .filter((comment) => {
-        const reviewId = comment.pull_request_review_id;
-        return (
-          comment.user?.login === viewerLogin &&
-          !comment.in_reply_to_id &&
-          reviewId !== null &&
-          reviewId !== undefined &&
-          jbotReviewIds.has(reviewId)
-        );
-      })
-      .map((comment) => comment.id),
-  );
+  const reviewIdByTopLevelId = new Map<number, number>();
+  for (const comment of comments) {
+    const reviewId = comment.pull_request_review_id;
+    if (
+      isViewerActor(comment.user?.login, viewerLogin) &&
+      !comment.in_reply_to_id &&
+      reviewId !== null &&
+      reviewId !== undefined &&
+      jbotReviewIds.has(reviewId)
+    ) {
+      reviewIdByTopLevelId.set(comment.id, reviewId);
+    }
+  }
   const addressedTopLevelIds = new Set(
     comments
       .filter(
@@ -420,7 +469,7 @@ async function listJbotReviewCommentState(
       .map((comment) => comment.in_reply_to_id as number),
   );
 
-  return { ownedTopLevelIds, addressedTopLevelIds };
+  return { addressedTopLevelIds, reviewIdByTopLevelId, reviewGroupsById };
 }
 
 /**
@@ -474,6 +523,23 @@ export async function postReview(
       throw new Error('Failed to post review to GitHub');
     }
   }
+}
+
+export async function updateReviewBody(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  reviewId: number,
+  body: string,
+): Promise<void> {
+  await octokit.rest.pulls.updateReview({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    review_id: reviewId,
+    body,
+  });
 }
 
 export function formatFindingMetadata(finding: Pick<Finding, 'kind' | 'confidence'>): string {
@@ -563,7 +629,7 @@ export async function removeOwnPrReaction(
   for (const reaction of reactions) {
     if (reaction.content !== content) continue;
     const login = reaction.user?.login;
-    if (login !== viewerLogin && !isGithubActionsAlias(login, viewerLogin)) continue;
+    if (!isViewerActor(login, viewerLogin)) continue;
     await octokit.rest.reactions.deleteForIssue({
       owner,
       repo,
@@ -625,6 +691,24 @@ export async function resolveReviewThread(octokit: Octokit, threadId: string): P
   );
 }
 
+export async function minimizePullRequestReview(
+  octokit: Octokit,
+  reviewNodeId: string,
+): Promise<void> {
+  await octokit.graphql(
+    `
+      mutation MinimizeResolvedReview($reviewNodeId: ID!) {
+        minimizeComment(input: { subjectId: $reviewNodeId, classifier: RESOLVED }) {
+          minimizedComment {
+            isMinimized
+          }
+        }
+      }
+    `,
+    { reviewNodeId },
+  );
+}
+
 export function formatPriorJbotThreadsForPrompt(threads: PriorJbotThread[]): string {
   if (threads.length === 0) return '';
   const promptThreads = [...threads]
@@ -680,12 +764,12 @@ function isJbotFinding(
   body: string,
   authorLogin: string | undefined,
   viewerLogin: string,
-  jbotCommentIds: ReadonlySet<number>,
+  reviewIdByCommentId: ReadonlyMap<number, number>,
   commentId?: number,
 ): boolean {
   if (hasInternalMarker(body, FINDING_MARKER)) return true;
-  if (authorLogin !== viewerLogin && !isGithubActionsAlias(authorLogin, viewerLogin)) return false;
-  return commentId !== undefined && jbotCommentIds.has(commentId);
+  if (!isViewerActor(authorLogin, viewerLogin)) return false;
+  return commentId !== undefined && reviewIdByCommentId.has(commentId);
 }
 
 function hasInternalMarker(body: string | undefined, marker: string): boolean {
@@ -707,19 +791,68 @@ export function isBotAddressedReply(
   // GitHub Actions the viewer is `github-actions` but replies are authored as
   // `github-actions[bot]`. The alias only matches the bot's Actions identity,
   // never a human, so marker forgery by a PR author is still rejected.
-  const isBot = authorLogin === viewerLogin || isGithubActionsAlias(authorLogin, viewerLogin);
+  const isBot = isViewerActor(authorLogin, viewerLogin);
   return isBot && hasInternalMarker(body, ADDRESSED_MARKER);
 }
 
-function isGithubActionsAlias(authorLogin: string | undefined, viewerLogin: string): boolean {
+function isViewerActor(authorLogin: string | undefined, viewerLogin: string): boolean {
   return (
-    authorLogin === 'github-actions[bot]' &&
-    (viewerLogin === 'github-actions' || viewerLogin === 'github-actions[bot]')
+    authorLogin === viewerLogin ||
+    (authorLogin === 'github-actions[bot]' && viewerLogin === 'github-actions')
   );
 }
 
 export function isJbotReviewBody(body: string): boolean {
   return body.includes(REVIEW_MARKER) || /^## j-?bot code review\b/i.test(body);
+}
+
+export function selectResolvedJbotReviewsToFinalize(
+  reviews: readonly JbotReviewGroup[],
+  resolvedThisRun: readonly string[],
+): JbotReviewGroup[] {
+  const resolved = new Set(resolvedThisRun);
+  return reviews.filter((review) => {
+    if (review.threads.length === 0) return false;
+    if (parseReviewFindingCount(review.body) !== review.threads.length) return false;
+    if (!review.threads.every((thread) => thread.isResolved || resolved.has(thread.id)))
+      return false;
+    return !review.isMinimized || !hasInternalMarker(review.body, COMPACTED_REVIEW_MARKER);
+  });
+}
+
+export function compactJbotReviewBody(body: string, threadCount: number): string {
+  if (hasInternalMarker(body, COMPACTED_REVIEW_MARKER)) return body;
+  const original = body
+    .replaceAll(REVIEW_MARKER, '')
+    .replaceAll(COMPACTED_REVIEW_MARKER, '')
+    .trim()
+    .replace(/^## j-?bot code review\s*/i, '')
+    .trim();
+  const noun = threadCount === 1 ? 'thread' : 'threads';
+  return appendReviewMarker(
+    [
+      '## J-Bot Code Review',
+      '',
+      `✅ **All ${threadCount} review ${noun} resolved.**`,
+      '',
+      '<details>',
+      '<summary>Show original review</summary>',
+      '',
+      original,
+      '',
+      '</details>',
+      '',
+      COMPACTED_REVIEW_MARKER,
+    ].join('\n'),
+  );
+}
+
+function parseReviewFindingCount(body: string): number | undefined {
+  const lines = body.split('\n');
+  const headerIndex = lines.findIndex((line) => /^\|\s*Total\s*\|\s*P0\s*\|/i.test(line));
+  if (headerIndex < 0) return undefined;
+  const count = lines[headerIndex + 2]?.match(/^\|\s*(\d+)\s*\|/)?.[1];
+  return count === undefined ? undefined : Number.parseInt(count, 10);
 }
 
 function appendReviewMarker(body: string): string {

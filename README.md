@@ -227,11 +227,15 @@ with:
 
 **Thread resolution token:** when jbot verifies a prior finding is fixed, it
 posts an addressed reply and then attempts to resolve the GitHub review thread.
+Once every finding in a review is represented by a resolved thread, the run that
+resolves the final thread (or the next run after a manual resolution) compacts
+its stale summary, keeps the original body under a disclosure, and minimizes the
+submitted review as resolved.
 Some `GITHUB_TOKEN` integrations can post review comments but cannot run
-GitHub's `resolveReviewThread` mutation. If you see `Resource not accessible by
-integration` in the logs, add a secret such as
+GitHub's `resolveReviewThread` or `minimizeComment` mutation. If you see
+`Resource not accessible by integration` in the logs, add a secret such as
 `JBOT_REVIEW_THREAD_RESOLUTION_TOKEN` with a PAT or GitHub App token that can
-resolve PR review threads, then pass it through `thread-resolution-token`.
+manage PR reviews, then pass it through `thread-resolution-token`.
 
 **Step 3 — (Optional) Add review guidelines.** Drop an `AGENTS.md`, `REVIEW.md`,
 `.cursor/BUGBOT.md`, `.coderabbit.yaml`, `greptile.json`, or
@@ -598,7 +602,7 @@ documentation lookup.
 | `enable-context7`            | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false`             |
 | `context7-api-key`           | No       | —                     | Optional Context7 key for reliable CI docs lookup                                      |
 | `github-token`               | Yes      | `${{ github.token }}` | Token to read PR and post review                                                       |
-| `thread-resolution-token`    | No       | —                     | Optional token used only to resolve addressed review threads                           |
+| `thread-resolution-token`    | No       | —                     | Optional token for resolving threads and minimizing completed reviews                  |
 | `pr-number`                  | No       | —                     | PR number for manual `workflow_dispatch` reviews                                       |
 | `dry-run`                    | No       | `false`               | Log review output without posting to GitHub                                            |
 | `max-findings`               | No       | `0`                   | Cap findings; `0` means no limit                                                       |
