@@ -21,6 +21,8 @@ import { createTelemetryRecorder, type TelemetryRecorder } from './telemetry.ts'
 import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
 import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
 import {
+  piModelAvailable,
+  piSupportsProvider,
   resolvePiEngine,
   runPiAddressedPriorCommentsCheck,
   runPiChangesSinceLastReview,
@@ -716,6 +718,8 @@ function missingOctokit(): Octokit {
 
 export interface ReviewRunOptions {
   enhancedContext?: boolean;
+  /** SDK routing override; blank defers to JBOT_SDK_ENGINE, then auto. */
+  sdkEngine?: string;
   dryRun?: boolean;
   maxFindings?: number;
   minSeverity?: Severity;
@@ -902,27 +906,6 @@ export async function runPrReview(params: {
   const { providerID, modelID } = parseModelName(model);
   const auxModel = options.auxModel || model;
   const { providerID: auxProviderID, modelID: auxModelID } = parseModelName(auxModel);
-  const piEngine = resolvePiEngine(process.env, process.version);
-  if (!piEngine.enabled && piEngine.reason) log(`pi engine disabled: ${piEngine.reason}`);
-  const backendSelection = selectReviewBackends({
-    providerID,
-    modelID,
-    apiKey,
-    auxProviderID,
-    auxModelID,
-    auxApiKey: options.auxApiKey,
-    piEnabled: piEngine.enabled,
-  });
-  const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
-  const mainOnPi = backendSelection.mainSdkEngine === 'pi';
-  const auxOnPi = backendSelection.auxSdkEngine === 'pi';
-  const mainOnOpencode = !mainCliBackend && !mainOnPi;
-  const auxOnOpencode = !auxCliBackend && !auxOnPi;
-  if (mainOnPi || auxOnPi) {
-    log(
-      `SDK engine routing: main=${mainCliBackend ?? (mainOnPi ? 'pi' : 'opencode')} aux=${auxCliBackend ?? (auxOnPi ? 'pi' : 'opencode')}`,
-    );
-  }
   const promptCachePolicy = resolvePromptCachePolicy({
     promptCache: options.promptCache,
     mainModel: model,
@@ -1049,6 +1032,47 @@ export async function runPrReview(params: {
     log(`Doc-only PR (${changedFiles.length} file(s)); skipping the full review.`);
     await finalizePriorResolvedReviews([]);
     return;
+  }
+
+  const piEngine = resolvePiEngine(
+    options.sdkEngine ? { JBOT_SDK_ENGINE: options.sdkEngine } : process.env,
+    process.version,
+  );
+  if (!piEngine.enabled && piEngine.reason) log(`pi engine disabled: ${piEngine.reason}`);
+  const [mainPiModelAvailable, auxPiModelAvailable] = piEngine.enabled
+    ? await Promise.all([
+        piModelAvailable(providerID, modelID),
+        piModelAvailable(auxProviderID, auxModelID),
+      ])
+    : [false, false];
+  if (piEngine.enabled) {
+    if (piSupportsProvider(providerID) && !mainPiModelAvailable) {
+      log(`pi catalog has no ${model}; routing main sessions through opencode.`);
+    }
+    if (piSupportsProvider(auxProviderID) && !auxPiModelAvailable && auxModel !== model) {
+      log(`pi catalog has no ${auxModel}; routing auxiliary sessions through opencode.`);
+    }
+  }
+  const backendSelection = selectReviewBackends({
+    providerID,
+    modelID,
+    apiKey,
+    auxProviderID,
+    auxModelID,
+    auxApiKey: options.auxApiKey,
+    piEnabled: piEngine.enabled,
+    mainPiModelAvailable,
+    auxPiModelAvailable,
+  });
+  const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
+  const mainOnPi = backendSelection.mainSdkEngine === 'pi';
+  const auxOnPi = backendSelection.auxSdkEngine === 'pi';
+  const mainOnOpencode = !mainCliBackend && !mainOnPi;
+  const auxOnOpencode = !auxCliBackend && !auxOnPi;
+  if (mainOnPi || auxOnPi) {
+    log(
+      `SDK engine routing: main=${mainCliBackend ?? (mainOnPi ? 'pi' : 'opencode')} aux=${auxCliBackend ?? (auxOnPi ? 'pi' : 'opencode')}`,
+    );
   }
 
   const discoveredGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
@@ -2085,6 +2109,7 @@ export function normalizeOptions(
   const maxPasses = 1 + COUNTED_LENS_KEYS.length;
   return {
     enhancedContext: options?.enhancedContext ?? false,
+    sdkEngine: options?.sdkEngine ?? '',
     dryRun: options?.dryRun ?? false,
     maxFindings: options?.maxFindings ?? 0,
     minSeverity: options?.minSeverity ?? 'nit',

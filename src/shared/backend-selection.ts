@@ -27,6 +27,9 @@ export interface ReviewBackendSelectionInput {
   auxApiKey: string;
   /** Whether the pi engine may be used at all (see resolvePiEngine). */
   piEnabled?: boolean;
+  /** Per-role catalog checks; false routes that role through opencode. */
+  mainPiModelAvailable?: boolean;
+  auxPiModelAvailable?: boolean;
 }
 
 export interface PiEngineConfig {
@@ -60,11 +63,26 @@ export interface ReviewBackendSelection {
 export function selectReviewBackends(input: ReviewBackendSelectionInput): ReviewBackendSelection {
   const mainCliBackend = cliBackendForProvider(input.providerID);
   const auxCliBackend = cliBackendForProvider(input.auxProviderID);
-  const mainPi = !mainCliBackend && !!input.piEnabled && piSupportsProvider(input.providerID);
-  const auxPi = !auxCliBackend && !!input.piEnabled && piSupportsProvider(input.auxProviderID);
+  const mainPi =
+    !mainCliBackend &&
+    !!input.piEnabled &&
+    input.mainPiModelAvailable !== false &&
+    piSupportsProvider(input.providerID);
+  const auxPi =
+    !auxCliBackend &&
+    !!input.piEnabled &&
+    input.auxPiModelAvailable !== false &&
+    piSupportsProvider(input.auxProviderID);
   const mainOpencode = !mainCliBackend && !mainPi;
   const auxOpencode = !auxCliBackend && !auxPi;
+  const needsOpencode = mainOpencode || auxOpencode;
   const needsPi = mainPi || auxPi;
+  const effectiveAuxApiKey =
+    input.auxApiKey || (input.auxProviderID === input.providerID ? input.apiKey : '');
+  const opencodeApiKey = mainOpencode
+    ? input.apiKey
+    : input.auxApiKey ||
+      (needsOpencode && input.auxProviderID === input.providerID ? input.apiKey : '');
   // A CLI backend's key is whichever role selected it: main wins, else aux,
   // else empty. One closure keeps that rule in a single place as backends grow.
   const keyFor = (backendID: CliBackendID): string => {
@@ -77,7 +95,7 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
     ...(auxCliBackend ? { auxCliBackend } : {}),
     ...(mainPi ? { mainSdkEngine: 'pi' as const } : {}),
     ...(auxPi ? { auxSdkEngine: 'pi' as const } : {}),
-    needsOpencode: mainOpencode || auxOpencode,
+    needsOpencode,
     devinApiKey: keyFor(DEVIN_PROVIDER_ID),
     commandCodeAccessKey: keyFor(COMMANDCODE_PROVIDER_ID),
     cursorApiKey: keyFor(CURSOR_PROVIDER_ID),
@@ -92,13 +110,13 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
     // when main is on opencode, else aux (a CLI or pi main defers to aux).
     opencodeProviderID: mainOpencode ? input.providerID : input.auxProviderID,
     opencodeModelID: mainOpencode ? input.modelID : input.auxModelID,
-    opencodeApiKey: mainOpencode ? input.apiKey : input.auxApiKey,
+    opencodeApiKey,
     ...(needsPi
       ? {
           pi: {
             providerID: mainPi ? input.providerID : input.auxProviderID,
             modelID: mainPi ? input.modelID : input.auxModelID,
-            apiKey: mainPi ? input.apiKey : input.auxApiKey,
+            apiKey: mainPi ? input.apiKey : effectiveAuxApiKey,
           },
         }
       : {}),

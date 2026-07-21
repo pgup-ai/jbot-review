@@ -14,7 +14,7 @@ RUN npm config set fetch-retries 5 \
 # Engine + optional commandcode/codex/cline/grok/kilo providers; --version verifies they run
 # on Node 24. Pinned exactly: with @latest the buildx layer cache froze whatever version
 # the last cache bust happened to grab — bump versions here deliberately instead.
-RUN npm install -g opencode-ai@1.17.13 command-code@0.40.17 @openai/codex@0.142.5 cline@3.0.34 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 \
+RUN npm install -g opencode-ai@1.18.4 command-code@0.40.17 @openai/codex@0.142.5 cline@3.0.34 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 \
   && npm cache clean --force \
   && opencode --version \
   && command-code --version \

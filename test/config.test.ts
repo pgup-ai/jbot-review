@@ -93,6 +93,20 @@ describe('provider configuration resolution', () => {
     assert.doesNotMatch(input, /^\s+default:/m);
   });
 
+  it('exposes SDK routing as an Action input without masking the env fallback', () => {
+    const action = readFileSync(new URL('../action.yml', import.meta.url), 'utf8');
+    const workflow = readFileSync(
+      new URL('../.github/workflows/jbot-review.yml', import.meta.url),
+      'utf8',
+    );
+    const input = action.split('\n  sdk-engine:\n')[1]?.split('\n  opencode-api-key:\n')[0];
+
+    assert.ok(input);
+    assert.match(input, /default: ''/);
+    assert.match(action, /INPUT_SDK-ENGINE: \$\{\{ inputs\.sdk-engine \}\}/);
+    assert.match(workflow, /sdk-engine: \$\{\{ vars\.JBOT_SDK_ENGINE \|\| '' \}\}/);
+  });
+
   it('registers cross-provider config and distinct models on a shared custom provider', () => {
     assert.equal(needsAuxOpencodeConfig('openai', 'gpt-5', 'openrouter', 'gpt-5'), true);
     assert.equal(

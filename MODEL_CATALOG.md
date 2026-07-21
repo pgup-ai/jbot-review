@@ -2,7 +2,7 @@
 
 # J-Bot model ID catalog
 
-Generated on **2026-07-18** from the live [Models.dev catalog](https://models.dev/api.json), Docker-pinned CLI npm packages, and authenticated CLI catalogs by `npm run models:update`.
+Generated on **2026-07-21** from the live [Models.dev catalog](https://models.dev/api.json), Docker-pinned CLI npm packages, and authenticated CLI catalogs by `npm run models:update`.
 
 J-Bot model values use `provider/model-id`. You may pass either the full value shown here or the model-id portion when `provider` is configured separately. Provider access, region, account tier, and model retirement can change independently of this snapshot.
 
@@ -14,13 +14,13 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 | Provider                | Catalog              |  Models | J-Bot default                                              |
 | ----------------------- | -------------------- | ------: | ---------------------------------------------------------- |
-| `opencode`              | Models.dev           |      79 | `opencode/deepseek-v4-flash-free`                          |
+| `opencode`              | Models.dev           |      82 | `opencode/deepseek-v4-flash-free`                          |
 | `opencode-go`           | Models.dev           |      21 | `opencode-go/deepseek-v4-flash`                            |
 | `deepseek`              | Models.dev           |       4 | `deepseek/deepseek-v4-flash`                               |
 | `openai`                | Models.dev           |      56 | `openai/gpt-5.4-nano`                                      |
 | `anthropic`             | Models.dev           |      14 | `anthropic/claude-sonnet-4-6`                              |
-| `google`                | Models.dev           |      23 | `google/gemini-2.5-flash`                                  |
-| `openrouter`            | Models.dev           |     343 | `openrouter/openai/gpt-4o-mini`                            |
+| `google`                | Models.dev           |      25 | `google/gemini-2.5-flash`                                  |
+| `openrouter`            | Models.dev           |     339 | `openrouter/openai/gpt-4o-mini`                            |
 | `nvidia`                | Models.dev           |      84 | `nvidia/nemotron-3-ultra-550b-a55b`                        |
 | `zai-coding-plan`       | Models.dev           |       6 | `zai-coding-plan/glm-5.2`                                  |
 | `kimi-for-coding`       | Models.dev           |       3 | `kimi-for-coding/k3`                                       |
@@ -29,20 +29,20 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `fireworks-ai`          | Models.dev           |      16 | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                            |
 | `commandcode`           | CLI snapshot         |      36 | `commandcode/default`                                      |
-| `cursor`                | CLI snapshot         |     190 | `cursor/default`                                           |
-| `qoder`                 | CLI snapshot         |      13 | `qoder/auto`                                               |
+| `cursor`                | CLI snapshot         |     175 | `cursor/default`                                           |
+| `qoder`                 | CLI snapshot         |      14 | `qoder/auto`                                               |
 | `codex`                 | CLI snapshot         |       6 | `codex/default`                                            |
 | `grok`                  | CLI snapshot         |       2 | `grok/default`                                             |
 | `cline`                 | CLI snapshot         |     257 | `cline/default`                                            |
 | `cline-pass`            | CLI snapshot         |      12 | `cline-pass/default`                                       |
-| `kilo`                  | CLI snapshot         |     272 | `kilo/kilo-auto/free`                                      |
+| `kilo`                  | CLI snapshot         |     276 | `kilo/kilo-auto/free`                                      |
 | `openai-compatible`     | Custom endpoint      | dynamic | required                                                   |
 
 ## Models.dev providers
 
 ### `opencode`
 
-79 model IDs. Default: `opencode/deepseek-v4-flash-free`.
+82 model IDs. Default: `opencode/deepseek-v4-flash-free`.
 
 - `opencode/big-pickle`
 - `opencode/claude-3-5-haiku`
@@ -64,6 +64,8 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/gemini-3-pro`
 - `opencode/gemini-3.1-pro`
 - `opencode/gemini-3.5-flash`
+- `opencode/gemini-3.5-flash-lite`
+- `opencode/gemini-3.6-flash`
 - `opencode/glm-4.6`
 - `opencode/glm-4.7`
 - `opencode/glm-4.7-free`
@@ -102,6 +104,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/kimi-k2.5-free`
 - `opencode/kimi-k2.6`
 - `opencode/kimi-k2.7-code`
+- `opencode/laguna-s-2.1-free`
 - `opencode/ling-2.6-flash-free`
 - `opencode/mimo-v2-flash-free`
 - `opencode/mimo-v2-omni-free`
@@ -241,7 +244,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `google`
 
-23 model IDs. Default: `google/gemini-2.5-flash`.
+25 model IDs. Default: `google/gemini-2.5-flash`.
 
 - `google/gemini-2.0-flash`
 - `google/gemini-2.0-flash-lite`
@@ -260,6 +263,8 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `google/gemini-3.1-pro-preview`
 - `google/gemini-3.1-pro-preview-customtools`
 - `google/gemini-3.5-flash`
+- `google/gemini-3.5-flash-lite`
+- `google/gemini-3.6-flash`
 - `google/gemini-embedding-001`
 - `google/gemini-flash-latest`
 - `google/gemini-flash-lite-latest`
@@ -269,7 +274,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `openrouter`
 
-343 model IDs. Default: `openrouter/openai/gpt-4o-mini`.
+339 model IDs. Default: `openrouter/openai/gpt-4o-mini`.
 
 - `openrouter/~anthropic/claude-fable-latest`
 - `openrouter/~anthropic/claude-haiku-latest`
@@ -317,7 +322,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/bytedance-seed/seed-2.0-mini`
 - `openrouter/bytedance/ui-tars-1.5-7b`
 - `openrouter/cognitivecomputations/dolphin-mistral-24b-venice-edition`
-- `openrouter/cognitivecomputations/dolphin-mistral-24b-venice-edition:free`
 - `openrouter/cohere/command-a`
 - `openrouter/cohere/command-r-08-2024`
 - `openrouter/cohere/command-r-plus-08-2024`
@@ -352,6 +356,8 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/google/gemini-3.1-pro-preview`
 - `openrouter/google/gemini-3.1-pro-preview-customtools`
 - `openrouter/google/gemini-3.5-flash`
+- `openrouter/google/gemini-3.5-flash-lite`
+- `openrouter/google/gemini-3.6-flash`
 - `openrouter/google/gemma-2-27b-it`
 - `openrouter/google/gemma-3-12b-it`
 - `openrouter/google/gemma-3-27b-it`
@@ -376,13 +382,12 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/kwaipilot/kat-coder-pro-v2`
 - `openrouter/kwaipilot/kat-coder-pro-v2.5`
 - `openrouter/mancer/weaver`
+- `openrouter/meituan/longcat-2.0`
 - `openrouter/meta-llama/llama-3.1-70b-instruct`
 - `openrouter/meta-llama/llama-3.1-8b-instruct`
 - `openrouter/meta-llama/llama-3.2-1b-instruct`
 - `openrouter/meta-llama/llama-3.2-3b-instruct`
-- `openrouter/meta-llama/llama-3.2-3b-instruct:free`
 - `openrouter/meta-llama/llama-3.3-70b-instruct`
-- `openrouter/meta-llama/llama-3.3-70b-instruct:free`
 - `openrouter/meta-llama/llama-4-maverick`
 - `openrouter/meta-llama/llama-4-scout`
 - `openrouter/meta-llama/llama-guard-4-12b`
@@ -428,7 +433,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/nex-agi/nex-n2-mini`
 - `openrouter/nex-agi/nex-n2-pro`
 - `openrouter/nousresearch/hermes-3-llama-3.1-405b`
-- `openrouter/nousresearch/hermes-3-llama-3.1-405b:free`
 - `openrouter/nousresearch/hermes-3-llama-3.1-70b`
 - `openrouter/nousresearch/hermes-4-405b`
 - `openrouter/nousresearch/hermes-4-70b`
@@ -545,11 +549,9 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/qwen/qwen3-coder-flash`
 - `openrouter/qwen/qwen3-coder-next`
 - `openrouter/qwen/qwen3-coder-plus`
-- `openrouter/qwen/qwen3-coder:free`
 - `openrouter/qwen/qwen3-max`
 - `openrouter/qwen/qwen3-max-thinking`
 - `openrouter/qwen/qwen3-next-80b-a3b-instruct`
-- `openrouter/qwen/qwen3-next-80b-a3b-instruct:free`
 - `openrouter/qwen/qwen3-next-80b-a3b-thinking`
 - `openrouter/qwen/qwen3-vl-235b-a22b-instruct`
 - `openrouter/qwen/qwen3-vl-235b-a22b-thinking`
@@ -586,7 +588,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/tencent/hunyuan-a13b-instruct`
 - `openrouter/tencent/hy3`
 - `openrouter/tencent/hy3-preview`
-- `openrouter/tencent/hy3:free`
 - `openrouter/thedrummer/cydonia-24b-v4.1`
 - `openrouter/thedrummer/rocinante-12b`
 - `openrouter/thedrummer/skyfall-36b-v2`
@@ -719,8 +720,8 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 3 model IDs. Default: `kimi-for-coding/k3`.
 
-- `kimi-for-coding/k2p7`
 - `kimi-for-coding/k3` **(default)**
+- `kimi-for-coding/kimi-for-coding`
 - `kimi-for-coding/kimi-for-coding-highspeed`
 
 ### `xai`
@@ -833,7 +834,7 @@ The CLI does not expose a complete list.
 - Refresh/list: `cursor-agent models`.
 - Note: The command returns the current account catalog, including parameterized reasoning and fast variants.
 
-190 J-Bot model values:
+175 J-Bot model values:
 
 - `cursor/auto`
 - `cursor/claude-4-sonnet`
@@ -920,32 +921,17 @@ The CLI does not expose a complete list.
 - `cursor/gemini-3-flash`
 - `cursor/gemini-3.1-pro`
 - `cursor/gemini-3.5-flash`
+- `cursor/gemini-3.6-flash-high`
+- `cursor/gemini-3.6-flash-low`
+- `cursor/gemini-3.6-flash-medium`
+- `cursor/gemini-3.6-flash-minimal`
 - `cursor/glm-5.2-high`
 - `cursor/glm-5.2-max`
 - `cursor/gpt-5-mini`
 - `cursor/gpt-5.1`
-- `cursor/gpt-5.1-codex-max-high`
-- `cursor/gpt-5.1-codex-max-high-fast`
-- `cursor/gpt-5.1-codex-max-low`
-- `cursor/gpt-5.1-codex-max-low-fast`
-- `cursor/gpt-5.1-codex-max-medium`
-- `cursor/gpt-5.1-codex-max-medium-fast`
-- `cursor/gpt-5.1-codex-max-xhigh`
-- `cursor/gpt-5.1-codex-max-xhigh-fast`
-- `cursor/gpt-5.1-codex-mini`
-- `cursor/gpt-5.1-codex-mini-high`
-- `cursor/gpt-5.1-codex-mini-low`
 - `cursor/gpt-5.1-high`
 - `cursor/gpt-5.1-low`
 - `cursor/gpt-5.2`
-- `cursor/gpt-5.2-codex`
-- `cursor/gpt-5.2-codex-fast`
-- `cursor/gpt-5.2-codex-high`
-- `cursor/gpt-5.2-codex-high-fast`
-- `cursor/gpt-5.2-codex-low`
-- `cursor/gpt-5.2-codex-low-fast`
-- `cursor/gpt-5.2-codex-xhigh`
-- `cursor/gpt-5.2-codex-xhigh-fast`
 - `cursor/gpt-5.2-fast`
 - `cursor/gpt-5.2-high`
 - `cursor/gpt-5.2-high-fast`
@@ -1032,7 +1018,7 @@ The CLI does not expose a complete list.
 - Refresh/list: `qodercli --list-models`.
 - Note: Names are passed unchanged to the Qoder Agent SDK; `Auto` is normalized to the SDK value `auto`.
 
-13 J-Bot model values:
+14 J-Bot model values:
 
 - `qoder/auto` **(default)**
 - `qoder/DeepSeek-V4-Flash`
@@ -1046,6 +1032,7 @@ The CLI does not expose a complete list.
 - `qoder/Performance`
 - `qoder/Qwen3.7-Max`
 - `qoder/Qwen3.7-Plus`
+- `qoder/Qwen3.8-Max-Preview`
 - `qoder/Ultimate`
 
 ### `codex`
@@ -1367,7 +1354,7 @@ The CLI does not expose a complete list.
 - Refresh/list: `kilo models --pure`.
 - Note: Kilo already prints fully qualified J-Bot values such as `kilo/openai/gpt-5.4`; do not add another `kilo/` prefix.
 
-272 J-Bot model values:
+276 J-Bot model values:
 
 - `kilo/~anthropic/claude-fable-latest`
 - `kilo/~anthropic/claude-haiku-latest`
@@ -1435,6 +1422,8 @@ The CLI does not expose a complete list.
 - `kilo/google/gemini-3.1-pro-preview`
 - `kilo/google/gemini-3.1-pro-preview-customtools`
 - `kilo/google/gemini-3.5-flash`
+- `kilo/google/gemini-3.5-flash-lite`
+- `kilo/google/gemini-3.6-flash`
 - `kilo/google/gemma-3-12b-it`
 - `kilo/google/gemma-3-27b-it`
 - `kilo/google/gemma-4-26b-a4b-it`
@@ -1453,6 +1442,7 @@ The CLI does not expose a complete list.
 - `kilo/kwaipilot/kat-coder-pro-v2`
 - `kilo/kwaipilot/kat-coder-pro-v2.5`
 - `kilo/kwaipilot/kat-coder-pro-v2.5:free`
+- `kilo/meituan/longcat-2.0`
 - `kilo/meta-llama/llama-3.1-70b-instruct`
 - `kilo/meta-llama/llama-3.1-8b-instruct`
 - `kilo/meta-llama/llama-3.3-70b-instruct`
@@ -1558,6 +1548,8 @@ The CLI does not expose a complete list.
 - `kilo/openrouter/free`
 - `kilo/poolside/laguna-m.1`
 - `kilo/poolside/laguna-m.1:free`
+- `kilo/poolside/laguna-s-2.1`
+- `kilo/poolside/laguna-s-2.1:free`
 - `kilo/poolside/laguna-xs-2.1`
 - `kilo/poolside/laguna-xs-2.1:free`
 - `kilo/qwen/qwen-2.5-72b-instruct`
@@ -1619,7 +1611,6 @@ The CLI does not expose a complete list.
 - `kilo/stepfun/step-3.7-flash:free`
 - `kilo/tencent/hy3`
 - `kilo/tencent/hy3-preview`
-- `kilo/tencent/hy3:free`
 - `kilo/thedrummer/unslopnemo-12b`
 - `kilo/thinkingmachines/inkling`
 - `kilo/upstage/solar-pro-3`

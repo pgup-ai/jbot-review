@@ -11,6 +11,7 @@ import {
   resolveWithinWorkspace,
   extractPiFinalText,
   mapPiUsage,
+  piCatalogHasModel,
   piModelCandidates,
   piProviderIDFor,
   piRuntimeSupported,
@@ -96,6 +97,23 @@ describe('piProviderIDFor', () => {
     assert.equal(piProviderIDFor('opencode-go'), 'opencode-go');
     assert.equal(piProviderIDFor('kilo'), undefined); // CLI backend
     assert.equal(piProviderIDFor('unknown'), undefined);
+  });
+});
+
+describe('piCatalogHasModel', () => {
+  const catalog = [
+    { provider: 'opencode', id: 'deepseek-v4-flash-free' },
+    { provider: 'nvidia', id: 'nvidia/nemotron-3-ultra-550b-a55b' },
+  ];
+
+  it('matches direct and provider-prefixed pi catalog ids', () => {
+    assert.equal(piCatalogHasModel(catalog, 'opencode', 'deepseek-v4-flash-free'), true);
+    assert.equal(piCatalogHasModel(catalog, 'nvidia', 'nemotron-3-ultra-550b-a55b'), true);
+  });
+
+  it('rejects catalog misses and providers outside the pi allowlist', () => {
+    assert.equal(piCatalogHasModel(catalog, 'opencode', 'laguna-s-2.1-free'), false);
+    assert.equal(piCatalogHasModel(catalog, 'unknown', 'deepseek-v4-flash-free'), false);
   });
 });
 

@@ -28,7 +28,7 @@ import {
   resolveAuxModelName,
   resolveModelName,
 } from '../shared/model.ts';
-import { resolvePiEngine } from '../shared/pi.ts';
+import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import type { ReviewCommit } from '../shared/review-context.ts';
 import { runPrReview } from '../shared/runner.ts';
@@ -257,6 +257,12 @@ async function main(): Promise<void> {
   // Preflight-only resolution (the runner re-resolves for its own routing):
   // roles served by the in-process pi engine need no opencode binary.
   const piEngine = resolvePiEngine(process.env, process.version);
+  const [mainPiModelAvailable, auxPiModelAvailable] = piEngine.enabled
+    ? await Promise.all([
+        piModelAvailable(providerID, modelID),
+        piModelAvailable(aux.providerID, aux.modelID),
+      ])
+    : [false, false];
   const selection = selectReviewBackends({
     providerID,
     modelID,
@@ -265,6 +271,8 @@ async function main(): Promise<void> {
     auxModelID: aux.modelID,
     auxApiKey: auxApiKey ?? '',
     piEnabled: piEngine.enabled,
+    mainPiModelAvailable,
+    auxPiModelAvailable,
   });
   const requiredBins = new Set<string>();
   if (selection.needsOpencode) requiredBins.add('opencode');
