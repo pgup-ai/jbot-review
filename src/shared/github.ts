@@ -10,6 +10,7 @@ export type Octokit = InstanceType<typeof Review>;
 const REVIEW_MARKER = '<!-- jbot-review:review -->';
 const FINDING_MARKER = '<!-- jbot-review:finding -->';
 const ADDRESSED_MARKER = '<!-- jbot-review:addressed -->';
+const COMPACTED_REVIEW_MARKER = '<!-- jbot-review:compacted -->';
 const MAX_PRIOR_JBOT_THREADS_FOR_PROMPT = 25;
 const MAX_PRIOR_JBOT_COMMENT_CHARS = 1000;
 const MAX_PRIOR_JBOT_REPLIES_FOR_PROMPT = 5;
@@ -36,6 +37,12 @@ export interface PriorJbotThreadReply {
   author: string;
   body: string;
   url: string;
+}
+
+export interface JbotReviewGroup {
+  id: number;
+  body: string;
+  threads: Array<{ id: string; isResolved: boolean }>;
 }
 
 export type Verdict = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
@@ -211,16 +218,20 @@ interface ReviewThreadsResponse {
 interface JbotReviewCommentState {
   ownedTopLevelIds: ReadonlySet<number>;
   addressedTopLevelIds: ReadonlySet<number>;
+  reviewIdByTopLevelId: ReadonlyMap<number, number>;
+  reviewGroupsById: ReadonlyMap<number, JbotReviewGroup>;
 }
 
 /**
  * Lists prior inline review threads created by the authenticated jbot actor.
- * Threads already acknowledged as addressed are omitted to avoid duplicate
- * replies on later review runs.
+ * Prompt context omits threads already acknowledged as addressed; review
+ * groups retain them so fully resolved review bodies can be compacted.
  */
 export interface PriorJbotThreads {
   /** Open jbot finding threads — review context + duplicate-suppression input. */
   threads: PriorJbotThread[];
+  /** Every jbot review with its finding threads, including resolved threads. */
+  reviewGroups: JbotReviewGroup[];
   /**
    * Threads jbot already replied to as addressed (marker present) but that are
    * still unresolved — e.g. a prior run's resolve call failed. They need a
@@ -297,7 +308,7 @@ export async function listPriorJbotThreads(
     })) as ReviewThreadsResponse;
     const viewerLogin = response.viewer.login;
     const page = response.repository?.pullRequest?.reviewThreads;
-    if (!page) return { threads, unresolvedAddressedThreadIds };
+    if (!page) return { threads, reviewGroups: [], unresolvedAddressedThreadIds };
     commentState ??= await listJbotReviewCommentState(
       octokit,
       owner,
@@ -321,6 +332,13 @@ export async function listPriorJbotThreads(
         )
       )
         continue;
+      const reviewId = commentState.reviewIdByTopLevelId.get(topLevel.databaseId);
+      if (reviewId) {
+        commentState.reviewGroupsById.get(reviewId)?.threads.push({
+          id: thread.id,
+          isResolved: thread.isResolved,
+        });
+      }
       const addressed =
         comments.some((comment) =>
           isBotAddressedReply(comment?.author?.login, comment?.body, viewerLogin),
@@ -366,7 +384,10 @@ export async function listPriorJbotThreads(
     }
   } while (after);
 
-  return { threads, unresolvedAddressedThreadIds };
+  const reviewGroups = commentState
+    ? [...commentState.reviewGroupsById.values()].filter((review) => review.threads.length > 0)
+    : [];
+  return { threads, reviewGroups, unresolvedAddressedThreadIds };
 }
 
 async function listJbotReviewCommentState(
@@ -382,10 +403,18 @@ async function listJbotReviewCommentState(
     pull_number: pullNumber,
     per_page: 100,
   });
-  const jbotReviewIds = new Set(
-    reviews
-      .filter((review) => review.user?.login === viewerLogin && isJbotReviewBody(review.body ?? ''))
-      .map((review) => review.id),
+  const jbotReviews = reviews.filter(
+    (review) =>
+      (review.user?.login === viewerLogin ||
+        isGithubActionsAlias(review.user?.login, viewerLogin)) &&
+      isJbotReviewBody(review.body ?? ''),
+  );
+  const jbotReviewIds = new Set(jbotReviews.map((review) => review.id));
+  const reviewGroupsById = new Map(
+    jbotReviews.map((review) => [
+      review.id,
+      { id: review.id, body: review.body ?? '', threads: [] } satisfies JbotReviewGroup,
+    ]),
   );
 
   const comments = await octokit.paginate(octokit.rest.pulls.listReviewComments, {
@@ -395,20 +424,22 @@ async function listJbotReviewCommentState(
     per_page: 100,
   });
 
-  const ownedTopLevelIds = new Set(
-    comments
-      .filter((comment) => {
-        const reviewId = comment.pull_request_review_id;
-        return (
-          comment.user?.login === viewerLogin &&
-          !comment.in_reply_to_id &&
-          reviewId !== null &&
-          reviewId !== undefined &&
-          jbotReviewIds.has(reviewId)
-        );
-      })
-      .map((comment) => comment.id),
-  );
+  const ownedTopLevelIds = new Set<number>();
+  const reviewIdByTopLevelId = new Map<number, number>();
+  for (const comment of comments) {
+    const reviewId = comment.pull_request_review_id;
+    if (
+      (comment.user?.login === viewerLogin ||
+        isGithubActionsAlias(comment.user?.login, viewerLogin)) &&
+      !comment.in_reply_to_id &&
+      reviewId !== null &&
+      reviewId !== undefined &&
+      jbotReviewIds.has(reviewId)
+    ) {
+      ownedTopLevelIds.add(comment.id);
+      reviewIdByTopLevelId.set(comment.id, reviewId);
+    }
+  }
   const addressedTopLevelIds = new Set(
     comments
       .filter(
@@ -420,7 +451,7 @@ async function listJbotReviewCommentState(
       .map((comment) => comment.in_reply_to_id as number),
   );
 
-  return { ownedTopLevelIds, addressedTopLevelIds };
+  return { ownedTopLevelIds, addressedTopLevelIds, reviewIdByTopLevelId, reviewGroupsById };
 }
 
 /**
@@ -474,6 +505,23 @@ export async function postReview(
       throw new Error('Failed to post review to GitHub');
     }
   }
+}
+
+export async function updateReviewBody(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  reviewId: number,
+  body: string,
+): Promise<void> {
+  await octokit.rest.pulls.updateReview({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    review_id: reviewId,
+    body,
+  });
 }
 
 export function formatFindingMetadata(finding: Pick<Finding, 'kind' | 'confidence'>): string {
@@ -720,6 +768,52 @@ function isGithubActionsAlias(authorLogin: string | undefined, viewerLogin: stri
 
 export function isJbotReviewBody(body: string): boolean {
   return body.includes(REVIEW_MARKER) || /^## j-?bot code review\b/i.test(body);
+}
+
+export function selectResolvedJbotReviewsToCompact(
+  reviews: JbotReviewGroup[],
+  resolvedThisRun: Iterable<string>,
+): JbotReviewGroup[] {
+  const resolved = new Set(resolvedThisRun);
+  return reviews.filter((review) => {
+    if (review.body.includes(COMPACTED_REVIEW_MARKER) || review.threads.length === 0) return false;
+    if (parseReviewFindingCount(review.body) !== review.threads.length) return false;
+    return review.threads.every((thread) => thread.isResolved || resolved.has(thread.id));
+  });
+}
+
+export function compactJbotReviewBody(body: string, threadCount: number): string {
+  const original = body
+    .replaceAll(REVIEW_MARKER, '')
+    .replaceAll(COMPACTED_REVIEW_MARKER, '')
+    .trim()
+    .replace(/^## j-?bot code review\s*/i, '')
+    .trim();
+  const noun = threadCount === 1 ? 'thread' : 'threads';
+  return appendReviewMarker(
+    [
+      '## J-Bot Code Review',
+      '',
+      `✅ **All ${threadCount} review ${noun} resolved.**`,
+      '',
+      '<details>',
+      '<summary>Show original review</summary>',
+      '',
+      original,
+      '',
+      '</details>',
+      '',
+      COMPACTED_REVIEW_MARKER,
+    ].join('\n'),
+  );
+}
+
+function parseReviewFindingCount(body: string): number | undefined {
+  const lines = body.split('\n');
+  const headerIndex = lines.findIndex((line) => /^\|\s*Total\s*\|\s*P0\s*\|/i.test(line));
+  if (headerIndex < 0) return undefined;
+  const count = lines[headerIndex + 2]?.match(/^\|\s*(\d+)\s*\|/)?.[1];
+  return count === undefined ? undefined : Number.parseInt(count, 10);
 }
 
 function appendReviewMarker(body: string): string {

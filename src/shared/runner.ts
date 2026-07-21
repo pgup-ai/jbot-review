@@ -173,8 +173,17 @@ import {
   postAddressedThreadReply,
   resolveReviewThread,
   isJbotReviewBody,
+  selectResolvedJbotReviewsToCompact,
+  compactJbotReviewBody,
+  updateReviewBody,
 } from './github.ts';
-import type { Octokit, PrFile, PriorJbotThread, PriorJbotThreads } from './github.ts';
+import type {
+  JbotReviewGroup,
+  Octokit,
+  PrFile,
+  PriorJbotThread,
+  PriorJbotThreads,
+} from './github.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
@@ -1054,8 +1063,12 @@ export async function runPrReview(params: {
   // CONTEXT and the addressed-reply posting). Otherwise a still-open finding
   // is invisible to the gate and the 🚀 lies — the same bug class as the
   // priorJbotReviewCount fetch above. safeListPriorJbotThreads is fail-open.
-  const { threads: allPriorJbotThreads, unresolvedAddressedThreadIds } = localDiff
-    ? { threads: [], unresolvedAddressedThreadIds: [] }
+  const {
+    threads: allPriorJbotThreads,
+    reviewGroups: priorJbotReviewGroups,
+    unresolvedAddressedThreadIds,
+  } = localDiff
+    ? { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [] }
     : await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
   const priorJbotThreads = options.includePriorComments ? allPriorJbotThreads : [];
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
@@ -1972,6 +1985,15 @@ export async function runPrReview(params: {
       });
       resolvedThisRun.push(...reResolved);
     }
+    await compactResolvedReviewBodies({
+      octokit,
+      owner,
+      repo,
+      pullNumber,
+      reviews: priorJbotReviewGroups,
+      resolvedThisRun,
+      log,
+    });
     // React 🚀 only when the PR has NO open jbot findings after this run.
     // Open = threads that are not already resolved AND were not resolved this
     // run (a model-claimed "addressed" whose reply/resolve failed stays open,
@@ -2672,7 +2694,7 @@ async function safeListPriorJbotThreads(
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    return { threads: [], unresolvedAddressedThreadIds: [] };
+    return { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [] };
   }
 }
 
@@ -2897,6 +2919,37 @@ async function resolveUnresolvedAddressedThreads(params: {
     if (await resolveThreadBestEffort(params, threadId)) resolved.push(threadId);
   }
   return resolved;
+}
+
+async function compactResolvedReviewBodies(params: {
+  octokit: Octokit;
+  owner: string;
+  repo: string;
+  pullNumber: number;
+  reviews: JbotReviewGroup[];
+  resolvedThisRun: Iterable<string>;
+  log: (msg: string) => void;
+}): Promise<void> {
+  const reviews = selectResolvedJbotReviewsToCompact(params.reviews, params.resolvedThisRun);
+  for (const review of reviews) {
+    try {
+      await updateReviewBody(
+        params.octokit,
+        params.owner,
+        params.repo,
+        params.pullNumber,
+        review.id,
+        compactJbotReviewBody(review.body, review.threads.length),
+      );
+      params.log(`Compacted resolved jbot-review ${review.id}.`);
+    } catch (error) {
+      params.log(
+        `Failed to compact resolved jbot-review ${review.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
 }
 
 /** Shared resolve with the permission hint. Returns whether it resolved. */

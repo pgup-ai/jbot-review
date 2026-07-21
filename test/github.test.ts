@@ -3,11 +3,31 @@ import { describe, it } from 'node:test';
 
 import {
   classifyPriorJbotThread,
+  compactJbotReviewBody,
   formatPriorJbotThreadsForPrompt,
   isBotAddressedReply,
+  listPriorJbotThreads,
   postAddressedThreadReply,
+  selectResolvedJbotReviewsToCompact,
+  updateReviewBody,
+  type JbotReviewGroup,
+  type Octokit,
   type PriorJbotThread,
 } from '../src/shared/github.ts';
+
+const REVIEW_BODY = [
+  '## J-Bot Code Review',
+  '',
+  '**Review state:** Needs changes before approval',
+  '',
+  '### Findings Summary',
+  '',
+  '| Total | P0 | P1 | P2 | P3 | nit |',
+  '| ---: | ---: | ---: | ---: | ---: | ---: |',
+  '| 1 | 0 | 0 | 1 | 0 | 0 |',
+  '',
+  '<!-- jbot-review:review -->',
+].join('\n');
 
 describe('isBotAddressedReply', () => {
   it('counts the addressed marker only from the bot itself', () => {
@@ -32,6 +52,150 @@ describe('classifyPriorJbotThread', () => {
     );
     assert.equal(classifyPriorJbotThread({ addressed: true, isResolved: false }), 'resolve-only');
     assert.equal(classifyPriorJbotThread({ addressed: true, isResolved: true }), 'skip');
+  });
+});
+
+describe('resolved review compaction', () => {
+  it('selects only reviews whose full finding count is represented by resolved threads', () => {
+    const review = (overrides: Partial<JbotReviewGroup>): JbotReviewGroup => ({
+      id: 1,
+      body: REVIEW_BODY,
+      threads: [{ id: 't1', isResolved: true }],
+      ...overrides,
+    });
+    const selected = selectResolvedJbotReviewsToCompact(
+      [
+        review({ id: 1 }),
+        review({ id: 2, threads: [{ id: 't2', isResolved: false }] }),
+        review({ id: 3, threads: [{ id: 't3', isResolved: false }] }),
+        review({
+          id: 4,
+          threads: [
+            { id: 't4', isResolved: true },
+            { id: 't5', isResolved: true },
+          ],
+        }),
+        review({ id: 5, body: `${REVIEW_BODY}\n<!-- jbot-review:compacted -->` }),
+      ],
+      ['t3'],
+    );
+
+    assert.deepEqual(
+      selected.map((item) => item.id),
+      [1, 3],
+    );
+  });
+
+  it('hides the stale body in a details block and preserves review markers', () => {
+    const body = compactJbotReviewBody(REVIEW_BODY, 1);
+
+    assert.match(body, /✅ \*\*All 1 review thread resolved\.\*\*/);
+    assert.match(body, /<summary>Show original review<\/summary>/);
+    assert.match(body, /Review state:\*\* Needs changes before approval/);
+    assert.equal(body.match(/jbot-review:review/g)?.length, 1);
+    assert.equal(body.match(/jbot-review:compacted/g)?.length, 1);
+  });
+
+  it('updates the submitted review summary body', async () => {
+    let request: unknown;
+    const octokit = {
+      rest: {
+        pulls: {
+          updateReview: async (params: unknown) => {
+            request = params;
+          },
+        },
+      },
+    };
+
+    await updateReviewBody(octokit as unknown as Octokit, 'acme', 'widget', 12, 77, 'compacted');
+
+    assert.deepEqual(request, {
+      owner: 'acme',
+      repo: 'widget',
+      pull_number: 12,
+      review_id: 77,
+      body: 'compacted',
+    });
+  });
+
+  it('keeps resolved addressed threads in their review group after omitting prompt context', async () => {
+    const listReviews = {};
+    const listReviewComments = {};
+    const octokit = {
+      rest: { pulls: { listReviews, listReviewComments } },
+      paginate: async (endpoint: unknown) => {
+        if (endpoint === listReviews) {
+          return [{ id: 77, user: { login: 'github-actions[bot]' }, body: REVIEW_BODY }];
+        }
+        if (endpoint === listReviewComments) {
+          return [
+            {
+              id: 100,
+              user: { login: 'github-actions[bot]' },
+              pull_request_review_id: 77,
+              in_reply_to_id: null,
+              body: 'finding\n\n<!-- jbot-review:finding -->',
+            },
+            {
+              id: 101,
+              user: { login: 'github-actions[bot]' },
+              pull_request_review_id: 77,
+              in_reply_to_id: 100,
+              body: '✅ Addressed.\n\n<!-- jbot-review:addressed -->',
+            },
+          ];
+        }
+        throw new Error('unexpected pagination endpoint');
+      },
+      graphql: async () => ({
+        viewer: { login: 'github-actions' },
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [
+                {
+                  id: 'PRRT_resolved',
+                  isResolved: true,
+                  path: 'src/example.ts',
+                  line: 4,
+                  originalLine: 4,
+                  comments: {
+                    nodes: [
+                      {
+                        databaseId: 100,
+                        body: 'finding\n\n<!-- jbot-review:finding -->',
+                        url: 'https://github.com/acme/widget/pull/1#discussion_r100',
+                        author: { login: 'github-actions[bot]' },
+                      },
+                      {
+                        databaseId: 101,
+                        body: '✅ Addressed.\n\n<!-- jbot-review:addressed -->',
+                        url: 'https://github.com/acme/widget/pull/1#discussion_r101',
+                        author: { login: 'github-actions[bot]' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    };
+
+    const result = await listPriorJbotThreads(octokit as unknown as Octokit, 'acme', 'widget', 1);
+
+    assert.deepEqual(result.threads, []);
+    assert.deepEqual(result.unresolvedAddressedThreadIds, []);
+    assert.deepEqual(result.reviewGroups, [
+      {
+        id: 77,
+        body: REVIEW_BODY,
+        threads: [{ id: 'PRRT_resolved', isResolved: true }],
+      },
+    ]);
   });
 });
 
