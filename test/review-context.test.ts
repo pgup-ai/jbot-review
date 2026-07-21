@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
 import {
   buildReviewContext,
   discoverGuidelineDocs,
@@ -16,6 +17,8 @@ import {
   MAX_FINDER_GUIDELINE_BYTES,
   MAX_PR_BODY_BYTES,
 } from '../src/shared/review-context.ts';
+
+const GIT_DIFF_COMMAND = `git ${GIT_DIFF_ARGS.join(' ')}`;
 
 describe('formatContextBudget', () => {
   it('reports per-fragment bytes largest-first with a total, dropping empties', () => {
@@ -327,7 +330,7 @@ describe('formatDiffScope', () => {
 
     assert.match(text, /Base: develop \(a{40}\)/);
     assert.match(text, /Head: b{40}/);
-    assert.match(text, new RegExp(`git diff ${baseSha}\\.\\.\\.${headSha}`));
+    assert.ok(text.includes(`${GIT_DIFF_COMMAND} ${baseSha}...${headSha}`));
     assert.match(text, /Only review changes within this diff\./);
   });
 
@@ -335,14 +338,14 @@ describe('formatDiffScope', () => {
     const text = formatDiffScope({ baseRef: 'main' });
 
     assert.match(text, /Base: main/);
-    assert.match(text, /git diff origin\/main\.\.\.HEAD/);
+    assert.ok(text.includes(`${GIT_DIFF_COMMAND} origin/main...HEAD`));
   });
 
   it('uses HEAD when only the base SHA is known', () => {
     const baseSha = 'c'.repeat(40);
     const text = formatDiffScope({ baseSha });
 
-    assert.match(text, new RegExp(`git diff ${baseSha}\\.\\.\\.HEAD`));
+    assert.ok(text.includes(`${GIT_DIFF_COMMAND} ${baseSha}...HEAD`));
   });
 
   it('returns an empty string when no scope data is available', () => {
@@ -355,10 +358,7 @@ describe('formatDiffScope', () => {
 
     // Two-dot against the working tree (no ...HEAD), with the content-shaping
     // flags that match the embedded hunks, and it must say so.
-    assert.match(
-      text,
-      new RegExp(`git diff --no-ext-diff --no-textconv --find-renames ${baseSha}`),
-    );
+    assert.ok(text.includes(`${GIT_DIFF_COMMAND} ${baseSha}`));
     assert.doesNotMatch(text, /\.\.\./);
     assert.match(text, /working tree/i);
     assert.match(text, /uncommitted/i);
@@ -385,7 +385,7 @@ describe('buildReviewContext', () => {
     const sections = context.split('\n\n');
     const prSection = sections.find((section) => section.startsWith('## Pull request')) ?? '';
     assert.match(prSection, /Base: main/);
-    assert.match(prSection, /git diff a{40}\.\.\.b{40}/);
+    assert.ok(prSection.includes(`${GIT_DIFF_COMMAND} ${'a'.repeat(40)}...${'b'.repeat(40)}`));
   });
 
   it('omits the diff scope lines when no scope is provided', () => {
