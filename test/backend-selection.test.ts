@@ -864,6 +864,68 @@ describe('selectReviewBackends pi engine routing', () => {
     });
   });
 
+  it('routes a pi catalog miss through opencode', () => {
+    const selection = selectReviewBackends({
+      providerID: 'opencode',
+      modelID: 'laguna-s-2.1-free',
+      apiKey: 'zen-key',
+      auxProviderID: 'opencode',
+      auxModelID: 'laguna-s-2.1-free',
+      auxApiKey: '',
+      piEnabled: true,
+      mainPiModelAvailable: false,
+      auxPiModelAvailable: false,
+    });
+    assert.equal(selection.mainSdkEngine, undefined);
+    assert.equal(selection.auxSdkEngine, undefined);
+    assert.equal(selection.needsOpencode, true);
+    assert.equal(selection.opencodeModelID, 'laguna-s-2.1-free');
+    assert.equal(selection.opencodeApiKey, 'zen-key');
+    assert.equal(selection.pi, undefined);
+  });
+
+  it('splits a same-provider catalog miss per role and reuses the main key', () => {
+    const mainFallback = selectReviewBackends({
+      providerID: 'opencode',
+      modelID: 'laguna-s-2.1-free',
+      apiKey: 'zen-key',
+      auxProviderID: 'opencode',
+      auxModelID: 'deepseek-v4-flash-free',
+      auxApiKey: '',
+      piEnabled: true,
+      mainPiModelAvailable: false,
+      auxPiModelAvailable: true,
+    });
+    assert.equal(mainFallback.mainSdkEngine, undefined);
+    assert.equal(mainFallback.auxSdkEngine, 'pi');
+    assert.equal(mainFallback.opencodeApiKey, 'zen-key');
+    assert.deepEqual(mainFallback.pi, {
+      providerID: 'opencode',
+      modelID: 'deepseek-v4-flash-free',
+      apiKey: 'zen-key',
+    });
+
+    const auxFallback = selectReviewBackends({
+      providerID: 'opencode',
+      modelID: 'deepseek-v4-flash-free',
+      apiKey: 'zen-key',
+      auxProviderID: 'opencode',
+      auxModelID: 'laguna-s-2.1-free',
+      auxApiKey: '',
+      piEnabled: true,
+      mainPiModelAvailable: true,
+      auxPiModelAvailable: false,
+    });
+    assert.equal(auxFallback.mainSdkEngine, 'pi');
+    assert.equal(auxFallback.auxSdkEngine, undefined);
+    assert.equal(auxFallback.opencodeApiKey, 'zen-key');
+    assert.deepEqual(auxFallback.pi, {
+      providerID: 'opencode',
+      modelID: 'deepseek-v4-flash-free',
+      apiKey: 'zen-key',
+    });
+  });
+
   it('keeps a provider pi cannot serve on opencode even with piEnabled', () => {
     assert.deepEqual(
       selectReviewBackends({

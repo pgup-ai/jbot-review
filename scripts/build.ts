@@ -8,6 +8,7 @@ const shared: esbuild.BuildOptions = {
   external: [
     '@actions/core',
     '@actions/github',
+    '@earendil-works/pi-ai',
     '@earendil-works/pi-coding-agent',
     '@opencode-ai/sdk',
     '@qoder-ai/qoder-agent-sdk',

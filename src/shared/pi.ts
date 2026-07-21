@@ -82,6 +82,22 @@ export function piModelCandidates(providerID: string, modelID: string): string[]
   return piID && !modelID.includes('/') ? [modelID, `${piID}/${modelID}`] : [modelID];
 }
 
+interface PiCatalogModel {
+  provider?: string;
+  id?: string;
+}
+
+export function piCatalogHasModel(
+  models: ReadonlyArray<PiCatalogModel>,
+  providerID: string,
+  modelID: string,
+): boolean {
+  const piID = piProviderIDFor(providerID);
+  if (!piID) return false;
+  const candidates = piModelCandidates(providerID, modelID);
+  return models.some((model) => model.provider === piID && candidates.includes(model.id ?? ''));
+}
+
 export function piProviderIDFor(providerID: string): string | undefined {
   return PI_PROVIDER_IDS[providerID];
 }
@@ -321,12 +337,14 @@ export function extractPiFinalText(messages: unknown): string {
 // Structural views of the pi SDK surface this module uses. Local types keep
 // typecheck independent of the 0.x package's own declarations; the dynamic
 // import is cast through them.
-interface PiAuthStorageLike {
-  setRuntimeApiKey(providerID: string, apiKey: string): void;
-}
-interface PiModelRegistryLike {
-  find(providerID: string, modelID: string): unknown;
-  getAll(): ReadonlyArray<{ provider?: string; id?: string }>;
+interface PiModelRuntimeLike {
+  setRuntimeApiKey(
+    providerID: string,
+    apiKey: string,
+    options?: { allowNetwork?: boolean },
+  ): Promise<void>;
+  getModel(providerID: string, modelID: string): unknown;
+  getModels(): ReadonlyArray<PiCatalogModel>;
 }
 interface PiResourceLoaderLike {
   reload(): Promise<void>;
@@ -340,8 +358,10 @@ interface PiAgentSessionLike {
 }
 interface PiSdkLike {
   createAgentSession(options: Record<string, unknown>): Promise<{ session: PiAgentSessionLike }>;
-  AuthStorage: { inMemory(): PiAuthStorageLike };
-  ModelRegistry: new (authStorage: PiAuthStorageLike) => PiModelRegistryLike;
+  ModelRuntime: {
+    create(options: Record<string, unknown>): Promise<PiModelRuntimeLike>;
+  };
+  InMemoryCredentialStore: new () => unknown;
   DefaultResourceLoader: new (options: Record<string, unknown>) => PiResourceLoaderLike;
   SessionManager: { inMemory(): unknown };
   SettingsManager: { inMemory(settings: Record<string, unknown>): unknown };
@@ -431,8 +451,12 @@ function createPiReadTool(sdk: PiSdkLike, workspace: string): unknown {
  */
 let piSdkPromise: Promise<PiSdkLike> | undefined;
 function loadPiSdk(): Promise<PiSdkLike> {
-  piSdkPromise ??= import('@earendil-works/pi-coding-agent').then(
-    (mod) => mod as unknown as PiSdkLike,
+  piSdkPromise ??= Promise.all([
+    import('@earendil-works/pi-coding-agent'),
+    import('@earendil-works/pi-ai'),
+  ]).then(
+    ([agent, ai]) =>
+      ({ ...agent, InMemoryCredentialStore: ai.InMemoryCredentialStore }) as unknown as PiSdkLike,
     (error: unknown) => {
       piSdkPromise = undefined;
       const message = error instanceof Error ? error.message : String(error);
@@ -445,10 +469,33 @@ function loadPiSdk(): Promise<PiSdkLike> {
   return piSdkPromise;
 }
 
+function createPiModelRuntime(sdk: PiSdkLike): Promise<PiModelRuntimeLike> {
+  return sdk.ModelRuntime.create({
+    credentials: new sdk.InMemoryCredentialStore(),
+    modelsPath: null,
+    allowModelNetwork: false,
+  });
+}
+
+let piCatalogPromise: Promise<ReadonlyArray<PiCatalogModel>> | undefined;
+
+export async function piModelAvailable(providerID: string, modelID: string): Promise<boolean> {
+  if (!piSupportsProvider(providerID)) return false;
+  piCatalogPromise ??= loadPiSdk()
+    .then(async (sdk) => {
+      const runtime = await createPiModelRuntime(sdk);
+      return runtime.getModels();
+    })
+    .catch((error: unknown) => {
+      piCatalogPromise = undefined;
+      throw error;
+    });
+  return piCatalogHasModel(await piCatalogPromise, providerID, modelID);
+}
+
 export interface PiRuntime {
   sdk: PiSdkLike;
-  authStorage: PiAuthStorageLike;
-  registry: PiModelRegistryLike;
+  modelRuntime: PiModelRuntimeLike;
   loader: PiResourceLoaderLike;
   workspace: string;
   /** Full `provider/model` — a bare model ID collides across providers. */
@@ -466,15 +513,11 @@ function requirePiProvider(providerID: string): string {
   return piID;
 }
 
-function requirePiModel(
-  registry: PiModelRegistryLike,
-  providerID: string,
-  modelID: string,
-): unknown {
+function requirePiModel(runtime: PiModelRuntimeLike, providerID: string, modelID: string): unknown {
   const piID = requirePiProvider(providerID);
   let model: unknown;
   for (const candidate of piModelCandidates(providerID, modelID)) {
-    model = registry.find(piID, candidate);
+    model = runtime.getModel(piID, candidate);
     if (model) break;
   }
   if (!model) {
@@ -507,15 +550,16 @@ export async function startPi(
 ): Promise<{ runtime: PiRuntime; stop: () => void }> {
   const piID = requirePiProvider(providerID);
   const sdk = await loadPiSdk();
-  const authStorage = sdk.AuthStorage.inMemory();
-  authStorage.setRuntimeApiKey(piID, apiKey);
+  const modelRuntime = await createPiModelRuntime(sdk);
+  await modelRuntime.setRuntimeApiKey(piID, apiKey, { allowNetwork: false });
   for (const extra of options.additionalProviderKeys ?? []) {
     if (!extra.apiKey || extra.providerID === providerID) continue;
     const extraPiID = piProviderIDFor(extra.providerID);
-    if (extraPiID) authStorage.setRuntimeApiKey(extraPiID, extra.apiKey);
+    if (extraPiID) {
+      await modelRuntime.setRuntimeApiKey(extraPiID, extra.apiKey, { allowNetwork: false });
+    }
   }
-  const registry = new sdk.ModelRegistry(authStorage);
-  requirePiModel(registry, providerID, modelID);
+  requirePiModel(modelRuntime, providerID, modelID);
 
   // The isolation dir must not outlive a failed init (a long-running webhook
   // server would accumulate leaked /tmp/jbot-pi-loader-* dirs).
@@ -549,8 +593,8 @@ export async function startPi(
     })`,
   );
   try {
-    const models = registry
-      .getAll()
+    const models = modelRuntime
+      .getModels()
       .filter((m) => m.provider === piID && typeof m.id === 'string')
       // pi already namespaces NIM ids (nvidia/nemotron-…); don't double the
       // provider prefix in the jbot-form listing.
@@ -570,8 +614,7 @@ export async function startPi(
   return {
     runtime: {
       sdk,
-      authStorage,
-      registry,
+      modelRuntime,
       loader,
       workspace,
       mainModel: `${providerID}/${modelID}`,
@@ -603,7 +646,7 @@ async function createPiSession(
   singleShot: boolean,
 ): Promise<PiAgentSessionLike> {
   const { providerID, modelID } = parseModelName(model);
-  const modelRef = requirePiModel(runtime.registry, providerID, modelID);
+  const modelRef = requirePiModel(runtime.modelRuntime, providerID, modelID);
   const { session } = await runtime.sdk.createAgentSession({
     model: modelRef,
     cwd: runtime.workspace,
@@ -612,8 +655,7 @@ async function createPiSession(
     // `read_file` and `git_diff` — and `tools` must name each one or it never
     // registers (verified live). Single-shot sessions get no tools at all.
     ...(singleShot ? { noTools: 'all' } : piCustomToolConfig(runtime)),
-    authStorage: runtime.authStorage,
-    modelRegistry: runtime.registry,
+    modelRuntime: runtime.modelRuntime,
     resourceLoader: runtime.loader,
     sessionManager: runtime.sdk.SessionManager.inMemory(),
     settingsManager: runtime.sdk.SettingsManager.inMemory({}),

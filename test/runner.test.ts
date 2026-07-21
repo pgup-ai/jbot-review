@@ -619,6 +619,11 @@ describe('emitReviewTelemetry sink', () => {
 });
 
 describe('normalizeOptions defaults', () => {
+  it('keeps SDK routing automatic unless an entrypoint supplies the override', () => {
+    assert.equal(normalizeOptions(undefined).sdkEngine, '');
+    assert.equal(normalizeOptions({ sdkEngine: 'opencode' }).sdkEngine, 'opencode');
+  });
+
   it('caps sessions at 3 by default and keeps explicit 0 as the unlimited escape hatch', () => {
     assert.equal(normalizeOptions(undefined).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({}).maxConcurrentSessions, 3);

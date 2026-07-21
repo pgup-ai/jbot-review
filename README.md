@@ -99,6 +99,7 @@ jobs:
         with:
           provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
           model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
+          sdk-engine: ${{ vars.JBOT_SDK_ENGINE || '' }}
           aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
           aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
           opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
@@ -275,6 +276,7 @@ without editing the workflow.
   with:
     provider: ${{ inputs.provider || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
     model: ${{ inputs.model || vars.JBOT_REVIEW_MODEL || '' }}
+    sdk-engine: ${{ vars.JBOT_SDK_ENGINE || '' }}
     aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
     aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
     pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] }}
@@ -377,15 +379,18 @@ enumerable catalog command and is documented as that explicit boundary.
 
 **SDK engines.** Non-CLI providers run on one of two in-repo SDK engines,
 chosen automatically per session role. The rule: a provider pi can also serve
-routes to the in-process [pi SDK](https://pi.dev/docs/latest/sdk) first; the
-opencode server serves the rest. pi's allowlist covers `anthropic`, `openai`,
+routes to the in-process [pi SDK](https://pi.dev/docs/latest/sdk) first when pi's
+catalog contains the selected model; catalog misses automatically stay on the
+opencode server so newly released models do not fail while pi catches up. pi's
+allowlist covers `anthropic`, `openai`,
 `google`, `deepseek`, `xai`, `openrouter`,
 `fireworks-ai`, `zai-coding-plan`, `xiaomi-token-plan-sgp`, `nvidia`, and the
 `opencode`/`opencode-go` Zen gateways (which pi reaches over their HTTP
 endpoint directly, not through the opencode server). `kimi-for-coding` and
-`openai-compatible` stay on opencode. Set
-`JBOT_SDK_ENGINE=opencode` to pin every SDK session to opencode — the one-line
-rollback if pi misbehaves, and the path CLI backends' aux sessions still use.
+`openai-compatible` stay on opencode. Set the Action input `sdk-engine: opencode`
+or, for hosted/local runs, `JBOT_SDK_ENGINE=opencode` to pin every SDK session
+to opencode — the one-line rollback if pi misbehaves, and the path CLI backends'
+aux sessions still use.
 The pi engine requires Node >= 22.19 (the published Docker image runs Node 24); on older runtimes it
 disables itself and logs why. pi sessions run hermetically (no user-level pi
 config, skills, or prompt templates are loaded), get no shell (pi ships no
@@ -576,6 +581,7 @@ documentation lookup.
 | ---------------------------- | -------- | --------------------- | -------------------------------------------------------------------------------------- |
 | `provider`                   | No       | `opencode`            | LLM provider key; can come from `JBOT_REVIEW_PROVIDER`                                 |
 | `model`                      | No       | Provider default      | Provider model id; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL` |
+| `sdk-engine`                 | No       | `auto`                | `auto` uses pi for cataloged models; `opencode` pins SDK sessions to opencode          |
 | `aux-provider`               | No       | Main provider         | Auxiliary model provider; can come from `JBOT_AUX_PROVIDER`                            |
 | `aux-model`                  | No       | Main model            | Auxiliary model id; can come from `JBOT_REVIEW_AUX_MODEL`                              |
 | `opencode-api-key`           | No       | —                     | Used when `provider` or `aux-provider` is `opencode`/`opencode-go`                     |
