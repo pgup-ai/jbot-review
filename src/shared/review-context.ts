@@ -1,6 +1,8 @@
 import { access, open, readdir, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
+import { GIT_DIFF_ARGS } from './git.ts';
+
 export interface ReviewCommit {
   sha: string;
   message: string;
@@ -42,6 +44,8 @@ export interface DiscoveredGuidelines {
   budgetExhausted: boolean;
 }
 
+const GIT_DIFF_COMMAND = `git ${GIT_DIFF_ARGS.join(' ')}`;
+
 /**
  * Renders the PR base/head and the exact three-dot diff command the agent
  * should run. Three-dot (merge-base) diff is required: GitHub's patch — which
@@ -65,20 +69,19 @@ export function formatDiffScope(scope: DiffScope): string {
   const base = scope.baseSha ?? (scope.baseRef ? `origin/${scope.baseRef}` : undefined);
   if (base && scope.worktree) {
     // Two-dot against the working tree: matches the merge-base→worktree diff the
-    // local run was built from, uncommitted changes included. The flags mirror
-    // the ones that shaped the embedded hunks so a re-run sees the same content
-    // (raw hunks, renames coalesced); the `-c` prefix pins are omitted because
-    // they only affect the parser, not what a reader sees.
+    // local run was built from, uncommitted changes included. Reuse the canonical
+    // safe argv so model-run diffs match the embedded hunks without invoking
+    // external diff or textconv drivers.
     lines.push(
       'To see exactly what this review covers (merge-base → working tree, includes uncommitted changes), run:',
-      `    git diff --no-ext-diff --no-textconv --find-renames ${base}`,
+      `    ${GIT_DIFF_COMMAND} ${base}`,
       'Only review changes within this diff.',
     );
   } else if (base) {
     const head = scope.headSha ?? 'HEAD';
     lines.push(
       'To see exactly what this PR changes, run:',
-      `    git diff ${base}...${head}`,
+      `    ${GIT_DIFF_COMMAND} ${base}...${head}`,
       'Only review changes within this diff.',
     );
   }
