@@ -176,13 +176,11 @@ import {
   selectResolvedJbotReviewsToCompact,
   compactJbotReviewBody,
   updateReviewBody,
-} from './github.ts';
-import type {
-  JbotReviewGroup,
-  Octokit,
-  PrFile,
-  PriorJbotThread,
-  PriorJbotThreads,
+  type JbotReviewGroup,
+  type Octokit,
+  type PrFile,
+  type PriorJbotThread,
+  type PriorJbotThreads,
 } from './github.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
@@ -989,6 +987,28 @@ export async function runPrReview(params: {
       );
     }
   }
+  // Fetch before the skip gates so a lightweight follow-up run can still
+  // compact manually resolved reviews. Full runs also need every open thread
+  // for the review-done reaction, regardless of includePriorComments.
+  const {
+    threads: allPriorJbotThreads,
+    reviewGroups: priorJbotReviewGroups,
+    unresolvedAddressedThreadIds,
+  } = localDiff
+    ? { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [] }
+    : await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
+  const compactPriorResolvedReviews = async (resolvedThisRun: readonly string[]) => {
+    if (options.dryRun) return;
+    await compactResolvedReviewBodies({
+      octokit,
+      owner,
+      repo,
+      pullNumber,
+      reviews: priorJbotReviewGroups,
+      resolvedThisRun,
+      log,
+    });
+  };
   const files = rawFiles.filter((f) => f.patch && !isNoiseFile(f.filename));
   // The "review done" 🚀 reaction means "the PR has no open jbot findings".
   // Skip paths below do NOT touch it: a no-reviewable-files or docs-only push
@@ -996,6 +1016,7 @@ export async function runPrReview(params: {
   // honest (a prior clean 🚀 stays; a PR with open findings stays 🚀-less).
   if (files.length === 0) {
     log('No reviewable files after filtering; leaving the review reaction unchanged.');
+    await compactPriorResolvedReviews([]);
     return;
   }
   const noiseCount = rawFiles.filter((file) => isNoiseFile(file.filename)).length;
@@ -1024,6 +1045,7 @@ export async function runPrReview(params: {
   // full review.
   if (options.skipDocOnly && isDocOnlyChange(changedFiles)) {
     log(`Doc-only PR (${changedFiles.length} file(s)); skipping the full review.`);
+    await compactPriorResolvedReviews([]);
     return;
   }
 
@@ -1058,18 +1080,6 @@ export async function runPrReview(params: {
   if (!options.includePriorComments) {
     log('Prior review comments excluded from review context by configuration.');
   }
-  // Always fetch open jbot threads: the "no open findings" reaction gate must
-  // see them regardless of includePriorComments (which gates only the prompt
-  // CONTEXT and the addressed-reply posting). Otherwise a still-open finding
-  // is invisible to the gate and the 🚀 lies — the same bug class as the
-  // priorJbotReviewCount fetch above. safeListPriorJbotThreads is fail-open.
-  const {
-    threads: allPriorJbotThreads,
-    reviewGroups: priorJbotReviewGroups,
-    unresolvedAddressedThreadIds,
-  } = localDiff
-    ? { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [] }
-    : await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
   const priorJbotThreads = options.includePriorComments ? allPriorJbotThreads : [];
   log(`Prior jbot-review threads available for addressed checks: ${priorJbotThreads.length}`);
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
@@ -1985,15 +1995,7 @@ export async function runPrReview(params: {
       });
       resolvedThisRun.push(...reResolved);
     }
-    await compactResolvedReviewBodies({
-      octokit,
-      owner,
-      repo,
-      pullNumber,
-      reviews: priorJbotReviewGroups,
-      resolvedThisRun,
-      log,
-    });
+    await compactPriorResolvedReviews(resolvedThisRun);
     // React 🚀 only when the PR has NO open jbot findings after this run.
     // Open = threads that are not already resolved AND were not resolved this
     // run (a model-claimed "addressed" whose reply/resolve failed stays open,
@@ -2926,8 +2928,8 @@ async function compactResolvedReviewBodies(params: {
   owner: string;
   repo: string;
   pullNumber: number;
-  reviews: JbotReviewGroup[];
-  resolvedThisRun: Iterable<string>;
+  reviews: readonly JbotReviewGroup[];
+  resolvedThisRun: readonly string[];
   log: (msg: string) => void;
 }): Promise<void> {
   const reviews = selectResolvedJbotReviewsToCompact(params.reviews, params.resolvedThisRun);

@@ -30,6 +30,18 @@ const PRIOR_JBOT_REVIEW = [
   '**Reviewed head:** `abc123def456`',
 ].join('\n');
 
+const RESOLVED_JBOT_REVIEW = [
+  '## J-Bot Code Review',
+  '',
+  '### Findings Summary',
+  '',
+  '| Total | P0 | P1 | P2 | P3 | nit |',
+  '| ---: | ---: | ---: | ---: | ---: | ---: |',
+  '| 1 | 0 | 0 | 1 | 0 | 0 |',
+  '',
+  '<!-- jbot-review:review -->',
+].join('\n');
+
 /** Longest common leading substring — the region a provider can cache. */
 function commonPrefix(a: string, b: string): string {
   let i = 0;
@@ -366,7 +378,7 @@ describe('formatReviewedWith', () => {
   });
 });
 
-describe('runPrReview local mode (localDiff)', () => {
+describe('runPrReview local mode and early exits', () => {
   // Blank workspace skips ensureGitSafeDirectory, so tests never touch the
   // developer's global git config.
   const base = {
@@ -427,6 +439,89 @@ describe('runPrReview local mode (localDiff)', () => {
       log: (msg) => logs.push(msg),
     });
     assert.ok(logs.some((msg) => /no reviewable files/i.test(msg)));
+  });
+
+  it('compacts resolved reviews before GitHub-backed skip paths return', async () => {
+    const scenarios = [
+      { name: 'no reviewable files', files: [{ filename: 'image.png', changes: 0 }] },
+      {
+        name: 'doc-only',
+        files: [{ filename: 'README.md', patch: '@@ -1 +1 @@\n-a\n+b', changes: 2 }],
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const listFiles = {};
+      const listReviews = {};
+      const listReviewComments = {};
+      const updatedBodies: string[] = [];
+      const octokit = {
+        rest: {
+          pulls: {
+            listFiles,
+            listReviews,
+            listReviewComments,
+            updateReview: async ({ body }: { body: string }) => updatedBodies.push(body),
+          },
+        },
+        paginate: async (endpoint: unknown) => {
+          if (endpoint === listFiles) return scenario.files;
+          if (endpoint === listReviews) {
+            return [{ id: 77, user: { login: 'jbot' }, body: RESOLVED_JBOT_REVIEW }];
+          }
+          if (endpoint === listReviewComments) {
+            return [
+              {
+                id: 100,
+                user: { login: 'jbot' },
+                pull_request_review_id: 77,
+                in_reply_to_id: null,
+              },
+            ];
+          }
+          throw new Error('unexpected pagination endpoint');
+        },
+        graphql: async () => ({
+          viewer: { login: 'jbot' },
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  {
+                    id: 'PRRT_resolved',
+                    isResolved: true,
+                    path: 'src/example.ts',
+                    line: 4,
+                    originalLine: 4,
+                    comments: {
+                      nodes: [
+                        {
+                          databaseId: 100,
+                          body: 'finding\n\n<!-- jbot-review:finding -->',
+                          url: 'https://github.com/acme/widget/pull/1#discussion_r100',
+                          author: { login: 'jbot' },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        }),
+      };
+
+      await runPrReview({
+        ...base,
+        octokit: octokit as unknown as Octokit,
+        options: {},
+        log: () => {},
+      });
+
+      assert.equal(updatedBodies.length, 1, scenario.name);
+      assert.match(updatedBodies[0], /All 1 review thread resolved/, scenario.name);
+    }
   });
 
   // Pins the production seam: without localDiff, the diff still comes from

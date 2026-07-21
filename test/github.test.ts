@@ -88,8 +88,10 @@ describe('resolved review compaction', () => {
 
   it('hides the stale body in a details block and preserves review markers', () => {
     const body = compactJbotReviewBody(REVIEW_BODY, 1);
+    const pluralBody = compactJbotReviewBody(REVIEW_BODY, 2);
 
     assert.match(body, /✅ \*\*All 1 review thread resolved\.\*\*/);
+    assert.match(pluralBody, /✅ \*\*All 2 review threads resolved\.\*\*/);
     assert.match(body, /<summary>Show original review<\/summary>/);
     assert.match(body, /Review state:\*\* Needs changes before approval/);
     assert.equal(body.match(/jbot-review:review/g)?.length, 1);
@@ -163,6 +165,7 @@ describe('resolved review compaction', () => {
                   originalLine: 4,
                   comments: {
                     nodes: [
+                      null,
                       {
                         databaseId: 100,
                         body: 'finding\n\n<!-- jbot-review:finding -->',

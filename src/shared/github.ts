@@ -216,7 +216,6 @@ interface ReviewThreadsResponse {
 }
 
 interface JbotReviewCommentState {
-  ownedTopLevelIds: ReadonlySet<number>;
   addressedTopLevelIds: ReadonlySet<number>;
   reviewIdByTopLevelId: ReadonlyMap<number, number>;
   reviewGroupsById: ReadonlyMap<number, JbotReviewGroup>;
@@ -230,7 +229,7 @@ interface JbotReviewCommentState {
 export interface PriorJbotThreads {
   /** Open jbot finding threads — review context + duplicate-suppression input. */
   threads: PriorJbotThread[];
-  /** Every jbot review with its finding threads, including resolved threads. */
+  /** Jbot reviews with their finding threads, including resolved threads. */
   reviewGroups: JbotReviewGroup[];
   /**
    * Threads jbot already replied to as addressed (marker present) but that are
@@ -316,33 +315,42 @@ export async function listPriorJbotThreads(
       pullNumber,
       viewerLogin,
     );
+    const state = commentState;
 
     for (const thread of page.nodes) {
       if (!thread) continue;
-      const comments = thread.comments.nodes ?? [];
-      const topLevel = comments[0];
+      const comments = (thread.comments.nodes ?? []).filter(
+        (comment): comment is NonNullable<typeof comment> => Boolean(comment),
+      );
+      const topLevel =
+        comments.find(
+          (comment) =>
+            comment.databaseId !== null &&
+            comment.databaseId !== undefined &&
+            state.reviewIdByTopLevelId.has(comment.databaseId),
+        ) ?? comments[0];
       if (!topLevel?.databaseId) continue;
       if (
         !isJbotFinding(
           topLevel.body,
           topLevel.author?.login,
           viewerLogin,
-          commentState.ownedTopLevelIds,
+          state.reviewIdByTopLevelId,
           topLevel.databaseId,
         )
       )
         continue;
-      const reviewId = commentState.reviewIdByTopLevelId.get(topLevel.databaseId);
-      if (reviewId) {
-        commentState.reviewGroupsById.get(reviewId)?.threads.push({
+      const reviewId = state.reviewIdByTopLevelId.get(topLevel.databaseId);
+      if (reviewId !== undefined) {
+        state.reviewGroupsById.get(reviewId)!.threads.push({
           id: thread.id,
           isResolved: thread.isResolved,
         });
       }
       const addressed =
         comments.some((comment) =>
-          isBotAddressedReply(comment?.author?.login, comment?.body, viewerLogin),
-        ) || commentState.addressedTopLevelIds.has(topLevel.databaseId);
+          isBotAddressedReply(comment.author?.login, comment.body, viewerLogin),
+        ) || state.addressedTopLevelIds.has(topLevel.databaseId);
       const disposition = classifyPriorJbotThread({ addressed, isResolved: thread.isResolved });
       if (disposition === 'skip') continue;
       if (disposition === 'resolve-only') {
@@ -351,8 +359,7 @@ export async function listPriorJbotThreads(
       }
 
       const replies = comments
-        .slice(1)
-        .filter((comment): comment is NonNullable<typeof comment> => Boolean(comment?.body))
+        .filter((comment) => comment !== topLevel)
         .map((comment) => ({
           author: comment.author?.login ?? 'unknown',
           body: comment.body,
@@ -405,9 +412,7 @@ async function listJbotReviewCommentState(
   });
   const jbotReviews = reviews.filter(
     (review) =>
-      (review.user?.login === viewerLogin ||
-        isGithubActionsAlias(review.user?.login, viewerLogin)) &&
-      isJbotReviewBody(review.body ?? ''),
+      isViewerActor(review.user?.login, viewerLogin) && isJbotReviewBody(review.body ?? ''),
   );
   const jbotReviewIds = new Set(jbotReviews.map((review) => review.id));
   const reviewGroupsById = new Map(
@@ -424,19 +429,16 @@ async function listJbotReviewCommentState(
     per_page: 100,
   });
 
-  const ownedTopLevelIds = new Set<number>();
   const reviewIdByTopLevelId = new Map<number, number>();
   for (const comment of comments) {
     const reviewId = comment.pull_request_review_id;
     if (
-      (comment.user?.login === viewerLogin ||
-        isGithubActionsAlias(comment.user?.login, viewerLogin)) &&
+      isViewerActor(comment.user?.login, viewerLogin) &&
       !comment.in_reply_to_id &&
       reviewId !== null &&
       reviewId !== undefined &&
       jbotReviewIds.has(reviewId)
     ) {
-      ownedTopLevelIds.add(comment.id);
       reviewIdByTopLevelId.set(comment.id, reviewId);
     }
   }
@@ -451,7 +453,7 @@ async function listJbotReviewCommentState(
       .map((comment) => comment.in_reply_to_id as number),
   );
 
-  return { ownedTopLevelIds, addressedTopLevelIds, reviewIdByTopLevelId, reviewGroupsById };
+  return { addressedTopLevelIds, reviewIdByTopLevelId, reviewGroupsById };
 }
 
 /**
@@ -611,7 +613,7 @@ export async function removeOwnPrReaction(
   for (const reaction of reactions) {
     if (reaction.content !== content) continue;
     const login = reaction.user?.login;
-    if (login !== viewerLogin && !isGithubActionsAlias(login, viewerLogin)) continue;
+    if (!isViewerActor(login, viewerLogin)) continue;
     await octokit.rest.reactions.deleteForIssue({
       owner,
       repo,
@@ -728,12 +730,12 @@ function isJbotFinding(
   body: string,
   authorLogin: string | undefined,
   viewerLogin: string,
-  jbotCommentIds: ReadonlySet<number>,
+  reviewIdByCommentId: ReadonlyMap<number, number>,
   commentId?: number,
 ): boolean {
   if (hasInternalMarker(body, FINDING_MARKER)) return true;
-  if (authorLogin !== viewerLogin && !isGithubActionsAlias(authorLogin, viewerLogin)) return false;
-  return commentId !== undefined && jbotCommentIds.has(commentId);
+  if (!isViewerActor(authorLogin, viewerLogin)) return false;
+  return commentId !== undefined && reviewIdByCommentId.has(commentId);
 }
 
 function hasInternalMarker(body: string | undefined, marker: string): boolean {
@@ -755,14 +757,14 @@ export function isBotAddressedReply(
   // GitHub Actions the viewer is `github-actions` but replies are authored as
   // `github-actions[bot]`. The alias only matches the bot's Actions identity,
   // never a human, so marker forgery by a PR author is still rejected.
-  const isBot = authorLogin === viewerLogin || isGithubActionsAlias(authorLogin, viewerLogin);
+  const isBot = isViewerActor(authorLogin, viewerLogin);
   return isBot && hasInternalMarker(body, ADDRESSED_MARKER);
 }
 
-function isGithubActionsAlias(authorLogin: string | undefined, viewerLogin: string): boolean {
+function isViewerActor(authorLogin: string | undefined, viewerLogin: string): boolean {
   return (
-    authorLogin === 'github-actions[bot]' &&
-    (viewerLogin === 'github-actions' || viewerLogin === 'github-actions[bot]')
+    authorLogin === viewerLogin ||
+    (authorLogin === 'github-actions[bot]' && viewerLogin === 'github-actions')
   );
 }
 
@@ -771,12 +773,13 @@ export function isJbotReviewBody(body: string): boolean {
 }
 
 export function selectResolvedJbotReviewsToCompact(
-  reviews: JbotReviewGroup[],
-  resolvedThisRun: Iterable<string>,
+  reviews: readonly JbotReviewGroup[],
+  resolvedThisRun: readonly string[],
 ): JbotReviewGroup[] {
   const resolved = new Set(resolvedThisRun);
   return reviews.filter((review) => {
-    if (review.body.includes(COMPACTED_REVIEW_MARKER) || review.threads.length === 0) return false;
+    if (hasInternalMarker(review.body, COMPACTED_REVIEW_MARKER) || review.threads.length === 0)
+      return false;
     if (parseReviewFindingCount(review.body) !== review.threads.length) return false;
     return review.threads.every((thread) => thread.isResolved || resolved.has(thread.id));
   });
