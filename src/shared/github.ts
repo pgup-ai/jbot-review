@@ -41,7 +41,9 @@ export interface PriorJbotThreadReply {
 
 export interface JbotReviewGroup {
   id: number;
+  nodeId: string;
   body: string;
+  isMinimized: boolean;
   threads: Array<{ id: string; isResolved: boolean }>;
 }
 
@@ -207,6 +209,9 @@ interface ReviewThreadsResponse {
               author?: {
                 login: string;
               } | null;
+              pullRequestReview?: {
+                isMinimized: boolean;
+              } | null;
             } | null> | null;
           };
         } | null>;
@@ -224,7 +229,7 @@ interface JbotReviewCommentState {
 /**
  * Lists prior inline review threads created by the authenticated jbot actor.
  * Prompt context omits threads already acknowledged as addressed; review
- * groups retain them so fully resolved review bodies can be compacted.
+ * groups retain them so fully resolved reviews can be compacted and minimized.
  */
 export interface PriorJbotThreads {
   /** Open jbot finding threads — review context + duplicate-suppression input. */
@@ -285,6 +290,9 @@ export async function listPriorJbotThreads(
                   author {
                     login
                   }
+                  pullRequestReview {
+                    isMinimized
+                  }
                 }
               }
             }
@@ -342,7 +350,9 @@ export async function listPriorJbotThreads(
         continue;
       const reviewId = state.reviewIdByTopLevelId.get(topLevel.databaseId);
       if (reviewId !== undefined) {
-        state.reviewGroupsById.get(reviewId)!.threads.push({
+        const review = state.reviewGroupsById.get(reviewId)!;
+        review.isMinimized = topLevel.pullRequestReview?.isMinimized ?? review.isMinimized;
+        review.threads.push({
           id: thread.id,
           isResolved: thread.isResolved,
         });
@@ -418,7 +428,13 @@ async function listJbotReviewCommentState(
   const reviewGroupsById = new Map(
     jbotReviews.map((review) => [
       review.id,
-      { id: review.id, body: review.body ?? '', threads: [] } satisfies JbotReviewGroup,
+      {
+        id: review.id,
+        nodeId: review.node_id,
+        body: review.body ?? '',
+        isMinimized: false,
+        threads: [],
+      } satisfies JbotReviewGroup,
     ]),
   );
 
@@ -675,6 +691,24 @@ export async function resolveReviewThread(octokit: Octokit, threadId: string): P
   );
 }
 
+export async function minimizePullRequestReview(
+  octokit: Octokit,
+  reviewNodeId: string,
+): Promise<void> {
+  await octokit.graphql(
+    `
+      mutation MinimizeResolvedReview($reviewNodeId: ID!) {
+        minimizeComment(input: { subjectId: $reviewNodeId, classifier: RESOLVED }) {
+          minimizedComment {
+            isMinimized
+          }
+        }
+      }
+    `,
+    { reviewNodeId },
+  );
+}
+
 export function formatPriorJbotThreadsForPrompt(threads: PriorJbotThread[]): string {
   if (threads.length === 0) return '';
   const promptThreads = [...threads]
@@ -772,20 +806,22 @@ export function isJbotReviewBody(body: string): boolean {
   return body.includes(REVIEW_MARKER) || /^## j-?bot code review\b/i.test(body);
 }
 
-export function selectResolvedJbotReviewsToCompact(
+export function selectResolvedJbotReviewsToFinalize(
   reviews: readonly JbotReviewGroup[],
   resolvedThisRun: readonly string[],
 ): JbotReviewGroup[] {
   const resolved = new Set(resolvedThisRun);
   return reviews.filter((review) => {
-    if (hasInternalMarker(review.body, COMPACTED_REVIEW_MARKER) || review.threads.length === 0)
-      return false;
+    if (review.threads.length === 0) return false;
     if (parseReviewFindingCount(review.body) !== review.threads.length) return false;
-    return review.threads.every((thread) => thread.isResolved || resolved.has(thread.id));
+    if (!review.threads.every((thread) => thread.isResolved || resolved.has(thread.id)))
+      return false;
+    return !review.isMinimized || !hasInternalMarker(review.body, COMPACTED_REVIEW_MARKER);
   });
 }
 
 export function compactJbotReviewBody(body: string, threadCount: number): string {
+  if (hasInternalMarker(body, COMPACTED_REVIEW_MARKER)) return body;
   const original = body
     .replaceAll(REVIEW_MARKER, '')
     .replaceAll(COMPACTED_REVIEW_MARKER, '')

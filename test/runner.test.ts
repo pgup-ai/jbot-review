@@ -441,12 +441,19 @@ describe('runPrReview local mode and early exits', () => {
     assert.ok(logs.some((msg) => /no reviewable files/i.test(msg)));
   });
 
-  it('compacts resolved reviews before GitHub-backed skip paths return', async () => {
+  it('finalizes resolved reviews before GitHub-backed skip paths return', async () => {
     const scenarios = [
-      { name: 'no reviewable files', files: [{ filename: 'image.png', changes: 0 }] },
+      {
+        name: 'no reviewable files',
+        files: [{ filename: 'image.png', changes: 0 }],
+        reviewBody: RESOLVED_JBOT_REVIEW,
+        expectedBodyUpdates: 1,
+      },
       {
         name: 'doc-only',
         files: [{ filename: 'README.md', patch: '@@ -1 +1 @@\n-a\n+b', changes: 2 }],
+        reviewBody: `${RESOLVED_JBOT_REVIEW}\n<!-- jbot-review:compacted -->`,
+        expectedBodyUpdates: 0,
       },
     ];
 
@@ -455,6 +462,7 @@ describe('runPrReview local mode and early exits', () => {
       const listReviews = {};
       const listReviewComments = {};
       const updatedBodies: string[] = [];
+      const minimizedReviewIds: string[] = [];
       const octokit = {
         rest: {
           pulls: {
@@ -467,7 +475,14 @@ describe('runPrReview local mode and early exits', () => {
         paginate: async (endpoint: unknown) => {
           if (endpoint === listFiles) return scenario.files;
           if (endpoint === listReviews) {
-            return [{ id: 77, user: { login: 'jbot' }, body: RESOLVED_JBOT_REVIEW }];
+            return [
+              {
+                id: 77,
+                node_id: 'PRR_77',
+                user: { login: 'jbot' },
+                body: scenario.reviewBody,
+              },
+            ];
           }
           if (endpoint === listReviewComments) {
             return [
@@ -481,35 +496,42 @@ describe('runPrReview local mode and early exits', () => {
           }
           throw new Error('unexpected pagination endpoint');
         },
-        graphql: async () => ({
-          viewer: { login: 'jbot' },
-          repository: {
-            pullRequest: {
-              reviewThreads: {
-                pageInfo: { hasNextPage: false, endCursor: null },
-                nodes: [
-                  {
-                    id: 'PRRT_resolved',
-                    isResolved: true,
-                    path: 'src/example.ts',
-                    line: 4,
-                    originalLine: 4,
-                    comments: {
-                      nodes: [
-                        {
-                          databaseId: 100,
-                          body: 'finding\n\n<!-- jbot-review:finding -->',
-                          url: 'https://github.com/acme/widget/pull/1#discussion_r100',
-                          author: { login: 'jbot' },
-                        },
-                      ],
+        graphql: async (query: string, variables?: { reviewNodeId?: string }) => {
+          if (query.includes('minimizeComment')) {
+            minimizedReviewIds.push(variables!.reviewNodeId!);
+            return {};
+          }
+          return {
+            viewer: { login: 'jbot' },
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: [
+                    {
+                      id: 'PRRT_resolved',
+                      isResolved: true,
+                      path: 'src/example.ts',
+                      line: 4,
+                      originalLine: 4,
+                      comments: {
+                        nodes: [
+                          {
+                            databaseId: 100,
+                            body: 'finding\n\n<!-- jbot-review:finding -->',
+                            url: 'https://github.com/acme/widget/pull/1#discussion_r100',
+                            author: { login: 'jbot' },
+                            pullRequestReview: { isMinimized: false },
+                          },
+                        ],
+                      },
                     },
-                  },
-                ],
+                  ],
+                },
               },
             },
-          },
-        }),
+          };
+        },
       };
 
       await runPrReview({
@@ -519,8 +541,11 @@ describe('runPrReview local mode and early exits', () => {
         log: () => {},
       });
 
-      assert.equal(updatedBodies.length, 1, scenario.name);
-      assert.match(updatedBodies[0], /All 1 review thread resolved/, scenario.name);
+      assert.equal(updatedBodies.length, scenario.expectedBodyUpdates, scenario.name);
+      if (updatedBodies[0]) {
+        assert.match(updatedBodies[0], /All 1 review thread resolved/, scenario.name);
+      }
+      assert.deepEqual(minimizedReviewIds, ['PRR_77'], scenario.name);
     }
   });
 

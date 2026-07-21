@@ -172,8 +172,9 @@ import {
   formatPriorJbotThreadsForPrompt,
   postAddressedThreadReply,
   resolveReviewThread,
+  minimizePullRequestReview,
   isJbotReviewBody,
-  selectResolvedJbotReviewsToCompact,
+  selectResolvedJbotReviewsToFinalize,
   compactJbotReviewBody,
   updateReviewBody,
   type JbotReviewGroup,
@@ -829,7 +830,7 @@ export async function runPrReview(params: {
   octokit?: Octokit;
   /**
    * Deliberately NOT proxy-defaulted like `octokit`: its undefined-ness is
-   * load-bearing. The only consumer falls back `?? octokit` (in local mode
+   * load-bearing. Its consumers fall back `?? octokit` (in local mode
    * that IS the landmine proxy, so no bare-undefined access exists), and the
    * missing-token error hint keys off `!threadResolutionOctokit` — a proxy
    * default would break both on GitHub runs without a resolution token.
@@ -988,7 +989,7 @@ export async function runPrReview(params: {
     }
   }
   // Fetch before the skip gates so a lightweight follow-up run can still
-  // compact manually resolved reviews. Full runs also need every open thread
+  // finalize manually resolved reviews. Full runs also need every open thread
   // for the review-done reaction, regardless of includePriorComments.
   const {
     threads: allPriorJbotThreads,
@@ -997,10 +998,11 @@ export async function runPrReview(params: {
   } = localDiff
     ? { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [] }
     : await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
-  const compactPriorResolvedReviews = async (resolvedThisRun: readonly string[]) => {
+  const finalizePriorResolvedReviews = async (resolvedThisRun: readonly string[]) => {
     if (options.dryRun) return;
-    await compactResolvedReviewBodies({
+    await finalizeResolvedReviews({
       octokit,
+      threadResolutionOctokit: params.threadResolutionOctokit,
       owner,
       repo,
       pullNumber,
@@ -1016,7 +1018,7 @@ export async function runPrReview(params: {
   // honest (a prior clean 🚀 stays; a PR with open findings stays 🚀-less).
   if (files.length === 0) {
     log('No reviewable files after filtering; leaving the review reaction unchanged.');
-    await compactPriorResolvedReviews([]);
+    await finalizePriorResolvedReviews([]);
     return;
   }
   const noiseCount = rawFiles.filter((file) => isNoiseFile(file.filename)).length;
@@ -1045,7 +1047,7 @@ export async function runPrReview(params: {
   // full review.
   if (options.skipDocOnly && isDocOnlyChange(changedFiles)) {
     log(`Doc-only PR (${changedFiles.length} file(s)); skipping the full review.`);
-    await compactPriorResolvedReviews([]);
+    await finalizePriorResolvedReviews([]);
     return;
   }
 
@@ -1995,7 +1997,7 @@ export async function runPrReview(params: {
       });
       resolvedThisRun.push(...reResolved);
     }
-    await compactPriorResolvedReviews(resolvedThisRun);
+    await finalizePriorResolvedReviews(resolvedThisRun);
     // React 🚀 only when the PR has NO open jbot findings after this run.
     // Open = threads that are not already resolved AND were not resolved this
     // run (a model-claimed "addressed" whose reply/resolve failed stays open,
@@ -2923,8 +2925,9 @@ async function resolveUnresolvedAddressedThreads(params: {
   return resolved;
 }
 
-async function compactResolvedReviewBodies(params: {
+async function finalizeResolvedReviews(params: {
   octokit: Octokit;
+  threadResolutionOctokit?: Octokit;
   owner: string;
   repo: string;
   pullNumber: number;
@@ -2932,21 +2935,38 @@ async function compactResolvedReviewBodies(params: {
   resolvedThisRun: readonly string[];
   log: (msg: string) => void;
 }): Promise<void> {
-  const reviews = selectResolvedJbotReviewsToCompact(params.reviews, params.resolvedThisRun);
+  const reviews = selectResolvedJbotReviewsToFinalize(params.reviews, params.resolvedThisRun);
   for (const review of reviews) {
+    const body = compactJbotReviewBody(review.body, review.threads.length);
+    if (body !== review.body) {
+      try {
+        await updateReviewBody(
+          params.octokit,
+          params.owner,
+          params.repo,
+          params.pullNumber,
+          review.id,
+          body,
+        );
+        params.log(`Compacted resolved jbot-review ${review.id}.`);
+      } catch (error) {
+        params.log(
+          `Failed to compact resolved jbot-review ${review.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    if (review.isMinimized) continue;
     try {
-      await updateReviewBody(
-        params.octokit,
-        params.owner,
-        params.repo,
-        params.pullNumber,
-        review.id,
-        compactJbotReviewBody(review.body, review.threads.length),
+      await minimizePullRequestReview(
+        params.threadResolutionOctokit ?? params.octokit,
+        review.nodeId,
       );
-      params.log(`Compacted resolved jbot-review ${review.id}.`);
+      params.log(`Minimized resolved jbot-review ${review.id}.`);
     } catch (error) {
       params.log(
-        `Failed to compact resolved jbot-review ${review.id}: ${
+        `Failed to minimize resolved jbot-review ${review.id}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

@@ -7,8 +7,9 @@ import {
   formatPriorJbotThreadsForPrompt,
   isBotAddressedReply,
   listPriorJbotThreads,
+  minimizePullRequestReview,
   postAddressedThreadReply,
-  selectResolvedJbotReviewsToCompact,
+  selectResolvedJbotReviewsToFinalize,
   updateReviewBody,
   type JbotReviewGroup,
   type Octokit,
@@ -55,15 +56,17 @@ describe('classifyPriorJbotThread', () => {
   });
 });
 
-describe('resolved review compaction', () => {
+describe('resolved review finalization', () => {
   it('selects only reviews whose full finding count is represented by resolved threads', () => {
     const review = (overrides: Partial<JbotReviewGroup>): JbotReviewGroup => ({
       id: 1,
+      nodeId: 'PRR_1',
       body: REVIEW_BODY,
+      isMinimized: false,
       threads: [{ id: 't1', isResolved: true }],
       ...overrides,
     });
-    const selected = selectResolvedJbotReviewsToCompact(
+    const selected = selectResolvedJbotReviewsToFinalize(
       [
         review({ id: 1 }),
         review({ id: 2, threads: [{ id: 't2', isResolved: false }] }),
@@ -75,14 +78,19 @@ describe('resolved review compaction', () => {
             { id: 't5', isResolved: true },
           ],
         }),
-        review({ id: 5, body: `${REVIEW_BODY}\n<!-- jbot-review:compacted -->` }),
+        review({
+          id: 5,
+          body: `${REVIEW_BODY}\n<!-- jbot-review:compacted -->`,
+          isMinimized: true,
+        }),
+        review({ id: 6, body: `${REVIEW_BODY}\n<!-- jbot-review:compacted -->` }),
       ],
       ['t3'],
     );
 
     assert.deepEqual(
       selected.map((item) => item.id),
-      [1, 3],
+      [1, 3, 6],
     );
   });
 
@@ -96,6 +104,7 @@ describe('resolved review compaction', () => {
     assert.match(body, /Review state:\*\* Needs changes before approval/);
     assert.equal(body.match(/jbot-review:review/g)?.length, 1);
     assert.equal(body.match(/jbot-review:compacted/g)?.length, 1);
+    assert.equal(compactJbotReviewBody(body, 1), body);
   });
 
   it('updates the submitted review summary body', async () => {
@@ -121,6 +130,23 @@ describe('resolved review compaction', () => {
     });
   });
 
+  it('minimizes the submitted review as resolved', async () => {
+    let query = '';
+    let variables: unknown;
+    const octokit = {
+      graphql: async (request: string, params: unknown) => {
+        query = request;
+        variables = params;
+      },
+    };
+
+    await minimizePullRequestReview(octokit as unknown as Octokit, 'PRR_77');
+
+    assert.match(query, /minimizeComment/);
+    assert.match(query, /classifier: RESOLVED/);
+    assert.deepEqual(variables, { reviewNodeId: 'PRR_77' });
+  });
+
   it('keeps resolved addressed threads in their review group after omitting prompt context', async () => {
     const listReviews = {};
     const listReviewComments = {};
@@ -128,7 +154,14 @@ describe('resolved review compaction', () => {
       rest: { pulls: { listReviews, listReviewComments } },
       paginate: async (endpoint: unknown) => {
         if (endpoint === listReviews) {
-          return [{ id: 77, user: { login: 'github-actions[bot]' }, body: REVIEW_BODY }];
+          return [
+            {
+              id: 77,
+              node_id: 'PRR_77',
+              user: { login: 'github-actions[bot]' },
+              body: REVIEW_BODY,
+            },
+          ];
         }
         if (endpoint === listReviewComments) {
           return [
@@ -171,6 +204,7 @@ describe('resolved review compaction', () => {
                         body: 'finding\n\n<!-- jbot-review:finding -->',
                         url: 'https://github.com/acme/widget/pull/1#discussion_r100',
                         author: { login: 'github-actions[bot]' },
+                        pullRequestReview: { isMinimized: true },
                       },
                       {
                         databaseId: 101,
@@ -195,7 +229,9 @@ describe('resolved review compaction', () => {
     assert.deepEqual(result.reviewGroups, [
       {
         id: 77,
+        nodeId: 'PRR_77',
         body: REVIEW_BODY,
+        isMinimized: true,
         threads: [{ id: 'PRRT_resolved', isResolved: true }],
       },
     ]);
