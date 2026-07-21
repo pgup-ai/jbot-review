@@ -227,8 +227,9 @@ with:
 
 **Thread resolution token:** when jbot verifies a prior finding is fixed, it
 posts an addressed reply and then attempts to resolve the GitHub review thread.
-The run that resolves a review's final thread (or the next run after a manual
-resolution) compacts its stale summary and keeps the original body under a disclosure.
+Once every finding in a review is represented by a resolved thread, the run that
+resolves the final thread (or the next run after a manual resolution) compacts
+its stale summary and keeps the original body under a disclosure.
 Some `GITHUB_TOKEN` integrations can post review comments but cannot run
 GitHub's `resolveReviewThread` mutation. If you see `Resource not accessible by
 integration` in the logs, add a secret such as
