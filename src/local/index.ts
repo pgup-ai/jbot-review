@@ -172,7 +172,8 @@ const INSTALL_HINTS: Record<string, string> = {
   [CLINE_CLI_BIN]: 'npm i -g cline',
   [GROK_CLI_BIN]: 'npm i -g @xai-official/grok',
   [KILO_CLI_BIN]: 'npm i -g @kilocode/cli',
-  [POOLSIDE_CLI_BIN]: 'curl -fsSL https://downloads.poolside.ai/pool/install.sh | sh',
+  [POOLSIDE_CLI_BIN]:
+    'curl -fsSL https://downloads.poolside.ai/pool/install.sh | POOL_INSTALL_ACCEPT_EULA=1 sh',
   [CURSOR_CLI_BIN]: 'curl -fsSL https://cursor.com/install | sh',
   devin: 'curl -fsSL https://cli.devin.ai/install.sh | sh',
 };
