@@ -289,6 +289,18 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
+  // Poolside's coding-agent models are available through Pool CLI even when
+  // they are absent from the platform API model catalog.
+  poolside: {
+    defaultModel: 'poolside/laguna-s-2.1',
+    keyEnv: 'POOLSIDE_API_KEY',
+    keyInput: 'poolside-api-key',
+    models: {
+      'laguna-s-2.1': { promptCache: false },
+      'laguna-m.1': { promptCache: false },
+      'laguna-xs-2.1': { promptCache: false },
+    },
+  },
 };
 
 export function modelSupportsPromptCache(providerID: string, modelID: string): boolean {
@@ -301,7 +313,8 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     providerID === 'cline' ||
     providerID === 'cline-pass' ||
     providerID === 'grok' ||
-    providerID === 'kilo'
+    providerID === 'kilo' ||
+    providerID === 'poolside'
   )
     return false;
   if (PROVIDERS[providerID]?.promptCache === false) return false;

@@ -30,6 +30,7 @@ describe('model catalog', () => {
       'cline-pass',
       'grok',
       'kilo',
+      'poolside',
     ]) {
       const section = catalog.split(`### \`${providerID}\``)[1]?.split('\n### ')[0];
       assert.ok(section, `missing ${providerID} catalog section`);
@@ -40,6 +41,8 @@ describe('model catalog', () => {
     assert.match(catalog, /`codex debug models`/);
     assert.match(catalog, /`grok models`/);
     assert.match(catalog, /authenticated remote catalog/);
+    assert.match(catalog, /interactive `\/model` picker/);
+    assert.doesNotMatch(catalog, /pool agents list/);
     assert.doesNotMatch(catalog, /`kilo\/kilo\/[^`]+`/);
   });
 

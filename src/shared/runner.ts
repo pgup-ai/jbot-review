@@ -18,7 +18,11 @@ import {
   suppressPreviouslyReported,
 } from './filter.ts';
 import { createTelemetryRecorder, type TelemetryRecorder } from './telemetry.ts';
-import { selectReviewBackends, type CliBackendID } from './backend-selection.ts';
+import {
+  cliBackendRequiresCompleteEmbeddedDiff,
+  selectReviewBackends,
+  type CliBackendID,
+} from './backend-selection.ts';
 import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
 import {
   piModelAvailable,
@@ -137,6 +141,14 @@ import {
   runKiloGuidelineComplianceCheck,
   runKiloReview,
 } from './kilo.ts';
+import {
+  POOLSIDE_PROVIDER_ID,
+  runPoolsideAddressedPriorCommentsCheck,
+  runPoolsideChangesSinceLastReview,
+  runPoolsideFindingVerification,
+  runPoolsideGuidelineComplianceCheck,
+  runPoolsideReview,
+} from './poolside.ts';
 import {
   QODER_PROVIDER_ID,
   runQoderAddressedPriorCommentsCheck,
@@ -622,6 +634,53 @@ function createKiloBackend(workspace: string, auth: string): ReviewBackend {
         timeoutMs,
         onTokenUsage,
         auth,
+      ),
+  };
+}
+
+function createPoolsideBackend(apiKey: string): ReviewBackend {
+  return {
+    name: POOLSIDE_PROVIDER_ID,
+    runReview: (model, prContext, guidelines, log, options) =>
+      runPoolsideReview(model, prContext, guidelines, log, { ...options, apiKey }),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runPoolsideAddressedPriorCommentsCheck(
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        apiKey,
+      ),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runPoolsideGuidelineComplianceCheck(
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        apiKey,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runPoolsideFindingVerification(
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        apiKey,
+      ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runPoolsideChangesSinceLastReview(
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        apiKey,
       ),
   };
 }
@@ -1129,14 +1188,8 @@ export async function runPrReview(params: {
   }
   const diffHunksBlock = buildDiffHunksBlock(files);
   if (diffHunksBlock) log(`Embedded diff hunks block: ${diffHunksBlock.length} chars.`);
-  const mainRequiresCompleteEmbeddedDiff =
-    mainCliBackend === COMMANDCODE_PROVIDER_ID ||
-    mainCliBackend === GROK_PROVIDER_ID ||
-    mainCliBackend === QODER_PROVIDER_ID;
-  const auxRequiresCompleteEmbeddedDiff =
-    auxCliBackend === COMMANDCODE_PROVIDER_ID ||
-    auxCliBackend === GROK_PROVIDER_ID ||
-    auxCliBackend === QODER_PROVIDER_ID;
+  const mainRequiresCompleteEmbeddedDiff = cliBackendRequiresCompleteEmbeddedDiff(mainCliBackend);
+  const auxRequiresCompleteEmbeddedDiff = cliBackendRequiresCompleteEmbeddedDiff(auxCliBackend);
   const embeddedOnlyCli = mainRequiresCompleteEmbeddedDiff || auxRequiresCompleteEmbeddedDiff;
   const embeddedOnlyCliDiffHunks = embeddedOnlyCli
     ? buildDiffHunksBlockWithMetadata(files, EMBEDDED_ONLY_CLI_DIFF_HUNKS_OPTIONS)
@@ -1252,6 +1305,7 @@ export async function runPrReview(params: {
   let grokBackend: ReviewBackend | undefined;
   let grokSessionSlots: Semaphore | undefined;
   let kiloBackend: ReviewBackend | undefined;
+  let poolsideBackend: ReviewBackend | undefined;
   let qoderBackend: ReviewBackend | undefined;
   let commandCodeHome: string | undefined;
   const cleanupCommandCodeHome = (): void => {
@@ -1412,6 +1466,18 @@ export async function runPrReview(params: {
     kiloBackend = createKiloBackend(workspace, kiloAuth);
   }
 
+  if (mainCliBackend === POOLSIDE_PROVIDER_ID || auxCliBackend === POOLSIDE_PROVIDER_ID) {
+    const poolsideApiKey = backendSelection.poolsideApiKey;
+    if (!poolsideApiKey) {
+      cleanupCliHomes();
+      throw new Error(`Missing API key for ${POOLSIDE_PROVIDER_ID} provider.`);
+    }
+    log(
+      'Poolside CLI authenticated via POOLSIDE_API_KEY; sessions use an isolated config and empty read-only workspace, and token usage is unavailable.',
+    );
+    poolsideBackend = createPoolsideBackend(poolsideApiKey);
+  }
+
   if (mainCliBackend === QODER_PROVIDER_ID || auxCliBackend === QODER_PROVIDER_ID) {
     const qoderToken = backendSelection.qoderToken;
     if (!qoderToken) {
@@ -1531,6 +1597,7 @@ export async function runPrReview(params: {
     [CLINE_PROVIDER_ID]: clineBackend,
     [GROK_PROVIDER_ID]: grokBackend,
     [KILO_PROVIDER_ID]: kiloBackend,
+    [POOLSIDE_PROVIDER_ID]: poolsideBackend,
     [QODER_PROVIDER_ID]: qoderBackend,
   };
   const mainBaseBackend = mainCliBackend

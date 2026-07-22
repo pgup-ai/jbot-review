@@ -29,6 +29,7 @@ import {
   resolveModelName,
 } from '../shared/model.ts';
 import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
+import { POOLSIDE_CLI_BIN, POOLSIDE_PROVIDER_ID } from '../shared/poolside.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import type { ReviewCommit } from '../shared/review-context.ts';
 import { runPrReview } from '../shared/runner.ts';
@@ -157,6 +158,7 @@ const CLI_BINS: Record<CliBackendID, string | null> = {
   [CLINE_PROVIDER_ID]: CLINE_CLI_BIN,
   [GROK_PROVIDER_ID]: GROK_CLI_BIN,
   [KILO_PROVIDER_ID]: KILO_CLI_BIN,
+  [POOLSIDE_PROVIDER_ID]: POOLSIDE_CLI_BIN,
   // The Agent SDK resolves its bundled, overridden, or global runtime itself.
   [QODER_PROVIDER_ID]: null,
 };
@@ -170,6 +172,7 @@ const INSTALL_HINTS: Record<string, string> = {
   [CLINE_CLI_BIN]: 'npm i -g cline',
   [GROK_CLI_BIN]: 'npm i -g @xai-official/grok',
   [KILO_CLI_BIN]: 'npm i -g @kilocode/cli',
+  [POOLSIDE_CLI_BIN]: 'curl -fsSL https://downloads.poolside.ai/pool/install.sh | sh',
   [CURSOR_CLI_BIN]: 'curl -fsSL https://cursor.com/install | sh',
   devin: 'curl -fsSL https://cli.devin.ai/install.sh | sh',
 };

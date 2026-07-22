@@ -36,6 +36,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `cline`                 | CLI snapshot         |     257 | `cline/default`                                            |
 | `cline-pass`            | CLI snapshot         |      12 | `cline-pass/default`                                       |
 | `kilo`                  | CLI snapshot         |     276 | `kilo/kilo-auto/free`                                      |
+| `poolside`              | CLI snapshot         |       3 | `poolside/laguna-s-2.1`                                    |
 | `openai-compatible`     | Custom endpoint      | dynamic | required                                                   |
 
 ## Models.dev providers
@@ -1632,6 +1633,18 @@ The CLI does not expose a complete list.
 - `kilo/z-ai/glm-5.1`
 - `kilo/z-ai/glm-5.2`
 - `kilo/z-ai/glm-5v-turbo`
+
+### `poolside`
+
+- Source: Vendor-installed Pool CLI pinned in the Docker image.
+- Refresh/list: the interactive `/model` picker in `pool`.
+- Note: Pool has no non-interactive model-list command. These centrally configured IDs were verified against the CLI picker and must be rechecked when Pool CLI is upgraded.
+
+3 J-Bot model values:
+
+- `poolside/laguna-m.1`
+- `poolside/laguna-s-2.1` **(default)**
+- `poolside/laguna-xs-2.1`
 
 ## Custom providers
 

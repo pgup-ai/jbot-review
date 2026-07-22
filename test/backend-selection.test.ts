@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { selectReviewBackends } from '../src/shared/backend-selection.ts';
+import {
+  cliBackendRequiresCompleteEmbeddedDiff,
+  selectReviewBackends,
+} from '../src/shared/backend-selection.ts';
 
 describe('selectReviewBackends', () => {
   const base = {
@@ -689,6 +692,67 @@ describe('selectReviewBackends', () => {
       opencodeModelID: 'kilo-auto/free',
       opencodeApiKey: '',
     });
+  });
+
+  it('routes Poolside main and aux sessions through one API-key-backed CLI backend', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        providerID: 'poolside',
+        modelID: 'laguna-s-2.1',
+        apiKey: 'poolside-key',
+        auxProviderID: 'poolside',
+        auxModelID: 'laguna-xs-2.1',
+        auxApiKey: '',
+      }),
+      {
+        mainCliBackend: 'poolside',
+        auxCliBackend: 'poolside',
+        needsOpencode: false,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: '',
+        codexAuth: '',
+        clineAuth: '',
+        grokAuth: '',
+        kiloAuth: '',
+        poolsideApiKey: 'poolside-key',
+        opencodeProviderID: 'poolside',
+        opencodeModelID: 'laguna-xs-2.1',
+        opencodeApiKey: '',
+      },
+    );
+  });
+
+  it('keeps Poolside credentials on the selected role in mixed-backend runs', () => {
+    const main = selectReviewBackends({
+      ...base,
+      providerID: 'poolside',
+      modelID: 'laguna-s-2.1',
+      apiKey: 'main-poolside-key',
+      auxApiKey: 'opencode-key',
+    });
+    assert.equal(main.mainCliBackend, 'poolside');
+    assert.equal(main.poolsideApiKey, 'main-poolside-key');
+    assert.equal(main.opencodeApiKey, 'opencode-key');
+
+    const aux = selectReviewBackends({
+      ...base,
+      auxProviderID: 'poolside',
+      auxModelID: 'laguna-xs-2.1',
+      auxApiKey: 'aux-poolside-key',
+    });
+    assert.equal(aux.auxCliBackend, 'poolside');
+    assert.equal(aux.poolsideApiKey, 'aux-poolside-key');
+    assert.equal(aux.opencodeApiKey, 'main-key');
+  });
+
+  it('requires the complete embedded diff for workspace-isolated CLI backends', () => {
+    for (const backend of ['commandcode', 'grok', 'poolside', 'qoder'] as const) {
+      assert.equal(cliBackendRequiresCompleteEmbeddedDiff(backend), true);
+    }
+    for (const backend of ['cursor', 'kilo', undefined] as const) {
+      assert.equal(cliBackendRequiresCompleteEmbeddedDiff(backend), false);
+    }
   });
 
   it('routes Qoder main and aux sessions through one PAT-backed CLI backend', () => {

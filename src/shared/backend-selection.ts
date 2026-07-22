@@ -6,6 +6,7 @@ import { DEVIN_PROVIDER_ID, isDevinProvider } from './devin.ts';
 import { GROK_PROVIDER_ID, isGrokProvider } from './grok.ts';
 import { KILO_PROVIDER_ID, isKiloProvider } from './kilo.ts';
 import { piSupportsProvider } from './pi.ts';
+import { POOLSIDE_PROVIDER_ID, isPoolsideProvider } from './poolside.ts';
 import { QODER_PROVIDER_ID, isQoderProvider } from './qoder.ts';
 
 export type CliBackendID =
@@ -16,6 +17,7 @@ export type CliBackendID =
   | typeof CLINE_PROVIDER_ID
   | typeof GROK_PROVIDER_ID
   | typeof KILO_PROVIDER_ID
+  | typeof POOLSIDE_PROVIDER_ID
   | typeof QODER_PROVIDER_ID;
 
 export interface ReviewBackendSelectionInput {
@@ -38,6 +40,17 @@ export interface PiEngineConfig {
   apiKey: string;
 }
 
+export function cliBackendRequiresCompleteEmbeddedDiff(
+  backendID: CliBackendID | undefined,
+): boolean {
+  return (
+    backendID === COMMANDCODE_PROVIDER_ID ||
+    backendID === GROK_PROVIDER_ID ||
+    backendID === POOLSIDE_PROVIDER_ID ||
+    backendID === QODER_PROVIDER_ID
+  );
+}
+
 export interface ReviewBackendSelection {
   mainCliBackend?: CliBackendID;
   auxCliBackend?: CliBackendID;
@@ -52,6 +65,7 @@ export interface ReviewBackendSelection {
   clineAuth: string;
   grokAuth: string;
   kiloAuth: string;
+  poolsideApiKey?: string;
   qoderToken?: string;
   opencodeProviderID: string;
   opencodeModelID: string;
@@ -103,6 +117,9 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
     clineAuth: keyFor(CLINE_PROVIDER_ID),
     grokAuth: keyFor(GROK_PROVIDER_ID),
     kiloAuth: keyFor(KILO_PROVIDER_ID),
+    ...(mainCliBackend === POOLSIDE_PROVIDER_ID || auxCliBackend === POOLSIDE_PROVIDER_ID
+      ? { poolsideApiKey: keyFor(POOLSIDE_PROVIDER_ID) }
+      : {}),
     ...(mainCliBackend === QODER_PROVIDER_ID || auxCliBackend === QODER_PROVIDER_ID
       ? { qoderToken: keyFor(QODER_PROVIDER_ID) }
       : {}),
@@ -131,6 +148,7 @@ function cliBackendForProvider(providerID: string): CliBackendID | undefined {
   if (isClineProvider(providerID)) return CLINE_PROVIDER_ID;
   if (isGrokProvider(providerID)) return GROK_PROVIDER_ID;
   if (isKiloProvider(providerID)) return KILO_PROVIDER_ID;
+  if (isPoolsideProvider(providerID)) return POOLSIDE_PROVIDER_ID;
   if (isQoderProvider(providerID)) return QODER_PROVIDER_ID;
   return undefined;
 }

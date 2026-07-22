@@ -188,6 +188,9 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   const kiloModels = parseKiloModelList(
     npmCliOutput('@kilocode/cli', 'kilo', ['models', '--pure']),
   );
+  const poolsideModels = Object.keys(PROVIDERS.poolside?.models ?? {}).map(
+    (model) => `poolside/${model}`,
+  );
   for (const [providerID, models] of Object.entries({
     commandcode: commandCodeModels,
     cursor: cursorModels,
@@ -197,6 +200,7 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
     'cline-pass': clinePassModels,
     grok: grokModels,
     kilo: kiloModels,
+    poolside: poolsideModels,
   })) {
     if (models.length === 0) throw new Error(`${providerID} returned no model IDs.`);
   }
@@ -274,6 +278,12 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
       source: `${npmSource('@kilocode/cli')} live catalog`,
       note: 'Kilo already prints fully qualified J-Bot values such as `kilo/openai/gpt-5.4`; do not add another `kilo/` prefix.',
       models: withDefault('kilo', kiloModels),
+    },
+    poolside: {
+      discovery: 'the interactive `/model` picker in `pool`',
+      source: 'Vendor-installed Pool CLI pinned in the Docker image',
+      note: 'Pool has no non-interactive model-list command. These centrally configured IDs were verified against the CLI picker and must be rechecked when Pool CLI is upgraded.',
+      models: withDefault('poolside', poolsideModels),
     },
   };
 }

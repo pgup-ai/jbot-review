@@ -86,6 +86,10 @@ inputs:
     description: 'Cursor API key. Used when provider or active aux-provider is cursor.'
     required: false
     default: ''
+  poolside-api-key:
+    description: 'Poolside API key. Used by Pool CLI when provider or active aux-provider is poolside.'
+    required: false
+    default: ''
   qoder-token:
     description: 'Qoder personal access token. Used when provider or active aux-provider is qoder.'
     required: false
@@ -228,6 +232,7 @@ runs:
     INPUT_DEVIN-WINDSURF-API-KEY: ${{ inputs.devin-windsurf-api-key }}
     INPUT_COMMANDCODE-ACCESS-KEY: ${{ inputs.commandcode-access-key }}
     INPUT_CURSOR-API-KEY: ${{ inputs.cursor-api-key }}
+    INPUT_POOLSIDE-API-KEY: ${{ inputs.poolside-api-key }}
     INPUT_QODER-TOKEN: ${{ inputs.qoder-token }}
     INPUT_CODEX-AUTH: ${{ inputs.codex-auth }}
     INPUT_CLINE-AUTH: ${{ inputs.cline-auth }}
