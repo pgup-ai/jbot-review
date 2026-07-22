@@ -3,6 +3,8 @@ import { paginateRest } from '@octokit/plugin-paginate-rest';
 import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 import type { Octokit } from '../shared/github.ts';
 import { clonePr } from '../app/clone.ts';
+import { defaultModelOptions } from '../shared/config.ts';
+import { parseModelName } from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { Severity } from '../shared/types.ts';
 import type { ClaimedJob, JobUpdate } from '../shared/worker-contract.ts';
@@ -70,10 +72,11 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         // Match the hosted app / Action defaults explicitly. The runner otherwise
         // auto-shards when reviewShards is unset (default 0) — bad on one BYOK key
         // and a small VPS — so pin a single shard, plus a 30-min wall-clock cap so
-        // one slow job can't starve the worker, and medium reasoning effort.
+        // one slow job can't starve the worker. Reasoning follows the selected
+        // provider's default.
         reviewShards: 1,
         timeBudgetMinutes: 30,
-        modelOptions: { reasoningEffort: 'medium' },
+        modelOptions: defaultModelOptions(parseModelName(job.model).providerID),
         onReviewResult: (r) => {
           const counts: Partial<Record<Severity, number>> = {};
           for (const f of r.findings) counts[f.severity] = (counts[f.severity] ?? 0) + 1;

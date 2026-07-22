@@ -18,6 +18,7 @@ describe('model catalog', () => {
     }
     assert.match(catalog, /`openai-compatible\/<endpoint-model-id>`/);
     assert.match(catalog, /does not invent or probe a default/);
+    assert.doesNotMatch(catalog, /`poolside\/poolside\//);
   });
 
   it('publishes sourced CLI snapshots with copyable J-Bot values', () => {

@@ -2,11 +2,11 @@
 
 # J-Bot model ID catalog
 
-Generated on **2026-07-21** from the live [Models.dev catalog](https://models.dev/api.json), Docker-pinned CLI npm packages, and authenticated CLI catalogs by `npm run models:update`.
+Generated on **2026-07-22** from the live [Models.dev catalog](https://models.dev/api.json), Docker-pinned CLI npm packages, and authenticated CLI catalogs by `npm run models:update`.
 
 J-Bot model values use `provider/model-id`. You may pass either the full value shown here or the model-id portion when `provider` is configured separately. Provider access, region, account tier, and model retirement can change independently of this snapshot.
 
-The Models.dev sections contain every model ID advertised for J-Bot's public OpenCode providers, including non-chat modalities. Choose a text-capable model appropriate for code review. CLI sections are exact snapshots from the source named in each section: public/package catalogs where available and the authenticated account otherwise.
+The Models.dev sections contain every advertised model ID for J-Bot's public providers plus any explicitly configured unlisted IDs. Choose a text-capable model appropriate for code review. CLI sections are exact snapshots from the source named in each section: public/package catalogs where available and the authenticated account otherwise.
 
 Refreshing CLI sections requires the Docker-pinned npm packages plus valid local authentication for account-scoped CLIs. The script reads credentials through each CLI and never writes them to the catalog.
 
@@ -15,18 +15,19 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | Provider                | Catalog              |  Models | J-Bot default                                              |
 | ----------------------- | -------------------- | ------: | ---------------------------------------------------------- |
 | `opencode`              | Models.dev           |      82 | `opencode/deepseek-v4-flash-free`                          |
-| `opencode-go`           | Models.dev           |      21 | `opencode-go/deepseek-v4-flash`                            |
+| `opencode-go`           | Models.dev           |      22 | `opencode-go/deepseek-v4-flash`                            |
 | `deepseek`              | Models.dev           |       4 | `deepseek/deepseek-v4-flash`                               |
 | `openai`                | Models.dev           |      56 | `openai/gpt-5.4-nano`                                      |
 | `anthropic`             | Models.dev           |      14 | `anthropic/claude-sonnet-4-6`                              |
 | `google`                | Models.dev           |      25 | `google/gemini-2.5-flash`                                  |
-| `openrouter`            | Models.dev           |     339 | `openrouter/openai/gpt-4o-mini`                            |
+| `openrouter`            | Models.dev           |     341 | `openrouter/openai/gpt-4o-mini`                            |
 | `nvidia`                | Models.dev           |      84 | `nvidia/nemotron-3-ultra-550b-a55b`                        |
-| `zai-coding-plan`       | Models.dev           |       6 | `zai-coding-plan/glm-5.2`                                  |
+| `zai-coding-plan`       | Models.dev           |       7 | `zai-coding-plan/glm-5.2`                                  |
 | `kimi-for-coding`       | Models.dev           |       3 | `kimi-for-coding/k3`                                       |
 | `xai`                   | Models.dev           |       9 | `xai/grok-4.3`                                             |
 | `xiaomi-token-plan-sgp` | Models.dev           |       7 | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                      |
 | `fireworks-ai`          | Models.dev           |      16 | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` |
+| `poolside`              | Models.dev           |       4 | `poolside/laguna-s-2.1`                                    |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                            |
 | `commandcode`           | CLI snapshot         |      36 | `commandcode/default`                                      |
 | `cursor`                | CLI snapshot         |     175 | `cursor/default`                                           |
@@ -129,7 +130,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode-go`
 
-21 model IDs. Default: `opencode-go/deepseek-v4-flash`.
+22 model IDs. Default: `opencode-go/deepseek-v4-flash`.
 
 - `opencode-go/deepseek-v4-flash` **(default)**
 - `opencode-go/deepseek-v4-pro`
@@ -137,6 +138,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode-go/glm-5.1`
 - `opencode-go/glm-5.2`
 - `opencode-go/grok-4.5`
+- `opencode-go/hy3`
 - `opencode-go/kimi-k2.5`
 - `opencode-go/kimi-k2.6`
 - `opencode-go/kimi-k2.7-code`
@@ -274,7 +276,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `openrouter`
 
-339 model IDs. Default: `openrouter/openai/gpt-4o-mini`.
+341 model IDs. Default: `openrouter/openai/gpt-4o-mini`.
 
 - `openrouter/~anthropic/claude-fable-latest`
 - `openrouter/~anthropic/claude-haiku-latest`
@@ -526,6 +528,8 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/perplexity/sonar-reasoning-pro`
 - `openrouter/poolside/laguna-m.1`
 - `openrouter/poolside/laguna-m.1:free`
+- `openrouter/poolside/laguna-s-2.1`
+- `openrouter/poolside/laguna-s-2.1:free`
 - `openrouter/poolside/laguna-xs-2.1`
 - `openrouter/poolside/laguna-xs-2.1:free`
 - `openrouter/qwen/qwen-2.5-72b-instruct`
@@ -707,10 +711,11 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `zai-coding-plan`
 
-6 model IDs. Default: `zai-coding-plan/glm-5.2`.
+7 model IDs. Default: `zai-coding-plan/glm-5.2`.
 
 - `zai-coding-plan/glm-4.5-air`
 - `zai-coding-plan/glm-4.7`
+- `zai-coding-plan/glm-5`
 - `zai-coding-plan/glm-5-turbo`
 - `zai-coding-plan/glm-5.1`
 - `zai-coding-plan/glm-5.2` **(default)**
@@ -770,6 +775,15 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `fireworks-ai/accounts/fireworks/routers/kimi-k2p6-fast`
 - `fireworks-ai/accounts/fireworks/routers/kimi-k2p6-turbo`
 - `fireworks-ai/accounts/fireworks/routers/kimi-k2p7-code-fast`
+
+### `poolside`
+
+4 model IDs. Default: `poolside/laguna-s-2.1`.
+
+- `poolside/laguna-m.1`
+- `poolside/laguna-s-2.1` **(default)**
+- `poolside/laguna-xs-2.1`
+- `poolside/laguna-xs.2`
 
 ## CLI providers
 

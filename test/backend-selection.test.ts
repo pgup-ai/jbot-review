@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { selectReviewBackends } from '../src/shared/backend-selection.ts';
+import {
+  backendRequiresCompleteEmbeddedDiff,
+  selectReviewBackends,
+} from '../src/shared/backend-selection.ts';
 
 describe('selectReviewBackends', () => {
   const base = {
@@ -689,6 +692,42 @@ describe('selectReviewBackends', () => {
       opencodeModelID: 'kilo-auto/free',
       opencodeApiKey: '',
     });
+  });
+
+  it('routes Poolside directly without starting OpenCode', () => {
+    assert.deepEqual(
+      selectReviewBackends({
+        providerID: 'poolside',
+        modelID: 'laguna-s-2.1',
+        apiKey: 'poolside-key',
+        auxProviderID: 'poolside',
+        auxModelID: 'laguna-xs-2.1',
+        auxApiKey: '',
+      }),
+      {
+        mainSdkEngine: 'poolside',
+        auxSdkEngine: 'poolside',
+        needsOpencode: false,
+        devinApiKey: '',
+        commandCodeAccessKey: '',
+        cursorApiKey: '',
+        codexAuth: '',
+        clineAuth: '',
+        grokAuth: '',
+        kiloAuth: '',
+        opencodeProviderID: 'poolside',
+        opencodeModelID: 'laguna-xs-2.1',
+        opencodeApiKey: '',
+      },
+    );
+  });
+
+  it('requires complete embedded diffs for Poolside and shell-free CLI backends', () => {
+    assert.equal(backendRequiresCompleteEmbeddedDiff('poolside', undefined), true);
+    for (const backend of ['commandcode', 'grok', 'qoder'] as const) {
+      assert.equal(backendRequiresCompleteEmbeddedDiff('other', backend), true);
+    }
+    assert.equal(backendRequiresCompleteEmbeddedDiff('other', 'cursor'), false);
   });
 
   it('routes Qoder main and aux sessions through one PAT-backed CLI backend', () => {

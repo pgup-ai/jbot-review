@@ -53,6 +53,12 @@ function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));
 }
 
+function qualifyModel(providerID: string, modelID: string): string {
+  // Poolside's direct backend accepts the fully qualified IDs returned by Models.dev.
+  if (providerID === 'poolside' && modelID.startsWith('poolside/')) return modelID;
+  return `${providerID}/${modelID}`;
+}
+
 function withDefault(providerID: string, models: string[]): string[] {
   const defaultModel = PROVIDERS[providerID]?.defaultModel;
   return uniqueSorted(defaultModel ? [defaultModel, ...models] : models);
@@ -309,9 +315,10 @@ async function main(): Promise<void> {
     if (!isModelsDevProvider(provider)) {
       throw new Error(`Provider "${providerID}" is missing from Models.dev and runtime catalogs.`);
     }
-    const models = Object.keys(provider.models)
-      .map((modelID) => `${providerID}/${modelID}`)
-      .sort((a, b) => a.localeCompare(b));
+    const models = uniqueSorted([
+      ...Object.keys(provider.models).map((modelID) => qualifyModel(providerID, modelID)),
+      ...Object.keys(config.models ?? {}).map((modelID) => qualifyModel(providerID, modelID)),
+    ]);
     const defaultModelID = config.defaultModel?.slice(`${providerID}/`.length);
     const catalogDefault = config.defaultModel
       ? models.find(
@@ -342,7 +349,7 @@ async function main(): Promise<void> {
     '',
     'J-Bot model values use `provider/model-id`. You may pass either the full value shown here or the model-id portion when `provider` is configured separately. Provider access, region, account tier, and model retirement can change independently of this snapshot.',
     '',
-    "The Models.dev sections contain every model ID advertised for J-Bot's public OpenCode providers, including non-chat modalities. Choose a text-capable model appropriate for code review. CLI sections are exact snapshots from the source named in each section: public/package catalogs where available and the authenticated account otherwise.",
+    "The Models.dev sections contain every advertised model ID for J-Bot's public providers plus any explicitly configured unlisted IDs. Choose a text-capable model appropriate for code review. CLI sections are exact snapshots from the source named in each section: public/package catalogs where available and the authenticated account otherwise.",
     '',
     'Refreshing CLI sections requires the Docker-pinned npm packages plus valid local authentication for account-scoped CLIs. The script reads credentials through each CLI and never writes them to the catalog.',
     '',

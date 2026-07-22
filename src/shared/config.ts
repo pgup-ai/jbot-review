@@ -51,6 +51,7 @@ export function resolveProviderModel(
 
 export function defaultModelOptions(providerID: string): Record<string, unknown> {
   // Arbitrary custom endpoints may reject provider-specific options.
+  if (providerID === 'poolside') return { reasoningEffort: 'default' };
   return PROVIDERS[providerID]?.custom ? {} : { reasoningEffort: 'medium' };
 }
 
@@ -287,6 +288,17 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     models: {
       // Kilo CLI is not driven through opencode, so prompt-cache options do not apply.
       default: { promptCache: false },
+    },
+  },
+  // Laguna S 2.1 works through Poolside's chat-completions endpoint when
+  // named explicitly, despite being absent from its advertised model catalog.
+  poolside: {
+    defaultModel: 'poolside/laguna-s-2.1',
+    keyEnv: 'POOLSIDE_API_KEY',
+    keyInput: 'poolside-api-key',
+    promptCache: false,
+    models: {
+      'laguna-s-2.1': { promptCache: false },
     },
   },
 };

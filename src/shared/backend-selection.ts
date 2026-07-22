@@ -6,6 +6,7 @@ import { DEVIN_PROVIDER_ID, isDevinProvider } from './devin.ts';
 import { GROK_PROVIDER_ID, isGrokProvider } from './grok.ts';
 import { KILO_PROVIDER_ID, isKiloProvider } from './kilo.ts';
 import { piSupportsProvider } from './pi.ts';
+import { isPoolsideProvider } from './poolside.ts';
 import { QODER_PROVIDER_ID, isQoderProvider } from './qoder.ts';
 
 export type CliBackendID =
@@ -38,12 +39,24 @@ export interface PiEngineConfig {
   apiKey: string;
 }
 
+export function backendRequiresCompleteEmbeddedDiff(
+  providerID: string,
+  cliBackend: CliBackendID | undefined,
+): boolean {
+  return (
+    isPoolsideProvider(providerID) ||
+    cliBackend === COMMANDCODE_PROVIDER_ID ||
+    cliBackend === GROK_PROVIDER_ID ||
+    cliBackend === QODER_PROVIDER_ID
+  );
+}
+
 export interface ReviewBackendSelection {
   mainCliBackend?: CliBackendID;
   auxCliBackend?: CliBackendID;
-  /** Present only when the role routes to the pi engine. */
-  mainSdkEngine?: 'pi';
-  auxSdkEngine?: 'pi';
+  /** Present only when the role bypasses the OpenCode server. */
+  mainSdkEngine?: 'pi' | 'poolside';
+  auxSdkEngine?: 'pi' | 'poolside';
   needsOpencode: boolean;
   devinApiKey: string;
   commandCodeAccessKey: string;
@@ -63,18 +76,22 @@ export interface ReviewBackendSelection {
 export function selectReviewBackends(input: ReviewBackendSelectionInput): ReviewBackendSelection {
   const mainCliBackend = cliBackendForProvider(input.providerID);
   const auxCliBackend = cliBackendForProvider(input.auxProviderID);
+  const mainPoolside = !mainCliBackend && isPoolsideProvider(input.providerID);
+  const auxPoolside = !auxCliBackend && isPoolsideProvider(input.auxProviderID);
   const mainPi =
     !mainCliBackend &&
+    !mainPoolside &&
     !!input.piEnabled &&
     input.mainPiModelAvailable !== false &&
     piSupportsProvider(input.providerID);
   const auxPi =
     !auxCliBackend &&
+    !auxPoolside &&
     !!input.piEnabled &&
     input.auxPiModelAvailable !== false &&
     piSupportsProvider(input.auxProviderID);
-  const mainOpencode = !mainCliBackend && !mainPi;
-  const auxOpencode = !auxCliBackend && !auxPi;
+  const mainOpencode = !mainCliBackend && !mainPi && !mainPoolside;
+  const auxOpencode = !auxCliBackend && !auxPi && !auxPoolside;
   const needsOpencode = mainOpencode || auxOpencode;
   const needsPi = mainPi || auxPi;
   const effectiveAuxApiKey =
@@ -93,8 +110,16 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
   return {
     ...(mainCliBackend ? { mainCliBackend } : {}),
     ...(auxCliBackend ? { auxCliBackend } : {}),
-    ...(mainPi ? { mainSdkEngine: 'pi' as const } : {}),
-    ...(auxPi ? { auxSdkEngine: 'pi' as const } : {}),
+    ...(mainPoolside
+      ? { mainSdkEngine: 'poolside' as const }
+      : mainPi
+        ? { mainSdkEngine: 'pi' as const }
+        : {}),
+    ...(auxPoolside
+      ? { auxSdkEngine: 'poolside' as const }
+      : auxPi
+        ? { auxSdkEngine: 'pi' as const }
+        : {}),
     needsOpencode,
     devinApiKey: keyFor(DEVIN_PROVIDER_ID),
     commandCodeAccessKey: keyFor(COMMANDCODE_PROVIDER_ID),

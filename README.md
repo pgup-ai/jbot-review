@@ -119,6 +119,7 @@ jobs:
           devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
           commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
           cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+          poolside-api-key: ${{ secrets.POOLSIDE_API_KEY }}
           qoder-token: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
           codex-auth: ${{ secrets.CODEX_AUTH_JSON }}
           cline-auth: ${{ secrets.CLINE_AUTH_JSON }}
@@ -142,7 +143,7 @@ and variables → Actions → New repository secret. Add the keys for the provid
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`, `KIMI_API_KEY`,
 `XAI_API_KEY`, `FIREWORKS_API_KEY`, `MIMO_API_KEY`, `DEVIN_WINDSURF_API_KEY`,
-`COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, `QODER_PERSONAL_ACCESS_TOKEN`, `CODEX_AUTH_JSON`,
+`COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, `POOLSIDE_API_KEY`, `QODER_PERSONAL_ACCESS_TOKEN`, `CODEX_AUTH_JSON`,
 `CLINE_AUTH_JSON`, `GROK_AUTH_JSON`, `KILO_AUTH_CONTENT`, `ANTHROPIC_API_KEY`, or
 `JBOT_OPENAI_COMPATIBLE_API_KEY`. Configure `JBOT_OPENAI_COMPATIBLE_BASE_URL`
 as an Actions variable when using the generic `openai-compatible` provider.
@@ -152,8 +153,8 @@ no key for the selected aux provider, it reuses the review provider API key.
 
 **CLI-backend credentials — where to get each one.** Unlike the model-provider keys
 above, these authenticate with a local CLI login or a dashboard key. You paste the
-**whole file** (Codex, Cline, Grok Build) or the **key value** (Cursor, Devin,
-Command Code) — no digging a field out of a JSON.
+**whole file** (for example, Codex, Cline, Grok Build) or the **key value** (for
+example, Cursor, Devin, Command Code) — no digging a field out of JSON.
 
 | Backend          | Get the credential                                                                                                                                      | Secret (Action input)                                            |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -178,6 +179,14 @@ subscription). Kilo reads its credential from the `KILO_AUTH_CONTENT` env var (n
 file written) with an isolated temporary `HOME`/`XDG_DATA_HOME` per session,
 removed after the run; it defaults to the free `kilo/kilo-auto/free` gateway
 model.
+
+Poolside uses its OpenAI-compatible chat-completions endpoint directly. Laguna
+S 2.1 is absent from Poolside's advertised model list, but the endpoint accepts
+`poolside/laguna-s-2.1` explicitly, so J-Bot uses it by default. Requests stream
+directly, use Poolside's full 32,768-token completion allowance, and leave
+reasoning at Poolside's default unless `model-options.reasoningEffort` overrides
+it. This avoids the Pool CLI's coding-agent loop while preserving review,
+auxiliary, token usage, timeouts, and repair behavior.
 
 Qoder can read and search the checkout but receives no shell or write-capable tool.
 Its user/project settings, hooks, MCP servers, skills, memory, web access, and
@@ -302,6 +311,7 @@ without editing the workflow.
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+    poolside-api-key: ${{ secrets.POOLSIDE_API_KEY }}
     qoder-token: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
     grok-auth: ${{ secrets.GROK_AUTH_JSON }}
     kilo-auth: ${{ secrets.KILO_AUTH_CONTENT }}
@@ -341,7 +351,7 @@ the review itself is unaffected._
 | `review-shards`           | `1`                | Parallel shards for the main review. `1` = no sharding, one full-diff session (default). `0` = auto from diff size, capped at 4. `N` = pin N shards. Sharding only speeds review up on providers that serve concurrent sessions; on free/throttled tiers the shards serialize on one key (see `max-concurrent-sessions`), so single-session is the better default. Either way the review covers the complete diff; raise it on paid concurrent tiers, or for very large PRs where smaller per-shard context helps depth.                                                                                                                                    |
 | `time-budget-minutes`     | `30`               | Wall-clock target (`0` = no budget). Finder sessions get the full budget (minus a 30s posting reserve) as their deadline; shard retries and verification use whatever remains, or are skipped (fail-open). An auxiliary session (lens, addressed-thread, guideline, verification) over its deadline is aborted and fails open — degrading only its own coverage, never the run. A main review shard that still fails after its retry aborts the run rather than posting partial coverage.                                                                                                                                                                   |
 | `max-concurrent-sessions` | `3`                | Max model sessions in flight (`0` = unlimited). Free/throttled tiers serialize one key's requests upstream — observed as a flash session queued 7+ minutes behind parallel shards. The capped default keeps each session's deadline measuring model time, not queue time; drop to `2` on tight free tiers, or set `0` on paid tiers with real concurrency.                                                                                                                                                                                                                                                                                                  |
-| `model-options`           | provider-dependent | JSON object of provider options for the main model, passed through opencode to the provider SDK. Native providers default to `{"reasoningEffort":"medium"}`; custom providers default to `{}` because arbitrary endpoints may reject unknown options. Explicit values are preserved.                                                                                                                                                                                                                                                                                                                                                                        |
+| `model-options`           | provider-dependent | JSON object of provider options for the main model. Native providers default to `{"reasoningEffort":"medium"}`; Poolside uses `{"reasoningEffort":"default"}` to leave reasoning provider-managed; custom providers default to `{}` because arbitrary endpoints may reject unknown options. Explicit values are preserved.                                                                                                                                                                                                                                                                                                                                  |
 | `prompt-cache`            | `true`             | Enable opencode prompt caching (provider `setCacheKey`). Parallel shards and re-reviews of the same PR share a byte-identical prompt prefix, so caching cuts input-token cost on models that honor it; models marked unsupported by capability metadata omit the cache key entirely. Each session logs a `tokens: …` line with `cache(read=… write=…)` — `read > 0` on a later shard or re-review confirms a hit. Mostly matters on paid tiers.                                                                                                                                                                                                             |
 | `skip-doc-only`           | `true`             | Skip the full review (no model call) when the entire PR diff is documentation, prose, or diagram assets (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, `.pdf`, `.svg`, `.drawio`, `.dio`, `.excalidraw`, `.mmd`, `.puml`, `.plantuml`); the reaction is left unchanged (a docs push doesn't change the verdict). Evaluated on the **reviewable** file set (noise like lockfiles and patchless/binary files are excluded — the bot never reviews those anyway, so the skip never drops review coverage); any reviewable code/config file forces a full review. Set `false` to always review, e.g. for docs with embedded code samples you care about. |
 | `review-telemetry`        | `true`             | Write per-finding disposition + per-session token telemetry to the gitignored `.jbot-review/telemetry.jsonl` (uploaded as a CI artifact by the dogfood workflow). Near-zero overhead; `false` disables.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -428,6 +438,7 @@ jbot-review does not use them for smart key rotation.
 | `devin`                 | `devin/default`                                            | `devin-windsurf-api-key`        | `DEVIN_WINDSURF_API_KEY`             |
 | `commandcode`           | `commandcode/default`                                      | `commandcode-access-key`        | `COMMANDCODE_ACCESS_KEY`             |
 | `cursor`                | `cursor/default`                                           | `cursor-api-key`                | `CURSOR_API_KEY`                     |
+| `poolside`              | `poolside/laguna-s-2.1`                                    | `poolside-api-key`              | `POOLSIDE_API_KEY`                   |
 | `qoder`                 | `qoder/auto`                                               | `qoder-token`                   | `QODER_PERSONAL_ACCESS_TOKEN`        |
 | `codex`                 | `codex/default`                                            | `codex-auth`                    | `CODEX_AUTH_JSON`                    |
 | `cline`                 | `cline/default`                                            | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
@@ -485,6 +496,8 @@ Use `provider: cursor` with `cursor-api-key` / `CURSOR_API_KEY` for the Cursor
 CLI backend. The Docker image includes the Cursor CLI (`cursor-agent`), which
 reads the key from the environment — no credential file — and runs read-only via
 `--mode plan`.
+Use `provider: poolside` with `poolside-api-key` / `POOLSIDE_API_KEY` for the
+Poolside inference provider. Its default is `poolside/laguna-s-2.1`.
 Use `provider: qoder` with `qoder-token` /
 `QODER_PERSONAL_ACCESS_TOKEN` for the Qoder CLI backend. It accepts `auto`,
 `ultimate`, `performance`, `efficient`, and `lite` model tiers. Each session uses
@@ -523,6 +536,7 @@ leave `JBOT_REVIEW_MODEL` unset to use the selected provider's default model
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+    poolside-api-key: ${{ secrets.POOLSIDE_API_KEY }}
     qoder-token: ${{ secrets.QODER_PERSONAL_ACCESS_TOKEN }}
     grok-auth: ${{ secrets.GROK_AUTH_JSON }}
     enable-context7: auto
@@ -546,7 +560,7 @@ the main model, `aux-provider` or `JBOT_AUX_PROVIDER` for the auxiliary
 provider, and `aux-model` or `JBOT_REVIEW_AUX_MODEL` for the auxiliary model.
 Provider API keys can also be supplied through their standard env vars, such as
 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`,
-`KIMI_API_KEY`, `JBOT_OPENAI_COMPATIBLE_API_KEY`, or `FIREWORKS_API_KEY`. The
+`KIMI_API_KEY`, `POOLSIDE_API_KEY`, `JBOT_OPENAI_COMPATIBLE_API_KEY`, or `FIREWORKS_API_KEY`. The
 custom endpoint also reads `JBOT_OPENAI_COMPATIBLE_BASE_URL`. This convenience
 pattern exposes every configured provider key to the action runtime.
 When `openai-compatible` is the auxiliary provider, pass its namespaced key and
@@ -600,6 +614,7 @@ documentation lookup.
 | `devin-windsurf-api-key`     | No       | —                     | Used when `provider` or active `aux-provider` is `devin`                               |
 | `commandcode-access-key`     | No       | —                     | Used when `provider` or active `aux-provider` is `commandcode`                         |
 | `cursor-api-key`             | No       | —                     | Used when `provider` or active `aux-provider` is `cursor`                              |
+| `poolside-api-key`           | No       | —                     | Used when `provider` or active `aux-provider` is `poolside`                            |
 | `qoder-token`                | No       | —                     | Used when `provider` or active `aux-provider` is `qoder`                               |
 | `codex-auth`                 | No       | —                     | Used when `provider` or active `aux-provider` is `codex`                               |
 | `cline-auth`                 | No       | —                     | Used when `provider` or active `aux-provider` is `cline` / `cline-pass`                |
