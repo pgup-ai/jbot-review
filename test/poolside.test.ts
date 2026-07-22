@@ -131,4 +131,22 @@ describe('Poolside API backend', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it('includes malformed success responses in diagnostics', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const [body, expected] of [
+        ['upstream returned plain text', /plain text/],
+        ['data: malformed-event', /malformed-event/],
+      ] as const) {
+        globalThis.fetch = async () => new Response(body);
+        await assert.rejects(
+          runPoolsideReview('sky_test', 'none', 'poolside/laguna-s-2.1', 'complete diff', '', noop),
+          expected,
+        );
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

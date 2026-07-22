@@ -243,7 +243,9 @@ function parsePoolsideStream(
     try {
       payload = JSON.parse(data);
     } catch {
-      throw new Error(`Poolside ${label} returned invalid streamed JSON.`);
+      throw new Error(
+        `Poolside ${label} returned invalid streamed JSON: ${truncateForLog(data, 1000)}`,
+      );
     }
     if (!isRecord(payload)) continue;
     usage = mapPoolsideUsage(payload.usage) ?? usage;
@@ -294,7 +296,11 @@ async function runPoolsidePrompt(options: PoolsidePromptOptions): Promise<string
   }
 
   const { raw, usage } = parsePoolsideStream(body, label);
-  if (!raw) throw new Error(`Poolside ${label} response contained no assistant text.`);
+  if (!raw) {
+    throw new Error(
+      `Poolside ${label} response contained no assistant text: ${truncateForLog(body, 1000)}`,
+    );
+  }
 
   if (usage) {
     log(
