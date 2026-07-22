@@ -1964,9 +1964,19 @@ export async function runPrReview(params: {
     if (shouldPostReviewComment(priorJbotReviewCount, findingCount)) {
       // File-level comments go first so a posting failure can still fall back
       // into the review body, which is built afterwards.
+      const fileLevelCommentIds: number[] = [];
       for (const finding of fileLevel) {
         try {
-          await postFileLevelComment(octokit, owner, repo, pullNumber, headSha as string, finding);
+          fileLevelCommentIds.push(
+            await postFileLevelComment(
+              octokit,
+              owner,
+              repo,
+              pullNumber,
+              headSha as string,
+              finding,
+            ),
+          );
           log(`Posted file-level comment for ${finding.path}.`);
         } catch (error) {
           log(
@@ -1993,7 +2003,16 @@ export async function runPrReview(params: {
       log(
         `Posting review: verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
       );
-      await postReview(octokit, owner, repo, pullNumber, verdict, body, inline);
+      await postReview(
+        octokit,
+        owner,
+        repo,
+        pullNumber,
+        verdict,
+        body,
+        inline,
+        fileLevelCommentIds,
+      );
       log('Review posted.');
     } else {
       log('No new findings on a re-run; skipping the review comment (reacting instead).');

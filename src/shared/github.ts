@@ -11,6 +11,10 @@ const REVIEW_MARKER = '<!-- jbot-review:review -->';
 const FINDING_MARKER = '<!-- jbot-review:finding -->';
 const ADDRESSED_MARKER = '<!-- jbot-review:addressed -->';
 const COMPACTED_REVIEW_MARKER = '<!-- jbot-review:compacted -->';
+const LINKED_COMMENTS_MARKER = 'jbot-review:linked-comments';
+const LINKED_COMMENTS_FOOTER = new RegExp(
+  `\\n?<!--\\s*${LINKED_COMMENTS_MARKER}:([\\d,]*)\\s*-->\\s*$`,
+);
 const MAX_PRIOR_JBOT_THREADS_FOR_PROMPT = 25;
 const MAX_PRIOR_JBOT_COMMENT_CHARS = 1000;
 const MAX_PRIOR_JBOT_REPLIES_FOR_PROMPT = 5;
@@ -222,6 +226,7 @@ interface ReviewThreadsResponse {
 
 interface JbotReviewCommentState {
   addressedTopLevelIds: ReadonlySet<number>;
+  directTopLevelIds: ReadonlySet<number>;
   reviewIdByTopLevelId: ReadonlyMap<number, number>;
   reviewGroupsById: ReadonlyMap<number, JbotReviewGroup>;
 }
@@ -351,7 +356,9 @@ export async function listPriorJbotThreads(
       const reviewId = state.reviewIdByTopLevelId.get(topLevel.databaseId);
       if (reviewId !== undefined) {
         const review = state.reviewGroupsById.get(reviewId)!;
-        review.isMinimized = topLevel.pullRequestReview?.isMinimized ?? review.isMinimized;
+        if (state.directTopLevelIds.has(topLevel.databaseId)) {
+          review.isMinimized = topLevel.pullRequestReview?.isMinimized ?? review.isMinimized;
+        }
         review.threads.push({
           id: thread.id,
           isResolved: thread.isResolved,
@@ -437,6 +444,12 @@ async function listJbotReviewCommentState(
       } satisfies JbotReviewGroup,
     ]),
   );
+  const linkedReviewIdByCommentId = new Map<number, number>();
+  for (const review of jbotReviews) {
+    for (const commentId of parseLinkedCommentIds(review.body ?? '')) {
+      linkedReviewIdByCommentId.set(commentId, review.id);
+    }
+  }
 
   const comments = await octokit.paginate(octokit.rest.pulls.listReviewComments, {
     owner,
@@ -446,16 +459,18 @@ async function listJbotReviewCommentState(
   });
 
   const reviewIdByTopLevelId = new Map<number, number>();
+  const directTopLevelIds = new Set<number>();
   for (const comment of comments) {
     const reviewId = comment.pull_request_review_id;
-    if (
-      isViewerActor(comment.user?.login, viewerLogin) &&
-      !comment.in_reply_to_id &&
-      reviewId !== null &&
-      reviewId !== undefined &&
-      jbotReviewIds.has(reviewId)
-    ) {
+    if (!isViewerActor(comment.user?.login, viewerLogin) || comment.in_reply_to_id) continue;
+    if (reviewId !== null && reviewId !== undefined && jbotReviewIds.has(reviewId)) {
       reviewIdByTopLevelId.set(comment.id, reviewId);
+      directTopLevelIds.add(comment.id);
+      continue;
+    }
+    const linkedReviewId = linkedReviewIdByCommentId.get(comment.id);
+    if (linkedReviewId !== undefined && hasInternalMarker(comment.body, FINDING_MARKER)) {
+      reviewIdByTopLevelId.set(comment.id, linkedReviewId);
     }
   }
   const addressedTopLevelIds = new Set(
@@ -469,7 +484,7 @@ async function listJbotReviewCommentState(
       .map((comment) => comment.in_reply_to_id as number),
   );
 
-  return { addressedTopLevelIds, reviewIdByTopLevelId, reviewGroupsById };
+  return { addressedTopLevelIds, directTopLevelIds, reviewIdByTopLevelId, reviewGroupsById };
 }
 
 /**
@@ -491,6 +506,7 @@ export async function postReview(
   verdict: Verdict,
   body: string,
   inlineFindings: Finding[],
+  linkedCommentIds: readonly number[],
 ): Promise<void> {
   const comments = inlineFindings.map((f) => ({
     path: f.path,
@@ -499,13 +515,14 @@ export async function postReview(
     body: formatFindingCommentBody(f),
   }));
 
+  const linkedBody = appendLinkedCommentsFooter(appendReviewMarker(body), linkedCommentIds);
   try {
     await octokit.rest.pulls.createReview({
       owner,
       repo,
       pull_number: pullNumber,
       event: verdict,
-      body: appendReviewMarker(body),
+      body: linkedBody,
       comments,
     });
   } catch {
@@ -515,8 +532,11 @@ export async function postReview(
         repo,
         pull_number: pullNumber,
         event: verdict,
-        body: appendReviewMarker(
-          `${body}\n\n_(inline comments omitted — failed to anchor to diff lines)_`,
+        body: appendLinkedCommentsFooter(
+          appendReviewMarker(
+            `${body}\n\n_(inline comments omitted — failed to anchor to diff lines)_`,
+          ),
+          linkedCommentIds,
         ),
       });
     } catch {
@@ -574,8 +594,8 @@ export async function postFileLevelComment(
   pullNumber: number,
   headSha: string,
   finding: Finding,
-): Promise<void> {
-  await octokit.rest.pulls.createReviewComment({
+): Promise<number> {
+  const response = await octokit.rest.pulls.createReviewComment({
     owner,
     repo,
     pull_number: pullNumber,
@@ -584,6 +604,7 @@ export async function postFileLevelComment(
     subject_type: 'file',
     body: formatFindingCommentBody(finding),
   });
+  return response.data.id;
 }
 
 /** The fixed set of reaction contents GitHub accepts (no ✅ / checkmark). */
@@ -822,28 +843,32 @@ export function selectResolvedJbotReviewsToFinalize(
 
 export function compactJbotReviewBody(body: string, threadCount: number): string {
   if (hasInternalMarker(body, COMPACTED_REVIEW_MARKER)) return body;
-  const original = body
+  const linkedCommentIds = parseLinkedCommentIds(body);
+  const original = stripLinkedCommentsFooter(body)
     .replaceAll(REVIEW_MARKER, '')
     .replaceAll(COMPACTED_REVIEW_MARKER, '')
     .trim()
     .replace(/^## j-?bot code review\s*/i, '')
     .trim();
   const noun = threadCount === 1 ? 'thread' : 'threads';
-  return appendReviewMarker(
-    [
-      '## J-Bot Code Review',
-      '',
-      `✅ **All ${threadCount} review ${noun} resolved.**`,
-      '',
-      '<details>',
-      '<summary>Show original review</summary>',
-      '',
-      original,
-      '',
-      '</details>',
-      '',
-      COMPACTED_REVIEW_MARKER,
-    ].join('\n'),
+  return appendLinkedCommentsFooter(
+    appendReviewMarker(
+      [
+        '## J-Bot Code Review',
+        '',
+        `✅ **All ${threadCount} review ${noun} resolved.**`,
+        '',
+        '<details>',
+        '<summary>Show original review</summary>',
+        '',
+        original,
+        '',
+        '</details>',
+        '',
+        COMPACTED_REVIEW_MARKER,
+      ].join('\n'),
+    ),
+    linkedCommentIds,
   );
 }
 
@@ -853,6 +878,20 @@ function parseReviewFindingCount(body: string): number | undefined {
   if (headerIndex < 0) return undefined;
   const count = lines[headerIndex + 2]?.match(/^\|\s*(\d+)\s*\|/)?.[1];
   return count === undefined ? undefined : Number.parseInt(count, 10);
+}
+
+function appendLinkedCommentsFooter(body: string, commentIds: readonly number[]): string {
+  const ids = [...new Set(commentIds)].join(',');
+  return `${stripLinkedCommentsFooter(body)}\n\n<!-- ${LINKED_COMMENTS_MARKER}:${ids} -->`;
+}
+
+function parseLinkedCommentIds(body: string): number[] {
+  const ids = body.match(LINKED_COMMENTS_FOOTER)?.[1];
+  return ids ? ids.split(',').map((id) => Number.parseInt(id, 10)) : [];
+}
+
+function stripLinkedCommentsFooter(body: string): string {
+  return body.replace(LINKED_COMMENTS_FOOTER, '').trimEnd();
 }
 
 function appendReviewMarker(body: string): string {

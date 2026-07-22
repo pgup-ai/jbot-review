@@ -262,7 +262,7 @@ export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
 export interface AnchoredFindings {
   /** Postable at a specific added line. */
   inline: Finding[];
-  /** Line 0 on a changed file — a file-level comment. */
+  /** Findings routed to a changed file instead of a specific added line. */
   fileLevel: Finding[];
   /** Anchor not in the diff; rendered in the review body's outside-the-diff section. */
   orphaned: Finding[];
@@ -273,8 +273,10 @@ export interface AnchoredFindings {
 /**
  * Splits final findings by where their anchor lands in the diff. A would-be
  * orphan whose evidence quote uniquely matches an added line is re-anchored to
- * it IN PLACE (so the review body, telemetry, and posting agree on the line);
- * that only runs when `evidenceQuotes` is on, so the opt-out is fully inert.
+ * it IN PLACE (so the review body, telemetry, and posting agree on the line).
+ * Otherwise a finding on a changed file falls back to a file-level thread so
+ * it remains independently resolvable; only findings outside the changed-file
+ * set stay in the review body.
  */
 export function anchorFindings(
   findings: Finding[],
@@ -296,6 +298,9 @@ export function anchorFindings(
         f.line = line;
         result.inline.push(f);
         result.rescued.push(f);
+      } else if (hasHeadSha && addable.has(f.path)) {
+        f.line = 0;
+        result.fileLevel.push(f);
       } else {
         result.orphaned.push(f);
       }
