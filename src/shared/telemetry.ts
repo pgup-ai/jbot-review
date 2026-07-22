@@ -101,8 +101,8 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     orphaned: new Set<string>(),
     rescued: new Set<string>(),
   };
-  // Final posted line for rescued findings (re-anchored after produced()); keeps
-  // `meta` honest as the model's original output rather than mutating it.
+  // Final posted line for findings re-routed after produced(); keeps `meta`
+  // honest as the model's original output rather than mutating it.
   const routedLine = new Map<string, number>();
   const sessions: SessionTelemetryRow[] = [];
 
@@ -133,7 +133,11 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     },
     route(routes) {
       for (const id of idsOf(routes.inline)) routing.inline.add(id);
-      for (const id of idsOf(routes.fileLevel)) routing.fileLevel.add(id);
+      for (const f of routes.fileLevel) {
+        if (!f.id) continue;
+        routing.fileLevel.add(f.id);
+        routedLine.set(f.id, f.line);
+      }
       for (const id of idsOf(routes.orphaned)) routing.orphaned.add(id);
       for (const f of routes.rescued) {
         if (!f.id) continue;

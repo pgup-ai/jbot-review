@@ -137,29 +137,36 @@ const FILE_LEVEL_DEDUPE_MIN_SHARED_TOKENS = 2;
  * A finding is suppressed only when BOTH hold, keeping the filter
  * conservative (a genuinely new bug near an old comment must survive):
  * - location match: same path and within ±3 lines of the thread anchor
- *   (file-level findings match file-level threads), and
+ *   (file-level threads also match changed-file anchor misses that will fall
+ *   back to file level), and
  * - content match: at least half of the finding title's significant words
  *   appear in the prior thread's comment body.
  */
 export function suppressPreviouslyReported(
   findings: Finding[],
   priorThreads: PriorFindingRef[],
+  addable?: ReadonlyMap<string, ReadonlySet<number>>,
 ): { findings: Finding[]; suppressedCount: number } {
   if (priorThreads.length === 0) return { findings, suppressedCount: 0 };
 
   const kept = findings.filter(
-    (finding) => !priorThreads.some((thread) => isSameIssue(finding, thread)),
+    (finding) => !priorThreads.some((thread) => isSameIssue(finding, thread, addable)),
   );
   return { findings: kept, suppressedCount: findings.length - kept.length };
 }
 
-function isSameIssue(finding: Finding, thread: PriorFindingRef): boolean {
+function isSameIssue(
+  finding: Finding,
+  thread: PriorFindingRef,
+  addable?: ReadonlyMap<string, ReadonlySet<number>>,
+): boolean {
   if (thread.isResolved) return false;
   if (finding.path !== thread.path) return false;
 
+  const addableLines = addable?.get(finding.path);
   const locationMatches =
     thread.line === undefined
-      ? finding.line === 0
+      ? finding.line === 0 || (addableLines !== undefined && !addableLines.has(finding.line))
       : finding.line > 0 && Math.abs(finding.line - thread.line) <= SUPPRESS_LINE_TOLERANCE;
   if (!locationMatches) return false;
 
@@ -262,7 +269,7 @@ export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
 export interface AnchoredFindings {
   /** Postable at a specific added line. */
   inline: Finding[];
-  /** Line 0 on a changed file — a file-level comment. */
+  /** Findings routed to a changed file instead of a specific added line. */
   fileLevel: Finding[];
   /** Anchor not in the diff; rendered in the review body's outside-the-diff section. */
   orphaned: Finding[];
@@ -273,8 +280,10 @@ export interface AnchoredFindings {
 /**
  * Splits final findings by where their anchor lands in the diff. A would-be
  * orphan whose evidence quote uniquely matches an added line is re-anchored to
- * it IN PLACE (so the review body, telemetry, and posting agree on the line);
- * that only runs when `evidenceQuotes` is on, so the opt-out is fully inert.
+ * it IN PLACE (so the review body, telemetry, and posting agree on the line).
+ * Otherwise a finding on a changed file falls back to a file-level thread so
+ * it remains independently resolvable; only findings outside the changed-file
+ * set stay in the review body.
  */
 export function anchorFindings(
   findings: Finding[],
@@ -296,6 +305,9 @@ export function anchorFindings(
         f.line = line;
         result.inline.push(f);
         result.rescued.push(f);
+      } else if (hasHeadSha && addable.has(f.path)) {
+        f.line = 0;
+        result.fileLevel.push(f);
       } else {
         result.orphaned.push(f);
       }

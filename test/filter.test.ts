@@ -341,6 +341,31 @@ describe('suppressPreviouslyReported', () => {
     );
   });
 
+  it('matches a changed-file anchor miss against its prior file-level thread', () => {
+    const fileLevelThread = { path: 'src/example.ts', body: 'Missing provider options wiring' };
+    const addable = new Map([['src/example.ts', new Set([5])]]);
+    const { findings, suppressedCount } = suppressPreviouslyReported(
+      [finding({ line: 99, title: 'Missing provider options wiring' })],
+      [fileLevelThread],
+      addable,
+    );
+
+    assert.equal(suppressedCount, 1);
+    assert.equal(findings.length, 0);
+  });
+
+  it('does not treat a valid inline anchor as a file-level fallback', () => {
+    const fileLevelThread = { path: 'src/example.ts', body: 'Missing provider options wiring' };
+    const addable = new Map([['src/example.ts', new Set([5])]]);
+    const { findings } = suppressPreviouslyReported(
+      [finding({ line: 5, title: 'Missing provider options wiring' })],
+      [fileLevelThread],
+      addable,
+    );
+
+    assert.equal(findings.length, 1);
+  });
+
   it('never suppresses when a title has no significant words to compare', () => {
     const { findings } = suppressPreviouslyReported(
       [finding({ line: 10, title: 'fix it' })],
@@ -436,18 +461,21 @@ describe('anchorFindings', () => {
   const patchByPath = new Map([['a.ts', patch]]);
 
   it('splits findings into inline, file-level, and orphaned buckets', () => {
+    const fallback = finding({ path: 'a.ts', line: 99 });
     const out = anchorFindings(
       [
         finding({ path: 'a.ts', line: 1 }),
         finding({ path: 'a.ts', line: 0 }),
-        finding({ path: 'a.ts', line: 99 }),
+        fallback,
+        finding({ path: 'outside.ts', line: 99 }),
       ],
       addable,
       patchByPath,
       true,
       false,
     );
-    assert.deepEqual([out.inline.length, out.fileLevel.length, out.orphaned.length], [1, 1, 1]);
+    assert.deepEqual([out.inline.length, out.fileLevel.length, out.orphaned.length], [1, 2, 1]);
+    assert.equal(fallback.line, 0);
   });
 
   it('re-anchors an orphan to its evidence line IN PLACE so every consumer agrees', () => {
@@ -459,18 +487,32 @@ describe('anchorFindings', () => {
     assert.equal(f.line, 2, 'the original object is re-anchored, not a copy');
   });
 
-  it('does not consume evidence when evidenceQuotes is off (opt-out fully inert)', () => {
+  it('falls back to the file when evidence rescue is disabled', () => {
     const f = finding({ path: 'a.ts', line: 99, evidence: 'return total;' });
     const out = anchorFindings([f], addable, patchByPath, true, false);
 
     assert.deepEqual(out.rescued, []);
-    assert.equal(out.orphaned[0], f);
-    assert.equal(f.line, 99, 'line untouched when the flag is off');
+    assert.equal(out.fileLevel[0], f);
+    assert.equal(f.line, 0);
   });
 
-  it('leaves an orphan orphaned when its evidence quote matches no unique added line', () => {
+  it('falls back to the file when evidence matches no unique added line', () => {
     const f = finding({ path: 'a.ts', line: 99, evidence: 'nonexistent code' });
     const out = anchorFindings([f], addable, patchByPath, true, true);
+    assert.equal(out.fileLevel[0], f);
+    assert.equal(f.line, 0);
+  });
+
+  it('keeps findings outside the changed-file set in the review body', () => {
+    const f = finding({ path: 'outside.ts', line: 99 });
+    const out = anchorFindings([f], addable, patchByPath, true, true);
     assert.equal(out.orphaned[0], f);
+  });
+
+  it('does not create a file-level route without a review head', () => {
+    const f = finding({ path: 'a.ts', line: 99 });
+    const out = anchorFindings([f], addable, patchByPath, false, true);
+    assert.equal(out.orphaned[0], f);
+    assert.equal(f.line, 99);
   });
 });

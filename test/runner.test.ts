@@ -496,10 +496,14 @@ describe('runPrReview local mode and early exits', () => {
           }
           throw new Error('unexpected pagination endpoint');
         },
-        graphql: async (query: string, variables?: { reviewNodeId?: string }) => {
+        graphql: async (query: string, variables?: { reviewNodeId?: string; ids?: string[] }) => {
           if (query.includes('minimizeComment')) {
             minimizedReviewIds.push(variables!.reviewNodeId!);
             return {};
+          }
+          if (query.includes('JbotReviewMinimization')) {
+            assert.deepEqual(variables, { ids: ['PRR_77'] });
+            return { nodes: [{ id: 'PRR_77', isMinimized: false }] };
           }
           return {
             viewer: { login: 'jbot' },
@@ -521,7 +525,6 @@ describe('runPrReview local mode and early exits', () => {
                             body: 'finding\n\n<!-- jbot-review:finding -->',
                             url: 'https://github.com/acme/widget/pull/1#discussion_r100',
                             author: { login: 'jbot' },
-                            pullRequestReview: { isMinimized: false },
                           },
                         ],
                       },

@@ -123,6 +123,20 @@ describe('createTelemetryRecorder finding dispositions', () => {
     );
   });
 
+  it('reports the posted line for a finding rerouted to file level', () => {
+    const rec = createTelemetryRecorder(true);
+    const [f] = rec.produced('review', [finding('a.ts', 99, 'P2')]);
+    for (const stage of ['gated', 'deduped', 'suppressed', 'verified', 'filtered'] as const) {
+      rec.snapshot(stage, [f]);
+    }
+    f.line = 0;
+    rec.route({ inline: [], fileLevel: [f], orphaned: [], rescued: [] });
+
+    const row = rec.findingRows()[0];
+    assert.equal(row.disposition, 'posted-file-level');
+    assert.equal(row.line, 0);
+  });
+
   it('serializes one JSONL line per finding row plus session rows', () => {
     const rec = createTelemetryRecorder(true);
     const [f] = rec.produced('review', [finding('a.ts', 1, 'P1')]);

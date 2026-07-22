@@ -11,6 +11,10 @@ const REVIEW_MARKER = '<!-- jbot-review:review -->';
 const FINDING_MARKER = '<!-- jbot-review:finding -->';
 const ADDRESSED_MARKER = '<!-- jbot-review:addressed -->';
 const COMPACTED_REVIEW_MARKER = '<!-- jbot-review:compacted -->';
+const LINKED_COMMENTS_MARKER = 'jbot-review:linked-comments';
+const LINKED_COMMENTS_FOOTER = new RegExp(
+  `\\n?<!--\\s*${LINKED_COMMENTS_MARKER}:([\\d,]*)\\s*-->\\s*$`,
+);
 const MAX_PRIOR_JBOT_THREADS_FOR_PROMPT = 25;
 const MAX_PRIOR_JBOT_COMMENT_CHARS = 1000;
 const MAX_PRIOR_JBOT_REPLIES_FOR_PROMPT = 5;
@@ -209,9 +213,6 @@ interface ReviewThreadsResponse {
               author?: {
                 login: string;
               } | null;
-              pullRequestReview?: {
-                isMinimized: boolean;
-              } | null;
             } | null> | null;
           };
         } | null>;
@@ -224,6 +225,13 @@ interface JbotReviewCommentState {
   addressedTopLevelIds: ReadonlySet<number>;
   reviewIdByTopLevelId: ReadonlyMap<number, number>;
   reviewGroupsById: ReadonlyMap<number, JbotReviewGroup>;
+}
+
+interface ReviewNodesResponse {
+  nodes: Array<{
+    id: string;
+    isMinimized: boolean;
+  } | null>;
 }
 
 /**
@@ -290,9 +298,6 @@ export async function listPriorJbotThreads(
                   author {
                     login
                   }
-                  pullRequestReview {
-                    isMinimized
-                  }
                 }
               }
             }
@@ -351,7 +356,6 @@ export async function listPriorJbotThreads(
       const reviewId = state.reviewIdByTopLevelId.get(topLevel.databaseId);
       if (reviewId !== undefined) {
         const review = state.reviewGroupsById.get(reviewId)!;
-        review.isMinimized = topLevel.pullRequestReview?.isMinimized ?? review.isMinimized;
         review.threads.push({
           id: thread.id,
           isResolved: thread.isResolved,
@@ -425,6 +429,24 @@ async function listJbotReviewCommentState(
       isViewerActor(review.user?.login, viewerLogin) && isJbotReviewBody(review.body ?? ''),
   );
   const jbotReviewIds = new Set(jbotReviews.map((review) => review.id));
+  const reviewNodes = jbotReviews.length
+    ? ((await octokit.graphql(
+        `
+          query JbotReviewMinimization($ids: [ID!]!) {
+            nodes(ids: $ids) {
+              ... on PullRequestReview {
+                id
+                isMinimized
+              }
+            }
+          }
+        `,
+        { ids: jbotReviews.map((review) => review.node_id) },
+      )) as ReviewNodesResponse)
+    : { nodes: [] };
+  const minimizedReviewNodeIds = new Set(
+    reviewNodes.nodes.flatMap((review) => (review?.isMinimized ? [review.id] : [])),
+  );
   const reviewGroupsById = new Map(
     jbotReviews.map((review) => [
       review.id,
@@ -432,11 +454,17 @@ async function listJbotReviewCommentState(
         id: review.id,
         nodeId: review.node_id,
         body: review.body ?? '',
-        isMinimized: false,
+        isMinimized: minimizedReviewNodeIds.has(review.node_id),
         threads: [],
       } satisfies JbotReviewGroup,
     ]),
   );
+  const linkedReviewIdByCommentId = new Map<number, number>();
+  for (const review of jbotReviews) {
+    for (const commentId of parseLinkedCommentIds(review.body ?? '')) {
+      linkedReviewIdByCommentId.set(commentId, review.id);
+    }
+  }
 
   const comments = await octokit.paginate(octokit.rest.pulls.listReviewComments, {
     owner,
@@ -448,14 +476,14 @@ async function listJbotReviewCommentState(
   const reviewIdByTopLevelId = new Map<number, number>();
   for (const comment of comments) {
     const reviewId = comment.pull_request_review_id;
-    if (
-      isViewerActor(comment.user?.login, viewerLogin) &&
-      !comment.in_reply_to_id &&
-      reviewId !== null &&
-      reviewId !== undefined &&
-      jbotReviewIds.has(reviewId)
-    ) {
+    if (!isViewerActor(comment.user?.login, viewerLogin) || comment.in_reply_to_id) continue;
+    if (reviewId !== null && reviewId !== undefined && jbotReviewIds.has(reviewId)) {
       reviewIdByTopLevelId.set(comment.id, reviewId);
+      continue;
+    }
+    const linkedReviewId = linkedReviewIdByCommentId.get(comment.id);
+    if (linkedReviewId !== undefined && hasInternalMarker(comment.body, FINDING_MARKER)) {
+      reviewIdByTopLevelId.set(comment.id, linkedReviewId);
     }
   }
   const addressedTopLevelIds = new Set(
@@ -491,6 +519,7 @@ export async function postReview(
   verdict: Verdict,
   body: string,
   inlineFindings: Finding[],
+  linkedCommentIds: readonly number[],
 ): Promise<void> {
   const comments = inlineFindings.map((f) => ({
     path: f.path,
@@ -499,13 +528,17 @@ export async function postReview(
     body: formatFindingCommentBody(f),
   }));
 
+  const linkedBody = appendLinkedCommentsFooter(
+    appendReviewMarker(stripLinkedCommentsFooter(body)),
+    linkedCommentIds,
+  );
   try {
     await octokit.rest.pulls.createReview({
       owner,
       repo,
       pull_number: pullNumber,
       event: verdict,
-      body: appendReviewMarker(body),
+      body: linkedBody,
       comments,
     });
   } catch {
@@ -515,8 +548,11 @@ export async function postReview(
         repo,
         pull_number: pullNumber,
         event: verdict,
-        body: appendReviewMarker(
-          `${body}\n\n_(inline comments omitted — failed to anchor to diff lines)_`,
+        body: appendLinkedCommentsFooter(
+          appendReviewMarker(
+            `${stripLinkedCommentsFooter(body)}\n\n_(inline comments omitted — failed to anchor to diff lines)_`,
+          ),
+          linkedCommentIds,
         ),
       });
     } catch {
@@ -574,8 +610,8 @@ export async function postFileLevelComment(
   pullNumber: number,
   headSha: string,
   finding: Finding,
-): Promise<void> {
-  await octokit.rest.pulls.createReviewComment({
+): Promise<number> {
+  const response = await octokit.rest.pulls.createReviewComment({
     owner,
     repo,
     pull_number: pullNumber,
@@ -584,6 +620,7 @@ export async function postFileLevelComment(
     subject_type: 'file',
     body: formatFindingCommentBody(finding),
   });
+  return response.data.id;
 }
 
 /** The fixed set of reaction contents GitHub accepts (no ✅ / checkmark). */
@@ -822,28 +859,32 @@ export function selectResolvedJbotReviewsToFinalize(
 
 export function compactJbotReviewBody(body: string, threadCount: number): string {
   if (hasInternalMarker(body, COMPACTED_REVIEW_MARKER)) return body;
-  const original = body
+  const linkedCommentIds = parseLinkedCommentIds(body);
+  const original = stripLinkedCommentsFooter(body)
     .replaceAll(REVIEW_MARKER, '')
     .replaceAll(COMPACTED_REVIEW_MARKER, '')
     .trim()
     .replace(/^## j-?bot code review\s*/i, '')
     .trim();
   const noun = threadCount === 1 ? 'thread' : 'threads';
-  return appendReviewMarker(
-    [
-      '## J-Bot Code Review',
-      '',
-      `✅ **All ${threadCount} review ${noun} resolved.**`,
-      '',
-      '<details>',
-      '<summary>Show original review</summary>',
-      '',
-      original,
-      '',
-      '</details>',
-      '',
-      COMPACTED_REVIEW_MARKER,
-    ].join('\n'),
+  return appendLinkedCommentsFooter(
+    appendReviewMarker(
+      [
+        '## J-Bot Code Review',
+        '',
+        `✅ **All ${threadCount} review ${noun} resolved.**`,
+        '',
+        '<details>',
+        '<summary>Show original review</summary>',
+        '',
+        original,
+        '',
+        '</details>',
+        '',
+        COMPACTED_REVIEW_MARKER,
+      ].join('\n'),
+    ),
+    linkedCommentIds,
   );
 }
 
@@ -853,6 +894,21 @@ function parseReviewFindingCount(body: string): number | undefined {
   if (headerIndex < 0) return undefined;
   const count = lines[headerIndex + 2]?.match(/^\|\s*(\d+)\s*\|/)?.[1];
   return count === undefined ? undefined : Number.parseInt(count, 10);
+}
+
+function appendLinkedCommentsFooter(body: string, commentIds: readonly number[]): string {
+  const strippedBody = stripLinkedCommentsFooter(body);
+  const ids = [...new Set(commentIds)].join(',');
+  return ids ? `${strippedBody}\n\n<!-- ${LINKED_COMMENTS_MARKER}:${ids} -->` : strippedBody;
+}
+
+function parseLinkedCommentIds(body: string): number[] {
+  const ids = body.match(LINKED_COMMENTS_FOOTER)?.[1];
+  return ids ? ids.split(',').map((id) => Number.parseInt(id, 10)) : [];
+}
+
+function stripLinkedCommentsFooter(body: string): string {
+  return body.replace(LINKED_COMMENTS_FOOTER, '').trimEnd();
 }
 
 function appendReviewMarker(body: string): string {
