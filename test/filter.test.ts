@@ -341,6 +341,31 @@ describe('suppressPreviouslyReported', () => {
     );
   });
 
+  it('matches a changed-file anchor miss against its prior file-level thread', () => {
+    const fileLevelThread = { path: 'src/example.ts', body: 'Missing provider options wiring' };
+    const addable = new Map([['src/example.ts', new Set([5])]]);
+    const { findings, suppressedCount } = suppressPreviouslyReported(
+      [finding({ line: 99, title: 'Missing provider options wiring' })],
+      [fileLevelThread],
+      addable,
+    );
+
+    assert.equal(suppressedCount, 1);
+    assert.equal(findings.length, 0);
+  });
+
+  it('does not treat a valid inline anchor as a file-level fallback', () => {
+    const fileLevelThread = { path: 'src/example.ts', body: 'Missing provider options wiring' };
+    const addable = new Map([['src/example.ts', new Set([5])]]);
+    const { findings } = suppressPreviouslyReported(
+      [finding({ line: 5, title: 'Missing provider options wiring' })],
+      [fileLevelThread],
+      addable,
+    );
+
+    assert.equal(findings.length, 1);
+  });
+
   it('never suppresses when a title has no significant words to compare', () => {
     const { findings } = suppressPreviouslyReported(
       [finding({ line: 10, title: 'fix it' })],

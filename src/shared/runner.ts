@@ -1871,7 +1871,11 @@ export async function runPrReview(params: {
     }
     // Full-diff re-review means repeats are possible by design; this is the
     // in-code backstop that drops findings prior jbot threads already cover.
-    const suppression = suppressPreviouslyReported(combinedFindings, priorJbotThreads);
+    const suppression = suppressPreviouslyReported(
+      combinedFindings,
+      priorJbotThreads,
+      headSha ? addable : undefined,
+    );
     telemetry.snapshot('suppressed', suppression.findings);
     if (suppression.suppressedCount > 0) {
       log(

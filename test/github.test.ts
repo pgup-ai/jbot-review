@@ -154,9 +154,10 @@ describe('resolved review finalization', () => {
     assert.deepEqual(variables, { reviewNodeId: 'PRR_77' });
   });
 
-  it('keeps resolved direct and linked threads in their review group', async () => {
+  it('reads summary minimization while grouping direct and linked threads', async () => {
     const listReviews = {};
     const listReviewComments = {};
+    let minimizationVariables: unknown;
     const octokit = {
       rest: { pulls: { listReviews, listReviewComments } },
       paginate: async (endpoint: unknown) => {
@@ -204,73 +205,78 @@ describe('resolved review finalization', () => {
         }
         throw new Error('unexpected pagination endpoint');
       },
-      graphql: async () => ({
-        viewer: { login: 'github-actions' },
-        repository: {
-          pullRequest: {
-            reviewThreads: {
-              pageInfo: { hasNextPage: false, endCursor: null },
-              nodes: [
-                {
-                  id: 'PRRT_resolved',
-                  isResolved: true,
-                  path: 'src/example.ts',
-                  line: 4,
-                  originalLine: 4,
-                  comments: {
-                    nodes: [
-                      null,
-                      {
-                        databaseId: 100,
-                        body: 'finding\n\n<!-- jbot-review:finding -->',
-                        url: 'https://github.com/acme/widget/pull/1#discussion_r100',
-                        author: { login: 'github-actions[bot]' },
-                        pullRequestReview: { isMinimized: true },
-                      },
-                      {
-                        databaseId: 101,
-                        body: '✅ Addressed.\n\n<!-- jbot-review:addressed -->',
-                        url: 'https://github.com/acme/widget/pull/1#discussion_r101',
-                        author: { login: 'github-actions[bot]' },
-                      },
-                    ],
+      graphql: async (query: string, variables: unknown) => {
+        if (query.includes('JbotReviewMinimization')) {
+          minimizationVariables = variables;
+          return { nodes: [{ id: 'PRR_77', isMinimized: true }] };
+        }
+        return {
+          viewer: { login: 'github-actions' },
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  {
+                    id: 'PRRT_resolved',
+                    isResolved: true,
+                    path: 'src/example.ts',
+                    line: 4,
+                    originalLine: 4,
+                    comments: {
+                      nodes: [
+                        null,
+                        {
+                          databaseId: 100,
+                          body: 'finding\n\n<!-- jbot-review:finding -->',
+                          url: 'https://github.com/acme/widget/pull/1#discussion_r100',
+                          author: { login: 'github-actions[bot]' },
+                        },
+                        {
+                          databaseId: 101,
+                          body: '✅ Addressed.\n\n<!-- jbot-review:addressed -->',
+                          url: 'https://github.com/acme/widget/pull/1#discussion_r101',
+                          author: { login: 'github-actions[bot]' },
+                        },
+                      ],
+                    },
                   },
-                },
-                {
-                  id: 'PRRT_file',
-                  isResolved: true,
-                  path: 'src/other.ts',
-                  line: null,
-                  originalLine: null,
-                  comments: {
-                    nodes: [
-                      {
-                        databaseId: 200,
-                        body: 'file finding\n\n<!-- jbot-review:finding -->',
-                        url: 'https://github.com/acme/widget/pull/1#discussion_r200',
-                        author: { login: 'github-actions[bot]' },
-                        pullRequestReview: { isMinimized: false },
-                      },
-                      {
-                        databaseId: 201,
-                        body: '✅ Addressed.\n\n<!-- jbot-review:addressed -->',
-                        url: 'https://github.com/acme/widget/pull/1#discussion_r201',
-                        author: { login: 'github-actions[bot]' },
-                      },
-                    ],
+                  {
+                    id: 'PRRT_file',
+                    isResolved: true,
+                    path: 'src/other.ts',
+                    line: null,
+                    originalLine: null,
+                    comments: {
+                      nodes: [
+                        {
+                          databaseId: 200,
+                          body: 'file finding\n\n<!-- jbot-review:finding -->',
+                          url: 'https://github.com/acme/widget/pull/1#discussion_r200',
+                          author: { login: 'github-actions[bot]' },
+                        },
+                        {
+                          databaseId: 201,
+                          body: '✅ Addressed.\n\n<!-- jbot-review:addressed -->',
+                          url: 'https://github.com/acme/widget/pull/1#discussion_r201',
+                          author: { login: 'github-actions[bot]' },
+                        },
+                      ],
+                    },
                   },
-                },
-              ],
+                ],
+              },
             },
           },
-        },
-      }),
+        };
+      },
     };
 
     const result = await listPriorJbotThreads(octokit as unknown as Octokit, 'acme', 'widget', 1);
 
     assert.deepEqual(result.threads, []);
     assert.deepEqual(result.unresolvedAddressedThreadIds, []);
+    assert.deepEqual(minimizationVariables, { ids: ['PRR_77'] });
     assert.deepEqual(result.reviewGroups, [
       {
         id: 77,
@@ -328,7 +334,7 @@ describe('review posting', () => {
       [],
       [],
     );
-    assert.match(request?.body ?? '', /jbot-review:linked-comments: -->$/);
+    assert.doesNotMatch(request?.body ?? '', /jbot-review:linked-comments/);
   });
 });
 
