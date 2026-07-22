@@ -57,13 +57,6 @@ RUN set -eux; \
   ln -s /usr/local/bin/node "$cnode"; \
   /root/.local/bin/cursor-agent --help >/dev/null; \
   rm -f /tmp/cursor-install.sh
-
-# Pool CLI (optional poolside provider). The vendor installer verifies the
-# pinned release checksum; headless installation requires explicit EULA acceptance.
-RUN curl -fsSL https://downloads.poolside.ai/pool/install.sh -o /tmp/pool-install.sh \
-  && POOL_INSTALL_ACCEPT_EULA=1 POOL_INSTALL_DIR=/root/.local/bin POOL_INSTALL_UPDATE_PATH=0 sh /tmp/pool-install.sh v1.0.14 \
-  && /root/.local/bin/pool --version \
-  && rm -f /tmp/pool-install.sh
 ENV PATH="/root/.local/bin:${PATH}"
 
 WORKDIR /app

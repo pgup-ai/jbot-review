@@ -87,7 +87,7 @@ inputs:
     required: false
     default: ''
   poolside-api-key:
-    description: 'Poolside API key. Used by Pool CLI when provider or active aux-provider is poolside.'
+    description: 'Poolside API key. Used when provider or active aux-provider is poolside.'
     required: false
     default: ''
   qoder-token:

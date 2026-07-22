@@ -19,7 +19,7 @@ import {
 } from './filter.ts';
 import { createTelemetryRecorder, type TelemetryRecorder } from './telemetry.ts';
 import {
-  cliBackendRequiresCompleteEmbeddedDiff,
+  backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
   type CliBackendID,
 } from './backend-selection.ts';
@@ -36,6 +36,15 @@ import {
   startPi,
   type PiRuntime,
 } from './pi.ts';
+import {
+  assertPoolsideApiKey,
+  poolsideReasoningEffort,
+  runPoolsideAddressedPriorCommentsCheck,
+  runPoolsideChangesSinceLastReview,
+  runPoolsideFindingVerification,
+  runPoolsideGuidelineComplianceCheck,
+  runPoolsideReview,
+} from './poolside.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   type DiffHunksOptions,
@@ -142,14 +151,6 @@ import {
   runKiloReview,
 } from './kilo.ts';
 import {
-  POOLSIDE_PROVIDER_ID,
-  runPoolsideAddressedPriorCommentsCheck,
-  runPoolsideChangesSinceLastReview,
-  runPoolsideFindingVerification,
-  runPoolsideGuidelineComplianceCheck,
-  runPoolsideReview,
-} from './poolside.ts';
-import {
   QODER_PROVIDER_ID,
   runQoderAddressedPriorCommentsCheck,
   runQoderChangesSinceLastReview,
@@ -203,7 +204,7 @@ import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
 /** Blocking findings verified per run; the rest pass through unverified. */
 const MAX_VERIFIED_FINDINGS = 10;
-const EMBEDDED_ONLY_CLI_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
+const EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
   totalBudgetBytes: 512 * 1024,
   perFileBudgetBytes: 512 * 1024,
 };
@@ -279,6 +280,62 @@ function createPiBackend(runtime: PiRuntime): ReviewBackend {
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
       runPiChangesSinceLastReview(
         runtime,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+  };
+}
+
+function createPoolsideBackend(
+  apiKey: string,
+  modelOptions?: Record<string, unknown>,
+): ReviewBackend {
+  const key = assertPoolsideApiKey(apiKey);
+  const reasoningEffort = poolsideReasoningEffort(modelOptions);
+  return {
+    name: 'poolside',
+    runReview: (model, prContext, guidelines, log, options) =>
+      runPoolsideReview(key, reasoningEffort, model, prContext, guidelines, log, options),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runPoolsideAddressedPriorCommentsCheck(
+        key,
+        reasoningEffort,
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runPoolsideGuidelineComplianceCheck(
+        key,
+        reasoningEffort,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runPoolsideFindingVerification(
+        key,
+        reasoningEffort,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+      ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runPoolsideChangesSinceLastReview(
+        key,
+        reasoningEffort,
         model,
         prContext,
         deltaContext,
@@ -638,53 +695,6 @@ function createKiloBackend(workspace: string, auth: string): ReviewBackend {
   };
 }
 
-function createPoolsideBackend(apiKey: string): ReviewBackend {
-  return {
-    name: POOLSIDE_PROVIDER_ID,
-    runReview: (model, prContext, guidelines, log, options) =>
-      runPoolsideReview(model, prContext, guidelines, log, { ...options, apiKey }),
-    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
-      runPoolsideAddressedPriorCommentsCheck(
-        model,
-        prContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        apiKey,
-      ),
-    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
-      runPoolsideGuidelineComplianceCheck(
-        model,
-        prContext,
-        guidelines,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        apiKey,
-      ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      runPoolsideFindingVerification(
-        model,
-        prContext,
-        findings,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        apiKey,
-      ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runPoolsideChangesSinceLastReview(
-        model,
-        prContext,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        apiKey,
-      ),
-  };
-}
-
 function createQoderBackend(workspace: string, token: string): ReviewBackend {
   return {
     name: QODER_PROVIDER_ID,
@@ -749,7 +759,7 @@ function requireCliBackend(
 
 function requireSdkBackend(
   backend: ReviewBackend | undefined,
-  engine: 'opencode' | 'pi',
+  engine: 'opencode' | 'pi' | 'poolside',
   role: 'main' | 'aux',
 ): ReviewBackend {
   if (!backend) {
@@ -828,9 +838,8 @@ export interface ReviewRunOptions {
    */
   reviewShards?: number;
   /**
-   * Provider options for the MAIN model, passed through opencode to the
-   * provider SDK — e.g. {"reasoningEffort":"medium"} to cap reasoning spend
-   * on heavy models. Aux-model sessions are unaffected.
+   * Provider options for the MAIN model — e.g. {"reasoningEffort":"medium"}
+   * to cap reasoning spend on heavy models. Aux-model sessions are unaffected.
    */
   modelOptions?: Record<string, unknown>;
   /**
@@ -1126,11 +1135,13 @@ export async function runPrReview(params: {
   const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
   const mainOnPi = backendSelection.mainSdkEngine === 'pi';
   const auxOnPi = backendSelection.auxSdkEngine === 'pi';
-  const mainOnOpencode = !mainCliBackend && !mainOnPi;
-  const auxOnOpencode = !auxCliBackend && !auxOnPi;
-  if (mainOnPi || auxOnPi) {
+  const mainOnPoolside = backendSelection.mainSdkEngine === 'poolside';
+  const auxOnPoolside = backendSelection.auxSdkEngine === 'poolside';
+  const mainOnOpencode = !mainCliBackend && !mainOnPi && !mainOnPoolside;
+  const auxOnOpencode = !auxCliBackend && !auxOnPi && !auxOnPoolside;
+  if (mainOnPi || auxOnPi || mainOnPoolside || auxOnPoolside) {
     log(
-      `SDK engine routing: main=${mainCliBackend ?? (mainOnPi ? 'pi' : 'opencode')} aux=${auxCliBackend ?? (auxOnPi ? 'pi' : 'opencode')}`,
+      `Backend routing: main=${mainCliBackend ?? backendSelection.mainSdkEngine ?? 'opencode'} aux=${auxCliBackend ?? backendSelection.auxSdkEngine ?? 'opencode'}`,
     );
   }
 
@@ -1188,17 +1199,25 @@ export async function runPrReview(params: {
   }
   const diffHunksBlock = buildDiffHunksBlock(files);
   if (diffHunksBlock) log(`Embedded diff hunks block: ${diffHunksBlock.length} chars.`);
-  const mainRequiresCompleteEmbeddedDiff = cliBackendRequiresCompleteEmbeddedDiff(mainCliBackend);
-  const auxRequiresCompleteEmbeddedDiff = cliBackendRequiresCompleteEmbeddedDiff(auxCliBackend);
-  const embeddedOnlyCli = mainRequiresCompleteEmbeddedDiff || auxRequiresCompleteEmbeddedDiff;
-  const embeddedOnlyCliDiffHunks = embeddedOnlyCli
-    ? buildDiffHunksBlockWithMetadata(files, EMBEDDED_ONLY_CLI_DIFF_HUNKS_OPTIONS)
+  const mainRequiresCompleteEmbeddedDiff = backendRequiresCompleteEmbeddedDiff(
+    providerID,
+    mainCliBackend,
+  );
+  const auxRequiresCompleteEmbeddedDiff = backendRequiresCompleteEmbeddedDiff(
+    auxProviderID,
+    auxCliBackend,
+  );
+  const embeddedOnlyBackend = mainRequiresCompleteEmbeddedDiff || auxRequiresCompleteEmbeddedDiff;
+  const embeddedOnlyBackendDiffHunks = embeddedOnlyBackend
+    ? buildDiffHunksBlockWithMetadata(files, EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS)
     : undefined;
-  const embeddedOnlyCliIncompleteDiffFiles = embeddedOnlyCliDiffHunks
-    ? incompleteDiffFiles(embeddedOnlyCliDiffHunks)
+  const embeddedOnlyBackendIncompleteDiffFiles = embeddedOnlyBackendDiffHunks
+    ? incompleteDiffFiles(embeddedOnlyBackendDiffHunks)
     : [];
-  if (embeddedOnlyCliDiffHunks?.text) {
-    log(`CLI-safe embedded diff hunks block: ${embeddedOnlyCliDiffHunks.text.length} chars.`);
+  if (embeddedOnlyBackendDiffHunks?.text) {
+    log(
+      `Embedded-only backend diff hunks block: ${embeddedOnlyBackendDiffHunks.text.length} chars.`,
+    );
   }
   const blastRadiusBlock = options.enhancedContext
     ? await buildBlastRadiusBlock(workspace, files)
@@ -1272,17 +1291,17 @@ export async function runPrReview(params: {
   coreContext = joinContext(UNTRUSTED_PR_CONTENT_NOTE, coreContext);
   const basePrContext = joinContext(coreContext, diffHunksBlock);
   const auxHasCompleteEmbeddedDiff =
-    !auxRequiresCompleteEmbeddedDiff || embeddedOnlyCliIncompleteDiffFiles.length === 0;
+    !auxRequiresCompleteEmbeddedDiff || embeddedOnlyBackendIncompleteDiffFiles.length === 0;
   if (!auxHasCompleteEmbeddedDiff) {
     log(
-      `Skipping ${auxCliBackend} auxiliary sessions: embedded diff exceeds the CLI hard budget (${formatFileList(
-        embeddedOnlyCliIncompleteDiffFiles,
+      `Skipping auxiliary sessions: embedded diff exceeds the backend hard budget (${formatFileList(
+        embeddedOnlyBackendIncompleteDiffFiles,
       )}). Main review continues without aux findings or verification.`,
     );
   }
   const auxPrContext =
-    auxRequiresCompleteEmbeddedDiff && embeddedOnlyCliDiffHunks && auxHasCompleteEmbeddedDiff
-      ? joinContext(coreContext, embeddedOnlyCliDiffHunks.text)
+    auxRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks && auxHasCompleteEmbeddedDiff
+      ? joinContext(coreContext, embeddedOnlyBackendDiffHunks.text)
       : basePrContext;
 
   // Use a per-run limiter around every backend so mixed Devin/OpenCode runs
@@ -1305,7 +1324,6 @@ export async function runPrReview(params: {
   let grokBackend: ReviewBackend | undefined;
   let grokSessionSlots: Semaphore | undefined;
   let kiloBackend: ReviewBackend | undefined;
-  let poolsideBackend: ReviewBackend | undefined;
   let qoderBackend: ReviewBackend | undefined;
   let commandCodeHome: string | undefined;
   const cleanupCommandCodeHome = (): void => {
@@ -1466,18 +1484,6 @@ export async function runPrReview(params: {
     kiloBackend = createKiloBackend(workspace, kiloAuth);
   }
 
-  if (mainCliBackend === POOLSIDE_PROVIDER_ID || auxCliBackend === POOLSIDE_PROVIDER_ID) {
-    const poolsideApiKey = backendSelection.poolsideApiKey;
-    if (!poolsideApiKey) {
-      cleanupCliHomes();
-      throw new Error(`Missing API key for ${POOLSIDE_PROVIDER_ID} provider.`);
-    }
-    log(
-      'Poolside CLI authenticated via POOLSIDE_API_KEY; sessions use an isolated config and empty read-only workspace, and token usage is unavailable.',
-    );
-    poolsideBackend = createPoolsideBackend(poolsideApiKey);
-  }
-
   if (mainCliBackend === QODER_PROVIDER_ID || auxCliBackend === QODER_PROVIDER_ID) {
     const qoderToken = backendSelection.qoderToken;
     if (!qoderToken) {
@@ -1546,6 +1552,12 @@ export async function runPrReview(params: {
     piBackend = createPiBackend(piRuntime.runtime);
   }
 
+  const mainPoolsideBackend = mainOnPoolside
+    ? createPoolsideBackend(apiKey, options.modelOptions)
+    : undefined;
+  const auxPoolsideKey = options.auxApiKey || (auxProviderID === providerID ? apiKey : '');
+  const auxPoolsideBackend = auxOnPoolside ? createPoolsideBackend(auxPoolsideKey) : undefined;
+
   if (needsOpencode) {
     const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
     if (!opencodeApiKey) {
@@ -1597,19 +1609,22 @@ export async function runPrReview(params: {
     [CLINE_PROVIDER_ID]: clineBackend,
     [GROK_PROVIDER_ID]: grokBackend,
     [KILO_PROVIDER_ID]: kiloBackend,
-    [POOLSIDE_PROVIDER_ID]: poolsideBackend,
     [QODER_PROVIDER_ID]: qoderBackend,
   };
   const mainBaseBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)
     : mainOnPi
       ? requireSdkBackend(piBackend, 'pi', 'main')
-      : requireSdkBackend(opencodeBackend, 'opencode', 'main');
+      : mainOnPoolside
+        ? requireSdkBackend(mainPoolsideBackend, 'poolside', 'main')
+        : requireSdkBackend(opencodeBackend, 'opencode', 'main');
   const auxBaseBackend = auxCliBackend
     ? requireCliBackend(cliBackends, auxCliBackend)
     : auxOnPi
       ? requireSdkBackend(piBackend, 'pi', 'aux')
-      : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
+      : auxOnPoolside
+        ? requireSdkBackend(auxPoolsideBackend, 'poolside', 'aux')
+        : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
   const mainBackend = limitReviewBackendSessions(
     mainBaseBackend,
     'main',
@@ -1739,7 +1754,7 @@ export async function runPrReview(params: {
       shards,
       requireCompleteEmbeddedDiff: mainRequiresCompleteEmbeddedDiff,
       diffHunksOptions: mainRequiresCompleteEmbeddedDiff
-        ? EMBEDDED_ONLY_CLI_DIFF_HUNKS_OPTIONS
+        ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
         : undefined,
     });
 
@@ -2559,7 +2574,7 @@ function assertCompleteEmbeddedDiff(
   const incomplete = incompleteDiffFiles(result);
   if (incomplete.length === 0) return;
   throw new Error(
-    `Embedded-only CLI ${label} would receive an incomplete embedded diff (${formatFileList(
+    `Embedded-only backend ${label} would receive an incomplete embedded diff (${formatFileList(
       incomplete,
     )}). ` +
       'Refusing partial review coverage because the provider cannot read the checkout; use more shards or another provider for this PR.',

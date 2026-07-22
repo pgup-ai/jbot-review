@@ -53,6 +53,19 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
   });
 });
 
+describe('poolside', () => {
+  it('registers the unlisted Laguna S 2.1 model as the low-reasoning default', () => {
+    const provider = PROVIDERS.poolside;
+    assert.equal(provider.defaultModel, 'poolside/laguna-s-2.1');
+    assert.equal(provider.keyEnv, 'POOLSIDE_API_KEY');
+    assert.equal(provider.keyInput, 'poolside-api-key');
+    assert.equal(provider.custom, undefined);
+    assert.deepEqual(provider.models?.['laguna-s-2.1'], { promptCache: false });
+    assert.equal(modelSupportsPromptCache('poolside', 'laguna-s-2.1'), false);
+    assert.deepEqual(defaultModelOptions('poolside'), { reasoningEffort: 'low' });
+  });
+});
+
 describe('provider credentials', () => {
   it('prefers Grok account auth and falls back to the xAI API key', () => {
     const grok = PROVIDERS.grok;

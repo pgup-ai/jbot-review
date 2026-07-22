@@ -51,6 +51,7 @@ export function resolveProviderModel(
 
 export function defaultModelOptions(providerID: string): Record<string, unknown> {
   // Arbitrary custom endpoints may reject provider-specific options.
+  if (providerID === 'poolside') return { reasoningEffort: 'low' };
   return PROVIDERS[providerID]?.custom ? {} : { reasoningEffort: 'medium' };
 }
 
@@ -289,16 +290,15 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
-  // Poolside's coding-agent models are available through Pool CLI even when
-  // they are absent from the platform API model catalog.
+  // Laguna S 2.1 works through Poolside's chat-completions endpoint when
+  // named explicitly, despite being absent from its advertised model catalog.
   poolside: {
     defaultModel: 'poolside/laguna-s-2.1',
     keyEnv: 'POOLSIDE_API_KEY',
     keyInput: 'poolside-api-key',
+    promptCache: false,
     models: {
       'laguna-s-2.1': { promptCache: false },
-      'laguna-m.1': { promptCache: false },
-      'laguna-xs-2.1': { promptCache: false },
     },
   },
 };
@@ -313,8 +313,7 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     providerID === 'cline' ||
     providerID === 'cline-pass' ||
     providerID === 'grok' ||
-    providerID === 'kilo' ||
-    providerID === 'poolside'
+    providerID === 'kilo'
   )
     return false;
   if (PROVIDERS[providerID]?.promptCache === false) return false;

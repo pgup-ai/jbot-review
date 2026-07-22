@@ -6,7 +6,7 @@ import { DEVIN_PROVIDER_ID, isDevinProvider } from './devin.ts';
 import { GROK_PROVIDER_ID, isGrokProvider } from './grok.ts';
 import { KILO_PROVIDER_ID, isKiloProvider } from './kilo.ts';
 import { piSupportsProvider } from './pi.ts';
-import { POOLSIDE_PROVIDER_ID, isPoolsideProvider } from './poolside.ts';
+import { isPoolsideProvider } from './poolside.ts';
 import { QODER_PROVIDER_ID, isQoderProvider } from './qoder.ts';
 
 export type CliBackendID =
@@ -17,7 +17,6 @@ export type CliBackendID =
   | typeof CLINE_PROVIDER_ID
   | typeof GROK_PROVIDER_ID
   | typeof KILO_PROVIDER_ID
-  | typeof POOLSIDE_PROVIDER_ID
   | typeof QODER_PROVIDER_ID;
 
 export interface ReviewBackendSelectionInput {
@@ -40,23 +39,24 @@ export interface PiEngineConfig {
   apiKey: string;
 }
 
-export function cliBackendRequiresCompleteEmbeddedDiff(
-  backendID: CliBackendID | undefined,
+export function backendRequiresCompleteEmbeddedDiff(
+  providerID: string,
+  cliBackend: CliBackendID | undefined,
 ): boolean {
   return (
-    backendID === COMMANDCODE_PROVIDER_ID ||
-    backendID === GROK_PROVIDER_ID ||
-    backendID === POOLSIDE_PROVIDER_ID ||
-    backendID === QODER_PROVIDER_ID
+    isPoolsideProvider(providerID) ||
+    cliBackend === COMMANDCODE_PROVIDER_ID ||
+    cliBackend === GROK_PROVIDER_ID ||
+    cliBackend === QODER_PROVIDER_ID
   );
 }
 
 export interface ReviewBackendSelection {
   mainCliBackend?: CliBackendID;
   auxCliBackend?: CliBackendID;
-  /** Present only when the role routes to the pi engine. */
-  mainSdkEngine?: 'pi';
-  auxSdkEngine?: 'pi';
+  /** Present only when the role bypasses the OpenCode server. */
+  mainSdkEngine?: 'pi' | 'poolside';
+  auxSdkEngine?: 'pi' | 'poolside';
   needsOpencode: boolean;
   devinApiKey: string;
   commandCodeAccessKey: string;
@@ -65,7 +65,6 @@ export interface ReviewBackendSelection {
   clineAuth: string;
   grokAuth: string;
   kiloAuth: string;
-  poolsideApiKey?: string;
   qoderToken?: string;
   opencodeProviderID: string;
   opencodeModelID: string;
@@ -77,18 +76,22 @@ export interface ReviewBackendSelection {
 export function selectReviewBackends(input: ReviewBackendSelectionInput): ReviewBackendSelection {
   const mainCliBackend = cliBackendForProvider(input.providerID);
   const auxCliBackend = cliBackendForProvider(input.auxProviderID);
+  const mainPoolside = !mainCliBackend && isPoolsideProvider(input.providerID);
+  const auxPoolside = !auxCliBackend && isPoolsideProvider(input.auxProviderID);
   const mainPi =
     !mainCliBackend &&
+    !mainPoolside &&
     !!input.piEnabled &&
     input.mainPiModelAvailable !== false &&
     piSupportsProvider(input.providerID);
   const auxPi =
     !auxCliBackend &&
+    !auxPoolside &&
     !!input.piEnabled &&
     input.auxPiModelAvailable !== false &&
     piSupportsProvider(input.auxProviderID);
-  const mainOpencode = !mainCliBackend && !mainPi;
-  const auxOpencode = !auxCliBackend && !auxPi;
+  const mainOpencode = !mainCliBackend && !mainPi && !mainPoolside;
+  const auxOpencode = !auxCliBackend && !auxPi && !auxPoolside;
   const needsOpencode = mainOpencode || auxOpencode;
   const needsPi = mainPi || auxPi;
   const effectiveAuxApiKey =
@@ -107,8 +110,16 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
   return {
     ...(mainCliBackend ? { mainCliBackend } : {}),
     ...(auxCliBackend ? { auxCliBackend } : {}),
-    ...(mainPi ? { mainSdkEngine: 'pi' as const } : {}),
-    ...(auxPi ? { auxSdkEngine: 'pi' as const } : {}),
+    ...(mainPoolside
+      ? { mainSdkEngine: 'poolside' as const }
+      : mainPi
+        ? { mainSdkEngine: 'pi' as const }
+        : {}),
+    ...(auxPoolside
+      ? { auxSdkEngine: 'poolside' as const }
+      : auxPi
+        ? { auxSdkEngine: 'pi' as const }
+        : {}),
     needsOpencode,
     devinApiKey: keyFor(DEVIN_PROVIDER_ID),
     commandCodeAccessKey: keyFor(COMMANDCODE_PROVIDER_ID),
@@ -117,9 +128,6 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
     clineAuth: keyFor(CLINE_PROVIDER_ID),
     grokAuth: keyFor(GROK_PROVIDER_ID),
     kiloAuth: keyFor(KILO_PROVIDER_ID),
-    ...(mainCliBackend === POOLSIDE_PROVIDER_ID || auxCliBackend === POOLSIDE_PROVIDER_ID
-      ? { poolsideApiKey: keyFor(POOLSIDE_PROVIDER_ID) }
-      : {}),
     ...(mainCliBackend === QODER_PROVIDER_ID || auxCliBackend === QODER_PROVIDER_ID
       ? { qoderToken: keyFor(QODER_PROVIDER_ID) }
       : {}),
@@ -148,7 +156,6 @@ function cliBackendForProvider(providerID: string): CliBackendID | undefined {
   if (isClineProvider(providerID)) return CLINE_PROVIDER_ID;
   if (isGrokProvider(providerID)) return GROK_PROVIDER_ID;
   if (isKiloProvider(providerID)) return KILO_PROVIDER_ID;
-  if (isPoolsideProvider(providerID)) return POOLSIDE_PROVIDER_ID;
   if (isQoderProvider(providerID)) return QODER_PROVIDER_ID;
   return undefined;
 }

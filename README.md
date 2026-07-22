@@ -153,7 +153,7 @@ no key for the selected aux provider, it reuses the review provider API key.
 
 **CLI-backend credentials — where to get each one.** Unlike the model-provider keys
 above, these authenticate with a local CLI login or a dashboard key. You paste the
-**whole file** (Codex, Cline, Grok Build) or the **key value** (Cursor, Poolside,
+**whole file** (Codex, Cline, Grok Build) or the **key value** (Cursor,
 Devin, Command Code) — no digging a field out of a JSON.
 
 | Backend          | Get the credential                                                                                                                                      | Secret (Action input)                                            |
@@ -162,7 +162,6 @@ Devin, Command Code) — no digging a field out of a JSON.
 | **Cline**        | `cline auth` → paste the whole `~/.cline/data/settings/providers.json`                                                                                  | `CLINE_AUTH_JSON` (`cline-auth`)                                 |
 | **Grok Build**   | `grok login --device-auth` → paste `~/.grok/auth.json`; alternatively create an xAI API key                                                             | `GROK_AUTH_JSON` (`grok-auth`), or `XAI_API_KEY` (`xai-api-key`) |
 | **Cursor**       | Create a key at [cursor.com/dashboard/integrations](https://cursor.com/dashboard/integrations) → paste it (`crsr_…`)                                    | `CURSOR_API_KEY` (`cursor-api-key`)                              |
-| **Poolside**     | Create a key in the [Poolside platform](https://platform.poolside.ai) (`sky_…`)                                                                         | `POOLSIDE_API_KEY` (`poolside-api-key`)                          |
 | **Qoder CLI**    | Create a Personal Access Token under [Qoder Integrations](https://qoder.com/account/integrations)                                                       | `QODER_PERSONAL_ACCESS_TOKEN` (`qoder-token`)                    |
 | **Devin**        | `devin auth login` → copy `windsurf_api_key` (`devin-session-token$…`) from `~/.local/share/devin/credentials.toml` ([docs](https://docs.devin.ai/cli)) | `DEVIN_WINDSURF_API_KEY` (`devin-windsurf-api-key`)              |
 | **Command Code** | Create an access key at [commandcode.ai](https://commandcode.ai/docs/quickstart) (`user_…`; the `apiKey` in `~/.commandcode/auth.json`) → paste it      | `COMMANDCODE_ACCESS_KEY` (`commandcode-access-key`)              |
@@ -181,14 +180,12 @@ file written) with an isolated temporary `HOME`/`XDG_DATA_HOME` per session,
 removed after the run; it defaults to the free `kilo/kilo-auto/free` gateway
 model.
 
-Poolside is a separate Pool CLI backend, not the Poolside Platform API provider.
-That distinction is intentional: Pool CLI exposes `poolside/laguna-s-2.1` even
-when it is absent from the API model listing. J-Bot defaults Poolside to Laguna
-S 2.1 and selects it with `POOLSIDE_STANDALONE_MODEL`. Each `pool exec` session
-gets an isolated temporary home and an empty read-only workspace; shell is
-disabled, all filesystem paths are denied, and only the complete budgeted diff
-embedded by J-Bot is available. The other currently exposed CLI choices are
-`poolside/laguna-m.1` and `poolside/laguna-xs-2.1`.
+Poolside uses its OpenAI-compatible chat-completions endpoint directly. Laguna
+S 2.1 is absent from Poolside's advertised model list, but the endpoint accepts
+`poolside/laguna-s-2.1` explicitly, so J-Bot uses it by default. Requests use
+Poolside's full 32,768-token completion allowance and default to low reasoning;
+this avoids the Pool CLI's coding-agent loop while preserving review,
+auxiliary, token-usage, timeout, and repair behavior.
 
 Qoder can read and search the checkout but receives no shell or write-capable tool.
 Its user/project settings, hooks, MCP servers, skills, memory, web access, and
@@ -499,7 +496,8 @@ CLI backend. The Docker image includes the Cursor CLI (`cursor-agent`), which
 reads the key from the environment — no credential file — and runs read-only via
 `--mode plan`.
 Use `provider: poolside` with `poolside-api-key` / `POOLSIDE_API_KEY` for the
-Pool CLI backend. Its default is `poolside/laguna-s-2.1`.
+Poolside inference provider. Its default is `poolside/laguna-s-2.1`, including
+when that model is absent from the endpoint's model listing.
 Use `provider: qoder` with `qoder-token` /
 `QODER_PERSONAL_ACCESS_TOKEN` for the Qoder CLI backend. It accepts `auto`,
 `ultimate`, `performance`, `efficient`, and `lite` model tiers. Each session uses

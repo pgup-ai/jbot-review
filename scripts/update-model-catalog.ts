@@ -53,6 +53,12 @@ function uniqueSorted(values: string[]): string[] {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));
 }
 
+function qualifyModel(providerID: string, modelID: string): string {
+  // Poolside's direct backend accepts the fully qualified IDs returned by Models.dev.
+  if (providerID === 'poolside' && modelID.startsWith('poolside/')) return modelID;
+  return `${providerID}/${modelID}`;
+}
+
 function withDefault(providerID: string, models: string[]): string[] {
   const defaultModel = PROVIDERS[providerID]?.defaultModel;
   return uniqueSorted(defaultModel ? [defaultModel, ...models] : models);
@@ -188,9 +194,6 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   const kiloModels = parseKiloModelList(
     npmCliOutput('@kilocode/cli', 'kilo', ['models', '--pure']),
   );
-  const poolsideModels = Object.keys(PROVIDERS.poolside?.models ?? {}).map(
-    (model) => `poolside/${model}`,
-  );
   for (const [providerID, models] of Object.entries({
     commandcode: commandCodeModels,
     cursor: cursorModels,
@@ -200,7 +203,6 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
     'cline-pass': clinePassModels,
     grok: grokModels,
     kilo: kiloModels,
-    poolside: poolsideModels,
   })) {
     if (models.length === 0) throw new Error(`${providerID} returned no model IDs.`);
   }
@@ -279,12 +281,6 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
       note: 'Kilo already prints fully qualified J-Bot values such as `kilo/openai/gpt-5.4`; do not add another `kilo/` prefix.',
       models: withDefault('kilo', kiloModels),
     },
-    poolside: {
-      discovery: 'the interactive `/model` picker in `pool`',
-      source: 'Vendor-installed Pool CLI pinned in the Docker image',
-      note: 'Pool has no non-interactive model-list command. These centrally configured IDs were verified against the CLI picker and must be rechecked when Pool CLI is upgraded.',
-      models: withDefault('poolside', poolsideModels),
-    },
   };
 }
 
@@ -319,9 +315,10 @@ async function main(): Promise<void> {
     if (!isModelsDevProvider(provider)) {
       throw new Error(`Provider "${providerID}" is missing from Models.dev and runtime catalogs.`);
     }
-    const models = Object.keys(provider.models)
-      .map((modelID) => `${providerID}/${modelID}`)
-      .sort((a, b) => a.localeCompare(b));
+    const models = uniqueSorted([
+      ...Object.keys(provider.models).map((modelID) => qualifyModel(providerID, modelID)),
+      ...Object.keys(config.models ?? {}).map((modelID) => qualifyModel(providerID, modelID)),
+    ]);
     const defaultModelID = config.defaultModel?.slice(`${providerID}/`.length);
     const catalogDefault = config.defaultModel
       ? models.find(
@@ -352,7 +349,7 @@ async function main(): Promise<void> {
     '',
     'J-Bot model values use `provider/model-id`. You may pass either the full value shown here or the model-id portion when `provider` is configured separately. Provider access, region, account tier, and model retirement can change independently of this snapshot.',
     '',
-    "The Models.dev sections contain every model ID advertised for J-Bot's public OpenCode providers, including non-chat modalities. Choose a text-capable model appropriate for code review. CLI sections are exact snapshots from the source named in each section: public/package catalogs where available and the authenticated account otherwise.",
+    "The Models.dev sections contain every advertised model ID for J-Bot's public providers plus any explicitly configured unlisted IDs. Choose a text-capable model appropriate for code review. CLI sections are exact snapshots from the source named in each section: public/package catalogs where available and the authenticated account otherwise.",
     '',
     'Refreshing CLI sections requires the Docker-pinned npm packages plus valid local authentication for account-scoped CLIs. The script reads credentials through each CLI and never writes them to the catalog.',
     '',
