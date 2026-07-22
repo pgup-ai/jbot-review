@@ -51,7 +51,7 @@ export function resolveProviderModel(
 
 export function defaultModelOptions(providerID: string): Record<string, unknown> {
   // Arbitrary custom endpoints may reject provider-specific options.
-  if (providerID === 'poolside') return { reasoningEffort: 'low' };
+  if (providerID === 'poolside') return { reasoningEffort: 'none' };
   return PROVIDERS[providerID]?.custom ? {} : { reasoningEffort: 'medium' };
 }
 

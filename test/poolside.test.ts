@@ -11,15 +11,27 @@ import {
 
 const noop = () => {};
 
+function streamResponse(content: string | string[], usage?: Record<string, unknown>): Response {
+  const chunks = Array.isArray(content) ? content : [content];
+  const events = [
+    ...chunks.map((chunk) => ({ choices: [{ delta: { content: chunk } }] })),
+    ...(usage ? [{ choices: [], usage }] : []),
+  ];
+  return new Response(
+    `${events.map((event) => `data: ${JSON.stringify(event)}`).join('\n\n')}\n\ndata: [DONE]\n\n`,
+    { headers: { 'content-type': 'text/event-stream' } },
+  );
+}
+
 describe('Poolside API backend', () => {
-  it('recognizes the provider and defaults to low reasoning', () => {
+  it('recognizes the provider and defaults to no hidden reasoning', () => {
     assert.equal(isPoolsideProvider('poolside'), true);
     assert.equal(isPoolsideProvider('Poolside'), false);
     assert.equal(assertPoolsideApiKey('  sky_test  '), 'sky_test');
     assert.throws(() => assertPoolsideApiKey('  '), /Missing Poolside API key/);
-    assert.equal(poolsideReasoningEffort(), 'low');
+    assert.equal(poolsideReasoningEffort(), 'none');
     assert.equal(poolsideReasoningEffort({ reasoningEffort: 'medium' }), 'medium');
-    assert.equal(poolsideReasoningEffort({ reasoningEffort: '  ' }), 'low');
+    assert.equal(poolsideReasoningEffort({ reasoningEffort: '  ' }), 'none');
   });
 
   it('maps OpenAI-compatible usage without double-counting reasoning', () => {
@@ -47,17 +59,15 @@ describe('Poolside API backend', () => {
     let usage: unknown;
     globalThis.fetch = async (_input, init) => {
       request = init;
-      return new Response(
-        JSON.stringify({
-          choices: [{ message: { content: '{"summary":"clean","findings":[]}' } }],
-          usage: { prompt_tokens: 12, completion_tokens: 4 },
-        }),
-      );
+      return streamResponse(['{"summary":"clean",', '"findings":[]}'], {
+        prompt_tokens: 12,
+        completion_tokens: 4,
+      });
     };
     try {
       const result = await runPoolsideReview(
         'sky_test',
-        'low',
+        'none',
         'poolside/laguna-s-2.1',
         'complete diff',
         '',
@@ -76,7 +86,9 @@ describe('Poolside API backend', () => {
       const body = JSON.parse(String(request.body)) as Record<string, unknown>;
       assert.equal(body.model, 'poolside/laguna-s-2.1');
       assert.equal(body.max_completion_tokens, 32_768);
-      assert.deepEqual(body.reasoning, { effort: 'low' });
+      assert.deepEqual(body.reasoning, { effort: 'none' });
+      assert.equal(body.stream, true);
+      assert.deepEqual(body.stream_options, { include_usage: true });
       assert.match(
         (body.messages as Array<{ content: string }>)[0]?.content ?? '',
         /^## Tool use disabled\n\nUse no tools for this review/,
@@ -102,22 +114,12 @@ describe('Poolside API backend', () => {
     let calls = 0;
     globalThis.fetch = async () => {
       calls += 1;
-      return new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: calls === 1 ? 'not json' : '{"summary":"repaired","findings":[]}',
-              },
-            },
-          ],
-        }),
-      );
+      return streamResponse(calls === 1 ? 'not json' : '{"summary":"repaired","findings":[]}');
     };
     try {
       const result = await runPoolsideReview(
         'sky_test',
-        'low',
+        'none',
         'poolside/laguna-s-2.1',
         'complete diff',
         '',

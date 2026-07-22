@@ -153,8 +153,8 @@ no key for the selected aux provider, it reuses the review provider API key.
 
 **CLI-backend credentials — where to get each one.** Unlike the model-provider keys
 above, these authenticate with a local CLI login or a dashboard key. You paste the
-**whole file** (Codex, Cline, Grok Build) or the **key value** (Cursor,
-Devin, Command Code) — no digging a field out of a JSON.
+**whole file** (for example, Codex, Cline, Grok Build) or the **key value** (for
+example, Cursor, Devin, Command Code) — no digging a field out of JSON.
 
 | Backend          | Get the credential                                                                                                                                      | Secret (Action input)                                            |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -182,10 +182,11 @@ model.
 
 Poolside uses its OpenAI-compatible chat-completions endpoint directly. Laguna
 S 2.1 is absent from Poolside's advertised model list, but the endpoint accepts
-`poolside/laguna-s-2.1` explicitly, so J-Bot uses it by default. Requests use
-Poolside's full 32,768-token completion allowance and default to low reasoning;
-this avoids the Pool CLI's coding-agent loop while preserving review,
-auxiliary, token-usage, timeout, and repair behavior.
+`poolside/laguna-s-2.1` explicitly, so J-Bot uses it by default. Requests stream
+directly, use Poolside's full 32,768-token completion allowance, and disable
+hidden reasoning by default so it cannot starve structured output. This avoids
+the Pool CLI's coding-agent loop while preserving review, auxiliary, token usage,
+timeouts, and repair behavior.
 
 Qoder can read and search the checkout but receives no shell or write-capable tool.
 Its user/project settings, hooks, MCP servers, skills, memory, web access, and
@@ -496,8 +497,7 @@ CLI backend. The Docker image includes the Cursor CLI (`cursor-agent`), which
 reads the key from the environment — no credential file — and runs read-only via
 `--mode plan`.
 Use `provider: poolside` with `poolside-api-key` / `POOLSIDE_API_KEY` for the
-Poolside inference provider. Its default is `poolside/laguna-s-2.1`, including
-when that model is absent from the endpoint's model listing.
+Poolside inference provider. Its default is `poolside/laguna-s-2.1`.
 Use `provider: qoder` with `qoder-token` /
 `QODER_PERSONAL_ACCESS_TOKEN` for the Qoder CLI backend. It accepts `auto`,
 `ultimate`, `performance`, `efficient`, and `lite` model tiers. Each session uses

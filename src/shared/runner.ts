@@ -1144,6 +1144,11 @@ export async function runPrReview(params: {
       `Backend routing: main=${mainCliBackend ?? backendSelection.mainSdkEngine ?? 'opencode'} aux=${auxCliBackend ?? backendSelection.auxSdkEngine ?? 'opencode'}`,
     );
   }
+  const mainPoolsideBackend = mainOnPoolside
+    ? createPoolsideBackend(apiKey, options.modelOptions)
+    : undefined;
+  const auxPoolsideKey = options.auxApiKey || (auxProviderID === providerID ? apiKey : '');
+  const auxPoolsideBackend = auxOnPoolside ? createPoolsideBackend(auxPoolsideKey) : undefined;
 
   const discoveredGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
   const guidelines = formatGuidelines(discoveredGuidelines);
@@ -1551,12 +1556,6 @@ export async function runPrReview(params: {
     }
     piBackend = createPiBackend(piRuntime.runtime);
   }
-
-  const mainPoolsideBackend = mainOnPoolside
-    ? createPoolsideBackend(apiKey, options.modelOptions)
-    : undefined;
-  const auxPoolsideKey = options.auxApiKey || (auxProviderID === providerID ? apiKey : '');
-  const auxPoolsideBackend = auxOnPoolside ? createPoolsideBackend(auxPoolsideKey) : undefined;
 
   if (needsOpencode) {
     const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;

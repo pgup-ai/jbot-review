@@ -40,7 +40,7 @@ export function assertPoolsideApiKey(apiKey: string): string {
 
 export function poolsideReasoningEffort(modelOptions?: Record<string, unknown>): string {
   const effort = modelOptions?.reasoningEffort;
-  return typeof effort === 'string' && effort.trim() ? effort.trim() : 'low';
+  return typeof effort === 'string' && effort.trim() ? effort.trim() : 'none';
 }
 
 export function mapPoolsideUsage(value: unknown): PromptTokenUsage | undefined {
@@ -227,6 +227,34 @@ interface PoolsidePromptOptions {
   onTokenUsage?: TokenUsageRecorder;
 }
 
+function parsePoolsideStream(
+  body: string,
+  label: string,
+): { raw: string; usage?: PromptTokenUsage } {
+  let raw = '';
+  let usage: PromptTokenUsage | undefined;
+  for (const line of body.split(/\r?\n/)) {
+    const event = line.trimStart();
+    if (!event.startsWith('data:')) continue;
+    const data = event.slice('data:'.length).trim();
+    if (!data || data === '[DONE]') continue;
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(data);
+    } catch {
+      throw new Error(`Poolside ${label} returned invalid streamed JSON.`);
+    }
+    if (!isRecord(payload)) continue;
+    usage = mapPoolsideUsage(payload.usage) ?? usage;
+    if (!Array.isArray(payload.choices)) continue;
+    const choice = payload.choices[0];
+    const delta = isRecord(choice) && isRecord(choice.delta) ? choice.delta : undefined;
+    if (typeof delta?.content === 'string') raw += delta.content;
+  }
+  return { raw: raw.trim(), ...(usage ? { usage } : {}) };
+}
+
 async function runPoolsidePrompt(options: PoolsidePromptOptions): Promise<string> {
   const { apiKey, reasoningEffort, model, prompt, label, log, onTokenUsage } = options;
   const timeoutMs = options.timeoutMs ?? POOLSIDE_PROMPT_TIMEOUT_MS;
@@ -235,6 +263,7 @@ async function runPoolsidePrompt(options: PoolsidePromptOptions): Promise<string
     `Calling ${label} prompt (backend=poolside-api, model=${model}, reasoning=${reasoningEffort})`,
   );
   let response: Response;
+  let body: string;
   try {
     response = await fetch(POOLSIDE_CHAT_COMPLETIONS_URL, {
       method: 'POST',
@@ -247,36 +276,26 @@ async function runPoolsidePrompt(options: PoolsidePromptOptions): Promise<string
         messages: [{ role: 'user', content: fullPrompt }],
         reasoning: { effort: reasoningEffort },
         max_completion_tokens: POOLSIDE_MAX_COMPLETION_TOKENS,
+        stream: true,
+        stream_options: { include_usage: true },
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
+    body = await response.text();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Poolside ${label} request failed: ${message}`);
   }
 
-  const body = await response.text();
   if (!response.ok) {
     throw new Error(
       `Poolside ${label} request failed (${response.status}): ${truncateForLog(body, 1000)}`,
     );
   }
 
-  let payload: unknown;
-  try {
-    payload = JSON.parse(body);
-  } catch {
-    throw new Error(`Poolside ${label} returned invalid JSON.`);
-  }
-  if (!isRecord(payload) || !Array.isArray(payload.choices)) {
-    throw new Error(`Poolside ${label} response omitted choices.`);
-  }
-  const choice = payload.choices[0];
-  const message = isRecord(choice) && isRecord(choice.message) ? choice.message : undefined;
-  const raw = typeof message?.content === 'string' ? message.content.trim() : '';
+  const { raw, usage } = parsePoolsideStream(body, label);
   if (!raw) throw new Error(`Poolside ${label} response contained no assistant text.`);
 
-  const usage = mapPoolsideUsage(payload.usage);
   if (usage) {
     log(
       `${label} tokens: input=${usage.input} output=${usage.output} reasoning=${usage.reasoning} cache-read=${usage.cacheRead}`,
