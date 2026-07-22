@@ -40,7 +40,7 @@ export function assertPoolsideApiKey(apiKey: string): string {
 
 export function poolsideReasoningEffort(modelOptions?: Record<string, unknown>): string {
   const effort = modelOptions?.reasoningEffort;
-  return typeof effort === 'string' && effort.trim() ? effort.trim() : 'none';
+  return typeof effort === 'string' && effort.trim() ? effort.trim() : 'default';
 }
 
 export function mapPoolsideUsage(value: unknown): PromptTokenUsage | undefined {
@@ -276,7 +276,7 @@ async function runPoolsidePrompt(options: PoolsidePromptOptions): Promise<string
       body: JSON.stringify({
         model,
         messages: [{ role: 'user', content: fullPrompt }],
-        reasoning: { effort: reasoningEffort },
+        ...(reasoningEffort === 'default' ? {} : { reasoning: { effort: reasoningEffort } }),
         max_completion_tokens: POOLSIDE_MAX_COMPLETION_TOKENS,
         stream: true,
         stream_options: { include_usage: true },

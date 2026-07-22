@@ -54,7 +54,7 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
 });
 
 describe('poolside', () => {
-  it('registers the unlisted Laguna S 2.1 model with reasoning off by default', () => {
+  it('registers the unlisted Laguna S 2.1 model with provider-default reasoning', () => {
     const provider = PROVIDERS.poolside;
     assert.equal(provider.defaultModel, 'poolside/laguna-s-2.1');
     assert.equal(provider.keyEnv, 'POOLSIDE_API_KEY');
@@ -62,7 +62,7 @@ describe('poolside', () => {
     assert.equal(provider.custom, undefined);
     assert.deepEqual(provider.models?.['laguna-s-2.1'], { promptCache: false });
     assert.equal(modelSupportsPromptCache('poolside', 'laguna-s-2.1'), false);
-    assert.deepEqual(defaultModelOptions('poolside'), { reasoningEffort: 'none' });
+    assert.deepEqual(defaultModelOptions('poolside'), { reasoningEffort: 'default' });
   });
 });
 

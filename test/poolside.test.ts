@@ -24,14 +24,14 @@ function streamResponse(content: string | string[], usage?: Record<string, unkno
 }
 
 describe('Poolside API backend', () => {
-  it('recognizes the provider and defaults to no hidden reasoning', () => {
+  it('recognizes the provider and defaults to Poolside-managed reasoning', () => {
     assert.equal(isPoolsideProvider('poolside'), true);
     assert.equal(isPoolsideProvider('Poolside'), false);
     assert.equal(assertPoolsideApiKey('  sky_test  '), 'sky_test');
     assert.throws(() => assertPoolsideApiKey('  '), /Missing Poolside API key/);
-    assert.equal(poolsideReasoningEffort(), 'none');
+    assert.equal(poolsideReasoningEffort(), 'default');
     assert.equal(poolsideReasoningEffort({ reasoningEffort: 'medium' }), 'medium');
-    assert.equal(poolsideReasoningEffort({ reasoningEffort: '  ' }), 'none');
+    assert.equal(poolsideReasoningEffort({ reasoningEffort: '  ' }), 'default');
   });
 
   it('maps OpenAI-compatible usage without double-counting reasoning', () => {
@@ -67,7 +67,7 @@ describe('Poolside API backend', () => {
     try {
       const result = await runPoolsideReview(
         'sky_test',
-        'none',
+        'default',
         'poolside/laguna-s-2.1',
         'complete diff',
         '',
@@ -86,7 +86,7 @@ describe('Poolside API backend', () => {
       const body = JSON.parse(String(request.body)) as Record<string, unknown>;
       assert.equal(body.model, 'poolside/laguna-s-2.1');
       assert.equal(body.max_completion_tokens, 32_768);
-      assert.deepEqual(body.reasoning, { effort: 'none' });
+      assert.equal(body.reasoning, undefined);
       assert.equal(body.stream, true);
       assert.deepEqual(body.stream_options, { include_usage: true });
       assert.match(
@@ -104,6 +104,30 @@ describe('Poolside API backend', () => {
         model: 'poolside/laguna-s-2.1',
         label: 'review',
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('sends an explicit reasoning override', async () => {
+    const originalFetch = globalThis.fetch;
+    let request: RequestInit | undefined;
+    globalThis.fetch = async (_input, init) => {
+      request = init;
+      return streamResponse('{"summary":"clean","findings":[]}');
+    };
+    try {
+      await runPoolsideReview(
+        'sky_test',
+        'medium',
+        'poolside/laguna-s-2.1',
+        'complete diff',
+        '',
+        noop,
+      );
+      assert.ok(request);
+      const body = JSON.parse(String(request.body)) as Record<string, unknown>;
+      assert.deepEqual(body.reasoning, { effort: 'medium' });
     } finally {
       globalThis.fetch = originalFetch;
     }
