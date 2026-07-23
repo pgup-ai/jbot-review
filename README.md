@@ -689,6 +689,51 @@ npm run review:local
   opencode server uses a free ephemeral port automatically;
   `JBOT_OPENCODE_PORT` pins one instead.
 
+## Observer gateway
+
+An optional, self-contained service that makes review sessions observable: the
+env-gated jbot-side tee copies every ACP frame outbound to this gateway, which
+appends each session to a plain-file journal and rebroadcasts it live. The
+bundled viewer renders sessions as streaming transcripts — thoughts, tool
+calls, permission decisions, findings — live or replayed.
+
+- **Local, zero config:** `npm run gateway` (loopback only, no auth), then
+  `npm run gateway:demo` in another terminal and open http://127.0.0.1:8790 to
+  watch a scripted session stream in.
+- **Watch a REAL review stream:** point a review at the gateway with
+  `JBOT_OBSERVER_URL`. In one terminal `npm run gateway`; in another,
+  `JBOT_OBSERVER_URL=http://127.0.0.1:8790 npm run review:local` (with your
+  provider config). The env-gated tee in the ACP driver copies every frame of
+  every session to the gateway as it happens — thoughts, tool calls,
+  permission decisions, and findings render live. `JBOT_OBSERVER_TOKEN` sets
+  the bearer when the gateway is tokened; `JBOT_OBSERVER_RUN` names the run.
+  The tee is default-off (no `JBOT_OBSERVER_URL` ⇒ zero overhead) and
+  fail-open: an unreachable or slow gateway never blocks, slows, or fails the
+  review.
+- **Status model:** the viewer separates _connection_ health (viewer↔gateway:
+  connected / reconnecting / offline) from _review_ state (reviewing /
+  completed / failed), so a dropped socket never looks like a failed review.
+  Sessions and journals are durable — a completed or failed run stays on disk
+  and reopening replays it. The review verdict is authoritative: `review:local`
+  reports `completed`/`failed` to the gateway when it finishes, rather than the
+  viewer guessing from the last frame.
+- **Naming:** the run defaults to `local-<branch>` for `review:local` (override
+  with `JBOT_OBSERVER_RUN`); each session is named by its role
+  (`review`, `guideline-compliance`, …, with a numeric suffix for repeats).
+- **Deploy (VPS-agnostic):** `npm run build`, copy `dist/`, run
+  `node dist/gateway/server.js` under any process manager. Configuration is
+  three env vars: `JBOT_GATEWAY_PORT` (default 8790), `JBOT_GATEWAY_DATA`
+  (journal directory — plain NDJSON files, so migrating servers is copying a
+  directory), and `JBOT_GATEWAY_TOKEN`. No database, no websocket library, no
+  provider-specific anything; SSE + HTTP work behind cloudflared or any
+  reverse proxy unchanged.
+- **Exposure is explicit:** without a token the server binds loopback only.
+  Setting `JBOT_GATEWAY_TOKEN` is the decision to listen on all interfaces;
+  ingest then requires `Authorization: Bearer` and viewers pass `?token=`.
+- **Privacy:** journaled frames contain prompt and diff content (never
+  credentials — auth is materialized into env/files and does not cross the
+  ACP wire). Point the tee at a gateway you control, for repos you own.
+
 ## Project guidelines
 
 The action automatically discovers repo-level guidance from the checked-out workspace:

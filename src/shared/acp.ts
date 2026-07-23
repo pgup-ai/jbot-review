@@ -15,6 +15,7 @@ import {
 } from './devin.ts';
 import { KILO_CLI_BIN, KILO_GATEWAY_FREE_MODEL, KILO_PROVIDER_ID, kiloEnvForAuth } from './kilo.ts';
 import { parseModelName } from './model.ts';
+import { makeSessionTee } from './observer.ts';
 import {
   parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,
@@ -161,8 +162,12 @@ class AcpConnection {
     private readonly io: AcpSessionIo,
     private readonly onNotification: (method: string, params: Record<string, unknown>) => void,
     private readonly onRequest: (method: string, params: Record<string, unknown>) => unknown,
+    private readonly tee?: (dir: 'out' | 'in', frame: Record<string, unknown>) => void,
   ) {
-    const read = createNdjsonReader((message) => this.dispatch(message));
+    const read = createNdjsonReader((message) => {
+      this.tee?.('in', message);
+      this.dispatch(message);
+    });
     io.output.setEncoding('utf8');
     io.output.on('data', (chunk: string | Buffer) => {
       if (!read(String(chunk))) {
@@ -190,6 +195,7 @@ class AcpConnection {
   private write(message: Record<string, unknown>): void {
     if (!this.io.input.writable) return;
     this.io.input.write(`${JSON.stringify(message)}\n`);
+    this.tee?.('out', message);
   }
 
   private dispatch(message: JsonRpcMessage): void {
@@ -240,6 +246,8 @@ interface AcpSessionOptions {
   agent: string;
   label: string;
   log: (msg: string) => void;
+  /** jbot model string (`<provider>/<id>`), forwarded to the observer tee. */
+  model?: string;
   /** Ordered candidates to select via the agent's ACP model config option
    * (agents whose spec sets modelConfigCandidates — CLI flags/env don't reach
    * their sessions). First candidate that matches an offered value wins. */
@@ -332,6 +340,7 @@ export async function driveAcpSession(
       }
       throw new Error(`unsupported agent request: ${method}`);
     },
+    makeSessionTee(agent, label, options.model),
   );
 
   const init = (await conn.request('initialize', {
@@ -576,6 +585,7 @@ async function runAcpPrompt(
           agent: spec.id,
           label,
           log,
+          model,
           configOptionModelIds,
           requirePlanMode: spec.requirePlanMode,
         },
