@@ -71,14 +71,21 @@ type PermissionResponse = {
   outcome: { outcome: 'selected'; optionId: string } | { outcome: 'cancelled' };
 };
 
-const DENIED_TOOL_KINDS = new Set(['edit', 'delete', 'move']);
+// ACP ToolKind maps file mutations to edit/delete/move; `write` is not a spec
+// kind but is denied too in case an agent labels nonstandardly.
+const DENIED_TOOL_KINDS = new Set(['edit', 'delete', 'move', 'write']);
 
 /**
  * Client-side read-only layer of invariant #8: mutating tool kinds are
  * rejected, everything else (read/search/execute/fetch — bash stays allowed
- * for git diff/log/grep) is approved. Prefers the `*_once` option so no
- * standing grant outlives a single call. Kind strings normalize `-` to `_`
- * (cursor emits hyphens). No usable option ⇒ cancelled outcome.
+ * for git diff/log/grep) is approved. This layer is deliberately kind-based
+ * and allow-by-default for unknown kinds: read tools commonly ship kind
+ * `other` or none, so denying unknowns would stall reviews (a recall hole),
+ * while command-level policing (e.g. bash filtering) lives in the agent-side
+ * layers — codex's OS sandbox and the plan modes — which invariant #8 pairs
+ * with this one. Prefers the `*_once` option so no standing grant outlives a
+ * single call. Kind strings normalize `-` to `_` (cursor emits hyphens). No
+ * usable option ⇒ cancelled outcome.
  */
 export function respondToPermissionRequest(params: PermissionRequestParams): PermissionResponse {
   const direction = DENIED_TOOL_KINDS.has(normalizeKind(params.toolCall?.kind))

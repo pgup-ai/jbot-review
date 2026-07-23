@@ -101,6 +101,9 @@ describe('acp', () => {
     assert.deepEqual(seen, [{ a: 1 }, { b: 2 }, { c: 3 }]);
   });
 
+  // execute-allow and unknown-kind-allow are the DESIGNED policy (invariant
+  // #8: bash stays allowed; agent-side sandbox/plan layers police commands),
+  // so this test pins them on purpose.
   it('answers permission requests read-only: mutations rejected, reads/exec allowed', () => {
     const options = [
       { optionId: 'aa', kind: 'allow_always' },
