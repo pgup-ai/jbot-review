@@ -24,7 +24,7 @@ import {
   type CliBackendID,
 } from './backend-selection.ts';
 import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
-import { codexAcpSpec, createAcpBackend, cursorAcpSpec, devinAcpSpec } from './acp.ts';
+import { codexAcpSpec, createAcpBackend, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from './acp.ts';
 import {
   piModelAvailable,
   piSupportsProvider,
@@ -117,16 +117,7 @@ import {
   runGrokReview,
   type GrokRuntime,
 } from './grok.ts';
-import {
-  KILO_PROVIDER_ID,
-  assertValidKiloAuth,
-  listKiloModels,
-  runKiloAddressedPriorCommentsCheck,
-  runKiloChangesSinceLastReview,
-  runKiloFindingVerification,
-  runKiloGuidelineComplianceCheck,
-  runKiloReview,
-} from './kilo.ts';
+import { assertValidKiloAuth, KILO_PROVIDER_ID, listKiloModels } from './kilo.ts';
 import {
   QODER_PROVIDER_ID,
   runQoderAddressedPriorCommentsCheck,
@@ -462,57 +453,6 @@ function createGrokBackend(runtime: GrokRuntime): ReviewBackend {
         timeoutMs,
         onTokenUsage,
         runtime,
-      ),
-  };
-}
-
-function createKiloBackend(workspace: string, auth: string): ReviewBackend {
-  return {
-    name: KILO_PROVIDER_ID,
-    runReview: (model, prContext, guidelines, log, options) =>
-      runKiloReview(workspace, model, prContext, guidelines, log, { ...options, auth }),
-    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
-      runKiloAddressedPriorCommentsCheck(
-        workspace,
-        model,
-        prContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        auth,
-      ),
-    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
-      runKiloGuidelineComplianceCheck(
-        workspace,
-        model,
-        prContext,
-        guidelines,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        auth,
-      ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      runKiloFindingVerification(
-        workspace,
-        model,
-        prContext,
-        findings,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        auth,
-      ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runKiloChangesSinceLastReview(
-        workspace,
-        model,
-        prContext,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        auth,
       ),
   };
 }
@@ -1310,7 +1250,7 @@ export async function runPrReview(params: {
     // session self-manages a temp HOME/XDG for kilo's SQLite data dir.
     log('Kilo CLI auth configured via KILO_AUTH_CONTENT (env-injected; per-session temp HOME).');
     log('Kilo CLI token usage is unavailable; review metadata may omit those sessions.');
-    kiloBackend = createKiloBackend(workspace, kiloAuth);
+    kiloBackend = createAcpBackend(kiloAcpSpec(kiloAuth), workspace);
   }
 
   if (mainCliBackend === QODER_PROVIDER_ID || auxCliBackend === QODER_PROVIDER_ID) {
