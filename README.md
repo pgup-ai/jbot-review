@@ -689,6 +689,31 @@ npm run review:local
   opencode server uses a free ephemeral port automatically;
   `JBOT_OPENCODE_PORT` pins one instead.
 
+## Observer gateway
+
+An optional, self-contained service that makes review sessions observable: the
+(planned) jbot-side tee copies every ACP frame outbound to this gateway, which
+appends each session to a plain-file journal and rebroadcasts it live. The
+bundled viewer renders sessions as streaming transcripts — thoughts, tool
+calls, permission decisions, findings — live or replayed.
+
+- **Local, zero config:** `npm run gateway` (loopback only, no auth), then
+  `npm run gateway:demo` in another terminal and open http://127.0.0.1:8790 to
+  watch a scripted session stream in.
+- **Deploy (VPS-agnostic):** `npm run build`, copy `dist/`, run
+  `node dist/gateway/server.js` under any process manager. Configuration is
+  three env vars: `JBOT_GATEWAY_PORT` (default 8790), `JBOT_GATEWAY_DATA`
+  (journal directory — plain NDJSON files, so migrating servers is copying a
+  directory), and `JBOT_GATEWAY_TOKEN`. No database, no websocket library, no
+  provider-specific anything; SSE + HTTP work behind cloudflared or any
+  reverse proxy unchanged.
+- **Exposure is explicit:** without a token the server binds loopback only.
+  Setting `JBOT_GATEWAY_TOKEN` is the decision to listen on all interfaces;
+  ingest then requires `Authorization: Bearer` and viewers pass `?token=`.
+- **Privacy:** journaled frames contain prompt and diff content (never
+  credentials — auth is materialized into env/files and does not cross the
+  ACP wire). Point the tee at a gateway you control, for repos you own.
+
 ## Project guidelines
 
 The action automatically discovers repo-level guidance from the checked-out workspace:

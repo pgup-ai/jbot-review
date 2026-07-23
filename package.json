@@ -13,6 +13,8 @@
     "lint": "oxlint --deny-warnings",
     "dev": "tsx src/app/server.ts",
     "review:local": "tsx src/local/index.ts",
+    "gateway": "tsx src/gateway/server.ts",
+    "gateway:demo": "tsx src/gateway/demo.ts",
     "models:update": "tsx scripts/update-model-catalog.ts",
     "env:minify-auth": "tsx scripts/minify-env-auth.ts",
     "start": "npx tsx src/app/server.ts"

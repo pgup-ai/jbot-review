@@ -13,4 +13,7 @@ docs/superpowers/
 
 # Local review reports (npm run review:local)
 .jbot-review/
+
+# Local observer-gateway journals (npm run gateway)
+gateway-data/
 .poolside/
