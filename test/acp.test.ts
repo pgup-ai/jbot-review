@@ -245,8 +245,10 @@ describe('acp', () => {
       'acp',
     ]);
     assert.deepEqual(cursorAcpSpec('key').args('cursor/default'), ['acp']);
-    assert.deepEqual(devinAcpSpec().args('devin/default'), ['acp']);
-    assert.deepEqual(devinAcpSpec().args('devin/sonnet'), ['acp', '--model', 'sonnet']);
+    const devin = devinAcpSpec();
+    assert.deepEqual(devin.args('devin/opus'), ['acp']);
+    assert.equal(devin.env('devin/default').env.HOME, process.env.HOME);
+    assert.throws(() => devin.env('devin/opus'), /cannot select a model/);
 
     assert.equal(isAcpEnabled({ JBOT_ACP: '1' }), true);
     assert.equal(isAcpEnabled({ JBOT_ACP: 'true' }), true);

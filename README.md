@@ -415,6 +415,8 @@ the `cursor`, `devin`, `codex`, and `opencode` backends over the
 [Agent Client Protocol](https://agentclientprotocol.com) — one stdio JSON-RPC
 driver instead of each CLI's bespoke headless mode, with read-only enforced by
 a client-side permission policy plus each agent's plan mode or sandbox config.
+`devin`'s ACP mode runs its default model only — use `devin/default` there, or
+the argv driver for model selection.
 `cline` intentionally stays on its argv driver: its ACP mode currently returns
 empty turns ([cline/cline#11015](https://github.com/cline/cline/issues/11015)).
 In ACP mode the opencode role skips the server (provider model listing and

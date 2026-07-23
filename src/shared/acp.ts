@@ -525,12 +525,20 @@ export function devinAcpSpec(): AcpAgentSpec {
   return {
     id: 'devin',
     bin: DEVIN_CLI_BIN,
-    args: (model) => {
-      const { modelID } = parseModelName(model);
-      return modelID === 'default' ? ['acp'] : ['acp', '--model', modelID];
-    },
+    args: () => ['acp'],
     // credentials.toml is already in the real HOME (writeDevinCredentials).
-    env: () => ({ env: { ...process.env } }),
+    env: (model) => {
+      const { modelID } = parseModelName(model);
+      // `devin acp` has no model selection: `--model` argv is rejected and
+      // DEVIN_MODEL is ignored (verified — an invalid value still answers).
+      // Refuse rather than silently review on devin's default model.
+      if (modelID !== 'default') {
+        throw new Error(
+          `devin ACP mode cannot select a model (got "${model}"); use devin/default, or unset JBOT_ACP for the argv driver.`,
+        );
+      }
+      return { env: { ...process.env } };
+    },
   };
 }
 
