@@ -13,3 +13,4 @@ docs/superpowers/
 
 # Local review reports (npm run review:local)
 .jbot-review/
+.poolside/
