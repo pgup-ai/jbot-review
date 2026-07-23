@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -28,6 +36,9 @@ interface FakeAgentApi {
 interface FakeAgentScript {
   modes?: Record<string, unknown>;
   configOptions?: unknown[];
+  authMethods?: unknown[];
+  /** First session/new fails -32000 until authenticate is called. */
+  authGate?: boolean;
   onPrompt: (agent: FakeAgentApi) => void;
   onClientResponse?: (id: number, result: unknown, agent: FakeAgentApi) => void;
 }
@@ -39,11 +50,14 @@ function fakeAgentIo(script: FakeAgentScript): {
   output: PassThrough;
   setModeIds: string[];
   setConfigCalls: unknown[];
+  authCalls: unknown[];
 } {
   const input = new PassThrough();
   const output = new PassThrough();
   const setModeIds: string[] = [];
   const setConfigCalls: unknown[] = [];
+  const authCalls: unknown[] = [];
+  let authed = false;
   let promptId: unknown;
   const send = (message: Record<string, unknown>): void => {
     output.write(`${JSON.stringify(message)}\n`);
@@ -58,7 +72,24 @@ function fakeAgentIo(script: FakeAgentScript): {
   const read = createNdjsonReader((message) => {
     const { id, method } = message as { id?: number; method?: string };
     if (method === 'initialize') {
-      send({ jsonrpc: '2.0', id, result: { protocolVersion: 1 } });
+      send({
+        jsonrpc: '2.0',
+        id,
+        result: {
+          protocolVersion: 1,
+          ...(script.authMethods ? { authMethods: script.authMethods } : {}),
+        },
+      });
+    } else if (method === 'authenticate') {
+      authCalls.push(message.params);
+      authed = true;
+      send({ jsonrpc: '2.0', id, result: {} });
+    } else if (method === 'session/new' && script.authGate && !authed) {
+      send({
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32000, message: 'Authentication required' },
+      });
     } else if (method === 'session/new') {
       send({
         jsonrpc: '2.0',
@@ -89,7 +120,7 @@ function fakeAgentIo(script: FakeAgentScript): {
   });
   input.setEncoding('utf8');
   input.on('data', (chunk: string) => read(chunk));
-  return { input, output, setModeIds, setConfigCalls };
+  return { input, output, setModeIds, setConfigCalls, authCalls };
 }
 
 describe('acp', () => {
@@ -267,6 +298,25 @@ describe('acp', () => {
       { sessionId: 's1', configId: 'model', value: 'glm-5-2' },
     ]);
 
+    // Auth-gated agents: -32000 on session/new triggers authenticate + one retry.
+    const fake5 = fakeAgentIo({
+      authMethods: [{ id: 'cli-login', name: 'CLI Login' }],
+      authGate: true,
+      onPrompt: (agent) => {
+        agent.update({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'authed' },
+        });
+        agent.finish();
+      },
+    });
+    const result5 = await driveAcpSession(
+      { input: fake5.input, output: fake5.output },
+      { cwd: '/x', prompt: 'p', agent: 'fake', label: 'review', log: noLog },
+    );
+    assert.equal(result5.text, 'authed');
+    assert.deepEqual(fake5.authCalls, [{ methodId: 'cli-login' }]);
+
     // requirePlanMode fails closed when the agent offers no plan mode.
     const fake4 = fakeAgentIo({
       modes: { currentModeId: 'code', availableModes: [{ id: 'code' }] },
@@ -311,6 +361,14 @@ describe('acp', () => {
     }
     rmSync(codexHome, { recursive: true, force: true });
 
+    const codexLeakPrefix = 'jbot-codex-acp-';
+    const codexBefore = readdirSync(tmpdir()).filter((entry) => entry.startsWith(codexLeakPrefix));
+    assert.throws(() =>
+      codexAcpSpec(mkdtempSync(join(tmpdir(), 'jbot-test-empty-'))).env('codex/default'),
+    );
+    const codexAfter = readdirSync(tmpdir()).filter((entry) => entry.startsWith(codexLeakPrefix));
+    assert.deepEqual(codexAfter, codexBefore);
+
     assert.deepEqual(cursorAcpSpec('key').args('cursor/composer-2'), [
       '--model',
       'composer-2',
@@ -338,6 +396,14 @@ describe('acp', () => {
     } finally {
       devinEnv.cleanup?.();
     }
+    // I/O failure after mkdtemp must reclaim the temp dir (no cleanup returned).
+    const devinLeakPrefix = 'jbot-devin-acp-';
+    const before = readdirSync(tmpdir()).filter((entry) => entry.startsWith(devinLeakPrefix));
+    assert.throws(() =>
+      devinAcpSpec(mkdtempSync(join(tmpdir(), 'jbot-test-empty-'))).env('devin/default'),
+    );
+    const after = readdirSync(tmpdir()).filter((entry) => entry.startsWith(devinLeakPrefix));
+    assert.deepEqual(after, before);
     rmSync(devinHome, { recursive: true, force: true });
 
     const modelOptions = [

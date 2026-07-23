@@ -198,11 +198,11 @@ class AcpConnection {
         // "requires re-authentication"), not in the generic message.
         const data =
           message.error.data === undefined ? '' : ` ${JSON.stringify(message.error.data)}`;
-        entry.reject(
-          new Error(
-            `agent error ${message.error.code ?? ''}: ${message.error.message ?? ''}${data}`,
-          ),
-        );
+        const error = new Error(
+          `agent error ${message.error.code ?? ''}: ${message.error.message ?? ''}${data}`,
+        ) as Error & { code?: number };
+        error.code = message.error.code;
+        entry.reject(error);
       } else {
         entry.resolve(message.result);
       }
@@ -329,7 +329,7 @@ export async function driveAcpSession(
     },
   );
 
-  await conn.request('initialize', {
+  const init = (await conn.request('initialize', {
     protocolVersion: ACP_PROTOCOL_VERSION,
     clientCapabilities: {
       fs: { readTextFile: false, writeTextFile: false },
@@ -340,11 +340,27 @@ export async function driveAcpSession(
       session: { configOptions: {} },
     },
     clientInfo: { name: 'jbot-review', version: '0' },
-  });
-  const session = (await conn.request('session/new', {
-    cwd: options.cwd,
-    mcpServers: [],
   })) as Record<string, unknown>;
+  const newSession = () =>
+    conn.request('session/new', { cwd: options.cwd, mcpServers: [] }) as Promise<
+      Record<string, unknown>
+    >;
+  let session: Record<string, unknown>;
+  try {
+    session = await newSession();
+  } catch (error) {
+    // Spec flow for auth-gated agents (error -32000): authenticate with an
+    // advertised method, retry once. Never called pre-emptively — advertised
+    // methods are often interactive logins, and agents with ambient
+    // credentials (cursor/devin, live-verified) don't gate session/new.
+    const methodId = ((init?.authMethods ?? []) as { id?: string }[])[0]?.id;
+    if ((error as { code?: number }).code !== -32000 || !methodId) throw error;
+    log(
+      `acp:${agent} ${label}: session/new requires auth; retrying after authenticate(${methodId})`,
+    );
+    await conn.request('authenticate', { methodId });
+    session = await newSession();
+  }
   const sessionId = session.sessionId;
   if (typeof sessionId !== 'string' || !sessionId) {
     throw new Error(`acp:${agent} ${label}: session/new returned no sessionId`);
@@ -693,12 +709,18 @@ export function devinAcpSpec(credentialsHome = process.env.HOME || homedir()): A
     // readout), so the model rides session/set_config_option instead.
     env: () => {
       const dir = mkdtempSync(join(tmpdir(), 'jbot-devin-acp-'));
-      const credentials = devinCredentialsPath(dir);
-      mkdirSync(dirname(credentials), { recursive: true, mode: 0o700 });
-      copyFileSync(devinCredentialsPath(credentialsHome), credentials);
-      const config = join(dir, '.config', 'devin', 'config.json');
-      mkdirSync(dirname(config), { recursive: true, mode: 0o700 });
-      writeFileSync(config, JSON.stringify(buildDevinReadOnlyConfig()), { mode: 0o600 });
+      try {
+        const credentials = devinCredentialsPath(dir);
+        mkdirSync(dirname(credentials), { recursive: true, mode: 0o700 });
+        copyFileSync(devinCredentialsPath(credentialsHome), credentials);
+        const config = join(dir, '.config', 'devin', 'config.json');
+        mkdirSync(dirname(config), { recursive: true, mode: 0o700 });
+        writeFileSync(config, JSON.stringify(buildDevinReadOnlyConfig()), { mode: 0o600 });
+      } catch (error) {
+        // The cleanup callback is only returned on success; reclaim the dir.
+        rmSync(dir, { recursive: true, force: true });
+        throw error;
+      }
       const env: NodeJS.ProcessEnv = { ...process.env, HOME: dir };
       // XDG overrides would bypass the temp HOME's config/credentials.
       delete env.XDG_CONFIG_HOME;
@@ -719,11 +741,17 @@ export function codexAcpSpec(codexHome: string): AcpAgentSpec {
       // Same per-spawn CODEX_HOME copy as the CLI driver. Read-only and model
       // ride config.toml because the adapter takes no argv for them.
       const dir = mkdtempSync(join(tmpdir(), 'jbot-codex-acp-'));
-      copyFileSync(codexAuthPath(codexHome), codexAuthPath(dir));
-      const { modelID } = parseModelName(model);
-      const lines = ['sandbox_mode = "read-only"'];
-      if (modelID !== 'default') lines.push(`model = ${tomlString(modelID)}`);
-      writeFileSync(join(dir, 'config.toml'), `${lines.join('\n')}\n`, { mode: 0o600 });
+      try {
+        copyFileSync(codexAuthPath(codexHome), codexAuthPath(dir));
+        const { modelID } = parseModelName(model);
+        const lines = ['sandbox_mode = "read-only"'];
+        if (modelID !== 'default') lines.push(`model = ${tomlString(modelID)}`);
+        writeFileSync(join(dir, 'config.toml'), `${lines.join('\n')}\n`, { mode: 0o600 });
+      } catch (error) {
+        // The cleanup callback is only returned on success; reclaim the dir.
+        rmSync(dir, { recursive: true, force: true });
+        throw error;
+      }
       return {
         env: codexEnvForHome(dir),
         cleanup: () => rmSync(dir, { recursive: true, force: true }),
