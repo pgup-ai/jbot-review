@@ -123,6 +123,7 @@ async function main(): Promise<void> {
           ts: Date.now(),
           agent: 'kilo',
           label: step.label,
+          model: 'kilo/kilo-auto/free',
           dir: step.dir,
           frame: step.frame,
         };

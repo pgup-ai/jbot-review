@@ -24,6 +24,8 @@ export interface ObserverEnvelope {
   label: string;
   dir: 'out' | 'in';
   frame: Record<string, unknown>;
+  /** jbot model string for this session (`<provider>/<id>`), for viewer meta. */
+  model?: string;
 }
 
 // Run/session ids become file names; the allowlist is the path-traversal

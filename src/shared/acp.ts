@@ -246,6 +246,8 @@ interface AcpSessionOptions {
   agent: string;
   label: string;
   log: (msg: string) => void;
+  /** jbot model string (`<provider>/<id>`), forwarded to the observer tee. */
+  model?: string;
   /** Ordered candidates to select via the agent's ACP model config option
    * (agents whose spec sets modelConfigCandidates — CLI flags/env don't reach
    * their sessions). First candidate that matches an offered value wins. */
@@ -338,7 +340,7 @@ export async function driveAcpSession(
       }
       throw new Error(`unsupported agent request: ${method}`);
     },
-    makeSessionTee(agent, label),
+    makeSessionTee(agent, label, options.model),
   );
 
   const init = (await conn.request('initialize', {
@@ -583,6 +585,7 @@ async function runAcpPrompt(
           agent: spec.id,
           label,
           log,
+          model,
           configOptionModelIds,
           requirePlanMode: spec.requirePlanMode,
         },

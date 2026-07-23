@@ -23,6 +23,7 @@ interface ObservedFrame {
   seq: number;
   agent: string;
   label: string;
+  model?: string;
   dir: 'out' | 'in';
   frame: Record<string, unknown>;
 }
@@ -79,11 +80,13 @@ let sessionCounter = 0;
 export function makeSessionTee(
   agent: string,
   label: string,
+  model?: string,
 ): ((dir: 'out' | 'in', frame: Record<string, unknown>) => void) | undefined {
   if (!observerEnabled) return undefined;
   const sessionId = `${label}-${(sessionCounter += 1)}`;
   let seq = 0;
-  return (dir, frame) => observeFrame({ sessionId, seq: (seq += 1), agent, label, dir, frame });
+  return (dir, frame) =>
+    observeFrame({ sessionId, seq: (seq += 1), agent, label, model, dir, frame });
 }
 
 /** Close the stream so the last buffered frames flush before the process exits. */
