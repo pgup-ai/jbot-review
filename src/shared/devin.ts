@@ -62,6 +62,7 @@ const DEVIN_USAGE_FIELD_NAMES = [
 ] as const;
 
 export const DEVIN_PROVIDER_ID = 'devin';
+export const DEVIN_CLI_BIN = 'devin';
 
 export function isDevinProvider(providerID: string): boolean {
   return providerID === DEVIN_PROVIDER_ID;
@@ -328,7 +329,7 @@ async function runDevinPrompt(
   log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
   try {
     for (let attempt = 0; ; attempt += 1) {
-      const result = await spawnWithTimeout('devin', args, {
+      const result = await spawnWithTimeout(DEVIN_CLI_BIN, args, {
         cwd: workspace,
         timeoutMs,
         timeoutMessage: `devin prompt timed out after ${Math.round(timeoutMs / 1000)}s`,

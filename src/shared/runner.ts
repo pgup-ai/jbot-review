@@ -25,6 +25,14 @@ import {
 } from './backend-selection.ts';
 import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
 import {
+  codexAcpSpec,
+  createAcpBackend,
+  cursorAcpSpec,
+  devinAcpSpec,
+  isAcpEnabled,
+  opencodeAcpSpec,
+} from './acp.ts';
+import {
   piModelAvailable,
   piSupportsProvider,
   resolvePiEngine,
@@ -1363,6 +1371,13 @@ export async function runPrReview(params: {
     cleanupGrokHome();
   };
 
+  const acpEnabled = isAcpEnabled();
+  if (acpEnabled) {
+    log(
+      'ACP engine enabled (JBOT_ACP=true): cursor/devin/codex/opencode run over ACP stdio (cline excluded: cline/cline#11015).',
+    );
+  }
+
   if (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID) {
     const devinApiKey = backendSelection.devinApiKey;
     if (!devinApiKey) {
@@ -1370,7 +1385,9 @@ export async function runPrReview(params: {
     }
     const credentialsPath = writeDevinCredentials(devinApiKey);
     log(`Devin CLI credentials configured at ${credentialsPath}.`);
-    devinBackend = createDevinBackend(workspace);
+    devinBackend = acpEnabled
+      ? createAcpBackend(devinAcpSpec(), workspace)
+      : createDevinBackend(workspace);
   }
 
   if (mainCliBackend === CURSOR_PROVIDER_ID || auxCliBackend === CURSOR_PROVIDER_ID) {
@@ -1383,7 +1400,9 @@ export async function runPrReview(params: {
     log(
       'Cursor CLI authenticated via CURSOR_API_KEY; token usage is unavailable for those sessions.',
     );
-    cursorBackend = createCursorBackend(workspace, cursorApiKey);
+    cursorBackend = acpEnabled
+      ? createAcpBackend(cursorAcpSpec(cursorApiKey), workspace)
+      : createCursorBackend(workspace, cursorApiKey);
   }
 
   if (mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID) {
@@ -1420,7 +1439,9 @@ export async function runPrReview(params: {
     }
     log(`Codex CLI auth configured at ${authPath}.`);
     log('Codex CLI token usage is unavailable; review metadata may omit those sessions.');
-    codexBackend = createCodexBackend(workspace, codexHome);
+    codexBackend = acpEnabled
+      ? createAcpBackend(codexAcpSpec(codexHome), workspace)
+      : createCodexBackend(workspace, codexHome);
   }
 
   if (mainCliBackend === CLINE_PROVIDER_ID || auxCliBackend === CLINE_PROVIDER_ID) {
@@ -1439,6 +1460,9 @@ export async function runPrReview(params: {
     }
     log(`Cline CLI auth configured at ${authPath}.`);
     log('Cline CLI token usage is unavailable; review metadata may omit those sessions.');
+    // cline stays on the argv driver even under JBOT_ACP: its ACP prompt loop
+    // returns end_turn with no output (cline/cline#11015, reproduced on
+    // 3.0.34 and 3.0.46) — an empty review must not ship behind the flag.
     clineBackend = createClineBackend(workspace, clineHome);
   }
 
@@ -1564,40 +1588,61 @@ export async function runPrReview(params: {
       cleanupCliHomes();
       throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
     }
-    log('Starting opencode server');
-    try {
-      opencodeRuntime = await startOpencode(
-        workspace,
-        opencodeProviderID,
-        opencodeModelID,
-        opencodeApiKey,
-        log,
-        {
+    const opencodeAuxProviderKeys = auxNeedsOpencodeConfig
+      ? [
+          {
+            providerID: auxProviderID,
+            apiKey: auxNeedsOwnKey ? options.auxApiKey : opencodeApiKey,
+            modelID: auxModelID,
+            baseURL: auxNeedsOwnKey ? options.auxBaseURL : baseURL,
+            promptCache: promptCachePolicy.auxProviderPromptCache,
+          },
+        ]
+      : undefined;
+    if (acpEnabled) {
+      // `opencode acp` per session instead of the server. Server-only extras
+      // are skipped in this mode: provider model listing and Context7 MCP.
+      log('opencode role runs via ACP (JBOT_ACP=true); skipping opencode server boot.');
+      opencodeBackend = createAcpBackend(
+        opencodeAcpSpec({
+          providerID: opencodeProviderID,
+          modelID: opencodeModelID,
+          apiKey: opencodeApiKey,
           modelOptions: mainOnOpencode ? options.modelOptions : undefined,
           baseURL: mainOnOpencode ? baseURL : options.auxBaseURL,
           promptCache: mainOnOpencode
             ? promptCachePolicy.providerPromptCache
             : promptCachePolicy.auxProviderPromptCache,
-          port: options.opencodePort > 0 ? options.opencodePort : undefined,
-          additionalProviderKeys: auxNeedsOpencodeConfig
-            ? [
-                {
-                  providerID: auxProviderID,
-                  apiKey: auxNeedsOwnKey ? options.auxApiKey : opencodeApiKey,
-                  modelID: auxModelID,
-                  baseURL: auxNeedsOwnKey ? options.auxBaseURL : baseURL,
-                  promptCache: promptCachePolicy.auxProviderPromptCache,
-                },
-              ]
-            : undefined,
-        },
+          additionalProviderKeys: opencodeAuxProviderKeys,
+        }),
+        workspace,
       );
-    } catch (error) {
-      piRuntime?.stop();
-      cleanupCliHomes();
-      throw error;
+    } else {
+      log('Starting opencode server');
+      try {
+        opencodeRuntime = await startOpencode(
+          workspace,
+          opencodeProviderID,
+          opencodeModelID,
+          opencodeApiKey,
+          log,
+          {
+            modelOptions: mainOnOpencode ? options.modelOptions : undefined,
+            baseURL: mainOnOpencode ? baseURL : options.auxBaseURL,
+            promptCache: mainOnOpencode
+              ? promptCachePolicy.providerPromptCache
+              : promptCachePolicy.auxProviderPromptCache,
+            port: options.opencodePort > 0 ? options.opencodePort : undefined,
+            additionalProviderKeys: opencodeAuxProviderKeys,
+          },
+        );
+      } catch (error) {
+        piRuntime?.stop();
+        cleanupCliHomes();
+        throw error;
+      }
+      opencodeBackend = createOpencodeBackend(opencodeRuntime.client);
     }
-    opencodeBackend = createOpencodeBackend(opencodeRuntime.client);
   }
 
   const cliBackends: Record<CliBackendID, ReviewBackend | undefined> = {
