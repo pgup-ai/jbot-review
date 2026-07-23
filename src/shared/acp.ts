@@ -247,20 +247,27 @@ interface AcpSessionOptions {
 interface ModelOptionCandidate {
   value?: string;
   name?: string;
+  /** Present on SessionConfigSelectGroup entries (grouped option lists). */
+  options?: ModelOptionCandidate[];
 }
 
 /** Resolves a jbot model id against a model config option's choices: exact
  * value, then display name (case-insensitive), then dotted→hyphenated value
- * (`glm-5.2` ⇒ devin's `glm-5-2`). */
+ * (`glm-5.2` ⇒ devin's `glm-5-2`). Grouped option lists (spec: entries with a
+ * nested `options` array under a group header) are flattened first — a
+ * group's `name` is a header, never a model. */
 export function matchModelOptionValue(
   options: ModelOptionCandidate[],
   modelID: string,
 ): string | undefined {
+  const flat = options.flatMap((option) =>
+    Array.isArray(option.options) ? option.options : [option],
+  );
   const lower = modelID.toLowerCase();
   const match =
-    options.find((option) => option.value === modelID) ??
-    options.find((option) => option.name?.toLowerCase() === lower) ??
-    options.find((option) => option.value === modelID.replaceAll('.', '-'));
+    flat.find((option) => option.value === modelID) ??
+    flat.find((option) => option.name?.toLowerCase() === lower) ??
+    flat.find((option) => option.value === modelID.replaceAll('.', '-'));
   return match?.value;
 }
 
@@ -324,7 +331,14 @@ export async function driveAcpSession(
 
   await conn.request('initialize', {
     protocolVersion: ACP_PROTOCOL_VERSION,
-    clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+    clientCapabilities: {
+      fs: { readTextFile: false, writeTextFile: false },
+      terminal: false,
+      // Advertised so conforming agents include configOptions in session/new —
+      // the model-selection surface (devin serves it either way; spec-gated
+      // agents may not).
+      session: { configOptions: {} },
+    },
     clientInfo: { name: 'jbot-review', version: '0' },
   });
   const session = (await conn.request('session/new', {
@@ -401,6 +415,7 @@ async function selectModelConfigOption(
   const value = matchModelOptionValue(modelOption.options ?? [], modelId);
   if (!value) {
     const available = (modelOption.options ?? [])
+      .flatMap((option) => (Array.isArray(option.options) ? option.options : [option]))
       .map((option) => option.value)
       .filter(Boolean)
       .slice(0, 12)

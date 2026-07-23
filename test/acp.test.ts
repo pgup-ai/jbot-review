@@ -351,5 +351,13 @@ describe('acp', () => {
       'claude-opus-4-8-medium',
     );
     assert.equal(matchModelOptionValue(modelOptions, 'nope'), undefined);
+    // Grouped option lists flatten; a group header's name is never a model.
+    const grouped = [
+      { name: 'Recommended', options: [{ value: 'glm-5-2', name: 'GLM 5.2' }] },
+      { name: 'Other', options: [{ value: 'swe-1-7', name: 'SWE 1.7' }] },
+    ];
+    assert.equal(matchModelOptionValue(grouped, 'glm-5.2'), 'glm-5-2');
+    assert.equal(matchModelOptionValue(grouped, 'swe-1-7'), 'swe-1-7');
+    assert.equal(matchModelOptionValue(grouped, 'recommended'), undefined);
   });
 });
