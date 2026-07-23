@@ -220,8 +220,10 @@ function setReview(state, text) {
 }
 function onRunStatus(d) {
   if (!meta || d.runId !== (active || '').split('/')[0]) return;
-  meta.live = false;
-  setReview(d.status, 'review ' + d.status);
+  // 'reviewing' is non-terminal: keep the session live so elapsed keeps ticking
+  // and frames still flow. completed/failed are terminal.
+  meta.live = d.status === 'reviewing';
+  setReview(d.status === 'reviewing' ? 'reviewing' : d.status, 'review ' + d.status);
   renderMeta();
 }
 

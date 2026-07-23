@@ -144,8 +144,11 @@ export function listRuns(dataDir: string): RunSummary[] {
       sessions.push(sessionId);
       updatedAt = Math.max(updatedAt, statSync(join(runDir, file)).mtimeMs);
     }
-    if (sessions.length > 0) {
-      const status = readRunStatus(dataDir, entry.name);
+    const status = readRunStatus(dataDir, entry.name);
+    // A run that failed before any ACP session still has a status file and
+    // must stay discoverable, so list it even with no session journals.
+    if (status) updatedAt = Math.max(updatedAt, statSync(join(runDir, 'status')).mtimeMs);
+    if (sessions.length > 0 || status) {
       runs.push({
         runId: entry.name,
         sessions: sessions.sort(),

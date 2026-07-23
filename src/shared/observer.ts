@@ -26,7 +26,13 @@ function runId(): string {
     // the same second (or sharing nothing but the clock) never merge journals.
     const stamp = `run-${new Date().toISOString().replaceAll(/[:.]/g, '-').slice(0, 19)}-${Math.random().toString(36).slice(2, 6)}`;
     const raw = process.env.JBOT_OBSERVER_RUN?.trim() || stamp;
-    cachedRunId = raw.replaceAll(/[^A-Za-z0-9._-]/g, '-').replace(/^[^A-Za-z0-9]+/, '') || 'run';
+    // Cap to the gateway's SAFE_ID limit (128) so a long branch name doesn't
+    // produce an id the gateway rejects (which would drop every frame).
+    cachedRunId =
+      raw
+        .replaceAll(/[^A-Za-z0-9._-]/g, '-')
+        .replace(/^[^A-Za-z0-9]+/, '')
+        .slice(0, 128) || 'run';
   }
   return cachedRunId;
 }
