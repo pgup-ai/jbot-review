@@ -129,6 +129,12 @@ async function main(): Promise<void> {
         };
         controller.enqueue(encoder.encode(`${JSON.stringify(envelope)}\n`));
       }
+      // Mark the run completed, like a real review's verdict does.
+      controller.enqueue(
+        encoder.encode(
+          `${JSON.stringify({ v: 1, kind: 'run', runId, status: 'completed', ts: Date.now() })}\n`,
+        ),
+      );
       controller.close();
     },
   });

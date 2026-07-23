@@ -73,8 +73,8 @@ describe('observer tee', () => {
       const runs = listRuns(dataDir);
       assert.equal(runs.length, 1);
       assert.equal(runs[0].runId, 'run-test');
-      assert.deepEqual(runs[0].sessions, ['review-1']);
-      const frames = readJournalLines(dataDir, 'run-test', 'review-1').map(
+      assert.deepEqual(runs[0].sessions, ['review']);
+      const frames = readJournalLines(dataDir, 'run-test', 'review').map(
         (line) => JSON.parse(line) as ObserverEnvelope,
       );
       assert.equal(frames.length, 3);

@@ -5,8 +5,22 @@ import {
   readdirSync,
   readFileSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+
+export type RunStatus = 'reviewing' | 'completed' | 'failed';
+const RUN_STATUSES: RunStatus[] = ['reviewing', 'completed', 'failed'];
+
+/** Run-level lifecycle control (the jbot verdict), sent on the ingest stream
+ * alongside frames but stored per-run, not per-session. */
+export interface RunControl {
+  v: 1;
+  kind: 'run';
+  runId: string;
+  status: RunStatus;
+  ts: number;
+}
 
 /**
  * One observed ACP frame, as sent by the jbot-side tee (or the demo feeder).
@@ -59,6 +73,34 @@ export function journalPath(dataDir: string, runId: string, sessionId: string): 
   return join(dataDir, runId, `${sessionId}.ndjson`);
 }
 
+/** Parse a run-status control line (distinct from a frame envelope). */
+export function parseRunControl(line: string): RunControl | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (typeof value !== 'object' || value === null) return undefined;
+  const c = value as Record<string, unknown>;
+  if (c.v !== 1 || c.kind !== 'run' || !isSafeId(c.runId)) return undefined;
+  if (!RUN_STATUSES.includes(c.status as RunStatus) || typeof c.ts !== 'number') return undefined;
+  return c as unknown as RunControl;
+}
+
+export function writeRunStatus(dataDir: string, control: RunControl): void {
+  const dir = join(dataDir, control.runId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'status'), control.status);
+}
+
+export function readRunStatus(dataDir: string, runId: string): RunStatus | undefined {
+  const path = join(dataDir, runId, 'status');
+  if (!existsSync(path)) return undefined;
+  const value = readFileSync(path, 'utf8').trim();
+  return RUN_STATUSES.includes(value as RunStatus) ? (value as RunStatus) : undefined;
+}
+
 export function appendEnvelope(dataDir: string, envelope: ObserverEnvelope): void {
   const dir = join(dataDir, envelope.runId);
   mkdirSync(dir, { recursive: true });
@@ -72,6 +114,7 @@ export interface RunSummary {
   runId: string;
   sessions: string[];
   updatedAt: number;
+  status?: RunStatus;
 }
 
 /** Newest-first run listing from the plain directory layout — no index, no DB. */
@@ -90,7 +133,15 @@ export function listRuns(dataDir: string): RunSummary[] {
       sessions.push(sessionId);
       updatedAt = Math.max(updatedAt, statSync(join(runDir, file)).mtimeMs);
     }
-    if (sessions.length > 0) runs.push({ runId: entry.name, sessions: sessions.sort(), updatedAt });
+    if (sessions.length > 0) {
+      const status = readRunStatus(dataDir, entry.name);
+      runs.push({
+        runId: entry.name,
+        sessions: sessions.sort(),
+        updatedAt,
+        ...(status ? { status } : {}),
+      });
+    }
   }
   return runs.sort((a, b) => b.updatedAt - a.updatedAt);
 }

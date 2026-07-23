@@ -6,8 +6,12 @@ import {
   isSafeId,
   listRuns,
   parseEnvelope,
+  parseRunControl,
   readJournalLines,
+  readRunStatus,
+  writeRunStatus,
   type ObserverEnvelope,
+  type RunControl,
 } from './journal.ts';
 import { VIEWER_HTML } from './viewer.ts';
 
@@ -46,6 +50,16 @@ function fanOut(envelope: ObserverEnvelope, line: string): void {
   for (const res of subs) sseWrite(res, line);
 }
 
+// A run-status control targets no single session, so it reaches every viewer
+// of any session in that run.
+function fanRunControl(control: RunControl, line: string): void {
+  const prefix = `${control.runId}/`;
+  for (const [key, subs] of subscribers) {
+    if (!key.startsWith(prefix)) continue;
+    for (const res of subs) sseWrite(res, line);
+  }
+}
+
 async function handleIngest(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // NDJSON stream: one envelope per line, appended and fanned out as it
   // arrives, so live viewers track an in-flight review. Invalid lines are
@@ -55,6 +69,13 @@ async function handleIngest(req: IncomingMessage, res: ServerResponse): Promise<
   const lines = createInterface({ input: req });
   for await (const line of lines) {
     if (!line.trim()) continue;
+    const control = parseRunControl(line);
+    if (control) {
+      writeRunStatus(dataDir, control);
+      fanRunControl(control, JSON.stringify(control));
+      accepted += 1;
+      continue;
+    }
     const envelope = parseEnvelope(line);
     if (!envelope) {
       rejected += 1;
@@ -77,6 +98,10 @@ function handleStream(res: ServerResponse, runId: string, sessionId: string): vo
   // Replay the journal first, then follow live; the viewer dedupes nothing —
   // replay and live are strictly ordered because appends happen before fanout.
   for (const line of readJournalLines(dataDir, runId, sessionId)) sseWrite(res, line);
+  // A run that already finished replays its terminal status so a late viewer
+  // shows completed/failed instead of a stale "reviewing".
+  const status = readRunStatus(dataDir, runId);
+  if (status) sseWrite(res, JSON.stringify({ v: 1, kind: 'run', runId, status, ts: Date.now() }));
   const key = journalKey(runId, sessionId);
   let subs = subscribers.get(key);
   if (!subs) {

@@ -11,7 +11,9 @@ import {
   journalPath,
   listRuns,
   parseEnvelope,
+  parseRunControl,
   readJournalLines,
+  writeRunStatus,
   type ObserverEnvelope,
 } from '../src/gateway/journal.ts';
 
@@ -59,6 +61,27 @@ describe('gateway', () => {
         [1, 2],
       );
       assert.deepEqual(readJournalLines(dataDir, 'run-1', 'missing'), []);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('parses and stores run-status controls, surfaced in the run listing', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'jbot-gw-run-'));
+    try {
+      const control = parseRunControl(
+        JSON.stringify({ v: 1, kind: 'run', runId: 'run-1', status: 'failed', ts: 1 }),
+      );
+      assert.equal(control?.status, 'failed');
+      // A frame is not a control, and a bad status / unsafe id is rejected.
+      assert.equal(parseRunControl(JSON.stringify(envelope())), undefined);
+      assert.equal(
+        parseRunControl(JSON.stringify({ v: 1, kind: 'run', runId: 'r', status: 'bogus', ts: 1 })),
+        undefined,
+      );
+      appendEnvelope(dataDir, envelope());
+      writeRunStatus(dataDir, control!);
+      assert.equal(listRuns(dataDir)[0].status, 'failed');
     } finally {
       rmSync(dataDir, { recursive: true, force: true });
     }

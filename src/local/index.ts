@@ -21,6 +21,7 @@ import {
 import { CURSOR_CLI_BIN, CURSOR_PROVIDER_ID } from '../shared/cursor.ts';
 import { DEVIN_CLI_BIN, DEVIN_PROVIDER_ID } from '../shared/devin.ts';
 import { isNoiseFile } from '../shared/filter.ts';
+import { reportRun, setRunName } from '../shared/observer.ts';
 import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID } from '../shared/kilo.ts';
 import {
@@ -176,6 +177,11 @@ const INSTALL_HINTS: Record<string, string> = {
 };
 
 async function main(): Promise<void> {
+  // Name the observer run after the branch under review (a no-op unless the
+  // observer is on); the tee sanitizes and only uses it if not already named.
+  const headBranch = (await gitOrEmpty(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+  if (headBranch) setRunName(`local-${headBranch}`);
+
   const { baseRef, mergeBase } = await resolveBase();
   const shortBase = mergeBase.slice(0, 12);
   log(`Diff base: ${baseRef} (merge-base ${shortBase}); right side is the working tree.`);
@@ -362,9 +368,13 @@ async function main(): Promise<void> {
 }
 
 if (loadDotEnv()) log('Loaded .env');
-main().catch((error: unknown) => {
-  console.error(
-    `[jbot-review] Local review failed: ${error instanceof Error ? error.message : String(error)}`,
-  );
-  process.exitCode = 1;
-});
+main().then(
+  () => reportRun('completed'),
+  (error: unknown) => {
+    console.error(
+      `[jbot-review] Local review failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exitCode = 1;
+    reportRun('failed');
+  },
+);

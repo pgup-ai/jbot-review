@@ -28,10 +28,18 @@ export const VIEWER_HTML = `<!doctype html>
           overflow-y:auto; }
   .brand { padding:17px 16px 13px; font-weight:600; letter-spacing:.2px; display:flex; align-items:center; gap:9px; }
   .brand .mark { width:9px; height:9px; border-radius:2px; background:var(--accent); transform:rotate(45deg); }
-  .brand small { margin-left:auto; color:var(--faint); font-weight:400; font:11px var(--mono); }
+  /* connection health (viewer ↔ gateway), distinct from any review's state */
+  .conn { margin-left:auto; display:flex; align-items:center; gap:6px; color:var(--faint); font:10px var(--mono);
+          text-transform:uppercase; letter-spacing:.4px; }
+  .conn .cdot { width:7px; height:7px; border-radius:50%; background:var(--faint); }
+  .conn.ok .cdot { background:var(--ok); } .conn.warn .cdot { background:var(--warn); } .conn.bad .cdot { background:var(--bad); }
   .runs { padding:2px 10px 20px; }
   .run { margin-bottom:15px; }
-  .run-id { font:11px/1.5 var(--mono); color:var(--faint); padding:5px 8px 3px; word-break:break-all; }
+  .run-id { font:11px/1.5 var(--mono); color:var(--faint); padding:5px 8px 3px; word-break:break-all;
+            display:flex; align-items:center; gap:7px; }
+  .run-id .rdot { width:6px; height:6px; border-radius:50%; background:var(--faint); flex:none; }
+  .run-id.completed .rdot { background:var(--ok); } .run-id.failed .rdot { background:var(--bad); }
+  .run-id.reviewing .rdot { background:var(--warn); }
   .session { display:flex; align-items:center; gap:9px; width:100%; text-align:left; background:none;
              border:1px solid transparent; color:var(--dim); font:12px/1.3 var(--mono); padding:7px 9px;
              border-radius:8px; cursor:pointer; transition:background .12s,border-color .12s,color .12s; }
@@ -50,8 +58,10 @@ export const VIEWER_HTML = `<!doctype html>
   .status { margin-left:auto; align-self:center; display:flex; align-items:center; gap:8px;
             font:12px var(--mono); color:var(--dim); }
   .status .dot { width:8px; height:8px; border-radius:50%; background:var(--faint); }
-  .status.live .dot { background:var(--ok); animation:pulse 1.9s infinite; }
-  .status.done .dot { background:var(--accent); }
+  .status.reviewing .dot { background:var(--ok); animation:pulse 1.9s infinite; }
+  .status.completed .dot { background:var(--ok); }
+  .status.failed .dot { background:var(--bad); }
+  .status.incomplete .dot { background:var(--warn); }
   @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(67,176,106,.5)} 70%{box-shadow:0 0 0 6px rgba(67,176,106,0)} 100%{box-shadow:0 0 0 0 rgba(67,176,106,0)} }
   .facts { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
   .fact { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border:1px solid var(--line);
@@ -88,7 +98,9 @@ export const VIEWER_HTML = `<!doctype html>
 </head>
 <body>
 <aside>
-  <div class="brand"><span class="mark"></span> jbot observer <small id="conn"></small></div>
+  <div class="brand"><span class="mark"></span> jbot observer
+    <span class="conn" id="conn"><span class="cdot"></span><span id="connText">connecting</span></span>
+  </div>
   <div class="runs" id="runs"></div>
 </aside>
 <main>
@@ -115,11 +127,23 @@ var logEl = document.getElementById('log');
 var jumpEl = document.getElementById('jump');
 var metaEl = document.getElementById('meta');
 var connEl = document.getElementById('conn');
+var connText = document.getElementById('connText');
 var mRole = document.getElementById('mRole');
 var mProv = document.getElementById('mProv');
 var mStatus = document.getElementById('mStatus');
 var mStatusText = document.getElementById('mStatusText');
 var mFacts = document.getElementById('mFacts');
+
+// Human labels: "guideline-compliance-2" -> "Guideline compliance 2".
+var LABELS = { 'guideline-compliance': 'Guideline compliance', 'addressed-prior-comments': 'Addressed comments',
+  'finding-verification': 'Verification', 'changes-since-last-review': 'Changes summary', review: 'Review' };
+function pretty(id) {
+  var m = id.match(/^(.*?)(?:-(\\d+))?$/);
+  var base = m[1], n = m[2];
+  var name = LABELS[base] || base.replace(/-/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); });
+  return n ? name + ' ' + n : name;
+}
+function connState(cls, text) { connEl.className = 'conn ' + cls; connText.textContent = text; }
 
 var es = null, active = null;
 var msgEl = null, thoughtEl = null;
@@ -188,9 +212,17 @@ function renderMeta() {
   facts.forEach(function (f) { mFacts.appendChild(f); });
   mProv.textContent = meta.version ? meta.agent + ' ' + meta.version : meta.agent;
 }
-function setStatus(state, text) {
+// Review state (reviewing/completed/failed/…) is separate from connection
+// health — a dropped socket must never look like a failed review.
+function setReview(state, text) {
   mStatus.className = 'status' + (state ? ' ' + state : '');
   mStatusText.textContent = text;
+}
+function onRunStatus(d) {
+  if (!meta || d.runId !== (active || '').split('/')[0]) return;
+  meta.live = false;
+  setReview(d.status, 'review ' + d.status);
+  renderMeta();
 }
 
 function ingest(e) {
@@ -199,6 +231,7 @@ function ingest(e) {
   if (e.model) meta.model = e.model;
   if (!meta.firstTs) meta.firstTs = e.ts;
   meta.lastTs = e.ts;
+  if (!meta.started) { meta.started = true; if (meta.live) setReview('reviewing', 'reviewing'); }
   var f = e.frame || {};
   var p = f.params || {};
 
@@ -227,8 +260,12 @@ function ingest(e) {
   } else if (e.dir === 'in' && f.result && f.result.stopReason) {
     if (f.result.usage) { meta.inTok = f.result.usage.inputTokens || meta.inTok; meta.outTok = f.result.usage.outputTokens || meta.outTok; }
     meta.live = false;
-    chip('end', 'done', f.result.stopReason);
-    setStatus('done', 'done · ' + f.result.stopReason);
+    var reason = f.result.stopReason;
+    chip('end', 'done', reason);
+    // Session turn ended; the run-status control (if any) is authoritative and
+    // will refine this to review completed/failed.
+    if (reason === 'end_turn') setReview('completed', 'session ended · ' + reason);
+    else setReview('incomplete', 'session ended · ' + reason);
   }
   renderMeta();
 }
@@ -240,19 +277,22 @@ function open(runId, sessionId, label) {
   var btn = document.querySelector('[data-key="' + runId + '/' + sessionId + '"]');
   if (btn) btn.classList.add('active');
   active = runId + '/' + sessionId;
-  meta = { agent: '', model: '', mode: '', version: '', firstTs: 0, lastTs: 0, inTok: 0, outTok: 0, ctxUsed: 0, ctxSize: 0, live: true };
+  meta = { agent: '', model: '', mode: '', version: '', firstTs: 0, lastTs: 0, inTok: 0, outTok: 0, ctxUsed: 0, ctxSize: 0, live: true, started: false };
   logEl.textContent = '';
   closeStreams();
   metaEl.hidden = false;
-  mRole.textContent = label;
+  mRole.textContent = pretty(sessionId);
   mProv.textContent = '';
-  setStatus('', 'connecting…');
+  setReview('', 'waiting…');
   renderMeta();
   tick = setInterval(function () { if (meta && meta.live) renderMeta(); }, 1000);
   es = new EventSource(withToken('/api/runs/' + runId + '/sessions/' + sessionId + '/stream'));
-  es.onopen = function () { if (meta.live) setStatus('live', 'live'); };
-  es.onerror = function () { if (meta.live) setStatus('', 'reconnecting…'); };
-  es.onmessage = function (m) { try { ingest(JSON.parse(m.data)); } catch (err) {} };
+  // onopen/onerror move ONLY the connection dot — never the review status.
+  es.onopen = function () { connState('ok', 'connected'); };
+  es.onerror = function () { connState('warn', 'reconnecting'); };
+  es.onmessage = function (m) {
+    try { var d = JSON.parse(m.data); if (d && d.kind === 'run') onRunStatus(d); else ingest(d); } catch (err) {}
+  };
 }
 
 logEl.addEventListener('scroll', function () { jumpEl.classList.toggle('show', !atBottom()); });
@@ -261,28 +301,30 @@ jumpEl.addEventListener('click', function () { logEl.scrollTop = logEl.scrollHei
 var lastRuns = '';
 function refreshRuns() {
   fetch(withToken('/api/runs')).then(function (r) { return r.text(); }).then(function (text) {
-    connEl.textContent = '';
+    connState('ok', 'connected');
     if (text === lastRuns) return; // unchanged: keep the DOM (and clicks) stable
     lastRuns = text;
     var runs = JSON.parse(text);
-    connEl.textContent = runs.length + (runs.length === 1 ? ' run' : ' runs');
     runsEl.textContent = '';
     runs.forEach(function (run) {
       var box = el('div', 'run');
-      box.appendChild(el('div', 'run-id', run.runId));
+      var head = el('div', 'run-id' + (run.status ? ' ' + run.status : ''));
+      head.appendChild(el('span', 'rdot'));
+      head.appendChild(document.createTextNode(run.runId));
+      box.appendChild(head);
       run.sessions.forEach(function (session) {
         var key = run.runId + '/' + session;
         var b = el('button', 'session');
         b.dataset.key = key;
         b.appendChild(el('span', 'sdot'));
-        b.appendChild(document.createTextNode(session));
+        b.appendChild(document.createTextNode(pretty(session)));
         if (active === key) b.classList.add('active');
-        b.onclick = function () { open(run.runId, session, session); };
+        b.onclick = function () { open(run.runId, session); };
         box.appendChild(b);
       });
       runsEl.appendChild(box);
     });
-  }).catch(function () { connEl.textContent = 'offline'; });
+  }).catch(function () { connState('bad', 'offline'); });
 }
 refreshRuns();
 setInterval(refreshRuns, 4000);

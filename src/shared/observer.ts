@@ -12,11 +12,28 @@ const rawUrl = process.env.JBOT_OBSERVER_URL?.trim();
 const token = process.env.JBOT_OBSERVER_TOKEN?.trim();
 export const observerEnabled = Boolean(rawUrl);
 const ingestUrl = rawUrl ? `${rawUrl.replace(/\/+$/, '')}/api/ingest` : '';
-// One run per process; a review:local invocation or an Action run is one run.
-const runId = observerEnabled
-  ? process.env.JBOT_OBSERVER_RUN?.trim() ||
-    `run-${new Date().toISOString().replaceAll(/[:.]/g, '-').slice(0, 19)}`
-  : '';
+
+export type RunStatus = 'reviewing' | 'completed' | 'failed';
+
+// A run = one process (a review:local invocation, an Action run). The name is
+// resolved lazily so an entry point can set JBOT_OBSERVER_RUN (or setRunName)
+// before the first frame; ids double as file/route components, hence the
+// sanitizing. Default is a sortable timestamp.
+let cachedRunId = '';
+function runId(): string {
+  if (!cachedRunId) {
+    const raw =
+      process.env.JBOT_OBSERVER_RUN?.trim() ||
+      `run-${new Date().toISOString().replaceAll(/[:.]/g, '-').slice(0, 19)}`;
+    cachedRunId = raw.replaceAll(/[^A-Za-z0-9._-]/g, '-').replace(/^[^A-Za-z0-9]+/, '') || 'run';
+  }
+  return cachedRunId;
+}
+
+/** Name this run before it starts (entry points; slashes etc. are sanitized). */
+export function setRunName(name: string): void {
+  if (observerEnabled && !cachedRunId && name.trim()) process.env.JBOT_OBSERVER_RUN = name.trim();
+}
 
 interface ObservedFrame {
   sessionId: string;
@@ -57,25 +74,36 @@ function ensureStream(): void {
   });
 }
 
-/** Copy one frame to the gateway. No-op unless the observer is enabled. */
-export function observeFrame(observed: ObservedFrame): void {
-  if (!observerEnabled || dead) return;
+function enqueueLine(payload: Record<string, unknown>): void {
   ensureStream();
   try {
-    controller?.enqueue(
-      encoder.encode(`${JSON.stringify({ v: 1, runId, ts: Date.now(), ...observed })}\n`),
-    );
+    controller?.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
   } catch {
-    // enqueue-after-close or any failure: drop the frame, never throw.
+    // enqueue-after-close or any failure: drop it, never throw.
   }
 }
 
-let sessionCounter = 0;
+/** Copy one frame to the gateway. No-op unless the observer is enabled. */
+export function observeFrame(observed: ObservedFrame): void {
+  if (!observerEnabled || dead) return;
+  enqueueLine({ v: 1, runId: runId(), ts: Date.now(), ...observed });
+}
+
+/** Report the review run's terminal outcome (the jbot-level verdict), so the
+ * viewer can show completed/failed authoritatively instead of guessing from
+ * the last ACP frame. No-op unless enabled. */
+export function reportRun(status: RunStatus): void {
+  if (!observerEnabled || dead) return;
+  enqueueLine({ v: 1, kind: 'run', runId: runId(), status, ts: Date.now() });
+}
+
+// Per-label ordinal: the first `review` is `review`, the next `review-2`, etc.
+// — readable session ids that never collide across shards or retries.
+const labelCounts = new Map<string, number>();
 
 /**
- * A per-session tee bound to a session id (`<label>-<n>`, unique across shards)
- * and a monotonic seq. Returns undefined when the observer is disabled, so the
- * hot path pays nothing.
+ * A per-session tee bound to a session id and a monotonic seq. Returns
+ * undefined when the observer is disabled, so the hot path pays nothing.
  */
 export function makeSessionTee(
   agent: string,
@@ -83,7 +111,9 @@ export function makeSessionTee(
   model?: string,
 ): ((dir: 'out' | 'in', frame: Record<string, unknown>) => void) | undefined {
   if (!observerEnabled) return undefined;
-  const sessionId = `${label}-${(sessionCounter += 1)}`;
+  const n = (labelCounts.get(label) ?? 0) + 1;
+  labelCounts.set(label, n);
+  const sessionId = n === 1 ? label : `${label}-${n}`;
   let seq = 0;
   return (dir, frame) =>
     observeFrame({ sessionId, seq: (seq += 1), agent, label, model, dir, frame });

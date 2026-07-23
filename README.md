@@ -710,6 +710,16 @@ calls, permission decisions, findings — live or replayed.
   The tee is default-off (no `JBOT_OBSERVER_URL` ⇒ zero overhead) and
   fail-open: an unreachable or slow gateway never blocks, slows, or fails the
   review.
+- **Status model:** the viewer separates *connection* health (viewer↔gateway:
+  connected / reconnecting / offline) from *review* state (reviewing /
+  completed / failed), so a dropped socket never looks like a failed review.
+  Sessions and journals are durable — a completed or failed run stays on disk
+  and reopening replays it. The review verdict is authoritative: `review:local`
+  reports `completed`/`failed` to the gateway when it finishes, rather than the
+  viewer guessing from the last frame.
+- **Naming:** the run defaults to `local-<branch>` for `review:local` (override
+  with `JBOT_OBSERVER_RUN`); each session is named by its role
+  (`review`, `guideline-compliance`, …, with a numeric suffix for repeats).
 - **Deploy (VPS-agnostic):** `npm run build`, copy `dist/`, run
   `node dist/gateway/server.js` under any process manager. Configuration is
   three env vars: `JBOT_GATEWAY_PORT` (default 8790), `JBOT_GATEWAY_DATA`
