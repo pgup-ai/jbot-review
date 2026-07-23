@@ -700,6 +700,16 @@ calls, permission decisions, findings — live or replayed.
 - **Local, zero config:** `npm run gateway` (loopback only, no auth), then
   `npm run gateway:demo` in another terminal and open http://127.0.0.1:8790 to
   watch a scripted session stream in.
+- **Watch a REAL review stream:** point a review at the gateway with
+  `JBOT_OBSERVER_URL`. In one terminal `npm run gateway`; in another,
+  `JBOT_OBSERVER_URL=http://127.0.0.1:8790 npm run review:local` (with your
+  provider config). The env-gated tee in the ACP driver copies every frame of
+  every session to the gateway as it happens — thoughts, tool calls,
+  permission decisions, and findings render live. `JBOT_OBSERVER_TOKEN` sets
+  the bearer when the gateway is tokened; `JBOT_OBSERVER_RUN` names the run.
+  The tee is default-off (no `JBOT_OBSERVER_URL` ⇒ zero overhead) and
+  fail-open: an unreachable or slow gateway never blocks, slows, or fails the
+  review.
 - **Deploy (VPS-agnostic):** `npm run build`, copy `dist/`, run
   `node dist/gateway/server.js` under any process manager. Configuration is
   three env vars: `JBOT_GATEWAY_PORT` (default 8790), `JBOT_GATEWAY_DATA`
