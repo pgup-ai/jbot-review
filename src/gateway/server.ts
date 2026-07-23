@@ -115,26 +115,36 @@ async function handleIngest(req: IncomingMessage, res: ServerResponse): Promise<
   let accepted = 0;
   let rejected = 0;
   let total = 0;
-  let buffer = '';
+  // Carries only the current incomplete line. Newlines are searched within
+  // each incoming chunk (never a re-scan of the whole buffer), so an
+  // unterminated line stays O(total) instead of O(total²).
+  let partial = '';
   let overflow = false;
+  const take = (line: string): void => {
+    if (!line.trim()) return;
+    if (acceptLine(line)) accepted += 1;
+    else rejected += 1;
+  };
   req.setEncoding('utf8');
   for await (const chunk of req as AsyncIterable<string>) {
     total += Buffer.byteLength(chunk);
-    buffer += chunk;
-    if (total > MAX_BODY_BYTES || buffer.length > MAX_LINE_BYTES) {
+    if (total > MAX_BODY_BYTES || partial.length + chunk.length > MAX_LINE_BYTES) {
       overflow = true;
       break;
     }
-    let nl = buffer.indexOf('\n');
-    while (nl !== -1) {
-      const line = buffer.slice(0, nl);
-      buffer = buffer.slice(nl + 1);
-      if (line.trim()) {
-        if (acceptLine(line)) accepted += 1;
-        else rejected += 1;
-      }
-      nl = buffer.indexOf('\n');
+    let start = chunk.indexOf('\n');
+    if (start === -1) {
+      partial += chunk;
+      continue;
     }
+    take(partial + chunk.slice(0, start));
+    let nl = chunk.indexOf('\n', start + 1);
+    while (nl !== -1) {
+      take(chunk.slice(start + 1, nl));
+      start = nl;
+      nl = chunk.indexOf('\n', start + 1);
+    }
+    partial = chunk.slice(start + 1);
   }
   if (overflow) {
     res.writeHead(413, { 'content-type': 'text/plain' });
@@ -142,10 +152,7 @@ async function handleIngest(req: IncomingMessage, res: ServerResponse): Promise<
     req.destroy();
     return;
   }
-  if (buffer.trim()) {
-    if (acceptLine(buffer)) accepted += 1;
-    else rejected += 1;
-  }
+  take(partial);
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ accepted, rejected }));
 }
@@ -187,7 +194,7 @@ function handleStream(res: ServerResponse, runId: string, sessionId: string): vo
   res.on('error', cleanup);
 }
 
-const server = createServer((req, res) => {
+function route(req: IncomingMessage, res: ServerResponse): void {
   const url = new URL(req.url ?? '/', 'http://localhost');
   if (req.method === 'GET' && url.pathname === '/healthz') {
     res.writeHead(200, { 'content-type': 'text/plain' });
@@ -229,6 +236,19 @@ const server = createServer((req, res) => {
   }
   res.writeHead(404, { 'content-type': 'text/plain' });
   res.end('not found');
+}
+
+const server = createServer((req, res) => {
+  // The handlers do synchronous fs reads (journals, run status, listing); a
+  // corrupt file or permission/disk error must return 500, never crash the
+  // long-lived gateway out of the request listener.
+  try {
+    route(req, res);
+  } catch (error) {
+    log(`request failed: ${error instanceof Error ? error.message : String(error)}`);
+    if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain' });
+    res.end('internal error');
+  }
 });
 
 server.listen(port, host, () => {

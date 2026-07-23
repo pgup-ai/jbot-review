@@ -6,6 +6,7 @@ import {
   readFileSync,
   statSync,
   writeFileSync,
+  type Dirent,
 } from 'node:fs';
 import { join } from 'node:path';
 
@@ -108,7 +109,12 @@ export function writeRunStatus(dataDir: string, control: RunControl): void {
 export function readRunStatus(dataDir: string, runId: string): RunStatus | undefined {
   const path = join(dataDir, runId, 'status');
   if (!existsSync(path)) return undefined;
-  const value = readFileSync(path, 'utf8').trim();
+  let value: string;
+  try {
+    value = readFileSync(path, 'utf8').trim();
+  } catch {
+    return undefined; // permission/disk error: treat as no status, never throw
+  }
   return RUN_STATUSES.includes(value as RunStatus) ? (value as RunStatus) : undefined;
 }
 
@@ -128,26 +134,44 @@ export interface RunSummary {
   status?: RunStatus;
 }
 
-/** Newest-first run listing from the plain directory layout — no index, no DB. */
+/** Newest-first run listing from the plain directory layout — no index, no DB.
+ * fs errors on any single run are skipped, never thrown, so one bad directory
+ * can't take down the listing (or the gateway). */
 export function listRuns(dataDir: string): RunSummary[] {
   if (!existsSync(dataDir)) return [];
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dataDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
   const runs: RunSummary[] = [];
-  for (const entry of readdirSync(dataDir, { withFileTypes: true })) {
+  for (const entry of entries) {
     if (!entry.isDirectory() || !isSafeId(entry.name)) continue;
     const runDir = join(dataDir, entry.name);
     const sessions: string[] = [];
     let updatedAt = 0;
-    for (const file of readdirSync(runDir)) {
-      if (!file.endsWith('.ndjson')) continue;
-      const sessionId = file.slice(0, -'.ndjson'.length);
-      if (!isSafeId(sessionId)) continue;
-      sessions.push(sessionId);
-      updatedAt = Math.max(updatedAt, statSync(join(runDir, file)).mtimeMs);
+    try {
+      for (const file of readdirSync(runDir)) {
+        if (!file.endsWith('.ndjson')) continue;
+        const sessionId = file.slice(0, -'.ndjson'.length);
+        if (!isSafeId(sessionId)) continue;
+        sessions.push(sessionId);
+        updatedAt = Math.max(updatedAt, statSync(join(runDir, file)).mtimeMs);
+      }
+    } catch {
+      continue; // unreadable run dir: skip it, keep listing the rest
     }
     const status = readRunStatus(dataDir, entry.name);
     // A run that failed before any ACP session still has a status file and
     // must stay discoverable, so list it even with no session journals.
-    if (status) updatedAt = Math.max(updatedAt, statSync(join(runDir, 'status')).mtimeMs);
+    if (status) {
+      try {
+        updatedAt = Math.max(updatedAt, statSync(join(runDir, 'status')).mtimeMs);
+      } catch {
+        /* status vanished mid-list: keep the run, mtime stays 0 */
+      }
+    }
     if (sessions.length > 0 || status) {
       runs.push({
         runId: entry.name,
@@ -164,5 +188,9 @@ export function listRuns(dataDir: string): RunSummary[] {
 export function readJournalLines(dataDir: string, runId: string, sessionId: string): string[] {
   const path = journalPath(dataDir, runId, sessionId);
   if (!existsSync(path)) return [];
-  return readFileSync(path, 'utf8').split('\n').filter(Boolean);
+  try {
+    return readFileSync(path, 'utf8').split('\n').filter(Boolean);
+  } catch {
+    return []; // corrupt/unreadable journal: empty replay, never throw
+  }
 }

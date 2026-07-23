@@ -145,7 +145,7 @@ function pretty(id) {
 }
 function connState(cls, text) { connEl.className = 'conn ' + cls; connText.textContent = text; }
 
-var es = null, active = null;
+var es = null, active = null, sseDown = false;
 var msgEl = null, thoughtEl = null;
 var meta = null, tick = null;
 
@@ -278,8 +278,9 @@ function ingest(e) {
   renderMeta();
 }
 
-function open(runId, sessionId, label) {
+function open(runId, sessionId) {
   if (es) es.close();
+  sseDown = false;
   if (tick) clearInterval(tick);
   document.querySelectorAll('.session.active').forEach(function (b) { b.classList.remove('active'); });
   var btn = document.querySelector('[data-key="' + runId + '/' + sessionId + '"]');
@@ -296,8 +297,8 @@ function open(runId, sessionId, label) {
   tick = setInterval(function () { if (meta && meta.live) renderMeta(); }, 1000);
   es = new EventSource(withToken('/api/runs/' + runId + '/sessions/' + sessionId + '/stream'));
   // onopen/onerror move ONLY the connection dot — never the review status.
-  es.onopen = function () { connState('ok', 'connected'); };
-  es.onerror = function () { connState('warn', 'reconnecting'); };
+  es.onopen = function () { sseDown = false; connState('ok', 'connected'); };
+  es.onerror = function () { sseDown = true; connState('warn', 'reconnecting'); };
   es.onmessage = function (m) {
     try { var d = JSON.parse(m.data); if (d && d.kind === 'run') onRunStatus(d); else ingest(d); } catch (err) {}
   };
@@ -312,7 +313,9 @@ function refreshRuns() {
     if (!r.ok) throw new Error('runs ' + r.status);
     return r.text();
   }).then(function (text) {
-    connState('ok', 'connected');
+    // The poll proves the gateway is reachable, but if the SSE stream is down
+    // the live view is stale — don't paint over 'reconnecting' with 'connected'.
+    if (!sseDown) connState('ok', 'connected');
     if (text === lastRuns) return; // unchanged: keep the DOM (and clicks) stable
     lastRuns = text;
     var runs = JSON.parse(text);

@@ -58,9 +58,10 @@ interface ObservedFrame {
 // One streaming POST for the whole process: the gateway demuxes by
 // runId/sessionId, and a single ordered connection keeps each session's frames
 // in order without any batching bookkeeping here. The stream's queue is bounded
-// so a slow-but-connected gateway drops frames instead of growing the review's
-// memory — fail-open observability, never review impact.
-const OBSERVER_QUEUE_LIMIT = 2000;
+// by BYTES (frames vary from tiny to the 32MB ACP budget), so a slow-but-
+// connected gateway drops frames instead of growing the review's memory —
+// fail-open observability, never review impact.
+const OBSERVER_QUEUE_BYTES = 64 * 1024 * 1024;
 const encoder = new TextEncoder();
 let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
 let sending: Promise<unknown> | undefined;
@@ -74,7 +75,7 @@ function ensureStream(): void {
         controller = c;
       },
     },
-    new CountQueuingStrategy({ highWaterMark: OBSERVER_QUEUE_LIMIT }),
+    new ByteLengthQueuingStrategy({ highWaterMark: OBSERVER_QUEUE_BYTES }),
   );
   sending = fetch(ingestUrl, {
     method: 'POST',
