@@ -12,6 +12,7 @@ import {
   devinAcpSpec,
   driveAcpSession,
   isAcpEnabled,
+  matchModelOptionValue,
   opencodeAcpSpec,
   respondToPermissionRequest,
 } from '../src/shared/acp.ts';
@@ -27,6 +28,7 @@ interface FakeAgentApi {
 
 interface FakeAgentScript {
   modes?: Record<string, unknown>;
+  configOptions?: unknown[];
   onPrompt: (agent: FakeAgentApi) => void;
   onClientResponse?: (id: number, result: unknown, agent: FakeAgentApi) => void;
 }
@@ -37,10 +39,12 @@ function fakeAgentIo(script: FakeAgentScript): {
   input: PassThrough;
   output: PassThrough;
   setModeIds: string[];
+  setConfigCalls: unknown[];
 } {
   const input = new PassThrough();
   const output = new PassThrough();
   const setModeIds: string[] = [];
+  const setConfigCalls: unknown[] = [];
   let promptId: unknown;
   const send = (message: Record<string, unknown>): void => {
     output.write(`${JSON.stringify(message)}\n`);
@@ -60,7 +64,19 @@ function fakeAgentIo(script: FakeAgentScript): {
       send({
         jsonrpc: '2.0',
         id,
-        result: { sessionId: 's1', ...(script.modes ? { modes: script.modes } : {}) },
+        result: {
+          sessionId: 's1',
+          ...(script.modes ? { modes: script.modes } : {}),
+          ...(script.configOptions ? { configOptions: script.configOptions } : {}),
+        },
+      });
+    } else if (method === 'session/set_config_option') {
+      setConfigCalls.push(message.params);
+      const params = message.params as { configId?: string; value?: string };
+      send({
+        jsonrpc: '2.0',
+        id,
+        result: { configOptions: [{ id: params.configId, currentValue: params.value }] },
       });
     } else if (method === 'session/set_mode') {
       setModeIds.push((message.params as { modeId?: string })?.modeId ?? '');
@@ -74,7 +90,7 @@ function fakeAgentIo(script: FakeAgentScript): {
   });
   input.setEncoding('utf8');
   input.on('data', (chunk: string) => read(chunk));
-  return { input, output, setModeIds };
+  return { input, output, setModeIds, setConfigCalls };
 }
 
 describe('acp', () => {
@@ -200,6 +216,40 @@ describe('acp', () => {
     );
     assert.equal(result2.text, 'second message');
     assert.deepEqual(fake2.setModeIds, []);
+
+    // Model selection rides session/set_config_option when the spec asks for it.
+    const fake3 = fakeAgentIo({
+      configOptions: [
+        {
+          id: 'model',
+          category: 'model',
+          currentValue: 'swe-1-7',
+          options: [{ value: 'glm-5-2', name: 'GLM 5.2' }],
+        },
+      ],
+      onPrompt: (agent) => {
+        agent.update({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'ok' },
+        });
+        agent.finish();
+      },
+    });
+    const result3 = await driveAcpSession(
+      { input: fake3.input, output: fake3.output },
+      {
+        cwd: '/x',
+        prompt: 'p',
+        agent: 'fake',
+        label: 'review',
+        log: noLog,
+        configOptionModelId: 'glm-5.2',
+      },
+    );
+    assert.equal(result3.text, 'ok');
+    assert.deepEqual(fake3.setConfigCalls, [
+      { sessionId: 's1', configId: 'model', value: 'glm-5-2' },
+    ]);
   });
 
   it('materializes per-agent read-only and model config', () => {
@@ -246,9 +296,21 @@ describe('acp', () => {
     ]);
     assert.deepEqual(cursorAcpSpec('key').args('cursor/default'), ['acp']);
     const devin = devinAcpSpec();
-    assert.deepEqual(devin.args('devin/opus'), ['acp']);
-    assert.equal(devin.env('devin/default').env.HOME, process.env.HOME);
-    assert.throws(() => devin.env('devin/opus'), /cannot select a model/);
+    assert.deepEqual(devin.args('devin/glm-5.2'), ['acp']);
+    assert.equal(devin.modelConfigOption, true);
+    assert.equal(devin.env('devin/glm-5.2').env.HOME, process.env.HOME);
+
+    const modelOptions = [
+      { value: 'glm-5-2', name: 'GLM 5.2' },
+      { value: 'claude-opus-4-8-medium', name: 'Claude Opus 4.8 Medium' },
+    ];
+    assert.equal(matchModelOptionValue(modelOptions, 'glm-5-2'), 'glm-5-2');
+    assert.equal(matchModelOptionValue(modelOptions, 'glm-5.2'), 'glm-5-2');
+    assert.equal(
+      matchModelOptionValue(modelOptions, 'claude opus 4.8 medium'),
+      'claude-opus-4-8-medium',
+    );
+    assert.equal(matchModelOptionValue(modelOptions, 'nope'), undefined);
 
     assert.equal(isAcpEnabled({ JBOT_ACP: '1' }), true);
     assert.equal(isAcpEnabled({ JBOT_ACP: 'true' }), true);

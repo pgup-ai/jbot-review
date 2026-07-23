@@ -200,6 +200,29 @@ interface AcpSessionOptions {
   agent: string;
   label: string;
   log: (msg: string) => void;
+  /** Select this model via the agent's ACP model config option (agents whose
+   * spec sets modelConfigOption — CLI flags/env don't reach their sessions). */
+  configOptionModelId?: string;
+}
+
+interface ModelOptionCandidate {
+  value?: string;
+  name?: string;
+}
+
+/** Resolves a jbot model id against a model config option's choices: exact
+ * value, then display name (case-insensitive), then dotted→hyphenated value
+ * (`glm-5.2` ⇒ devin's `glm-5-2`). */
+export function matchModelOptionValue(
+  options: ModelOptionCandidate[],
+  modelID: string,
+): string | undefined {
+  const lower = modelID.toLowerCase();
+  const match =
+    options.find((option) => option.value === modelID) ??
+    options.find((option) => option.name?.toLowerCase() === lower) ??
+    options.find((option) => option.value === modelID.replaceAll('.', '-'));
+  return match?.value;
 }
 
 interface AcpSessionResult {
@@ -273,6 +296,9 @@ export async function driveAcpSession(
   if (typeof sessionId !== 'string' || !sessionId) {
     throw new Error(`acp:${agent} ${label}: session/new returned no sessionId`);
   }
+  if (options.configOptionModelId) {
+    await selectModelConfigOption(conn, sessionId, session, options);
+  }
   const modes = session.modes as
     | { currentModeId?: string; availableModes?: { id?: string }[] }
     | undefined;
@@ -299,6 +325,59 @@ export async function driveAcpSession(
   };
 }
 
+interface ConfigOptionState {
+  id?: string;
+  category?: string;
+  currentValue?: unknown;
+  options?: ModelOptionCandidate[];
+}
+
+/** Every failure here throws: silently reviewing on a model the user did not
+ * pick would misrepresent the review, so no fail-open. */
+async function selectModelConfigOption(
+  conn: AcpConnection,
+  sessionId: string,
+  session: Record<string, unknown>,
+  options: AcpSessionOptions,
+): Promise<void> {
+  const { agent, label, configOptionModelId } = options;
+  const modelId = configOptionModelId as string;
+  const configOptions = (session.configOptions ?? []) as ConfigOptionState[];
+  const modelOption = configOptions.find(
+    (option) => option.id === 'model' || option.category === 'model',
+  );
+  if (!modelOption?.id) {
+    throw new Error(
+      `acp:${agent} ${label}: agent exposes no model config option; cannot select "${modelId}"`,
+    );
+  }
+  const value = matchModelOptionValue(modelOption.options ?? [], modelId);
+  if (!value) {
+    const available = (modelOption.options ?? [])
+      .map((option) => option.value)
+      .filter(Boolean)
+      .slice(0, 12)
+      .join(', ');
+    throw new Error(
+      `acp:${agent} ${label}: model "${modelId}" is not offered by the agent; first offers: ${available}`,
+    );
+  }
+  if (modelOption.currentValue === value) return;
+  const updated = (await conn.request('session/set_config_option', {
+    sessionId,
+    configId: modelOption.id,
+    value,
+  })) as Record<string, unknown> | undefined;
+  const after = ((updated?.configOptions ?? []) as ConfigOptionState[]).find(
+    (option) => option.id === modelOption.id,
+  );
+  if (after?.currentValue !== value) {
+    throw new Error(
+      `acp:${agent} ${label}: model selection did not stick (wanted "${value}", agent reports ${JSON.stringify(after?.currentValue)})`,
+    );
+  }
+}
+
 interface AcpAgentSpec {
   /** jbot backend id this spec serves; the engine name becomes `acp:<id>`. */
   id: string;
@@ -306,6 +385,9 @@ interface AcpAgentSpec {
   args(model: string): string[];
   /** Per-spawn env + optional cleanup (temp auth copies, config files). */
   env(model: string): { env: NodeJS.ProcessEnv; cleanup?: () => void };
+  /** Model rides the agent's ACP model config option — for agents (devin)
+   * whose CLI flags/env/config never reach the ACP session. */
+  modelConfigOption?: boolean;
 }
 
 async function runAcpPrompt(
@@ -318,6 +400,8 @@ async function runAcpPrompt(
   timeoutMs = ACP_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
   const { env, cleanup } = spec.env(model);
+  const { modelID } = parseModelName(model);
+  const configOptionModelId = spec.modelConfigOption && modelID !== 'default' ? modelID : undefined;
   log(`Calling ${label} prompt (agent=acp:${spec.id}, model=${model})`);
   const child = spawn(spec.bin, spec.args(model), {
     cwd: workspace,
@@ -340,7 +424,7 @@ async function runAcpPrompt(
     const result = await Promise.race([
       driveAcpSession(
         { input: child.stdin as Writable, output: child.stdout as Readable },
-        { cwd: workspace, prompt, agent: spec.id, label, log },
+        { cwd: workspace, prompt, agent: spec.id, label, log, configOptionModelId },
       ),
       new Promise<never>((_, reject) => {
         child.on('error', reject);
@@ -527,18 +611,11 @@ export function devinAcpSpec(): AcpAgentSpec {
     bin: DEVIN_CLI_BIN,
     args: () => ['acp'],
     // credentials.toml is already in the real HOME (writeDevinCredentials).
-    env: (model) => {
-      const { modelID } = parseModelName(model);
-      // `devin acp` has no model selection: `--model` argv is rejected and
-      // DEVIN_MODEL is ignored (verified — an invalid value still answers).
-      // Refuse rather than silently review on devin's default model.
-      if (modelID !== 'default') {
-        throw new Error(
-          `devin ACP mode cannot select a model (got "${model}"); use devin/default, or unset JBOT_ACP for the argv driver.`,
-        );
-      }
-      return { env: { ...process.env } };
-    },
+    // --model argv, DEVIN_MODEL, and config-file agent.model never reach the
+    // ACP session (verified via the session's own config-option readout), so
+    // the model rides session/set_config_option instead.
+    env: () => ({ env: { ...process.env } }),
+    modelConfigOption: true,
   };
 }
 
