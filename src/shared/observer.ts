@@ -150,6 +150,15 @@ export async function closeObserver(timeoutMs = 2000): Promise<void> {
     /* already closed */
   }
   controller = undefined;
-  // sending and the timeout both only ever resolve, so no catch is needed.
-  await Promise.race([sending, new Promise((resolve) => setTimeout(resolve, timeoutMs))]);
+  // sending and the timeout both only ever resolve, so no catch is needed; the
+  // loser timer is cleared so it can't hold the process open for the full wait.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    sending,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }

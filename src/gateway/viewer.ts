@@ -218,8 +218,10 @@ function setReview(state, text) {
   mStatus.className = 'status' + (state ? ' ' + state : '');
   mStatusText.textContent = text;
 }
+function terminal() { return meta && (meta.runStatus === 'completed' || meta.runStatus === 'failed'); }
 function onRunStatus(d) {
   if (!meta || d.runId !== (active || '').split('/')[0]) return;
+  meta.runStatus = d.status;
   // 'reviewing' is non-terminal: keep the session live so elapsed keeps ticking
   // and frames still flow. completed/failed are terminal.
   meta.live = d.status === 'reviewing';
@@ -239,7 +241,7 @@ function ingest(e) {
   if (e.model) meta.model = e.model;
   if (!meta.firstTs) meta.firstTs = e.ts;
   meta.lastTs = e.ts;
-  if (!meta.started) { meta.started = true; if (meta.live) setReview('reviewing', 'reviewing'); }
+  if (!meta.started) { meta.started = true; if (meta.live && !terminal()) setReview('reviewing', 'reviewing'); }
   var f = e.frame || {};
   var p = f.params || {};
 
@@ -270,23 +272,28 @@ function ingest(e) {
     meta.live = false;
     var reason = f.result.stopReason;
     chip('end', 'done', reason);
-    // Session turn ended; the run-status control (if any) is authoritative and
-    // will refine this to review completed/failed.
-    if (reason === 'end_turn') setReview('completed', 'session ended · ' + reason);
-    else setReview('incomplete', 'session ended · ' + reason);
+    // Session turn ended. The run-level verdict (if it arrived) is authoritative
+    // — don't overwrite it with the per-session outcome.
+    if (!terminal()) {
+      if (reason === 'end_turn') setReview('completed', 'session ended · ' + reason);
+      else setReview('incomplete', 'session ended · ' + reason);
+    }
   }
   renderMeta();
 }
 
 function open(runId, sessionId) {
   if (es) es.close();
-  sseDown = false;
+  // This session's SSE isn't open yet — mark it down so the poll can't show
+  // 'connected' until es.onopen confirms live frames are flowing.
+  sseDown = true;
+  connState('warn', 'connecting');
   if (tick) clearInterval(tick);
   document.querySelectorAll('.session.active').forEach(function (b) { b.classList.remove('active'); });
   var btn = document.querySelector('[data-key="' + runId + '/' + sessionId + '"]');
   if (btn) btn.classList.add('active');
   active = runId + '/' + sessionId;
-  meta = { agent: '', model: '', mode: '', version: '', firstTs: 0, lastTs: 0, lastSeq: 0, inTok: 0, outTok: 0, ctxUsed: 0, ctxSize: 0, live: true, started: false };
+  meta = { agent: '', model: '', mode: '', version: '', runStatus: '', firstTs: 0, lastTs: 0, lastSeq: 0, inTok: 0, outTok: 0, ctxUsed: 0, ctxSize: 0, live: true, started: false };
   logEl.textContent = '';
   closeStreams();
   metaEl.hidden = false;

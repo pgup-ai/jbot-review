@@ -111,6 +111,12 @@ async function main(): Promise<void> {
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
+      // Announce in-progress up front, like a real review's runPrReview does.
+      controller.enqueue(
+        encoder.encode(
+          `${JSON.stringify({ v: 1, kind: 'run', runId, status: 'reviewing', ts: Date.now() })}\n`,
+        ),
+      );
       for (const step of steps) {
         await sleep(step.delayMs);
         const seq = (seqBySession.get(step.sessionId) ?? 0) + 1;

@@ -1922,6 +1922,9 @@ async function runReviewPipeline(params: {
  */
 export async function runPrReview(params: Parameters<typeof runReviewPipeline>[0]): Promise<void> {
   setRunName(`pr-${params.owner}-${params.repo}-${params.pullNumber}`);
+  // Announce the run as in-progress so live/mid-run viewers see "reviewing"
+  // until the terminal verdict overwrites it.
+  reportRun('reviewing');
   try {
     await runReviewPipeline(params);
     reportRun('completed');

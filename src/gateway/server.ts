@@ -117,8 +117,10 @@ async function handleIngest(req: IncomingMessage, res: ServerResponse): Promise<
   let total = 0;
   // Carries only the current incomplete line. Newlines are searched within
   // each incoming chunk (never a re-scan of the whole buffer), so an
-  // unterminated line stays O(total) instead of O(total²).
+  // unterminated line stays O(total) instead of O(total²). partialBytes tracks
+  // the line's ENCODED size so the cap stays byte-accurate for non-ASCII.
   let partial = '';
+  let partialBytes = 0;
   let overflow = false;
   const take = (line: string): void => {
     if (!line.trim()) return;
@@ -128,13 +130,18 @@ async function handleIngest(req: IncomingMessage, res: ServerResponse): Promise<
   req.setEncoding('utf8');
   for await (const chunk of req as AsyncIterable<string>) {
     total += Buffer.byteLength(chunk);
-    if (total > MAX_BODY_BYTES || partial.length + chunk.length > MAX_LINE_BYTES) {
+    if (total > MAX_BODY_BYTES) {
       overflow = true;
       break;
     }
     let start = chunk.indexOf('\n');
     if (start === -1) {
       partial += chunk;
+      partialBytes += Buffer.byteLength(chunk);
+      if (partialBytes > MAX_LINE_BYTES) {
+        overflow = true;
+        break;
+      }
       continue;
     }
     take(partial + chunk.slice(0, start));
@@ -145,6 +152,11 @@ async function handleIngest(req: IncomingMessage, res: ServerResponse): Promise<
       nl = chunk.indexOf('\n', start + 1);
     }
     partial = chunk.slice(start + 1);
+    partialBytes = Buffer.byteLength(partial);
+    if (partialBytes > MAX_LINE_BYTES) {
+      overflow = true;
+      break;
+    }
   }
   if (overflow) {
     res.writeHead(413, { 'content-type': 'text/plain' });
@@ -163,14 +175,14 @@ function handleStream(res: ServerResponse, runId: string, sessionId: string): vo
     'cache-control': 'no-store',
     connection: 'keep-alive',
   });
-  // Replay the journal first, then follow live. Replay + subscribe is one
-  // synchronous block, so no live frame slips through the gap; the viewer also
-  // de-dupes by seq, which tolerates the EventSource auto-reconnect replay.
-  for (const line of readJournalLines(dataDir, runId, sessionId)) sseWrite(res, line);
-  // A run that already finished replays its terminal status so a late viewer
-  // shows completed/failed instead of a stale "reviewing".
+  // Send the run status FIRST, so a viewer opening a finished run sees the
+  // terminal verdict before the replayed frames and never flashes "reviewing".
   const status = readRunStatus(dataDir, runId);
   if (status) sseWrite(res, JSON.stringify({ v: 1, kind: 'run', runId, status, ts: Date.now() }));
+  // Then replay the journal. Replay + subscribe is one synchronous block, so no
+  // live frame slips through the gap; the viewer also de-dupes by seq, which
+  // tolerates the EventSource auto-reconnect replay.
+  for (const line of readJournalLines(dataDir, runId, sessionId)) sseWrite(res, line);
   const key = journalKey(runId, sessionId);
   let subs = subscribers.get(key);
   if (!subs) {
