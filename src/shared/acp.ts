@@ -7,7 +7,12 @@ import type { Readable, Writable } from 'node:stream';
 import { terminateProcessTree } from './cli-process.ts';
 import { codexAuthPath, codexEnvForHome } from './codex.ts';
 import { CURSOR_CLI_BIN, cursorEnvForKey } from './cursor.ts';
-import { buildDevinReadOnlyConfig, DEVIN_CLI_BIN, devinCredentialsPath } from './devin.ts';
+import {
+  buildDevinReadOnlyConfig,
+  DEVIN_CLI_BIN,
+  devinCredentialsPath,
+  tomlString,
+} from './devin.ts';
 import { parseModelName } from './model.ts';
 import {
   parseChangesSinceLastReviewSummary,
@@ -693,10 +698,7 @@ export function codexAcpSpec(codexHome: string): AcpAgentSpec {
       copyFileSync(codexAuthPath(codexHome), codexAuthPath(dir));
       const { modelID } = parseModelName(model);
       const lines = ['sandbox_mode = "read-only"'];
-      if (modelID !== 'default') {
-        const escaped = modelID.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-        lines.push(`model = "${escaped}"`);
-      }
+      if (modelID !== 'default') lines.push(`model = ${tomlString(modelID)}`);
       writeFileSync(join(dir, 'config.toml'), `${lines.join('\n')}\n`, { mode: 0o600 });
       return {
         env: codexEnvForHome(dir),

@@ -520,7 +520,7 @@ function formatDevinUsage(usage: PromptTokenUsage): string {
   return `usage: ${parts.join(' ')}`;
 }
 
-function tomlString(value: string): string {
+export function tomlString(value: string): string {
   return JSON.stringify(value);
 }
 
