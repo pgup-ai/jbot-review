@@ -104,6 +104,11 @@ describe('acp', () => {
     const capped = createNdjsonReader(() => undefined, 8);
     assert.equal(capped('{"x":"aaaaaaaaaa'), false);
     assert.equal(capped('"}\n'), false);
+    // Same budget applies when the newline lands in the same chunk.
+    const oneShot: unknown[] = [];
+    const capped2 = createNdjsonReader((message) => oneShot.push(message), 8);
+    assert.equal(capped2('{"x":"aaaaaaaaaa"}\n'), false);
+    assert.deepEqual(oneShot, []);
   });
 
   // execute-allow and unknown-kind-allow are the DESIGNED policy (invariant
@@ -140,6 +145,11 @@ describe('acp', () => {
       }),
       { outcome: { outcome: 'selected', optionId: 'ao' } },
     );
+    // switch_mode is denied: jbot sets the session mode; approving one would
+    // let a prompt-injected switch escape the plan-mode read-only layer.
+    assert.deepEqual(respondToPermissionRequest({ toolCall: { kind: 'switch_mode' }, options }), {
+      outcome: { outcome: 'selected', optionId: 'ro' },
+    });
     // A denied tool with only allow options gets the cancelled outcome, never an allow.
     assert.deepEqual(
       respondToPermissionRequest({

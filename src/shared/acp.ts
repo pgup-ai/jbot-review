@@ -63,6 +63,13 @@ export function createNdjsonReader(
       buffer = buffer.slice(newline + 1);
       newline = buffer.indexOf('\n');
       if (!line) continue;
+      // A newline arriving in the same chunk as an oversized frame would
+      // otherwise reach JSON.parse before the post-loop budget check.
+      if (line.length > maxFrameBytes) {
+        overflowed = true;
+        buffer = '';
+        return false;
+      }
       let message: unknown;
       try {
         message = JSON.parse(line);
@@ -90,8 +97,10 @@ type PermissionResponse = {
 };
 
 // ACP ToolKind maps file mutations to edit/delete/move; `write` is not a spec
-// kind but is denied too in case an agent labels nonstandardly.
-const DENIED_TOOL_KINDS = new Set(['edit', 'delete', 'move', 'write']);
+// kind but is denied too in case an agent labels nonstandardly. `switch_mode`
+// is denied because jbot sets the session mode itself — approving one would
+// let a prompt-injected request escape the plan-mode read-only layer.
+const DENIED_TOOL_KINDS = new Set(['edit', 'delete', 'move', 'write', 'switch_mode']);
 
 /**
  * Client-side read-only layer of invariant #8: mutating tool kinds are
