@@ -428,9 +428,9 @@ would drop per-session token usage, provider model listing, and Context7 MCP.
 
 Review metadata reports backend usage counters when they are available.
 OpenCode-backed and Qoder sessions report token counters and cost from result
-metadata; Devin CLI sessions also contribute usage when the ATIF export includes
-token or cost records. Other CLI backends do not expose machine-readable
-per-session usage today, so those sessions may be absent from the metadata block.
+metadata. The ACP-driven backends (cursor/devin/codex) and the other CLI
+backends do not report machine-readable per-session usage today, so those
+sessions may be absent from the metadata block.
 These counters are observability only: they do not identify API keys,
 accounts, organizations, quota buckets, remaining quota, or reset times, so
 jbot-review does not use them for smart key rotation.
