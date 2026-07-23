@@ -345,6 +345,32 @@ describe('acp', () => {
       { sessionId: 's1', configId: 'mode', value: 'plan' },
     ]);
 
+    // Trailing frames after the prompt response are captured (opencode#17505):
+    // finish first, then stream text, and the drain must still return it —
+    // even though some text arrived before the response.
+    const fake4b = fakeAgentIo({
+      onPrompt: (agent) => {
+        agent.update({
+          sessionUpdate: 'agent_message_chunk',
+          messageId: 'm1',
+          content: { type: 'text', text: '{"summary":"ok",' },
+        });
+        agent.finish();
+        setTimeout(() => {
+          agent.update({
+            sessionUpdate: 'agent_message_chunk',
+            messageId: 'm1',
+            content: { type: 'text', text: '"findings":[]}' },
+          });
+        }, 40);
+      },
+    });
+    const result4b = await driveAcpSession(
+      { input: fake4b.input, output: fake4b.output },
+      { cwd: '/x', prompt: 'p', agent: 'fake', label: 'review', log: noLog },
+    );
+    assert.equal(result4b.text, '{"summary":"ok","findings":[]}');
+
     // Auth-gated agents: -32000 on session/new triggers authenticate + one retry.
     const fake5 = fakeAgentIo({
       authMethods: [{ id: 'cli-login', name: 'CLI Login' }],
@@ -389,6 +415,12 @@ describe('acp', () => {
     const codexHome = mkdtempSync(join(tmpdir(), 'jbot-test-codex-'));
     writeFileSync(codexAuthPath(codexHome), '{}');
     const codex = codexAcpSpec(codexHome);
+    // Seed the adapter runtime overrides so the strip assertions are not
+    // vacuous: env() inherits process.env, so if a delete were dropped the
+    // ambient value would leak into the child.
+    const overrides = ['CODEX_CONFIG', 'CODEX_PATH', 'MODEL_PROVIDER'] as const;
+    const savedOverrides = overrides.map((key) => [key, process.env[key]] as const);
+    for (const key of overrides) process.env[key] = `ambient-${key}`;
     const codexEnv = codex.env('codex/gpt-5.2-codex');
     try {
       const home = codexEnv.env.CODEX_HOME as string;
@@ -403,13 +435,18 @@ describe('acp', () => {
         weird.cleanup?.();
       }
       assert.ok(existsSync(codexAuthPath(home)));
-      // codex-acp runtime overrides are stripped/pinned (README: CODEX_CONFIG
-      // merges into session config; INITIAL_AGENT_MODE selects the mode).
-      assert.equal(codexEnv.env.CODEX_CONFIG, undefined);
+      // codex-acp runtime overrides are stripped despite the seeded ambient
+      // values (README: CODEX_CONFIG merges into session config, CODEX_PATH
+      // swaps the binary, MODEL_PROVIDER redirects models); mode is pinned.
+      for (const key of overrides) assert.equal(codexEnv.env[key], undefined);
       assert.equal(codexEnv.env.INITIAL_AGENT_MODE, 'read-only');
       assert.equal(codexEnv.env.NO_BROWSER, '1');
     } finally {
       codexEnv.cleanup?.();
+      for (const [key, value] of savedOverrides) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
     rmSync(codexHome, { recursive: true, force: true });
 

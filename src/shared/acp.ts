@@ -41,7 +41,9 @@ const ACP_PROTOCOL_VERSION = 1;
 // runaway child, and the connection fails loud instead of buffering to OOM.
 const ACP_MAX_FRAME_BYTES = 32 * 1024 * 1024;
 const ACP_STDERR_TAIL_BYTES = 64 * 1024;
-const ACP_POST_TURN_DRAIN_MS = 750;
+// The trailing-frame race (opencode#17505) is flush-ordering, so late frames
+// arrive within an I/O tick; this covers it without paying 750ms per session.
+const ACP_POST_TURN_DRAIN_MS = 300;
 
 export const CODEX_ACP_BIN = 'codex-acp';
 
@@ -403,14 +405,13 @@ export async function driveAcpSession(
     sessionId,
     prompt: [{ type: 'text', text: options.prompt }],
   })) as Record<string, unknown>;
+  // opencode-lineage agents can flush trailing session/update frames AFTER the
+  // prompt response (anomalyco/opencode#17505, live-hit via kilo). Flushing
+  // now would truncate — the trailing chunks land in `current` after this
+  // point whether or not text already arrived — so drain first (the ordering
+  // race resolves within one I/O flush), then take the final segment.
+  await new Promise((resolve) => setTimeout(resolve, ACP_POST_TURN_DRAIN_MS));
   flush();
-  if (segments.length === 0) {
-    // opencode-lineage agents can flush trailing session/update frames AFTER
-    // the prompt response (anomalyco/opencode#17505, live-hit via kilo);
-    // drain briefly before declaring the turn textless.
-    await new Promise((resolve) => setTimeout(resolve, ACP_POST_TURN_DRAIN_MS));
-    flush();
-  }
   return {
     text: (segments[segments.length - 1] ?? '').trim(),
     stopReason: String(result?.stopReason ?? 'unknown'),
