@@ -410,11 +410,27 @@ tool serves any hunks past the embed budget), and manage provider prompt
 caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions
 only.
 
+**ACP engine.** The `cursor`, `devin`, and `codex` backends run over the
+[Agent Client Protocol](https://agentclientprotocol.com) — one stdio JSON-RPC
+driver instead of each CLI's bespoke headless mode. Read-only is layered: a
+client-side permission policy (mutating tool kinds rejected; bash allowed per
+the review invariants), a REQUIRED plan session mode for cursor and devin —
+the session fails closed if plan mode is missing or cannot be set — plus
+agent-side config (codex runs under `sandbox_mode = "read-only"`; devin gets
+the argv driver's read-only permissions config in a per-spawn HOME).
+`devin` ignores its CLI model flags in ACP mode, so jbot selects the model
+through the session's ACP model config option — ids like `devin/glm-5-2`
+(dotted `devin/glm-5.2` and display names also match).
+`cline` stays on its argv driver: its ACP mode currently returns empty turns
+([cline/cline#11015](https://github.com/cline/cline/issues/11015)). The
+opencode server engine keeps serving SDK providers directly — its ACP mode
+would drop per-session token usage, provider model listing, and Context7 MCP.
+
 Review metadata reports backend usage counters when they are available.
 OpenCode-backed and Qoder sessions report token counters and cost from result
-metadata; Devin CLI sessions also contribute usage when the ATIF export includes
-token or cost records. Other CLI backends do not expose machine-readable
-per-session usage today, so those sessions may be absent from the metadata block.
+metadata. The ACP-driven backends (cursor/devin/codex) and the other CLI
+backends do not report machine-readable per-session usage today, so those
+sessions may be absent from the metadata block.
 These counters are observability only: they do not identify API keys,
 accounts, organizations, quota buckets, remaining quota, or reset times, so
 jbot-review does not use them for smart key rotation.

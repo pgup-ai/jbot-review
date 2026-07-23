@@ -1,6 +1,38 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 
 const DEFAULT_KILL_GRACE_MS = 2_000;
+
+/**
+ * SIGTERMs the child's process group (plain pid on Windows — no process
+ * groups there), escalating to SIGKILL after graceMs unless it exits first.
+ * Returns a cancel for the escalation timer; the SIGKILL also self-guards on
+ * exitCode so a late signal can never land on a reused pid.
+ */
+export function terminateProcessTree(
+  child: ChildProcess,
+  graceMs = DEFAULT_KILL_GRACE_MS,
+): () => void {
+  const pid = child.pid;
+  if (pid === undefined) return () => {};
+  const target = process.platform === 'win32' ? pid : -pid;
+  try {
+    process.kill(target, 'SIGTERM');
+  } catch {
+    /* best effort */
+  }
+  const killTimer = setTimeout(() => {
+    // A signal-terminated child keeps exitCode null and sets signalCode, so
+    // check both — otherwise the escalation could fire at a reused pid.
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    try {
+      process.kill(target, 'SIGKILL');
+    } catch {
+      /* best effort */
+    }
+  }, graceMs);
+  killTimer.unref();
+  return () => clearTimeout(killTimer);
+}
 
 export interface CliProcessResult {
   stdout: string;
@@ -56,37 +88,17 @@ export function spawnWithTimeout(
     let stdout = '';
     let stderr = '';
     let settled = false;
-    let killTimer: NodeJS.Timeout | undefined;
+    let cancelKill: (() => void) | undefined;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      const pid = child.pid;
-      if (pid !== undefined) {
-        const target = process.platform === 'win32' ? pid : -pid;
-        try {
-          process.kill(target, 'SIGTERM');
-        } catch {
-          /* best effort */
-        }
-        // Escalate to SIGKILL only if the child is still alive after the grace
-        // period; the close/error handlers clear this timer the instant it
-        // exits, so a late SIGKILL can never land on a reused pid.
-        killTimer = setTimeout(() => {
-          if (child.exitCode !== null) return;
-          try {
-            process.kill(target, 'SIGKILL');
-          } catch {
-            /* best effort */
-          }
-        }, killGraceMs);
-        killTimer.unref();
-      }
+      cancelKill = terminateProcessTree(child, killGraceMs);
       reject(new Error(timeoutMessage));
     }, timeoutMs);
     timer.unref();
     const clearTimers = () => {
       clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
+      cancelKill?.();
     };
 
     child.stdout?.setEncoding('utf8');

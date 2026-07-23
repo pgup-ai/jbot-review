@@ -11,17 +11,18 @@ RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000
 
-# Engine + optional commandcode/codex/cline/grok/kilo providers; --version verifies they run
+# Engine + optional commandcode/cline/grok/kilo providers and the codex ACP
+# adapter (which bundles its own @openai/codex); --version verifies they run
 # on Node 24. Pinned exactly: with @latest the buildx layer cache froze whatever version
 # the last cache bust happened to grab — bump versions here deliberately instead.
-RUN npm install -g opencode-ai@1.18.4 command-code@0.40.17 @openai/codex@0.142.5 cline@3.0.34 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 \
+RUN npm install -g opencode-ai@1.18.4 command-code@0.40.17 cline@3.0.46 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 @agentclientprotocol/codex-acp@1.1.7 \
   && npm cache clean --force \
   && opencode --version \
   && command-code --version \
-  && codex --version \
   && cline --version \
   && grok --version \
-  && kilo --version
+  && kilo --version \
+  && codex-acp --version
 
 # Keep Qoder in its own layer: its package is large enough to push the combined
 # multi-CLI npm install over common Docker Desktop memory limits.
