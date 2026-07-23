@@ -710,8 +710,8 @@ calls, permission decisions, findings — live or replayed.
   The tee is default-off (no `JBOT_OBSERVER_URL` ⇒ zero overhead) and
   fail-open: an unreachable or slow gateway never blocks, slows, or fails the
   review.
-- **Status model:** the viewer separates *connection* health (viewer↔gateway:
-  connected / reconnecting / offline) from *review* state (reviewing /
+- **Status model:** the viewer separates _connection_ health (viewer↔gateway:
+  connected / reconnecting / offline) from _review_ state (reviewing /
   completed / failed), so a dropped socket never looks like a failed review.
   Sessions and journals are durable — a completed or failed run stays on disk
   and reopening replays it. The review verdict is authoritative: `review:local`
