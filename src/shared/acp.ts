@@ -837,12 +837,12 @@ export function kiloAcpSpec(auth: string): AcpAgentSpec {
     },
     // ALWAYS select: the ACP session default is a paid model, while jbot's
     // kilo/default means the free gateway tier. Option values are full
-    // gateway-prefixed ids (`kilo/<vendor>/<model>`), so the bare id gets the
-    // prefixed form as its second candidate.
+    // gateway-prefixed ids (`kilo/<vendor>/<model>`), so the prefixed form
+    // leads; the bare id is only a hedge against kilo dropping the prefix.
     modelConfigCandidates: (model) => {
       const { modelID } = parseModelName(model);
       const id = modelID === 'default' ? KILO_GATEWAY_FREE_MODEL : modelID;
-      return [id, `${KILO_PROVIDER_ID}/${id}`];
+      return [`${KILO_PROVIDER_ID}/${id}`, id];
     },
     requirePlanMode: true,
   };

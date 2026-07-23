@@ -335,7 +335,7 @@ describe('acp', () => {
         agent: 'kilo',
         label: 'review',
         log: noLog,
-        configOptionModelIds: ['kilo-auto/free', 'kilo/kilo-auto/free'],
+        configOptionModelIds: ['kilo/kilo-auto/free', 'kilo-auto/free'],
         requirePlanMode: true,
       },
     );
@@ -427,12 +427,12 @@ describe('acp', () => {
     // Selection ALWAYS runs: kilo's session default is a paid model while
     // jbot's kilo/default means the free gateway tier; values are prefixed.
     assert.deepEqual(kilo.modelConfigCandidates?.('kilo/default'), [
-      'kilo-auto/free',
       'kilo/kilo-auto/free',
+      'kilo-auto/free',
     ]);
     assert.deepEqual(kilo.modelConfigCandidates?.('kilo/stepfun/step-3.7-flash:free'), [
-      'stepfun/step-3.7-flash:free',
       'kilo/stepfun/step-3.7-flash:free',
+      'stepfun/step-3.7-flash:free',
     ]);
     const kiloEnv = kilo.env('kilo/default');
     try {
