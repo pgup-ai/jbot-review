@@ -24,14 +24,7 @@ import {
   type CliBackendID,
 } from './backend-selection.ts';
 import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
-import {
-  codexAcpSpec,
-  createAcpBackend,
-  cursorAcpSpec,
-  devinAcpSpec,
-  isAcpEnabled,
-  opencodeAcpSpec,
-} from './acp.ts';
+import { codexAcpSpec, createAcpBackend, cursorAcpSpec, devinAcpSpec } from './acp.ts';
 import {
   piModelAvailable,
   piSupportsProvider,
@@ -91,15 +84,7 @@ import {
   Semaphore,
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
-import {
-  DEVIN_PROVIDER_ID,
-  runDevinAddressedPriorCommentsCheck,
-  runDevinFindingVerification,
-  runDevinGuidelineComplianceCheck,
-  runDevinChangesSinceLastReview,
-  runDevinReview,
-  writeDevinCredentials,
-} from './devin.ts';
+import { DEVIN_PROVIDER_ID, writeDevinCredentials } from './devin.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
   listCommandCodeModels,
@@ -110,24 +95,8 @@ import {
   runCommandCodeReview,
   writeCommandCodeAuth,
 } from './commandcode.ts';
-import {
-  CURSOR_PROVIDER_ID,
-  listCursorModels,
-  runCursorAddressedPriorCommentsCheck,
-  runCursorFindingVerification,
-  runCursorGuidelineComplianceCheck,
-  runCursorChangesSinceLastReview,
-  runCursorReview,
-} from './cursor.ts';
-import {
-  CODEX_PROVIDER_ID,
-  runCodexAddressedPriorCommentsCheck,
-  runCodexChangesSinceLastReview,
-  runCodexFindingVerification,
-  runCodexGuidelineComplianceCheck,
-  runCodexReview,
-  writeCodexAuth,
-} from './codex.ts';
+import { CURSOR_PROVIDER_ID, listCursorModels } from './cursor.ts';
+import { CODEX_PROVIDER_ID, writeCodexAuth } from './codex.ts';
 import {
   CLINE_PROVIDER_ID,
   runClineAddressedPriorCommentsCheck,
@@ -354,53 +323,6 @@ function createPoolsideBackend(
   };
 }
 
-function createDevinBackend(workspace: string): ReviewBackend {
-  return {
-    name: DEVIN_PROVIDER_ID,
-    runReview: (model, prContext, guidelines, log, options) =>
-      runDevinReview(workspace, model, prContext, guidelines, log, options),
-    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
-      runDevinAddressedPriorCommentsCheck(
-        workspace,
-        model,
-        prContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-      ),
-    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
-      runDevinGuidelineComplianceCheck(
-        workspace,
-        model,
-        prContext,
-        guidelines,
-        log,
-        timeoutMs,
-        onTokenUsage,
-      ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      runDevinFindingVerification(
-        workspace,
-        model,
-        prContext,
-        findings,
-        log,
-        timeoutMs,
-        onTokenUsage,
-      ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runDevinChangesSinceLastReview(
-        workspace,
-        model,
-        prContext,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-      ),
-  };
-}
-
 function createCommandCodeBackend(workspace: string, home: string): ReviewBackend {
   return {
     name: COMMANDCODE_PROVIDER_ID,
@@ -451,114 +373,6 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
         timeoutMs,
         onTokenUsage,
         home,
-      ),
-  };
-}
-
-function createCursorBackend(workspace: string, apiKey: string): ReviewBackend {
-  return {
-    name: CURSOR_PROVIDER_ID,
-    runReview: (model, prContext, guidelines, log, options) =>
-      runCursorReview(workspace, model, prContext, guidelines, log, {
-        ...options,
-        apiKey,
-      }),
-    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
-      runCursorAddressedPriorCommentsCheck(
-        workspace,
-        model,
-        prContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        apiKey,
-      ),
-    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
-      runCursorGuidelineComplianceCheck(
-        workspace,
-        model,
-        prContext,
-        guidelines,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        apiKey,
-      ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      runCursorFindingVerification(
-        workspace,
-        model,
-        prContext,
-        findings,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        apiKey,
-      ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runCursorChangesSinceLastReview(
-        workspace,
-        model,
-        prContext,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        apiKey,
-      ),
-  };
-}
-
-function createCodexBackend(workspace: string, codexHome: string): ReviewBackend {
-  return {
-    name: CODEX_PROVIDER_ID,
-    runReview: (model, prContext, guidelines, log, options) =>
-      runCodexReview(workspace, model, prContext, guidelines, log, {
-        ...options,
-        home: codexHome,
-      }),
-    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
-      runCodexAddressedPriorCommentsCheck(
-        workspace,
-        model,
-        prContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        codexHome,
-      ),
-    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
-      runCodexGuidelineComplianceCheck(
-        workspace,
-        model,
-        prContext,
-        guidelines,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        codexHome,
-      ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      runCodexFindingVerification(
-        workspace,
-        model,
-        prContext,
-        findings,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        codexHome,
-      ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runCodexChangesSinceLastReview(
-        workspace,
-        model,
-        prContext,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        codexHome,
       ),
   };
 }
@@ -1371,13 +1185,6 @@ export async function runPrReview(params: {
     cleanupGrokHome();
   };
 
-  const acpEnabled = isAcpEnabled();
-  if (acpEnabled) {
-    log(
-      'ACP engine enabled (JBOT_ACP=true): cursor/devin/codex/opencode run over ACP stdio (cline excluded: cline/cline#11015).',
-    );
-  }
-
   if (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID) {
     const devinApiKey = backendSelection.devinApiKey;
     if (!devinApiKey) {
@@ -1385,9 +1192,7 @@ export async function runPrReview(params: {
     }
     const credentialsPath = writeDevinCredentials(devinApiKey);
     log(`Devin CLI credentials configured at ${credentialsPath}.`);
-    devinBackend = acpEnabled
-      ? createAcpBackend(devinAcpSpec(), workspace)
-      : createDevinBackend(workspace);
+    devinBackend = createAcpBackend(devinAcpSpec(), workspace);
   }
 
   if (mainCliBackend === CURSOR_PROVIDER_ID || auxCliBackend === CURSOR_PROVIDER_ID) {
@@ -1400,9 +1205,7 @@ export async function runPrReview(params: {
     log(
       'Cursor CLI authenticated via CURSOR_API_KEY; token usage is unavailable for those sessions.',
     );
-    cursorBackend = acpEnabled
-      ? createAcpBackend(cursorAcpSpec(cursorApiKey), workspace)
-      : createCursorBackend(workspace, cursorApiKey);
+    cursorBackend = createAcpBackend(cursorAcpSpec(cursorApiKey), workspace);
   }
 
   if (mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID) {
@@ -1439,9 +1242,7 @@ export async function runPrReview(params: {
     }
     log(`Codex CLI auth configured at ${authPath}.`);
     log('Codex CLI token usage is unavailable; review metadata may omit those sessions.');
-    codexBackend = acpEnabled
-      ? createAcpBackend(codexAcpSpec(codexHome), workspace)
-      : createCodexBackend(workspace, codexHome);
+    codexBackend = createAcpBackend(codexAcpSpec(codexHome), workspace);
   }
 
   if (mainCliBackend === CLINE_PROVIDER_ID || auxCliBackend === CLINE_PROVIDER_ID) {
@@ -1460,9 +1261,8 @@ export async function runPrReview(params: {
     }
     log(`Cline CLI auth configured at ${authPath}.`);
     log('Cline CLI token usage is unavailable; review metadata may omit those sessions.');
-    // cline stays on the argv driver even under JBOT_ACP: its ACP prompt loop
-    // returns end_turn with no output (cline/cline#11015, reproduced on
-    // 3.0.34 and 3.0.46) — an empty review must not ship behind the flag.
+    // cline stays on the argv driver: its ACP prompt loop returns end_turn
+    // with no output (cline/cline#11015, reproduced on 3.0.34 and 3.0.46).
     clineBackend = createClineBackend(workspace, clineHome);
   }
 
@@ -1588,61 +1388,40 @@ export async function runPrReview(params: {
       cleanupCliHomes();
       throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
     }
-    const opencodeAuxProviderKeys = auxNeedsOpencodeConfig
-      ? [
-          {
-            providerID: auxProviderID,
-            apiKey: auxNeedsOwnKey ? options.auxApiKey : opencodeApiKey,
-            modelID: auxModelID,
-            baseURL: auxNeedsOwnKey ? options.auxBaseURL : baseURL,
-            promptCache: promptCachePolicy.auxProviderPromptCache,
-          },
-        ]
-      : undefined;
-    if (acpEnabled) {
-      // `opencode acp` per session instead of the server. Server-only extras
-      // are skipped in this mode: provider model listing and Context7 MCP.
-      log('opencode role runs via ACP (JBOT_ACP=true); skipping opencode server boot.');
-      opencodeBackend = createAcpBackend(
-        opencodeAcpSpec({
-          providerID: opencodeProviderID,
-          modelID: opencodeModelID,
-          apiKey: opencodeApiKey,
+    log('Starting opencode server');
+    try {
+      opencodeRuntime = await startOpencode(
+        workspace,
+        opencodeProviderID,
+        opencodeModelID,
+        opencodeApiKey,
+        log,
+        {
           modelOptions: mainOnOpencode ? options.modelOptions : undefined,
           baseURL: mainOnOpencode ? baseURL : options.auxBaseURL,
           promptCache: mainOnOpencode
             ? promptCachePolicy.providerPromptCache
             : promptCachePolicy.auxProviderPromptCache,
-          additionalProviderKeys: opencodeAuxProviderKeys,
-        }),
-        workspace,
+          port: options.opencodePort > 0 ? options.opencodePort : undefined,
+          additionalProviderKeys: auxNeedsOpencodeConfig
+            ? [
+                {
+                  providerID: auxProviderID,
+                  apiKey: auxNeedsOwnKey ? options.auxApiKey : opencodeApiKey,
+                  modelID: auxModelID,
+                  baseURL: auxNeedsOwnKey ? options.auxBaseURL : baseURL,
+                  promptCache: promptCachePolicy.auxProviderPromptCache,
+                },
+              ]
+            : undefined,
+        },
       );
-    } else {
-      log('Starting opencode server');
-      try {
-        opencodeRuntime = await startOpencode(
-          workspace,
-          opencodeProviderID,
-          opencodeModelID,
-          opencodeApiKey,
-          log,
-          {
-            modelOptions: mainOnOpencode ? options.modelOptions : undefined,
-            baseURL: mainOnOpencode ? baseURL : options.auxBaseURL,
-            promptCache: mainOnOpencode
-              ? promptCachePolicy.providerPromptCache
-              : promptCachePolicy.auxProviderPromptCache,
-            port: options.opencodePort > 0 ? options.opencodePort : undefined,
-            additionalProviderKeys: opencodeAuxProviderKeys,
-          },
-        );
-      } catch (error) {
-        piRuntime?.stop();
-        cleanupCliHomes();
-        throw error;
-      }
-      opencodeBackend = createOpencodeBackend(opencodeRuntime.client);
+    } catch (error) {
+      piRuntime?.stop();
+      cleanupCliHomes();
+      throw error;
     }
+    opencodeBackend = createOpencodeBackend(opencodeRuntime.client);
   }
 
   const cliBackends: Record<CliBackendID, ReviewBackend | undefined> = {

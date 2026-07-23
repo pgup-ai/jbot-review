@@ -10,11 +10,9 @@ import { CURSOR_CLI_BIN, cursorEnvForKey } from './cursor.ts';
 import { DEVIN_CLI_BIN } from './devin.ts';
 import { parseModelName } from './model.ts';
 import {
-  buildConfig,
   parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,
   parseReview,
-  type OpencodeProviderConfig,
 } from './opencode.ts';
 import {
   assembleAddressedPriorCommentsPrompt,
@@ -35,13 +33,6 @@ const ACP_KILL_GRACE_MS = 2_000;
 const ACP_PROTOCOL_VERSION = 1;
 
 const CODEX_ACP_BIN = 'codex-acp';
-const OPENCODE_CLI_BIN = 'opencode';
-
-/** Opt-in switch for the ACP engine; default off ⇒ existing drivers unchanged. */
-export function isAcpEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const value = env.JBOT_ACP?.trim().toLowerCase();
-  return value === '1' || value === 'true';
-}
 
 /**
  * ACP frames are newline-delimited JSON (no Content-Length headers). Tolerates
@@ -635,46 +626,6 @@ export function codexAcpSpec(codexHome: string): AcpAgentSpec {
       writeFileSync(join(dir, 'config.toml'), `${lines.join('\n')}\n`, { mode: 0o600 });
       return {
         env: codexEnvForHome(dir),
-        cleanup: () => rmSync(dir, { recursive: true, force: true }),
-      };
-    },
-  };
-}
-
-interface OpencodeAcpInput {
-  providerID: string;
-  modelID: string;
-  apiKey: string;
-  modelOptions?: Record<string, unknown>;
-  promptCache: boolean;
-  additionalProviderKeys?: OpencodeProviderConfig[];
-  baseURL?: string;
-}
-
-export function opencodeAcpSpec(input: OpencodeAcpInput): AcpAgentSpec {
-  // Same config object the opencode server boots with (provider auth +
-  // read-only permission block), built once; each spawn only re-points the
-  // top-level model so main and aux roles share the provider entries.
-  const base = buildConfig(
-    input.providerID,
-    input.modelID,
-    input.apiKey,
-    input.modelOptions,
-    input.promptCache,
-    input.additionalProviderKeys ?? [],
-    input.baseURL,
-  );
-  return {
-    id: 'opencode',
-    bin: OPENCODE_CLI_BIN,
-    args: () => ['acp'],
-    env: (model) => {
-      parseModelName(model); // validate "provider/model" before it lands in config
-      const dir = mkdtempSync(join(tmpdir(), 'jbot-opencode-acp-'));
-      const path = join(dir, 'opencode.json');
-      writeFileSync(path, JSON.stringify({ ...base, model }), { mode: 0o600 });
-      return {
-        env: { ...process.env, OPENCODE_CONFIG: path },
         cleanup: () => rmSync(dir, { recursive: true, force: true }),
       };
     },

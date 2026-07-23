@@ -11,9 +11,7 @@ import {
   cursorAcpSpec,
   devinAcpSpec,
   driveAcpSession,
-  isAcpEnabled,
   matchModelOptionValue,
-  opencodeAcpSpec,
   respondToPermissionRequest,
 } from '../src/shared/acp.ts';
 import { codexAuthPath } from '../src/shared/codex.ts';
@@ -268,27 +266,6 @@ describe('acp', () => {
     }
     rmSync(codexHome, { recursive: true, force: true });
 
-    const opencode = opencodeAcpSpec({
-      providerID: 'anthropic',
-      modelID: 'claude-x',
-      apiKey: 'k',
-      promptCache: false,
-    });
-    const ocEnv = opencode.env('anthropic/claude-x');
-    try {
-      const config = JSON.parse(readFileSync(ocEnv.env.OPENCODE_CONFIG as string, 'utf8')) as {
-        model: string;
-        permission: { edit: string; external_directory: string };
-        provider: Record<string, { options: { apiKey: string } }>;
-      };
-      assert.equal(config.model, 'anthropic/claude-x');
-      assert.equal(config.permission.edit, 'deny');
-      assert.equal(config.permission.external_directory, 'deny');
-      assert.equal(config.provider.anthropic.options.apiKey, 'k');
-    } finally {
-      ocEnv.cleanup?.();
-    }
-
     assert.deepEqual(cursorAcpSpec('key').args('cursor/composer-2'), [
       '--model',
       'composer-2',
@@ -311,10 +288,5 @@ describe('acp', () => {
       'claude-opus-4-8-medium',
     );
     assert.equal(matchModelOptionValue(modelOptions, 'nope'), undefined);
-
-    assert.equal(isAcpEnabled({ JBOT_ACP: '1' }), true);
-    assert.equal(isAcpEnabled({ JBOT_ACP: 'true' }), true);
-    assert.equal(isAcpEnabled({ JBOT_ACP: '0' }), false);
-    assert.equal(isAcpEnabled({}), false);
   });
 });

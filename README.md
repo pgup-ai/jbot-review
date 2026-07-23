@@ -410,19 +410,17 @@ tool serves any hunks past the embed budget), and manage provider prompt
 caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions
 only.
 
-**ACP engine (experimental).** `JBOT_ACP=true` (env var, default off) drives
-the `cursor`, `devin`, `codex`, and `opencode` backends over the
+**ACP engine.** The `cursor`, `devin`, and `codex` backends run over the
 [Agent Client Protocol](https://agentclientprotocol.com) — one stdio JSON-RPC
 driver instead of each CLI's bespoke headless mode, with read-only enforced by
 a client-side permission policy plus each agent's plan mode or sandbox config.
 `devin` ignores its CLI model flags in ACP mode, so jbot selects the model
 through the session's ACP model config option — ids like `devin/glm-5-2`
 (dotted `devin/glm-5.2` and display names also match).
-`cline` intentionally stays on its argv driver: its ACP mode currently returns
-empty turns ([cline/cline#11015](https://github.com/cline/cline/issues/11015)).
-In ACP mode the opencode role skips the server (provider model listing and
-Context7 MCP injection are unavailable), and the legacy drivers remain the
-default until parity is validated.
+`cline` stays on its argv driver: its ACP mode currently returns empty turns
+([cline/cline#11015](https://github.com/cline/cline/issues/11015)). The
+opencode server engine keeps serving SDK providers directly — its ACP mode
+would drop per-session token usage, provider model listing, and Context7 MCP.
 
 Review metadata reports backend usage counters when they are available.
 OpenCode-backed and Qoder sessions report token counters and cost from result
@@ -682,7 +680,7 @@ npm run review:local
   `JBOT_DYNAMIC_FANOUT`, `JBOT_MODEL_OPTIONS`, `JBOT_PROMPT_CACHE`,
   `JBOT_SKIP_DOC_ONLY`, `JBOT_MAX_CONCURRENT_SESSIONS`, `JBOT_REVIEW_TELEMETRY`,
   `JBOT_EVIDENCE_QUOTES`, `JBOT_REVIEW_AUX_MODEL` (+ `JBOT_AUX_PROVIDER`),
-  `JBOT_SDK_ENGINE`, `JBOT_ACP` (see
+  `JBOT_SDK_ENGINE` (see
   [Provider configuration](#provider-configuration-in-repo)). The
   opencode server uses a free ephemeral port automatically;
   `JBOT_OPENCODE_PORT` pins one instead.
