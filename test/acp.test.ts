@@ -19,6 +19,7 @@ import {
   cursorAcpSpec,
   devinAcpSpec,
   driveAcpSession,
+  kiloAcpSpec,
   matchModelOptionValue,
   respondToPermissionRequest,
 } from '../src/shared/acp.ts';
@@ -290,12 +291,58 @@ describe('acp', () => {
         agent: 'fake',
         label: 'review',
         log: noLog,
-        configOptionModelId: 'glm-5.2',
+        configOptionModelIds: ['glm-5.2'],
       },
     );
     assert.equal(result3.text, 'ok');
     assert.deepEqual(fake3.setConfigCalls, [
       { sessionId: 's1', configId: 'model', value: 'glm-5-2' },
+    ]);
+
+    // kilo shape: no session/modes; plan mode and the model both ride config
+    // options, and the model matches on the gateway-prefixed second candidate.
+    const fake6 = fakeAgentIo({
+      configOptions: [
+        {
+          id: 'mode',
+          category: 'mode',
+          currentValue: 'code',
+          options: [
+            { value: 'code', name: 'Code' },
+            { value: 'plan', name: 'Plan' },
+          ],
+        },
+        {
+          id: 'model',
+          category: 'model',
+          currentValue: 'kilo/stealth/paid-model',
+          options: [{ value: 'kilo/kilo-auto/free', name: 'Free' }],
+        },
+      ],
+      onPrompt: (agent) => {
+        agent.update({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'kilo-ok' },
+        });
+        agent.finish();
+      },
+    });
+    const result6 = await driveAcpSession(
+      { input: fake6.input, output: fake6.output },
+      {
+        cwd: '/x',
+        prompt: 'p',
+        agent: 'kilo',
+        label: 'review',
+        log: noLog,
+        configOptionModelIds: ['kilo-auto/free', 'kilo/kilo-auto/free'],
+        requirePlanMode: true,
+      },
+    );
+    assert.equal(result6.text, 'kilo-ok');
+    assert.deepEqual(fake6.setConfigCalls, [
+      { sessionId: 's1', configId: 'model', value: 'kilo/kilo-auto/free' },
+      { sessionId: 's1', configId: 'mode', value: 'plan' },
     ]);
 
     // Auth-gated agents: -32000 on session/new triggers authenticate + one retry.
@@ -356,6 +403,11 @@ describe('acp', () => {
         weird.cleanup?.();
       }
       assert.ok(existsSync(codexAuthPath(home)));
+      // codex-acp runtime overrides are stripped/pinned (README: CODEX_CONFIG
+      // merges into session config; INITIAL_AGENT_MODE selects the mode).
+      assert.equal(codexEnv.env.CODEX_CONFIG, undefined);
+      assert.equal(codexEnv.env.INITIAL_AGENT_MODE, 'read-only');
+      assert.equal(codexEnv.env.NO_BROWSER, '1');
     } finally {
       codexEnv.cleanup?.();
     }
@@ -369,6 +421,28 @@ describe('acp', () => {
     const codexAfter = readdirSync(tmpdir()).filter((entry) => entry.startsWith(codexLeakPrefix));
     assert.deepEqual(codexAfter, codexBefore);
 
+    const kilo = kiloAcpSpec('{"token":"k"}');
+    assert.deepEqual(kilo.args('kilo/default'), ['acp']);
+    assert.equal(kilo.requirePlanMode, true);
+    // Selection ALWAYS runs: kilo's session default is a paid model while
+    // jbot's kilo/default means the free gateway tier; values are prefixed.
+    assert.deepEqual(kilo.modelConfigCandidates?.('kilo/default'), [
+      'kilo-auto/free',
+      'kilo/kilo-auto/free',
+    ]);
+    assert.deepEqual(kilo.modelConfigCandidates?.('kilo/stepfun/step-3.7-flash:free'), [
+      'stepfun/step-3.7-flash:free',
+      'kilo/stepfun/step-3.7-flash:free',
+    ]);
+    const kiloEnv = kilo.env('kilo/default');
+    try {
+      assert.equal(kiloEnv.env.KILO_AUTH_CONTENT, '{"token":"k"}');
+      assert.notEqual(kiloEnv.env.HOME, process.env.HOME);
+    } finally {
+      kiloEnv.cleanup?.();
+    }
+    assert.throws(() => kiloAcpSpec('not json').env('kilo/default'));
+
     assert.deepEqual(cursorAcpSpec('key').args('cursor/composer-2'), [
       '--model',
       'composer-2',
@@ -381,7 +455,8 @@ describe('acp', () => {
     writeFileSync(sourceCredentials, 'windsurf_api_key = "k"\n');
     const devin = devinAcpSpec(devinHome);
     assert.deepEqual(devin.args('devin/glm-5.2'), ['acp']);
-    assert.equal(devin.modelConfigOption, true);
+    assert.deepEqual(devin.modelConfigCandidates?.('devin/glm-5.2'), ['glm-5.2', 'devin/glm-5.2']);
+    assert.deepEqual(devin.modelConfigCandidates?.('devin/default'), []);
     assert.equal(devin.requirePlanMode, true);
     const devinEnv = devin.env('devin/glm-5.2');
     try {

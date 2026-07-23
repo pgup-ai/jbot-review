@@ -13,6 +13,7 @@ import {
   devinCredentialsPath,
   tomlString,
 } from './devin.ts';
+import { KILO_CLI_BIN, KILO_GATEWAY_FREE_MODEL, KILO_PROVIDER_ID, kiloEnvForAuth } from './kilo.ts';
 import { parseModelName } from './model.ts';
 import {
   parseChangesSinceLastReviewSummary,
@@ -40,6 +41,7 @@ const ACP_PROTOCOL_VERSION = 1;
 // runaway child, and the connection fails loud instead of buffering to OOM.
 const ACP_MAX_FRAME_BYTES = 32 * 1024 * 1024;
 const ACP_STDERR_TAIL_BYTES = 64 * 1024;
+const ACP_POST_TURN_DRAIN_MS = 750;
 
 export const CODEX_ACP_BIN = 'codex-acp';
 
@@ -236,9 +238,10 @@ interface AcpSessionOptions {
   agent: string;
   label: string;
   log: (msg: string) => void;
-  /** Select this model via the agent's ACP model config option (agents whose
-   * spec sets modelConfigOption — CLI flags/env don't reach their sessions). */
-  configOptionModelId?: string;
+  /** Ordered candidates to select via the agent's ACP model config option
+   * (agents whose spec sets modelConfigCandidates — CLI flags/env don't reach
+   * their sessions). First candidate that matches an offered value wins. */
+  configOptionModelIds?: string[];
   /** Fail closed when plan mode is missing or cannot be set (agents with no
    * agent-side sandbox — plan mode is their behavioral read-only layer). */
   requirePlanMode?: boolean;
@@ -365,7 +368,7 @@ export async function driveAcpSession(
   if (typeof sessionId !== 'string' || !sessionId) {
     throw new Error(`acp:${agent} ${label}: session/new returned no sessionId`);
   }
-  if (options.configOptionModelId) {
+  if (options.configOptionModelIds?.length) {
     await selectModelConfigOption(conn, sessionId, session, options);
   }
   const modes = session.modes as
@@ -386,16 +389,28 @@ export async function driveAcpSession(
       }
       log(`acp:${agent} ${label}: ${detail}; relying on permission policy`);
     }
-  } else if (!planOffered && options.requirePlanMode) {
-    throw new Error(
-      `acp:${agent} ${label}: agent offered no plan mode; refusing to run without it`,
-    );
+  } else if (!planOffered) {
+    // kilo exposes mode as a config option (no session/modes); its `plan`
+    // value is the read-only agent — the same contract as opencode's.
+    const applied = await selectPlanConfigOption(conn, sessionId, session, options);
+    if (!applied && options.requirePlanMode) {
+      throw new Error(
+        `acp:${agent} ${label}: agent offered no plan mode; refusing to run without it`,
+      );
+    }
   }
   const result = (await conn.request('session/prompt', {
     sessionId,
     prompt: [{ type: 'text', text: options.prompt }],
   })) as Record<string, unknown>;
   flush();
+  if (segments.length === 0) {
+    // opencode-lineage agents can flush trailing session/update frames AFTER
+    // the prompt response (anomalyco/opencode#17505, live-hit via kilo);
+    // drain briefly before declaring the turn textless.
+    await new Promise((resolve) => setTimeout(resolve, ACP_POST_TURN_DRAIN_MS));
+    flush();
+  }
   return {
     text: (segments[segments.length - 1] ?? '').trim(),
     stopReason: String(result?.stopReason ?? 'unknown'),
@@ -411,14 +426,58 @@ interface ConfigOptionState {
 
 /** Every failure here throws: silently reviewing on a model the user did not
  * pick would misrepresent the review, so no fail-open. */
+/** Plan mode via the `mode` config option, for agents without session/modes.
+ * Returns whether plan is (now) active; setting failures throw when plan mode
+ * is required — a review outside the read-only agent must not run. */
+async function selectPlanConfigOption(
+  conn: AcpConnection,
+  sessionId: string,
+  session: Record<string, unknown>,
+  options: AcpSessionOptions,
+): Promise<boolean> {
+  const { agent, label, log } = options;
+  const configOptions = (session.configOptions ?? []) as ConfigOptionState[];
+  const modeOption = configOptions.find(
+    (option) => option.id === 'mode' || option.category === 'mode',
+  );
+  if (!modeOption?.id) return false;
+  const plan = matchModelOptionValue(modeOption.options ?? [], 'plan');
+  if (!plan) return false;
+  if (modeOption.currentValue === plan) return true;
+  try {
+    const updated = (await conn.request('session/set_config_option', {
+      sessionId,
+      configId: modeOption.id,
+      value: plan,
+    })) as Record<string, unknown> | undefined;
+    const after = ((updated?.configOptions ?? []) as ConfigOptionState[]).find(
+      (option) => option.id === modeOption.id,
+    );
+    if (after?.currentValue !== plan) {
+      throw new Error(`agent reports mode ${JSON.stringify(after?.currentValue)}`);
+    }
+    return true;
+  } catch (error) {
+    const detail = `plan mode via config option failed (${
+      error instanceof Error ? error.message : String(error)
+    })`;
+    if (options.requirePlanMode) {
+      throw new Error(`acp:${agent} ${label}: ${detail}; refusing to run without it`);
+    }
+    log(`acp:${agent} ${label}: ${detail}; relying on permission policy`);
+    return false;
+  }
+}
+
 async function selectModelConfigOption(
   conn: AcpConnection,
   sessionId: string,
   session: Record<string, unknown>,
   options: AcpSessionOptions,
 ): Promise<void> {
-  const { agent, label, configOptionModelId } = options;
-  const modelId = configOptionModelId as string;
+  const { agent, label } = options;
+  const candidates = options.configOptionModelIds as string[];
+  const modelId = candidates[0];
   const configOptions = (session.configOptions ?? []) as ConfigOptionState[];
   const modelOption = configOptions.find(
     (option) => option.id === 'model' || option.category === 'model',
@@ -428,7 +487,11 @@ async function selectModelConfigOption(
       `acp:${agent} ${label}: agent exposes no model config option; cannot select "${modelId}"`,
     );
   }
-  const value = matchModelOptionValue(modelOption.options ?? [], modelId);
+  let value: string | undefined;
+  for (const candidate of candidates) {
+    value = matchModelOptionValue(modelOption.options ?? [], candidate);
+    if (value) break;
+  }
   if (!value) {
     const available = (modelOption.options ?? [])
       .flatMap((option) => (Array.isArray(option.options) ? option.options : [option]))
@@ -463,9 +526,12 @@ interface AcpAgentSpec {
   args(model: string): string[];
   /** Per-spawn env + optional cleanup (temp auth copies, config files). */
   env(model: string): { env: NodeJS.ProcessEnv; cleanup?: () => void };
-  /** Model rides the agent's ACP model config option — for agents (devin)
-   * whose CLI flags/env/config never reach the ACP session. */
-  modelConfigOption?: boolean;
+  /** Ordered model-id candidates for the agent's ACP model config option —
+   * for agents (devin, kilo) whose CLI flags/env/config never reach the ACP
+   * session. Empty result skips selection; kilo always returns candidates
+   * because its session default is a PAID model while jbot's kilo/default
+   * means the free gateway tier. */
+  modelConfigCandidates?(model: string): string[];
   /** See AcpSessionOptions.requirePlanMode. */
   requirePlanMode?: boolean;
 }
@@ -480,8 +546,7 @@ async function runAcpPrompt(
   timeoutMs = ACP_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
   const { env, cleanup } = spec.env(model);
-  const { modelID } = parseModelName(model);
-  const configOptionModelId = spec.modelConfigOption && modelID !== 'default' ? modelID : undefined;
+  const configOptionModelIds = spec.modelConfigCandidates?.(model);
   log(`Calling ${label} prompt (agent=acp:${spec.id}, model=${model})`);
   const child = spawn(spec.bin, spec.args(model), {
     cwd: workspace,
@@ -510,7 +575,7 @@ async function runAcpPrompt(
           agent: spec.id,
           label,
           log,
-          configOptionModelId,
+          configOptionModelIds,
           requirePlanMode: spec.requirePlanMode,
         },
       ),
@@ -551,7 +616,22 @@ async function runAcpPrompt(
     if (child.exitCode === null && child.signalCode === null) {
       terminateProcessTree(child, ACP_KILL_GRACE_MS);
     }
-    cleanup?.();
+    // Wait (bounded) for the exit before removing the temp home: a dying
+    // agent still writing there (kilo's SQLite) races rmSync into ENOTEMPTY.
+    await new Promise<void>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) return resolve();
+      const grace = setTimeout(resolve, ACP_KILL_GRACE_MS + 500);
+      grace.unref();
+      child.once('close', () => {
+        clearTimeout(grace);
+        resolve();
+      });
+    });
+    try {
+      cleanup?.();
+    } catch {
+      // Teardown must never mask the session result; tmpdir reclaims leftovers.
+    }
   }
 }
 
@@ -727,7 +807,43 @@ export function devinAcpSpec(credentialsHome = process.env.HOME || homedir()): A
       delete env.XDG_DATA_HOME;
       return { env, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
     },
-    modelConfigOption: true,
+    modelConfigCandidates: (model) => {
+      const { modelID } = parseModelName(model);
+      return modelID === 'default' ? [] : [modelID, model];
+    },
+    requirePlanMode: true,
+  };
+}
+
+export function kiloAcpSpec(auth: string): AcpAgentSpec {
+  return {
+    id: 'kilo',
+    bin: KILO_CLI_BIN,
+    args: () => ['acp'],
+    // kiloEnvForAuth: per-spawn temp HOME/XDG (kilo's SQLite data dir race) +
+    // env-injected KILO_AUTH_CONTENT + ambient key stripping — the argv
+    // driver's materialization, live-verified against `kilo acp`.
+    env: () => {
+      const dir = mkdtempSync(join(tmpdir(), 'jbot-kilo-acp-'));
+      try {
+        return {
+          env: kiloEnvForAuth(auth, dir),
+          cleanup: () => rmSync(dir, { recursive: true, force: true }),
+        };
+      } catch (error) {
+        rmSync(dir, { recursive: true, force: true });
+        throw error;
+      }
+    },
+    // ALWAYS select: the ACP session default is a paid model, while jbot's
+    // kilo/default means the free gateway tier. Option values are full
+    // gateway-prefixed ids (`kilo/<vendor>/<model>`), so the bare id gets the
+    // prefixed form as its second candidate.
+    modelConfigCandidates: (model) => {
+      const { modelID } = parseModelName(model);
+      const id = modelID === 'default' ? KILO_GATEWAY_FREE_MODEL : modelID;
+      return [id, `${KILO_PROVIDER_ID}/${id}`];
+    },
     requirePlanMode: true,
   };
 }
@@ -752,8 +868,18 @@ export function codexAcpSpec(codexHome: string): AcpAgentSpec {
         rmSync(dir, { recursive: true, force: true });
         throw error;
       }
+      const env = codexEnvForHome(dir);
+      // codex-acp runtime overrides (README): CODEX_CONFIG merges into session
+      // config, CODEX_PATH swaps the binary, MODEL_PROVIDER redirects models —
+      // ambient values must not subvert the temp-home setup. INITIAL_AGENT_MODE
+      // is pinned to the adapter's read-only mode as a positive layer.
+      delete env.CODEX_CONFIG;
+      delete env.CODEX_PATH;
+      delete env.MODEL_PROVIDER;
+      env.INITIAL_AGENT_MODE = 'read-only';
+      env.NO_BROWSER = '1';
       return {
-        env: codexEnvForHome(dir),
+        env,
         cleanup: () => rmSync(dir, { recursive: true, force: true }),
       };
     },
