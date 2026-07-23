@@ -12,7 +12,7 @@ export const VIEWER_HTML = `<!doctype html>
 <title>jbot observer</title>
 <style>
   :root { --bg:#0e1116; --panel:#161b22; --line:#242b36; --text:#dde3ec; --dim:#8b95a5;
-          --accent:#58a6ff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
+          --accent:#58a6ff; --ok:#3fb950; --bad:#f85149; --mono:ui-monospace,SFMono-Regular,Menlo,monospace; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,sans-serif; display:flex; height:100vh; }
   aside { width:260px; min-width:200px; border-right:1px solid var(--line); overflow-y:auto; padding:10px; }

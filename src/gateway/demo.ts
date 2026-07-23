@@ -13,9 +13,7 @@ import type { ObserverEnvelope } from './journal.ts';
 const url = process.env.JBOT_GATEWAY_URL?.trim() || 'http://127.0.0.1:8790';
 const token = process.env.JBOT_GATEWAY_TOKEN?.trim() || '';
 
-const now = new Date();
-const stamp = now.toISOString().replaceAll(/[:.]/g, '-').slice(0, 19);
-const runId = `demo-${stamp}`;
+const runId = `demo-${new Date().toISOString().replaceAll(/[:.]/g, '-').slice(0, 19)}`;
 
 interface Step {
   delayMs: number;
@@ -127,8 +125,6 @@ async function main(): Promise<void> {
           label: step.label,
           dir: step.dir,
           frame: step.frame,
-          repo: 'pgup-ai/jbot-review',
-          pr: 0,
         };
         controller.enqueue(encoder.encode(`${JSON.stringify(envelope)}\n`));
       }

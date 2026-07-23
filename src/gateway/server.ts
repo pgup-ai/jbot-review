@@ -26,8 +26,7 @@ const log = (msg: string): void => {
   console.log(`[jbot-gateway] ${msg}`);
 };
 
-type Subscriber = ServerResponse;
-const subscribers = new Map<string, Set<Subscriber>>();
+const subscribers = new Map<string, Set<ServerResponse>>();
 const journalKey = (runId: string, sessionId: string): string => `${runId}/${sessionId}`;
 
 function authorized(req: IncomingMessage, url: URL): boolean {
@@ -87,11 +86,15 @@ function handleStream(res: ServerResponse, runId: string, sessionId: string): vo
   subs.add(res);
   const heartbeat = setInterval(() => res.write(': ping\n\n'), HEARTBEAT_MS);
   heartbeat.unref();
-  res.on('close', () => {
+  const cleanup = (): void => {
     clearInterval(heartbeat);
     subs.delete(res);
     if (subs.size === 0) subscribers.delete(key);
-  });
+  };
+  res.on('close', cleanup);
+  // An abrupt disconnect can surface as a stream 'error'; without a listener
+  // that becomes an uncaught exception and takes the whole gateway down.
+  res.on('error', cleanup);
 }
 
 const server = createServer((req, res) => {

@@ -24,8 +24,6 @@ export interface ObserverEnvelope {
   label: string;
   dir: 'out' | 'in';
   frame: Record<string, unknown>;
-  repo?: string;
-  pr?: number;
 }
 
 // Run/session ids become file names; the allowlist is the path-traversal
