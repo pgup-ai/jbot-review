@@ -21,7 +21,9 @@ export function terminateProcessTree(
     /* best effort */
   }
   const killTimer = setTimeout(() => {
-    if (child.exitCode !== null) return;
+    // A signal-terminated child keeps exitCode null and sets signalCode, so
+    // check both — otherwise the escalation could fire at a reused pid.
+    if (child.exitCode !== null || child.signalCode !== null) return;
     try {
       process.kill(target, 'SIGKILL');
     } catch {

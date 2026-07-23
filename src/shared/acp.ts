@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process';
-import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 
 import { terminateProcessTree } from './cli-process.ts';
 import { codexAuthPath, codexEnvForHome } from './codex.ts';
 import { CURSOR_CLI_BIN, cursorEnvForKey } from './cursor.ts';
-import { DEVIN_CLI_BIN } from './devin.ts';
+import { buildDevinReadOnlyConfig, DEVIN_CLI_BIN, devinCredentialsPath } from './devin.ts';
 import { parseModelName } from './model.ts';
 import {
   parseChangesSinceLastReviewSummary,
@@ -31,8 +31,12 @@ const ACP_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const ACP_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 const ACP_KILL_GRACE_MS = 2_000;
 const ACP_PROTOCOL_VERSION = 1;
+// One JSON-RPC frame far above any real message; growth past it means a
+// runaway child, and the connection fails loud instead of buffering to OOM.
+const ACP_MAX_FRAME_BYTES = 32 * 1024 * 1024;
+const ACP_STDERR_TAIL_BYTES = 64 * 1024;
 
-const CODEX_ACP_BIN = 'codex-acp';
+export const CODEX_ACP_BIN = 'codex-acp';
 
 /**
  * ACP frames are newline-delimited JSON (no Content-Length headers). Tolerates
@@ -41,9 +45,12 @@ const CODEX_ACP_BIN = 'codex-acp';
  */
 export function createNdjsonReader(
   onMessage: (message: Record<string, unknown>) => void,
-): (chunk: string) => void {
+  maxFrameBytes = ACP_MAX_FRAME_BYTES,
+): (chunk: string) => boolean {
   let buffer = '';
+  let overflowed = false;
   return (chunk) => {
+    if (overflowed) return false;
     buffer += chunk;
     let newline = buffer.indexOf('\n');
     while (newline !== -1) {
@@ -59,6 +66,12 @@ export function createNdjsonReader(
       }
       if (message && typeof message === 'object') onMessage(message as Record<string, unknown>);
     }
+    if (buffer.length > maxFrameBytes) {
+      overflowed = true;
+      buffer = '';
+      return false;
+    }
+    return true;
   };
 }
 
@@ -133,7 +146,18 @@ class AcpConnection {
   ) {
     const read = createNdjsonReader((message) => this.dispatch(message));
     io.output.setEncoding('utf8');
-    io.output.on('data', (chunk: string | Buffer) => read(String(chunk)));
+    io.output.on('data', (chunk: string | Buffer) => {
+      if (!read(String(chunk))) {
+        this.failAllPending(
+          new Error('agent stdout exceeded the 32MB frame budget without a newline'),
+        );
+      }
+    });
+  }
+
+  private failAllPending(error: Error): void {
+    for (const entry of this.pending.values()) entry.reject(error);
+    this.pending.clear();
   }
 
   request(method: string, params: Record<string, unknown>): Promise<unknown> {
@@ -201,6 +225,9 @@ interface AcpSessionOptions {
   /** Select this model via the agent's ACP model config option (agents whose
    * spec sets modelConfigOption — CLI flags/env don't reach their sessions). */
   configOptionModelId?: string;
+  /** Fail closed when plan mode is missing or cannot be set (agents with no
+   * agent-side sandbox — plan mode is their behavioral read-only layer). */
+  requirePlanMode?: boolean;
 }
 
 interface ModelOptionCandidate {
@@ -300,17 +327,25 @@ export async function driveAcpSession(
   const modes = session.modes as
     | { currentModeId?: string; availableModes?: { id?: string }[] }
     | undefined;
-  if (modes?.availableModes?.some((mode) => mode.id === 'plan') && modes.currentModeId !== 'plan') {
+  const planOffered = modes?.availableModes?.some((mode) => mode.id === 'plan') ?? false;
+  if (planOffered && modes?.currentModeId !== 'plan') {
     try {
       await conn.request('session/set_mode', { sessionId, modeId: 'plan' });
     } catch (error) {
-      // Mode is one read-only layer of several; losing it must not fail the run.
-      log(
-        `acp:${agent} ${label}: plan mode unavailable (${
-          error instanceof Error ? error.message : String(error)
-        }); relying on permission policy`,
-      );
+      const detail = `plan mode unavailable (${
+        error instanceof Error ? error.message : String(error)
+      })`;
+      // Agents with no agent-side sandbox (spec.requirePlanMode) fail CLOSED
+      // here — plan mode is their behavioral read-only layer, not a nicety.
+      if (options.requirePlanMode) {
+        throw new Error(`acp:${agent} ${label}: ${detail}; refusing to run without it`);
+      }
+      log(`acp:${agent} ${label}: ${detail}; relying on permission policy`);
     }
+  } else if (!planOffered && options.requirePlanMode) {
+    throw new Error(
+      `acp:${agent} ${label}: agent offered no plan mode; refusing to run without it`,
+    );
   }
   const result = (await conn.request('session/prompt', {
     sessionId,
@@ -386,6 +421,8 @@ interface AcpAgentSpec {
   /** Model rides the agent's ACP model config option — for agents (devin)
    * whose CLI flags/env/config never reach the ACP session. */
   modelConfigOption?: boolean;
+  /** See AcpSessionOptions.requirePlanMode. */
+  requirePlanMode?: boolean;
 }
 
 async function runAcpPrompt(
@@ -412,7 +449,7 @@ async function runAcpPrompt(
   let stderr = '';
   child.stderr?.setEncoding('utf8');
   child.stderr?.on('data', (chunk: string) => {
-    stderr += chunk;
+    stderr = (stderr + chunk).slice(-ACP_STDERR_TAIL_BYTES);
   });
   child.stdin?.on('error', (error: Error) => {
     stderr += `\n[stdin error: ${error.message}]`;
@@ -422,7 +459,15 @@ async function runAcpPrompt(
     const result = await Promise.race([
       driveAcpSession(
         { input: child.stdin as Writable, output: child.stdout as Readable },
-        { cwd: workspace, prompt, agent: spec.id, label, log, configOptionModelId },
+        {
+          cwd: workspace,
+          prompt,
+          agent: spec.id,
+          label,
+          log,
+          configOptionModelId,
+          requirePlanMode: spec.requirePlanMode,
+        },
       ),
       new Promise<never>((_, reject) => {
         child.on('error', reject);
@@ -458,7 +503,9 @@ async function runAcpPrompt(
     return result.text;
   } finally {
     if (timer) clearTimeout(timer);
-    if (child.exitCode === null) terminateProcessTree(child, ACP_KILL_GRACE_MS);
+    if (child.exitCode === null && child.signalCode === null) {
+      terminateProcessTree(child, ACP_KILL_GRACE_MS);
+    }
     cleanup?.();
   }
 }
@@ -600,20 +647,37 @@ export function cursorAcpSpec(apiKey: string): AcpAgentSpec {
       return modelID === 'default' ? ['acp'] : ['--model', modelID, 'acp'];
     },
     env: () => ({ env: cursorEnvForKey(apiKey) }),
+    requirePlanMode: true,
   };
 }
 
-export function devinAcpSpec(): AcpAgentSpec {
+export function devinAcpSpec(credentialsHome = process.env.HOME || homedir()): AcpAgentSpec {
   return {
     id: 'devin',
     bin: DEVIN_CLI_BIN,
     args: () => ['acp'],
-    // credentials.toml is already in the real HOME (writeDevinCredentials).
-    // --model argv, DEVIN_MODEL, and config-file agent.model never reach the
-    // ACP session (verified via the session's own config-option readout), so
-    // the model rides session/set_config_option instead.
-    env: () => ({ env: { ...process.env } }),
+    // Per-spawn temp HOME: credentials copy plus the same read-only
+    // permissions config the argv driver enforces — devin has no OS sandbox
+    // in ACP mode, so this config + required plan mode are its agent-side
+    // layers. --model argv, DEVIN_MODEL, and config-file agent.model never
+    // reach the ACP session (verified via the session's own config-option
+    // readout), so the model rides session/set_config_option instead.
+    env: () => {
+      const dir = mkdtempSync(join(tmpdir(), 'jbot-devin-acp-'));
+      const credentials = devinCredentialsPath(dir);
+      mkdirSync(dirname(credentials), { recursive: true, mode: 0o700 });
+      copyFileSync(devinCredentialsPath(credentialsHome), credentials);
+      const config = join(dir, '.config', 'devin', 'config.json');
+      mkdirSync(dirname(config), { recursive: true, mode: 0o700 });
+      writeFileSync(config, JSON.stringify(buildDevinReadOnlyConfig()), { mode: 0o600 });
+      const env: NodeJS.ProcessEnv = { ...process.env, HOME: dir };
+      // XDG overrides would bypass the temp HOME's config/credentials.
+      delete env.XDG_CONFIG_HOME;
+      delete env.XDG_DATA_HOME;
+      return { env, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+    },
     modelConfigOption: true,
+    requirePlanMode: true,
   };
 }
 
@@ -629,7 +693,10 @@ export function codexAcpSpec(codexHome: string): AcpAgentSpec {
       copyFileSync(codexAuthPath(codexHome), codexAuthPath(dir));
       const { modelID } = parseModelName(model);
       const lines = ['sandbox_mode = "read-only"'];
-      if (modelID !== 'default') lines.push(`model = "${modelID}"`);
+      if (modelID !== 'default') {
+        const escaped = modelID.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+        lines.push(`model = "${escaped}"`);
+      }
       writeFileSync(join(dir, 'config.toml'), `${lines.join('\n')}\n`, { mode: 0o600 });
       return {
         env: codexEnvForHome(dir),

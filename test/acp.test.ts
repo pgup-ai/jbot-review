@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, it } from 'node:test';
 
@@ -15,6 +15,7 @@ import {
   respondToPermissionRequest,
 } from '../src/shared/acp.ts';
 import { codexAuthPath } from '../src/shared/codex.ts';
+import { devinCredentialsPath } from '../src/shared/devin.ts';
 
 const noLog = (): void => undefined;
 
@@ -99,6 +100,10 @@ describe('acp', () => {
     read(':1}\n{"b":2}\n\n{"c"');
     read(':3}\n');
     assert.deepEqual(seen, [{ a: 1 }, { b: 2 }, { c: 3 }]);
+    // Oversized frame trips the budget and latches the reader off.
+    const capped = createNdjsonReader(() => undefined, 8);
+    assert.equal(capped('{"x":"aaaaaaaaaa'), false);
+    assert.equal(capped('"}\n'), false);
   });
 
   // execute-allow and unknown-kind-allow are the DESIGNED policy (invariant
@@ -251,6 +256,26 @@ describe('acp', () => {
     assert.deepEqual(fake3.setConfigCalls, [
       { sessionId: 's1', configId: 'model', value: 'glm-5-2' },
     ]);
+
+    // requirePlanMode fails closed when the agent offers no plan mode.
+    const fake4 = fakeAgentIo({
+      modes: { currentModeId: 'code', availableModes: [{ id: 'code' }] },
+      onPrompt: (agent) => agent.finish(),
+    });
+    await assert.rejects(
+      driveAcpSession(
+        { input: fake4.input, output: fake4.output },
+        {
+          cwd: '/x',
+          prompt: 'p',
+          agent: 'fake',
+          label: 'review',
+          log: noLog,
+          requirePlanMode: true,
+        },
+      ),
+      /offered no plan mode/,
+    );
   });
 
   it('materializes per-agent read-only and model config', () => {
@@ -263,6 +288,13 @@ describe('acp', () => {
       const config = readFileSync(join(home, 'config.toml'), 'utf8');
       assert.match(config, /sandbox_mode = "read-only"/);
       assert.match(config, /model = "gpt-5\.2-codex"/);
+      const weird = codex.env('codex/we"ird\\model');
+      try {
+        const escaped = readFileSync(join(weird.env.CODEX_HOME as string, 'config.toml'), 'utf8');
+        assert.ok(escaped.includes('model = "we\\"ird\\\\model"'));
+      } finally {
+        weird.cleanup?.();
+      }
       assert.ok(existsSync(codexAuthPath(home)));
     } finally {
       codexEnv.cleanup?.();
@@ -275,10 +307,28 @@ describe('acp', () => {
       'acp',
     ]);
     assert.deepEqual(cursorAcpSpec('key').args('cursor/default'), ['acp']);
-    const devin = devinAcpSpec();
+    const devinHome = mkdtempSync(join(tmpdir(), 'jbot-test-devin-'));
+    const sourceCredentials = devinCredentialsPath(devinHome);
+    mkdirSync(dirname(sourceCredentials), { recursive: true });
+    writeFileSync(sourceCredentials, 'windsurf_api_key = "k"\n');
+    const devin = devinAcpSpec(devinHome);
     assert.deepEqual(devin.args('devin/glm-5.2'), ['acp']);
     assert.equal(devin.modelConfigOption, true);
-    assert.equal(devin.env('devin/glm-5.2').env.HOME, process.env.HOME);
+    assert.equal(devin.requirePlanMode, true);
+    const devinEnv = devin.env('devin/glm-5.2');
+    try {
+      const home = devinEnv.env.HOME as string;
+      assert.notEqual(home, devinHome);
+      assert.equal(devinEnv.env.XDG_CONFIG_HOME, undefined);
+      assert.ok(existsSync(devinCredentialsPath(home)));
+      const config = JSON.parse(
+        readFileSync(join(home, '.config', 'devin', 'config.json'), 'utf8'),
+      ) as { permissions: { deny: string[] } };
+      assert.ok(config.permissions.deny.includes('write'));
+    } finally {
+      devinEnv.cleanup?.();
+    }
+    rmSync(devinHome, { recursive: true, force: true });
 
     const modelOptions = [
       { value: 'glm-5-2', name: 'GLM 5.2' },

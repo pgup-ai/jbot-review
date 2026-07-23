@@ -412,8 +412,12 @@ only.
 
 **ACP engine.** The `cursor`, `devin`, and `codex` backends run over the
 [Agent Client Protocol](https://agentclientprotocol.com) — one stdio JSON-RPC
-driver instead of each CLI's bespoke headless mode, with read-only enforced by
-a client-side permission policy plus each agent's plan mode or sandbox config.
+driver instead of each CLI's bespoke headless mode. Read-only is layered: a
+client-side permission policy (mutating tool kinds rejected; bash allowed per
+the review invariants), a REQUIRED plan session mode for cursor and devin —
+the session fails closed if plan mode is missing or cannot be set — plus
+agent-side config (codex runs under `sandbox_mode = "read-only"`; devin gets
+the argv driver's read-only permissions config in a per-spawn HOME).
 `devin` ignores its CLI model flags in ACP mode, so jbot selects the model
 through the session's ACP model config option — ids like `devin/glm-5-2`
 (dotted `devin/glm-5.2` and display names also match).

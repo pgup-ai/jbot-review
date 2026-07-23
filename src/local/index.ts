@@ -7,7 +7,8 @@ import { promisify } from 'node:util';
 import { parseEnvBoolean, parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
 import { selectReviewBackends, type CliBackendID } from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
-import { CODEX_CLI_BIN, CODEX_PROVIDER_ID } from '../shared/codex.ts';
+import { CODEX_PROVIDER_ID } from '../shared/codex.ts';
+import { CODEX_ACP_BIN } from '../shared/acp.ts';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
 import {
   PROVIDERS,
@@ -18,7 +19,7 @@ import {
   resolveProviderModel,
 } from '../shared/config.ts';
 import { CURSOR_CLI_BIN, CURSOR_PROVIDER_ID } from '../shared/cursor.ts';
-import { DEVIN_PROVIDER_ID } from '../shared/devin.ts';
+import { DEVIN_CLI_BIN, DEVIN_PROVIDER_ID } from '../shared/devin.ts';
 import { isNoiseFile } from '../shared/filter.ts';
 import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID } from '../shared/kilo.ts';
@@ -148,12 +149,12 @@ async function binaryUsable(bin: string): Promise<boolean> {
   }
 }
 
-// devin.ts spawns the literal 'devin' (no exported BIN constant).
 const CLI_BINS: Record<CliBackendID, string | null> = {
-  [DEVIN_PROVIDER_ID]: 'devin',
+  [DEVIN_PROVIDER_ID]: DEVIN_CLI_BIN,
   [COMMANDCODE_PROVIDER_ID]: COMMANDCODE_CLI_BIN,
   [CURSOR_PROVIDER_ID]: CURSOR_CLI_BIN,
-  [CODEX_PROVIDER_ID]: CODEX_CLI_BIN,
+  // codex reviews spawn the ACP adapter, not the codex CLI itself.
+  [CODEX_PROVIDER_ID]: CODEX_ACP_BIN,
   [CLINE_PROVIDER_ID]: CLINE_CLI_BIN,
   [GROK_PROVIDER_ID]: GROK_CLI_BIN,
   [KILO_PROVIDER_ID]: KILO_CLI_BIN,
@@ -166,12 +167,12 @@ const CLI_BINS: Record<CliBackendID, string | null> = {
 const INSTALL_HINTS: Record<string, string> = {
   opencode: 'npm i -g opencode-ai',
   [COMMANDCODE_CLI_BIN]: 'npm i -g command-code',
-  [CODEX_CLI_BIN]: 'npm i -g @openai/codex',
+  [CODEX_ACP_BIN]: 'npm i -g @agentclientprotocol/codex-acp',
   [CLINE_CLI_BIN]: 'npm i -g cline',
   [GROK_CLI_BIN]: 'npm i -g @xai-official/grok',
   [KILO_CLI_BIN]: 'npm i -g @kilocode/cli',
   [CURSOR_CLI_BIN]: 'curl -fsSL https://cursor.com/install | sh',
-  devin: 'curl -fsSL https://cli.devin.ai/install.sh | sh',
+  [DEVIN_CLI_BIN]: 'curl -fsSL https://cli.devin.ai/install.sh | sh',
 };
 
 async function main(): Promise<void> {
