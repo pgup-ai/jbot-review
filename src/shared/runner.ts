@@ -24,6 +24,7 @@ import {
   type CliBackendID,
 } from './backend-selection.ts';
 import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
+import { closeObserver, reportRun, setRunName } from './observer.ts';
 import { codexAcpSpec, createAcpBackend, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from './acp.ts';
 import {
   piModelAvailable,
@@ -659,7 +660,7 @@ export interface ReviewRunOptions {
   }) => void;
 }
 
-export async function runPrReview(params: {
+async function runReviewPipeline(params: {
   /** Required for the GitHub-backed paths; optional when `localDiff` is provided. */
   octokit?: Octokit;
   /**
@@ -1911,6 +1912,26 @@ export async function runPrReview(params: {
   } finally {
     stop();
     cleanupCliHomes();
+  }
+}
+
+/**
+ * Public entry: runs the review pipeline and, when the observer is enabled
+ * (`JBOT_OBSERVER_URL`), reports the run's verdict and flushes the tee. All
+ * observer calls are no-ops otherwise, so this wrapper is free for normal runs.
+ */
+export async function runPrReview(params: Parameters<typeof runReviewPipeline>[0]): Promise<void> {
+  setRunName(`pr-${params.owner}-${params.repo}-${params.pullNumber}`);
+  try {
+    await runReviewPipeline(params);
+    reportRun('completed');
+  } catch (error) {
+    reportRun('failed');
+    throw error;
+  } finally {
+    // The streaming tee holds the event loop open, so this explicit close is
+    // what lets an observer-enabled process exit (beforeExit can't fire).
+    await closeObserver();
   }
 }
 

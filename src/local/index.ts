@@ -21,7 +21,7 @@ import {
 import { CURSOR_CLI_BIN, CURSOR_PROVIDER_ID } from '../shared/cursor.ts';
 import { DEVIN_CLI_BIN, DEVIN_PROVIDER_ID } from '../shared/devin.ts';
 import { isNoiseFile } from '../shared/filter.ts';
-import { reportRun, setRunName } from '../shared/observer.ts';
+import { setRunName } from '../shared/observer.ts';
 import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID } from '../shared/kilo.ts';
 import {
@@ -368,13 +368,11 @@ async function main(): Promise<void> {
 }
 
 if (loadDotEnv()) log('Loaded .env');
-main().then(
-  () => reportRun('completed'),
-  (error: unknown) => {
-    console.error(
-      `[jbot-review] Local review failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    process.exitCode = 1;
-    reportRun('failed');
-  },
-);
+// Run verdict + observer flush live in runPrReview; here we only surface the
+// error and set the exit code.
+main().catch((error: unknown) => {
+  console.error(
+    `[jbot-review] Local review failed: ${error instanceof Error ? error.message : String(error)}`,
+  );
+  process.exitCode = 1;
+});

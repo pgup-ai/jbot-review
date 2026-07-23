@@ -692,7 +692,7 @@ npm run review:local
 ## Observer gateway
 
 An optional, self-contained service that makes review sessions observable: the
-(planned) jbot-side tee copies every ACP frame outbound to this gateway, which
+env-gated jbot-side tee copies every ACP frame outbound to this gateway, which
 appends each session to a plain-file journal and rebroadcasts it live. The
 bundled viewer renders sessions as streaming transcripts — thoughts, tool
 calls, permission decisions, findings — live or replayed.

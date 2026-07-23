@@ -43,4 +43,10 @@ await esbuild.build({
   outfile: 'dist/gateway/server.js',
 });
 
+// The bundles are ESM; copying only `dist/` drops the repo-root package.json
+// that tells Node so. Emit a minimal one so `node dist/gateway/server.js`
+// (the documented deploy) runs from a bare `dist/`.
+const { writeFileSync } = await import('node:fs');
+writeFileSync('dist/package.json', `${JSON.stringify({ type: 'module' }, null, 2)}\n`);
+
 console.log('Build complete.');

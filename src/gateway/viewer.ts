@@ -227,6 +227,12 @@ function onRunStatus(d) {
 
 function ingest(e) {
   if (!meta) return;
+  // EventSource auto-reconnects on any blip and the server replays the whole
+  // journal, so drop frames already rendered (seq is monotonic per session).
+  if (typeof e.seq === 'number') {
+    if (e.seq <= meta.lastSeq) return;
+    meta.lastSeq = e.seq;
+  }
   meta.agent = e.agent || meta.agent;
   if (e.model) meta.model = e.model;
   if (!meta.firstTs) meta.firstTs = e.ts;
@@ -277,7 +283,7 @@ function open(runId, sessionId, label) {
   var btn = document.querySelector('[data-key="' + runId + '/' + sessionId + '"]');
   if (btn) btn.classList.add('active');
   active = runId + '/' + sessionId;
-  meta = { agent: '', model: '', mode: '', version: '', firstTs: 0, lastTs: 0, inTok: 0, outTok: 0, ctxUsed: 0, ctxSize: 0, live: true, started: false };
+  meta = { agent: '', model: '', mode: '', version: '', firstTs: 0, lastTs: 0, lastSeq: 0, inTok: 0, outTok: 0, ctxUsed: 0, ctxSize: 0, live: true, started: false };
   logEl.textContent = '';
   closeStreams();
   metaEl.hidden = false;
@@ -300,7 +306,10 @@ jumpEl.addEventListener('click', function () { logEl.scrollTop = logEl.scrollHei
 
 var lastRuns = '';
 function refreshRuns() {
-  fetch(withToken('/api/runs')).then(function (r) { return r.text(); }).then(function (text) {
+  fetch(withToken('/api/runs')).then(function (r) {
+    if (!r.ok) throw new Error('runs ' + r.status);
+    return r.text();
+  }).then(function (text) {
     connState('ok', 'connected');
     if (text === lastRuns) return; // unchanged: keep the DOM (and clicks) stable
     lastRuns = text;

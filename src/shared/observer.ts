@@ -22,17 +22,21 @@ export type RunStatus = 'reviewing' | 'completed' | 'failed';
 let cachedRunId = '';
 function runId(): string {
   if (!cachedRunId) {
-    const raw =
-      process.env.JBOT_OBSERVER_RUN?.trim() ||
-      `run-${new Date().toISOString().replaceAll(/[:.]/g, '-').slice(0, 19)}`;
+    // A random suffix keeps the DEFAULT id process-unique so two runs started
+    // the same second (or sharing nothing but the clock) never merge journals.
+    const stamp = `run-${new Date().toISOString().replaceAll(/[:.]/g, '-').slice(0, 19)}-${Math.random().toString(36).slice(2, 6)}`;
+    const raw = process.env.JBOT_OBSERVER_RUN?.trim() || stamp;
     cachedRunId = raw.replaceAll(/[^A-Za-z0-9._-]/g, '-').replace(/^[^A-Za-z0-9]+/, '') || 'run';
   }
   return cachedRunId;
 }
 
-/** Name this run before it starts (entry points; slashes etc. are sanitized). */
+/** Name this run before it starts (entry points; slashes etc. are sanitized).
+ * First name wins, so a specific caller (`local-<branch>`) beats a generic one. */
 export function setRunName(name: string): void {
-  if (observerEnabled && !cachedRunId && name.trim()) process.env.JBOT_OBSERVER_RUN = name.trim();
+  if (observerEnabled && !cachedRunId && !process.env.JBOT_OBSERVER_RUN && name.trim()) {
+    process.env.JBOT_OBSERVER_RUN = name.trim();
+  }
 }
 
 interface ObservedFrame {
@@ -47,7 +51,10 @@ interface ObservedFrame {
 
 // One streaming POST for the whole process: the gateway demuxes by
 // runId/sessionId, and a single ordered connection keeps each session's frames
-// in order without any batching bookkeeping here.
+// in order without any batching bookkeeping here. The stream's queue is bounded
+// so a slow-but-connected gateway drops frames instead of growing the review's
+// memory — fail-open observability, never review impact.
+const OBSERVER_QUEUE_LIMIT = 2000;
 const encoder = new TextEncoder();
 let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
 let sending: Promise<unknown> | undefined;
@@ -55,11 +62,14 @@ let dead = false;
 
 function ensureStream(): void {
   if (sending || dead) return;
-  const body = new ReadableStream<Uint8Array>({
-    start: (c) => {
-      controller = c;
+  const body = new ReadableStream<Uint8Array>(
+    {
+      start: (c) => {
+        controller = c;
+      },
     },
-  });
+    new CountQueuingStrategy({ highWaterMark: OBSERVER_QUEUE_LIMIT }),
+  );
   sending = fetch(ingestUrl, {
     method: 'POST',
     headers: token ? { authorization: `Bearer ${token}` } : {},
@@ -76,8 +86,11 @@ function ensureStream(): void {
 
 function enqueueLine(payload: Record<string, unknown>): void {
   ensureStream();
+  // Backpressure: once the queue is full (slow consumer), drop rather than
+  // buffer without bound.
+  if (!controller || (controller.desiredSize ?? 1) <= 0) return;
   try {
-    controller?.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+    controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
   } catch {
     // enqueue-after-close or any failure: drop it, never throw.
   }
@@ -119,7 +132,9 @@ export function makeSessionTee(
     observeFrame({ sessionId, seq: (seq += 1), agent, label, model, dir, frame });
 }
 
-/** Close the stream so the last buffered frames flush before the process exits. */
+// MUST be called at a completion point (see runPrReview / review:local): the
+// streaming POST keeps the event loop alive, so `beforeExit` can't be relied on
+// to flush — and without this close the process would hang after the review.
 export async function closeObserver(timeoutMs = 2000): Promise<void> {
   if (!observerEnabled || !controller) return;
   try {
@@ -128,18 +143,6 @@ export async function closeObserver(timeoutMs = 2000): Promise<void> {
     /* already closed */
   }
   controller = undefined;
-  await Promise.race([sending, new Promise((resolve) => setTimeout(resolve, timeoutMs))]).catch(
-    () => undefined,
-  );
-}
-
-// Self-wire the tail flush: beforeExit fires when the loop drains (the review
-// is done) and may run async work, so no entry point needs to know we exist.
-if (observerEnabled) {
-  let closed = false;
-  process.once('beforeExit', () => {
-    if (closed) return;
-    closed = true;
-    void closeObserver();
-  });
+  // sending and the timeout both only ever resolve, so no catch is needed.
+  await Promise.race([sending, new Promise((resolve) => setTimeout(resolve, timeoutMs))]);
 }

@@ -1,5 +1,5 @@
+import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { createInterface } from 'node:readline';
 
 import {
   appendEnvelope,
@@ -17,6 +17,12 @@ import { VIEWER_HTML } from './viewer.ts';
 
 // SSE comment ping; keeps idle viewer connections alive through proxies.
 const HEARTBEAT_MS = 25_000;
+// Ingest caps: one NDJSON frame, and one whole POST (a run's frame stream).
+// Both fail closed (413) so an oversized/never-terminated line can't OOM. The
+// per-line cap sits above the ACP frame budget (32MB) so a legitimate large
+// frame passes; it only stops a line that never terminates.
+const MAX_LINE_BYTES = 48 * 1024 * 1024;
+const MAX_BODY_BYTES = 1024 * 1024 * 1024;
 
 const port =
   Number(process.env.JBOT_GATEWAY_PORT) > 0 ? Number(process.env.JBOT_GATEWAY_PORT) : 8790;
@@ -33,15 +39,42 @@ const log = (msg: string): void => {
 const subscribers = new Map<string, Set<ServerResponse>>();
 const journalKey = (runId: string, sessionId: string): string => `${runId}/${sessionId}`;
 
-function authorized(req: IncomingMessage, url: URL): boolean {
-  if (!token) return true;
-  if (req.headers.authorization === `Bearer ${token}`) return true;
-  // EventSource cannot set headers, so viewers pass the token as a query param.
-  return url.searchParams.get('token') === token;
+// Constant-time compare so the token (which also decides public exposure)
+// can't be recovered by timing. Length is not secret; unequal lengths short out.
+function tokenMatches(candidate: string): boolean {
+  const a = Buffer.from(candidate);
+  const b = Buffer.from(token);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
+function authorized(req: IncomingMessage, url: URL): boolean {
+  if (!token) return true;
+  const header = req.headers.authorization;
+  if (typeof header === 'string' && header.startsWith('Bearer ') && tokenMatches(header.slice(7))) {
+    return true;
+  }
+  // Query token is for EventSource/browser GETs only (they cannot set headers);
+  // ingest (POST) must use the Authorization header so the token never lands in
+  // access logs or proxy caches.
+  if (req.method === 'GET') {
+    const q = url.searchParams.get('token');
+    if (q && tokenMatches(q)) return true;
+  }
+  return false;
+}
+
+// SSE writes must never throw: a subscriber can disconnect between the
+// membership check and the write, and an unhandled error would crash the
+// long-lived gateway. Fail open per subscriber.
+function sseSend(res: ServerResponse, payload: string): void {
+  try {
+    res.write(payload);
+  } catch {
+    /* subscriber gone; cleanup runs on its close/error */
+  }
+}
 function sseWrite(res: ServerResponse, line: string): void {
-  res.write(`data: ${line}\n\n`);
+  sseSend(res, `data: ${line}\n\n`);
 }
 
 function fanOut(envelope: ObserverEnvelope, line: string): void {
@@ -60,30 +93,58 @@ function fanRunControl(control: RunControl, line: string): void {
   }
 }
 
+/** Store + fan one ingest line. Returns whether it was a recognized message. */
+function acceptLine(line: string): boolean {
+  const control = parseRunControl(line);
+  if (control) {
+    writeRunStatus(dataDir, control);
+    fanRunControl(control, JSON.stringify(control));
+    return true;
+  }
+  const envelope = parseEnvelope(line);
+  if (!envelope) return false;
+  appendEnvelope(dataDir, envelope);
+  fanOut(envelope, JSON.stringify(envelope));
+  return true;
+}
+
 async function handleIngest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  // NDJSON stream: one envelope per line, appended and fanned out as it
-  // arrives, so live viewers track an in-flight review. Invalid lines are
-  // counted and dropped — ingest is a trust boundary, not a crash surface.
+  // Bounded NDJSON: one envelope per line, appended and fanned out as it
+  // arrives so live viewers track an in-flight review. Byte-capped per line
+  // and per body — ingest is a trust boundary, not a crash surface.
   let accepted = 0;
   let rejected = 0;
-  const lines = createInterface({ input: req });
-  for await (const line of lines) {
-    if (!line.trim()) continue;
-    const control = parseRunControl(line);
-    if (control) {
-      writeRunStatus(dataDir, control);
-      fanRunControl(control, JSON.stringify(control));
-      accepted += 1;
-      continue;
+  let total = 0;
+  let buffer = '';
+  let overflow = false;
+  req.setEncoding('utf8');
+  for await (const chunk of req as AsyncIterable<string>) {
+    total += Buffer.byteLength(chunk);
+    buffer += chunk;
+    if (total > MAX_BODY_BYTES || buffer.length > MAX_LINE_BYTES) {
+      overflow = true;
+      break;
     }
-    const envelope = parseEnvelope(line);
-    if (!envelope) {
-      rejected += 1;
-      continue;
+    let nl = buffer.indexOf('\n');
+    while (nl !== -1) {
+      const line = buffer.slice(0, nl);
+      buffer = buffer.slice(nl + 1);
+      if (line.trim()) {
+        if (acceptLine(line)) accepted += 1;
+        else rejected += 1;
+      }
+      nl = buffer.indexOf('\n');
     }
-    appendEnvelope(dataDir, envelope);
-    fanOut(envelope, JSON.stringify(envelope));
-    accepted += 1;
+  }
+  if (overflow) {
+    res.writeHead(413, { 'content-type': 'text/plain' });
+    res.end('payload too large');
+    req.destroy();
+    return;
+  }
+  if (buffer.trim()) {
+    if (acceptLine(buffer)) accepted += 1;
+    else rejected += 1;
   }
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ accepted, rejected }));
@@ -95,8 +156,9 @@ function handleStream(res: ServerResponse, runId: string, sessionId: string): vo
     'cache-control': 'no-store',
     connection: 'keep-alive',
   });
-  // Replay the journal first, then follow live; the viewer dedupes nothing —
-  // replay and live are strictly ordered because appends happen before fanout.
+  // Replay the journal first, then follow live. Replay + subscribe is one
+  // synchronous block, so no live frame slips through the gap; the viewer also
+  // de-dupes by seq, which tolerates the EventSource auto-reconnect replay.
   for (const line of readJournalLines(dataDir, runId, sessionId)) sseWrite(res, line);
   // A run that already finished replays its terminal status so a late viewer
   // shows completed/failed instead of a stale "reviewing".
@@ -109,16 +171,19 @@ function handleStream(res: ServerResponse, runId: string, sessionId: string): vo
     subscribers.set(key, subs);
   }
   subs.add(res);
-  const heartbeat = setInterval(() => res.write(': ping\n\n'), HEARTBEAT_MS);
+  const heartbeat = setInterval(() => sseSend(res, ': ping\n\n'), HEARTBEAT_MS);
   heartbeat.unref();
+  // close and error can both fire; run once, and only drop the key if this is
+  // still the set the map holds (a concurrent reconnect may have replaced it).
+  let done = false;
   const cleanup = (): void => {
+    if (done) return;
+    done = true;
     clearInterval(heartbeat);
     subs.delete(res);
-    if (subs.size === 0) subscribers.delete(key);
+    if (subs.size === 0 && subscribers.get(key) === subs) subscribers.delete(key);
   };
   res.on('close', cleanup);
-  // An abrupt disconnect can surface as a stream 'error'; without a listener
-  // that becomes an uncaught exception and takes the whole gateway down.
   res.on('error', cleanup);
 }
 
@@ -140,7 +205,7 @@ const server = createServer((req, res) => {
     return;
   }
   if (req.method === 'GET' && url.pathname === '/api/runs') {
-    res.writeHead(200, { 'content-type': 'application/json' });
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' });
     res.end(JSON.stringify(listRuns(dataDir)));
     return;
   }

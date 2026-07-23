@@ -88,10 +88,21 @@ export function parseRunControl(line: string): RunControl | undefined {
   return c as unknown as RunControl;
 }
 
+// Journals hold prompt/diff content, so keep them off other host accounts:
+// 0700 dirs, 0600 files. A per-run mkdir cache avoids a syscall per frame.
+const ensuredDirs = new Set<string>();
+function ensureRunDir(dataDir: string, runId: string): string {
+  const dir = join(dataDir, runId);
+  if (!ensuredDirs.has(dir)) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    ensuredDirs.add(dir);
+  }
+  return dir;
+}
+
 export function writeRunStatus(dataDir: string, control: RunControl): void {
-  const dir = join(dataDir, control.runId);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'status'), control.status);
+  const dir = ensureRunDir(dataDir, control.runId);
+  writeFileSync(join(dir, 'status'), control.status, { mode: 0o600 });
 }
 
 export function readRunStatus(dataDir: string, runId: string): RunStatus | undefined {
@@ -102,11 +113,11 @@ export function readRunStatus(dataDir: string, runId: string): RunStatus | undef
 }
 
 export function appendEnvelope(dataDir: string, envelope: ObserverEnvelope): void {
-  const dir = join(dataDir, envelope.runId);
-  mkdirSync(dir, { recursive: true });
+  ensureRunDir(dataDir, envelope.runId);
   appendFileSync(
     journalPath(dataDir, envelope.runId, envelope.sessionId),
     `${JSON.stringify(envelope)}\n`,
+    { mode: 0o600 },
   );
 }
 

@@ -8,16 +8,16 @@ import { describe, it } from 'node:test';
 import { listRuns, readJournalLines, type ObserverEnvelope } from '../src/gateway/journal.ts';
 
 // The observer reads its config at import time, so it is exercised end-to-end
-// through a child process rather than by re-importing with mutated env.
-const driverSource = (url: string): string => `
-import { makeSessionTee, observeFrame, closeObserver } from '${join(process.cwd(), 'src/shared/observer.ts')}';
+// through a child process (JBOT_OBSERVER_URL set in the spawn env) rather than
+// by re-importing with mutated env.
+const DRIVER_SOURCE = `
+import { makeSessionTee, closeObserver } from '${join(process.cwd(), 'src/shared/observer.ts')}';
 const tee = makeSessionTee('kilo', 'review');
 if (!tee) throw new Error('tee should be enabled');
 tee('out', { jsonrpc: '2.0', id: 1, method: 'session/prompt' });
 tee('in', { jsonrpc: '2.0', method: 'session/update', params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' } } } });
 tee('in', { jsonrpc: '2.0', id: 1, result: { stopReason: 'end_turn' } });
 await closeObserver();
-void observeFrame; void '${url}';
 `;
 
 describe('observer tee', () => {
@@ -39,12 +39,19 @@ describe('observer tee', () => {
 
   it('streams real frames into a gateway that journals them', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'jbot-obs-int-'));
-    const port = 18500 + Math.floor(Math.random() * 1000);
+    // Port range disjoint from gateway.test.ts (18000-19999) to avoid collisions.
+    const port = 20000 + Math.floor(Math.random() * 2000);
     const base = `http://127.0.0.1:${port}`;
     let gateway: ChildProcess | undefined;
     try {
+      // Clear any inherited token so the gateway runs in local (no-auth) mode.
       gateway = spawn(process.execPath, ['--import', 'tsx', 'src/gateway/server.ts'], {
-        env: { ...process.env, JBOT_GATEWAY_PORT: String(port), JBOT_GATEWAY_DATA: dataDir },
+        env: {
+          ...process.env,
+          JBOT_GATEWAY_TOKEN: '',
+          JBOT_GATEWAY_PORT: String(port),
+          JBOT_GATEWAY_DATA: dataDir,
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       await new Promise<void>((resolve, reject) => {
@@ -67,7 +74,7 @@ describe('observer tee', () => {
         driver.on('exit', (code) =>
           code === 0 ? resolve() : reject(new Error(`driver exited ${code}`)),
         );
-        driver.stdin?.end(driverSource(base));
+        driver.stdin?.end(DRIVER_SOURCE);
       });
 
       const runs = listRuns(dataDir);
