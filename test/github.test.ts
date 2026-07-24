@@ -16,6 +16,7 @@ import {
   type Octokit,
   type PriorJbotThread,
 } from '../src/shared/github.ts';
+import type { Finding } from '../src/shared/types.ts';
 
 const REVIEW_BODY = [
   '## J-Bot Code Review',
@@ -318,6 +319,7 @@ describe('review posting', () => {
       'review body',
       [],
       [200, 200, 201],
+      'headsha',
     );
 
     assert.match(request?.body ?? '', /jbot-review:linked-comments:200,201/);
@@ -333,8 +335,59 @@ describe('review posting', () => {
       'review body\n<!-- jbot-review:linked-comments:999 -->',
       [],
       [],
+      'headsha',
     );
     assert.doesNotMatch(request?.body ?? '', /jbot-review:linked-comments/);
+  });
+
+  it('salvages the still-anchorable comments when the batched review is rejected', async () => {
+    // One bad anchor rejects the whole createReview call, so the survivors are
+    // re-posted one at a time instead of being lost with it.
+    const posted: number[] = [];
+    let bodyOnly: { body?: string } | undefined;
+    const octokit = {
+      rest: {
+        pulls: {
+          createReview: async (params: { body?: string; comments?: unknown[] }) => {
+            if (params.comments?.length) throw new Error('422 line must be part of the diff');
+            bodyOnly = params;
+          },
+          createReviewComment: async (params: { line: number }) => {
+            if (params.line === 99) throw new Error('422 line must be part of the diff');
+            posted.push(params.line);
+            return { data: { id: 300 + params.line } };
+          },
+        },
+      },
+    };
+
+    const finding = (line: number): Finding => ({
+      path: 'a.ts',
+      line,
+      severity: 'P2',
+      title: `t${line}`,
+      body: 'b',
+    });
+    const result = await postReview(
+      octokit as unknown as Octokit,
+      'acme',
+      'widget',
+      12,
+      'COMMENT',
+      'review body',
+      [finding(5), finding(99), finding(7)],
+      [],
+      'headsha',
+    );
+
+    assert.deepEqual(posted, [5, 7], 'one bad anchor no longer costs the good ones');
+    assert.deepEqual(result, { inlinePosted: 2, inlineDropped: 1 });
+    assert.match(bodyOnly?.body ?? '', /1 inline comment/, 'the body reports what was lost');
+    assert.match(
+      bodyOnly?.body ?? '',
+      /jbot-review:linked-comments:305,307/,
+      'salvaged comments are linked so the review can still be finalized',
+    );
   });
 });
 
