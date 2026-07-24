@@ -188,14 +188,11 @@ async function runRemotePrompt(
     });
     // Fail on the real status (401/413/5xx) instead of waiting out the ack.
     if (!opened.ok) throw new Error(`${label}: gateway rejected the open (${opened.status})`);
-    const ack = await Promise.race([
-      acked.promise,
-      closed.promise,
-      failAfter(
-        GATEWAY_TIMEOUT_MS,
-        `${label}: endpoint ${config.endpoint} did not answer the open`,
-      ),
-    ]);
+    const ack = await raceWithDeadline(
+      [acked.promise, closed.promise],
+      GATEWAY_TIMEOUT_MS,
+      `${label}: endpoint ${config.endpoint} did not answer the open`,
+    );
     if (ack.kind === 'refused') {
       throw new Error(
         `${label}: endpoint ${config.endpoint} refused: ${ack.reason ?? 'no reason'}`,
@@ -203,26 +200,26 @@ async function runRemotePrompt(
     }
     log(`Calling ${label} prompt (agent=${config.agent}@${config.endpoint}, model=${model})`);
 
-    const result = await Promise.race([
-      driveAcpSession(
-        { input, output },
-        {
-          cwd: ack.workspace ?? '.',
-          prompt,
-          agent: config.agent,
-          label,
-          log,
-          model,
-          ...(ack.modelCandidates ? { configOptionModelIds: ack.modelCandidates } : {}),
-          ...(ack.requirePlanMode ? { requirePlanMode: true } : {}),
-        },
-      ),
-      closed.promise,
-      failAfter(
-        timeoutMs,
-        `${label}: remote prompt timed out after ${Math.round(timeoutMs / 1000)}s (model=${model})`,
-      ),
-    ]);
+    const result = await raceWithDeadline(
+      [
+        driveAcpSession(
+          { input, output },
+          {
+            cwd: ack.workspace ?? '.',
+            prompt,
+            agent: config.agent,
+            label,
+            log,
+            model,
+            ...(ack.modelCandidates ? { configOptionModelIds: ack.modelCandidates } : {}),
+            ...(ack.requirePlanMode ? { requirePlanMode: true } : {}),
+          },
+        ),
+        closed.promise,
+      ],
+      timeoutMs,
+      `${label}: remote prompt timed out after ${Math.round(timeoutMs / 1000)}s (model=${model})`,
+    );
     log(
       `${label} prompt complete via gateway: stopReason=${result.stopReason} last-message=${result.text.length} chars`,
     );
@@ -256,11 +253,16 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-const failAfter = (ms: number, message: string): Promise<never> =>
-  new Promise((_, reject) => {
-    const timer = setTimeout(() => reject(new Error(message)), ms);
+/** Races `work` against a deadline, clearing the timer once anything settles —
+ * a timer left armed would reject after the race and go unobserved. */
+function raceWithDeadline<T>(work: Promise<T>[], ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
     timer.unref();
   });
+  return Promise.race([...work, deadline]).finally(() => clearTimeout(timer));
+}
 
 /** Reads an SSE body, handing each `data:` payload to `onLine` unparsed. */
 async function pump(
