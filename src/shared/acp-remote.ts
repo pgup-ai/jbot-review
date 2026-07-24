@@ -230,7 +230,9 @@ async function runRemotePrompt(
     }
     return result.text;
   } finally {
-    await post({ kind: 'close', sessionId, reason: 'prompt complete' }).catch(() => {});
+    // Advisory teardown — the result is already in hand, and a dropped close
+    // is covered by the gateway's resume window, so never block the return.
+    void post({ kind: 'close', sessionId, reason: 'prompt complete' }).catch(() => {});
     stream.abort();
     output.end();
     await reading;
