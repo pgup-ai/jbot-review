@@ -50,6 +50,13 @@ const log = (msg: string): void => {
   console.log(`[jbot-companion] ${msg}`);
 };
 
+/** The companion's own gateway credentials must never reach a spawned agent. */
+function scrubbedEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.startsWith('JBOT_COMPANION_')) delete env[key];
+  return env;
+}
+
 if (!gatewayUrl || !token || !endpointId) {
   console.error('Set JBOT_COMPANION_GATEWAY, JBOT_COMPANION_TOKEN, and JBOT_COMPANION_ENDPOINT.');
   process.exit(1);
@@ -68,7 +75,7 @@ function resolveAgent(entry: string): { name: string; spec: AcpAgentSpec } | str
     if (!name || !bin) return `invalid custom agent entry: ${entry}`;
     return {
       name,
-      spec: { id: name, bin, args: () => args, env: () => ({ env: { ...process.env } }) },
+      spec: { id: name, bin, args: () => args, env: () => ({ env: scrubbedEnv() }) },
     };
   }
   switch (entry) {
@@ -123,22 +130,36 @@ const encoder = new TextEncoder();
 let upstream: ReadableStreamDefaultController<Uint8Array> | undefined;
 const outbox: string[] = [];
 
+// Overflow means the upstream can't deliver, so don't try to send close
+// frames through it (that would re-enter here): kill the agents and let the
+// gateway's resume window fail the sessions to their clients.
+function failAllSessions(reason: string): void {
+  log(reason);
+  for (const sessionId of sessions.keys()) endSession(sessionId, reason, false);
+}
+
 function sendLine(line: string): void {
   if (upstream) {
     try {
       upstream.enqueue(encoder.encode(`${line}\n`));
-      return;
     } catch {
       upstream = undefined;
+      outbox.push(line);
+      return;
     }
+    // desiredSize goes negative as the stream's queue backs up past its high-
+    // water mark; a large backlog means a stalled gateway, so fail loud rather
+    // than grow the queue without bound.
+    const { desiredSize } = upstream;
+    if (desiredSize !== null && desiredSize < -MAX_OUTBOX_LINES) {
+      failAllSessions('companion upstream backlog exceeded');
+    }
+    return;
   }
   outbox.push(line);
   if (outbox.length > MAX_OUTBOX_LINES) {
-    log('outbox overflow; failing live sessions');
     outbox.length = 0;
-    for (const sessionId of sessions.keys()) {
-      endSession(sessionId, 'companion buffer overflow', true);
-    }
+    failAllSessions('companion buffer overflow');
   }
 }
 
@@ -153,16 +174,30 @@ function hello(): HelloControl {
     device,
     agents: [...agents.keys()].map((agent) => ({ agent })),
     maxSessions,
+    // Live agents this process still holds — a fresh start sends none, so the
+    // relay fails any stale sessions instead of leaving them as zombies.
+    sessions: [...sessions.keys()],
   };
+}
+
+function finalizeSession(session: LiveSession): void {
+  session.cleanup?.();
+  rmSync(session.workspace, { recursive: true, force: true });
 }
 
 function endSession(sessionId: string, reason: string, notify: boolean): void {
   const session = sessions.get(sessionId);
   if (!session) return;
   sessions.delete(sessionId);
-  terminateProcessTree(session.child, KILL_GRACE_MS);
-  session.cleanup?.();
-  rmSync(session.workspace, { recursive: true, force: true });
+  // Reclaim temp homes/workspaces only after the child is truly gone — some
+  // agents (kilo's SQLite dir) still write during the SIGTERM grace.
+  const { child } = session;
+  if (child.exitCode === null && child.signalCode === null) {
+    child.once('exit', () => finalizeSession(session));
+    terminateProcessTree(child, KILL_GRACE_MS);
+  } else {
+    finalizeSession(session);
+  }
   if (notify) sendControl({ kind: 'close', sessionId, reason });
   log(`session ${sessionId} ended: ${reason}`);
 }
@@ -215,6 +250,10 @@ function openSession(control: OpenControl): void {
     return refuse(`agent setup failed: ${error instanceof Error ? error.message : String(error)}`);
   }
   const child = spawn(spec.bin, spec.args(model), { cwd: workspace, env, stdio: 'pipe' });
+  // Stream-level errors (EPIPE writing to a dead agent) must stay scoped to
+  // this session, not throw out and take the whole companion down.
+  child.stdin?.on('error', () => {});
+  child.stdout?.on('error', () => {});
   const session: LiveSession = {
     child,
     runId: control.runId,
@@ -287,7 +326,10 @@ function handleWireLine(line: string): void {
 async function connectOnce(): Promise<void> {
   const headers = { authorization: `Bearer ${token}` };
   const down = await fetch(`${gatewayUrl}/api/endpoints/${endpointId}/stream`, { headers });
-  if (down.status !== 200 || !down.body) throw new Error(`stream connect ${down.status}`);
+  if (down.status !== 200 || !down.body) {
+    await down.body?.cancel();
+    throw new Error(`stream connect ${down.status}`);
+  }
 
   const body = new ReadableStream<Uint8Array>({
     start: (controller) => {
@@ -348,7 +390,9 @@ async function main(): Promise<void> {
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     for (const sessionId of sessions.keys()) endSession(sessionId, 'companion shutdown', true);
-    process.exit(0);
+    // Brief grace for close frames to reach the gateway before exit; the
+    // resume window is the backstop if they don't.
+    setTimeout(() => process.exit(0), 200);
   });
 }
 

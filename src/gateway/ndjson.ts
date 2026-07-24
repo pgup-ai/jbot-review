@@ -20,8 +20,12 @@ export async function readNdjsonBody(
   let total = 0;
   let partial = '';
   let partialBytes = 0;
-  const take = (line: string): void => {
-    if (line.trim()) onLine(line);
+  let overflow = false;
+  const take = (line: string, extraBytes: number): void => {
+    if (partialBytes + extraBytes > MAX_LINE_BYTES) overflow = true;
+    else if (line.trim()) onLine(line);
+    partial = '';
+    partialBytes = 0;
   };
   req.setEncoding('utf8');
   for await (const chunk of req as AsyncIterable<string>) {
@@ -34,10 +38,16 @@ export async function readNdjsonBody(
       if (partialBytes > MAX_LINE_BYTES) return { overflow: true };
       continue;
     }
-    take(partial + chunk.slice(0, start));
+    // Each completed line is length-checked (partial carry-over + this chunk's
+    // slice), so a cap-exceeding line can't slip through by ending in-chunk.
+    const head = chunk.slice(0, start);
+    take(partial + head, Buffer.byteLength(head));
+    if (overflow) return { overflow: true };
     let nl = chunk.indexOf('\n', start + 1);
     while (nl !== -1) {
-      take(chunk.slice(start + 1, nl));
+      const line = chunk.slice(start + 1, nl);
+      take(line, Buffer.byteLength(line));
+      if (overflow) return { overflow: true };
       start = nl;
       nl = chunk.indexOf('\n', start + 1);
     }
@@ -45,6 +55,6 @@ export async function readNdjsonBody(
     partialBytes = Buffer.byteLength(partial);
     if (partialBytes > MAX_LINE_BYTES) return { overflow: true };
   }
-  take(partial);
-  return { overflow: false };
+  take(partial, 0);
+  return { overflow };
 }

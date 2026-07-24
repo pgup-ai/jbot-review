@@ -48,8 +48,14 @@ const relay = createRelay({
       ? Number(process.env.JBOT_GATEWAY_RESUME_MS)
       : undefined,
   onLine: (_sessionId, _runId, _dir, line) => {
-    const envelope = parseEnvelope(line);
-    if (envelope) appendEnvelope(dataDir, envelope);
+    // Journaling is observability — a write failure (ENOSPC, EACCES) must
+    // never break the live relay.
+    try {
+      const envelope = parseEnvelope(line);
+      if (envelope) appendEnvelope(dataDir, envelope);
+    } catch (error) {
+      log(`journal write failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   },
 });
 const sendToEndpoint =
@@ -210,22 +216,17 @@ async function handleSessionIngest(
   overflowOr(res, req, overflow);
 }
 
-function authorizedEndpoint(req: IncomingMessage, url: URL, id: string): boolean {
+// Header-only: the companion is a fetch client (unlike a browser EventSource
+// viewer), so its token never needs the ?token= query form that lands in logs.
+function authorizedEndpoint(req: IncomingMessage, id: string): boolean {
   const expected = endpointTokens.get(id);
   if (!expected) return false;
   const header = req.headers.authorization;
-  if (
+  return (
     typeof header === 'string' &&
     header.startsWith('Bearer ') &&
     tokenMatches(header.slice(7), expected)
-  ) {
-    return true;
-  }
-  if (req.method === 'GET') {
-    const q = url.searchParams.get('token');
-    if (q && tokenMatches(q, expected)) return true;
-  }
-  return false;
+  );
 }
 
 /** One live SSE leg per peer; last connection wins, cleanup only clears the
@@ -310,7 +311,7 @@ function route(req: IncomingMessage, res: ServerResponse): void {
   const endpointRoute = url.pathname.match(/^\/api\/endpoints\/([^/]+)\/(stream|ingest)$/);
   if (endpointRoute) {
     const [, id, mode] = endpointRoute;
-    if (!isSafeId(id) || !authorizedEndpoint(req, url, id)) {
+    if (!isSafeId(id) || !authorizedEndpoint(req, id)) {
       res.writeHead(401, { 'content-type': 'text/plain' });
       res.end('unauthorized');
       return;

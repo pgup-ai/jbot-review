@@ -132,6 +132,37 @@ describe('relay', () => {
     assert.equal(relay.sessionRun('sid-3'), 'run-1');
   });
 
+  it('refuses opens against a detached endpoint until it reattaches', () => {
+    const relay = createRelay();
+    const refusals: string[] = [];
+    const client = (line: string): void => {
+      const c = JSON.parse(line) as { kind: string; reason?: string };
+      if (c.kind === 'refused') refusals.push(c.reason ?? '');
+    };
+    relay.attachEndpoint(hello(), () => {});
+    relay.detachEndpoint('laptop');
+    relay.openSession(open(), client);
+    assert.deepEqual(refusals, ['endpoint offline']);
+    // Reattach clears the offline state.
+    relay.attachEndpoint(hello(), () => {});
+    relay.openSession(open({ sessionId: 'sid-9' }), client);
+    assert.equal(relay.sessionRun('sid-9'), 'run-1');
+  });
+
+  it('resumes declared sessions on reattach and fails undeclared zombies', () => {
+    const failed: string[] = [];
+    const relay = createRelay({ onSessionFailed: (sid) => failed.push(sid) });
+    relay.attachEndpoint(hello(), () => {});
+    relay.openSession(open({ sessionId: 'live' }), () => {});
+    relay.openSession(open({ sessionId: 'zombie' }), () => {});
+    relay.detachEndpoint('laptop');
+    // A restarted companion re-declares only the session it still holds.
+    relay.attachEndpoint(hello({ sessions: ['live'] }), () => {});
+    assert.deepEqual(failed, ['zombie']);
+    assert.equal(relay.sessionRun('live'), 'run-1');
+    assert.equal(relay.sessionRun('zombie'), undefined);
+  });
+
   it('fails sessions loudly past the resume window; reattach cancels', async () => {
     const failed: string[] = [];
     const relay = createRelay({

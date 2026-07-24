@@ -19,6 +19,9 @@ export interface HelloControl {
   device: string;
   agents: EndpointAgent[];
   maxSessions: number;
+  /** Sessions the companion still has live, so a reattach resumes those and
+   * fails the rest (a restarted companion sends none). */
+  sessions?: string[];
 }
 
 export interface OpenControl {
@@ -82,12 +85,19 @@ export function parseRelayControl(line: string): RelayControl | undefined {
       }
       const max = Number(raw.maxSessions);
       if (!Number.isInteger(max) || max < 1) return undefined;
+      let sessions: string[] | undefined;
+      if (raw.sessions !== undefined) {
+        if (!Array.isArray(raw.sessions) || !raw.sessions.every((s) => isSafeId(s)))
+          return undefined;
+        sessions = raw.sessions as string[];
+      }
       return {
         kind: 'hello',
         endpoint: raw.endpoint,
         device: raw.device,
         agents,
         maxSessions: max,
+        ...(sessions ? { sessions } : {}),
       };
     }
     case 'open': {
@@ -122,6 +132,7 @@ interface Attachment {
   hello: HelloControl;
   send: SendLine;
   sessions: Set<string>;
+  online: boolean;
 }
 
 interface Session {
@@ -165,23 +176,32 @@ export function createRelay(options: RelayOptions = {}) {
   };
 
   return {
-    /** Companion (re)attached. Reconnects cancel pending resume failures. */
+    /** Companion (re)attached. Sessions the companion still declares resume
+     * (cancel their resume timers); any it dropped — e.g. after a restart —
+     * fail loudly instead of lingering as zombies that hold capacity. */
     attachEndpoint(hello: HelloControl, send: SendLine): void {
       const existing = endpoints.get(hello.endpoint);
-      const carried = existing?.sessions ?? new Set<string>();
-      endpoints.set(hello.endpoint, { hello, send, sessions: carried });
-      for (const sessionId of carried) {
+      const declared = new Set(hello.sessions ?? [...(existing?.sessions ?? [])]);
+      const carried = new Set<string>();
+      for (const sessionId of existing?.sessions ?? []) {
+        if (!declared.has(sessionId)) {
+          failSession(sessionId, 'endpoint reattached without this session');
+          continue;
+        }
+        carried.add(sessionId);
         const session = sessions.get(sessionId);
         if (session?.resumeTimer) {
           clearTimeout(session.resumeTimer);
           session.resumeTimer = undefined;
         }
       }
+      endpoints.set(hello.endpoint, { hello, send, sessions: carried, online: true });
     },
 
     detachEndpoint(endpoint: string): void {
       const attachment = endpoints.get(endpoint);
       if (!attachment) return;
+      attachment.online = false;
       for (const sessionId of attachment.sessions) {
         const session = sessions.get(sessionId);
         if (!session || session.resumeTimer) continue;
@@ -214,7 +234,7 @@ export function createRelay(options: RelayOptions = {}) {
           } satisfies AckControl),
         );
       const attachment = endpoints.get(control.endpoint);
-      if (!attachment) return refuse('endpoint offline');
+      if (!attachment?.online) return refuse('endpoint offline');
       if (sessions.has(control.sessionId)) return refuse('session id in use');
       if (attachment.sessions.size >= attachment.hello.maxSessions) return refuse('at capacity');
       if (!attachment.hello.agents.some((a) => a.agent === control.agent))
