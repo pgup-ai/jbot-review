@@ -357,11 +357,11 @@ function route(req: IncomingMessage, res: ServerResponse): void {
       return;
     }
     if (mode === 'stream' && req.method === 'GET') {
-      // A client drop with no explicit close would otherwise leave the session
-      // (and the companion's agent) running — end it when the last leg closes.
-      registerPeerStream(sessionStreams, sid, res, () =>
-        relay.closeSession(sid, 'client disconnected'),
-      );
+      // Client leg (re)connected: cancel any pending client-side resume, then
+      // arm it again if this leg drops — symmetric with the endpoint side, so a
+      // blip or the SIGTERM drain doesn't kill the session outright.
+      relay.attachClient(sid);
+      registerPeerStream(sessionStreams, sid, res, () => relay.detachClient(sid));
       return;
     }
     if (mode === 'ingest' && req.method === 'POST') {

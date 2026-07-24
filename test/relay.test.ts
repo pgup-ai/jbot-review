@@ -200,4 +200,23 @@ describe('relay', () => {
     assert.equal(JSON.parse(toClient.at(-1)!).kind, 'close');
     assert.equal(relay.sessionRun('sid-1'), undefined);
   });
+
+  it('gives the client leg its own resume window; reattach within it survives', async () => {
+    const failed: string[] = [];
+    const relay = createRelay({ resumeWindowMs: 40, onSessionFailed: (sid) => failed.push(sid) });
+    relay.attachEndpoint(hello(), () => {});
+    relay.openSession(open(), () => {});
+
+    // A client blip that reconnects within the window must not fail the session.
+    relay.detachClient('sid-1');
+    relay.attachClient('sid-1');
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    assert.deepEqual(failed, []);
+    assert.equal(relay.sessionRun('sid-1'), 'run-1');
+
+    // A client gone past the window fails it.
+    relay.detachClient('sid-1');
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    assert.deepEqual(failed, ['sid-1']);
+  });
 });

@@ -349,7 +349,14 @@ function handleWireLine(line: string): void {
  * downstream ends; live sessions survive into the next epoch. */
 async function connectOnce(): Promise<void> {
   const headers = { authorization: `Bearer ${token}` };
-  const down = await fetch(`${gatewayUrl}/api/endpoints/${endpointId}/stream`, { headers });
+  // One signal ties both legs: if the ingest POST fails, the read loop aborts
+  // and reconnects, so the companion can't sit half-connected — receiving opens
+  // it can't answer while responses pile into a dead upstream.
+  const epoch = new AbortController();
+  const down = await fetch(`${gatewayUrl}/api/endpoints/${endpointId}/stream`, {
+    headers,
+    signal: epoch.signal,
+  });
   if (down.status !== 200 || !down.body) {
     await down.body?.cancel();
     throw new Error(`stream connect ${down.status}`);
@@ -360,14 +367,23 @@ async function connectOnce(): Promise<void> {
       upstream = controller;
     },
   });
+  const failUp = (): void => {
+    upstream = undefined;
+    epoch.abort();
+  };
   const up = fetch(`${gatewayUrl}/api/endpoints/${endpointId}/ingest`, {
     method: 'POST',
     headers,
     body,
     duplex: 'half',
-  } as RequestInit).catch(() => {
-    upstream = undefined;
-  });
+    signal: epoch.signal,
+  } as RequestInit)
+    .then((res) => {
+      // A non-2xx (413 overflow, 401, 5xx) means the gateway stopped reading;
+      // don't keep streaming into it.
+      if (!res.ok) failUp();
+    })
+    .catch(failUp);
   sendControl(hello());
   while (outbox.length > 0 && upstream) sendLine(outbox.shift()!);
   log(`attached to ${gatewayUrl} as ${endpointId} (${[...agents.keys()].join(', ')})`);
@@ -397,6 +413,7 @@ async function connectOnce(): Promise<void> {
       /* already closed */
     }
     upstream = undefined;
+    epoch.abort();
     await up;
   }
 }

@@ -135,12 +135,16 @@ interface Attachment {
   online: boolean;
 }
 
+type ResumeLeg = 'endpointResume' | 'clientResume';
+
 interface Session {
   runId: string;
   endpoint: string;
   clientSend: SendLine;
-  /** Set while a peer is disconnected; fires loud failure past the window. */
-  resumeTimer?: ReturnType<typeof setTimeout>;
+  // A leg's timer is armed while that peer is disconnected; either firing
+  // fails the session past the window. Both legs get the same grace.
+  endpointResume?: ReturnType<typeof setTimeout>;
+  clientResume?: ReturnType<typeof setTimeout>;
 }
 
 export interface RelayOptions {
@@ -164,10 +168,25 @@ export function createRelay(options: RelayOptions = {}) {
   const endpoints = new Map<string, Attachment>();
   const sessions = new Map<string, Session>();
 
+  const disarm = (session: Session, leg: ResumeLeg): void => {
+    if (session[leg]) {
+      clearTimeout(session[leg]);
+      session[leg] = undefined;
+    }
+  };
+  const arm = (sessionId: string, leg: ResumeLeg, reason: string): void => {
+    const session = sessions.get(sessionId);
+    if (!session || session[leg]) return;
+    const timer = setTimeout(() => failSession(sessionId, reason), resumeWindowMs);
+    timer.unref?.();
+    session[leg] = timer;
+  };
+
   const failSession = (sessionId: string, reason: string): void => {
     const session = sessions.get(sessionId);
     if (!session) return;
-    if (session.resumeTimer) clearTimeout(session.resumeTimer);
+    disarm(session, 'endpointResume');
+    disarm(session, 'clientResume');
     sessions.delete(sessionId);
     endpoints.get(session.endpoint)?.sessions.delete(sessionId);
     const close = JSON.stringify({ kind: 'close', sessionId, reason } satisfies CloseControl);
@@ -191,10 +210,7 @@ export function createRelay(options: RelayOptions = {}) {
         }
         carried.add(sessionId);
         const session = sessions.get(sessionId);
-        if (session?.resumeTimer) {
-          clearTimeout(session.resumeTimer);
-          session.resumeTimer = undefined;
-        }
+        if (session) disarm(session, 'endpointResume');
       }
       endpoints.set(hello.endpoint, { hello, send, sessions: carried, online: true });
       // A companion may still be running agents for sessions the relay already
@@ -211,14 +227,20 @@ export function createRelay(options: RelayOptions = {}) {
       if (!attachment) return;
       attachment.online = false;
       for (const sessionId of attachment.sessions) {
-        const session = sessions.get(sessionId);
-        if (!session || session.resumeTimer) continue;
-        session.resumeTimer = setTimeout(
-          () => failSession(sessionId, 'endpoint gone past resume window'),
-          resumeWindowMs,
-        );
-        session.resumeTimer.unref?.();
+        arm(sessionId, 'endpointResume', 'endpoint gone past resume window');
       }
+    },
+
+    /** Client SSE leg dropped — give it the same resume grace as the endpoint
+     * side, so a transient blip (or the gateway's own SIGTERM drain) doesn't
+     * tear the session down. A reattach within the window cancels it. */
+    detachClient(sessionId: string): void {
+      arm(sessionId, 'clientResume', 'client gone past resume window');
+    },
+
+    attachClient(sessionId: string): void {
+      const session = sessions.get(sessionId);
+      if (session) disarm(session, 'clientResume');
     },
 
     listEndpoints(): EndpointPresence[] {
