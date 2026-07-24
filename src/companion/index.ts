@@ -254,6 +254,9 @@ function openSession(control: OpenControl): void {
   // this session, not throw out and take the whole companion down.
   child.stdin?.on('error', () => {});
   child.stdout?.on('error', () => {});
+  // Drain stderr so a chatty agent can't deadlock on a full pipe buffer.
+  child.stderr?.resume();
+  child.stderr?.on('error', () => {});
   const session: LiveSession = {
     child,
     runId: control.runId,
@@ -351,25 +354,30 @@ async function connectOnce(): Promise<void> {
   const reader = down.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let nl = buffer.indexOf('\n');
-    while (nl !== -1) {
-      const line = buffer.slice(0, nl);
-      buffer = buffer.slice(nl + 1);
-      if (line.startsWith('data: ')) handleWireLine(line.slice(6));
-      nl = buffer.indexOf('\n');
-    }
-  }
   try {
-    upstream?.close();
-  } catch {
-    /* already closed */
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl = buffer.indexOf('\n');
+      while (nl !== -1) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        if (line.startsWith('data: ')) handleWireLine(line.slice(6));
+        nl = buffer.indexOf('\n');
+      }
+    }
+  } finally {
+    // Always tear down this epoch's upstream, even on a read error, so the
+    // next connectOnce() doesn't leak the prior /ingest POST.
+    try {
+      upstream?.close();
+    } catch {
+      /* already closed */
+    }
+    upstream = undefined;
+    await up;
   }
-  upstream = undefined;
-  await up;
 }
 
 async function main(): Promise<void> {

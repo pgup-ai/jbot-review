@@ -291,5 +291,3 @@ export function createRelay(options: RelayOptions = {}) {
     },
   };
 }
-
-export type Relay = ReturnType<typeof createRelay>;
