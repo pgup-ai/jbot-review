@@ -27,9 +27,8 @@ jobs:
     # guaranteed failure.
     if: github.repository == 'pgup-ai/jbot-review'
     runs-on: ubuntu-latest
-    # Repo secrets: VPS_SSH_KEY (jbot-deploy private key), VPS_HOST,
-    # VPS_HOST_KEY (ssh-keyscan line), OBSERVER_HOSTNAME. All secrets, not
-    # vars, so none of them appear in public workflow logs.
+    # Credentials are secrets, not vars, so they never appear in public
+    # workflow logs; setup and values: deploy/observer/README.md.
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
