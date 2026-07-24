@@ -63,8 +63,16 @@ export function clonePr({
       rmSync(askpass, { force: true });
     }
   };
-  const fetchCommit = (url: string, sha: string, depth: string, env: NodeJS.ProcessEnv) =>
-    runGit(['fetch', '--no-tags', depth, url, sha], dir, env);
+  // Head and base fetches alternate into one shallow repo and each rewrites
+  // .git/shallow, so git can reject the next fetch as racing itself. The retry
+  // re-reads the settled file; a real failure fails again the same way.
+  const fetchCommit = (url: string, sha: string, depth: string, env: NodeJS.ProcessEnv) => {
+    const result = runGit(['fetch', '--no-tags', depth, url, sha], dir, env);
+    if (result.status === 0 || !/shallow file has changed/i.test(String(result.stderr ?? ''))) {
+      return result;
+    }
+    return runGit(['fetch', '--no-tags', depth, url, sha], dir, env);
+  };
 
   // Use argv arrays throughout so branch names never pass through a shell.
   withAuth((env) => {
