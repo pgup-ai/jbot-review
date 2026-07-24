@@ -65,6 +65,7 @@ const OBSERVER_QUEUE_BYTES = 64 * 1024 * 1024;
 const encoder = new TextEncoder();
 let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
 let sending: Promise<unknown> | undefined;
+let aborter: AbortController | undefined;
 let dead = false;
 
 function ensureStream(): void {
@@ -77,15 +78,18 @@ function ensureStream(): void {
     },
     new ByteLengthQueuingStrategy({ highWaterMark: OBSERVER_QUEUE_BYTES }),
   );
+  aborter = new AbortController();
   sending = fetch(ingestUrl, {
     method: 'POST',
     headers: token ? { authorization: `Bearer ${token}` } : {},
     body,
+    signal: aborter.signal,
     // Node's fetch requires half-duplex to be explicit for a streamed body.
     duplex: 'half',
   } as RequestInit).catch(() => {
-    // Gateway unreachable: stop buffering so an offline gateway can't grow
-    // memory. Observability is lost; the review is unaffected.
+    // Gateway unreachable (or aborted at close): stop buffering so an offline
+    // gateway can't grow memory. Observability is lost; the review is
+    // unaffected.
     dead = true;
     controller = undefined;
   });
@@ -161,4 +165,10 @@ export async function closeObserver(timeoutMs = 2000): Promise<void> {
   ]).finally(() => {
     if (timer) clearTimeout(timer);
   });
+  // The race can lose to a request that neither completes nor errors (a
+  // blackholed endpoint, a server that never responds); abort so the pending
+  // socket cannot keep the process alive after the review. No-op when the
+  // request already settled.
+  aborter?.abort();
+  aborter = undefined;
 }
