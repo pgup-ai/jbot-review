@@ -1,0 +1,136 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import {
+  createRelay,
+  parseEndpointTokens,
+  parseRelayControl,
+  type HelloControl,
+  type OpenControl,
+} from '../src/gateway/relay.ts';
+
+const hello = (overrides: Partial<HelloControl> = {}): HelloControl => ({
+  kind: 'hello',
+  endpoint: 'laptop',
+  device: 'macbook',
+  agents: [{ agent: 'kilo' }],
+  maxSessions: 2,
+  ...overrides,
+});
+
+const open = (overrides: Partial<OpenControl> = {}): OpenControl => ({
+  kind: 'open',
+  sessionId: 'sid-1',
+  runId: 'run-1',
+  endpoint: 'laptop',
+  agent: 'kilo',
+  ...overrides,
+});
+
+describe('relay', () => {
+  it('parses controls strictly and rejects unsafe or malformed input', () => {
+    assert.equal(parseRelayControl(JSON.stringify(hello()))?.kind, 'hello');
+    const parsedOpen = parseRelayControl(JSON.stringify(open({ model: 'kilo/x', ref: 'main' })));
+    assert.deepEqual(parsedOpen, { ...open(), model: 'kilo/x', ref: 'main' });
+    assert.equal(
+      parseRelayControl(JSON.stringify({ kind: 'close', sessionId: 's', reason: 'r' }))?.kind,
+      'close',
+    );
+    for (const bad of [
+      'not json',
+      JSON.stringify({ kind: 'nope' }),
+      JSON.stringify(hello({ endpoint: '../x' })),
+      JSON.stringify(hello({ maxSessions: 0 })),
+      JSON.stringify(hello({ agents: [{}] as never })),
+      JSON.stringify(open({ sessionId: 'a/b' })),
+      JSON.stringify(open({ runId: '.hidden' })),
+      JSON.stringify({ kind: 'opened' }),
+      JSON.stringify({ jsonrpc: '2.0', method: 'session/update' }),
+    ]) {
+      assert.equal(parseRelayControl(bad), undefined, bad);
+    }
+  });
+
+  it('parses endpoint token config and drops malformed entries', () => {
+    const tokens = parseEndpointTokens(' laptop:tok1, vps:tok2 ,bad entry,:x,noid');
+    assert.deepEqual(
+      [...tokens.entries()],
+      [
+        ['laptop', 'tok1'],
+        ['vps', 'tok2'],
+      ],
+    );
+    assert.equal(parseEndpointTokens(undefined).size, 0);
+  });
+
+  it('pairs sessions, relays both directions, and journals via onLine', () => {
+    const journal: string[] = [];
+    const relay = createRelay({
+      onLine: (sid, run, dir, line) => journal.push(`${sid}/${run}/${dir}/${line}`),
+    });
+    const toEndpoint: string[] = [];
+    const toClient: string[] = [];
+    relay.attachEndpoint(hello(), (line) => toEndpoint.push(line));
+    relay.openSession(open(), (line) => toClient.push(line));
+    assert.equal(JSON.parse(toEndpoint[0]).kind, 'open');
+    relay.clientLine('sid-1', 'frame-out');
+    relay.endpointLine('sid-1', 'frame-in');
+    assert.equal(toEndpoint[1], 'frame-out');
+    assert.equal(toClient[0], 'frame-in');
+    assert.deepEqual(journal, ['sid-1/run-1/out/frame-out', 'sid-1/run-1/in/frame-in']);
+    assert.equal(relay.sessionRun('sid-1'), 'run-1');
+    // Unknown sessions are dropped, never crash.
+    relay.clientLine('ghost', 'x');
+    relay.endpointLine('ghost', 'x');
+  });
+
+  it('refuses offline endpoints, duplicates, capacity, and unknown agents', () => {
+    const relay = createRelay();
+    const refusals: string[] = [];
+    const client = (line: string): void => {
+      const control = JSON.parse(line) as { kind: string; reason?: string };
+      if (control.kind === 'refused') refusals.push(control.reason ?? '');
+    };
+    relay.openSession(open(), client);
+    relay.attachEndpoint(hello({ maxSessions: 1 }), () => {});
+    relay.openSession(open({ agent: 'ghost' }), client);
+    relay.openSession(open(), client);
+    relay.openSession(open({ sessionId: 'sid-1' }), client); // duplicate
+    relay.openSession(open({ sessionId: 'sid-2' }), client); // over capacity
+    assert.deepEqual(refusals, [
+      'endpoint offline',
+      'agent ghost not offered',
+      'session id in use',
+      'at capacity',
+    ]);
+    // A companion refusal frees the slot for the next open.
+    const ack = { kind: 'refused' as const, sessionId: 'sid-1', reason: 'no auth' };
+    relay.endpointAck(ack, JSON.stringify(ack));
+    relay.openSession(open({ sessionId: 'sid-3' }), client);
+    assert.equal(relay.sessionRun('sid-3'), 'run-1');
+  });
+
+  it('fails sessions loudly past the resume window; reattach cancels', async () => {
+    const failed: string[] = [];
+    const relay = createRelay({
+      resumeWindowMs: 30,
+      onSessionFailed: (sid, reason) => failed.push(`${sid}:${reason}`),
+    });
+    const toClient: string[] = [];
+    relay.attachEndpoint(hello(), () => {});
+    relay.openSession(open(), (line) => toClient.push(line));
+    relay.openSession(open({ sessionId: 'sid-2' }), () => {});
+
+    relay.detachEndpoint('laptop');
+    relay.attachEndpoint(hello(), () => {}); // sid survives: reattach in window
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.deepEqual(failed, []);
+
+    relay.detachEndpoint('laptop');
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(failed.length, 2);
+    assert.match(failed[0], /resume window/);
+    assert.equal(JSON.parse(toClient.at(-1)!).kind, 'close');
+    assert.equal(relay.sessionRun('sid-1'), undefined);
+  });
+});

@@ -13,16 +13,12 @@ import {
   type ObserverEnvelope,
   type RunControl,
 } from './journal.ts';
+import { readNdjsonBody } from './ndjson.ts';
+import { createRelay, parseEndpointTokens, parseRelayControl } from './relay.ts';
 import { VIEWER_HTML } from './viewer.ts';
 
 // SSE comment ping; keeps idle viewer connections alive through proxies.
 const HEARTBEAT_MS = 25_000;
-// Ingest caps: one NDJSON frame, and one whole POST (a run's frame stream).
-// Both fail closed (413) so an oversized/never-terminated line can't OOM. The
-// per-line cap sits above the ACP frame budget (32MB) so a legitimate large
-// frame passes; it only stops a line that never terminates.
-const MAX_LINE_BYTES = 48 * 1024 * 1024;
-const MAX_BODY_BYTES = 1024 * 1024 * 1024;
 
 const port =
   Number(process.env.JBOT_GATEWAY_PORT) > 0 ? Number(process.env.JBOT_GATEWAY_PORT) : 8790;
@@ -41,11 +37,39 @@ const log = (msg: string): void => {
 const subscribers = new Map<string, Set<ServerResponse>>();
 const journalKey = (runId: string, sessionId: string): string => `${runId}/${sessionId}`;
 
-// Constant-time compare so the token (which also decides public exposure)
-// can't be recovered by timing. Length is not secret; unequal lengths short out.
-function tokenMatches(candidate: string): boolean {
+// Relay state: companions and clients each hold one SSE leg; sends resolve
+// through the maps so a reconnect rebinds without touching the relay.
+const endpointTokens = parseEndpointTokens(process.env.JBOT_GATEWAY_ENDPOINTS);
+const endpointStreams = new Map<string, ServerResponse>();
+const sessionStreams = new Map<string, ServerResponse>();
+const relay = createRelay({
+  resumeWindowMs:
+    Number(process.env.JBOT_GATEWAY_RESUME_MS) > 0
+      ? Number(process.env.JBOT_GATEWAY_RESUME_MS)
+      : undefined,
+  onLine: (_sessionId, _runId, _dir, line) => {
+    const envelope = parseEnvelope(line);
+    if (envelope) appendEnvelope(dataDir, envelope);
+  },
+});
+const sendToEndpoint =
+  (id: string) =>
+  (line: string): void => {
+    const res = endpointStreams.get(id);
+    if (res) sseWrite(res, line);
+  };
+const sendToSession =
+  (sid: string) =>
+  (line: string): void => {
+    const res = sessionStreams.get(sid);
+    if (res) sseWrite(res, line);
+  };
+
+// Constant-time compare so tokens can't be recovered by timing. Length is not
+// secret; unequal lengths short out.
+function tokenMatches(candidate: string, expected = token): boolean {
   const a = Buffer.from(candidate);
-  const b = Buffer.from(token);
+  const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
@@ -112,63 +136,129 @@ function acceptLine(line: string): boolean {
 
 async function handleIngest(req: IncomingMessage, res: ServerResponse): Promise<void> {
   // Bounded NDJSON: one envelope per line, appended and fanned out as it
-  // arrives so live viewers track an in-flight review. Byte-capped per line
-  // and per body — ingest is a trust boundary, not a crash surface.
+  // arrives so live viewers track an in-flight review.
   let accepted = 0;
   let rejected = 0;
-  let total = 0;
-  // Carries only the current incomplete line. Newlines are searched within
-  // each incoming chunk (never a re-scan of the whole buffer), so an
-  // unterminated line stays O(total) instead of O(total²). partialBytes tracks
-  // the line's ENCODED size so the cap stays byte-accurate for non-ASCII.
-  let partial = '';
-  let partialBytes = 0;
-  let overflow = false;
-  const take = (line: string): void => {
-    if (!line.trim()) return;
+  const { overflow } = await readNdjsonBody(req, (line) => {
     if (acceptLine(line)) accepted += 1;
     else rejected += 1;
-  };
-  req.setEncoding('utf8');
-  for await (const chunk of req as AsyncIterable<string>) {
-    total += Buffer.byteLength(chunk);
-    if (total > MAX_BODY_BYTES) {
-      overflow = true;
-      break;
-    }
-    let start = chunk.indexOf('\n');
-    if (start === -1) {
-      partial += chunk;
-      partialBytes += Buffer.byteLength(chunk);
-      if (partialBytes > MAX_LINE_BYTES) {
-        overflow = true;
-        break;
-      }
-      continue;
-    }
-    take(partial + chunk.slice(0, start));
-    let nl = chunk.indexOf('\n', start + 1);
-    while (nl !== -1) {
-      take(chunk.slice(start + 1, nl));
-      start = nl;
-      nl = chunk.indexOf('\n', start + 1);
-    }
-    partial = chunk.slice(start + 1);
-    partialBytes = Buffer.byteLength(partial);
-    if (partialBytes > MAX_LINE_BYTES) {
-      overflow = true;
-      break;
-    }
-  }
+  });
   if (overflow) {
     res.writeHead(413, { 'content-type': 'text/plain' });
     res.end('payload too large');
     req.destroy();
     return;
   }
-  take(partial);
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ accepted, rejected }));
+}
+
+function overflowOr(res: ServerResponse, req: IncomingMessage, overflow: boolean): void {
+  if (overflow) {
+    res.writeHead(413, { 'content-type': 'text/plain' });
+    res.end('payload too large');
+    req.destroy();
+    return;
+  }
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end('{}');
+}
+
+// Companion upstream: hello attaches, acks/frames route by sessionId. The
+// path id is the authority — a hello for another endpoint is ignored.
+async function handleEndpointIngest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  id: string,
+): Promise<void> {
+  const { overflow } = await readNdjsonBody(req, (line) => {
+    const control = parseRelayControl(line);
+    if (control) {
+      if (control.kind === 'hello' && control.endpoint === id) {
+        relay.attachEndpoint(control, sendToEndpoint(id));
+      } else if (control.kind === 'opened' || control.kind === 'refused') {
+        relay.endpointAck(control, line);
+      } else if (control.kind === 'close') {
+        relay.closeSession(control.sessionId, control.reason ?? 'closed by endpoint');
+      }
+      return;
+    }
+    const envelope = parseEnvelope(line);
+    if (envelope) relay.endpointLine(envelope.sessionId, line);
+  });
+  overflowOr(res, req, overflow);
+}
+
+// Client upstream: open pairs, frames relay, close tears down. The path sid
+// is the authority for every line.
+async function handleSessionIngest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  sid: string,
+): Promise<void> {
+  const { overflow } = await readNdjsonBody(req, (line) => {
+    const control = parseRelayControl(line);
+    if (control?.kind === 'open' && control.sessionId === sid) {
+      relay.openSession(control, sendToSession(sid));
+    } else if (control?.kind === 'close' && control.sessionId === sid) {
+      relay.closeSession(sid, control.reason ?? 'closed by client');
+    } else if (!control) {
+      const envelope = parseEnvelope(line);
+      if (envelope && envelope.sessionId === sid) relay.clientLine(sid, line);
+    }
+  });
+  overflowOr(res, req, overflow);
+}
+
+function authorizedEndpoint(req: IncomingMessage, url: URL, id: string): boolean {
+  const expected = endpointTokens.get(id);
+  if (!expected) return false;
+  const header = req.headers.authorization;
+  if (
+    typeof header === 'string' &&
+    header.startsWith('Bearer ') &&
+    tokenMatches(header.slice(7), expected)
+  ) {
+    return true;
+  }
+  if (req.method === 'GET') {
+    const q = url.searchParams.get('token');
+    if (q && tokenMatches(q, expected)) return true;
+  }
+  return false;
+}
+
+/** One live SSE leg per peer; last connection wins, cleanup only clears the
+ * map when this response is still the registered one. */
+function registerPeerStream(
+  streams: Map<string, ServerResponse>,
+  key: string,
+  res: ServerResponse,
+  onGone?: () => void,
+): void {
+  streams.get(key)?.end();
+  streams.set(key, res);
+  res.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-store',
+    connection: 'keep-alive',
+  });
+  // Flush headers now — peers await them before sending hello/open.
+  sseSend(res, ': connected\n\n');
+  const heartbeat = setInterval(() => sseSend(res, ': ping\n\n'), HEARTBEAT_MS);
+  heartbeat.unref();
+  let done = false;
+  const cleanup = (): void => {
+    if (done) return;
+    done = true;
+    clearInterval(heartbeat);
+    if (streams.get(key) === res) {
+      streams.delete(key);
+      onGone?.();
+    }
+  };
+  res.on('close', cleanup);
+  res.on('error', cleanup);
 }
 
 function handleStream(res: ServerResponse, runId: string, sessionId: string): void {
@@ -215,6 +305,28 @@ function route(req: IncomingMessage, res: ServerResponse): void {
     res.end('ok');
     return;
   }
+  // Companion routes authenticate with their per-endpoint token, not the
+  // gateway token, so they sit before the global gate.
+  const endpointRoute = url.pathname.match(/^\/api\/endpoints\/([^/]+)\/(stream|ingest)$/);
+  if (endpointRoute) {
+    const [, id, mode] = endpointRoute;
+    if (!isSafeId(id) || !authorizedEndpoint(req, url, id)) {
+      res.writeHead(401, { 'content-type': 'text/plain' });
+      res.end('unauthorized');
+      return;
+    }
+    if (mode === 'stream' && req.method === 'GET') {
+      registerPeerStream(endpointStreams, id, res, () => relay.detachEndpoint(id));
+      return;
+    }
+    if (mode === 'ingest' && req.method === 'POST') {
+      void handleEndpointIngest(req, res, id).catch(() => res.destroy());
+      return;
+    }
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('not found');
+    return;
+  }
   if (!authorized(req, url)) {
     res.writeHead(401, { 'content-type': 'text/plain' });
     res.end('unauthorized');
@@ -229,6 +341,28 @@ function route(req: IncomingMessage, res: ServerResponse): void {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' });
     res.end(JSON.stringify(listRuns(dataDir)));
     return;
+  }
+  if (req.method === 'GET' && url.pathname === '/api/endpoints') {
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' });
+    res.end(JSON.stringify(relay.listEndpoints()));
+    return;
+  }
+  const sessionRoute = url.pathname.match(/^\/api\/sessions\/([^/]+)\/(stream|ingest)$/);
+  if (sessionRoute) {
+    const [, sid, mode] = sessionRoute;
+    if (!isSafeId(sid)) {
+      res.writeHead(400, { 'content-type': 'text/plain' });
+      res.end('bad id');
+      return;
+    }
+    if (mode === 'stream' && req.method === 'GET') {
+      registerPeerStream(sessionStreams, sid, res);
+      return;
+    }
+    if (mode === 'ingest' && req.method === 'POST') {
+      void handleSessionIngest(req, res, sid).catch(() => res.destroy());
+      return;
+    }
   }
   const stream = url.pathname.match(/^\/api\/runs\/([^/]+)\/sessions\/([^/]+)\/stream$/);
   if (req.method === 'GET' && stream) {
@@ -263,6 +397,17 @@ const server = createServer((req, res) => {
     if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain' });
     res.end('internal error');
   }
+});
+
+// Drain on deploy: close every live SSE leg so peers reconnect and resume
+// within the relay's window, instead of waiting out dead connections.
+process.on('SIGTERM', () => {
+  log('SIGTERM: draining');
+  server.close(() => process.exit(0));
+  for (const res of endpointStreams.values()) res.end();
+  for (const res of sessionStreams.values()) res.end();
+  for (const subs of subscribers.values()) for (const res of subs) res.end();
+  setTimeout(() => process.exit(0), 3000).unref();
 });
 
 server.listen(port, host, () => {
