@@ -122,6 +122,7 @@ const sessions = new Map<string, LiveSession>();
 const encoder = new TextEncoder();
 let upstream: ReadableStreamDefaultController<Uint8Array> | undefined;
 const outbox: string[] = [];
+let shuttingDown = false;
 
 // Overflow means the upstream can't deliver, so don't try to send close
 // frames through it (that would re-enter here): kill the agents and let the
@@ -329,6 +330,9 @@ function openSession(control: OpenControl): void {
 }
 
 function handleWireLine(line: string): void {
+  // Stop accepting work once shutting down, so a late open can't spawn an
+  // agent that the shutdown sweep has already passed.
+  if (shuttingDown) return;
   const control = parseRelayControl(line);
   if (control) {
     if (control.kind === 'open') openSession(control);
@@ -433,7 +437,6 @@ async function main(): Promise<void> {
   }
 }
 
-let shuttingDown = false;
 function shutdown(): void {
   if (shuttingDown) return;
   shuttingDown = true;
