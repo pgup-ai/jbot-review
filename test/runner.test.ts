@@ -590,7 +590,7 @@ describe('emitReviewTelemetry sink', () => {
       for (const stage of ['gated', 'deduped', 'suppressed', 'verified', 'filtered'] as const) {
         rec.snapshot(stage, [f]);
       }
-      rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [] });
+      rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [], anchorMissed: [] });
 
       const logs: string[] = [];
       emitReviewTelemetry(rec, dir, (m) => logs.push(m));

@@ -22,7 +22,7 @@ describe('createTelemetryRecorder (disabled = inert)', () => {
     assert.deepEqual(out, input, 'findings pass through untouched');
     assert.equal(out[0].id, undefined, 'no id assigned when disabled');
     rec.snapshot('deduped', out);
-    rec.route({ inline: out, fileLevel: [], orphaned: [], rescued: [] });
+    rec.route({ inline: out, fileLevel: [], orphaned: [], rescued: [], anchorMissed: [] });
     assert.deepEqual(rec.findingRows(), []);
     assert.equal(rec.toJsonl(), '');
   });
@@ -48,7 +48,7 @@ describe('createTelemetryRecorder finding dispositions', () => {
     for (const stage of ['gated', 'deduped', 'suppressed', 'verified', 'filtered'] as const) {
       rec.snapshot(stage, [f]);
     }
-    rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [] });
+    rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [], anchorMissed: [] });
 
     assert.equal(rec.findingRows()[0].disposition, 'posted-inline');
   });
@@ -67,7 +67,7 @@ describe('createTelemetryRecorder finding dispositions', () => {
     rec.snapshot('suppressed', [refute, sevfilt, posted]); // supp dropped
     rec.snapshot('verified', [sevfilt, posted]); // refute dropped
     rec.snapshot('filtered', [posted]); // sevfilt dropped
-    rec.route({ inline: [posted], fileLevel: [], orphaned: [], rescued: [] });
+    rec.route({ inline: [posted], fileLevel: [], orphaned: [], rescued: [], anchorMissed: [] });
 
     const byId = new Map(rec.findingRows().map((r) => [r.id, r.disposition]));
     assert.equal(byId.get('f1'), 'deduped');
@@ -85,7 +85,7 @@ describe('createTelemetryRecorder finding dispositions', () => {
     const [f] = rec.produced('review', [finding('a.ts', 1, 'P1')]);
     rec.snapshot('gated', [f]);
     rec.snapshot('filtered', [f]); // 'deduped'/'suppressed'/'verified' omitted
-    rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [] });
+    rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [], anchorMissed: [] });
 
     assert.equal(rec.findingRows()[0].disposition, 'posted-inline');
   });
@@ -97,7 +97,13 @@ describe('createTelemetryRecorder finding dispositions', () => {
     for (const stage of ['deduped', 'suppressed', 'verified', 'filtered'] as const) {
       rec.snapshot(stage, [{ ...f, severity: 'P3' }]);
     }
-    rec.route({ inline: [], fileLevel: [], orphaned: [{ ...f, severity: 'P3' }], rescued: [] });
+    rec.route({
+      inline: [],
+      fileLevel: [],
+      orphaned: [{ ...f, severity: 'P3' }],
+      rescued: [],
+      anchorMissed: [],
+    });
 
     const row = rec.findingRows()[0];
     assert.equal(row.demoted, true);
@@ -111,7 +117,7 @@ describe('createTelemetryRecorder finding dispositions', () => {
       rec.snapshot(stage, [f]);
     }
     f.line = 2; // rescue re-anchors the model's bad line 99 to the real added line
-    rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [f] });
+    rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [f], anchorMissed: [] });
 
     const row = rec.findingRows()[0];
     assert.equal(row.disposition, 'rescued');
@@ -123,18 +129,31 @@ describe('createTelemetryRecorder finding dispositions', () => {
     );
   });
 
-  it('reports the posted line for a finding rerouted to file level', () => {
+  it('reports the posted line for a model-declared file-level finding', () => {
     const rec = createTelemetryRecorder(true);
-    const [f] = rec.produced('review', [finding('a.ts', 99, 'P2')]);
+    const [f] = rec.produced('review', [finding('a.ts', 0, 'P2')]);
     for (const stage of ['gated', 'deduped', 'suppressed', 'verified', 'filtered'] as const) {
       rec.snapshot(stage, [f]);
     }
-    f.line = 0;
-    rec.route({ inline: [], fileLevel: [f], orphaned: [], rescued: [] });
+    rec.route({ inline: [], fileLevel: [f], orphaned: [], rescued: [], anchorMissed: [] });
 
     const row = rec.findingRows()[0];
     assert.equal(row.disposition, 'posted-file-level');
     assert.equal(row.line, 0);
+  });
+
+  it('flags an anchor-missed finding and keeps the line the model claimed', () => {
+    const rec = createTelemetryRecorder(true);
+    const [f] = rec.produced('review', [finding('a.ts', 99, 'P2', { evidence: 'const x = 1;' })]);
+    for (const stage of ['gated', 'deduped', 'suppressed', 'verified', 'filtered'] as const) {
+      rec.snapshot(stage, [f]);
+    }
+    f.line = 0; // demoted to a file-level thread once anchoring failed
+    rec.route({ inline: [], fileLevel: [f], orphaned: [], rescued: [], anchorMissed: [f] });
+
+    const row = rec.findingRows()[0];
+    assert.equal(row.disposition, 'anchor-missed');
+    assert.equal(row.line, 99, 'the claimed line is the diagnostic, not the 0 it was demoted to');
   });
 
   it('serializes one JSONL line per finding row plus session rows', () => {
@@ -143,7 +162,7 @@ describe('createTelemetryRecorder finding dispositions', () => {
     for (const stage of ['gated', 'deduped', 'suppressed', 'verified', 'filtered'] as const) {
       rec.snapshot(stage, [f]);
     }
-    rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [] });
+    rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [], anchorMissed: [] });
     rec.recordSession({
       session: 'review',
       model: 'deepseek/deepseek-v4-flash',

@@ -1767,7 +1767,7 @@ async function runReviewPipeline(params: {
       `Review complete: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
-    const { inline, fileLevel, orphaned, rescued } = anchorFindings(
+    const { inline, fileLevel, orphaned, rescued, anchorMissed } = anchorFindings(
       filteredFindings,
       addable,
       patchByPath,
@@ -1777,7 +1777,7 @@ async function runReviewPipeline(params: {
     if (rescued.length > 0) {
       log(`Rescued ${rescued.length} orphaned finding(s) by re-anchoring to their evidence quote.`);
     }
-    telemetry.route({ inline, fileLevel, orphaned, rescued });
+    telemetry.route({ inline, fileLevel, orphaned, rescued, anchorMissed });
     const verdict = decideVerdict(filteredFindings);
 
     // Report the final filtered findings + summary on EVERY completed review (dry-run or
