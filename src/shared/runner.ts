@@ -1875,7 +1875,7 @@ async function runReviewPipeline(params: {
       log(
         `Posting review: verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
       );
-      await postReview(
+      const { inlinePosted, inlineDropped } = await postReview(
         octokit,
         owner,
         repo,
@@ -1884,8 +1884,13 @@ async function runReviewPipeline(params: {
         body,
         inline,
         fileLevelCommentIds,
+        headSha as string,
       );
-      log('Review posted.');
+      log(
+        inlineDropped > 0
+          ? `Review posted; ${inlineDropped} inline comment(s) failed to anchor (${inlinePosted} salvaged).`
+          : 'Review posted.',
+      );
     } else {
       log('No new findings on a re-run; skipping the review comment (reacting instead).');
     }

@@ -16,6 +16,7 @@ import {
   type Octokit,
   type PriorJbotThread,
 } from '../src/shared/github.ts';
+import type { Finding } from '../src/shared/types.ts';
 
 const REVIEW_BODY = [
   '## J-Bot Code Review',
@@ -318,6 +319,7 @@ describe('review posting', () => {
       'review body',
       [],
       [200, 200, 201],
+      'headsha',
     );
 
     assert.match(request?.body ?? '', /jbot-review:linked-comments:200,201/);
@@ -333,8 +335,70 @@ describe('review posting', () => {
       'review body\n<!-- jbot-review:linked-comments:999 -->',
       [],
       [],
+      'headsha',
     );
     assert.doesNotMatch(request?.body ?? '', /jbot-review:linked-comments/);
+  });
+
+  const finding = (line: number): Finding => ({
+    path: 'a.ts',
+    line,
+    severity: 'P2',
+    title: `t${line}`,
+    body: 'b',
+  });
+
+  /** Stub whose batched createReview fails with `status`; per-comment posts reject `badLine`. */
+  function rejectingOctokit(status: number, badLine?: number) {
+    const state = { posted: [] as number[], body: '' };
+    const octokit = {
+      rest: {
+        pulls: {
+          createReview: async (params: { body?: string; comments?: unknown[] }) => {
+            if (params.comments?.length) throw Object.assign(new Error('rejected'), { status });
+            state.body = params.body ?? '';
+          },
+          createReviewComment: async (params: { line: number }) => {
+            if (params.line === badLine) throw Object.assign(new Error('bad'), { status: 422 });
+            state.posted.push(params.line);
+            return { data: { id: 300 + params.line } };
+          },
+        },
+      },
+    };
+    return { octokit: octokit as unknown as Octokit, state };
+  }
+
+  const post = (octokit: Octokit, findings: Finding[]) =>
+    postReview(octokit, 'acme', 'widget', 12, 'COMMENT', 'review body', findings, [], 'headsha');
+
+  it('salvages the still-anchorable comments when GitHub rejects the batch', async () => {
+    const partial = rejectingOctokit(422, 99);
+    const result = await post(partial.octokit, [finding(5), finding(99), finding(7)]);
+
+    assert.deepEqual(partial.state.posted, [5, 7], 'one bad anchor no longer costs the good ones');
+    assert.deepEqual(result, { inlinePosted: 2, inlineDropped: 1 });
+    assert.match(partial.state.body, /1 inline comment/, 'the body reports what was lost');
+    assert.match(
+      partial.state.body,
+      /jbot-review:linked-comments:305,307/,
+      'salvaged comments are linked so the review can still be finalized',
+    );
+
+    // Everything salvaged: no omission note, or the body would claim a loss that did not happen.
+    const full = rejectingOctokit(422);
+    const allSaved = await post(full.octokit, [finding(5), finding(7)]);
+    assert.deepEqual(allSaved, { inlinePosted: 2, inlineDropped: 0 });
+    assert.doesNotMatch(full.state.body, /omitted/);
+  });
+
+  it('does not re-post comments when the batch failure was not a rejection', async () => {
+    // A 500 may have been applied server-side; salvaging would duplicate every comment.
+    const flaky = rejectingOctokit(500);
+    const result = await post(flaky.octokit, [finding(5), finding(7)]);
+
+    assert.deepEqual(flaky.state.posted, [], 'no comment is re-posted on an ambiguous failure');
+    assert.deepEqual(result, { inlinePosted: 0, inlineDropped: 2 });
   });
 });
 

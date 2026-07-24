@@ -510,7 +510,15 @@ export function decideVerdict(_findings: Finding[]): Verdict {
   return 'COMMENT';
 }
 
-/** Posts one review; inline-anchorable findings become inline comments. */
+/**
+ * Posts one review; inline-anchorable findings become inline comments.
+ *
+ * GitHub rejects the whole createReview call if any single comment fails to
+ * anchor, so a rejected batch is retried one comment at a time: a stale or
+ * unanchorable line costs itself, not every other finding in the run. Only a
+ * 422 counts as a rejection — any other failure may already have been applied
+ * server-side, where re-posting would duplicate every comment.
+ */
 export async function postReview(
   octokit: Octokit,
   owner: string,
@@ -520,45 +528,73 @@ export async function postReview(
   body: string,
   inlineFindings: Finding[],
   linkedCommentIds: readonly number[],
-): Promise<void> {
-  const comments = inlineFindings.map((f) => ({
-    path: f.path,
-    line: f.line,
-    side: 'RIGHT' as const,
-    body: formatFindingCommentBody(f),
-  }));
-
-  const linkedBody = appendLinkedCommentsFooter(
-    appendReviewMarker(stripLinkedCommentsFooter(body)),
-    linkedCommentIds,
-  );
+  headSha: string,
+): Promise<{ inlinePosted: number; inlineDropped: number }> {
+  const base = stripLinkedCommentsFooter(body);
+  let rejected = false;
   try {
     await octokit.rest.pulls.createReview({
       owner,
       repo,
       pull_number: pullNumber,
       event: verdict,
-      body: linkedBody,
-      comments,
+      body: appendLinkedCommentsFooter(appendReviewMarker(base), linkedCommentIds),
+      comments: inlineFindings.map((f) => ({
+        path: f.path,
+        line: f.line,
+        side: 'RIGHT' as const,
+        body: formatFindingCommentBody(f),
+      })),
     });
-  } catch {
-    try {
-      await octokit.rest.pulls.createReview({
-        owner,
-        repo,
-        pull_number: pullNumber,
-        event: verdict,
-        body: appendLinkedCommentsFooter(
-          appendReviewMarker(
-            `${stripLinkedCommentsFooter(body)}\n\n_(inline comments omitted — failed to anchor to diff lines)_`,
-          ),
-          linkedCommentIds,
-        ),
-      });
-    } catch {
-      throw new Error('Failed to post review to GitHub');
+    return { inlinePosted: inlineFindings.length, inlineDropped: 0 };
+  } catch (error) {
+    rejected = (error as { status?: number } | null)?.status === 422;
+  }
+
+  // Salvage first so the body can state the true dropped count and link the
+  // survivors: like file-level comments, they hang off the PR, not this review.
+  // GitHub does not name the offending comment, so every one is retried.
+  const salvagedIds: number[] = [];
+  if (rejected) {
+    for (const finding of inlineFindings) {
+      try {
+        const response = await octokit.rest.pulls.createReviewComment({
+          owner,
+          repo,
+          pull_number: pullNumber,
+          commit_id: headSha,
+          path: finding.path,
+          line: finding.line,
+          side: 'RIGHT',
+          body: formatFindingCommentBody(finding),
+        });
+        salvagedIds.push(response.data.id);
+      } catch {
+        /* this one could not anchor; counted below */
+      }
     }
   }
+  const inlineDropped = inlineFindings.length - salvagedIds.length;
+
+  try {
+    await octokit.rest.pulls.createReview({
+      owner,
+      repo,
+      pull_number: pullNumber,
+      event: verdict,
+      body: appendLinkedCommentsFooter(
+        appendReviewMarker(
+          inlineDropped > 0
+            ? `${base}\n\n_(${inlineDropped} inline comment(s) omitted — failed to anchor to diff lines)_`
+            : base,
+        ),
+        [...linkedCommentIds, ...salvagedIds],
+      ),
+    });
+  } catch {
+    throw new Error('Failed to post review to GitHub');
+  }
+  return { inlinePosted: salvagedIds.length, inlineDropped };
 }
 
 export async function updateReviewBody(
