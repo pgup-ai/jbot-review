@@ -100,19 +100,22 @@ describe('gateway', () => {
           JBOT_GATEWAY_PORT: String(port),
           JBOT_GATEWAY_DATA: dataDir,
           JBOT_GATEWAY_TOKEN: token,
+          // Reverse-proxy topology: token auth without the 0.0.0.0 bind.
+          JBOT_GATEWAY_HOST: '127.0.0.1',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-      await new Promise<void>((resolve, reject) => {
+      const startupLine = await new Promise<string>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('gateway did not start')), 15_000);
         child?.stdout?.on('data', (chunk: Buffer) => {
           if (String(chunk).includes('listening')) {
             clearTimeout(timer);
-            resolve();
+            resolve(String(chunk));
           }
         });
         child?.on('exit', (code) => reject(new Error(`gateway exited ${code}`)));
       });
+      assert.ok(startupLine.includes('http://127.0.0.1:'), `host override ignored: ${startupLine}`);
 
       assert.equal((await fetch(`${base}/healthz`)).status, 200);
       // Token mode: unauthenticated ingest and streams are refused.

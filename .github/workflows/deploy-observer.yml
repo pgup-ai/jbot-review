@@ -1,0 +1,61 @@
+# Deploys the observer gateway (dist/gateway/server.js + dist/package.json)
+# to the operator VPS whenever gateway code lands on main.
+# One-time host setup: deploy/observer/README.md.
+name: Deploy Observer Gateway
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/gateway/**'
+      - 'scripts/build.ts'
+      - 'deploy/observer/**'
+      - '.github/workflows/deploy-observer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize deploys; a stale build must not overwrite a newer one mid-rsync.
+concurrency:
+  group: deploy-observer
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Forks have no deploy target; don't burn their Actions minutes on a
+    # guaranteed failure.
+    if: github.repository == 'pgup-ai/jbot-review'
+    runs-on: ubuntu-latest
+    # Repo secrets: VPS_SSH_KEY (jbot-deploy private key), VPS_HOST,
+    # VPS_HOST_KEY (ssh-keyscan line), OBSERVER_HOSTNAME. All secrets, not
+    # vars, so none of them appear in public workflow logs.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          HOST_KEY: ${{ secrets.VPS_HOST_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+      - name: Deploy and restart
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          TARGET="jbot-deploy@$VPS_HOST"
+          rsync -az -e "ssh -i ~/.ssh/deploy_key" dist/package.json "$TARGET:/opt/jbot-observer/dist/"
+          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key" dist/gateway/ "$TARGET:/opt/jbot-observer/dist/gateway/"
+          ssh -i ~/.ssh/deploy_key "$TARGET" 'sudo systemctl restart jbot-gateway && systemctl is-active jbot-gateway'
+      - name: Health check
+        env:
+          OBSERVER_HOSTNAME: ${{ secrets.OBSERVER_HOSTNAME }}
+        run: curl -fsS --retry 5 --retry-delay 2 --retry-all-errors "https://$OBSERVER_HOSTNAME/healthz"

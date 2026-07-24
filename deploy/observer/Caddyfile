@@ -1,0 +1,8 @@
+# install.sh substitutes the real hostname and writes this to /etc/caddy/Caddyfile.
+# Caddy auto-provisions and renews the Let's Encrypt certificate.
+{$OBSERVER_HOSTNAME} {
+	# SSE + streaming ingest: forward bytes as they arrive, never buffer.
+	reverse_proxy 127.0.0.1:8790 {
+		flush_interval -1
+	}
+}

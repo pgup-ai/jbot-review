@@ -1,0 +1,26 @@
+[Unit]
+Description=jbot-review observer gateway
+Documentation=https://github.com/pgup-ai/jbot-review
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=jbot-gateway
+Group=jbot-gateway
+EnvironmentFile=/etc/jbot-gateway/env
+# install.sh substitutes the host's node path here.
+ExecStart=/usr/bin/node /opt/jbot-observer/dist/gateway/server.js
+Restart=always
+RestartSec=2
+
+# Journal dir (JBOT_GATEWAY_DATA in the env file) — created and owned for us.
+StateDirectory=jbot-gateway
+StateDirectoryMode=0700
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
