@@ -6,8 +6,10 @@
  */
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
-/** Walks a patch, yielding each ADDED line's new-side number and content (sans '+'). */
-function* addedLines(patch: string): Generator<{ line: number; content: string }> {
+/** Walks a patch, yielding every NEW-side line (added or context) with its number. */
+function* newSideLines(
+  patch: string,
+): Generator<{ line: number; content: string; added: boolean }> {
   let newLine = 0;
   let insideHunk = false;
   for (const raw of patch.split('\n')) {
@@ -19,17 +21,24 @@ function* addedLines(patch: string): Generator<{ line: number; content: string }
     }
     if (!insideHunk) continue;
     const marker = raw[0];
-    if (marker === '+') {
-      yield { line: newLine, content: raw.slice(1) };
-      newLine += 1;
-    } else if (marker === '-') {
-      // Removed line: present only on the old side.
-    } else if (marker === '\\') {
-      // "\ No newline at end of file": annotates the preceding line, on neither side.
-    } else {
-      newLine += 1;
-    }
+    // Removed lines are old-side only; "\ No newline at end of file" annotates
+    // the preceding line and is on neither side.
+    if (marker === '-' || marker === '\\') continue;
+    yield { line: newLine, content: raw.slice(1), added: marker === '+' };
+    newLine += 1;
   }
+}
+
+/** Walks a patch, yielding each ADDED line's new-side number and content (sans '+'). */
+function* addedLines(patch: string): Generator<{ line: number; content: string }> {
+  for (const side of newSideLines(patch)) if (side.added) yield side;
+}
+
+/** Trim, drop a leading diff marker, trim again — indentation and '+'/'-' must not block a match. */
+function normalizeSnippetLine(text: string): string {
+  const trimmed = text.trim();
+  const unmarked = trimmed.startsWith('+') || trimmed.startsWith('-') ? trimmed.slice(1) : trimmed;
+  return unmarked.trim();
 }
 
 export function parseAddedLines(patch: string | undefined): Set<number> {
@@ -60,4 +69,40 @@ export function rescueAnchorByEvidence(
     if (content.trim().startsWith(needle)) matches.push(line);
   }
   return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
+ * New-side line to anchor a finding whose `evidence` quotes one or more
+ * consecutive lines of the file. The matched window may span context lines —
+ * that is what makes a short quote unique — but the anchor is the first ADDED
+ * line inside it, because GitHub only accepts comments on lines this PR added.
+ *
+ * Undefined unless EXACTLY one window matches: an ambiguous quote must leave
+ * the finding orphaned rather than mis-anchored. Blank lines are trimmed off
+ * the quote's ends only; internally the run must be genuinely consecutive, so
+ * "consecutive" keeps meaning what it says and the anchor stays unambiguous.
+ */
+export function anchorByEvidenceSnippet(
+  patch: string | undefined,
+  evidence: string,
+): number | undefined {
+  if (!patch) return undefined;
+  const target = evidence.split('\n').map(normalizeSnippetLine);
+  while (target[0] === '') target.shift();
+  while (target.at(-1) === '') target.pop();
+  if (target.length === 0) return undefined;
+
+  const side = [...newSideLines(patch)].map((l) => ({
+    ...l,
+    text: normalizeSnippetLine(l.content),
+  }));
+  let matches = 0;
+  let anchor: number | undefined;
+  for (let i = 0; i + target.length <= side.length; i += 1) {
+    if (target.some((line, j) => side[i + j].text !== line)) continue;
+    matches += 1;
+    if (matches > 1) return undefined;
+    anchor = side.slice(i, i + target.length).find((l) => l.added)?.line;
+  }
+  return anchor;
 }
