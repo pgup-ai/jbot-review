@@ -123,13 +123,19 @@ const encoder = new TextEncoder();
 let upstream: ReadableStreamDefaultController<Uint8Array> | undefined;
 const outbox: string[] = [];
 let shuttingDown = false;
+/** Drops the current connection epoch; set while connected. */
+let abortEpoch: (() => void) | undefined;
 
-// Overflow means the upstream can't deliver, so don't try to send close
-// frames through it (that would re-enter here): kill the agents and let the
-// gateway's resume window fail the sessions to their clients.
+// The upstream can't deliver, so don't try to send close frames through it
+// (that would re-enter here): kill the agents, drop the epoch so no further
+// opens are accepted into a dead stream, and let the reconnect resync — the
+// gateway's resume window fails the sessions to their clients meanwhile.
 function failAllSessions(reason: string): void {
   log(reason);
   for (const sessionId of sessions.keys()) endSession(sessionId, reason, false);
+  upstream = undefined;
+  outbox.length = 0;
+  abortEpoch?.();
 }
 
 function sendLine(line: string): void {
@@ -174,19 +180,23 @@ function hello(): HelloControl {
   };
 }
 
+/** Reclaim a session's temp state. Never throws: a cleanup failure must not
+ * abort a shutdown loop, an exit handler, or a refusal path. */
+function discard(workspace: string, cleanup?: () => void): void {
+  try {
+    cleanup?.();
+  } catch {
+    /* best effort */
+  }
+  try {
+    rmSync(workspace, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
+}
+
 function finalizeSession(session: LiveSession): void {
-  // Never throw — a cleanup failure must not abort a shutdown loop over the
-  // other sessions, nor an exit handler.
-  try {
-    session.cleanup?.();
-  } catch {
-    /* best effort */
-  }
-  try {
-    rmSync(session.workspace, { recursive: true, force: true });
-  } catch {
-    /* best effort */
-  }
+  discard(session.workspace, session.cleanup);
 }
 
 function endSession(sessionId: string, reason: string, notify: boolean): void {
@@ -240,7 +250,7 @@ function openSession(control: OpenControl): void {
   if (control.repo) {
     const failure = fetchWorkspace(workspace, control.repo, control.ref);
     if (failure) {
-      rmSync(workspace, { recursive: true, force: true });
+      discard(workspace);
       return refuse(failure);
     }
   }
@@ -250,7 +260,7 @@ function openSession(control: OpenControl): void {
   try {
     ({ env, cleanup } = spec.env(model));
   } catch (error) {
-    rmSync(workspace, { recursive: true, force: true });
+    discard(workspace);
     return refuse(`agent setup failed: ${error instanceof Error ? error.message : String(error)}`);
   }
   // Built-in specs build env from process.env, so scrub the companion's own
@@ -268,8 +278,7 @@ function openSession(control: OpenControl): void {
       stdio: 'pipe',
     });
   } catch (error) {
-    cleanup?.();
-    rmSync(workspace, { recursive: true, force: true });
+    discard(workspace, cleanup);
     return refuse(`spawn failed: ${error instanceof Error ? error.message : String(error)}`);
   }
   // Stream-level errors (EPIPE writing to a dead agent) must stay scoped to
@@ -357,6 +366,7 @@ async function connectOnce(): Promise<void> {
   // and reconnects, so the companion can't sit half-connected — receiving opens
   // it can't answer while responses pile into a dead upstream.
   const epoch = new AbortController();
+  abortEpoch = () => epoch.abort();
   const down = await fetch(`${gatewayUrl}/api/endpoints/${endpointId}/stream`, {
     headers,
     signal: epoch.signal,
@@ -417,6 +427,7 @@ async function connectOnce(): Promise<void> {
       /* already closed */
     }
     upstream = undefined;
+    abortEpoch = undefined;
     epoch.abort();
     await up;
   }
