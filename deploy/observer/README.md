@@ -47,11 +47,14 @@ JBOT_OBSERVER_URL=https://observer.<your-domain>
 JBOT_OBSERVER_TOKEN=<token from /etc/jbot-gateway/env>
 ```
 
-Viewer: `https://observer.<your-domain>/?token=<token>`.
+Viewer: `https://observer.<your-domain>/?token=<token>` — the URL carries
+the credential (EventSource cannot send headers); treat it like the token
+itself and don't share it.
 
 ## Notes
 
-- Migrating hosts = re-run `install.sh` + copy `/var/lib/jbot-gateway`
-  (journals) and `/etc/jbot-gateway/env` (token).
+- Migrating hosts = stop `jbot-gateway`, re-run `install.sh` on the new box,
+  then copy `/var/lib/jbot-gateway` (journals) and `/etc/jbot-gateway/env`
+  (token) preserving ownership and modes (`rsync -a`/`cp -a`), and restart.
 - The gateway is single-process by design (in-memory SSE fan-out): one
   instance, no replicas.

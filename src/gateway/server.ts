@@ -28,11 +28,11 @@ const port =
   Number(process.env.JBOT_GATEWAY_PORT) > 0 ? Number(process.env.JBOT_GATEWAY_PORT) : 8790;
 const dataDir = process.env.JBOT_GATEWAY_DATA?.trim() || 'gateway-data';
 const token = process.env.JBOT_GATEWAY_TOKEN?.trim() || '';
-// No token = local mode: loopback bind only, no auth. A token flips the bind
-// to all interfaces — the token IS the decision to be reachable. Behind a
+// No token = local mode: loopback bind only, no auth — JBOT_GATEWAY_HOST
+// cannot override that. With a token the default is all interfaces; behind a
 // local TLS proxy (deploy/observer), JBOT_GATEWAY_HOST=127.0.0.1 keeps token
 // auth while making the proxy the only public door, firewall or not.
-const host = process.env.JBOT_GATEWAY_HOST?.trim() || (token ? '0.0.0.0' : '127.0.0.1');
+const host = token ? process.env.JBOT_GATEWAY_HOST?.trim() || '0.0.0.0' : '127.0.0.1';
 
 const log = (msg: string): void => {
   console.log(`[jbot-gateway] ${msg}`);

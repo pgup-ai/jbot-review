@@ -16,6 +16,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # installed version, so this script never installs or upgrades node.
 NODE_BIN="$(command -v node || true)"
 [ -n "$NODE_BIN" ] || { echo "node not found on PATH; install Node.js >=20 first" >&2; exit 1; }
+# The unit's ProtectHome=true hides /root and /home from the service — an
+# nvm-style node there would crash-loop it.
+NODE_BIN="$(readlink -f "$NODE_BIN")"
+case "$NODE_BIN" in
+  /home/* | /root/*)
+    echo "node resolves to $NODE_BIN; the service needs a system-wide install (ProtectHome=true)" >&2
+    exit 1
+    ;;
+esac
 
 # Users: jbot-gateway runs the service; jbot-deploy owns $APP_DIR and is the
 # CI rsync/ssh target.
@@ -24,16 +33,19 @@ id -u jbot-deploy >/dev/null 2>&1 || useradd -m -s /bin/bash jbot-deploy
 install -d -o jbot-deploy -g jbot-deploy "$APP_DIR" "$APP_DIR/dist"
 install -d -m 700 -o jbot-deploy -g jbot-deploy /home/jbot-deploy/.ssh
 
-# Token: generated once; survives re-runs.
+# Token: generated once; survives re-runs. Subshell so the tight umask
+# cannot leak onto later files (the Caddyfile must stay caddy-readable).
 if [ ! -f "$ENV_FILE" ]; then
   install -d -m 755 /etc/jbot-gateway
-  umask 077
-  {
-    echo "JBOT_GATEWAY_TOKEN=$(openssl rand -hex 32)"
-    echo "JBOT_GATEWAY_DATA=/var/lib/jbot-gateway"
-    # Loopback + token: Caddy is the only public door, firewall or not.
-    echo "JBOT_GATEWAY_HOST=127.0.0.1"
-  } > "$ENV_FILE"
+  (
+    umask 077
+    {
+      echo "JBOT_GATEWAY_TOKEN=$(openssl rand -hex 32)"
+      echo "JBOT_GATEWAY_DATA=/var/lib/jbot-gateway"
+      # Loopback + token: Caddy is the only public door, firewall or not.
+      echo "JBOT_GATEWAY_HOST=127.0.0.1"
+    } > "$ENV_FILE"
+  )
 fi
 
 sed "s|/usr/bin/node|$NODE_BIN|" "$SCRIPT_DIR/jbot-gateway.service" \
@@ -49,23 +61,32 @@ visudo -cf "$SUDOERS_TMP"
 install -m 0440 "$SUDOERS_TMP" /etc/sudoers.d/jbot-deploy
 rm -f "$SUDOERS_TMP"
 
-# Caddy terminates TLS. Refuse to clobber a Caddyfile some other service owns.
-CADDY_WAS_ACTIVE=false
-systemctl is-active --quiet caddy && CADDY_WAS_ACTIVE=true
-if ! command -v caddy >/dev/null; then
+# Caddy terminates TLS. Never clobber a Caddyfile some other setup owns:
+# write it only when this installer marked it or freshly installed caddy.
+CADDYFILE=/etc/caddy/Caddyfile
+MARK="# managed by jbot-observer install.sh"
+CADDY_PREINSTALLED=true
+command -v caddy >/dev/null || CADDY_PREINSTALLED=false
+if ! $CADDY_PREINSTALLED; then
   dnf -y install 'dnf-command(copr)'
   dnf -y copr enable @caddy/caddy
   dnf -y install caddy
 fi
-MARK="# managed by jbot-observer install.sh"
-if $CADDY_WAS_ACTIVE && ! grep -q "$MARK" /etc/caddy/Caddyfile 2>/dev/null; then
-  echo "caddy is already active with an unmanaged Caddyfile;" >&2
+SITE="$(
+  echo "$MARK"
+  sed "s|{\$OBSERVER_HOSTNAME}|$OBSERVER_HOSTNAME|" "$SCRIPT_DIR/Caddyfile"
+)"
+if $CADDY_PREINSTALLED && [ -f "$CADDYFILE" ] && ! grep -q "$MARK" "$CADDYFILE"; then
+  echo "pre-existing unmanaged $CADDYFILE;" >&2
   echo "add the site block from $SCRIPT_DIR/Caddyfile (hostname: $OBSERVER_HOSTNAME) yourself" >&2
 else
-  {
-    echo "$MARK"
-    sed "s|{\$OBSERVER_HOSTNAME}|$OBSERVER_HOSTNAME|" "$SCRIPT_DIR/Caddyfile"
-  } > /etc/caddy/Caddyfile
+  # A hand-edited managed file is still rewritten (that is what managed
+  # means), but never silently: keep the previous copy next to it.
+  if [ -f "$CADDYFILE" ] && grep -q "$MARK" "$CADDYFILE" && ! printf '%s\n' "$SITE" | cmp -s - "$CADDYFILE"; then
+    cp -p "$CADDYFILE" "$CADDYFILE.bak"
+    echo "rewrote managed $CADDYFILE; previous copy at $CADDYFILE.bak"
+  fi
+  printf '%s\n' "$SITE" > "$CADDYFILE"
   systemctl enable caddy
   systemctl reload-or-restart caddy
 fi
@@ -82,14 +103,12 @@ if systemctl is-active --quiet firewalld; then
   firewall-cmd --reload >/dev/null
 fi
 
-# First gateway start happens after CI rsyncs the build (Restart=always would
-# crash-loop on a missing file).
-if [ -f "$APP_DIR/dist/gateway/server.js" ]; then
-  systemctl restart jbot-gateway
-fi
+# ConditionPathExists in the unit makes this a clean no-op until the first
+# CI rsync delivers the bundle.
+systemctl restart jbot-gateway
 
 echo
-echo "installed. $(grep JBOT_GATEWAY_TOKEN "$ENV_FILE")"
+echo "installed. gateway token is in $ENV_FILE"
 echo "next: DNS A record $OBSERVER_HOSTNAME -> this host, CI deploy key in"
 echo "/home/jbot-deploy/.ssh/authorized_keys, repo secrets, then run the"
 echo "deploy-observer workflow (see deploy/observer/README.md)."

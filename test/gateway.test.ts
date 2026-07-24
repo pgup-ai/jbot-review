@@ -105,17 +105,21 @@ describe('gateway', () => {
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-      const startupLine = await new Promise<string>((resolve, reject) => {
+      // Accumulate stdout: chunk boundaries are arbitrary, so never assert
+      // against a single data event.
+      let startupLog = '';
+      await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('gateway did not start')), 15_000);
         child?.stdout?.on('data', (chunk: Buffer) => {
-          if (String(chunk).includes('listening')) {
+          startupLog += String(chunk);
+          if (startupLog.includes('listening')) {
             clearTimeout(timer);
-            resolve(String(chunk));
+            resolve();
           }
         });
         child?.on('exit', (code) => reject(new Error(`gateway exited ${code}`)));
       });
-      assert.ok(startupLine.includes('http://127.0.0.1:'), `host override ignored: ${startupLine}`);
+      assert.ok(startupLog.includes('http://127.0.0.1:'), `host override ignored: ${startupLog}`);
 
       assert.equal((await fetch(`${base}/healthz`)).status, 200);
       // Token mode: unauthenticated ingest and streams are refused.

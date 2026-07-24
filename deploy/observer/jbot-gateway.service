@@ -3,6 +3,9 @@ Description=jbot-review observer gateway
 Documentation=https://github.com/pgup-ai/jbot-review
 After=network-online.target
 Wants=network-online.target
+# Skip cleanly (instead of Restart=always crash-looping) until the first
+# deploy rsyncs the bundle.
+ConditionPathExists=/opt/jbot-observer/dist/gateway/server.js
 
 [Service]
 User=jbot-gateway
