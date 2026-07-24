@@ -180,6 +180,12 @@ jobs:
           # only COPY dist/ rebuilds. No cache-to — PRs read, don't write.
           cache-from: type=registry,ref=ghcr.io/pgup-ai/jbot-review:buildcache
       - uses: ./
+        # Observer tee: streams ACP session frames to the live viewer.
+        # Fail-open by design, and a no-op when the secrets are absent (forks):
+        # an empty JBOT_OBSERVER_URL leaves the tee disabled.
+        env:
+          JBOT_OBSERVER_URL: ${{ secrets.OBSERVER_HOSTNAME && format('https://{0}', secrets.OBSERVER_HOSTNAME) || '' }}
+          JBOT_OBSERVER_TOKEN: ${{ secrets.JBOT_OBSERVER_TOKEN }}
         with:
           # Precedence: /jbot comment flag > dispatch input > repo variable > default.
           provider: ${{ needs.command.outputs.provider || inputs.provider || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
