@@ -156,6 +156,7 @@ export interface EndpointPresence {
   agents: EndpointAgent[];
   maxSessions: number;
   activeSessions: number;
+  online: boolean;
 }
 
 export function createRelay(options: RelayOptions = {}) {
@@ -196,6 +197,13 @@ export function createRelay(options: RelayOptions = {}) {
         }
       }
       endpoints.set(hello.endpoint, { hello, send, sessions: carried, online: true });
+      // A companion may still be running agents for sessions the relay already
+      // failed (resume window elapsed while it was gone) — tell it to close them.
+      for (const sessionId of hello.sessions ?? []) {
+        if (!sessions.has(sessionId)) {
+          send(JSON.stringify({ kind: 'close', sessionId, reason: 'session already ended' }));
+        }
+      }
     },
 
     detachEndpoint(endpoint: string): void {
@@ -214,12 +222,13 @@ export function createRelay(options: RelayOptions = {}) {
     },
 
     listEndpoints(): EndpointPresence[] {
-      return [...endpoints.values()].map(({ hello, sessions: active }) => ({
+      return [...endpoints.values()].map(({ hello, sessions: active, online }) => ({
         endpoint: hello.endpoint,
         device: hello.device,
         agents: hello.agents,
         maxSessions: hello.maxSessions,
         activeSessions: active.size,
+        online,
       }));
     },
 

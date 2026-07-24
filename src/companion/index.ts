@@ -50,13 +50,6 @@ const log = (msg: string): void => {
   console.log(`[jbot-companion] ${msg}`);
 };
 
-/** The companion's own gateway credentials must never reach a spawned agent. */
-function scrubbedEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  for (const key of Object.keys(env)) if (key.startsWith('JBOT_COMPANION_')) delete env[key];
-  return env;
-}
-
 if (!gatewayUrl || !token || !endpointId) {
   console.error('Set JBOT_COMPANION_GATEWAY, JBOT_COMPANION_TOKEN, and JBOT_COMPANION_ENDPOINT.');
   process.exit(1);
@@ -75,7 +68,7 @@ function resolveAgent(entry: string): { name: string; spec: AcpAgentSpec } | str
     if (!name || !bin) return `invalid custom agent entry: ${entry}`;
     return {
       name,
-      spec: { id: name, bin, args: () => args, env: () => ({ env: scrubbedEnv() }) },
+      spec: { id: name, bin, args: () => args, env: () => ({ env: { ...process.env } }) },
     };
   }
   switch (entry) {
@@ -181,8 +174,18 @@ function hello(): HelloControl {
 }
 
 function finalizeSession(session: LiveSession): void {
-  session.cleanup?.();
-  rmSync(session.workspace, { recursive: true, force: true });
+  // Never throw — a cleanup failure must not abort a shutdown loop over the
+  // other sessions, nor an exit handler.
+  try {
+    session.cleanup?.();
+  } catch {
+    /* best effort */
+  }
+  try {
+    rmSync(session.workspace, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
 }
 
 function endSession(sessionId: string, reason: string, notify: boolean): void {
@@ -249,7 +252,25 @@ function openSession(control: OpenControl): void {
     rmSync(workspace, { recursive: true, force: true });
     return refuse(`agent setup failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const child = spawn(spec.bin, spec.args(model), { cwd: workspace, env, stdio: 'pipe' });
+  // Built-in specs build env from process.env, so scrub the companion's own
+  // gateway credentials here — the single choke point every agent passes.
+  for (const key of Object.keys(env)) if (key.startsWith('JBOT_COMPANION_')) delete env[key];
+
+  let child: ChildProcess;
+  try {
+    child = spawn(spec.bin, spec.args(model), {
+      cwd: workspace,
+      env,
+      // Own process group so terminateProcessTree's group signal reaches the
+      // whole agent subtree (mirrors driveAcpSession).
+      detached: process.platform !== 'win32',
+      stdio: 'pipe',
+    });
+  } catch (error) {
+    cleanup?.();
+    rmSync(workspace, { recursive: true, force: true });
+    return refuse(`spawn failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   // Stream-level errors (EPIPE writing to a dead agent) must stay scoped to
   // this session, not throw out and take the whole companion down.
   child.stdin?.on('error', () => {});
@@ -395,13 +416,25 @@ async function main(): Promise<void> {
   }
 }
 
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => {
-    for (const sessionId of sessions.keys()) endSession(sessionId, 'companion shutdown', true);
-    // Brief grace for close frames to reach the gateway before exit; the
-    // resume window is the backstop if they don't.
-    setTimeout(() => process.exit(0), 200);
-  });
+let shuttingDown = false;
+function shutdown(): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  for (const sessionId of sessions.keys()) {
+    const session = sessions.get(sessionId)!;
+    sessions.delete(sessionId);
+    // Detached agents outlive us, so SIGKILL the group now (grace 0); then
+    // reclaim temp homes/workspaces synchronously so credential copies never
+    // outlive the process.
+    terminateProcessTree(session.child, 0);
+    finalizeSession(session);
+    sendControl({ kind: 'close', sessionId, reason: 'companion shutdown' });
+  }
+  // Brief grace for the close frames to reach the gateway; its resume window
+  // is the backstop if they don't.
+  setTimeout(() => process.exit(0), 200);
 }
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, shutdown);
 
 await main();

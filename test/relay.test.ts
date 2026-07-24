@@ -163,6 +163,20 @@ describe('relay', () => {
     assert.equal(relay.sessionRun('zombie'), undefined);
   });
 
+  it('tells a reconnecting companion to close sessions the relay already ended', () => {
+    const relay = createRelay();
+    relay.attachEndpoint(hello(), () => {});
+    relay.openSession(open(), () => {});
+    relay.closeSession('sid-1', 'resume window elapsed'); // relay drops it
+    const sent: string[] = [];
+    // The companion reconnects still holding the agent for sid-1.
+    relay.attachEndpoint(hello({ sessions: ['sid-1'] }), (line) => sent.push(line));
+    const closes = sent
+      .map((line) => JSON.parse(line) as { kind: string; sessionId: string })
+      .filter((c) => c.kind === 'close' && c.sessionId === 'sid-1');
+    assert.equal(closes.length, 1);
+  });
+
   it('fails sessions loudly past the resume window; reattach cancels', async () => {
     const failed: string[] = [];
     const relay = createRelay({
