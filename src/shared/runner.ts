@@ -26,7 +26,11 @@ import {
 import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
 import { closeObserver, reportRun, setRunName } from './observer.ts';
 import { codexAcpSpec, createAcpBackend, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from './acp.ts';
-import { createRemoteAcpBackend, remoteAcpConfigFromEnv } from './acp-remote.ts';
+import {
+  ACP_GATEWAY_PROVIDERS,
+  createRemoteAcpBackend,
+  remoteAcpConfigFromEnv,
+} from './acp-remote.ts';
 import {
   piModelAvailable,
   piSupportsProvider,
@@ -1085,7 +1089,7 @@ async function runReviewPipeline(params: {
 
   let opencodeRuntime: Awaited<ReturnType<typeof startOpencode>> | undefined;
   let opencodeBackend: ReviewBackend | undefined;
-  // With a gateway configured, ACP providers run on a remote companion's
+  // With a gateway configured, these providers run on a remote companion's
   // agent instead of a local CLI — so their local setup (credentials, temp
   // homes) is skipped entirely.
   const remoteAcp = remoteAcpConfigFromEnv();
@@ -1376,18 +1380,23 @@ async function runReviewPipeline(params: {
     opencodeBackend = createOpencodeBackend(opencodeRuntime.client);
   }
 
-  const remoteBackend = (agent: string): ReviewBackend | undefined =>
-    remoteAcp ? createRemoteAcpBackend({ ...remoteAcp, agent }) : undefined;
   const cliBackends: Record<CliBackendID, ReviewBackend | undefined> = {
-    [DEVIN_PROVIDER_ID]: remoteBackend(DEVIN_PROVIDER_ID) ?? devinBackend,
+    [DEVIN_PROVIDER_ID]: devinBackend,
     [COMMANDCODE_PROVIDER_ID]: commandCodeBackend,
-    [CURSOR_PROVIDER_ID]: remoteBackend(CURSOR_PROVIDER_ID) ?? cursorBackend,
-    [CODEX_PROVIDER_ID]: remoteBackend(CODEX_PROVIDER_ID) ?? codexBackend,
+    [CURSOR_PROVIDER_ID]: cursorBackend,
+    [CODEX_PROVIDER_ID]: codexBackend,
     [CLINE_PROVIDER_ID]: clineBackend,
     [GROK_PROVIDER_ID]: grokBackend,
-    [KILO_PROVIDER_ID]: remoteBackend(KILO_PROVIDER_ID) ?? kiloBackend,
+    [KILO_PROVIDER_ID]: kiloBackend,
     [QODER_PROVIDER_ID]: qoderBackend,
   };
+  // The gateway serves these providers instead of a local CLI; their local
+  // construction above is skipped for the same reason.
+  if (remoteAcp) {
+    for (const agent of ACP_GATEWAY_PROVIDERS) {
+      cliBackends[agent] = createRemoteAcpBackend({ ...remoteAcp, agent });
+    }
+  }
   const mainBaseBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)
     : mainOnPi

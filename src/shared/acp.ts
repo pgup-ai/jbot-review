@@ -646,10 +646,8 @@ async function runAcpPrompt(
   }
 }
 
-/** One generic ReviewBackend over ACP: five session methods share one prompt
- * runner, so per-agent variation lives entirely in the spec table. */
 /** Delivers one assembled prompt to an agent and returns its final text. */
-export type AcpPromptRunner = (
+type AcpPromptRunner = (
   model: string,
   prompt: string,
   label: string,

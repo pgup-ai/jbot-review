@@ -9,12 +9,16 @@ import { randomBytes } from 'node:crypto';
 import { PassThrough, Writable } from 'node:stream';
 
 import { createAcpReviewBackend, driveAcpSession } from './acp.ts';
+import { parseEnvelope } from '../gateway/journal.ts';
 import type { AckControl } from '../gateway/relay.ts';
 import { parseRelayControl } from '../gateway/relay.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 
 const REMOTE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const OPEN_TIMEOUT_MS = 60_000;
+
+/** Providers the gateway can serve — the ones with an ACP engine (see acp.ts). */
+export const ACP_GATEWAY_PROVIDERS = ['devin', 'cursor', 'codex', 'kilo'] as const;
 
 export interface RemoteAcpConfig {
   gateway: string;
@@ -108,17 +112,20 @@ async function runRemotePrompt(
   }
   // Agent frames feed the session's stdin-equivalent; controls resolve the
   // open handshake or fail the prompt.
-  const reading = pump(sse.body, (message) => {
-    const control = parseRelayControl(JSON.stringify(message));
+  const reading = pump(sse.body, (line) => {
+    const control = parseRelayControl(line);
     if (control?.kind === 'opened' || control?.kind === 'refused') {
       acked.resolve(control);
-    } else if (control?.kind === 'close') {
+      return;
+    }
+    if (control?.kind === 'close') {
       closed.reject(
         new Error(`${label}: session closed by gateway: ${control.reason ?? 'closed'}`),
       );
-    } else if (message.frame) {
-      output.write(`${JSON.stringify(message.frame)}\n`);
+      return;
     }
+    const envelope = parseEnvelope(line);
+    if (envelope) output.write(`${JSON.stringify(envelope.frame)}\n`);
   });
 
   const input = new Writable({
@@ -138,19 +145,6 @@ async function runRemotePrompt(
     },
   });
 
-  const deadline = new Promise<never>((_, reject) => {
-    const timer = setTimeout(
-      () =>
-        reject(
-          new Error(
-            `${label}: remote prompt timed out after ${Math.round(timeoutMs / 1000)}s (model=${model})`,
-          ),
-        ),
-      timeoutMs,
-    );
-    timer.unref();
-  });
-
   try {
     await post({
       kind: 'open',
@@ -162,7 +156,11 @@ async function runRemotePrompt(
       ...(config.repo ? { repo: config.repo } : {}),
       ...(config.ref ? { ref: config.ref } : {}),
     });
-    const ack = await Promise.race([acked.promise, closed.promise, withTimeout(OPEN_TIMEOUT_MS)]);
+    const ack = await Promise.race([
+      acked.promise,
+      closed.promise,
+      failAfter(OPEN_TIMEOUT_MS, `${label}: endpoint ${config.endpoint} did not answer the open`),
+    ]);
     if (ack.kind === 'refused') {
       throw new Error(
         `${label}: endpoint ${config.endpoint} refused: ${ack.reason ?? 'no reason'}`,
@@ -185,7 +183,10 @@ async function runRemotePrompt(
         },
       ),
       closed.promise,
-      deadline,
+      failAfter(
+        timeoutMs,
+        `${label}: remote prompt timed out after ${Math.round(timeoutMs / 1000)}s (model=${model})`,
+      ),
     ]);
     log(
       `${label} prompt complete via gateway: stopReason=${result.stopReason} last-message=${result.text.length} chars`,
@@ -220,16 +221,16 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-const withTimeout = (ms: number): Promise<never> =>
+const failAfter = (ms: number, message: string): Promise<never> =>
   new Promise((_, reject) => {
-    const timer = setTimeout(() => reject(new Error('timed out awaiting the gateway')), ms);
+    const timer = setTimeout(() => reject(new Error(message)), ms);
     timer.unref();
   });
 
-/** Reads an SSE body, handing each `data:` payload to `onMessage`. */
+/** Reads an SSE body, handing each `data:` payload to `onLine` unparsed. */
 async function pump(
   body: ReadableStream<Uint8Array>,
-  onMessage: (message: Record<string, unknown>) => void,
+  onLine: (line: string) => void,
 ): Promise<void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -242,13 +243,7 @@ async function pump(
     while (nl !== -1) {
       const line = buffer.slice(0, nl);
       buffer = buffer.slice(nl + 1);
-      if (line.startsWith('data: ')) {
-        try {
-          onMessage(JSON.parse(line.slice(6)) as Record<string, unknown>);
-        } catch {
-          /* heartbeat or partial payload */
-        }
-      }
+      if (line.startsWith('data: ')) onLine(line.slice(6));
       nl = buffer.indexOf('\n');
     }
   }

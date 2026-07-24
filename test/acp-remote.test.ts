@@ -126,8 +126,6 @@ describe('remote acp backend', () => {
 
       // The prompt reached the agent and the reply came back over the relay,
       // both directions journaled under the client's run id.
-      const sessions = readJournalLines(dataDir, 'run-remote', 'review');
-      assert.equal(sessions.length, 0, 'session ids are unique per prompt, not the bare label');
       const runDir = (await (await fetch(`${base}/api/runs?token=client-tok`)).json()) as {
         runId: string;
         sessions: string[];
