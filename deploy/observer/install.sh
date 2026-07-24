@@ -26,6 +26,10 @@ case "$NODE_BIN" in
     ;;
 esac
 
+# CI deploys over rsync, which must exist on BOTH ends of the ssh transport;
+# minimal EL images don't ship it.
+command -v rsync >/dev/null || dnf -y install rsync
+
 # Users: jbot-gateway runs the service; jbot-deploy owns $APP_DIR and is the
 # CI rsync/ssh target.
 id -u jbot-gateway >/dev/null 2>&1 || useradd -r -s /sbin/nologin jbot-gateway
