@@ -15,7 +15,8 @@ import { parseRelayControl } from '../gateway/relay.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 
 const REMOTE_PROMPT_TIMEOUT_MS = 20 * 60_000;
-const OPEN_TIMEOUT_MS = 60_000;
+/** Bounds every gateway round trip: POSTs, the SSE connect, and the open ack. */
+const GATEWAY_TIMEOUT_MS = 60_000;
 
 /** Providers the gateway can serve — the ones with an ACP engine (see acp.ts). */
 export const ACP_GATEWAY_PROVIDERS = ['devin', 'cursor', 'codex', 'kilo'] as const;
@@ -45,7 +46,12 @@ export function remoteAcpConfigFromEnv(): Omit<RemoteAcpConfig, 'agent'> | undef
     gateway: gateway.replace(/\/+$/, ''),
     token,
     endpoint,
-    runId: rawRun.replaceAll(/[^A-Za-z0-9._-]/g, '-').slice(0, 128),
+    // Must satisfy the gateway's isSafeId: alphanumeric first character.
+    runId:
+      rawRun
+        .replaceAll(/[^A-Za-z0-9._-]/g, '-')
+        .replace(/^[^A-Za-z0-9]+/, '')
+        .slice(0, 128) || 'jbot',
     ...(process.env.JBOT_ACP_GATEWAY_REPO?.trim()
       ? { repo: process.env.JBOT_ACP_GATEWAY_REPO.trim() }
       : {}),
@@ -55,9 +61,10 @@ export function remoteAcpConfigFromEnv(): Omit<RemoteAcpConfig, 'agent'> | undef
   };
 }
 
-/** Session ids double as journal filenames, so keep them id-safe and unique. */
+/** Session ids double as journal filenames, so keep them id-safe and unique.
+ * The label is clamped, not the whole id, so the random suffix always survives. */
 const sessionIdFor = (label: string): string =>
-  `${label.replaceAll(/[^A-Za-z0-9._-]/g, '-')}-${randomBytes(4).toString('hex')}`.slice(0, 128);
+  `${label.replaceAll(/[^A-Za-z0-9._-]/g, '-').slice(0, 100)}-${randomBytes(4).toString('hex')}`;
 
 export function createRemoteAcpBackend(config: RemoteAcpConfig): ReviewBackend {
   return createAcpReviewBackend(`acp-gateway:${config.agent}@${config.endpoint}`, (...args) =>
@@ -85,6 +92,7 @@ async function runRemotePrompt(
       method: 'POST',
       headers: { ...auth, 'content-type': 'application/x-ndjson' },
       body: `${JSON.stringify(payload)}\n`,
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
     });
   const sendFrame = (frame: Record<string, unknown>): Promise<Response> =>
     post({
@@ -102,10 +110,19 @@ async function runRemotePrompt(
 
   const acked = deferred<AckControl>();
   const closed = deferred<never>();
+  // Loses most races; without a handler its rejection would surface as an
+  // unhandled rejection rather than the error the caller already saw.
+  closed.promise.catch(() => {});
 
-  const sse = await fetch(`${base}/stream?token=${encodeURIComponent(config.token)}`, {
-    signal: stream.signal,
-  });
+  // Header auth, not ?token= — that form exists for browser EventSource, which
+  // cannot set headers, and would put the credential in logs and caches.
+  const connectTimer = setTimeout(() => stream.abort(), GATEWAY_TIMEOUT_MS);
+  let sse: Response;
+  try {
+    sse = await fetch(`${base}/stream`, { headers: auth, signal: stream.signal });
+  } finally {
+    clearTimeout(connectTimer);
+  }
   if (!sse.ok || !sse.body) {
     await sse.body?.cancel();
     throw new Error(`${label}: gateway stream refused (${sse.status})`);
@@ -126,7 +143,14 @@ async function runRemotePrompt(
     }
     const envelope = parseEnvelope(line);
     if (envelope) output.write(`${JSON.stringify(envelope.frame)}\n`);
-  });
+  })
+    // A stream that ends or errors without a close control would otherwise
+    // leave the session waiting out its full timeout.
+    .then(
+      () => closed.reject(new Error(`${label}: gateway stream ended`)),
+      (error: Error) =>
+        closed.reject(new Error(`${label}: gateway stream failed: ${error.message}`)),
+    );
 
   const input = new Writable({
     write(chunk, _encoding, callback) {
@@ -144,9 +168,12 @@ async function runRemotePrompt(
       );
     },
   });
+  // A write failure is reported through the session's error path; without a
+  // listener the stream's 'error' event would take down the process.
+  input.on('error', () => {});
 
   try {
-    await post({
+    const opened = await post({
       kind: 'open',
       sessionId,
       runId: config.runId,
@@ -156,10 +183,15 @@ async function runRemotePrompt(
       ...(config.repo ? { repo: config.repo } : {}),
       ...(config.ref ? { ref: config.ref } : {}),
     });
+    // Fail on the real status (401/413/5xx) instead of waiting out the ack.
+    if (!opened.ok) throw new Error(`${label}: gateway rejected the open (${opened.status})`);
     const ack = await Promise.race([
       acked.promise,
       closed.promise,
-      failAfter(OPEN_TIMEOUT_MS, `${label}: endpoint ${config.endpoint} did not answer the open`),
+      failAfter(
+        GATEWAY_TIMEOUT_MS,
+        `${label}: endpoint ${config.endpoint} did not answer the open`,
+      ),
     ]);
     if (ack.kind === 'refused') {
       throw new Error(
@@ -201,7 +233,7 @@ async function runRemotePrompt(
     await post({ kind: 'close', sessionId, reason: 'prompt complete' }).catch(() => {});
     stream.abort();
     output.end();
-    await reading.catch(() => {});
+    await reading;
   }
 }
 
