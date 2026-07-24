@@ -4,6 +4,8 @@
 
 # J-Bot Code Review
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/pgup-ai/jbot-review)
+
 An agentic PR reviewer built on OpenCode. It runs as a GitHub Action: add one
 workflow file and one secret, and every opened or updated pull request is reviewed
 on your own GitHub Actions runner. The review core is `runner.ts` + `opencode.ts` +
