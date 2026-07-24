@@ -275,6 +275,8 @@ export interface AnchoredFindings {
   orphaned: Finding[];
   /** A subset of `inline`: findings re-anchored from an orphan via their evidence quote. */
   rescued: Finding[];
+  /** A subset of `fileLevel`: demoted because no anchor resolved, unlike a model-declared line 0. */
+  anchorMissed: Finding[];
 }
 
 /**
@@ -292,7 +294,13 @@ export function anchorFindings(
   hasHeadSha: boolean,
   evidenceQuotes: boolean,
 ): AnchoredFindings {
-  const result: AnchoredFindings = { inline: [], fileLevel: [], orphaned: [], rescued: [] };
+  const result: AnchoredFindings = {
+    inline: [],
+    fileLevel: [],
+    orphaned: [],
+    rescued: [],
+    anchorMissed: [],
+  };
   for (const f of findings) {
     if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
     else if (addable.get(f.path)?.has(f.line)) result.inline.push(f);
@@ -308,6 +316,7 @@ export function anchorFindings(
       } else if (hasHeadSha && addable.has(f.path)) {
         f.line = 0;
         result.fileLevel.push(f);
+        result.anchorMissed.push(f);
       } else {
         result.orphaned.push(f);
       }

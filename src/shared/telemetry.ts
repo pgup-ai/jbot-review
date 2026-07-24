@@ -13,7 +13,8 @@ export type FindingDisposition =
   | 'posted-inline'
   | 'posted-file-level'
   | 'orphaned'
-  | 'rescued';
+  | 'rescued'
+  | 'anchor-missed';
 
 export interface FindingTelemetryRow {
   kind: 'finding';
@@ -49,6 +50,7 @@ export interface FindingRouting {
   fileLevel: Finding[];
   orphaned: Finding[];
   rescued: Finding[];
+  anchorMissed: Finding[];
 }
 
 /** Snapshot points, in pipeline order. */
@@ -100,6 +102,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     fileLevel: new Set<string>(),
     orphaned: new Set<string>(),
     rescued: new Set<string>(),
+    anchorMissed: new Set<string>(),
   };
   // Final posted line for findings re-routed after produced(); keeps `meta`
   // honest as the model's original output rather than mutating it.
@@ -132,11 +135,14 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
       stageSeverity.set(stage, byId);
     },
     route(routes) {
+      const missed = idsOf(routes.anchorMissed);
       for (const id of idsOf(routes.inline)) routing.inline.add(id);
+      for (const id of missed) routing.anchorMissed.add(id);
       for (const f of routes.fileLevel) {
         if (!f.id) continue;
         routing.fileLevel.add(f.id);
-        routedLine.set(f.id, f.line);
+        // An anchor miss keeps the line the model claimed; the 0 it was demoted to says nothing.
+        if (!missed.has(f.id)) routedLine.set(f.id, f.line);
       }
       for (const id of idsOf(routes.orphaned)) routing.orphaned.add(id);
       for (const f of routes.rescued) {
@@ -171,6 +177,7 @@ function deriveRow(
     fileLevel: Set<string>;
     orphaned: Set<string>;
     rescued: Set<string>;
+    anchorMissed: Set<string>;
   },
 ): FindingTelemetryRow {
   const severityAt = (stage: TelemetryStage): Severity | undefined =>
@@ -193,13 +200,11 @@ function deriveRow(
   const last = present[present.length - 1];
   let disposition: FindingDisposition;
   if (last === 'filtered') {
-    disposition = routing.rescued.has(id)
-      ? 'rescued'
-      : routing.inline.has(id)
-        ? 'posted-inline'
-        : routing.fileLevel.has(id)
-          ? 'posted-file-level'
-          : 'orphaned';
+    if (routing.rescued.has(id)) disposition = 'rescued';
+    else if (routing.inline.has(id)) disposition = 'posted-inline';
+    else if (routing.anchorMissed.has(id)) disposition = 'anchor-missed';
+    else if (routing.fileLevel.has(id)) disposition = 'posted-file-level';
+    else disposition = 'orphaned';
   } else {
     const droppedEntering = last ? STAGE_ORDER[STAGE_ORDER.indexOf(last) + 1] : 'deduped';
     disposition =

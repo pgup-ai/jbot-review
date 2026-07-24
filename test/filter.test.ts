@@ -476,6 +476,7 @@ describe('anchorFindings', () => {
     );
     assert.deepEqual([out.inline.length, out.fileLevel.length, out.orphaned.length], [1, 2, 1]);
     assert.equal(fallback.line, 0);
+    assert.deepEqual(out.anchorMissed, [fallback], 'a model-declared line 0 is not an anchor miss');
   });
 
   it('re-anchors an orphan to its evidence line IN PLACE so every consumer agrees', () => {
