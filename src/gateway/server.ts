@@ -264,6 +264,11 @@ const server = createServer((req, res) => {
     res.end('internal error');
   }
 });
+// The ingest POST streams for a whole review (often >5min); Node's default
+// 300s requestTimeout would sever it mid-review, dropping trailing frames and
+// the terminal run status (leaving the viewer stuck on "reviewing"). Byte caps
+// in handleIngest are the real bound, so disable the wall-clock cap.
+server.requestTimeout = 0;
 
 server.listen(port, host, () => {
   log(`listening on http://${host}:${port} (data: ${dataDir})`);
