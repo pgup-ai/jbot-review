@@ -62,12 +62,13 @@ install -m 0440 "$SUDOERS_TMP" /etc/sudoers.d/jbot-deploy
 rm -f "$SUDOERS_TMP"
 
 # Caddy terminates TLS. Never clobber a Caddyfile some other setup owns:
-# write it only when this installer marked it or freshly installed caddy.
+# the guard keys on the FILE pre-existing (captured before dnf can install a
+# package default), so even a pre-staged config with no caddy binary is safe.
 CADDYFILE=/etc/caddy/Caddyfile
 MARK="# managed by jbot-observer install.sh"
-CADDY_PREINSTALLED=true
-command -v caddy >/dev/null || CADDY_PREINSTALLED=false
-if ! $CADDY_PREINSTALLED; then
+CADDYFILE_PREEXISTED=false
+[ -f "$CADDYFILE" ] && CADDYFILE_PREEXISTED=true
+if ! command -v caddy >/dev/null; then
   dnf -y install 'dnf-command(copr)'
   dnf -y copr enable @caddy/caddy
   dnf -y install caddy
@@ -76,7 +77,7 @@ SITE="$(
   echo "$MARK"
   sed "s|{\$OBSERVER_HOSTNAME}|$OBSERVER_HOSTNAME|" "$SCRIPT_DIR/Caddyfile"
 )"
-if $CADDY_PREINSTALLED && [ -f "$CADDYFILE" ] && ! grep -q "$MARK" "$CADDYFILE"; then
+if $CADDYFILE_PREEXISTED && ! grep -q "$MARK" "$CADDYFILE"; then
   echo "pre-existing unmanaged $CADDYFILE;" >&2
   echo "add the site block from $SCRIPT_DIR/Caddyfile (hostname: $OBSERVER_HOSTNAME) yourself" >&2
 else
