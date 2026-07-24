@@ -168,9 +168,12 @@ async function runRemotePrompt(
       );
     },
   });
-  // A write failure is reported through the session's error path; without a
-  // listener the stream's 'error' event would take down the process.
-  input.on('error', () => {});
+  // Without a listener the stream's 'error' event would take down the process,
+  // and swallowing it would hang the prompt — driveAcpSession has no input
+  // error path — so fail the session through the race the caller already awaits.
+  input.on('error', (error: Error) =>
+    closed.reject(new Error(`${label}: frame send failed: ${error.message}`)),
+  );
 
   try {
     const opened = await post({
