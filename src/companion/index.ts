@@ -334,7 +334,15 @@ function openSession(control: OpenControl): void {
     if (sessions.has(control.sessionId))
       endSession(control.sessionId, `agent exited ${code ?? 'by signal'}`, true);
   });
-  sendControl({ kind: 'opened', sessionId: control.sessionId });
+  // The client drives the session but doesn't hold the agent spec, so hand it
+  // the workspace and this agent's session policy.
+  sendControl({
+    kind: 'opened',
+    sessionId: control.sessionId,
+    workspace,
+    ...(spec.requirePlanMode ? { requirePlanMode: true } : {}),
+    ...(spec.modelConfigCandidates ? { modelCandidates: spec.modelConfigCandidates(model) } : {}),
+  });
   log(`session ${control.sessionId} opened (agent=${control.agent})`);
 }
 

@@ -39,6 +39,12 @@ export interface AckControl {
   kind: 'opened' | 'refused';
   sessionId: string;
   reason?: string;
+  /** On `opened`: what the client needs to drive this agent — the workspace
+   * the companion checked out, plus the agent's session policy. The companion
+   * owns the agent spec, so this is the one place that knowledge lives. */
+  workspace?: string;
+  requirePlanMode?: boolean;
+  modelCandidates?: string[];
 }
 
 export interface CloseControl {
@@ -121,6 +127,14 @@ export function parseRelayControl(line: string): RelayControl | undefined {
       if (!str(raw.sessionId) || !isSafeId(raw.sessionId)) return undefined;
       const control = { kind: raw.kind, sessionId: raw.sessionId } as AckControl | CloseControl;
       if (str(raw.reason)) control.reason = raw.reason;
+      if (raw.kind === 'opened') {
+        const ack = control as AckControl;
+        if (str(raw.workspace)) ack.workspace = raw.workspace;
+        if (typeof raw.requirePlanMode === 'boolean') ack.requirePlanMode = raw.requirePlanMode;
+        if (Array.isArray(raw.modelCandidates) && raw.modelCandidates.every(str)) {
+          ack.modelCandidates = raw.modelCandidates as string[];
+        }
+      }
       return control;
     }
     default:

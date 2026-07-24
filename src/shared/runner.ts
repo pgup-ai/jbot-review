@@ -27,6 +27,11 @@ import { limitReviewBackendSessions, type ReviewBackend } from './session-concur
 import { closeObserver, reportRun, setRunName } from './observer.ts';
 import { codexAcpSpec, createAcpBackend, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from './acp.ts';
 import {
+  ACP_GATEWAY_PROVIDERS,
+  createRemoteAcpBackend,
+  remoteAcpConfigFromEnv,
+} from './acp-remote.ts';
+import {
   piModelAvailable,
   piSupportsProvider,
   resolvePiEngine,
@@ -1084,6 +1089,13 @@ async function runReviewPipeline(params: {
 
   let opencodeRuntime: Awaited<ReturnType<typeof startOpencode>> | undefined;
   let opencodeBackend: ReviewBackend | undefined;
+  // With a gateway configured, these providers run on a remote companion's
+  // agent instead of a local CLI — so their local setup (credentials, temp
+  // homes) is skipped entirely.
+  const remoteAcp = remoteAcpConfigFromEnv();
+  if (remoteAcp) {
+    log(`ACP gateway: routing ACP providers to ${remoteAcp.endpoint} via ${remoteAcp.gateway}`);
+  }
   let devinBackend: ReviewBackend | undefined;
   let commandCodeBackend: ReviewBackend | undefined;
   let cursorBackend: ReviewBackend | undefined;
@@ -1126,7 +1138,7 @@ async function runReviewPipeline(params: {
     cleanupGrokHome();
   };
 
-  if (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID) {
+  if (!remoteAcp && (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID)) {
     const devinApiKey = backendSelection.devinApiKey;
     if (!devinApiKey) {
       throw new Error(`Missing API key for ${DEVIN_PROVIDER_ID} provider.`);
@@ -1136,7 +1148,10 @@ async function runReviewPipeline(params: {
     devinBackend = createAcpBackend(devinAcpSpec(), workspace);
   }
 
-  if (mainCliBackend === CURSOR_PROVIDER_ID || auxCliBackend === CURSOR_PROVIDER_ID) {
+  if (
+    !remoteAcp &&
+    (mainCliBackend === CURSOR_PROVIDER_ID || auxCliBackend === CURSOR_PROVIDER_ID)
+  ) {
     const cursorApiKey = backendSelection.cursorApiKey;
     if (!cursorApiKey) {
       throw new Error(`Missing API key for ${CURSOR_PROVIDER_ID} provider.`);
@@ -1167,7 +1182,7 @@ async function runReviewPipeline(params: {
     commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome);
   }
 
-  if (mainCliBackend === CODEX_PROVIDER_ID || auxCliBackend === CODEX_PROVIDER_ID) {
+  if (!remoteAcp && (mainCliBackend === CODEX_PROVIDER_ID || auxCliBackend === CODEX_PROVIDER_ID)) {
     const codexAuth = backendSelection.codexAuth;
     if (!codexAuth) {
       cleanupCliHomes();
@@ -1235,7 +1250,7 @@ async function runReviewPipeline(params: {
     grokSessionSlots = new Semaphore(1);
   }
 
-  if (mainCliBackend === KILO_PROVIDER_ID || auxCliBackend === KILO_PROVIDER_ID) {
+  if (!remoteAcp && (mainCliBackend === KILO_PROVIDER_ID || auxCliBackend === KILO_PROVIDER_ID)) {
     const kiloAuth = backendSelection.kiloAuth;
     if (!kiloAuth) {
       cleanupCliHomes();
@@ -1375,6 +1390,13 @@ async function runReviewPipeline(params: {
     [KILO_PROVIDER_ID]: kiloBackend,
     [QODER_PROVIDER_ID]: qoderBackend,
   };
+  // The gateway serves these providers instead of a local CLI; their local
+  // construction above is skipped for the same reason.
+  if (remoteAcp) {
+    for (const agent of ACP_GATEWAY_PROVIDERS) {
+      cliBackends[agent] = createRemoteAcpBackend({ ...remoteAcp, agent });
+    }
+  }
   const mainBaseBackend = mainCliBackend
     ? requireCliBackend(cliBackends, mainCliBackend)
     : mainOnPi

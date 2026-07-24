@@ -1,0 +1,289 @@
+/**
+ * Drives review sessions on an agent hosted by a remote companion, through the
+ * ACP gateway, instead of spawning a CLI locally. The frames and the session
+ * logic are identical — only the transport differs — so this supplies
+ * `driveAcpSession` with a network-backed stream pair and reuses everything
+ * above it. Spec: docs/superpowers/specs/2026-07-24-acp-gateway-m2-design.md.
+ */
+import { randomBytes } from 'node:crypto';
+import { PassThrough, Writable } from 'node:stream';
+
+import { createAcpReviewBackend, driveAcpSession } from './acp.ts';
+import { parseEnvelope } from '../gateway/journal.ts';
+import type { AckControl } from '../gateway/relay.ts';
+import { parseRelayControl } from '../gateway/relay.ts';
+import type { ReviewBackend } from './session-concurrency.ts';
+
+const REMOTE_PROMPT_TIMEOUT_MS = 20 * 60_000;
+/** Bounds every gateway round trip: POSTs, the SSE connect, and the open ack. */
+const GATEWAY_TIMEOUT_MS = 60_000;
+
+/** Providers the gateway can serve — the ones with an ACP engine (see acp.ts). */
+export const ACP_GATEWAY_PROVIDERS = ['devin', 'cursor', 'codex', 'kilo'] as const;
+
+export interface RemoteAcpConfig {
+  gateway: string;
+  token: string;
+  endpoint: string;
+  agent: string;
+  /** Groups this run's sessions in the gateway journal and viewer. */
+  runId: string;
+  /** Checked out by the companion so the agent can explore the code it reviews. */
+  repo?: string;
+  ref?: string;
+}
+
+/** Present only when all three required vars are set; the agent comes from the
+ * selected provider, so no separate agent var. */
+export function remoteAcpConfigFromEnv(): Omit<RemoteAcpConfig, 'agent'> | undefined {
+  const gateway = process.env.JBOT_ACP_GATEWAY_URL?.trim();
+  const token = process.env.JBOT_ACP_GATEWAY_TOKEN?.trim();
+  const endpoint = process.env.JBOT_ACP_GATEWAY_ENDPOINT?.trim();
+  if (!gateway || !token || !endpoint) return undefined;
+  const rawRun =
+    process.env.JBOT_ACP_GATEWAY_RUN?.trim() || process.env.JBOT_OBSERVER_RUN?.trim() || 'jbot';
+  return {
+    gateway: gateway.replace(/\/+$/, ''),
+    token,
+    endpoint,
+    // Must satisfy the gateway's isSafeId: alphanumeric first character.
+    runId:
+      rawRun
+        .replaceAll(/[^A-Za-z0-9._-]/g, '-')
+        .replace(/^[^A-Za-z0-9]+/, '')
+        .slice(0, 128) || 'jbot',
+    ...(process.env.JBOT_ACP_GATEWAY_REPO?.trim()
+      ? { repo: process.env.JBOT_ACP_GATEWAY_REPO.trim() }
+      : {}),
+    ...(process.env.JBOT_ACP_GATEWAY_REF?.trim()
+      ? { ref: process.env.JBOT_ACP_GATEWAY_REF.trim() }
+      : {}),
+  };
+}
+
+/** Session ids double as journal filenames, so keep them id-safe and unique.
+ * The label is clamped, not the whole id, so the random suffix always survives. */
+const sessionIdFor = (label: string): string =>
+  `${label.replaceAll(/[^A-Za-z0-9._-]/g, '-').slice(0, 100)}-${randomBytes(4).toString('hex')}`;
+
+export function createRemoteAcpBackend(config: RemoteAcpConfig): ReviewBackend {
+  return createAcpReviewBackend(`acp-gateway:${config.agent}@${config.endpoint}`, (...args) =>
+    runRemotePrompt(config, ...args),
+  );
+}
+
+async function runRemotePrompt(
+  config: RemoteAcpConfig,
+  model: string,
+  prompt: string,
+  label: string,
+  log: (msg: string) => void,
+  timeoutMs = REMOTE_PROMPT_TIMEOUT_MS,
+): Promise<string> {
+  const sessionId = sessionIdFor(label);
+  const base = `${config.gateway}/api/sessions/${sessionId}`;
+  const auth = { authorization: `Bearer ${config.token}` };
+  const output = new PassThrough();
+  const stream = new AbortController();
+  let seq = 0;
+
+  const post = (payload: Record<string, unknown>): Promise<Response> =>
+    fetch(`${base}/ingest`, {
+      method: 'POST',
+      headers: { ...auth, 'content-type': 'application/x-ndjson' },
+      body: `${JSON.stringify(payload)}\n`,
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
+    });
+  const sendFrame = (frame: Record<string, unknown>): Promise<Response> =>
+    post({
+      v: 1,
+      runId: config.runId,
+      sessionId,
+      seq: (seq += 1),
+      ts: Date.now(),
+      agent: config.agent,
+      label,
+      model,
+      dir: 'out',
+      frame,
+    });
+
+  const acked = deferred<AckControl>();
+  const closed = deferred<never>();
+  // Loses most races; without a handler its rejection would surface as an
+  // unhandled rejection rather than the error the caller already saw.
+  closed.promise.catch(() => {});
+
+  // Header auth, not ?token= — that form exists for browser EventSource, which
+  // cannot set headers, and would put the credential in logs and caches.
+  const connectTimer = setTimeout(() => stream.abort(), GATEWAY_TIMEOUT_MS);
+  let sse: Response;
+  try {
+    sse = await fetch(`${base}/stream`, { headers: auth, signal: stream.signal });
+  } finally {
+    clearTimeout(connectTimer);
+  }
+  if (!sse.ok || !sse.body) {
+    await sse.body?.cancel();
+    throw new Error(`${label}: gateway stream refused (${sse.status})`);
+  }
+  // Agent frames feed the session's stdin-equivalent; controls resolve the
+  // open handshake or fail the prompt.
+  const reading = pump(sse.body, (line) => {
+    const control = parseRelayControl(line);
+    if (control?.kind === 'opened' || control?.kind === 'refused') {
+      acked.resolve(control);
+      return;
+    }
+    if (control?.kind === 'close') {
+      closed.reject(
+        new Error(`${label}: session closed by gateway: ${control.reason ?? 'closed'}`),
+      );
+      return;
+    }
+    const envelope = parseEnvelope(line);
+    if (envelope) output.write(`${JSON.stringify(envelope.frame)}\n`);
+  })
+    // A stream that ends or errors without a close control would otherwise
+    // leave the session waiting out its full timeout.
+    .then(
+      () => closed.reject(new Error(`${label}: gateway stream ended`)),
+      (error: Error) =>
+        closed.reject(new Error(`${label}: gateway stream failed: ${error.message}`)),
+    );
+
+  const input = new Writable({
+    write(chunk, _encoding, callback) {
+      let frame: Record<string, unknown>;
+      try {
+        frame = JSON.parse(String(chunk)) as Record<string, unknown>;
+      } catch (error) {
+        callback(error as Error);
+        return;
+      }
+      sendFrame(frame).then(
+        (res) =>
+          callback(res.ok ? null : new Error(`${label}: gateway rejected a frame (${res.status})`)),
+        callback,
+      );
+    },
+  });
+  // Without a listener the stream's 'error' event would take down the process,
+  // and swallowing it would hang the prompt — driveAcpSession has no input
+  // error path — so fail the session through the race the caller already awaits.
+  input.on('error', (error: Error) =>
+    closed.reject(new Error(`${label}: frame send failed: ${error.message}`)),
+  );
+
+  try {
+    const opened = await post({
+      kind: 'open',
+      sessionId,
+      runId: config.runId,
+      endpoint: config.endpoint,
+      agent: config.agent,
+      model,
+      ...(config.repo ? { repo: config.repo } : {}),
+      ...(config.ref ? { ref: config.ref } : {}),
+    });
+    // Fail on the real status (401/413/5xx) instead of waiting out the ack.
+    if (!opened.ok) throw new Error(`${label}: gateway rejected the open (${opened.status})`);
+    const ack = await raceWithDeadline(
+      [acked.promise, closed.promise],
+      GATEWAY_TIMEOUT_MS,
+      `${label}: endpoint ${config.endpoint} did not answer the open`,
+    );
+    if (ack.kind === 'refused') {
+      throw new Error(
+        `${label}: endpoint ${config.endpoint} refused: ${ack.reason ?? 'no reason'}`,
+      );
+    }
+    log(`Calling ${label} prompt (agent=${config.agent}@${config.endpoint}, model=${model})`);
+
+    const result = await raceWithDeadline(
+      [
+        driveAcpSession(
+          { input, output },
+          {
+            cwd: ack.workspace ?? '.',
+            prompt,
+            agent: config.agent,
+            label,
+            log,
+            model,
+            ...(ack.modelCandidates ? { configOptionModelIds: ack.modelCandidates } : {}),
+            ...(ack.requirePlanMode ? { requirePlanMode: true } : {}),
+          },
+        ),
+        closed.promise,
+      ],
+      timeoutMs,
+      `${label}: remote prompt timed out after ${Math.round(timeoutMs / 1000)}s (model=${model})`,
+    );
+    log(
+      `${label} prompt complete via gateway: stopReason=${result.stopReason} last-message=${result.text.length} chars`,
+    );
+    if (!result.text) {
+      throw new Error(
+        `${label}: agent produced no assistant message (stopReason=${result.stopReason})`,
+      );
+    }
+    return result.text;
+  } finally {
+    // Advisory teardown — the result is already in hand, and a dropped close
+    // is covered by the gateway's resume window, so never block the return.
+    void post({ kind: 'close', sessionId, reason: 'prompt complete' }).catch(() => {});
+    stream.abort();
+    output.end();
+    await reading;
+  }
+}
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: Error) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** Races `work` against a deadline, clearing the timer once anything settles —
+ * a timer left armed would reject after the race and go unobserved. */
+function raceWithDeadline<T>(work: Promise<T>[], ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+    timer.unref();
+  });
+  return Promise.race([...work, deadline]).finally(() => clearTimeout(timer));
+}
+
+/** Reads an SSE body, handing each `data:` payload to `onLine` unparsed. */
+async function pump(
+  body: ReadableStream<Uint8Array>,
+  onLine: (line: string) => void,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    buffer += decoder.decode(value, { stream: true });
+    let nl = buffer.indexOf('\n');
+    while (nl !== -1) {
+      const line = buffer.slice(0, nl);
+      buffer = buffer.slice(nl + 1);
+      if (line.startsWith('data: ')) onLine(line.slice(6));
+      nl = buffer.indexOf('\n');
+    }
+  }
+}

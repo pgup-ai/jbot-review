@@ -646,18 +646,28 @@ async function runAcpPrompt(
   }
 }
 
-/** One generic ReviewBackend over ACP: five session methods share one prompt
- * runner, so per-agent variation lives entirely in the spec table. */
+/** Delivers one assembled prompt to an agent and returns its final text. */
+type AcpPromptRunner = (
+  model: string,
+  prompt: string,
+  label: string,
+  log: (msg: string) => void,
+  timeoutMs?: number,
+) => Promise<string>;
+
 export function createAcpBackend(spec: AcpAgentSpec, workspace: string): ReviewBackend {
-  const run = (
-    model: string,
-    prompt: string,
-    label: string,
-    log: (msg: string) => void,
-    timeoutMs?: number,
-  ) => runAcpPrompt(spec, workspace, model, prompt, label, log, timeoutMs);
+  return createAcpReviewBackend(`acp:${spec.id}`, (model, prompt, label, log, timeoutMs) =>
+    runAcpPrompt(spec, workspace, model, prompt, label, log, timeoutMs),
+  );
+}
+
+/** Every backend method reduces to "send a prompt, parse the reply", so local
+ * (spawn) and remote (gateway) backends share this whole surface — prompt
+ * assembly, parsing, and the single JSON repair retry — and differ only in the
+ * runner they are built with. */
+export function createAcpReviewBackend(name: string, run: AcpPromptRunner): ReviewBackend {
   return {
-    name: `acp:${spec.id}`,
+    name,
     async runReview(model, prContext, guidelines, log, options = {}): Promise<ReviewResult> {
       // ACP carries usage in usage_update, but mirror the other CLI backends and skip it.
       void options.onTokenUsage;
@@ -669,7 +679,7 @@ export function createAcpBackend(spec: AcpAgentSpec, workspace: string): ReviewB
         options.evidenceQuotes ?? false,
       );
       log(
-        `Prompt assembled (${label}, acp:${spec.id}): ${prompt.length} chars, guidelines=${!!guidelines}`,
+        `Prompt assembled (${label}, ${name}): ${prompt.length} chars, guidelines=${!!guidelines}`,
       );
       const raw = await run(model, prompt, label, log, options.timeoutMs);
       try {
@@ -677,7 +687,7 @@ export function createAcpBackend(spec: AcpAgentSpec, workspace: string): ReviewB
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         log(
-          `${label} response unparseable; sending one JSON repair prompt via acp:${spec.id}: ${message}`,
+          `${label} response unparseable; sending one JSON repair prompt via ${name}: ${message}`,
         );
         const repaired = await run(
           model,
