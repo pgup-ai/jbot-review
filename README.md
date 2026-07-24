@@ -730,6 +730,8 @@ calls, permission decisions, findings — live or replayed.
 - **Exposure is explicit:** without a token the server binds loopback only.
   Setting `JBOT_GATEWAY_TOKEN` is the decision to listen on all interfaces;
   ingest then requires `Authorization: Bearer` and viewers pass `?token=`.
+  Behind a local TLS proxy, `JBOT_GATEWAY_HOST=127.0.0.1` keeps token auth
+  while the proxy stays the only public door (`deploy/observer` does this).
 - **Privacy:** journaled frames contain prompt and diff content (never
   credentials — auth is materialized into env/files and does not cross the
   ACP wire). Point the tee at a gateway you control, for repos you own.
