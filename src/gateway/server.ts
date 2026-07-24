@@ -177,14 +177,14 @@ async function handleEndpointIngest(
       if (control.kind === 'hello' && control.endpoint === id) {
         relay.attachEndpoint(control, sendToEndpoint(id));
       } else if (control.kind === 'opened' || control.kind === 'refused') {
-        relay.endpointAck(control, line);
+        relay.endpointAck(id, control, line);
       } else if (control.kind === 'close') {
-        relay.closeSession(control.sessionId, control.reason ?? 'closed by endpoint');
+        relay.endpointClose(id, control.sessionId, control.reason ?? 'closed by endpoint');
       }
       return;
     }
     const envelope = parseEnvelope(line);
-    if (envelope) relay.endpointLine(envelope.sessionId, line);
+    if (envelope) relay.endpointLine(id, envelope.sessionId, line);
   });
   overflowOr(res, req, overflow);
 }

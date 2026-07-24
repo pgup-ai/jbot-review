@@ -11,7 +11,6 @@ export type SendLine = (line: string) => void;
 
 export interface EndpointAgent {
   agent: string;
-  model?: string;
 }
 
 export interface HelloControl {
@@ -20,8 +19,6 @@ export interface HelloControl {
   device: string;
   agents: EndpointAgent[];
   maxSessions: number;
-  /** Resume cursors: sessionId → last seq this peer saw (v1 wire field). */
-  lastSeq?: Record<string, number>;
 }
 
 export interface OpenControl {
@@ -81,20 +78,16 @@ export function parseRelayControl(line: string): RelayControl | undefined {
       const agents: EndpointAgent[] = [];
       for (const entry of raw.agents as Record<string, unknown>[]) {
         if (!entry || !str(entry.agent)) return undefined;
-        agents.push({ agent: entry.agent, ...(str(entry.model) ? { model: entry.model } : {}) });
+        agents.push({ agent: entry.agent });
       }
       const max = Number(raw.maxSessions);
       if (!Number.isInteger(max) || max < 1) return undefined;
-      const lastSeq = raw.lastSeq;
-      if (lastSeq !== undefined && (lastSeq === null || typeof lastSeq !== 'object'))
-        return undefined;
       return {
         kind: 'hello',
         endpoint: raw.endpoint,
         device: raw.device,
         agents,
         maxSessions: max,
-        ...(lastSeq ? { lastSeq: lastSeq as Record<string, number> } : {}),
       };
     }
     case 'open': {
@@ -235,23 +228,30 @@ export function createRelay(options: RelayOptions = {}) {
       attachment.send(JSON.stringify(control));
     },
 
-    /** opened/refused from the companion; a refusal frees the slot. */
-    endpointAck(control: AckControl, line: string): void {
+    /** opened/refused from the companion; a refusal frees the slot. Ignored
+     * unless the session belongs to this endpoint (no cross-endpoint spoofing). */
+    endpointAck(endpoint: string, control: AckControl, line: string): void {
       const session = sessions.get(control.sessionId);
-      if (!session) return;
+      if (session?.endpoint !== endpoint) return;
       session.clientSend(line);
       if (control.kind === 'refused') {
         sessions.delete(control.sessionId);
-        endpoints.get(session.endpoint)?.sessions.delete(control.sessionId);
+        endpoints.get(endpoint)?.sessions.delete(control.sessionId);
       }
     },
 
-    /** Frame from the companion side, relayed to the session's client. */
-    endpointLine(sessionId: string, line: string): void {
+    /** Frame from the companion side, relayed to its session's client. A
+     * companion can only reach sessions it owns. */
+    endpointLine(endpoint: string, sessionId: string, line: string): void {
       const session = sessions.get(sessionId);
-      if (!session) return;
+      if (session?.endpoint !== endpoint) return;
       options.onLine?.(sessionId, session.runId, 'in', line);
       session.clientSend(line);
+    },
+
+    /** Close initiated by a companion — only for its own sessions. */
+    endpointClose(endpoint: string, sessionId: string, reason: string): void {
+      if (sessions.get(sessionId)?.endpoint === endpoint) failSession(sessionId, reason);
     },
 
     /** Frame from the client side, relayed to the owning endpoint. */

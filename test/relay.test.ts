@@ -30,6 +30,11 @@ const open = (overrides: Partial<OpenControl> = {}): OpenControl => ({
 describe('relay', () => {
   it('parses controls strictly and rejects unsafe or malformed input', () => {
     assert.equal(parseRelayControl(JSON.stringify(hello()))?.kind, 'hello');
+    // Unknown fields (future resume cursors) are ignored, not rejected.
+    assert.equal(
+      parseRelayControl(JSON.stringify({ ...hello(), lastSeq: { a: 1 } }))?.kind,
+      'hello',
+    );
     const parsedOpen = parseRelayControl(JSON.stringify(open({ model: 'kilo/x', ref: 'main' })));
     assert.deepEqual(parsedOpen, { ...open(), model: 'kilo/x', ref: 'main' });
     assert.equal(
@@ -74,14 +79,31 @@ describe('relay', () => {
     relay.openSession(open(), (line) => toClient.push(line));
     assert.equal(JSON.parse(toEndpoint[0]).kind, 'open');
     relay.clientLine('sid-1', 'frame-out');
-    relay.endpointLine('sid-1', 'frame-in');
+    relay.endpointLine('laptop', 'sid-1', 'frame-in');
     assert.equal(toEndpoint[1], 'frame-out');
     assert.equal(toClient[0], 'frame-in');
     assert.deepEqual(journal, ['sid-1/run-1/out/frame-out', 'sid-1/run-1/in/frame-in']);
     assert.equal(relay.sessionRun('sid-1'), 'run-1');
     // Unknown sessions are dropped, never crash.
     relay.clientLine('ghost', 'x');
-    relay.endpointLine('ghost', 'x');
+    relay.endpointLine('laptop', 'ghost', 'x');
+  });
+
+  it('rejects cross-endpoint frames, acks, and closes (sender must own the session)', () => {
+    const relay = createRelay();
+    const toClient: string[] = [];
+    relay.attachEndpoint(hello({ endpoint: 'mine' }), () => {});
+    relay.attachEndpoint(hello({ endpoint: 'attacker' }), () => {});
+    relay.openSession(open({ endpoint: 'mine' }), (line) => toClient.push(line));
+    // A frame/ack/close from the wrong endpoint reaches nothing.
+    relay.endpointLine('attacker', 'sid-1', 'injected');
+    relay.endpointAck('attacker', { kind: 'refused', sessionId: 'sid-1' }, 'spoof');
+    relay.endpointClose('attacker', 'sid-1', 'hijack');
+    assert.deepEqual(toClient, []);
+    assert.equal(relay.sessionRun('sid-1'), 'run-1');
+    // The owning endpoint still works.
+    relay.endpointLine('mine', 'sid-1', 'legit');
+    assert.deepEqual(toClient, ['legit']);
   });
 
   it('refuses offline endpoints, duplicates, capacity, and unknown agents', () => {
@@ -105,7 +127,7 @@ describe('relay', () => {
     ]);
     // A companion refusal frees the slot for the next open.
     const ack = { kind: 'refused' as const, sessionId: 'sid-1', reason: 'no auth' };
-    relay.endpointAck(ack, JSON.stringify(ack));
+    relay.endpointAck('laptop', ack, JSON.stringify(ack));
     relay.openSession(open({ sessionId: 'sid-3' }), client);
     assert.equal(relay.sessionRun('sid-3'), 'run-1');
   });
