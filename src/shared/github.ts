@@ -514,8 +514,10 @@ export function decideVerdict(_findings: Finding[]): Verdict {
  * Posts one review; inline-anchorable findings become inline comments.
  *
  * GitHub rejects the whole createReview call if any single comment fails to
- * anchor, so the rejected batch is retried one comment at a time: a stale or
- * unanchorable line costs itself, not every other finding in the run.
+ * anchor, so a rejected batch is retried one comment at a time: a stale or
+ * unanchorable line costs itself, not every other finding in the run. Only a
+ * 422 counts as a rejection — any other failure may already have been applied
+ * server-side, where re-posting would duplicate every comment.
  */
 export async function postReview(
   octokit: Octokit,
@@ -529,6 +531,7 @@ export async function postReview(
   headSha: string,
 ): Promise<{ inlinePosted: number; inlineDropped: number }> {
   const base = stripLinkedCommentsFooter(body);
+  let rejected = false;
   try {
     await octokit.rest.pulls.createReview({
       owner,
@@ -544,28 +547,31 @@ export async function postReview(
       })),
     });
     return { inlinePosted: inlineFindings.length, inlineDropped: 0 };
-  } catch {
-    /* GitHub does not say which comment it rejected, so all of them are retried */
+  } catch (error) {
+    rejected = (error as { status?: number } | null)?.status === 422;
   }
 
   // Salvage first so the body can state the true dropped count and link the
   // survivors: like file-level comments, they hang off the PR, not this review.
+  // GitHub does not name the offending comment, so every one is retried.
   const salvagedIds: number[] = [];
-  for (const finding of inlineFindings) {
-    try {
-      const response = await octokit.rest.pulls.createReviewComment({
-        owner,
-        repo,
-        pull_number: pullNumber,
-        commit_id: headSha,
-        path: finding.path,
-        line: finding.line,
-        side: 'RIGHT',
-        body: formatFindingCommentBody(finding),
-      });
-      salvagedIds.push(response.data.id);
-    } catch {
-      /* this one could not anchor; counted below */
+  if (rejected) {
+    for (const finding of inlineFindings) {
+      try {
+        const response = await octokit.rest.pulls.createReviewComment({
+          owner,
+          repo,
+          pull_number: pullNumber,
+          commit_id: headSha,
+          path: finding.path,
+          line: finding.line,
+          side: 'RIGHT',
+          body: formatFindingCommentBody(finding),
+        });
+        salvagedIds.push(response.data.id);
+      } catch {
+        /* this one could not anchor; counted below */
+      }
     }
   }
   const inlineDropped = inlineFindings.length - salvagedIds.length;
