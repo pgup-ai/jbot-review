@@ -529,7 +529,7 @@ async function selectModelConfigOption(
   }
 }
 
-interface AcpAgentSpec {
+export interface AcpAgentSpec {
   /** jbot backend id this spec serves; the engine name becomes `acp:<id>`. */
   id: string;
   bin: string;

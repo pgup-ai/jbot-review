@@ -16,4 +16,10 @@ docs/superpowers/
 
 # Local observer-gateway journals (npm run gateway)
 gateway-data/
+
+# Local CLI-provider auth/state, materialized when dogfooding a provider
+.commandcode/
 .poolside/
+
+# Local scratch / ad-hoc research notes
+.research/
