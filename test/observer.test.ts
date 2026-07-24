@@ -103,4 +103,35 @@ describe('observer tee', () => {
       rmSync(dataDir, { recursive: true, force: true });
     }
   });
+
+  it('exits even when the gateway accepts the connection but never responds', async () => {
+    // A pending fetch with no response would keep the event loop alive after
+    // the review; closeObserver must abort it so the process can exit.
+    const { createServer } = await import('node:http');
+    const blackhole = createServer(() => {
+      /* accept, read, never respond */
+    });
+    await new Promise<void>((resolve) => blackhole.listen(0, '127.0.0.1', resolve));
+    const { port } = blackhole.address() as { port: number };
+    try {
+      const code = await new Promise<number | null>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error('driver hung: fetch never aborted')),
+          15_000,
+        );
+        const driver = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-'], {
+          env: { ...process.env, JBOT_OBSERVER_URL: `http://127.0.0.1:${port}` },
+          stdio: ['pipe', 'ignore', 'inherit'],
+        });
+        driver.on('exit', (c) => {
+          clearTimeout(timer);
+          resolve(c);
+        });
+        driver.stdin?.end(DRIVER_SOURCE);
+      });
+      assert.equal(code, 0);
+    } finally {
+      blackhole.close();
+    }
+  });
 });
