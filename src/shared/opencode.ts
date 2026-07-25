@@ -1100,7 +1100,9 @@ function sleep(ms: number): Promise<void> {
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 // Evidence quotes parse from any backend regardless of the prompt flag; the cap
 // defends against runaway quotes.
-const EVIDENCE_MAX_CHARS = 200;
+// Room for the two or three consecutive lines EVIDENCE_INSTRUCTION asks for:
+// a quote truncated mid-line cannot match the file exactly.
+const EVIDENCE_MAX_CHARS = 400;
 
 /**
  * Defensively parses the agent's JSON. Main review output is strict so we

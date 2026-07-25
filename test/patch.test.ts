@@ -102,6 +102,13 @@ describe('rescueAnchorByEvidence (F12 orphan rescue)', () => {
   it('does not rescue an ambiguous quote that matches multiple added lines', () => {
     const dup = ['@@ -1,0 +1,2 @@', '+  x = 1;', '+  x = 1;'].join('\n');
     assert.equal(rescueAnchorByEvidence(dup, 'x = 1;'), undefined);
+
+    // Ambiguous as written must fail closed, not retry without the leading
+    // sign — that reading would anchor to a line the quote never pointed at.
+    const signs = ['@@ -1,0 +1,3 @@', '+  -1;', '+  1;', '+  -1;'].join('\n');
+    assert.equal(rescueAnchorByEvidence(signs, '-1;'), undefined);
+    // A quote that matches nothing as written still falls back to the marker read.
+    assert.equal(rescueAnchorByEvidence(signs, '+  1;'), 2);
   });
 
   it('ignores a blank quote or missing patch', () => {

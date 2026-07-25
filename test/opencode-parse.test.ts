@@ -179,7 +179,7 @@ describe('parseReview evidence field (F12)', () => {
 
   it('truncates an oversized evidence quote to the cap', () => {
     const result = parseReview(rawWithEvidence('x'.repeat(500)), 'test', noLog);
-    assert.equal(result.findings[0].evidence?.length, 200);
+    assert.equal(result.findings[0].evidence?.length, 400);
   });
 
   it('ignores a blank or non-string evidence value', () => {

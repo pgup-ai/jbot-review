@@ -10,6 +10,7 @@ import {
   anchorFindings,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
+  resolveFindingAnchors,
   isNoiseFile,
   isPrCleanAfterRun,
   openFindingThreadIds,
@@ -1728,6 +1729,13 @@ async function runReviewPipeline(params: {
     if (demotedCount > 0) {
       log(`Demoted ${demotedCount} low-confidence blocking finding(s) to P3.`);
     }
+    // Must precede dedupe and suppression — both compare path:line.
+    const reanchored = gatedLists.flatMap((gated) =>
+      resolveFindingAnchors(gated.findings, addable, patchByPath, options.evidenceQuotes),
+    );
+    if (reanchored.length > 0) {
+      log(`Re-anchored ${reanchored.length} finding(s) from their evidence quote.`);
+    }
     // Main review first: on equal-strength path:line collisions its richer
     // general context wins over lens and compliance findings.
     const combinedFindings = dedupeFindings(...gatedLists.map((gated) => gated.findings));
@@ -1767,17 +1775,23 @@ async function runReviewPipeline(params: {
       `Review complete: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
-    const { inline, fileLevel, orphaned, rescued, anchorMissed } = anchorFindings(
+    const { inline, fileLevel, orphaned, anchorMissed } = anchorFindings(
       filteredFindings,
       addable,
-      patchByPath,
       !!headSha,
-      options.evidenceQuotes,
     );
-    if (rescued.length > 0) {
-      log(`Rescued ${rescued.length} orphaned finding(s) by re-anchoring to their evidence quote.`);
-    }
-    telemetry.route({ inline, fileLevel, orphaned, rescued, anchorMissed });
+    // Re-anchoring runs before dedupe/verify/filter, so some of it did not
+    // survive; telemetry's rescued set must stay a subset of what was posted.
+    const reanchoredIds = new Set(reanchored.map((f) => f.id));
+    telemetry.route({
+      inline,
+      fileLevel,
+      orphaned,
+      // Ids exist only while telemetry is on, and an undefined id matches every
+      // other finding that lacks one — so never look one up.
+      rescued: inline.filter((f) => f.id !== undefined && reanchoredIds.has(f.id)),
+      anchorMissed,
+    });
     const verdict = decideVerdict(filteredFindings);
 
     // Report the final filtered findings + summary on EVERY completed review (dry-run or

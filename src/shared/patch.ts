@@ -6,8 +6,10 @@
  */
 const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
-/** Walks a patch, yielding each ADDED line's new-side number and content (sans '+'). */
-function* addedLines(patch: string): Generator<{ line: number; content: string }> {
+/** Walks a patch, yielding every NEW-side line (added or context) with its number. */
+function* newSideLines(
+  patch: string,
+): Generator<{ line: number; content: string; added: boolean }> {
   let newLine = 0;
   let insideHunk = false;
   for (const raw of patch.split('\n')) {
@@ -19,17 +21,28 @@ function* addedLines(patch: string): Generator<{ line: number; content: string }
     }
     if (!insideHunk) continue;
     const marker = raw[0];
-    if (marker === '+') {
-      yield { line: newLine, content: raw.slice(1) };
-      newLine += 1;
-    } else if (marker === '-') {
-      // Removed line: present only on the old side.
-    } else if (marker === '\\') {
-      // "\ No newline at end of file": annotates the preceding line, on neither side.
-    } else {
-      newLine += 1;
-    }
+    // Removed lines are old-side only; "\ No newline at end of file" annotates
+    // the preceding line and is on neither side.
+    if (marker === '-' || marker === '\\') continue;
+    yield { line: newLine, content: raw.slice(1), added: marker === '+' };
+    newLine += 1;
   }
+}
+
+/** Walks a patch, yielding each ADDED line's new-side number and content (sans '+'). */
+function* addedLines(patch: string): Generator<{ line: number; content: string }> {
+  for (const side of newSideLines(patch)) if (side.added) yield side;
+}
+
+/**
+ * Drops a leading diff marker the model may have copied along with the line.
+ * Applied to a QUOTE only, never to patch content — `newSideLines` already
+ * removed the real marker, so stripping again would eat a genuine leading
+ * '+'/'-' from source (`-1`, `--verbose`, a markdown bullet) and let two
+ * different lines collapse to the same text.
+ */
+function stripQuotedMarker(line: string): string {
+  return line.startsWith('+') || line.startsWith('-') ? line.slice(1).trim() : line;
 }
 
 export function parseAddedLines(patch: string | undefined): Set<number> {
@@ -55,9 +68,76 @@ export function rescueAnchorByEvidence(
 ): number | undefined {
   const needle = evidence.trim();
   if (!patch || !needle) return undefined;
+  // Ambiguity fails closed: only a quote that matched nothing as written is
+  // retried on the assumption its leading '+'/'-' was a marker.
+  const asWritten = prefixMatches(patch, needle);
+  const found = asWritten.length > 0 ? asWritten : prefixMatches(patch, stripQuotedMarker(needle));
+  return found.length === 1 ? found[0] : undefined;
+}
+
+function prefixMatches(patch: string, needle: string): number[] {
+  if (!needle) return [];
   const matches: number[] = [];
   for (const { line, content } of addedLines(patch)) {
     if (content.trim().startsWith(needle)) matches.push(line);
   }
-  return matches.length === 1 ? matches[0] : undefined;
+  return matches;
+}
+
+/**
+ * New-side line to anchor a finding whose `evidence` quotes one or more
+ * consecutive lines of the file. The matched window may span context lines —
+ * that is what makes a short quote unique — but the anchor is the first ADDED
+ * line inside it, because GitHub only accepts comments on lines this PR added.
+ *
+ * Undefined unless EXACTLY one window matches: an ambiguous quote must leave
+ * the finding orphaned rather than mis-anchored. Blank lines are trimmed off
+ * the quote's ends only; internally the run must be genuinely consecutive, so
+ * "consecutive" keeps meaning what it says and the anchor stays unambiguous.
+ */
+export function anchorByEvidenceSnippet(
+  patch: string | undefined,
+  evidence: string,
+): number | undefined {
+  if (!patch) return undefined;
+  const target = evidence.split('\n').map((line) => line.trim());
+  while (target[0] === '') target.shift();
+  while (target.at(-1) === '') target.pop();
+  if (target.length === 0) return undefined;
+
+  const side = Array.from(newSideLines(patch), (l) => ({
+    line: l.line,
+    added: l.added,
+    text: l.content.trim(),
+  }));
+  // Source that legitimately starts with '+'/'-' is indistinguishable from a
+  // copied diff marker, so the quote is tried as written first. Only a quote
+  // that matched NOTHING is retried stripped: retrying an AMBIGUOUS one would
+  // let a second reading of it anchor somewhere the quote itself never pointed.
+  const asWritten = matchWindow(side, target);
+  if (asWritten.matches > 0) return asWritten.anchor;
+  return matchWindow(side, target.map(stripQuotedMarker)).anchor;
+}
+
+/** `matches` separates "no match" from "ambiguous"; only exactly one yields an anchor. */
+function matchWindow(
+  side: { line: number; added: boolean; text: string }[],
+  target: string[],
+): { matches: number; anchor: number | undefined } {
+  let matches = 0;
+  let anchor: number | undefined;
+  for (let i = 0; i + target.length <= side.length; i += 1) {
+    const mismatched = target.some(
+      (line, j) =>
+        side[i + j].text !== line ||
+        // Hunks are yielded back to back, so neighbours in `side` can straddle a
+        // hunk boundary and be far apart in the file — not a consecutive run.
+        (j > 0 && side[i + j].line !== side[i + j - 1].line + 1),
+    );
+    if (mismatched) continue;
+    matches += 1;
+    if (matches > 1) return { matches, anchor: undefined };
+    anchor = side.slice(i, i + target.length).find((l) => l.added)?.line;
+  }
+  return { matches, anchor };
 }

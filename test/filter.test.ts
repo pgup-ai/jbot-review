@@ -9,6 +9,7 @@ import {
   isNoiseFile,
   isPrCleanAfterRun,
   openFindingThreadIds,
+  resolveFindingAnchors,
   selectBlockingFindingIndexes,
   shouldPostReviewComment,
   suppressPreviouslyReported,
@@ -455,10 +456,63 @@ describe('openFindingThreadIds', () => {
   });
 });
 
-describe('anchorFindings', () => {
-  const patch = ['@@ -1,0 +1,2 @@', '+  const total = order.total;', '+  return total;'].join('\n');
-  const addable = new Map([['a.ts', new Set([1, 2])]]);
+describe('resolveFindingAnchors', () => {
+  const patch = [
+    '@@ -1,1 +1,3 @@',
+    ' const a = 1;',
+    '+const total = order.total;',
+    '+return total;',
+  ].join('\n');
+  const addable = new Map([['a.ts', new Set([2, 3])]]);
   const patchByPath = new Map([['a.ts', patch]]);
+
+  it('moves only the findings whose line cannot anchor, in place', () => {
+    const bogus = finding({ path: 'a.ts', line: 99, evidence: 'return total;' });
+    const valid = finding({ path: 'a.ts', line: 2, evidence: 'return total;' });
+    const declared = finding({ path: 'a.ts', line: 0, evidence: 'return total;' });
+    const noEvidence = finding({ path: 'a.ts', line: 99 });
+
+    const moved = resolveFindingAnchors(
+      [bogus, valid, declared, noEvidence],
+      addable,
+      patchByPath,
+      true,
+    );
+
+    assert.deepEqual(moved, [bogus]);
+    assert.equal(bogus.line, 3, 're-anchored in place so every consumer agrees');
+    assert.equal(valid.line, 2, 'an anchor that already works is left alone');
+    assert.equal(declared.line, 0, 'line 0 stays an explicit file-level signal');
+    assert.equal(noEvidence.line, 99, 'nothing to match without evidence');
+
+    const off = finding({ path: 'a.ts', line: 99, evidence: 'return total;' });
+    assert.deepEqual(resolveFindingAnchors([off], addable, patchByPath, false), []);
+    assert.equal(off.line, 99, 'inert when evidence quotes are disabled');
+  });
+
+  it('leaves a finding alone when nothing matches its quote', () => {
+    const unmatched = finding({ path: 'a.ts', line: 99, evidence: 'never appears' });
+    const noPatch = finding({ path: 'other.ts', line: 99, evidence: 'return total;' });
+
+    assert.deepEqual(resolveFindingAnchors([unmatched, noPatch], addable, patchByPath, true), []);
+    assert.equal(unmatched.line, 99, 'an unmatched quote must not move the finding');
+    assert.equal(noPatch.line, 99, 'nor may a path with no patch');
+  });
+
+  it('lets dedupe collapse one issue the model anchored to two different wrong lines', () => {
+    // Why this runs before dedupe and suppression: both compare path:line, so a
+    // finding left on a bad line escapes the collision it should have had.
+    const a = finding({ path: 'a.ts', line: 40, evidence: 'return total;' });
+    const b = finding({ path: 'a.ts', line: 99, evidence: 'return total;' });
+
+    resolveFindingAnchors([a, b], addable, patchByPath, true);
+
+    assert.equal(dedupeFindings([a], [b]).length, 1);
+  });
+});
+
+describe('anchorFindings', () => {
+  const addable = new Map([['a.ts', new Set([1, 2])]]);
 
   it('splits findings into inline, file-level, and orphaned buckets', () => {
     const fallback = finding({ path: 'a.ts', line: 99 });
@@ -470,49 +524,21 @@ describe('anchorFindings', () => {
         finding({ path: 'outside.ts', line: 99 }),
       ],
       addable,
-      patchByPath,
       true,
-      false,
     );
     assert.deepEqual([out.inline.length, out.fileLevel.length, out.orphaned.length], [1, 2, 1]);
     assert.equal(fallback.line, 0);
     assert.deepEqual(out.anchorMissed, [fallback], 'a model-declared line 0 is not an anchor miss');
   });
 
-  it('re-anchors an orphan to its evidence line IN PLACE so every consumer agrees', () => {
-    const f = finding({ path: 'a.ts', line: 99, evidence: 'return total;' });
-    const out = anchorFindings([f], addable, patchByPath, true, true);
-
-    assert.deepEqual(out.orphaned, []);
-    assert.equal(out.rescued[0], out.inline[0], 'rescued findings are a subset of inline');
-    assert.equal(f.line, 2, 'the original object is re-anchored, not a copy');
-  });
-
-  it('falls back to the file when evidence rescue is disabled', () => {
-    const f = finding({ path: 'a.ts', line: 99, evidence: 'return total;' });
-    const out = anchorFindings([f], addable, patchByPath, true, false);
-
-    assert.deepEqual(out.rescued, []);
-    assert.equal(out.fileLevel[0], f);
-    assert.equal(f.line, 0);
-  });
-
-  it('falls back to the file when evidence matches no unique added line', () => {
-    const f = finding({ path: 'a.ts', line: 99, evidence: 'nonexistent code' });
-    const out = anchorFindings([f], addable, patchByPath, true, true);
-    assert.equal(out.fileLevel[0], f);
-    assert.equal(f.line, 0);
-  });
-
   it('keeps findings outside the changed-file set in the review body', () => {
     const f = finding({ path: 'outside.ts', line: 99 });
-    const out = anchorFindings([f], addable, patchByPath, true, true);
-    assert.equal(out.orphaned[0], f);
+    assert.equal(anchorFindings([f], addable, true).orphaned[0], f);
   });
 
   it('does not create a file-level route without a review head', () => {
     const f = finding({ path: 'a.ts', line: 99 });
-    const out = anchorFindings([f], addable, patchByPath, false, true);
+    const out = anchorFindings([f], addable, false);
     assert.equal(out.orphaned[0], f);
     assert.equal(f.line, 99);
   });
