@@ -53,6 +53,20 @@ describe('anchorByEvidenceSnippet', () => {
     assert.equal(anchorByEvidenceSnippet(signs, '+  -1;'), 1);
   });
 
+  it('refuses to anchor a window that straddles a hunk boundary', () => {
+    // The two lines are adjacent in `side` but 49 apart in the file, so quoting
+    // them together describes a run that does not exist.
+    const twoHunks = [
+      '@@ -1,1 +1,1 @@',
+      ' const a = 1;',
+      '@@ -50,0 +50,1 @@',
+      '+const b = 2;',
+    ].join('\n');
+
+    assert.equal(anchorByEvidenceSnippet(twoHunks, 'const a = 1;\nconst b = 2;'), undefined);
+    assert.equal(anchorByEvidenceSnippet(twoHunks, 'const b = 2;'), 50, 'each hunk still matches');
+  });
+
   it('refuses to anchor a match containing no added line', () => {
     // Context-only quotes have no postable anchor; they fall through to the
     // existing file-level chain rather than anchoring to an unchanged line.

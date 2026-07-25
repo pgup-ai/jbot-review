@@ -120,7 +120,14 @@ function matchWindow(
   let matches = 0;
   let anchor: number | undefined;
   for (let i = 0; i + target.length <= side.length; i += 1) {
-    if (target.some((line, j) => side[i + j].text !== line)) continue;
+    const mismatched = target.some(
+      (line, j) =>
+        side[i + j].text !== line ||
+        // Hunks are yielded back to back, so neighbours in `side` can straddle a
+        // hunk boundary and be far apart in the file — not a consecutive run.
+        (j > 0 && side[i + j].line !== side[i + j - 1].line + 1),
+    );
+    if (mismatched) continue;
     matches += 1;
     if (matches > 1) return undefined;
     anchor = side.slice(i, i + target.length).find((l) => l.added)?.line;
