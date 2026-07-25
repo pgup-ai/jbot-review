@@ -68,18 +68,20 @@ export function rescueAnchorByEvidence(
 ): number | undefined {
   const needle = evidence.trim();
   if (!patch || !needle) return undefined;
-  // As quoted first: only then assume a leading '+'/'-' was the diff marker
-  // rather than part of the code.
-  return prefixMatch(patch, needle) ?? prefixMatch(patch, stripQuotedMarker(needle));
+  // Ambiguity fails closed: only a quote that matched nothing as written is
+  // retried on the assumption its leading '+'/'-' was a marker.
+  const asWritten = prefixMatches(patch, needle);
+  const found = asWritten.length > 0 ? asWritten : prefixMatches(patch, stripQuotedMarker(needle));
+  return found.length === 1 ? found[0] : undefined;
 }
 
-function prefixMatch(patch: string, needle: string): number | undefined {
-  if (!needle) return undefined;
+function prefixMatches(patch: string, needle: string): number[] {
+  if (!needle) return [];
   const matches: number[] = [];
   for (const { line, content } of addedLines(patch)) {
     if (content.trim().startsWith(needle)) matches.push(line);
   }
-  return matches.length === 1 ? matches[0] : undefined;
+  return matches;
 }
 
 /**
@@ -108,15 +110,20 @@ export function anchorByEvidenceSnippet(
     added: l.added,
     text: l.content.trim(),
   }));
-  // As quoted first, then assuming each line kept its diff marker: source that
-  // legitimately starts with '+'/'-' makes the two indistinguishable.
-  return matchWindow(side, target) ?? matchWindow(side, target.map(stripQuotedMarker));
+  // Source that legitimately starts with '+'/'-' is indistinguishable from a
+  // copied diff marker, so the quote is tried as written first. Only a quote
+  // that matched NOTHING is retried stripped: retrying an AMBIGUOUS one would
+  // let a second reading of it anchor somewhere the quote itself never pointed.
+  const asWritten = matchWindow(side, target);
+  if (asWritten.matches > 0) return asWritten.anchor;
+  return matchWindow(side, target.map(stripQuotedMarker)).anchor;
 }
 
+/** `matches` separates "no match" from "ambiguous"; only exactly one yields an anchor. */
 function matchWindow(
   side: { line: number; added: boolean; text: string }[],
   target: string[],
-): number | undefined {
+): { matches: number; anchor: number | undefined } {
   let matches = 0;
   let anchor: number | undefined;
   for (let i = 0; i + target.length <= side.length; i += 1) {
@@ -129,8 +136,8 @@ function matchWindow(
     );
     if (mismatched) continue;
     matches += 1;
-    if (matches > 1) return undefined;
+    if (matches > 1) return { matches, anchor: undefined };
     anchor = side.slice(i, i + target.length).find((l) => l.added)?.line;
   }
-  return anchor;
+  return { matches, anchor };
 }

@@ -53,6 +53,16 @@ describe('anchorByEvidenceSnippet', () => {
     assert.equal(anchorByEvidenceSnippet(signs, '+  -1;'), 1);
   });
 
+  it('fails closed when the quote is ambiguous as written', () => {
+    // '-1;' matches twice as written. Stripping its leading sign would match
+    // '1;' uniquely — a different line the quote never pointed at — so an
+    // ambiguous quote must not fall through to the marker-stripped reading.
+    const signs = ['@@ -0,0 +1,3 @@', '+  -1;', '+  1;', '+  -1;'].join('\n');
+
+    assert.equal(anchorByEvidenceSnippet(signs, '-1;'), undefined);
+    assert.equal(anchorByEvidenceSnippet(signs, '1;'), 2, 'the unambiguous quote still anchors');
+  });
+
   it('refuses to anchor a window that straddles a hunk boundary', () => {
     // The two lines are adjacent in `side` but 49 apart in the file, so quoting
     // them together describes a run that does not exist.
