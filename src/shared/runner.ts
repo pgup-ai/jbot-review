@@ -10,6 +10,7 @@ import {
   anchorFindings,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
+  resolveFindingAnchors,
   isNoiseFile,
   isPrCleanAfterRun,
   openFindingThreadIds,
@@ -1728,6 +1729,16 @@ async function runReviewPipeline(params: {
     if (demotedCount > 0) {
       log(`Demoted ${demotedCount} low-confidence blocking finding(s) to P3.`);
     }
+    // Resolve evidence-based anchors before dedupe and suppression: both compare
+    // path:line, so a finding the model put on the wrong line escapes the
+    // collision it should have had — with a sibling session's copy of the same
+    // issue, or with the prior thread that already reported it.
+    const reanchored = gatedLists.flatMap((gated) =>
+      resolveFindingAnchors(gated.findings, addable, patchByPath, options.evidenceQuotes),
+    );
+    if (reanchored.length > 0) {
+      log(`Re-anchored ${reanchored.length} finding(s) from their evidence quote.`);
+    }
     // Main review first: on equal-strength path:line collisions its richer
     // general context wins over lens and compliance findings.
     const combinedFindings = dedupeFindings(...gatedLists.map((gated) => gated.findings));
@@ -1767,17 +1778,12 @@ async function runReviewPipeline(params: {
       `Review complete: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
-    const { inline, fileLevel, orphaned, rescued, anchorMissed } = anchorFindings(
+    const { inline, fileLevel, orphaned, anchorMissed } = anchorFindings(
       filteredFindings,
       addable,
-      patchByPath,
       !!headSha,
-      options.evidenceQuotes,
     );
-    if (rescued.length > 0) {
-      log(`Rescued ${rescued.length} orphaned finding(s) by re-anchoring to their evidence quote.`);
-    }
-    telemetry.route({ inline, fileLevel, orphaned, rescued, anchorMissed });
+    telemetry.route({ inline, fileLevel, orphaned, rescued: reanchored, anchorMissed });
     const verdict = decideVerdict(filteredFindings);
 
     // Report the final filtered findings + summary on EVERY completed review (dry-run or

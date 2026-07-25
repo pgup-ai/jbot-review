@@ -1,4 +1,4 @@
-import { rescueAnchorByEvidence } from './patch.ts';
+import { anchorByEvidenceSnippet, rescueAnchorByEvidence } from './patch.ts';
 import type { Finding, FindingConfidence, FindingVerdict, Severity } from './types.ts';
 
 /** Drops noise files (lockfiles, generated, minified) before the agent sees them. */
@@ -266,6 +266,42 @@ export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
   return { findings: result, demotedCount };
 }
 
+/**
+ * Moves findings whose model line cannot anchor onto the line their evidence
+ * quote identifies, IN PLACE, and returns the ones it moved.
+ *
+ * Runs before dedupe and prior-thread suppression, not at routing time: both
+ * compare path:line, so a finding left on a wrong line escapes the collision it
+ * should have had — either with a sibling session's copy of the same issue, or
+ * with the prior thread that already reported it.
+ *
+ * Line 0 is left alone: the prompt defines it as a finding no single added line
+ * can carry, and its evidence necessarily quotes adjacent code rather than the
+ * defect.
+ */
+export function resolveFindingAnchors(
+  findings: Finding[],
+  addable: ReadonlyMap<string, ReadonlySet<number>>,
+  patchByPath: ReadonlyMap<string, string>,
+  evidenceQuotes: boolean,
+): Finding[] {
+  if (!evidenceQuotes) return [];
+  const moved: Finding[] = [];
+  for (const f of findings) {
+    if (f.line === 0 || addable.get(f.path)?.has(f.line) || !f.evidence) continue;
+    const patch = patchByPath.get(f.path);
+    // The snippet matcher handles multi-line quotes; the prefix rescue still
+    // covers a single line truncated at the evidence cap, which cannot match whole.
+    const line =
+      anchorByEvidenceSnippet(patch, f.evidence) ?? rescueAnchorByEvidence(patch, f.evidence);
+    if (line !== undefined) {
+      f.line = line;
+      moved.push(f);
+    }
+  }
+  return moved;
+}
+
 export interface AnchoredFindings {
   /** Postable at a specific added line. */
   inline: Finding[];
@@ -273,53 +309,32 @@ export interface AnchoredFindings {
   fileLevel: Finding[];
   /** Anchor not in the diff; rendered in the review body's outside-the-diff section. */
   orphaned: Finding[];
-  /** A subset of `inline`: findings re-anchored from an orphan via their evidence quote. */
-  rescued: Finding[];
   /** A subset of `fileLevel`: demoted because no anchor resolved, unlike a model-declared line 0. */
   anchorMissed: Finding[];
 }
 
 /**
- * Splits final findings by where their anchor lands in the diff. A would-be
- * orphan whose evidence quote uniquely matches an added line is re-anchored to
- * it IN PLACE (so the review body, telemetry, and posting agree on the line).
- * Otherwise a finding on a changed file falls back to a file-level thread so
- * it remains independently resolvable; only findings outside the changed-file
- * set stay in the review body.
+ * Splits final findings by where their anchor lands in the diff. Anchors are
+ * already resolved by `resolveFindingAnchors`, so this only routes: a finding on
+ * a changed file that still has no usable line falls back to a file-level thread
+ * so it remains independently resolvable, and only findings outside the
+ * changed-file set stay in the review body.
  */
 export function anchorFindings(
   findings: Finding[],
-  addable: Map<string, Set<number>>,
-  patchByPath: Map<string, string>,
+  addable: ReadonlyMap<string, ReadonlySet<number>>,
   hasHeadSha: boolean,
-  evidenceQuotes: boolean,
 ): AnchoredFindings {
-  const result: AnchoredFindings = {
-    inline: [],
-    fileLevel: [],
-    orphaned: [],
-    rescued: [],
-    anchorMissed: [],
-  };
+  const result: AnchoredFindings = { inline: [], fileLevel: [], orphaned: [], anchorMissed: [] };
   for (const f of findings) {
     if (f.line === 0 && hasHeadSha && addable.has(f.path)) result.fileLevel.push(f);
     else if (addable.get(f.path)?.has(f.line)) result.inline.push(f);
-    else {
-      const line =
-        evidenceQuotes && f.evidence
-          ? rescueAnchorByEvidence(patchByPath.get(f.path), f.evidence)
-          : undefined;
-      if (line !== undefined) {
-        f.line = line;
-        result.inline.push(f);
-        result.rescued.push(f);
-      } else if (hasHeadSha && addable.has(f.path)) {
-        f.line = 0;
-        result.fileLevel.push(f);
-        result.anchorMissed.push(f);
-      } else {
-        result.orphaned.push(f);
-      }
+    else if (hasHeadSha && addable.has(f.path)) {
+      f.line = 0;
+      result.fileLevel.push(f);
+      result.anchorMissed.push(f);
+    } else {
+      result.orphaned.push(f);
     }
   }
   return result;
