@@ -490,6 +490,15 @@ describe('resolveFindingAnchors', () => {
     assert.equal(off.line, 99, 'inert when evidence quotes are disabled');
   });
 
+  it('leaves a finding alone when nothing matches its quote', () => {
+    const unmatched = finding({ path: 'a.ts', line: 99, evidence: 'never appears' });
+    const noPatch = finding({ path: 'other.ts', line: 99, evidence: 'return total;' });
+
+    assert.deepEqual(resolveFindingAnchors([unmatched, noPatch], addable, patchByPath, true), []);
+    assert.equal(unmatched.line, 99, 'an unmatched quote must not move the finding');
+    assert.equal(noPatch.line, 99, 'nor may a path with no patch');
+  });
+
   it('lets dedupe collapse one issue the model anchored to two different wrong lines', () => {
     // Why this runs before dedupe and suppression: both compare path:line, so a
     // finding left on a bad line escapes the collision it should have had.

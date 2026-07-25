@@ -1780,7 +1780,18 @@ async function runReviewPipeline(params: {
       addable,
       !!headSha,
     );
-    telemetry.route({ inline, fileLevel, orphaned, rescued: reanchored, anchorMissed });
+    // Re-anchoring runs before dedupe/verify/filter, so some of it did not
+    // survive; telemetry's rescued set must stay a subset of what was posted.
+    const reanchoredIds = new Set(reanchored.map((f) => f.id));
+    telemetry.route({
+      inline,
+      fileLevel,
+      orphaned,
+      // Ids exist only while telemetry is on, and an undefined id matches every
+      // other finding that lacks one — so never look one up.
+      rescued: inline.filter((f) => f.id !== undefined && reanchoredIds.has(f.id)),
+      anchorMissed,
+    });
     const verdict = decideVerdict(filteredFindings);
 
     // Report the final filtered findings + summary on EVERY completed review (dry-run or

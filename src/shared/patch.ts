@@ -34,11 +34,15 @@ function* addedLines(patch: string): Generator<{ line: number; content: string }
   for (const side of newSideLines(patch)) if (side.added) yield side;
 }
 
-/** Trim, drop a leading diff marker, trim again — indentation and '+'/'-' must not block a match. */
-function normalizeSnippetLine(text: string): string {
-  const trimmed = text.trim();
-  const unmarked = trimmed.startsWith('+') || trimmed.startsWith('-') ? trimmed.slice(1) : trimmed;
-  return unmarked.trim();
+/**
+ * Drops a leading diff marker the model may have copied along with the line.
+ * Applied to a QUOTE only, never to patch content — `newSideLines` already
+ * removed the real marker, so stripping again would eat a genuine leading
+ * '+'/'-' from source (`-1`, `--verbose`, a markdown bullet) and let two
+ * different lines collapse to the same text.
+ */
+function stripQuotedMarker(line: string): string {
+  return line.startsWith('+') || line.startsWith('-') ? line.slice(1).trim() : line;
 }
 
 export function parseAddedLines(patch: string | undefined): Set<number> {
@@ -64,6 +68,13 @@ export function rescueAnchorByEvidence(
 ): number | undefined {
   const needle = evidence.trim();
   if (!patch || !needle) return undefined;
+  // As quoted first: only then assume a leading '+'/'-' was the diff marker
+  // rather than part of the code.
+  return prefixMatch(patch, needle) ?? prefixMatch(patch, stripQuotedMarker(needle));
+}
+
+function prefixMatch(patch: string, needle: string): number | undefined {
+  if (!needle) return undefined;
   const matches: number[] = [];
   for (const { line, content } of addedLines(patch)) {
     if (content.trim().startsWith(needle)) matches.push(line);
@@ -87,7 +98,7 @@ export function anchorByEvidenceSnippet(
   evidence: string,
 ): number | undefined {
   if (!patch) return undefined;
-  const target = evidence.split('\n').map(normalizeSnippetLine);
+  const target = evidence.split('\n').map((line) => line.trim());
   while (target[0] === '') target.shift();
   while (target.at(-1) === '') target.pop();
   if (target.length === 0) return undefined;
@@ -95,8 +106,17 @@ export function anchorByEvidenceSnippet(
   const side = Array.from(newSideLines(patch), (l) => ({
     line: l.line,
     added: l.added,
-    text: normalizeSnippetLine(l.content),
+    text: l.content.trim(),
   }));
+  // As quoted first, then assuming each line kept its diff marker: source that
+  // legitimately starts with '+'/'-' makes the two indistinguishable.
+  return matchWindow(side, target) ?? matchWindow(side, target.map(stripQuotedMarker));
+}
+
+function matchWindow(
+  side: { line: number; added: boolean; text: string }[],
+  target: string[],
+): number | undefined {
   let matches = 0;
   let anchor: number | undefined;
   for (let i = 0; i + target.length <= side.length; i += 1) {

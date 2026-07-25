@@ -42,6 +42,17 @@ describe('anchorByEvidenceSnippet', () => {
     assert.equal(anchorByEvidenceSnippet(repeated, 'return null;\nconst x = 1;'), 1);
   });
 
+  it('keeps a genuine leading sign in source instead of reading it as a diff marker', () => {
+    // newSideLines already stripped the real marker, so stripping again would
+    // collapse '-1;' and '1;' to the same text and mis-anchor between them.
+    const signs = ['@@ -0,0 +1,2 @@', '+  -1;', '+  1;'].join('\n');
+
+    assert.equal(anchorByEvidenceSnippet(signs, '-1;'), 1);
+    assert.equal(anchorByEvidenceSnippet(signs, '1;'), 2);
+    // The model may also quote the line with the diff marker still attached.
+    assert.equal(anchorByEvidenceSnippet(signs, '+  -1;'), 1);
+  });
+
   it('refuses to anchor a match containing no added line', () => {
     // Context-only quotes have no postable anchor; they fall through to the
     // existing file-level chain rather than anchoring to an unchanged line.
