@@ -29,6 +29,7 @@ import { closeObserver, reportRun, setRunName } from './observer.ts';
 import { codexAcpSpec, createAcpBackend, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from './acp.ts';
 import {
   ACP_GATEWAY_PROVIDERS,
+  checkEndpointReady,
   createRemoteAcpBackend,
   remoteAcpConfigFromEnv,
 } from './acp-remote.ts';
@@ -1082,21 +1083,34 @@ async function runReviewPipeline(params: {
   // honor one global cap. Disable opencode's older process-global limiter to
   // avoid double-limiting OpenCode sessions inside this runner path.
   configureSessionConcurrency(0);
-  const sessionSlots =
-    options.maxConcurrentSessions > 0 ? new Semaphore(options.maxConcurrentSessions) : undefined;
-  if (options.maxConcurrentSessions > 0) {
-    log(`Model session concurrency capped at ${options.maxConcurrentSessions}.`);
+  const remoteAcp = remoteAcpConfigFromEnv();
+  // Fail before any model spend if the endpoint can't serve this run, and cap
+  // sessions at what the companion accepts — its limit is typically lower than
+  // jbot's, and the excess would be refused mid-review.
+  let sessionCap = options.maxConcurrentSessions;
+  // Only the selected providers the gateway actually serves; a gateway
+  // configured alongside an opencode/pi/other-CLI run must not touch it.
+  const routedAgents = [...new Set([mainCliBackend, auxCliBackend])].filter(
+    (id): id is CliBackendID =>
+      Boolean(id) && (ACP_GATEWAY_PROVIDERS as readonly string[]).includes(id as string),
+  );
+  if (remoteAcp && routedAgents.length > 0) {
+    for (const agent of routedAgents) {
+      const { freeSessions } = await checkEndpointReady(remoteAcp, agent);
+      if (sessionCap === 0 || freeSessions < sessionCap) sessionCap = freeSessions;
+    }
+    log(
+      `ACP gateway: routing ${routedAgents.join(', ')} to ${remoteAcp.endpoint} via ${remoteAcp.gateway}`,
+    );
   }
+  const sessionSlots = sessionCap > 0 ? new Semaphore(sessionCap) : undefined;
+  if (sessionCap > 0) log(`Model session concurrency capped at ${sessionCap}.`);
 
   let opencodeRuntime: Awaited<ReturnType<typeof startOpencode>> | undefined;
   let opencodeBackend: ReviewBackend | undefined;
   // With a gateway configured, these providers run on a remote companion's
   // agent instead of a local CLI — so their local setup (credentials, temp
   // homes) is skipped entirely.
-  const remoteAcp = remoteAcpConfigFromEnv();
-  if (remoteAcp) {
-    log(`ACP gateway: routing ACP providers to ${remoteAcp.endpoint} via ${remoteAcp.gateway}`);
-  }
   let devinBackend: ReviewBackend | undefined;
   let commandCodeBackend: ReviewBackend | undefined;
   let cursorBackend: ReviewBackend | undefined;
