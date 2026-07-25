@@ -8,7 +8,7 @@ import { parseEnvBoolean, parseEnvInt, parseEnvJsonObject } from '../app/app.ts'
 import { selectReviewBackends, type CliBackendID } from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_PROVIDER_ID } from '../shared/codex.ts';
-import { CODEX_ACP_BIN } from '../shared/acp.ts';
+import { CODEX_ACP_BIN } from '../shared/acp-protocol.ts';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
 import {
   PROVIDERS,
