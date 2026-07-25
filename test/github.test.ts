@@ -353,6 +353,9 @@ describe('review posting', () => {
 
     assert.match(request?.body ?? '', /jbot-review:linked-comments:200,201/);
     assert.doesNotMatch(request?.body ?? '', /200,200/);
+    // The expected-thread count must be built from the same deduped ids as the
+    // footer, or finalization waits forever for a thread that never existed.
+    assert.match(request?.body ?? '', /jbot-review:threads:2 -->/);
     assert.match(request?.body ?? '', /jbot-review:linked-comments:200,201 -->$/);
 
     await postReview(

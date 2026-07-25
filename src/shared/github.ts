@@ -532,6 +532,9 @@ export async function postReview(
   headSha: string,
 ): Promise<{ inlinePosted: number; inlineDropped: number }> {
   const base = stripLinkedCommentsFooter(body);
+  // The footer stores unique ids, so the expected-thread count must be built
+  // from the same set — a duplicate would wait forever for a thread that never was.
+  const linkedIds = [...new Set(linkedCommentIds)];
   let rejected = false;
   try {
     await octokit.rest.pulls.createReview({
@@ -540,8 +543,8 @@ export async function postReview(
       pull_number: pullNumber,
       event: verdict,
       body: appendLinkedCommentsFooter(
-        appendReviewMarker(withThreadCount(base, inlineFindings.length + linkedCommentIds.length)),
-        linkedCommentIds,
+        appendReviewMarker(withThreadCount(base, inlineFindings.length + linkedIds.length)),
+        linkedIds,
       ),
       comments: inlineFindings.map((f) => ({
         path: f.path,
@@ -579,6 +582,8 @@ export async function postReview(
     }
   }
   const inlineDropped = inlineFindings.length - salvagedIds.length;
+  // Nothing posted with the batch, so every surviving thread is a linked one.
+  const salvagedLinkedIds = [...new Set([...linkedIds, ...salvagedIds])];
 
   try {
     await octokit.rest.pulls.createReview({
@@ -592,10 +597,10 @@ export async function postReview(
             inlineDropped > 0
               ? `${base}\n\n_(${inlineDropped} inline comment(s) omitted — failed to anchor to diff lines)_`
               : base,
-            salvagedIds.length + linkedCommentIds.length,
+            salvagedLinkedIds.length,
           ),
         ),
-        [...linkedCommentIds, ...salvagedIds],
+        salvagedLinkedIds,
       ),
     });
   } catch {
