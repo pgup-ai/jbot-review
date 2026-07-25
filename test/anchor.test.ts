@@ -53,14 +53,19 @@ describe('anchorByEvidenceSnippet', () => {
     assert.equal(anchorByEvidenceSnippet(signs, '+  -1;'), 1);
   });
 
-  it('fails closed when the quote is ambiguous as written', () => {
-    // '-1;' matches twice as written. Stripping its leading sign would match
-    // '1;' uniquely — a different line the quote never pointed at — so an
-    // ambiguous quote must not fall through to the marker-stripped reading.
-    const signs = ['@@ -0,0 +1,3 @@', '+  -1;', '+  1;', '+  -1;'].join('\n');
+  it('fails closed rather than retrying a quote that already matched', () => {
+    // Both triggers strip to a DIFFERENT line that would match uniquely, so the
+    // marker-stripped retry may only run when the quote matched nothing at all.
 
-    assert.equal(anchorByEvidenceSnippet(signs, '-1;'), undefined);
-    assert.equal(anchorByEvidenceSnippet(signs, '1;'), 2, 'the unambiguous quote still anchors');
+    // Matched twice: ambiguous.
+    const ambiguous = ['@@ -0,0 +1,3 @@', '+  -1;', '+  1;', '+  -1;'].join('\n');
+    assert.equal(anchorByEvidenceSnippet(ambiguous, '-1;'), undefined);
+    assert.equal(anchorByEvidenceSnippet(ambiguous, '1;'), 2, 'the unambiguous quote anchors');
+
+    // Matched once, but on a context line — real, and simply not postable.
+    const contextOnly = ['@@ -1,3 +1,4 @@', ' ctx', ' -1', '+1', ' end'].join('\n');
+    assert.equal(anchorByEvidenceSnippet(contextOnly, '-1'), undefined);
+    assert.equal(anchorByEvidenceSnippet(contextOnly, '1'), 3, 'the added line still anchors');
   });
 
   it('refuses to anchor a window that straddles a hunk boundary', () => {
