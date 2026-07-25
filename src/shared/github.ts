@@ -12,6 +12,7 @@ const FINDING_MARKER = '<!-- jbot-review:finding -->';
 const ADDRESSED_MARKER = '<!-- jbot-review:addressed -->';
 const COMPACTED_REVIEW_MARKER = '<!-- jbot-review:compacted -->';
 const LINKED_COMMENTS_MARKER = 'jbot-review:linked-comments';
+const THREAD_COUNT_MARKER = 'jbot-review:threads';
 const LINKED_COMMENTS_FOOTER = new RegExp(
   `\\n?<!--\\s*${LINKED_COMMENTS_MARKER}:([\\d,]*)\\s*-->\\s*$`,
 );
@@ -538,7 +539,10 @@ export async function postReview(
       repo,
       pull_number: pullNumber,
       event: verdict,
-      body: appendLinkedCommentsFooter(appendReviewMarker(base), linkedCommentIds),
+      body: appendLinkedCommentsFooter(
+        appendReviewMarker(withThreadCount(base, inlineFindings.length + linkedCommentIds.length)),
+        linkedCommentIds,
+      ),
       comments: inlineFindings.map((f) => ({
         path: f.path,
         line: f.line,
@@ -584,9 +588,12 @@ export async function postReview(
       event: verdict,
       body: appendLinkedCommentsFooter(
         appendReviewMarker(
-          inlineDropped > 0
-            ? `${base}\n\n_(${inlineDropped} inline comment(s) omitted — failed to anchor to diff lines)_`
-            : base,
+          withThreadCount(
+            inlineDropped > 0
+              ? `${base}\n\n_(${inlineDropped} inline comment(s) omitted — failed to anchor to diff lines)_`
+              : base,
+            salvagedIds.length + linkedCommentIds.length,
+          ),
         ),
         [...linkedCommentIds, ...salvagedIds],
       ),
@@ -886,7 +893,12 @@ export function selectResolvedJbotReviewsToFinalize(
   const resolved = new Set(resolvedThisRun);
   return reviews.filter((review) => {
     if (review.threads.length === 0) return false;
-    if (parseReviewFindingCount(review.body) !== review.threads.length) return false;
+    // The summary total counts findings that never get a thread (outside-the-diff
+    // ones, and any inline comment a salvage could not place), so it can never
+    // balance for those reviews. Reviews posted since record the count they
+    // actually expected; older ones fall back to the total.
+    const expected = parseExpectedThreadCount(review.body) ?? parseReviewFindingCount(review.body);
+    if (expected !== review.threads.length) return false;
     if (!review.threads.every((thread) => thread.isResolved || resolved.has(thread.id)))
       return false;
     return !review.isMinimized || !hasInternalMarker(review.body, COMPACTED_REVIEW_MARKER);
@@ -929,6 +941,16 @@ function parseReviewFindingCount(body: string): number | undefined {
   const headerIndex = lines.findIndex((line) => /^\|\s*Total\s*\|\s*P0\s*\|/i.test(line));
   if (headerIndex < 0) return undefined;
   const count = lines[headerIndex + 2]?.match(/^\|\s*(\d+)\s*\|/)?.[1];
+  return count === undefined ? undefined : Number.parseInt(count, 10);
+}
+
+/** Records how many threads this review expected, so finalization has a target that can be met. */
+function withThreadCount(body: string, threads: number): string {
+  return `${body}\n<!-- ${THREAD_COUNT_MARKER}:${threads} -->`;
+}
+
+function parseExpectedThreadCount(body: string): number | undefined {
+  const count = body.match(new RegExp(`<!--\\s*${THREAD_COUNT_MARKER}:(\\d+)\\s*-->`))?.[1];
   return count === undefined ? undefined : Number.parseInt(count, 10);
 }
 

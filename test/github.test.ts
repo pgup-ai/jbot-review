@@ -100,6 +100,35 @@ describe('resolved review finalization', () => {
     );
   });
 
+  it('finalizes a review whose body-only findings were never going to have threads', () => {
+    // The summary total counts outside-the-diff findings, which render in the
+    // body and never become threads — so total-vs-threads can never balance and
+    // such a review would stay expanded forever.
+    const twoFindings = REVIEW_BODY.replace(
+      '| 1 | 0 | 0 | 1 | 0 | 0 |',
+      '| 2 | 0 | 0 | 1 | 1 | 0 |',
+    );
+    const base = {
+      nodeId: 'PRR_1',
+      isMinimized: false,
+      threads: [{ id: 't1', isResolved: true }],
+    };
+    const select = (body: string, id: number) =>
+      selectResolvedJbotReviewsToFinalize([{ id, body, ...base }], []).map((r) => r.id);
+
+    assert.deepEqual(select(`${twoFindings}\n<!-- jbot-review:threads:1 -->`, 1), [1]);
+    assert.deepEqual(
+      select(twoFindings, 2),
+      [],
+      'without the marker the old total-vs-threads rule stands, so old reviews are unchanged',
+    );
+    assert.deepEqual(
+      select(`${twoFindings}\n<!-- jbot-review:threads:2 -->`, 3),
+      [],
+      'a thread the run expected but did not find is still a reason to refuse',
+    );
+  });
+
   it('hides the stale body in a details block and preserves review markers', () => {
     const body = compactJbotReviewBody(REVIEW_BODY, 1);
     const pluralBody = compactJbotReviewBody(REVIEW_BODY, 2);
