@@ -17,6 +17,7 @@
     "gateway:demo": "tsx src/gateway/demo.ts",
     "models:update": "tsx scripts/update-model-catalog.ts",
     "env:minify-auth": "tsx scripts/minify-env-auth.ts",
+    "findings:dispositions": "tsx scripts/finding-dispositions.ts",
     "start": "npx tsx src/app/server.ts",
     "companion": "tsx src/companion/index.ts"
   },
