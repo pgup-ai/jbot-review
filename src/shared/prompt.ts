@@ -41,10 +41,9 @@ Optimize for both, in that order.
 
 Your response is parsed by a program, not read directly by a human:
 
-- Your "path" + "line" anchors are validated against the PR diff. Findings on
-  lines this PR did not add are demoted out of inline comments, so anchor
-  precisely. Use line 0 for a file-level finding on a changed file that no
-  single added line can carry (e.g. missing wiring this PR should have added).
+- Your "path" + "line" anchors are validated against the PR diff, so anchor
+  precisely. A finding that cannot be anchored is demoted out of inline
+  comments.
 - The merge guidance shown to humans is computed from your severity tags.
 - Low-confidence P0/P1/P2 findings are demoted to advisory severity.
 - Findings that duplicate a prior jbot-review thread are suppressed after you
@@ -308,7 +307,8 @@ Field constraints:
 - "path": exact file path as it appears in the diff.
 - "line": integer line number on the NEW side of the file. The line must have
   been ADDED by this PR (it starts with '+' in the diff), or 0 for a
-  file-level finding on a changed file.
+  file-level finding on a changed file that no single added line can carry
+  (e.g. missing wiring this PR should have added).
 - "severity": exactly one of "P0", "P1", "P2", "P3", "nit".
 - "kind": exactly one of "bug", "security", "performance", "maintainability",
   "architecture", "test", "docs", "investigate".
@@ -334,11 +334,14 @@ you like next" message.`;
 // reminder stays last); absent when the flag is off so that prompt is unchanged.
 export const EVIDENCE_INSTRUCTION = `## Evidence field
 
-For each finding, ALSO include an "evidence" field alongside the others: a short
-verbatim quote (at most 200 characters) copied EXACTLY from the changed line your
-finding is about — the same characters as in the diff, no paraphrase. It anchors
-the finding to a real added line. If you cannot quote a specific changed line,
-the finding likely lacks a concrete trigger; reconsider whether it belongs.`;
+For each finding whose "line" is above 0, ALSO include an "evidence" field: a
+verbatim quote copied EXACTLY from the diff — the same characters, no paraphrase,
+at most 400 characters. One line is usually enough; quote two or three
+consecutive lines when a single line would be ambiguous on its own. This is what
+re-anchors the finding when its line number lands wrong. A line-0 finding is
+about something absent and carries no evidence. If you cannot quote the code a
+finding is about, it likely lacks a concrete trigger; reconsider whether it
+belongs.`;
 
 // Prepended for prompt-bound backends (cline) whose read-only mode denies every tool
 // call: without it they stall asking to run the git/grep steps the base prompt assumes.

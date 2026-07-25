@@ -92,8 +92,9 @@ export function anchorByEvidenceSnippet(
   while (target.at(-1) === '') target.pop();
   if (target.length === 0) return undefined;
 
-  const side = [...newSideLines(patch)].map((l) => ({
-    ...l,
+  const side = Array.from(newSideLines(patch), (l) => ({
+    line: l.line,
+    added: l.added,
     text: normalizeSnippetLine(l.content),
   }));
   let matches = 0;

@@ -1729,10 +1729,7 @@ async function runReviewPipeline(params: {
     if (demotedCount > 0) {
       log(`Demoted ${demotedCount} low-confidence blocking finding(s) to P3.`);
     }
-    // Resolve evidence-based anchors before dedupe and suppression: both compare
-    // path:line, so a finding the model put on the wrong line escapes the
-    // collision it should have had — with a sibling session's copy of the same
-    // issue, or with the prior thread that already reported it.
+    // Must precede dedupe and suppression — both compare path:line.
     const reanchored = gatedLists.flatMap((gated) =>
       resolveFindingAnchors(gated.findings, addable, patchByPath, options.evidenceQuotes),
     );
