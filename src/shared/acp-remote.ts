@@ -10,7 +10,7 @@ import { PassThrough, Writable } from 'node:stream';
 
 import { createAcpReviewBackend, driveAcpSession } from './acp.ts';
 import { parseEnvelope } from '../gateway/journal.ts';
-import type { AckControl } from '../gateway/relay.ts';
+import type { AckControl, EndpointPresence } from '../gateway/relay.ts';
 import { parseRelayControl } from '../gateway/relay.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 
@@ -65,6 +65,54 @@ export function remoteAcpConfigFromEnv(): Omit<RemoteAcpConfig, 'agent'> | undef
  * The label is clamped, not the whole id, so the random suffix always survives. */
 const sessionIdFor = (label: string): string =>
   `${label.replaceAll(/[^A-Za-z0-9._-]/g, '-').slice(0, 100)}-${randomBytes(4).toString('hex')}`;
+
+/**
+ * Fails fast when the endpoint can't serve this review. Without it a bad
+ * gateway URL, a stale token, a sleeping laptop, or an agent the companion
+ * doesn't offer would surface minutes in, as a refused session mid-review.
+ * Returns the endpoint's session capacity so callers can respect it.
+ */
+export async function checkEndpointReady(
+  config: Omit<RemoteAcpConfig, 'agent'>,
+  agent: string,
+): Promise<{ maxSessions: number }> {
+  const url = `${config.gateway}/api/endpoints`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { authorization: `Bearer ${config.token}` },
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new Error(
+      `ACP gateway unreachable at ${config.gateway}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(
+      `ACP gateway rejected the endpoint listing (${response.status}); check JBOT_ACP_GATEWAY_TOKEN.`,
+    );
+  }
+  const endpoints = (await response.json()) as EndpointPresence[];
+  const endpoint = endpoints.find((entry) => entry.endpoint === config.endpoint);
+  if (!endpoint?.online) {
+    const online = endpoints
+      .filter((entry) => entry.online)
+      .map((entry) => entry.endpoint)
+      .join(', ');
+    throw new Error(
+      `ACP endpoint "${config.endpoint}" is offline; start its companion. Online now: ${online || 'none'}.`,
+    );
+  }
+  if (!endpoint.agents.some((offered) => offered.agent === agent)) {
+    throw new Error(
+      `ACP endpoint "${config.endpoint}" does not offer agent "${agent}"; it offers: ${
+        endpoint.agents.map((offered) => offered.agent).join(', ') || 'none'
+      }.`,
+    );
+  }
+  return { maxSessions: endpoint.maxSessions };
+}
 
 export function createRemoteAcpBackend(config: RemoteAcpConfig): ReviewBackend {
   return createAcpReviewBackend(`acp-gateway:${config.agent}@${config.endpoint}`, (...args) =>

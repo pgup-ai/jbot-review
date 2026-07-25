@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { createRemoteAcpBackend, remoteAcpConfigFromEnv } from '../src/shared/acp-remote.ts';
+import {
+  checkEndpointReady,
+  createRemoteAcpBackend,
+  remoteAcpConfigFromEnv,
+} from '../src/shared/acp-remote.ts';
 import { readJournalLines } from '../src/gateway/journal.ts';
 
 // Answers the ACP handshake and returns a review payload, so the backend is
@@ -109,6 +113,19 @@ describe('remote acp backend', () => {
         ).json()) as { endpoint: string; online: boolean }[];
         return listed.find((entry) => entry.endpoint === 'box' && entry.online);
       }, 'endpoint presence');
+
+      // Preflight: ready for the offered agent, loud for anything it can't serve.
+      const config = { gateway: base, token: 'client-tok', endpoint: 'box', runId: 'run-remote' };
+      assert.equal((await checkEndpointReady(config, 'probe')).maxSessions, 2);
+      await assert.rejects(() => checkEndpointReady(config, 'kilo'), /does not offer agent "kilo"/);
+      await assert.rejects(
+        () => checkEndpointReady({ ...config, endpoint: 'ghost' }, 'probe'),
+        /is offline/,
+      );
+      await assert.rejects(
+        () => checkEndpointReady({ ...config, token: 'wrong' }, 'probe'),
+        /rejected the endpoint listing/,
+      );
 
       const backend = createRemoteAcpBackend({
         gateway: base,

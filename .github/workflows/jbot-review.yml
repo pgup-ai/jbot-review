@@ -186,6 +186,16 @@ jobs:
         env:
           JBOT_OBSERVER_URL: ${{ secrets.OBSERVER_HOSTNAME && format('https://{0}', secrets.OBSERVER_HOSTNAME) || '' }}
           JBOT_OBSERVER_TOKEN: ${{ secrets.JBOT_OBSERVER_TOKEN }}
+          # ACP gateway thin client: when set, ACP providers run on a remote
+          # companion's logged-in agent and need no provider key here. Absent
+          # secrets leave the URL empty, which keeps the local-CLI path.
+          # The ref is a SHA, never a branch name, so nothing here is
+          # attacker-controlled text.
+          JBOT_ACP_GATEWAY_URL: ${{ secrets.JBOT_ACP_GATEWAY_URL }}
+          JBOT_ACP_GATEWAY_TOKEN: ${{ secrets.JBOT_ACP_GATEWAY_TOKEN }}
+          JBOT_ACP_GATEWAY_ENDPOINT: ${{ vars.JBOT_ACP_GATEWAY_ENDPOINT }}
+          JBOT_ACP_GATEWAY_REPO: ${{ github.event.repository.clone_url }}
+          JBOT_ACP_GATEWAY_REF: ${{ github.event.pull_request.head.sha }}
           # One run id per invocation (run+attempt), not per PR: re-reviews of a
           # PR share a runId otherwise, and the gateway's append+seq-dedup
           # journal then drops the newer transcript as already-seen.
