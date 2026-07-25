@@ -195,7 +195,9 @@ jobs:
           JBOT_ACP_GATEWAY_TOKEN: ${{ secrets.JBOT_ACP_GATEWAY_TOKEN }}
           JBOT_ACP_GATEWAY_ENDPOINT: ${{ vars.JBOT_ACP_GATEWAY_ENDPOINT }}
           JBOT_ACP_GATEWAY_REPO: ${{ github.event.repository.clone_url }}
-          JBOT_ACP_GATEWAY_REF: ${{ github.event.pull_request.head.sha }}
+          # Same resolution the checkout step uses: pull_request carries the
+          # head SHA, while issue_comment/workflow_dispatch resolve the PR ref.
+          JBOT_ACP_GATEWAY_REF: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs['pr-number'] || github.event.issue.number) }}
           # One run id per invocation (run+attempt), not per PR: re-reviews of a
           # PR share a runId otherwise, and the gateway's append+seq-dedup
           # journal then drops the newer transcript as already-seen.

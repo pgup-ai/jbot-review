@@ -70,12 +70,13 @@ const sessionIdFor = (label: string): string =>
  * Fails fast when the endpoint can't serve this review. Without it a bad
  * gateway URL, a stale token, a sleeping laptop, or an agent the companion
  * doesn't offer would surface minutes in, as a refused session mid-review.
- * Returns the endpoint's session capacity so callers can respect it.
+ * Returns the slots free right now — a snapshot, but a run sized to the
+ * endpoint's total would collide with whatever it is already serving.
  */
 export async function checkEndpointReady(
   config: Omit<RemoteAcpConfig, 'agent'>,
   agent: string,
-): Promise<{ maxSessions: number }> {
+): Promise<{ freeSessions: number }> {
   const url = `${config.gateway}/api/endpoints`;
   let response: Response;
   try {
@@ -111,7 +112,13 @@ export async function checkEndpointReady(
       }.`,
     );
   }
-  return { maxSessions: endpoint.maxSessions };
+  const freeSessions = endpoint.maxSessions - endpoint.activeSessions;
+  if (freeSessions <= 0) {
+    throw new Error(
+      `ACP endpoint "${config.endpoint}" has no free session slots (${endpoint.activeSessions}/${endpoint.maxSessions} in use).`,
+    );
+  }
+  return { freeSessions };
 }
 
 export function createRemoteAcpBackend(config: RemoteAcpConfig): ReviewBackend {

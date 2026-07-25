@@ -1088,13 +1088,20 @@ async function runReviewPipeline(params: {
   // sessions at what the companion accepts — its limit is typically lower than
   // jbot's, and the excess would be refused mid-review.
   let sessionCap = options.maxConcurrentSessions;
-  if (remoteAcp) {
-    const routed = mainCliBackend ?? auxCliBackend ?? '';
-    const { maxSessions } = await checkEndpointReady(remoteAcp, routed);
+  // Only the selected providers the gateway actually serves; a gateway
+  // configured alongside an opencode/pi/other-CLI run must not touch it.
+  const routedAgents = [...new Set([mainCliBackend, auxCliBackend])].filter(
+    (id): id is CliBackendID =>
+      Boolean(id) && (ACP_GATEWAY_PROVIDERS as readonly string[]).includes(id as string),
+  );
+  if (remoteAcp && routedAgents.length > 0) {
+    for (const agent of routedAgents) {
+      const { freeSessions } = await checkEndpointReady(remoteAcp, agent);
+      if (sessionCap === 0 || freeSessions < sessionCap) sessionCap = freeSessions;
+    }
     log(
-      `ACP gateway: routing ${routed} to ${remoteAcp.endpoint} via ${remoteAcp.gateway} (endpoint allows ${maxSessions} sessions)`,
+      `ACP gateway: routing ${routedAgents.join(', ')} to ${remoteAcp.endpoint} via ${remoteAcp.gateway}`,
     );
-    if (sessionCap === 0 || maxSessions < sessionCap) sessionCap = maxSessions;
   }
   const sessionSlots = sessionCap > 0 ? new Semaphore(sessionCap) : undefined;
   if (sessionCap > 0) log(`Model session concurrency capped at ${sessionCap}.`);

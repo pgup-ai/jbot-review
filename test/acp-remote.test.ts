@@ -116,7 +116,7 @@ describe('remote acp backend', () => {
 
       // Preflight: ready for the offered agent, loud for anything it can't serve.
       const config = { gateway: base, token: 'client-tok', endpoint: 'box', runId: 'run-remote' };
-      assert.equal((await checkEndpointReady(config, 'probe')).maxSessions, 2);
+      assert.equal((await checkEndpointReady(config, 'probe')).freeSessions, 2, 'idle: all free');
       await assert.rejects(() => checkEndpointReady(config, 'kilo'), /does not offer agent "kilo"/);
       await assert.rejects(
         () => checkEndpointReady({ ...config, endpoint: 'ghost' }, 'probe'),
