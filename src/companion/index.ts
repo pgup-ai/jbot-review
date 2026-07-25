@@ -19,7 +19,7 @@ import {
   kiloAcpSpec,
   respondToPermissionRequest,
   type AcpAgentSpec,
-} from '../shared/acp.ts';
+} from '../shared/acp-protocol.ts';
 import { codexAuthPath } from '../shared/codex.ts';
 import { devinCredentialsPath } from '../shared/devin.ts';
 import type { ObserverEnvelope } from '../gateway/journal.ts';

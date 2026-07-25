@@ -22,7 +22,7 @@ import {
   kiloAcpSpec,
   matchModelOptionValue,
   respondToPermissionRequest,
-} from '../src/shared/acp.ts';
+} from '../src/shared/acp-protocol.ts';
 import { codexAuthPath } from '../src/shared/codex.ts';
 import { devinCredentialsPath } from '../src/shared/devin.ts';
 

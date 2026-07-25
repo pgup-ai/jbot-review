@@ -26,7 +26,8 @@ import {
 } from './backend-selection.ts';
 import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
 import { closeObserver, reportRun, setRunName } from './observer.ts';
-import { codexAcpSpec, createAcpBackend, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from './acp.ts';
+import { createAcpBackend } from './acp.ts';
+import { codexAcpSpec, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from './acp-protocol.ts';
 import {
   ACP_GATEWAY_PROVIDERS,
   checkEndpointReady,

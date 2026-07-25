@@ -8,7 +8,8 @@
 import { randomBytes } from 'node:crypto';
 import { PassThrough, Writable } from 'node:stream';
 
-import { createAcpReviewBackend, driveAcpSession } from './acp.ts';
+import { createAcpReviewBackend } from './acp.ts';
+import { driveAcpSession } from './acp-protocol.ts';
 import { parseEnvelope } from '../gateway/journal.ts';
 import type { AckControl, EndpointPresence } from '../gateway/relay.ts';
 import { parseRelayControl } from '../gateway/relay.ts';
