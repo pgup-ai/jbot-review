@@ -1,10 +1,13 @@
 import { execFile } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { parseEnvBoolean, parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
+import { remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
 import { selectReviewBackends, type CliBackendID } from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_PROVIDER_ID } from '../shared/codex.ts';
@@ -42,7 +45,8 @@ import { loadDotEnv, parseOwnerRepo, renderReport } from './util.ts';
  * Local review driver (`npm run review:local`): runs the real review pipeline
  * against merge-base→worktree changes with zero GitHub dependency — no token,
  * no PR, no API call, no fetch. See shared/git.ts for the diff-side semantics
- * (invariant #7).
+ * (invariant #7). Routing to the ACP gateway moves the right side to HEAD, so
+ * the driver and the companion's clone describe the same commit.
  */
 
 const execFileAsync = promisify(execFile);
@@ -112,6 +116,35 @@ async function localCommits(mergeBase: string): Promise<ReviewCommit[]> {
     });
 }
 
+interface IsolatedCheckout {
+  path: string;
+  head: string;
+  remove: () => Promise<void>;
+}
+
+/**
+ * A gateway review runs against the companion's clone of a committed ref, so
+ * the driver has to read the same bytes — diffing the dirty worktree hands the
+ * agent a diff its own checkout contradicts. A linked worktree is the cheap way
+ * to get HEAD on disk without disturbing that tree.
+ */
+async function checkoutHead(): Promise<IsolatedCheckout> {
+  const head = (await git(['rev-parse', 'HEAD'])).trim();
+  const path = await mkdtemp(join(tmpdir(), 'jbot-review-'));
+  await git(['worktree', 'add', '--detach', '--quiet', path, head]);
+  return {
+    path,
+    head,
+    remove: async () => {
+      await gitOrEmpty(['worktree', 'remove', '--force', path]);
+      await rm(path, { recursive: true, force: true }); // git leaves the directory if that failed
+      // The runner marks every workspace safe.directory globally, so a per-run
+      // temp path would otherwise add a dead gitconfig line on each run.
+      await gitOrEmpty(['config', '--global', '--unset', '--fixed-value', 'safe.directory', path]);
+    },
+  };
+}
+
 /**
  * Ephemeral free port for the opencode server unless JBOT_OPENCODE_PORT pins
  * one — a developer's own opencode session often occupies the default 4096,
@@ -177,6 +210,15 @@ const INSTALL_HINTS: Record<string, string> = {
 };
 
 async function main(): Promise<void> {
+  const isolated = remoteAcpConfigFromEnv() ? await checkoutHead() : undefined;
+  try {
+    await review(isolated);
+  } finally {
+    await isolated?.remove();
+  }
+}
+
+async function review(isolated: IsolatedCheckout | undefined): Promise<void> {
   // Name the observer run after the branch under review — gated on the
   // observer being on so a disabled review skips the extra git call.
   if (observerEnabled) {
@@ -186,25 +228,35 @@ async function main(): Promise<void> {
 
   const { baseRef, mergeBase } = await resolveBase();
   const shortBase = mergeBase.slice(0, 12);
-  log(`Diff base: ${baseRef} (merge-base ${shortBase}); right side is the working tree.`);
+  const rightSide = isolated ? `HEAD ${isolated.head.slice(0, 12)}` : 'the working tree';
+  log(`Diff base: ${baseRef} (merge-base ${shortBase}); right side is ${rightSide}.`);
   log('Note: a stale base ref widens the diff — fetch before reviewing if in doubt.');
 
-  // Disclosed before the empty-diff exit: when the only changes are brand-new
-  // untracked files, a bare "nothing to review" would be misleading.
-  const untracked = (await gitOrEmpty(['ls-files', '--others', '--exclude-standard']))
-    .split('\n')
-    .filter(Boolean);
-  if (untracked.length > 0) {
-    const shown = untracked.slice(0, 10).join(', ');
-    const more = untracked.length > 10 ? ` … and ${untracked.length - 10} more` : '';
+  // Disclosed before the empty-diff exit, or a bare "nothing to review" misleads.
+  if (isolated) {
+    const pending = (await gitOrEmpty(['status', '--porcelain']))
+      .split('\n')
+      .filter(Boolean).length;
     log(
-      `${untracked.length} untracked file(s) not reviewed (\`git add -N\` includes them): ${shown}${more}`,
+      `ACP gateway configured: reviewing committed HEAD from an isolated checkout so the diff ` +
+        `matches the companion's clone${pending ? `; ${pending} uncommitted change(s) excluded` : ''}.`,
     );
+  } else {
+    const untracked = (await gitOrEmpty(['ls-files', '--others', '--exclude-standard']))
+      .split('\n')
+      .filter(Boolean);
+    if (untracked.length > 0) {
+      const shown = untracked.slice(0, 10).join(', ');
+      const more = untracked.length > 10 ? ` … and ${untracked.length - 10} more` : '';
+      log(
+        `${untracked.length} untracked file(s) not reviewed (\`git add -N\` includes them): ${shown}${more}`,
+      );
+    }
   }
 
-  // Left side merge-base, right side worktree; see GIT_DIFF_ARGS for the
-  // gitconfig pins that keep the output parseable.
-  const diffText = await git([...GIT_DIFF_ARGS, mergeBase]);
+  // Left side merge-base; see GIT_DIFF_ARGS for the gitconfig pins that keep
+  // the output parseable.
+  const diffText = await git([...GIT_DIFF_ARGS, mergeBase, ...(isolated ? [isolated.head] : [])]);
   const files = parseGitDiff(diffText);
   // Exit before requiring credentials when nothing the runner would review is
   // present: parseGitDiff yields patchless entries for binary/mode-only/pure-
@@ -320,7 +372,7 @@ async function main(): Promise<void> {
     pullNumber: 0,
     pullTitle: subject || `Local review of ${branch}`,
     pullBody: body,
-    workspace: process.cwd(),
+    workspace: isolated?.path ?? process.cwd(),
     model,
     apiKey,
     baseURL,

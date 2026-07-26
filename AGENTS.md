@@ -68,7 +68,9 @@ in this repo; `CLAUDE.md` just points here.
    Local mode (`src/local/*`) is the one sanctioned exception: it diffs
    merge-base→**working tree** (two-dot `git diff <merge-base>`) to include
    uncommitted changes, but keeps the merge-base as the left side and never
-   posts, so anchor validity is unaffected.
+   posts, so anchor validity is unaffected. Routing local mode to the ACP
+   gateway pins the right side back to HEAD in a throwaway linked worktree —
+   the companion clones a committed ref, and the two must agree.
 8. **Read-only enforced in three layers** for every opencode session: the
    `plan` agent, config-level `permission.edit/external_directory: deny`,
    and per-prompt `tools: { write/edit/patch: false }`. The sessions must
