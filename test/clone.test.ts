@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { it } from 'node:test';
@@ -65,6 +65,12 @@ it('clones complete fork head and upstream base histories', () => {
     assert.equal(run(cloned.dir, ['remote', 'get-url', 'origin']), headUrl);
     assert.equal(run(cloned.dir, ['remote']), 'origin');
     assert.deepEqual(readdirSync(dirname(cloned.dir)), ['repo']);
+
+    // Cleanup raced git's auto-gc and lost with ENOTEMPTY, silently leaking a
+    // whole clone per review; safeRm swallows the error, so assert the effect.
+    const cloneRoot = dirname(cloned.dir);
+    cleanup();
+    assert.equal(existsSync(cloneRoot), false, 'clone root survived cleanup');
   } finally {
     cleanup?.();
     rmSync(root, { recursive: true, force: true });

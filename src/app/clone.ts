@@ -126,7 +126,9 @@ export function clonePr({
 
 function safeRm(path: string): void {
   try {
-    rmSync(path, { recursive: true, force: true });
+    // git's auto-gc keeps writing into .git after the last fetch returns, so a
+    // plain recursive rm loses the race with ENOTEMPTY and leaks the clone.
+    rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch {
     // best effort
   }
