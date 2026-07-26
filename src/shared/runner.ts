@@ -78,6 +78,7 @@ import {
   selectLensKeys,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
+import { onFatalSignal } from './signal-cleanup.ts';
 import {
   startOpencode,
   configureSessionConcurrency,
@@ -1153,6 +1154,9 @@ async function runReviewPipeline(params: {
     cleanupClineHome();
     cleanupGrokHome();
   };
+  // These homes hold materialized provider credentials, so they must not
+  // outlive an interrupted run.
+  const unregisterCliHomeCleanup = onFatalSignal(cleanupCliHomes);
 
   if (!remoteAcp && (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID)) {
     const devinApiKey = backendSelection.devinApiKey;
@@ -1968,6 +1972,7 @@ async function runReviewPipeline(params: {
   } finally {
     stop();
     cleanupCliHomes();
+    unregisterCliHomeCleanup();
   }
 }
 

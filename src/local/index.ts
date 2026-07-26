@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { parseEnvBoolean, parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
-import { remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
+import { ACP_GATEWAY_PROVIDERS, remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
 import { selectReviewBackends, type CliBackendID } from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_PROVIDER_ID } from '../shared/codex.ts';
@@ -34,6 +34,7 @@ import {
   resolveModelName,
 } from '../shared/model.ts';
 import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
+import { onFatalSignal } from '../shared/signal-cleanup.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import type { ReviewCommit } from '../shared/review-context.ts';
 import { runPrReview } from '../shared/runner.ts';
@@ -124,6 +125,19 @@ interface IsolatedCheckout {
 }
 
 /**
+ * Gateway *routing*, not merely gateway config, is what forces the committed
+ * checkout: runner.ts routes only these providers, so a run configured with
+ * gateway vars but pointed at any other provider stays local and must keep
+ * reviewing the working tree.
+ */
+function routesToGateway(model: string, auxModel: string | undefined): boolean {
+  if (!remoteAcpConfigFromEnv()) return false;
+  return [model, auxModel || model].some((name) =>
+    (ACP_GATEWAY_PROVIDERS as readonly string[]).includes(parseModelName(name).providerID),
+  );
+}
+
+/**
  * A gateway review runs against the companion's clone of a committed ref, so
  * the driver has to read the same bytes — diffing the dirty worktree hands the
  * agent a diff its own checkout contradicts. A linked worktree is the cheap way
@@ -142,9 +156,15 @@ async function checkoutHead(): Promise<IsolatedCheckout> {
     path,
     head,
     remove: () => {
-      // spawnSync so a signal handler can complete it; it also never throws.
-      spawnSync('git', ['worktree', 'remove', '--force', path], { stdio: 'ignore' });
-      rmSync(path, { recursive: true, force: true }); // git leaves the directory if that failed
+      // Never throw: in a finally this would mask the review's own error, and in
+      // a signal handler it would skip the re-raise and leave the process alive.
+      try {
+        // spawnSync so a signal handler can complete the teardown synchronously.
+        spawnSync('git', ['worktree', 'remove', '--force', path], { stdio: 'ignore' });
+        rmSync(path, { recursive: true, force: true }); // git leaves the directory if that failed
+      } catch (error) {
+        log(`Could not remove ${path}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     },
   };
 }
@@ -213,38 +233,54 @@ const INSTALL_HINTS: Record<string, string> = {
   [DEVIN_CLI_BIN]: 'curl -fsSL https://cli.devin.ai/install.sh | sh',
 };
 
-const CLEANUP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
-
 async function main(): Promise<void> {
-  const isolated = remoteAcpConfigFromEnv() ? await checkoutHead() : undefined;
-  if (!isolated) {
-    await review(undefined);
-    return;
-  }
-  // Ctrl-C is how a long review usually ends, and a signal bypasses the finally
-  // below — take the checkout down first, then re-raise so the shell still sees
-  // a signal death. Nothing else in this process listens for these.
-  const onSignal = (signal: NodeJS.Signals): void => {
-    isolated.remove();
-    process.removeAllListeners(signal);
-    process.kill(process.pid, signal);
-  };
-  for (const signal of CLEANUP_SIGNALS) process.on(signal, onSignal);
+  // Adopted from review() once it knows whether the run routes to the gateway.
+  let isolated: IsolatedCheckout | undefined;
+  const unregister = onFatalSignal(() => isolated?.remove());
   try {
-    await review(isolated);
+    await review((checkout) => {
+      isolated = checkout;
+    });
   } finally {
-    isolated.remove();
-    for (const signal of CLEANUP_SIGNALS) process.off(signal, onSignal);
+    isolated?.remove();
+    unregister();
   }
 }
 
-async function review(isolated: IsolatedCheckout | undefined): Promise<void> {
+async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void> {
   // Name the observer run after the branch under review — gated on the
   // observer being on so a disabled review skips the extra git call.
   if (observerEnabled) {
     const headBranch = (await gitOrEmpty(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
     if (headBranch) setRunName(`local-${headBranch}`);
   }
+
+  // Provider/model resolution mirrors src/app/server.ts. Credentials stay below
+  // the diff so a clean tree still exits "nothing to review" without a key set;
+  // the model names have to come first because they decide whether this run
+  // routes to the gateway, which is what the diff's right side depends on.
+  const provider = process.env.PROVIDER || 'opencode';
+  const providerCfg = PROVIDERS[provider];
+  if (!providerCfg) {
+    throw new Error(
+      `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
+    );
+  }
+  const model = formatModelName(
+    resolveModelName(provider, resolveProviderModel(provider, providerCfg, process.env.MODEL)),
+  );
+  const auxModelInput = process.env.JBOT_REVIEW_AUX_MODEL?.trim();
+  const auxProvider = auxModelInput ? process.env.JBOT_AUX_PROVIDER?.trim() || provider : provider;
+  const auxCfg = auxModelInput ? PROVIDERS[auxProvider] : undefined;
+  if (auxModelInput && !auxCfg) {
+    throw new Error(
+      `Unknown aux provider "${auxProvider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
+    );
+  }
+  const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
+
+  const isolated = routesToGateway(model, auxModel) ? await checkoutHead() : undefined;
+  if (isolated) adopt(isolated);
 
   const { baseRef, mergeBase } = await resolveBase();
   const shortBase = mergeBase.slice(0, 12);
@@ -290,15 +326,6 @@ async function review(isolated: IsolatedCheckout | undefined): Promise<void> {
     return;
   }
 
-  // Provider/model/key resolution mirrors src/app/server.ts. Deliberately
-  // after the diff: a clean tree exits "nothing to review" with no key set.
-  const provider = process.env.PROVIDER || 'opencode';
-  const providerCfg = PROVIDERS[provider];
-  if (!providerCfg) {
-    throw new Error(
-      `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-    );
-  }
   const apiKey = resolveProviderCredential(providerCfg, ({ env }) => process.env[env]);
   if (!apiKey) {
     const envNames = providerCredentialSources(providerCfg)
@@ -310,22 +337,10 @@ async function review(isolated: IsolatedCheckout | undefined): Promise<void> {
     );
   }
   const baseURL = resolveProviderBaseURL(provider, providerCfg, ({ env }) => process.env[env]);
-  const model = formatModelName(
-    resolveModelName(provider, resolveProviderModel(provider, providerCfg, process.env.MODEL)),
-  );
-  const auxModelInput = process.env.JBOT_REVIEW_AUX_MODEL?.trim();
-  const auxProvider = auxModelInput ? process.env.JBOT_AUX_PROVIDER?.trim() || provider : provider;
-  const auxCfg = auxModelInput ? PROVIDERS[auxProvider] : undefined;
-  if (auxModelInput && !auxCfg) {
-    throw new Error(
-      `Unknown aux provider "${auxProvider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-    );
-  }
   const auxApiKey =
     auxModelInput && auxProvider !== provider && auxCfg
       ? resolveProviderCredential(auxCfg, ({ env }) => process.env[env])
       : undefined;
-  const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
   const auxBaseURL =
     auxModelInput && auxProvider !== provider && auxCfg
       ? resolveProviderBaseURL(auxProvider, auxCfg, ({ env }) => process.env[env])
