@@ -69,6 +69,7 @@ describe('verifyJournalLines', () => {
       verified: 1,
       skipped: 1,
       breaks: 0,
+      misplaced: 0,
     });
 
     // Tampered, unsigned-inbound and unparseable all count as checked-not-verified.
@@ -78,7 +79,7 @@ describe('verifyJournalLines', () => {
         [sign(privateKey, 1), tampered, JSON.stringify({ ...envelope, seq: 2 }), '{oops'],
         [publicKey],
       ),
-      { checked: 4, verified: 1, skipped: 0, breaks: 0 },
+      { checked: 4, verified: 1, skipped: 0, breaks: 0, misplaced: 0 },
     );
 
     // A signed frame stays checked however its unverified fields are rewritten:
@@ -93,6 +94,7 @@ describe('verifyJournalLines', () => {
       verified: 0,
       skipped: 0,
       breaks: 0,
+      misplaced: 0,
     });
   });
 
@@ -112,6 +114,7 @@ describe('verifyJournalLines', () => {
       verified: 4,
       skipped: 0,
       breaks: 0,
+      misplaced: 0,
     });
     // One key: the other companion's frames fail rather than being set aside —
     // there is no skip an endpoint rewrite could route a tampered frame into.
@@ -120,6 +123,33 @@ describe('verifyJournalLines', () => {
       verified: 2,
       skipped: 0,
       breaks: 0,
+      misplaced: 0,
+    });
+  });
+
+  it('flags genuine frames transplanted from another run or session', () => {
+    const { privateKey, publicKey } = generateSigningKeys();
+    const here = { runId: 'run-1', sessionId: 'sess-1' };
+    const foreign = JSON.stringify(
+      signEnvelope({ ...envelope, sessionId: 'sess-9', seq: 1, endpoint: 'e2e' }, privateKey),
+    );
+
+    assert.deepEqual(verifyJournalLines([sign(privateKey, 1)], [publicKey], here), {
+      checked: 1,
+      verified: 1,
+      skipped: 0,
+      breaks: 0,
+      misplaced: 0,
+    });
+    // A whole file swapped for another session's genuine journal: every
+    // signature and its sequence are valid, only the signed ids give it away.
+    // Foreign frames also stay out of the local sequence runs.
+    assert.deepEqual(verifyJournalLines([sign(privateKey, 1), foreign], [publicKey], here), {
+      checked: 2,
+      verified: 1,
+      skipped: 0,
+      breaks: 0,
+      misplaced: 1,
     });
   });
 

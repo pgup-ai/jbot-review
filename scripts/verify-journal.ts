@@ -57,6 +57,7 @@ try {
 
 let bad = 0;
 let broken = 0;
+let moved = 0;
 let unreadable = 0;
 let unsigned = 0;
 for (const file of files) {
@@ -72,9 +73,13 @@ for (const file of files) {
     unreadable += 1;
     continue;
   }
-  const { checked, verified, skipped, breaks } = verifyJournalLines(lines, publicKeys);
-  bad += checked - verified;
+  const { checked, verified, skipped, breaks, misplaced } = verifyJournalLines(lines, publicKeys, {
+    runId,
+    sessionId,
+  });
+  bad += checked - verified - misplaced;
   broken += breaks;
+  moved += misplaced;
   unsigned += skipped;
   const parts = [];
   if (skipped > 0) parts.push(`${skipped} unsigned`);
@@ -91,6 +96,9 @@ for (const file of files) {
 // posing as one is caught by the sequence break it leaves behind.
 const unread = unreadable > 0 ? `, ${unreadable} unreadable session(s)` : '';
 const seq = broken > 0 ? `, ${broken} sequence break(s)` : '';
+const swapped = moved > 0 ? `, ${moved} frame(s) signed for a different run/session` : '';
 const unsig = unsigned > 0 ? `, ${unsigned} unsigned frame(s)` : '';
-console.log(`${files.length} session(s), ${bad} unverified frame(s)${seq}${unread}${unsig}`);
-process.exitCode = bad === 0 && broken === 0 && unreadable === 0 ? 0 : 1;
+console.log(
+  `${files.length} session(s), ${bad} unverified frame(s)${seq}${swapped}${unread}${unsig}`,
+);
+process.exitCode = bad === 0 && broken === 0 && moved === 0 && unreadable === 0 ? 0 : 1;

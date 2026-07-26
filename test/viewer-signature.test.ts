@@ -30,6 +30,12 @@ describe('viewer signature check', () => {
     // Signed at all means signed throughout: unsigned inbound frames wait in a
     // pending count that lands once any signature appears in the session.
     assert.match(VIEWER_HTML, /sigBad \+= sigPendingUnsigned; sigPendingUnsigned = 0;/);
+    // Gap tracking runs at arrival, not at verdict — verdicts resolve out of
+    // order, and a deleted middle frame must still surface in the badge.
+    assert.match(
+      VIEWER_HTML,
+      /if \(e\.seq !== \(sigLastSeq\[e\.endpoint\] \|\| 0\) \+ 1\) \{ sigGaps\+\+;/,
+    );
   });
 
   it('verifies a companion signature through the browser primitives', async () => {

@@ -80,11 +80,13 @@ export function verifyEnvelope(line: object, publicKeyPem: string): boolean {
 export function verifyJournalLines(
   lines: string[],
   publicKeyPems: string[],
-): { checked: number; verified: number; skipped: number; breaks: number } {
+  expected?: { runId: string; sessionId: string },
+): { checked: number; verified: number; skipped: number; breaks: number; misplaced: number } {
   let checked = 0;
   let verified = 0;
   let skipped = 0;
   let breaks = 0;
+  let misplaced = 0;
   const lastSeqByEndpoint = new Map<string, number>();
   for (const line of lines) {
     let parsed: Record<string, unknown> | undefined;
@@ -100,10 +102,17 @@ export function verifyJournalLines(
     }
     checked += 1;
     if (!parsed || !publicKeyPems.some((pem) => verifyEnvelope(parsed, pem))) continue;
+    // Genuine signature, wrong journal: runId/sessionId are signed, so a file
+    // swapped in from another run or session gives itself away here. Kept out
+    // of the sequence runs — foreign frames form their own coherent run.
+    if (expected && (parsed.runId !== expected.runId || parsed.sessionId !== expected.sessionId)) {
+      misplaced += 1;
+      continue;
+    }
     verified += 1;
     const endpoint = typeof parsed.endpoint === 'string' ? parsed.endpoint : '';
     if (parsed.seq !== (lastSeqByEndpoint.get(endpoint) ?? 0) + 1) breaks += 1;
     if (typeof parsed.seq === 'number') lastSeqByEndpoint.set(endpoint, parsed.seq);
   }
-  return { checked, verified, skipped, breaks };
+  return { checked, verified, skipped, breaks, misplaced };
 }

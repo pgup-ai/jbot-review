@@ -232,17 +232,20 @@ function onRunStatus(d) {
 // Envelope signatures (M2d): the companion signs what it emits, so the page
 // checks frames against the key that endpoint advertised rather than trusting
 // the gateway that served them.
-var sigKeys = Object.create(null), sigOk = 0, sigBad = 0, sigSeen = {}, sigGen = 0, sigLoadSeq = 0, sigReady = null, sigLoaded = false, sigStarved = false, sigSessionSigned = false, sigPendingUnsigned = 0, sigEl = document.getElementById('mSig');
+var sigKeys = Object.create(null), sigOk = 0, sigBad = 0, sigGaps = 0, sigLastSeq = Object.create(null), sigSeen = {}, sigGen = 0, sigLoadSeq = 0, sigReady = null, sigLoaded = false, sigStarved = false, sigSessionSigned = false, sigPendingUnsigned = 0, sigEl = document.getElementById('mSig');
 function b64bytes(b64) {
   var raw = atob(b64), out = new Uint8Array(raw.length);
   for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
   return out;
 }
 function renderSig() {
+  var alerts = [];
+  if (sigBad > 0) alerts.push(sigBad + ' unverified');
+  if (sigGaps > 0) alerts.push(sigGaps + ' sequence gap' + (sigGaps > 1 ? 's' : ''));
   // Colour set on every branch: leaving it behind bleeds a previous session's
   // warning onto a clean one.
-  sigEl.style.color = sigBad > 0 ? 'var(--bad)' : '';
-  if (sigBad > 0) sigEl.textContent = '\u26a0 ' + sigBad + ' unverified';
+  sigEl.style.color = alerts.length > 0 ? 'var(--bad)' : '';
+  if (alerts.length > 0) sigEl.textContent = '\u26a0 ' + alerts.join(' \u00b7 ');
   else if (sigOk > 0) sigEl.textContent = '\u2713 signed';
   else sigEl.textContent = '';
 }
@@ -316,6 +319,14 @@ function judgeSig(e, gen) {
   if (!sigSessionSigned && gen === sigGen) {
     sigSessionSigned = true;
     if (sigPendingUnsigned > 0) { sigBad += sigPendingUnsigned; sigPendingUnsigned = 0; renderSig(); }
+  }
+  // Arrival-order gap tracking, since verdicts resolve async and out of order:
+  // a deleted or reordered frame surfaces here, a faked filler fails crypto
+  // below, so the badge warns either way. Exact duplicates are folded by the
+  // replay dedup and stay an offline finding.
+  if (gen === sigGen && typeof e.endpoint === 'string' && typeof e.seq === 'number') {
+    if (e.seq !== (sigLastSeq[e.endpoint] || 0) + 1) { sigGaps++; renderSig(); }
+    sigLastSeq[e.endpoint] = e.seq;
   }
   var key = sigKeys[e.endpoint];
   // A signature nobody can be checked against is unverified, not unchecked.
@@ -413,7 +424,7 @@ function open(runId, sessionId) {
   setReview('', 'waiting…');
   renderMeta();
   tick = setInterval(function () { if (meta && meta.live) renderMeta(); }, 1000);
-  sigGen++; sigOk = 0; sigBad = 0; sigSeen = {}; sigStarved = false; sigSessionSigned = false; sigPendingUnsigned = 0; renderSig();
+  sigGen++; sigOk = 0; sigBad = 0; sigGaps = 0; sigLastSeq = Object.create(null); sigSeen = {}; sigStarved = false; sigSessionSigned = false; sigPendingUnsigned = 0; renderSig();
   // Keys before frames: the stream replays the journal on open, and a frame
   // arriving first would be judged against an empty key set.
   // Fresh keys at every open: a companion that attached since the last load
