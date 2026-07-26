@@ -1,6 +1,6 @@
-import { execFile } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { execFile, spawnSync } from 'node:child_process';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtemp } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -119,7 +119,8 @@ async function localCommits(mergeBase: string): Promise<ReviewCommit[]> {
 interface IsolatedCheckout {
   path: string;
   head: string;
-  remove: () => Promise<void>;
+  /** Synchronous so a signal handler can finish it before the process dies. */
+  remove: () => void;
 }
 
 /**
@@ -131,16 +132,19 @@ interface IsolatedCheckout {
 async function checkoutHead(): Promise<IsolatedCheckout> {
   const head = (await git(['rev-parse', 'HEAD'])).trim();
   const path = await mkdtemp(join(tmpdir(), 'jbot-review-'));
-  await git(['worktree', 'add', '--detach', '--quiet', path, head]);
+  try {
+    await git(['worktree', 'add', '--detach', '--quiet', path, head]);
+  } catch (error) {
+    rmSync(path, { recursive: true, force: true }); // nobody holds a remove() yet
+    throw error;
+  }
   return {
     path,
     head,
-    remove: async () => {
-      await gitOrEmpty(['worktree', 'remove', '--force', path]);
-      await rm(path, { recursive: true, force: true }); // git leaves the directory if that failed
-      // The runner marks every workspace safe.directory globally, so a per-run
-      // temp path would otherwise add a dead gitconfig line on each run.
-      await gitOrEmpty(['config', '--global', '--unset', '--fixed-value', 'safe.directory', path]);
+    remove: () => {
+      // spawnSync so a signal handler can complete it; it also never throws.
+      spawnSync('git', ['worktree', 'remove', '--force', path], { stdio: 'ignore' });
+      rmSync(path, { recursive: true, force: true }); // git leaves the directory if that failed
     },
   };
 }
@@ -209,12 +213,28 @@ const INSTALL_HINTS: Record<string, string> = {
   [DEVIN_CLI_BIN]: 'curl -fsSL https://cli.devin.ai/install.sh | sh',
 };
 
+const CLEANUP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
+
 async function main(): Promise<void> {
   const isolated = remoteAcpConfigFromEnv() ? await checkoutHead() : undefined;
+  if (!isolated) {
+    await review(undefined);
+    return;
+  }
+  // Ctrl-C is how a long review usually ends, and a signal bypasses the finally
+  // below — take the checkout down first, then re-raise so the shell still sees
+  // a signal death. Nothing else in this process listens for these.
+  const onSignal = (signal: NodeJS.Signals): void => {
+    isolated.remove();
+    process.removeAllListeners(signal);
+    process.kill(process.pid, signal);
+  };
+  for (const signal of CLEANUP_SIGNALS) process.on(signal, onSignal);
   try {
     await review(isolated);
   } finally {
-    await isolated?.remove();
+    isolated.remove();
+    for (const signal of CLEANUP_SIGNALS) process.off(signal, onSignal);
   }
 }
 
