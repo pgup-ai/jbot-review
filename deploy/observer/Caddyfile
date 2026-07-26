@@ -2,6 +2,17 @@
 # Caddy auto-provisions and renews the Let's Encrypt certificate.
 {$OBSERVER_HOSTNAME} {
 	# SSE + streaming ingest: forward bytes as they arrive, never buffer.
+	# Everything but the live stream: text/event-stream must stay unbuffered, and
+	# encoding buffers. The bulk journal is ~34x smaller compressed.
+	encode {
+		zstd
+		gzip
+		match {
+			header Content-Type application/x-ndjson*
+			header Content-Type application/json*
+			header Content-Type text/html*
+		}
+	}
 	reverse_proxy 127.0.0.1:8790 {
 		flush_interval -1
 	}

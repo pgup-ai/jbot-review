@@ -145,7 +145,10 @@ function pretty(id) {
 }
 function connState(cls, text) { connEl.className = 'conn ' + cls; connText.textContent = text; }
 
-var es = null, active = null, sseDown = false;
+var es = null, active = null, sseDown = false, staticView = false;
+// runId -> status, from the runs poll: a finished run is fetched whole instead
+// of replayed frame by frame.
+var runStatusById = Object.create(null);
 var msgEl = null, thoughtEl = null;
 var meta = null, tick = null;
 
@@ -467,6 +470,7 @@ function open(runId, sessionId) {
   setReview('', 'waiting…');
   renderMeta();
   tick = setInterval(function () { if (meta && meta.live) renderMeta(); }, 1000);
+  staticView = false;
   sigGen++; sigOk = 0; sigBad = 0; sigGaps = 0; sigUnsignedSeq = 0; sigLastSeq = Object.create(null); sigSeen = {}; sigStarved = false; sigSessionSigned = false; sigPendingUnsigned = 0; renderSig();
   // Keys before frames: the stream replays the journal on open, and a frame
   // arriving first would be judged against an empty key set.
@@ -481,6 +485,38 @@ function open(runId, sessionId) {
 }
 
 function startStream(runId, sessionId) {
+  var known = runStatusById[runId];
+  if (known && known !== 'reviewing') { loadJournal(runId, sessionId); return; }
+  startLiveStream(runId, sessionId);
+}
+// One compressed, cacheable response instead of 24k SSE messages. Falls back to
+// the stream on any failure, so a missing endpoint on an older gateway degrades
+// to the previous behaviour rather than an empty pane.
+function loadJournal(runId, sessionId) {
+  staticView = true;
+  connState('warn', 'loading');
+  fetch(withToken('/api/runs/' + runId + '/sessions/' + sessionId + '/journal')).then(function (r) {
+    if (!r.ok) throw new Error('journal ' + r.status);
+    return r.text();
+  }).then(function (text) {
+    if (active !== runId + '/' + sessionId) return;
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      if (!lines[i]) continue;
+      var d;
+      try { d = JSON.parse(lines[i]); } catch (err) { continue; }
+      if (d && d.kind === 'run') onRunStatus(d); else ingest(d);
+    }
+    flushPending();
+    connState('ok', 'complete');
+  }).catch(function () {
+    if (active !== runId + '/' + sessionId) return;
+    staticView = false;
+    startLiveStream(runId, sessionId);
+  });
+}
+function startLiveStream(runId, sessionId) {
+  staticView = false;
   es = new EventSource(withToken('/api/runs/' + runId + '/sessions/' + sessionId + '/stream'));
   // onopen/onerror move ONLY the connection dot — never the review status.
   es.onopen = function () { sseDown = false; connState('ok', 'connected'); };
@@ -502,10 +538,11 @@ function refreshRuns() {
   }).then(function (text) {
     // The poll proves the gateway is reachable, but if the SSE stream is down
     // the live view is stale — don't paint over 'reconnecting' with 'connected'.
-    if (!sseDown) connState('ok', 'connected');
+    if (!sseDown && !staticView) connState('ok', 'connected');
     if (text === lastRuns) return; // unchanged: keep the DOM (and clicks) stable
     lastRuns = text;
     var runs = JSON.parse(text);
+    runs.forEach(function (r) { runStatusById[r.runId] = r.status; });
     runsEl.textContent = '';
     runs.forEach(function (run) {
       var box = el('div', 'run');

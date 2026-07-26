@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import {
@@ -7,6 +8,7 @@ import {
   listRuns,
   parseEnvelope,
   parseRunControl,
+  journalPath,
   readJournalLines,
   readRunStatus,
   writeRunStatus,
@@ -264,6 +266,60 @@ function registerPeerStream(
   res.on('error', cleanup);
 }
 
+/**
+ * The whole journal in one compressible, cacheable response. A finished review
+ * is immutable and often large — the run that prompted this is 24k frames and
+ * 9MB — and SSE can carry none of that cheaply: it is never compressed (that
+ * would defeat streaming) and never cached, so every visit paid full size and
+ * 24k message dispatches to replay something that had stopped changing.
+ */
+function handleJournal(
+  req: IncomingMessage,
+  res: ServerResponse,
+  runId: string,
+  sessionId: string,
+): void {
+  let mtimeMs: number;
+  let size: number;
+  try {
+    const stat = statSync(journalPath(dataDir, runId, sessionId));
+    mtimeMs = stat.mtimeMs;
+    size = stat.size;
+  } catch {
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('no journal');
+    return;
+  }
+  const status = readRunStatus(dataDir, runId);
+  // Size and mtime together: an append changes both, so a stale body cannot
+  // survive a revalidation even while a run is still being written.
+  const etag = `"${size}-${Math.trunc(mtimeMs)}"`;
+  const live = status === undefined || status === 'reviewing';
+  if (!live && req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { etag });
+    res.end();
+    return;
+  }
+  // Same shape the stream sends: run status first, then the frames, so the
+  // viewer can process both paths with one code path.
+  const head = status
+    ? `${JSON.stringify({ v: 1, kind: 'run', runId, status, ts: Math.trunc(mtimeMs) })}\n`
+    : '';
+  const body =
+    head +
+    readJournalLines(dataDir, runId, sessionId)
+      .map((l) => `${l}\n`)
+      .join('');
+  res.writeHead(200, {
+    'content-type': 'application/x-ndjson',
+    etag,
+    // Revalidate rather than freeze: a late frame after a status write must not
+    // be able to serve a stale transcript forever. A 304 costs one round trip.
+    'cache-control': live ? 'no-store' : 'private, max-age=0, must-revalidate',
+  });
+  res.end(body);
+}
+
 function handleStream(res: ServerResponse, runId: string, sessionId: string): void {
   res.writeHead(200, {
     'content-type': 'text/event-stream',
@@ -370,6 +426,17 @@ function route(req: IncomingMessage, res: ServerResponse): void {
       void handleSessionIngest(req, res, sid).catch(() => res.destroy());
       return;
     }
+  }
+  const journal = url.pathname.match(/^\/api\/runs\/([^/]+)\/sessions\/([^/]+)\/journal$/);
+  if (req.method === 'GET' && journal) {
+    const [, runId, sessionId] = journal;
+    if (!isSafeId(runId) || !isSafeId(sessionId)) {
+      res.writeHead(400, { 'content-type': 'text/plain' });
+      res.end('bad id');
+      return;
+    }
+    handleJournal(req, res, runId, sessionId);
+    return;
   }
   const stream = url.pathname.match(/^\/api\/runs\/([^/]+)\/sessions\/([^/]+)\/stream$/);
   if (req.method === 'GET' && stream) {
