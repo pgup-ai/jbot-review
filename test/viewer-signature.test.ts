@@ -14,7 +14,15 @@ describe('viewer signature check', () => {
     // seq would be dropped unchecked; the dedup key is a digest of the WHOLE
     // envelope, so copying a seq or sig onto rewritten bytes never inherits a
     // verdict, and full frames are not retained for the session's lifetime.
-    assert.match(VIEWER_HTML, /function ingest\(e\) \{\s*checkSig\(e\);/);
+    // The session-identity guard comes first: a straggler from a closed stream
+    // must neither tally into this session's badge nor poison its seq dedup.
+    assert.match(
+      VIEWER_HTML,
+      /function ingest\(e\) \{[\s\S]{0,220}?if \(active !== e\.runId \+ '\/' \+ e\.sessionId\) return;\s*checkSig\(e\);/,
+    );
+    // Only the newest key load writes, so a slow older response cannot put
+    // back keys a later load replaced.
+    assert.match(VIEWER_HTML, /if \(mySeq === sigLoadSeq\) sigKeys\[entry\.endpoint\] = k;/);
     assert.match(VIEWER_HTML, /sha256hex\(JSON\.stringify\(e\)\)/);
     // Keyless frames stay unseen (judgeable later) and mark the session starved
     // so a successful key load replays it.

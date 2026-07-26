@@ -232,14 +232,13 @@ function onRunStatus(d) {
 // Envelope signatures (M2d): the companion signs what it emits, so the page
 // checks frames against the key that endpoint advertised rather than trusting
 // the gateway that served them.
-var sigKeys = {}, sigOk = 0, sigBad = 0, sigSeen = {}, sigGen = 0, sigReady = null, sigLoaded = false, sigStarved = false, sigEl = document.getElementById('mSig');
+var sigKeys = {}, sigOk = 0, sigBad = 0, sigSeen = {}, sigGen = 0, sigLoadSeq = 0, sigReady = null, sigLoaded = false, sigStarved = false, sigEl = document.getElementById('mSig');
 function b64bytes(b64) {
   var raw = atob(b64), out = new Uint8Array(raw.length);
   for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
   return out;
 }
 function renderSig() {
-  if (!sigEl) return;
   // Colour set on every branch: leaving it behind bleeds a previous session's
   // warning onto a clean one.
   sigEl.style.color = sigBad > 0 ? 'var(--bad)' : '';
@@ -248,12 +247,15 @@ function renderSig() {
   else sigEl.textContent = '';
 }
 function loadSigKeys() {
+  // Loads race (every poll and open starts one); only the newest may write, or
+  // a slow older response would put back keys a later load had replaced.
+  var mySeq = ++sigLoadSeq;
   return fetch(withToken('/api/endpoints')).then(function (r) { return r.json(); }).then(function (list) {
-    return Promise.all((list || []).map(function (entry) {
+    return Promise.all(list.map(function (entry) {
       if (!entry.publicKey) return null;
       var der = b64bytes(entry.publicKey.replace(/-----[^-]+-----/g, '').replace(/\\s+/g, ''));
       return crypto.subtle.importKey('spki', der, { name: 'Ed25519' }, false, ['verify'])
-        .then(function (k) { sigKeys[entry.endpoint] = k; }, function () {});
+        .then(function (k) { if (mySeq === sigLoadSeq) sigKeys[entry.endpoint] = k; }, function () {});
     }));
   }).then(function () {
     sigLoaded = true;
@@ -310,6 +312,9 @@ function judgeSig(e, gen) {
 }
 
 function ingest(e) {
+  // Only the named session: a straggler from a just-closed stream would
+  // otherwise tally into this session's badge and poison its seq dedup.
+  if (active !== e.runId + '/' + e.sessionId) return;
   checkSig(e);
   if (!meta) return;
   // EventSource auto-reconnects on any blip and the server replays the whole
