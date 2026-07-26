@@ -4,15 +4,20 @@ import { join } from 'node:path';
 import { verifyJournalLines } from '../src/shared/envelope-signature.ts';
 
 /**
- * Checks a stored run's frames against the endpoint's advertised key. Unlike
- * the viewer, this depends on the gateway for nothing — run it where the
+ * Checks a stored run's frames against a companion's key. Run it where the
  * journal lives, on a copy if the host itself is in question:
  *
  *   npx tsx scripts/verify-journal.ts <runId> <publicKey.pem> [dataDir] [endpoint]
  *
- * The key comes from /api/endpoints (`publicKey`) on the gateway. One key
- * verifies one companion: on a run spanning several, name the endpoint so the
- * others are skipped rather than read as tampered.
+ * The verdict is only as trustworthy as the key's provenance. For corruption
+ * and storage tampering, /api/endpoints (`publicKey`) is fine. To audit a
+ * gateway you no longer trust, the key must never have come from it: copy
+ * ~/.local/share/jbot-companion/signing-key.pub.pem off the companion machine.
+ * A fully compromised gateway is shut down and rotated, not argued with — this
+ * tool then tells you which stored runs still deserve belief.
+ *
+ * One key verifies one companion: on a run spanning several, name the endpoint
+ * so the others are skipped rather than read as tampered.
  */
 const [runId, keyPath, dataDir = process.env.JBOT_GATEWAY_DATA || 'gateway-data', endpoint] =
   process.argv.slice(2);

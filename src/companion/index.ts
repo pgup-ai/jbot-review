@@ -64,9 +64,16 @@ const maxSessions =
 function loadSigningKeys(): { privateKey: string; publicKey: string } {
   const dir = join(homedir(), '.local', 'share', 'jbot-companion');
   const path = join(dir, 'signing-key.pem');
+  // The public half sits beside it as a file the operator can copy off this
+  // machine: a journal audit that distrusts the gateway needs a key that never
+  // came from the gateway, and this is that channel.
+  const publish = (publicKey: string): void =>
+    writeFileSync(join(dir, 'signing-key.pub.pem'), publicKey, { mode: 0o644 });
   if (existsSync(path)) {
     const privateKey = readFileSync(path, 'utf8');
-    return { privateKey, publicKey: publicKeyFrom(privateKey) };
+    const publicKey = publicKeyFrom(privateKey);
+    publish(publicKey);
+    return { privateKey, publicKey };
   }
   const keys = generateSigningKeys();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -77,13 +84,16 @@ function loadSigningKeys(): { privateKey: string; publicKey: string } {
   writeFileSync(staged, keys.privateKey, { mode: 0o600 });
   try {
     linkSync(staged, path);
+    publish(keys.publicKey);
     return keys;
   } catch (error) {
     // Only a lost race falls back; anything else (permissions, full disk) must
     // surface itself rather than resurface as ENOENT on a path never created.
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     const privateKey = readFileSync(path, 'utf8');
-    return { privateKey, publicKey: publicKeyFrom(privateKey) };
+    const publicKey = publicKeyFrom(privateKey);
+    publish(publicKey);
+    return { privateKey, publicKey };
   } finally {
     rmSync(staged, { force: true });
   }
