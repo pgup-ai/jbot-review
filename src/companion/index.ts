@@ -32,6 +32,8 @@ const BACKOFF_MIN_MS = 1_000;
 const BACKOFF_MAX_MS = 30_000;
 // Must-deliver buffer while the gateway is away; overflow fails sessions loud.
 const MAX_OUTBOX_LINES = 10_000;
+// Depth 1 left the agent unable to run git log/diff against the PR base.
+const WORKSPACE_DEPTH = '50';
 
 const gatewayUrl = (process.env.JBOT_COMPANION_GATEWAY ?? '').trim().replace(/\/+$/, '');
 const token = (process.env.JBOT_COMPANION_TOKEN ?? '').trim();
@@ -226,11 +228,11 @@ function fetchWorkspace(workspace: string, repo: string, ref?: string): string |
       : `git ${args[0]} failed: ${(result.stderr || result.stdout || '').slice(0, 300)}`;
   };
   // `--` so a repo/ref starting with `-` can never become a git flag.
-  const clone = run(['clone', '--depth', '1', '--no-tags', '--', repo, workspace]);
+  const clone = run(['clone', '--depth', WORKSPACE_DEPTH, '--no-tags', '--', repo, workspace]);
   if (clone) return clone;
   if (!ref) return undefined;
   return (
-    run(['-C', workspace, 'fetch', '--depth', '1', 'origin', '--', ref]) ??
+    run(['-C', workspace, 'fetch', '--depth', WORKSPACE_DEPTH, 'origin', '--', ref]) ??
     run(['-C', workspace, 'checkout', '--detach', 'FETCH_HEAD'])
   );
 }
