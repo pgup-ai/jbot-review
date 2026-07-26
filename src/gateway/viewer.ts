@@ -163,21 +163,47 @@ function pinned(mutate) {
   mutate();
   if (stick) logEl.scrollTop = logEl.scrollHeight;
 }
-function append(node) { pinned(function () { logEl.appendChild(node); }); return node; }
-function closeStreams() { msgEl = null; thoughtEl = null; }
+// Flush first: a chip or turn marker appended now must not jump ahead of the
+// text that arrived before it.
+function append(node) { flushPending(); pinned(function () { logEl.appendChild(node); }); return node; }
+function closeStreams() { flushPending(); msgEl = null; thoughtEl = null; }
 
+// A finished review replays in one burst — 24k frames is normal. Writing each
+// straight to the DOM meant a forced layout per frame (pinned measures before,
+// scrolls after) and a textContent += whose cost grows with the transcript, so
+// the tab stalled for the whole replay. Buffer instead and apply once per
+// animation frame: one measure, one scroll, one concatenation per block.
+var pending = [], pendingFrame = 0, metaDirty = false;
+// Past this many characters a block starts a new element, so appending stays
+// proportional to the chunk rather than to everything before it.
+var MAX_BLOCK = 64000;
 function stream(kind, text) {
-  pinned(function () {
-    if (kind === 'msg') {
-      thoughtEl = null;
-      if (!msgEl) { msgEl = el('div', 'msg'); logEl.appendChild(msgEl); }
-      msgEl.textContent += text;
-    } else {
-      msgEl = null;
-      if (!thoughtEl) { thoughtEl = el('div', 'thought'); logEl.appendChild(thoughtEl); }
-      thoughtEl.textContent += text;
-    }
-  });
+  var last = pending[pending.length - 1];
+  if (last && last.kind === kind) last.text += text;
+  else pending.push({ kind: kind, text: text });
+  if (!pendingFrame) pendingFrame = requestAnimationFrame(flushPending);
+}
+function flushPending() {
+  if (pendingFrame) { cancelAnimationFrame(pendingFrame); pendingFrame = 0; }
+  if (pending.length > 0) {
+    var batch = pending;
+    pending = [];
+    pinned(function () {
+      for (var i = 0; i < batch.length; i++) {
+        var kind = batch[i].kind, text = batch[i].text;
+        if (kind === 'msg') {
+          thoughtEl = null;
+          if (!msgEl || msgEl.textContent.length > MAX_BLOCK) { msgEl = el('div', 'msg'); logEl.appendChild(msgEl); }
+          msgEl.textContent += text;
+        } else {
+          msgEl = null;
+          if (!thoughtEl || thoughtEl.textContent.length > MAX_BLOCK) { thoughtEl = el('div', 'thought'); logEl.appendChild(thoughtEl); }
+          thoughtEl.textContent += text;
+        }
+      }
+    });
+  }
+  if (metaDirty) { metaDirty = false; renderMeta(); }
 }
 function chip(cls, tag, text) {
   var c = el('span', 'chip' + (cls ? ' ' + cls : ''));
@@ -232,6 +258,7 @@ function onRunStatus(d) {
 // Envelope signatures (M2d): the companion signs what it emits, so the page
 // checks frames against the key that endpoint advertised rather than trusting
 // the gateway that served them.
+var sigUnsignedSeq = 0;
 var sigKeys = Object.create(null), sigOk = 0, sigBad = 0, sigGaps = 0, sigLastSeq = Object.create(null), sigSeen = {}, sigGen = 0, sigLoadSeq = 0, sigReady = null, sigLoaded = false, sigStarved = false, sigSessionSigned = false, sigPendingUnsigned = 0, sigEl = document.getElementById('mSig');
 function b64bytes(b64) {
   var raw = atob(b64), out = new Uint8Array(raw.length);
@@ -297,6 +324,18 @@ function checkSig(e) {
   // sig can each be copied onto rewritten bytes and must not carry a verdict
   // with them; verdicts landing after a session switch are dropped.
   if (!sigLoaded) { sigStarved = true; return; }
+  // No signature anywhere in this session and no key for this endpoint: there is
+  // no verdict to dedup, so skip the digest. Hashing every frame of an unsigned
+  // observer run spends a digest and a retained key per frame to decide nothing.
+  // The pending count only needs replay safety, which the seq high-water gives.
+  if (typeof e.sig !== 'string' && !sigSessionSigned && !sigKeys[e.endpoint]) {
+    if (typeof e.seq === 'number') {
+      if (e.seq <= sigUnsignedSeq) return;
+      sigUnsignedSeq = e.seq;
+    }
+    judgeSig(e, sigGen);
+    return;
+  }
   var gen = sigGen;
   sha256hex(JSON.stringify(e)).then(function (id) {
     if (gen !== sigGen || sigSeen[id]) return;
@@ -401,7 +440,11 @@ function ingest(e) {
       else setReview('incomplete', 'session ended · ' + reason);
     }
   }
-  renderMeta();
+  // Coalesced with the text flush: rebuilding the facts row per frame meant
+  // clearing and re-appending it 24k times during a replay. The 1s tick keeps
+  // elapsed moving regardless.
+  metaDirty = true;
+  if (!pendingFrame) pendingFrame = requestAnimationFrame(flushPending);
 }
 
 function open(runId, sessionId) {
@@ -424,7 +467,7 @@ function open(runId, sessionId) {
   setReview('', 'waiting…');
   renderMeta();
   tick = setInterval(function () { if (meta && meta.live) renderMeta(); }, 1000);
-  sigGen++; sigOk = 0; sigBad = 0; sigGaps = 0; sigLastSeq = Object.create(null); sigSeen = {}; sigStarved = false; sigSessionSigned = false; sigPendingUnsigned = 0; renderSig();
+  sigGen++; sigOk = 0; sigBad = 0; sigGaps = 0; sigUnsignedSeq = 0; sigLastSeq = Object.create(null); sigSeen = {}; sigStarved = false; sigSessionSigned = false; sigPendingUnsigned = 0; renderSig();
   // Keys before frames: the stream replays the journal on open, and a frame
   // arriving first would be judged against an empty key set.
   // Fresh keys at every open: a companion that attached since the last load

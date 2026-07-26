@@ -27,6 +27,12 @@ describe('viewer signature check', () => {
     // Keyless frames stay unseen (judgeable later) and mark the session starved
     // so a successful key load replays it.
     assert.match(VIEWER_HTML, /if \(!sigLoaded\) \{ sigStarved = true; return; \}/);
+    // An unsigned run with no keys hashes nothing: the digest exists only to
+    // dedup a verdict, and there is no verdict to reach.
+    assert.match(
+      VIEWER_HTML,
+      /typeof e\.sig !== 'string' && !sigSessionSigned && !sigKeys\[e\.endpoint\]/,
+    );
     // Signed at all means signed throughout: unsigned inbound frames wait in a
     // pending count that lands once any signature appears in the session.
     assert.match(VIEWER_HTML, /sigBad \+= sigPendingUnsigned; sigPendingUnsigned = 0;/);
