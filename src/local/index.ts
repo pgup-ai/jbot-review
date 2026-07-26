@@ -146,24 +146,33 @@ function routesToGateway(model: string, auxModel: string | undefined): boolean {
 async function checkoutHead(): Promise<IsolatedCheckout> {
   const head = (await git(['rev-parse', 'HEAD'])).trim();
   const path = await mkdtemp(join(tmpdir(), 'jbot-review-'));
+  const discard = (): void => {
+    // Never throw: in a finally this would mask the review's own error.
+    try {
+      spawnSync('git', ['worktree', 'remove', '--force', path], { stdio: 'ignore' });
+      // git leaves the directory if that failed, and a signal can land while
+      // `worktree add` is still populating it — retry past its writes.
+      rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (error) {
+      log(`Could not remove ${path}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  // Guarded from the moment the directory exists rather than once the caller
+  // holds it: `git worktree add` awaits, and a signal in that gap strands it.
+  const unregister = onFatalSignal(discard);
   try {
     await git(['worktree', 'add', '--detach', '--quiet', path, head]);
   } catch (error) {
-    rmSync(path, { recursive: true, force: true }); // nobody holds a remove() yet
+    unregister();
+    discard();
     throw error;
   }
   return {
     path,
     head,
     remove: () => {
-      // Never throw: in a finally this would mask the review's own error, and in
-      // a signal handler it would skip the re-raise and leave the process alive.
-      try {
-        spawnSync('git', ['worktree', 'remove', '--force', path], { stdio: 'ignore' });
-        rmSync(path, { recursive: true, force: true }); // git leaves the directory if that failed
-      } catch (error) {
-        log(`Could not remove ${path}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      unregister();
+      discard();
     },
   };
 }
@@ -233,16 +242,16 @@ const INSTALL_HINTS: Record<string, string> = {
 };
 
 async function main(): Promise<void> {
-  // Adopted from review() once it knows whether the run routes to the gateway.
+  // Adopted from review() once it knows whether the run routes to the gateway;
+  // checkoutHead covers the signal path itself from the moment it has a
+  // directory, so this only has to handle the ordinary return and throw.
   let isolated: IsolatedCheckout | undefined;
-  const unregister = onFatalSignal(() => isolated?.remove());
   try {
     await review((checkout) => {
       isolated = checkout;
     });
   } finally {
     isolated?.remove();
-    unregister();
   }
 }
 
