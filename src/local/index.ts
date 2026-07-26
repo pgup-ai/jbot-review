@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -228,6 +228,19 @@ const INSTALL_HINTS: Record<string, string> = {
   [DEVIN_CLI_BIN]: 'curl -fsSL https://cli.devin.ai/install.sh | sh',
 };
 
+/** The runner writes telemetry under the workspace, which is the throwaway
+ * checkout when gateway-routed — keep it in the repo before that goes away. */
+function keepTelemetry(from: string): void {
+  const source = join(from, REPORT_DIR, 'telemetry.jsonl');
+  if (!existsSync(source)) return;
+  try {
+    mkdirSync(REPORT_DIR, { recursive: true });
+    copyFileSync(source, join(REPORT_DIR, 'telemetry.jsonl'));
+  } catch (error) {
+    log(`Could not keep telemetry: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function main(): Promise<void> {
   // Adopted from review() once it knows whether the run routes to the gateway;
   // checkoutHead covers the signal path itself from the moment it has a
@@ -238,6 +251,7 @@ async function main(): Promise<void> {
       isolated = checkout;
     });
   } finally {
+    if (isolated) keepTelemetry(isolated.path);
     isolated?.remove();
   }
 }
