@@ -57,47 +57,81 @@ describe('envelope signatures', () => {
 });
 
 describe('verifyJournalLines', () => {
+  const sign = (privateKey: string, seq: number, endpoint = 'e2e') =>
+    JSON.stringify(signEnvelope({ ...envelope, seq, endpoint }, privateKey));
+
   it('skips only unsigned client frames, so no field can turn tampering into a skip', () => {
     const { privateKey, publicKey } = generateSigningKeys();
-    const good = JSON.stringify(signEnvelope(envelope, privateKey));
-    const tampered = JSON.stringify({ ...signEnvelope(envelope, privateKey), seq: 99 });
     const clientFrame = JSON.stringify({ v: 1, seq: 1, dir: 'out', frame: {} });
 
-    assert.deepEqual(verifyJournalLines([good, clientFrame], publicKey), {
+    assert.deepEqual(verifyJournalLines([sign(privateKey, 1), clientFrame], publicKey), {
       checked: 1,
       verified: 1,
       skipped: 1,
       unattributed: 0,
+      breaks: 0,
     });
 
     // Tampered, unsigned-inbound and unparseable all count as checked-not-verified.
+    const tampered = JSON.stringify({ ...JSON.parse(sign(privateKey, 2)), ts: 999 });
     assert.deepEqual(
-      verifyJournalLines([good, tampered, JSON.stringify(envelope), '{oops'], publicKey),
-      { checked: 4, verified: 1, skipped: 0, unattributed: 0 },
+      verifyJournalLines(
+        [sign(privateKey, 1), tampered, JSON.stringify({ ...envelope, seq: 2 }), '{oops'],
+        publicKey,
+      ),
+      { checked: 4, verified: 1, skipped: 0, unattributed: 0, breaks: 0 },
     );
 
     // A signed frame stays checked however its unverified fields are rewritten:
     // flipping dir to 'out' or deleting endpoint must not skip it.
-    const flipped = JSON.stringify({ ...signEnvelope(envelope, privateKey), dir: 'out' });
-    const { endpoint: _gone, ...stripped } = JSON.parse(good) as Record<string, unknown>;
+    const flipped = JSON.stringify({ ...JSON.parse(sign(privateKey, 1)), dir: 'out' });
+    const { endpoint: _gone, ...stripped } = JSON.parse(sign(privateKey, 2)) as Record<
+      string,
+      unknown
+    >;
     assert.deepEqual(verifyJournalLines([flipped, JSON.stringify(stripped)], publicKey), {
       checked: 2,
       verified: 0,
       skipped: 0,
       unattributed: 0,
+      breaks: 0,
     });
   });
 
   it('reports another companion frames as unattributed rather than skipping them', () => {
     const { privateKey, publicKey } = generateSigningKeys();
-    const mine = JSON.stringify(signEnvelope(envelope, privateKey));
-    const theirs = JSON.stringify(signEnvelope({ ...envelope, endpoint: 'other' }, privateKey));
 
-    assert.deepEqual(verifyJournalLines([mine, theirs], publicKey, 'e2e'), {
-      checked: 1,
-      verified: 1,
-      skipped: 0,
-      unattributed: 1,
-    });
+    assert.deepEqual(
+      verifyJournalLines([sign(privateKey, 1), sign(privateKey, 2, 'other')], publicKey, 'e2e'),
+      // No break: the set-aside frame sat at the tail of the run, and tail
+      // truncation is the stated limit — the unattributed count itself fails the run.
+      { checked: 1, verified: 1, skipped: 0, unattributed: 1, breaks: 0 },
+    );
+  });
+
+  it('breaks when the signed sequence gaps, repeats, or reorders', () => {
+    const { privateKey, publicKey } = generateSigningKeys();
+    const run = (seqs: number[]) =>
+      verifyJournalLines(
+        seqs.map((n) => sign(privateKey, n)),
+        publicKey,
+      ).breaks;
+
+    assert.equal(run([1, 2, 3]), 0);
+    // A deleted middle frame leaves a gap the survivors' signatures pin in place —
+    // including one whose signature was stripped to masquerade as a client frame.
+    assert.equal(run([1, 3]), 1);
+    const strippedTwo: Record<string, unknown> = JSON.parse(sign(privateKey, 2));
+    delete strippedTwo.sig;
+    strippedTwo.dir = 'out';
+    const hidden = verifyJournalLines(
+      [sign(privateKey, 1), JSON.stringify(strippedTwo), sign(privateKey, 3)],
+      publicKey,
+    );
+    assert.equal(hidden.skipped, 1);
+    assert.equal(hidden.breaks, 1);
+    assert.equal(run([2, 3]), 1); // head deletion
+    assert.equal(run([1, 1, 2]), 1); // duplicate breaks once; the run then resumes
+    assert.equal(run([2, 1]), 2); // reorder breaks both steps
   });
 });

@@ -64,24 +64,33 @@ export function verifyEnvelope(line: object, publicKeyPem: string): boolean {
 }
 
 /**
- * Tally over a journal. Every skip here keys on whether a line carries a
- * signature, never on `dir` or `endpoint`: those are attacker-controlled until
- * verified, so skipping by them lets a flipped field turn a tampered frame into
- * an ignored one. Only an unsigned client frame is genuinely out of scope.
+ * Tally over a journal. Client frames (unsigned `dir: 'out'`) pass through
+ * unsigned by design and are skipped; everything else is checked, so deleting
+ * `endpoint` from a signed frame makes it fail rather than disappear. Pass
+ * `endpoint` to scope a pass to one companion — its signed frames elsewhere are
+ * reported as `unattributed`, never silently dropped.
  *
- * `endpoint` scopes a pass to one companion. Signed frames belonging to another
- * are reported as `unattributed` rather than skipped — the caller has no key for
- * them, and silence would let changing the field empty the check.
+ * `breaks` counts violations of the signed sequence: the companion numbers its
+ * frames 1,2,3… per session inside the signed payload, so among the frames that
+ * VERIFY the run must climb by exactly one from 1. A deletion leaves a gap no
+ * rewriting can hide — the survivors' signatures pin their seqs — and a
+ * duplicate or reorder breaks the climb. This is what still catches a signed
+ * frame whose signature was stripped and direction flipped to look like a
+ * client frame: the frame itself skips, its seq vanishes, the run breaks.
+ * Limits: truncation at the tail, and deletion of every signed frame at once,
+ * leave no survivors to break against.
  */
 export function verifyJournalLines(
   lines: string[],
   publicKeyPem: string,
   endpoint?: string,
-): { checked: number; verified: number; skipped: number; unattributed: number } {
+): { checked: number; verified: number; skipped: number; unattributed: number; breaks: number } {
   let checked = 0;
   let verified = 0;
   let skipped = 0;
   let unattributed = 0;
+  let breaks = 0;
+  let lastSeq = 0;
   for (const line of lines) {
     let parsed: Record<string, unknown> | undefined;
     try {
@@ -100,7 +109,11 @@ export function verifyJournalLines(
       continue;
     }
     checked += 1;
-    if (parsed && verifyEnvelope(parsed, publicKeyPem)) verified += 1;
+    if (parsed && verifyEnvelope(parsed, publicKeyPem)) {
+      verified += 1;
+      if (parsed.seq !== lastSeq + 1) breaks += 1;
+      if (typeof parsed.seq === 'number') lastSeq = parsed.seq;
+    }
   }
-  return { checked, verified, skipped, unattributed };
+  return { checked, verified, skipped, unattributed, breaks };
 }

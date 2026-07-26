@@ -232,7 +232,7 @@ function onRunStatus(d) {
 // Envelope signatures (M2d): the companion signs what it emits, so the page
 // checks frames against the key that endpoint advertised rather than trusting
 // the gateway that served them.
-var sigKeys = {}, sigOk = 0, sigBad = 0, sigSeen = {}, sigGen = 0, sigReady = null, sigLoaded = false, sigEl = document.getElementById('mSig');
+var sigKeys = {}, sigOk = 0, sigBad = 0, sigSeen = {}, sigGen = 0, sigReady = null, sigLoaded = false, sigStarved = false, sigEl = document.getElementById('mSig');
 function b64bytes(b64) {
   var raw = atob(b64), out = new Uint8Array(raw.length);
   for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
@@ -255,25 +255,43 @@ function loadSigKeys() {
       return crypto.subtle.importKey('spki', der, { name: 'Ed25519' }, false, ['verify'])
         .then(function (k) { sigKeys[entry.endpoint] = k; }, function () {});
     }));
-  }).then(function () { sigLoaded = true; }, function () { sigReady = null; });
+  }).then(function () {
+    sigLoaded = true;
+    // A session that streamed while keys were missing was never judged (its
+    // frames stayed unseen) — replay it now that judging is possible.
+    if (sigStarved && active) {
+      sigStarved = false;
+      var parts = active.split('/');
+      open(parts[0], parts[1]);
+    }
+  }, function () { sigReady = null; });
+}
+function sha256hex(text) {
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function (buf) {
+    var bytes = new Uint8Array(buf), out = '';
+    for (var i = 0; i < bytes.length; i++) out += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+    return out;
+  });
 }
 function sigFailed(gen) { if (gen === sigGen) { sigBad++; renderSig(); } }
 function checkSig(e) {
-  // Nothing loaded means we cannot judge — and the frame must stay unseen, or a
-  // later key fetch or replay would skip it forever.
-  if (!sigLoaded) return;
-  // Runs before the seq dedup, or a tampered frame could carry a replayed seq
-  // and be dropped unchecked. Keyed on the whole envelope rather than the seq
-  // or the signature alone: either can be reused on rewritten bytes, which
-  // would then inherit the original's verdict.
-  var id = JSON.stringify(e);
-  if (sigSeen[id]) return;
-  sigSeen[id] = 1;
+  // Invariants, in order: no judging without keys, and no memory of frames seen
+  // keyless (a later load must still judge them); one verdict per distinct
+  // envelope per generation, where distinct means the WHOLE envelope — seq and
+  // sig can each be copied onto rewritten bytes and must not carry a verdict
+  // with them; verdicts landing after a session switch are dropped.
+  if (!sigLoaded) { sigStarved = true; return; }
   var gen = sigGen;
+  sha256hex(JSON.stringify(e)).then(function (id) {
+    if (gen !== sigGen || sigSeen[id]) return;
+    sigSeen[id] = 1;
+    judgeSig(e, gen);
+  });
+}
+function judgeSig(e, gen) {
   var key = sigKeys[e.endpoint];
-  // A signature nobody can be checked against is unverified, not unchecked:
-  // deleting or repointing the endpoint is exactly the tampering it detects.
-  // Genuinely unsigned client frames are the only thing out of scope.
+  // A signature nobody can be checked against is unverified, not unchecked;
+  // genuinely unsigned client frames are the only thing out of scope.
   if (!key) return typeof e.sig === 'string' ? sigFailed(gen) : undefined;
   if (typeof e.sig !== 'string') return sigFailed(gen);
   var sig;
@@ -366,10 +384,12 @@ function open(runId, sessionId) {
   setReview('', 'waiting…');
   renderMeta();
   tick = setInterval(function () { if (meta && meta.live) renderMeta(); }, 1000);
-  sigGen++; sigOk = 0; sigBad = 0; sigSeen = {}; renderSig();
+  sigGen++; sigOk = 0; sigBad = 0; sigSeen = {}; sigStarved = false; renderSig();
   // Keys before frames: the stream replays the journal on open, and a frame
   // arriving first would be judged against an empty key set.
-  if (!sigReady) sigReady = loadSigKeys();
+  // Fresh keys at every open: a companion that attached since the last load
+  // would otherwise read as unverified until the next poll.
+  sigReady = loadSigKeys();
   var gen = sigGen;
   sigReady.then(function () {
     if (gen !== sigGen) return; // the viewer moved on while keys imported

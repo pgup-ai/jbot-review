@@ -60,20 +60,22 @@ for (const file of files) {
     unreadable += 1;
     continue;
   }
-  const { checked, verified, skipped, unattributed } = verifyJournalLines(
+  const { checked, verified, skipped, unattributed, breaks } = verifyJournalLines(
     lines,
     publicKey,
     endpoint,
   );
-  bad += checked - verified;
+  bad += checked - verified + breaks;
   other += unattributed;
   unsigned += skipped;
   const parts = [];
   if (skipped > 0) parts.push(`${skipped} unsigned`);
+  if (breaks > 0)
+    parts.push(`${breaks} sequence break(s): frames deleted, reordered, or duplicated`);
   if (unattributed > 0) parts.push(`${unattributed} for another endpoint`);
   const note = parts.length > 0 ? ` (${parts.join(', ')})` : '';
   console.log(
-    `${verified === checked ? 'ok  ' : 'FAIL'} ${sessionId}: ${verified}/${checked} verified${note}`,
+    `${verified === checked && breaks === 0 ? 'ok  ' : 'FAIL'} ${sessionId}: ${verified}/${checked} verified${note}`,
   );
 }
 

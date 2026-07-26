@@ -11,10 +11,14 @@ describe('viewer signature check', () => {
     assert.match(VIEWER_HTML, /replace\(\/\\s\+\/g, ''\)/);
     assert.match(VIEWER_HTML, /name: 'Ed25519'/);
     // Checked before the seq dedup, or a tampered frame carrying a replayed
-    // seq would be dropped unchecked; checkSig dedups itself so a reconnect
-    // replay still counts each frame once.
+    // seq would be dropped unchecked; the dedup key is a digest of the WHOLE
+    // envelope, so copying a seq or sig onto rewritten bytes never inherits a
+    // verdict, and full frames are not retained for the session's lifetime.
     assert.match(VIEWER_HTML, /function ingest\(e\) \{\s*checkSig\(e\);/);
-    assert.match(VIEWER_HTML, /if \(sigSeen\[id\]\) return;/);
+    assert.match(VIEWER_HTML, /sha256hex\(JSON\.stringify\(e\)\)/);
+    // Keyless frames stay unseen (judgeable later) and mark the session starved
+    // so a successful key load replays it.
+    assert.match(VIEWER_HTML, /if \(!sigLoaded\) \{ sigStarved = true; return; \}/);
   });
 
   it('verifies a companion signature through the browser primitives', async () => {
