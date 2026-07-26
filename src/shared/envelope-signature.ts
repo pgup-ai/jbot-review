@@ -62,3 +62,21 @@ export function verifyEnvelope(line: object, publicKeyPem: string): boolean {
     return false;
   }
 }
+
+/** Signature tally for a journal file: unsigned and forged both count as bad. */
+export function verifyJournalLines(
+  lines: string[],
+  publicKeyPem: string,
+): { total: number; verified: number } {
+  let verified = 0;
+  for (const line of lines) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue; // counted against the total: an unparseable line is not intact
+    }
+    if (parsed && typeof parsed === 'object' && verifyEnvelope(parsed, publicKeyPem)) verified += 1;
+  }
+  return { total: lines.length, verified };
+}

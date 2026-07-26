@@ -5,6 +5,7 @@ import {
   generateSigningKeys,
   signEnvelope,
   verifyEnvelope,
+  verifyJournalLines,
 } from '../src/shared/envelope-signature.ts';
 
 const envelope = {
@@ -51,5 +52,20 @@ describe('envelope signatures', () => {
     // Unsigned and forged must be indistinguishable to a caller: both false.
     assert.equal(verifyEnvelope(envelope, publicKey), false);
     assert.equal(verifyEnvelope({ ...signed, sig: 'not-base64!' }, publicKey), false);
+  });
+});
+
+describe('verifyJournalLines', () => {
+  it('counts every line that is not provably intact against the total', () => {
+    const { privateKey, publicKey } = generateSigningKeys();
+    const good = JSON.stringify(signEnvelope(envelope, privateKey));
+    const tampered = JSON.stringify({ ...signEnvelope(envelope, privateKey), seq: 99 });
+
+    assert.deepEqual(verifyJournalLines([good, good], publicKey), { total: 2, verified: 2 });
+    // Tampered, unsigned and unparseable are all just "not verified".
+    assert.deepEqual(
+      verifyJournalLines([good, tampered, JSON.stringify(envelope), '{oops'], publicKey),
+      { total: 4, verified: 1 },
+    );
   });
 });
