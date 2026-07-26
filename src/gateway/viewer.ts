@@ -240,7 +240,7 @@ function b64bytes(b64) {
 }
 function renderSig() {
   if (!sigEl) return;
-  if (sigBad > 0) { sigEl.textContent = '\u26a0 ' + sigBad + ' unverified'; sigEl.style.color = 'var(--bad, #d33)'; }
+  if (sigBad > 0) { sigEl.textContent = '\u26a0 ' + sigBad + ' unverified'; sigEl.style.color = 'var(--bad)'; }
   else if (sigOk > 0) sigEl.textContent = '\u2713 signed';
   else sigEl.textContent = '';
 }

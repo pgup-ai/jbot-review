@@ -70,12 +70,13 @@ const log = (msg: string): void => {
   console.log(`[jbot-companion] ${msg}`);
 };
 
-const signingKeys = loadSigningKeys();
-
 if (!gatewayUrl || !token || !endpointId) {
   console.error('Set JBOT_COMPANION_GATEWAY, JBOT_COMPANION_TOKEN, and JBOT_COMPANION_ENDPOINT.');
   process.exit(1);
 }
+
+// After the config guard, so a misconfigured start writes no key material.
+const signingKeys = loadSigningKeys();
 
 /** Built-ins use the machine's ambient auth; `name=cmd arg…` entries add any
  * ACP binary (also the test seam). Returns an error string when auth is absent. */

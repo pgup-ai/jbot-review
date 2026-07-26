@@ -5,9 +5,9 @@ import { readJournalLines } from '../src/gateway/journal.ts';
 import { verifyJournalLines } from '../src/shared/envelope-signature.ts';
 
 /**
- * Checks a stored run's frames against the endpoint's advertised key, which is
- * what makes the journal tamper-evident rather than merely tamper-evident in
- * principle. Run where the journal lives:
+ * Checks a stored run's frames against the endpoint's advertised key. Unlike
+ * the viewer, this depends on the gateway for nothing — run it where the
+ * journal lives, on a copy if the host itself is in question:
  *
  *   npx tsx scripts/verify-journal.ts <runId> <publicKey.pem> [dataDir]
  *

@@ -8,14 +8,14 @@ import { createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto'
  */
 
 /** Signed line as it travels: the envelope's own fields plus `sig`, always last. */
-export const SIGNATURE_FIELD = 'sig';
+const SIGNATURE_FIELD = 'sig';
 
 /**
  * Bytes covered by a signature: the line minus its signature. `sig` is appended
  * last on the wire, so deleting it and re-serializing reproduces exactly what
  * the signer hashed — JSON.parse preserves the key order of the text it read.
  */
-export function signedPayload(line: object): string {
+function signedPayload(line: object): string {
   const { [SIGNATURE_FIELD]: _signature, ...rest } = line as Record<string, unknown>;
   return JSON.stringify(rest);
 }
