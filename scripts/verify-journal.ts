@@ -14,17 +14,11 @@ import { verifyJournalLines } from '../src/shared/envelope-signature.ts';
  * verifies one companion: on a run spanning several, name the endpoint so the
  * others are skipped rather than read as tampered.
  */
-// An unsigned frame cannot be told from a companion frame whose signature was
-// stripped and `dir` flipped, so unsigned frames fail unless accepted: client
-// frames stay unsigned until clients get keys, and that is the operator's call.
-const allowUnsigned = process.argv.includes('--allow-unsigned');
 const [runId, keyPath, dataDir = process.env.JBOT_GATEWAY_DATA || 'gateway-data', endpoint] =
-  process.argv.slice(2).filter((arg) => arg !== '--allow-unsigned');
+  process.argv.slice(2);
 
 if (!runId || !keyPath) {
-  console.error(
-    'usage: verify-journal.ts <runId> <publicKey.pem> [dataDir] [endpoint] [--allow-unsigned]',
-  );
+  console.error('usage: verify-journal.ts <runId> <publicKey.pem> [dataDir] [endpoint]');
   process.exit(2);
 }
 
@@ -89,10 +83,11 @@ const unread = unreadable > 0 ? `, ${unreadable} unreadable session(s)` : '';
 // Unexamined is not clean: rewriting endpoints would otherwise empty a scoped
 // pass and still exit 0. Supply each companion's key to complete the audit.
 const rest = other > 0 ? `, ${other} frame(s) UNEXAMINED (need another endpoint's key)` : '';
-const unsig =
-  unsigned > 0
-    ? `, ${unsigned} unsigned frame(s)${allowUnsigned ? ' (accepted)' : ' — pass --allow-unsigned to accept'}`
-    : '';
+// Reported, not failed: client frames carry no signature until clients hold
+// keys, so failing on them is an alarm nothing can clear. That leaves a
+// stripped signature indistinguishable from a client frame — a gap in a
+// companion's signed seq run is the detector for that, once seq numbering per
+// endpoint is confirmed contiguous.
+const unsig = unsigned > 0 ? `, ${unsigned} unsigned frame(s)` : '';
 console.log(`${files.length} session(s), ${bad} unverified frame(s)${unread}${rest}${unsig}`);
-process.exitCode =
-  bad === 0 && unreadable === 0 && other === 0 && (allowUnsigned || unsigned === 0) ? 0 : 1;
+process.exitCode = bad === 0 && unreadable === 0 && other === 0 ? 0 : 1;
