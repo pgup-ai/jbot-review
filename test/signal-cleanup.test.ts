@@ -5,22 +5,23 @@ import { onFatalSignal } from '../src/shared/signal-cleanup.ts';
 
 describe('onFatalSignal', () => {
   it('shares one listener per signal and removes it once the last cleanup deregisters', () => {
-    const before = process.listenerCount('SIGINT');
+    const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
+    // Per-signal baselines: one signal's count is not a valid expectation for another.
+    const before = signals.map((s) => process.listenerCount(s));
+    const counts = () => signals.map((s, i) => process.listenerCount(s) - (before[i] ?? 0));
 
     const first = onFatalSignal(() => {});
-    assert.equal(process.listenerCount('SIGINT'), before + 1);
-    assert.equal(process.listenerCount('SIGTERM'), before + 1);
+    assert.deepEqual(counts(), [1, 1, 1]);
 
     // A second registration must not stack another listener, or the first
     // handler to re-raise would cancel the others.
     const second = onFatalSignal(() => {});
-    assert.equal(process.listenerCount('SIGINT'), before + 1);
+    assert.deepEqual(counts(), [1, 1, 1]);
 
     first();
-    assert.equal(process.listenerCount('SIGINT'), before + 1, 'still one cleanup outstanding');
+    assert.deepEqual(counts(), [1, 1, 1], 'still one cleanup outstanding');
 
     second();
-    assert.equal(process.listenerCount('SIGINT'), before);
-    assert.equal(process.listenerCount('SIGHUP'), before);
+    assert.deepEqual(counts(), [0, 0, 0]);
   });
 });
