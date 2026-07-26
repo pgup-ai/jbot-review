@@ -336,6 +336,11 @@ function handleJournal(
     return;
   }
   const gz = createGzip();
+  // Same reason sseSend swallows: an unhandled stream error would take the whole
+  // gateway down. A client vanishing mid-response is handled by pipe's unpipe —
+  // measured, no crash and no retained buffers — but a zlib failure has nothing
+  // listening, so it ends this response instead of the process.
+  gz.on('error', () => res.destroy());
   gz.pipe(res);
   if (head) gz.write(head);
   gz.end(frames);
