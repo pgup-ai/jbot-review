@@ -259,16 +259,16 @@ function loadSigKeys() {
 }
 function sigFailed(gen) { if (gen === sigGen) { sigBad++; renderSig(); } }
 function checkSig(e) {
+  // Nothing loaded means we cannot judge — and the frame must stay unseen, or a
+  // later key fetch or replay would skip it forever.
+  if (!sigLoaded) return;
   // Runs before the seq dedup, or a tampered frame could carry a replayed seq
-  // and be dropped unchecked; this keeps each frame counted exactly once.
-  // Keyed on the signature, not the seq: a tampered frame can reuse an earlier
-  // seq, and deduping by it would suppress the frame with the count intact.
-  var id = typeof e.sig === 'string' ? e.sig : e.sessionId + '#' + e.seq + '#unsigned';
+  // and be dropped unchecked. Keyed on the whole envelope rather than the seq
+  // or the signature alone: either can be reused on rewritten bytes, which
+  // would then inherit the original's verdict.
+  var id = JSON.stringify(e);
   if (sigSeen[id]) return;
   sigSeen[id] = 1;
-  // Nothing loaded means we cannot judge, which is not the same as a frame
-  // failing: a fetch blip would otherwise mark every signed frame unverified.
-  if (!sigLoaded) return;
   var gen = sigGen;
   var key = sigKeys[e.endpoint];
   // A signature nobody can be checked against is unverified, not unchecked:
