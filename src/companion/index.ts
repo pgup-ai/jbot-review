@@ -322,6 +322,7 @@ function openSession(control: OpenControl): void {
       agent: session.agent,
       label: session.agent,
       ...(session.model ? { model: session.model } : {}),
+      endpoint: endpointId,
       dir: 'in',
       frame,
     };

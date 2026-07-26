@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { generateSigningKeys, verifyEnvelope } from '../src/shared/envelope-signature.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -108,6 +109,7 @@ describe('relay e2e', () => {
           endpoint: string;
           device: string;
           agents: { agent: string }[];
+          publicKey?: string;
         }[];
         return listed.find((entry) => entry.endpoint === 'e2e');
       }, 'endpoint presence');
@@ -185,6 +187,16 @@ describe('relay e2e', () => {
       );
       assert.ok(journaled.some((entry) => entry.dir === 'out'));
       assert.ok(journaled.some((entry) => entry.dir === 'in' && entry.agent === 'echo'));
+
+      // The companion's own frames must verify against the key it advertised,
+      // through the real relay and journal rather than a hand-built envelope.
+      assert.ok(presence.publicKey, 'companion advertised a signing key');
+      const signed = journaled.filter((entry) => entry.dir === 'in' && entry.endpoint === 'e2e');
+      assert.ok(signed.length > 0, 'companion emitted at least one signed frame');
+      for (const entry of signed) assert.equal(verifyEnvelope(entry, presence.publicKey), true);
+      // A key from a different companion must not validate these.
+      const stranger = generateSigningKeys().publicKey;
+      assert.equal(verifyEnvelope(signed[0]!, stranger), false);
 
       // Companion death fails the session loudly within the resume window.
       companion.kill('SIGKILL');

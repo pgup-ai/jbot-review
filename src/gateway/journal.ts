@@ -41,6 +41,8 @@ export interface ObserverEnvelope {
   frame: Record<string, unknown>;
   /** jbot model string for this session (`<provider>/<id>`), for viewer meta. */
   model?: string;
+  /** Signing endpoint, so a reader knows which advertised key to verify against. */
+  endpoint?: string;
 }
 
 // Run/session ids become file names; the allowlist is the path-traversal
