@@ -78,7 +78,10 @@ function loadSigningKeys(): { privateKey: string; publicKey: string } {
   try {
     linkSync(staged, path);
     return keys;
-  } catch {
+  } catch (error) {
+    // Only a lost race falls back; anything else (permissions, full disk) must
+    // surface itself rather than resurface as ENOENT on a path never created.
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
     const privateKey = readFileSync(path, 'utf8');
     return { privateKey, publicKey: publicKeyFrom(privateKey) };
   } finally {
