@@ -14,11 +14,17 @@ import { verifyJournalLines } from '../src/shared/envelope-signature.ts';
  * verifies one companion: on a run spanning several, name the endpoint so the
  * others are skipped rather than read as tampered.
  */
+// An unsigned frame cannot be told from a companion frame whose signature was
+// stripped and `dir` flipped, so unsigned frames fail unless accepted: client
+// frames stay unsigned until clients get keys, and that is the operator's call.
+const allowUnsigned = process.argv.includes('--allow-unsigned');
 const [runId, keyPath, dataDir = process.env.JBOT_GATEWAY_DATA || 'gateway-data', endpoint] =
-  process.argv.slice(2);
+  process.argv.slice(2).filter((arg) => arg !== '--allow-unsigned');
 
 if (!runId || !keyPath) {
-  console.error('usage: verify-journal.ts <runId> <publicKey.pem> [dataDir] [endpoint]');
+  console.error(
+    'usage: verify-journal.ts <runId> <publicKey.pem> [dataDir] [endpoint] [--allow-unsigned]',
+  );
   process.exit(2);
 }
 
@@ -46,6 +52,7 @@ try {
 let bad = 0;
 let unreadable = 0;
 let other = 0;
+let unsigned = 0;
 for (const file of files) {
   const sessionId = file.replace(/\.ndjson$/, '');
   let lines: string[];
@@ -66,8 +73,9 @@ for (const file of files) {
   );
   bad += checked - verified;
   other += unattributed;
+  unsigned += skipped;
   const parts = [];
-  if (skipped > 0) parts.push(`${skipped} unsigned client`);
+  if (skipped > 0) parts.push(`${skipped} unsigned`);
   if (unattributed > 0) parts.push(`${unattributed} for another endpoint`);
   const note = parts.length > 0 ? ` (${parts.join(', ')})` : '';
   console.log(
@@ -81,5 +89,10 @@ const unread = unreadable > 0 ? `, ${unreadable} unreadable session(s)` : '';
 // Unexamined is not clean: rewriting endpoints would otherwise empty a scoped
 // pass and still exit 0. Supply each companion's key to complete the audit.
 const rest = other > 0 ? `, ${other} frame(s) UNEXAMINED (need another endpoint's key)` : '';
-console.log(`${files.length} session(s), ${bad} unverified frame(s)${unread}${rest}`);
-process.exitCode = bad === 0 && unreadable === 0 && other === 0 ? 0 : 1;
+const unsig =
+  unsigned > 0
+    ? `, ${unsigned} unsigned frame(s)${allowUnsigned ? ' (accepted)' : ' — pass --allow-unsigned to accept'}`
+    : '';
+console.log(`${files.length} session(s), ${bad} unverified frame(s)${unread}${rest}${unsig}`);
+process.exitCode =
+  bad === 0 && unreadable === 0 && other === 0 && (allowUnsigned || unsigned === 0) ? 0 : 1;

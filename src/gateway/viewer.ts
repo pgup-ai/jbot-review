@@ -255,8 +255,7 @@ function loadSigKeys() {
       return crypto.subtle.importKey('spki', der, { name: 'Ed25519' }, false, ['verify'])
         .then(function (k) { sigKeys[entry.endpoint] = k; }, function () {});
     }));
-    sigLoaded = true;
-  }).catch(function () { sigReady = null; });
+  }).then(function () { sigLoaded = true; }, function () { sigReady = null; });
 }
 function sigFailed(gen) { if (gen === sigGen) { sigBad++; renderSig(); } }
 function checkSig(e) {
