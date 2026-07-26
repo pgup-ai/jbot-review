@@ -232,7 +232,7 @@ function onRunStatus(d) {
 // Envelope signatures (M2d): the companion signs what it emits, so the page
 // checks frames against the key that endpoint advertised rather than trusting
 // the gateway that served them.
-var sigKeys = {}, sigOk = 0, sigBad = 0, sigSeen = {}, sigGen = 0, sigLoadSeq = 0, sigReady = null, sigLoaded = false, sigStarved = false, sigEl = document.getElementById('mSig');
+var sigKeys = Object.create(null), sigOk = 0, sigBad = 0, sigSeen = {}, sigGen = 0, sigLoadSeq = 0, sigReady = null, sigLoaded = false, sigStarved = false, sigSessionSigned = false, sigPendingUnsigned = 0, sigEl = document.getElementById('mSig');
 function b64bytes(b64) {
   var raw = atob(b64), out = new Uint8Array(raw.length);
   for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
@@ -258,8 +258,15 @@ function loadSigKeys() {
       try {
         var der = b64bytes(entry.publicKey.replace(/-----[^-]+-----/g, '').replace(/\\s+/g, ''));
         return crypto.subtle.importKey('spki', der, { name: 'Ed25519' }, false, ['verify'])
-          .then(function (k) { if (mySeq === sigLoadSeq) sigKeys[entry.endpoint] = k; }, function () {});
-      } catch (err) { return null; }
+          .then(function (k) { if (mySeq === sigLoadSeq) sigKeys[entry.endpoint] = k; },
+                function () { if (mySeq === sigLoadSeq) delete sigKeys[entry.endpoint]; });
+      } catch (err) {
+        // An unreadable advertisement must also unseat the previous key, or
+        // frames keep reading signed against a key the endpoint no longer
+        // provably holds — costing the endpoint its key means exactly that.
+        if (mySeq === sigLoadSeq) delete sigKeys[entry.endpoint];
+        return null;
+      }
     }));
   }).then(function () {
     sigLoaded = true;
@@ -295,11 +302,24 @@ function checkSig(e) {
   });
 }
 function judgeSig(e, gen) {
+  if (typeof e.sig !== 'string') {
+    // Client frames are unsigned by design; inbound frames are not. Per frame
+    // an all-stripped companion frame and a plain observer frame look alike,
+    // so the rule is session-level: signed at all means signed throughout.
+    // Strips before the first signature wait in a pending count and land the
+    // moment one appears; a never-signed observer session stays blank.
+    if (e.dir === 'out') return;
+    if (sigSessionSigned || sigKeys[e.endpoint]) return sigFailed(gen);
+    if (gen === sigGen) sigPendingUnsigned++;
+    return;
+  }
+  if (!sigSessionSigned && gen === sigGen) {
+    sigSessionSigned = true;
+    if (sigPendingUnsigned > 0) { sigBad += sigPendingUnsigned; sigPendingUnsigned = 0; renderSig(); }
+  }
   var key = sigKeys[e.endpoint];
-  // A signature nobody can be checked against is unverified, not unchecked;
-  // genuinely unsigned client frames are the only thing out of scope.
-  if (!key) return typeof e.sig === 'string' ? sigFailed(gen) : undefined;
-  if (typeof e.sig !== 'string') return sigFailed(gen);
+  // A signature nobody can be checked against is unverified, not unchecked.
+  if (!key) return sigFailed(gen);
   var sig;
   // atob throws on malformed base64, and unwinding out of ingest would drop
   // the frame entirely — a tampered journal must not hide one.
@@ -393,7 +413,7 @@ function open(runId, sessionId) {
   setReview('', 'waiting…');
   renderMeta();
   tick = setInterval(function () { if (meta && meta.live) renderMeta(); }, 1000);
-  sigGen++; sigOk = 0; sigBad = 0; sigSeen = {}; sigStarved = false; renderSig();
+  sigGen++; sigOk = 0; sigBad = 0; sigSeen = {}; sigStarved = false; sigSessionSigned = false; sigPendingUnsigned = 0; renderSig();
   // Keys before frames: the stream replays the journal on open, and a frame
   // arriving first would be judged against an empty key set.
   // Fresh keys at every open: a companion that attached since the last load

@@ -145,6 +145,12 @@ describe('verifyJournalLines', () => {
     assert.equal(hidden.skipped, 1);
     assert.equal(hidden.breaks, 1);
     assert.equal(run([2, 3]), 1); // head deletion
+    // A name colliding with Object.prototype members must act like any other.
+    const proto = verifyJournalLines(
+      [sign(privateKey, 1, '__proto__'), sign(privateKey, 2, '__proto__')],
+      [publicKey],
+    );
+    assert.equal(proto.breaks, 0);
     assert.equal(run([1, 1, 2]), 1); // duplicate breaks once; the run then resumes
     assert.equal(run([2, 1]), 2); // reorder breaks both steps
   });

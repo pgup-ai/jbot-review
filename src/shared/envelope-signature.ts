@@ -85,7 +85,7 @@ export function verifyJournalLines(
   let verified = 0;
   let skipped = 0;
   let breaks = 0;
-  const lastSeqByEndpoint: Record<string, number> = {};
+  const lastSeqByEndpoint = new Map<string, number>();
   for (const line of lines) {
     let parsed: Record<string, unknown> | undefined;
     try {
@@ -102,8 +102,8 @@ export function verifyJournalLines(
     if (!parsed || !publicKeyPems.some((pem) => verifyEnvelope(parsed, pem))) continue;
     verified += 1;
     const endpoint = typeof parsed.endpoint === 'string' ? parsed.endpoint : '';
-    if (parsed.seq !== (lastSeqByEndpoint[endpoint] ?? 0) + 1) breaks += 1;
-    if (typeof parsed.seq === 'number') lastSeqByEndpoint[endpoint] = parsed.seq;
+    if (parsed.seq !== (lastSeqByEndpoint.get(endpoint) ?? 0) + 1) breaks += 1;
+    if (typeof parsed.seq === 'number') lastSeqByEndpoint.set(endpoint, parsed.seq);
   }
   return { checked, verified, skipped, breaks };
 }
