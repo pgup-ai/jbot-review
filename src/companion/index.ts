@@ -7,7 +7,7 @@
  * Spec: docs/superpowers/specs/2026-07-24-acp-gateway-m2-design.md (M2a).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,6 +21,7 @@ import {
   type AcpAgentSpec,
 } from '../shared/acp-protocol.ts';
 import { fetchWorkspace } from './workspace.ts';
+import { generateSigningKeys, publicKeyFrom, signEnvelope } from '../shared/envelope-signature.ts';
 import { codexAuthPath } from '../shared/codex.ts';
 import { devinCredentialsPath } from '../shared/devin.ts';
 import type { ObserverEnvelope } from '../gateway/journal.ts';
@@ -47,9 +48,29 @@ const maxSessions =
     ? Number(process.env.JBOT_COMPANION_MAX_SESSIONS)
     : 2;
 
+/**
+ * Signing key for this machine, generated once and kept at 0600. The private
+ * half never leaves here: signing at the companion is what makes the journal
+ * tamper-evident against the relay rather than merely by it.
+ */
+function loadSigningKeys(): { privateKey: string; publicKey: string } {
+  const dir = join(homedir(), '.local', 'share', 'jbot-companion');
+  const path = join(dir, 'signing-key.pem');
+  if (existsSync(path)) {
+    const privateKey = readFileSync(path, 'utf8');
+    return { privateKey, publicKey: publicKeyFrom(privateKey) };
+  }
+  const keys = generateSigningKeys();
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(path, keys.privateKey, { mode: 0o600 });
+  return keys;
+}
+
 const log = (msg: string): void => {
   console.log(`[jbot-companion] ${msg}`);
 };
+
+const signingKeys = loadSigningKeys();
 
 if (!gatewayUrl || !token || !endpointId) {
   console.error('Set JBOT_COMPANION_GATEWAY, JBOT_COMPANION_TOKEN, and JBOT_COMPANION_ENDPOINT.');
@@ -178,6 +199,7 @@ function hello(): HelloControl {
     // Live agents this process still holds — a fresh start sends none, so the
     // relay fails any stale sessions instead of leaving them as zombies.
     sessions: [...sessions.keys()],
+    publicKey: signingKeys.publicKey,
   };
 }
 
@@ -303,7 +325,7 @@ function openSession(control: OpenControl): void {
       dir: 'in',
       frame,
     };
-    sendLine(JSON.stringify(envelope));
+    sendLine(JSON.stringify(signEnvelope(envelope, signingKeys.privateKey)));
   });
   child.stdout?.setEncoding('utf8');
   child.stdout?.on('data', (chunk: string) => {
