@@ -299,6 +299,9 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
 
   const { baseRef, mergeBase } = await resolveBase();
   const shortBase = mergeBase.slice(0, 12);
+  // Deepen target for the companion: a shallow clone that stops short of the
+  // base cannot run the merge-base diff this prompt describes.
+  if (isolated) process.env.JBOT_ACP_GATEWAY_BASE = mergeBase;
   const rightSide = isolated ? `HEAD ${isolated.head.slice(0, 12)}` : 'the working tree';
   log(`Diff base: ${baseRef} (merge-base ${shortBase}); right side is ${rightSide}.`);
   log('Note: a stale base ref widens the diff — fetch before reviewing if in doubt.');

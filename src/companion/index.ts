@@ -6,7 +6,7 @@
  * never authorize writes on this machine.
  * Spec: docs/superpowers/specs/2026-07-24-acp-gateway-m2-design.md (M2a).
  */
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,6 +20,7 @@ import {
   respondToPermissionRequest,
   type AcpAgentSpec,
 } from '../shared/acp-protocol.ts';
+import { fetchWorkspace } from './workspace.ts';
 import { codexAuthPath } from '../shared/codex.ts';
 import { devinCredentialsPath } from '../shared/devin.ts';
 import type { ObserverEnvelope } from '../gateway/journal.ts';
@@ -32,8 +33,6 @@ const BACKOFF_MIN_MS = 1_000;
 const BACKOFF_MAX_MS = 30_000;
 // Must-deliver buffer while the gateway is away; overflow fails sessions loud.
 const MAX_OUTBOX_LINES = 10_000;
-// Depth 1 left the agent unable to run git log/diff against the PR base.
-const WORKSPACE_DEPTH = '50';
 
 const gatewayUrl = (process.env.JBOT_COMPANION_GATEWAY ?? '').trim().replace(/\/+$/, '');
 const token = (process.env.JBOT_COMPANION_TOKEN ?? '').trim();
@@ -218,25 +217,6 @@ function endSession(sessionId: string, reason: string, notify: boolean): void {
   log(`session ${sessionId} ended: ${reason}`);
 }
 
-/** argv-only git (the ref is remote-controlled input); best-effort — a fetch
- * failure refuses the session rather than running the agent on nothing. */
-function fetchWorkspace(workspace: string, repo: string, ref?: string): string | undefined {
-  const run = (args: string[]): string | undefined => {
-    const result = spawnSync('git', args, { encoding: 'utf8', timeout: 120_000 });
-    return result.status === 0
-      ? undefined
-      : `git ${args[0]} failed: ${(result.stderr || result.stdout || '').slice(0, 300)}`;
-  };
-  // `--` so a repo/ref starting with `-` can never become a git flag.
-  const clone = run(['clone', '--depth', WORKSPACE_DEPTH, '--no-tags', '--', repo, workspace]);
-  if (clone) return clone;
-  if (!ref) return undefined;
-  return (
-    run(['-C', workspace, 'fetch', '--depth', WORKSPACE_DEPTH, 'origin', '--', ref]) ??
-    run(['-C', workspace, 'checkout', '--detach', 'FETCH_HEAD'])
-  );
-}
-
 function openSession(control: OpenControl): void {
   const refuse = (reason: string): void => {
     sendControl({ kind: 'refused', sessionId: control.sessionId, reason });
@@ -250,7 +230,7 @@ function openSession(control: OpenControl): void {
   const model = control.model ?? 'default';
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-companion-'));
   if (control.repo) {
-    const failure = fetchWorkspace(workspace, control.repo, control.ref);
+    const failure = fetchWorkspace(workspace, control.repo, control.ref, control.base);
     if (failure) {
       discard(workspace);
       return refuse(failure);
