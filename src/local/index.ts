@@ -274,8 +274,12 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   }
   const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
 
+  // Only when the companion will actually hold a matching checkout: repo and
+  // ref are both optional, and without them it reviews an empty workspace, so
+  // pinning to HEAD would drop uncommitted work to align with nothing.
+  const gateway = remoteAcpConfigFromEnv();
   const isolated =
-    remoteAcpConfigFromEnv() && gatewayRoutedModels([model, auxModel])
+    gateway?.repo && gateway.ref && gatewayRoutedModels([model, auxModel])
       ? await checkoutHead()
       : undefined;
   if (isolated) adopt(isolated);

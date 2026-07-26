@@ -1155,11 +1155,16 @@ async function runReviewPipeline(params: {
     cleanupGrokHome();
     // Also where the registration is dropped: the try that would otherwise
     // release it starts below the backend setup's own throws.
-    unregisterCliHomeCleanup();
+    unregisterCliHomes?.();
+    unregisterCliHomes = undefined;
   };
-  // These homes hold materialized provider credentials, so they must not
-  // outlive an interrupted run.
-  const unregisterCliHomeCleanup = onFatalSignal(cleanupCliHomes);
+  // Armed only once a home exists, so the setup throws above it — which reach
+  // no cleanup of their own — cannot strand a registration. The homes hold
+  // materialized provider credentials and must not outlive an interrupted run.
+  let unregisterCliHomes: (() => void) | undefined;
+  const guardCliHomes = (): void => {
+    unregisterCliHomes ??= onFatalSignal(cleanupCliHomes);
+  };
 
   if (!remoteAcp && (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID)) {
     const devinApiKey = backendSelection.devinApiKey;
@@ -1198,9 +1203,10 @@ async function runReviewPipeline(params: {
     let authPath: string;
     try {
       commandCodeHome = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
+      guardCliHomes();
       authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
     } catch (error) {
-      cleanupCommandCodeHome();
+      cleanupCliHomes();
       throw error;
     }
     log(`CommandCode CLI auth configured at ${authPath}.`);
@@ -1217,6 +1223,7 @@ async function runReviewPipeline(params: {
     let authPath: string;
     try {
       codexHome = mkdtempSync(join(tmpdir(), 'jbot-codex-home-'));
+      guardCliHomes();
       authPath = writeCodexAuth(codexAuth, codexHome);
     } catch (error) {
       cleanupCliHomes();
@@ -1236,6 +1243,7 @@ async function runReviewPipeline(params: {
     let authPath: string;
     try {
       clineHome = mkdtempSync(join(tmpdir(), 'jbot-cline-home-'));
+      guardCliHomes();
       authPath = writeClineAuth(clineAuth, clineHome);
     } catch (error) {
       cleanupCliHomes();
@@ -1257,6 +1265,7 @@ async function runReviewPipeline(params: {
     let runtime: GrokRuntime;
     try {
       grokHome = mkdtempSync(join(tmpdir(), 'jbot-grok-home-'));
+      guardCliHomes();
       runtime = configureGrokHome(grokCredential, grokHome);
       await assertGrokAuthenticated(runtime);
     } catch (error) {

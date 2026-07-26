@@ -57,7 +57,13 @@ export function clonePr({
     return result;
   };
   const withAuth = <T>(fn: (env: NodeJS.ProcessEnv) => T): T => {
-    writeFileSync(askpass, ASKPASS_SCRIPT, { mode: 0o700 });
+    // Through fail() so a filesystem error unregisters and removes the root
+    // like every other setup failure, instead of escaping with both live.
+    try {
+      writeFileSync(askpass, ASKPASS_SCRIPT, { mode: 0o700 });
+    } catch (error) {
+      fail('Failed to write the git askpass helper', String(error));
+    }
     try {
       return fn({
         ...process.env,
