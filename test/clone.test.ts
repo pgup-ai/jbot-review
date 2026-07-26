@@ -66,11 +66,17 @@ it('clones complete fork head and upstream base histories', () => {
     assert.equal(run(cloned.dir, ['remote']), 'origin');
     assert.deepEqual(readdirSync(dirname(cloned.dir)), ['repo']);
 
-    // Cleanup raced git's auto-gc and lost with ENOTEMPTY, silently leaking a
-    // whole clone per review; safeRm swallows the error, so assert the effect.
+    // A single rm attempt leaked a whole clone per review, and safeRm swallows
+    // the error, so assert the effect. Report what survived: the failure mode is
+    // an ENOTEMPTY rmdir on an already-empty directory, which is worth seeing.
     const cloneRoot = dirname(cloned.dir);
     cleanup();
-    assert.equal(existsSync(cloneRoot), false, 'clone root survived cleanup');
+    const survived = existsSync(cloneRoot);
+    assert.equal(
+      survived,
+      false,
+      `clone root survived cleanup: [${survived ? readdirSync(cloneRoot) : ''}]`,
+    );
   } finally {
     cleanup?.();
     rmSync(root, { recursive: true, force: true });

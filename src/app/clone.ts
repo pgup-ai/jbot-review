@@ -126,9 +126,11 @@ export function clonePr({
 
 function safeRm(path: string): void {
   try {
-    // git's auto-gc keeps writing into .git after the last fetch returns, so a
-    // plain recursive rm loses the race with ENOTEMPTY and leaks the clone.
-    rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    // Emptying a fresh clone and removing its root in one pass loses often
+    // enough: rmdir reports ENOTEMPTY on a directory that is already empty by
+    // the time anything looks, with no git process left holding it. A single
+    // attempt leaked a whole clone per review; retrying settles it.
+    rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
   } catch {
     // best effort
   }
