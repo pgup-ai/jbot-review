@@ -62,7 +62,14 @@ function loadSigningKeys(): { privateKey: string; publicKey: string } {
   }
   const keys = generateSigningKeys();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(path, keys.privateKey, { mode: 0o600 });
+  try {
+    // `wx` so two first starts cannot each advertise a key while one survives:
+    // the loser reads the winner's rather than signing with an orphan.
+    writeFileSync(path, keys.privateKey, { mode: 0o600, flag: 'wx' });
+  } catch {
+    const privateKey = readFileSync(path, 'utf8');
+    return { privateKey, publicKey: publicKeyFrom(privateKey) };
+  }
   return keys;
 }
 

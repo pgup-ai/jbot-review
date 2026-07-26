@@ -16,7 +16,8 @@ const envelope = {
   ts: 1_700_000_000_000,
   agent: 'kilo',
   label: 'review',
-  dir: 'out',
+  dir: 'in',
+  endpoint: 'e2e',
   frame: { jsonrpc: '2.0', method: 'session/update', params: { text: 'hello' } },
 };
 
@@ -56,16 +57,23 @@ describe('envelope signatures', () => {
 });
 
 describe('verifyJournalLines', () => {
-  it('counts every line that is not provably intact against the total', () => {
+  it('checks only the frames a companion signed, and fails anything not intact', () => {
     const { privateKey, publicKey } = generateSigningKeys();
     const good = JSON.stringify(signEnvelope(envelope, privateKey));
     const tampered = JSON.stringify({ ...signEnvelope(envelope, privateKey), seq: 99 });
+    // A client frame carries no endpoint and is never signed: counting it would
+    // fail every real journal.
+    const clientFrame = JSON.stringify({ v: 1, seq: 1, dir: 'out', frame: {} });
 
-    assert.deepEqual(verifyJournalLines([good, good], publicKey), { total: 2, verified: 2 });
-    // Tampered, unsigned and unparseable are all just "not verified".
+    assert.deepEqual(verifyJournalLines([good, clientFrame], publicKey), {
+      checked: 1,
+      verified: 1,
+      skipped: 1,
+    });
+    // Tampered, signature-stripped and unparseable all count as checked-not-verified.
     assert.deepEqual(
       verifyJournalLines([good, tampered, JSON.stringify(envelope), '{oops'], publicKey),
-      { total: 4, verified: 1 },
+      { checked: 4, verified: 1, skipped: 0 },
     );
   });
 });

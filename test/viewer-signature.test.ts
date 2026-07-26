@@ -10,7 +10,8 @@ describe('viewer signature check', () => {
     // browser would then strip literal "s" from a PEM and fail every key.
     assert.match(VIEWER_HTML, /replace\(\/\\s\+\/g, ''\)/);
     assert.match(VIEWER_HTML, /name: 'Ed25519'/);
-    assert.match(VIEWER_HTML, /function ingest\(e\) \{\s*checkSig\(e\);/);
+    // Counted after the seq dedup, or a reconnect replay tallies twice.
+    assert.match(VIEWER_HTML, /meta\.lastSeq = e\.seq;\s*\}[\s\S]{0,160}?checkSig\(e\);/);
   });
 
   it('verifies a companion signature through the browser primitives', async () => {

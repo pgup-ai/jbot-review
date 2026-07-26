@@ -254,19 +254,25 @@ function loadSigKeys() {
     }));
   }).catch(function () {});
 }
+function sigFailed() { sigBad++; renderSig(); }
 function checkSig(e) {
   var key = sigKeys[e.endpoint];
-  // No key means nothing to check against, not a failure: unsigned observer
-  // frames and endpoints that predate signing both land here.
-  if (!key || typeof e.sig !== 'string') return;
+  // No advertised key means nothing to check against — observer frames and
+  // endpoints predating signing land here. Once a key exists the frame must
+  // carry a signature, or stripping one would be cheaper than forging it.
+  if (!key) return;
+  if (typeof e.sig !== 'string') return sigFailed();
+  var sig;
+  // atob throws on malformed base64, and unwinding out of ingest would drop
+  // the frame entirely — a tampered journal must not hide one.
+  try { sig = b64bytes(e.sig); } catch (err) { return sigFailed(); }
   var rest = {};
   for (var k in e) if (k !== 'sig') rest[k] = e[k];
-  crypto.subtle.verify('Ed25519', key, b64bytes(e.sig), new TextEncoder().encode(JSON.stringify(rest)))
-    .then(function (ok) { if (ok) sigOk++; else sigBad++; renderSig(); }, function () { sigBad++; renderSig(); });
+  crypto.subtle.verify('Ed25519', key, sig, new TextEncoder().encode(JSON.stringify(rest)))
+    .then(function (ok) { if (ok) sigOk++; else sigBad++; renderSig(); }, sigFailed);
 }
 
 function ingest(e) {
-  checkSig(e);
   if (!meta) return;
   // EventSource auto-reconnects on any blip and the server replays the whole
   // journal, so drop frames already rendered (seq is monotonic per session).
@@ -274,6 +280,9 @@ function ingest(e) {
     if (e.seq <= meta.lastSeq) return;
     meta.lastSeq = e.seq;
   }
+  // After the dedup: a reconnect replays the journal, and re-counting a frame
+  // would drift the tally without bound.
+  checkSig(e);
   meta.agent = e.agent || meta.agent;
   if (e.model) meta.model = e.model;
   if (!meta.firstTs) meta.firstTs = e.ts;
@@ -339,6 +348,7 @@ function open(runId, sessionId) {
   setReview('', 'waiting…');
   renderMeta();
   tick = setInterval(function () { if (meta && meta.live) renderMeta(); }, 1000);
+  sigOk = 0; sigBad = 0; renderSig();
   es = new EventSource(withToken('/api/runs/' + runId + '/sessions/' + sessionId + '/stream'));
   // onopen/onerror move ONLY the connection dot — never the review status.
   es.onopen = function () { sseDown = false; connState('ok', 'connected'); };

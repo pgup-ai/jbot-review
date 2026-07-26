@@ -63,20 +63,33 @@ export function verifyEnvelope(line: object, publicKeyPem: string): boolean {
   }
 }
 
-/** Signature tally for a journal file: unsigned and forged both count as bad. */
+/**
+ * Tally over a journal. Only companion-emitted frames carry `endpoint`, and
+ * only those are signed — client frames pass through unsigned by design, so
+ * counting them as failures would fail every real journal. An unparseable line
+ * is checked and unverified: it cannot be shown intact.
+ */
 export function verifyJournalLines(
   lines: string[],
   publicKeyPem: string,
-): { total: number; verified: number } {
+): { checked: number; verified: number; skipped: number } {
+  let checked = 0;
   let verified = 0;
+  let skipped = 0;
   for (const line of lines) {
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
     } catch {
-      continue; // counted against the total: an unparseable line is not intact
+      checked += 1;
+      continue;
     }
-    if (parsed && typeof parsed === 'object' && verifyEnvelope(parsed, publicKeyPem)) verified += 1;
+    if (!parsed || typeof parsed !== 'object' || !('endpoint' in parsed)) {
+      skipped += 1;
+      continue;
+    }
+    checked += 1;
+    if (verifyEnvelope(parsed, publicKeyPem)) verified += 1;
   }
-  return { total: lines.length, verified };
+  return { checked, verified, skipped };
 }
