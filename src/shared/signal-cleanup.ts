@@ -18,10 +18,12 @@ function onSignal(signal: NodeJS.Signals): void {
       // not strand the rest or skip the re-raise below.
     }
   }
-  // Drop back to the default disposition so the exit code still reports the
-  // signal (128+signum) instead of a clean exit.
   for (const other of SIGNALS) process.removeListener(other, onSignal);
-  process.kill(process.pid, signal);
+  // Re-raise only once nothing else handles this signal, which drops back to the
+  // default disposition and the 128+signum exit. With another listener present
+  // Node skips that default, so re-sending would run the host's hook a second
+  // time and still not exit — termination is the host's to decide there.
+  if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
 }
 
 /**
