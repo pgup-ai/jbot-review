@@ -11,6 +11,7 @@ import { PassThrough, Writable } from 'node:stream';
 import { createAcpReviewBackend } from './acp.ts';
 import { driveAcpSession } from './acp-protocol.ts';
 import { parseEnvelope } from '../gateway/journal.ts';
+import { parseModelName } from './model.ts';
 import type { AckControl, EndpointPresence } from '../gateway/relay.ts';
 import { parseRelayControl } from '../gateway/relay.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
@@ -21,6 +22,20 @@ const GATEWAY_TIMEOUT_MS = 60_000;
 
 /** Providers the gateway can serve — the ones with an ACP engine (see acp.ts). */
 export const ACP_GATEWAY_PROVIDERS = ['devin', 'cursor', 'codex', 'kilo'] as const;
+
+/**
+ * Whether any of these models would reach a companion. Gateway *routing*, not
+ * merely gateway config, is what forces local mode onto the committed ref — a
+ * run configured with gateway vars but pointed elsewhere stays local and must
+ * keep reviewing the working tree.
+ */
+export function gatewayRoutedModels(models: (string | undefined)[]): boolean {
+  return models.some(
+    (name) =>
+      name &&
+      (ACP_GATEWAY_PROVIDERS as readonly string[]).includes(parseModelName(name).providerID),
+  );
+}
 
 export interface RemoteAcpConfig {
   gateway: string;

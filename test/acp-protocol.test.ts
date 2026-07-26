@@ -453,8 +453,11 @@ describe('acp', () => {
     const codexLeakPrefix = 'jbot-codex-acp-';
     const codexBefore = readdirSync(tmpdir()).filter((entry) => entry.startsWith(codexLeakPrefix));
     const codexEmptyHome = mkdtempSync(join(tmpdir(), 'jbot-test-empty-'));
-    assert.throws(() => codexAcpSpec(codexEmptyHome).env('codex/default'));
-    rmSync(codexEmptyHome, { recursive: true, force: true });
+    try {
+      assert.throws(() => codexAcpSpec(codexEmptyHome).env('codex/default'));
+    } finally {
+      rmSync(codexEmptyHome, { recursive: true, force: true });
+    }
     const codexAfter = readdirSync(tmpdir()).filter((entry) => entry.startsWith(codexLeakPrefix));
     assert.deepEqual(codexAfter, codexBefore);
 
@@ -512,8 +515,11 @@ describe('acp', () => {
     const devinLeakPrefix = 'jbot-devin-acp-';
     const before = readdirSync(tmpdir()).filter((entry) => entry.startsWith(devinLeakPrefix));
     const devinEmptyHome = mkdtempSync(join(tmpdir(), 'jbot-test-empty-'));
-    assert.throws(() => devinAcpSpec(devinEmptyHome).env('devin/default'));
-    rmSync(devinEmptyHome, { recursive: true, force: true });
+    try {
+      assert.throws(() => devinAcpSpec(devinEmptyHome).env('devin/default'));
+    } finally {
+      rmSync(devinEmptyHome, { recursive: true, force: true });
+    }
     const after = readdirSync(tmpdir()).filter((entry) => entry.startsWith(devinLeakPrefix));
     assert.deepEqual(after, before);
     rmSync(devinHome, { recursive: true, force: true });

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { parseEnvBoolean, parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
-import { ACP_GATEWAY_PROVIDERS, remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
+import { gatewayRoutedModels, remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
 import { selectReviewBackends, type CliBackendID } from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_PROVIDER_ID } from '../shared/codex.ts';
@@ -122,19 +122,6 @@ interface IsolatedCheckout {
   head: string;
   /** Synchronous so a signal handler can finish it before the process dies. */
   remove: () => void;
-}
-
-/**
- * Gateway *routing*, not merely gateway config, is what forces the committed
- * checkout: runner.ts routes only these providers, so a run configured with
- * gateway vars but pointed at any other provider stays local and must keep
- * reviewing the working tree.
- */
-function routesToGateway(model: string, auxModel: string | undefined): boolean {
-  if (!remoteAcpConfigFromEnv()) return false;
-  return [model, auxModel || model].some((name) =>
-    (ACP_GATEWAY_PROVIDERS as readonly string[]).includes(parseModelName(name).providerID),
-  );
 }
 
 /**
@@ -287,7 +274,10 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   }
   const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
 
-  const isolated = routesToGateway(model, auxModel) ? await checkoutHead() : undefined;
+  const isolated =
+    remoteAcpConfigFromEnv() && gatewayRoutedModels([model, auxModel])
+      ? await checkoutHead()
+      : undefined;
   if (isolated) adopt(isolated);
 
   const { baseRef, mergeBase } = await resolveBase();
