@@ -66,9 +66,8 @@ it('clones complete fork head and upstream base histories', () => {
     assert.equal(run(cloned.dir, ['remote']), 'origin');
     assert.deepEqual(readdirSync(dirname(cloned.dir)), ['repo']);
 
-    // A single rm attempt leaked a whole clone per review, and safeRm swallows
-    // the error, so assert the effect. Report what survived: the failure mode is
-    // an ENOTEMPTY rmdir on an already-empty directory, which is worth seeing.
+    // safeRm swallows its error, so the leak it hid is only visible as an
+    // effect. The message reports leftovers: empty means the root itself stuck.
     const cloneRoot = dirname(cloned.dir);
     cleanup();
     const survived = existsSync(cloneRoot);

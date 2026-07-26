@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { onFatalSignal } from '../shared/signal-cleanup.ts';
+
 const INITIAL_HISTORY_DEPTH = 50;
 const HISTORY_DEEPEN_STEPS = [200, 1_000];
 const MAX_HISTORY_DEPTH = INITIAL_HISTORY_DEPTH + HISTORY_DEEPEN_STEPS.reduce((a, b) => a + b);
@@ -33,7 +35,11 @@ export function clonePr({
   const root = mkdtempSync(join(tmpdir(), 'jbot-'));
   const dir = join(root, 'repo');
   const askpass = join(root, 'askpass.sh');
+  // Guarded before the clone runs, not after it returns: cloning is the slowest
+  // part of a run and leaves the largest thing behind if a signal cuts it short.
+  const unregister = onFatalSignal(() => safeRm(root));
   const fail = (action: string, stderr?: string): never => {
+    unregister();
     safeRm(root);
     throw new Error(stderr?.trim() ? `${action}: ${stderr.trim()}` : action);
   };
@@ -121,15 +127,21 @@ export function clonePr({
     }
   };
 
-  return { dir, prepareDiff, cleanup: () => safeRm(root) };
+  return {
+    dir,
+    prepareDiff,
+    cleanup: () => {
+      unregister();
+      safeRm(root);
+    },
+  };
 }
 
 function safeRm(path: string): void {
   try {
-    // Emptying a fresh clone and removing its root in one pass loses often
-    // enough: rmdir reports ENOTEMPTY on a directory that is already empty by
-    // the time anything looks, with no git process left holding it. A single
-    // attempt leaked a whole clone per review; retrying settles it.
+    // One pass leaked a whole clone per review: rmdir reports ENOTEMPTY on a
+    // root that is already empty by the time anything looks, with no git
+    // process left holding it. Retrying settles it.
     rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
   } catch {
     // best effort
