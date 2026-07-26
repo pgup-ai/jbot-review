@@ -288,6 +288,13 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   }
   // Both, not either: a ref without a repo still leaves the companion empty.
   const isolated = routed?.repo && routed.ref ? await checkoutHead() : undefined;
+  if (isolated) {
+    // Pin the companion to the commit actually diffed, read back below by
+    // remoteAcpConfigFromEnv: the configured ref may name another branch, or be
+    // a branch that advances mid-run, and either way the agent would read a
+    // different revision from the one this prompt describes.
+    process.env.JBOT_ACP_GATEWAY_REF = isolated.head;
+  }
   if (isolated) adopt(isolated);
 
   const { baseRef, mergeBase } = await resolveBase();
