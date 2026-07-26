@@ -1149,10 +1149,20 @@ async function runReviewPipeline(params: {
   // Multiple CLI homes can be live at once (e.g. main=codex, aux=commandcode), so
   // clean every one at every downstream failure/exit point.
   const cleanupCliHomes = (): void => {
-    cleanupCommandCodeHome();
-    cleanupCodexHome();
-    cleanupClineHome();
-    cleanupGrokHome();
+    // Independently: force only suppresses a missing path, so one failed
+    // removal would otherwise leave the remaining credential homes on disk.
+    for (const cleanup of [
+      cleanupCommandCodeHome,
+      cleanupCodexHome,
+      cleanupClineHome,
+      cleanupGrokHome,
+    ]) {
+      try {
+        cleanup();
+      } catch (error) {
+        log(`CLI home teardown failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     // Also where the registration is dropped: the try that would otherwise
     // release it starts below the backend setup's own throws.
     unregisterCliHomes?.();
