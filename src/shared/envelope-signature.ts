@@ -88,7 +88,7 @@ export function verifyJournalLines(
       const value: unknown = JSON.parse(line);
       if (value && typeof value === 'object') parsed = value as Record<string, unknown>;
     } catch {
-      /* unparseable: checked below, and never verifiable */
+      /* left undefined */
     }
     const signed = typeof parsed?.sig === 'string';
     if (!signed && parsed?.dir === 'out') {

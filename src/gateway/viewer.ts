@@ -232,7 +232,7 @@ function onRunStatus(d) {
 // Envelope signatures (M2d): the companion signs what it emits, so the page
 // checks frames against the key that endpoint advertised rather than trusting
 // the gateway that served them.
-var sigKeys = {}, sigOk = 0, sigBad = 0, sigSeen = {}, sigGen = 0, sigReady = null, sigEl = document.getElementById('mSig');
+var sigKeys = {}, sigOk = 0, sigBad = 0, sigSeen = {}, sigGen = 0, sigReady = null, sigLoaded = false, sigEl = document.getElementById('mSig');
 function b64bytes(b64) {
   var raw = atob(b64), out = new Uint8Array(raw.length);
   for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
@@ -255,7 +255,8 @@ function loadSigKeys() {
       return crypto.subtle.importKey('spki', der, { name: 'Ed25519' }, false, ['verify'])
         .then(function (k) { sigKeys[entry.endpoint] = k; }, function () {});
     }));
-  }).catch(function () {});
+    sigLoaded = true;
+  }).catch(function () { sigReady = null; });
 }
 function sigFailed(gen) { if (gen === sigGen) { sigBad++; renderSig(); } }
 function checkSig(e) {
@@ -266,6 +267,9 @@ function checkSig(e) {
   var id = typeof e.sig === 'string' ? e.sig : e.sessionId + '#' + e.seq + '#unsigned';
   if (sigSeen[id]) return;
   sigSeen[id] = 1;
+  // Nothing loaded means we cannot judge, which is not the same as a frame
+  // failing: a fetch blip would otherwise mark every signed frame unverified.
+  if (!sigLoaded) return;
   var gen = sigGen;
   var key = sigKeys[e.endpoint];
   // A signature nobody can be checked against is unverified, not unchecked:

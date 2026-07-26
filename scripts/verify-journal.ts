@@ -78,7 +78,8 @@ for (const file of files) {
 // Counted apart: an unreadable session is not one bad frame, and rolling it
 // into the frame tally would understate what it hides.
 const unread = unreadable > 0 ? `, ${unreadable} unreadable session(s)` : '';
-// Named, not silent: frames this key cannot speak for are still unexamined.
-const rest = other > 0 ? `, ${other} frame(s) left for another endpoint's key` : '';
+// Unexamined is not clean: rewriting endpoints would otherwise empty a scoped
+// pass and still exit 0. Supply each companion's key to complete the audit.
+const rest = other > 0 ? `, ${other} frame(s) UNEXAMINED (need another endpoint's key)` : '';
 console.log(`${files.length} session(s), ${bad} unverified frame(s)${unread}${rest}`);
-process.exitCode = bad === 0 && unreadable === 0 ? 0 : 1;
+process.exitCode = bad === 0 && unreadable === 0 && other === 0 ? 0 : 1;
