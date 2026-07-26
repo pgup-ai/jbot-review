@@ -274,14 +274,20 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   }
   const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
 
-  // Only when the companion will actually hold a matching checkout: repo and
-  // ref are both optional, and without them it reviews an empty workspace, so
-  // pinning to HEAD would drop uncommitted work to align with nothing.
+  // The companion checks out repo@ref, and both are optional. With neither it
+  // works in an empty workspace, so the worktree diff stands — there is nothing
+  // to align with. With both, the diff has to describe that same commit.
   const gateway = remoteAcpConfigFromEnv();
-  const isolated =
-    gateway?.repo && gateway.ref && gatewayRoutedModels([model, auxModel])
-      ? await checkoutHead()
-      : undefined;
+  const routed = gateway && gatewayRoutedModels([model, auxModel]) ? gateway : undefined;
+  if (routed?.repo && !routed.ref) {
+    throw new Error(
+      'JBOT_ACP_GATEWAY_REPO is set without JBOT_ACP_GATEWAY_REF: the companion would review a ' +
+        'default-branch checkout, which matches neither the working tree nor HEAD. Set the ref ' +
+        'to the commit under review, or unset the repo to run against an empty workspace.',
+    );
+  }
+  // Both, not either: a ref without a repo still leaves the companion empty.
+  const isolated = routed?.repo && routed.ref ? await checkoutHead() : undefined;
   if (isolated) adopt(isolated);
 
   const { baseRef, mergeBase } = await resolveBase();
