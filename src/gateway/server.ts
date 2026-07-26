@@ -1,9 +1,12 @@
 import { timingSafeEqual } from 'node:crypto';
+import { readFileSync, statSync } from 'node:fs';
+import { createGzip } from 'node:zlib';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import {
   appendEnvelope,
   isSafeId,
+  journalPath,
   listRuns,
   parseEnvelope,
   parseRunControl,
@@ -264,6 +267,85 @@ function registerPeerStream(
   res.on('error', cleanup);
 }
 
+/**
+ * The whole journal in one compressible, cacheable response. A finished review
+ * is immutable and often large — the run that prompted this is 24k frames and
+ * 9MB — and SSE can carry none of that cheaply: it is never compressed (that
+ * would defeat streaming) and never cached, so every visit paid full size and
+ * 24k message dispatches to replay something that had stopped changing.
+ */
+function handleJournal(
+  req: IncomingMessage,
+  res: ServerResponse,
+  runId: string,
+  sessionId: string,
+): void {
+  let mtimeMs: number;
+  let size: number;
+  try {
+    const stat = statSync(journalPath(dataDir, runId, sessionId));
+    mtimeMs = stat.mtimeMs;
+    size = stat.size;
+  } catch {
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('no journal');
+    return;
+  }
+  const status = readRunStatus(dataDir, runId);
+  // Size and mtime together: an append changes both, so a stale body cannot
+  // survive a revalidation even while a run is still being written.
+  const etag = `"${size}-${Math.trunc(mtimeMs)}"`;
+  const live = status === undefined || status === 'reviewing';
+  if (!live && req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { etag });
+    res.end();
+    return;
+  }
+  // The file is already newline-delimited JSON, so it ships as-is rather than
+  // being split into lines only to be rejoined — that tripled peak memory for
+  // no gain. Same shape the stream sends: run status first, then the frames.
+  let frames: Buffer;
+  try {
+    frames = readFileSync(journalPath(dataDir, runId, sessionId));
+  } catch {
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('no journal');
+    return;
+  }
+  const head = status
+    ? `${JSON.stringify({ v: 1, kind: 'run', runId, status, ts: Math.trunc(mtimeMs) })}\n`
+    : '';
+  // Compressed here rather than at the proxy: a journal is ~34x smaller gzipped,
+  // and making that depend on external config would leave a standalone gateway
+  // shipping megabytes. A proxy that sees content-encoding set passes it through.
+  const gzipped = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
+  res.writeHead(200, {
+    'content-type': 'application/x-ndjson',
+    etag,
+    vary: 'accept-encoding',
+    // Revalidate rather than freeze: a late frame after a status write must not
+    // be able to serve a stale transcript forever. A 304 costs one round trip.
+    'cache-control': live ? 'no-store' : 'private, max-age=0, must-revalidate',
+    ...(gzipped ? { 'content-encoding': 'gzip' } : {}),
+  });
+  // Header and body written separately, never concatenated: joining them copies
+  // the whole journal a second time for nothing.
+  if (!gzipped) {
+    if (head) res.write(head);
+    res.end(frames);
+    return;
+  }
+  const gz = createGzip();
+  // Same reason sseSend swallows: an unhandled stream error would take the whole
+  // gateway down. A client vanishing mid-response is handled by pipe's unpipe —
+  // measured, no crash and no retained buffers — but a zlib failure has nothing
+  // listening, so it ends this response instead of the process.
+  gz.on('error', () => res.destroy());
+  gz.pipe(res);
+  if (head) gz.write(head);
+  gz.end(frames);
+}
+
 function handleStream(res: ServerResponse, runId: string, sessionId: string): void {
   res.writeHead(200, {
     'content-type': 'text/event-stream',
@@ -370,6 +452,17 @@ function route(req: IncomingMessage, res: ServerResponse): void {
       void handleSessionIngest(req, res, sid).catch(() => res.destroy());
       return;
     }
+  }
+  const journal = url.pathname.match(/^\/api\/runs\/([^/]+)\/sessions\/([^/]+)\/journal$/);
+  if (req.method === 'GET' && journal) {
+    const [, runId, sessionId] = journal;
+    if (!isSafeId(runId) || !isSafeId(sessionId)) {
+      res.writeHead(400, { 'content-type': 'text/plain' });
+      res.end('bad id');
+      return;
+    }
+    handleJournal(req, res, runId, sessionId);
+    return;
   }
   const stream = url.pathname.match(/^\/api\/runs\/([^/]+)\/sessions\/([^/]+)\/stream$/);
   if (req.method === 'GET' && stream) {
