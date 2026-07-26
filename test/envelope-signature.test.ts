@@ -57,40 +57,47 @@ describe('envelope signatures', () => {
 });
 
 describe('verifyJournalLines', () => {
-  it('checks only the frames a companion signed, and fails anything not intact', () => {
+  it('skips only unsigned client frames, so no field can turn tampering into a skip', () => {
     const { privateKey, publicKey } = generateSigningKeys();
     const good = JSON.stringify(signEnvelope(envelope, privateKey));
     const tampered = JSON.stringify({ ...signEnvelope(envelope, privateKey), seq: 99 });
-    // A client frame carries no endpoint and is never signed: counting it would
-    // fail every real journal.
     const clientFrame = JSON.stringify({ v: 1, seq: 1, dir: 'out', frame: {} });
 
     assert.deepEqual(verifyJournalLines([good, clientFrame], publicKey), {
       checked: 1,
       verified: 1,
       skipped: 1,
+      unattributed: 0,
     });
-    // Tampered, signature-stripped and unparseable all count as checked-not-verified.
+
+    // Tampered, unsigned-inbound and unparseable all count as checked-not-verified.
     assert.deepEqual(
       verifyJournalLines([good, tampered, JSON.stringify(envelope), '{oops'], publicKey),
-      { checked: 4, verified: 1, skipped: 0 },
+      { checked: 4, verified: 1, skipped: 0, unattributed: 0 },
     );
 
-    // Deleting `endpoint` must not turn a signed frame into a skipped one, or
-    // an altered journal could still exit green.
-    const { endpoint: _dropped, ...noEndpoint } = JSON.parse(good) as Record<string, unknown>;
-    assert.deepEqual(verifyJournalLines([JSON.stringify(noEndpoint)], publicKey), {
-      checked: 1,
+    // A signed frame stays checked however its unverified fields are rewritten:
+    // flipping dir to 'out' or deleting endpoint must not skip it.
+    const flipped = JSON.stringify({ ...signEnvelope(envelope, privateKey), dir: 'out' });
+    const { endpoint: _gone, ...stripped } = JSON.parse(good) as Record<string, unknown>;
+    assert.deepEqual(verifyJournalLines([flipped, JSON.stringify(stripped)], publicKey), {
+      checked: 2,
       verified: 0,
       skipped: 0,
+      unattributed: 0,
     });
+  });
 
-    // Scoping to one companion skips another's frames rather than failing them.
-    const other = JSON.stringify(signEnvelope({ ...envelope, endpoint: 'other' }, privateKey));
-    assert.deepEqual(verifyJournalLines([good, other], publicKey, 'e2e'), {
+  it('reports another companion frames as unattributed rather than skipping them', () => {
+    const { privateKey, publicKey } = generateSigningKeys();
+    const mine = JSON.stringify(signEnvelope(envelope, privateKey));
+    const theirs = JSON.stringify(signEnvelope({ ...envelope, endpoint: 'other' }, privateKey));
+
+    assert.deepEqual(verifyJournalLines([mine, theirs], publicKey, 'e2e'), {
       checked: 1,
       verified: 1,
-      skipped: 1,
+      skipped: 0,
+      unattributed: 1,
     });
   });
 });

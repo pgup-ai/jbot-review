@@ -232,7 +232,7 @@ function onRunStatus(d) {
 // Envelope signatures (M2d): the companion signs what it emits, so the page
 // checks frames against the key that endpoint advertised rather than trusting
 // the gateway that served them.
-var sigKeys = {}, sigOk = 0, sigBad = 0, sigSeen = {}, sigGen = 0, sigEl = document.getElementById('mSig');
+var sigKeys = {}, sigOk = 0, sigBad = 0, sigSeen = {}, sigGen = 0, sigReady = null, sigEl = document.getElementById('mSig');
 function b64bytes(b64) {
   var raw = atob(b64), out = new Uint8Array(raw.length);
   for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
@@ -261,15 +261,17 @@ function sigFailed(gen) { if (gen === sigGen) { sigBad++; renderSig(); } }
 function checkSig(e) {
   // Runs before the seq dedup, or a tampered frame could carry a replayed seq
   // and be dropped unchecked; this keeps each frame counted exactly once.
-  var id = e.sessionId + '#' + e.seq;
+  // Keyed on the signature, not the seq: a tampered frame can reuse an earlier
+  // seq, and deduping by it would suppress the frame with the count intact.
+  var id = typeof e.sig === 'string' ? e.sig : e.sessionId + '#' + e.seq + '#unsigned';
   if (sigSeen[id]) return;
   sigSeen[id] = 1;
   var gen = sigGen;
   var key = sigKeys[e.endpoint];
-  // No advertised key means nothing to check against — observer frames and
-  // endpoints predating signing land here. Once a key exists the frame must
-  // carry a signature, or stripping one would be cheaper than forging it.
-  if (!key) return;
+  // A signature nobody can be checked against is unverified, not unchecked:
+  // deleting or repointing the endpoint is exactly the tampering it detects.
+  // Genuinely unsigned client frames are the only thing out of scope.
+  if (!key) return typeof e.sig === 'string' ? sigFailed(gen) : undefined;
   if (typeof e.sig !== 'string') return sigFailed(gen);
   var sig;
   // atob throws on malformed base64, and unwinding out of ingest would drop
@@ -362,6 +364,17 @@ function open(runId, sessionId) {
   renderMeta();
   tick = setInterval(function () { if (meta && meta.live) renderMeta(); }, 1000);
   sigGen++; sigOk = 0; sigBad = 0; sigSeen = {}; renderSig();
+  // Keys before frames: the stream replays the journal on open, and a frame
+  // arriving first would be judged against an empty key set.
+  if (!sigReady) sigReady = loadSigKeys();
+  var gen = sigGen;
+  sigReady.then(function () {
+    if (gen !== sigGen) return; // the viewer moved on while keys imported
+    startStream(runId, sessionId);
+  });
+}
+
+function startStream(runId, sessionId) {
   es = new EventSource(withToken('/api/runs/' + runId + '/sessions/' + sessionId + '/stream'));
   // onopen/onerror move ONLY the connection dot — never the review status.
   es.onopen = function () { sseDown = false; connState('ok', 'connected'); };
@@ -376,7 +389,7 @@ jumpEl.addEventListener('click', function () { logEl.scrollTop = logEl.scrollHei
 
 var lastRuns = '';
 function refreshRuns() {
-  loadSigKeys();
+  if (!sigReady) sigReady = loadSigKeys();
   fetch(withToken('/api/runs')).then(function (r) {
     if (!r.ok) throw new Error('runs ' + r.status);
     return r.text();

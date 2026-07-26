@@ -64,20 +64,24 @@ export function verifyEnvelope(line: object, publicKeyPem: string): boolean {
 }
 
 /**
- * Tally over a journal. Client frames (`dir: 'out'`) pass through unsigned by
- * design and are skipped; everything else is checked, so deleting `endpoint`
- * from a signed frame makes it fail rather than disappear. Pass `endpoint` to
- * scope a pass to one companion — a run spanning several needs a key each, and
- * another companion's frames would otherwise read as tampered.
+ * Tally over a journal. Every skip here keys on whether a line carries a
+ * signature, never on `dir` or `endpoint`: those are attacker-controlled until
+ * verified, so skipping by them lets a flipped field turn a tampered frame into
+ * an ignored one. Only an unsigned client frame is genuinely out of scope.
+ *
+ * `endpoint` scopes a pass to one companion. Signed frames belonging to another
+ * are reported as `unattributed` rather than skipped — the caller has no key for
+ * them, and silence would let changing the field empty the check.
  */
 export function verifyJournalLines(
   lines: string[],
   publicKeyPem: string,
   endpoint?: string,
-): { checked: number; verified: number; skipped: number } {
+): { checked: number; verified: number; skipped: number; unattributed: number } {
   let checked = 0;
   let verified = 0;
   let skipped = 0;
+  let unattributed = 0;
   for (const line of lines) {
     let parsed: Record<string, unknown> | undefined;
     try {
@@ -86,12 +90,17 @@ export function verifyJournalLines(
     } catch {
       /* unparseable: checked below, and never verifiable */
     }
-    if (parsed?.dir === 'out' || (endpoint !== undefined && parsed?.endpoint !== endpoint)) {
+    const signed = typeof parsed?.sig === 'string';
+    if (!signed && parsed?.dir === 'out') {
       skipped += 1;
+      continue;
+    }
+    if (signed && endpoint !== undefined && parsed?.endpoint !== endpoint) {
+      unattributed += 1;
       continue;
     }
     checked += 1;
     if (parsed && verifyEnvelope(parsed, publicKeyPem)) verified += 1;
   }
-  return { checked, verified, skipped };
+  return { checked, verified, skipped, unattributed };
 }

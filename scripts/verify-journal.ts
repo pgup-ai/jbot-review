@@ -45,6 +45,7 @@ try {
 
 let bad = 0;
 let unreadable = 0;
+let other = 0;
 for (const file of files) {
   const sessionId = file.replace(/\.ndjson$/, '');
   let lines: string[];
@@ -58,9 +59,17 @@ for (const file of files) {
     unreadable += 1;
     continue;
   }
-  const { checked, verified, skipped } = verifyJournalLines(lines, publicKey, endpoint);
+  const { checked, verified, skipped, unattributed } = verifyJournalLines(
+    lines,
+    publicKey,
+    endpoint,
+  );
   bad += checked - verified;
-  const note = skipped > 0 ? ` (${skipped} skipped)` : '';
+  other += unattributed;
+  const parts = [];
+  if (skipped > 0) parts.push(`${skipped} unsigned client`);
+  if (unattributed > 0) parts.push(`${unattributed} for another endpoint`);
+  const note = parts.length > 0 ? ` (${parts.join(', ')})` : '';
   console.log(
     `${verified === checked ? 'ok  ' : 'FAIL'} ${sessionId}: ${verified}/${checked} verified${note}`,
   );
@@ -69,5 +78,7 @@ for (const file of files) {
 // Counted apart: an unreadable session is not one bad frame, and rolling it
 // into the frame tally would understate what it hides.
 const unread = unreadable > 0 ? `, ${unreadable} unreadable session(s)` : '';
-console.log(`${files.length} session(s), ${bad} unverified frame(s)${unread}`);
+// Named, not silent: frames this key cannot speak for are still unexamined.
+const rest = other > 0 ? `, ${other} frame(s) left for another endpoint's key` : '';
+console.log(`${files.length} session(s), ${bad} unverified frame(s)${unread}${rest}`);
 process.exitCode = bad === 0 && unreadable === 0 ? 0 : 1;
