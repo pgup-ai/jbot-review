@@ -1,14 +1,14 @@
 import { timingSafeEqual } from 'node:crypto';
-import { statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import {
   appendEnvelope,
   isSafeId,
+  journalPath,
   listRuns,
   parseEnvelope,
   parseRunControl,
-  journalPath,
   readJournalLines,
   readRunStatus,
   writeRunStatus,
@@ -300,16 +300,20 @@ function handleJournal(
     res.end();
     return;
   }
-  // Same shape the stream sends: run status first, then the frames, so the
-  // viewer can process both paths with one code path.
+  // The file is already newline-delimited JSON, so it ships as-is rather than
+  // being split into lines only to be rejoined — that tripled peak memory for
+  // no gain. Same shape the stream sends: run status first, then the frames.
+  let frames: Buffer;
+  try {
+    frames = readFileSync(journalPath(dataDir, runId, sessionId));
+  } catch {
+    res.writeHead(404, { 'content-type': 'text/plain' });
+    res.end('no journal');
+    return;
+  }
   const head = status
     ? `${JSON.stringify({ v: 1, kind: 'run', runId, status, ts: Math.trunc(mtimeMs) })}\n`
     : '';
-  const body =
-    head +
-    readJournalLines(dataDir, runId, sessionId)
-      .map((l) => `${l}\n`)
-      .join('');
   res.writeHead(200, {
     'content-type': 'application/x-ndjson',
     etag,
@@ -317,7 +321,7 @@ function handleJournal(
     // be able to serve a stale transcript forever. A 304 costs one round trip.
     'cache-control': live ? 'no-store' : 'private, max-age=0, must-revalidate',
   });
-  res.end(body);
+  res.end(head ? Buffer.concat([Buffer.from(head), frames]) : frames);
 }
 
 function handleStream(res: ServerResponse, runId: string, sessionId: string): void {
