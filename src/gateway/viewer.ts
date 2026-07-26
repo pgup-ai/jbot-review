@@ -149,6 +149,10 @@ var es = null, active = null, sseDown = false, staticView = false;
 // runId -> status, from the runs poll: a finished run is fetched whole instead
 // of replayed frame by frame.
 var runStatusById = Object.create(null);
+// runId -> updatedAt, so a static view can notice a frame that landed after the
+// run was marked terminal and re-read the journal rather than stay short.
+var runUpdatedById = Object.create(null);
+var staticUpdatedAt = 0;
 var msgEl = null, thoughtEl = null;
 var meta = null, tick = null;
 
@@ -185,6 +189,14 @@ function stream(kind, text) {
   if (last && last.kind === kind) last.text += text;
   else pending.push({ kind: kind, text: text });
   if (!pendingFrame) pendingFrame = requestAnimationFrame(flushPending);
+}
+// Drops buffered text without writing it. open() clears the log for the new
+// session, so anything still queued belongs to the old one and must not follow
+// it in — flushing there would paint the previous transcript into this pane.
+function discardPending() {
+  if (pendingFrame) { cancelAnimationFrame(pendingFrame); pendingFrame = 0; }
+  pending = [];
+  metaDirty = false;
 }
 function flushPending() {
   if (pendingFrame) { cancelAnimationFrame(pendingFrame); pendingFrame = 0; }
@@ -462,6 +474,7 @@ function open(runId, sessionId) {
   if (btn) btn.classList.add('active');
   active = runId + '/' + sessionId;
   meta = { agent: '', model: '', mode: '', version: '', runStatus: '', firstTs: 0, lastTs: 0, lastSeq: 0, inTok: 0, outTok: 0, ctxUsed: 0, ctxSize: 0, live: true, started: false };
+  discardPending();
   logEl.textContent = '';
   closeStreams();
   metaEl.hidden = false;
@@ -494,6 +507,7 @@ function startStream(runId, sessionId) {
 // to the previous behaviour rather than an empty pane.
 function loadJournal(runId, sessionId) {
   staticView = true;
+  staticUpdatedAt = runUpdatedById[runId] || 0;
   connState('warn', 'loading');
   fetch(withToken('/api/runs/' + runId + '/sessions/' + sessionId + '/journal')).then(function (r) {
     if (!r.ok) throw new Error('journal ' + r.status);
@@ -542,7 +556,15 @@ function refreshRuns() {
     if (text === lastRuns) return; // unchanged: keep the DOM (and clicks) stable
     lastRuns = text;
     var runs = JSON.parse(text);
-    runs.forEach(function (r) { runStatusById[r.runId] = r.status; });
+    runs.forEach(function (r) {
+      runStatusById[r.runId] = r.status;
+      runUpdatedById[r.runId] = r.updatedAt;
+      if (staticView && active && active.indexOf(r.runId + '/') === 0 && r.updatedAt > staticUpdatedAt) {
+        staticUpdatedAt = r.updatedAt;
+        var parts = active.split('/');
+        open(parts[0], parts[1]);
+      }
+    });
     runsEl.textContent = '';
     runs.forEach(function (run) {
       var box = el('div', 'run');

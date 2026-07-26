@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
+import { createGzip } from 'node:zlib';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import {
@@ -314,14 +315,30 @@ function handleJournal(
   const head = status
     ? `${JSON.stringify({ v: 1, kind: 'run', runId, status, ts: Math.trunc(mtimeMs) })}\n`
     : '';
+  // Compressed here rather than at the proxy: a journal is ~34x smaller gzipped,
+  // and making that depend on external config would leave a standalone gateway
+  // shipping megabytes. A proxy that sees content-encoding set passes it through.
+  const gzipped = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''));
   res.writeHead(200, {
     'content-type': 'application/x-ndjson',
     etag,
+    vary: 'accept-encoding',
     // Revalidate rather than freeze: a late frame after a status write must not
     // be able to serve a stale transcript forever. A 304 costs one round trip.
     'cache-control': live ? 'no-store' : 'private, max-age=0, must-revalidate',
+    ...(gzipped ? { 'content-encoding': 'gzip' } : {}),
   });
-  res.end(head ? Buffer.concat([Buffer.from(head), frames]) : frames);
+  // Header and body written separately, never concatenated: joining them copies
+  // the whole journal a second time for nothing.
+  if (!gzipped) {
+    if (head) res.write(head);
+    res.end(frames);
+    return;
+  }
+  const gz = createGzip();
+  gz.pipe(res);
+  if (head) gz.write(head);
+  gz.end(frames);
 }
 
 function handleStream(res: ServerResponse, runId: string, sessionId: string): void {
