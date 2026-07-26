@@ -106,7 +106,7 @@ export const VIEWER_HTML = `<!doctype html>
 <main>
   <header class="meta" id="meta" hidden>
     <div class="meta-top">
-      <div class="meta-title"><span id="mRole"></span><span class="prov" id="mProv"></span></div>
+      <div class="meta-title"><span id="mRole"></span><span class="prov" id="mProv"></span><span class="prov" id="mSig"></span></div>
       <div class="status" id="mStatus"><span class="dot"></span><span id="mStatusText">idle</span></div>
     </div>
     <div class="facts" id="mFacts"></div>
@@ -229,7 +229,44 @@ function onRunStatus(d) {
   renderMeta();
 }
 
+// Envelope signatures (M2d): the companion signs what it emits, so the page
+// checks frames against the key that endpoint advertised rather than trusting
+// the gateway that served them.
+var sigKeys = {}, sigOk = 0, sigBad = 0, sigEl = document.getElementById('mSig');
+function b64bytes(b64) {
+  var raw = atob(b64), out = new Uint8Array(raw.length);
+  for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+function renderSig() {
+  if (!sigEl) return;
+  if (sigBad > 0) { sigEl.textContent = '\u26a0 ' + sigBad + ' unverified'; sigEl.style.color = 'var(--bad, #d33)'; }
+  else if (sigOk > 0) sigEl.textContent = '\u2713 signed';
+  else sigEl.textContent = '';
+}
+function loadSigKeys() {
+  return fetch(withToken('/api/endpoints')).then(function (r) { return r.json(); }).then(function (list) {
+    return Promise.all((list || []).map(function (entry) {
+      if (!entry.publicKey) return null;
+      var der = b64bytes(entry.publicKey.replace(/-----[^-]+-----/g, '').replace(/\\s+/g, ''));
+      return crypto.subtle.importKey('spki', der, { name: 'Ed25519' }, false, ['verify'])
+        .then(function (k) { sigKeys[entry.endpoint] = k; }, function () {});
+    }));
+  }).catch(function () {});
+}
+function checkSig(e) {
+  var key = sigKeys[e.endpoint];
+  // No key means nothing to check against, not a failure: unsigned observer
+  // frames and endpoints that predate signing both land here.
+  if (!key || typeof e.sig !== 'string') return;
+  var rest = {};
+  for (var k in e) if (k !== 'sig') rest[k] = e[k];
+  crypto.subtle.verify('Ed25519', key, b64bytes(e.sig), new TextEncoder().encode(JSON.stringify(rest)))
+    .then(function (ok) { if (ok) sigOk++; else sigBad++; renderSig(); }, function () { sigBad++; renderSig(); });
+}
+
 function ingest(e) {
+  checkSig(e);
   if (!meta) return;
   // EventSource auto-reconnects on any blip and the server replays the whole
   // journal, so drop frames already rendered (seq is monotonic per session).
@@ -316,6 +353,7 @@ jumpEl.addEventListener('click', function () { logEl.scrollTop = logEl.scrollHei
 
 var lastRuns = '';
 function refreshRuns() {
+  loadSigKeys();
   fetch(withToken('/api/runs')).then(function (r) {
     if (!r.ok) throw new Error('runs ' + r.status);
     return r.text();
