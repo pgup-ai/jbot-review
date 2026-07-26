@@ -82,6 +82,13 @@ in this repo; `CLAUDE.md` just points here.
    resolved location is a regression signal.
 10. **Extract pure logic for tests.** New decision logic goes in a pure
     module (like `filter.ts`), unit-tested; `runner.ts` only wires.
+11. **Compromise means shutdown, not mitigation.** Runtime components never
+    try to keep operating across a compromised peer — a compromised gateway
+    or companion is shut down and its tokens rotated. In-band integrity
+    machinery attests only downward in the trust chain (a viewer served by
+    the gateway can never audit the gateway). The post-incident audit path is
+    `scripts/verify-journal.ts` on copied journals with companion-sourced
+    keys; durable key identity is M3.
 
 ## Conventions
 

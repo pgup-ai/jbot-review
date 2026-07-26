@@ -22,6 +22,8 @@ export interface HelloControl {
   /** Sessions the companion still has live, so a reattach resumes those and
    * fails the rest (a restarted companion sends none). */
   sessions?: string[];
+  /** SPKI PEM the companion signs its envelopes with; absent means unsigned. */
+  publicKey?: string;
 }
 
 export interface OpenControl {
@@ -105,6 +107,7 @@ export function parseRelayControl(line: string): RelayControl | undefined {
         agents,
         maxSessions: max,
         ...(sessions ? { sessions } : {}),
+        ...(str(raw.publicKey) ? { publicKey: raw.publicKey } : {}),
       };
     }
     case 'open': {
@@ -177,6 +180,8 @@ export interface EndpointPresence {
   maxSessions: number;
   activeSessions: number;
   online: boolean;
+  /** Verify this endpoint's envelopes against it; absent means it signs none. */
+  publicKey?: string;
 }
 
 export function createRelay(options: RelayOptions = {}) {
@@ -267,6 +272,7 @@ export function createRelay(options: RelayOptions = {}) {
         maxSessions: hello.maxSessions,
         activeSessions: active.size,
         online,
+        ...(hello.publicKey ? { publicKey: hello.publicKey } : {}),
       }));
     },
 

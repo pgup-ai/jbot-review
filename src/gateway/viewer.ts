@@ -106,7 +106,7 @@ export const VIEWER_HTML = `<!doctype html>
 <main>
   <header class="meta" id="meta" hidden>
     <div class="meta-top">
-      <div class="meta-title"><span id="mRole"></span><span class="prov" id="mProv"></span></div>
+      <div class="meta-title"><span id="mRole"></span><span class="prov" id="mProv"></span><span class="prov" id="mSig"></span></div>
       <div class="status" id="mStatus"><span class="dot"></span><span id="mStatusText">idle</span></div>
     </div>
     <div class="facts" id="mFacts"></div>
@@ -229,7 +229,128 @@ function onRunStatus(d) {
   renderMeta();
 }
 
+// Envelope signatures (M2d): the companion signs what it emits, so the page
+// checks frames against the key that endpoint advertised rather than trusting
+// the gateway that served them.
+var sigKeys = Object.create(null), sigOk = 0, sigBad = 0, sigGaps = 0, sigLastSeq = Object.create(null), sigSeen = {}, sigGen = 0, sigLoadSeq = 0, sigReady = null, sigLoaded = false, sigStarved = false, sigSessionSigned = false, sigPendingUnsigned = 0, sigEl = document.getElementById('mSig');
+function b64bytes(b64) {
+  var raw = atob(b64), out = new Uint8Array(raw.length);
+  for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+function renderSig() {
+  var alerts = [];
+  if (sigBad > 0) alerts.push(sigBad + ' unverified');
+  if (sigGaps > 0) alerts.push(sigGaps + ' sequence gap' + (sigGaps > 1 ? 's' : ''));
+  // Colour set on every branch: leaving it behind bleeds a previous session's
+  // warning onto a clean one.
+  sigEl.style.color = alerts.length > 0 ? 'var(--bad)' : '';
+  if (alerts.length > 0) sigEl.textContent = '\u26a0 ' + alerts.join(' \u00b7 ');
+  else if (sigOk > 0) sigEl.textContent = '\u2713 signed';
+  else sigEl.textContent = '';
+}
+function loadSigKeys() {
+  // Loads race (every poll and open starts one); only the newest may write, or
+  // a slow older response would put back keys a later load had replaced.
+  var mySeq = ++sigLoadSeq;
+  return fetch(withToken('/api/endpoints')).then(function (r) { return r.json(); }).then(function (list) {
+    return Promise.all(list.map(function (entry) {
+      if (!entry.publicKey) return null;
+      // Per entry: one malformed PEM (atob throws synchronously) must cost that
+      // endpoint its key, not reject the whole load and blind every session.
+      try {
+        var der = b64bytes(entry.publicKey.replace(/-----[^-]+-----/g, '').replace(/\\s+/g, ''));
+        return crypto.subtle.importKey('spki', der, { name: 'Ed25519' }, false, ['verify'])
+          .then(function (k) { if (mySeq === sigLoadSeq) sigKeys[entry.endpoint] = k; },
+                function () { if (mySeq === sigLoadSeq) delete sigKeys[entry.endpoint]; });
+      } catch (err) {
+        // An unreadable advertisement must also unseat the previous key, or
+        // frames keep reading signed against a key the endpoint no longer
+        // provably holds — costing the endpoint its key means exactly that.
+        if (mySeq === sigLoadSeq) delete sigKeys[entry.endpoint];
+        return null;
+      }
+    }));
+  }).then(function () {
+    sigLoaded = true;
+    // A session that streamed while keys were missing was never judged (its
+    // frames stayed unseen) — replay it now that judging is possible.
+    if (sigStarved && active) {
+      sigStarved = false;
+      var parts = active.split('/');
+      open(parts[0], parts[1]);
+    }
+  }, function () { sigReady = null; });
+}
+function sha256hex(text) {
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function (buf) {
+    var bytes = new Uint8Array(buf), out = '';
+    for (var i = 0; i < bytes.length; i++) out += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+    return out;
+  });
+}
+function sigFailed(gen) { if (gen === sigGen) { sigBad++; renderSig(); } }
+function checkSig(e) {
+  // Invariants, in order: no judging without keys, and no memory of frames seen
+  // keyless (a later load must still judge them); one verdict per distinct
+  // envelope per generation, where distinct means the WHOLE envelope — seq and
+  // sig can each be copied onto rewritten bytes and must not carry a verdict
+  // with them; verdicts landing after a session switch are dropped.
+  if (!sigLoaded) { sigStarved = true; return; }
+  var gen = sigGen;
+  sha256hex(JSON.stringify(e)).then(function (id) {
+    if (gen !== sigGen || sigSeen[id]) return;
+    sigSeen[id] = 1;
+    judgeSig(e, gen);
+  });
+}
+function judgeSig(e, gen) {
+  if (typeof e.sig !== 'string') {
+    // Client frames are unsigned by design; inbound frames are not. Per frame
+    // an all-stripped companion frame and a plain observer frame look alike,
+    // so the rule is session-level: signed at all means signed throughout.
+    // Strips before the first signature wait in a pending count and land the
+    // moment one appears; a never-signed observer session stays blank.
+    if (e.dir === 'out') return;
+    if (sigSessionSigned || sigKeys[e.endpoint]) return sigFailed(gen);
+    if (gen === sigGen) sigPendingUnsigned++;
+    return;
+  }
+  if (!sigSessionSigned && gen === sigGen) {
+    sigSessionSigned = true;
+    if (sigPendingUnsigned > 0) { sigBad += sigPendingUnsigned; sigPendingUnsigned = 0; renderSig(); }
+  }
+  // Arrival-order gap tracking, since verdicts resolve async and out of order:
+  // a deleted or reordered frame surfaces here, a faked filler fails crypto
+  // below, so the badge warns either way. Exact duplicates are folded by the
+  // replay dedup and stay an offline finding.
+  if (gen === sigGen && typeof e.endpoint === 'string' && typeof e.seq === 'number') {
+    if (e.seq !== (sigLastSeq[e.endpoint] || 0) + 1) { sigGaps++; renderSig(); }
+    sigLastSeq[e.endpoint] = e.seq;
+  }
+  var key = sigKeys[e.endpoint];
+  // A signature nobody can be checked against is unverified, not unchecked.
+  if (!key) return sigFailed(gen);
+  var sig;
+  // atob throws on malformed base64, and unwinding out of ingest would drop
+  // the frame entirely — a tampered journal must not hide one.
+  try { sig = b64bytes(e.sig); } catch (err) { return sigFailed(gen); }
+  var rest = {};
+  for (var k in e) if (k !== 'sig') rest[k] = e[k];
+  crypto.subtle.verify('Ed25519', key, sig, new TextEncoder().encode(JSON.stringify(rest)))
+    .then(function (ok) {
+      // A late result from a session the viewer already left must not count.
+      if (gen !== sigGen) return;
+      if (ok) sigOk++; else sigBad++;
+      renderSig();
+    }, function () { sigFailed(gen); });
+}
+
 function ingest(e) {
+  // Only the named session: a straggler from a just-closed stream would
+  // otherwise tally into this session's badge and poison its seq dedup.
+  if (active !== e.runId + '/' + e.sessionId) return;
+  checkSig(e);
   if (!meta) return;
   // EventSource auto-reconnects on any blip and the server replays the whole
   // journal, so drop frames already rendered (seq is monotonic per session).
@@ -237,6 +358,7 @@ function ingest(e) {
     if (e.seq <= meta.lastSeq) return;
     meta.lastSeq = e.seq;
   }
+
   meta.agent = e.agent || meta.agent;
   if (e.model) meta.model = e.model;
   if (!meta.firstTs) meta.firstTs = e.ts;
@@ -302,6 +424,20 @@ function open(runId, sessionId) {
   setReview('', 'waiting…');
   renderMeta();
   tick = setInterval(function () { if (meta && meta.live) renderMeta(); }, 1000);
+  sigGen++; sigOk = 0; sigBad = 0; sigGaps = 0; sigLastSeq = Object.create(null); sigSeen = {}; sigStarved = false; sigSessionSigned = false; sigPendingUnsigned = 0; renderSig();
+  // Keys before frames: the stream replays the journal on open, and a frame
+  // arriving first would be judged against an empty key set.
+  // Fresh keys at every open: a companion that attached since the last load
+  // would otherwise read as unverified until the next poll.
+  sigReady = loadSigKeys();
+  var gen = sigGen;
+  sigReady.then(function () {
+    if (gen !== sigGen) return; // the viewer moved on while keys imported
+    startStream(runId, sessionId);
+  });
+}
+
+function startStream(runId, sessionId) {
   es = new EventSource(withToken('/api/runs/' + runId + '/sessions/' + sessionId + '/stream'));
   // onopen/onerror move ONLY the connection dot — never the review status.
   es.onopen = function () { sseDown = false; connState('ok', 'connected'); };
@@ -316,6 +452,7 @@ jumpEl.addEventListener('click', function () { logEl.scrollTop = logEl.scrollHei
 
 var lastRuns = '';
 function refreshRuns() {
+  if (!sigReady) sigReady = loadSigKeys();
   fetch(withToken('/api/runs')).then(function (r) {
     if (!r.ok) throw new Error('runs ' + r.status);
     return r.text();

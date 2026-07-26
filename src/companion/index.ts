@@ -7,7 +7,15 @@
  * Spec: docs/superpowers/specs/2026-07-24-acp-gateway-m2-design.md (M2a).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,6 +29,7 @@ import {
   type AcpAgentSpec,
 } from '../shared/acp-protocol.ts';
 import { fetchWorkspace } from './workspace.ts';
+import { generateSigningKeys, publicKeyFrom, signEnvelope } from '../shared/envelope-signature.ts';
 import { codexAuthPath } from '../shared/codex.ts';
 import { devinCredentialsPath } from '../shared/devin.ts';
 import type { ObserverEnvelope } from '../gateway/journal.ts';
@@ -47,6 +56,49 @@ const maxSessions =
     ? Number(process.env.JBOT_COMPANION_MAX_SESSIONS)
     : 2;
 
+/**
+ * Signing key for this machine, generated once and kept at 0600. The private
+ * half never leaves here: signing at the companion is what makes the journal
+ * tamper-evident against the relay rather than merely by it.
+ */
+function loadSigningKeys(): { privateKey: string; publicKey: string } {
+  const dir = join(homedir(), '.local', 'share', 'jbot-companion');
+  const path = join(dir, 'signing-key.pem');
+  // The public half sits beside it as a file the operator can copy off this
+  // machine: a journal audit that distrusts the gateway needs a key that never
+  // came from the gateway, and this is that channel.
+  const publish = (publicKey: string): void =>
+    writeFileSync(join(dir, 'signing-key.pub.pem'), publicKey, { mode: 0o644 });
+  if (existsSync(path)) {
+    const privateKey = readFileSync(path, 'utf8');
+    const publicKey = publicKeyFrom(privateKey);
+    publish(publicKey);
+    return { privateKey, publicKey };
+  }
+  const keys = generateSigningKeys();
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // Written elsewhere then linked into place: `wx` alone would expose the path
+  // before the PEM is complete, and a racing start could read half a key. The
+  // link fails if another start won, and that winner's key is the one used.
+  const staged = `${path}.${process.pid}`;
+  writeFileSync(staged, keys.privateKey, { mode: 0o600 });
+  try {
+    linkSync(staged, path);
+    publish(keys.publicKey);
+    return keys;
+  } catch (error) {
+    // Only a lost race falls back; anything else (permissions, full disk) must
+    // surface itself rather than resurface as ENOENT on a path never created.
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    const privateKey = readFileSync(path, 'utf8');
+    const publicKey = publicKeyFrom(privateKey);
+    publish(publicKey);
+    return { privateKey, publicKey };
+  } finally {
+    rmSync(staged, { force: true });
+  }
+}
+
 const log = (msg: string): void => {
   console.log(`[jbot-companion] ${msg}`);
 };
@@ -55,6 +107,9 @@ if (!gatewayUrl || !token || !endpointId) {
   console.error('Set JBOT_COMPANION_GATEWAY, JBOT_COMPANION_TOKEN, and JBOT_COMPANION_ENDPOINT.');
   process.exit(1);
 }
+
+// After the config guard, so a misconfigured start writes no key material.
+const signingKeys = loadSigningKeys();
 
 /** Built-ins use the machine's ambient auth; `name=cmd arg…` entries add any
  * ACP binary (also the test seam). Returns an error string when auth is absent. */
@@ -178,6 +233,7 @@ function hello(): HelloControl {
     // Live agents this process still holds — a fresh start sends none, so the
     // relay fails any stale sessions instead of leaving them as zombies.
     sessions: [...sessions.keys()],
+    publicKey: signingKeys.publicKey,
   };
 }
 
@@ -300,10 +356,11 @@ function openSession(control: OpenControl): void {
       agent: session.agent,
       label: session.agent,
       ...(session.model ? { model: session.model } : {}),
+      endpoint: endpointId,
       dir: 'in',
       frame,
     };
-    sendLine(JSON.stringify(envelope));
+    sendLine(JSON.stringify(signEnvelope(envelope, signingKeys.privateKey)));
   });
   child.stdout?.setEncoding('utf8');
   child.stdout?.on('data', (chunk: string) => {
