@@ -11,7 +11,6 @@ const cleanups = new Set<() => void>();
 
 function onSignal(signal: NodeJS.Signals): void {
   for (const cleanup of cleanups) cleanup();
-  cleanups.clear();
   // Drop back to the default disposition so the exit code still reports the
   // signal (128+signum) instead of a clean exit.
   for (const other of SIGNALS) process.removeListener(other, onSignal);

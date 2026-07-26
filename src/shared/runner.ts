@@ -1153,6 +1153,9 @@ async function runReviewPipeline(params: {
     cleanupCodexHome();
     cleanupClineHome();
     cleanupGrokHome();
+    // Also where the registration is dropped: the try that would otherwise
+    // release it starts below the backend setup's own throws.
+    unregisterCliHomeCleanup();
   };
   // These homes hold materialized provider credentials, so they must not
   // outlive an interrupted run.
@@ -1161,6 +1164,7 @@ async function runReviewPipeline(params: {
   if (!remoteAcp && (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID)) {
     const devinApiKey = backendSelection.devinApiKey;
     if (!devinApiKey) {
+      cleanupCliHomes();
       throw new Error(`Missing API key for ${DEVIN_PROVIDER_ID} provider.`);
     }
     const credentialsPath = writeDevinCredentials(devinApiKey);
@@ -1174,6 +1178,7 @@ async function runReviewPipeline(params: {
   ) {
     const cursorApiKey = backendSelection.cursorApiKey;
     if (!cursorApiKey) {
+      cleanupCliHomes();
       throw new Error(`Missing API key for ${CURSOR_PROVIDER_ID} provider.`);
     }
     // Cursor authenticates from CURSOR_API_KEY in each spawn's env — no
@@ -1187,6 +1192,7 @@ async function runReviewPipeline(params: {
   if (mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID) {
     const commandCodeAccessKey = backendSelection.commandCodeAccessKey;
     if (!commandCodeAccessKey) {
+      cleanupCliHomes();
       throw new Error(`Missing access key for ${COMMANDCODE_PROVIDER_ID} provider.`);
     }
     let authPath: string;
@@ -1972,7 +1978,6 @@ async function runReviewPipeline(params: {
   } finally {
     stop();
     cleanupCliHomes();
-    unregisterCliHomeCleanup();
   }
 }
 

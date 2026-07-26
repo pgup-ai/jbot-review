@@ -34,10 +34,10 @@ import {
   resolveModelName,
 } from '../shared/model.ts';
 import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
-import { onFatalSignal } from '../shared/signal-cleanup.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import type { ReviewCommit } from '../shared/review-context.ts';
 import { runPrReview } from '../shared/runner.ts';
+import { onFatalSignal } from '../shared/signal-cleanup.ts';
 import type { ReviewResult } from '../shared/types.ts';
 import { GIT_DIFF_ARGS, parseGitDiff } from '../shared/git.ts';
 import { loadDotEnv, parseOwnerRepo, renderReport } from './util.ts';
@@ -159,7 +159,6 @@ async function checkoutHead(): Promise<IsolatedCheckout> {
       // Never throw: in a finally this would mask the review's own error, and in
       // a signal handler it would skip the re-raise and leave the process alive.
       try {
-        // spawnSync so a signal handler can complete the teardown synchronously.
         spawnSync('git', ['worktree', 'remove', '--force', path], { stdio: 'ignore' });
         rmSync(path, { recursive: true, force: true }); // git leaves the directory if that failed
       } catch (error) {

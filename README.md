@@ -672,8 +672,9 @@ npm run review:local
   `origin/main`; override with `JBOT_LOCAL_BASE=<ref>`) → the **working
   tree** — uncommitted changes are reviewed; untracked files are listed but
   not reviewed. On a clean tree this equals `base...HEAD`; with no changes it
-  prints "nothing to review" and exits 0. With the ACP gateway vars set the
-  right side becomes **HEAD** in a throwaway worktree, removed afterwards — the
+  prints "nothing to review" and exits 0. When the run actually routes to the
+  ACP gateway — gateway vars set _and_ a gateway-served provider — the right
+  side becomes **HEAD** in a throwaway worktree, removed afterwards: the
   companion clones a committed ref, so uncommitted work would hand the agent a
   diff its own checkout contradicts. The run logs how much it excluded.
 - **Auth:** only the model provider credential — `PROVIDER` plus its key env
