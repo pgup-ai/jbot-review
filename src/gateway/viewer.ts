@@ -240,7 +240,10 @@ function b64bytes(b64) {
 }
 function renderSig() {
   if (!sigEl) return;
-  if (sigBad > 0) { sigEl.textContent = '\u26a0 ' + sigBad + ' unverified'; sigEl.style.color = 'var(--bad)'; }
+  // Colour set on every branch: leaving it behind bleeds a previous session's
+  // warning onto a clean one.
+  sigEl.style.color = sigBad > 0 ? 'var(--bad)' : '';
+  if (sigBad > 0) sigEl.textContent = '\u26a0 ' + sigBad + ' unverified';
   else if (sigOk > 0) sigEl.textContent = '\u2713 signed';
   else sigEl.textContent = '';
 }
