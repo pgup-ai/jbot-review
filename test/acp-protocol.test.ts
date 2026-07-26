@@ -452,9 +452,12 @@ describe('acp', () => {
 
     const codexLeakPrefix = 'jbot-codex-acp-';
     const codexBefore = readdirSync(tmpdir()).filter((entry) => entry.startsWith(codexLeakPrefix));
-    assert.throws(() =>
-      codexAcpSpec(mkdtempSync(join(tmpdir(), 'jbot-test-empty-'))).env('codex/default'),
-    );
+    const codexEmptyHome = mkdtempSync(join(tmpdir(), 'jbot-test-empty-'));
+    try {
+      assert.throws(() => codexAcpSpec(codexEmptyHome).env('codex/default'));
+    } finally {
+      rmSync(codexEmptyHome, { recursive: true, force: true });
+    }
     const codexAfter = readdirSync(tmpdir()).filter((entry) => entry.startsWith(codexLeakPrefix));
     assert.deepEqual(codexAfter, codexBefore);
 
@@ -511,9 +514,12 @@ describe('acp', () => {
     // I/O failure after mkdtemp must reclaim the temp dir (no cleanup returned).
     const devinLeakPrefix = 'jbot-devin-acp-';
     const before = readdirSync(tmpdir()).filter((entry) => entry.startsWith(devinLeakPrefix));
-    assert.throws(() =>
-      devinAcpSpec(mkdtempSync(join(tmpdir(), 'jbot-test-empty-'))).env('devin/default'),
-    );
+    const devinEmptyHome = mkdtempSync(join(tmpdir(), 'jbot-test-empty-'));
+    try {
+      assert.throws(() => devinAcpSpec(devinEmptyHome).env('devin/default'));
+    } finally {
+      rmSync(devinEmptyHome, { recursive: true, force: true });
+    }
     const after = readdirSync(tmpdir()).filter((entry) => entry.startsWith(devinLeakPrefix));
     assert.deepEqual(after, before);
     rmSync(devinHome, { recursive: true, force: true });

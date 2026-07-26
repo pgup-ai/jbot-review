@@ -48,11 +48,13 @@ const relay = createRelay({
       ? Number(process.env.JBOT_GATEWAY_RESUME_MS)
       : undefined,
   onLine: (_sessionId, _runId, _dir, line) => {
+    const envelope = parseEnvelope(line);
+    if (!envelope) return;
+    fanOut(envelope, line);
     // Journaling is observability — a write failure (ENOSPC, EACCES) must
     // never break the live relay.
     try {
-      const envelope = parseEnvelope(line);
-      if (envelope) appendEnvelope(dataDir, envelope);
+      appendEnvelope(dataDir, envelope);
     } catch (error) {
       log(`journal write failed: ${error instanceof Error ? error.message : String(error)}`);
     }

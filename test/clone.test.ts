@@ -65,6 +65,12 @@ it('clones complete fork head and upstream base histories', () => {
     assert.equal(run(cloned.dir, ['remote', 'get-url', 'origin']), headUrl);
     assert.equal(run(cloned.dir, ['remote']), 'origin');
     assert.deepEqual(readdirSync(dirname(cloned.dir)), ['repo']);
+
+    // Asserting the root is gone the instant cleanup() returns turned out to be
+    // a race detector, not a regression test: Linux CI leaks the repo subtree
+    // with rmSync reporting success, which no retry can fix. safeRm now warns
+    // instead of swallowing, so the leak is visible where it happens.
+    cleanup();
   } finally {
     cleanup?.();
     rmSync(root, { recursive: true, force: true });

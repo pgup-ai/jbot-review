@@ -1,10 +1,13 @@
-import { execFile } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { execFile, spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtemp } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { parseEnvBoolean, parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
+import { gatewayRoutedModels, remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
 import { selectReviewBackends, type CliBackendID } from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_PROVIDER_ID } from '../shared/codex.ts';
@@ -34,6 +37,7 @@ import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import type { ReviewCommit } from '../shared/review-context.ts';
 import { runPrReview } from '../shared/runner.ts';
+import { onFatalSignal } from '../shared/signal-cleanup.ts';
 import type { ReviewResult } from '../shared/types.ts';
 import { GIT_DIFF_ARGS, parseGitDiff } from '../shared/git.ts';
 import { loadDotEnv, parseOwnerRepo, renderReport } from './util.ts';
@@ -42,7 +46,8 @@ import { loadDotEnv, parseOwnerRepo, renderReport } from './util.ts';
  * Local review driver (`npm run review:local`): runs the real review pipeline
  * against merge-base→worktree changes with zero GitHub dependency — no token,
  * no PR, no API call, no fetch. See shared/git.ts for the diff-side semantics
- * (invariant #7).
+ * (invariant #7). Routing to the ACP gateway moves the right side to HEAD, so
+ * the driver and the companion's clone describe the same commit.
  */
 
 const execFileAsync = promisify(execFile);
@@ -112,6 +117,53 @@ async function localCommits(mergeBase: string): Promise<ReviewCommit[]> {
     });
 }
 
+interface IsolatedCheckout {
+  path: string;
+  head: string;
+  /** Synchronous so a signal handler can finish it before the process dies. */
+  remove: () => void;
+}
+
+/**
+ * A gateway review runs against the companion's clone of a committed ref, so
+ * the driver has to read the same bytes — diffing the dirty worktree hands the
+ * agent a diff its own checkout contradicts. A linked worktree is the cheap way
+ * to get HEAD on disk without disturbing that tree.
+ */
+async function checkoutHead(): Promise<IsolatedCheckout> {
+  const head = (await git(['rev-parse', 'HEAD'])).trim();
+  const path = await mkdtemp(join(tmpdir(), 'jbot-review-'));
+  const discard = (): void => {
+    // Never throw: in a finally this would mask the review's own error.
+    try {
+      spawnSync('git', ['worktree', 'remove', '--force', path], { stdio: 'ignore' });
+      // git leaves the directory if that failed, and a signal can land while
+      // `worktree add` is still populating it — retry past its writes.
+      rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (error) {
+      log(`Could not remove ${path}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  // Guarded from the moment the directory exists rather than once the caller
+  // holds it: `git worktree add` awaits, and a signal in that gap strands it.
+  const unregister = onFatalSignal(discard);
+  try {
+    await git(['worktree', 'add', '--detach', '--quiet', path, head]);
+  } catch (error) {
+    unregister();
+    discard();
+    throw error;
+  }
+  return {
+    path,
+    head,
+    remove: () => {
+      unregister();
+      discard();
+    },
+  };
+}
+
 /**
  * Ephemeral free port for the opencode server unless JBOT_OPENCODE_PORT pins
  * one — a developer's own opencode session often occupies the default 4096,
@@ -176,7 +228,35 @@ const INSTALL_HINTS: Record<string, string> = {
   [DEVIN_CLI_BIN]: 'curl -fsSL https://cli.devin.ai/install.sh | sh',
 };
 
+/** The runner writes telemetry under the workspace, which is the throwaway
+ * checkout when gateway-routed — keep it in the repo before that goes away. */
+function keepTelemetry(from: string): void {
+  const source = join(from, REPORT_DIR, 'telemetry.jsonl');
+  if (!existsSync(source)) return;
+  try {
+    mkdirSync(REPORT_DIR, { recursive: true });
+    copyFileSync(source, join(REPORT_DIR, 'telemetry.jsonl'));
+  } catch (error) {
+    log(`Could not keep telemetry: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function main(): Promise<void> {
+  // Adopted from review() once it knows whether the run routes to the gateway;
+  // checkoutHead covers the signal path itself from the moment it has a
+  // directory, so this only has to handle the ordinary return and throw.
+  let isolated: IsolatedCheckout | undefined;
+  try {
+    await review((checkout) => {
+      isolated = checkout;
+    });
+  } finally {
+    if (isolated) keepTelemetry(isolated.path);
+    isolated?.remove();
+  }
+}
+
+async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void> {
   // Name the observer run after the branch under review — gated on the
   // observer being on so a disabled review skips the extra git call.
   if (observerEnabled) {
@@ -184,27 +264,87 @@ async function main(): Promise<void> {
     if (headBranch) setRunName(`local-${headBranch}`);
   }
 
-  const { baseRef, mergeBase } = await resolveBase();
-  const shortBase = mergeBase.slice(0, 12);
-  log(`Diff base: ${baseRef} (merge-base ${shortBase}); right side is the working tree.`);
-  log('Note: a stale base ref widens the diff — fetch before reviewing if in doubt.');
-
-  // Disclosed before the empty-diff exit: when the only changes are brand-new
-  // untracked files, a bare "nothing to review" would be misleading.
-  const untracked = (await gitOrEmpty(['ls-files', '--others', '--exclude-standard']))
-    .split('\n')
-    .filter(Boolean);
-  if (untracked.length > 0) {
-    const shown = untracked.slice(0, 10).join(', ');
-    const more = untracked.length > 10 ? ` … and ${untracked.length - 10} more` : '';
-    log(
-      `${untracked.length} untracked file(s) not reviewed (\`git add -N\` includes them): ${shown}${more}`,
+  // Provider/model resolution mirrors src/app/server.ts. Credentials stay below
+  // the diff so a clean tree still exits "nothing to review" without a key set;
+  // the model names have to come first because they decide whether this run
+  // routes to the gateway, which is what the diff's right side depends on.
+  const provider = process.env.PROVIDER || 'opencode';
+  const providerCfg = PROVIDERS[provider];
+  if (!providerCfg) {
+    throw new Error(
+      `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
     );
   }
+  const model = formatModelName(
+    resolveModelName(provider, resolveProviderModel(provider, providerCfg, process.env.MODEL)),
+  );
+  const auxModelInput = process.env.JBOT_REVIEW_AUX_MODEL?.trim();
+  const auxProvider = auxModelInput ? process.env.JBOT_AUX_PROVIDER?.trim() || provider : provider;
+  const auxCfg = auxModelInput ? PROVIDERS[auxProvider] : undefined;
+  if (auxModelInput && !auxCfg) {
+    throw new Error(
+      `Unknown aux provider "${auxProvider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
+    );
+  }
+  const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
 
-  // Left side merge-base, right side worktree; see GIT_DIFF_ARGS for the
-  // gitconfig pins that keep the output parseable.
-  const diffText = await git([...GIT_DIFF_ARGS, mergeBase]);
+  // The companion checks out repo@ref, and both are optional. With neither it
+  // works in an empty workspace, so the worktree diff stands — there is nothing
+  // to align with. With both, the diff has to describe that same commit.
+  const gateway = remoteAcpConfigFromEnv();
+  const routed = gateway && gatewayRoutedModels([model, auxModel]) ? gateway : undefined;
+  if (routed?.repo && !routed.ref) {
+    throw new Error(
+      'JBOT_ACP_GATEWAY_REPO is set without JBOT_ACP_GATEWAY_REF: the companion would review a ' +
+        'default-branch checkout, which matches neither the working tree nor HEAD. Set the ref ' +
+        'to the commit under review, or unset the repo to run against an empty workspace.',
+    );
+  }
+  // Both, not either: a ref without a repo still leaves the companion empty.
+  const isolated = routed?.repo && routed.ref ? await checkoutHead() : undefined;
+  if (isolated) {
+    // Pin the companion to the commit actually diffed, read back below by
+    // remoteAcpConfigFromEnv: the configured ref may name another branch, or be
+    // a branch that advances mid-run, and either way the agent would read a
+    // different revision from the one this prompt describes.
+    process.env.JBOT_ACP_GATEWAY_REF = isolated.head;
+  }
+  if (isolated) adopt(isolated);
+
+  const { baseRef, mergeBase } = await resolveBase();
+  const shortBase = mergeBase.slice(0, 12);
+  // Deepen target for the companion: a shallow clone that stops short of the
+  // base cannot run the merge-base diff this prompt describes.
+  if (isolated) process.env.JBOT_ACP_GATEWAY_BASE = mergeBase;
+  const rightSide = isolated ? `HEAD ${isolated.head.slice(0, 12)}` : 'the working tree';
+  log(`Diff base: ${baseRef} (merge-base ${shortBase}); right side is ${rightSide}.`);
+  log('Note: a stale base ref widens the diff — fetch before reviewing if in doubt.');
+
+  // Disclosed before the empty-diff exit, or a bare "nothing to review" misleads.
+  if (isolated) {
+    const pending = (await gitOrEmpty(['status', '--porcelain']))
+      .split('\n')
+      .filter(Boolean).length;
+    log(
+      `ACP gateway configured: reviewing committed HEAD from an isolated checkout so the diff ` +
+        `matches the companion's clone${pending ? `; ${pending} uncommitted change(s) excluded` : ''}.`,
+    );
+  } else {
+    const untracked = (await gitOrEmpty(['ls-files', '--others', '--exclude-standard']))
+      .split('\n')
+      .filter(Boolean);
+    if (untracked.length > 0) {
+      const shown = untracked.slice(0, 10).join(', ');
+      const more = untracked.length > 10 ? ` … and ${untracked.length - 10} more` : '';
+      log(
+        `${untracked.length} untracked file(s) not reviewed (\`git add -N\` includes them): ${shown}${more}`,
+      );
+    }
+  }
+
+  // Left side merge-base; see GIT_DIFF_ARGS for the gitconfig pins that keep
+  // the output parseable.
+  const diffText = await git([...GIT_DIFF_ARGS, mergeBase, ...(isolated ? [isolated.head] : [])]);
   const files = parseGitDiff(diffText);
   // Exit before requiring credentials when nothing the runner would review is
   // present: parseGitDiff yields patchless entries for binary/mode-only/pure-
@@ -218,15 +358,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Provider/model/key resolution mirrors src/app/server.ts. Deliberately
-  // after the diff: a clean tree exits "nothing to review" with no key set.
-  const provider = process.env.PROVIDER || 'opencode';
-  const providerCfg = PROVIDERS[provider];
-  if (!providerCfg) {
-    throw new Error(
-      `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-    );
-  }
   const apiKey = resolveProviderCredential(providerCfg, ({ env }) => process.env[env]);
   if (!apiKey) {
     const envNames = providerCredentialSources(providerCfg)
@@ -238,22 +369,10 @@ async function main(): Promise<void> {
     );
   }
   const baseURL = resolveProviderBaseURL(provider, providerCfg, ({ env }) => process.env[env]);
-  const model = formatModelName(
-    resolveModelName(provider, resolveProviderModel(provider, providerCfg, process.env.MODEL)),
-  );
-  const auxModelInput = process.env.JBOT_REVIEW_AUX_MODEL?.trim();
-  const auxProvider = auxModelInput ? process.env.JBOT_AUX_PROVIDER?.trim() || provider : provider;
-  const auxCfg = auxModelInput ? PROVIDERS[auxProvider] : undefined;
-  if (auxModelInput && !auxCfg) {
-    throw new Error(
-      `Unknown aux provider "${auxProvider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-    );
-  }
   const auxApiKey =
     auxModelInput && auxProvider !== provider && auxCfg
       ? resolveProviderCredential(auxCfg, ({ env }) => process.env[env])
       : undefined;
-  const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
   const auxBaseURL =
     auxModelInput && auxProvider !== provider && auxCfg
       ? resolveProviderBaseURL(auxProvider, auxCfg, ({ env }) => process.env[env])
@@ -320,7 +439,7 @@ async function main(): Promise<void> {
     pullNumber: 0,
     pullTitle: subject || `Local review of ${branch}`,
     pullBody: body,
-    workspace: process.cwd(),
+    workspace: isolated?.path ?? process.cwd(),
     model,
     apiKey,
     baseURL,

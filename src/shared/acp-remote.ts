@@ -11,6 +11,7 @@ import { PassThrough, Writable } from 'node:stream';
 import { createAcpReviewBackend } from './acp.ts';
 import { driveAcpSession } from './acp-protocol.ts';
 import { parseEnvelope } from '../gateway/journal.ts';
+import { parseModelName } from './model.ts';
 import type { AckControl, EndpointPresence } from '../gateway/relay.ts';
 import { parseRelayControl } from '../gateway/relay.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
@@ -22,6 +23,20 @@ const GATEWAY_TIMEOUT_MS = 60_000;
 /** Providers the gateway can serve — the ones with an ACP engine (see acp.ts). */
 export const ACP_GATEWAY_PROVIDERS = ['devin', 'cursor', 'codex', 'kilo'] as const;
 
+/**
+ * Whether any of these models would reach a companion. Gateway *routing*, not
+ * merely gateway config, is what forces local mode onto the committed ref — a
+ * run configured with gateway vars but pointed elsewhere stays local and must
+ * keep reviewing the working tree.
+ */
+export function gatewayRoutedModels(models: (string | undefined)[]): boolean {
+  return models.some(
+    (name) =>
+      name &&
+      (ACP_GATEWAY_PROVIDERS as readonly string[]).includes(parseModelName(name).providerID),
+  );
+}
+
 export interface RemoteAcpConfig {
   gateway: string;
   token: string;
@@ -32,6 +47,8 @@ export interface RemoteAcpConfig {
   /** Checked out by the companion so the agent can explore the code it reviews. */
   repo?: string;
   ref?: string;
+  /** Merge base, so the companion deepens until the diff the prompt shows is runnable. */
+  base?: string;
 }
 
 /** Present only when all three required vars are set; the agent comes from the
@@ -58,6 +75,9 @@ export function remoteAcpConfigFromEnv(): Omit<RemoteAcpConfig, 'agent'> | undef
       : {}),
     ...(process.env.JBOT_ACP_GATEWAY_REF?.trim()
       ? { ref: process.env.JBOT_ACP_GATEWAY_REF.trim() }
+      : {}),
+    ...(process.env.JBOT_ACP_GATEWAY_BASE?.trim()
+      ? { base: process.env.JBOT_ACP_GATEWAY_BASE.trim() }
       : {}),
   };
 }
@@ -241,6 +261,7 @@ async function runRemotePrompt(
       model,
       ...(config.repo ? { repo: config.repo } : {}),
       ...(config.ref ? { ref: config.ref } : {}),
+      ...(config.base ? { base: config.base } : {}),
     });
     // Fail on the real status (401/413/5xx) instead of waiting out the ack.
     if (!opened.ok) throw new Error(`${label}: gateway rejected the open (${opened.status})`);

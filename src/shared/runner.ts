@@ -78,6 +78,7 @@ import {
   selectLensKeys,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
+import { onFatalSignal } from './signal-cleanup.ts';
 import {
   startOpencode,
   configureSessionConcurrency,
@@ -1148,15 +1149,37 @@ async function runReviewPipeline(params: {
   // Multiple CLI homes can be live at once (e.g. main=codex, aux=commandcode), so
   // clean every one at every downstream failure/exit point.
   const cleanupCliHomes = (): void => {
-    cleanupCommandCodeHome();
-    cleanupCodexHome();
-    cleanupClineHome();
-    cleanupGrokHome();
+    // Independently: force only suppresses a missing path, so one failed
+    // removal would otherwise leave the remaining credential homes on disk.
+    for (const cleanup of [
+      cleanupCommandCodeHome,
+      cleanupCodexHome,
+      cleanupClineHome,
+      cleanupGrokHome,
+    ]) {
+      try {
+        cleanup();
+      } catch (error) {
+        log(`CLI home teardown failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    // Also where the registration is dropped: the try that would otherwise
+    // release it starts below the backend setup's own throws.
+    unregisterCliHomes?.();
+    unregisterCliHomes = undefined;
+  };
+  // Armed only once a home exists, so the setup throws above it — which reach
+  // no cleanup of their own — cannot strand a registration. The homes hold
+  // materialized provider credentials and must not outlive an interrupted run.
+  let unregisterCliHomes: (() => void) | undefined;
+  const guardCliHomes = (): void => {
+    unregisterCliHomes ??= onFatalSignal(cleanupCliHomes);
   };
 
   if (!remoteAcp && (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID)) {
     const devinApiKey = backendSelection.devinApiKey;
     if (!devinApiKey) {
+      cleanupCliHomes();
       throw new Error(`Missing API key for ${DEVIN_PROVIDER_ID} provider.`);
     }
     const credentialsPath = writeDevinCredentials(devinApiKey);
@@ -1170,6 +1193,7 @@ async function runReviewPipeline(params: {
   ) {
     const cursorApiKey = backendSelection.cursorApiKey;
     if (!cursorApiKey) {
+      cleanupCliHomes();
       throw new Error(`Missing API key for ${CURSOR_PROVIDER_ID} provider.`);
     }
     // Cursor authenticates from CURSOR_API_KEY in each spawn's env — no
@@ -1183,14 +1207,16 @@ async function runReviewPipeline(params: {
   if (mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID) {
     const commandCodeAccessKey = backendSelection.commandCodeAccessKey;
     if (!commandCodeAccessKey) {
+      cleanupCliHomes();
       throw new Error(`Missing access key for ${COMMANDCODE_PROVIDER_ID} provider.`);
     }
     let authPath: string;
     try {
       commandCodeHome = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
+      guardCliHomes();
       authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
     } catch (error) {
-      cleanupCommandCodeHome();
+      cleanupCliHomes();
       throw error;
     }
     log(`CommandCode CLI auth configured at ${authPath}.`);
@@ -1207,6 +1233,7 @@ async function runReviewPipeline(params: {
     let authPath: string;
     try {
       codexHome = mkdtempSync(join(tmpdir(), 'jbot-codex-home-'));
+      guardCliHomes();
       authPath = writeCodexAuth(codexAuth, codexHome);
     } catch (error) {
       cleanupCliHomes();
@@ -1226,6 +1253,7 @@ async function runReviewPipeline(params: {
     let authPath: string;
     try {
       clineHome = mkdtempSync(join(tmpdir(), 'jbot-cline-home-'));
+      guardCliHomes();
       authPath = writeClineAuth(clineAuth, clineHome);
     } catch (error) {
       cleanupCliHomes();
@@ -1247,6 +1275,7 @@ async function runReviewPipeline(params: {
     let runtime: GrokRuntime;
     try {
       grokHome = mkdtempSync(join(tmpdir(), 'jbot-grok-home-'));
+      guardCliHomes();
       runtime = configureGrokHome(grokCredential, grokHome);
       await assertGrokAuthenticated(runtime);
     } catch (error) {

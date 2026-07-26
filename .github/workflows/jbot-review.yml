@@ -179,6 +179,19 @@ jobs:
           # Reuse the code-independent layers main published to :buildcache;
           # only COPY dist/ rebuilds. No cache-to — PRs read, don't write.
           cache-from: type=registry,ref=ghcr.io/pgup-ai/jbot-review:buildcache
+      # issue_comment and workflow_dispatch carry no pull_request payload, so
+      # the base the companion deepens to has to be looked up for those events.
+      - id: base
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}
+          EVENT_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          sha="$EVENT_BASE"
+          # Fail open: without a base the companion just keeps its initial depth,
+          # which must not cost the whole review.
+          [ -n "$sha" ] || sha=$(gh api "repos/${{ github.repository }}/pulls/$PR" --jq .base.sha || true)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: ./
         # Observer tee: streams ACP session frames to the live viewer.
         # Fail-open by design, and a no-op when the secrets are absent (forks):
@@ -198,6 +211,7 @@ jobs:
           # Same resolution the checkout step uses: pull_request carries the
           # head SHA, while issue_comment/workflow_dispatch resolve the PR ref.
           JBOT_ACP_GATEWAY_REF: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs['pr-number'] || github.event.issue.number) }}
+          JBOT_ACP_GATEWAY_BASE: ${{ steps.base.outputs.sha }}
           # One run id per invocation (run+attempt), not per PR: re-reviews of a
           # PR share a runId otherwise, and the gateway's append+seq-dedup
           # journal then drops the newer transcript as already-seen.

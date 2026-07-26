@@ -33,6 +33,7 @@ export interface OpenControl {
   model?: string;
   repo?: string;
   ref?: string;
+  base?: string;
 }
 
 export interface AckControl {
@@ -119,6 +120,7 @@ export function parseRelayControl(line: string): RelayControl | undefined {
         ...(str(raw.model) ? { model: raw.model } : {}),
         ...(str(raw.repo) ? { repo: raw.repo } : {}),
         ...(str(raw.ref) ? { ref: raw.ref } : {}),
+        ...(str(raw.base) ? { base: raw.base } : {}),
       };
     }
     case 'opened':

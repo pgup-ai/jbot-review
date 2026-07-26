@@ -8,6 +8,7 @@ import { describe, it } from 'node:test';
 import {
   checkEndpointReady,
   createRemoteAcpBackend,
+  gatewayRoutedModels,
   remoteAcpConfigFromEnv,
 } from '../src/shared/acp-remote.ts';
 import { readJournalLines } from '../src/gateway/journal.ts';
@@ -159,5 +160,16 @@ describe('remote acp backend', () => {
       gateway?.kill('SIGKILL');
       rmSync(dataDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('gatewayRoutedModels', () => {
+  it('is true only when a model resolves to a provider the gateway serves', () => {
+    assert.equal(gatewayRoutedModels(['devin/glm-5.2', undefined]), true);
+    // Aux alone is enough: the runner routes either role.
+    assert.equal(gatewayRoutedModels(['opencode/grok-code', 'kilo/kilo-auto']), true);
+    // Configured-but-unrouted — local review must keep reviewing the worktree.
+    assert.equal(gatewayRoutedModels(['opencode/grok-code', undefined]), false);
+    assert.equal(gatewayRoutedModels([undefined, undefined]), false);
   });
 });
