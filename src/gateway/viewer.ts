@@ -232,7 +232,7 @@ function onRunStatus(d) {
 // Envelope signatures (M2d): the companion signs what it emits, so the page
 // checks frames against the key that endpoint advertised rather than trusting
 // the gateway that served them.
-var sigKeys = {}, sigOk = 0, sigBad = 0, sigEl = document.getElementById('mSig');
+var sigKeys = {}, sigOk = 0, sigBad = 0, sigSeen = {}, sigGen = 0, sigEl = document.getElementById('mSig');
 function b64bytes(b64) {
   var raw = atob(b64), out = new Uint8Array(raw.length);
   for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
@@ -254,25 +254,37 @@ function loadSigKeys() {
     }));
   }).catch(function () {});
 }
-function sigFailed() { sigBad++; renderSig(); }
+function sigFailed(gen) { if (gen === sigGen) { sigBad++; renderSig(); } }
 function checkSig(e) {
+  // Runs before the seq dedup, or a tampered frame could carry a replayed seq
+  // and be dropped unchecked; this keeps each frame counted exactly once.
+  var id = e.sessionId + '#' + e.seq;
+  if (sigSeen[id]) return;
+  sigSeen[id] = 1;
+  var gen = sigGen;
   var key = sigKeys[e.endpoint];
   // No advertised key means nothing to check against — observer frames and
   // endpoints predating signing land here. Once a key exists the frame must
   // carry a signature, or stripping one would be cheaper than forging it.
   if (!key) return;
-  if (typeof e.sig !== 'string') return sigFailed();
+  if (typeof e.sig !== 'string') return sigFailed(gen);
   var sig;
   // atob throws on malformed base64, and unwinding out of ingest would drop
   // the frame entirely — a tampered journal must not hide one.
-  try { sig = b64bytes(e.sig); } catch (err) { return sigFailed(); }
+  try { sig = b64bytes(e.sig); } catch (err) { return sigFailed(gen); }
   var rest = {};
   for (var k in e) if (k !== 'sig') rest[k] = e[k];
   crypto.subtle.verify('Ed25519', key, sig, new TextEncoder().encode(JSON.stringify(rest)))
-    .then(function (ok) { if (ok) sigOk++; else sigBad++; renderSig(); }, sigFailed);
+    .then(function (ok) {
+      // A late result from a session the viewer already left must not count.
+      if (gen !== sigGen) return;
+      if (ok) sigOk++; else sigBad++;
+      renderSig();
+    }, function () { sigFailed(gen); });
 }
 
 function ingest(e) {
+  checkSig(e);
   if (!meta) return;
   // EventSource auto-reconnects on any blip and the server replays the whole
   // journal, so drop frames already rendered (seq is monotonic per session).
@@ -280,9 +292,7 @@ function ingest(e) {
     if (e.seq <= meta.lastSeq) return;
     meta.lastSeq = e.seq;
   }
-  // After the dedup: a reconnect replays the journal, and re-counting a frame
-  // would drift the tally without bound.
-  checkSig(e);
+
   meta.agent = e.agent || meta.agent;
   if (e.model) meta.model = e.model;
   if (!meta.firstTs) meta.firstTs = e.ts;
@@ -348,7 +358,7 @@ function open(runId, sessionId) {
   setReview('', 'waiting…');
   renderMeta();
   tick = setInterval(function () { if (meta && meta.live) renderMeta(); }, 1000);
-  sigOk = 0; sigBad = 0; renderSig();
+  sigGen++; sigOk = 0; sigBad = 0; sigSeen = {}; renderSig();
   es = new EventSource(withToken('/api/runs/' + runId + '/sessions/' + sessionId + '/stream'));
   // onopen/onerror move ONLY the connection dot — never the review status.
   es.onopen = function () { sseDown = false; connState('ok', 'connected'); };

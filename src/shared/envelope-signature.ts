@@ -64,32 +64,34 @@ export function verifyEnvelope(line: object, publicKeyPem: string): boolean {
 }
 
 /**
- * Tally over a journal. Only companion-emitted frames carry `endpoint`, and
- * only those are signed — client frames pass through unsigned by design, so
- * counting them as failures would fail every real journal. An unparseable line
- * is checked and unverified: it cannot be shown intact.
+ * Tally over a journal. Client frames (`dir: 'out'`) pass through unsigned by
+ * design and are skipped; everything else is checked, so deleting `endpoint`
+ * from a signed frame makes it fail rather than disappear. Pass `endpoint` to
+ * scope a pass to one companion — a run spanning several needs a key each, and
+ * another companion's frames would otherwise read as tampered.
  */
 export function verifyJournalLines(
   lines: string[],
   publicKeyPem: string,
+  endpoint?: string,
 ): { checked: number; verified: number; skipped: number } {
   let checked = 0;
   let verified = 0;
   let skipped = 0;
   for (const line of lines) {
-    let parsed: unknown;
+    let parsed: Record<string, unknown> | undefined;
     try {
-      parsed = JSON.parse(line);
+      const value: unknown = JSON.parse(line);
+      if (value && typeof value === 'object') parsed = value as Record<string, unknown>;
     } catch {
-      checked += 1;
-      continue;
+      /* unparseable: checked below, and never verifiable */
     }
-    if (!parsed || typeof parsed !== 'object' || !('endpoint' in parsed)) {
+    if (parsed?.dir === 'out' || (endpoint !== undefined && parsed?.endpoint !== endpoint)) {
       skipped += 1;
       continue;
     }
     checked += 1;
-    if (verifyEnvelope(parsed, publicKeyPem)) verified += 1;
+    if (parsed && verifyEnvelope(parsed, publicKeyPem)) verified += 1;
   }
   return { checked, verified, skipped };
 }

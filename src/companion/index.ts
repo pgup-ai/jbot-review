@@ -7,7 +7,15 @@
  * Spec: docs/superpowers/specs/2026-07-24-acp-gateway-m2-design.md (M2a).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -62,15 +70,20 @@ function loadSigningKeys(): { privateKey: string; publicKey: string } {
   }
   const keys = generateSigningKeys();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // Written elsewhere then linked into place: `wx` alone would expose the path
+  // before the PEM is complete, and a racing start could read half a key. The
+  // link fails if another start won, and that winner's key is the one used.
+  const staged = `${path}.${process.pid}`;
+  writeFileSync(staged, keys.privateKey, { mode: 0o600 });
   try {
-    // `wx` so two first starts cannot each advertise a key while one survives:
-    // the loser reads the winner's rather than signing with an orphan.
-    writeFileSync(path, keys.privateKey, { mode: 0o600, flag: 'wx' });
+    linkSync(staged, path);
+    return keys;
   } catch {
     const privateKey = readFileSync(path, 'utf8');
     return { privateKey, publicKey: publicKeyFrom(privateKey) };
+  } finally {
+    rmSync(staged, { force: true });
   }
-  return keys;
 }
 
 const log = (msg: string): void => {

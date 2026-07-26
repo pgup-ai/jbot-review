@@ -75,5 +75,22 @@ describe('verifyJournalLines', () => {
       verifyJournalLines([good, tampered, JSON.stringify(envelope), '{oops'], publicKey),
       { checked: 4, verified: 1, skipped: 0 },
     );
+
+    // Deleting `endpoint` must not turn a signed frame into a skipped one, or
+    // an altered journal could still exit green.
+    const { endpoint: _dropped, ...noEndpoint } = JSON.parse(good) as Record<string, unknown>;
+    assert.deepEqual(verifyJournalLines([JSON.stringify(noEndpoint)], publicKey), {
+      checked: 1,
+      verified: 0,
+      skipped: 0,
+    });
+
+    // Scoping to one companion skips another's frames rather than failing them.
+    const other = JSON.stringify(signEnvelope({ ...envelope, endpoint: 'other' }, privateKey));
+    assert.deepEqual(verifyJournalLines([good, other], publicKey, 'e2e'), {
+      checked: 1,
+      verified: 1,
+      skipped: 1,
+    });
   });
 });

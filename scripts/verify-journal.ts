@@ -8,16 +8,17 @@ import { verifyJournalLines } from '../src/shared/envelope-signature.ts';
  * the viewer, this depends on the gateway for nothing — run it where the
  * journal lives, on a copy if the host itself is in question:
  *
- *   npx tsx scripts/verify-journal.ts <runId> <publicKey.pem> [dataDir]
+ *   npx tsx scripts/verify-journal.ts <runId> <publicKey.pem> [dataDir] [endpoint]
  *
  * The key comes from /api/endpoints (`publicKey`) on the gateway. One key
- * verifies one companion, so a run spanning several needs a pass each.
+ * verifies one companion: on a run spanning several, name the endpoint so the
+ * others are skipped rather than read as tampered.
  */
-const [runId, keyPath, dataDir = process.env.JBOT_GATEWAY_DATA || 'gateway-data'] =
+const [runId, keyPath, dataDir = process.env.JBOT_GATEWAY_DATA || 'gateway-data', endpoint] =
   process.argv.slice(2);
 
 if (!runId || !keyPath) {
-  console.error('usage: verify-journal.ts <runId> <publicKey.pem> [dataDir]');
+  console.error('usage: verify-journal.ts <runId> <publicKey.pem> [dataDir] [endpoint]');
   process.exit(2);
 }
 
@@ -56,9 +57,9 @@ for (const file of files) {
     bad += 1;
     continue;
   }
-  const { checked, verified, skipped } = verifyJournalLines(lines, publicKey);
+  const { checked, verified, skipped } = verifyJournalLines(lines, publicKey, endpoint);
   bad += checked - verified;
-  const note = skipped > 0 ? ` (${skipped} unsigned client frame(s) skipped)` : '';
+  const note = skipped > 0 ? ` (${skipped} skipped)` : '';
   console.log(
     `${verified === checked ? 'ok  ' : 'FAIL'} ${sessionId}: ${verified}/${checked} verified${note}`,
   );
