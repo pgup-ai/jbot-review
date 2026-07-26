@@ -149,7 +149,10 @@ function safeRm(path: string): void {
     // root that is already empty by the time anything looks, with no git
     // process left holding it. Retrying settles it.
     rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
-  } catch {
-    // best effort
+  } catch (error) {
+    // Best effort, but not silent: swallowing this is what hid a leaked clone
+    // per review, and the errno is the only way to tell a losable race from a
+    // permanent failure.
+    console.warn(`[jbot-review] could not remove ${path}: ${String(error)}`);
   }
 }
