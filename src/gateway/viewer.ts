@@ -253,9 +253,13 @@ function loadSigKeys() {
   return fetch(withToken('/api/endpoints')).then(function (r) { return r.json(); }).then(function (list) {
     return Promise.all(list.map(function (entry) {
       if (!entry.publicKey) return null;
-      var der = b64bytes(entry.publicKey.replace(/-----[^-]+-----/g, '').replace(/\\s+/g, ''));
-      return crypto.subtle.importKey('spki', der, { name: 'Ed25519' }, false, ['verify'])
-        .then(function (k) { if (mySeq === sigLoadSeq) sigKeys[entry.endpoint] = k; }, function () {});
+      // Per entry: one malformed PEM (atob throws synchronously) must cost that
+      // endpoint its key, not reject the whole load and blind every session.
+      try {
+        var der = b64bytes(entry.publicKey.replace(/-----[^-]+-----/g, '').replace(/\\s+/g, ''));
+        return crypto.subtle.importKey('spki', der, { name: 'Ed25519' }, false, ['verify'])
+          .then(function (k) { if (mySeq === sigLoadSeq) sigKeys[entry.endpoint] = k; }, function () {});
+      } catch (err) { return null; }
     }));
   }).then(function () {
     sigLoaded = true;

@@ -64,33 +64,28 @@ export function verifyEnvelope(line: object, publicKeyPem: string): boolean {
 }
 
 /**
- * Tally over a journal. Client frames (unsigned `dir: 'out'`) pass through
- * unsigned by design and are skipped; everything else is checked, so deleting
- * `endpoint` from a signed frame makes it fail rather than disappear. Pass
- * `endpoint` to scope a pass to one companion — its signed frames elsewhere are
- * reported as `unattributed`, never silently dropped.
+ * Tally over a journal against every companion key the caller trusts. A signed
+ * frame verifies if any key fits — the endpoint field sits inside the signed
+ * payload, so there is no attacker-writable selector and no skip to bypass:
+ * only an unsigned client frame is out of scope, and a signed frame counts
+ * against `checked` no matter how its fields were rewritten.
  *
- * `breaks` counts violations of the signed sequence: the companion numbers its
- * frames 1,2,3… per session inside the signed payload, so among the frames that
- * VERIFY the run must climb by exactly one from 1. A deletion leaves a gap no
- * rewriting can hide — the survivors' signatures pin their seqs — and a
- * duplicate or reorder breaks the climb. This is what still catches a signed
- * frame whose signature was stripped and direction flipped to look like a
- * client frame: the frame itself skips, its seq vanishes, the run breaks.
- * Limits: truncation at the tail, and deletion of every signed frame at once,
- * leave no survivors to break against.
+ * `breaks` counts signed-sequence violations per endpoint: each companion
+ * numbers its frames 1,2,3… per session inside the payload, so among verified
+ * frames each endpoint's run must climb by one from 1. A deleted frame leaves
+ * a gap no rewriting can hide, which is also what still catches a signature
+ * stripped to pose as a client frame. Limits: truncation at the tail, and
+ * deletion of every signed frame at once, leave no survivors to break against.
  */
 export function verifyJournalLines(
   lines: string[],
-  publicKeyPem: string,
-  endpoint?: string,
-): { checked: number; verified: number; skipped: number; unattributed: number; breaks: number } {
+  publicKeyPems: string[],
+): { checked: number; verified: number; skipped: number; breaks: number } {
   let checked = 0;
   let verified = 0;
   let skipped = 0;
-  let unattributed = 0;
   let breaks = 0;
-  let lastSeq = 0;
+  const lastSeqByEndpoint: Record<string, number> = {};
   for (const line of lines) {
     let parsed: Record<string, unknown> | undefined;
     try {
@@ -99,21 +94,16 @@ export function verifyJournalLines(
     } catch {
       /* left undefined */
     }
-    const signed = typeof parsed?.sig === 'string';
-    if (!signed && parsed?.dir === 'out') {
+    if (typeof parsed?.sig !== 'string' && parsed?.dir === 'out') {
       skipped += 1;
       continue;
     }
-    if (signed && endpoint !== undefined && parsed?.endpoint !== endpoint) {
-      unattributed += 1;
-      continue;
-    }
     checked += 1;
-    if (parsed && verifyEnvelope(parsed, publicKeyPem)) {
-      verified += 1;
-      if (parsed.seq !== lastSeq + 1) breaks += 1;
-      if (typeof parsed.seq === 'number') lastSeq = parsed.seq;
-    }
+    if (!parsed || !publicKeyPems.some((pem) => verifyEnvelope(parsed, pem))) continue;
+    verified += 1;
+    const endpoint = typeof parsed.endpoint === 'string' ? parsed.endpoint : '';
+    if (parsed.seq !== (lastSeqByEndpoint[endpoint] ?? 0) + 1) breaks += 1;
+    if (typeof parsed.seq === 'number') lastSeqByEndpoint[endpoint] = parsed.seq;
   }
-  return { checked, verified, skipped, unattributed, breaks };
+  return { checked, verified, skipped, breaks };
 }

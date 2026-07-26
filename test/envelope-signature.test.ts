@@ -64,11 +64,10 @@ describe('verifyJournalLines', () => {
     const { privateKey, publicKey } = generateSigningKeys();
     const clientFrame = JSON.stringify({ v: 1, seq: 1, dir: 'out', frame: {} });
 
-    assert.deepEqual(verifyJournalLines([sign(privateKey, 1), clientFrame], publicKey), {
+    assert.deepEqual(verifyJournalLines([sign(privateKey, 1), clientFrame], [publicKey]), {
       checked: 1,
       verified: 1,
       skipped: 1,
-      unattributed: 0,
       breaks: 0,
     });
 
@@ -77,9 +76,9 @@ describe('verifyJournalLines', () => {
     assert.deepEqual(
       verifyJournalLines(
         [sign(privateKey, 1), tampered, JSON.stringify({ ...envelope, seq: 2 }), '{oops'],
-        publicKey,
+        [publicKey],
       ),
-      { checked: 4, verified: 1, skipped: 0, unattributed: 0, breaks: 0 },
+      { checked: 4, verified: 1, skipped: 0, breaks: 0 },
     );
 
     // A signed frame stays checked however its unverified fields are rewritten:
@@ -89,32 +88,47 @@ describe('verifyJournalLines', () => {
       string,
       unknown
     >;
-    assert.deepEqual(verifyJournalLines([flipped, JSON.stringify(stripped)], publicKey), {
+    assert.deepEqual(verifyJournalLines([flipped, JSON.stringify(stripped)], [publicKey]), {
       checked: 2,
       verified: 0,
       skipped: 0,
-      unattributed: 0,
       breaks: 0,
     });
   });
 
-  it('reports another companion frames as unattributed rather than skipping them', () => {
-    const { privateKey, publicKey } = generateSigningKeys();
+  it('audits a multi-companion run in one pass, with per-endpoint sequence runs', () => {
+    const a = generateSigningKeys();
+    const b = generateSigningKeys();
+    const journal = [
+      sign(a.privateKey, 1, 'A'),
+      sign(b.privateKey, 1, 'B'),
+      sign(a.privateKey, 2, 'A'),
+      sign(b.privateKey, 2, 'B'),
+    ];
 
-    assert.deepEqual(
-      verifyJournalLines([sign(privateKey, 1), sign(privateKey, 2, 'other')], publicKey, 'e2e'),
-      // No break: the set-aside frame sat at the tail of the run, and tail
-      // truncation is the stated limit — the unattributed count itself fails the run.
-      { checked: 1, verified: 1, skipped: 0, unattributed: 1, breaks: 0 },
-    );
+    // Both keys: everything verifies, and each endpoint's run climbs on its own.
+    assert.deepEqual(verifyJournalLines(journal, [a.publicKey, b.publicKey]), {
+      checked: 4,
+      verified: 4,
+      skipped: 0,
+      breaks: 0,
+    });
+    // One key: the other companion's frames fail rather than being set aside —
+    // there is no skip an endpoint rewrite could route a tampered frame into.
+    assert.deepEqual(verifyJournalLines(journal, [a.publicKey]), {
+      checked: 4,
+      verified: 2,
+      skipped: 0,
+      breaks: 0,
+    });
   });
 
-  it('breaks when the signed sequence gaps, repeats, or reorders', () => {
+  it('breaks when a signed sequence gaps, repeats, or reorders', () => {
     const { privateKey, publicKey } = generateSigningKeys();
     const run = (seqs: number[]) =>
       verifyJournalLines(
         seqs.map((n) => sign(privateKey, n)),
-        publicKey,
+        [publicKey],
       ).breaks;
 
     assert.equal(run([1, 2, 3]), 0);
@@ -126,7 +140,7 @@ describe('verifyJournalLines', () => {
     strippedTwo.dir = 'out';
     const hidden = verifyJournalLines(
       [sign(privateKey, 1), JSON.stringify(strippedTwo), sign(privateKey, 3)],
-      publicKey,
+      [publicKey],
     );
     assert.equal(hidden.skipped, 1);
     assert.equal(hidden.breaks, 1);

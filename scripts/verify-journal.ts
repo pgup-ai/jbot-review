@@ -4,26 +4,32 @@ import { join } from 'node:path';
 import { verifyJournalLines } from '../src/shared/envelope-signature.ts';
 
 /**
- * Checks a stored run's frames against a companion's key. Run it where the
+ * Checks a stored run's frames against its companions' keys. Run it where the
  * journal lives, on a copy if the host itself is in question:
  *
- *   npx tsx scripts/verify-journal.ts <runId> <publicKey.pem> [dataDir] [endpoint]
+ *   npx tsx scripts/verify-journal.ts <runId> <publicKey.pem>... [dataDir]
  *
- * The verdict is only as trustworthy as the key's provenance. For corruption
+ * Pass every companion's key; a frame verifies under whichever fits, so a run
+ * spanning several companions audits in one invocation.
+ *
+ * The verdict is only as trustworthy as the keys' provenance. For corruption
  * and storage tampering, /api/endpoints (`publicKey`) is fine. To audit a
- * gateway you no longer trust, the key must never have come from it: copy
- * ~/.local/share/jbot-companion/signing-key.pub.pem off the companion machine.
- * A fully compromised gateway is shut down and rotated, not argued with — this
- * tool then tells you which stored runs still deserve belief.
- *
- * One key verifies one companion: on a run spanning several, name the endpoint
- * so the others are skipped rather than read as tampered.
+ * gateway you no longer trust, the keys must never have come from it: copy
+ * ~/.local/share/jbot-companion/signing-key.pub.pem off each companion
+ * machine. A fully compromised gateway is shut down and rotated, not argued
+ * with — this tool then tells you which stored runs still deserve belief.
  */
-const [runId, keyPath, dataDir = process.env.JBOT_GATEWAY_DATA || 'gateway-data', endpoint] =
-  process.argv.slice(2);
+const args = process.argv.slice(2);
+const runId = args.shift();
+// Everything that looks like a key is one; a lone trailing non-.pem arg is the
+// data dir, matching the old positional form.
+const dataDirArg =
+  args.length > 1 && !args[args.length - 1]!.endsWith('.pem') ? args.pop() : undefined;
+const keyPaths = args;
+const dataDir = dataDirArg ?? process.env.JBOT_GATEWAY_DATA ?? 'gateway-data';
 
-if (!runId || !keyPath) {
-  console.error('usage: verify-journal.ts <runId> <publicKey.pem> [dataDir] [endpoint]');
+if (!runId || keyPaths.length === 0) {
+  console.error('usage: verify-journal.ts <runId> <publicKey.pem>... [dataDir]');
   process.exit(2);
 }
 
@@ -33,12 +39,13 @@ function fail(what: string, error: unknown): never {
   process.exit(2);
 }
 
-let publicKey = '';
-try {
-  publicKey = readFileSync(keyPath, 'utf8');
-} catch (error) {
-  fail(`cannot read key ${keyPath}`, error);
-}
+const publicKeys = keyPaths.map((keyPath) => {
+  try {
+    return readFileSync(keyPath, 'utf8');
+  } catch (error) {
+    fail(`cannot read key ${keyPath}`, error);
+  }
+});
 
 const runDir = join(dataDir, runId);
 let files: string[] = [];
@@ -49,8 +56,8 @@ try {
 }
 
 let bad = 0;
+let broken = 0;
 let unreadable = 0;
-let other = 0;
 let unsigned = 0;
 for (const file of files) {
   const sessionId = file.replace(/\.ndjson$/, '');
@@ -65,36 +72,25 @@ for (const file of files) {
     unreadable += 1;
     continue;
   }
-  const { checked, verified, skipped, unattributed, breaks } = verifyJournalLines(
-    lines,
-    publicKey,
-    endpoint,
-  );
-  bad += checked - verified + breaks;
-  other += unattributed;
+  const { checked, verified, skipped, breaks } = verifyJournalLines(lines, publicKeys);
+  bad += checked - verified;
+  broken += breaks;
   unsigned += skipped;
   const parts = [];
   if (skipped > 0) parts.push(`${skipped} unsigned`);
   if (breaks > 0)
     parts.push(`${breaks} sequence break(s): frames deleted, reordered, or duplicated`);
-  if (unattributed > 0) parts.push(`${unattributed} for another endpoint`);
   const note = parts.length > 0 ? ` (${parts.join(', ')})` : '';
   console.log(
     `${verified === checked && breaks === 0 ? 'ok  ' : 'FAIL'} ${sessionId}: ${verified}/${checked} verified${note}`,
   );
 }
 
-// Counted apart: an unreadable session is not one bad frame, and rolling it
-// into the frame tally would understate what it hides.
-const unread = unreadable > 0 ? `, ${unreadable} unreadable session(s)` : '';
-// Unexamined is not clean: rewriting endpoints would otherwise empty a scoped
-// pass and still exit 0. Supply each companion's key to complete the audit.
-const rest = other > 0 ? `, ${other} frame(s) UNEXAMINED (need another endpoint's key)` : '';
 // Reported, not failed: client frames carry no signature until clients hold
-// keys, so failing on them is an alarm nothing can clear. That leaves a
-// stripped signature indistinguishable from a client frame — a gap in a
-// companion's signed seq run is the detector for that, once seq numbering per
-// endpoint is confirmed contiguous.
+// keys, so failing on them is an alarm nothing can clear. A stripped signature
+// posing as one is caught by the sequence break it leaves behind.
+const unread = unreadable > 0 ? `, ${unreadable} unreadable session(s)` : '';
+const seq = broken > 0 ? `, ${broken} sequence break(s)` : '';
 const unsig = unsigned > 0 ? `, ${unsigned} unsigned frame(s)` : '';
-console.log(`${files.length} session(s), ${bad} unverified frame(s)${unread}${rest}${unsig}`);
-process.exitCode = bad === 0 && unreadable === 0 && other === 0 ? 0 : 1;
+console.log(`${files.length} session(s), ${bad} unverified frame(s)${seq}${unread}${unsig}`);
+process.exitCode = bad === 0 && broken === 0 && unreadable === 0 ? 0 : 1;
