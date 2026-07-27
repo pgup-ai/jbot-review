@@ -22,16 +22,16 @@ const GIT_ERROR_TAIL = 300;
 function runGit(args: string[], signal?: AbortSignal): Promise<string | undefined> {
   return new Promise((resolve) => {
     const child = spawn('git', args, {
-      // A repo the companion cannot read has to fail now: without these git
-      // waits on a credential prompt (or an askpass GUI) that never answers,
-      // and the session burns the full timeout before anyone hears why.
-      // BatchMode too, because ssh asks for host keys and passphrases on
-      // /dev/tty — neither our closed stdin nor GIT_TERMINAL_PROMPT reaches it.
-      // Appended, not replaced: an operator's own command carries the identity
-      // or jump host that makes the clone work at all.
+      // Nothing here may wait on a human: a repo the companion cannot read has
+      // to fail now, not burn the session's timeout on a prompt no one will
+      // answer. GIT_ASKPASS is emptied rather than deleted because an empty
+      // value also suppresses the core.askPass config, which GIT_TERMINAL_PROMPT
+      // does not gate. BatchMode because ssh asks on /dev/tty, out of reach of
+      // both — appended, so an operator's identity or jump host survives.
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: '0',
+        GIT_ASKPASS: '',
         GIT_SSH_COMMAND: `${process.env.GIT_SSH_COMMAND || 'ssh'} -o BatchMode=yes`,
       },
       stdio: ['ignore', 'pipe', 'pipe'],

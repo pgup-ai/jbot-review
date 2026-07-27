@@ -803,7 +803,7 @@ A journal alone doesn't prove it — the observer tee also fires for local
 backends. The session's `cwd` is what distinguishes them:
 
 ```sh
-curl -s --compressed "https://observer.example.com/api/runs/<runId>/sessions/<sessionId>/journal?token=<gateway token>" | grep -m1 session/new
+curl -s --compressed -H "authorization: Bearer <gateway token>" https://observer.example.com/api/runs/<runId>/sessions/<sessionId>/journal | grep -m1 session/new
 ```
 
 A `jbot-companion-*` temp dir means the companion served it; `/github/workspace`
