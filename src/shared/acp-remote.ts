@@ -31,7 +31,14 @@ const RUN_ID_MAX_LENGTH = 128;
  * letting the clamp above eat the suffix.
  */
 export function localRunId(branch: string, when: Date): string {
-  const stamp = when.toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
+  // Milliseconds kept: two attempts a second apart are ordinary, and dropping
+  // them would merge exactly the runs this id exists to separate.
+  const stamp = when
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/Z$/, '')
+    .replace('T', '-')
+    .replace('.', '-');
   const room = RUN_ID_MAX_LENGTH - `local--${stamp}`.length;
   return `local-${branch.slice(0, room)}-${stamp}`;
 }
