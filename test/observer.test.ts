@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { listRuns, readJournalLines, type ObserverEnvelope } from '../src/gateway/journal.ts';
+import { type ObserverEnvelope } from '@symma/protocol';
+import { listRuns, readJournalLines } from '../src/gateway/journal.ts';
 
 // The observer reads its config at import time, so it is exercised end-to-end
 // through a child process (JBOT_OBSERVER_URL set in the spawn env) rather than

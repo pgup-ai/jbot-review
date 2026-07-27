@@ -9,7 +9,7 @@ import {
 
 import { isContext7QuotaError } from './context7.ts';
 import { PROVIDERS } from './config.ts';
-import { parseModelName } from './model.ts';
+import { parseModelName } from '@symma/protocol';
 import {
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,

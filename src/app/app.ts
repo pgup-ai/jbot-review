@@ -5,7 +5,8 @@ import { createAppOctokit } from './auth.ts';
 import { clonePr } from './clone.ts';
 import { runPrReview } from '../shared/runner.ts';
 import { defaultModelOptions } from '../shared/config.ts';
-import { parseModelName, resolveAuxModelName } from '../shared/model.ts';
+import { parseModelName } from '@symma/protocol';
+import { resolveAuxModelName } from '../shared/model.ts';
 import { enqueue } from './queue.ts';
 
 export interface AppConfig {

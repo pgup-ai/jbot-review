@@ -1,5 +1,5 @@
 import { spawnWithTimeout } from '@symma/protocol';
-import { truncateForLog } from './text.ts';
+import { truncateForLog } from '@symma/protocol';
 
 const CURSOR_MODEL_LIST_TIMEOUT_MS = 60_000;
 

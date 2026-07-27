@@ -65,7 +65,7 @@ import {
   shardFilesForReview,
 } from './diff-context.ts';
 import { needsAuxOpencodeConfig, resolvePromptCachePolicy } from './config.ts';
-import { parseModelName } from './model.ts';
+import { parseModelName } from '@symma/protocol';
 import { parseAddedLines } from './patch.ts';
 import {
   COUNTED_LENS_KEYS,

@@ -22,7 +22,7 @@ import {
   buildJsonRepairFollowupPrompt,
 } from './prompt.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
-import { truncateForLog } from './text.ts';
+import { truncateForLog } from '@symma/protocol';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const ACP_PROMPT_TIMEOUT_MS = 20 * 60_000;

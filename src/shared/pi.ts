@@ -5,7 +5,7 @@ import { join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 import { GIT_DIFF_ARGS } from './git.ts';
-import { parseModelName } from './model.ts';
+import { parseModelName } from '@symma/protocol';
 import {
   formatTokenUsage,
   parseChangesSinceLastReviewSummary,

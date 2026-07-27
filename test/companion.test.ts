@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { readJournalLines, type ObserverEnvelope } from '../src/gateway/journal.ts';
+import { type ObserverEnvelope } from '@symma/protocol';
+import { readJournalLines } from '../src/gateway/journal.ts';
 
 // Scripted ACP agent: answers initialize/new/prompt like a real CLI, so the
 // black-box path (client → gateway → companion → agent and back) is exercised

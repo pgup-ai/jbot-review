@@ -4,7 +4,7 @@ import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 import type { Octokit } from '../shared/github.ts';
 import { clonePr } from '../app/clone.ts';
 import { defaultModelOptions } from '../shared/config.ts';
-import { parseModelName } from '../shared/model.ts';
+import { parseModelName } from '@symma/protocol';
 import { runPrReview } from '../shared/runner.ts';
 import type { Severity } from '../shared/types.ts';
 import type { ClaimedJob, JobUpdate } from '../shared/worker-contract.ts';

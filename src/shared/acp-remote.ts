@@ -10,10 +10,10 @@ import { PassThrough, Writable } from 'node:stream';
 
 import { createAcpReviewBackend } from './acp.ts';
 import { driveAcpSession } from './acp-protocol.ts';
-import { parseEnvelope } from '../gateway/journal.ts';
-import { parseModelName } from './model.ts';
-import type { AckControl, EndpointPresence } from '../gateway/relay.ts';
-import { parseRelayControl } from '../gateway/relay.ts';
+import { parseEnvelope } from '@symma/protocol';
+import { parseModelName } from '@symma/protocol';
+import type { AckControl, EndpointPresence } from '@symma/protocol';
+import { parseRelayControl } from '@symma/protocol';
 import type { ReviewBackend } from './session-concurrency.ts';
 
 const REMOTE_PROMPT_TIMEOUT_MS = 20 * 60_000;

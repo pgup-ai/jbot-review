@@ -8,7 +8,7 @@
  * Frame shapes mirror real ACP traffic (kilo/devin captures), so the viewer
  * is tested against what production actually emits.
  */
-import type { ObserverEnvelope } from './journal.ts';
+import type { ObserverEnvelope } from '@symma/protocol';
 
 const url = process.env.JBOT_GATEWAY_URL?.trim() || 'http://127.0.0.1:8790';
 const token = process.env.JBOT_GATEWAY_TOKEN?.trim() || '';

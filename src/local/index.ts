@@ -27,12 +27,8 @@ import { isNoiseFile } from '../shared/filter.ts';
 import { observerEnabled, setRunName } from '../shared/observer.ts';
 import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID } from '@symma/protocol';
-import {
-  formatModelName,
-  parseModelName,
-  resolveAuxModelName,
-  resolveModelName,
-} from '../shared/model.ts';
+import { parseModelName } from '@symma/protocol';
+import { formatModelName, resolveAuxModelName, resolveModelName } from '../shared/model.ts';
 import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import type { ReviewCommit } from '../shared/review-context.ts';

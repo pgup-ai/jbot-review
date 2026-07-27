@@ -5,16 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { isSafeId, parseEnvelope, type ObserverEnvelope } from '@symma/protocol';
 import {
   appendEnvelope,
-  isSafeId,
   journalPath,
   listRuns,
-  parseEnvelope,
   parseRunControl,
   readJournalLines,
   writeRunStatus,
-  type ObserverEnvelope,
 } from '../src/gateway/journal.ts';
 
 const envelope = (overrides: Partial<ObserverEnvelope> = {}): ObserverEnvelope => ({

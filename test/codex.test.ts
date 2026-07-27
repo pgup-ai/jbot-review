@@ -4,12 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import {
-  codexAuthPath,
-  codexEnvForHome,
-  isCodexProvider,
-  writeCodexAuth,
-} from '@symma/protocol';
+import { codexAuthPath, codexEnvForHome, isCodexProvider, writeCodexAuth } from '@symma/protocol';
 
 describe('Codex CLI provider helpers', () => {
   it('matches only the explicit codex provider id', () => {

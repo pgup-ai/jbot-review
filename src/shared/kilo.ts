@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { spawnWithTimeout } from '@symma/protocol';
-import { truncateForLog } from './text.ts';
+import { truncateForLog } from '@symma/protocol';
 
 const KILO_MODEL_LIST_TIMEOUT_MS = 60_000;
 

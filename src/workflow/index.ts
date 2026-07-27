@@ -10,12 +10,8 @@ import {
   resolveProviderModel,
 } from '../shared/config.ts';
 import { parseContext7Mode } from '../shared/context7.ts';
-import {
-  formatModelName,
-  parseModelName,
-  resolveAuxModelName,
-  resolveModelName,
-} from '../shared/model.ts';
+import { parseModelName } from '@symma/protocol';
+import { formatModelName, resolveAuxModelName, resolveModelName } from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { Octokit } from '../shared/github.ts';
 import type { Severity } from '../shared/types.ts';

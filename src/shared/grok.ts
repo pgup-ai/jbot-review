@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { parseModelName } from './model.ts';
+import { parseModelName } from '@symma/protocol';
 import {
   NO_TOOLS_REVIEW_DIRECTIVE,
   assembleAddressedPriorCommentsPrompt,
@@ -20,7 +20,7 @@ import {
   type TokenUsageRecorder,
 } from './opencode.ts';
 import { spawnWithTimeout } from '@symma/protocol';
-import { truncateForLog } from './text.ts';
+import { truncateForLog } from '@symma/protocol';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const GROK_PROMPT_TIMEOUT_MS = 20 * 60_000;

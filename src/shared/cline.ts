@@ -2,7 +2,7 @@ import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { parseModelName } from './model.ts';
+import { parseModelName } from '@symma/protocol';
 import {
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
@@ -21,7 +21,7 @@ import {
   type TokenUsageRecorder,
 } from './opencode.ts';
 import { spawnWithTimeout } from '@symma/protocol';
-import { truncateForLog } from './text.ts';
+import { truncateForLog } from '@symma/protocol';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const CLINE_PROMPT_TIMEOUT_MS = 20 * 60_000;

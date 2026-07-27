@@ -5,7 +5,7 @@
  * resume decisions are unit-testable without sockets.
  * Spec: docs/superpowers/specs/2026-07-24-acp-gateway-m2-design.md.
  */
-import { isSafeId } from './journal.ts';
+import { isSafeId } from '@symma/protocol';
 
 export type SendLine = (line: string) => void;
 
