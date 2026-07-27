@@ -237,6 +237,10 @@ interface AcpSessionOptions {
   /** Fail closed when plan mode is missing or cannot be set (agents with no
    * agent-side sandbox — plan mode is their behavioral read-only layer). */
   requirePlanMode?: boolean;
+  /** Relayed through a gateway, so the companion already journals these frames
+   * — signed, and attributed to its endpoint. Teeing from here too would post
+   * the same session a second time under a different id, unsigned. */
+  relayed?: boolean;
 }
 
 interface ModelOptionCandidate {
@@ -322,7 +326,7 @@ export async function driveAcpSession(
       }
       throw new Error(`unsupported agent request: ${method}`);
     },
-    makeSessionTee(agent, label, options.model),
+    options.relayed ? undefined : makeSessionTee(agent, label, options.model),
   );
 
   const init = (await conn.request('initialize', {

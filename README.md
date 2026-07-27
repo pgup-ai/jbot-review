@@ -742,6 +742,73 @@ calls, permission decisions, findings — live or replayed.
   credentials — auth is materialized into env/files and does not cross the
   ACP wire). Point the tee at a gateway you control, for repos you own.
 
+## ACP gateway
+
+Runs the review on an agent hosted by a **companion** on another machine, so
+the agent's credentials never leave it. The runner becomes a thin client: it
+drives the ACP session over the gateway while the companion spawns the agent
+and checks out the code itself.
+
+Applies only to ACP providers (`devin`, `cursor`, `codex`, `kilo`); any other
+provider ignores the gateway vars entirely.
+
+### Companion (the machine with the agent CLIs)
+
+The companion is its own process and **does not read `.env`** — pass its
+config in the environment. `JBOT_COMPANION_GATEWAY`, `_TOKEN`, and `_ENDPOINT`
+are required; the rest have defaults.
+
+| var                           | default  | notes                                                                                                                   |
+| ----------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `JBOT_COMPANION_GATEWAY`      | —        | gateway origin, no path                                                                                                 |
+| `JBOT_COMPANION_TOKEN`        | —        | this endpoint's token from the gateway's `JBOT_GATEWAY_ENDPOINTS` (`<endpoint>:<token>`) — **not** `JBOT_GATEWAY_TOKEN` |
+| `JBOT_COMPANION_ENDPOINT`     | —        | endpoint id; clients name this in `JBOT_ACP_GATEWAY_ENDPOINT`                                                           |
+| `JBOT_COMPANION_DEVICE`       | hostname | display name in the viewer                                                                                              |
+| `JBOT_COMPANION_AGENTS`       | `kilo`   | comma-separated agents to offer                                                                                         |
+| `JBOT_COMPANION_MAX_SESSIONS` | `2`      | concurrent sessions this endpoint accepts                                                                               |
+
+Attach it (reads the endpoint token straight off the gateway host):
+
+```sh
+JBOT_COMPANION_GATEWAY=https://observer.example.com JBOT_COMPANION_TOKEN="$(ssh gateway-host 'grep ^JBOT_GATEWAY_ENDPOINTS= /etc/jbot-gateway/env | cut -d: -f2-')" JBOT_COMPANION_ENDPOINT=laptop JBOT_COMPANION_DEVICE=macbook-pro JBOT_COMPANION_AGENTS=devin npm run companion
+```
+
+It logs `attached to <gateway> as <endpoint> (<agents>)`. That `cut -d: -f2-`
+is right for a single endpoint; with several configured, take the field for
+yours. Confirm from anywhere:
+
+```sh
+curl -s -H "authorization: Bearer <JBOT_GATEWAY_TOKEN>" https://observer.example.com/api/endpoints
+```
+
+### Client (the machine running the review)
+
+Three vars, all required to enable routing. `JBOT_ACP_GATEWAY_TOKEN` is the
+gateway's `JBOT_GATEWAY_TOKEN` — the same value the viewer URL carries, and a
+different credential from the companion's.
+
+```sh
+JBOT_ACP_GATEWAY_URL=https://observer.example.com JBOT_ACP_GATEWAY_TOKEN=<gateway token> JBOT_ACP_GATEWAY_ENDPOINT=laptop PROVIDER=devin MODEL=devin/default npm run review:local
+```
+
+The companion clones the repo itself, so a routed `review:local` reviews the
+committed **HEAD** in a throwaway worktree, not your working tree — push or
+commit first. For CI, `.github/workflows/jbot-review.yml` already passes all
+of it, including `JBOT_ACP_GATEWAY_REPO`/`_REF`/`_BASE`; supply the two
+secrets and the endpoint variable and pick a gateway-served provider.
+
+### Confirming a review really ran on the companion
+
+A journal alone doesn't prove it — the observer tee also fires for local
+backends. The session's `cwd` is what distinguishes them:
+
+```sh
+curl -s --compressed -H "authorization: Bearer <gateway token>" https://observer.example.com/api/runs/<runId>/sessions/<sessionId>/journal | grep -m1 session/new
+```
+
+A `jbot-companion-*` temp dir means the companion served it; `/github/workspace`
+(or your own checkout) means the agent ran locally and routing didn't engage.
+
 ## Project guidelines
 
 The action automatically discovers repo-level guidance from the checked-out workspace:
