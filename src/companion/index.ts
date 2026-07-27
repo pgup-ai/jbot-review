@@ -29,13 +29,13 @@ import {
   type AcpAgentSpec,
 } from '../shared/acp-protocol.ts';
 import { fetchWorkspace } from './workspace.ts';
-import { generateSigningKeys, publicKeyFrom, signEnvelope } from '../shared/envelope-signature.ts';
-import { codexAuthPath } from '../shared/codex.ts';
-import { devinCredentialsPath } from '../shared/devin.ts';
+import { generateSigningKeys, publicKeyFrom, signEnvelope } from '@symma/protocol';
+import { codexAuthPath } from '@symma/protocol';
+import { devinCredentialsPath } from '@symma/protocol';
 import type { ObserverEnvelope } from '../gateway/journal.ts';
 import type { HelloControl, OpenControl, RelayControl } from '../gateway/relay.ts';
 import { parseRelayControl } from '../gateway/relay.ts';
-import { terminateProcessTree } from '../shared/cli-process.ts';
+import { terminateProcessTree } from '@symma/protocol';
 
 const KILL_GRACE_MS = 2_000;
 const BACKOFF_MIN_MS = 1_000;

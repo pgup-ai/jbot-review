@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { generateSigningKeys, verifyEnvelope } from '../src/shared/envelope-signature.ts';
+import { generateSigningKeys, verifyEnvelope } from '@symma/protocol';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

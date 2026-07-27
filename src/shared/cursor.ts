@@ -1,4 +1,4 @@
-import { spawnWithTimeout } from './cli-process.ts';
+import { spawnWithTimeout } from '@symma/protocol';
 import { truncateForLog } from './text.ts';
 
 const CURSOR_MODEL_LIST_TIMEOUT_MS = 60_000;

@@ -31,7 +31,9 @@
     "@octokit/plugin-rest-endpoint-methods": "^17.0.0",
     "@octokit/webhooks": "^14.2.0",
     "@opencode-ai/sdk": "^1.18.4",
-    "@qoder-ai/qoder-agent-sdk": "^1.0.13"
+    "@qoder-ai/qoder-agent-sdk": "^1.0.13",
+    "@symma/client": "0.1.1",
+    "@symma/protocol": "0.1.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

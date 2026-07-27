@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { VIEWER_HTML } from '../src/gateway/viewer.ts';
-import { generateSigningKeys, signEnvelope } from '../src/shared/envelope-signature.ts';
+import { generateSigningKeys, signEnvelope } from '@symma/protocol';
 
 describe('viewer signature check', () => {
   it('ships the verification path with its regex escaping intact', () => {

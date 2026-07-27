@@ -9,7 +9,7 @@ import {
   codexEnvForHome,
   isCodexProvider,
   writeCodexAuth,
-} from '../src/shared/codex.ts';
+} from '@symma/protocol';
 
 describe('Codex CLI provider helpers', () => {
   it('matches only the explicit codex provider id', () => {

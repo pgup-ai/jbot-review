@@ -6,7 +6,7 @@ import {
   signEnvelope,
   verifyEnvelope,
   verifyJournalLines,
-} from '../src/shared/envelope-signature.ts';
+} from '@symma/protocol';
 
 const envelope = {
   v: 1,

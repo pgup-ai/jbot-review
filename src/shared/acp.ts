@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 
 import { driveAcpSession, type AcpAgentSpec } from './acp-protocol.ts';
-import { terminateProcessTree } from './cli-process.ts';
+import { terminateProcessTree } from '@symma/protocol';
 import {
   parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,

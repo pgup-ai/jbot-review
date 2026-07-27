@@ -16,7 +16,7 @@ import {
   type ObserverEnvelope,
   type RunControl,
 } from './journal.ts';
-import { readNdjsonBody } from './ndjson.ts';
+import { readNdjsonBody } from '@symma/protocol';
 import { createRelay, parseEndpointTokens, parseRelayControl } from './relay.ts';
 import { VIEWER_HTML } from './viewer.ts';
 

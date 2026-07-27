@@ -20,7 +20,7 @@ import {
   parseReview,
   type TokenUsageRecorder,
 } from './opencode.ts';
-import { spawnWithTimeout } from './cli-process.ts';
+import { spawnWithTimeout } from '@symma/protocol';
 import { truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
