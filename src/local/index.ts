@@ -11,7 +11,7 @@ import { gatewayRoutedModels, localRunId, remoteAcpConfigFromEnv } from '../shar
 import { selectReviewBackends, type CliBackendID } from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_PROVIDER_ID } from '@symma/protocol';
-import { CODEX_ACP_BIN } from '../shared/acp-protocol.ts';
+import { CODEX_ACP_BIN } from '@symma/protocol';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
 import {
   PROVIDERS,

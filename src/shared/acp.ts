@@ -6,7 +6,7 @@
 import { spawn } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 
-import { driveAcpSession, type AcpAgentSpec } from './acp-protocol.ts';
+import { driveAcpSession, type AcpAgentSpec } from '@symma/protocol';
 import { terminateProcessTree } from '@symma/protocol';
 import {
   parseChangesSinceLastReviewSummary,
@@ -23,6 +23,7 @@ import {
 } from './prompt.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 import { truncateForLog } from '@symma/protocol';
+import { makeSessionTee } from './observer.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const ACP_PROMPT_TIMEOUT_MS = 20 * 60_000;
@@ -73,6 +74,9 @@ async function runAcpPrompt(
           model,
           configOptionModelIds,
           requirePlanMode: spec.requirePlanMode,
+          // The package takes the tee injected; only a relayed session passes
+          // none, because the companion already journals it signed.
+          tee: makeSessionTee(spec.id, label, model),
         },
       ),
       new Promise<never>((_, reject) => {

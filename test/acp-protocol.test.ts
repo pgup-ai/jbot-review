@@ -22,7 +22,7 @@ import {
   kiloAcpSpec,
   matchModelOptionValue,
   respondToPermissionRequest,
-} from '../src/shared/acp-protocol.ts';
+} from '@symma/protocol';
 import { codexAuthPath } from '@symma/protocol';
 import { devinCredentialsPath } from '@symma/protocol';
 

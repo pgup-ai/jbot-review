@@ -27,7 +27,7 @@ import {
   kiloAcpSpec,
   respondToPermissionRequest,
   type AcpAgentSpec,
-} from '../shared/acp-protocol.ts';
+} from '@symma/protocol';
 import { fetchWorkspace } from './workspace.ts';
 import { generateSigningKeys, publicKeyFrom, signEnvelope } from '@symma/protocol';
 import { codexAuthPath } from '@symma/protocol';
