@@ -229,6 +229,15 @@ function chip(cls, tag, text) {
 }
 
 function fmt(n) { return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n || 0); }
+// Local time, and the date only when it is not today — a long transcript is
+// usually read the same day it ran, and the date is noise then.
+function stamp(ts) {
+  var d = new Date(ts);
+  var t = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return d.toDateString() === new Date().toDateString()
+    ? t
+    : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + t;
+}
 function elapsed() {
   if (!meta || !meta.firstTs) return '0:00';
   var end = meta.live ? Date.now() : meta.lastTs;
@@ -248,6 +257,10 @@ function renderMeta() {
   if (meta.mode) facts.push(fact('mode', meta.mode));
   if (meta.inTok || meta.outTok) facts.push(fact('tokens', '↑' + fmt(meta.inTok) + '  ↓' + fmt(meta.outTok)));
   if (meta.ctxSize) facts.push(fact('context', fmt(meta.ctxUsed) + ' / ' + fmt(meta.ctxSize)));
+  // When it ran, in the reader's timezone: elapsed alone cannot tell yesterday's
+  // session from this one, and the sidebar groups by run rather than by time.
+  if (meta.firstTs) facts.push(fact('started', stamp(meta.firstTs)));
+  if (!meta.live && meta.lastTs) facts.push(fact('ended', stamp(meta.lastTs)));
   facts.push(fact('elapsed', elapsed()));
   mFacts.textContent = '';
   facts.forEach(function (f) { mFacts.appendChild(f); });
