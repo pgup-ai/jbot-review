@@ -514,7 +514,7 @@ function loadJournal(runId, sessionId) {
     return r.text();
   }).then(function (text) {
     if (active !== runId + '/' + sessionId) return;
-    var lines = text.split('\n');
+    var lines = text.split('\\n');
     for (var i = 0; i < lines.length; i++) {
       if (!lines[i]) continue;
       var d;
