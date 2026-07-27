@@ -20,6 +20,22 @@ const REMOTE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 /** Bounds every gateway round trip: POSTs, the SSE connect, and the open ack. */
 const GATEWAY_TIMEOUT_MS = 60_000;
 
+/** Run ids become directory names in the journal, so they are clamped here. */
+const RUN_ID_MAX_LENGTH = 128;
+
+/**
+ * Run id for a local review. CI takes one from the workflow run and attempt;
+ * locally there is none, and without one every local review falls through to
+ * the `jbot` fallback below and piles into a single entry. The timestamp is
+ * what separates attempts, so a long branch gives up characters rather than
+ * letting the clamp above eat the suffix.
+ */
+export function localRunId(branch: string, when: Date): string {
+  const stamp = when.toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
+  const room = RUN_ID_MAX_LENGTH - `local--${stamp}`.length;
+  return `local-${branch.slice(0, room)}-${stamp}`;
+}
+
 /** Providers the gateway can serve — the ones with an ACP engine (see acp.ts). */
 export const ACP_GATEWAY_PROVIDERS = ['devin', 'cursor', 'codex', 'kilo'] as const;
 
@@ -69,7 +85,7 @@ export function remoteAcpConfigFromEnv(): Omit<RemoteAcpConfig, 'agent'> | undef
       rawRun
         .replaceAll(/[^A-Za-z0-9._-]/g, '-')
         .replace(/^[^A-Za-z0-9]+/, '')
-        .slice(0, 128) || 'jbot',
+        .slice(0, RUN_ID_MAX_LENGTH) || 'jbot',
     ...(process.env.JBOT_ACP_GATEWAY_REPO?.trim()
       ? { repo: process.env.JBOT_ACP_GATEWAY_REPO.trim() }
       : {}),
