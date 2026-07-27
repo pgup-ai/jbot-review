@@ -17,10 +17,20 @@ describe('viewer script', () => {
     const close = VIEWER_HTML.indexOf('</script>', open);
     assert.ok(open !== -1 && close !== -1, 'viewer ships an inline script');
 
-    assert.doesNotThrow(
-      () => new Function(VIEWER_HTML.slice(open + '<script>'.length, close)),
-      SyntaxError,
-    );
+    const script = VIEWER_HTML.slice(open + '<script>'.length, close);
+    assert.doesNotThrow(() => new Function(script), SyntaxError);
+
+    // Parsing is not enough for the delimiter that broke: one backslash is a
+    // SyntaxError, two split on a newline, four split on a literal backslash-n
+    // and quietly return the whole journal as a single line. Run it rather than
+    // match its text — a substring assertion carries the same escaping hazard
+    // it would be guarding.
+    const delimiter = /text\.split\((.+?)\)/.exec(script)?.[1];
+    assert.ok(delimiter, 'the journal split is still there to check');
+    const split = new Function('text', `return text.split(${delimiter})`) as (
+      text: string,
+    ) => string[];
+    assert.equal(split('a\nb').length, 2, 'journal lines split on a newline');
   });
 
   it('doubles every backslash meant for the browser', () => {
