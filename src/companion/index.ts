@@ -174,13 +174,30 @@ interface LiveSession {
   cleanup?: () => void;
 }
 
+/** An open whose clone is still running: it holds a capacity slot and can be
+ * cancelled before any agent is spawned. */
+interface PendingOpen {
+  cancelled: boolean;
+  workspace: string;
+  abort: AbortController;
+}
+
 const sessions = new Map<string, LiveSession>();
+const pending = new Map<string, PendingOpen>();
 const encoder = new TextEncoder();
 let upstream: ReadableStreamDefaultController<Uint8Array> | undefined;
 const outbox: string[] = [];
 let shuttingDown = false;
 /** Drops the current connection epoch; set while connected. */
 let abortEpoch: (() => void) | undefined;
+
+/** Drop an open still cloning: kill the git child and reclaim its temp dir.
+ * openSession sees `cancelled` and returns without spawning anything. */
+function abandonPending(slot: PendingOpen): void {
+  slot.cancelled = true;
+  slot.abort.abort();
+  discard(slot.workspace);
+}
 
 // The upstream can't deliver, so don't try to send close frames through it
 // (that would re-enter here): kill the agents, drop the epoch so no further
@@ -189,6 +206,7 @@ let abortEpoch: (() => void) | undefined;
 function failAllSessions(reason: string): void {
   log(reason);
   for (const sessionId of sessions.keys()) endSession(sessionId, reason, false);
+  for (const slot of pending.values()) abandonPending(slot);
   upstream = undefined;
   outbox.length = 0;
   abortEpoch?.();
@@ -257,6 +275,8 @@ function finalizeSession(session: LiveSession): void {
 }
 
 function endSession(sessionId: string, reason: string, notify: boolean): void {
+  const slot = pending.get(sessionId);
+  if (slot) abandonPending(slot);
   const session = sessions.get(sessionId);
   if (!session) return;
   sessions.delete(sessionId);
@@ -273,20 +293,40 @@ function endSession(sessionId: string, reason: string, notify: boolean): void {
   log(`session ${sessionId} ended: ${reason}`);
 }
 
-function openSession(control: OpenControl): void {
+async function openSession(control: OpenControl): Promise<void> {
   const refuse = (reason: string): void => {
     sendControl({ kind: 'refused', sessionId: control.sessionId, reason });
     log(`refused ${control.sessionId}: ${reason}`);
   };
-  if (sessions.size >= maxSessions) return refuse('at capacity');
-  if (sessions.has(control.sessionId)) return refuse('session id in use');
+  if (sessions.size + pending.size >= maxSessions) return refuse('at capacity');
+  if (sessions.has(control.sessionId) || pending.has(control.sessionId))
+    return refuse('session id in use');
   const spec = agents.get(control.agent);
   if (!spec) return refuse(`agent ${control.agent} not offered`);
 
   const model = control.model ?? 'default';
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-companion-'));
   if (control.repo) {
-    const failure = fetchWorkspace(workspace, control.repo, control.ref, control.base);
+    // The clone is the one await in this function: hold a slot across it so it
+    // counts against capacity and a close can cancel it. Everything after runs
+    // synchronously, so nothing can interleave between here and sessions.set.
+    const slot: PendingOpen = { cancelled: false, workspace, abort: new AbortController() };
+    pending.set(control.sessionId, slot);
+    let failure: string | undefined;
+    try {
+      failure = await fetchWorkspace(
+        workspace,
+        control.repo,
+        control.ref,
+        control.base,
+        slot.abort.signal,
+      );
+    } finally {
+      pending.delete(control.sessionId);
+    }
+    // Cancelled mid-clone: abandonPending already reclaimed the workspace, and
+    // spawning now would leave an agent nobody is waiting for.
+    if (slot.cancelled || shuttingDown) return;
     if (failure) {
       discard(workspace);
       return refuse(failure);
@@ -391,8 +431,17 @@ function handleWireLine(line: string): void {
   if (shuttingDown) return;
   const control = parseRelayControl(line);
   if (control) {
-    if (control.kind === 'open') openSession(control);
-    else if (control.kind === 'close')
+    if (control.kind === 'open') {
+      // The open is async now, so its rejection needs an owner here: an
+      // unhandled one would take the whole companion down over one session.
+      void openSession(control).catch((error: unknown) => {
+        sendControl({
+          kind: 'refused',
+          sessionId: control.sessionId,
+          reason: `open failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      });
+    } else if (control.kind === 'close')
       endSession(control.sessionId, control.reason ?? 'closed', false);
     return;
   }
@@ -506,6 +555,12 @@ function shutdown(): void {
     // outlive the process.
     terminateProcessTree(session.child, 0);
     finalizeSession(session);
+    sendControl({ kind: 'close', sessionId, reason: 'companion shutdown' });
+  }
+  // In-flight clones have no agent yet, but they do hold a git child and a temp
+  // dir — neither may outlive the process.
+  for (const [sessionId, slot] of pending) {
+    abandonPending(slot);
     sendControl({ kind: 'close', sessionId, reason: 'companion shutdown' });
   }
   // Brief grace for the close frames to reach the gateway; its resume window
