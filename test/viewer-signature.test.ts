@@ -6,8 +6,8 @@ import { generateSigningKeys, signEnvelope } from '../src/shared/envelope-signat
 
 describe('viewer signature check', () => {
   it('ships the verification path with its regex escaping intact', () => {
-    // The page is a template literal, so `\s` collapses unless doubled — the
-    // browser would then strip literal "s" from a PEM and fail every key.
+    // Escaping is guarded generally in viewer-script.test.ts; this pins that the
+    // PEM header/whitespace strip is still in the key path at all.
     assert.match(VIEWER_HTML, /replace\(\/\\s\+\/g, ''\)/);
     assert.match(VIEWER_HTML, /name: 'Ed25519'/);
     // Checked before the seq dedup, or a tampered frame carrying a replayed
