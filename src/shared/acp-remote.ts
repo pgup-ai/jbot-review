@@ -311,6 +311,7 @@ async function runRemotePrompt(
             label,
             log,
             model,
+            relayed: true,
             ...(ack.modelCandidates ? { configOptionModelIds: ack.modelCandidates } : {}),
             ...(ack.requirePlanMode ? { requirePlanMode: true } : {}),
           },

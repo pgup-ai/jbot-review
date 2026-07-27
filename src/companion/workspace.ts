@@ -27,12 +27,17 @@ function runGit(args: string[], signal?: AbortSignal): Promise<string | undefine
       // and the session burns the full timeout before anyone hears why.
       // BatchMode too, because ssh asks for host keys and passphrases on
       // /dev/tty — neither our closed stdin nor GIT_TERMINAL_PROMPT reaches it.
+      // Appended, not replaced: an operator's own command carries the identity
+      // or jump host that makes the clone work at all.
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: '0',
-        GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
+        GIT_SSH_COMMAND: `${process.env.GIT_SSH_COMMAND || 'ssh'} -o BatchMode=yes`,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
+      // SIGKILL so an abort cannot leave the child writing into a workspace
+      // the caller is about to reclaim.
+      killSignal: 'SIGKILL',
       signal,
     });
     let output = '';
@@ -45,12 +50,18 @@ function runGit(args: string[], signal?: AbortSignal): Promise<string | undefine
     }
     const timer = setTimeout(() => child.kill('SIGKILL'), GIT_TIMEOUT_MS);
     timer.unref();
-    const finish = (detail: string | undefined) => {
+    // Settled on 'close', never on 'error': 'error' fires first (abort, ENOENT)
+    // while the child is still exiting, and a caller that reclaims the
+    // workspace on it would race git into recreating the directory.
+    let spawnError: string | undefined;
+    child.on('error', (error) => {
+      spawnError = error.message;
+    });
+    child.on('close', (code) => {
       clearTimeout(timer);
+      const detail = spawnError ?? (code === 0 ? undefined : output);
       resolve(detail === undefined ? undefined : `git ${args[0]} failed: ${detail}`);
-    };
-    child.on('error', (error) => finish(error.message));
-    child.on('close', (code) => finish(code === 0 ? undefined : output));
+    });
   });
 }
 

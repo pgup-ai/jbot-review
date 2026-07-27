@@ -573,6 +573,7 @@ function shutdown(): void {
   }
   // In-flight clones hold a git child and a temp dir, and nothing runs
   // openSession's continuation past the exit below — so reclaim both here.
+  // The abort SIGKILLs, so the child cannot write again after it returns.
   for (const [sessionId, slot] of pending) {
     abandonPending(sessionId, slot);
     discard(slot.workspace);
