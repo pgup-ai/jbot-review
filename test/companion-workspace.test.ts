@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -81,20 +82,34 @@ describe('fetchWorkspace', () => {
 
   it('stops the clone when its open is cancelled', async () => {
     const { dir, clean } = workspace();
+    const origin = mkdtempSync(join(tmpdir(), 'jbot-workspace-origin-'));
     try {
-      const failure = await fetchWorkspace(
-        dir,
-        join(dir, 'no-such-repo.git'),
-        undefined,
-        undefined,
-        AbortSignal.abort(),
-      );
+      // A repo that WOULD clone: an implementation that drops the signal
+      // succeeds here and returns undefined, so this can only pass when the
+      // abort is honoured — a nonexistent path would fail either way.
+      execFileSync('git', ['-C', origin, 'init', '-q']);
+      execFileSync('git', [
+        '-C',
+        origin,
+        '-c',
+        'user.email=t@example.com',
+        '-c',
+        'user.name=t',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'base',
+      ]);
+
+      const failure = await fetchWorkspace(dir, origin, undefined, undefined, AbortSignal.abort());
 
       // Reported as a failure like any other, so the caller discards the
       // workspace instead of running an agent on an empty directory.
-      assert.match(String(failure), /^git clone failed: /);
+      assert.match(String(failure), /^git clone failed: .*abort/is);
     } finally {
       clean();
+      rmSync(origin, { recursive: true, force: true });
     }
   });
 });

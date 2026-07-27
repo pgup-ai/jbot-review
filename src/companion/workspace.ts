@@ -22,10 +22,16 @@ const GIT_ERROR_TAIL = 300;
 function runGit(args: string[], signal?: AbortSignal): Promise<string | undefined> {
   return new Promise((resolve) => {
     const child = spawn('git', args, {
-      // A repo the companion cannot read has to fail now: without this git
+      // A repo the companion cannot read has to fail now: without these git
       // waits on a credential prompt (or an askpass GUI) that never answers,
       // and the session burns the full timeout before anyone hears why.
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      // BatchMode too, because ssh asks for host keys and passphrases on
+      // /dev/tty — neither our closed stdin nor GIT_TERMINAL_PROMPT reaches it.
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
       signal,
     });

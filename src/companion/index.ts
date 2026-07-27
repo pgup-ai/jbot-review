@@ -191,12 +191,13 @@ let shuttingDown = false;
 /** Drops the current connection epoch; set while connected. */
 let abortEpoch: (() => void) | undefined;
 
-/** Drop an open still cloning: kill the git child and reclaim its temp dir.
- * openSession sees `cancelled` and returns without spawning anything. */
-function abandonPending(slot: PendingOpen): void {
+/** Drop an open still cloning: it stops holding capacity now, but its
+ * workspace is reclaimed by openSession once git has actually exited — the
+ * abort only signals, and deleting under a still-writing child recreates it. */
+function abandonPending(sessionId: string, slot: PendingOpen): void {
   slot.cancelled = true;
   slot.abort.abort();
-  discard(slot.workspace);
+  pending.delete(sessionId);
 }
 
 // The upstream can't deliver, so don't try to send close frames through it
@@ -206,7 +207,7 @@ function abandonPending(slot: PendingOpen): void {
 function failAllSessions(reason: string): void {
   log(reason);
   for (const sessionId of sessions.keys()) endSession(sessionId, reason, false);
-  for (const slot of pending.values()) abandonPending(slot);
+  for (const [sessionId, slot] of pending) abandonPending(sessionId, slot);
   upstream = undefined;
   outbox.length = 0;
   abortEpoch?.();
@@ -249,8 +250,11 @@ function hello(): HelloControl {
     agents: [...agents.keys()].map((agent) => ({ agent })),
     maxSessions,
     // Live agents this process still holds — a fresh start sends none, so the
-    // relay fails any stale sessions instead of leaving them as zombies.
-    sessions: [...sessions.keys()],
+    // relay fails any stale sessions instead of leaving them as zombies. Opens
+    // still cloning count: they have no agent yet, but the relay holds them and
+    // would otherwise fail them for a blip the clone simply outlasted.
+    // Abandoned ones are already out of `pending`, so they stay undeclared.
+    sessions: [...sessions.keys(), ...pending.keys()],
     publicKey: signingKeys.publicKey,
   };
 }
@@ -276,7 +280,7 @@ function finalizeSession(session: LiveSession): void {
 
 function endSession(sessionId: string, reason: string, notify: boolean): void {
   const slot = pending.get(sessionId);
-  if (slot) abandonPending(slot);
+  if (slot) abandonPending(sessionId, slot);
   const session = sessions.get(sessionId);
   if (!session) return;
   sessions.delete(sessionId);
@@ -321,12 +325,22 @@ async function openSession(control: OpenControl): Promise<void> {
         control.base,
         slot.abort.signal,
       );
+    } catch (error) {
+      // handleWireLine turns this into a refusal, but only this frame still
+      // knows which temp dir to reclaim.
+      discard(workspace);
+      throw error;
     } finally {
-      pending.delete(control.sessionId);
+      // Conditional: a same-id open that started after this one was abandoned
+      // owns the entry now.
+      if (pending.get(control.sessionId) === slot) pending.delete(control.sessionId);
     }
-    // Cancelled mid-clone: abandonPending already reclaimed the workspace, and
-    // spawning now would leave an agent nobody is waiting for.
-    if (slot.cancelled || shuttingDown) return;
+    // Cancelled mid-clone: git has exited by now, so this is where the
+    // workspace is safe to remove. Spawning would leave an agent nobody awaits.
+    if (slot.cancelled || shuttingDown) {
+      discard(workspace);
+      return;
+    }
     if (failure) {
       discard(workspace);
       return refuse(failure);
@@ -557,10 +571,11 @@ function shutdown(): void {
     finalizeSession(session);
     sendControl({ kind: 'close', sessionId, reason: 'companion shutdown' });
   }
-  // In-flight clones have no agent yet, but they do hold a git child and a temp
-  // dir — neither may outlive the process.
+  // In-flight clones hold a git child and a temp dir, and nothing runs
+  // openSession's continuation past the exit below — so reclaim both here.
   for (const [sessionId, slot] of pending) {
-    abandonPending(slot);
+    abandonPending(sessionId, slot);
+    discard(slot.workspace);
     sendControl({ kind: 'close', sessionId, reason: 'companion shutdown' });
   }
   // Brief grace for the close frames to reach the gateway; its resume window
