@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { parseEnvBoolean, parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
-import { gatewayRoutedModels, remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
+import { gatewayRoutedModels, localRunId, remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
 import { selectReviewBackends, type CliBackendID } from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_PROVIDER_ID } from '../shared/codex.ts';
@@ -257,11 +257,15 @@ async function main(): Promise<void> {
 }
 
 async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void> {
-  // Name the observer run after the branch under review — gated on the
-  // observer being on so a disabled review skips the extra git call.
-  if (observerEnabled) {
-    const headBranch = (await gitOrEmpty(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
-    if (headBranch) setRunName(`local-${headBranch}`);
+  // Name the run after the branch under review. CI gets a unique id from the
+  // workflow run and attempt; locally there is none, and without one every
+  // local review collapses into the gateway's `jbot` fallback together — one
+  // entry accumulating unattributable sessions. The timestamp keeps each
+  // attempt its own entry.
+  const headBranch = (await gitOrEmpty(['rev-parse', '--abbrev-ref', 'HEAD'])).trim() || 'head';
+  if (observerEnabled) setRunName(`local-${headBranch}`);
+  if (!process.env.JBOT_ACP_GATEWAY_RUN?.trim()) {
+    process.env.JBOT_ACP_GATEWAY_RUN = localRunId(headBranch, new Date());
   }
 
   // Provider/model resolution mirrors src/app/server.ts. Credentials stay below

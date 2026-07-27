@@ -9,6 +9,7 @@ import {
   checkEndpointReady,
   createRemoteAcpBackend,
   gatewayRoutedModels,
+  localRunId,
   remoteAcpConfigFromEnv,
 } from '../src/shared/acp-remote.ts';
 import { readJournalLines } from '../src/gateway/journal.ts';
@@ -171,5 +172,29 @@ describe('gatewayRoutedModels', () => {
     // Configured-but-unrouted — local review must keep reviewing the worktree.
     assert.equal(gatewayRoutedModels(['opencode/grok-code', undefined]), false);
     assert.equal(gatewayRoutedModels([undefined, undefined]), false);
+  });
+});
+
+describe('localRunId', () => {
+  const when = new Date('2026-07-27T01:00:29.123Z');
+
+  it('keeps the timestamp whatever the branch costs', () => {
+    assert.equal(localRunId('main', when), 'local-main-20260727-010029-123');
+
+    // The clamp truncates the tail, so a long branch must yield first — losing
+    // the stamp would merge every attempt on that branch into one entry again.
+    const long = localRunId('b'.repeat(400), when);
+    // Derived, not literal: this pins that the suffix survives, which is the
+    // invariant — the exact format is asserted once above.
+    const stamp = localRunId('x', when).slice('local-x'.length);
+    assert.ok(long.endsWith(stamp), 'stamp survives a long branch');
+    assert.ok(long.length <= 128, 'stays inside the clamp');
+
+    // Attempts stay distinct a second apart and within the same second.
+    assert.notEqual(localRunId('main', when), localRunId('main', new Date('2026-07-27T01:00:30Z')));
+    assert.notEqual(
+      localRunId('main', when),
+      localRunId('main', new Date('2026-07-27T01:00:29.124Z')),
+    );
   });
 });
