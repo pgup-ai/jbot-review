@@ -29,13 +29,19 @@ import {
   type AcpAgentSpec,
 } from '@symma/protocol';
 import { fetchWorkspace } from './workspace.ts';
-import { generateSigningKeys, publicKeyFrom, signEnvelope } from '@symma/protocol';
-import { codexAuthPath } from '@symma/protocol';
-import { devinCredentialsPath } from '@symma/protocol';
-import type { ObserverEnvelope } from '@symma/protocol';
-import type { HelloControl, OpenControl, RelayControl } from '@symma/protocol';
-import { parseRelayControl } from '@symma/protocol';
-import { terminateProcessTree } from '@symma/protocol';
+import {
+  codexAuthPath,
+  devinCredentialsPath,
+  generateSigningKeys,
+  parseRelayControl,
+  publicKeyFrom,
+  signEnvelope,
+  terminateProcessTree,
+  type HelloControl,
+  type ObserverEnvelope,
+  type OpenControl,
+  type RelayControl,
+} from '@symma/protocol';
 
 const KILL_GRACE_MS = 2_000;
 const BACKOFF_MIN_MS = 1_000;

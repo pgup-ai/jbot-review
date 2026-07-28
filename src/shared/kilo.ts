@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { spawnWithTimeout } from '@symma/protocol';
-import { truncateForLog } from '@symma/protocol';
+import { spawnWithTimeout } from './cli-process.ts';
+import { truncateForLog } from './text.ts';
 
 const KILO_MODEL_LIST_TIMEOUT_MS = 60_000;
 

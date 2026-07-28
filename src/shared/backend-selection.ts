@@ -1,8 +1,12 @@
 import { CLINE_PROVIDER_ID, isClineProvider } from './cline.ts';
 import { CODEX_PROVIDER_ID, isCodexProvider } from '@symma/protocol';
 import { COMMANDCODE_PROVIDER_ID, isCommandCodeProvider } from './commandcode.ts';
-import { CURSOR_PROVIDER_ID, isCursorProvider } from '@symma/protocol';
-import { DEVIN_PROVIDER_ID, isDevinProvider } from '@symma/protocol';
+import {
+  CURSOR_PROVIDER_ID,
+  DEVIN_PROVIDER_ID,
+  isCursorProvider,
+  isDevinProvider,
+} from '@symma/protocol';
 import { GROK_PROVIDER_ID, isGrokProvider } from './grok.ts';
 import { KILO_PROVIDER_ID, isKiloProvider } from '@symma/protocol';
 import { piSupportsProvider } from './pi.ts';

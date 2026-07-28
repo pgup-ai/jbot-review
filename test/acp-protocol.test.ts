@@ -23,8 +23,7 @@ import {
   matchModelOptionValue,
   respondToPermissionRequest,
 } from '@symma/protocol';
-import { codexAuthPath } from '@symma/protocol';
-import { devinCredentialsPath } from '@symma/protocol';
+import { codexAuthPath, devinCredentialsPath } from '@symma/protocol';
 
 const noLog = (): void => undefined;
 

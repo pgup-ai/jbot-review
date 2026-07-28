@@ -3,11 +3,10 @@
  * runner consumes. Local (spawn) and remote (gateway) share everything here
  * and differ only in the prompt runner they are built with.
  */
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
 
-import { driveAcpSession, type AcpAgentSpec } from '@symma/protocol';
-import { terminateProcessTree } from '@symma/protocol';
+import { driveAcpSession, terminateProcessTree, type AcpAgentSpec } from '@symma/protocol';
 import {
   parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,
@@ -31,6 +30,23 @@ const ACP_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const ACP_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 const ACP_KILL_GRACE_MS = 2_000;
 const ACP_STDERR_TAIL_BYTES = 64 * 1024;
+// A stdout that just ended means the child is on its way out; this only has to
+// outlast the gap between the pipe closing and 'close' firing.
+const ACP_EXIT_SETTLE_MS = 250;
+
+/** Exit code or signal if the child is already gone, or goes within `ms`. */
+function exitWithin(child: ChildProcess, ms: number): Promise<number | string | undefined> {
+  const settled = child.exitCode ?? child.signalCode;
+  if (settled !== null) return Promise.resolve(settled);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), ms);
+    timer.unref();
+    child.once('close', (code, signal) => {
+      clearTimeout(timer);
+      resolve(code ?? signal ?? undefined);
+    });
+  });
+}
 
 async function runAcpPrompt(
   spec: AcpAgentSpec,
@@ -74,8 +90,6 @@ async function runAcpPrompt(
           model,
           configOptionModelIds,
           requirePlanMode: spec.requirePlanMode,
-          // The package takes the tee injected; only a relayed session passes
-          // none, because the companion already journals it signed.
           tee: makeSessionTee(spec.id, label, model),
         },
       ),
@@ -111,6 +125,16 @@ async function runAcpPrompt(
       );
     }
     return result.text;
+  } catch (error) {
+    // The agent's stdout ends before its process 'close' fires, so the engine's
+    // transport error wins the race above and says nothing about why the agent
+    // died. Expired credentials are the common case and the reason is only on
+    // stderr, so wait briefly for the exit and report that instead.
+    const exit = await exitWithin(child, ACP_EXIT_SETTLE_MS);
+    if (exit === undefined) throw error;
+    throw new Error(
+      `acp:${spec.id} ${label} exited ${exit} before responding: ${truncateForLog(stderr, 1000)}`,
+    );
   } finally {
     if (timer) clearTimeout(timer);
     if (child.exitCode === null && child.signalCode === null) {

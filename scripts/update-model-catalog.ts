@@ -8,8 +8,7 @@ import { format } from 'prettier';
 
 import { parseCommandCodeModelList } from '../src/shared/commandcode.ts';
 import { PROVIDERS } from '../src/shared/config.ts';
-import { parseCursorModelList } from '../src/shared/cursor.ts';
-import { parseKiloModelList } from '../src/shared/kilo.ts';
+import { parseCursorModelList, parseKiloModelList } from '@symma/protocol';
 
 const MODELS_DEV_URL = 'https://models.dev/api.json';
 const CLINE_RECOMMENDED_MODELS_URL = 'https://api.cline.bot/api/v1/ai/cline/recommended-models';

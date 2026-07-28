@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { verifyJournalLines } from '../src/shared/envelope-signature.ts';
+import { verifyJournalLines } from '@symma/protocol';
 
 /**
  * Checks a stored run's frames against its companions' keys. Run it where the

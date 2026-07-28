@@ -19,8 +19,7 @@ import {
   parseReview,
   type TokenUsageRecorder,
 } from './opencode.ts';
-import { spawnWithTimeout } from '@symma/protocol';
-import { truncateForLog } from '@symma/protocol';
+import { spawnWithTimeout, truncateForLog } from '@symma/protocol';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const GROK_PROMPT_TIMEOUT_MS = 20 * 60_000;

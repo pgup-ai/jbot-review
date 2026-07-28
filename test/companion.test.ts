@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { type ObserverEnvelope } from '@symma/protocol';
+import type { ObserverEnvelope } from '@symma/protocol';
 import { readJournalLines } from '../src/gateway/journal.ts';
 
 // Scripted ACP agent: answers initialize/new/prompt like a real CLI, so the

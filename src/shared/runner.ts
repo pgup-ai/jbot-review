@@ -105,8 +105,12 @@ import {
   runCommandCodeReview,
   writeCommandCodeAuth,
 } from './commandcode.ts';
-import { CURSOR_PROVIDER_ID, listCursorModels } from '@symma/protocol';
-import { CODEX_PROVIDER_ID, writeCodexAuth } from '@symma/protocol';
+import {
+  CODEX_PROVIDER_ID,
+  CURSOR_PROVIDER_ID,
+  listCursorModels,
+  writeCodexAuth,
+} from '@symma/protocol';
 import {
   CLINE_PROVIDER_ID,
   runClineAddressedPriorCommentsCheck,

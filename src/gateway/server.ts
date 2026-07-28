@@ -14,8 +14,7 @@ import {
   type RunControl,
   writeRunStatus,
 } from './journal.ts';
-import { readNdjsonBody } from '@symma/protocol';
-import { parseRelayControl } from '@symma/protocol';
+import { parseRelayControl, readNdjsonBody } from '@symma/protocol';
 import { createRelay, parseEndpointTokens } from './relay.ts';
 import { VIEWER_HTML } from './viewer.ts';
 
