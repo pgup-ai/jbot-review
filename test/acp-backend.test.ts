@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
+import { respondToPermissionRequest } from '@symma/protocol';
+
 import { createAcpBackend } from '../src/shared/acp.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'jbot-acp-backend-'));
@@ -118,6 +120,57 @@ await closeObserver();
     assert.deepEqual(
       [...new Set(frames.map((f) => `${f.agent}/${f.label}/${f.model ?? '-'}`))],
       ['probe/review/probe/default'],
+    );
+  });
+});
+
+// The floor is @symma/protocol's code, but the read-only guarantee is invariant
+// #8 and it is jbot's to hold. The pin is exact, so this fails on the bump that
+// loosens it rather than after the review that wrote to a repo.
+describe('read-only permission floor', () => {
+  it('answers permission requests read-only: mutations rejected, reads/exec allowed', () => {
+    const options = [
+      { optionId: 'aa', kind: 'allow_always' },
+      { optionId: 'ao', kind: 'allow_once' },
+      { optionId: 'ro', kind: 'reject_once' },
+    ];
+    assert.deepEqual(respondToPermissionRequest({ toolCall: { kind: 'execute' }, options }), {
+      outcome: { outcome: 'selected', optionId: 'ao' },
+    });
+    assert.deepEqual(respondToPermissionRequest({ toolCall: { kind: 'edit' }, options }), {
+      outcome: { outcome: 'selected', optionId: 'ro' },
+    });
+    // Hyphenated kinds (cursor) normalize; *_always is the same-direction fallback.
+    assert.deepEqual(
+      respondToPermissionRequest({
+        toolCall: { kind: 'delete' },
+        options: [
+          { optionId: 'ra', kind: 'reject-always' },
+          { optionId: 'aa', kind: 'allow-always' },
+        ],
+      }),
+      { outcome: { outcome: 'selected', optionId: 'ra' } },
+    );
+    // Missing kind defaults to allow — read tools commonly ship kind "other" or none.
+    assert.deepEqual(
+      respondToPermissionRequest({
+        toolCall: {},
+        options: [{ optionId: 'ao', kind: 'allow_once' }],
+      }),
+      { outcome: { outcome: 'selected', optionId: 'ao' } },
+    );
+    // switch_mode is denied: jbot sets the session mode; approving one would
+    // let a prompt-injected switch escape the plan-mode read-only layer.
+    assert.deepEqual(respondToPermissionRequest({ toolCall: { kind: 'switch_mode' }, options }), {
+      outcome: { outcome: 'selected', optionId: 'ro' },
+    });
+    // A denied tool with only allow options gets the cancelled outcome, never an allow.
+    assert.deepEqual(
+      respondToPermissionRequest({
+        toolCall: { kind: 'edit' },
+        options: [{ optionId: 'aa', kind: 'allow_always' }],
+      }),
+      { outcome: { outcome: 'cancelled' } },
     );
   });
 });
