@@ -11,7 +11,7 @@ import {
   type SDKResultMessage,
 } from '@qoder-ai/qoder-agent-sdk';
 
-import { parseModelName } from './model.ts';
+import { parseModelName } from '@symma/protocol';
 import {
   formatTokenUsage,
   parseChangesSinceLastReviewSummary,
@@ -30,7 +30,7 @@ import {
   buildJsonRepairFollowupPrompt,
   type VerifiableFinding,
 } from './prompt.ts';
-import { truncateForLog } from './text.ts';
+import { truncateForLog } from '@symma/protocol';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const QODER_PROMPT_TIMEOUT_MS = 20 * 60_000;

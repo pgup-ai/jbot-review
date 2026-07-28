@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { cursorEnvForKey, isCursorProvider, parseCursorModelList } from '../src/shared/cursor.ts';
+import { cursorEnvForKey, isCursorProvider, parseCursorModelList } from '@symma/protocol';
 
 describe('Cursor CLI provider helpers', () => {
   it('matches only the explicit cursor provider id', () => {

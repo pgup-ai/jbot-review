@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { onFatalSignal } from '../src/shared/signal-cleanup.ts';
+import { onFatalSignal } from '@symma/protocol';
 
 describe('onFatalSignal', () => {
   it('shares one listener per signal and removes it once the last cleanup deregisters', () => {

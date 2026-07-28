@@ -1,13 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  createRelay,
-  parseEndpointTokens,
-  parseRelayControl,
-  type HelloControl,
-  type OpenControl,
-} from '../src/gateway/relay.ts';
+import { parseRelayControl, type HelloControl, type OpenControl } from '@symma/protocol';
+import { createRelay, parseEndpointTokens } from '../src/gateway/relay.ts';
 
 const hello = (overrides: Partial<HelloControl> = {}): HelloControl => ({
   kind: 'hello',

@@ -9,11 +9,14 @@ import { randomBytes } from 'node:crypto';
 import { PassThrough, Writable } from 'node:stream';
 
 import { createAcpReviewBackend } from './acp.ts';
-import { driveAcpSession } from './acp-protocol.ts';
-import { parseEnvelope } from '../gateway/journal.ts';
-import { parseModelName } from './model.ts';
-import type { AckControl, EndpointPresence } from '../gateway/relay.ts';
-import { parseRelayControl } from '../gateway/relay.ts';
+import {
+  driveAcpSession,
+  parseEnvelope,
+  parseModelName,
+  parseRelayControl,
+  type AckControl,
+  type EndpointPresence,
+} from '@symma/protocol';
 import type { ReviewBackend } from './session-concurrency.ts';
 
 const REMOTE_PROMPT_TIMEOUT_MS = 20 * 60_000;
@@ -311,7 +314,8 @@ async function runRemotePrompt(
             label,
             log,
             model,
-            relayed: true,
+            // No tee on purpose: the companion signs and journals a relayed
+            // session itself, so teeing here would duplicate it unsigned.
             ...(ack.modelCandidates ? { configOptionModelIds: ack.modelCandidates } : {}),
             ...(ack.requirePlanMode ? { requirePlanMode: true } : {}),
           },

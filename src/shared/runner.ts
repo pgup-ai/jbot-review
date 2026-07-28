@@ -27,7 +27,7 @@ import {
 import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
 import { closeObserver, reportRun, setRunName } from './observer.ts';
 import { createAcpBackend } from './acp.ts';
-import { codexAcpSpec, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from './acp-protocol.ts';
+import { codexAcpSpec, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from '@symma/protocol';
 import {
   ACP_GATEWAY_PROVIDERS,
   checkEndpointReady,
@@ -65,7 +65,7 @@ import {
   shardFilesForReview,
 } from './diff-context.ts';
 import { needsAuxOpencodeConfig, resolvePromptCachePolicy } from './config.ts';
-import { parseModelName } from './model.ts';
+import { parseModelName } from '@symma/protocol';
 import { parseAddedLines } from './patch.ts';
 import {
   COUNTED_LENS_KEYS,
@@ -78,7 +78,7 @@ import {
   selectLensKeys,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
-import { onFatalSignal } from './signal-cleanup.ts';
+import { onFatalSignal } from '@symma/protocol';
 import {
   startOpencode,
   configureSessionConcurrency,
@@ -94,7 +94,7 @@ import {
   Semaphore,
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
-import { DEVIN_PROVIDER_ID, writeDevinCredentials } from './devin.ts';
+import { DEVIN_PROVIDER_ID, writeDevinCredentials } from '@symma/protocol';
 import {
   COMMANDCODE_PROVIDER_ID,
   listCommandCodeModels,
@@ -105,8 +105,12 @@ import {
   runCommandCodeReview,
   writeCommandCodeAuth,
 } from './commandcode.ts';
-import { CURSOR_PROVIDER_ID, listCursorModels } from './cursor.ts';
-import { CODEX_PROVIDER_ID, writeCodexAuth } from './codex.ts';
+import {
+  CODEX_PROVIDER_ID,
+  CURSOR_PROVIDER_ID,
+  listCursorModels,
+  writeCodexAuth,
+} from '@symma/protocol';
 import {
   CLINE_PROVIDER_ID,
   runClineAddressedPriorCommentsCheck,
@@ -127,7 +131,7 @@ import {
   runGrokReview,
   type GrokRuntime,
 } from './grok.ts';
-import { assertValidKiloAuth, KILO_PROVIDER_ID, listKiloModels } from './kilo.ts';
+import { assertValidKiloAuth, KILO_PROVIDER_ID, listKiloModels } from '@symma/protocol';
 import {
   QODER_PROVIDER_ID,
   runQoderAddressedPriorCommentsCheck,

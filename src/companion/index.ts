@@ -27,15 +27,21 @@ import {
   kiloAcpSpec,
   respondToPermissionRequest,
   type AcpAgentSpec,
-} from '../shared/acp-protocol.ts';
+} from '@symma/protocol';
 import { fetchWorkspace } from './workspace.ts';
-import { generateSigningKeys, publicKeyFrom, signEnvelope } from '../shared/envelope-signature.ts';
-import { codexAuthPath } from '../shared/codex.ts';
-import { devinCredentialsPath } from '../shared/devin.ts';
-import type { ObserverEnvelope } from '../gateway/journal.ts';
-import type { HelloControl, OpenControl, RelayControl } from '../gateway/relay.ts';
-import { parseRelayControl } from '../gateway/relay.ts';
-import { terminateProcessTree } from '../shared/cli-process.ts';
+import {
+  codexAuthPath,
+  devinCredentialsPath,
+  generateSigningKeys,
+  parseRelayControl,
+  publicKeyFrom,
+  signEnvelope,
+  terminateProcessTree,
+  type HelloControl,
+  type ObserverEnvelope,
+  type OpenControl,
+  type RelayControl,
+} from '@symma/protocol';
 
 const KILL_GRACE_MS = 2_000;
 const BACKOFF_MIN_MS = 1_000;

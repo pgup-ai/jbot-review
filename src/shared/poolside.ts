@@ -15,7 +15,8 @@ import {
   NO_TOOLS_REVIEW_DIRECTIVE,
   type VerifiableFinding,
 } from './prompt.ts';
-import { isFiniteNumber, isRecord, truncateForLog } from './text.ts';
+import { truncateForLog } from '@symma/protocol';
+import { isFiniteNumber, isRecord } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const POOLSIDE_CHAT_COMPLETIONS_URL = 'https://inference.poolside.ai/v1/chat/completions';

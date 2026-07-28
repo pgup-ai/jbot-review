@@ -10,8 +10,7 @@ import { parseEnvBoolean, parseEnvInt, parseEnvJsonObject } from '../app/app.ts'
 import { gatewayRoutedModels, localRunId, remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
 import { selectReviewBackends, type CliBackendID } from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
-import { CODEX_PROVIDER_ID } from '../shared/codex.ts';
-import { CODEX_ACP_BIN } from '../shared/acp-protocol.ts';
+import { CODEX_ACP_BIN, CODEX_PROVIDER_ID } from '@symma/protocol';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
 import {
   PROVIDERS,
@@ -21,23 +20,22 @@ import {
   resolveProviderCredential,
   resolveProviderModel,
 } from '../shared/config.ts';
-import { CURSOR_CLI_BIN, CURSOR_PROVIDER_ID } from '../shared/cursor.ts';
-import { DEVIN_CLI_BIN, DEVIN_PROVIDER_ID } from '../shared/devin.ts';
+import {
+  CURSOR_CLI_BIN,
+  CURSOR_PROVIDER_ID,
+  DEVIN_CLI_BIN,
+  DEVIN_PROVIDER_ID,
+} from '@symma/protocol';
 import { isNoiseFile } from '../shared/filter.ts';
 import { observerEnabled, setRunName } from '../shared/observer.ts';
 import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
-import { KILO_CLI_BIN, KILO_PROVIDER_ID } from '../shared/kilo.ts';
-import {
-  formatModelName,
-  parseModelName,
-  resolveAuxModelName,
-  resolveModelName,
-} from '../shared/model.ts';
+import { KILO_CLI_BIN, KILO_PROVIDER_ID, parseModelName } from '@symma/protocol';
+import { formatModelName, resolveAuxModelName, resolveModelName } from '../shared/model.ts';
 import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import type { ReviewCommit } from '../shared/review-context.ts';
 import { runPrReview } from '../shared/runner.ts';
-import { onFatalSignal } from '../shared/signal-cleanup.ts';
+import { onFatalSignal } from '@symma/protocol';
 import type { ReviewResult } from '../shared/types.ts';
 import { GIT_DIFF_ARGS, parseGitDiff } from '../shared/git.ts';
 import { loadDotEnv, parseOwnerRepo, renderReport } from './util.ts';

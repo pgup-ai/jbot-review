@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { onFatalSignal } from '../shared/signal-cleanup.ts';
+import { onFatalSignal } from '@symma/protocol';
 
 const INITIAL_HISTORY_DEPTH = 50;
 const HISTORY_DEEPEN_STEPS = [200, 1_000];

@@ -9,7 +9,7 @@ import {
   devinCredentialsPath,
   isDevinProvider,
   writeDevinCredentials,
-} from '../src/shared/devin.ts';
+} from '@symma/protocol';
 import { truncateUtf8WithNotice } from '../src/shared/prompt.ts';
 
 describe('Devin CLI provider helpers', () => {

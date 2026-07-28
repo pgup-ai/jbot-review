@@ -7,7 +7,7 @@ import {
   KILO_STRIPPED_ENV_KEYS,
   kiloEnvForAuth,
   parseKiloModelList,
-} from '../src/shared/kilo.ts';
+} from '@symma/protocol';
 import { modelSupportsPromptCache, PROVIDERS } from '../src/shared/config.ts';
 
 describe('Kilo CLI provider helpers', () => {

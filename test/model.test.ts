@@ -6,12 +6,8 @@ import {
   modelSupportsPromptCache,
   resolvePromptCachePolicy,
 } from '../src/shared/config.ts';
-import {
-  formatModelName,
-  parseModelName,
-  resolveAuxModelName,
-  resolveModelName,
-} from '../src/shared/model.ts';
+import { parseModelName } from '@symma/protocol';
+import { formatModelName, resolveAuxModelName, resolveModelName } from '../src/shared/model.ts';
 
 describe('parseModelName', () => {
   it('keeps the first segment as provider and the remaining path as model id', () => {

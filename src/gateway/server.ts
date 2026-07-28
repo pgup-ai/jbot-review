@@ -3,21 +3,19 @@ import { readFileSync, statSync } from 'node:fs';
 import { createGzip } from 'node:zlib';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
+import { isSafeId, parseEnvelope, type ObserverEnvelope } from '@symma/protocol';
 import {
   appendEnvelope,
-  isSafeId,
   journalPath,
   listRuns,
-  parseEnvelope,
   parseRunControl,
   readJournalLines,
   readRunStatus,
-  writeRunStatus,
-  type ObserverEnvelope,
   type RunControl,
+  writeRunStatus,
 } from './journal.ts';
-import { readNdjsonBody } from './ndjson.ts';
-import { createRelay, parseEndpointTokens, parseRelayControl } from './relay.ts';
+import { parseRelayControl, readNdjsonBody } from '@symma/protocol';
+import { createRelay, parseEndpointTokens } from './relay.ts';
 import { VIEWER_HTML } from './viewer.ts';
 
 // SSE comment ping; keeps idle viewer connections alive through proxies.

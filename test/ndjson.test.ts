@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { readNdjsonBody } from '../src/gateway/ndjson.ts';
+import { readNdjsonBody } from '@symma/protocol';
 
 function fakeReq(chunks: string[]): Parameters<typeof readNdjsonBody>[0] {
   return {
