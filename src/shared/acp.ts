@@ -1,9 +1,8 @@
 /**
- * ACP review backends: turns the protocol engine into the ReviewBackend the
- * runner consumes. Local (spawn) and remote (gateway) share everything here
- * and differ only in the prompt runner they are built with.
+ * ACP review backends: wraps a prompt runner in the ReviewBackend the runner
+ * consumes, and parses what the agent returns. Local and remote share
+ * everything here and differ only in the runner they are built with.
  */
-
 import { runLocalAcpPrompt } from '@symma/client';
 import type { AcpAgentSpec } from '@symma/protocol';
 import {
@@ -23,7 +22,6 @@ import type { ReviewBackend } from './session-concurrency.ts';
 import { makeSessionTee } from './observer.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
-// Repair-followup budgets: review policy, not session mechanics.
 const ACP_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const ACP_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 

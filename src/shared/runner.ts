@@ -28,11 +28,11 @@ import { limitReviewBackendSessions, type ReviewBackend } from './session-concur
 import { closeObserver, reportRun, setRunName } from './observer.ts';
 import { createAcpBackend } from './acp.ts';
 import { codexAcpSpec, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from '@symma/protocol';
-import { checkEndpointReady } from '@symma/client';
 import {
   ACP_GATEWAY_PROVIDERS,
   createRemoteAcpBackend,
   remoteAcpConfigFromEnv,
+  checkGatewayEndpointReady,
 } from './acp-remote.ts';
 import {
   piModelAvailable,
@@ -1102,7 +1102,7 @@ async function runReviewPipeline(params: {
   );
   if (remoteAcp && routedAgents.length > 0) {
     for (const agent of routedAgents) {
-      const { freeSessions } = await checkEndpointReady(remoteAcp, agent);
+      const { freeSessions } = await checkGatewayEndpointReady(remoteAcp, agent);
       if (sessionCap === 0 || freeSessions < sessionCap) sessionCap = freeSessions;
     }
     log(

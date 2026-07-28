@@ -53,9 +53,9 @@ const specFor = (path: string) =>
 
 describe('acp review backend', () => {
   it('reports the agent stderr when it dies before responding', async () => {
-    // The engine rejects on stdout end, which fires before the child's own
-    // 'close' — so without the exit wait this surfaces as a bare transport
-    // error and the reason (expired auth, missing binary) is lost.
+    // Pins the outcome, not which racer produces it: whatever wins, the
+    // operator must see why the agent died. Without it the transport error can
+    // surface alone and the reason — expired auth, missing binary — is lost.
     const crash = script(
       'crash.mjs',
       `process.stderr.write('probe: no auth\\n'); process.exit(3);`,
@@ -71,7 +71,7 @@ describe('acp review backend', () => {
   it('tees frames to the observer', async () => {
     // observer.ts reads its config at import time, so the tee is exercised
     // through a child process rather than by mutating env here.
-    const frames: { dir: string }[] = [];
+    const frames: { dir: string; agent: string; label: string; model?: string }[] = [];
     const ingest = createServer((req, res) => {
       let body = '';
       req.on('data', (c) => (body += String(c)));
@@ -112,6 +112,12 @@ await closeObserver();
     assert.ok(
       frames.some((f) => f.dir === 'out') && frames.some((f) => f.dir === 'in'),
       'both directions reach the journal',
+    );
+    // The call site passes agent, label and model positionally; transposing
+    // them would still tee, just mislabelled.
+    assert.deepEqual(
+      [...new Set(frames.map((f) => `${f.agent}/${f.label}/${f.model ?? '-'}`))],
+      ['probe/review/probe/default'],
     );
   });
 });

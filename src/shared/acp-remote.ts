@@ -1,11 +1,9 @@
 /**
  * Routing policy for reviews served by a remote companion through the ACP
- * gateway. The transport itself is `@symma/client`; what stays here is which
- * providers the gateway serves, how this run is named and how its config is
- * read from the environment.
+ * gateway. `@symma/client` owns the transport; the decisions stay here.
  * Spec: docs/superpowers/specs/2026-07-24-acp-gateway-m2-design.md.
  */
-import { runRemotePrompt, type RemoteAcpConfig } from '@symma/client';
+import { checkEndpointReady, runRemotePrompt, type RemoteAcpConfig } from '@symma/client';
 import { parseModelName } from '@symma/protocol';
 
 import { createAcpReviewBackend } from './acp.ts';
@@ -82,6 +80,25 @@ export function remoteAcpConfigFromEnv(): Omit<RemoteAcpConfig, 'agent'> | undef
   };
 }
 
+/** Preflight, with the variables to go fix. `@symma/client` serves any caller
+ * and cannot name ours, so the mapping's owner re-attaches it. */
+export async function checkGatewayEndpointReady(
+  config: Omit<RemoteAcpConfig, 'agent'>,
+  agent: string,
+): Promise<{ freeSessions: number }> {
+  try {
+    return await checkEndpointReady(config, agent);
+  } catch (error) {
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)} Gateway config comes from ` +
+        `JBOT_ACP_GATEWAY_URL, JBOT_ACP_GATEWAY_TOKEN and JBOT_ACP_GATEWAY_ENDPOINT.`,
+    );
+  }
+}
+
+// No tee on a relayed session: the companion signs and journals it itself, so
+// teeing here would duplicate every frame unsigned. Journaling it twice is a
+// bug this repo already shipped once.
 export function createRemoteAcpBackend(config: RemoteAcpConfig): ReviewBackend {
   return createAcpReviewBackend(`acp-gateway:${config.agent}@${config.endpoint}`, (...args) =>
     runRemotePrompt(config, ...args),
