@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { checkGatewayEndpointReady as checkEndpointReady } from '../src/shared/acp-remote.ts';
 import {
-  checkEndpointReady,
   createRemoteAcpBackend,
   gatewayRoutedModels,
   localRunId,
@@ -126,7 +126,7 @@ describe('remote acp backend', () => {
       );
       await assert.rejects(
         () => checkEndpointReady({ ...config, token: 'wrong' }, 'probe'),
-        /rejected the endpoint listing/,
+        /rejected the endpoint listing.*JBOT_ACP_GATEWAY_TOKEN/s,
       );
 
       const backend = createRemoteAcpBackend({

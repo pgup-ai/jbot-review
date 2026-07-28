@@ -1,12 +1,10 @@
 /**
- * ACP review backends: turns the protocol engine into the ReviewBackend the
- * runner consumes. Local (spawn) and remote (gateway) share everything here
- * and differ only in the prompt runner they are built with.
+ * ACP review backends: wraps a prompt runner in the ReviewBackend the runner
+ * consumes, and parses what the agent returns. Local and remote share
+ * everything here and differ only in the runner they are built with.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
-import type { Readable, Writable } from 'node:stream';
-
-import { driveAcpSession, terminateProcessTree, type AcpAgentSpec } from '@symma/protocol';
+import { runLocalAcpPrompt } from '@symma/client';
+import type { AcpAgentSpec } from '@symma/protocol';
 import {
   parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,
@@ -21,143 +19,11 @@ import {
   buildJsonRepairFollowupPrompt,
 } from './prompt.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
-import { truncateForLog } from '@symma/protocol';
 import { makeSessionTee } from './observer.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
-const ACP_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const ACP_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const ACP_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
-const ACP_KILL_GRACE_MS = 2_000;
-const ACP_STDERR_TAIL_BYTES = 64 * 1024;
-// A stdout that just ended means the child is on its way out; this only has to
-// outlast the gap between the pipe closing and 'close' firing.
-const ACP_EXIT_SETTLE_MS = 250;
-
-/** Exit code or signal if the child is already gone, or goes within `ms`. */
-function exitWithin(child: ChildProcess, ms: number): Promise<number | string | undefined> {
-  const settled = child.exitCode ?? child.signalCode;
-  if (settled !== null) return Promise.resolve(settled);
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(undefined), ms);
-    timer.unref();
-    child.once('close', (code, signal) => {
-      clearTimeout(timer);
-      resolve(code ?? signal ?? undefined);
-    });
-  });
-}
-
-async function runAcpPrompt(
-  spec: AcpAgentSpec,
-  workspace: string,
-  model: string,
-  prompt: string,
-  label: string,
-  log: (msg: string) => void,
-  timeoutMs = ACP_PROMPT_TIMEOUT_MS,
-): Promise<string> {
-  const { env, cleanup } = spec.env(model);
-  const configOptionModelIds = spec.modelConfigCandidates?.(model);
-  log(`Calling ${label} prompt (agent=acp:${spec.id}, model=${model})`);
-  const child = spawn(spec.bin, spec.args(model), {
-    cwd: workspace,
-    // Same process-group contract as cli-process.ts: a wedged agent (and any
-    // child it spawned) can never outlive the review.
-    detached: process.platform !== 'win32',
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env,
-  });
-  let stderr = '';
-  child.stderr?.setEncoding('utf8');
-  child.stderr?.on('data', (chunk: string) => {
-    stderr = (stderr + chunk).slice(-ACP_STDERR_TAIL_BYTES);
-  });
-  child.stdin?.on('error', (error: Error) => {
-    stderr += `\n[stdin error: ${error.message}]`;
-  });
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    const result = await Promise.race([
-      driveAcpSession(
-        { input: child.stdin as Writable, output: child.stdout as Readable },
-        {
-          cwd: workspace,
-          prompt,
-          agent: spec.id,
-          label,
-          log,
-          model,
-          configOptionModelIds,
-          requirePlanMode: spec.requirePlanMode,
-          tee: makeSessionTee(spec.id, label, model),
-        },
-      ),
-      new Promise<never>((_, reject) => {
-        child.on('error', reject);
-        child.on('close', (code) =>
-          reject(
-            new Error(
-              `acp:${spec.id} ${label} exited ${code} before responding: ${truncateForLog(stderr, 1000)}`,
-            ),
-          ),
-        );
-      }),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () =>
-            reject(
-              new Error(
-                `acp:${spec.id} ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s (model=${model})`,
-              ),
-            ),
-          timeoutMs,
-        );
-        timer.unref();
-      }),
-    ]);
-    log(
-      `${label} prompt complete via acp:${spec.id}: stopReason=${result.stopReason} last-message=${result.text.length} chars`,
-    );
-    if (!result.text) {
-      throw new Error(
-        `acp:${spec.id} ${label} produced no assistant message (stopReason=${result.stopReason}); stderr: ${truncateForLog(stderr, 1000)}`,
-      );
-    }
-    return result.text;
-  } catch (error) {
-    // The agent's stdout ends before its process 'close' fires, so the engine's
-    // transport error wins the race above and says nothing about why the agent
-    // died. Expired credentials are the common case and the reason is only on
-    // stderr, so wait briefly for the exit and report that instead.
-    const exit = await exitWithin(child, ACP_EXIT_SETTLE_MS);
-    if (exit === undefined) throw error;
-    throw new Error(
-      `acp:${spec.id} ${label} exited ${exit} before responding: ${truncateForLog(stderr, 1000)}`,
-    );
-  } finally {
-    if (timer) clearTimeout(timer);
-    if (child.exitCode === null && child.signalCode === null) {
-      terminateProcessTree(child, ACP_KILL_GRACE_MS);
-    }
-    // Wait (bounded) for the exit before removing the temp home: a dying
-    // agent still writing there (kilo's SQLite) races rmSync into ENOTEMPTY.
-    await new Promise<void>((resolve) => {
-      if (child.exitCode !== null || child.signalCode !== null) return resolve();
-      const grace = setTimeout(resolve, ACP_KILL_GRACE_MS + 500);
-      grace.unref();
-      child.once('close', () => {
-        clearTimeout(grace);
-        resolve();
-      });
-    });
-    try {
-      cleanup?.();
-    } catch {
-      // Teardown must never mask the session result; tmpdir reclaims leftovers.
-    }
-  }
-}
 
 /** Delivers one assembled prompt to an agent and returns its final text. */
 type AcpPromptRunner = (
@@ -170,7 +36,10 @@ type AcpPromptRunner = (
 
 export function createAcpBackend(spec: AcpAgentSpec, workspace: string): ReviewBackend {
   return createAcpReviewBackend(`acp:${spec.id}`, (model, prompt, label, log, timeoutMs) =>
-    runAcpPrompt(spec, workspace, model, prompt, label, log, timeoutMs),
+    runLocalAcpPrompt(spec, workspace, model, prompt, label, log, {
+      timeoutMs,
+      tee: makeSessionTee(spec.id, label, model),
+    }),
   );
 }
 
