@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { checkEndpointReady } from '@symma/client';
 import {
-  checkEndpointReady,
   createRemoteAcpBackend,
   gatewayRoutedModels,
   localRunId,

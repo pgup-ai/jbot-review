@@ -28,9 +28,9 @@ import { limitReviewBackendSessions, type ReviewBackend } from './session-concur
 import { closeObserver, reportRun, setRunName } from './observer.ts';
 import { createAcpBackend } from './acp.ts';
 import { codexAcpSpec, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from '@symma/protocol';
+import { checkEndpointReady } from '@symma/client';
 import {
   ACP_GATEWAY_PROVIDERS,
-  checkEndpointReady,
   createRemoteAcpBackend,
   remoteAcpConfigFromEnv,
 } from './acp-remote.ts';
