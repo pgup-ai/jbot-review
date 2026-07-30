@@ -6,14 +6,15 @@ import { clonePr } from './clone.ts';
 import { runPrReview } from '../shared/runner.ts';
 import { defaultModelOptions } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
-import { resolveAuxModelName } from '../shared/model.ts';
+import { pickPooledModel, resolveAuxModelName } from '../shared/model.ts';
 import { enqueue } from './queue.ts';
 
 export interface AppConfig {
   appId: string;
   privateKey: string;
   apiKey: string;
-  model: string;
+  /** Candidate models for this deployment; one is picked per PR head. */
+  modelPool: string[];
   baseURL?: string;
   auxProvider?: string;
   auxApiKey?: string;
@@ -89,7 +90,10 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         token: authRes.token,
       });
       cleanup = cloned.cleanup;
-      const { providerID } = parseModelName(cfg.model);
+      const model = pickPooledModel(cfg.modelPool, pr.head.sha);
+      const { providerID } = parseModelName(model);
+      // A run that fails before posting has no review metadata block naming the model.
+      console.log(`[jbot-review] Reviewing ${owner}/${repoName}#${pr.number} with ${model}.`);
       const auxModel = resolveAuxModelName(
         providerID,
         process.env.JBOT_REVIEW_AUX_MODEL,
@@ -103,7 +107,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         pullTitle: pr.title,
         pullBody: pr.body ?? '',
         workspace: cloned.dir,
-        model: cfg.model,
+        model,
         apiKey: cfg.apiKey,
         baseURL: cfg.baseURL,
         headSha: pr.head.sha,
