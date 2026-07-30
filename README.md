@@ -602,7 +602,8 @@ happen to pick it. The chosen model is logged and appears in the posted review's
 metadata block.
 
 ```yaml
-model: deepseek-v4-flash-free,glm-5.2-free,kimi-k2.6-free
+provider: opencode
+model: deepseek-v4-flash-free,glm-5-free,kimi-k2.5-free
 ```
 
 For manual reruns, `workflow_dispatch` provider and model inputs can take
