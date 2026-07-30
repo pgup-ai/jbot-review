@@ -14,6 +14,11 @@ export function resolveModelName(providerID: string, model: string): ParsedModel
   if (!trimmedModel || trimmedModel.startsWith('/')) {
     throw new Error(`Invalid model "${model}"; expected a non-empty model id.`);
   }
+  // resolveModelPool splits before it gets here, so a comma at this point is a
+  // pool handed to a single-model input — aux-model being the likely one.
+  if (trimmedModel.includes(',')) {
+    throw new Error(`Invalid model "${model}"; expected one model id, not a list.`);
+  }
 
   const providerPrefix = `${trimmedProviderID}/`;
   const modelID = trimmedModel.startsWith(providerPrefix)

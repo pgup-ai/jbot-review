@@ -14,7 +14,7 @@ on:
         required: false
         default: ''
       model:
-        description: 'Model as provider/model. Uses provider default if unset; required for openai-compatible.'
+        description: 'Model as provider/model, or a comma-separated pool of same-provider models. Uses provider default if unset; required for openai-compatible.'
         required: false
         default: ''
       dry-run:
@@ -93,7 +93,7 @@ jobs:
                 key="${tok%%=*}" val="${tok#*=}"
                 case "$val" in
                   '') echo "::warning::/jbot: $key has an empty value; using the repo default" ;;
-                  *[!A-Za-z0-9._:/-]*) echo "::warning::/jbot: ignoring $key value with unsupported characters; using the repo default" ;;
+                  *[!A-Za-z0-9._:/,-]*) echo "::warning::/jbot: ignoring $key value with unsupported characters; using the repo default" ;;
                   *) if [ "$key" = '--provider' ]; then provider="$val"; else model="$val"; fi ;;
                 esac
                 ;;

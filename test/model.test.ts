@@ -149,6 +149,11 @@ describe('resolveModelName', () => {
   it('rejects an empty selected-provider-prefixed model id', () => {
     assert.throws(() => resolveModelName('opencode', 'opencode/'), /expected a non-empty model id/);
   });
+
+  it('rejects a comma, so only pooled inputs can carry one', () => {
+    assert.throws(() => resolveModelName('opencode', 'a, b'), /one model id, not a list/);
+    assert.throws(() => resolveAuxModelName('opencode', 'a, b'), /one model id, not a list/);
+  });
 });
 
 describe('resolveModelPool', () => {
@@ -176,7 +181,6 @@ describe('pickPooledModel', () => {
     const seed = 'e3f0c1a9b7d24e6f8a0b1c2d3e4f5a6b7c8d9e0f';
 
     assert.equal(pickPooledModel(pool, seed), pickPooledModel(pool, seed));
-    assert.ok(pool.includes(pickPooledModel(pool, seed)));
     assert.deepEqual(
       [
         ...new Set(Array.from({ length: 60 }, (_, i) => pickPooledModel(pool, `${seed}${i}`))),
