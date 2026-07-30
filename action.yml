@@ -11,7 +11,7 @@ inputs:
     required: false
     default: ''
   model:
-    description: 'Provider model id, optionally prefixed as provider/model. Uses provider default if unset; required for openai-compatible.'
+    description: 'Provider model id, optionally prefixed as provider/model. A comma-separated list is a pool of same-provider models; each run picks one by PR head sha. Uses provider default if unset; required for openai-compatible.'
     required: false
     default: ''
   sdk-engine:

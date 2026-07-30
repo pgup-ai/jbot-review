@@ -592,6 +592,19 @@ when `provider` is `opencode`. Slash-containing provider catalog ids such as
 `moonshotai/kimi-k2.6` are passed through as the model id for the selected
 provider.
 
+A comma-separated `model` is a pool: each run reviews with one candidate, chosen
+by hashing the PR head sha. Load spreads across the pool as PRs and pushes come
+in, while re-reviewing the same commit always picks the same model, so a rerun
+reproduces. All candidates must belong to the selected `provider` — the pool
+shares its one credential — and every candidate is validated before the review
+starts, so a typo fails the next run outright rather than only the runs that
+happen to pick it. The chosen model is logged and appears in the posted review's
+metadata block.
+
+```yaml
+model: deepseek-v4-flash-free,glm-5.2-free,kimi-k2.6-free
+```
+
 For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic
 `pull_request` runs use the variable values.
@@ -685,6 +698,9 @@ npm run review:local
   enforced in code.
 - **Output:** findings print to the terminal; set `JBOT_LOCAL_REPORT=true` to
   also write `.jbot-review/last-run.md` (gitignored).
+- **Model pool:** `MODEL` accepts the same comma-separated pool as the action,
+  seeded on HEAD instead of a PR head sha — so re-running against uncommitted
+  edits keeps the same reviewer and a before/after comparison stays comparable.
 - **Knobs:** the same env knobs as the hosted app apply — `JBOT_REVIEW_PASSES`,
   `JBOT_VERIFY_FINDINGS`, `JBOT_TIME_BUDGET_MINUTES`, `JBOT_REVIEW_SHARDS`,
   `JBOT_DYNAMIC_FANOUT`, `JBOT_MODEL_OPTIONS`, `JBOT_PROMPT_CACHE`,

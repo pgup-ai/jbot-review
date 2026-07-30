@@ -8,7 +8,7 @@ import {
   resolveProviderCredential,
   resolveProviderModel,
 } from '../shared/config.ts';
-import { formatModelName, resolveModelName } from '../shared/model.ts';
+import { resolveModelPool } from '../shared/model.ts';
 import { handlePrEvent } from './app.ts';
 import type { AppConfig } from './app.ts';
 
@@ -56,9 +56,7 @@ const appCfg: AppConfig = {
   appId: mustEnv('GITHUB_APP_ID'),
   privateKey: mustEnv('GITHUB_APP_PRIVATE_KEY').replace(/\\n/g, '\n'),
   apiKey,
-  model: formatModelName(
-    resolveModelName(provider, resolveProviderModel(provider, cfg, process.env.MODEL)),
-  ),
+  modelPool: resolveModelPool(provider, resolveProviderModel(provider, cfg, process.env.MODEL)),
   ...(baseURL ? { baseURL } : {}),
   auxProvider,
   ...(auxApiKey ? { auxApiKey } : {}),

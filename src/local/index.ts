@@ -30,7 +30,7 @@ import { isNoiseFile } from '../shared/filter.ts';
 import { observerEnabled, setRunName } from '../shared/observer.ts';
 import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID, parseModelName } from '@symma/protocol';
-import { formatModelName, resolveAuxModelName, resolveModelName } from '../shared/model.ts';
+import { pickPooledModel, resolveAuxModelName, resolveModelPool } from '../shared/model.ts';
 import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import type { ReviewCommit } from '../shared/review-context.ts';
@@ -277,8 +277,11 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
       `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
     );
   }
-  const model = formatModelName(
-    resolveModelName(provider, resolveProviderModel(provider, providerCfg, process.env.MODEL)),
+  // HEAD, not the worktree: iterating on uncommitted edits keeps the same
+  // reviewer, so a before/after comparison is not confounded by the pick.
+  const model = pickPooledModel(
+    resolveModelPool(provider, resolveProviderModel(provider, providerCfg, process.env.MODEL)),
+    (await git(['rev-parse', 'HEAD'])).trim(),
   );
   const auxModelInput = process.env.JBOT_REVIEW_AUX_MODEL?.trim();
   const auxProvider = auxModelInput ? process.env.JBOT_AUX_PROVIDER?.trim() || provider : provider;

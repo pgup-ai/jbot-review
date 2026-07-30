@@ -11,7 +11,7 @@ import {
 } from '../shared/config.ts';
 import { parseContext7Mode } from '../shared/context7.ts';
 import { parseModelName } from '@symma/protocol';
-import { formatModelName, resolveAuxModelName, resolveModelName } from '../shared/model.ts';
+import { pickPooledModel, resolveAuxModelName, resolveModelPool } from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { Octokit } from '../shared/github.ts';
 import type { Severity } from '../shared/types.ts';
@@ -41,12 +41,12 @@ async function main(): Promise<void> {
   const baseURL = resolveProviderBaseURL(provider, cfg, ({ input, env }) =>
     getInputOrEnv(input, env),
   );
-  const modelInput = resolveProviderModel(
+  // Validated before the PR lookup so a bad pool fails without spending an API
+  // call; the pick needs the head sha, so it waits until that is known.
+  const modelPool = resolveModelPool(
     provider,
-    cfg,
-    getInputOrEnv('model', 'JBOT_REVIEW_MODEL'),
+    resolveProviderModel(provider, cfg, getInputOrEnv('model', 'JBOT_REVIEW_MODEL')),
   );
-  const model = formatModelName(resolveModelName(provider, modelInput));
   const auxModelInput = getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL');
   const auxProvider = auxModelInput
     ? getInputOrEnv('aux-provider', 'JBOT_AUX_PROVIDER') || provider
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
     evidenceQuotes: parseBooleanInput('evidence-quotes', true),
   };
   const pullTarget = getPullRequestTarget();
-  core.info(`Provider: ${provider}  Model: ${model}`);
+  core.info(`Provider: ${provider}  Model: ${modelPool.join(', ')}`);
   core.info(
     `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModel || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} modelOptions=${JSON.stringify(options.modelOptions)} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,
   );
@@ -112,6 +112,9 @@ async function main(): Promise<void> {
     core.info(
       `Event: ${github.context.eventName}  PR: #${pull.number}  Action: ${github.context.payload.action ?? 'manual'}`,
     );
+
+    const model = pickPooledModel(modelPool, pull.head.sha);
+    if (modelPool.length > 1) core.info(`Model pool of ${modelPool.length}: picked ${model}`);
 
     await runPrReview({
       octokit,
