@@ -1009,7 +1009,7 @@ function formatReviewBody(
   linkedCommentIds: readonly number[] = [],
 ): string {
   return appendLinkedCommentsFooter(
-    appendReviewMarker(withThreadCount(stripLinkedCommentsFooter(body), threads)),
+    appendReviewMarker(withThreadCount(body, threads)),
     linkedCommentIds,
   );
 }

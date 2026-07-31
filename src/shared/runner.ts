@@ -827,8 +827,9 @@ async function runReviewPipeline(params: {
     threads: allPriorJbotThreads,
     reviewGroups: priorJbotReviewGroups,
     unresolvedAddressedThreadIds,
+    lookupSucceeded: priorThreadStateKnown,
   } = localDiff
-    ? { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [] }
+    ? { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [], lookupSucceeded: true }
     : await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
   const finalizePriorResolvedReviews = async (resolvedThisRun: readonly string[]) => {
     if (options.dryRun) return;
@@ -2006,7 +2007,11 @@ async function runReviewPipeline(params: {
     ).length;
     const openThreadCount =
       openFindingThreadIds(allPriorJbotThreads, resolvedThisRun).length + failedAddressedResolves;
-    const approvalClean = isPrCleanAfterRun(verifiedFindings.length, openThreadCount);
+    const approvalClean = isPrCleanAfterRun(
+      verifiedFindings.length,
+      openThreadCount,
+      priorThreadStateKnown,
+    );
     let approved = false;
     if (options.autoApprove && approvalClean && headSha) {
       let decision: AutoApprovalDecision | undefined;
@@ -2041,6 +2046,8 @@ async function runReviewPipeline(params: {
       }
     } else if (options.autoApprove && approvalClean) {
       log('Auto-approval skipped: the reviewed head SHA is unavailable.');
+    } else if (options.autoApprove && !priorThreadStateKnown) {
+      log('Auto-approval skipped: prior jbot-review thread state is unavailable.');
     }
 
     if (deferCleanComment && !approved) {
@@ -2052,8 +2059,10 @@ async function runReviewPipeline(params: {
     }
 
     const reactionFindingCount = options.autoApprove ? verifiedFindings.length : findingCount;
-    if (isPrCleanAfterRun(reactionFindingCount, openThreadCount)) {
+    if (isPrCleanAfterRun(reactionFindingCount, openThreadCount, priorThreadStateKnown)) {
       await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
+    } else if (!priorThreadStateKnown) {
+      log('Prior jbot-review thread state is unavailable; not adding the review-done reaction.');
     } else {
       log('Open findings remain; not adding the review-done reaction.');
     }
@@ -2754,16 +2763,24 @@ async function safeListPriorJbotThreads(
   repo: string,
   pullNumber: number,
   log: (msg: string) => void,
-): Promise<PriorJbotThreads> {
+): Promise<PriorJbotThreads & { lookupSucceeded: boolean }> {
   try {
-    return await listPriorJbotThreads(octokit, owner, repo, pullNumber);
+    return {
+      ...(await listPriorJbotThreads(octokit, owner, repo, pullNumber)),
+      lookupSucceeded: true,
+    };
   } catch (error) {
     log(
       `Prior jbot-review thread lookup skipped: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    return { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [] };
+    return {
+      threads: [],
+      reviewGroups: [],
+      unresolvedAddressedThreadIds: [],
+      lookupSucceeded: false,
+    };
   }
 }
 

@@ -1,4 +1,4 @@
-export interface AutoApprovalSnapshot {
+interface AutoApprovalSnapshot {
   state: string;
   draft: boolean;
   headSha: string;
