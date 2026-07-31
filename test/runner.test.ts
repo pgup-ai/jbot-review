@@ -413,6 +413,18 @@ describe('runPrReview local mode and early exits', () => {
     );
   });
 
+  it('requires a head SHA for GitHub-backed reviews', async () => {
+    await assert.rejects(
+      runPrReview({
+        ...base,
+        octokit: {} as Octokit,
+        options: { dryRun: true },
+        log: () => {},
+      }),
+      /requires headSha/,
+    );
+  });
+
   // No `octokit` at all: the runner's internal landmine Proxy throws on ANY
   // property access, so completing proves local mode performs zero GitHub
   // calls on this path — structurally, not by mock bookkeeping.
@@ -540,6 +552,7 @@ describe('runPrReview local mode and early exits', () => {
       await runPrReview({
         ...base,
         octokit: octokit as unknown as Octokit,
+        headSha: 'headsha',
         options: {},
         log: () => {},
       });
@@ -561,7 +574,13 @@ describe('runPrReview local mode and early exits', () => {
       paginate: () => Promise.reject(sentinel),
     } as unknown as Octokit;
     await assert.rejects(
-      runPrReview({ ...base, octokit: fake, options: { dryRun: true }, log: () => {} }),
+      runPrReview({
+        ...base,
+        octokit: fake,
+        headSha: 'headsha',
+        options: { dryRun: true },
+        log: () => {},
+      }),
       (error: unknown) => error === sentinel,
     );
   });

@@ -699,6 +699,7 @@ async function runReviewPipeline(params: {
   apiKey: string;
   /** Base URL for a custom main provider. Native Models.dev providers leave this unset. */
   baseURL?: string;
+  /** Required for GitHub-backed reviews; local worktree reviews omit it. */
   headSha?: string;
   baseRef?: string;
   baseSha?: string;
@@ -743,6 +744,9 @@ async function runReviewPipeline(params: {
   // rather than letting a later read hit the local-mode Proxy and mislead.
   if (!localDiff && !params.octokit) {
     throw new Error('runPrReview requires an octokit client unless localDiff is provided.');
+  }
+  if (!localDiff && !headSha) {
+    throw new Error('runPrReview requires headSha for GitHub-backed reviews.');
   }
   const runStartedAt = Date.now();
   const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes);
@@ -1964,12 +1968,15 @@ async function runReviewPipeline(params: {
           : 'Review posted.',
       );
     };
+    const postCurrentReviewIfNeeded = async (): Promise<void> => {
+      if (shouldPostComment) {
+        await postCurrentReview();
+      } else {
+        log('No new findings on a re-run; skipping the review comment (reacting instead).');
+      }
+    };
 
-    if (shouldPostComment && !deferCleanComment) {
-      await postCurrentReview();
-    } else if (!deferCleanComment) {
-      log('No new findings on a re-run; skipping the review comment (reacting instead).');
-    }
+    if (!deferCleanComment) await postCurrentReviewIfNeeded();
 
     const resolvedThisRun = await acknowledgeAddressedPriorComments({
       octokit,
@@ -2044,22 +2051,13 @@ async function runReviewPipeline(params: {
       } else if (decision?.status === 'blocked') {
         log(`Auto-approval skipped: ${decision.reason}.`);
       }
-    } else if (options.autoApprove && approvalClean) {
-      log('Auto-approval skipped: the reviewed head SHA is unavailable.');
     } else if (options.autoApprove && !priorThreadStateKnown) {
       log('Auto-approval skipped: prior jbot-review thread state is unavailable.');
     }
 
-    if (deferCleanComment && !approved) {
-      if (shouldPostComment) {
-        await postCurrentReview();
-      } else {
-        log('No new findings on a re-run; skipping the review comment (reacting instead).');
-      }
-    }
+    if (deferCleanComment && !approved) await postCurrentReviewIfNeeded();
 
-    const reactionFindingCount = options.autoApprove ? verifiedFindings.length : findingCount;
-    if (isPrCleanAfterRun(reactionFindingCount, openThreadCount, priorThreadStateKnown)) {
+    if (isPrCleanAfterRun(findingCount, openThreadCount, priorThreadStateKnown)) {
       await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
     } else if (!priorThreadStateKnown) {
       log('Prior jbot-review thread state is unavailable; not adding the review-done reaction.');
