@@ -677,10 +677,11 @@ documentation lookup.
 
 ### Review output
 
-`jbot-review` posts `COMMENT` reviews by default and never posts
-`REQUEST_CHANGES`. With `auto-approve: true`, an eligible clean run posts an
-`APPROVE` review for the exact reviewed head. The review body includes advisory
-merge guidance:
+`jbot-review` posts `COMMENT` reviews for findings and never uses
+`REQUEST_CHANGES` as a finding verdict. With `auto-approve: true`, an eligible
+clean run posts an `APPROVE` review for the exact reviewed head. If GitHub cannot
+confirm that approval remains safe, jbot supersedes it with `REQUEST_CHANGES`
+and fails the run. The review body includes advisory merge guidance:
 
 - `Needs changes before approval` when any `P0`, `P1`, or `P2` finding is present.
 - `Mergeable with non-blocking comments` when only `P3` or `nit` findings are present.

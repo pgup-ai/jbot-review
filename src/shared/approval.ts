@@ -1,8 +1,11 @@
-interface AutoApprovalSnapshot {
+interface ApprovalContinuitySnapshot {
   state: string;
   draft: boolean;
   headSha: string;
   reviewedHeadSha: string;
+}
+
+interface AutoApprovalSnapshot extends ApprovalContinuitySnapshot {
   mergeable: boolean | null;
 }
 
@@ -10,7 +13,9 @@ type AutoApprovalSafetyDecision = { status: 'eligible' } | { status: 'blocked'; 
 
 export type AutoApprovalDecision = AutoApprovalSafetyDecision | { status: 'already-approved' };
 
-export function decideAutoApproval(snapshot: AutoApprovalSnapshot): AutoApprovalSafetyDecision {
+export function decideApprovalContinuity(
+  snapshot: ApprovalContinuitySnapshot,
+): AutoApprovalSafetyDecision {
   if (snapshot.state !== 'open') {
     return { status: 'blocked', reason: 'the pull request is not open' };
   }
@@ -20,6 +25,13 @@ export function decideAutoApproval(snapshot: AutoApprovalSnapshot): AutoApproval
   if (snapshot.headSha !== snapshot.reviewedHeadSha) {
     return { status: 'blocked', reason: 'the pull request head changed during review' };
   }
+  return { status: 'eligible' };
+}
+
+export function decideAutoApproval(snapshot: AutoApprovalSnapshot): AutoApprovalSafetyDecision {
+  const continuity = decideApprovalContinuity(snapshot);
+  if (continuity.status === 'blocked') return continuity;
+
   if (snapshot.mergeable !== true) {
     return {
       status: 'blocked',

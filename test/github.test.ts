@@ -19,7 +19,11 @@ import {
   type Octokit,
   type PriorJbotThread,
 } from '../src/shared/github.ts';
-import { decideAutoApproval, isDefinitiveApprovalRejection } from '../src/shared/approval.ts';
+import {
+  decideApprovalContinuity,
+  decideAutoApproval,
+  isDefinitiveApprovalRejection,
+} from '../src/shared/approval.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 const REVIEW_BODY = [
@@ -93,6 +97,15 @@ describe('auto approval', () => {
     assert.equal(decideAutoApproval({ ...eligible, headSha: 'new-head' }).status, 'blocked');
     assert.equal(decideAutoApproval({ ...eligible, mergeable: false }).status, 'blocked');
     assert.equal(decideAutoApproval({ ...eligible, mergeable: null }).status, 'blocked');
+    assert.deepEqual(
+      decideApprovalContinuity({
+        state: 'open',
+        draft: false,
+        headSha: 'headsha',
+        reviewedHeadSha: 'headsha',
+      }),
+      { status: 'eligible' },
+    );
   });
 
   it('deduplicates only this bot approval on the reviewed head', async () => {
@@ -133,7 +146,7 @@ describe('auto approval', () => {
       ),
       { status: 'already-approved' },
     );
-    assert.equal(pullReads, 0, 'an idempotent rerun needs no fresh safety read');
+    assert.equal(pullReads, 1, 'an existing approval still requires a fresh safety read');
 
     approvedCommit = 'old-head';
     assert.deepEqual(
@@ -146,7 +159,69 @@ describe('auto approval', () => {
       ),
       { status: 'eligible' },
     );
-    assert.equal(pullReads, 1, 'an older approval must not cover the newly reviewed head');
+    assert.equal(pullReads, 2, 'an older approval must not cover the newly reviewed head');
+  });
+
+  it('rejects a stale approved head after a fresh safety read', async () => {
+    let reviewReads = 0;
+    const octokit = {
+      rest: {
+        pulls: {
+          listReviews: {},
+          get: async () => pullResponse('new-head'),
+        },
+      },
+      paginate: async () => {
+        reviewReads++;
+        return [];
+      },
+      graphql: async () => ({ viewer: { login: 'github-actions' } }),
+    };
+
+    assert.deepEqual(
+      await checkAutoApprovalEligibility(
+        octokit as unknown as Octokit,
+        'acme',
+        'widget',
+        12,
+        'headsha',
+      ),
+      { status: 'blocked', reason: 'the pull request head changed during review' },
+    );
+    assert.equal(reviewReads, 1);
+  });
+
+  it('does not deduplicate an approval superseded by changes requested', async () => {
+    const listReviews = {};
+    const review = {
+      commit_id: 'headsha',
+      user: { login: 'github-actions[bot]' },
+      body: '## J-Bot Code Review\n\n<!-- jbot-review:review -->',
+    };
+    const octokit = {
+      rest: {
+        pulls: {
+          listReviews,
+          get: async () => pullResponse('headsha'),
+        },
+      },
+      paginate: async () => [
+        { ...review, state: 'APPROVED' },
+        { ...review, state: 'CHANGES_REQUESTED' },
+      ],
+      graphql: async () => ({ viewer: { login: 'github-actions' } }),
+    };
+
+    assert.deepEqual(
+      await checkAutoApprovalEligibility(
+        octokit as unknown as Octokit,
+        'acme',
+        'widget',
+        12,
+        'headsha',
+      ),
+      { status: 'eligible' },
+    );
   });
 
   it('pins approval to the reviewed commit and keeps the review marker', async () => {
@@ -164,6 +239,28 @@ describe('auto approval', () => {
     assert.equal(request?.commit_id, 'headsha');
     assert.match(String(request?.body), /jbot-review:threads:0/);
     assert.match(String(request?.body), /jbot-review:review/);
+  });
+
+  it('keeps a confirmed approval when mergeability is temporarily unknown', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const octokit = approvalOctokit({
+      createReview: async (params: Record<string, unknown>) => {
+        requests.push(params);
+      },
+      get: async () => ({
+        data: {
+          state: 'open',
+          draft: false,
+          head: { sha: 'headsha' },
+          mergeable: null,
+        },
+      }),
+    });
+
+    await postApproval(octokit);
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]?.event, 'APPROVE');
   });
 
   it('replaces a raced approval with changes requested on the current head', async () => {

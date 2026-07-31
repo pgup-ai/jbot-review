@@ -5,6 +5,7 @@ import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 import type { Finding } from './types.ts';
 import type { ReviewCommit } from './review-context.ts';
 import {
+  decideApprovalContinuity,
   decideAutoApproval,
   isDefinitiveApprovalRejection,
   type AutoApprovalDecision,
@@ -525,27 +526,33 @@ export async function checkAutoApprovalEligibility(
     pull_number: pullNumber,
     per_page: 100,
   });
-  const alreadyApproved = reviews.some(
-    (review) =>
-      review.state === 'APPROVED' &&
-      review.commit_id === reviewedHeadSha &&
-      isViewerActor(review.user?.login, viewerLogin) &&
-      isJbotReviewBody(review.body ?? ''),
-  );
-  if (alreadyApproved) return { status: 'already-approved' };
+  // COMMENT reviews do not change approval state; only the latest decisive
+  // review from this bot can make the dedupe safe.
+  const latestDecision = [...reviews]
+    .reverse()
+    .find(
+      (review) =>
+        (review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED') &&
+        review.commit_id === reviewedHeadSha &&
+        isViewerActor(review.user?.login, viewerLogin) &&
+        isJbotReviewBody(review.body ?? ''),
+    );
 
   const pull = await octokit.rest.pulls.get({
     owner,
     repo,
     pull_number: pullNumber,
   });
-  return decideAutoApproval({
+  const decision = decideAutoApproval({
     state: pull.data.state,
     draft: pull.data.draft === true,
     headSha: pull.data.head.sha,
     reviewedHeadSha,
     mergeable: pull.data.mergeable,
   });
+  if (decision.status === 'blocked') return decision;
+  if (latestDecision?.state === 'APPROVED') return { status: 'already-approved' };
+  return decision;
 }
 
 export async function postApprovalReview(
@@ -602,12 +609,11 @@ export async function postApprovalReview(
       pull_number: pullNumber,
     });
     currentHeadSha = pull.data.head.sha;
-    const decision = decideAutoApproval({
+    const decision = decideApprovalContinuity({
       state: pull.data.state,
       draft: pull.data.draft === true,
       headSha: currentHeadSha,
       reviewedHeadSha: headSha,
-      mergeable: pull.data.mergeable,
     });
     if (decision.status === 'eligible') return;
     blockedReason = decision.reason;
