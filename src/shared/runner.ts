@@ -750,7 +750,7 @@ async function runReviewPipeline(params: {
   if (!localDiff && !headSha) {
     throw new Error('runPrReview requires headSha for GitHub-backed reviews.');
   }
-  if (!localDiff && !options.dryRun) {
+  if (!localDiff && !options.dryRun && options.autoApprove) {
     try {
       const withdrawn = await withdrawStaleJbotApproval(octokit, owner, repo, pullNumber, headSha!);
       if (withdrawn) log('Withdrew a stale jbot approval from an older head.');
@@ -1911,27 +1911,29 @@ async function runReviewPipeline(params: {
       return;
     }
 
-    const openThreadsBeforePosting =
-      openFindingThreadIds(allPriorJbotThreads, []).length + unresolvedAddressedThreadIds.length;
-    let approvalWithdrawalReason: string | undefined;
-    if (!priorThreadStateKnown) {
-      approvalWithdrawalReason = 'prior jbot-review thread state could not be verified';
-    } else if (verifiedFindings.length > 0) {
-      approvalWithdrawalReason = 'the latest review found new findings';
-    } else if (openThreadsBeforePosting > 0) {
-      approvalWithdrawalReason = 'open jbot findings remain';
-    }
-    if (approvalWithdrawalReason) {
-      const withdrawn = await withdrawJbotApprovalForReviewedHead(
-        octokit,
-        owner,
-        repo,
-        pullNumber,
-        headSha!,
-        approvalWithdrawalReason,
-      );
-      if (withdrawn)
-        log(`Withdrew the existing jbot approval because ${approvalWithdrawalReason}.`);
+    if (options.autoApprove) {
+      const openThreadsBeforePosting =
+        openFindingThreadIds(allPriorJbotThreads, []).length + unresolvedAddressedThreadIds.length;
+      let approvalWithdrawalReason: string | undefined;
+      if (!priorThreadStateKnown) {
+        approvalWithdrawalReason = 'prior jbot-review thread state could not be verified';
+      } else if (verifiedFindings.length > 0) {
+        approvalWithdrawalReason = 'the latest review found new findings';
+      } else if (openThreadsBeforePosting > 0) {
+        approvalWithdrawalReason = 'open jbot findings remain';
+      }
+      if (approvalWithdrawalReason) {
+        const withdrawn = await withdrawJbotApprovalForReviewedHead(
+          octokit,
+          owner,
+          repo,
+          pullNumber,
+          headSha!,
+          approvalWithdrawalReason,
+        );
+        if (withdrawn)
+          log(`Withdrew the existing jbot approval because ${approvalWithdrawalReason}.`);
+      }
     }
 
     // Don't post a redundant "all clear" comment on a re-run.

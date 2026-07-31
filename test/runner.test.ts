@@ -483,7 +483,7 @@ describe('runPrReview local mode and early exits', () => {
         ...base,
         octokit: octokit as unknown as Octokit,
         headSha: 'headsha',
-        options: {},
+        options: { autoApprove: true },
         log: () => {},
       }),
       (error: unknown) => error === failure,
@@ -597,7 +597,7 @@ describe('runPrReview local mode and early exits', () => {
         ...base,
         octokit: octokit as unknown as Octokit,
         headSha: 'headsha',
-        options: {},
+        options: { autoApprove: true },
         log: () => {},
       });
 
@@ -612,7 +612,7 @@ describe('runPrReview local mode and early exits', () => {
 
   // Pins the production seam: without localDiff, the diff still comes from
   // listPrFiles (octokit.paginate), byte-identical to the pre-seam behavior.
-  it('still sources the diff from GitHub when localDiff is absent', async () => {
+  it('reaches the GitHub diff without reading approval state when auto-approve is off', async () => {
     const sentinel = new Error('listPrFiles reached');
     const fake = {
       rest: { pulls: { listFiles: {} } },
@@ -623,7 +623,7 @@ describe('runPrReview local mode and early exits', () => {
         ...base,
         octokit: fake,
         headSha: 'headsha',
-        options: { dryRun: true },
+        options: {},
         log: () => {},
       }),
       (error: unknown) => error === sentinel,
