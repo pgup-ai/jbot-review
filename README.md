@@ -135,9 +135,12 @@ jobs:
 ```
 
 The minimal version reviews every push. The full example also supports
-**one-off reviews** — comment `/jbot [--provider=<id>] [--model=<id>]` on a PR
+**one-off reviews** — comment
+`/jbot [--provider=<id>] [--model=<id>] [--auto-approve[=true|false]]` on a PR
 (repo owners/members/collaborators only) to re-run the review once with
-overrides, e.g. a stronger model as a final sign-off. Semantics — fallbacks,
+overrides, e.g. `/jbot --provider=devin --model=devin/glm-5.2 --auto-approve`.
+Bare `--auto-approve` is equivalent to `--auto-approve=true`; explicit `false`
+overrides an enabled repository default for that run. Semantics — fallbacks,
 fork policy, `workflow_dispatch` parity — are documented in
 [`pgup-ai/jbot-review-action`](https://github.com/pgup-ai/jbot-review-action#one-off-reviews-jbot).
 

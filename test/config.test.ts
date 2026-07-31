@@ -131,7 +131,11 @@ describe('provider configuration resolution', () => {
     assert.ok(input);
     assert.match(input, /default: 'false'/);
     assert.match(action, /INPUT_AUTO-APPROVE: \$\{\{ inputs\.auto-approve \}\}/);
-    assert.match(workflow, /auto-approve: \$\{\{ vars\.JBOT_AUTO_APPROVE \|\| 'false' \}\}/);
+    assert.match(workflow, /auto_approve: \$\{\{ steps\.cmd\.outputs\.auto_approve \}\}/);
+    assert.match(
+      workflow,
+      /auto-approve: \$\{\{ needs\.command\.outputs\.auto_approve \|\| vars\.JBOT_AUTO_APPROVE \|\| 'false' \}\}/,
+    );
   });
 
   it('registers cross-provider config and distinct models on a shared custom provider', () => {
