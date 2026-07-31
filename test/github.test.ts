@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   classifyPriorJbotThread,
   compactJbotReviewBody,
+  formatFindingLabel,
   formatPriorJbotThreadsForPrompt,
   isBotAddressedReply,
   listPriorJbotThreads,
@@ -35,6 +36,31 @@ const LINKED_REVIEW_BODY = [
   REVIEW_BODY.replace('| 1 | 0 | 0 | 1 | 0 | 0 |', '| 2 | 0 | 0 | 1 | 1 | 0 |'),
   '<!-- jbot-review:linked-comments:200 -->',
 ].join('\n');
+
+describe('formatFindingLabel', () => {
+  it('keeps confidence explicit but visually secondary', () => {
+    assert.equal(
+      formatFindingLabel({
+        severity: 'P3',
+        kind: 'investigate',
+        confidence: 'low',
+      }),
+      '**P3 · investigate** (*conf: low*)',
+    );
+    assert.equal(
+      formatFindingLabel({
+        severity: 'P2',
+        kind: 'bug',
+        confidence: 'medium',
+      }),
+      '**P2 · bug** (*conf: med*)',
+    );
+  });
+
+  it('omits absent optional metadata', () => {
+    assert.equal(formatFindingLabel({ severity: 'P1' }), '**P1**');
+  });
+});
 
 describe('isBotAddressedReply', () => {
   it('counts the addressed marker only from the bot itself', () => {

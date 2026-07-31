@@ -158,7 +158,7 @@ import {
   listPrComments,
   listPrCommits,
   getCheckStatusSummary,
-  formatFindingMetadata,
+  formatFindingLabel,
   formatFindingLocation,
   postFileLevelComment,
   addPrReaction,
@@ -2364,8 +2364,7 @@ function filterFindings(findings: Finding[], options: NormalizedReviewRunOptions
 
 function formatInlineFinding(finding: Finding): string {
   const indentedBody = finding.body.replace(/\n/g, '\n  ');
-  const metadata = formatFindingMetadata(finding);
-  return `- ${formatFindingLocation(finding)} ${finding.severity}${metadata} ${finding.title}\n  ${indentedBody}`;
+  return `- ${formatFindingLocation(finding)} ${formatFindingLabel(finding)} ${finding.title}\n  ${indentedBody}`;
 }
 
 function formatAddressedPriorComment(comment: AddressedPriorComment): string {

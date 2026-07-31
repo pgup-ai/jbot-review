@@ -1,5 +1,5 @@
 import type { Finding } from './types.ts';
-import { formatFindingLocation, formatFindingMetadata } from './github.ts';
+import { formatFindingLabel, formatFindingLocation } from './github.ts';
 
 /**
  * Pure review-body layout helpers. `runner.ts` wires these into the posted
@@ -8,9 +8,8 @@ import { formatFindingLocation, formatFindingMetadata } from './github.ts';
  * not enforced in code.
  */
 
-/** One-line entry: severity, kind/confidence, title, clickable location. */
 function findingLine(finding: Finding): string {
-  return `- **${finding.severity}${formatFindingMetadata(finding)}** ${finding.title} — \`${formatFindingLocation(finding)}\``;
+  return `- ${formatFindingLabel(finding)} ${finding.title} — \`${formatFindingLocation(finding)}\``;
 }
 
 /**

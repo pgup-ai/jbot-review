@@ -626,9 +626,14 @@ export async function updateReviewBody(
   });
 }
 
-export function formatFindingMetadata(finding: Pick<Finding, 'kind' | 'confidence'>): string {
-  const parts = [finding.kind, finding.confidence].filter(Boolean);
-  return parts.length > 0 ? ` (${parts.join(', ')})` : '';
+export function formatFindingLabel(
+  finding: Pick<Finding, 'severity' | 'kind' | 'confidence'>,
+): string {
+  const kind = finding.kind ? ` · ${finding.kind}` : '';
+  const confidence = finding.confidence
+    ? ` (*conf: ${finding.confidence === 'medium' ? 'med' : finding.confidence}*)`
+    : '';
+  return `**${finding.severity}${kind}**${confidence}`;
 }
 
 /** `path:line` for an anchored finding, or just `path` for a file-level one. */
@@ -642,7 +647,7 @@ export function formatFindingLocation(finding: Pick<Finding, 'path' | 'line'>): 
  * findings by it, so every posting path must go through here.
  */
 function formatFindingCommentBody(finding: Finding): string {
-  return `**${finding.severity}${formatFindingMetadata(finding)}** — ${finding.title}\n\n${finding.body}\n\n${FINDING_MARKER}`;
+  return `${formatFindingLabel(finding)} — ${finding.title}\n\n${finding.body}\n\n${FINDING_MARKER}`;
 }
 
 /**
