@@ -44,6 +44,18 @@ export function decideAutoApproval(snapshot: AutoApprovalSnapshot): AutoApproval
   return { status: 'eligible' };
 }
 
+export function approvalWithdrawalReason(snapshot: {
+  findingCount: number;
+  openThreadCount: number;
+  threadStateKnown: boolean;
+}): string | undefined {
+  if (snapshot.findingCount > 0) return 'the latest review found new findings';
+  if (snapshot.threadStateKnown && snapshot.openThreadCount > 0) {
+    return 'open jbot findings remain';
+  }
+  return undefined;
+}
+
 export function isDefinitiveApprovalRejection(error: unknown): boolean {
   const status = (error as { status?: number } | null)?.status;
   return status === 403 || status === 422;

@@ -184,7 +184,11 @@ import {
   type PriorJbotThread,
   type PriorJbotThreads,
 } from './github.ts';
-import { isDefinitiveApprovalRejection, type AutoApprovalDecision } from './approval.ts';
+import {
+  approvalWithdrawalReason,
+  isDefinitiveApprovalRejection,
+  type AutoApprovalDecision,
+} from './approval.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
@@ -1914,25 +1918,21 @@ async function runReviewPipeline(params: {
     if (options.autoApprove) {
       const openThreadsBeforePosting =
         openFindingThreadIds(allPriorJbotThreads, []).length + unresolvedAddressedThreadIds.length;
-      let approvalWithdrawalReason: string | undefined;
-      if (!priorThreadStateKnown) {
-        approvalWithdrawalReason = 'prior jbot-review thread state could not be verified';
-      } else if (verifiedFindings.length > 0) {
-        approvalWithdrawalReason = 'the latest review found new findings';
-      } else if (openThreadsBeforePosting > 0) {
-        approvalWithdrawalReason = 'open jbot findings remain';
-      }
-      if (approvalWithdrawalReason) {
+      const withdrawalReason = approvalWithdrawalReason({
+        findingCount: verifiedFindings.length,
+        openThreadCount: openThreadsBeforePosting,
+        threadStateKnown: priorThreadStateKnown,
+      });
+      if (withdrawalReason) {
         const withdrawn = await withdrawJbotApprovalForReviewedHead(
           octokit,
           owner,
           repo,
           pullNumber,
           headSha!,
-          approvalWithdrawalReason,
+          withdrawalReason,
         );
-        if (withdrawn)
-          log(`Withdrew the existing jbot approval because ${approvalWithdrawalReason}.`);
+        if (withdrawn) log(`Withdrew the existing jbot approval because ${withdrawalReason}.`);
       }
     }
 

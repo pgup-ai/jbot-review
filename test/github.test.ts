@@ -22,6 +22,7 @@ import {
   type PriorJbotThread,
 } from '../src/shared/github.ts';
 import {
+  approvalWithdrawalReason,
   decideApprovalContinuity,
   decideAutoApproval,
   isDefinitiveApprovalRejection,
@@ -118,6 +119,41 @@ describe('auto approval', () => {
         reviewedHeadSha: 'headsha',
       }),
       { status: 'eligible' },
+    );
+  });
+
+  it('withdraws only for verified unsafe review state', () => {
+    assert.equal(
+      approvalWithdrawalReason({
+        findingCount: 1,
+        openThreadCount: 0,
+        threadStateKnown: false,
+      }),
+      'the latest review found new findings',
+    );
+    assert.equal(
+      approvalWithdrawalReason({
+        findingCount: 0,
+        openThreadCount: 1,
+        threadStateKnown: true,
+      }),
+      'open jbot findings remain',
+    );
+    assert.equal(
+      approvalWithdrawalReason({
+        findingCount: 0,
+        openThreadCount: 0,
+        threadStateKnown: false,
+      }),
+      undefined,
+    );
+    assert.equal(
+      approvalWithdrawalReason({
+        findingCount: 0,
+        openThreadCount: 0,
+        threadStateKnown: true,
+      }),
+      undefined,
     );
   });
 
