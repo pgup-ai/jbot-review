@@ -15,6 +15,7 @@ import {
   postReview,
   selectResolvedJbotReviewsToFinalize,
   updateReviewBody,
+  withdrawStaleJbotApproval,
   type JbotReviewGroup,
   type Octokit,
   type PriorJbotThread,
@@ -89,6 +90,8 @@ describe('auto approval', () => {
     ({ rest: { pulls } }) as unknown as Octokit;
   const postApproval = (octokit: Octokit) =>
     postApprovalReview(octokit, 'acme', 'widget', 12, 'review body', 'headsha');
+  const withdrawStale = (octokit: Octokit) =>
+    withdrawStaleJbotApproval(octokit, 'acme', 'widget', 12, 'headsha');
 
   it('requires the exact open, non-draft, mergeable reviewed head', () => {
     assert.deepEqual(decideAutoApproval(eligible), { status: 'eligible' });
@@ -207,7 +210,7 @@ describe('auto approval', () => {
       },
       paginate: async () => [
         { ...review, state: 'APPROVED' },
-        { ...review, state: 'CHANGES_REQUESTED' },
+        { ...review, state: 'CHANGES_REQUESTED', commit_id: 'newer-head' },
       ],
       graphql: async () => ({ viewer: { login: 'github-actions' } }),
     };
@@ -222,6 +225,70 @@ describe('auto approval', () => {
       ),
       { status: 'eligible' },
     );
+  });
+
+  it('withdraws the latest jbot approval when it belongs to an older head', async () => {
+    const listReviews = {};
+    let request: Record<string, unknown> | undefined;
+    const review = {
+      user: { login: 'github-actions[bot]' },
+      body: '## J-Bot Code Review\n\n<!-- jbot-review:review -->',
+    };
+    const octokit = {
+      rest: {
+        pulls: {
+          listReviews,
+          createReview: async (params: Record<string, unknown>) => {
+            request = params;
+          },
+        },
+      },
+      paginate: async () => [
+        { ...review, state: 'APPROVED', commit_id: 'old-head' },
+        { ...review, state: 'COMMENTED', commit_id: 'headsha' },
+      ],
+      graphql: async () => ({ viewer: { login: 'github-actions' } }),
+    };
+
+    assert.equal(await withdrawStale(octokit as unknown as Octokit), true);
+    assert.equal(request?.event, 'REQUEST_CHANGES');
+    assert.equal(request?.commit_id, 'headsha');
+    assert.match(String(request?.body), /head changed after review/);
+    assert.match(String(request?.body), /jbot-review:review/);
+  });
+
+  it('keeps same-head and already-superseded approvals unchanged', async () => {
+    const listReviews = {};
+    let reviews = [
+      {
+        state: 'APPROVED',
+        commit_id: 'headsha',
+        user: { login: 'github-actions[bot]' },
+        body: '<!-- jbot-review:review -->',
+      },
+    ];
+    let createCalls = 0;
+    const octokit = {
+      rest: {
+        pulls: {
+          listReviews,
+          createReview: async () => {
+            createCalls++;
+          },
+        },
+      },
+      paginate: async () => reviews,
+      graphql: async () => ({ viewer: { login: 'github-actions' } }),
+    };
+
+    assert.equal(await withdrawStale(octokit as unknown as Octokit), false);
+
+    reviews = [
+      { ...reviews[0], commit_id: 'old-head' },
+      { ...reviews[0], state: 'CHANGES_REQUESTED', commit_id: 'headsha' },
+    ];
+    assert.equal(await withdrawStale(octokit as unknown as Octokit), false);
+    assert.equal(createCalls, 0);
   });
 
   it('pins approval to the reviewed commit and keeps the review marker', async () => {

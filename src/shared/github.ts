@@ -60,6 +60,13 @@ export interface JbotReviewGroup {
 
 export type Verdict = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
 
+interface ReviewDecision {
+  state: string;
+  commit_id: string | null;
+  user?: { login?: string } | null;
+  body?: string | null;
+}
+
 /** Lists changed files (with their patches) in the pull request. */
 export async function listPrFiles(
   octokit: Octokit,
@@ -526,17 +533,7 @@ export async function checkAutoApprovalEligibility(
     pull_number: pullNumber,
     per_page: 100,
   });
-  // COMMENT reviews do not change approval state; only the latest decisive
-  // review from this bot can make the dedupe safe.
-  const latestDecision = [...reviews]
-    .reverse()
-    .find(
-      (review) =>
-        (review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED') &&
-        review.commit_id === reviewedHeadSha &&
-        isViewerActor(review.user?.login, viewerLogin) &&
-        isJbotReviewBody(review.body ?? ''),
-    );
+  const latestDecision = findLatestJbotDecision(reviews, viewerLogin);
 
   const pull = await octokit.rest.pulls.get({
     owner,
@@ -551,8 +548,40 @@ export async function checkAutoApprovalEligibility(
     mergeable: pull.data.mergeable,
   });
   if (decision.status === 'blocked') return decision;
-  if (latestDecision?.state === 'APPROVED') return { status: 'already-approved' };
+  if (latestDecision?.state === 'APPROVED' && latestDecision.commit_id === reviewedHeadSha) {
+    return { status: 'already-approved' };
+  }
   return decision;
+}
+
+export async function withdrawStaleJbotApproval(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  currentHeadSha: string,
+): Promise<boolean> {
+  const viewerLogin = await getViewerLogin(octokit);
+  const reviews = await octokit.paginate(octokit.rest.pulls.listReviews, {
+    owner,
+    repo,
+    pull_number: pullNumber,
+    per_page: 100,
+  });
+  const latestDecision = findLatestJbotDecision(reviews, viewerLogin);
+  if (latestDecision?.state !== 'APPROVED' || latestDecision.commit_id === currentHeadSha) {
+    return false;
+  }
+
+  await postApprovalWithdrawal(
+    octokit,
+    owner,
+    repo,
+    pullNumber,
+    'the pull request head changed after review',
+    currentHeadSha,
+  );
+  return true;
 }
 
 export async function postApprovalReview(
@@ -567,14 +596,7 @@ export async function postApprovalReview(
     // Dismissing a submitted review can require admin access. A newer
     // REQUEST_CHANGES review supersedes this bot's approval with the existing token.
     try {
-      await octokit.rest.pulls.createReview({
-        owner,
-        repo,
-        pull_number: pullNumber,
-        ...(currentHeadSha ? { commit_id: currentHeadSha } : {}),
-        event: 'REQUEST_CHANGES',
-        body: formatReviewBody(`Auto-approval withdrawn because ${reason}.`, 0),
-      });
+      await postApprovalWithdrawal(octokit, owner, repo, pullNumber, reason, currentHeadSha);
     } catch (error) {
       throw new Error(
         `Auto-approval may still be active: failed to withdraw it because ${reason}.`,
@@ -621,6 +643,24 @@ export async function postApprovalReview(
     blockedReason = 'the pull request state could not be revalidated after approval';
   }
   await withdrawApproval(blockedReason, currentHeadSha);
+}
+
+async function postApprovalWithdrawal(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  reason: string,
+  headSha?: string,
+): Promise<void> {
+  await octokit.rest.pulls.createReview({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    ...(headSha ? { commit_id: headSha } : {}),
+    event: 'REQUEST_CHANGES',
+    body: formatReviewBody(`Auto-approval withdrawn because ${reason}.`, 0),
+  });
 }
 
 /**
@@ -995,6 +1035,23 @@ function isViewerActor(authorLogin: string | undefined, viewerLogin: string): bo
     authorLogin === viewerLogin ||
     (authorLogin === 'github-actions[bot]' && viewerLogin === 'github-actions')
   );
+}
+
+function findLatestJbotDecision(
+  reviews: readonly ReviewDecision[],
+  viewerLogin: string,
+): ReviewDecision | undefined {
+  // COMMENT reviews do not replace an approval or changes-requested decision.
+  return [...reviews]
+    .reverse()
+    .find(
+      (review) =>
+        (review.state === 'APPROVED' ||
+          review.state === 'CHANGES_REQUESTED' ||
+          review.state === 'DISMISSED') &&
+        isViewerActor(review.user?.login, viewerLogin) &&
+        isJbotReviewBody(review.body ?? ''),
+    );
 }
 
 export function isJbotReviewBody(body: string): boolean {

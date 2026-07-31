@@ -475,12 +475,16 @@ describe('runPrReview local mode and early exits', () => {
       const listReviewComments = {};
       const updatedBodies: string[] = [];
       const minimizedReviewIds: string[] = [];
+      const createdReviewEvents: string[] = [];
       const octokit = {
         rest: {
           pulls: {
             listFiles,
             listReviews,
             listReviewComments,
+            createReview: async ({ event }: { event: string }) => {
+              createdReviewEvents.push(event);
+            },
             updateReview: async ({ body }: { body: string }) => updatedBodies.push(body),
           },
         },
@@ -493,6 +497,8 @@ describe('runPrReview local mode and early exits', () => {
                 node_id: 'PRR_77',
                 user: { login: 'jbot' },
                 body: scenario.reviewBody,
+                state: 'APPROVED',
+                commit_id: 'old-head',
               },
             ];
           }
@@ -562,6 +568,7 @@ describe('runPrReview local mode and early exits', () => {
         assert.match(updatedBodies[0], /All 1 review thread resolved/, scenario.name);
       }
       assert.deepEqual(minimizedReviewIds, ['PRR_77'], scenario.name);
+      assert.deepEqual(createdReviewEvents, ['REQUEST_CHANGES'], scenario.name);
     }
   });
 
