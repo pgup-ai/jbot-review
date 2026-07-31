@@ -1920,7 +1920,12 @@ async function runReviewPipeline(params: {
         tokenUsage.snapshot(),
         engineByModel,
       );
-    const postCurrentReview = async (): Promise<void> => {
+    const postCurrentReviewIfNeeded = async (): Promise<void> => {
+      if (!shouldPostComment) {
+        log('No new findings on a re-run; skipping the review comment (reacting instead).');
+        return;
+      }
+
       // File-level comments go first so a posting failure can still fall back
       // into the review body, which is built afterwards.
       const fileLevelCommentIds: number[] = [];
@@ -1967,13 +1972,6 @@ async function runReviewPipeline(params: {
           ? `Review posted; ${inlineDropped} inline comment(s) failed to anchor (${inlinePosted} salvaged).`
           : 'Review posted.',
       );
-    };
-    const postCurrentReviewIfNeeded = async (): Promise<void> => {
-      if (shouldPostComment) {
-        await postCurrentReview();
-      } else {
-        log('No new findings on a re-run; skipping the review comment (reacting instead).');
-      }
     };
 
     if (!deferCleanComment) await postCurrentReviewIfNeeded();
