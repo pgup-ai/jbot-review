@@ -166,6 +166,7 @@ import {
   postReview,
   checkAutoApprovalEligibility,
   postApprovalReview,
+  withdrawJbotApprovalForReviewedHead,
   withdrawStaleJbotApproval,
   decideVerdict,
   listPriorJbotThreads,
@@ -1908,6 +1909,29 @@ async function runReviewPipeline(params: {
         );
       }
       return;
+    }
+
+    const openThreadsBeforePosting =
+      openFindingThreadIds(allPriorJbotThreads, []).length + unresolvedAddressedThreadIds.length;
+    let approvalWithdrawalReason: string | undefined;
+    if (!priorThreadStateKnown) {
+      approvalWithdrawalReason = 'prior jbot-review thread state could not be verified';
+    } else if (verifiedFindings.length > 0) {
+      approvalWithdrawalReason = 'the latest review found new findings';
+    } else if (openThreadsBeforePosting > 0) {
+      approvalWithdrawalReason = 'open jbot findings remain';
+    }
+    if (approvalWithdrawalReason) {
+      const withdrawn = await withdrawJbotApprovalForReviewedHead(
+        octokit,
+        owner,
+        repo,
+        pullNumber,
+        headSha!,
+        approvalWithdrawalReason,
+      );
+      if (withdrawn)
+        log(`Withdrew the existing jbot approval because ${approvalWithdrawalReason}.`);
     }
 
     // Don't post a redundant "all clear" comment on a re-run.

@@ -526,14 +526,7 @@ export async function checkAutoApprovalEligibility(
   pullNumber: number,
   reviewedHeadSha: string,
 ): Promise<AutoApprovalDecision> {
-  const viewerLogin = await getViewerLogin(octokit);
-  const reviews = await octokit.paginate(octokit.rest.pulls.listReviews, {
-    owner,
-    repo,
-    pull_number: pullNumber,
-    per_page: 100,
-  });
-  const latestDecision = findLatestJbotDecision(reviews, viewerLogin);
+  const latestDecision = await getLatestJbotDecision(octokit, owner, repo, pullNumber);
 
   const pull = await octokit.rest.pulls.get({
     owner,
@@ -561,14 +554,7 @@ export async function withdrawStaleJbotApproval(
   pullNumber: number,
   currentHeadSha: string,
 ): Promise<boolean> {
-  const viewerLogin = await getViewerLogin(octokit);
-  const reviews = await octokit.paginate(octokit.rest.pulls.listReviews, {
-    owner,
-    repo,
-    pull_number: pullNumber,
-    per_page: 100,
-  });
-  const latestDecision = findLatestJbotDecision(reviews, viewerLogin);
+  const latestDecision = await getLatestJbotDecision(octokit, owner, repo, pullNumber);
   if (latestDecision?.state !== 'APPROVED' || latestDecision.commit_id === currentHeadSha) {
     return false;
   }
@@ -584,6 +570,23 @@ export async function withdrawStaleJbotApproval(
   return true;
 }
 
+export async function withdrawJbotApprovalForReviewedHead(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  reviewedHeadSha: string,
+  reason: string,
+): Promise<boolean> {
+  const latestDecision = await getLatestJbotDecision(octokit, owner, repo, pullNumber);
+  if (latestDecision?.state !== 'APPROVED' || latestDecision.commit_id !== reviewedHeadSha) {
+    return false;
+  }
+
+  await postApprovalWithdrawal(octokit, owner, repo, pullNumber, reason, reviewedHeadSha);
+  return true;
+}
+
 export async function postApprovalReview(
   octokit: Octokit,
   owner: string,
@@ -592,7 +595,7 @@ export async function postApprovalReview(
   body: string,
   headSha: string,
 ): Promise<void> {
-  const withdrawApproval = async (reason: string, currentHeadSha?: string): Promise<never> => {
+  const withdrawApproval = async (reason: string, currentHeadSha = headSha): Promise<never> => {
     // Dismissing a submitted review can require admin access. A newer
     // REQUEST_CHANGES review supersedes this bot's approval with the existing token.
     try {
@@ -651,13 +654,13 @@ async function postApprovalWithdrawal(
   repo: string,
   pullNumber: number,
   reason: string,
-  headSha?: string,
+  headSha: string,
 ): Promise<void> {
   await octokit.rest.pulls.createReview({
     owner,
     repo,
     pull_number: pullNumber,
-    ...(headSha ? { commit_id: headSha } : {}),
+    commit_id: headSha,
     event: 'REQUEST_CHANGES',
     body: formatReviewBody(`Auto-approval withdrawn because ${reason}.`, 0),
   });
@@ -1052,6 +1055,24 @@ function findLatestJbotDecision(
         isViewerActor(review.user?.login, viewerLogin) &&
         isJbotReviewBody(review.body ?? ''),
     );
+}
+
+async function getLatestJbotDecision(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+): Promise<ReviewDecision | undefined> {
+  const [viewerLogin, reviews] = await Promise.all([
+    getViewerLogin(octokit),
+    octokit.paginate(octokit.rest.pulls.listReviews, {
+      owner,
+      repo,
+      pull_number: pullNumber,
+      per_page: 100,
+    }),
+  ]);
+  return findLatestJbotDecision(reviews, viewerLogin);
 }
 
 export function isJbotReviewBody(body: string): boolean {
