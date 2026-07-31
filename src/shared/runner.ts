@@ -750,8 +750,13 @@ async function runReviewPipeline(params: {
     throw new Error('runPrReview requires headSha for GitHub-backed reviews.');
   }
   if (!localDiff && !options.dryRun) {
-    const withdrawn = await withdrawStaleJbotApproval(octokit, owner, repo, pullNumber, headSha!);
-    if (withdrawn) log('Withdrew a stale jbot approval from an older head.');
+    try {
+      const withdrawn = await withdrawStaleJbotApproval(octokit, owner, repo, pullNumber, headSha!);
+      if (withdrawn) log('Withdrew a stale jbot approval from an older head.');
+    } catch (error) {
+      await safeRemoveReviewReaction(octokit, owner, repo, pullNumber, log);
+      throw error;
+    }
   }
   const runStartedAt = Date.now();
   const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes);

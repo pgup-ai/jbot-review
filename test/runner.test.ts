@@ -453,6 +453,44 @@ describe('runPrReview local mode and early exits', () => {
     assert.ok(logs.some((msg) => /no reviewable files/i.test(msg)));
   });
 
+  it('clears the review reaction when stale approval withdrawal fails', async () => {
+    const listReviews = {};
+    const listForIssue = {};
+    const failure = new Error('review lookup failed');
+    const deletedReactionIds: number[] = [];
+    const octokit = {
+      rest: {
+        pulls: { listReviews },
+        reactions: {
+          listForIssue,
+          deleteForIssue: async ({ reaction_id }: { reaction_id: number }) => {
+            deletedReactionIds.push(reaction_id);
+          },
+        },
+      },
+      paginate: async (endpoint: unknown) => {
+        if (endpoint === listReviews) throw failure;
+        if (endpoint === listForIssue) {
+          return [{ id: 7, content: 'rocket', user: { login: 'jbot' } }];
+        }
+        throw new Error('unexpected pagination endpoint');
+      },
+      graphql: async () => ({ viewer: { login: 'jbot' } }),
+    };
+
+    await assert.rejects(
+      runPrReview({
+        ...base,
+        octokit: octokit as unknown as Octokit,
+        headSha: 'headsha',
+        options: {},
+        log: () => {},
+      }),
+      (error: unknown) => error === failure,
+    );
+    assert.deepEqual(deletedReactionIds, [7]);
+  });
+
   it('finalizes resolved reviews before GitHub-backed skip paths return', async () => {
     const scenarios = [
       {
