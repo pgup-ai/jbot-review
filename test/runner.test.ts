@@ -413,6 +413,18 @@ describe('runPrReview local mode and early exits', () => {
     );
   });
 
+  it('requires a head SHA for GitHub-backed reviews', async () => {
+    await assert.rejects(
+      runPrReview({
+        ...base,
+        octokit: {} as Octokit,
+        options: { dryRun: true },
+        log: () => {},
+      }),
+      /requires headSha/,
+    );
+  });
+
   // No `octokit` at all: the runner's internal landmine Proxy throws on ANY
   // property access, so completing proves local mode performs zero GitHub
   // calls on this path — structurally, not by mock bookkeeping.
@@ -441,6 +453,44 @@ describe('runPrReview local mode and early exits', () => {
     assert.ok(logs.some((msg) => /no reviewable files/i.test(msg)));
   });
 
+  it('clears the review reaction when stale approval withdrawal fails', async () => {
+    const listReviews = {};
+    const listForIssue = {};
+    const failure = new Error('review lookup failed');
+    const deletedReactionIds: number[] = [];
+    const octokit = {
+      rest: {
+        pulls: { listReviews },
+        reactions: {
+          listForIssue,
+          deleteForIssue: async ({ reaction_id }: { reaction_id: number }) => {
+            deletedReactionIds.push(reaction_id);
+          },
+        },
+      },
+      paginate: async (endpoint: unknown) => {
+        if (endpoint === listReviews) throw failure;
+        if (endpoint === listForIssue) {
+          return [{ id: 7, content: 'rocket', user: { login: 'jbot' } }];
+        }
+        throw new Error('unexpected pagination endpoint');
+      },
+      graphql: async () => ({ viewer: { login: 'jbot' } }),
+    };
+
+    await assert.rejects(
+      runPrReview({
+        ...base,
+        octokit: octokit as unknown as Octokit,
+        headSha: 'headsha',
+        options: { autoApprove: true },
+        log: () => {},
+      }),
+      (error: unknown) => error === failure,
+    );
+    assert.deepEqual(deletedReactionIds, [7]);
+  });
+
   it('finalizes resolved reviews before GitHub-backed skip paths return', async () => {
     const scenarios = [
       {
@@ -463,12 +513,16 @@ describe('runPrReview local mode and early exits', () => {
       const listReviewComments = {};
       const updatedBodies: string[] = [];
       const minimizedReviewIds: string[] = [];
+      const createdReviewEvents: string[] = [];
       const octokit = {
         rest: {
           pulls: {
             listFiles,
             listReviews,
             listReviewComments,
+            createReview: async ({ event }: { event: string }) => {
+              createdReviewEvents.push(event);
+            },
             updateReview: async ({ body }: { body: string }) => updatedBodies.push(body),
           },
         },
@@ -481,6 +535,8 @@ describe('runPrReview local mode and early exits', () => {
                 node_id: 'PRR_77',
                 user: { login: 'jbot' },
                 body: scenario.reviewBody,
+                state: 'APPROVED',
+                commit_id: 'old-head',
               },
             ];
           }
@@ -540,7 +596,8 @@ describe('runPrReview local mode and early exits', () => {
       await runPrReview({
         ...base,
         octokit: octokit as unknown as Octokit,
-        options: {},
+        headSha: 'headsha',
+        options: { autoApprove: true },
         log: () => {},
       });
 
@@ -549,19 +606,26 @@ describe('runPrReview local mode and early exits', () => {
         assert.match(updatedBodies[0], /All 1 review thread resolved/, scenario.name);
       }
       assert.deepEqual(minimizedReviewIds, ['PRR_77'], scenario.name);
+      assert.deepEqual(createdReviewEvents, ['REQUEST_CHANGES'], scenario.name);
     }
   });
 
   // Pins the production seam: without localDiff, the diff still comes from
   // listPrFiles (octokit.paginate), byte-identical to the pre-seam behavior.
-  it('still sources the diff from GitHub when localDiff is absent', async () => {
+  it('reaches the GitHub diff without reading approval state when auto-approve is off', async () => {
     const sentinel = new Error('listPrFiles reached');
     const fake = {
       rest: { pulls: { listFiles: {} } },
       paginate: () => Promise.reject(sentinel),
     } as unknown as Octokit;
     await assert.rejects(
-      runPrReview({ ...base, octokit: fake, options: { dryRun: true }, log: () => {} }),
+      runPrReview({
+        ...base,
+        octokit: fake,
+        headSha: 'headsha',
+        options: {},
+        log: () => {},
+      }),
       (error: unknown) => error === sentinel,
     );
   });
@@ -622,6 +686,11 @@ describe('emitReviewTelemetry sink', () => {
 });
 
 describe('normalizeOptions defaults', () => {
+  it('keeps auto approval opt-in', () => {
+    assert.equal(normalizeOptions(undefined).autoApprove, false);
+    assert.equal(normalizeOptions({ autoApprove: true }).autoApprove, true);
+  });
+
   it('keeps SDK routing automatic unless an entrypoint supplies the override', () => {
     assert.equal(normalizeOptions(undefined).sdkEngine, '');
     assert.equal(normalizeOptions({ sdkEngine: 'opencode' }).sdkEngine, 'opencode');

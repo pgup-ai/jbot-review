@@ -28,7 +28,7 @@ test('renderOrphanedSection: lists outside-diff findings flat with bodies', () =
   ]);
   assert.equal(lines[0], '### Findings (outside the diff)');
   const text = lines.join('\n');
-  assert.match(text, /- \*\*P2 \(bug, high\)\*\* Outside one — `src\/o\.ts:2`/);
+  assert.match(text, /- \*\*P2 · bug\*\* \(\*conf: high\*\) Outside one — `src\/o\.ts:2`/);
   assert.match(text, /\n {2}b1/);
 });
 

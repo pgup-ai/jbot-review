@@ -381,7 +381,12 @@ export function openFindingThreadIds(
  * quiet". Clean requires BOTH no new findings posted now AND no finding
  * thread still open (a still-open prior finding can be suppressed from
  * `findingCount`, so the open-thread count is what keeps the reaction honest).
+ * If the thread lookup failed, the PR cannot be proven clean.
  */
-export function isPrCleanAfterRun(findingCount: number, openThreadCount: number): boolean {
-  return findingCount === 0 && openThreadCount === 0;
+export function isPrCleanAfterRun(
+  findingCount: number,
+  openThreadCount: number,
+  threadStateKnown: boolean,
+): boolean {
+  return threadStateKnown && findingCount === 0 && openThreadCount === 0;
 }

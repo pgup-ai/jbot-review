@@ -103,6 +103,7 @@ jobs:
           model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
           sdk-engine: ${{ vars.JBOT_SDK_ENGINE || '' }}
           aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
+          auto-approve: ${{ vars.JBOT_AUTO_APPROVE || 'false' }}
           aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
           opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
           deepseek-api-key: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -134,9 +135,12 @@ jobs:
 ```
 
 The minimal version reviews every push. The full example also supports
-**one-off reviews** — comment `/jbot [--provider=<id>] [--model=<id>]` on a PR
+**one-off reviews** — comment
+`/jbot [--provider=<id>] [--model=<id>] [--auto-approve[=true|false]]` on a PR
 (repo owners/members/collaborators only) to re-run the review once with
-overrides, e.g. a stronger model as a final sign-off. Semantics — fallbacks,
+overrides, e.g. `/jbot --provider=devin --model=devin/glm-5.2 --auto-approve`.
+Bare `--auto-approve` is equivalent to `--auto-approve=true`; explicit `false`
+overrides an enabled repository default for that run. Semantics — fallbacks,
 fork policy, `workflow_dispatch` parity — are documented in
 [`pgup-ai/jbot-review-action`](https://github.com/pgup-ai/jbot-review-action#one-off-reviews-jbot).
 
@@ -292,6 +296,7 @@ without editing the workflow.
     aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
     pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] }}
     dry-run: ${{ inputs['dry-run'] || 'false' }}
+    auto-approve: ${{ vars.JBOT_AUTO_APPROVE || 'false' }}
     max-findings: ${{ inputs['max-findings'] || '0' }}
     min-severity: ${{ inputs['min-severity'] || 'nit' }}
     include-prior-comments: ${{ inputs['include-prior-comments'] || 'true' }}
@@ -332,7 +337,11 @@ balance:
 
 **Posting behavior.** The first visible run on a PR always posts a review
 (baseline), and any run that finds something posts. A clean re-run posts no
-comment. The 🚀 reaction means **the PR has no open jbot findings** — it is
+comment. With `auto-approve: true`, a clean run approves the exact reviewed
+head only when every prior jbot thread is resolved and GitHub reports the PR
+open, non-draft, and mergeable. CI, required reviews, and every other merge
+requirement remain GitHub's responsibility. The 🚀 reaction means **the PR has
+no open jbot findings** — it is
 added only when a real review leaves zero new findings _and_ every prior
 finding thread is resolved, and removed when a review starts. So 🚀-present
 means "reviewed, all good"; 🚀-absent means a review is in flight or the PR
@@ -345,6 +354,7 @@ the review itself is unaffected._
 
 | Input                     | Default            | Effect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto-approve`            | `false`            | Approve the exact reviewed head when the run produces no findings before display filters, all prior jbot threads are resolved, and GitHub reports the PR open, non-draft, and mergeable. Existing same-head jbot approvals are not duplicated. GitHub branch protection still decides whether the PR can merge.                                                                                                                                                                                                                                                                                                                                             |
 | `review-passes`           | `1`                | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `dynamic-fanout`          | `true`             | Scale the recall-supplement fan-out (extra lens passes + the guideline-compliance pass) to the diff's risk and size: a small, low-risk change (≤3 files, ≤60 added lines, no security/data/API/infra path or build/CI tooling like `package.json`/`action.yml`/workflows, no dependency-manifest change, no large deletion) runs the general pass only and skips the guideline pass; everything else runs the full requested fan-out. The requested config is the ceiling — this only ever reduces it, and never gates the main full-diff review or `verify-findings`. Set `false` to force the full requested fan-out on every PR.                         |
 | `verify-findings`         | `true`             | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -658,6 +668,7 @@ documentation lookup.
 | `thread-resolution-token`    | No       | —                     | Optional token for resolving threads and minimizing completed reviews                  |
 | `pr-number`                  | No       | —                     | PR number for manual `workflow_dispatch` reviews                                       |
 | `dry-run`                    | No       | `false`               | Log review output without posting to GitHub                                            |
+| `auto-approve`               | No       | `false`               | Approve an eligible exact reviewed head when no new or open jbot findings remain       |
 | `max-findings`               | No       | `0`                   | Cap findings; `0` means no limit                                                       |
 | `min-severity`               | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                                               |
 | `include-prior-comments`     | No       | `true`                | Include existing PR review comments in context                                         |
@@ -666,8 +677,11 @@ documentation lookup.
 
 ### Review output
 
-`jbot-review` always posts a GitHub `COMMENT` review, not an automatic approval
-or request-changes review. The review body includes advisory merge guidance:
+`jbot-review` posts `COMMENT` reviews for findings and never uses
+`REQUEST_CHANGES` as a finding verdict. With `auto-approve: true`, an eligible
+clean run posts an `APPROVE` review for the exact reviewed head. If GitHub cannot
+confirm that approval remains safe, jbot supersedes it with `REQUEST_CHANGES`
+and fails the run. The review body includes advisory merge guidance:
 
 - `Needs changes before approval` when any `P0`, `P1`, or `P2` finding is present.
 - `Mergeable with non-blocking comments` when only `P3` or `nit` findings are present.

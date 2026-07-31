@@ -158,12 +158,16 @@ import {
   listPrComments,
   listPrCommits,
   getCheckStatusSummary,
-  formatFindingMetadata,
+  formatFindingLabel,
   formatFindingLocation,
   postFileLevelComment,
   addPrReaction,
   removeOwnPrReaction,
   postReview,
+  checkAutoApprovalEligibility,
+  postApprovalReview,
+  withdrawJbotApprovalForReviewedHead,
+  withdrawStaleJbotApproval,
   decideVerdict,
   listPriorJbotThreads,
   formatPriorJbotThreadsForPrompt,
@@ -180,6 +184,11 @@ import {
   type PriorJbotThread,
   type PriorJbotThreads,
 } from './github.ts';
+import {
+  approvalWithdrawalReason,
+  isDefinitiveApprovalRejection,
+  type AutoApprovalDecision,
+} from './approval.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
@@ -566,6 +575,8 @@ export interface ReviewRunOptions {
   /** SDK routing override; blank defers to JBOT_SDK_ENGINE, then auto. */
   sdkEngine?: string;
   dryRun?: boolean;
+  /** Approve an exact reviewed head when no new or open jbot findings remain. */
+  autoApprove?: boolean;
   maxFindings?: number;
   minSeverity?: Severity;
   includePriorComments?: boolean;
@@ -694,6 +705,7 @@ async function runReviewPipeline(params: {
   apiKey: string;
   /** Base URL for a custom main provider. Native Models.dev providers leave this unset. */
   baseURL?: string;
+  /** Required for GitHub-backed reviews; local worktree reviews omit it. */
   headSha?: string;
   baseRef?: string;
   baseSha?: string;
@@ -738,6 +750,18 @@ async function runReviewPipeline(params: {
   // rather than letting a later read hit the local-mode Proxy and mislead.
   if (!localDiff && !params.octokit) {
     throw new Error('runPrReview requires an octokit client unless localDiff is provided.');
+  }
+  if (!localDiff && !headSha) {
+    throw new Error('runPrReview requires headSha for GitHub-backed reviews.');
+  }
+  if (!localDiff && !options.dryRun && options.autoApprove) {
+    try {
+      const withdrawn = await withdrawStaleJbotApproval(octokit, owner, repo, pullNumber, headSha!);
+      if (withdrawn) log('Withdrew a stale jbot approval from an older head.');
+    } catch (error) {
+      await safeRemoveReviewReaction(octokit, owner, repo, pullNumber, log);
+      throw error;
+    }
   }
   const runStartedAt = Date.now();
   const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes);
@@ -822,8 +846,9 @@ async function runReviewPipeline(params: {
     threads: allPriorJbotThreads,
     reviewGroups: priorJbotReviewGroups,
     unresolvedAddressedThreadIds,
+    lookupSucceeded: priorThreadStateKnown,
   } = localDiff
-    ? { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [] }
+    ? { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [], lookupSucceeded: true }
     : await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
   const finalizePriorResolvedReviews = async (resolvedThisRun: readonly string[]) => {
     if (options.dryRun) return;
@@ -1890,12 +1915,53 @@ async function runReviewPipeline(params: {
       return;
     }
 
-    // Don't post a redundant "all clear" comment on a re-run; a clean re-run
-    // is signaled by the reaction instead. `priorJbotReviewCount` is computed
+    if (options.autoApprove) {
+      const openThreadsBeforePosting =
+        openFindingThreadIds(allPriorJbotThreads, []).length + unresolvedAddressedThreadIds.length;
+      const withdrawalReason = approvalWithdrawalReason({
+        findingCount: verifiedFindings.length,
+        openThreadCount: openThreadsBeforePosting,
+        threadStateKnown: priorThreadStateKnown,
+      });
+      if (withdrawalReason) {
+        const withdrawn = await withdrawJbotApprovalForReviewedHead(
+          octokit,
+          owner,
+          repo,
+          pullNumber,
+          headSha!,
+          withdrawalReason,
+        );
+        if (withdrawn) log(`Withdrew the existing jbot approval because ${withdrawalReason}.`);
+      }
+    }
+
+    // Don't post a redundant "all clear" comment on a re-run.
+    // `priorJbotReviewCount` is computed
     // up front (independent of includePriorComments). Addressed-thread replies
     // (below) still run regardless.
     const findingCount = inline.length + fileLevel.length + orphaned.length;
-    if (shouldPostReviewComment(priorJbotReviewCount, findingCount)) {
+    const shouldPostComment = shouldPostReviewComment(priorJbotReviewCount, findingCount);
+    const deferCleanComment = options.autoApprove && verifiedFindings.length === 0;
+    const buildCurrentBody = () =>
+      buildBody(
+        changesSinceText,
+        summary,
+        filteredFindings,
+        orphaned,
+        model,
+        owner,
+        repo,
+        headSha,
+        tokenUsage.snapshot(),
+        engineByModel,
+      );
+    const postCurrentReviewIfNeeded = async (): Promise<void> => {
+      if (!shouldPostComment) {
+        log('No new findings on a re-run; skipping the review comment (reacting instead).');
+        return;
+      }
+
       // File-level comments go first so a posting failure can still fall back
       // into the review body, which is built afterwards.
       const fileLevelCommentIds: number[] = [];
@@ -1922,18 +1988,7 @@ async function runReviewPipeline(params: {
         }
       }
 
-      const body = buildBody(
-        changesSinceText,
-        summary,
-        filteredFindings,
-        orphaned,
-        model,
-        owner,
-        repo,
-        headSha,
-        tokenUsage.snapshot(),
-        engineByModel,
-      );
+      const body = buildCurrentBody();
       log(
         `Posting review: verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
       );
@@ -1953,9 +2008,9 @@ async function runReviewPipeline(params: {
           ? `Review posted; ${inlineDropped} inline comment(s) failed to anchor (${inlinePosted} salvaged).`
           : 'Review posted.',
       );
-    } else {
-      log('No new findings on a re-run; skipping the review comment (reacting instead).');
-    }
+    };
+
+    if (!deferCleanComment) await postCurrentReviewIfNeeded();
 
     const resolvedThisRun = await acknowledgeAddressedPriorComments({
       octokit,
@@ -1993,8 +2048,67 @@ async function runReviewPipeline(params: {
     ).length;
     const openThreadCount =
       openFindingThreadIds(allPriorJbotThreads, resolvedThisRun).length + failedAddressedResolves;
-    if (isPrCleanAfterRun(findingCount, openThreadCount)) {
+    const approvalClean = isPrCleanAfterRun(
+      verifiedFindings.length,
+      openThreadCount,
+      priorThreadStateKnown,
+    );
+    let approved = false;
+    if (options.autoApprove && approvalClean) {
+      const reviewedHeadSha = headSha!;
+      let decision: AutoApprovalDecision | undefined;
+      try {
+        decision = await checkAutoApprovalEligibility(
+          octokit,
+          owner,
+          repo,
+          pullNumber,
+          reviewedHeadSha,
+        );
+      } catch (error) {
+        log(
+          `Could not verify auto-approval safety; leaving a comment instead: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+
+      if (decision?.status === 'eligible') {
+        try {
+          await postApprovalReview(
+            octokit,
+            owner,
+            repo,
+            pullNumber,
+            buildCurrentBody(),
+            reviewedHeadSha,
+          );
+          approved = true;
+          log(`Approved reviewed head ${reviewedHeadSha}.`);
+        } catch (error) {
+          if (!isDefinitiveApprovalRejection(error)) throw error;
+          log(
+            `GitHub rejected auto-approval; leaving a comment instead: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      } else if (decision?.status === 'already-approved') {
+        approved = true;
+        log(`Reviewed head ${reviewedHeadSha} already has a jbot approval; skipping a duplicate.`);
+      } else if (decision?.status === 'blocked') {
+        log(`Auto-approval skipped: ${decision.reason}.`);
+      }
+    } else if (options.autoApprove && !priorThreadStateKnown) {
+      log('Auto-approval skipped: prior jbot-review thread state is unavailable.');
+    }
+
+    if (deferCleanComment && !approved) await postCurrentReviewIfNeeded();
+
+    if (isPrCleanAfterRun(findingCount, openThreadCount, priorThreadStateKnown)) {
       await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
+    } else if (!priorThreadStateKnown) {
+      log('Prior jbot-review thread state is unavailable; not adding the review-done reaction.');
     } else {
       log('Open findings remain; not adding the review-done reaction.');
     }
@@ -2092,6 +2206,7 @@ export function normalizeOptions(
     enhancedContext: options?.enhancedContext ?? false,
     sdkEngine: options?.sdkEngine ?? '',
     dryRun: options?.dryRun ?? false,
+    autoApprove: options?.autoApprove ?? false,
     maxFindings: options?.maxFindings ?? 0,
     minSeverity: options?.minSeverity ?? 'nit',
     includePriorComments: options?.includePriorComments ?? true,
@@ -2364,8 +2479,7 @@ function filterFindings(findings: Finding[], options: NormalizedReviewRunOptions
 
 function formatInlineFinding(finding: Finding): string {
   const indentedBody = finding.body.replace(/\n/g, '\n  ');
-  const metadata = formatFindingMetadata(finding);
-  return `- ${formatFindingLocation(finding)} ${finding.severity}${metadata} ${finding.title}\n  ${indentedBody}`;
+  return `- ${formatFindingLocation(finding)} ${formatFindingLabel(finding)} ${finding.title}\n  ${indentedBody}`;
 }
 
 function formatAddressedPriorComment(comment: AddressedPriorComment): string {
@@ -2695,16 +2809,24 @@ async function safeListPriorJbotThreads(
   repo: string,
   pullNumber: number,
   log: (msg: string) => void,
-): Promise<PriorJbotThreads> {
+): Promise<PriorJbotThreads & { lookupSucceeded: boolean }> {
   try {
-    return await listPriorJbotThreads(octokit, owner, repo, pullNumber);
+    return {
+      ...(await listPriorJbotThreads(octokit, owner, repo, pullNumber)),
+      lookupSucceeded: true,
+    };
   } catch (error) {
     log(
       `Prior jbot-review thread lookup skipped: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    return { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [] };
+    return {
+      threads: [],
+      reviewGroups: [],
+      unresolvedAddressedThreadIds: [],
+      lookupSucceeded: false,
+    };
   }
 }
 

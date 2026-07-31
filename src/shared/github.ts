@@ -4,6 +4,12 @@ import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 
 import type { Finding } from './types.ts';
 import type { ReviewCommit } from './review-context.ts';
+import {
+  decideApprovalContinuity,
+  decideAutoApproval,
+  isDefinitiveApprovalRejection,
+  type AutoApprovalDecision,
+} from './approval.ts';
 
 const Review = CoreOctokit.plugin(paginateRest, restEndpointMethods);
 export type Octokit = InstanceType<typeof Review>;
@@ -53,6 +59,13 @@ export interface JbotReviewGroup {
 }
 
 export type Verdict = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
+
+interface ReviewDecision {
+  state: string;
+  commit_id: string | null;
+  user?: { login?: string } | null;
+  body?: string | null;
+}
 
 /** Lists changed files (with their patches) in the pull request. */
 export async function listPrFiles(
@@ -501,14 +514,156 @@ async function listJbotReviewCommentState(
   return { addressedTopLevelIds, reviewIdByTopLevelId, reviewGroupsById };
 }
 
-/**
- * Decision rubric for posting a review: we only ever post COMMENT reviews
- * (inline comments only). We never auto-approve or request-changes because
- * that requires elevated permissions that may fail on forks. The verdict
- * logic is kept for the summary body only.
- */
+/** Finding reviews are advisory; clean-run approval is handled separately. */
 export function decideVerdict(_findings: Finding[]): Verdict {
   return 'COMMENT';
+}
+
+export async function checkAutoApprovalEligibility(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  reviewedHeadSha: string,
+): Promise<AutoApprovalDecision> {
+  const latestDecision = await getLatestJbotDecision(octokit, owner, repo, pullNumber);
+
+  const pull = await octokit.rest.pulls.get({
+    owner,
+    repo,
+    pull_number: pullNumber,
+  });
+  const decision = decideAutoApproval({
+    state: pull.data.state,
+    draft: pull.data.draft === true,
+    headSha: pull.data.head.sha,
+    reviewedHeadSha,
+    mergeable: pull.data.mergeable,
+  });
+  if (decision.status === 'blocked') return decision;
+  if (latestDecision?.state === 'APPROVED' && latestDecision.commit_id === reviewedHeadSha) {
+    return { status: 'already-approved' };
+  }
+  return decision;
+}
+
+export async function withdrawStaleJbotApproval(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  currentHeadSha: string,
+): Promise<boolean> {
+  const latestDecision = await getLatestJbotDecision(octokit, owner, repo, pullNumber);
+  if (latestDecision?.state !== 'APPROVED' || latestDecision.commit_id === currentHeadSha) {
+    return false;
+  }
+
+  await postApprovalWithdrawal(
+    octokit,
+    owner,
+    repo,
+    pullNumber,
+    'the pull request head changed after review',
+    currentHeadSha,
+  );
+  return true;
+}
+
+export async function withdrawJbotApprovalForReviewedHead(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  reviewedHeadSha: string,
+  reason: string,
+): Promise<boolean> {
+  const latestDecision = await getLatestJbotDecision(octokit, owner, repo, pullNumber);
+  if (latestDecision?.state !== 'APPROVED' || latestDecision.commit_id !== reviewedHeadSha) {
+    return false;
+  }
+
+  await postApprovalWithdrawal(octokit, owner, repo, pullNumber, reason, reviewedHeadSha);
+  return true;
+}
+
+export async function postApprovalReview(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  body: string,
+  headSha: string,
+): Promise<void> {
+  const withdrawApproval = async (reason: string, currentHeadSha = headSha): Promise<never> => {
+    // Dismissing a submitted review can require admin access. A newer
+    // REQUEST_CHANGES review supersedes this bot's approval with the existing token.
+    try {
+      await postApprovalWithdrawal(octokit, owner, repo, pullNumber, reason, currentHeadSha);
+    } catch (error) {
+      throw new Error(
+        `Auto-approval may still be active: failed to withdraw it because ${reason}.`,
+        {
+          cause: error,
+        },
+      );
+    }
+    throw new Error(`Auto-approval was withdrawn because ${reason}.`);
+  };
+
+  try {
+    await octokit.rest.pulls.createReview({
+      owner,
+      repo,
+      pull_number: pullNumber,
+      commit_id: headSha,
+      event: 'APPROVE',
+      body: formatReviewBody(body, 0),
+    });
+  } catch (error) {
+    if (isDefinitiveApprovalRejection(error)) throw error;
+    await withdrawApproval('GitHub did not confirm whether the approval was posted');
+  }
+
+  let currentHeadSha: string | undefined;
+  let blockedReason: string;
+  try {
+    const pull = await octokit.rest.pulls.get({
+      owner,
+      repo,
+      pull_number: pullNumber,
+    });
+    currentHeadSha = pull.data.head.sha;
+    const decision = decideApprovalContinuity({
+      state: pull.data.state,
+      draft: pull.data.draft === true,
+      headSha: currentHeadSha,
+      reviewedHeadSha: headSha,
+    });
+    if (decision.status === 'eligible') return;
+    blockedReason = decision.reason;
+  } catch {
+    blockedReason = 'the pull request state could not be revalidated after approval';
+  }
+  await withdrawApproval(blockedReason, currentHeadSha);
+}
+
+async function postApprovalWithdrawal(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  reason: string,
+  headSha: string,
+): Promise<void> {
+  await octokit.rest.pulls.createReview({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    commit_id: headSha,
+    event: 'REQUEST_CHANGES',
+    body: formatReviewBody(`Auto-approval withdrawn because ${reason}.`, 0),
+  });
 }
 
 /**
@@ -542,10 +697,7 @@ export async function postReview(
       repo,
       pull_number: pullNumber,
       event: verdict,
-      body: appendLinkedCommentsFooter(
-        appendReviewMarker(withThreadCount(base, inlineFindings.length + linkedIds.length)),
-        linkedIds,
-      ),
+      body: formatReviewBody(base, inlineFindings.length + linkedIds.length, linkedIds),
       comments: inlineFindings.map((f) => ({
         path: f.path,
         line: f.line,
@@ -591,15 +743,11 @@ export async function postReview(
       repo,
       pull_number: pullNumber,
       event: verdict,
-      body: appendLinkedCommentsFooter(
-        appendReviewMarker(
-          withThreadCount(
-            inlineDropped > 0
-              ? `${base}\n\n_(${inlineDropped} inline comment(s) omitted — failed to anchor to diff lines)_`
-              : base,
-            salvagedLinkedIds.length,
-          ),
-        ),
+      body: formatReviewBody(
+        inlineDropped > 0
+          ? `${base}\n\n_(${inlineDropped} inline comment(s) omitted — failed to anchor to diff lines)_`
+          : base,
+        salvagedLinkedIds.length,
         salvagedLinkedIds,
       ),
     });
@@ -626,9 +774,14 @@ export async function updateReviewBody(
   });
 }
 
-export function formatFindingMetadata(finding: Pick<Finding, 'kind' | 'confidence'>): string {
-  const parts = [finding.kind, finding.confidence].filter(Boolean);
-  return parts.length > 0 ? ` (${parts.join(', ')})` : '';
+export function formatFindingLabel(
+  finding: Pick<Finding, 'severity' | 'kind' | 'confidence'>,
+): string {
+  const kind = finding.kind ? ` · ${finding.kind}` : '';
+  const confidence = finding.confidence
+    ? ` (*conf: ${finding.confidence === 'medium' ? 'med' : finding.confidence}*)`
+    : '';
+  return `**${finding.severity}${kind}**${confidence}`;
 }
 
 /** `path:line` for an anchored finding, or just `path` for a file-level one. */
@@ -642,7 +795,7 @@ export function formatFindingLocation(finding: Pick<Finding, 'path' | 'line'>): 
  * findings by it, so every posting path must go through here.
  */
 function formatFindingCommentBody(finding: Finding): string {
-  return `**${finding.severity}${formatFindingMetadata(finding)}** — ${finding.title}\n\n${finding.body}\n\n${FINDING_MARKER}`;
+  return `${formatFindingLabel(finding)} — ${finding.title}\n\n${finding.body}\n\n${FINDING_MARKER}`;
 }
 
 /**
@@ -887,6 +1040,41 @@ function isViewerActor(authorLogin: string | undefined, viewerLogin: string): bo
   );
 }
 
+function findLatestJbotDecision(
+  reviews: readonly ReviewDecision[],
+  viewerLogin: string,
+): ReviewDecision | undefined {
+  // COMMENT reviews do not replace an approval or changes-requested decision.
+  return [...reviews]
+    .reverse()
+    .find(
+      (review) =>
+        (review.state === 'APPROVED' ||
+          review.state === 'CHANGES_REQUESTED' ||
+          review.state === 'DISMISSED') &&
+        isViewerActor(review.user?.login, viewerLogin) &&
+        isJbotReviewBody(review.body ?? ''),
+    );
+}
+
+async function getLatestJbotDecision(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+): Promise<ReviewDecision | undefined> {
+  const [viewerLogin, reviews] = await Promise.all([
+    getViewerLogin(octokit),
+    octokit.paginate(octokit.rest.pulls.listReviews, {
+      owner,
+      repo,
+      pull_number: pullNumber,
+      per_page: 100,
+    }),
+  ]);
+  return findLatestJbotDecision(reviews, viewerLogin);
+}
+
 export function isJbotReviewBody(body: string): boolean {
   return body.includes(REVIEW_MARKER) || /^## j-?bot code review\b/i.test(body);
 }
@@ -952,6 +1140,17 @@ function parseReviewFindingCount(body: string): number | undefined {
 /** Records how many threads this review expected, so finalization has a target that can be met. */
 function withThreadCount(body: string, threads: number): string {
   return `${body}\n<!-- ${THREAD_COUNT_MARKER}:${threads} -->`;
+}
+
+function formatReviewBody(
+  body: string,
+  threads: number,
+  linkedCommentIds: readonly number[] = [],
+): string {
+  return appendLinkedCommentsFooter(
+    appendReviewMarker(withThreadCount(body, threads)),
+    linkedCommentIds,
+  );
 }
 
 function parseExpectedThreadCount(body: string): number | undefined {
