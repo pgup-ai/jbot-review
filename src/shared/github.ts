@@ -4,6 +4,7 @@ import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 
 import type { Finding } from './types.ts';
 import type { ReviewCommit } from './review-context.ts';
+import { decideAutoApproval, type AutoApprovalDecision } from './approval.ts';
 
 const Review = CoreOctokit.plugin(paginateRest, restEndpointMethods);
 export type Octokit = InstanceType<typeof Review>;
@@ -501,14 +502,64 @@ async function listJbotReviewCommentState(
   return { addressedTopLevelIds, reviewIdByTopLevelId, reviewGroupsById };
 }
 
-/**
- * Decision rubric for posting a review: we only ever post COMMENT reviews
- * (inline comments only). We never auto-approve or request-changes because
- * that requires elevated permissions that may fail on forks. The verdict
- * logic is kept for the summary body only.
- */
+/** Finding reviews are advisory; clean-run approval is handled separately. */
 export function decideVerdict(_findings: Finding[]): Verdict {
   return 'COMMENT';
+}
+
+export async function checkAutoApprovalEligibility(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  reviewedHeadSha: string,
+): Promise<AutoApprovalDecision> {
+  const viewerLogin = await getViewerLogin(octokit);
+  const reviews = await octokit.paginate(octokit.rest.pulls.listReviews, {
+    owner,
+    repo,
+    pull_number: pullNumber,
+    per_page: 100,
+  });
+  const alreadyApproved = reviews.some(
+    (review) =>
+      review.state === 'APPROVED' &&
+      review.commit_id === reviewedHeadSha &&
+      isViewerActor(review.user?.login, viewerLogin) &&
+      isJbotReviewBody(review.body ?? ''),
+  );
+  if (alreadyApproved) return { status: 'already-approved' };
+
+  const pull = await octokit.rest.pulls.get({
+    owner,
+    repo,
+    pull_number: pullNumber,
+  });
+  return decideAutoApproval({
+    state: pull.data.state,
+    draft: pull.data.draft === true,
+    headSha: pull.data.head.sha,
+    reviewedHeadSha,
+    mergeable: pull.data.mergeable,
+  });
+}
+
+export async function postApprovalReview(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  body: string,
+  headSha: string,
+): Promise<void> {
+  await octokit.rest.pulls.createReview({
+    owner,
+    repo,
+    pull_number: pullNumber,
+    commit_id: headSha,
+    event: 'APPROVE',
+    body: formatReviewBody(body, 0),
+  });
 }
 
 /**
@@ -542,10 +593,7 @@ export async function postReview(
       repo,
       pull_number: pullNumber,
       event: verdict,
-      body: appendLinkedCommentsFooter(
-        appendReviewMarker(withThreadCount(base, inlineFindings.length + linkedIds.length)),
-        linkedIds,
-      ),
+      body: formatReviewBody(base, inlineFindings.length + linkedIds.length, linkedIds),
       comments: inlineFindings.map((f) => ({
         path: f.path,
         line: f.line,
@@ -591,15 +639,11 @@ export async function postReview(
       repo,
       pull_number: pullNumber,
       event: verdict,
-      body: appendLinkedCommentsFooter(
-        appendReviewMarker(
-          withThreadCount(
-            inlineDropped > 0
-              ? `${base}\n\n_(${inlineDropped} inline comment(s) omitted — failed to anchor to diff lines)_`
-              : base,
-            salvagedLinkedIds.length,
-          ),
-        ),
+      body: formatReviewBody(
+        inlineDropped > 0
+          ? `${base}\n\n_(${inlineDropped} inline comment(s) omitted — failed to anchor to diff lines)_`
+          : base,
+        salvagedLinkedIds.length,
         salvagedLinkedIds,
       ),
     });
@@ -957,6 +1001,17 @@ function parseReviewFindingCount(body: string): number | undefined {
 /** Records how many threads this review expected, so finalization has a target that can be met. */
 function withThreadCount(body: string, threads: number): string {
   return `${body}\n<!-- ${THREAD_COUNT_MARKER}:${threads} -->`;
+}
+
+function formatReviewBody(
+  body: string,
+  threads: number,
+  linkedCommentIds: readonly number[] = [],
+): string {
+  return appendLinkedCommentsFooter(
+    appendReviewMarker(withThreadCount(stripLinkedCommentsFooter(body), threads)),
+    linkedCommentIds,
+  );
 }
 
 function parseExpectedThreadCount(body: string): number | undefined {

@@ -622,6 +622,11 @@ describe('emitReviewTelemetry sink', () => {
 });
 
 describe('normalizeOptions defaults', () => {
+  it('keeps auto approval opt-in', () => {
+    assert.equal(normalizeOptions(undefined).autoApprove, false);
+    assert.equal(normalizeOptions({ autoApprove: true }).autoApprove, true);
+  });
+
   it('keeps SDK routing automatic unless an entrypoint supplies the override', () => {
     assert.equal(normalizeOptions(undefined).sdkEngine, '');
     assert.equal(normalizeOptions({ sdkEngine: 'opencode' }).sdkEngine, 'opencode');

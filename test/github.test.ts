@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  checkAutoApprovalEligibility,
   classifyPriorJbotThread,
   compactJbotReviewBody,
   formatFindingLabel,
@@ -10,6 +11,7 @@ import {
   listPriorJbotThreads,
   minimizePullRequestReview,
   postAddressedThreadReply,
+  postApprovalReview,
   postReview,
   selectResolvedJbotReviewsToFinalize,
   updateReviewBody,
@@ -17,6 +19,7 @@ import {
   type Octokit,
   type PriorJbotThread,
 } from '../src/shared/github.ts';
+import { decideAutoApproval, isDefinitiveApprovalRejection } from '../src/shared/approval.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 const REVIEW_BODY = [
@@ -59,6 +62,120 @@ describe('formatFindingLabel', () => {
 
   it('omits absent optional metadata', () => {
     assert.equal(formatFindingLabel({ severity: 'P1' }), '**P1**');
+  });
+});
+
+describe('auto approval', () => {
+  const eligible = {
+    state: 'open',
+    draft: false,
+    headSha: 'headsha',
+    reviewedHeadSha: 'headsha',
+    mergeable: true,
+  } as const;
+
+  it('requires the exact open, non-draft, mergeable reviewed head', () => {
+    assert.deepEqual(decideAutoApproval(eligible), { status: 'eligible' });
+    assert.equal(decideAutoApproval({ ...eligible, state: 'closed' }).status, 'blocked');
+    assert.equal(decideAutoApproval({ ...eligible, draft: true }).status, 'blocked');
+    assert.equal(decideAutoApproval({ ...eligible, headSha: 'new-head' }).status, 'blocked');
+    assert.equal(decideAutoApproval({ ...eligible, mergeable: false }).status, 'blocked');
+    assert.equal(decideAutoApproval({ ...eligible, mergeable: null }).status, 'blocked');
+  });
+
+  it('deduplicates only this bot approval on the reviewed head', async () => {
+    const listReviews = {};
+    let pullReads = 0;
+    let approvedCommit = 'headsha';
+    const octokit = {
+      rest: {
+        pulls: {
+          listReviews,
+          get: async () => {
+            pullReads++;
+            return {
+              data: {
+                state: 'open',
+                draft: false,
+                head: { sha: 'headsha' },
+                mergeable: true,
+              },
+            };
+          },
+        },
+      },
+      paginate: async (endpoint: unknown) => {
+        assert.equal(endpoint, listReviews);
+        return [
+          {
+            state: 'APPROVED',
+            commit_id: approvedCommit,
+            user: { login: 'github-actions[bot]' },
+            body: '## J-Bot Code Review\n\n<!-- jbot-review:review -->',
+          },
+        ];
+      },
+      graphql: async () => ({ viewer: { login: 'github-actions' } }),
+    };
+
+    assert.deepEqual(
+      await checkAutoApprovalEligibility(
+        octokit as unknown as Octokit,
+        'acme',
+        'widget',
+        12,
+        'headsha',
+      ),
+      { status: 'already-approved' },
+    );
+    assert.equal(pullReads, 0, 'an idempotent rerun needs no fresh safety read');
+
+    approvedCommit = 'old-head';
+    assert.deepEqual(
+      await checkAutoApprovalEligibility(
+        octokit as unknown as Octokit,
+        'acme',
+        'widget',
+        12,
+        'headsha',
+      ),
+      { status: 'eligible' },
+    );
+    assert.equal(pullReads, 1, 'an older approval must not cover the newly reviewed head');
+  });
+
+  it('pins approval to the reviewed commit and keeps the review marker', async () => {
+    let request: Record<string, unknown> | undefined;
+    const octokit = {
+      rest: {
+        pulls: {
+          createReview: async (params: Record<string, unknown>) => {
+            request = params;
+          },
+        },
+      },
+    };
+
+    await postApprovalReview(
+      octokit as unknown as Octokit,
+      'acme',
+      'widget',
+      12,
+      'review body',
+      'headsha',
+    );
+
+    assert.equal(request?.event, 'APPROVE');
+    assert.equal(request?.commit_id, 'headsha');
+    assert.match(String(request?.body), /jbot-review:threads:0/);
+    assert.match(String(request?.body), /jbot-review:review/);
+  });
+
+  it('falls back only for definitive GitHub approval rejections', () => {
+    assert.equal(isDefinitiveApprovalRejection({ status: 403 }), true);
+    assert.equal(isDefinitiveApprovalRejection({ status: 422 }), true);
+    assert.equal(isDefinitiveApprovalRejection({ status: 500 }), false);
+    assert.equal(isDefinitiveApprovalRejection(new Error('network')), false);
   });
 });
 

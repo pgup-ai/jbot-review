@@ -228,6 +228,7 @@ jobs:
           sdk-engine: ${{ vars.JBOT_SDK_ENGINE || '' }}
           pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}
           dry-run: ${{ inputs['dry-run'] || 'false' }}
+          auto-approve: ${{ vars.JBOT_AUTO_APPROVE || 'false' }}
           max-findings: ${{ inputs['max-findings'] || '0' }}
           min-severity: ${{ inputs['min-severity'] || 'nit' }}
           include-prior-comments: ${{ inputs['include-prior-comments'] || 'true' }}

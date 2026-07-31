@@ -73,6 +73,7 @@ async function main(): Promise<void> {
     enhancedContext: true,
     sdkEngine: getInputOrEnv('sdk-engine', 'JBOT_SDK_ENGINE') || 'auto',
     dryRun: parseBooleanInput('dry-run', false),
+    autoApprove: parseBooleanInput('auto-approve', false),
     maxFindings: parseNumberInput('max-findings', 0),
     minSeverity: parseSeverityInput('min-severity', 'nit'),
     includePriorComments: parseBooleanInput('include-prior-comments', true),
@@ -97,7 +98,7 @@ async function main(): Promise<void> {
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${modelPool.join(', ')}`);
   core.info(
-    `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModel || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} modelOptions=${JSON.stringify(options.modelOptions)} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,
+    `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModel || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} modelOptions=${JSON.stringify(options.modelOptions)} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,
   );
 
   const octokit = github.getOctokit(token) as unknown as Octokit;

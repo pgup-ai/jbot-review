@@ -164,6 +164,8 @@ import {
   addPrReaction,
   removeOwnPrReaction,
   postReview,
+  checkAutoApprovalEligibility,
+  postApprovalReview,
   decideVerdict,
   listPriorJbotThreads,
   formatPriorJbotThreadsForPrompt,
@@ -180,6 +182,7 @@ import {
   type PriorJbotThread,
   type PriorJbotThreads,
 } from './github.ts';
+import { isDefinitiveApprovalRejection, type AutoApprovalDecision } from './approval.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
@@ -566,6 +569,8 @@ export interface ReviewRunOptions {
   /** SDK routing override; blank defers to JBOT_SDK_ENGINE, then auto. */
   sdkEngine?: string;
   dryRun?: boolean;
+  /** Approve an exact reviewed head when no new or open jbot findings remain. */
+  autoApprove?: boolean;
   maxFindings?: number;
   minSeverity?: Severity;
   includePriorComments?: boolean;
@@ -1890,12 +1895,27 @@ async function runReviewPipeline(params: {
       return;
     }
 
-    // Don't post a redundant "all clear" comment on a re-run; a clean re-run
-    // is signaled by the reaction instead. `priorJbotReviewCount` is computed
+    // Don't post a redundant "all clear" comment on a re-run.
+    // `priorJbotReviewCount` is computed
     // up front (independent of includePriorComments). Addressed-thread replies
     // (below) still run regardless.
     const findingCount = inline.length + fileLevel.length + orphaned.length;
-    if (shouldPostReviewComment(priorJbotReviewCount, findingCount)) {
+    const shouldPostComment = shouldPostReviewComment(priorJbotReviewCount, findingCount);
+    const deferCleanComment = options.autoApprove && verifiedFindings.length === 0;
+    const buildCurrentBody = () =>
+      buildBody(
+        changesSinceText,
+        summary,
+        filteredFindings,
+        orphaned,
+        model,
+        owner,
+        repo,
+        headSha,
+        tokenUsage.snapshot(),
+        engineByModel,
+      );
+    const postCurrentReview = async (): Promise<void> => {
       // File-level comments go first so a posting failure can still fall back
       // into the review body, which is built afterwards.
       const fileLevelCommentIds: number[] = [];
@@ -1922,18 +1942,7 @@ async function runReviewPipeline(params: {
         }
       }
 
-      const body = buildBody(
-        changesSinceText,
-        summary,
-        filteredFindings,
-        orphaned,
-        model,
-        owner,
-        repo,
-        headSha,
-        tokenUsage.snapshot(),
-        engineByModel,
-      );
+      const body = buildCurrentBody();
       log(
         `Posting review: verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
       );
@@ -1953,7 +1962,11 @@ async function runReviewPipeline(params: {
           ? `Review posted; ${inlineDropped} inline comment(s) failed to anchor (${inlinePosted} salvaged).`
           : 'Review posted.',
       );
-    } else {
+    };
+
+    if (shouldPostComment && !deferCleanComment) {
+      await postCurrentReview();
+    } else if (!deferCleanComment) {
       log('No new findings on a re-run; skipping the review comment (reacting instead).');
     }
 
@@ -1993,7 +2006,53 @@ async function runReviewPipeline(params: {
     ).length;
     const openThreadCount =
       openFindingThreadIds(allPriorJbotThreads, resolvedThisRun).length + failedAddressedResolves;
-    if (isPrCleanAfterRun(findingCount, openThreadCount)) {
+    const approvalClean = isPrCleanAfterRun(verifiedFindings.length, openThreadCount);
+    let approved = false;
+    if (options.autoApprove && approvalClean && headSha) {
+      let decision: AutoApprovalDecision | undefined;
+      try {
+        decision = await checkAutoApprovalEligibility(octokit, owner, repo, pullNumber, headSha);
+      } catch (error) {
+        log(
+          `Could not verify auto-approval safety; leaving a comment instead: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+
+      if (decision?.status === 'eligible') {
+        try {
+          await postApprovalReview(octokit, owner, repo, pullNumber, buildCurrentBody(), headSha);
+          approved = true;
+          log(`Approved reviewed head ${headSha}.`);
+        } catch (error) {
+          if (!isDefinitiveApprovalRejection(error)) throw error;
+          log(
+            `GitHub rejected auto-approval; leaving a comment instead: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      } else if (decision?.status === 'already-approved') {
+        approved = true;
+        log(`Reviewed head ${headSha} already has a jbot approval; skipping a duplicate.`);
+      } else if (decision?.status === 'blocked') {
+        log(`Auto-approval skipped: ${decision.reason}.`);
+      }
+    } else if (options.autoApprove && approvalClean) {
+      log('Auto-approval skipped: the reviewed head SHA is unavailable.');
+    }
+
+    if (deferCleanComment && !approved) {
+      if (shouldPostComment) {
+        await postCurrentReview();
+      } else {
+        log('No new findings on a re-run; skipping the review comment (reacting instead).');
+      }
+    }
+
+    const reactionFindingCount = options.autoApprove ? verifiedFindings.length : findingCount;
+    if (isPrCleanAfterRun(reactionFindingCount, openThreadCount)) {
       await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
     } else {
       log('Open findings remain; not adding the review-done reaction.');
@@ -2092,6 +2151,7 @@ export function normalizeOptions(
     enhancedContext: options?.enhancedContext ?? false,
     sdkEngine: options?.sdkEngine ?? '',
     dryRun: options?.dryRun ?? false,
+    autoApprove: options?.autoApprove ?? false,
     maxFindings: options?.maxFindings ?? 0,
     minSeverity: options?.minSeverity ?? 'nit',
     includePriorComments: options?.includePriorComments ?? true,

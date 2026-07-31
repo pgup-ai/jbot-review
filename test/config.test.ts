@@ -120,6 +120,20 @@ describe('provider configuration resolution', () => {
     assert.match(workflow, /sdk-engine: \$\{\{ vars\.JBOT_SDK_ENGINE \|\| '' \}\}/);
   });
 
+  it('keeps auto approval off unless the Action input is explicitly enabled', () => {
+    const action = readFileSync(new URL('../action.yml', import.meta.url), 'utf8');
+    const workflow = readFileSync(
+      new URL('../.github/workflows/jbot-review.yml', import.meta.url),
+      'utf8',
+    );
+    const input = action.split('\n  auto-approve:\n')[1]?.split('\n  max-findings:\n')[0];
+
+    assert.ok(input);
+    assert.match(input, /default: 'false'/);
+    assert.match(action, /INPUT_AUTO-APPROVE: \$\{\{ inputs\.auto-approve \}\}/);
+    assert.match(workflow, /auto-approve: \$\{\{ vars\.JBOT_AUTO_APPROVE \|\| 'false' \}\}/);
+  });
+
   it('registers cross-provider config and distinct models on a shared custom provider', () => {
     assert.equal(needsAuxOpencodeConfig('openai', 'gpt-5', 'openrouter', 'gpt-5'), true);
     assert.equal(

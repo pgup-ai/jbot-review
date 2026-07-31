@@ -134,6 +134,10 @@ inputs:
     description: 'Log the review body and inline comments without posting to GitHub.'
     required: false
     default: 'false'
+  auto-approve:
+    description: 'Approve an open, non-draft, mergeable PR when its exact reviewed head has no new or open jbot findings.'
+    required: false
+    default: 'false'
   max-findings:
     description: 'Maximum number of findings to post or log. Use 0 for no limit.'
     required: false
@@ -244,6 +248,7 @@ runs:
     INPUT_THREAD-RESOLUTION-TOKEN: ${{ inputs.thread-resolution-token }}
     INPUT_PR-NUMBER: ${{ inputs.pr-number }}
     INPUT_DRY-RUN: ${{ inputs.dry-run }}
+    INPUT_AUTO-APPROVE: ${{ inputs.auto-approve }}
     INPUT_MAX-FINDINGS: ${{ inputs.max-findings }}
     INPUT_MIN-SEVERITY: ${{ inputs.min-severity }}
     INPUT_INCLUDE-PRIOR-COMMENTS: ${{ inputs.include-prior-comments }}
