@@ -4,7 +4,11 @@ import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 
 import type { Finding } from './types.ts';
 import type { ReviewCommit } from './review-context.ts';
-import { decideAutoApproval, type AutoApprovalDecision } from './approval.ts';
+import {
+  decideAutoApproval,
+  isDefinitiveApprovalRejection,
+  type AutoApprovalDecision,
+} from './approval.ts';
 
 const Review = CoreOctokit.plugin(paginateRest, restEndpointMethods);
 export type Octokit = InstanceType<typeof Review>;
@@ -552,14 +556,65 @@ export async function postApprovalReview(
   body: string,
   headSha: string,
 ): Promise<void> {
-  await octokit.rest.pulls.createReview({
-    owner,
-    repo,
-    pull_number: pullNumber,
-    commit_id: headSha,
-    event: 'APPROVE',
-    body: formatReviewBody(body, 0),
-  });
+  const withdrawApproval = async (reason: string, currentHeadSha?: string): Promise<never> => {
+    // Dismissing a submitted review can require admin access. A newer
+    // REQUEST_CHANGES review supersedes this bot's approval with the existing token.
+    try {
+      await octokit.rest.pulls.createReview({
+        owner,
+        repo,
+        pull_number: pullNumber,
+        ...(currentHeadSha ? { commit_id: currentHeadSha } : {}),
+        event: 'REQUEST_CHANGES',
+        body: formatReviewBody(`Auto-approval withdrawn because ${reason}.`, 0),
+      });
+    } catch (error) {
+      throw new Error(
+        `Auto-approval may still be active: failed to withdraw it because ${reason}.`,
+        {
+          cause: error,
+        },
+      );
+    }
+    throw new Error(`Auto-approval was withdrawn because ${reason}.`);
+  };
+
+  try {
+    await octokit.rest.pulls.createReview({
+      owner,
+      repo,
+      pull_number: pullNumber,
+      commit_id: headSha,
+      event: 'APPROVE',
+      body: formatReviewBody(body, 0),
+    });
+  } catch (error) {
+    if (isDefinitiveApprovalRejection(error)) throw error;
+    await withdrawApproval('GitHub did not confirm whether the approval was posted');
+  }
+
+  let currentHeadSha: string | undefined;
+  let blockedReason: string;
+  try {
+    const pull = await octokit.rest.pulls.get({
+      owner,
+      repo,
+      pull_number: pullNumber,
+    });
+    currentHeadSha = pull.data.head.sha;
+    const decision = decideAutoApproval({
+      state: pull.data.state,
+      draft: pull.data.draft === true,
+      headSha: currentHeadSha,
+      reviewedHeadSha: headSha,
+      mergeable: pull.data.mergeable,
+    });
+    if (decision.status === 'eligible') return;
+    blockedReason = decision.reason;
+  } catch {
+    blockedReason = 'the pull request state could not be revalidated after approval';
+  }
+  await withdrawApproval(blockedReason, currentHeadSha);
 }
 
 /**

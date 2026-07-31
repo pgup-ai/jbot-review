@@ -2020,10 +2020,17 @@ async function runReviewPipeline(params: {
       priorThreadStateKnown,
     );
     let approved = false;
-    if (options.autoApprove && approvalClean && headSha) {
+    if (options.autoApprove && approvalClean) {
+      const reviewedHeadSha = headSha!;
       let decision: AutoApprovalDecision | undefined;
       try {
-        decision = await checkAutoApprovalEligibility(octokit, owner, repo, pullNumber, headSha);
+        decision = await checkAutoApprovalEligibility(
+          octokit,
+          owner,
+          repo,
+          pullNumber,
+          reviewedHeadSha,
+        );
       } catch (error) {
         log(
           `Could not verify auto-approval safety; leaving a comment instead: ${
@@ -2034,9 +2041,16 @@ async function runReviewPipeline(params: {
 
       if (decision?.status === 'eligible') {
         try {
-          await postApprovalReview(octokit, owner, repo, pullNumber, buildCurrentBody(), headSha);
+          await postApprovalReview(
+            octokit,
+            owner,
+            repo,
+            pullNumber,
+            buildCurrentBody(),
+            reviewedHeadSha,
+          );
           approved = true;
-          log(`Approved reviewed head ${headSha}.`);
+          log(`Approved reviewed head ${reviewedHeadSha}.`);
         } catch (error) {
           if (!isDefinitiveApprovalRejection(error)) throw error;
           log(
@@ -2047,7 +2061,7 @@ async function runReviewPipeline(params: {
         }
       } else if (decision?.status === 'already-approved') {
         approved = true;
-        log(`Reviewed head ${headSha} already has a jbot approval; skipping a duplicate.`);
+        log(`Reviewed head ${reviewedHeadSha} already has a jbot approval; skipping a duplicate.`);
       } else if (decision?.status === 'blocked') {
         log(`Auto-approval skipped: ${decision.reason}.`);
       }
