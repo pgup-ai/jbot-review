@@ -29,10 +29,19 @@ export function shardFingerprint(input: {
   /** Provider-call configuration that changes output without changing the prompt (engine, modelOptions). */
   config: string;
 }): string {
+  // JSON-array framing keeps field boundaries unambiguous: a delimiter-joined
+  // payload would let a NUL inside one field alias a different field split.
   const hash = createHash('sha256');
   hash.update(
-    `v${FINGERPRINT_VERSION}\0${input.headSha}\0${input.model}\0${input.evidenceQuotes}` +
-      `\0${input.config}\0${input.context}\0${input.guidelines}`,
+    JSON.stringify([
+      FINGERPRINT_VERSION,
+      input.headSha,
+      input.model,
+      input.evidenceQuotes,
+      input.config,
+      input.context,
+      input.guidelines,
+    ]),
   );
   return hash.digest('hex').slice(0, 32);
 }

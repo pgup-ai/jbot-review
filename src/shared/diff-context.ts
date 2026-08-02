@@ -182,12 +182,52 @@ export const TARGET_SHARD_DIFF_BYTES = 24 * 1024;
 export const DEFAULT_MAX_REVIEW_SHARDS = 4;
 
 const baseOf = (name: string) => name.slice(name.lastIndexOf('/') + 1);
+
+// A two-letter suffix is only a locale when it IS one — otherwise config-ui
+// and config-db would merge on the stem. Common ISO 639-1 codes suffice for
+// the message_en/message_zh pairing this exists for.
+const LOCALE_CODES = new Set([
+  'ar',
+  'cs',
+  'da',
+  'de',
+  'el',
+  'en',
+  'es',
+  'fi',
+  'fr',
+  'he',
+  'hi',
+  'hu',
+  'id',
+  'it',
+  'ja',
+  'ko',
+  'nb',
+  'nl',
+  'no',
+  'pl',
+  'pt',
+  'ro',
+  'ru',
+  'sv',
+  'th',
+  'tr',
+  'uk',
+  'vi',
+  'zh',
+]);
+
 /** Basename stripped of extension, test/spec suffix, and locale suffix — the affinity key. */
-const stemOf = (name: string) =>
-  baseOf(name)
+const stemOf = (name: string) => {
+  const withoutSuffixes = baseOf(name)
     .replace(/\.[^.]+$/, '')
-    .replace(/[._-](test|spec)$/i, '')
-    .replace(/[_-][a-z]{2}([_-][a-z]{2})?$/i, '');
+    .replace(/[._-](test|spec)$/i, '');
+  const locale = withoutSuffixes.match(/[_-]([a-z]{2})([_-][a-z]{2})?$/i);
+  return locale && LOCALE_CODES.has(locale[1].toLowerCase())
+    ? withoutSuffixes.slice(0, locale.index)
+    : withoutSuffixes;
+};
 
 /**
  * Groups files that review best together — same directory, or a variant pair

@@ -221,6 +221,20 @@ describe('shardFilesForReview', () => {
     const shardOf = (name: string) =>
       shards.findIndex((shard) => shard.some((file) => file.filename === name));
     assert.notEqual(shardOf('a/index.ts'), shardOf('b/index.ts'));
+
+    // A two-letter suffix is only a locale when it IS one: config-ui and
+    // config-db share no real affinity and must not merge via the stem.
+    const suffixed = shardFilesForReview(
+      [
+        fileOfSize('a/config-ui.ts', 8_000),
+        fileOfSize('b/config-db.ts', 8_000),
+        fileOfSize('c/other.ts', 8_000),
+      ],
+      { requestedShards: 2 },
+    );
+    const suffixedShardOf = (name: string) =>
+      suffixed.findIndex((shard) => shard.some((file) => file.filename === name));
+    assert.notEqual(suffixedShardOf('a/config-ui.ts'), suffixedShardOf('b/config-db.ts'));
   });
 
   it('splits clusters rather than under-filling an explicitly pinned shard count', () => {

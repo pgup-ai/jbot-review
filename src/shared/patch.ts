@@ -100,7 +100,7 @@ export function anchorByEvidenceSnippet(
   evidence: string,
 ): number | undefined {
   const window = evidenceWindow(patch, evidence);
-  return typeof window === 'object' ? window?.anchor : undefined;
+  return typeof window === 'object' ? window.anchor : undefined;
 }
 
 export interface EvidenceWindow {

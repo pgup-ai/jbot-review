@@ -2824,6 +2824,12 @@ async function runShardedReview(params: {
         // sub-path below — a later reuse/complete must not erase its trace.
         cover('failed', error);
         if (params.context7Active) await disableContext7Once();
+        // The retry is its own attempt: its rows carry the -retry session
+        // label (matching its token-usage rows), the base-context prompt
+        // size, and a duration clocked from the retry itself.
+        const retryPromptBytes =
+          Buffer.byteLength(plan.baseContext, 'utf8') +
+          Buffer.byteLength(guidelinesForPrompt, 'utf8');
         // A prior run's successful retry was saved under the base-context
         // key; the lookup costs no model time, so it runs even with no
         // retry budget left.
@@ -2832,7 +2838,11 @@ async function runShardedReview(params: {
           const cached = loadCachedShardResult(params.cache.dir, retryFingerprint);
           if (cached) {
             log(`${plan.label}: reusing cached retry result (${retryFingerprint}).`);
-            params.onCoverage?.({ session: plan.label, state: 'reused', promptBytes });
+            params.onCoverage?.({
+              session: `${plan.label}-retry`,
+              state: 'reused',
+              promptBytes: retryPromptBytes,
+            });
             return { plan, result: cached };
           }
         }
@@ -2852,6 +2862,15 @@ async function runShardedReview(params: {
             params.context7ApiKey,
           )}`,
         );
+        const retryStartedAt = Date.now();
+        const coverRetry = (state: 'completed' | 'failed', retryError?: unknown) =>
+          params.onCoverage?.({
+            session: `${plan.label}-retry`,
+            state,
+            ...(retryError !== undefined ? { error: retryError } : {}),
+            durationMs: Date.now() - retryStartedAt,
+            promptBytes: retryPromptBytes,
+          });
         try {
           const result = await backend.runReview(
             model,
@@ -2866,10 +2885,10 @@ async function runShardedReview(params: {
             },
           );
           persist(result, retryFingerprint);
-          cover('completed');
+          coverRetry('completed');
           return { plan, result };
         } catch (retryError) {
-          cover('failed', retryError);
+          coverRetry('failed', retryError);
           return { plan, error: retryError };
         }
       }

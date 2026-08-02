@@ -38,6 +38,13 @@ describe('shardFingerprint', () => {
         `${Object.keys(variant)[0]} must change the fingerprint`,
       );
     }
+
+    // Field boundaries must be unambiguous: a NUL inside one field must not
+    // alias a different split of the same bytes across two fields.
+    assert.notEqual(
+      shardFingerprint({ ...input, config: 'a\0b', context: 'c' }),
+      shardFingerprint({ ...input, config: 'a', context: 'b\0c' }),
+    );
   });
 });
 
