@@ -76,6 +76,9 @@ function isCachedFinding(value: unknown): boolean {
   return (
     typeof f.path === 'string' &&
     typeof f.line === 'number' &&
+    // Same bar as parseReview: integer ≥ 0 (isInteger also rejects NaN/Infinity).
+    Number.isInteger(f.line) &&
+    f.line >= 0 &&
     typeof f.title === 'string' &&
     typeof f.body === 'string' &&
     typeof f.severity === 'string' &&

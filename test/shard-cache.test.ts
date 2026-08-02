@@ -92,6 +92,18 @@ describe('shard result cache', () => {
         undefined,
         'a mistyped optional field is a miss — it would crash the anchor matcher downstream',
       );
+      writeFileSync(
+        join(dir, `${fingerprint}.json`),
+        JSON.stringify({
+          summary: 's',
+          findings: [{ path: 'a', line: 2.5, severity: 'P2', title: 't', body: 'b' }],
+        }),
+      );
+      assert.equal(
+        loadCachedShardResult(dir, fingerprint),
+        undefined,
+        'a fractional line is a miss — parsers require integer lines ≥ 0',
+      );
 
       // A directory that cannot be created must not throw either.
       saveShardResult('/dev/null/nope', fingerprint, result);

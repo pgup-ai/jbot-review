@@ -2820,27 +2820,13 @@ async function runShardedReview(params: {
         // streams drop ("Upstream idle timeout exceeded"), providers blip,
         // and a shard that died early still has budget left. Context7 is a
         // possible culprit, so the retry always uses the base context.
+        // The failed primary attempt gets its row HERE, once for every
+        // sub-path below — a later reuse/complete must not erase its trace.
+        cover('failed', error);
         if (params.context7Active) await disableContext7Once();
-        const retryTimeoutMs = computeRetryTimeoutMs(params.deadlineAt, Date.now(), timeoutMs);
-        if (retryTimeoutMs === 0) {
-          log(
-            `${plan.label} failed with no budget left for a retry: ${formatContext7Error(
-              error,
-              params.context7ApiKey,
-            )}`,
-          );
-          cover('failed', error);
-          return { plan, error };
-        }
-        log(
-          `${plan.label} failed; retrying once in a fresh session: ${formatContext7Error(
-            error,
-            params.context7ApiKey,
-          )}`,
-        );
         // A prior run's successful retry was saved under the base-context
-        // key; a same-content re-run that fails its primary again can reuse
-        // it instead of re-billing the retry.
+        // key; the lookup costs no model time, so it runs even with no
+        // retry budget left.
         const retryFingerprint = fingerprintFor(plan.baseContext);
         if (params.cache && retryFingerprint) {
           const cached = loadCachedShardResult(params.cache.dir, retryFingerprint);
@@ -2850,6 +2836,22 @@ async function runShardedReview(params: {
             return { plan, result: cached };
           }
         }
+        const retryTimeoutMs = computeRetryTimeoutMs(params.deadlineAt, Date.now(), timeoutMs);
+        if (retryTimeoutMs === 0) {
+          log(
+            `${plan.label} failed with no budget left for a retry: ${formatContext7Error(
+              error,
+              params.context7ApiKey,
+            )}`,
+          );
+          return { plan, error };
+        }
+        log(
+          `${plan.label} failed; retrying once in a fresh session: ${formatContext7Error(
+            error,
+            params.context7ApiKey,
+          )}`,
+        );
         try {
           const result = await backend.runReview(
             model,
@@ -2863,7 +2865,7 @@ async function runShardedReview(params: {
               evidenceQuotes: params.evidenceQuotes,
             },
           );
-          persist(result, fingerprintFor(plan.baseContext));
+          persist(result, retryFingerprint);
           cover('completed');
           return { plan, result };
         } catch (retryError) {
@@ -3162,7 +3164,13 @@ function startChangesSinceLastReviewSummary(params: {
           error instanceof Error ? error.message : String(error)
         })`,
       );
-      params.onCoverage?.({ session, state: 'failed', error, durationMs: Date.now() - startedAt });
+      // A git failure before any model session is a skip, not a failed model
+      // session — that distinction is what modelRan exists for.
+      params.onCoverage?.(
+        modelRan
+          ? { session, state: 'failed', error, durationMs: Date.now() - startedAt }
+          : { session, state: 'skipped' },
+      );
       return '';
     });
 }

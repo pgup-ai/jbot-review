@@ -409,20 +409,28 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
       requestedShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
     });
     // Mirror the runner for complete-diff backends: their sessions embed
-    // under the 512KiB hard budget, and an aux overflow disables the
-    // compliance pass (widening finders to the full guideline set). Provider
-    // id stands in for the CLI-backend id — for these backends they coincide.
-    const requiresCompleteDiff = backendRequiresCompleteEmbeddedDiff(
+    // under the 512KiB hard budget, and an AUX overflow disables the
+    // compliance pass (widening finders to the full guideline set). Main and
+    // aux providers can differ, so each is checked separately. Provider id
+    // stands in for the CLI-backend id — for these backends they coincide.
+    const mainRequiresCompleteDiff = backendRequiresCompleteEmbeddedDiff(
       provider,
       provider as CliBackendID,
     );
-    const diffHunksOptions = requiresCompleteDiff
+    const auxRequiresCompleteDiff = backendRequiresCompleteEmbeddedDiff(
+      auxProvider,
+      auxProvider as CliBackendID,
+    );
+    const diffHunksOptions = mainRequiresCompleteDiff
       ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
       : undefined;
     const auxDiffComplete =
-      !requiresCompleteDiff ||
+      !auxRequiresCompleteDiff ||
       (() => {
-        const aux = buildDiffHunksBlockWithMetadata(reviewable, diffHunksOptions);
+        const aux = buildDiffHunksBlockWithMetadata(
+          reviewable,
+          EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
+        );
         return aux.truncatedFiles.length === 0 && aux.omittedFiles.length === 0;
       })();
     const guidelinePass = (fanout?.guidelinePass ?? true) && auxDiffComplete;
