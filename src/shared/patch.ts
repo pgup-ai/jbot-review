@@ -99,7 +99,8 @@ export function anchorByEvidenceSnippet(
   patch: string | undefined,
   evidence: string,
 ): number | undefined {
-  return evidenceWindow(patch, evidence)?.anchor;
+  const window = evidenceWindow(patch, evidence);
+  return typeof window === 'object' ? window?.anchor : undefined;
 }
 
 export interface EvidenceWindow {
@@ -114,11 +115,14 @@ export interface EvidenceWindow {
  * The unique window `anchorByEvidenceSnippet` matches, with its new-side span.
  * The span lets a caller distinguish "the quote corroborates this claimed
  * line" (line inside the window) from "the quote lives elsewhere".
+ * 'ambiguous' is distinct from undefined (no match) so a caller can refuse
+ * weaker fallbacks: a context+added duplicate matches the window twice but the
+ * added-lines-only prefix rescue once, and that rescue must not win.
  */
 export function evidenceWindow(
   patch: string | undefined,
   evidence: string,
-): EvidenceWindow | undefined {
+): EvidenceWindow | 'ambiguous' | undefined {
   if (!patch) return undefined;
   const target = evidence.split('\n').map((line) => line.trim());
   while (target[0] === '') target.shift();
@@ -137,6 +141,7 @@ export function evidenceWindow(
   const asWritten = matchWindow(side, target);
   const result =
     asWritten.matches > 0 ? asWritten : matchWindow(side, target.map(stripQuotedMarker));
+  if (result.matches > 1) return 'ambiguous';
   return result.matches === 1
     ? { anchor: result.anchor, start: result.start, end: result.end }
     : undefined;

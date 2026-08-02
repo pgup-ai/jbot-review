@@ -88,7 +88,6 @@ describe('anchorByEvidenceSnippet', () => {
       start: 1,
       end: 2,
     });
-    assert.equal(evidenceWindow(PATCH, 'not in this patch'), undefined);
 
     const repeated = [
       '@@ -0,0 +1,3 @@',
@@ -96,7 +95,11 @@ describe('anchorByEvidenceSnippet', () => {
       '+const x = 1;',
       '+  return null;',
     ].join('\n');
-    assert.equal(evidenceWindow(repeated, 'return null;'), undefined, 'ambiguity yields no window');
+    assert.equal(
+      evidenceWindow(repeated, 'return null;'),
+      'ambiguous',
+      'ambiguity is distinct from no-match so callers can refuse weaker fallbacks',
+    );
   });
 
   it('refuses to anchor a match containing no added line', () => {

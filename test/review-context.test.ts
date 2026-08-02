@@ -512,7 +512,19 @@ describe('formatFinderGuidelines', () => {
       );
       await writeFile(
         join(repo, '.cursor', 'rules', 'zzz-ts.mdc'),
-        '---\nglobs:\n  - "*.ts"\n---\n# TS rules\nfindme-ts\n' + 't'.repeat(280),
+        '---\nglobs: ["*.{ts,tsx}"]\n---\n# TS rules\nfindme-ts\n' + 't'.repeat(280),
+      );
+      // Oversized declared scopes are ignored, leaving the doc unscoped rather
+      // than wrongly demoted. Sorts after zzz-ts so the tight-cap phase above
+      // is undisturbed.
+      await writeFile(
+        join(repo, '.cursor', 'rules', 'zzz2-huge.mdc'),
+        '---\nglobs:\n  - "' + '*'.repeat(150) + '"\n---\nfindme-huge',
+      );
+      // An unbalanced brace must degrade to "no match", never crash discovery.
+      await writeFile(
+        join(repo, '.cursor', 'rules', 'zzz3-broken.mdc'),
+        '---\nglobs: "{*.zzz"\n---\nfindme-broken',
       );
 
       const discovered = await discoverGuidelineDocs(repo, ['src/index.ts']);
@@ -527,6 +539,8 @@ describe('formatFinderGuidelines', () => {
       // Demoted, never dropped: with budget to spare it still renders.
       const roomy = formatFinderGuidelines(discovered, { forFiles: ['src/index.ts'] });
       assert.match(roomy, /findme-python/);
+      assert.match(roomy, /findme-huge/, 'an unusable declared scope never demotes the doc');
+      assert.match(roomy, /findme-broken/, 'a malformed glob is a non-match, not a crash');
     });
   });
 });

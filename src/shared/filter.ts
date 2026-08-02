@@ -296,8 +296,11 @@ export function resolveFindingAnchors(
     if (addable.get(f.path)?.has(f.line)) {
       // An addable claim moves only on provable inconsistency: the quote
       // resolves uniquely elsewhere. A claim inside the matched window is
-      // corroborated — snapping it to the window anchor would be churn.
+      // corroborated — snapping it to the window anchor would be churn — and
+      // an AMBIGUOUS quote proves nothing, so the prefix rescue may only run
+      // on a confirmed no-match.
       const window = evidenceWindow(patch, f.evidence);
+      if (window === 'ambiguous') continue;
       if (window !== undefined) {
         if (f.line >= window.start && f.line <= window.end) continue;
         target = window.anchor;

@@ -107,8 +107,13 @@ export function renderReviewPreview(input: {
 }): string {
   const lines: string[] = ['── Review preview (no sessions started) ──'];
   lines.push(`Shards: ${input.shards.length}`);
+  // Mirrors the runner's gate: finders get the capped slice only while the
+  // compliance pass audits the full set; otherwise they carry the full set.
+  const guidelineBytes = input.guidelinePass
+    ? input.guidelines.finderBytes
+    : input.guidelines.fullBytes;
   for (const shard of input.shards) {
-    const tokens = Math.round((shard.embeddedBytes + input.guidelines.finderBytes) / 4);
+    const tokens = Math.round((shard.embeddedBytes + guidelineBytes) / 4);
     const budget = [
       shard.truncated > 0 ? `${shard.truncated} file(s) truncated` : '',
       shard.omitted > 0 ? `${shard.omitted} file(s) omitted from embedding` : '',

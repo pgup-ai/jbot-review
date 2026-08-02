@@ -201,6 +201,38 @@ describe('shardFilesForReview', () => {
     );
   });
 
+  it('refuses stem links when a basename repeats across directories', () => {
+    // a/index.ts and b/index.ts are unrelated; c/index.test.ts must not
+    // bridge them into one cluster just by adding basename diversity.
+    const shards = shardFilesForReview(
+      [
+        fileOfSize('a/index.ts', 8_000),
+        fileOfSize('b/index.ts', 8_000),
+        fileOfSize('c/index.test.ts', 1_000),
+        fileOfSize('d/other.ts', 8_000),
+      ],
+      { requestedShards: 2 },
+    );
+    const shardOf = (name: string) =>
+      shards.findIndex((shard) => shard.some((file) => file.filename === name));
+    assert.notEqual(shardOf('a/index.ts'), shardOf('b/index.ts'));
+  });
+
+  it('splits clusters rather than under-filling an explicitly pinned shard count', () => {
+    // One small same-dir cluster; the pin is a contract the affinity pass
+    // must not silently reduce.
+    const shards = shardFilesForReview(
+      [
+        fileOfSize('pkg/a.ts', 4_000),
+        fileOfSize('pkg/b.ts', 4_000),
+        fileOfSize('pkg/c.ts', 4_000),
+        fileOfSize('pkg/d.ts', 4_000),
+      ],
+      { requestedShards: 2 },
+    );
+    assert.equal(shards.length, 2);
+  });
+
   it('balances shard sizes largest-first', () => {
     const files = [
       fileOfSize('big.ts', 40_000),

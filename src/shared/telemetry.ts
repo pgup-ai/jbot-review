@@ -66,7 +66,8 @@ export interface RunTelemetryMeta {
   auxModel?: string;
 }
 
-export type RunTerminalState = 'completed' | 'failed';
+/** 'skipped' = the run exited before any session (doc-only PR, empty diff). */
+export type RunTerminalState = 'completed' | 'failed' | 'skipped';
 
 export type SessionFailureClass = 'timeout' | 'provider' | 'parse' | 'aborted' | 'unknown';
 
@@ -236,7 +237,9 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
         kind: 'coverage',
         session: cov.session,
         state: cov.state,
-        ...(cov.error !== undefined ? { failureClass: classifySessionError(cov.error) } : {}),
+        // Every failed row carries a class — an error-less failure (unusable
+        // output) classifies as unknown rather than omitting the field.
+        ...(cov.state === 'failed' ? { failureClass: classifySessionError(cov.error) } : {}),
         ...(cov.durationMs !== undefined ? { durationMs: cov.durationMs } : {}),
         ...(cov.promptBytes !== undefined ? { promptBytes: cov.promptBytes } : {}),
       });

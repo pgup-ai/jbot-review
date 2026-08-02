@@ -45,6 +45,13 @@ export interface GuidelineDoc {
  * its own path scope. Returns the effective globs — empty for `alwaysApply`
  * rules and for docs without frontmatter, so absence means "applies anywhere".
  */
+// Both PR-controlled inputs to globMatches are bounded before any regex is
+// built: an unusable glob is dropped, and a doc whose scopes all drop is
+// simply unscoped (never demoted) — hostile frontmatter cannot stall or
+// mis-rank the review.
+const MAX_GLOB_LENGTH = 128;
+const MAX_GLOBS_PER_DOC = 64;
+
 function parseMdcGlobs(text: string): string[] {
   const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1];
   if (!frontmatter) return [];
@@ -55,8 +62,12 @@ function parseMdcGlobs(text: string): string[] {
   for (let i = 0; i < lines.length; i += 1) {
     const inline = lines[i].match(/^globs:\s*(.*)$/);
     if (!inline) continue;
-    if (inline[1].trim()) {
-      globs.push(...inline[1].split(',').map(unquote));
+    const value = inline[1].trim();
+    if (value) {
+      // YAML flow sequences (`globs: ["a", "b"]`) reduce to the comma form;
+      // the split must not break inside a brace set (`*.{ts,tsx}`).
+      const entries = value.startsWith('[') && value.endsWith(']') ? value.slice(1, -1) : value;
+      globs.push(...splitOutsideBraces(entries).map(unquote));
     } else {
       for (let j = i + 1; j < lines.length; j += 1) {
         const item = lines[j].match(/^\s*-\s*(.+)$/);
@@ -65,13 +76,35 @@ function parseMdcGlobs(text: string): string[] {
       }
     }
   }
-  return globs.filter(Boolean);
+  return globs
+    .filter((glob) => glob.length > 0 && glob.length <= MAX_GLOB_LENGTH)
+    .filter((glob) => (glob.match(/\*/g) ?? []).length <= 16)
+    .slice(0, MAX_GLOBS_PER_DOC);
+}
+
+function splitOutsideBraces(value: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of value) {
+    if (ch === '{') depth += 1;
+    else if (ch === '}') depth = Math.max(0, depth - 1);
+    if (ch === ',' && depth === 0) {
+      parts.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+  return parts;
 }
 
 /** Slash-less globs match the basename (Cursor's `*.ts` means "any .ts file"). */
 function globMatches(glob: string, file: string): boolean {
   const target = glob.includes('/') ? file : file.slice(file.lastIndexOf('/') + 1);
   let pattern = '^';
+  let braceDepth = 0;
   for (let i = 0; i < glob.length; i += 1) {
     const ch = glob[i];
     if (ch === '*') {
@@ -84,11 +117,25 @@ function globMatches(glob: string, file: string): boolean {
       }
     } else if (ch === '?') {
       pattern += '[^/]';
+    } else if (ch === '{') {
+      braceDepth += 1;
+      pattern += '(?:';
+    } else if (ch === '}' && braceDepth > 0) {
+      braceDepth -= 1;
+      pattern += ')';
+    } else if (ch === ',' && braceDepth > 0) {
+      pattern += '|';
     } else {
       pattern += ch.replace(/[.+^${}()|[\]\\]/g, '\\$&');
     }
   }
-  return new RegExp(`${pattern}$`).test(target);
+  // Malformed frontmatter (unbalanced braces) must degrade to "no match",
+  // never crash guideline discovery.
+  try {
+    return new RegExp(`${pattern}$`).test(target);
+  } catch {
+    return false;
+  }
 }
 
 export interface DiscoveredGuidelines {

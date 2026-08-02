@@ -177,8 +177,9 @@ describe('renderReviewPreview', () => {
     assert.match(preview, /lenses: interactions/);
     assert.match(preview, /guideline pass: off/);
     assert.match(preview, /3 doc\(s\).*finder slice 24000 bytes/);
-    // bytes/4 estimate for shard 1: (24000 embedded + 24000 finder) / 4 = 12000.
-    assert.match(preview, /~12000 tokens/);
+    // With the pass off, finders get the FULL guideline set (the runner's
+    // widening fallback), so the estimate uses it: (24000 + 50000) / 4.
+    assert.match(preview, /~18500 tokens/);
     assert.match(preview, /no sessions started/i);
   });
 });

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { EmitterWebhookEvent } from '@octokit/webhooks';
@@ -81,6 +81,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
 
   enqueue(async () => {
     let cleanup: (() => void) | undefined;
+    let workspaceDir: string | undefined;
     try {
       const octokit = createAppOctokit(cfg.appId, cfg.privateKey, installationId);
       const authRes = (await octokit.auth()) as InstallationAccessTokenAuthentication;
@@ -93,6 +94,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         token: authRes.token,
       });
       cleanup = cloned.cleanup;
+      workspaceDir = cloned.dir;
       const model = pickPooledModel(cfg.modelPool, pr.head.sha);
       const { providerID } = parseModelName(model);
       // A run that fails before posting has no review metadata block naming the model.
@@ -135,27 +137,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),
           reviewTelemetry: parseEnvBoolean('JBOT_REVIEW_TELEMETRY', true),
           evidenceQuotes: parseEnvBoolean('JBOT_EVIDENCE_QUOTES', true),
-          // The clone (and the telemetry.jsonl inside it) is deleted in the
-          // finally below; JBOT_TELEMETRY_DIR opts into keeping a copy per run.
-          ...(process.env.JBOT_TELEMETRY_DIR
-            ? {
-                onReviewResult: (result: { telemetry?: string }) => {
-                  if (!result.telemetry) return;
-                  const dir = process.env.JBOT_TELEMETRY_DIR!;
-                  try {
-                    mkdirSync(dir, { recursive: true });
-                    writeFileSync(
-                      join(dir, `${owner}-${repoName}-pr${pr.number}-${Date.now()}.jsonl`),
-                      `${result.telemetry}\n`,
-                    );
-                  } catch (err) {
-                    console.error(
-                      `[jbot-review] telemetry persist failed: ${(err as Error).message}`,
-                    );
-                  }
-                },
-              }
-            : {}),
+          shardCachePath: process.env.JBOT_SHARD_CACHE_DIR?.trim() ?? '',
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });
@@ -164,6 +146,23 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         `[jbot-review] Review failed for ${owner}/${repoName}#${pr.number}: ${(error as Error).message}`,
       );
     } finally {
+      // Copy from the clone in the finally, not an on-success hook: the runner
+      // emits telemetry.jsonl on failed runs too, and failures are exactly
+      // when a persistent copy is most valuable. The clone dies right after.
+      if (process.env.JBOT_TELEMETRY_DIR && workspaceDir) {
+        try {
+          const dir = process.env.JBOT_TELEMETRY_DIR;
+          mkdirSync(dir, { recursive: true });
+          copyFileSync(
+            join(workspaceDir, '.jbot-review', 'telemetry.jsonl'),
+            join(dir, `${owner}-${repoName}-pr${pr.number}-${Date.now()}.jsonl`),
+          );
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            console.error(`[jbot-review] telemetry persist failed: ${(err as Error).message}`);
+          }
+        }
+      }
       cleanup?.();
     }
   });

@@ -710,10 +710,15 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions({ evidenceQuotes: false }).evidenceQuotes, false);
   });
 
+  it('keeps the shard cache off without an operator-configured external path', () => {
+    // Security property: a default-on cache would read from the PR-controlled
+    // workspace, letting a PR forge its own cached "clean" shard result.
+    assert.equal(normalizeOptions(undefined).shardCachePath, '');
+  });
+
   it('runs the guideline pass by default in every entry mode, with a working opt-out', () => {
-    // Local, app, and worker entries never set guidelinePass; this default is
-    // what turns the compliance session on for them (only the Action exposes
-    // an input). Misread once as "off outside the Action" — hence the pin.
+    // Local/app/worker never set guidelinePass; this default is what turns the
+    // compliance session on there. Pinned after a misread claimed otherwise.
     assert.equal(normalizeOptions(undefined).guidelinePass, true);
     assert.equal(normalizeOptions({}).guidelinePass, true);
     assert.equal(normalizeOptions({ guidelinePass: false }).guidelinePass, false);

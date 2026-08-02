@@ -36,10 +36,12 @@ which rejects mutating tool kinds regardless of what the agent requests.
 
 Bash stays available to opencode sessions for `git diff`/`log`/`grep`. The
 bash pattern denylist (git commit/push/checkout/reset/clean, `rm`, …) is an
-ACCIDENT filter and is documented in-code as "NOT a security boundary"
-(`src/shared/opencode.ts`). The boundary is the blast radius: sessions run in
-a throwaway CI checkout or, in local mode, an isolated worktree — never the
-operator's live tree — and T1's layers block workspace writes.
+ACCIDENT filter that mitigates common model-driven git mutations and is
+documented in-code as "NOT a security boundary" (`src/shared/opencode.ts`) —
+it is not a shell-write guarantee. The boundary is the blast radius: sessions
+run in a throwaway CI checkout or, in local mode, an isolated worktree —
+never the operator's live tree — and workspace writes through the session's
+own tools are denied by T1's permission layers.
 
 ### T3 — Prompt injection via PR content steers the posted review
 
@@ -56,15 +58,22 @@ annotate code outside the diff. Prior-run recognition uses hidden markers
 
 The dogfood workflow refuses `/jbot` comment-triggered runs on fork-head PRs
 because it builds the reviewer from the checked-out head
-(`.github/workflows/jbot-review.yml`). Consumers of the published Action run
-the prebuilt image and inherit GitHub's default fork-PR token restrictions.
+(`.github/workflows/jbot-review.yml`). For consumers of the published Action,
+this claim is scoped to the supported `pull_request`-event path with GitHub's
+default read-only fork-PR token: the caller's workflow controls the actual
+permissions, and invoking the action from `pull_request_target` or with
+widened `permissions` grants is outside this assurance.
 
 ### T5 — Credential or content leakage through telemetry
 
-Run/coverage telemetry stores typed failure classes only — raw error text
-(which can embed URLs, tokens, or key material) is classified and discarded
-before anything is persisted (`src/shared/telemetry.ts`). Finding rows carry
-paths, lines, and severities; prompt and response content are never persisted.
+This assurance is scoped to the persisted telemetry JSONL: run/coverage rows
+store typed failure classes only — raw error text (which can embed URLs,
+tokens, or key material) is classified and discarded before anything is
+persisted (`src/shared/telemetry.ts`). Finding rows carry paths, line
+numbers, severities, and boolean flags — no finding titles or bodies, and no
+prompt or response content. Process LOGS are a separate surface: they may
+echo raw provider error messages, and their retention is governed by the
+hosting CI/runtime, not by this repository.
 
 ### T6 — Compromised gateway or companion (remote ACP topology)
 
@@ -75,7 +84,18 @@ only downward in the trust chain — a viewer served by the gateway can never
 audit the gateway. The post-incident audit path is offline:
 `scripts/verify-journal.ts` over copied journals with companion-sourced keys.
 
-### T7 — Supply chain
+### T7 — Forged shard-cache entries
+
+Cached shard results are review output a run will trust without a model
+session, so the cache must never be readable from author-controlled paths: it
+is OFF by default and activates only when an operator configures a directory
+(`shardCachePath` / `JBOT_SHARD_CACHE_DIR`) that must live outside the
+reviewed checkout (`src/shared/runner.ts`). Entries are content-addressed
+over the shard's full prompt payload (head SHA, model, assembled context,
+guidelines, prompt options) and shape-validated on read
+(`src/shared/shard-cache.ts`); an unrecognized entry is a cache miss.
+
+### T8 — Supply chain
 
 Dependencies are deliberately minimal ("no new dependencies without clear
 need", AGENTS.md) and pinned by `package-lock.json` (`npm ci`). The shipped
@@ -90,8 +110,8 @@ the repo.
 - Read-only enforcement for opencode sessions relies on opencode honoring its
   own permission config; the three layers exist so a regression in one is
   caught by another, but all three live in the same process.
-- Telemetry JSONL includes file paths and finding titles — code metadata a
-  repo owner already shares with their provider by requesting review, but not
+- Telemetry JSONL includes file paths and line numbers — code metadata a repo
+  owner already shares with their provider by requesting review, but not
   scrubbed further.
 - Release artifacts are not signed; consumers pin the image by registry tag.
 

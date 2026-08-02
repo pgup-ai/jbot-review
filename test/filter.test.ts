@@ -532,6 +532,18 @@ describe('resolveFindingAnchors', () => {
       true,
     );
     assert.equal(ambiguous.line, 2, 'ambiguous evidence leaves an addable claim untouched');
+
+    // A context/added duplicate is still ambiguous: the added copy must not
+    // win by being the only rescuable one.
+    const mixedPatch = ['@@ -1,2 +1,3 @@', ' return x;', '+const z = 2;', '+return x;'].join('\n');
+    const mixed = finding({ path: 'c.ts', line: 2, evidence: 'return x;' });
+    resolveFindingAnchors(
+      [mixed],
+      new Map([['c.ts', new Set([2, 3])]]),
+      new Map([['c.ts', mixedPatch]]),
+      true,
+    );
+    assert.equal(mixed.line, 2, 'a context+added duplicate never moves an addable claim');
   });
 
   it('lets dedupe collapse one issue the model anchored to two different wrong lines', () => {

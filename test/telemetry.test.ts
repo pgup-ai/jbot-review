@@ -242,6 +242,9 @@ describe('run and coverage telemetry', () => {
     for (const [message] of cases) {
       t.recordCoverage({ session: message, state: 'failed', error: new Error(message) });
     }
+    // A failure with no exception (e.g. unusable output) still carries a class.
+    t.recordCoverage({ session: 'no-error', state: 'failed' });
+    cases.push(['no-error', 'unknown']);
     const rows = t
       .toJsonl()
       .split('\n')

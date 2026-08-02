@@ -194,7 +194,8 @@ const stemOf = (name: string) =>
  * sharing a basename stem (impl+test, locale twins) — so one session sees both
  * halves of a related change instead of orphaning each half to a parallel
  * shard. Same stem with the SAME basename (a/index.ts vs b/index.ts) is not a
- * variant relationship and does not link.
+ * variant relationship and does not link — including transitively via a
+ * variant that could pair with either copy.
  */
 function affinityClusters(files: PrFile[]): PrFile[][] {
   const parent = files.map((_, i) => i);
@@ -214,7 +215,13 @@ function affinityClusters(files: PrFile[]): PrFile[][] {
     byStem.set(stem, [...(byStem.get(stem) ?? []), i]);
   });
   for (const idxs of byStem.values()) {
-    if (new Set(idxs.map((i) => baseOf(files[i].filename))).size > 1) {
+    const basenames = new Set(idxs.map((i) => baseOf(files[i].filename)));
+    // Variant pairs only, and unambiguous ones: a repeated basename in the
+    // bucket (a/index.ts vs b/index.ts) means a variant like index.test.ts
+    // has no single base to pair with — linking would bridge unrelated files
+    // through it, so the whole bucket fails closed to no stem link. Same-dir
+    // affinity still applies.
+    if (basenames.size > 1 && basenames.size === idxs.length) {
       for (const i of idxs.slice(1)) union(idxs[0], i);
     }
   }
@@ -227,6 +234,16 @@ function affinityClusters(files: PrFile[]): PrFile[][] {
   return [...clusters.values()];
 }
 
+/** Stem groups within a cluster — the fine affinity relation splits fall back to. */
+function stemGroups(cluster: PrFile[]): PrFile[][] {
+  const groups = new Map<string, PrFile[]>();
+  for (const file of cluster) {
+    const stem = stemOf(file.filename);
+    groups.set(stem, [...(groups.get(stem) ?? []), file]);
+  }
+  return [...groups.values()];
+}
+
 /**
  * Affinity never overrides balance: a cluster bigger than the shard target is
  * broken back down (stem groups first, then single files) so shard wall-clocks
@@ -235,13 +252,9 @@ function affinityClusters(files: PrFile[]): PrFile[][] {
 function splitOversized(cluster: PrFile[], patchBytes: (file: PrFile) => number): PrFile[][] {
   const bytes = cluster.reduce((sum, file) => sum + patchBytes(file), 0);
   if (cluster.length <= 1 || bytes <= TARGET_SHARD_DIFF_BYTES) return [cluster];
-  const groups = new Map<string, PrFile[]>();
-  for (const file of cluster) {
-    const stem = stemOf(file.filename);
-    groups.set(stem, [...(groups.get(stem) ?? []), file]);
-  }
-  if (groups.size === 1) return cluster.map((file) => [file]);
-  return [...groups.values()].flatMap((group) => splitOversized(group, patchBytes));
+  const groups = stemGroups(cluster);
+  if (groups.length === 1) return cluster.map((file) => [file]);
+  return groups.flatMap((group) => splitOversized(group, patchBytes));
 }
 
 /**
@@ -274,8 +287,24 @@ export function shardFilesForReview(
   const patchless = files.filter((file) => !file.patch);
   const shards: PrFile[][] = Array.from({ length: shardCount }, () => []);
   const loads = Array.from({ length: shardCount }, () => 0);
-  const clusters = affinityClusters(withPatch)
-    .flatMap((cluster) => splitOversized(cluster, patchBytes))
+  let clusterList = affinityClusters(withPatch).flatMap((cluster) =>
+    splitOversized(cluster, patchBytes),
+  );
+  // The shard count is a contract (explicit pin, or byte-derived parallelism):
+  // when affinity coalesces below it, split the largest divisible cluster
+  // (stem groups, then singles) until every requested shard can be fed.
+  while (clusterList.length < shardCount) {
+    const clusterBytes = (cluster: PrFile[]) =>
+      cluster.reduce((sum, file) => sum + patchBytes(file), 0);
+    const divisible = clusterList
+      .filter((cluster) => cluster.length > 1)
+      .sort((a, b) => clusterBytes(b) - clusterBytes(a))[0];
+    if (!divisible) break;
+    const groups = stemGroups(divisible);
+    const pieces = groups.length > 1 ? groups : divisible.map((file) => [file]);
+    clusterList = [...clusterList.filter((cluster) => cluster !== divisible), ...pieces];
+  }
+  const clusters = clusterList
     .map((cluster) => ({
       cluster: [...cluster].sort((a, b) => a.filename.localeCompare(b.filename)),
       bytes: cluster.reduce((sum, file) => sum + patchBytes(file), 0),

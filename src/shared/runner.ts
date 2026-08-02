@@ -22,6 +22,7 @@ import {
 import {
   assembledContextWarning,
   createTelemetryRecorder,
+  type RunTerminalState,
   type SessionCoverageRecorder,
   type TelemetryRecorder,
 } from './telemetry.ts';
@@ -591,6 +592,13 @@ export interface ReviewRunOptions {
   context7ApiKey?: string;
   guidelinePass?: boolean;
   /**
+   * Directory for content-addressed reuse of completed shard results across
+   * same-content re-runs. Must live OUTSIDE the reviewed checkout (the
+   * workspace is the PR author's tree — a cache inside it is forgeable) and
+   * is therefore off ('') unless an operator configures a path.
+   */
+  shardCachePath?: string;
+  /**
    * Model for the auxiliary sessions (addressed-check, guideline compliance,
    * finding verification). Lets the main review run on a stronger tier while
    * the mechanical checks stay on a cheap one. Empty = use the main model.
@@ -725,6 +733,12 @@ async function runReviewPipeline(params: {
    */
   localDiff?: { files: PrFile[]; commits: ReviewCommit[] };
   options?: ReviewRunOptions;
+  /**
+   * Internal: runPrReview installs the pipeline's failure finalizer here so a
+   * throw anywhere after the recorder exists — setup, sessions, or posting —
+   * still emits the run's terminal telemetry.
+   */
+  telemetryLifecycle?: { onFailure?: () => void };
   log: (msg: string) => void;
 }): Promise<void> {
   const {
@@ -822,6 +836,37 @@ async function runReviewPipeline(params: {
     ...(auxModel !== model ? { auxModel } : {}),
   });
   const recordCoverage: SessionCoverageRecorder = (coverage) => telemetry.recordCoverage(coverage);
+  const trackedAux: AuxiliarySession<unknown>[] = [];
+  const trackAux = <T>(label: string, promise: Promise<T>): AuxiliarySession<T> => {
+    const session = trackAuxiliarySession(label, promise);
+    trackedAux.push(session as AuxiliarySession<unknown>);
+    return session;
+  };
+  let telemetryDone = false;
+  const finishTelemetry = (state: RunTerminalState) => {
+    if (telemetryDone) return;
+    telemetryDone = true;
+    telemetry.finishRun(state, Date.now() - runStartedAt);
+    emitReviewTelemetry(telemetry, workspace, log);
+  };
+  if (params.telemetryLifecycle) {
+    // Installed AFTER the recorder exists so runPrReview's catch can finalize
+    // any later throw — setup, sessions, or posting. Aux sessions still in
+    // flight when the run dies are recorded as aborted: an absent row would
+    // read as "never ran".
+    params.telemetryLifecycle.onFailure = () => {
+      for (const session of trackedAux) {
+        if (!session.isSettled()) {
+          recordCoverage({
+            session: session.label,
+            state: 'failed',
+            error: new Error('aborted: the run failed while this session was in flight'),
+          });
+        }
+      }
+      finishTelemetry('failed');
+    };
+  }
 
   // Local checkouts are owned by the invoking user — dubious-ownership can't
   // trigger — so never touch the developer's global gitconfig from local mode.
@@ -886,6 +931,7 @@ async function runReviewPipeline(params: {
   if (files.length === 0) {
     log('No reviewable files after filtering; leaving the review reaction unchanged.');
     await finalizePriorResolvedReviews([]);
+    finishTelemetry('skipped');
     return;
   }
   const noiseCount = rawFiles.filter((file) => isNoiseFile(file.filename)).length;
@@ -915,6 +961,7 @@ async function runReviewPipeline(params: {
   if (options.skipDocOnly && isDocOnlyChange(changedFiles)) {
     log(`Doc-only PR (${changedFiles.length} file(s)); skipping the full review.`);
     await finalizePriorResolvedReviews([]);
+    finishTelemetry('skipped');
     return;
   }
 
@@ -1628,14 +1675,6 @@ async function runReviewPipeline(params: {
         ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
         : undefined,
     });
-    // Local mode has no headSha (the right side is a worktree), so exact
-    // content-addressing is impossible there and the cache stays off.
-    const shardCache = headSha
-      ? {
-          dir: join(workspace, '.jbot-review', 'shard-cache'),
-          fingerprints: shards.map((shard) => shardFingerprint({ headSha, model, files: shard })),
-        }
-      : undefined;
 
     // On a re-review, drop the recall supplements whose trigger class the
     // incremental delta (since the last reviewed head) doesn't touch. Best-effort
@@ -1679,14 +1718,35 @@ async function runReviewPipeline(params: {
       }
     }
 
-    // Finder shards + recall lenses get the capped, relevance-ranked slice
-    // ONLY while the compliance session will actually run this run and audit
-    // the full set in parallel — keyed on the same final enable the session
-    // uses below, not on the option alone. ANY reason the session stays off
-    // (option disabled, aux embedded-diff overflow, trivial-delta incremental
-    // trim) widens finders back to the full set, so the docs beyond the slice
-    // are never seen by zero sessions.
+    // Finders get the capped, relevance-ranked slice ONLY while the compliance
+    // session will actually run and audit the full set in parallel — keyed on
+    // the session's own final enable, not the option. Any reason it stays off
+    // (option, aux embedded-diff overflow, trivial-delta trim) widens finders
+    // back to the full set so no doc is seen by zero sessions.
     const guidelinesForPrompt = incrementalLenses.guidelinePass ? finderGuidelines : guidelines;
+
+    // Opt-in via an operator-configured directory, NEVER a path inside the
+    // reviewed checkout: the workspace is the PR author's tree, so a cache
+    // read from it would let a PR commit a forged "clean" result for its own
+    // shard and skip review entirely. Local mode also has no headSha (the
+    // right side is a worktree), so exact content-addressing is off there.
+    // The fingerprint hashes the shard's full prompt payload, so any change
+    // to PR metadata, prior threads, guidelines, or the diff slice is a miss.
+    const shardCache =
+      headSha && options.shardCachePath
+        ? {
+            dir: options.shardCachePath,
+            fingerprints: shardPlans.map((plan) =>
+              shardFingerprint({
+                headSha,
+                model,
+                context: plan.context,
+                guidelines: guidelinesForPrompt,
+                evidenceQuotes: !!options.evidenceQuotes,
+              }),
+            ),
+          }
+        : undefined;
 
     log(
       formatContextBudget([
@@ -1719,7 +1779,7 @@ async function runReviewPipeline(params: {
       cache: shardCache,
     });
 
-    const addressedPriorCheck = trackAuxiliarySession(
+    const addressedPriorCheck = trackAux(
       'addressed-prior-comments',
       startAddressedPriorCommentsCheck({
         backend: auxBackend,
@@ -1733,7 +1793,7 @@ async function runReviewPipeline(params: {
       }),
     );
 
-    const guidelineComplianceCheck = trackAuxiliarySession(
+    const guidelineComplianceCheck = trackAux(
       'guideline-compliance',
       startGuidelineComplianceCheck({
         backend: auxBackend,
@@ -1749,7 +1809,7 @@ async function runReviewPipeline(params: {
       }),
     );
 
-    const changesSinceLastReview = trackAuxiliarySession(
+    const changesSinceLastReview = trackAux(
       'changes-since-last-review',
       startChangesSinceLastReviewSummary({
         backend: auxBackend,
@@ -1778,7 +1838,7 @@ async function runReviewPipeline(params: {
     // pass) and use the aux context (no Context7 block): they have no
     // Context7 retry path, so a Context7 hiccup must not be able to zero a
     // pass's findings.
-    const lensPasses = trackAuxiliarySession(
+    const lensPasses = trackAux(
       `${incrementalLenses.lensKeys.length} lens pass(es)`,
       startLensPasses({
         backend: auxBackend,
@@ -1794,17 +1854,7 @@ async function runReviewPipeline(params: {
       }),
     );
 
-    // A failed run must still leave its accounting on disk — that is when the
-    // coverage rows matter most.
-    let mainOutcome: { summary: string; findings: Finding[] };
-    try {
-      mainOutcome = await mainReview;
-    } catch (error) {
-      telemetry.finishRun('failed', Date.now() - runStartedAt);
-      emitReviewTelemetry(telemetry, workspace, log);
-      throw error;
-    }
-    const { summary, findings } = mainOutcome;
+    const { summary, findings } = await mainReview;
     const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
       lensPasses,
       addressedPriorCheck,
@@ -1915,8 +1965,8 @@ async function runReviewPipeline(params: {
     // Report the final filtered findings + summary on EVERY completed review (dry-run or
     // real post), so a caller can forward per-severity counts (the worker → check-run gate).
     // Isolated: this is a side-channel hook and must not abort the actual review post below.
-    telemetry.finishRun('completed', Date.now() - runStartedAt);
-    emitReviewTelemetry(telemetry, workspace, log);
+    // Terminal telemetry is NOT written here: 'completed' is only earned after
+    // the posting/approval phase below succeeds.
     try {
       options.onReviewResult?.({
         summary,
@@ -1958,6 +2008,7 @@ async function runReviewPipeline(params: {
             .join('\n')}`,
         );
       }
+      finishTelemetry('completed');
       return;
     }
 
@@ -2158,6 +2209,8 @@ async function runReviewPipeline(params: {
     } else {
       log('Open findings remain; not adding the review-done reaction.');
     }
+
+    finishTelemetry('completed');
   } finally {
     stop();
     cleanupCliHomes();
@@ -2174,10 +2227,12 @@ export async function runPrReview(params: Parameters<typeof runReviewPipeline>[0
   // Announce the run as in-progress so live/mid-run viewers see "reviewing"
   // until the terminal verdict overwrites it.
   reportRun('reviewing');
+  const telemetryLifecycle: { onFailure?: () => void } = {};
   try {
-    await runReviewPipeline(params);
+    await runReviewPipeline({ ...params, telemetryLifecycle });
     reportRun('completed');
   } catch (error) {
+    telemetryLifecycle.onFailure?.();
     reportRun('failed');
     throw error;
   } finally {
@@ -2259,6 +2314,7 @@ export function normalizeOptions(
     context7Mode: options?.context7Mode ?? 'auto',
     context7ApiKey: options?.context7ApiKey ?? '',
     guidelinePass: options?.guidelinePass ?? true,
+    shardCachePath: options?.shardCachePath ?? '',
     auxModel: options?.auxModel ?? '',
     auxApiKey: options?.auxApiKey ?? '',
     auxBaseURL: options?.auxBaseURL ?? '',

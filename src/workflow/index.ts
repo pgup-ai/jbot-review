@@ -19,6 +19,9 @@ import type { Severity } from '../shared/types.ts';
 const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 
 async function main(): Promise<void> {
+  // Pessimistic default so even a validation throw (outside the try below)
+  // leaves a readable terminal-state; overwritten on success.
+  core.setOutput('terminal-state', 'failed');
   const failOnError = parseBooleanInput('fail-on-error', true);
   const token = core.getInput('github-token', { required: true });
   const threadResolutionToken = core.getInput('thread-resolution-token').trim();
@@ -94,6 +97,9 @@ async function main(): Promise<void> {
     maxConcurrentSessions: parseNumberInput('max-concurrent-sessions', 3),
     reviewTelemetry: parseBooleanInput('review-telemetry', true),
     evidenceQuotes: parseBooleanInput('evidence-quotes', true),
+    // Env-only, no action input: a shard cache is only sound on persistent,
+    // operator-controlled runners, and the path must live outside the checkout.
+    shardCachePath: process.env.JBOT_SHARD_CACHE_DIR?.trim() ?? '',
   };
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${modelPool.join(', ')}`);
@@ -117,6 +123,7 @@ async function main(): Promise<void> {
     const model = pickPooledModel(modelPool, pull.head.sha);
     if (modelPool.length > 1) core.info(`Model pool of ${modelPool.length}: picked ${model}`);
 
+    let findingCount: number | undefined;
     await runPrReview({
       octokit,
       owner,
@@ -135,14 +142,16 @@ async function main(): Promise<void> {
       options: {
         ...options,
         onReviewResult: (result) => {
-          core.setOutput('findings-posted', String(result.findings.length));
+          findingCount = result.findings.length;
         },
       },
       log: (msg) => core.info(msg),
     });
+    // Set only after the whole run — posting included — succeeded, so the
+    // output never claims findings were posted by a run that then failed.
+    if (findingCount !== undefined) core.setOutput('findings-posted', String(findingCount));
     core.setOutput('terminal-state', 'completed');
   } catch (error) {
-    core.setOutput('terminal-state', 'failed');
     const message = error instanceof Error ? error.message : String(error);
     if (failOnError) core.setFailed(message);
     else core.warning(`Review failed but fail-on-error=false: ${message}`);

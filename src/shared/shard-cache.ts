@@ -5,16 +5,12 @@ import { join } from 'node:path';
 import type { Finding } from './types.ts';
 
 /**
- * Content-addressed reuse of completed shard results. When one shard of a
- * sharded review fails permanently, the whole run fails (invariant 1 forbids
- * partial coverage) and a re-trigger re-bills every shard — including the ones
- * that succeeded. Keying completed results by the exact content they reviewed
- * lets the re-run reuse them: same head, same model, byte-identical patches.
- *
- * Reuse is exact-content only, so invariant 1 is untouched — the union of
- * shards still covers the full diff; a cached result IS that shard's full
- * review of identical input. Bump FINGERPRINT_VERSION when the prompt contract
- * changes in ways that make old outputs incomparable.
+ * Content-addressed reuse of completed shard results: a shard failure fails
+ * the whole run (invariant 1 forbids partial coverage), so a re-trigger
+ * re-bills every shard — including the ones that succeeded. Reuse is
+ * exact-content only (same head, model, byte-identical patches), so the union
+ * of shards still covers the full diff and invariant 1 is untouched. Bump
+ * FINGERPRINT_VERSION when the prompt contract makes old outputs incomparable.
  */
 const FINGERPRINT_VERSION = 1;
 
@@ -26,13 +22,32 @@ export interface CachedShardResult {
 export function shardFingerprint(input: {
   headSha: string;
   model: string;
-  files: { filename: string; patch?: string }[];
+  /** The shard's assembled prompt context — carries PR metadata, prior threads, and the diff slice. */
+  context: string;
+  guidelines: string;
+  evidenceQuotes: boolean;
 }): string {
   const hash = createHash('sha256');
-  hash.update(`v${FINGERPRINT_VERSION}\0${input.headSha}\0${input.model}`);
-  const sorted = [...input.files].sort((a, b) => a.filename.localeCompare(b.filename));
-  for (const file of sorted) hash.update(`\0${file.filename}\0${file.patch ?? ''}`);
+  hash.update(
+    `v${FINGERPRINT_VERSION}\0${input.headSha}\0${input.model}\0${input.evidenceQuotes}` +
+      `\0${input.context}\0${input.guidelines}`,
+  );
   return hash.digest('hex').slice(0, 32);
+}
+
+const CACHED_SEVERITIES = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
+
+function isCachedFinding(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  const f = value as Record<string, unknown>;
+  return (
+    typeof f.path === 'string' &&
+    typeof f.line === 'number' &&
+    typeof f.title === 'string' &&
+    typeof f.body === 'string' &&
+    typeof f.severity === 'string' &&
+    CACHED_SEVERITIES.has(f.severity)
+  );
 }
 
 /** Fail-open: a cache problem is a miss, never a run failure. */
@@ -48,7 +63,8 @@ export function loadCachedShardResult(
       typeof parsed !== 'object' ||
       parsed === null ||
       typeof (parsed as CachedShardResult).summary !== 'string' ||
-      !Array.isArray((parsed as CachedShardResult).findings)
+      !Array.isArray((parsed as CachedShardResult).findings) ||
+      !(parsed as CachedShardResult).findings.every(isCachedFinding)
     ) {
       return undefined;
     }
