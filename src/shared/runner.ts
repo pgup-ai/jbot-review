@@ -32,7 +32,12 @@ import {
   type CliBackendID,
 } from './backend-selection.ts';
 import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
-import { loadCachedShardResult, saveShardResult, shardFingerprint } from './shard-cache.ts';
+import {
+  loadCachedShardResult,
+  resolveShardCacheDir,
+  saveShardResult,
+  shardFingerprint,
+} from './shard-cache.ts';
 import { closeObserver, reportRun, setRunName } from './observer.ts';
 import { createAcpBackend } from './acp.ts';
 import { codexAcpSpec, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from '@symma/protocol';
@@ -1728,25 +1733,22 @@ async function runReviewPipeline(params: {
     // Opt-in via an operator-configured directory, NEVER a path inside the
     // reviewed checkout: the workspace is the PR author's tree, so a cache
     // read from it would let a PR commit a forged "clean" result for its own
-    // shard and skip review entirely. Local mode also has no headSha (the
+    // shard and skip review entirely — resolveShardCacheDir enforces that
+    // even for a misconfigured path. Local mode also has no headSha (the
     // right side is a worktree), so exact content-addressing is off there.
-    // The fingerprint hashes the shard's full prompt payload, so any change
-    // to PR metadata, prior threads, guidelines, or the diff slice is a miss.
-    const shardCache =
+    // Fingerprints hash the shard's full prompt payload and are computed per
+    // ATTEMPT in runShardedReview: the Context7-stripped retry produces a
+    // different prompt and must never be cached under the primary key.
+    const shardCacheDir =
       headSha && options.shardCachePath
-        ? {
-            dir: options.shardCachePath,
-            fingerprints: shardPlans.map((plan) =>
-              shardFingerprint({
-                headSha,
-                model,
-                context: plan.context,
-                guidelines: guidelinesForPrompt,
-                evidenceQuotes: !!options.evidenceQuotes,
-              }),
-            ),
-          }
+        ? resolveShardCacheDir(options.shardCachePath, workspace)
         : undefined;
+    if (headSha && options.shardCachePath && !shardCacheDir) {
+      log(
+        'Shard cache disabled: the configured directory resolves inside the reviewed checkout (forgeable).',
+      );
+    }
+    const shardCache = shardCacheDir && headSha ? { dir: shardCacheDir, headSha } : undefined;
 
     log(
       formatContextBudget([
@@ -2727,8 +2729,8 @@ async function runShardedReview(params: {
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
-  /** Content-addressed reuse of completed shard results; index-aligned with shardPlans. */
-  cache?: { dir: string; fingerprints: string[] };
+  /** Content-addressed reuse of completed shard results. */
+  cache?: { dir: string; headSha: string };
 }): Promise<{ summary: string; findings: Finding[] }> {
   const { backend, model, guidelinesForPrompt, shardPlans, timeoutMs, log } = params;
   const sharded = shardPlans.length > 1;
@@ -2742,7 +2744,7 @@ async function runShardedReview(params: {
   };
 
   const outcomes: ShardOutcome[] = await Promise.all(
-    shardPlans.map(async (plan, index): Promise<ShardOutcome> => {
+    shardPlans.map(async (plan): Promise<ShardOutcome> => {
       const startedAt = Date.now();
       const promptBytes =
         Buffer.byteLength(plan.context, 'utf8') + Buffer.byteLength(guidelinesForPrompt, 'utf8');
@@ -2756,16 +2758,31 @@ async function runShardedReview(params: {
           durationMs: Date.now() - startedAt,
           promptBytes,
         });
-      const fingerprint = params.cache?.fingerprints[index];
-      if (params.cache && fingerprint) {
-        const cached = loadCachedShardResult(params.cache.dir, fingerprint);
+      // Keyed by the exact prompt DELIVERED: the retry uses baseContext (no
+      // Context7 block), a different prompt, so its result must never be
+      // stored or found under the primary key.
+      const fingerprintFor = (context: string) =>
+        params.cache
+          ? shardFingerprint({
+              headSha: params.cache.headSha,
+              model,
+              context,
+              guidelines: guidelinesForPrompt,
+              evidenceQuotes: !!params.evidenceQuotes,
+            })
+          : undefined;
+      const primaryFingerprint = fingerprintFor(plan.context);
+      if (params.cache && primaryFingerprint) {
+        const cached = loadCachedShardResult(params.cache.dir, primaryFingerprint);
         if (cached) {
-          log(`${plan.label}: reusing cached result for identical content (${fingerprint}).`);
+          log(
+            `${plan.label}: reusing cached result for identical content (${primaryFingerprint}).`,
+          );
           params.onCoverage?.({ session: plan.label, state: 'reused', promptBytes });
           return { plan, result: cached };
         }
       }
-      const persist = (result: ReviewResultLike) => {
+      const persist = (result: ReviewResultLike, fingerprint: string | undefined) => {
         if (params.cache && fingerprint) {
           saveShardResult(params.cache.dir, fingerprint, {
             summary: result.summary,
@@ -2780,7 +2797,7 @@ async function runShardedReview(params: {
           onTokenUsage: params.onTokenUsage,
           evidenceQuotes: params.evidenceQuotes,
         });
-        persist(result);
+        persist(result, primaryFingerprint);
         cover('completed');
         return { plan, result };
       } catch (error) {
@@ -2819,7 +2836,7 @@ async function runShardedReview(params: {
               evidenceQuotes: params.evidenceQuotes,
             },
           );
-          persist(result);
+          persist(result, fingerprintFor(plan.baseContext));
           cover('completed');
           return { plan, result };
         } catch (retryError) {

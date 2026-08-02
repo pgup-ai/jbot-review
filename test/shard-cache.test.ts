@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
   loadCachedShardResult,
+  resolveShardCacheDir,
   saveShardResult,
   shardFingerprint,
 } from '../src/shared/shard-cache.ts';
@@ -77,11 +78,49 @@ describe('shard result cache', () => {
         undefined,
         'unknown severity is a miss',
       );
+      writeFileSync(
+        join(dir, `${fingerprint}.json`),
+        JSON.stringify({
+          summary: 's',
+          findings: [{ path: 'a', line: 1, severity: 'P2', title: 't', body: 'b', evidence: 42 }],
+        }),
+      );
+      assert.equal(
+        loadCachedShardResult(dir, fingerprint),
+        undefined,
+        'a mistyped optional field is a miss — it would crash the anchor matcher downstream',
+      );
 
       // A directory that cannot be created must not throw either.
       saveShardResult('/dev/null/nope', fingerprint, result);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a cache directory inside the reviewed workspace, symlinks included', () => {
+    const root = mkdtempSync(join(tmpdir(), 'shard-cache-guard-'));
+    try {
+      const workspace = join(root, 'checkout');
+      const outside = join(root, 'cache');
+      mkdirSync(workspace, { recursive: true });
+      mkdirSync(outside, { recursive: true });
+
+      assert.equal(resolveShardCacheDir(outside, workspace), outside, 'an outside dir is usable');
+      assert.equal(
+        resolveShardCacheDir(join(workspace, '.jbot-review', 'cache'), workspace),
+        undefined,
+        'a dir inside the PR-controlled checkout is forgeable and refused',
+      );
+      assert.equal(resolveShardCacheDir(workspace, workspace), undefined);
+
+      // A symlink that RESOLVES into the workspace must not bypass the guard.
+      const sneaky = join(root, 'sneaky');
+      symlinkSync(join(workspace, 'sub'), sneaky);
+      mkdirSync(join(workspace, 'sub'), { recursive: true });
+      assert.equal(resolveShardCacheDir(sneaky, workspace), undefined);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

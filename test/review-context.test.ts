@@ -510,9 +510,11 @@ describe('formatFinderGuidelines', () => {
         join(repo, '.cursor', 'rules', 'mmm-always.mdc'),
         '---\nglobs: *.py\nalwaysApply: true\n---\nfindme-always',
       );
+      // Flow sequence + brace set + a trailing YAML comment, all of which
+      // Cursor tolerates and the parser must too.
       await writeFile(
         join(repo, '.cursor', 'rules', 'zzz-ts.mdc'),
-        '---\nglobs: ["*.{ts,tsx}"]\n---\n# TS rules\nfindme-ts\n' + 't'.repeat(280),
+        '---\nglobs: ["*.{ts,tsx}"] # typescript\n---\n# TS rules\nfindme-ts\n' + 't'.repeat(280),
       );
       // Oversized declared scopes are ignored, leaving the doc unscoped rather
       // than wrongly demoted. Sorts after zzz-ts so the tight-cap phase above
