@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 
-import { VALID_SEVERITIES, type Finding, type Severity } from './types.ts';
+import { sanitizeFinding, type Finding } from './types.ts';
 
 /**
  * Content-addressed reuse of completed shard results: a shard failure fails
@@ -76,31 +76,6 @@ export function resolveShardCacheDir(dir: string, workspace: string): string | u
   return inside ? undefined : dir;
 }
 
-const optionalString = (value: unknown): boolean =>
-  value === undefined || typeof value === 'string';
-
-function isCachedFinding(value: unknown): boolean {
-  if (typeof value !== 'object' || value === null) return false;
-  const f = value as Record<string, unknown>;
-  return (
-    typeof f.path === 'string' &&
-    typeof f.line === 'number' &&
-    // Same bar as parseReview: integer ≥ 0 (isInteger also rejects NaN/Infinity).
-    Number.isInteger(f.line) &&
-    f.line >= 0 &&
-    typeof f.title === 'string' &&
-    typeof f.body === 'string' &&
-    typeof f.severity === 'string' &&
-    VALID_SEVERITIES.has(f.severity as Severity) &&
-    // Mistyped optionals would crash downstream (the anchor matcher splits
-    // `evidence`; filters read `confidence`/`kind`).
-    optionalString(f.evidence) &&
-    optionalString(f.kind) &&
-    optionalString(f.confidence) &&
-    optionalString(f.id)
-  );
-}
-
 /** Fail-open: a cache problem is a miss, never a run failure. */
 export function loadCachedShardResult(
   dir: string,
@@ -108,18 +83,21 @@ export function loadCachedShardResult(
 ): CachedShardResult | undefined {
   try {
     const parsed: unknown = JSON.parse(readFileSync(join(dir, `${fingerprint}.json`), 'utf8'));
-    // A persistent workspace can hold entries written by other jbot versions;
-    // a shape this version does not recognize is a miss, not a crash.
+    // A persistent cache can hold entries written by other jbot versions; the
+    // findings go through the SAME gate as a live model response
+    // (sanitizeFinding), so required-field damage is a miss and optionals
+    // normalize with the live path's tolerance.
     if (
       typeof parsed !== 'object' ||
       parsed === null ||
       typeof (parsed as CachedShardResult).summary !== 'string' ||
-      !Array.isArray((parsed as CachedShardResult).findings) ||
-      !(parsed as CachedShardResult).findings.every(isCachedFinding)
+      !Array.isArray((parsed as CachedShardResult).findings)
     ) {
       return undefined;
     }
-    return parsed as CachedShardResult;
+    const findings = (parsed as CachedShardResult).findings.map(sanitizeFinding);
+    if (findings.some((finding) => finding === undefined)) return undefined;
+    return { summary: (parsed as CachedShardResult).summary, findings: findings as Finding[] };
   } catch {
     return undefined;
   }

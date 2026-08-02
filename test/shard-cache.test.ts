@@ -60,7 +60,10 @@ describe('shard result cache', () => {
 
       assert.equal(loadCachedShardResult(dir, fingerprint), undefined, 'miss before save');
       saveShardResult(dir, fingerprint, result);
-      assert.deepEqual(loadCachedShardResult(dir, fingerprint), result);
+      assert.deepEqual(loadCachedShardResult(dir, fingerprint), {
+        summary: result.summary,
+        findings: [{ ...result.findings[0], kind: undefined, confidence: undefined }],
+      });
 
       // Fail-open covers entries other versions may have written: junk bytes,
       // and structurally-valid JSON whose findings are not findings.
@@ -87,6 +90,9 @@ describe('shard result cache', () => {
         undefined,
         'unknown severity is a miss',
       );
+      // Optionals get the LIVE parse bar (sanitizeFinding): a mistyped
+      // evidence is stripped, not entry-fatal — the finding survives with the
+      // same tolerance a model response gets, and nothing crashy remains.
       writeFileSync(
         join(dir, `${fingerprint}.json`),
         JSON.stringify({
@@ -94,11 +100,20 @@ describe('shard result cache', () => {
           findings: [{ path: 'a', line: 1, severity: 'P2', title: 't', body: 'b', evidence: 42 }],
         }),
       );
-      assert.equal(
-        loadCachedShardResult(dir, fingerprint),
-        undefined,
-        'a mistyped optional field is a miss — it would crash the anchor matcher downstream',
-      );
+      assert.deepEqual(loadCachedShardResult(dir, fingerprint), {
+        summary: 's',
+        findings: [
+          {
+            path: 'a',
+            line: 1,
+            severity: 'P2',
+            title: 't',
+            body: 'b',
+            kind: undefined,
+            confidence: undefined,
+          },
+        ],
+      });
       writeFileSync(
         join(dir, `${fingerprint}.json`),
         JSON.stringify({
