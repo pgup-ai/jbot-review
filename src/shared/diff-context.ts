@@ -277,9 +277,11 @@ export function shardFilesForReview(
   const totalBytes = withPatch.reduce((sum, file) => sum + patchBytes(file), 0);
   const autoShards = Math.ceil(totalBytes / TARGET_SHARD_DIFF_BYTES);
   const requested = options.requestedShards ?? 0;
+  // maxShards caps only AUTO scaling; an explicit pin is a contract, bounded
+  // by the file count alone — per-file pins are the escape hatch for agent
+  // CLIs that only finish small sessions.
   const shardCount = Math.min(
-    Math.max(requested > 0 ? requested : autoShards, 1),
-    maxShards,
+    Math.max(requested > 0 ? requested : Math.min(autoShards, maxShards), 1),
     withPatch.length,
   );
   if (shardCount <= 1) return [files];

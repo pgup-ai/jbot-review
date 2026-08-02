@@ -402,7 +402,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
       shape,
     );
     const shards = shardFilesForReview(reviewable, {
-      requestedShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
+      requestedShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
     });
     const discovered = await discoverGuidelineDocs(process.cwd(), changedFilenames);
     console.log(
@@ -531,7 +531,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
       ...(auxApiKey ? { auxApiKey } : {}),
       ...(auxBaseURL ? { auxBaseURL } : {}),
       timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
-      reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
+      reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
       dynamicFanout: parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),
       modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', defaultModelOptions(provider)),
       promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),

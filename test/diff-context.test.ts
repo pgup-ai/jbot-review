@@ -142,6 +142,11 @@ describe('shardFilesForReview', () => {
 
     assert.equal(shardFilesForReview(files, { requestedShards: 3 }).length, 2);
     assert.equal(shardFilesForReview(files, { requestedShards: 2 }).length, 2);
+
+    // A pin may exceed the AUTO cap: some agent CLIs only finish small
+    // sessions, and per-file pins are the operator's escape hatch.
+    const many = Array.from({ length: 10 }, (_, i) => fileOfSize(`m${i}.ts`, 20_000));
+    assert.equal(shardFilesForReview(many, { requestedShards: 8 }).length, 8);
   });
 
   it('assigns every file to exactly one shard', () => {

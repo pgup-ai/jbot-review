@@ -717,7 +717,9 @@ npm run review:local
   seeded on HEAD instead of a PR head sha — so re-running against uncommitted
   edits keeps the same reviewer and a before/after comparison stays comparable.
 - **Knobs:** the same env knobs as the hosted app apply — `JBOT_REVIEW_PASSES`,
-  `JBOT_VERIFY_FINDINGS`, `JBOT_TIME_BUDGET_MINUTES`, `JBOT_REVIEW_SHARDS`,
+  `JBOT_VERIFY_FINDINGS`, `JBOT_TIME_BUDGET_MINUTES`, `JBOT_REVIEW_SHARDS`
+  (defaults to 0 = auto here, unlike the Action's 1: large local diffs shard
+  into smaller sessions, which some agent CLIs need to finish a turn),
   `JBOT_DYNAMIC_FANOUT`, `JBOT_MODEL_OPTIONS`, `JBOT_PROMPT_CACHE`,
   `JBOT_SKIP_DOC_ONLY`, `JBOT_MAX_CONCURRENT_SESSIONS`, `JBOT_REVIEW_TELEMETRY`,
   `JBOT_EVIDENCE_QUOTES`, `JBOT_REVIEW_AUX_MODEL` (+ `JBOT_AUX_PROVIDER`),
