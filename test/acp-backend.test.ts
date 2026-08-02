@@ -167,6 +167,46 @@ process.stdin.on('data', (c) => {
     assert.equal(findings[0].title, 'recovered finding');
   });
 
+  it('treats an array-shaped reply as an attempt, not an abandoned turn', async () => {
+    // '[]' is invalid for every parser (all demand an object) but it IS an
+    // attempt: verification fails open to undefined with no follow-up session.
+    const state = join(dir, 'array-reply.count');
+    const arrayReply = script(
+      'array-reply.mjs',
+      `
+import { readFileSync, writeFileSync } from 'node:fs';
+let n = 0; try { n = Number(readFileSync(${JSON.stringify(state)}, 'utf8')); } catch {}
+writeFileSync(${JSON.stringify(state)}, String(n + 1));
+let buf = '';
+process.stdin.setEncoding('utf8');
+const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+process.stdin.on('data', (c) => {
+  buf += c;
+  let i;
+  while ((i = buf.indexOf('\\n')) >= 0) {
+    const line = buf.slice(0, i); buf = buf.slice(i + 1);
+    if (!line.trim()) continue;
+    const m = JSON.parse(line);
+    if (m.id === undefined) continue;
+    if (m.method === 'session/new') out({ jsonrpc: '2.0', id: m.id, result: { sessionId: 's1' } });
+    else if (m.method === 'session/prompt') {
+      out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '[]' } } } });
+      out({ jsonrpc: '2.0', id: m.id, result: { stopReason: 'end_turn' } });
+    } else out({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: 1 } });
+  }
+});
+`,
+    );
+    const verdicts = await createAcpBackend(specFor(arrayReply), dir).runFindingVerification(
+      'probe/default',
+      'CTX',
+      [{ path: 'a.ts', line: 1, severity: 'P1', title: 't', body: 'b' }],
+      () => {},
+    );
+    assert.equal(verdicts, undefined, 'verification fails open on an unusable attempt');
+    assert.equal(readFileSync(state, 'utf8'), '1', 'no continuation session was spawned');
+  });
+
   it('reports the agent stderr when it dies before responding', async () => {
     // Pins the outcome, not which racer produces it: whatever wins, the
     // operator must see why the agent died. Without it the transport error can

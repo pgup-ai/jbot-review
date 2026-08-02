@@ -26,11 +26,13 @@ export function shardFingerprint(input: {
   context: string;
   guidelines: string;
   evidenceQuotes: boolean;
+  /** Provider-call configuration that changes output without changing the prompt (engine, modelOptions). */
+  config: string;
 }): string {
   const hash = createHash('sha256');
   hash.update(
     `v${FINGERPRINT_VERSION}\0${input.headSha}\0${input.model}\0${input.evidenceQuotes}` +
-      `\0${input.context}\0${input.guidelines}`,
+      `\0${input.config}\0${input.context}\0${input.guidelines}`,
   );
   return hash.digest('hex').slice(0, 32);
 }

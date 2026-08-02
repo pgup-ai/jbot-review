@@ -85,7 +85,10 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
     parse: (raw: string, parseLabel: string) => T,
   ): Promise<T> => {
     const raw = await deliver(model, prompt, label, log, timeoutMs);
-    if (!raw.includes('{')) {
+    // Any JSON delimiter counts as an attempt: an array-shaped reply is wrong
+    // but reformable (or fails open in its parser) — only delimiter-free text
+    // is an abandoned turn worth a continuation.
+    if (!raw.includes('{') && !raw.includes('[')) {
       log(`${label} ended its turn without attempting the task; sending one continuation prompt`);
       const continued = await deliver(
         model,

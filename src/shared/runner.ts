@@ -1748,7 +1748,19 @@ async function runReviewPipeline(params: {
         'Shard cache disabled: the configured directory resolves inside the reviewed checkout (forgeable).',
       );
     }
-    const shardCache = shardCacheDir && headSha ? { dir: shardCacheDir, headSha } : undefined;
+    const shardCache =
+      shardCacheDir && headSha
+        ? {
+            dir: shardCacheDir,
+            headSha,
+            // Provider-call config changes output without changing the prompt;
+            // a re-run under different options must never hit the old entry.
+            config: JSON.stringify({
+              engine: mainBackend.name,
+              modelOptions: options.modelOptions,
+            }),
+          }
+        : undefined;
 
     log(
       formatContextBudget([
@@ -2730,7 +2742,7 @@ async function runShardedReview(params: {
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
   /** Content-addressed reuse of completed shard results. */
-  cache?: { dir: string; headSha: string };
+  cache?: { dir: string; headSha: string; config: string };
 }): Promise<{ summary: string; findings: Finding[] }> {
   const { backend, model, guidelinesForPrompt, shardPlans, timeoutMs, log } = params;
   const sharded = shardPlans.length > 1;
@@ -2769,6 +2781,7 @@ async function runShardedReview(params: {
               context,
               guidelines: guidelinesForPrompt,
               evidenceQuotes: !!params.evidenceQuotes,
+              config: params.cache.config,
             })
           : undefined;
       const primaryFingerprint = fingerprintFor(plan.context);

@@ -17,6 +17,7 @@ const input = {
   context: 'PR context + assignment + diff slice',
   guidelines: 'guideline slice',
   evidenceQuotes: true,
+  config: '{"engine":"opencode","modelOptions":{"reasoningEffort":"medium"}}',
 };
 
 describe('shardFingerprint', () => {
@@ -29,6 +30,7 @@ describe('shardFingerprint', () => {
       { context: 'different prompt' },
       { guidelines: 'other guidelines' },
       { evidenceQuotes: false },
+      { config: '{"engine":"pi","modelOptions":{"reasoningEffort":"high"}}' },
     ]) {
       assert.notEqual(
         shardFingerprint({ ...input, ...variant }),
