@@ -8,7 +8,11 @@ import { promisify } from 'node:util';
 
 import { parseEnvBoolean, parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
 import { gatewayRoutedModels, localRunId, remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
-import { selectReviewBackends, type CliBackendID } from '../shared/backend-selection.ts';
+import {
+  backendRequiresCompleteEmbeddedDiff,
+  selectReviewBackends,
+  type CliBackendID,
+} from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_ACP_BIN, CODEX_PROVIDER_ID } from '@symma/protocol';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
@@ -39,7 +43,7 @@ import {
   formatGuidelines,
   type ReviewCommit,
 } from '../shared/review-context.ts';
-import { runPrReview } from '../shared/runner.ts';
+import { EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS, runPrReview } from '../shared/runner.ts';
 import { onFatalSignal } from '@symma/protocol';
 import type { ReviewResult } from '../shared/types.ts';
 import { GIT_DIFF_ARGS, parseGitDiff } from '../shared/git.ts';
@@ -404,11 +408,29 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     const shards = shardFilesForReview(reviewable, {
       requestedShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
     });
+    // Mirror the runner for complete-diff backends: their sessions embed
+    // under the 512KiB hard budget, and an aux overflow disables the
+    // compliance pass (widening finders to the full guideline set). Provider
+    // id stands in for the CLI-backend id — for these backends they coincide.
+    const requiresCompleteDiff = backendRequiresCompleteEmbeddedDiff(
+      provider,
+      provider as CliBackendID,
+    );
+    const diffHunksOptions = requiresCompleteDiff
+      ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
+      : undefined;
+    const auxDiffComplete =
+      !requiresCompleteDiff ||
+      (() => {
+        const aux = buildDiffHunksBlockWithMetadata(reviewable, diffHunksOptions);
+        return aux.truncatedFiles.length === 0 && aux.omittedFiles.length === 0;
+      })();
+    const guidelinePass = (fanout?.guidelinePass ?? true) && auxDiffComplete;
     const discovered = await discoverGuidelineDocs(process.cwd(), changedFilenames);
     console.log(
       `\n${renderReviewPreview({
         shards: shards.map((shard, index) => {
-          const embedded = buildDiffHunksBlockWithMetadata(shard);
+          const embedded = buildDiffHunksBlockWithMetadata(shard, diffHunksOptions);
           return {
             label: shards.length > 1 ? `review-shard-${index + 1}` : 'main-review',
             files: shard.map((f) => f.filename),
@@ -419,7 +441,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
           };
         }),
         lensKeys,
-        guidelinePass: fanout?.guidelinePass ?? true,
+        guidelinePass,
         ...(fanout ? { fanoutTier: fanout.tier, fanoutReason: fanout.reason } : {}),
         guidelines: {
           docCount: discovered.docs.length,

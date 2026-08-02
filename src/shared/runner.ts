@@ -208,7 +208,7 @@ import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
 /** Blocking findings verified per run; the rest pass through unverified. */
 const MAX_VERIFIED_FINDINGS = 10;
-const EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
+export const EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
   totalBudgetBytes: 512 * 1024,
   perFileBudgetBytes: 512 * 1024,
 };
@@ -1754,10 +1754,12 @@ async function runReviewPipeline(params: {
             dir: shardCacheDir,
             headSha,
             // Provider-call config changes output without changing the prompt;
-            // a re-run under different options must never hit the old entry.
+            // a re-run under different options or endpoint must never hit the
+            // old entry.
             config: JSON.stringify({
               engine: mainBackend.name,
               modelOptions: options.modelOptions,
+              baseURL,
             }),
           }
         : undefined;
@@ -2836,6 +2838,18 @@ async function runShardedReview(params: {
             params.context7ApiKey,
           )}`,
         );
+        // A prior run's successful retry was saved under the base-context
+        // key; a same-content re-run that fails its primary again can reuse
+        // it instead of re-billing the retry.
+        const retryFingerprint = fingerprintFor(plan.baseContext);
+        if (params.cache && retryFingerprint) {
+          const cached = loadCachedShardResult(params.cache.dir, retryFingerprint);
+          if (cached) {
+            log(`${plan.label}: reusing cached retry result (${retryFingerprint}).`);
+            params.onCoverage?.({ session: plan.label, state: 'reused', promptBytes });
+            return { plan, result: cached };
+          }
+        }
         try {
           const result = await backend.runReview(
             model,

@@ -1,4 +1,7 @@
 export type Severity = 'P0' | 'P1' | 'P2' | 'P3' | 'nit';
+
+/** The one severity allowlist — parsers and entries validate against this. */
+export const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 export type FindingKind =
   | 'bug'
   | 'security'

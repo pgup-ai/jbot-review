@@ -118,6 +118,51 @@ describe('acp review backend', () => {
     assert.match(followup, /within this single turn/i);
   });
 
+  it('repairs a malformed continuation reply instead of failing the session', async () => {
+    // plan → (continuation) malformed JSON → (repair) valid: the reformat
+    // fallback must chain after a continuation exactly as on the direct path.
+    const state = join(dir, 'three-stage.count');
+    const threeStage = script(
+      'three-stage.mjs',
+      `
+import { readFileSync, writeFileSync } from 'node:fs';
+let n = 0; try { n = Number(readFileSync(${JSON.stringify(state)}, 'utf8')); } catch {}
+writeFileSync(${JSON.stringify(state)}, String(n + 1));
+let buf = '';
+process.stdin.setEncoding('utf8');
+const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+const BY_ATTEMPT = [
+  "I'll investigate first.",
+  '{"summary": "broken',
+  JSON.stringify({ summary: 'repaired', findings: [], addressedPriorComments: [] }),
+];
+process.stdin.on('data', (c) => {
+  buf += c;
+  let i;
+  while ((i = buf.indexOf('\\n')) >= 0) {
+    const line = buf.slice(0, i); buf = buf.slice(i + 1);
+    if (!line.trim()) continue;
+    const m = JSON.parse(line);
+    if (m.id === undefined) continue;
+    if (m.method === 'session/new') out({ jsonrpc: '2.0', id: m.id, result: { sessionId: 's1' } });
+    else if (m.method === 'session/prompt') {
+      out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: BY_ATTEMPT[Math.min(n, 2)] } } } });
+      out({ jsonrpc: '2.0', id: m.id, result: { stopReason: 'end_turn' } });
+    } else out({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: 1 } });
+  }
+});
+`,
+    );
+    const result = await createAcpBackend(specFor(threeStage), dir).runReview(
+      'probe/default',
+      'CTX',
+      '',
+      () => {},
+      { label: 'review' },
+    );
+    assert.equal(result.summary, 'repaired');
+  });
+
   it('diagnoses a model that ignores the continuation too, instead of a generic parse error', async () => {
     const alwaysPlans = script(
       'always-plans.mjs',

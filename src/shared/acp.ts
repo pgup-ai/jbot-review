@@ -84,6 +84,34 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
     timeoutMs: number | undefined,
     parse: (raw: string, parseLabel: string) => T,
   ): Promise<T> => {
+    // Parse with the reformat fallback — used for the direct reply and again
+    // for a continuation reply, so a malformed continuation still gets its
+    // repair instead of failing the session.
+    const parseWithRepair = async (raw: string, parseLabel: string): Promise<T> => {
+      try {
+        return parse(raw, parseLabel);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        log(
+          `${parseLabel} response unparseable; sending one JSON repair prompt via ${name}: ${message}`,
+        );
+        const repaired = await deliver(
+          model,
+          buildJsonRepairFollowupPrompt({
+            originalPrompt: prompt,
+            invalidResponse: raw,
+            parseError: message,
+            promptBudgetBytes: ACP_REPAIR_PROMPT_BUDGET_BYTES,
+            responseBudgetBytes: ACP_REPAIR_RESPONSE_BUDGET_BYTES,
+          }),
+          `${parseLabel}-repair`,
+          log,
+          timeoutMs,
+        );
+        return parse(repaired, `${parseLabel}-repair`);
+      }
+    };
+
     const raw = await deliver(model, prompt, label, log, timeoutMs);
     // Any JSON delimiter counts as an attempt: an array-shaped reply is wrong
     // but reformable (or fails open in its parser) — only delimiter-free text
@@ -102,7 +130,7 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
         log,
         timeoutMs,
       );
-      if (!continued.includes('{')) {
+      if (!continued.includes('{') && !continued.includes('[')) {
         // Observed with devin/glm-5.2 on large reviews: the model announces a
         // plan and stops, even when the continuation explicitly forbids it —
         // while completing small prompts fine. Name the condition and the
@@ -111,28 +139,9 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
           `${label}: the agent twice ended its turn without attempting the task (an announcement, then again after an explicit continuation). This model/CLI pairing appears unable to complete a session of this size in one turn — try more shards (review-shards: 0 for auto) or a different model/backend.`,
         );
       }
-      return parse(continued, `${label}-continue`);
+      return parseWithRepair(continued, `${label}-continue`);
     }
-    try {
-      return parse(raw, label);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      log(`${label} response unparseable; sending one JSON repair prompt via ${name}: ${message}`);
-      const repaired = await deliver(
-        model,
-        buildJsonRepairFollowupPrompt({
-          originalPrompt: prompt,
-          invalidResponse: raw,
-          parseError: message,
-          promptBudgetBytes: ACP_REPAIR_PROMPT_BUDGET_BYTES,
-          responseBudgetBytes: ACP_REPAIR_RESPONSE_BUDGET_BYTES,
-        }),
-        `${label}-repair`,
-        log,
-        timeoutMs,
-      );
-      return parse(repaired, `${label}-repair`);
-    }
+    return parseWithRepair(raw, label);
   };
 
   return {

@@ -14,9 +14,7 @@ import { parseModelName } from '@symma/protocol';
 import { pickPooledModel, resolveAuxModelName, resolveModelPool } from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { Octokit } from '../shared/github.ts';
-import type { Severity } from '../shared/types.ts';
-
-const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
+import { VALID_SEVERITIES, type Severity } from '../shared/types.ts';
 
 async function main(): Promise<void> {
   // Pessimistic default so even a validation throw (outside the try below)

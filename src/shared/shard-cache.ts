@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 
-import type { Finding } from './types.ts';
+import { VALID_SEVERITIES, type Finding, type Severity } from './types.ts';
 
 /**
  * Content-addressed reuse of completed shard results: a shard failure fails
@@ -67,8 +67,6 @@ export function resolveShardCacheDir(dir: string, workspace: string): string | u
   return inside ? undefined : dir;
 }
 
-const CACHED_SEVERITIES = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
-
 const optionalString = (value: unknown): boolean =>
   value === undefined || typeof value === 'string';
 
@@ -81,7 +79,7 @@ function isCachedFinding(value: unknown): boolean {
     typeof f.title === 'string' &&
     typeof f.body === 'string' &&
     typeof f.severity === 'string' &&
-    CACHED_SEVERITIES.has(f.severity) &&
+    VALID_SEVERITIES.has(f.severity as Severity) &&
     // Mistyped optionals would crash downstream (the anchor matcher splits
     // `evidence`; filters read `confidence`/`kind`).
     optionalString(f.evidence) &&

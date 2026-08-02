@@ -19,14 +19,15 @@ import {
   buildJsonRepairPrompt,
 } from './prompt.ts';
 import { isFiniteNumber, isRecord } from './text.ts';
-import type {
-  AddressedPriorComment,
-  Finding,
-  FindingConfidence,
-  FindingKind,
-  FindingVerdict,
-  ReviewResult,
-  Severity,
+import {
+  VALID_SEVERITIES,
+  type AddressedPriorComment,
+  type Finding,
+  type FindingConfidence,
+  type FindingKind,
+  type FindingVerdict,
+  type ReviewResult,
+  type Severity,
 } from './types.ts';
 
 const READY_TIMEOUT_MS = 15_000;
@@ -1097,7 +1098,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 // Evidence quotes parse from any backend regardless of the prompt flag; the cap
 // defends against runaway quotes.
 // Room for the two or three consecutive lines EVIDENCE_INSTRUCTION asks for:
@@ -1124,6 +1124,21 @@ export function parseReview(
     log(`${label} response was not valid JSON: ${message}`);
     log(`${label} response preview:\n${truncateForLog(raw, 2000)}`);
     if (options.strict) throw new Error(`opencode ${label} returned unparseable JSON: ${message}`);
+    return {
+      summary: 'The reviewer returned an unparseable response.',
+      findings: [],
+      addressedPriorComments: [],
+    };
+  }
+
+  // A parseable non-object root (a bare array, a string) would read as a
+  // silent zero-finding review; strict mode must throw so the repair prompt
+  // gets its chance, and auxiliaries fail open as with any garbage.
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    log(`${label} response was valid JSON but not an object.`);
+    if (options.strict) {
+      throw new Error(`opencode ${label} returned a non-object JSON root`);
+    }
     return {
       summary: 'The reviewer returned an unparseable response.',
       findings: [],
