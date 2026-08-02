@@ -1054,12 +1054,6 @@ async function runReviewPipeline(params: {
   // full block. Hunks always go last — closest to the output reminder, where
   // small models attend most.
   let coreContext: string;
-  // Finder shards + recall lenses get the capped, relevance-ranked slice, but
-  // ONLY when the guideline-compliance pass is enabled to audit the full set in
-  // parallel. With compliance off, finders fall back to the full set so no
-  // guideline coverage is silently dropped — otherwise the omitted docs would
-  // be seen by no session at all.
-  const guidelinesForPrompt = effectiveGuidelinePass ? finderGuidelines : guidelines;
   if (options.enhancedContext) {
     const commits = localDiff
       ? localDiff.commits
@@ -1077,9 +1071,9 @@ async function runReviewPipeline(params: {
       priorComments,
       commits,
       checkSummary,
-      // Guidelines are injected per pass via guidelinesForPrompt (defined
-      // above: the capped finder slice for shards/lenses when the compliance
-      // pass carries the full set, else the full set), kept out of the shared
+      // Guidelines are injected per pass via guidelinesForPrompt (defined just
+      // before dispatch: the capped finder slice while the compliance pass
+      // carries the full set, else the full set), kept out of the shared
       // context so they land in the early prompt slot (invariant #5) instead
       // of being buried mid-context.
       guidelines: '',
@@ -1684,6 +1678,15 @@ async function runReviewPipeline(params: {
         );
       }
     }
+
+    // Finder shards + recall lenses get the capped, relevance-ranked slice
+    // ONLY while the compliance session will actually run this run and audit
+    // the full set in parallel — keyed on the same final enable the session
+    // uses below, not on the option alone. ANY reason the session stays off
+    // (option disabled, aux embedded-diff overflow, trivial-delta incremental
+    // trim) widens finders back to the full set, so the docs beyond the slice
+    // are never seen by zero sessions.
+    const guidelinesForPrompt = incrementalLenses.guidelinePass ? finderGuidelines : guidelines;
 
     log(
       formatContextBudget([

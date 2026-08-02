@@ -386,12 +386,12 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     const changedFilenames = reviewable.map((f) => f.filename);
     const requestedPasses = parseEnvInt('JBOT_REVIEW_PASSES', 1);
     const shape = classifyChangeShape(reviewable);
-    // requestedGuidelinePass mirrors the runner input: local mode never sets
-    // options.guidelinePass, so the compliance session is off here today.
+    // true mirrors normalizeOptions: entries that leave guidelinePass unset
+    // (this one included) run the compliance pass by default.
     const fanout = parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true)
       ? planReviewFanout({
           requestedPasses,
-          requestedGuidelinePass: false,
+          requestedGuidelinePass: true,
           files: reviewable,
           shape,
         })
@@ -419,7 +419,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
           };
         }),
         lensKeys,
-        guidelinePass: fanout?.guidelinePass ?? false,
+        guidelinePass: fanout?.guidelinePass ?? true,
         ...(fanout ? { fanoutTier: fanout.tier, fanoutReason: fanout.reason } : {}),
         guidelines: {
           docCount: discovered.docs.length,

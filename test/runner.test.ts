@@ -709,4 +709,13 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions({ reviewTelemetry: false }).reviewTelemetry, false);
     assert.equal(normalizeOptions({ evidenceQuotes: false }).evidenceQuotes, false);
   });
+
+  it('runs the guideline pass by default in every entry mode, with a working opt-out', () => {
+    // Local, app, and worker entries never set guidelinePass; this default is
+    // what turns the compliance session on for them (only the Action exposes
+    // an input). Misread once as "off outside the Action" — hence the pin.
+    assert.equal(normalizeOptions(undefined).guidelinePass, true);
+    assert.equal(normalizeOptions({}).guidelinePass, true);
+    assert.equal(normalizeOptions({ guidelinePass: false }).guidelinePass, false);
+  });
 });
