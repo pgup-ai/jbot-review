@@ -496,4 +496,37 @@ describe('formatFinderGuidelines', () => {
   it('uses MAX_FINDER_GUIDELINE_BYTES by default and is smaller than the total cap', () => {
     assert.ok(MAX_FINDER_GUIDELINE_BYTES < 96 * 1024);
   });
+
+  it('demotes .mdc rules whose declared globs match none of the changed files', async () => {
+    await withTempRepo(async (repo) => {
+      // Adversarial ordering: without demotion, budget order keeps the small
+      // early non-matching doc and drops the large late matching one.
+      await mkdir(join(repo, '.cursor', 'rules'), { recursive: true });
+      await writeFile(
+        join(repo, '.cursor', 'rules', 'aaa-python.mdc'),
+        '---\nglobs: *.py\n---\n# Python rules\nfindme-python\n' + 'p'.repeat(250),
+      );
+      await writeFile(
+        join(repo, '.cursor', 'rules', 'mmm-always.mdc'),
+        '---\nglobs: *.py\nalwaysApply: true\n---\nfindme-always',
+      );
+      await writeFile(
+        join(repo, '.cursor', 'rules', 'zzz-ts.mdc'),
+        '---\nglobs:\n  - "*.ts"\n---\n# TS rules\nfindme-ts\n' + 't'.repeat(280),
+      );
+
+      const discovered = await discoverGuidelineDocs(repo, ['src/index.ts']);
+      const finder = formatFinderGuidelines(discovered, {
+        capBytes: 480,
+        forFiles: ['src/index.ts'],
+      });
+      assert.match(finder, /findme-ts/, 'glob-matching rule outranks a non-matching one');
+      assert.match(finder, /findme-always/, 'alwaysApply rule is never demoted');
+      assert.doesNotMatch(finder, /findme-python/, 'non-matching rule is first out under the cap');
+
+      // Demoted, never dropped: with budget to spare it still renders.
+      const roomy = formatFinderGuidelines(discovered, { forFiles: ['src/index.ts'] });
+      assert.match(roomy, /findme-python/);
+    });
+  });
 });

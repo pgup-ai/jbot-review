@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,13 +19,19 @@ import {
   shouldPostReviewComment,
   suppressPreviouslyReported,
 } from './filter.ts';
-import { createTelemetryRecorder, type TelemetryRecorder } from './telemetry.ts';
+import {
+  assembledContextWarning,
+  createTelemetryRecorder,
+  type SessionCoverageRecorder,
+  type TelemetryRecorder,
+} from './telemetry.ts';
 import {
   backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
   type CliBackendID,
 } from './backend-selection.ts';
 import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
+import { loadCachedShardResult, saveShardResult, shardFingerprint } from './shard-cache.ts';
 import { closeObserver, reportRun, setRunName } from './observer.ts';
 import { createAcpBackend } from './acp.ts';
 import { codexAcpSpec, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from '@symma/protocol';
@@ -807,6 +814,14 @@ async function runReviewPipeline(params: {
       ...(isFiniteNumber(usage.costUsd) ? { costUsd: usage.costUsd } : {}),
     });
   };
+  telemetry.beginRun({
+    runId: randomUUID(),
+    ...(baseSha ? { baseSha } : {}),
+    ...(headSha ? { headSha } : {}),
+    model,
+    ...(auxModel !== model ? { auxModel } : {}),
+  });
+  const recordCoverage: SessionCoverageRecorder = (coverage) => telemetry.recordCoverage(coverage);
 
   // Local checkouts are owned by the invoking user — dubious-ownership can't
   // trigger — so never touch the developer's global gitconfig from local mode.
@@ -953,7 +968,9 @@ async function runReviewPipeline(params: {
 
   const discoveredGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
   const guidelines = formatGuidelines(discoveredGuidelines);
-  const finderGuidelines = formatFinderGuidelines(discoveredGuidelines);
+  const finderGuidelines = formatFinderGuidelines(discoveredGuidelines, {
+    forFiles: changedFiles,
+  });
   if (guidelines) {
     log(
       `Guidelines loaded (${guidelines.length} bytes; finder slice ${finderGuidelines.length} bytes).`,
@@ -1617,6 +1634,14 @@ async function runReviewPipeline(params: {
         ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
         : undefined,
     });
+    // Local mode has no headSha (the right side is a worktree), so exact
+    // content-addressing is impossible there and the cache stays off.
+    const shardCache = headSha
+      ? {
+          dir: join(workspace, '.jbot-review', 'shard-cache'),
+          fingerprints: shards.map((shard) => shardFingerprint({ headSha, model, files: shard })),
+        }
+      : undefined;
 
     // On a re-review, drop the recall supplements whose trigger class the
     // incremental delta (since the last reviewed head) doesn't touch. Best-effort
@@ -1687,6 +1712,8 @@ async function runReviewPipeline(params: {
       evidenceQuotes: options.evidenceQuotes,
       log,
       onTokenUsage: recordTokenUsage,
+      onCoverage: recordCoverage,
+      cache: shardCache,
     });
 
     const addressedPriorCheck = trackAuxiliarySession(
@@ -1699,6 +1726,7 @@ async function runReviewPipeline(params: {
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
+        onCoverage: recordCoverage,
       }),
     );
 
@@ -1714,6 +1742,7 @@ async function runReviewPipeline(params: {
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
+        onCoverage: recordCoverage,
       }),
     );
 
@@ -1738,6 +1767,7 @@ async function runReviewPipeline(params: {
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
+        onCoverage: recordCoverage,
       }),
     );
 
@@ -1757,10 +1787,21 @@ async function runReviewPipeline(params: {
         evidenceQuotes: options.evidenceQuotes,
         log,
         onTokenUsage: recordTokenUsage,
+        onCoverage: recordCoverage,
       }),
     );
 
-    const { summary, findings } = await mainReview;
+    // A failed run must still leave its accounting on disk — that is when the
+    // coverage rows matter most.
+    let mainOutcome: { summary: string; findings: Finding[] };
+    try {
+      mainOutcome = await mainReview;
+    } catch (error) {
+      telemetry.finishRun('failed', Date.now() - runStartedAt);
+      emitReviewTelemetry(telemetry, workspace, log);
+      throw error;
+    }
+    const { summary, findings } = mainOutcome;
     const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
       lensPasses,
       addressedPriorCheck,
@@ -1840,6 +1881,7 @@ async function runReviewPipeline(params: {
       enabled: options.verifyFindings && auxHasCompleteEmbeddedDiff,
       log,
       onTokenUsage: recordTokenUsage,
+      onCoverage: recordCoverage,
     });
     telemetry.snapshot('verified', verifiedFindings);
     const filteredFindings = filterFindings(verifiedFindings, options);
@@ -1870,6 +1912,7 @@ async function runReviewPipeline(params: {
     // Report the final filtered findings + summary on EVERY completed review (dry-run or
     // real post), so a caller can forward per-severity counts (the worker → check-run gate).
     // Isolated: this is a side-channel hook and must not abort the actual review post below.
+    telemetry.finishRun('completed', Date.now() - runStartedAt);
     emitReviewTelemetry(telemetry, workspace, log);
     try {
       options.onReviewResult?.({
@@ -2347,14 +2390,16 @@ function startLensPasses(params: {
   evidenceQuotes?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
+  onCoverage?: SessionCoverageRecorder;
 }): Promise<Finding[][]> {
   const { lensKeys } = params;
   if (lensKeys.length === 0) return Promise.resolve([]);
 
   params.log(`Starting ${lensKeys.length} lens pass(es) in parallel: ${lensKeys.join(', ')}.`);
   return Promise.all(
-    lensKeys.map((key) =>
-      params.backend
+    lensKeys.map((key) => {
+      const startedAt = Date.now();
+      return params.backend
         .runReview(params.model, params.prContext, params.guidelinesForPrompt, params.log, {
           lensAddendum: REVIEW_LENSES[key],
           label: `review-${key}`,
@@ -2364,15 +2409,26 @@ function startLensPasses(params: {
         })
         .then((result) => {
           params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
+          params.onCoverage?.({
+            session: `review-${key}`,
+            state: 'completed',
+            durationMs: Date.now() - startedAt,
+          });
           return result.findings;
         })
         .catch((error) => {
           params.log(
             `(skipped ${key} lens pass: ${error instanceof Error ? error.message : String(error)})`,
           );
+          params.onCoverage?.({
+            session: `review-${key}`,
+            state: 'failed',
+            error,
+            durationMs: Date.now() - startedAt,
+          });
           return [];
-        }),
-    ),
+        });
+    }),
   );
 }
 
@@ -2414,21 +2470,31 @@ async function verifyBlockingFindings(params: {
   timeoutMs?: number;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
+  onCoverage?: SessionCoverageRecorder;
 }): Promise<Finding[]> {
-  if (!params.enabled) return params.findings;
+  const session = 'finding-verification';
+  if (!params.enabled) {
+    params.onCoverage?.({ session, state: 'skipped' });
+    return params.findings;
+  }
   if (params.timeoutMs === 0) {
     params.log(
       'Skipping finding verification: time budget exhausted; posting findings unverified (fail-open).',
     );
+    params.onCoverage?.({ session, state: 'skipped' });
     return params.findings;
   }
 
   const selectedIndexes = selectBlockingFindingIndexes(params.findings, MAX_VERIFIED_FINDINGS);
-  if (selectedIndexes.length === 0) return params.findings;
+  if (selectedIndexes.length === 0) {
+    params.onCoverage?.({ session, state: 'skipped' });
+    return params.findings;
+  }
 
   const targets = selectedIndexes.map((index) => params.findings[index]);
   params.log(`Verifying ${targets.length} blocking finding(s) before posting.`);
 
+  const startedAt = Date.now();
   let verdicts;
   try {
     verdicts = await params.backend.runFindingVerification(
@@ -2443,12 +2509,15 @@ async function verifyBlockingFindings(params: {
     params.log(
       `(skipped finding verification: ${error instanceof Error ? error.message : String(error)})`,
     );
+    params.onCoverage?.({ session, state: 'failed', error, durationMs: Date.now() - startedAt });
     return params.findings;
   }
   if (!verdicts) {
     params.log('(finding verification output unusable; keeping findings unverified)');
+    params.onCoverage?.({ session, state: 'failed', durationMs: Date.now() - startedAt });
     return params.findings;
   }
+  params.onCoverage?.({ session, state: 'completed', durationMs: Date.now() - startedAt });
 
   const application = applyFindingVerdicts(params.findings, selectedIndexes, verdicts);
   for (const { finding, reason } of application.dropped) {
@@ -2598,6 +2667,9 @@ async function runShardedReview(params: {
   evidenceQuotes?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
+  onCoverage?: SessionCoverageRecorder;
+  /** Content-addressed reuse of completed shard results; index-aligned with shardPlans. */
+  cache?: { dir: string; fingerprints: string[] };
 }): Promise<{ summary: string; findings: Finding[] }> {
   const { backend, model, guidelinesForPrompt, shardPlans, timeoutMs, log } = params;
   const sharded = shardPlans.length > 1;
@@ -2611,7 +2683,37 @@ async function runShardedReview(params: {
   };
 
   const outcomes: ShardOutcome[] = await Promise.all(
-    shardPlans.map(async (plan): Promise<ShardOutcome> => {
+    shardPlans.map(async (plan, index): Promise<ShardOutcome> => {
+      const startedAt = Date.now();
+      const promptBytes =
+        Buffer.byteLength(plan.context, 'utf8') + Buffer.byteLength(guidelinesForPrompt, 'utf8');
+      const oversized = assembledContextWarning(plan.label, promptBytes);
+      if (oversized) log(oversized);
+      const cover = (state: 'completed' | 'failed', error?: unknown) =>
+        params.onCoverage?.({
+          session: plan.label,
+          state,
+          ...(error !== undefined ? { error } : {}),
+          durationMs: Date.now() - startedAt,
+          promptBytes,
+        });
+      const fingerprint = params.cache?.fingerprints[index];
+      if (params.cache && fingerprint) {
+        const cached = loadCachedShardResult(params.cache.dir, fingerprint);
+        if (cached) {
+          log(`${plan.label}: reusing cached result for identical content (${fingerprint}).`);
+          params.onCoverage?.({ session: plan.label, state: 'reused', promptBytes });
+          return { plan, result: cached };
+        }
+      }
+      const persist = (result: ReviewResultLike) => {
+        if (params.cache && fingerprint) {
+          saveShardResult(params.cache.dir, fingerprint, {
+            summary: result.summary,
+            findings: result.findings,
+          });
+        }
+      };
       try {
         const result = await backend.runReview(model, plan.context, guidelinesForPrompt, log, {
           label: plan.label,
@@ -2619,6 +2721,8 @@ async function runShardedReview(params: {
           onTokenUsage: params.onTokenUsage,
           evidenceQuotes: params.evidenceQuotes,
         });
+        persist(result);
+        cover('completed');
         return { plan, result };
       } catch (error) {
         // One retry per shard in a fresh session, for ANY failure: upstream
@@ -2634,6 +2738,7 @@ async function runShardedReview(params: {
               params.context7ApiKey,
             )}`,
           );
+          cover('failed', error);
           return { plan, error };
         }
         log(
@@ -2655,8 +2760,11 @@ async function runShardedReview(params: {
               evidenceQuotes: params.evidenceQuotes,
             },
           );
+          persist(result);
+          cover('completed');
           return { plan, result };
         } catch (retryError) {
+          cover('failed', retryError);
           return { plan, error: retryError };
         }
       }
@@ -2838,9 +2946,15 @@ function startAddressedPriorCommentsCheck(params: {
   timeoutMs?: number;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
+  onCoverage?: SessionCoverageRecorder;
 }): Promise<AddressedPriorComment[]> {
-  if (params.priorJbotThreads.length === 0) return Promise.resolve([]);
+  const session = 'addressed-prior-comments';
+  if (params.priorJbotThreads.length === 0) {
+    params.onCoverage?.({ session, state: 'skipped' });
+    return Promise.resolve([]);
+  }
 
+  const startedAt = Date.now();
   params.log('Starting addressed-prior-comments check in parallel.');
   return params.backend
     .runAddressedPriorCommentsCheck(
@@ -2854,6 +2968,7 @@ function startAddressedPriorCommentsCheck(params: {
       params.log(
         `Addressed-prior-comments check complete: ${independentlyAddressed.length} addressed prior comment(s)`,
       );
+      params.onCoverage?.({ session, state: 'completed', durationMs: Date.now() - startedAt });
       return independentlyAddressed;
     })
     .catch((error) => {
@@ -2862,6 +2977,7 @@ function startAddressedPriorCommentsCheck(params: {
           error instanceof Error ? error.message : String(error)
         })`,
       );
+      params.onCoverage?.({ session, state: 'failed', error, durationMs: Date.now() - startedAt });
       return [];
     });
 }
@@ -2899,10 +3015,17 @@ function startChangesSinceLastReviewSummary(params: {
   timeoutMs?: number;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
+  onCoverage?: SessionCoverageRecorder;
 }): Promise<string> {
-  if (!params.enabled || !params.reviewedHead || !params.headSha) return Promise.resolve('');
+  const session = 'changes-since-last-review';
+  if (!params.enabled || !params.reviewedHead || !params.headSha) {
+    params.onCoverage?.({ session, state: 'skipped' });
+    return Promise.resolve('');
+  }
   const reviewedHead = params.reviewedHead;
   const headSha = params.headSha;
+  const startedAt = Date.now();
+  let modelRan = false;
   params.log('Starting changes-since-last-review summary in parallel.');
   return (async () => {
     const subjects = await collectCommitSubjects(params.workspace, reviewedHead, headSha);
@@ -2911,6 +3034,7 @@ function startChangesSinceLastReviewSummary(params: {
       return '';
     }
     const deltaContext = buildChangesSinceContextBlock(reviewedHead, headSha, subjects);
+    modelRan = true;
     return params.backend.runChangesSinceLastReview(
       params.model,
       params.prContext,
@@ -2922,6 +3046,11 @@ function startChangesSinceLastReviewSummary(params: {
   })()
     .then((text) => {
       params.log(`changes-since-last-review summary complete: ${text.length} chars`);
+      params.onCoverage?.(
+        modelRan
+          ? { session, state: 'completed', durationMs: Date.now() - startedAt }
+          : { session, state: 'skipped' },
+      );
       return text;
     })
     .catch((error) => {
@@ -2930,6 +3059,7 @@ function startChangesSinceLastReviewSummary(params: {
           error instanceof Error ? error.message : String(error)
         })`,
       );
+      params.onCoverage?.({ session, state: 'failed', error, durationMs: Date.now() - startedAt });
       return '';
     });
 }
@@ -2944,13 +3074,20 @@ function startGuidelineComplianceCheck(params: {
   timeoutMs?: number;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
+  onCoverage?: SessionCoverageRecorder;
 }): Promise<Finding[]> {
-  if (!params.enabled) return Promise.resolve([]);
+  const session = 'guideline-compliance';
+  if (!params.enabled) {
+    params.onCoverage?.({ session, state: 'skipped' });
+    return Promise.resolve([]);
+  }
   if (!params.hasGuidelines) {
     params.log('Guideline-compliance check skipped: no repository guidelines discovered.');
+    params.onCoverage?.({ session, state: 'skipped' });
     return Promise.resolve([]);
   }
 
+  const startedAt = Date.now();
   params.log('Starting guideline-compliance check in parallel.');
   return params.backend
     .runGuidelineComplianceCheck(
@@ -2963,6 +3100,7 @@ function startGuidelineComplianceCheck(params: {
     )
     .then((findings) => {
       params.log(`Guideline-compliance check complete: ${findings.length} finding(s)`);
+      params.onCoverage?.({ session, state: 'completed', durationMs: Date.now() - startedAt });
       return findings;
     })
     .catch((error) => {
@@ -2971,6 +3109,7 @@ function startGuidelineComplianceCheck(params: {
           error instanceof Error ? error.message : String(error)
         })`,
       );
+      params.onCoverage?.({ session, state: 'failed', error, durationMs: Date.now() - startedAt });
       return [];
     });
 }

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
+import {
+  ASSEMBLED_CONTEXT_WARN_BYTES,
+  assembledContextWarning,
+  createTelemetryRecorder,
+} from '../src/shared/telemetry.ts';
 import type { Finding, Severity } from '../src/shared/types.ts';
 
 function finding(
@@ -23,6 +27,9 @@ describe('createTelemetryRecorder (disabled = inert)', () => {
     assert.equal(out[0].id, undefined, 'no id assigned when disabled');
     rec.snapshot('deduped', out);
     rec.route({ inline: out, fileLevel: [], orphaned: [], rescued: [], anchorMissed: [] });
+    rec.beginRun({ runId: 'r', model: 'm' });
+    rec.recordCoverage({ session: 's', state: 'completed' });
+    rec.finishRun('completed', 1);
     assert.deepEqual(rec.findingRows(), []);
     assert.equal(rec.toJsonl(), '');
   });
@@ -177,5 +184,78 @@ describe('createTelemetryRecorder finding dispositions', () => {
       .map((l) => JSON.parse(l));
     assert.ok(lines.some((l) => l.kind === 'finding' && l.disposition === 'posted-inline'));
     assert.ok(lines.some((l) => l.kind === 'session' && l.model === 'deepseek/deepseek-v4-flash'));
+  });
+});
+
+describe('run and coverage telemetry', () => {
+  it('emits a run header first with coverage rows carrying typed failure classes only', () => {
+    const t = createTelemetryRecorder(true);
+    t.beginRun({ runId: 'r1', baseSha: 'base', headSha: 'head', model: 'prov/model' });
+    t.recordCoverage({
+      session: 'review-shard-1',
+      state: 'completed',
+      durationMs: 1200,
+      promptBytes: 64_000,
+    });
+    t.recordCoverage({
+      session: 'review-interactions',
+      state: 'failed',
+      durationMs: 900_000,
+      error: new Error('Request to https://secret.example/token?key=abc timed out after 900000ms'),
+    });
+    t.recordCoverage({ session: 'guideline-compliance', state: 'skipped' });
+    t.finishRun('completed', 123_456);
+
+    const lines = t
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(lines[0].kind, 'run');
+    assert.equal(lines[0].schemaVersion, 1);
+    assert.equal(lines[0].headSha, 'head');
+    assert.equal(lines[0].terminalState, 'completed');
+    assert.equal(lines[0].elapsedMs, 123_456);
+
+    const coverage = lines.filter((line) => line.kind === 'coverage');
+    assert.deepEqual(
+      coverage.map((c) => [c.session, c.state, c.failureClass]),
+      [
+        ['review-shard-1', 'completed', undefined],
+        ['review-interactions', 'failed', 'timeout'],
+        ['guideline-compliance', 'skipped', undefined],
+      ],
+    );
+    assert.equal(coverage[0].promptBytes, 64_000);
+    // The redaction floor: only the class persists, never the error's own text.
+    assert.doesNotMatch(t.toJsonl(), /secret\.example/);
+  });
+
+  it('classifies aborts, parse failures, provider errors, and defaults to unknown', () => {
+    const t = createTelemetryRecorder(true);
+    const cases: [string, string][] = [
+      ['This operation was aborted', 'aborted'],
+      ['Failed to parse review response as JSON', 'parse'],
+      ['429 Too Many Requests from upstream', 'provider'],
+      ['fetch failed: ECONNRESET', 'provider'],
+      ['something inexplicable', 'unknown'],
+    ];
+    for (const [message] of cases) {
+      t.recordCoverage({ session: message, state: 'failed', error: new Error(message) });
+    }
+    const rows = t
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((line) => line.kind === 'coverage');
+    assert.deepEqual(
+      rows.map((r) => r.failureClass),
+      cases.map(([, cls]) => cls),
+    );
+  });
+
+  it('warns only when an assembled session context exceeds the byte gate', () => {
+    assert.equal(assembledContextWarning('review-shard-1', 1000), undefined);
+    const warning = assembledContextWarning('review-shard-1', ASSEMBLED_CONTEXT_WARN_BYTES + 1);
+    assert.match(warning ?? '', /review-shard-1/);
   });
 });

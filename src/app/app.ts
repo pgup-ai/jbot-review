@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import type { EmitterWebhookEvent } from '@octokit/webhooks';
 import type { InstallationAccessTokenAuthentication } from '@octokit/auth-app';
 
@@ -132,6 +135,27 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),
           reviewTelemetry: parseEnvBoolean('JBOT_REVIEW_TELEMETRY', true),
           evidenceQuotes: parseEnvBoolean('JBOT_EVIDENCE_QUOTES', true),
+          // The clone (and the telemetry.jsonl inside it) is deleted in the
+          // finally below; JBOT_TELEMETRY_DIR opts into keeping a copy per run.
+          ...(process.env.JBOT_TELEMETRY_DIR
+            ? {
+                onReviewResult: (result: { telemetry?: string }) => {
+                  if (!result.telemetry) return;
+                  const dir = process.env.JBOT_TELEMETRY_DIR!;
+                  try {
+                    mkdirSync(dir, { recursive: true });
+                    writeFileSync(
+                      join(dir, `${owner}-${repoName}-pr${pr.number}-${Date.now()}.jsonl`),
+                      `${result.telemetry}\n`,
+                    );
+                  } catch (err) {
+                    console.error(
+                      `[jbot-review] telemetry persist failed: ${(err as Error).message}`,
+                    );
+                  }
+                },
+              }
+            : {}),
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });

@@ -33,12 +33,24 @@ import { KILO_CLI_BIN, KILO_PROVIDER_ID, parseModelName } from '@symma/protocol'
 import { pickPooledModel, resolveAuxModelName, resolveModelPool } from '../shared/model.ts';
 import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
-import type { ReviewCommit } from '../shared/review-context.ts';
+import {
+  discoverGuidelineDocs,
+  formatFinderGuidelines,
+  formatGuidelines,
+  type ReviewCommit,
+} from '../shared/review-context.ts';
 import { runPrReview } from '../shared/runner.ts';
 import { onFatalSignal } from '@symma/protocol';
 import type { ReviewResult } from '../shared/types.ts';
 import { GIT_DIFF_ARGS, parseGitDiff } from '../shared/git.ts';
-import { loadDotEnv, parseOwnerRepo, renderReport } from './util.ts';
+import {
+  buildDiffHunksBlockWithMetadata,
+  classifyChangeShape,
+  shardFilesForReview,
+} from '../shared/diff-context.ts';
+import { planReviewFanout } from '../shared/fanout.ts';
+import { selectLensKeys } from '../shared/prompt.ts';
+import { loadDotEnv, parseOwnerRepo, renderReport, renderReviewPreview } from './util.ts';
 
 /**
  * Local review driver (`npm run review:local`): runs the real review pipeline
@@ -293,11 +305,16 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   }
   const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
 
+  // Preview never spawns checkouts or sessions: it inspects the worktree diff
+  // exactly as the non-gateway path would review it.
+  const preview = process.argv.includes('--preview');
+
   // The companion checks out repo@ref, and both are optional. With neither it
   // works in an empty workspace, so the worktree diff stands — there is nothing
   // to align with. With both, the diff has to describe that same commit.
   const gateway = remoteAcpConfigFromEnv();
-  const routed = gateway && gatewayRoutedModels([model, auxModel]) ? gateway : undefined;
+  const routed =
+    !preview && gateway && gatewayRoutedModels([model, auxModel]) ? gateway : undefined;
   if (routed?.repo && !routed.ref) {
     throw new Error(
       'JBOT_ACP_GATEWAY_REPO is set without JBOT_ACP_GATEWAY_REF: the companion would review a ' +
@@ -360,6 +377,60 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   if (reviewable.length === 0) {
     const detail = files.length > 0 ? ' (only binary/mode-only/noise changes)' : '';
     log(`Nothing to review vs ${baseRef} (merge-base ${shortBase})${detail}.`);
+    return;
+  }
+
+  // Before credential resolution on purpose: a preview must cost nothing and
+  // need no key.
+  if (preview) {
+    const changedFilenames = reviewable.map((f) => f.filename);
+    const requestedPasses = parseEnvInt('JBOT_REVIEW_PASSES', 1);
+    const shape = classifyChangeShape(reviewable);
+    // requestedGuidelinePass mirrors the runner input: local mode never sets
+    // options.guidelinePass, so the compliance session is off here today.
+    const fanout = parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true)
+      ? planReviewFanout({
+          requestedPasses,
+          requestedGuidelinePass: false,
+          files: reviewable,
+          shape,
+        })
+      : null;
+    const lensKeys = selectLensKeys(
+      fanout?.reviewPasses ?? requestedPasses,
+      changedFilenames,
+      shape,
+    );
+    const shards = shardFilesForReview(reviewable, {
+      requestedShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
+    });
+    const discovered = await discoverGuidelineDocs(process.cwd(), changedFilenames);
+    console.log(
+      `\n${renderReviewPreview({
+        shards: shards.map((shard, index) => {
+          const embedded = buildDiffHunksBlockWithMetadata(shard);
+          return {
+            label: shards.length > 1 ? `review-shard-${index + 1}` : 'main-review',
+            files: shard.map((f) => f.filename),
+            diffBytes: shard.reduce((sum, f) => sum + Buffer.byteLength(f.patch ?? '', 'utf8'), 0),
+            embeddedBytes: Buffer.byteLength(embedded.text, 'utf8'),
+            truncated: embedded.truncatedFiles.length,
+            omitted: embedded.omittedFiles.length,
+          };
+        }),
+        lensKeys,
+        guidelinePass: fanout?.guidelinePass ?? false,
+        ...(fanout ? { fanoutTier: fanout.tier, fanoutReason: fanout.reason } : {}),
+        guidelines: {
+          docCount: discovered.docs.length,
+          fullBytes: Buffer.byteLength(formatGuidelines(discovered), 'utf8'),
+          finderBytes: Buffer.byteLength(
+            formatFinderGuidelines(discovered, { forFiles: changedFilenames }),
+            'utf8',
+          ),
+        },
+      })}\n`,
+    );
     return;
   }
 

@@ -132,10 +132,17 @@ async function main(): Promise<void> {
       baseRef: pull.base.ref,
       baseSha: pull.base.sha,
       threadResolutionOctokit,
-      options,
+      options: {
+        ...options,
+        onReviewResult: (result) => {
+          core.setOutput('findings-posted', String(result.findings.length));
+        },
+      },
       log: (msg) => core.info(msg),
     });
+    core.setOutput('terminal-state', 'completed');
   } catch (error) {
+    core.setOutput('terminal-state', 'failed');
     const message = error instanceof Error ? error.message : String(error);
     if (failOnError) core.setFailed(message);
     else core.warning(`Review failed but fail-on-error=false: ${message}`);

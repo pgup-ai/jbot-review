@@ -33,6 +33,62 @@ export interface GuidelineDoc {
   text: string;
   /** Higher = more relevant to the changed files (scoped > governance > root). */
   relevance: GuidelineRelevance;
+  /**
+   * Path scopes a `.mdc` rule declared for itself (Cursor `globs:` frontmatter).
+   * Absent for docs with no declared scope and for `alwaysApply: true` rules.
+   */
+  globs?: string[];
+}
+
+/**
+ * Cursor `.mdc` frontmatter: the one discovered-guideline source that declares
+ * its own path scope. Returns the effective globs — empty for `alwaysApply`
+ * rules and for docs without frontmatter, so absence means "applies anywhere".
+ */
+function parseMdcGlobs(text: string): string[] {
+  const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1];
+  if (!frontmatter) return [];
+  const lines = frontmatter.split(/\r?\n/);
+  if (lines.some((line) => /^alwaysApply:\s*true\b/.test(line))) return [];
+  const unquote = (value: string) => value.trim().replace(/^['"]|['"]$/g, '');
+  const globs: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const inline = lines[i].match(/^globs:\s*(.*)$/);
+    if (!inline) continue;
+    if (inline[1].trim()) {
+      globs.push(...inline[1].split(',').map(unquote));
+    } else {
+      for (let j = i + 1; j < lines.length; j += 1) {
+        const item = lines[j].match(/^\s*-\s*(.+)$/);
+        if (!item) break;
+        globs.push(unquote(item[1]));
+      }
+    }
+  }
+  return globs.filter(Boolean);
+}
+
+/** Slash-less globs match the basename (Cursor's `*.ts` means "any .ts file"). */
+function globMatches(glob: string, file: string): boolean {
+  const target = glob.includes('/') ? file : file.slice(file.lastIndexOf('/') + 1);
+  let pattern = '^';
+  for (let i = 0; i < glob.length; i += 1) {
+    const ch = glob[i];
+    if (ch === '*') {
+      if (glob[i + 1] === '*') {
+        pattern += '.*';
+        i += 1;
+        if (glob[i + 1] === '/') i += 1;
+      } else {
+        pattern += '[^/]*';
+      }
+    } else if (ch === '?') {
+      pattern += '[^/]';
+    } else {
+      pattern += ch.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  return new RegExp(`${pattern}$`).test(target);
 }
 
 export interface DiscoveredGuidelines {
@@ -297,7 +353,8 @@ export async function discoverGuidelineDocs(
       if (!trimmed) return undefined;
       seen.add(resolved.absolutePath);
       seenRealPaths.add(resolved.realPath);
-      docs.push({ label, text: trimmed, relevance });
+      const globs = label.endsWith('.mdc') ? parseMdcGlobs(trimmed) : [];
+      docs.push({ label, text: trimmed, relevance, ...(globs.length > 0 ? { globs } : {}) });
       return { text, absolutePath: resolved.absolutePath };
     } catch {
       return undefined;
@@ -516,13 +573,21 @@ export const MAX_FINDER_GUIDELINE_BYTES = 24 * 1024;
  */
 export function formatFinderGuidelines(
   discovered: DiscoveredGuidelines,
-  options: { capBytes?: number } = {},
+  options: { capBytes?: number; forFiles?: string[] } = {},
 ): string {
   const capBytes = options.capBytes ?? MAX_FINDER_GUIDELINE_BYTES;
 
+  // A rule that declared its own path scope and matches none of the changed
+  // files ranks below everything else: demoted (first out under the cap),
+  // never dropped outright — the compliance pass still sees the full set.
+  const { forFiles } = options;
+  const effectiveRelevance = (doc: GuidelineDoc): number =>
+    forFiles && doc.globs && !doc.globs.some((glob) => forFiles.some((f) => globMatches(glob, f)))
+      ? 0
+      : doc.relevance;
   const ranked = discovered.docs
-    .map((doc, index) => ({ doc, index }))
-    .sort((a, b) => b.doc.relevance - a.doc.relevance || a.index - b.index);
+    .map((doc, index) => ({ doc, index, relevance: effectiveRelevance(doc) }))
+    .sort((a, b) => b.relevance - a.relevance || a.index - b.index);
 
   const keptIndices = new Set<number>();
   let usedBytes = 0;

@@ -53,6 +53,65 @@ export interface FindingRouting {
   anchorMissed: Finding[];
 }
 
+/**
+ * Run-level accounting: one header row per run so coverage and failures are
+ * queryable across runs — a fail-open aux session must leave a machine-readable
+ * trace, not just a log line.
+ */
+export interface RunTelemetryMeta {
+  runId: string;
+  baseSha?: string;
+  headSha?: string;
+  model: string;
+  auxModel?: string;
+}
+
+export type RunTerminalState = 'completed' | 'failed';
+
+export type SessionFailureClass = 'timeout' | 'provider' | 'parse' | 'aborted' | 'unknown';
+
+export interface SessionCoverage {
+  session: string;
+  state: 'completed' | 'failed' | 'skipped' | 'reused';
+  /** Classified into a failureClass; the error's own text is never persisted. */
+  error?: unknown;
+  durationMs?: number;
+  promptBytes?: number;
+}
+
+export type SessionCoverageRecorder = (coverage: SessionCoverage) => void;
+
+/**
+ * Generic failure classes only — raw provider/error text can carry URLs,
+ * tokens, or key material and must never reach the persisted JSONL.
+ */
+function classifySessionError(error: unknown): SessionFailureClass {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/abort/i.test(message)) return 'aborted';
+  if (/timed?\s*out|timeout|deadline/i.test(message)) return 'timeout';
+  if (/parse|json|schema|repair/i.test(message)) return 'parse';
+  if (
+    /\b[45]\d\d\b|http|rate limit|overloaded|econn|enotfound|fetch failed|socket|stream|upstream|network|api/i.test(
+      message,
+    )
+  ) {
+    return 'provider';
+  }
+  return 'unknown';
+}
+
+/**
+ * Soft byte gate for one session's assembled context (PR context + guidelines).
+ * Log-only: every fragment already has a hard budget, but the 149KB dilution
+ * incident was an assembled TOTAL nobody was watching. Warning, not a failure.
+ */
+export const ASSEMBLED_CONTEXT_WARN_BYTES = 80 * 1024;
+
+export function assembledContextWarning(label: string, bytes: number): string | undefined {
+  if (bytes <= ASSEMBLED_CONTEXT_WARN_BYTES) return undefined;
+  return `${label}: assembled context is ${bytes} bytes (soft cap ${ASSEMBLED_CONTEXT_WARN_BYTES}); large contexts dilute finder attention`;
+}
+
 /** Snapshot points, in pipeline order. */
 export type TelemetryStage = 'gated' | 'deduped' | 'suppressed' | 'verified' | 'filtered';
 const STAGE_ORDER: TelemetryStage[] = ['gated', 'deduped', 'suppressed', 'verified', 'filtered'];
@@ -67,6 +126,11 @@ export interface TelemetryRecorder {
   /** Record the terminal routing of the surviving findings. */
   route(routing: FindingRouting): void;
   recordSession(row: SessionTelemetryRow): void;
+  /** Open the run header row; identity fields only, sealed at start. */
+  beginRun(meta: RunTelemetryMeta): void;
+  /** Close the run header with its terminal state and wall clock. */
+  finishRun(state: RunTerminalState, elapsedMs: number): void;
+  recordCoverage(coverage: SessionCoverage): void;
   findingRows(): FindingTelemetryRow[];
   toJsonl(): string;
 }
@@ -77,6 +141,9 @@ const DISABLED: TelemetryRecorder = {
   snapshot: () => undefined,
   route: () => undefined,
   recordSession: () => undefined,
+  beginRun: () => undefined,
+  finishRun: () => undefined,
+  recordCoverage: () => undefined,
   findingRows: () => [],
   toJsonl: () => '',
 };
@@ -108,6 +175,10 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   // honest as the model's original output rather than mutating it.
   const routedLine = new Map<string, number>();
   const sessions: SessionTelemetryRow[] = [];
+  let run:
+    | (RunTelemetryMeta & { terminalState?: RunTerminalState; elapsedMs?: number })
+    | undefined;
+  const coverage: Record<string, unknown>[] = [];
 
   const idsOf = (findings: Finding[]): Set<string> =>
     new Set(findings.map((f) => f.id).filter((id): id is string => Boolean(id)));
@@ -154,6 +225,22 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     recordSession(row) {
       sessions.push({ kind: 'session', ...row });
     },
+    beginRun(meta) {
+      run = { ...meta };
+    },
+    finishRun(state, elapsedMs) {
+      if (run) Object.assign(run, { terminalState: state, elapsedMs });
+    },
+    recordCoverage(cov) {
+      coverage.push({
+        kind: 'coverage',
+        session: cov.session,
+        state: cov.state,
+        ...(cov.error !== undefined ? { failureClass: classifySessionError(cov.error) } : {}),
+        ...(cov.durationMs !== undefined ? { durationMs: cov.durationMs } : {}),
+        ...(cov.promptBytes !== undefined ? { promptBytes: cov.promptBytes } : {}),
+      });
+    },
     findingRows() {
       return order.map((id) => {
         const row = deriveRow(id, meta.get(id)!, stageSeverity, routing);
@@ -162,7 +249,8 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
       });
     },
     toJsonl() {
-      const lines = [...this.findingRows(), ...sessions];
+      const header = run ? [{ kind: 'run', schemaVersion: 1, ...run }] : [];
+      const lines = [...header, ...coverage, ...this.findingRows(), ...sessions];
       return lines.map((l) => JSON.stringify(l)).join('\n');
     },
   };

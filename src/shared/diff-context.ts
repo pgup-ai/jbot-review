@@ -181,12 +181,76 @@ export function classifyChangeShape(files: PrFile[]): ChangeShape {
 export const TARGET_SHARD_DIFF_BYTES = 24 * 1024;
 export const DEFAULT_MAX_REVIEW_SHARDS = 4;
 
+const baseOf = (name: string) => name.slice(name.lastIndexOf('/') + 1);
+/** Basename stripped of extension, test/spec suffix, and locale suffix — the affinity key. */
+const stemOf = (name: string) =>
+  baseOf(name)
+    .replace(/\.[^.]+$/, '')
+    .replace(/[._-](test|spec)$/i, '')
+    .replace(/[_-][a-z]{2}([_-][a-z]{2})?$/i, '');
+
+/**
+ * Groups files that review best together — same directory, or a variant pair
+ * sharing a basename stem (impl+test, locale twins) — so one session sees both
+ * halves of a related change instead of orphaning each half to a parallel
+ * shard. Same stem with the SAME basename (a/index.ts vs b/index.ts) is not a
+ * variant relationship and does not link.
+ */
+function affinityClusters(files: PrFile[]): PrFile[][] {
+  const parent = files.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const union = (a: number, b: number) => {
+    parent[find(a)] = find(b);
+  };
+
+  const byDir = new Map<string, number>();
+  const byStem = new Map<string, number[]>();
+  files.forEach((file, i) => {
+    const dir = file.filename.slice(0, file.filename.lastIndexOf('/') + 1);
+    const seen = byDir.get(dir);
+    if (seen === undefined) byDir.set(dir, i);
+    else union(seen, i);
+    const stem = stemOf(file.filename);
+    byStem.set(stem, [...(byStem.get(stem) ?? []), i]);
+  });
+  for (const idxs of byStem.values()) {
+    if (new Set(idxs.map((i) => baseOf(files[i].filename))).size > 1) {
+      for (const i of idxs.slice(1)) union(idxs[0], i);
+    }
+  }
+
+  const clusters = new Map<number, PrFile[]>();
+  files.forEach((file, i) => {
+    const root = find(i);
+    clusters.set(root, [...(clusters.get(root) ?? []), file]);
+  });
+  return [...clusters.values()];
+}
+
+/**
+ * Affinity never overrides balance: a cluster bigger than the shard target is
+ * broken back down (stem groups first, then single files) so shard wall-clocks
+ * stay even and the byte-derived shard count keeps its parallelism.
+ */
+function splitOversized(cluster: PrFile[], patchBytes: (file: PrFile) => number): PrFile[][] {
+  const bytes = cluster.reduce((sum, file) => sum + patchBytes(file), 0);
+  if (cluster.length <= 1 || bytes <= TARGET_SHARD_DIFF_BYTES) return [cluster];
+  const groups = new Map<string, PrFile[]>();
+  for (const file of cluster) {
+    const stem = stemOf(file.filename);
+    groups.set(stem, [...(groups.get(stem) ?? []), file]);
+  }
+  if (groups.size === 1) return cluster.map((file) => [file]);
+  return [...groups.values()].flatMap((group) => splitOversized(group, patchBytes));
+}
+
 /**
  * Splits reviewable files into balanced shards. Shard count grows with total
  * patch size (one shard per TARGET_SHARD_DIFF_BYTES) up to maxShards;
- * `requestedShards` > 0 pins the count explicitly. Files are assigned
- * largest-first to the least-loaded shard, so shards finish in similar time.
- * Returns a single shard (no split) for small diffs.
+ * `requestedShards` > 0 pins the count explicitly. Affinity clusters are
+ * assigned whole, largest-first to the least-loaded shard, so related files
+ * co-review while shards still finish in similar time. Returns a single shard
+ * (no split) for small diffs.
  */
 export function shardFilesForReview(
   files: PrFile[],
@@ -210,13 +274,19 @@ export function shardFilesForReview(
   const patchless = files.filter((file) => !file.patch);
   const shards: PrFile[][] = Array.from({ length: shardCount }, () => []);
   const loads = Array.from({ length: shardCount }, () => 0);
-  const bySize = [...withPatch].sort(
-    (a, b) => patchBytes(b) - patchBytes(a) || a.filename.localeCompare(b.filename),
-  );
-  for (const file of bySize) {
+  const clusters = affinityClusters(withPatch)
+    .flatMap((cluster) => splitOversized(cluster, patchBytes))
+    .map((cluster) => ({
+      cluster: [...cluster].sort((a, b) => a.filename.localeCompare(b.filename)),
+      bytes: cluster.reduce((sum, file) => sum + patchBytes(file), 0),
+    }))
+    .sort(
+      (a, b) => b.bytes - a.bytes || a.cluster[0].filename.localeCompare(b.cluster[0].filename),
+    );
+  for (const { cluster, bytes } of clusters) {
     const target = loads.indexOf(Math.min(...loads));
-    shards[target].push(file);
-    loads[target] += patchBytes(file);
+    shards[target].push(...cluster);
+    loads[target] += bytes;
   }
   for (const file of patchless) {
     const target = loads.indexOf(Math.min(...loads));

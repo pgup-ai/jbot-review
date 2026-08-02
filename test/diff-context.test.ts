@@ -168,6 +168,39 @@ describe('shardFilesForReview', () => {
     assert.deepEqual(new Set(assigned), new Set(files.map((file) => file.filename)));
   });
 
+  it('co-locates affinity pairs (impl+test, locale twins) in one shard', () => {
+    const shardOf = (shards: PrFile[][], name: string) =>
+      shards.findIndex((shard) => shard.some((file) => file.filename === name));
+
+    // Sized so plain largest-first greedy provably separates the pair.
+    const paired = shardFilesForReview([
+      fileOfSize('src/shared/filter.ts', 12_000),
+      fileOfSize('test/filter.test.ts', 8_000),
+      fileOfSize('src/shared/runner.ts', 20_000),
+      fileOfSize('src/app/app.ts', 10_000),
+    ]);
+    assert.equal(
+      shardOf(paired, 'src/shared/filter.ts'),
+      shardOf(paired, 'test/filter.test.ts'),
+      'a test file reviews alongside the implementation it exercises',
+    );
+
+    const twins = shardFilesForReview(
+      [
+        fileOfSize('a/big1.ts', 20_000),
+        fileOfSize('b/big2.ts', 18_000),
+        fileOfSize('i18n/message_en.properties', 6_000),
+        fileOfSize('i18n/message_zh.properties', 6_000),
+      ],
+      { requestedShards: 2 },
+    );
+    assert.equal(
+      shardOf(twins, 'i18n/message_en.properties'),
+      shardOf(twins, 'i18n/message_zh.properties'),
+      'locale twins stay in one review unit',
+    );
+  });
+
   it('balances shard sizes largest-first', () => {
     const files = [
       fileOfSize('big.ts', 40_000),

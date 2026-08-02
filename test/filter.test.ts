@@ -469,7 +469,7 @@ describe('resolveFindingAnchors', () => {
 
   it('moves only the findings whose line cannot anchor, in place', () => {
     const bogus = finding({ path: 'a.ts', line: 99, evidence: 'return total;' });
-    const valid = finding({ path: 'a.ts', line: 2, evidence: 'return total;' });
+    const valid = finding({ path: 'a.ts', line: 2, evidence: 'const total = order.total;' });
     const declared = finding({ path: 'a.ts', line: 0, evidence: 'return total;' });
     const noEvidence = finding({ path: 'a.ts', line: 99 });
 
@@ -482,7 +482,7 @@ describe('resolveFindingAnchors', () => {
 
     assert.deepEqual(moved, [bogus]);
     assert.equal(bogus.line, 3, 're-anchored in place so every consumer agrees');
-    assert.equal(valid.line, 2, 'an anchor that already works is left alone');
+    assert.equal(valid.line, 2, 'an anchor corroborated by its evidence is left alone');
     assert.equal(declared.line, 0, 'line 0 stays an explicit file-level signal');
     assert.equal(noEvidence.line, 99, 'nothing to match without evidence');
 
@@ -498,6 +498,40 @@ describe('resolveFindingAnchors', () => {
     assert.deepEqual(resolveFindingAnchors([unmatched, noPatch], addable, patchByPath, true), []);
     assert.equal(unmatched.line, 99, 'an unmatched quote must not move the finding');
     assert.equal(noPatch.line, 99, 'nor may a path with no patch');
+  });
+
+  it('re-anchors an addable line its evidence contradicts, keeping corroborated ones', () => {
+    // The claimed line parses as a valid anchor, but the quote uniquely lives
+    // elsewhere — trusting the quote is the evidence contract's whole point.
+    const wrong = finding({ path: 'a.ts', line: 2, evidence: 'return total;' });
+    const insideWindow = finding({
+      path: 'a.ts',
+      line: 3,
+      evidence: 'const total = order.total;\nreturn total;',
+    });
+
+    const moved = resolveFindingAnchors([wrong, insideWindow], addable, patchByPath, true);
+
+    assert.deepEqual(moved, [wrong]);
+    assert.equal(wrong.line, 3, 'moved to the line the evidence identifies');
+    assert.equal(
+      insideWindow.line,
+      3,
+      'a claimed line inside the evidence window is corroborated, not churned to the window anchor',
+    );
+
+    // Ambiguity fails closed exactly as it does for unanchorable lines.
+    const ambiguousPatch = ['@@ -0,0 +1,3 @@', '+return x;', '+const y = 1;', '+return x;'].join(
+      '\n',
+    );
+    const ambiguous = finding({ path: 'b.ts', line: 2, evidence: 'return x;' });
+    resolveFindingAnchors(
+      [ambiguous],
+      new Map([['b.ts', new Set([1, 2, 3])]]),
+      new Map([['b.ts', ambiguousPatch]]),
+      true,
+    );
+    assert.equal(ambiguous.line, 2, 'ambiguous evidence leaves an addable claim untouched');
   });
 
   it('lets dedupe collapse one issue the model anchored to two different wrong lines', () => {
