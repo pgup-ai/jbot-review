@@ -119,29 +119,49 @@ function splitOutsideBraces(value: string): string[] {
   return parts;
 }
 
-/** `{a,b}` sets multiply into brace-free variants; unbalanced braces stay literal. */
+/**
+ * `{a,b}` sets multiply into brace-free variants; unbalanced braces stay
+ * literal. Iterative — one brace set per pass — and bails the moment the
+ * working set exceeds the cap, so a brace bomb ({a,b} × N) costs at most
+ * one over-cap pass instead of expanding its full Cartesian product. An
+ * over-cap result (length > MAX_GLOB_VARIANTS) marks the glob unusable.
+ */
 function expandBraces(glob: string): string[] {
-  const open = glob.indexOf('{');
-  if (open < 0) return [glob];
-  let depth = 0;
-  let close = -1;
-  for (let i = open; i < glob.length; i += 1) {
-    if (glob[i] === '{') depth += 1;
-    else if (glob[i] === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        close = i;
-        break;
+  let variants = [glob];
+  for (;;) {
+    const next: string[] = [];
+    let expanded = false;
+    for (const variant of variants) {
+      const open = variant.indexOf('{');
+      let close = -1;
+      if (open >= 0) {
+        let depth = 0;
+        for (let i = open; i < variant.length; i += 1) {
+          if (variant[i] === '{') depth += 1;
+          else if (variant[i] === '}') {
+            depth -= 1;
+            if (depth === 0) {
+              close = i;
+              break;
+            }
+          }
+        }
       }
+      if (open < 0 || close < 0) {
+        next.push(variant);
+        continue;
+      }
+      expanded = true;
+      const prefix = variant.slice(0, open);
+      const suffix = variant.slice(close + 1);
+      for (const part of splitOutsideBraces(variant.slice(open + 1, close))) {
+        next.push(prefix + part + suffix);
+      }
+      if (next.length > MAX_GLOB_VARIANTS) return next;
     }
+    if (!expanded) return next;
+    variants = next;
   }
-  if (close < 0) return [glob];
-  const prefix = glob.slice(0, open);
-  const suffix = glob.slice(close + 1);
-  const variants = splitOutsideBraces(glob.slice(open + 1, close)).flatMap((part) =>
-    expandBraces(prefix + part + suffix),
-  );
-  return variants.length <= MAX_GLOB_VARIANTS ? variants : variants.slice(0, MAX_GLOB_VARIANTS + 1);
 }
 
 type GlobToken =

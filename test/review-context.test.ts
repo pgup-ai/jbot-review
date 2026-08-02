@@ -528,6 +528,12 @@ describe('formatFinderGuidelines', () => {
         join(repo, '.cursor', 'rules', 'zzz3-broken.mdc'),
         '---\nglobs: "{*.zzz"\n---\nfindme-broken',
       );
+      // A brace bomb ({a,b} × 25 = 2^25 combinations) must be discarded in
+      // one over-cap expansion pass; this test HANGING is its failure mode.
+      await writeFile(
+        join(repo, '.cursor', 'rules', 'zzz4-bomb.mdc'),
+        '---\nglobs: "' + '{a,b}'.repeat(25) + '"\n---\nfindme-bomb',
+      );
 
       const discovered = await discoverGuidelineDocs(repo, ['src/index.ts']);
       const finder = formatFinderGuidelines(discovered, {
@@ -543,6 +549,7 @@ describe('formatFinderGuidelines', () => {
       assert.match(roomy, /findme-python/);
       assert.match(roomy, /findme-huge/, 'an unusable declared scope never demotes the doc');
       assert.match(roomy, /findme-broken/, 'a malformed glob is a non-match, not a crash');
+      assert.match(roomy, /findme-bomb/, 'a brace bomb leaves the doc unscoped, never demoted');
     });
   });
 });

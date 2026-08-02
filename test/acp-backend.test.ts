@@ -68,7 +68,7 @@ writeFileSync(${JSON.stringify(state)}, String(n + 1));
 let buf = '';
 process.stdin.setEncoding('utf8');
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
-const REVIEW = JSON.stringify({ summary: 'recovered', findings: [], addressedPriorComments: [] });
+const REVIEW = JSON.stringify({ summary: 'recovered', findings: [{ path: 'a.ts', line: 1, severity: 'P2', title: 'recovered finding', body: 'b' }], addressedPriorComments: [] });
 process.stdin.on('data', (c) => {
   buf += c;
   let i;
@@ -161,7 +161,10 @@ process.stdin.on('data', (c) => {
       'GUIDELINES',
       () => {},
     );
-    assert.deepEqual(findings, []);
+    // The finding proves the CONTINUATION spawn answered: a non-strict parse
+    // of the empty first turn alone would yield [] and hide a broken recovery.
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].title, 'recovered finding');
   });
 
   it('reports the agent stderr when it dies before responding', async () => {
