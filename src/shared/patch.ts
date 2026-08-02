@@ -99,6 +99,30 @@ export function anchorByEvidenceSnippet(
   patch: string | undefined,
   evidence: string,
 ): number | undefined {
+  const window = evidenceWindow(patch, evidence);
+  return typeof window === 'object' ? window.anchor : undefined;
+}
+
+export interface EvidenceWindow {
+  /** First ADDED line in the window; undefined when the match is context-only. */
+  anchor: number | undefined;
+  /** New-side span of the matched run, context lines included. */
+  start: number;
+  end: number;
+}
+
+/**
+ * The unique window `anchorByEvidenceSnippet` matches, with its new-side span.
+ * The span lets a caller distinguish "the quote corroborates this claimed
+ * line" (line inside the window) from "the quote lives elsewhere".
+ * 'ambiguous' is distinct from undefined (no match) so a caller can refuse
+ * weaker fallbacks: a context+added duplicate matches the window twice but the
+ * added-lines-only prefix rescue once, and that rescue must not win.
+ */
+export function evidenceWindow(
+  patch: string | undefined,
+  evidence: string,
+): EvidenceWindow | 'ambiguous' | undefined {
   if (!patch) return undefined;
   const target = evidence.split('\n').map((line) => line.trim());
   while (target[0] === '') target.shift();
@@ -115,17 +139,23 @@ export function anchorByEvidenceSnippet(
   // that matched NOTHING is retried stripped: retrying an AMBIGUOUS one would
   // let a second reading of it anchor somewhere the quote itself never pointed.
   const asWritten = matchWindow(side, target);
-  if (asWritten.matches > 0) return asWritten.anchor;
-  return matchWindow(side, target.map(stripQuotedMarker)).anchor;
+  const result =
+    asWritten.matches > 0 ? asWritten : matchWindow(side, target.map(stripQuotedMarker));
+  if (result.matches > 1) return 'ambiguous';
+  return result.matches === 1
+    ? { anchor: result.anchor, start: result.start, end: result.end }
+    : undefined;
 }
 
-/** `matches` separates "no match" from "ambiguous"; only exactly one yields an anchor. */
+/** `matches` separates "no match" from "ambiguous"; only exactly one yields a window. */
 function matchWindow(
   side: { line: number; added: boolean; text: string }[],
   target: string[],
-): { matches: number; anchor: number | undefined } {
+): { matches: number; anchor: number | undefined; start: number; end: number } {
   let matches = 0;
   let anchor: number | undefined;
+  let start = 0;
+  let end = 0;
   for (let i = 0; i + target.length <= side.length; i += 1) {
     const mismatched = target.some(
       (line, j) =>
@@ -136,8 +166,10 @@ function matchWindow(
     );
     if (mismatched) continue;
     matches += 1;
-    if (matches > 1) return { matches, anchor: undefined };
+    if (matches > 1) return { matches, anchor: undefined, start: 0, end: 0 };
     anchor = side.slice(i, i + target.length).find((l) => l.added)?.line;
+    start = side[i].line;
+    end = side[i + target.length - 1].line;
   }
-  return { matches, anchor };
+  return { matches, anchor, start, end };
 }

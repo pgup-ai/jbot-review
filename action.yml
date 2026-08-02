@@ -210,6 +210,12 @@ inputs:
     required: false
     default: 'true'
 
+outputs:
+  findings-posted:
+    description: 'Findings posted (or logged in dry-run) by this run. Unset when the review fails before completing.'
+  terminal-state:
+    description: 'completed when the review pipeline finished; failed when it aborted. Run-level coverage detail lands in .jbot-review/telemetry.jsonl — upload it as a workflow artifact to keep history.'
+
 runs:
   using: 'docker'
   image: 'docker://ghcr.io/pgup-ai/jbot-review:latest'

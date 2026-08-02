@@ -80,3 +80,60 @@ export function renderReport(
   }
   return lines.join('\n');
 }
+
+interface ShardPreview {
+  label: string;
+  files: string[];
+  /** Raw patch bytes assigned to this shard. */
+  diffBytes: number;
+  /** Bytes the diff budget would actually embed in the prompt. */
+  embeddedBytes: number;
+  truncated: number;
+  omitted: number;
+}
+
+/**
+ * Zero-LLM dry-run summary: shard assignment, fan-out plan, and budget
+ * utilization, so shard/fanout decisions are debuggable without paying for a
+ * run. Token figures are bytes/4 estimates over diff + guidelines only.
+ */
+export function renderReviewPreview(input: {
+  shards: ShardPreview[];
+  lensKeys: string[];
+  guidelinePass: boolean;
+  fanoutTier?: 'minimal' | 'full';
+  fanoutReason?: string;
+  guidelines: { docCount: number; fullBytes: number; finderBytes: number };
+}): string {
+  const lines: string[] = ['── Review preview (no sessions started) ──'];
+  lines.push(`Shards: ${input.shards.length}`);
+  // Mirrors the runner's gate: finders get the capped slice only while the
+  // compliance pass audits the full set; otherwise they carry the full set.
+  const guidelineBytes = input.guidelinePass
+    ? input.guidelines.finderBytes
+    : input.guidelines.fullBytes;
+  for (const shard of input.shards) {
+    const tokens = Math.round((shard.embeddedBytes + guidelineBytes) / 4);
+    const budget = [
+      shard.truncated > 0 ? `${shard.truncated} file(s) truncated` : '',
+      shard.omitted > 0 ? `${shard.omitted} file(s) omitted from embedding` : '',
+    ]
+      .filter(Boolean)
+      .join(', ');
+    lines.push(
+      `  ${shard.label}: ${shard.files.length} file(s), ${shard.diffBytes} diff bytes ` +
+        `(${shard.embeddedBytes} embedded${budget ? `; ${budget}` : ''}) → ~${tokens} tokens (bytes/4, diff + guidelines)`,
+    );
+    lines.push(`    ${shard.files.join(', ')}`);
+  }
+  const fanout = input.fanoutTier === 'minimal' ? ` [minimal fan-out: ${input.fanoutReason}]` : '';
+  lines.push(
+    `Recall supplements: lenses: ${input.lensKeys.length > 0 ? input.lensKeys.join(', ') : '(none)'}; ` +
+      `guideline pass: ${input.guidelinePass ? 'on' : 'off'}${fanout}`,
+  );
+  lines.push(
+    `Guidelines: ${input.guidelines.docCount} doc(s), ${input.guidelines.fullBytes} bytes full; ` +
+      `finder slice ${input.guidelines.finderBytes} bytes`,
+  );
+  return lines.join('\n');
+}

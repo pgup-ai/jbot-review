@@ -33,6 +33,215 @@ export interface GuidelineDoc {
   text: string;
   /** Higher = more relevant to the changed files (scoped > governance > root). */
   relevance: GuidelineRelevance;
+  /**
+   * Path scopes a `.mdc` rule declared for itself (Cursor `globs:` frontmatter).
+   * Absent for docs with no declared scope and for `alwaysApply: true` rules.
+   */
+  globs?: string[];
+}
+
+/**
+ * Cursor `.mdc` frontmatter: the one discovered-guideline source that declares
+ * its own path scope. Returns the effective globs — empty for `alwaysApply`
+ * rules and for docs without frontmatter, so absence means "applies anywhere".
+ */
+// Both PR-controlled inputs to globMatches are bounded, and matching is a
+// linear-time walk (no RegExp anywhere), so hostile frontmatter can neither
+// stall nor crash the review. An unusable glob is dropped at parse time,
+// leaving the doc unscoped (never demoted).
+const MAX_GLOB_LENGTH = 128;
+const MAX_GLOBS_PER_DOC = 64;
+const MAX_GLOB_VARIANTS = 64;
+
+/** Cuts an unquoted trailing `# comment` — valid YAML Cursor tolerates. */
+function stripYamlComment(value: string): string {
+  let quote: string | undefined;
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i];
+    if (quote) {
+      if (ch === quote) quote = undefined;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === '#' && (i === 0 || /\s/.test(value[i - 1]))) return value.slice(0, i).trimEnd();
+  }
+  return value;
+}
+
+function parseMdcGlobs(text: string): string[] {
+  const frontmatter = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1];
+  if (!frontmatter) return [];
+  const lines = frontmatter.split(/\r?\n/);
+  if (lines.some((line) => /^alwaysApply:\s*true\b/.test(line))) return [];
+  const unquote = (value: string) => value.trim().replace(/^['"]|['"]$/g, '');
+  const globs: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const inline = lines[i].match(/^globs:\s*(.*)$/);
+    if (!inline) continue;
+    const value = stripYamlComment(inline[1].trim());
+    if (value) {
+      // YAML flow sequences (`globs: ["a", "b"]`) reduce to the comma form;
+      // the split must not break inside a brace set (`*.{ts,tsx}`).
+      const entries = value.startsWith('[') && value.endsWith(']') ? value.slice(1, -1) : value;
+      globs.push(...splitOutsideBraces(entries).map(unquote));
+    } else {
+      for (let j = i + 1; j < lines.length; j += 1) {
+        const item = lines[j].match(/^\s*-\s*(.+)$/);
+        if (!item) break;
+        globs.push(unquote(stripYamlComment(item[1])));
+      }
+    }
+  }
+  return globs
+    .filter((glob) => glob.length > 0 && glob.length <= MAX_GLOB_LENGTH)
+    .filter((glob) => expandBraces(glob).length <= MAX_GLOB_VARIANTS)
+    .slice(0, MAX_GLOBS_PER_DOC);
+}
+
+function splitOutsideBraces(value: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of value) {
+    if (ch === '{') depth += 1;
+    else if (ch === '}') depth = Math.max(0, depth - 1);
+    if (ch === ',' && depth === 0) {
+      parts.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+  return parts;
+}
+
+/**
+ * `{a,b}` sets multiply into brace-free variants; unbalanced braces stay
+ * literal. Iterative — one brace set per pass — and bails the moment the
+ * working set exceeds the cap, so a brace bomb ({a,b} × N) costs at most
+ * one over-cap pass instead of expanding its full Cartesian product. An
+ * over-cap result (length > MAX_GLOB_VARIANTS) marks the glob unusable.
+ */
+function expandBraces(glob: string): string[] {
+  let variants = [glob];
+  for (;;) {
+    const next: string[] = [];
+    let expanded = false;
+    for (const variant of variants) {
+      const open = variant.indexOf('{');
+      let close = -1;
+      if (open >= 0) {
+        let depth = 0;
+        for (let i = open; i < variant.length; i += 1) {
+          if (variant[i] === '{') depth += 1;
+          else if (variant[i] === '}') {
+            depth -= 1;
+            if (depth === 0) {
+              close = i;
+              break;
+            }
+          }
+        }
+      }
+      if (open < 0 || close < 0) {
+        next.push(variant);
+        continue;
+      }
+      expanded = true;
+      const prefix = variant.slice(0, open);
+      const suffix = variant.slice(close + 1);
+      for (const part of splitOutsideBraces(variant.slice(open + 1, close))) {
+        next.push(prefix + part + suffix);
+      }
+      if (next.length > MAX_GLOB_VARIANTS) return next;
+    }
+    if (!expanded) return next;
+    variants = next;
+  }
+}
+
+type GlobToken =
+  | { kind: 'lit'; ch: string }
+  | { kind: 'any1' }
+  | { kind: 'star' }
+  | { kind: 'globstar' }
+  | { kind: 'globstarSlash' };
+
+function tokenizeGlob(glob: string): GlobToken[] {
+  const tokens: GlobToken[] = [];
+  for (let i = 0; i < glob.length; i += 1) {
+    if (glob[i] === '*') {
+      if (glob[i + 1] === '*') {
+        i += 1;
+        if (glob[i + 1] === '/') {
+          i += 1;
+          tokens.push({ kind: 'globstarSlash' });
+        } else {
+          tokens.push({ kind: 'globstar' });
+        }
+      } else {
+        tokens.push({ kind: 'star' });
+      }
+    } else if (glob[i] === '?') {
+      tokens.push({ kind: 'any1' });
+    } else {
+      tokens.push({ kind: 'lit', ch: glob[i] });
+    }
+  }
+  return tokens;
+}
+
+/**
+ * Linear-time glob match: one reachability pass per token over the target,
+ * O(tokens × length) with no regex engine, so a hostile pattern cannot make
+ * matching backtrack — only take a proportionally longer straight walk.
+ */
+function matchGlobVariant(glob: string, target: string): boolean {
+  const tokens = tokenizeGlob(glob);
+  let reachable = Array.from({ length: target.length + 1 }, () => false);
+  reachable[0] = true;
+  for (const token of tokens) {
+    const next = Array.from({ length: target.length + 1 }, () => false);
+    for (let j = 0; j <= target.length; j += 1) {
+      if (!reachable[j]) continue;
+      switch (token.kind) {
+        case 'lit':
+          if (target[j] === token.ch) next[j + 1] = true;
+          break;
+        case 'any1':
+          if (j < target.length && target[j] !== '/') next[j + 1] = true;
+          break;
+        case 'star':
+          for (let k = j; k <= target.length && (k === j || target[k - 1] !== '/'); k += 1) {
+            next[k] = true;
+          }
+          break;
+        case 'globstar':
+          for (let k = j; k <= target.length; k += 1) next[k] = true;
+          break;
+        case 'globstarSlash':
+          // `**/` spans any leading directories or none: `**/a.ts` matches
+          // both `a.ts` and `src/a.ts`.
+          next[j] = true;
+          for (let k = j + 1; k <= target.length; k += 1) {
+            if (target[k - 1] === '/') next[k] = true;
+          }
+          break;
+      }
+    }
+    reachable = next;
+  }
+  return reachable[target.length];
+}
+
+/** Slash-less globs match the basename (Cursor's `*.ts` means "any .ts file"). */
+function globMatches(glob: string, file: string): boolean {
+  const target = glob.includes('/') ? file : file.slice(file.lastIndexOf('/') + 1);
+  return expandBraces(glob).some((variant) => matchGlobVariant(variant, target));
 }
 
 export interface DiscoveredGuidelines {
@@ -297,7 +506,8 @@ export async function discoverGuidelineDocs(
       if (!trimmed) return undefined;
       seen.add(resolved.absolutePath);
       seenRealPaths.add(resolved.realPath);
-      docs.push({ label, text: trimmed, relevance });
+      const globs = label.endsWith('.mdc') ? parseMdcGlobs(trimmed) : [];
+      docs.push({ label, text: trimmed, relevance, ...(globs.length > 0 ? { globs } : {}) });
       return { text, absolutePath: resolved.absolutePath };
     } catch {
       return undefined;
@@ -516,13 +726,21 @@ export const MAX_FINDER_GUIDELINE_BYTES = 24 * 1024;
  */
 export function formatFinderGuidelines(
   discovered: DiscoveredGuidelines,
-  options: { capBytes?: number } = {},
+  options: { capBytes?: number; forFiles?: string[] } = {},
 ): string {
   const capBytes = options.capBytes ?? MAX_FINDER_GUIDELINE_BYTES;
 
+  // A rule that declared its own path scope and matches none of the changed
+  // files ranks below everything else: demoted (first out under the cap),
+  // never dropped outright — the compliance pass still sees the full set.
+  const { forFiles } = options;
+  const effectiveRelevance = (doc: GuidelineDoc): number =>
+    forFiles && doc.globs && !doc.globs.some((glob) => forFiles.some((f) => globMatches(glob, f)))
+      ? 0
+      : doc.relevance;
   const ranked = discovered.docs
-    .map((doc, index) => ({ doc, index }))
-    .sort((a, b) => b.doc.relevance - a.doc.relevance || a.index - b.index);
+    .map((doc, index) => ({ doc, index, relevance: effectiveRelevance(doc) }))
+    .sort((a, b) => b.relevance - a.relevance || a.index - b.index);
 
   const keptIndices = new Set<number>();
   let usedBytes = 0;

@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { loadDotEnv, parseOwnerRepo, renderReport } from '../src/local/util.ts';
+import {
+  loadDotEnv,
+  parseOwnerRepo,
+  renderReport,
+  renderReviewPreview,
+} from '../src/local/util.ts';
 
 describe('loadDotEnv', () => {
   it('parses assignments, comments, quotes, and export prefixes without overriding real env', () => {
@@ -136,5 +141,45 @@ describe('renderReport', () => {
     const report = renderReport({ summary: '', findings: [], addressedPriorComments: [] }, meta);
     assert.match(report, /No findings\./);
     assert.match(report, /_\(no summary\)_/);
+  });
+});
+
+describe('renderReviewPreview', () => {
+  it('lists shard assignments, fan-out plan, budget flags, and a rough token figure', () => {
+    const preview = renderReviewPreview({
+      shards: [
+        {
+          label: 'review-shard-1',
+          files: ['src/a.ts', 'src/b.ts'],
+          diffBytes: 30_000,
+          embeddedBytes: 24_000,
+          truncated: 1,
+          omitted: 0,
+        },
+        {
+          label: 'review-shard-2',
+          files: ['src/c.ts'],
+          diffBytes: 12_000,
+          embeddedBytes: 12_000,
+          truncated: 0,
+          omitted: 0,
+        },
+      ],
+      lensKeys: ['interactions'],
+      guidelinePass: false,
+      fanoutTier: 'full',
+      fanoutReason: '',
+      guidelines: { docCount: 3, fullBytes: 50_000, finderBytes: 24_000 },
+    });
+
+    assert.match(preview, /review-shard-1[\s\S]*?src\/a\.ts, src\/b\.ts/);
+    assert.match(preview, /1 file\(s\) truncated/);
+    assert.match(preview, /lenses: interactions/);
+    assert.match(preview, /guideline pass: off/);
+    assert.match(preview, /3 doc\(s\).*finder slice 24000 bytes/);
+    // With the pass off, finders get the FULL guideline set (the runner's
+    // widening fallback), so the estimate uses it: (24000 + 50000) / 4.
+    assert.match(preview, /~18500 tokens/);
+    assert.match(preview, /no sessions started/i);
   });
 });

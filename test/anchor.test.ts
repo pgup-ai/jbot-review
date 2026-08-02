@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { anchorByEvidenceSnippet } from '../src/shared/patch.ts';
+import { anchorByEvidenceSnippet, evidenceWindow } from '../src/shared/patch.ts';
 
 // newLine starts at 1: context, added, added, context.
 const PATCH = [
@@ -80,6 +80,26 @@ describe('anchorByEvidenceSnippet', () => {
 
     assert.equal(anchorByEvidenceSnippet(twoHunks, 'const a = 1;\nconst b = 2;'), undefined);
     assert.equal(anchorByEvidenceSnippet(twoHunks, 'const b = 2;'), 50, 'each hunk still matches');
+  });
+
+  it('reports the matched span so callers can test claimed-line membership', () => {
+    assert.deepEqual(evidenceWindow(PATCH, 'const a = 1;\nconst b = compute(a);'), {
+      anchor: 2,
+      start: 1,
+      end: 2,
+    });
+
+    const repeated = [
+      '@@ -0,0 +1,3 @@',
+      '+  return null;',
+      '+const x = 1;',
+      '+  return null;',
+    ].join('\n');
+    assert.equal(
+      evidenceWindow(repeated, 'return null;'),
+      'ambiguous',
+      'ambiguity is distinct from no-match so callers can refuse weaker fallbacks',
+    );
   });
 
   it('refuses to anchor a match containing no added line', () => {

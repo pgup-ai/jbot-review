@@ -106,6 +106,15 @@ describe('parseReview', () => {
     );
   });
 
+  it('rejects a non-object JSON root in strict mode instead of returning an empty review', () => {
+    // A bare array parses, so it used to read as summary:'' + findings:[] —
+    // a silent "no findings" review the repair prompt never got to fix.
+    assert.throws(() => parseReview('[]', 'review', noLog, { strict: true }), /non-object/);
+    assert.throws(() => parseReview('"done"', 'review', noLog, { strict: true }), /non-object/);
+    // Non-strict auxiliaries keep failing open to an empty result.
+    assert.deepEqual(parseReview('[]', 'aux', noLog).findings, []);
+  });
+
   it('returns a fallback result in non-strict mode', () => {
     const result = parseReview('not json at all', 'aux', noLog);
 

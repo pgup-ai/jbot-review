@@ -327,8 +327,10 @@ Respond now with one raw JSON object with exactly two top-level keys,
 "summary" and "findings", matching the Output section above. Do not write any
 text before or after the JSON. Do not wrap it in markdown fences. Markdown is
 allowed only inside JSON string values; escape newlines inside string values
-as \\n. Do not write a session recap, completion note, question, or "what would
-you like next" message.`;
+as \\n. Complete everything within this single turn — never end your turn with
+a plan or an announcement of work you have not done yet. Do not write a
+session recap, completion note, question, or "what would you like next"
+message.`;
 
 // evidenceQuotes addendum, appended before the output reminder (invariant #5:
 // reminder stays last); absent when the flag is off so that prompt is unchanged.
@@ -1144,6 +1146,40 @@ export function buildJsonRepairFollowupPrompt(params: {
       'Previous invalid response',
     ),
     buildJsonRepairPrompt(params.parseError),
+  ].join('\n\n');
+}
+
+/**
+ * Follow-up for a turn that ended without ATTEMPTING the task — an
+ * announcement of intent, or no output at all. Distinct from the JSON repair:
+ * there is nothing to reformat, so asking for a reformat just elicits another
+ * announcement (observed with devin/glm-5.2). ACP sessions are one-shot, so
+ * this re-carries the original prompt into a fresh session.
+ */
+export function buildContinuationFollowupPrompt(params: {
+  originalPrompt: string;
+  previousResponse: string;
+  promptBudgetBytes: number;
+  responseBudgetBytes: number;
+}): string {
+  return [
+    truncateUtf8WithNotice(
+      params.originalPrompt,
+      params.promptBudgetBytes,
+      'Original review prompt',
+    ),
+    '## Previous attempt',
+    truncateUtf8WithNotice(
+      params.previousResponse || '(the turn ended with no output at all)',
+      params.responseBudgetBytes,
+      'Previous attempt',
+    ),
+    `## Continue
+
+Your previous turn ended with only the text above — an announcement, not the
+work. Do NOT announce a plan and do NOT ask whether to proceed. Perform the
+task now, within this single turn, and end your turn with ONLY the raw JSON
+object the original prompt specifies.`,
   ].join('\n\n');
 }
 

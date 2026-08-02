@@ -181,12 +181,129 @@ export function classifyChangeShape(files: PrFile[]): ChangeShape {
 export const TARGET_SHARD_DIFF_BYTES = 24 * 1024;
 export const DEFAULT_MAX_REVIEW_SHARDS = 4;
 
+const baseOf = (name: string) => name.slice(name.lastIndexOf('/') + 1);
+
+// A two-letter suffix is only a locale when it IS one — otherwise config-ui
+// and config-db would merge on the stem. Common ISO 639-1 codes suffice for
+// the message_en/message_zh pairing this exists for.
+const LOCALE_CODES = new Set([
+  'ar',
+  'cs',
+  'da',
+  'de',
+  'el',
+  'en',
+  'es',
+  'fi',
+  'fr',
+  'he',
+  'hi',
+  'hu',
+  'id',
+  'it',
+  'ja',
+  'ko',
+  'nb',
+  'nl',
+  'no',
+  'pl',
+  'pt',
+  'ro',
+  'ru',
+  'sv',
+  'th',
+  'tr',
+  'uk',
+  'vi',
+  'zh',
+]);
+
+/** Basename stripped of extension, test/spec suffix, and locale suffix — the affinity key. */
+const stemOf = (name: string) => {
+  const withoutSuffixes = baseOf(name)
+    .replace(/\.[^.]+$/, '')
+    .replace(/[._-](test|spec)$/i, '');
+  const locale = withoutSuffixes.match(/[_-]([a-z]{2})([_-][a-z]{2})?$/i);
+  return locale && LOCALE_CODES.has(locale[1].toLowerCase())
+    ? withoutSuffixes.slice(0, locale.index)
+    : withoutSuffixes;
+};
+
+/**
+ * Groups files that review best together — same directory, or a variant pair
+ * sharing a basename stem (impl+test, locale twins) — so one session sees both
+ * halves of a related change instead of orphaning each half to a parallel
+ * shard. Same stem with the SAME basename (a/index.ts vs b/index.ts) is not a
+ * variant relationship and does not link — including transitively via a
+ * variant that could pair with either copy.
+ */
+function affinityClusters(files: PrFile[]): PrFile[][] {
+  const parent = files.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const union = (a: number, b: number) => {
+    parent[find(a)] = find(b);
+  };
+
+  const byDir = new Map<string, number>();
+  const byStem = new Map<string, number[]>();
+  files.forEach((file, i) => {
+    const dir = file.filename.slice(0, file.filename.lastIndexOf('/') + 1);
+    const seen = byDir.get(dir);
+    if (seen === undefined) byDir.set(dir, i);
+    else union(seen, i);
+    const stem = stemOf(file.filename);
+    byStem.set(stem, [...(byStem.get(stem) ?? []), i]);
+  });
+  for (const idxs of byStem.values()) {
+    const basenames = new Set(idxs.map((i) => baseOf(files[i].filename)));
+    // Variant pairs only, and unambiguous ones: a repeated basename in the
+    // bucket (a/index.ts vs b/index.ts) means a variant like index.test.ts
+    // has no single base to pair with — linking would bridge unrelated files
+    // through it, so the whole bucket fails closed to no stem link. Same-dir
+    // affinity still applies.
+    if (basenames.size > 1 && basenames.size === idxs.length) {
+      for (const i of idxs.slice(1)) union(idxs[0], i);
+    }
+  }
+
+  const clusters = new Map<number, PrFile[]>();
+  files.forEach((file, i) => {
+    const root = find(i);
+    clusters.set(root, [...(clusters.get(root) ?? []), file]);
+  });
+  return [...clusters.values()];
+}
+
+/** Stem groups within a cluster — the fine affinity relation splits fall back to. */
+function stemGroups(cluster: PrFile[]): PrFile[][] {
+  const groups = new Map<string, PrFile[]>();
+  for (const file of cluster) {
+    const stem = stemOf(file.filename);
+    groups.set(stem, [...(groups.get(stem) ?? []), file]);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * Affinity never overrides balance: a cluster bigger than the shard target is
+ * broken back down (stem groups first, then single files) so shard wall-clocks
+ * stay even and the byte-derived shard count keeps its parallelism.
+ */
+function splitOversized(cluster: PrFile[], patchBytes: (file: PrFile) => number): PrFile[][] {
+  const bytes = cluster.reduce((sum, file) => sum + patchBytes(file), 0);
+  if (cluster.length <= 1 || bytes <= TARGET_SHARD_DIFF_BYTES) return [cluster];
+  const groups = stemGroups(cluster);
+  if (groups.length === 1) return cluster.map((file) => [file]);
+  return groups.flatMap((group) => splitOversized(group, patchBytes));
+}
+
 /**
  * Splits reviewable files into balanced shards. Shard count grows with total
  * patch size (one shard per TARGET_SHARD_DIFF_BYTES) up to maxShards;
- * `requestedShards` > 0 pins the count explicitly. Files are assigned
- * largest-first to the least-loaded shard, so shards finish in similar time.
- * Returns a single shard (no split) for small diffs.
+ * `requestedShards` > 0 pins the count explicitly. Affinity clusters are
+ * assigned whole, largest-first to the least-loaded shard, so related files
+ * co-review while shards still finish in similar time. Returns a single shard
+ * (no split) for small diffs.
  */
 export function shardFilesForReview(
   files: PrFile[],
@@ -200,9 +317,11 @@ export function shardFilesForReview(
   const totalBytes = withPatch.reduce((sum, file) => sum + patchBytes(file), 0);
   const autoShards = Math.ceil(totalBytes / TARGET_SHARD_DIFF_BYTES);
   const requested = options.requestedShards ?? 0;
+  // maxShards caps only AUTO scaling; an explicit pin is a contract, bounded
+  // by the file count alone — per-file pins are the escape hatch for agent
+  // CLIs that only finish small sessions.
   const shardCount = Math.min(
-    Math.max(requested > 0 ? requested : autoShards, 1),
-    maxShards,
+    Math.max(requested > 0 ? requested : Math.min(autoShards, maxShards), 1),
     withPatch.length,
   );
   if (shardCount <= 1) return [files];
@@ -210,13 +329,35 @@ export function shardFilesForReview(
   const patchless = files.filter((file) => !file.patch);
   const shards: PrFile[][] = Array.from({ length: shardCount }, () => []);
   const loads = Array.from({ length: shardCount }, () => 0);
-  const bySize = [...withPatch].sort(
-    (a, b) => patchBytes(b) - patchBytes(a) || a.filename.localeCompare(b.filename),
+  let clusterList = affinityClusters(withPatch).flatMap((cluster) =>
+    splitOversized(cluster, patchBytes),
   );
-  for (const file of bySize) {
+  // The shard count is a contract (explicit pin, or byte-derived parallelism):
+  // when affinity coalesces below it, split the largest divisible cluster
+  // (stem groups, then singles) until every requested shard can be fed.
+  while (clusterList.length < shardCount) {
+    const clusterBytes = (cluster: PrFile[]) =>
+      cluster.reduce((sum, file) => sum + patchBytes(file), 0);
+    const divisible = clusterList
+      .filter((cluster) => cluster.length > 1)
+      .sort((a, b) => clusterBytes(b) - clusterBytes(a))[0];
+    if (!divisible) break;
+    const groups = stemGroups(divisible);
+    const pieces = groups.length > 1 ? groups : divisible.map((file) => [file]);
+    clusterList = [...clusterList.filter((cluster) => cluster !== divisible), ...pieces];
+  }
+  const clusters = clusterList
+    .map((cluster) => ({
+      cluster: [...cluster].sort((a, b) => a.filename.localeCompare(b.filename)),
+      bytes: cluster.reduce((sum, file) => sum + patchBytes(file), 0),
+    }))
+    .sort(
+      (a, b) => b.bytes - a.bytes || a.cluster[0].filename.localeCompare(b.cluster[0].filename),
+    );
+  for (const { cluster, bytes } of clusters) {
     const target = loads.indexOf(Math.min(...loads));
-    shards[target].push(file);
-    loads[target] += patchBytes(file);
+    shards[target].push(...cluster);
+    loads[target] += bytes;
   }
   for (const file of patchless) {
     const target = loads.indexOf(Math.min(...loads));

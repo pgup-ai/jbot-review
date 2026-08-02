@@ -142,6 +142,11 @@ describe('shardFilesForReview', () => {
 
     assert.equal(shardFilesForReview(files, { requestedShards: 3 }).length, 2);
     assert.equal(shardFilesForReview(files, { requestedShards: 2 }).length, 2);
+
+    // A pin may exceed the AUTO cap: some agent CLIs only finish small
+    // sessions, and per-file pins are the operator's escape hatch.
+    const many = Array.from({ length: 10 }, (_, i) => fileOfSize(`m${i}.ts`, 20_000));
+    assert.equal(shardFilesForReview(many, { requestedShards: 8 }).length, 8);
   });
 
   it('assigns every file to exactly one shard', () => {
@@ -166,6 +171,85 @@ describe('shardFilesForReview', () => {
     const assigned = shards.flat().map((file) => file.filename);
 
     assert.deepEqual(new Set(assigned), new Set(files.map((file) => file.filename)));
+  });
+
+  it('co-locates affinity pairs (impl+test, locale twins) in one shard', () => {
+    const shardOf = (shards: PrFile[][], name: string) =>
+      shards.findIndex((shard) => shard.some((file) => file.filename === name));
+
+    // Sized so plain largest-first greedy provably separates the pair.
+    const paired = shardFilesForReview([
+      fileOfSize('src/shared/filter.ts', 12_000),
+      fileOfSize('test/filter.test.ts', 8_000),
+      fileOfSize('src/shared/runner.ts', 20_000),
+      fileOfSize('src/app/app.ts', 10_000),
+    ]);
+    assert.equal(
+      shardOf(paired, 'src/shared/filter.ts'),
+      shardOf(paired, 'test/filter.test.ts'),
+      'a test file reviews alongside the implementation it exercises',
+    );
+
+    const twins = shardFilesForReview(
+      [
+        fileOfSize('a/big1.ts', 20_000),
+        fileOfSize('b/big2.ts', 18_000),
+        fileOfSize('i18n/message_en.properties', 6_000),
+        fileOfSize('i18n/message_zh.properties', 6_000),
+      ],
+      { requestedShards: 2 },
+    );
+    assert.equal(
+      shardOf(twins, 'i18n/message_en.properties'),
+      shardOf(twins, 'i18n/message_zh.properties'),
+      'locale twins stay in one review unit',
+    );
+  });
+
+  it('refuses stem links when a basename repeats across directories', () => {
+    // a/index.ts and b/index.ts are unrelated; c/index.test.ts must not
+    // bridge them into one cluster just by adding basename diversity.
+    const shards = shardFilesForReview(
+      [
+        fileOfSize('a/index.ts', 8_000),
+        fileOfSize('b/index.ts', 8_000),
+        fileOfSize('c/index.test.ts', 1_000),
+        fileOfSize('d/other.ts', 8_000),
+      ],
+      { requestedShards: 2 },
+    );
+    const shardOf = (name: string) =>
+      shards.findIndex((shard) => shard.some((file) => file.filename === name));
+    assert.notEqual(shardOf('a/index.ts'), shardOf('b/index.ts'));
+
+    // A two-letter suffix is only a locale when it IS one: config-ui and
+    // config-db share no real affinity and must not merge via the stem.
+    const suffixed = shardFilesForReview(
+      [
+        fileOfSize('a/config-ui.ts', 8_000),
+        fileOfSize('b/config-db.ts', 8_000),
+        fileOfSize('c/other.ts', 8_000),
+      ],
+      { requestedShards: 2 },
+    );
+    const suffixedShardOf = (name: string) =>
+      suffixed.findIndex((shard) => shard.some((file) => file.filename === name));
+    assert.notEqual(suffixedShardOf('a/config-ui.ts'), suffixedShardOf('b/config-db.ts'));
+  });
+
+  it('splits clusters rather than under-filling an explicitly pinned shard count', () => {
+    // One small same-dir cluster; the pin is a contract the affinity pass
+    // must not silently reduce.
+    const shards = shardFilesForReview(
+      [
+        fileOfSize('pkg/a.ts', 4_000),
+        fileOfSize('pkg/b.ts', 4_000),
+        fileOfSize('pkg/c.ts', 4_000),
+        fileOfSize('pkg/d.ts', 4_000),
+      ],
+      { requestedShards: 2 },
+    );
+    assert.equal(shards.length, 2);
   });
 
   it('balances shard sizes largest-first', () => {

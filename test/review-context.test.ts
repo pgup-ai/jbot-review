@@ -496,4 +496,60 @@ describe('formatFinderGuidelines', () => {
   it('uses MAX_FINDER_GUIDELINE_BYTES by default and is smaller than the total cap', () => {
     assert.ok(MAX_FINDER_GUIDELINE_BYTES < 96 * 1024);
   });
+
+  it('demotes .mdc rules whose declared globs match none of the changed files', async () => {
+    await withTempRepo(async (repo) => {
+      // Adversarial ordering: without demotion, budget order keeps the small
+      // early non-matching doc and drops the large late matching one.
+      await mkdir(join(repo, '.cursor', 'rules'), { recursive: true });
+      await writeFile(
+        join(repo, '.cursor', 'rules', 'aaa-python.mdc'),
+        '---\nglobs: *.py\n---\n# Python rules\nfindme-python\n' + 'p'.repeat(250),
+      );
+      await writeFile(
+        join(repo, '.cursor', 'rules', 'mmm-always.mdc'),
+        '---\nglobs: *.py\nalwaysApply: true\n---\nfindme-always',
+      );
+      // Flow sequence + brace set + a trailing YAML comment, all of which
+      // Cursor tolerates and the parser must too.
+      await writeFile(
+        join(repo, '.cursor', 'rules', 'zzz-ts.mdc'),
+        '---\nglobs: ["*.{ts,tsx}"] # typescript\n---\n# TS rules\nfindme-ts\n' + 't'.repeat(280),
+      );
+      // Oversized declared scopes are ignored, leaving the doc unscoped rather
+      // than wrongly demoted. Sorts after zzz-ts so the tight-cap phase above
+      // is undisturbed.
+      await writeFile(
+        join(repo, '.cursor', 'rules', 'zzz2-huge.mdc'),
+        '---\nglobs:\n  - "' + '*'.repeat(150) + '"\n---\nfindme-huge',
+      );
+      // An unbalanced brace must degrade to "no match", never crash discovery.
+      await writeFile(
+        join(repo, '.cursor', 'rules', 'zzz3-broken.mdc'),
+        '---\nglobs: "{*.zzz"\n---\nfindme-broken',
+      );
+      // A brace bomb ({a,b} × 25 = 2^25 combinations) must be discarded in
+      // one over-cap expansion pass; this test HANGING is its failure mode.
+      await writeFile(
+        join(repo, '.cursor', 'rules', 'zzz4-bomb.mdc'),
+        '---\nglobs: "' + '{a,b}'.repeat(25) + '"\n---\nfindme-bomb',
+      );
+
+      const discovered = await discoverGuidelineDocs(repo, ['src/index.ts']);
+      const finder = formatFinderGuidelines(discovered, {
+        capBytes: 480,
+        forFiles: ['src/index.ts'],
+      });
+      assert.match(finder, /findme-ts/, 'glob-matching rule outranks a non-matching one');
+      assert.match(finder, /findme-always/, 'alwaysApply rule is never demoted');
+      assert.doesNotMatch(finder, /findme-python/, 'non-matching rule is first out under the cap');
+
+      // Demoted, never dropped: with budget to spare it still renders.
+      const roomy = formatFinderGuidelines(discovered, { forFiles: ['src/index.ts'] });
+      assert.match(roomy, /findme-python/);
+      assert.match(roomy, /findme-huge/, 'an unusable declared scope never demotes the doc');
+      assert.match(roomy, /findme-broken/, 'a malformed glob is a non-match, not a crash');
+      assert.match(roomy, /findme-bomb/, 'a brace bomb leaves the doc unscoped, never demoted');
+    });
+  });
 });

@@ -16,6 +16,7 @@ import {
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
+  buildContinuationFollowupPrompt,
   buildJsonRepairFollowupPrompt,
 } from './prompt.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
@@ -45,9 +46,104 @@ export function createAcpBackend(spec: AcpAgentSpec, workspace: string): ReviewB
 
 /** Every backend method reduces to "send a prompt, parse the reply", so local
  * (spawn) and remote (gateway) backends share this whole surface — prompt
- * assembly, parsing, and the single JSON repair retry — and differ only in the
+ * assembly, parsing, and the recovery follow-ups — and differ only in the
  * runner they are built with. */
 export function createAcpReviewBackend(name: string, run: AcpPromptRunner): ReviewBackend {
+  // The client throws when a turn ends with no assistant message; for recovery
+  // purposes that is the same "never attempted the task" state as a plan-only
+  // reply, so it maps to '' instead of failing the session outright. The
+  // message text is owned by @symma/client.
+  const deliver = async (
+    model: string,
+    prompt: string,
+    label: string,
+    log: (msg: string) => void,
+    timeoutMs?: number,
+  ): Promise<string> => {
+    try {
+      return await run(model, prompt, label, log, timeoutMs);
+    } catch (error) {
+      if (error instanceof Error && /produced no assistant message/.test(error.message)) return '';
+      throw error;
+    }
+  };
+
+  /**
+   * One prompt with two distinct recoveries, one attempt each:
+   * - no JSON at all (a plan announcement, or an empty turn) → a CONTINUATION
+   *   prompt: there is nothing to reformat, and asking for a reformat just
+   *   elicits another announcement (observed with devin/glm-5.2);
+   * - JSON-ish but unparseable → the reformat repair prompt.
+   * Sessions are one-shot processes, so both re-carry the original prompt.
+   */
+  const promptWithRecovery = async <T>(
+    model: string,
+    prompt: string,
+    label: string,
+    log: (msg: string) => void,
+    timeoutMs: number | undefined,
+    parse: (raw: string, parseLabel: string) => T,
+  ): Promise<T> => {
+    // Parse with the reformat fallback — used for the direct reply and again
+    // for a continuation reply, so a malformed continuation still gets its
+    // repair instead of failing the session.
+    const parseWithRepair = async (raw: string, parseLabel: string): Promise<T> => {
+      try {
+        return parse(raw, parseLabel);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        log(
+          `${parseLabel} response unparseable; sending one JSON repair prompt via ${name}: ${message}`,
+        );
+        const repaired = await deliver(
+          model,
+          buildJsonRepairFollowupPrompt({
+            originalPrompt: prompt,
+            invalidResponse: raw,
+            parseError: message,
+            promptBudgetBytes: ACP_REPAIR_PROMPT_BUDGET_BYTES,
+            responseBudgetBytes: ACP_REPAIR_RESPONSE_BUDGET_BYTES,
+          }),
+          `${parseLabel}-repair`,
+          log,
+          timeoutMs,
+        );
+        return parse(repaired, `${parseLabel}-repair`);
+      }
+    };
+
+    const raw = await deliver(model, prompt, label, log, timeoutMs);
+    // Any JSON delimiter counts as an attempt: an array-shaped reply is wrong
+    // but reformable (or fails open in its parser) — only delimiter-free text
+    // is an abandoned turn worth a continuation.
+    if (!raw.includes('{') && !raw.includes('[')) {
+      log(`${label} ended its turn without attempting the task; sending one continuation prompt`);
+      const continued = await deliver(
+        model,
+        buildContinuationFollowupPrompt({
+          originalPrompt: prompt,
+          previousResponse: raw,
+          promptBudgetBytes: ACP_REPAIR_PROMPT_BUDGET_BYTES,
+          responseBudgetBytes: ACP_REPAIR_RESPONSE_BUDGET_BYTES,
+        }),
+        `${label}-continue`,
+        log,
+        timeoutMs,
+      );
+      if (!continued.includes('{') && !continued.includes('[')) {
+        // Observed with devin/glm-5.2 on large reviews: the model announces a
+        // plan and stops, even when the continuation explicitly forbids it —
+        // while completing small prompts fine. Name the condition and the
+        // lever instead of reporting a generic parse failure.
+        throw new Error(
+          `${label}: the agent twice ended its turn without attempting the task (an announcement, then again after an explicit continuation). This model/CLI pairing appears unable to complete a session of this size in one turn — try more shards (review-shards: 0 for auto) or a different model/backend.`,
+        );
+      }
+      return parseWithRepair(continued, `${label}-continue`);
+    }
+    return parseWithRepair(raw, label);
+  };
+
   return {
     name,
     async runReview(model, prContext, guidelines, log, options = {}): Promise<ReviewResult> {
@@ -63,29 +159,9 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
       log(
         `Prompt assembled (${label}, ${name}): ${prompt.length} chars, guidelines=${!!guidelines}`,
       );
-      const raw = await run(model, prompt, label, log, options.timeoutMs);
-      try {
-        return parseReview(raw, label, log, { strict: true });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        log(
-          `${label} response unparseable; sending one JSON repair prompt via ${name}: ${message}`,
-        );
-        const repaired = await run(
-          model,
-          buildJsonRepairFollowupPrompt({
-            originalPrompt: prompt,
-            invalidResponse: raw,
-            parseError: message,
-            promptBudgetBytes: ACP_REPAIR_PROMPT_BUDGET_BYTES,
-            responseBudgetBytes: ACP_REPAIR_RESPONSE_BUDGET_BYTES,
-          }),
-          `${label}-repair`,
-          log,
-          options.timeoutMs,
-        );
-        return parseReview(repaired, `${label}-repair`, log, { strict: true });
-      }
+      return promptWithRecovery(model, prompt, label, log, options.timeoutMs, (raw, parseLabel) =>
+        parseReview(raw, parseLabel, log, { strict: true }),
+      );
     },
     async runAddressedPriorCommentsCheck(
       model,
@@ -95,14 +171,14 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
       onTokenUsage,
     ): Promise<AddressedPriorComment[]> {
       void onTokenUsage;
-      const raw = await run(
+      return promptWithRecovery(
         model,
         assembleAddressedPriorCommentsPrompt(prContext),
         'addressed-prior-comments',
         log,
         timeoutMs,
+        (raw, parseLabel) => parseReview(raw, parseLabel, log).addressedPriorComments,
       );
-      return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
     },
     async runGuidelineComplianceCheck(
       model,
@@ -113,14 +189,14 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
       onTokenUsage,
     ): Promise<Finding[]> {
       void onTokenUsage;
-      const raw = await run(
+      return promptWithRecovery(
         model,
         assembleGuidelineCompliancePrompt(prContext, guidelines),
         'guideline-compliance',
         log,
         timeoutMs,
+        (raw, parseLabel) => parseReview(raw, parseLabel, log).findings,
       );
-      return parseReview(raw, 'guideline-compliance', log).findings;
     },
     async runFindingVerification(
       model,
@@ -131,14 +207,14 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
       onTokenUsage,
     ): Promise<FindingVerdict[] | undefined> {
       void onTokenUsage;
-      const raw = await run(
+      return promptWithRecovery(
         model,
         assembleFindingVerificationPrompt(prContext, findings),
         'finding-verification',
         log,
         timeoutMs,
+        (raw) => parseFindingVerdicts(raw, findings.length, log),
       );
-      return parseFindingVerdicts(raw, findings.length, log);
     },
     async runChangesSinceLastReview(
       model,
@@ -149,14 +225,14 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
       onTokenUsage,
     ): Promise<string> {
       void onTokenUsage;
-      const raw = await run(
+      return promptWithRecovery(
         model,
         assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
         'changes-since-last-review',
         log,
         timeoutMs,
+        (raw, parseLabel) => parseChangesSinceLastReviewSummary(raw, parseLabel, log),
       );
-      return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
     },
   };
 }

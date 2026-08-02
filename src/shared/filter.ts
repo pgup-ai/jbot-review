@@ -1,4 +1,4 @@
-import { anchorByEvidenceSnippet, rescueAnchorByEvidence } from './patch.ts';
+import { anchorByEvidenceSnippet, evidenceWindow, rescueAnchorByEvidence } from './patch.ts';
 import type { Finding, FindingConfidence, FindingVerdict, Severity } from './types.ts';
 
 /** Drops noise files (lockfiles, generated, minified) before the agent sees them. */
@@ -267,8 +267,10 @@ export function demoteLowConfidenceBlockingFindings(findings: Finding[]): {
 }
 
 /**
- * Moves findings whose model line cannot anchor onto the line their evidence
- * quote identifies, IN PLACE, and returns the ones it moved.
+ * Moves findings onto the line their evidence quote identifies, IN PLACE, and
+ * returns the ones it moved — both lines that cannot anchor at all and addable
+ * lines the quote provably contradicts (a confidently wrong line number is the
+ * one case the quote exists to correct).
  *
  * Runs before dedupe and prior-thread suppression, not at routing time: both
  * compare path:line, so a finding left on a wrong line escapes the collision it
@@ -288,14 +290,34 @@ export function resolveFindingAnchors(
   if (!evidenceQuotes) return [];
   const moved: Finding[] = [];
   for (const f of findings) {
-    if (f.line === 0 || addable.get(f.path)?.has(f.line) || !f.evidence) continue;
+    if (f.line === 0 || !f.evidence) continue;
     const patch = patchByPath.get(f.path);
-    // The snippet matcher handles multi-line quotes; the prefix rescue still
-    // covers a single line truncated at the evidence cap, which cannot match whole.
-    const line =
-      anchorByEvidenceSnippet(patch, f.evidence) ?? rescueAnchorByEvidence(patch, f.evidence);
-    if (line !== undefined) {
-      f.line = line;
+    let target: number | undefined;
+    if (addable.get(f.path)?.has(f.line)) {
+      // An addable claim moves only on provable inconsistency: the quote
+      // resolves uniquely elsewhere. A claim inside the matched window is
+      // corroborated — snapping it to the window anchor would be churn — and
+      // an AMBIGUOUS quote proves nothing, so the prefix rescue may only run
+      // on a confirmed no-match.
+      const window = evidenceWindow(patch, f.evidence);
+      if (window === 'ambiguous') continue;
+      if (window !== undefined) {
+        if (f.line >= window.start && f.line <= window.end) continue;
+        target = window.anchor;
+      } else {
+        // Unique-prefix rescue: if the claimed line also matched the prefix,
+        // the match would have been ambiguous and undefined — so a hit here
+        // is a line the quote fits and the claimed line does not.
+        target = rescueAnchorByEvidence(patch, f.evidence);
+      }
+    } else {
+      // The snippet matcher handles multi-line quotes; the prefix rescue still
+      // covers a single line truncated at the evidence cap, which cannot match whole.
+      target =
+        anchorByEvidenceSnippet(patch, f.evidence) ?? rescueAnchorByEvidence(patch, f.evidence);
+    }
+    if (target !== undefined && target !== f.line) {
+      f.line = target;
       moved.push(f);
     }
   }

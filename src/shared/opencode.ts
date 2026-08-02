@@ -19,14 +19,12 @@ import {
   buildJsonRepairPrompt,
 } from './prompt.ts';
 import { isFiniteNumber, isRecord } from './text.ts';
-import type {
-  AddressedPriorComment,
-  Finding,
-  FindingConfidence,
-  FindingKind,
-  FindingVerdict,
-  ReviewResult,
-  Severity,
+import {
+  sanitizeFinding,
+  type AddressedPriorComment,
+  type Finding,
+  type FindingVerdict,
+  type ReviewResult,
 } from './types.ts';
 
 const READY_TIMEOUT_MS = 15_000;
@@ -38,17 +36,6 @@ const PROMPT_PROGRESS_LOG_MS = 60_000;
 const CONTEXT7_MCP_NAME = 'context7';
 const CONTEXT7_MCP_URL = 'https://mcp.context7.com/mcp';
 const CONTEXT7_MCP_TIMEOUT_MS = 15_000;
-const VALID_FINDING_KINDS = new Set<FindingKind>([
-  'bug',
-  'security',
-  'performance',
-  'maintainability',
-  'architecture',
-  'test',
-  'docs',
-  'investigate',
-]);
-const VALID_CONFIDENCES = new Set<FindingConfidence>(['high', 'medium', 'low']);
 
 export interface ProviderKeyConfig {
   providerID: string;
@@ -1097,12 +1084,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const VALID_SEVERITIES: ReadonlySet<Severity> = new Set(['P0', 'P1', 'P2', 'P3', 'nit']);
 // Evidence quotes parse from any backend regardless of the prompt flag; the cap
 // defends against runaway quotes.
 // Room for the two or three consecutive lines EVIDENCE_INSTRUCTION asks for:
 // a quote truncated mid-line cannot match the file exactly.
-const EVIDENCE_MAX_CHARS = 400;
 
 /**
  * Defensively parses the agent's JSON. Main review output is strict so we
@@ -1131,6 +1116,21 @@ export function parseReview(
     };
   }
 
+  // A parseable non-object root (a bare array, a string) would read as a
+  // silent zero-finding review; strict mode must throw so the repair prompt
+  // gets its chance, and auxiliaries fail open as with any garbage.
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    log(`${label} response was valid JSON but not an object.`);
+    if (options.strict) {
+      throw new Error(`opencode ${label} returned a non-object JSON root`);
+    }
+    return {
+      summary: 'The reviewer returned an unparseable response.',
+      findings: [],
+      addressedPriorComments: [],
+    };
+  }
+
   const obj = parsed as Record<string, unknown>;
   const summary = typeof obj.summary === 'string' ? obj.summary : '';
   const rawFindings = Array.isArray(obj.findings) ? obj.findings : [];
@@ -1138,39 +1138,8 @@ export function parseReview(
 
   const findings: Finding[] = [];
   for (const item of rawFindings) {
-    const f = item as Record<string, unknown>;
-    if (
-      typeof f.path === 'string' &&
-      typeof f.line === 'number' &&
-      // Line 0 is a deliberate file-level anchor; negative or fractional
-      // lines are model noise.
-      Number.isInteger(f.line) &&
-      f.line >= 0 &&
-      typeof f.title === 'string' &&
-      typeof f.body === 'string' &&
-      typeof f.severity === 'string' &&
-      VALID_SEVERITIES.has(f.severity as Severity)
-    ) {
-      findings.push({
-        path: f.path,
-        line: f.line,
-        severity: f.severity as Severity,
-        kind:
-          typeof f.kind === 'string' && VALID_FINDING_KINDS.has(f.kind as FindingKind)
-            ? (f.kind as FindingKind)
-            : undefined,
-        confidence:
-          typeof f.confidence === 'string' &&
-          VALID_CONFIDENCES.has(f.confidence as FindingConfidence)
-            ? (f.confidence as FindingConfidence)
-            : undefined,
-        title: f.title,
-        body: f.body,
-        ...(typeof f.evidence === 'string' && f.evidence.trim()
-          ? { evidence: f.evidence.trim().slice(0, EVIDENCE_MAX_CHARS) }
-          : {}),
-      });
-    }
+    const finding = sanitizeFinding(item);
+    if (finding) findings.push(finding);
   }
   const addressedPriorComments: AddressedPriorComment[] = [];
   for (const item of rawAddressed) {

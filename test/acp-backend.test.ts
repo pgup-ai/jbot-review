@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -53,7 +53,205 @@ const specFor = (path: string) =>
     env: () => ({ env: { ...process.env } }),
   }) as never;
 
+// An agent whose FIRST spawn answers `firstTurn` and later spawns answer with
+// the review JSON, capturing the follow-up prompt. Sessions are one-shot
+// processes, so cross-spawn state lives in a counter file.
+const recoveringAgent = (name: string, firstTurn: string): { path: string; capture: string } => {
+  const state = join(dir, `${name}.count`);
+  const capture = join(dir, `${name}.prompt`);
+  const path = script(
+    `${name}.mjs`,
+    `
+import { readFileSync, writeFileSync } from 'node:fs';
+let n = 0; try { n = Number(readFileSync(${JSON.stringify(state)}, 'utf8')); } catch {}
+writeFileSync(${JSON.stringify(state)}, String(n + 1));
+let buf = '';
+process.stdin.setEncoding('utf8');
+const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+const REVIEW = JSON.stringify({ summary: 'recovered', findings: [{ path: 'a.ts', line: 1, severity: 'P2', title: 'recovered finding', body: 'b' }], addressedPriorComments: [] });
+process.stdin.on('data', (c) => {
+  buf += c;
+  let i;
+  while ((i = buf.indexOf('\\n')) >= 0) {
+    const line = buf.slice(0, i); buf = buf.slice(i + 1);
+    if (!line.trim()) continue;
+    const m = JSON.parse(line);
+    if (m.id === undefined) continue;
+    if (m.method === 'session/new') out({ jsonrpc: '2.0', id: m.id, result: { sessionId: 's1' } });
+    else if (m.method === 'session/prompt') {
+      if (n === 0) {
+        ${firstTurn}
+      } else {
+        writeFileSync(${JSON.stringify(capture)}, JSON.stringify(m.params));
+        out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: REVIEW } } } });
+        out({ jsonrpc: '2.0', id: m.id, result: { stopReason: 'end_turn' } });
+      }
+    } else out({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: 1 } });
+  }
+});
+`,
+  );
+  return { path, capture };
+};
+
 describe('acp review backend', () => {
+  it('recovers a plan-then-stop turn with one continuation prompt', async () => {
+    // The devin/glm failure mode: the model announces its plan, calls no
+    // tools, and ends the turn. A reformat repair cannot help (there is
+    // nothing to reformat); the recovery is a continuation instruction.
+    const { path, capture } = recoveringAgent(
+      'plan-then-json',
+      `out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: "I'll investigate this PR thoroughly before producing the review." } } } });
+       out({ jsonrpc: '2.0', id: m.id, result: { stopReason: 'end_turn' } });`,
+    );
+    const result = await createAcpBackend(specFor(path), dir).runReview(
+      'probe/default',
+      'CTX',
+      '',
+      () => {},
+      { label: 'review' },
+    );
+    assert.equal(result.summary, 'recovered');
+    const followup = readFileSync(capture, 'utf8');
+    assert.match(followup, /Previous attempt/);
+    assert.match(followup, /I'll investigate/, 'the announcement is quoted back');
+    assert.match(followup, /within this single turn/i);
+  });
+
+  it('repairs a malformed continuation reply instead of failing the session', async () => {
+    // plan → (continuation) malformed JSON → (repair) valid: the reformat
+    // fallback must chain after a continuation exactly as on the direct path.
+    const state = join(dir, 'three-stage.count');
+    const threeStage = script(
+      'three-stage.mjs',
+      `
+import { readFileSync, writeFileSync } from 'node:fs';
+let n = 0; try { n = Number(readFileSync(${JSON.stringify(state)}, 'utf8')); } catch {}
+writeFileSync(${JSON.stringify(state)}, String(n + 1));
+let buf = '';
+process.stdin.setEncoding('utf8');
+const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+const BY_ATTEMPT = [
+  "I'll investigate first.",
+  '{"summary": "broken',
+  JSON.stringify({ summary: 'repaired', findings: [], addressedPriorComments: [] }),
+];
+process.stdin.on('data', (c) => {
+  buf += c;
+  let i;
+  while ((i = buf.indexOf('\\n')) >= 0) {
+    const line = buf.slice(0, i); buf = buf.slice(i + 1);
+    if (!line.trim()) continue;
+    const m = JSON.parse(line);
+    if (m.id === undefined) continue;
+    if (m.method === 'session/new') out({ jsonrpc: '2.0', id: m.id, result: { sessionId: 's1' } });
+    else if (m.method === 'session/prompt') {
+      out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: BY_ATTEMPT[Math.min(n, 2)] } } } });
+      out({ jsonrpc: '2.0', id: m.id, result: { stopReason: 'end_turn' } });
+    } else out({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: 1 } });
+  }
+});
+`,
+    );
+    const result = await createAcpBackend(specFor(threeStage), dir).runReview(
+      'probe/default',
+      'CTX',
+      '',
+      () => {},
+      { label: 'review' },
+    );
+    assert.equal(result.summary, 'repaired');
+  });
+
+  it('diagnoses a model that ignores the continuation too, instead of a generic parse error', async () => {
+    const alwaysPlans = script(
+      'always-plans.mjs',
+      `
+let buf = '';
+process.stdin.setEncoding('utf8');
+const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+process.stdin.on('data', (c) => {
+  buf += c;
+  let i;
+  while ((i = buf.indexOf('\\n')) >= 0) {
+    const line = buf.slice(0, i); buf = buf.slice(i + 1);
+    if (!line.trim()) continue;
+    const m = JSON.parse(line);
+    if (m.id === undefined) continue;
+    if (m.method === 'session/new') out({ jsonrpc: '2.0', id: m.id, result: { sessionId: 's1' } });
+    else if (m.method === 'session/prompt') {
+      out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: "I'll investigate first." } } } });
+      out({ jsonrpc: '2.0', id: m.id, result: { stopReason: 'end_turn' } });
+    } else out({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: 1 } });
+  }
+});
+`,
+    );
+    await assert.rejects(
+      createAcpBackend(specFor(alwaysPlans), dir).runReview('probe/default', 'CTX', '', () => {}, {
+        label: 'review',
+      }),
+      /twice ended its turn without attempting/,
+    );
+  });
+
+  it('recovers a turn that produced no assistant message at all', async () => {
+    const { path } = recoveringAgent(
+      'empty-then-json',
+      `out({ jsonrpc: '2.0', id: m.id, result: { stopReason: 'end_turn' } });`,
+    );
+    const findings = await createAcpBackend(specFor(path), dir).runGuidelineComplianceCheck(
+      'probe/default',
+      'CTX',
+      'GUIDELINES',
+      () => {},
+    );
+    // The finding proves the CONTINUATION spawn answered: a non-strict parse
+    // of the empty first turn alone would yield [] and hide a broken recovery.
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].title, 'recovered finding');
+  });
+
+  it('treats an array-shaped reply as an attempt, not an abandoned turn', async () => {
+    // '[]' is invalid for every parser (all demand an object) but it IS an
+    // attempt: verification fails open to undefined with no follow-up session.
+    const state = join(dir, 'array-reply.count');
+    const arrayReply = script(
+      'array-reply.mjs',
+      `
+import { readFileSync, writeFileSync } from 'node:fs';
+let n = 0; try { n = Number(readFileSync(${JSON.stringify(state)}, 'utf8')); } catch {}
+writeFileSync(${JSON.stringify(state)}, String(n + 1));
+let buf = '';
+process.stdin.setEncoding('utf8');
+const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+process.stdin.on('data', (c) => {
+  buf += c;
+  let i;
+  while ((i = buf.indexOf('\\n')) >= 0) {
+    const line = buf.slice(0, i); buf = buf.slice(i + 1);
+    if (!line.trim()) continue;
+    const m = JSON.parse(line);
+    if (m.id === undefined) continue;
+    if (m.method === 'session/new') out({ jsonrpc: '2.0', id: m.id, result: { sessionId: 's1' } });
+    else if (m.method === 'session/prompt') {
+      out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '[]' } } } });
+      out({ jsonrpc: '2.0', id: m.id, result: { stopReason: 'end_turn' } });
+    } else out({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: 1 } });
+  }
+});
+`,
+    );
+    const verdicts = await createAcpBackend(specFor(arrayReply), dir).runFindingVerification(
+      'probe/default',
+      'CTX',
+      [{ path: 'a.ts', line: 1, severity: 'P1', title: 't', body: 'b' }],
+      () => {},
+    );
+    assert.equal(verdicts, undefined, 'verification fails open on an unusable attempt');
+    assert.equal(readFileSync(state, 'utf8'), '1', 'no continuation session was spawned');
+  });
+
   it('reports the agent stderr when it dies before responding', async () => {
     // Pins the outcome, not which racer produces it: whatever wins, the
     // operator must see why the agent died. Without it the transport error can
