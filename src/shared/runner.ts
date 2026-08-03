@@ -1459,8 +1459,10 @@ async function runReviewPipeline(params: {
     auxProviderID !== providerID && ((mainOnPi && auxOnPi) || (mainOnOpencode && auxOnOpencode));
   // A same-provider aux model on a non-custom provider needs no entry of its
   // own except to carry its lower reasoning effort, which is scoped per model.
-  const auxModelOptions =
-    auxModelID === modelID ? undefined : defaultAuxModelOptions(auxProviderID);
+  // Identity is provider-scoped: two providers can serve the same model id, and
+  // the aux one is routed separately, so it still needs its own options.
+  const auxSharesMainEntry = auxProviderID === providerID && auxModelID === modelID;
+  const auxModelOptions = auxSharesMainEntry ? undefined : defaultAuxModelOptions(auxProviderID);
   const auxNeedsOpencodeConfig =
     mainOnOpencode &&
     auxOnOpencode &&
@@ -1488,7 +1490,10 @@ async function runReviewPipeline(params: {
         piConfig.apiKey,
         log,
         {
-          modelOptions: mainOnPi ? options.modelOptions : undefined,
+          // pi's thinking level is runtime-wide, so a runtime shared by both
+          // roles follows the main model. One serving aux alone takes the aux
+          // effort instead of none.
+          modelOptions: mainOnPi ? options.modelOptions : auxModelOptions,
           // pi's prompt caching is provider-managed (no setCacheKey knob);
           // resolvePromptCachePolicy applies to the opencode server only.
           additionalProviderKeys: auxNeedsOwnKey

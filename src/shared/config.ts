@@ -38,7 +38,6 @@ export function resolveProviderCredential(
 }
 
 export interface ProviderCredential {
-  config: ProviderConfig;
   apiKey: string;
   baseURL?: string;
 }
@@ -73,7 +72,6 @@ export function resolvePoolCredentials(
       );
     }
     credentials.set(providerID, {
-      config,
       apiKey,
       baseURL: resolveProviderBaseURL(providerID, config, read),
     });
@@ -109,10 +107,14 @@ export function defaultModelOptions(providerID: string): Record<string, unknown>
 }
 
 /**
- * Auxiliary sessions are recall supplements that land on the run's tail, and
- * these models spend most of their output budget reasoning — one lens was
+ * Auxiliary sessions are recall supplements that land on the tail of the run,
+ * and these models spend most of their output budget reasoning — one lens was
  * observed emitting 15,762 reasoning tokens and 53 of content, producing
  * nothing while costing minutes. They get a lower effort than the deep pass.
+ *
+ * Reaches an aux session only when it runs a model of its own: options are
+ * scoped per model id, so an aux model that IS the main model shares its entry
+ * and its effort.
  */
 export function defaultAuxModelOptions(providerID: string): Record<string, unknown> {
   return reasoningOptions(providerID, 'low');
