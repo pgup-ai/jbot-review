@@ -479,6 +479,10 @@ export async function listPriorJbotThreads(
  * disclose that its list is incomplete (invariant #4). */
 const MAX_LINKED_ISSUES = 3;
 
+// Aux-context lookup: bounded like blast-radius' git grep — a stalled request
+// must fail open in seconds, not at undici's multi-minute defaults.
+const LINKED_ISSUES_TIMEOUT_MS = 10_000;
+
 export async function listClosingIssues(
   octokit: Octokit,
   owner: string,
@@ -508,7 +512,12 @@ export async function listClosingIssues(
         }
       }
     `,
-    { owner, repo, number: pullNumber },
+    {
+      owner,
+      repo,
+      number: pullNumber,
+      request: { signal: AbortSignal.timeout(LINKED_ISSUES_TIMEOUT_MS) },
+    },
   )) as {
     repository?: {
       pullRequest?: {
