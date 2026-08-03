@@ -619,9 +619,9 @@ block.
 model: opencode/deepseek-v4-flash-free,opencode/glm-5-free,opencode/kimi-k2.5-free
 ```
 
-`aux-model` takes a pool on the same terms. Its pick is salted, so an aux pool
-is never index-locked to the main one — setting both to the same list still
-varies the pair rather than always drawing the same two entries.
+`aux-model` takes a pool on the same terms. Its pick is salted, so setting both
+inputs to the same list still varies the pair instead of always drawing the
+same two entries.
 
 **Legacy `provider` / `aux-provider`** still work unchanged. Setting either one
 _pins_ the provider: an unprefixed id belongs to it, a matching `provider/`

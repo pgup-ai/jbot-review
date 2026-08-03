@@ -51,9 +51,8 @@ interface ModelSelection {
 }
 
 /**
- * Splits a comma-separated input into a canonical pool and the one provider
- * serving it. Every candidate is resolved up front so a typo fails the next run
- * outright instead of only the runs that happen to pick it.
+ * Every candidate is resolved up front so a typo fails the next run outright
+ * instead of only the runs that happen to pick it.
  */
 function resolveSelection(input: string, resolution: ProviderResolution): ModelSelection {
   const { pinned, label } = resolution;
@@ -110,13 +109,12 @@ export function pickPooledModel(pool: string[], seed: string): string {
 }
 
 /**
- * Resolves the auxiliary pool on the same terms as the main one.
  * `pinnedProviderID` is the legacy aux-provider input, falling back to the
  * legacy main provider input — either pins the aux model, because the old
  * resolver always pinned it (to aux-provider, else the main provider) and never
- * derived. With neither set, an unqualified ref stays on the main provider.
- * An empty pool means "use the main model" and still reports the main provider,
- * so callers can compare the two to decide whether separate credentials apply.
+ * derived. An empty pool means "use the main model" and still reports the main
+ * provider, so callers can compare the two to decide whether separate
+ * credentials apply.
  */
 export function resolveAuxModel(
   auxModel: string | undefined,

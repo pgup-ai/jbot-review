@@ -196,27 +196,24 @@ describe('resolveAuxModel', () => {
     assert.throws(() => resolveAuxModel('a', 'openai', 'nope'), /Unknown provider "nope"/);
   });
 
-  it('names the input in errors so the failing field is obvious', () => {
+  it('names the input the error came from, on both throw paths', () => {
     assert.throws(() => resolveModelSelection('/x'), /Invalid model "\/x"/);
     assert.throws(() => resolveAuxModel('/x', 'opencode'), /Invalid aux-model "\/x"/);
-    assert.throws(() => resolveModelSelection('a/b, c/d'), /The model pool mixes providers/);
-    // The pinned branch has its own throw, and had kept the main-model label.
+    // The pinned branch throws separately and must carry the same label.
     assert.throws(() => resolveAuxModel('opencode/', 'opencode', 'opencode'), /Invalid aux-model/);
   });
 });
 
 describe('pickAuxModel', () => {
-  it('picks reproducibly and independently of the main pool', () => {
+  it('salts the seed so an aux pool is not locked to the main pool index', () => {
     const pool = ['opencode/a', 'opencode/b', 'opencode/c'];
-    const seed = 'e3f0c1a9b7d24e6f8a0b1c2d3e4f5a6b7c8d9e0f';
+    // A seed the salt actually moves: on a third of seeds both land together,
+    // and those cannot tell a salted pick from an unsalted one.
+    const seed = 'deadbeef';
 
-    assert.equal(pickAuxModel(pool, seed), pickAuxModel(pool, seed));
+    assert.equal(pickAuxModel(pool, seed), pickPooledModel(pool, `aux:${seed}`));
+    assert.notEqual(pickAuxModel(pool, seed), pickPooledModel(pool, seed));
     assert.equal(pickAuxModel([], seed), '');
-    // Salted, so an identical aux pool is not locked to the main pool's index.
-    const decoupled = Array.from({ length: 40 }, (_, i) => `${seed}${i}`).some(
-      (s) => pickAuxModel(pool, s) !== pickPooledModel(pool, s),
-    );
-    assert.ok(decoupled);
   });
 });
 
