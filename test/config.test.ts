@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 
 import {
   PROVIDERS,
+  auxModelOptionsFor,
   defaultModelOptions,
   modelSupportsPromptCache,
   needsAuxOpencodeConfig,
@@ -142,6 +143,23 @@ describe('provider configuration resolution', () => {
       workflow,
       /auto-approve: \$\{\{ needs\.command\.outputs\.auto_approve \|\| vars\.JBOT_AUTO_APPROVE \|\| 'false' \}\}/,
     );
+  });
+
+  it('gives the aux model its own options unless it shares the main entry', () => {
+    // Identity is provider-scoped: same id on another provider is routed
+    // separately, so it still needs its own effort.
+    assert.equal(auxModelOptionsFor('openai', 'gpt-5', 'openai', 'gpt-5'), undefined);
+    assert.deepEqual(auxModelOptionsFor('openai', 'gpt-5', 'openai', 'gpt-5-mini'), {
+      reasoningEffort: 'low',
+    });
+    assert.deepEqual(auxModelOptionsFor('openai', 'gpt-5', 'openrouter', 'gpt-5'), {
+      reasoningEffort: 'low',
+    });
+    // Provider guards still apply to the aux default.
+    assert.deepEqual(auxModelOptionsFor('openai', 'm', 'poolside', 'laguna-s-2.1'), {
+      reasoningEffort: 'default',
+    });
+    assert.deepEqual(auxModelOptionsFor('openai', 'm', 'openai-compatible', 'x'), {});
   });
 
   it('registers cross-provider config and distinct models on a shared custom provider', () => {

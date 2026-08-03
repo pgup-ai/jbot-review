@@ -77,11 +77,7 @@ import {
   isDocOnlyChange,
   shardFilesForReview,
 } from './diff-context.ts';
-import {
-  defaultAuxModelOptions,
-  needsAuxOpencodeConfig,
-  resolvePromptCachePolicy,
-} from './config.ts';
+import { auxModelOptionsFor, needsAuxOpencodeConfig, resolvePromptCachePolicy } from './config.ts';
 import { parseModelName } from '@symma/protocol';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -1457,12 +1453,7 @@ async function runReviewPipeline(params: {
   // different vendor's endpoint (and fail auth there anyway).
   const auxNeedsOwnKey =
     auxProviderID !== providerID && ((mainOnPi && auxOnPi) || (mainOnOpencode && auxOnOpencode));
-  // A same-provider aux model on a non-custom provider needs no entry of its
-  // own except to carry its lower reasoning effort, which is scoped per model.
-  // Identity is provider-scoped: two providers can serve the same model id, and
-  // the aux one is routed separately, so it still needs its own options.
-  const auxSharesMainEntry = auxProviderID === providerID && auxModelID === modelID;
-  const auxModelOptions = auxSharesMainEntry ? undefined : defaultAuxModelOptions(auxProviderID);
+  const auxModelOptions = auxModelOptionsFor(providerID, modelID, auxProviderID, auxModelID);
   const auxNeedsOpencodeConfig =
     mainOnOpencode &&
     auxOnOpencode &&
@@ -2622,8 +2613,12 @@ const AUXILIARY_SETTLE_GRACE_MS = 120_000;
  * within the grace. Never rejects: aux work fails open (invariant #3), so a
  * session that already failed yields the fallback just like one that runs out
  * of grace — otherwise a settled rejection would abort the run through the
- * caller's Promise.all. Abandoning the wait does not cancel the session; the
- * pipeline's teardown stops the runtime, which ends it.
+ * caller's Promise.all.
+ *
+ * Bounds the WAIT, not the session: an abandoned prompt runs on and keeps its
+ * concurrency slot until teardown, so with every slot held the verifier can
+ * still queue behind one. Cancelling it needs abort plumbing through every
+ * backend; until then the cap is on how long the run waits for results.
  */
 export function settleWithinGrace<T>(
   session: AuxiliarySession<T>,

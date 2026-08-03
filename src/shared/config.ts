@@ -120,6 +120,21 @@ export function defaultAuxModelOptions(providerID: string): Record<string, unkno
   return reasoningOptions(providerID, 'low');
 }
 
+/**
+ * The aux model's options, or undefined when it shares the main model's entry
+ * and therefore its effort. Identity is provider-scoped: two providers can
+ * serve the same model id, and the aux one is routed separately.
+ */
+export function auxModelOptionsFor(
+  providerID: string,
+  modelID: string,
+  auxProviderID: string,
+  auxModelID: string,
+): Record<string, unknown> | undefined {
+  if (auxProviderID === providerID && auxModelID === modelID) return undefined;
+  return defaultAuxModelOptions(auxProviderID);
+}
+
 export function needsAuxOpencodeConfig(
   providerID: string,
   modelID: string,
