@@ -10,11 +10,11 @@ on:
         description: Pull request number to review
         required: true
       provider:
-        description: 'LLM provider. Uses JBOT_REVIEW_PROVIDER or opencode if unset.'
+        description: 'Deprecated — name the provider in model instead. Pins the provider when set.'
         required: false
         default: ''
       model:
-        description: 'Model as provider/model, or a comma-separated pool of same-provider models. Uses provider default if unset; required for openai-compatible.'
+        description: 'Model as provider/model, or a comma-separated pool naming one provider. Uses the opencode default if unset; required for openai-compatible.'
         required: false
         default: ''
       dry-run:
@@ -238,7 +238,7 @@ jobs:
           JBOT_OBSERVER_RUN: ${{ github.repository }}-pr-${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}-${{ github.run_id }}-${{ github.run_attempt }}
         with:
           # Precedence: /jbot comment flag > dispatch input > repo variable > default.
-          provider: ${{ needs.command.outputs.provider || inputs.provider || vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
+          provider: ${{ needs.command.outputs.provider || inputs.provider || vars.JBOT_REVIEW_PROVIDER || '' }}
           model: ${{ needs.command.outputs.model || inputs.model || vars.JBOT_REVIEW_MODEL || '' }}
           sdk-engine: ${{ vars.JBOT_SDK_ENGINE || '' }}
           pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}

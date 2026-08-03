@@ -2,13 +2,12 @@ import { createServer } from 'node:http';
 import { Webhooks, createNodeMiddleware } from '@octokit/webhooks';
 
 import {
-  PROVIDERS,
+  providerConfig,
   providerCredentialSources,
   resolveProviderBaseURL,
   resolveProviderCredential,
-  resolveProviderModel,
 } from '../shared/config.ts';
-import { resolveModelPool } from '../shared/model.ts';
+import { resolveAuxModel, resolveModelSelection } from '../shared/model.ts';
 import { handlePrEvent } from './app.ts';
 import type { AppConfig } from './app.ts';
 
@@ -18,22 +17,18 @@ function mustEnv(name: string): string {
   return value;
 }
 
-const provider = process.env.PROVIDER || 'opencode';
-const cfg = PROVIDERS[provider];
-if (!cfg) {
-  throw new Error(
-    `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-  );
-}
+const { providerID: provider, pool: modelPool } = resolveModelSelection(
+  process.env.MODEL,
+  process.env.PROVIDER,
+);
+const cfg = providerConfig(provider);
 
-const auxModelInput = process.env.JBOT_REVIEW_AUX_MODEL?.trim();
-const auxProvider = auxModelInput ? process.env.JBOT_AUX_PROVIDER?.trim() || provider : provider;
-const auxCfg = auxModelInput ? PROVIDERS[auxProvider] : undefined;
-if (auxModelInput && !auxCfg) {
-  throw new Error(
-    `Unknown aux provider "${auxProvider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-  );
-}
+const { model: auxModel, providerID: auxProviderID } = resolveAuxModel(
+  process.env.JBOT_REVIEW_AUX_MODEL,
+  provider,
+  process.env.JBOT_AUX_PROVIDER,
+);
+const auxCfg = auxProviderID !== provider ? providerConfig(auxProviderID) : undefined;
 const apiKey = resolveProviderCredential(cfg, ({ env }) => process.env[env]);
 if (!apiKey) {
   throw new Error(
@@ -43,22 +38,20 @@ if (!apiKey) {
   );
 }
 const baseURL = resolveProviderBaseURL(provider, cfg, ({ env }) => process.env[env]);
-const auxApiKey =
-  auxModelInput && auxProvider !== provider && auxCfg
-    ? resolveProviderCredential(auxCfg, ({ env }) => process.env[env])
-    : undefined;
-const auxBaseURL =
-  auxModelInput && auxProvider !== provider && auxCfg
-    ? resolveProviderBaseURL(auxProvider, auxCfg, ({ env }) => process.env[env])
-    : undefined;
+const auxApiKey = auxCfg
+  ? resolveProviderCredential(auxCfg, ({ env }) => process.env[env])
+  : undefined;
+const auxBaseURL = auxCfg
+  ? resolveProviderBaseURL(auxProviderID, auxCfg, ({ env }) => process.env[env])
+  : undefined;
 
 const appCfg: AppConfig = {
   appId: mustEnv('GITHUB_APP_ID'),
   privateKey: mustEnv('GITHUB_APP_PRIVATE_KEY').replace(/\\n/g, '\n'),
   apiKey,
-  modelPool: resolveModelPool(provider, resolveProviderModel(provider, cfg, process.env.MODEL)),
+  modelPool,
   ...(baseURL ? { baseURL } : {}),
-  auxProvider,
+  auxModel,
   ...(auxApiKey ? { auxApiKey } : {}),
   ...(auxBaseURL ? { auxBaseURL } : {}),
 };

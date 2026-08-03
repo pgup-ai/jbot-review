@@ -2,16 +2,14 @@ import * as core from '@actions/core';
 import * as github from '@actions/github';
 
 import {
-  PROVIDERS,
   defaultModelOptions,
+  providerConfig,
   providerCredentialSources,
   resolveProviderBaseURL,
   resolveProviderCredential,
-  resolveProviderModel,
 } from '../shared/config.ts';
 import { parseContext7Mode } from '../shared/context7.ts';
-import { parseModelName } from '@symma/protocol';
-import { pickPooledModel, resolveAuxModelName, resolveModelPool } from '../shared/model.ts';
+import { pickPooledModel, resolveAuxModel, resolveModelSelection } from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { Octokit } from '../shared/github.ts';
 import { VALID_SEVERITIES, type Severity } from '../shared/types.ts';
@@ -23,13 +21,13 @@ async function main(): Promise<void> {
   const failOnError = parseBooleanInput('fail-on-error', true);
   const token = core.getInput('github-token', { required: true });
   const threadResolutionToken = core.getInput('thread-resolution-token').trim();
-  const provider = getInputOrEnv('provider', 'JBOT_REVIEW_PROVIDER') || 'opencode';
-  const cfg = PROVIDERS[provider];
-  if (!cfg) {
-    throw new Error(
-      `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-    );
-  }
+  // Resolved before the PR lookup so a bad pool fails without spending an API
+  // call; the pick needs the head sha, so it waits until that is known.
+  const { providerID: provider, pool: modelPool } = resolveModelSelection(
+    getInputOrEnv('model', 'JBOT_REVIEW_MODEL'),
+    getInputOrEnv('provider', 'JBOT_REVIEW_PROVIDER'),
+  );
+  const cfg = providerConfig(provider);
 
   const apiKey = resolveProviderCredential(cfg, ({ input, env }) => getInputOrEnv(input, env));
   if (!apiKey) {
@@ -42,34 +40,18 @@ async function main(): Promise<void> {
   const baseURL = resolveProviderBaseURL(provider, cfg, ({ input, env }) =>
     getInputOrEnv(input, env),
   );
-  // Validated before the PR lookup so a bad pool fails without spending an API
-  // call; the pick needs the head sha, so it waits until that is known.
-  const modelPool = resolveModelPool(
+  const { model: auxModel, providerID: auxProviderID } = resolveAuxModel(
+    getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL'),
     provider,
-    resolveProviderModel(provider, cfg, getInputOrEnv('model', 'JBOT_REVIEW_MODEL')),
+    getInputOrEnv('aux-provider', 'JBOT_AUX_PROVIDER'),
   );
-  const auxModelInput = getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL');
-  const auxProvider = auxModelInput
-    ? getInputOrEnv('aux-provider', 'JBOT_AUX_PROVIDER') || provider
-    : provider;
-  const auxCfg = auxModelInput ? PROVIDERS[auxProvider] : undefined;
-  if (auxModelInput && !auxCfg) {
-    throw new Error(
-      `Unknown aux provider "${auxProvider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-    );
-  }
-  const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
-  const auxProviderID = auxModel ? parseModelName(auxModel).providerID : provider;
-  let auxApiKey = '';
-  if (auxModel && auxProviderID !== provider) {
-    auxApiKey = resolveProviderCredential(auxCfg!, ({ input, env }) => getInputOrEnv(input, env));
-  }
-  const auxBaseURL =
-    auxModel && auxProviderID !== provider
-      ? resolveProviderBaseURL(auxProviderID, auxCfg!, ({ input, env }) =>
-          getInputOrEnv(input, env),
-        )
-      : undefined;
+  const auxCfg = auxProviderID !== provider ? providerConfig(auxProviderID) : undefined;
+  const auxApiKey = auxCfg
+    ? resolveProviderCredential(auxCfg, ({ input, env }) => getInputOrEnv(input, env))
+    : '';
+  const auxBaseURL = auxCfg
+    ? resolveProviderBaseURL(auxProviderID, auxCfg, ({ input, env }) => getInputOrEnv(input, env))
+    : undefined;
   const options = {
     enhancedContext: true,
     sdkEngine: getInputOrEnv('sdk-engine', 'JBOT_SDK_ENGINE') || 'auto',

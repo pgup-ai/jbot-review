@@ -17,12 +17,11 @@ import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_ACP_BIN, CODEX_PROVIDER_ID } from '@symma/protocol';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
 import {
-  PROVIDERS,
   defaultModelOptions,
+  providerConfig,
   providerCredentialSources,
   resolveProviderBaseURL,
   resolveProviderCredential,
-  resolveProviderModel,
 } from '../shared/config.ts';
 import {
   CURSOR_CLI_BIN,
@@ -34,7 +33,7 @@ import { isNoiseFile } from '../shared/filter.ts';
 import { observerEnabled, setRunName } from '../shared/observer.ts';
 import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID, parseModelName } from '@symma/protocol';
-import { pickPooledModel, resolveAuxModelName, resolveModelPool } from '../shared/model.ts';
+import { pickPooledModel, resolveAuxModel, resolveModelSelection } from '../shared/model.ts';
 import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import {
@@ -286,28 +285,20 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   // the diff so a clean tree still exits "nothing to review" without a key set;
   // the model names have to come first because they decide whether this run
   // routes to the gateway, which is what the diff's right side depends on.
-  const provider = process.env.PROVIDER || 'opencode';
-  const providerCfg = PROVIDERS[provider];
-  if (!providerCfg) {
-    throw new Error(
-      `Unknown provider "${provider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-    );
-  }
+  const { providerID: provider, pool } = resolveModelSelection(
+    process.env.MODEL,
+    process.env.PROVIDER,
+  );
+  const providerCfg = providerConfig(provider);
   // HEAD, not the worktree: iterating on uncommitted edits keeps the same
   // reviewer, so a before/after comparison is not confounded by the pick.
-  const model = pickPooledModel(
-    resolveModelPool(provider, resolveProviderModel(provider, providerCfg, process.env.MODEL)),
-    (await git(['rev-parse', 'HEAD'])).trim(),
+  const model = pickPooledModel(pool, (await git(['rev-parse', 'HEAD'])).trim());
+  const { model: auxModel, providerID: auxProviderID } = resolveAuxModel(
+    process.env.JBOT_REVIEW_AUX_MODEL,
+    provider,
+    process.env.JBOT_AUX_PROVIDER,
   );
-  const auxModelInput = process.env.JBOT_REVIEW_AUX_MODEL?.trim();
-  const auxProvider = auxModelInput ? process.env.JBOT_AUX_PROVIDER?.trim() || provider : provider;
-  const auxCfg = auxModelInput ? PROVIDERS[auxProvider] : undefined;
-  if (auxModelInput && !auxCfg) {
-    throw new Error(
-      `Unknown aux provider "${auxProvider}". Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
-    );
-  }
-  const auxModel = resolveAuxModelName(provider, auxModelInput, auxProvider);
+  const auxCfg = auxProviderID !== provider ? providerConfig(auxProviderID) : undefined;
 
   // Preview never spawns checkouts or sessions: it inspects the worktree diff
   // exactly as the non-gateway path would review it.
@@ -418,8 +409,8 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
       provider as CliBackendID,
     );
     const auxRequiresCompleteDiff = backendRequiresCompleteEmbeddedDiff(
-      auxProvider,
-      auxProvider as CliBackendID,
+      auxProviderID,
+      auxProviderID as CliBackendID,
     );
     const diffHunksOptions = mainRequiresCompleteDiff
       ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
@@ -475,14 +466,12 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     );
   }
   const baseURL = resolveProviderBaseURL(provider, providerCfg, ({ env }) => process.env[env]);
-  const auxApiKey =
-    auxModelInput && auxProvider !== provider && auxCfg
-      ? resolveProviderCredential(auxCfg, ({ env }) => process.env[env])
-      : undefined;
-  const auxBaseURL =
-    auxModelInput && auxProvider !== provider && auxCfg
-      ? resolveProviderBaseURL(auxProvider, auxCfg, ({ env }) => process.env[env])
-      : undefined;
+  const auxApiKey = auxCfg
+    ? resolveProviderCredential(auxCfg, ({ env }) => process.env[env])
+    : undefined;
+  const auxBaseURL = auxCfg
+    ? resolveProviderBaseURL(auxProviderID, auxCfg, ({ env }) => process.env[env])
+    : undefined;
 
   // Backend-aware preflight: opencode only when the selection needs it; CLI
   // backends bring their own binary.
