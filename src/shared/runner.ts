@@ -94,6 +94,7 @@ import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
 import { onFatalSignal } from '@symma/protocol';
 import {
   startOpencode,
+  withTimeout,
   configureSessionConcurrency,
   runReview as runOpencodeReview,
   runAddressedPriorCommentsCheck as runOpencodeAddressedPriorCommentsCheck,
@@ -655,7 +656,9 @@ export interface ReviewRunOptions {
   reviewShards?: number;
   /**
    * Provider options for the MAIN model — e.g. {"reasoningEffort":"medium"}
-   * to cap reasoning spend on heavy models. Aux-model sessions are unaffected.
+   * to cap reasoning spend on heavy models. An aux model running an entry of
+   * its own gets defaultAuxModelOptions instead; one that IS the main model
+   * shares this.
    */
   modelOptions?: Record<string, unknown>;
   /**
@@ -2608,6 +2611,9 @@ function pendingAuxiliarySessionLabels(
  */
 const AUXILIARY_SETTLE_GRACE_MS = 120_000;
 
+/** Distinguishes the grace expiring from the session failing on its own. */
+const GRACE_EXPIRED = 'jbot: auxiliary settle grace expired';
+
 /**
  * Resolves to the session's value, or to `fallback` if it has not settled
  * within the grace. Never rejects: aux work fails open (invariant #3), so a
@@ -2627,17 +2633,15 @@ export function settleWithinGrace<T>(
   graceMs = AUXILIARY_SETTLE_GRACE_MS,
 ): Promise<T> {
   if (session.isSettled()) return session.promise.catch(() => fallback);
-  return new Promise<T>((resolve) => {
-    const timer = setTimeout(() => {
+  return withTimeout(session.promise, graceMs, GRACE_EXPIRED).catch((error: unknown) => {
+    // Only the grace expiring is worth a line; a session that failed on its own
+    // already logged why.
+    if (error instanceof Error && error.message === GRACE_EXPIRED) {
       log(
         `${session.label} still running ${graceMs / 1000}s after the main review; abandoning it.`,
       );
-      resolve(fallback);
-    }, graceMs);
-    void session.promise
-      .then(resolve)
-      .catch(() => resolve(fallback))
-      .finally(() => clearTimeout(timer));
+    }
+    return fallback;
   });
 }
 
