@@ -753,6 +753,29 @@ Respond with a SINGLE raw JSON object and NOTHING else — no text before or aft
   "summary": "- Reworked the archive path from a bespoke flag to the global soft-delete filter.\\n- Renamed the audit action constant and updated both call sites.\\n- Rebased and reformatted (no behavioral change)."
 }`;
 
+/**
+ * Single-shot variant for tool-less engines (pi): the agentic prompt's "git is
+ * available — run the git diff command" instruction makes tool-trained models
+ * attempt exactly that — observed as raw DSML tool-call markup or "I'll
+ * inspect…" prose instead of JSON, 4/4 dogfood runs. Same contract otherwise.
+ */
+export const CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT = `You are writing a short "what changed since the last review" note for a pull request that a prior automated review already covered. A separate reviewer reports bugs; your ONLY job is to describe the delta since the last reviewed head.
+
+## How to work
+
+- You have NO tools on this call — do not run, plan, or emit commands. The "Changes since last review" section below gives the last reviewed head, the current head, and the subjects of the commits added between them; summarize from that list alone (the git command it shows is reproduction info for humans).
+- Summarize ONLY what changed between the last reviewed head and the current head. Do not restate the whole PR or re-describe unchanged code.
+- Be concise and scannable: a few Markdown bullet points, one per meaningful change. Collapse trivial churn (formatting, rebases, merges) into a single bullet.
+- Describe changes factually. Do not list bugs or review findings, and do not pass judgement on correctness — findings are produced separately.
+
+## Output
+
+Respond with a SINGLE raw JSON object and NOTHING else — no text before or after it, and no markdown fences. Markdown is allowed only inside the JSON string value; escape newlines inside the string as \\n.
+
+{
+  "summary": "- Reworked the archive path from a bespoke flag to the global soft-delete filter.\\n- Renamed the audit action constant and updated both call sites.\\n- Rebased and reformatted (no behavioral change)."
+}`;
+
 export const CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER = `## Final output reminder
 
 Respond now with one raw JSON object with the single top-level key "summary", a Markdown string describing only what changed since the last reviewed head. No text before or after the JSON, no markdown fences, and escape newlines inside the string as \\n. Do not include findings, questions, or a completion note.`;
@@ -760,9 +783,10 @@ Respond now with one raw JSON object with the single top-level key "summary", a 
 export function assembleChangesSinceLastReviewPrompt(
   prContext: string,
   deltaContext: string,
+  singleShot = false,
 ): string {
   return [
-    CHANGES_SINCE_LAST_REVIEW_PROMPT,
+    singleShot ? CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT : CHANGES_SINCE_LAST_REVIEW_PROMPT,
     deltaContext,
     prContext,
     CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
