@@ -68,8 +68,12 @@ export interface PriorThreadOutcome {
 
 export interface OutcomeTelemetryRow extends PriorThreadOutcome {
   kind: 'outcome';
-  /** The current PR diff still touches this thread's file. */
-  fileChangedSince: boolean;
+  /**
+   * The thread's file is part of the current PR diff. Informational only:
+   * prior findings anchor to PR files, so this is usually true — false means
+   * the area was reverted or dropped, NOT "unchanged since the thread".
+   */
+  fileInDiff: boolean;
 }
 
 export interface FindingRouting {
@@ -366,7 +370,7 @@ export interface GuidelineCandidateArea {
   pushback: number;
   /** Explicit agreement: addressed, or a 👍. */
   endorsed: number;
-  /** No human signal at all and the file has not changed since — likely noise. */
+  /** No human signal at all, never addressed or resolved — likely noise. */
   ignored: number;
   addressed: number;
   resolved: number;
@@ -399,13 +403,7 @@ export function aggregateOutcomeRows(rows: OutcomeTelemetryRow[]): GuidelineCand
       entry.pushback += 1;
     }
     if (row.addressed || row.thumbsUp > 0) entry.endorsed += 1;
-    if (
-      row.humanReplies === 0 &&
-      reactions === 0 &&
-      !row.addressed &&
-      !row.resolved &&
-      !row.fileChangedSince
-    ) {
+    if (row.humanReplies === 0 && reactions === 0 && !row.addressed && !row.resolved) {
       entry.ignored += 1;
     }
     if (row.addressed) entry.addressed += 1;

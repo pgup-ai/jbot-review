@@ -8,6 +8,7 @@ import {
   formatFindingLabel,
   formatPriorJbotThreadsForPrompt,
   isBotAddressedReply,
+  listClosingIssues,
   listPriorJbotThreads,
   minimizePullRequestReview,
   postAddressedThreadReply,
@@ -797,7 +798,7 @@ describe('resolved review finalization', () => {
 });
 
 describe('prior thread outcomes', () => {
-  it('counts human replies and reaction totals, excluding bot accounts', async () => {
+  it('counts human replies and User reactions, excluding bot accounts from both', async () => {
     const octokit = {
       rest: { pulls: { listReviews: {}, listReviewComments: {} } },
       paginate: async () => [],
@@ -822,9 +823,15 @@ describe('prior thread outcomes', () => {
                         url: 'https://github.com/acme/widget/pull/1#discussion_r300',
                         author: { login: 'github-actions[bot]' },
                         reactionGroups: [
-                          { content: 'THUMBS_UP', reactors: { totalCount: 2 } },
-                          { content: 'THUMBS_DOWN', reactors: { totalCount: 1 } },
-                          { content: 'HEART', reactors: { totalCount: 5 } },
+                          {
+                            content: 'THUMBS_UP',
+                            reactors: { nodes: [{ __typename: 'User' }, { __typename: 'User' }] },
+                          },
+                          {
+                            content: 'THUMBS_DOWN',
+                            reactors: { nodes: [{ __typename: 'User' }, { __typename: 'Bot' }] },
+                          },
+                          { content: 'HEART', reactors: { nodes: [{ __typename: 'User' }] } },
                         ],
                       },
                       {
@@ -865,6 +872,53 @@ describe('prior thread outcomes', () => {
         confused: 0,
       },
     ]);
+  });
+});
+
+describe('listClosingIssues', () => {
+  it('keeps same-repo issues up to the cap and counts every other closing reference as omitted', async () => {
+    const octokit = {
+      graphql: async () => ({
+        repository: {
+          pullRequest: {
+            closingIssuesReferences: {
+              totalCount: 6,
+              nodes: [
+                {
+                  number: 1,
+                  title: 'A',
+                  body: 'body a',
+                  repository: { name: 'widget', owner: { login: 'ACME' } },
+                },
+                {
+                  number: 2,
+                  title: 'B',
+                  body: null,
+                  repository: { name: 'widget', owner: { login: 'acme' } },
+                },
+                {
+                  number: 3,
+                  title: 'X',
+                  body: 'cross-repo',
+                  repository: { name: 'other', owner: { login: 'acme' } },
+                },
+                null,
+              ],
+            },
+          },
+        },
+      }),
+    };
+
+    const result = await listClosingIssues(octokit as unknown as Octokit, 'acme', 'widget', 1);
+
+    assert.deepEqual(result, {
+      issues: [
+        { number: 1, title: 'A', body: 'body a' },
+        { number: 2, title: 'B', body: '' },
+      ],
+      omitted: 4,
+    });
   });
 });
 

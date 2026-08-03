@@ -128,7 +128,8 @@ const BASH_PERMISSIONS = {
  * the bash accident-filter above explicitly does not close.
  */
 export function sessionEnvDenyKeys(keys: string[]): string[] {
-  const CREDENTIAL_SUFFIX = /(_API_KEY|_TOKEN|_SECRET|_PASSWORD|_PRIVATE_KEY|_AUTH_CONTENT)$/;
+  const CREDENTIAL_SUFFIX =
+    /(_API_KEY|_TOKEN|_SECRET|_PASSWORD|_PRIVATE_KEY|_AUTH_CONTENT|_AUTH_JSON|_ACCESS_KEY(?:_ID)?)$/;
   return keys.filter((key) => {
     const upper = key.toUpperCase();
     return (

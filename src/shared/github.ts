@@ -230,7 +230,7 @@ interface ReviewThreadsResponse {
               } | null;
               reactionGroups?: Array<{
                 content: string;
-                reactors: { totalCount: number };
+                reactors: { nodes?: Array<{ __typename: string } | null> | null };
               }> | null;
             } | null> | null;
           };
@@ -325,8 +325,10 @@ export async function listPriorJbotThreads(
                   }
                   reactionGroups {
                     content
-                    reactors {
-                      totalCount
+                    reactors(first: 50) {
+                      nodes {
+                        __typename
+                      }
                     }
                   }
                 }
@@ -398,9 +400,12 @@ export async function listPriorJbotThreads(
           isBotAddressedReply(comment.author?.login, comment.body, viewerLogin),
         ) || state.addressedTopLevelIds.has(topLevel.databaseId);
       // Before the disposition gates: outcomes cover skip/resolve-only threads too.
+      // Only User-typed reactors count — a bot's 👍 is not a human outcome,
+      // mirroring the [bot] exclusion in humanReplies below.
       const count = (content: string) =>
-        topLevel.reactionGroups?.find((group) => group.content === content)?.reactors.totalCount ??
-        0;
+        topLevel.reactionGroups
+          ?.find((group) => group.content === content)
+          ?.reactors.nodes?.filter((reactor) => reactor?.__typename === 'User').length ?? 0;
       outcomes.push({
         threadId: thread.id,
         path: thread.path,
@@ -466,7 +471,9 @@ export async function listPriorJbotThreads(
 /** Same-repo issues GitHub records this PR as closing (closing keywords or
  * manual links) — intent input for the claims-verification pass. Cross-repo
  * references are dropped (the query over-fetches to leave headroom for that);
- * the formatter budgets the bytes. */
+ * the formatter budgets the bytes. `omitted` counts every closing reference
+ * not returned — beyond the cap or cross-repo — so the context block can
+ * disclose that its list is incomplete (invariant #4). */
 const MAX_LINKED_ISSUES = 3;
 
 export async function listClosingIssues(
@@ -474,13 +481,14 @@ export async function listClosingIssues(
   owner: string,
   repo: string,
   pullNumber: number,
-): Promise<LinkedIssue[]> {
+): Promise<{ issues: LinkedIssue[]; omitted: number }> {
   const response = (await octokit.graphql(
     `
       query ClosingIssues($owner: String!, $repo: String!, $number: Int!) {
         repository(owner: $owner, name: $repo) {
           pullRequest(number: $number) {
             closingIssuesReferences(first: 10) {
+              totalCount
               nodes {
                 number
                 title
@@ -502,6 +510,7 @@ export async function listClosingIssues(
     repository?: {
       pullRequest?: {
         closingIssuesReferences?: {
+          totalCount?: number;
           nodes?: Array<{
             number: number;
             title: string;
@@ -512,8 +521,9 @@ export async function listClosingIssues(
       } | null;
     } | null;
   };
-  const nodes = response.repository?.pullRequest?.closingIssuesReferences?.nodes ?? [];
-  return nodes
+  const refs = response.repository?.pullRequest?.closingIssuesReferences;
+  const nodes = refs?.nodes ?? [];
+  const issues = nodes
     .filter((node): node is NonNullable<typeof node> => Boolean(node))
     .filter(
       (node) =>
@@ -522,6 +532,7 @@ export async function listClosingIssues(
     )
     .slice(0, MAX_LINKED_ISSUES)
     .map((node) => ({ number: node.number, title: node.title, body: node.body ?? '' }));
+  return { issues, omitted: Math.max(0, (refs?.totalCount ?? nodes.length) - issues.length) };
 }
 
 async function listJbotReviewCommentState(

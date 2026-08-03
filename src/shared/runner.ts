@@ -925,10 +925,10 @@ async function runReviewPipeline(params: {
       }
     : await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
   if (telemetry.enabled && priorThreadOutcomes.length > 0) {
-    // rawFiles (pre noise-filter) answers "does the current diff still touch it".
-    const changedNow = new Set(rawFiles.map((file) => file.filename));
+    // rawFiles (pre noise-filter) is the full current PR diff membership set.
+    const inDiff = new Set(rawFiles.map((file) => file.filename));
     for (const outcome of priorThreadOutcomes) {
-      telemetry.recordOutcome({ ...outcome, fileChangedSince: changedNow.has(outcome.path) });
+      telemetry.recordOutcome({ ...outcome, fileInDiff: inDiff.has(outcome.path) });
     }
     log(`Outcome telemetry: recorded ${priorThreadOutcomes.length} prior finding thread(s).`);
   }
@@ -1127,8 +1127,8 @@ async function runReviewPipeline(params: {
     const commits = localDiff
       ? localDiff.commits
       : await listPrCommits(octokit, owner, repo, pullNumber);
-    const linkedIssues = localDiff
-      ? []
+    const { issues: linkedIssues, omitted: linkedIssuesOmitted } = localDiff
+      ? { issues: [], omitted: 0 }
       : await safeListClosingIssues(octokit, owner, repo, pullNumber, log);
     // Belt-and-braces: local mode never reaches GitHub for checks (the local
     // driver also passes no headSha, so the fallback text stays literally true).
@@ -1151,6 +1151,7 @@ async function runReviewPipeline(params: {
       guidelines: '',
       diffScope,
       linkedIssues,
+      linkedIssuesOmitted,
     });
     coreContext = `${coreContext}\n\n${summaryScopeBlock}`;
     coreContext = `${coreContext}\n\n${reviewFocusBlock}`;
@@ -3091,18 +3092,20 @@ async function safeListClosingIssues(
   repo: string,
   pullNumber: number,
   log: (msg: string) => void,
-): Promise<LinkedIssue[]> {
+): Promise<{ issues: LinkedIssue[]; omitted: number }> {
   try {
-    const issues = await listClosingIssues(octokit, owner, repo, pullNumber);
-    if (issues.length > 0) {
+    const result = await listClosingIssues(octokit, owner, repo, pullNumber);
+    if (result.issues.length > 0) {
       log(
-        `Linked issues for intent context: ${issues.map((issue) => `#${issue.number}`).join(', ')}.`,
+        `Linked issues for intent context: ${result.issues
+          .map((issue) => `#${issue.number}`)
+          .join(', ')}${result.omitted > 0 ? ` (+${result.omitted} not embedded)` : ''}.`,
       );
     }
-    return issues;
+    return result;
   } catch (error) {
     log(`Linked-issue lookup skipped: ${error instanceof Error ? error.message : String(error)}`);
-    return [];
+    return { issues: [], omitted: 0 };
   }
 }
 

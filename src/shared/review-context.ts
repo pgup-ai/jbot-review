@@ -329,6 +329,8 @@ export interface BuildReviewContextParams {
   guidelines: string;
   diffScope?: DiffScope;
   linkedIssues?: LinkedIssue[];
+  /** Closing issues the fetch dropped (cap, cross-repo) — disclosed in the block. */
+  linkedIssuesOmitted?: number;
 }
 
 // Issue bodies are author-controlled and unbounded like the PR body; all linked
@@ -336,36 +338,54 @@ export interface BuildReviewContextParams {
 export const MAX_LINKED_ISSUES_BYTES = 4 * 1024;
 const LINKED_ISSUE_TRUNCATION_NOTICE =
   '\n[Issue body truncated to keep the review prompt bounded.]';
+// Room held back for the trailing omission line so it always fits.
+const LINKED_ISSUE_OMISSION_RESERVE_BYTES = 96;
 
 /**
  * Data-only block (the instruction to review against it lives in prompt.ts).
- * Bodies are emitted in order until the shared budget runs out; every
- * truncation or omission is disclosed inline.
+ * Every emitted byte — headings, bodies, placeholders, notices, joiners —
+ * charges the shared budget, so the rendered block never exceeds
+ * MAX_LINKED_ISSUES_BYTES. `omittedCount` carries issues the fetch already
+ * dropped (cap, cross-repo); issues that don't fit here add to it, and one
+ * trailing line discloses the total.
  */
-export function formatLinkedIssues(issues: LinkedIssue[]): string {
+export function formatLinkedIssues(issues: LinkedIssue[], omittedCount = 0): string {
   if (issues.length === 0) return '';
-  const sections = ['## Linked issues\n\nGitHub records this PR as closing these issues.'];
-  let remaining = MAX_LINKED_ISSUES_BYTES;
+  const intro = '## Linked issues\n\nGitHub records this PR as closing these issues.';
+  const sections = [intro];
+  const cost = (section: string) => Buffer.byteLength(`\n\n${section}`, 'utf8');
+  let omitted = omittedCount;
+  let remaining =
+    MAX_LINKED_ISSUES_BYTES -
+    Buffer.byteLength(intro, 'utf8') -
+    LINKED_ISSUE_OMISSION_RESERVE_BYTES;
   for (const issue of issues) {
     const heading = `### #${issue.number}: ${issue.title || '(untitled)'}`;
     const body = issue.body.trim();
-    const bytes = Buffer.byteLength(body, 'utf8');
-    if (remaining <= 0) {
-      sections.push(`${heading}\n(body omitted: linked-issue budget reached)`);
-    } else if (bytes <= remaining) {
-      sections.push(`${heading}\n${body || '(no body)'}`);
-      remaining -= bytes;
-    } else {
-      const buffer = Buffer.from(body, 'utf8');
-      const budget = Math.max(
-        0,
-        remaining - Buffer.byteLength(LINKED_ISSUE_TRUNCATION_NOTICE, 'utf8'),
-      );
-      sections.push(
-        `${heading}\n${buffer.toString('utf8', 0, findUtf8Boundary(buffer, budget))}${LINKED_ISSUE_TRUNCATION_NOTICE}`,
-      );
-      remaining = 0;
+    const full = `${heading}\n${body || '(no body)'}`;
+    if (cost(full) <= remaining) {
+      sections.push(full);
+      remaining -= cost(full);
+      continue;
     }
+    const bodyBudget = remaining - cost(`${heading}\n${LINKED_ISSUE_TRUNCATION_NOTICE}`);
+    if (body && bodyBudget > 0) {
+      const buffer = Buffer.from(body, 'utf8');
+      const truncated = `${heading}\n${buffer.toString(
+        'utf8',
+        0,
+        findUtf8Boundary(buffer, bodyBudget),
+      )}${LINKED_ISSUE_TRUNCATION_NOTICE}`;
+      sections.push(truncated);
+      remaining -= cost(truncated);
+    } else {
+      omitted += 1;
+    }
+  }
+  if (omitted > 0) {
+    sections.push(
+      `(${omitted} closing issue(s) not shown: issue cap, cross-repo, or byte budget.)`,
+    );
   }
   return sections.join('\n\n');
 }
@@ -396,7 +416,10 @@ export function buildReviewContext(params: BuildReviewContextParams): string {
   if (diffScopeText) pullRequestLines.push(diffScopeText);
   sections.push(pullRequestLines.join('\n'));
 
-  const linkedIssuesBlock = formatLinkedIssues(params.linkedIssues ?? []);
+  const linkedIssuesBlock = formatLinkedIssues(
+    params.linkedIssues ?? [],
+    params.linkedIssuesOmitted ?? 0,
+  );
   if (linkedIssuesBlock) sections.push(linkedIssuesBlock);
 
   sections.push(
