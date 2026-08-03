@@ -9,7 +9,7 @@ import { clonePr } from './clone.ts';
 import { runPrReview } from '../shared/runner.ts';
 import { defaultModelOptions, type ProviderCredential } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
-import { pickAuxModel, pickPooledModel } from '../shared/model.ts';
+import { pickAuxModel, pickPooledModel, resolveAuxModel } from '../shared/model.ts';
 import { enqueue } from './queue.ts';
 
 export interface AppConfig {
@@ -17,8 +17,10 @@ export interface AppConfig {
   privateKey: string;
   /** Candidate models for this deployment; one is picked per PR head. */
   modelPool: string[];
-  /** Auxiliary-session candidates; empty means the main model. */
-  auxPool: string[];
+  /** Raw aux-model input; resolved per PR, since a bare id follows the pick. */
+  auxModelInput: string;
+  /** Legacy aux-provider pin, when one is configured. */
+  auxPinned?: string;
   /** Credential per provider either pool draws on, keyed by provider id. */
   credentials: Map<string, ProviderCredential>;
 }
@@ -97,7 +99,10 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
       const model = pickPooledModel(cfg.modelPool, pr.head.sha);
       const { providerID } = parseModelName(model);
       const { apiKey, baseURL } = cfg.credentials.get(providerID)!;
-      const auxModel = pickAuxModel(cfg.auxPool, pr.head.sha);
+      const auxModel = pickAuxModel(
+        resolveAuxModel(cfg.auxModelInput, providerID, cfg.auxPinned),
+        pr.head.sha,
+      );
       const auxProviderID = auxModel ? parseModelName(auxModel).providerID : providerID;
       const auxCredential =
         auxProviderID === providerID ? undefined : cfg.credentials.get(auxProviderID);

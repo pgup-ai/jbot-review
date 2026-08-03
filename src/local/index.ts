@@ -286,22 +286,19 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   // the model names have to come first because they decide whether this run
   // routes to the gateway, which is what the diff's right side depends on.
   const pool = resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
-  const auxPool = resolveAuxModel(
-    process.env.JBOT_REVIEW_AUX_MODEL,
-    parseModelName(pool[0]).providerID,
-    process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
-  );
-  const credentials = resolvePoolCredentials(
-    [...pool, ...auxPool],
-    ({ env }: { env: string }) => process.env[env],
-    ' Local review needs only the provider configuration — no GitHub token; set it in the environment or in .env.',
-  );
   // HEAD, not the worktree: iterating on uncommitted edits keeps the same
   // reviewer, so a before/after comparison is not confounded by the pick.
   const headSha = (await git(['rev-parse', 'HEAD'])).trim();
   const model = pickPooledModel(pool, headSha);
-  const auxModel = pickAuxModel(auxPool, headSha);
   const provider = parseModelName(model).providerID;
+  // After the pick: a pool may span providers, so an aux id naming none
+  // belongs to the model this run actually chose, not to the pool's first.
+  const auxPool = resolveAuxModel(
+    process.env.JBOT_REVIEW_AUX_MODEL,
+    provider,
+    process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
+  );
+  const auxModel = pickAuxModel(auxPool, headSha);
   const auxProviderID = auxModel ? parseModelName(auxModel).providerID : provider;
   for (const warning of swallowedProviderWarnings([...pool, ...auxPool])) log(warning);
 
@@ -460,6 +457,11 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     return;
   }
 
+  const credentials = resolvePoolCredentials(
+    [model, ...(auxModel ? [auxModel] : [])],
+    ({ env }: { env: string }) => process.env[env],
+    ' Local review needs only the provider configuration — no GitHub token; set it in the environment or in .env.',
+  );
   const { apiKey, baseURL } = credentials.get(provider)!;
   const auxCredential = auxProviderID === provider ? undefined : credentials.get(auxProviderID);
   const auxApiKey = auxCredential?.apiKey;

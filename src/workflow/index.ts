@@ -30,12 +30,17 @@ async function main(): Promise<void> {
     getInputOrEnv('model', 'JBOT_REVIEW_MODEL'),
     providerInput,
   );
-  const auxPool = resolveAuxModel(
-    getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL'),
+  const auxModelInput = getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL');
+  const auxPinned = getInputOrEnv('aux-provider', 'JBOT_AUX_PROVIDER') || providerInput;
+  // Probe only to learn which providers need a key. A qualified or pinned aux
+  // ref names its own provider regardless of the pick; a bare one lands on the
+  // picked model's provider, which the main pool already covers either way.
+  const auxProbe = resolveAuxModel(
+    auxModelInput,
     parseModelName(modelPool[0]).providerID,
-    getInputOrEnv('aux-provider', 'JBOT_AUX_PROVIDER') || providerInput,
+    auxPinned,
   );
-  const credentials = resolvePoolCredentials([...modelPool, ...auxPool], ({ input, env }) =>
+  const credentials = resolvePoolCredentials([...modelPool, ...auxProbe], ({ input, env }) =>
     getInputOrEnv(input, env),
   );
   const options = {
@@ -64,12 +69,12 @@ async function main(): Promise<void> {
     shardCachePath: process.env.JBOT_SHARD_CACHE_DIR?.trim() ?? '',
   };
   const pullTarget = getPullRequestTarget();
-  for (const warning of swallowedProviderWarnings([...modelPool, ...auxPool])) {
+  for (const warning of swallowedProviderWarnings([...modelPool, ...auxProbe])) {
     core.warning(warning);
   }
   core.info(`Model: ${modelPool.join(', ')}`);
   core.info(
-    `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxPool.join(', ') || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,
+    `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModelInput || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,
   );
 
   const octokit = github.getOctokit(token) as unknown as Octokit;
@@ -87,11 +92,15 @@ async function main(): Promise<void> {
 
     const model = pickPooledModel(modelPool, pull.head.sha);
     if (modelPool.length > 1) core.info(`Model pool of ${modelPool.length}: picked ${model}`);
-    const auxModel = pickAuxModel(auxPool, pull.head.sha);
-    if (auxPool.length > 1) core.info(`Aux model pool of ${auxPool.length}: picked ${auxModel}`);
-    // The pick decides the provider, so its credential is only known here.
+    // The pick decides the provider, so both its credential and the provider a
+    // bare aux ref belongs to are only known here.
     const { providerID } = parseModelName(model);
     const { apiKey, baseURL } = credentials.get(providerID)!;
+    const auxPool = resolveAuxModel(auxModelInput, providerID, auxPinned);
+    const auxModel = pickAuxModel(auxPool, pull.head.sha);
+    if (auxPool.length > 1) core.info(`Aux model pool of ${auxPool.length}: picked ${auxModel}`);
+    const modelOptions = parseJsonObjectInput('model-options', defaultModelOptions(providerID));
+    core.info(`Model options: ${JSON.stringify(modelOptions)}`);
     const auxProviderID = auxModel ? parseModelName(auxModel).providerID : providerID;
     const auxCredential = auxProviderID === providerID ? undefined : credentials.get(auxProviderID);
 
@@ -116,7 +125,7 @@ async function main(): Promise<void> {
         auxModel,
         auxApiKey: auxCredential?.apiKey ?? '',
         auxBaseURL: auxCredential?.baseURL,
-        modelOptions: parseJsonObjectInput('model-options', defaultModelOptions(providerID)),
+        modelOptions,
         onReviewResult: (result) => {
           findingCount = result.findings.length;
         },

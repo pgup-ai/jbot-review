@@ -77,7 +77,11 @@ import {
   isDocOnlyChange,
   shardFilesForReview,
 } from './diff-context.ts';
-import { needsAuxOpencodeConfig, resolvePromptCachePolicy } from './config.ts';
+import {
+  defaultAuxModelOptions,
+  needsAuxOpencodeConfig,
+  resolvePromptCachePolicy,
+} from './config.ts';
 import { parseModelName } from '@symma/protocol';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -1453,10 +1457,15 @@ async function runReviewPipeline(params: {
   // different vendor's endpoint (and fail auth there anyway).
   const auxNeedsOwnKey =
     auxProviderID !== providerID && ((mainOnPi && auxOnPi) || (mainOnOpencode && auxOnOpencode));
+  // A same-provider aux model on a non-custom provider needs no entry of its
+  // own except to carry its lower reasoning effort, which is scoped per model.
+  const auxModelOptions =
+    auxModelID === modelID ? undefined : defaultAuxModelOptions(auxProviderID);
   const auxNeedsOpencodeConfig =
     mainOnOpencode &&
     auxOnOpencode &&
-    needsAuxOpencodeConfig(providerID, modelID, auxProviderID, auxModelID);
+    (needsAuxOpencodeConfig(providerID, modelID, auxProviderID, auxModelID) ||
+      Boolean(auxModelOptions && Object.keys(auxModelOptions).length > 0));
   if (auxNeedsOwnKey && !options.auxApiKey) {
     cleanupCliHomes();
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
@@ -1533,6 +1542,7 @@ async function runReviewPipeline(params: {
                   modelID: auxModelID,
                   baseURL: auxNeedsOwnKey ? options.auxBaseURL : baseURL,
                   promptCache: promptCachePolicy.auxProviderPromptCache,
+                  ...(auxModelOptions ? { modelOptions: auxModelOptions } : {}),
                 },
               ]
             : undefined,

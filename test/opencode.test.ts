@@ -138,3 +138,34 @@ describe('buildConfig bash permissions', () => {
     }
   });
 });
+
+describe('aux model options', () => {
+  it('scopes a lower reasoning effort to the aux model alone', () => {
+    // Same provider, different models: the aux entry exists only to carry its
+    // own options, since the provider entry has no model-level scope for it.
+    const config = buildConfig('opencode', 'main-model', 'k', { reasoningEffort: 'medium' }, true, [
+      {
+        providerID: 'opencode',
+        apiKey: 'k',
+        modelID: 'aux-model',
+        modelOptions: { reasoningEffort: 'low' },
+      },
+    ]);
+    const models = (config as { provider: Record<string, { models: Record<string, unknown> }> })
+      .provider.opencode.models;
+
+    assert.deepEqual(models, {
+      'main-model': { options: { reasoningEffort: 'medium' } },
+      'aux-model': { options: { reasoningEffort: 'low' } },
+    });
+  });
+
+  it('adds no entry for a same-provider aux model with nothing of its own', () => {
+    const config = buildConfig('opencode', 'main-model', 'k', undefined, true, [
+      { providerID: 'opencode', apiKey: 'k', modelID: 'aux-model' },
+    ]);
+    const entry = (config as { provider: Record<string, { models?: unknown }> }).provider.opencode;
+
+    assert.equal(entry.models, undefined);
+  });
+});

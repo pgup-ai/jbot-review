@@ -97,10 +97,25 @@ export function providerConfig(providerID: string, source?: string): ProviderCon
   return config;
 }
 
-export function defaultModelOptions(providerID: string): Record<string, unknown> {
-  // Arbitrary custom endpoints may reject provider-specific options.
+function reasoningOptions(providerID: string, effort: string): Record<string, unknown> {
+  // Poolside manages reasoning itself, and arbitrary custom endpoints may
+  // reject provider-specific options.
   if (providerID === 'poolside') return { reasoningEffort: 'default' };
-  return PROVIDERS[providerID]?.custom ? {} : { reasoningEffort: 'medium' };
+  return PROVIDERS[providerID]?.custom ? {} : { reasoningEffort: effort };
+}
+
+export function defaultModelOptions(providerID: string): Record<string, unknown> {
+  return reasoningOptions(providerID, 'medium');
+}
+
+/**
+ * Auxiliary sessions are recall supplements that land on the run's tail, and
+ * these models spend most of their output budget reasoning — one lens was
+ * observed emitting 15,762 reasoning tokens and 53 of content, producing
+ * nothing while costing minutes. They get a lower effort than the deep pass.
+ */
+export function defaultAuxModelOptions(providerID: string): Record<string, unknown> {
+  return reasoningOptions(providerID, 'low');
 }
 
 export function needsAuxOpencodeConfig(

@@ -1031,6 +1031,19 @@ describe('swallowedProviderWarnings', () => {
     assert.match(warning, /Drop provider\/aux-provider/);
   });
 
+  it('flags a slashless CLI-backend id too', () => {
+    // `provider: opencode` + `model: devin` resolves to `opencode/devin`, which
+    // fails the same way as the nested form.
+    const [warning] = swallowedProviderWarnings(['opencode/devin']);
+    assert.match(warning, /"opencode\/devin" sends model id "devin" to provider "opencode"/);
+  });
+
+  it('stays quiet when the provider is itself a CLI backend', () => {
+    // devin/codex is a real model, and kilo routes zai/… on purpose — the tool
+    // named in the id is where the run is already going, so nothing was swallowed.
+    assert.deepEqual(swallowedProviderWarnings(['devin/codex', 'kilo/zai/glm-5.2']), []);
+  });
+
   it('stays quiet for vendor prefixes, which are legitimate catalog ids', () => {
     // Only CLI-backend ids name a tool rather than a vendor. OpenRouter's own
     // default is openrouter/openai/gpt-4o-mini, and nvidia publishes under a

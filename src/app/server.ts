@@ -15,15 +15,15 @@ function mustEnv(name: string): string {
 }
 
 const modelPool = resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
-const auxPool = resolveAuxModel(
-  process.env.JBOT_REVIEW_AUX_MODEL,
-  parseModelName(modelPool[0]).providerID,
-  process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
-);
+const auxModelInput = process.env.JBOT_REVIEW_AUX_MODEL ?? '';
+const auxPinned = process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER;
+// Probe only to learn which providers need a key: a bare aux ref belongs to
+// whichever model a PR picks, and those providers come from the main pool.
+const auxProbe = resolveAuxModel(auxModelInput, parseModelName(modelPool[0]).providerID, auxPinned);
 // Resolved at boot: the deployment picks per PR, so a missing key must fail
 // here rather than on whichever PR happens to draw that provider.
 const credentials = resolvePoolCredentials(
-  [...modelPool, ...auxPool],
+  [...modelPool, ...auxProbe],
   ({ env }: { env: string }) => process.env[env],
 );
 
@@ -32,10 +32,11 @@ const appCfg: AppConfig = {
   privateKey: mustEnv('GITHUB_APP_PRIVATE_KEY').replace(/\\n/g, '\n'),
   credentials,
   modelPool,
-  auxPool,
+  auxModelInput,
+  ...(auxPinned ? { auxPinned } : {}),
 };
 
-for (const warning of swallowedProviderWarnings([...modelPool, ...auxPool])) {
+for (const warning of swallowedProviderWarnings([...modelPool, ...auxProbe])) {
   console.warn(`[jbot-review] ${warning}`);
 }
 
