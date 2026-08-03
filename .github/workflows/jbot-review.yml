@@ -10,11 +10,11 @@ on:
         description: Pull request number to review
         required: true
       provider:
-        description: 'Deprecated — name the provider in model instead. Pins the provider when set.'
+        description: 'Deprecated — name the provider in model instead. Pins both models when set.'
         required: false
         default: ''
       model:
-        description: 'Model as provider/model, or a comma-separated pool naming one provider. Uses the opencode default if unset; required for openai-compatible.'
+        description: 'Model as provider/model, or a comma-separated pool naming one provider. Uses the provider default if unset (opencode when nothing names one); required for openai-compatible.'
         required: false
         default: ''
       dry-run:
