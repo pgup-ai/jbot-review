@@ -457,8 +457,11 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     return;
   }
 
+  // The whole pool, not just the picked pair: a missing key must fail the next
+  // run rather than only the runs that happen to draw that provider. Still
+  // below the no-review exits, so a clean tree needs no key at all.
   const credentials = resolvePoolCredentials(
-    [model, ...(auxModel ? [auxModel] : [])],
+    [...pool, ...auxPool],
     ({ env }: { env: string }) => process.env[env],
     ' Local review needs only the provider configuration — no GitHub token; set it in the environment or in .env.',
   );

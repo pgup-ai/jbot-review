@@ -155,7 +155,7 @@ inputs:
     required: false
     default: 'true'
   aux-model:
-    description: 'Model for auxiliary sessions (addressed-thread check, guideline compliance, finding verification), as provider/model, or a comma-separated pool picked per PR head sha; pool candidates may name different providers. An id that names no provider belongs to aux-provider when set, else to the deprecated provider pin when that is set, else to the main model this run picked. Uses the main model when unset.'
+    description: 'Model for auxiliary sessions (recall lens passes, addressed-thread check, guideline compliance, finding verification), as provider/model, or a comma-separated pool picked per PR head sha; pool candidates may name different providers. An id that names no provider belongs to aux-provider when set, else to the deprecated provider pin when that is set, else to the main model this run picked. Uses the main model when unset.'
     required: false
     default: ''
   aux-provider:
