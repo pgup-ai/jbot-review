@@ -755,4 +755,13 @@ describe('settleWithinGrace', () => {
     const done = Promise.resolve(['kept']);
     assert.deepEqual(await settleWithinGrace(session(done, true), [], () => {}, 0), ['kept']);
   });
+
+  it('falls back for a session that already rejected, rather than aborting the run', async () => {
+    // Callers await these under Promise.all, so a propagated rejection would
+    // fail the whole review over fail-open work (invariant #3).
+    const failed = Promise.reject(new Error('boom'));
+    failed.catch(() => {});
+
+    assert.deepEqual(await settleWithinGrace(session(failed, true), [], () => {}), []);
+  });
 });

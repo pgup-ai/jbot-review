@@ -138,9 +138,8 @@ describe('resolveAuxModel', () => {
     assert.deepEqual(resolveAuxModel('gpt-5.4-mini', 'openai'), ['openai/gpt-5.4-mini']);
   });
 
-  it('reports the main provider when no aux model is set', () => {
-    // Callers compare this against the main provider to decide whether the aux
-    // sessions need their own credential.
+  it('returns an empty pool when no aux model is set', () => {
+    // An empty pool means the aux sessions reuse the main model and its credential.
     assert.deepEqual(resolveAuxModel(undefined, 'openai'), []);
     assert.deepEqual(resolveAuxModel('  ', 'openai'), []);
   });

@@ -1532,7 +1532,9 @@ async function runReviewPipeline(params: {
         opencodeApiKey,
         log,
         {
-          modelOptions: mainOnOpencode ? options.modelOptions : undefined,
+          // Symmetric to the pi runtime below: when main is not on opencode the
+          // root model IS the aux model, so it carries the aux options.
+          modelOptions: mainOnOpencode ? options.modelOptions : auxModelOptions,
           baseURL: mainOnOpencode ? baseURL : options.auxBaseURL,
           promptCache: mainOnOpencode
             ? promptCachePolicy.providerPromptCache
@@ -2617,7 +2619,10 @@ const AUXILIARY_SETTLE_GRACE_MS = 120_000;
 
 /**
  * Resolves to the session's value, or to `fallback` if it has not settled
- * within the grace. Abandoning the wait does not cancel the session; the
+ * within the grace. Never rejects: aux work fails open (invariant #3), so a
+ * session that already failed yields the fallback just like one that runs out
+ * of grace — otherwise a settled rejection would abort the run through the
+ * caller's Promise.all. Abandoning the wait does not cancel the session; the
  * pipeline's teardown stops the runtime, which ends it.
  */
 export function settleWithinGrace<T>(
@@ -2626,7 +2631,7 @@ export function settleWithinGrace<T>(
   log: (msg: string) => void,
   graceMs = AUXILIARY_SETTLE_GRACE_MS,
 ): Promise<T> {
-  if (session.isSettled() || graceMs <= 0) return session.promise;
+  if (session.isSettled()) return session.promise.catch(() => fallback);
   return new Promise<T>((resolve) => {
     const timer = setTimeout(() => {
       log(
