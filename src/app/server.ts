@@ -23,7 +23,7 @@ const { providerID: provider, pool: modelPool } = resolveModelSelection(
 );
 const cfg = providerConfig(provider);
 
-const { model: auxModel, providerID: auxProviderID } = resolveAuxModel(
+const { pool: auxPool, providerID: auxProviderID } = resolveAuxModel(
   process.env.JBOT_REVIEW_AUX_MODEL,
   provider,
   process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
@@ -51,7 +51,7 @@ const appCfg: AppConfig = {
   apiKey,
   modelPool,
   ...(baseURL ? { baseURL } : {}),
-  auxModel,
+  auxPool,
   ...(auxApiKey ? { auxApiKey } : {}),
   ...(auxBaseURL ? { auxBaseURL } : {}),
 };

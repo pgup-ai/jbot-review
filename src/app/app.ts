@@ -9,7 +9,7 @@ import { clonePr } from './clone.ts';
 import { runPrReview } from '../shared/runner.ts';
 import { defaultModelOptions } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
-import { pickPooledModel } from '../shared/model.ts';
+import { pickAuxModel, pickPooledModel } from '../shared/model.ts';
 import { enqueue } from './queue.ts';
 
 export interface AppConfig {
@@ -19,8 +19,8 @@ export interface AppConfig {
   /** Candidate models for this deployment; one is picked per PR head. */
   modelPool: string[];
   baseURL?: string;
-  /** Canonical `provider/model` for auxiliary sessions; empty means the main model. */
-  auxModel: string;
+  /** Auxiliary-session candidates; empty means the main model. */
+  auxPool: string[];
   auxApiKey?: string;
   auxBaseURL?: string;
 }
@@ -124,7 +124,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           scrubSessionEnv: false,
           reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 1),
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
-          auxModel: cfg.auxModel,
+          auxModel: pickAuxModel(cfg.auxPool, pr.head.sha),
           ...(cfg.auxApiKey ? { auxApiKey: cfg.auxApiKey } : {}),
           ...(cfg.auxBaseURL ? { auxBaseURL: cfg.auxBaseURL } : {}),
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),

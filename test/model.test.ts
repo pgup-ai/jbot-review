@@ -7,7 +7,12 @@ import {
   resolvePromptCachePolicy,
 } from '../src/shared/config.ts';
 import { parseModelName } from '@symma/protocol';
-import { pickPooledModel, resolveAuxModel, resolveModelSelection } from '../src/shared/model.ts';
+import {
+  pickAuxModel,
+  pickPooledModel,
+  resolveAuxModel,
+  resolveModelSelection,
+} from '../src/shared/model.ts';
 
 describe('parseModelName', () => {
   it('keeps the first segment as provider and the remaining path as model id', () => {
@@ -145,7 +150,7 @@ describe('pickPooledModel', () => {
 describe('resolveAuxModel', () => {
   it('keeps an unqualified aux model on the main provider', () => {
     assert.deepEqual(resolveAuxModel('gpt-5.4-mini', 'openai'), {
-      model: 'openai/gpt-5.4-mini',
+      pool: ['openai/gpt-5.4-mini'],
       providerID: 'openai',
     });
   });
@@ -153,16 +158,27 @@ describe('resolveAuxModel', () => {
   it('reports the main provider when no aux model is set', () => {
     // Callers compare this against the main provider to decide whether the aux
     // sessions need their own credential.
-    assert.deepEqual(resolveAuxModel(undefined, 'openai'), { model: '', providerID: 'openai' });
-    assert.deepEqual(resolveAuxModel('  ', 'openai'), { model: '', providerID: 'openai' });
+    assert.deepEqual(resolveAuxModel(undefined, 'openai'), { pool: [], providerID: 'openai' });
+    assert.deepEqual(resolveAuxModel('  ', 'openai'), { pool: [], providerID: 'openai' });
   });
 
   it('routes a qualified aux model to the provider it names', () => {
     assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'openai'), {
-      model: 'google/gemini-2.5-flash',
+      pool: ['google/gemini-2.5-flash'],
       providerID: 'google',
     });
     assert.throws(() => resolveAuxModel('nope/m', 'openai'), /Unknown provider "nope"/);
+  });
+
+  it('accepts a pool on the same terms as the main model', () => {
+    assert.deepEqual(resolveAuxModel('opencode/a, opencode/b', 'openai'), {
+      pool: ['opencode/a', 'opencode/b'],
+      providerID: 'opencode',
+    });
+    assert.throws(
+      () => resolveAuxModel('opencode/a, devin/b', 'openai'),
+      /aux-model pool mixes providers/,
+    );
   });
 
   it('lets a legacy aux provider pin the model as before', () => {
@@ -170,18 +186,37 @@ describe('resolveAuxModel', () => {
     // main provider — so a legacy pin must still swallow a qualified ref rather
     // than let it route itself. Entries pass `aux-provider || provider` here.
     assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'openai', 'openrouter'), {
-      model: 'openrouter/google/gemini-2.5-flash',
+      pool: ['openrouter/google/gemini-2.5-flash'],
       providerID: 'openrouter',
     });
     assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'opencode', 'opencode'), {
-      model: 'opencode/google/gemini-2.5-flash',
+      pool: ['opencode/google/gemini-2.5-flash'],
       providerID: 'opencode',
     });
     assert.throws(() => resolveAuxModel('a', 'openai', 'nope'), /Unknown provider "nope"/);
   });
 
-  it('rejects a pool handed to the single-model aux input', () => {
-    assert.throws(() => resolveAuxModel('a, b', 'opencode'), /one model id, not a list/);
+  it('names the input in errors so the failing field is obvious', () => {
+    assert.throws(() => resolveModelSelection('/x'), /Invalid model "\/x"/);
+    assert.throws(() => resolveAuxModel('/x', 'opencode'), /Invalid aux-model "\/x"/);
+    assert.throws(() => resolveModelSelection('a/b, c/d'), /The model pool mixes providers/);
+    // The pinned branch has its own throw, and had kept the main-model label.
+    assert.throws(() => resolveAuxModel('opencode/', 'opencode', 'opencode'), /Invalid aux-model/);
+  });
+});
+
+describe('pickAuxModel', () => {
+  it('picks reproducibly and independently of the main pool', () => {
+    const pool = ['opencode/a', 'opencode/b', 'opencode/c'];
+    const seed = 'e3f0c1a9b7d24e6f8a0b1c2d3e4f5a6b7c8d9e0f';
+
+    assert.equal(pickAuxModel(pool, seed), pickAuxModel(pool, seed));
+    assert.equal(pickAuxModel([], seed), '');
+    // Salted, so an identical aux pool is not locked to the main pool's index.
+    const decoupled = Array.from({ length: 40 }, (_, i) => `${seed}${i}`).some(
+      (s) => pickAuxModel(pool, s) !== pickPooledModel(pool, s),
+    );
+    assert.ok(decoupled);
   });
 });
 

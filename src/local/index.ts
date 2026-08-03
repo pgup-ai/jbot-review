@@ -33,7 +33,12 @@ import { isNoiseFile } from '../shared/filter.ts';
 import { observerEnabled, setRunName } from '../shared/observer.ts';
 import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID, parseModelName } from '@symma/protocol';
-import { pickPooledModel, resolveAuxModel, resolveModelSelection } from '../shared/model.ts';
+import {
+  pickAuxModel,
+  pickPooledModel,
+  resolveAuxModel,
+  resolveModelSelection,
+} from '../shared/model.ts';
 import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import {
@@ -292,12 +297,14 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   const providerCfg = providerConfig(provider);
   // HEAD, not the worktree: iterating on uncommitted edits keeps the same
   // reviewer, so a before/after comparison is not confounded by the pick.
-  const model = pickPooledModel(pool, (await git(['rev-parse', 'HEAD'])).trim());
-  const { model: auxModel, providerID: auxProviderID } = resolveAuxModel(
+  const headSha = (await git(['rev-parse', 'HEAD'])).trim();
+  const model = pickPooledModel(pool, headSha);
+  const { pool: auxPool, providerID: auxProviderID } = resolveAuxModel(
     process.env.JBOT_REVIEW_AUX_MODEL,
     provider,
     process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
   );
+  const auxModel = pickAuxModel(auxPool, headSha);
   const auxCfg = auxProviderID !== provider ? providerConfig(auxProviderID) : undefined;
 
   // Preview never spawns checkouts or sessions: it inspects the worktree diff
