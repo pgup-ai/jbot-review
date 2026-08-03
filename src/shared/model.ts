@@ -11,6 +11,8 @@ interface ProviderResolution {
   pinned?: string;
   /** Provider for a ref that carries no provider segment. */
   fallback: string;
+  /** Input this came from, so an error points at the field to fix. */
+  label: 'model' | 'aux-model';
 }
 
 /**
@@ -19,22 +21,20 @@ interface ProviderResolution {
  * `kilo/zai/glm-5.2` and `devin/glm-5.2` stay distinct routes to what may be
  * the same underlying model.
  */
-function parseModelRef(model: string, { pinned, fallback }: ProviderResolution): ParsedModel {
+function parseModelRef(
+  model: string,
+  { pinned, fallback, label }: ProviderResolution,
+): ParsedModel {
   const trimmed = model.trim();
-  // resolveModelSelection splits before it gets here, so a comma at this point
-  // is a pool handed to a single-model input — aux-model being the likely one.
-  if (trimmed.includes(',')) {
-    throw new Error(`Invalid model "${model}"; expected one model id, not a list.`);
-  }
   // Ahead of the split: a pinned provider would otherwise absorb a leading
   // slash into the model id as `provider//id` instead of rejecting it.
   if (!trimmed || trimmed.startsWith('/')) {
-    throw new Error(`Invalid model "${model}"; expected a non-empty model id.`);
+    throw new Error(`Invalid ${label} "${model}"; expected a non-empty model id.`);
   }
 
   if (pinned) {
     const modelID = trimmed.startsWith(`${pinned}/`) ? trimmed.slice(pinned.length + 1) : trimmed;
-    if (!modelID) throw new Error(`Invalid model "${model}"; expected a non-empty model id.`);
+    if (!modelID) throw new Error(`Invalid ${label} "${model}"; expected a non-empty model id.`);
     return { providerID: pinned, modelID };
   }
   // Derived refs go through the protocol parser, so this boundary and every
@@ -51,22 +51,17 @@ interface ModelSelection {
 }
 
 /**
- * Resolves the main review pool and the provider serving it. `pinnedProviderID`
- * is the legacy provider input: when set it pins every candidate, otherwise the
- * provider comes from the refs, which must therefore agree on one. Every
- * candidate is resolved up front so a typo in a pool fails the next run
- * outright instead of only the runs that happen to pick it.
+ * Every candidate is resolved up front so a typo fails the next run outright
+ * instead of only the runs that happen to pick it.
  */
-export function resolveModelSelection(models?: string, pinnedProviderID?: string): ModelSelection {
-  const pinned = pinnedProviderID?.trim();
-  const input = models?.trim() || defaultModelOf(pinned || DEFAULT_PROVIDER_ID);
-
+function resolveSelection(input: string, resolution: ProviderResolution): ModelSelection {
+  const { pinned, label } = resolution;
   const pool = input
     .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean)
-    .map((entry) => parseModelRef(entry, { pinned, fallback: DEFAULT_PROVIDER_ID }));
-  if (!pool.length) throw new Error(`Invalid model "${input}"; expected at least one model.`);
+    .map((entry) => parseModelRef(entry, resolution));
+  if (!pool.length) throw new Error(`Invalid ${label} "${input}"; expected at least one model.`);
 
   const [first] = pool;
   const mixed = pool.find((entry) => entry.providerID !== first.providerID);
@@ -74,14 +69,25 @@ export function resolveModelSelection(models?: string, pinnedProviderID?: string
     // Resolved names, not bare ids: only they show a fallback provider the user
     // never wrote.
     throw new Error(
-      `Model pool mixes providers: "${formatModelName(first)}" and "${formatModelName(mixed)}". ` +
-        'Every pooled model must name the same provider.',
+      `The ${label} pool mixes providers: "${formatModelName(first)}" and ` +
+        `"${formatModelName(mixed)}". Every pooled model must name the same provider.`,
     );
   }
   // A pinned provider was named outright, so only a derived one cites its model.
   providerConfig(first.providerID, pinned ? undefined : formatModelName(first));
 
   return { providerID: first.providerID, pool: pool.map(formatModelName) };
+}
+
+/**
+ * Resolves the main review pool and the provider serving it. `pinnedProviderID`
+ * is the legacy provider input: when set it pins every candidate, otherwise the
+ * provider comes from the refs, which must therefore agree on one.
+ */
+export function resolveModelSelection(models?: string, pinnedProviderID?: string): ModelSelection {
+  const pinned = pinnedProviderID?.trim();
+  const input = models?.trim() || defaultModelOf(pinned || DEFAULT_PROVIDER_ID);
+  return resolveSelection(input, { pinned, fallback: DEFAULT_PROVIDER_ID, label: 'model' });
 }
 
 function defaultModelOf(providerID: string): string {
@@ -103,27 +109,33 @@ export function pickPooledModel(pool: string[], seed: string): string {
 }
 
 /**
- * Resolves the auxiliary model. `pinnedProviderID` is the legacy aux-provider
- * input, falling back to the legacy main provider input — either one pins the
- * aux model, because the old resolver always pinned it (to aux-provider, else
- * the main provider) and never derived. With neither set an unqualified ref
- * stays on the main provider and a qualified one names its own. An absent aux
- * model reports the main provider, so callers can compare the two to decide
- * whether separate credentials apply.
+ * `pinnedProviderID` is the legacy aux-provider input, falling back to the
+ * legacy main provider input — either pins the aux model, because the old
+ * resolver always pinned it (to aux-provider, else the main provider) and never
+ * derived. An empty pool means "use the main model" and still reports the main
+ * provider, so callers can compare the two to decide whether separate
+ * credentials apply.
  */
 export function resolveAuxModel(
   auxModel: string | undefined,
   mainProviderID: string,
   pinnedProviderID?: string,
-): { model: string; providerID: string } {
+): ModelSelection {
   const input = auxModel?.trim();
-  if (!input) return { model: '', providerID: mainProviderID };
-  const pinned = pinnedProviderID?.trim();
+  if (!input) return { providerID: mainProviderID, pool: [] };
+  return resolveSelection(input, {
+    pinned: pinnedProviderID?.trim(),
+    fallback: mainProviderID,
+    label: 'aux-model',
+  });
+}
 
-  const parsed = parseModelRef(input, { pinned, fallback: mainProviderID });
-  const model = formatModelName(parsed);
-  providerConfig(parsed.providerID, pinned ? undefined : model);
-  return { model, providerID: parsed.providerID };
+/**
+ * Salted so an aux pool is not index-locked to the main one: on the raw seed,
+ * equal-length pools would always pair the same two entries.
+ */
+export function pickAuxModel(pool: string[], seed: string): string {
+  return pool.length ? pickPooledModel(pool, `aux:${seed}`) : '';
 }
 
 function formatModelName(model: ParsedModel): string {

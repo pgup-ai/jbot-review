@@ -9,7 +9,12 @@ import {
   resolveProviderCredential,
 } from '../shared/config.ts';
 import { parseContext7Mode } from '../shared/context7.ts';
-import { pickPooledModel, resolveAuxModel, resolveModelSelection } from '../shared/model.ts';
+import {
+  pickAuxModel,
+  pickPooledModel,
+  resolveAuxModel,
+  resolveModelSelection,
+} from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { Octokit } from '../shared/github.ts';
 import { VALID_SEVERITIES, type Severity } from '../shared/types.ts';
@@ -41,7 +46,7 @@ async function main(): Promise<void> {
   const baseURL = resolveProviderBaseURL(provider, cfg, ({ input, env }) =>
     getInputOrEnv(input, env),
   );
-  const { model: auxModel, providerID: auxProviderID } = resolveAuxModel(
+  const { pool: auxPool, providerID: auxProviderID } = resolveAuxModel(
     getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL'),
     provider,
     getInputOrEnv('aux-provider', 'JBOT_AUX_PROVIDER') || providerInput,
@@ -64,7 +69,6 @@ async function main(): Promise<void> {
     context7Mode: parseContext7Mode(core.getInput('enable-context7')),
     context7ApiKey: getInputOrEnv('context7-api-key', 'CONTEXT7_API_KEY'),
     guidelinePass: parseBooleanInput('enable-guideline-pass', true),
-    auxModel,
     auxApiKey,
     auxBaseURL,
     reviewPasses: parseNumberInput('review-passes', 1),
@@ -85,7 +89,7 @@ async function main(): Promise<void> {
   const pullTarget = getPullRequestTarget();
   core.info(`Provider: ${provider}  Model: ${modelPool.join(', ')}`);
   core.info(
-    `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModel || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} modelOptions=${JSON.stringify(options.modelOptions)} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,
+    `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxPool.join(', ') || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} modelOptions=${JSON.stringify(options.modelOptions)} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,
   );
 
   const octokit = github.getOctokit(token) as unknown as Octokit;
@@ -103,6 +107,8 @@ async function main(): Promise<void> {
 
     const model = pickPooledModel(modelPool, pull.head.sha);
     if (modelPool.length > 1) core.info(`Model pool of ${modelPool.length}: picked ${model}`);
+    const auxModel = pickAuxModel(auxPool, pull.head.sha);
+    if (auxPool.length > 1) core.info(`Aux model pool of ${auxPool.length}: picked ${auxModel}`);
 
     let findingCount: number | undefined;
     await runPrReview({
@@ -122,6 +128,7 @@ async function main(): Promise<void> {
       threadResolutionOctokit,
       options: {
         ...options,
+        auxModel,
         onReviewResult: (result) => {
           findingCount = result.findings.length;
         },
