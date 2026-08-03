@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 
-import { defaultModelOptions, resolveRunnablePools } from '../shared/config.ts';
+import { defaultModelOptions, resolvePoolCredentials } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 
 import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
@@ -26,23 +26,17 @@ async function main(): Promise<void> {
   const providerInput = getInputOrEnv('provider', 'JBOT_REVIEW_PROVIDER');
   // Resolved before the PR lookup so a bad pool fails without spending an API
   // call; the pick needs the head sha, so it waits until that is known.
-  const configuredPool = resolveModelSelection(
+  const modelPool = resolveModelSelection(
     getInputOrEnv('model', 'JBOT_REVIEW_MODEL'),
     providerInput,
   );
-  const {
-    pool: modelPool,
-    auxPool,
-    credentials,
-    dropped,
-  } = resolveRunnablePools(
-    configuredPool,
-    resolveAuxModel(
-      getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL'),
-      parseModelName(configuredPool[0]).providerID,
-      getInputOrEnv('aux-provider', 'JBOT_AUX_PROVIDER') || providerInput,
-    ),
-    ({ input, env }) => getInputOrEnv(input, env),
+  const auxPool = resolveAuxModel(
+    getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL'),
+    parseModelName(modelPool[0]).providerID,
+    getInputOrEnv('aux-provider', 'JBOT_AUX_PROVIDER') || providerInput,
+  );
+  const credentials = resolvePoolCredentials([...modelPool, ...auxPool], ({ input, env }) =>
+    getInputOrEnv(input, env),
   );
   const options = {
     enhancedContext: true,
@@ -73,7 +67,6 @@ async function main(): Promise<void> {
   for (const warning of swallowedProviderWarnings([...modelPool, ...auxPool])) {
     core.warning(warning);
   }
-  if (dropped.length) core.warning(`No key for: ${dropped.join(', ')} — dropped from the pool.`);
   core.info(`Model: ${modelPool.join(', ')}`);
   core.info(
     `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxPool.join(', ') || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,

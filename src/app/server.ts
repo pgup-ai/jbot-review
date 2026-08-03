@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { Webhooks, createNodeMiddleware } from '@octokit/webhooks';
 
 import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
-import { resolveRunnablePools } from '../shared/config.ts';
+import { resolvePoolCredentials } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 import { resolveAuxModel, resolveModelSelection } from '../shared/model.ts';
 import { handlePrEvent } from './app.ts';
@@ -14,26 +14,18 @@ function mustEnv(name: string): string {
   return value;
 }
 
-const configuredPool = resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
-// Resolved at boot: the deployment picks per PR, so an unusable pool must fail
+const modelPool = resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
+const auxPool = resolveAuxModel(
+  process.env.JBOT_REVIEW_AUX_MODEL,
+  parseModelName(modelPool[0]).providerID,
+  process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
+);
+// Resolved at boot: the deployment picks per PR, so a missing key must fail
 // here rather than on whichever PR happens to draw that provider.
-const {
-  pool: modelPool,
-  auxPool,
-  credentials,
-  dropped,
-} = resolveRunnablePools(
-  configuredPool,
-  resolveAuxModel(
-    process.env.JBOT_REVIEW_AUX_MODEL,
-    parseModelName(configuredPool[0]).providerID,
-    process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
-  ),
+const credentials = resolvePoolCredentials(
+  [...modelPool, ...auxPool],
   ({ env }: { env: string }) => process.env[env],
 );
-if (dropped.length) {
-  console.warn(`[jbot-review] No key for: ${dropped.join(', ')} — dropped from the pool.`);
-}
 
 const appCfg: AppConfig = {
   appId: mustEnv('GITHUB_APP_ID'),

@@ -43,46 +43,34 @@ export interface ProviderCredential {
   baseURL?: string;
 }
 
-export interface RunnablePools {
-  pool: string[];
-  auxPool: string[];
-  /** Credential per provider that survived, keyed by provider id. */
-  credentials: Map<string, ProviderCredential>;
-  /** Candidates dropped for want of a key, for the run log. */
-  dropped: string[];
-}
-
 /**
- * Resolves what the configured pools can actually run. A pool may span
- * providers, and a candidate whose provider has no key is simply not a
- * candidate — dropping it keeps a pool listing models you only sometimes hold
- * keys for usable, instead of failing every run over the one you cannot reach.
- * Deterministic, so the seeded pick stays reproducible.
+ * Resolves a credential for every provider the pools draw on. A pool may span
+ * providers — only one candidate runs per PR — so each needs its own key, and
+ * resolving all of them up front keeps a missing key failing on the next run
+ * rather than only the runs that happen to pick that provider.
  *
- * An empty main pool is fatal; an empty aux pool just falls back to the main
- * model, which is what an unset aux-model does anyway.
+ * A configured candidate is never silently dropped: listing a model is a
+ * request to review with it, so an unusable one is a configuration error.
  */
-export function resolveRunnablePools(
+export function resolvePoolCredentials(
   pool: string[],
-  auxPool: string[],
   read: (source: ProviderCredentialSource) => string | undefined,
   missingKeyHint = '',
-): RunnablePools {
+): Map<string, ProviderCredential> {
   const credentials = new Map<string, ProviderCredential>();
-  const unauthenticated = new Map<string, string>();
-  for (const model of [...pool, ...auxPool]) {
+  for (const model of pool) {
     const { providerID } = parseModelName(model);
-    if (credentials.has(providerID) || unauthenticated.has(providerID)) continue;
+    if (credentials.has(providerID)) continue;
     const config = providerConfig(providerID, model);
     const apiKey = resolveProviderCredential(config, read);
     if (!apiKey) {
-      unauthenticated.set(
-        providerID,
-        providerCredentialSources(config)
-          .map(({ input, env }) => `"${input}" or ${env}`)
-          .join(', then fallback to '),
+      const sources = providerCredentialSources(config)
+        .map(({ input, env }) => `"${input}" or ${env}`)
+        .join(', then fallback to ');
+      throw new Error(
+        `Missing key for provider "${providerID}", required by pooled model "${model}". ` +
+          `Pass ${sources}.${missingKeyHint}`,
       );
-      continue;
     }
     credentials.set(providerID, {
       config,
@@ -90,25 +78,7 @@ export function resolveRunnablePools(
       baseURL: resolveProviderBaseURL(providerID, config, read),
     });
   }
-
-  const runnable = (candidates: string[]): string[] =>
-    candidates.filter((model) => credentials.has(parseModelName(model).providerID));
-  const usable = runnable(pool);
-  if (!usable.length) {
-    const needed = [...unauthenticated]
-      .map(([providerID, sources]) => `"${providerID}" (pass ${sources})`)
-      .join('; ');
-    throw new Error(`No model has a usable key. Needed: ${needed}.${missingKeyHint}`);
-  }
-
-  return {
-    pool: usable,
-    auxPool: runnable(auxPool),
-    credentials,
-    dropped: [...pool, ...auxPool].filter(
-      (model) => !credentials.has(parseModelName(model).providerID),
-    ),
-  };
+  return credentials;
 }
 
 /**

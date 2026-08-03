@@ -17,7 +17,7 @@ import {
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_ACP_BIN, CODEX_PROVIDER_ID } from '@symma/protocol';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
-import { defaultModelOptions, resolveRunnablePools } from '../shared/config.ts';
+import { defaultModelOptions, resolvePoolCredentials } from '../shared/config.ts';
 import {
   CURSOR_CLI_BIN,
   CURSOR_PROVIDER_ID,
@@ -285,18 +285,17 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   // the diff so a clean tree still exits "nothing to review" without a key set;
   // the model names have to come first because they decide whether this run
   // routes to the gateway, which is what the diff's right side depends on.
-  const configuredPool = resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
-  const { pool, auxPool, credentials, dropped } = resolveRunnablePools(
-    configuredPool,
-    resolveAuxModel(
-      process.env.JBOT_REVIEW_AUX_MODEL,
-      parseModelName(configuredPool[0]).providerID,
-      process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
-    ),
+  const pool = resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
+  const auxPool = resolveAuxModel(
+    process.env.JBOT_REVIEW_AUX_MODEL,
+    parseModelName(pool[0]).providerID,
+    process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
+  );
+  const credentials = resolvePoolCredentials(
+    [...pool, ...auxPool],
     ({ env }: { env: string }) => process.env[env],
     ' Local review needs only the provider configuration — no GitHub token; set it in the environment or in .env.',
   );
-  if (dropped.length) log(`No key for: ${dropped.join(', ')} — dropped from the pool.`);
   // HEAD, not the worktree: iterating on uncommitted edits keeps the same
   // reviewer, so a before/after comparison is not confounded by the pick.
   const headSha = (await git(['rev-parse', 'HEAD'])).trim();

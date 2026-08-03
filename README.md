@@ -620,9 +620,11 @@ provider's key is resolved separately, so a pool can mix them:
 model: opencode/deepseek-v4-flash-free,deepseek/deepseek-v4-flash,openai/gpt-5.4-nano
 ```
 
-A candidate whose provider has no key configured is **dropped** from the pool
-and logged, rather than failing the run — so a pool listing models you only
-sometimes hold keys for stays usable. The run fails only when nothing is left.
+Every provider a pool draws on needs its own key, and all of them are resolved
+before the review starts — a missing one fails the next run outright rather
+than only the runs that happen to pick that provider. Listing a model is a
+request to review with it, so an unusable candidate is a configuration error,
+never silently skipped.
 
 `aux-model` takes a pool on the same terms. Its pick is salted, so setting both
 inputs to the same list still varies the pair instead of always drawing the
