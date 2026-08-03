@@ -1,3 +1,5 @@
+import { parseModelName } from '@symma/protocol';
+
 import { CLINE_PROVIDER_ID, isClineProvider } from './cline.ts';
 import { CODEX_PROVIDER_ID, isCodexProvider } from '@symma/protocol';
 import { COMMANDCODE_PROVIDER_ID, isCommandCodeProvider } from './commandcode.ts';
@@ -162,4 +164,27 @@ function cliBackendForProvider(providerID: string): CliBackendID | undefined {
   if (isKiloProvider(providerID)) return KILO_PROVIDER_ID;
   if (isQoderProvider(providerID)) return QODER_PROVIDER_ID;
   return undefined;
+}
+
+/**
+ * Flags candidates whose model id starts with a CLI-backend provider that the
+ * pinned provider swallowed — `provider: opencode` + `model: devin/glm-5.2`
+ * resolves to `opencode/devin/glm-5.2` and is sent to opencode as the model id
+ * `devin/glm-5.2`, which fails only once the session reaches the endpoint.
+ *
+ * Only CLI-backend ids qualify. They name tools, so no catalog nests models
+ * under them, whereas vendor names legitimately do: OpenRouter's own default is
+ * `openrouter/openai/gpt-4o-mini`, and flagging that would be noise.
+ */
+export function swallowedProviderWarnings(pool: string[]): string[] {
+  return pool.flatMap((model) => {
+    const { providerID, modelID } = parseModelName(model);
+    const prefix = modelID.slice(0, Math.max(modelID.indexOf('/'), 0));
+    if (!prefix || prefix === providerID || !cliBackendForProvider(prefix)) return [];
+    return [
+      `"${model}" sends model id "${modelID}" to provider "${providerID}", but "${prefix}" is ` +
+        `itself a provider — a pinned provider input swallowed it. Drop provider/aux-provider so ` +
+        `the model's own prefix selects the backend.`,
+    ];
+  });
 }

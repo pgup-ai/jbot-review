@@ -8,6 +8,7 @@ import {
   resolveProviderBaseURL,
   resolveProviderCredential,
 } from '../shared/config.ts';
+import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
 import { parseContext7Mode } from '../shared/context7.ts';
 import {
   pickAuxModel,
@@ -87,6 +88,9 @@ async function main(): Promise<void> {
     shardCachePath: process.env.JBOT_SHARD_CACHE_DIR?.trim() ?? '',
   };
   const pullTarget = getPullRequestTarget();
+  for (const warning of swallowedProviderWarnings([...modelPool, ...auxPool])) {
+    core.warning(warning);
+  }
   core.info(`Provider: ${provider}  Model: ${modelPool.join(', ')}`);
   core.info(
     `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxPool.join(', ') || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} modelOptions=${JSON.stringify(options.modelOptions)} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,

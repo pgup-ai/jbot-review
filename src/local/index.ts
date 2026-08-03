@@ -11,6 +11,7 @@ import { gatewayRoutedModels, localRunId, remoteAcpConfigFromEnv } from '../shar
 import {
   backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
+  swallowedProviderWarnings,
   type CliBackendID,
 } from '../shared/backend-selection.ts';
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
@@ -306,6 +307,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   );
   const auxModel = pickAuxModel(auxPool, headSha);
   const auxCfg = auxProviderID !== provider ? providerConfig(auxProviderID) : undefined;
+  for (const warning of swallowedProviderWarnings([...pool, ...auxPool])) log(warning);
 
   // Preview never spawns checkouts or sessions: it inspects the worktree diff
   // exactly as the non-gateway path would review it.

@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { Webhooks, createNodeMiddleware } from '@octokit/webhooks';
 
+import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
 import {
   providerConfig,
   providerCredentialSources,
@@ -55,6 +56,10 @@ const appCfg: AppConfig = {
   ...(auxApiKey ? { auxApiKey } : {}),
   ...(auxBaseURL ? { auxBaseURL } : {}),
 };
+
+for (const warning of swallowedProviderWarnings([...modelPool, ...auxPool])) {
+  console.warn(`[jbot-review] ${warning}`);
+}
 
 const webhooks = new Webhooks({ secret: mustEnv('GITHUB_WEBHOOK_SECRET') });
 
