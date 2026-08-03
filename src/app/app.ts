@@ -7,7 +7,7 @@ import type { InstallationAccessTokenAuthentication } from '@octokit/auth-app';
 import { createAppOctokit } from './auth.ts';
 import { clonePr } from './clone.ts';
 import { runPrReview } from '../shared/runner.ts';
-import { defaultModelOptions } from '../shared/config.ts';
+import { defaultModelOptions, type ProviderCredential } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 import { pickAuxModel, pickPooledModel } from '../shared/model.ts';
 import { enqueue } from './queue.ts';
@@ -15,14 +15,12 @@ import { enqueue } from './queue.ts';
 export interface AppConfig {
   appId: string;
   privateKey: string;
-  apiKey: string;
   /** Candidate models for this deployment; one is picked per PR head. */
   modelPool: string[];
-  baseURL?: string;
   /** Auxiliary-session candidates; empty means the main model. */
   auxPool: string[];
-  auxApiKey?: string;
-  auxBaseURL?: string;
+  /** Credential per provider either pool draws on, keyed by provider id. */
+  credentials: Map<string, ProviderCredential>;
 }
 
 // The pull_request webhook event is a union of action-specific payload types.
@@ -98,6 +96,11 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
       workspaceDir = cloned.dir;
       const model = pickPooledModel(cfg.modelPool, pr.head.sha);
       const { providerID } = parseModelName(model);
+      const { apiKey, baseURL } = cfg.credentials.get(providerID)!;
+      const auxModel = pickAuxModel(cfg.auxPool, pr.head.sha);
+      const auxProviderID = auxModel ? parseModelName(auxModel).providerID : providerID;
+      const auxCredential =
+        auxProviderID === providerID ? undefined : cfg.credentials.get(auxProviderID);
       // A run that fails before posting has no review metadata block naming the model.
       console.log(`[jbot-review] Reviewing ${owner}/${repoName}#${pr.number} with ${model}.`);
       await runPrReview({
@@ -109,8 +112,8 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         pullBody: pr.body ?? '',
         workspace: cloned.dir,
         model,
-        apiKey: cfg.apiKey,
-        baseURL: cfg.baseURL,
+        apiKey,
+        baseURL,
         headSha: pr.head.sha,
         baseRef: pr.base.ref,
         baseSha: pr.base.sha,
@@ -124,9 +127,9 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           scrubSessionEnv: false,
           reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 1),
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
-          auxModel: pickAuxModel(cfg.auxPool, pr.head.sha),
-          ...(cfg.auxApiKey ? { auxApiKey: cfg.auxApiKey } : {}),
-          ...(cfg.auxBaseURL ? { auxBaseURL: cfg.auxBaseURL } : {}),
+          auxModel,
+          ...(auxCredential ? { auxApiKey: auxCredential.apiKey } : {}),
+          ...(auxCredential?.baseURL ? { auxBaseURL: auxCredential.baseURL } : {}),
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
           reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 1),
           dynamicFanout: parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),

@@ -17,13 +17,7 @@ import {
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_ACP_BIN, CODEX_PROVIDER_ID } from '@symma/protocol';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
-import {
-  defaultModelOptions,
-  providerConfig,
-  providerCredentialSources,
-  resolveProviderBaseURL,
-  resolveProviderCredential,
-} from '../shared/config.ts';
+import { defaultModelOptions, resolveRunnablePools } from '../shared/config.ts';
 import {
   CURSOR_CLI_BIN,
   CURSOR_PROVIDER_ID,
@@ -291,22 +285,25 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   // the diff so a clean tree still exits "nothing to review" without a key set;
   // the model names have to come first because they decide whether this run
   // routes to the gateway, which is what the diff's right side depends on.
-  const { providerID: provider, pool } = resolveModelSelection(
-    process.env.MODEL,
-    process.env.PROVIDER,
+  const configuredPool = resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
+  const { pool, auxPool, credentials, dropped } = resolveRunnablePools(
+    configuredPool,
+    resolveAuxModel(
+      process.env.JBOT_REVIEW_AUX_MODEL,
+      parseModelName(configuredPool[0]).providerID,
+      process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
+    ),
+    ({ env }: { env: string }) => process.env[env],
+    ' Local review needs only the provider configuration — no GitHub token; set it in the environment or in .env.',
   );
-  const providerCfg = providerConfig(provider);
+  if (dropped.length) log(`No key for: ${dropped.join(', ')} — dropped from the pool.`);
   // HEAD, not the worktree: iterating on uncommitted edits keeps the same
   // reviewer, so a before/after comparison is not confounded by the pick.
   const headSha = (await git(['rev-parse', 'HEAD'])).trim();
   const model = pickPooledModel(pool, headSha);
-  const { pool: auxPool, providerID: auxProviderID } = resolveAuxModel(
-    process.env.JBOT_REVIEW_AUX_MODEL,
-    provider,
-    process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
-  );
   const auxModel = pickAuxModel(auxPool, headSha);
-  const auxCfg = auxProviderID !== provider ? providerConfig(auxProviderID) : undefined;
+  const provider = parseModelName(model).providerID;
+  const auxProviderID = auxModel ? parseModelName(auxModel).providerID : provider;
   for (const warning of swallowedProviderWarnings([...pool, ...auxPool])) log(warning);
 
   // Preview never spawns checkouts or sessions: it inspects the worktree diff
@@ -464,23 +461,10 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     return;
   }
 
-  const apiKey = resolveProviderCredential(providerCfg, ({ env }) => process.env[env]);
-  if (!apiKey) {
-    const envNames = providerCredentialSources(providerCfg)
-      .map(({ env }) => env)
-      .join(' or ');
-    throw new Error(
-      `Missing ${envNames} for provider "${provider}". Local review needs only the ` +
-        'provider configuration — no GitHub token. Set it in the environment or in .env.',
-    );
-  }
-  const baseURL = resolveProviderBaseURL(provider, providerCfg, ({ env }) => process.env[env]);
-  const auxApiKey = auxCfg
-    ? resolveProviderCredential(auxCfg, ({ env }) => process.env[env])
-    : undefined;
-  const auxBaseURL = auxCfg
-    ? resolveProviderBaseURL(auxProviderID, auxCfg, ({ env }) => process.env[env])
-    : undefined;
+  const { apiKey, baseURL } = credentials.get(provider)!;
+  const auxCredential = auxProviderID === provider ? undefined : credentials.get(auxProviderID);
+  const auxApiKey = auxCredential?.apiKey;
+  const auxBaseURL = auxCredential?.baseURL;
 
   // Backend-aware preflight: opencode only when the selection needs it; CLI
   // backends bring their own binary.

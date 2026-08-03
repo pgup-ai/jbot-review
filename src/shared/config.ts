@@ -1,3 +1,5 @@
+import { parseModelName } from '@symma/protocol';
+
 export interface ProviderConfig {
   defaultModel?: string;
   keyEnv: string;
@@ -33,6 +35,80 @@ export function resolveProviderCredential(
     if (value) return value;
   }
   return '';
+}
+
+export interface ProviderCredential {
+  config: ProviderConfig;
+  apiKey: string;
+  baseURL?: string;
+}
+
+export interface RunnablePools {
+  pool: string[];
+  auxPool: string[];
+  /** Credential per provider that survived, keyed by provider id. */
+  credentials: Map<string, ProviderCredential>;
+  /** Candidates dropped for want of a key, for the run log. */
+  dropped: string[];
+}
+
+/**
+ * Resolves what the configured pools can actually run. A pool may span
+ * providers, and a candidate whose provider has no key is simply not a
+ * candidate — dropping it keeps a pool listing models you only sometimes hold
+ * keys for usable, instead of failing every run over the one you cannot reach.
+ * Deterministic, so the seeded pick stays reproducible.
+ *
+ * An empty main pool is fatal; an empty aux pool just falls back to the main
+ * model, which is what an unset aux-model does anyway.
+ */
+export function resolveRunnablePools(
+  pool: string[],
+  auxPool: string[],
+  read: (source: ProviderCredentialSource) => string | undefined,
+  missingKeyHint = '',
+): RunnablePools {
+  const credentials = new Map<string, ProviderCredential>();
+  const unauthenticated = new Map<string, string>();
+  for (const model of [...pool, ...auxPool]) {
+    const { providerID } = parseModelName(model);
+    if (credentials.has(providerID) || unauthenticated.has(providerID)) continue;
+    const config = providerConfig(providerID, model);
+    const apiKey = resolveProviderCredential(config, read);
+    if (!apiKey) {
+      unauthenticated.set(
+        providerID,
+        providerCredentialSources(config)
+          .map(({ input, env }) => `"${input}" or ${env}`)
+          .join(', then fallback to '),
+      );
+      continue;
+    }
+    credentials.set(providerID, {
+      config,
+      apiKey,
+      baseURL: resolveProviderBaseURL(providerID, config, read),
+    });
+  }
+
+  const runnable = (candidates: string[]): string[] =>
+    candidates.filter((model) => credentials.has(parseModelName(model).providerID));
+  const usable = runnable(pool);
+  if (!usable.length) {
+    const needed = [...unauthenticated]
+      .map(([providerID, sources]) => `"${providerID}" (pass ${sources})`)
+      .join('; ');
+    throw new Error(`No model has a usable key. Needed: ${needed}.${missingKeyHint}`);
+  }
+
+  return {
+    pool: usable,
+    auxPool: runnable(auxPool),
+    credentials,
+    dropped: [...pool, ...auxPool].filter(
+      (model) => !credentials.has(parseModelName(model).providerID),
+    ),
+  };
 }
 
 /**

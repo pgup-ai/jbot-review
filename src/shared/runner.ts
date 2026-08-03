@@ -1932,12 +1932,14 @@ async function runReviewPipeline(params: {
         )}.`,
       );
     }
-    const lensFindingLists = await lensPasses.promise;
+    // Each falls back to its own empty result, which is the same value these
+    // sessions produce when they fail open on their own.
+    const lensFindingLists = await settleWithinGrace(lensPasses, [], log);
     // The dedicated parallel session is the single owner of addressed-thread
     // verification; the main review no longer reports them.
-    const verifiedAddressedPriorComments = await addressedPriorCheck.promise;
-    const complianceFindings = await guidelineComplianceCheck.promise;
-    const changesSinceText = await changesSinceLastReview.promise;
+    const verifiedAddressedPriorComments = await settleWithinGrace(addressedPriorCheck, [], log);
+    const complianceFindings = await settleWithinGrace(guidelineComplianceCheck, [], log);
+    const changesSinceText = await settleWithinGrace(changesSinceLastReview, '', log);
     // Gate confidence BEFORE deduping so each finding carries its effective
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
@@ -2577,6 +2579,42 @@ function pendingAuxiliarySessionLabels(
   sessions: { label: string; isSettled: () => boolean }[],
 ): string[] {
   return sessions.filter((session) => !session.isSettled()).map((session) => session.label);
+}
+
+/**
+ * Grace an auxiliary session gets once the main review is done. Aux work is a
+ * recall supplement that already fails open (invariant #3), so past this point
+ * it is pure tail: the deep pass has landed and the run is only waiting. The
+ * finder budget is the wrong bound here — it is sized for a session that gates
+ * the review, and lets one lens (or its JSON repair) add many minutes to a run
+ * whose useful work has finished.
+ */
+const AUXILIARY_SETTLE_GRACE_MS = 120_000;
+
+/**
+ * Resolves to the session's value, or to `fallback` if it has not settled
+ * within the grace. Abandoning the wait does not cancel the session; the
+ * pipeline's teardown stops the runtime, which ends it.
+ */
+export function settleWithinGrace<T>(
+  session: AuxiliarySession<T>,
+  fallback: T,
+  log: (msg: string) => void,
+  graceMs = AUXILIARY_SETTLE_GRACE_MS,
+): Promise<T> {
+  if (session.isSettled() || graceMs <= 0) return session.promise;
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => {
+      log(
+        `${session.label} still running ${graceMs / 1000}s after the main review; abandoning it.`,
+      );
+      resolve(fallback);
+    }, graceMs);
+    void session.promise
+      .then(resolve)
+      .catch(() => resolve(fallback))
+      .finally(() => clearTimeout(timer));
+  });
 }
 
 /**

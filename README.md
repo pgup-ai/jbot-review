@@ -357,7 +357,7 @@ the review itself is unaffected._
 | `review-passes`           | `1`                | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `dynamic-fanout`          | `true`             | Scale the recall-supplement fan-out (extra lens passes + the guideline-compliance pass) to the diff's risk and size: a small, low-risk change (≤3 files, ≤60 added lines, no security/data/API/infra path or build/CI tooling like `package.json`/`action.yml`/workflows, no dependency-manifest change, no large deletion) runs the general pass only and skips the guideline pass; everything else runs the full requested fan-out. The requested config is the ceiling — this only ever reduces it, and never gates the main full-diff review or `verify-findings`. Set `false` to force the full requested fan-out on every PR.                         |
 | `verify-findings`         | `true`             | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `aux-model`               | unset              | Model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification), as `provider/model`, or a same-provider pool like `model`; an id naming no provider stays on the main provider. Lets the main review run on a stronger tier while supporting checks stay cheap and fast. When it names **another** provider, that provider's own key input/env var is required — a key is never reused across providers.                                                                                                                                                                                                        |
+| `aux-model`               | unset              | Model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification), as `provider/model`, or a pool like `model`; an id naming no provider stays on the main provider. Lets the main review run on a stronger tier while supporting checks stay cheap and fast. When it names **another** provider, that provider's own key input/env var is required — a key is never reused across providers.                                                                                                                                                                                                                      |
 | `aux-provider`            | from `aux-model`   | Deprecated — qualify `aux-model` instead; pins the aux provider when set (`JBOT_AUX_PROVIDER`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `review-shards`           | `1`                | Parallel shards for the main review. `1` = no sharding, one full-diff session (default). `0` = auto from diff size, capped at 4. `N` = pin N shards. Sharding only speeds review up on providers that serve concurrent sessions; on free/throttled tiers the shards serialize on one key (see `max-concurrent-sessions`), so single-session is the better default. Either way the review covers the complete diff; raise it on paid concurrent tiers, or for very large PRs where smaller per-shard context helps depth.                                                                                                                                    |
 | `time-budget-minutes`     | `30`               | Wall-clock target (`0` = no budget). Finder sessions get the full budget (minus a 30s posting reserve) as their deadline; shard retries and verification use whatever remains, or are skipped (fail-open). An auxiliary session (lens, addressed-thread, guideline, verification) over its deadline is aborted and fails open — degrading only its own coverage, never the run. A main review shard that still fails after its retry aborts the run rather than posting partial coverage.                                                                                                                                                                   |
@@ -609,15 +609,20 @@ with no provider segment falls back to `opencode`.
 A comma-separated `model` is a pool: each run reviews with one candidate, chosen
 by hashing the PR head sha. Load spreads across the pool as PRs and pushes come
 in, while re-reviewing the same commit always picks the same model, so a rerun
-reproduces. All candidates must name the same provider — the pool shares its one
-credential — and every candidate is validated before the review starts, so a
-typo fails the next run outright rather than only the runs that happen to pick
-it. The chosen model is logged and appears in the posted review's metadata
-block.
+reproduces. Every candidate is validated before the review starts, so a typo
+fails the next run outright rather than only the runs that happen to pick it.
+The chosen model is logged and appears in the posted review's metadata block.
+
+**Candidates may name different providers.** Only one runs per PR, and each
+provider's key is resolved separately, so a pool can mix them:
 
 ```yaml
-model: opencode/deepseek-v4-flash-free,opencode/glm-5-free,opencode/kimi-k2.5-free
+model: opencode/deepseek-v4-flash-free,deepseek/deepseek-v4-flash,openai/gpt-5.4-nano
 ```
+
+A candidate whose provider has no key configured is **dropped** from the pool
+and logged, rather than failing the run — so a pool listing models you only
+sometimes hold keys for stays usable. The run fails only when nothing is left.
 
 `aux-model` takes a pool on the same terms. Its pick is salted, so setting both
 inputs to the same list still varies the pair instead of always drawing the
@@ -653,48 +658,48 @@ documentation lookup.
 
 ### Input reference
 
-| Input                        | Required | Default               | Description                                                                                                              |
-| ---------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `provider`                   | No       | from `model`          | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                |
-| `model`                      | No       | `opencode` default    | `provider/model` reference, or a same-provider pool; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL` |
-| `sdk-engine`                 | No       | `auto`                | `auto` uses pi for cataloged models; `opencode` pins SDK sessions to opencode                                            |
-| `aux-provider`               | No       | from `aux-model`      | Deprecated — qualify `aux-model` instead; pins the aux provider when set (`JBOT_AUX_PROVIDER`)                           |
-| `aux-model`                  | No       | Main model            | Auxiliary model id; can come from `JBOT_REVIEW_AUX_MODEL`                                                                |
-| `opencode-api-key`           | No       | —                     | Used when the main or aux model names `opencode`/`opencode-go`                                                           |
-| `deepseek-api-key`           | No       | —                     | Used when the main or aux model names `deepseek`                                                                         |
-| `openai-api-key`             | No       | —                     | Used when the main or aux model names `openai`                                                                           |
-| `openai-compatible-api-key`  | No       | —                     | Namespaced key for `openai-compatible`                                                                                   |
-| `openai-compatible-base-url` | No       | —                     | Required endpoint URL for `openai-compatible`                                                                            |
-| `anthropic-api-key`          | No       | —                     | Used when the main or aux model names `anthropic`                                                                        |
-| `gemini-api-key`             | No       | —                     | Used when the main or aux model names `google`                                                                           |
-| `openrouter-api-key`         | No       | —                     | Used when the main or aux model names `openrouter`                                                                       |
-| `nvidia-api-key`             | No       | —                     | Used when the main or aux model names `nvidia`                                                                           |
-| `zai-api-key`                | No       | —                     | Used when the main or aux model names `zai-coding-plan`                                                                  |
-| `kimi-api-key`               | No       | —                     | Used when the main or aux model names `kimi-for-coding`                                                                  |
-| `xai-api-key`                | No       | —                     | Used by `xai`, or by `grok` when `grok-auth` is empty                                                                    |
-| `fireworks-api-key`          | No       | —                     | Used when the main or aux model names `fireworks-ai`                                                                     |
-| `mimo-api-key`               | No       | —                     | Used when the main or aux model names `xiaomi-token-plan-sgp`                                                            |
-| `devin-windsurf-api-key`     | No       | —                     | Used when the main or aux model names `devin`                                                                            |
-| `commandcode-access-key`     | No       | —                     | Used when the main or aux model names `commandcode`                                                                      |
-| `cursor-api-key`             | No       | —                     | Used when the main or aux model names `cursor`                                                                           |
-| `poolside-api-key`           | No       | —                     | Used when the main or aux model names `poolside`                                                                         |
-| `qoder-token`                | No       | —                     | Used when the main or aux model names `qoder`                                                                            |
-| `codex-auth`                 | No       | —                     | Used when the main or aux model names `codex`                                                                            |
-| `cline-auth`                 | No       | —                     | Used when the main or aux model names `cline` / `cline-pass`                                                             |
-| `grok-auth`                  | No       | —                     | Grok account auth; preferred over `xai-api-key` when `grok` is selected                                                  |
-| `kilo-auth`                  | No       | —                     | Used when the main or aux model names `kilo`                                                                             |
-| `enable-context7`            | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false`                                               |
-| `context7-api-key`           | No       | —                     | Optional Context7 key for reliable CI docs lookup                                                                        |
-| `github-token`               | Yes      | `${{ github.token }}` | Token to read PR and post review                                                                                         |
-| `thread-resolution-token`    | No       | —                     | Optional token for resolving threads and minimizing completed reviews                                                    |
-| `pr-number`                  | No       | —                     | PR number for manual `workflow_dispatch` reviews                                                                         |
-| `dry-run`                    | No       | `false`               | Log review output without posting to GitHub                                                                              |
-| `auto-approve`               | No       | `false`               | Approve an eligible exact reviewed head when no new or open jbot findings remain                                         |
-| `max-findings`               | No       | `0`                   | Cap findings; `0` means no limit                                                                                         |
-| `min-severity`               | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                                                                                 |
-| `include-prior-comments`     | No       | `true`                | Include existing PR review comments in context                                                                           |
-| `enable-guideline-pass`      | No       | `true`                | Run a dedicated guideline-compliance session when repo guidelines exist                                                  |
-| `fail-on-error`              | No       | `true`                | Fail the workflow if the review cannot complete                                                                          |
+| Input                        | Required | Default               | Description                                                                                                                                        |
+| ---------------------------- | -------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                   | No       | from `model`          | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                                          |
+| `model`                      | No       | `opencode` default    | `provider/model` reference, or a comma-separated pool that may span providers; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL` |
+| `sdk-engine`                 | No       | `auto`                | `auto` uses pi for cataloged models; `opencode` pins SDK sessions to opencode                                                                      |
+| `aux-provider`               | No       | from `aux-model`      | Deprecated — qualify `aux-model` instead; pins the aux provider when set (`JBOT_AUX_PROVIDER`)                                                     |
+| `aux-model`                  | No       | Main model            | Auxiliary model id; can come from `JBOT_REVIEW_AUX_MODEL`                                                                                          |
+| `opencode-api-key`           | No       | —                     | Used when the main or aux model names `opencode`/`opencode-go`                                                                                     |
+| `deepseek-api-key`           | No       | —                     | Used when the main or aux model names `deepseek`                                                                                                   |
+| `openai-api-key`             | No       | —                     | Used when the main or aux model names `openai`                                                                                                     |
+| `openai-compatible-api-key`  | No       | —                     | Namespaced key for `openai-compatible`                                                                                                             |
+| `openai-compatible-base-url` | No       | —                     | Required endpoint URL for `openai-compatible`                                                                                                      |
+| `anthropic-api-key`          | No       | —                     | Used when the main or aux model names `anthropic`                                                                                                  |
+| `gemini-api-key`             | No       | —                     | Used when the main or aux model names `google`                                                                                                     |
+| `openrouter-api-key`         | No       | —                     | Used when the main or aux model names `openrouter`                                                                                                 |
+| `nvidia-api-key`             | No       | —                     | Used when the main or aux model names `nvidia`                                                                                                     |
+| `zai-api-key`                | No       | —                     | Used when the main or aux model names `zai-coding-plan`                                                                                            |
+| `kimi-api-key`               | No       | —                     | Used when the main or aux model names `kimi-for-coding`                                                                                            |
+| `xai-api-key`                | No       | —                     | Used by `xai`, or by `grok` when `grok-auth` is empty                                                                                              |
+| `fireworks-api-key`          | No       | —                     | Used when the main or aux model names `fireworks-ai`                                                                                               |
+| `mimo-api-key`               | No       | —                     | Used when the main or aux model names `xiaomi-token-plan-sgp`                                                                                      |
+| `devin-windsurf-api-key`     | No       | —                     | Used when the main or aux model names `devin`                                                                                                      |
+| `commandcode-access-key`     | No       | —                     | Used when the main or aux model names `commandcode`                                                                                                |
+| `cursor-api-key`             | No       | —                     | Used when the main or aux model names `cursor`                                                                                                     |
+| `poolside-api-key`           | No       | —                     | Used when the main or aux model names `poolside`                                                                                                   |
+| `qoder-token`                | No       | —                     | Used when the main or aux model names `qoder`                                                                                                      |
+| `codex-auth`                 | No       | —                     | Used when the main or aux model names `codex`                                                                                                      |
+| `cline-auth`                 | No       | —                     | Used when the main or aux model names `cline` / `cline-pass`                                                                                       |
+| `grok-auth`                  | No       | —                     | Grok account auth; preferred over `xai-api-key` when `grok` is selected                                                                            |
+| `kilo-auth`                  | No       | —                     | Used when the main or aux model names `kilo`                                                                                                       |
+| `enable-context7`            | No       | `auto`                | Use Context7 MCP for external contract changes; `auto`, `true`, or `false`                                                                         |
+| `context7-api-key`           | No       | —                     | Optional Context7 key for reliable CI docs lookup                                                                                                  |
+| `github-token`               | Yes      | `${{ github.token }}` | Token to read PR and post review                                                                                                                   |
+| `thread-resolution-token`    | No       | —                     | Optional token for resolving threads and minimizing completed reviews                                                                              |
+| `pr-number`                  | No       | —                     | PR number for manual `workflow_dispatch` reviews                                                                                                   |
+| `dry-run`                    | No       | `false`               | Log review output without posting to GitHub                                                                                                        |
+| `auto-approve`               | No       | `false`               | Approve an eligible exact reviewed head when no new or open jbot findings remain                                                                   |
+| `max-findings`               | No       | `0`                   | Cap findings; `0` means no limit                                                                                                                   |
+| `min-severity`               | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                                                                                                           |
+| `include-prior-comments`     | No       | `true`                | Include existing PR review comments in context                                                                                                     |
+| `enable-guideline-pass`      | No       | `true`                | Run a dedicated guideline-compliance session when repo guidelines exist                                                                            |
+| `fail-on-error`              | No       | `true`                | Fail the workflow if the review cannot complete                                                                                                    |
 
 ### Review output
 

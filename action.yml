@@ -11,7 +11,7 @@ inputs:
     required: false
     default: ''
   model:
-    description: "Model as provider/model, e.g. opencode/deepseek-v4-flash-free. Only the first segment selects the provider; the rest is that provider's own model id and may itself contain slashes (kilo/zai/glm-5.2). A comma-separated list is a pool, which must name one provider; each run picks one by PR head sha. Uses the provider default if unset; required for openai-compatible."
+    description: "Model as provider/model, e.g. opencode/deepseek-v4-flash-free. Only the first segment selects the provider; the rest is that provider's own model id and may itself contain slashes (kilo/zai/glm-5.2). A comma-separated list is a pool; each run picks one by PR head sha. Candidates may name different providers, and a candidate whose provider key is missing is dropped from the pool. Uses the provider default if unset; required for openai-compatible."
     required: false
     default: ''
   sdk-engine:
@@ -155,7 +155,7 @@ inputs:
     required: false
     default: 'true'
   aux-model:
-    description: 'Model for auxiliary sessions (addressed-thread check, guideline compliance, finding verification), as provider/model. Accepts a comma-separated same-provider pool like model, picked per PR head sha. An id that names no provider stays on the main provider. Uses the main model when unset.'
+    description: 'Model for auxiliary sessions (addressed-thread check, guideline compliance, finding verification), as provider/model. Accepts a comma-separated pool like model, picked per PR head sha. An id that names no provider stays on the main provider. Uses the main model when unset.'
     required: false
     default: ''
   aux-provider:

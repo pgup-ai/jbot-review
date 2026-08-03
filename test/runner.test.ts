@@ -18,6 +18,7 @@ import {
   formatReviewedWith,
   normalizeOptions,
   renderReviewMetadataBlock,
+  settleWithinGrace,
   runPrReview,
 } from '../src/shared/runner.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
@@ -722,5 +723,36 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions(undefined).guidelinePass, true);
     assert.equal(normalizeOptions({}).guidelinePass, true);
     assert.equal(normalizeOptions({ guidelinePass: false }).guidelinePass, false);
+  });
+});
+
+describe('settleWithinGrace', () => {
+  const session = <T>(promise: Promise<T>, settled = false) => ({
+    label: 'lens',
+    promise,
+    isSettled: () => settled,
+  });
+
+  it('abandons a session that outlives the grace, and logs why', async () => {
+    const logs: string[] = [];
+    const stuck = new Promise<number[]>(() => {});
+
+    assert.deepEqual(await settleWithinGrace(session(stuck), [], (m) => logs.push(m), 5), []);
+    assert.match(logs.join('\n'), /lens still running .* after the main review; abandoning it/);
+  });
+
+  it('returns the real value when it lands inside the grace', async () => {
+    const done = Promise.resolve([1]);
+    assert.deepEqual(await settleWithinGrace(session(done), [], () => {}, 1000), [1]);
+  });
+
+  it('falls back rather than throwing when the session rejects', async () => {
+    const failed = Promise.reject(new Error('boom'));
+    assert.deepEqual(await settleWithinGrace(session(failed), [], () => {}, 1000), []);
+  });
+
+  it('waits out an already-settled session, so a 0 grace cannot drop its result', async () => {
+    const done = Promise.resolve(['kept']);
+    assert.deepEqual(await settleWithinGrace(session(done, true), [], () => {}, 0), ['kept']);
   });
 });

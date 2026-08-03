@@ -2,12 +2,8 @@ import { createServer } from 'node:http';
 import { Webhooks, createNodeMiddleware } from '@octokit/webhooks';
 
 import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
-import {
-  providerConfig,
-  providerCredentialSources,
-  resolveProviderBaseURL,
-  resolveProviderCredential,
-} from '../shared/config.ts';
+import { resolveRunnablePools } from '../shared/config.ts';
+import { parseModelName } from '@symma/protocol';
 import { resolveAuxModel, resolveModelSelection } from '../shared/model.ts';
 import { handlePrEvent } from './app.ts';
 import type { AppConfig } from './app.ts';
@@ -18,43 +14,33 @@ function mustEnv(name: string): string {
   return value;
 }
 
-const { providerID: provider, pool: modelPool } = resolveModelSelection(
-  process.env.MODEL,
-  process.env.PROVIDER,
+const configuredPool = resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
+// Resolved at boot: the deployment picks per PR, so an unusable pool must fail
+// here rather than on whichever PR happens to draw that provider.
+const {
+  pool: modelPool,
+  auxPool,
+  credentials,
+  dropped,
+} = resolveRunnablePools(
+  configuredPool,
+  resolveAuxModel(
+    process.env.JBOT_REVIEW_AUX_MODEL,
+    parseModelName(configuredPool[0]).providerID,
+    process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
+  ),
+  ({ env }: { env: string }) => process.env[env],
 );
-const cfg = providerConfig(provider);
-
-const { pool: auxPool, providerID: auxProviderID } = resolveAuxModel(
-  process.env.JBOT_REVIEW_AUX_MODEL,
-  provider,
-  process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
-);
-const auxCfg = auxProviderID !== provider ? providerConfig(auxProviderID) : undefined;
-const apiKey = resolveProviderCredential(cfg, ({ env }) => process.env[env]);
-if (!apiKey) {
-  throw new Error(
-    `Missing provider credential: ${providerCredentialSources(cfg)
-      .map(({ env }) => env)
-      .join(' or ')}`,
-  );
+if (dropped.length) {
+  console.warn(`[jbot-review] No key for: ${dropped.join(', ')} — dropped from the pool.`);
 }
-const baseURL = resolveProviderBaseURL(provider, cfg, ({ env }) => process.env[env]);
-const auxApiKey = auxCfg
-  ? resolveProviderCredential(auxCfg, ({ env }) => process.env[env])
-  : undefined;
-const auxBaseURL = auxCfg
-  ? resolveProviderBaseURL(auxProviderID, auxCfg, ({ env }) => process.env[env])
-  : undefined;
 
 const appCfg: AppConfig = {
   appId: mustEnv('GITHUB_APP_ID'),
   privateKey: mustEnv('GITHUB_APP_PRIVATE_KEY').replace(/\\n/g, '\n'),
-  apiKey,
+  credentials,
   modelPool,
-  ...(baseURL ? { baseURL } : {}),
   auxPool,
-  ...(auxApiKey ? { auxApiKey } : {}),
-  ...(auxBaseURL ? { auxBaseURL } : {}),
 };
 
 for (const warning of swallowedProviderWarnings([...modelPool, ...auxPool])) {
@@ -75,5 +61,5 @@ webhooks.onError((error) => {
 const port = Number(process.env.PORT) || 3000;
 
 createServer(createNodeMiddleware(webhooks, { path: '/webhooks' })).listen(port, () => {
-  console.log(`[jbot-review] App server listening on :${port} (provider: ${provider})`);
+  console.log(`[jbot-review] App server listening on :${port} (models: ${modelPool.join(', ')})`);
 });
