@@ -423,9 +423,7 @@ export async function startOpencode(
     };
     if (options.scrubEnv !== false) {
       for (const key of sessionEnvDenyKeys(Object.keys(process.env))) {
-        const value = process.env[key];
-        if (value === undefined) continue;
-        scrubbedEnv.set(key, value);
+        scrubbedEnv.set(key, process.env[key]!);
         delete process.env[key];
       }
     }
