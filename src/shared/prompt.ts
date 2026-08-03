@@ -736,46 +736,44 @@ The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}
   return lines.join('\n');
 }
 
-export const CHANGES_SINCE_LAST_REVIEW_PROMPT = `You are writing a short "what changed since the last review" note for a pull request that a prior automated review already covered. A separate reviewer reports bugs; your ONLY job is to describe the delta since the last reviewed head.
+// The two changes-since variants share everything except how the delta may be
+// inspected; composing them from one base keeps contract edits single-sited.
+const CHANGES_SINCE_INTRO = `You are writing a short "what changed since the last review" note for a pull request that a prior automated review already covered. A separate reviewer reports bugs; your ONLY job is to describe the delta since the last reviewed head.
 
-## How to work
+## How to work`;
 
-- The "Changes since last review" section below gives the last reviewed head, the current head, and the commits added between them. The full repository is checked out on the PR branch and git is available — run the \`git diff\` command shown there to see exactly what those commits changed.
-- Summarize ONLY what changed between the last reviewed head and the current head. Do not restate the whole PR or re-describe unchanged code.
+const CHANGES_SINCE_SHARED_RULES = `- Summarize ONLY what changed between the last reviewed head and the current head. Do not restate the whole PR or re-describe unchanged code.
 - Be concise and scannable: a few Markdown bullet points, one per meaningful change. Collapse trivial churn (formatting, rebases, merges) into a single bullet.
-- Describe changes factually. Do not list bugs or review findings, and do not pass judgement on correctness — findings are produced separately.
+- Describe changes factually. Do not list bugs or review findings, and do not pass judgement on correctness — findings are produced separately.`;
 
-## Output
+const CHANGES_SINCE_OUTPUT = `## Output
 
 Respond with a SINGLE raw JSON object and NOTHING else — no text before or after it, and no markdown fences. Markdown is allowed only inside the JSON string value; escape newlines inside the string as \\n.
 
 {
   "summary": "- Reworked the archive path from a bespoke flag to the global soft-delete filter.\\n- Renamed the audit action constant and updated both call sites.\\n- Rebased and reformatted (no behavioral change)."
 }`;
+
+export const CHANGES_SINCE_LAST_REVIEW_PROMPT = [
+  CHANGES_SINCE_INTRO,
+  `- The "Changes since last review" section below gives the last reviewed head, the current head, and the commits added between them. The full repository is checked out on the PR branch and git is available — run the \`git diff\` command shown there to see exactly what those commits changed.
+${CHANGES_SINCE_SHARED_RULES}`,
+  CHANGES_SINCE_OUTPUT,
+].join('\n\n');
 
 /**
- * Single-shot variant for tool-less engines (pi): the agentic prompt's "git is
+ * Variant for tool-less single-shot engines (pi): the agentic "git is
  * available — run the git diff command" instruction makes tool-trained models
  * attempt exactly that — observed as raw DSML tool-call markup or "I'll
- * inspect…" prose instead of JSON, 4/4 dogfood runs. Same contract otherwise.
+ * inspect…" prose instead of JSON, 4/4 dogfood runs.
  */
-export const CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT = `You are writing a short "what changed since the last review" note for a pull request that a prior automated review already covered. A separate reviewer reports bugs; your ONLY job is to describe the delta since the last reviewed head.
-
-## How to work
-
-- You have NO tools on this call — do not run, plan, or emit commands. The "Changes since last review" section below gives the last reviewed head, the current head, and the subjects of the commits added between them; summarize from that list alone (the git command it shows is reproduction info for humans).
+export const CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT = [
+  CHANGES_SINCE_INTRO,
+  `- You have NO tools on this call — do not run, plan, or emit commands. The "Changes since last review" section below gives the last reviewed head, the current head, and the subjects of the commits added between them; summarize from that list alone (the git command it shows is reproduction info for humans).
 - If that section says more commits were omitted, your summary is PARTIAL: end it with a bullet stating how many further commits it does not cover.
-- Summarize ONLY what changed between the last reviewed head and the current head. Do not restate the whole PR or re-describe unchanged code.
-- Be concise and scannable: a few Markdown bullet points, one per meaningful change. Collapse trivial churn (formatting, rebases, merges) into a single bullet.
-- Describe changes factually. Do not list bugs or review findings, and do not pass judgement on correctness — findings are produced separately.
-
-## Output
-
-Respond with a SINGLE raw JSON object and NOTHING else — no text before or after it, and no markdown fences. Markdown is allowed only inside the JSON string value; escape newlines inside the string as \\n.
-
-{
-  "summary": "- Reworked the archive path from a bespoke flag to the global soft-delete filter.\\n- Renamed the audit action constant and updated both call sites.\\n- Rebased and reformatted (no behavioral change)."
-}`;
+${CHANGES_SINCE_SHARED_RULES}`,
+  CHANGES_SINCE_OUTPUT,
+].join('\n\n');
 
 export const CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER = `## Final output reminder
 
