@@ -1474,15 +1474,14 @@ async function runReviewPipeline(params: {
     piBackend = createPiBackend(piRuntime.runtime);
   }
 
+  let auxOpencodeBootError: unknown;
   if (needsOpencode) {
     const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
-    if (!opencodeApiKey) {
-      piRuntime?.stop();
-      cleanupCliHomes();
-      throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
-    }
-    log('Starting opencode server');
     try {
+      if (!opencodeApiKey) {
+        throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
+      }
+      log('Starting opencode server');
       opencodeRuntime = await startOpencode(
         workspace,
         opencodeProviderID,
@@ -1509,12 +1508,24 @@ async function runReviewPipeline(params: {
             : undefined,
         },
       );
+      opencodeBackend = createOpencodeBackend(opencodeRuntime.client);
     } catch (error) {
-      piRuntime?.stop();
-      cleanupCliHomes();
-      throw error;
+      if (mainOnOpencode) {
+        piRuntime?.stop();
+        cleanupCliHomes();
+        throw error;
+      }
+      // Opencode serves only aux roles here — invariant #3: a broken aux
+      // backend must never fail the run. The auxSessionsEnabled gate below
+      // keeps every aux session off; main review continues.
+      auxOpencodeBootError = error;
+      recordCoverage({ session: 'aux-opencode-boot', state: 'failed', error });
+      log(
+        `Auxiliary opencode backend unavailable; lens/guideline/addressed/changes-since/verification sessions are disabled for this run (fail-open): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
-    opencodeBackend = createOpencodeBackend(opencodeRuntime.client);
   }
 
   const cliBackends: Record<CliBackendID, ReviewBackend | undefined> = {
@@ -1547,7 +1558,10 @@ async function runReviewPipeline(params: {
       ? requireSdkBackend(piBackend, 'pi', 'aux')
       : auxOnPoolside
         ? requireSdkBackend(auxPoolsideBackend, 'poolside', 'aux')
-        : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
+        : auxOpencodeBootError
+          ? // Fail-open stand-in only: auxSessionsEnabled keeps it undispatched.
+            mainBaseBackend
+          : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
   const mainBackend = limitReviewBackendSessions(
     mainBaseBackend,
     'main',
@@ -1560,6 +1574,10 @@ async function runReviewPipeline(params: {
     sessionSlots,
     auxBaseBackend === grokBackend ? grokSessionSlots : undefined,
   );
+  // Single gate for every aux session (lenses, guideline, addressed,
+  // changes-since, verification): an incomplete embedded diff and a failed
+  // aux-only opencode boot disable them the same way (invariant #3).
+  const auxSessionsEnabled = auxHasCompleteEmbeddedDiff && !auxOpencodeBootError;
   // Which engine each model ran on, for the review footer (main wins on
   // collision — same model ⇒ same engine anyway).
   const engineByModel: Record<string, string> = {
@@ -1698,9 +1716,9 @@ async function runReviewPipeline(params: {
             return null;
           })
         : null;
-    const guidelineCandidate = effectiveGuidelinePass && auxHasCompleteEmbeddedDiff;
+    const guidelineCandidate = effectiveGuidelinePass && auxSessionsEnabled;
     const candidateLensKeys = selectLensKeys(
-      auxHasCompleteEmbeddedDiff ? effectiveReviewPasses : 1,
+      auxSessionsEnabled ? effectiveReviewPasses : 1,
       changedFiles,
       changeShape,
     );
@@ -1801,7 +1819,7 @@ async function runReviewPipeline(params: {
         backend: auxBackend,
         model: auxModel,
         prContext: auxPrContext,
-        priorJbotThreads: auxHasCompleteEmbeddedDiff ? priorJbotThreads : [],
+        priorJbotThreads: auxSessionsEnabled ? priorJbotThreads : [],
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -1842,7 +1860,7 @@ async function runReviewPipeline(params: {
         headSha,
         enabled:
           shouldSummarizeChangesSinceLastReview(allPriorReviewComments, headSha) &&
-          auxHasCompleteEmbeddedDiff,
+          auxSessionsEnabled,
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -1947,7 +1965,7 @@ async function runReviewPipeline(params: {
       prContext: auxPrContext,
       timeoutMs: computeVerificationTimeoutMs(options.timeBudgetMinutes, Date.now() - runStartedAt),
       findings: suppression.findings,
-      enabled: options.verifyFindings && auxHasCompleteEmbeddedDiff,
+      enabled: options.verifyFindings && auxSessionsEnabled,
       log,
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
