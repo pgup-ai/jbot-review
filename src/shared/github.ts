@@ -544,7 +544,7 @@ export async function listClosingIssues(
     )
     .slice(0, MAX_LINKED_ISSUES)
     .map((node) => ({ number: node.number, title: node.title, body: node.body ?? '' }));
-  return { issues, omitted: Math.max(0, (refs?.totalCount ?? nodes.length) - issues.length) };
+  return { issues, omitted: (refs?.totalCount ?? nodes.length) - issues.length };
 }
 
 async function listJbotReviewCommentState(
