@@ -46,6 +46,8 @@ export interface OpencodeProviderConfig extends ProviderKeyConfig {
   modelID?: string;
   baseURL?: string;
   promptCache?: boolean;
+  /** Provider options for this entry's model, scoped to it alone. */
+  modelOptions?: Record<string, unknown>;
 }
 
 type ProviderEntry = NonNullable<NonNullable<ServerOptions['config']>['provider']>[string];
@@ -151,9 +153,10 @@ export function sessionEnvDenyKeys(keys: string[]): string[] {
  * denied. Bash stays allowed: the review needs git diff/log/grep, filtered
  * by BASH_PERMISSIONS below.
  *
- * `modelOptions` pass through opencode to the provider SDK for the MAIN
- * model only — the lever for capping reasoning spend on heavy models (e.g.
+ * `modelOptions` pass through opencode to the provider SDK, scoped to the model
+ * they are attached to — the lever for capping reasoning spend (e.g.
  * {"reasoningEffort":"medium"} for OpenAI, thinking budgets for Anthropic).
+ * Auxiliary entries carry their own via OpencodeProviderConfig.modelOptions.
  *
  * `promptCache` sets the provider's `setCacheKey` option (opencode's
  * promptCacheKey toggle, default off in the SDK). Parallel review shards and
@@ -189,11 +192,20 @@ export function buildConfig(
     if (!providerKey.providerID) continue;
     if (providerKey.providerID === providerID) {
       const custom = PROVIDERS[providerID]?.custom;
-      if (!custom || !providerKey.modelID || providerKey.modelID === modelID) continue;
+      const auxOptions = providerKey.modelOptions;
+      const hasAuxOptions = Boolean(auxOptions && Object.keys(auxOptions).length > 0);
+      // A same-provider aux model needs its own entry only to carry a name
+      // (custom providers) or options of its own; otherwise the provider entry
+      // already covers it.
+      if (!providerKey.modelID || providerKey.modelID === modelID) continue;
+      if (!custom && !hasAuxOptions) continue;
       const entry = providerConfig[providerID];
       entry.models = {
         ...entry.models,
-        [providerKey.modelID]: { name: providerKey.modelID },
+        [providerKey.modelID]: {
+          ...(custom ? { name: providerKey.modelID } : {}),
+          ...(hasAuxOptions ? { options: auxOptions } : {}),
+        },
       };
       continue;
     }
@@ -202,9 +214,8 @@ export function buildConfig(
       apiKey: providerKey.apiKey,
       baseURL: providerKey.baseURL,
       promptCache: providerKey.promptCache ?? promptCache,
-      // modelOptions is main-model-only (see above); an aux entry carries just
-      // the key + its already-resolved promptCache boolean.
       modelID: providerKey.modelID ?? '',
+      modelOptions: providerKey.modelOptions,
     });
   }
   return {

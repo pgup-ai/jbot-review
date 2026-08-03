@@ -1,3 +1,5 @@
+import { parseModelName } from '@symma/protocol';
+
 import { CLINE_PROVIDER_ID, isClineProvider } from './cline.ts';
 import { CODEX_PROVIDER_ID, isCodexProvider } from '@symma/protocol';
 import { COMMANDCODE_PROVIDER_ID, isCommandCodeProvider } from './commandcode.ts';
@@ -162,4 +164,35 @@ function cliBackendForProvider(providerID: string): CliBackendID | undefined {
   if (isKiloProvider(providerID)) return KILO_PROVIDER_ID;
   if (isQoderProvider(providerID)) return QODER_PROVIDER_ID;
   return undefined;
+}
+
+/**
+ * Flags candidates whose model id leads with a CLI-backend provider that a
+ * pinned provider swallowed — `provider: opencode` + `model: devin/glm-5.2`
+ * resolves to `opencode/devin/glm-5.2` and is sent to opencode as the model id
+ * `devin/glm-5.2`, which fails only once the session reaches the endpoint.
+ *
+ * Reachable without a pin — an explicit `opencode/devin/glm-5.2` resolves the
+ * same way — so the message states the routing and the remedy without assuming
+ * a provider input exists to drop.
+ *
+ * Two things keep this quiet on correct configs. Only CLI-backend ids qualify:
+ * they name tools, so no catalog nests models under them, whereas vendor names
+ * legitimately do (OpenRouter's own default is `openrouter/openai/gpt-4o-mini`).
+ * And a CLI backend's own catalog may name another tool — `devin/codex` is a
+ * real model — so only a non-CLI provider swallowing one is a misconfiguration.
+ */
+export function swallowedProviderWarnings(pool: string[]): string[] {
+  return pool.flatMap((model) => {
+    const { providerID, modelID } = parseModelName(model);
+    if (cliBackendForProvider(providerID)) return [];
+    const slash = modelID.indexOf('/');
+    const prefix = slash < 0 ? modelID : modelID.slice(0, slash);
+    if (!cliBackendForProvider(prefix)) return [];
+    return [
+      `"${model}" sends model id "${modelID}" to provider "${providerID}", but "${prefix}" is ` +
+        `itself a provider. To review on "${prefix}", name the model under it instead — and drop ` +
+        `provider/aux-provider if either is set, since a pin absorbs the prefix.`,
+    ];
+  });
 }

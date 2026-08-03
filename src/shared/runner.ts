@@ -77,7 +77,7 @@ import {
   isDocOnlyChange,
   shardFilesForReview,
 } from './diff-context.ts';
-import { needsAuxOpencodeConfig, resolvePromptCachePolicy } from './config.ts';
+import { auxModelOptionsFor, needsAuxOpencodeConfig, resolvePromptCachePolicy } from './config.ts';
 import { parseModelName } from '@symma/protocol';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -94,6 +94,7 @@ import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
 import { onFatalSignal } from '@symma/protocol';
 import {
   startOpencode,
+  withTimeout,
   configureSessionConcurrency,
   runReview as runOpencodeReview,
   runAddressedPriorCommentsCheck as runOpencodeAddressedPriorCommentsCheck,
@@ -655,7 +656,9 @@ export interface ReviewRunOptions {
   reviewShards?: number;
   /**
    * Provider options for the MAIN model — e.g. {"reasoningEffort":"medium"}
-   * to cap reasoning spend on heavy models. Aux-model sessions are unaffected.
+   * to cap reasoning spend on heavy models. An aux model running an entry of
+   * its own gets defaultAuxModelOptions instead; one that IS the main model
+   * shares this.
    */
   modelOptions?: Record<string, unknown>;
   /**
@@ -1453,10 +1456,12 @@ async function runReviewPipeline(params: {
   // different vendor's endpoint (and fail auth there anyway).
   const auxNeedsOwnKey =
     auxProviderID !== providerID && ((mainOnPi && auxOnPi) || (mainOnOpencode && auxOnOpencode));
+  const auxModelOptions = auxModelOptionsFor(providerID, modelID, auxProviderID, auxModelID);
   const auxNeedsOpencodeConfig =
     mainOnOpencode &&
     auxOnOpencode &&
-    needsAuxOpencodeConfig(providerID, modelID, auxProviderID, auxModelID);
+    (needsAuxOpencodeConfig(providerID, modelID, auxProviderID, auxModelID) ||
+      Boolean(auxModelOptions && Object.keys(auxModelOptions).length > 0));
   if (auxNeedsOwnKey && !options.auxApiKey) {
     cleanupCliHomes();
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
@@ -1479,7 +1484,10 @@ async function runReviewPipeline(params: {
         piConfig.apiKey,
         log,
         {
-          modelOptions: mainOnPi ? options.modelOptions : undefined,
+          // pi's thinking level is runtime-wide, so a runtime shared by both
+          // roles follows the main model. One serving aux alone takes the aux
+          // effort instead of none.
+          modelOptions: mainOnPi ? options.modelOptions : auxModelOptions,
           // pi's prompt caching is provider-managed (no setCacheKey knob);
           // resolvePromptCachePolicy applies to the opencode server only.
           additionalProviderKeys: auxNeedsOwnKey
@@ -1518,7 +1526,9 @@ async function runReviewPipeline(params: {
         opencodeApiKey,
         log,
         {
-          modelOptions: mainOnOpencode ? options.modelOptions : undefined,
+          // Symmetric to the pi runtime below: when main is not on opencode the
+          // root model IS the aux model, so it carries the aux options.
+          modelOptions: mainOnOpencode ? options.modelOptions : auxModelOptions,
           baseURL: mainOnOpencode ? baseURL : options.auxBaseURL,
           promptCache: mainOnOpencode
             ? promptCachePolicy.providerPromptCache
@@ -1533,6 +1543,7 @@ async function runReviewPipeline(params: {
                   modelID: auxModelID,
                   baseURL: auxNeedsOwnKey ? options.auxBaseURL : baseURL,
                   promptCache: promptCachePolicy.auxProviderPromptCache,
+                  ...(auxModelOptions ? { modelOptions: auxModelOptions } : {}),
                 },
               ]
             : undefined,
@@ -1932,12 +1943,23 @@ async function runReviewPipeline(params: {
         )}.`,
       );
     }
-    const lensFindingLists = await lensPasses.promise;
-    // The dedicated parallel session is the single owner of addressed-thread
-    // verification; the main review no longer reports them.
-    const verifiedAddressedPriorComments = await addressedPriorCheck.promise;
-    const complianceFindings = await guidelineComplianceCheck.promise;
-    const changesSinceText = await changesSinceLastReview.promise;
+    // Started together, not awaited in turn: each grace begins when its call is
+    // made, so awaiting them one by one would give the group N graces of tail
+    // rather than one. Each falls back to its own empty result — the same value
+    // these sessions produce when they fail open on their own.
+    const [
+      lensFindingLists,
+      // The dedicated parallel session is the single owner of addressed-thread
+      // verification; the main review no longer reports them.
+      verifiedAddressedPriorComments,
+      complianceFindings,
+      changesSinceText,
+    ] = await Promise.all([
+      settleWithinGrace(lensPasses, [], log),
+      settleWithinGrace(addressedPriorCheck, [], log),
+      settleWithinGrace(guidelineComplianceCheck, [], log),
+      settleWithinGrace(changesSinceLastReview, '', log),
+    ]);
     // Gate confidence BEFORE deduping so each finding carries its effective
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
@@ -2577,6 +2599,50 @@ function pendingAuxiliarySessionLabels(
   sessions: { label: string; isSettled: () => boolean }[],
 ): string[] {
   return sessions.filter((session) => !session.isSettled()).map((session) => session.label);
+}
+
+/**
+ * Grace an auxiliary session gets once the main review is done. Aux work is a
+ * recall supplement that already fails open (invariant #3), so past this point
+ * it is pure tail: the deep pass has landed and the run is only waiting. The
+ * finder budget is the wrong bound here — it is sized for a session that gates
+ * the review, and lets one lens (or its JSON repair) add many minutes to a run
+ * whose useful work has finished.
+ */
+const AUXILIARY_SETTLE_GRACE_MS = 120_000;
+
+/** Distinguishes the grace expiring from the session failing on its own. */
+const GRACE_EXPIRED = 'jbot: auxiliary settle grace expired';
+
+/**
+ * Resolves to the session's value, or to `fallback` if it has not settled
+ * within the grace. Never rejects: aux work fails open (invariant #3), so a
+ * session that already failed yields the fallback just like one that runs out
+ * of grace — otherwise a settled rejection would abort the run through the
+ * caller's Promise.all.
+ *
+ * Bounds the WAIT, not the session: an abandoned prompt runs on and keeps its
+ * concurrency slot until teardown, so with every slot held the verifier can
+ * still queue behind one. Cancelling it needs abort plumbing through every
+ * backend; until then the cap is on how long the run waits for results.
+ */
+export function settleWithinGrace<T>(
+  session: AuxiliarySession<T>,
+  fallback: T,
+  log: (msg: string) => void,
+  graceMs = AUXILIARY_SETTLE_GRACE_MS,
+): Promise<T> {
+  if (session.isSettled()) return session.promise.catch(() => fallback);
+  return withTimeout(session.promise, graceMs, GRACE_EXPIRED).catch((error: unknown) => {
+    // Only the grace expiring is worth a line; a session that failed on its own
+    // already logged why.
+    if (error instanceof Error && error.message === GRACE_EXPIRED) {
+      log(
+        `${session.label} still running ${graceMs / 1000}s after the main review; abandoning it.`,
+      );
+    }
+    return fallback;
+  });
 }
 
 /**

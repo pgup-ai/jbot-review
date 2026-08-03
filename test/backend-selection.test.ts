@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
+  swallowedProviderWarnings,
 } from '../src/shared/backend-selection.ts';
 
 describe('selectReviewBackends', () => {
@@ -1013,5 +1014,50 @@ describe('selectReviewBackends pi engine routing', () => {
       assert.equal(aux.opencodeProviderID, providerID);
       assert.equal(aux.opencodeApiKey, 'aux-key');
     }
+  });
+});
+
+describe('swallowedProviderWarnings', () => {
+  it('flags a CLI-backend id that a pinned provider turned into a model id', () => {
+    // `provider: opencode` + `model: devin/glm-5.2` resolves here, then fails at
+    // opencode's endpoint with "Model devin/glm-5.2 is not supported".
+    const [warning, ...rest] = swallowedProviderWarnings([
+      'opencode/deepseek-v4-flash-free',
+      'opencode/devin/glm-5.2',
+    ]);
+
+    assert.equal(rest.length, 0);
+    assert.match(warning, /"opencode\/devin\/glm-5\.2" sends model id "devin\/glm-5\.2"/);
+    // No pin is needed to reach this, so the remedy must not assume one.
+    assert.match(warning, /To review on "devin", name the model under it instead/);
+  });
+
+  it('flags a slashless CLI-backend id too', () => {
+    // `provider: opencode` + `model: devin` resolves to `opencode/devin`, which
+    // fails the same way as the nested form.
+    const [warning] = swallowedProviderWarnings(['opencode/devin']);
+    assert.match(warning, /"opencode\/devin" sends model id "devin" to provider "opencode"/);
+  });
+
+  it('stays quiet when the provider is itself a CLI backend', () => {
+    // devin/codex is a real model, and kilo routes zai/… on purpose — the tool
+    // named in the id is where the run is already going, so nothing was swallowed.
+    assert.deepEqual(swallowedProviderWarnings(['devin/codex', 'kilo/zai/glm-5.2']), []);
+  });
+
+  it('stays quiet for vendor prefixes, which are legitimate catalog ids', () => {
+    // Only CLI-backend ids name a tool rather than a vendor. OpenRouter's own
+    // default is openrouter/openai/gpt-4o-mini, and nvidia publishes under a
+    // vendor prefix — flagging either would be noise on a correct config.
+    assert.deepEqual(
+      swallowedProviderWarnings([
+        'openrouter/openai/gpt-4o-mini',
+        'nvidia/moonshotai/kimi-k2.6',
+        'kilo/zai/glm-5.2',
+        'devin/glm-5.2',
+        'opencode/deepseek-v4-flash-free',
+      ]),
+      [],
+    );
   });
 });

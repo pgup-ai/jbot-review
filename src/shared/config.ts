@@ -1,3 +1,5 @@
+import { parseModelName } from '@symma/protocol';
+
 export interface ProviderConfig {
   defaultModel?: string;
   keyEnv: string;
@@ -35,6 +37,48 @@ export function resolveProviderCredential(
   return '';
 }
 
+export interface ProviderCredential {
+  apiKey: string;
+  baseURL?: string;
+}
+
+/**
+ * Resolves a credential for every provider the pools draw on. A pool may span
+ * providers — only one candidate runs per PR — so each needs its own key, and
+ * resolving all of them up front keeps a missing key failing on the next run
+ * rather than only the runs that happen to pick that provider.
+ *
+ * A configured candidate is never silently dropped: listing a model is a
+ * request to review with it, so an unusable one is a configuration error.
+ */
+export function resolvePoolCredentials(
+  pool: string[],
+  read: (source: ProviderCredentialSource) => string | undefined,
+  missingKeyHint = '',
+): Map<string, ProviderCredential> {
+  const credentials = new Map<string, ProviderCredential>();
+  for (const model of pool) {
+    const { providerID } = parseModelName(model);
+    if (credentials.has(providerID)) continue;
+    const config = providerConfig(providerID, model);
+    const apiKey = resolveProviderCredential(config, read);
+    if (!apiKey) {
+      const sources = providerCredentialSources(config)
+        .map(({ input, env }) => `"${input}" or ${env}`)
+        .join(', then fallback to ');
+      throw new Error(
+        `Missing key for provider "${providerID}", required by pooled model "${model}". ` +
+          `Pass ${sources}.${missingKeyHint}`,
+      );
+    }
+    credentials.set(providerID, {
+      apiKey,
+      baseURL: resolveProviderBaseURL(providerID, config, read),
+    });
+  }
+  return credentials;
+}
+
 /**
  * Looks a provider up by id. `source` names the model ref the id was derived
  * from, so a run that dropped its provider input but kept an unqualified model
@@ -51,10 +95,44 @@ export function providerConfig(providerID: string, source?: string): ProviderCon
   return config;
 }
 
-export function defaultModelOptions(providerID: string): Record<string, unknown> {
-  // Arbitrary custom endpoints may reject provider-specific options.
+function reasoningOptions(providerID: string, effort: string): Record<string, unknown> {
+  // Poolside manages reasoning itself, and arbitrary custom endpoints may
+  // reject provider-specific options.
   if (providerID === 'poolside') return { reasoningEffort: 'default' };
-  return PROVIDERS[providerID]?.custom ? {} : { reasoningEffort: 'medium' };
+  return PROVIDERS[providerID]?.custom ? {} : { reasoningEffort: effort };
+}
+
+export function defaultModelOptions(providerID: string): Record<string, unknown> {
+  return reasoningOptions(providerID, 'medium');
+}
+
+/**
+ * Auxiliary sessions are recall supplements that land on the tail of the run,
+ * and these models spend most of their output budget reasoning — one lens was
+ * observed emitting 15,762 reasoning tokens and 53 of content, producing
+ * nothing while costing minutes. They get a lower effort than the deep pass.
+ *
+ * Reaches an aux session only when it runs a model of its own: options are
+ * scoped per model id, so an aux model that IS the main model shares its entry
+ * and its effort.
+ */
+export function defaultAuxModelOptions(providerID: string): Record<string, unknown> {
+  return reasoningOptions(providerID, 'low');
+}
+
+/**
+ * The aux model's options, or undefined when it shares the main model's entry
+ * and therefore its effort. Identity is provider-scoped: two providers can
+ * serve the same model id, and the aux one is routed separately.
+ */
+export function auxModelOptionsFor(
+  providerID: string,
+  modelID: string,
+  auxProviderID: string,
+  auxModelID: string,
+): Record<string, unknown> | undefined {
+  if (auxProviderID === providerID && auxModelID === modelID) return undefined;
+  return defaultAuxModelOptions(auxProviderID);
 }
 
 export function needsAuxOpencodeConfig(

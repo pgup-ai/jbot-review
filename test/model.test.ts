@@ -27,34 +27,31 @@ describe('resolveModelSelection', () => {
   it('derives the provider from the first segment and keeps the rest as the model id', () => {
     // Only the first segment routes, so these stay distinct routes to what may
     // be the same underlying model.
-    assert.deepEqual(resolveModelSelection('kilo/zai/glm-5.2'), {
-      providerID: 'kilo',
-      pool: ['kilo/zai/glm-5.2'],
-    });
-    assert.deepEqual(resolveModelSelection('devin/glm-5.2'), {
-      providerID: 'devin',
-      pool: ['devin/glm-5.2'],
-    });
+    assert.deepEqual(resolveModelSelection('kilo/zai/glm-5.2'), ['kilo/zai/glm-5.2']);
+    assert.deepEqual(resolveModelSelection('devin/glm-5.2'), ['devin/glm-5.2']);
   });
 
   it('resolves a comma-separated pool of same-provider refs', () => {
-    assert.deepEqual(resolveModelSelection(' opencode/a , opencode/b/c ,, opencode/d '), {
-      providerID: 'opencode',
-      pool: ['opencode/a', 'opencode/b/c', 'opencode/d'],
-    });
+    assert.deepEqual(resolveModelSelection(' opencode/a , opencode/b/c ,, opencode/d '), [
+      'opencode/a',
+      'opencode/b/c',
+      'opencode/d',
+    ]);
   });
 
-  it('rejects a pool that spans providers, naming the resolved candidates', () => {
-    assert.throws(
-      () => resolveModelSelection('opencode/a, devin/b'),
-      /mixes providers: "opencode\/a" and "devin\/b"/,
-    );
-    // An unqualified candidate took the default provider; the resolved form is
-    // what shows the user where the second provider came from.
-    assert.throws(
-      () => resolveModelSelection('devin/glm-5.2, glm-5.2'),
-      /mixes providers: "devin\/glm-5\.2" and "opencode\/glm-5\.2"/,
-    );
+  it('accepts a pool that spans providers', () => {
+    // One candidate runs per PR and each provider carries its own credential,
+    // so a pool has no reason to be single-provider.
+    assert.deepEqual(resolveModelSelection('opencode/a, devin/b, deepseek/c'), [
+      'opencode/a',
+      'devin/b',
+      'deepseek/c',
+    ]);
+    // An unqualified candidate still takes the default provider.
+    assert.deepEqual(resolveModelSelection('devin/glm-5.2, glm-5.2'), [
+      'devin/glm-5.2',
+      'opencode/glm-5.2',
+    ]);
   });
 
   it('names the offending model when the derived provider is unknown', () => {
@@ -65,21 +62,14 @@ describe('resolveModelSelection', () => {
   });
 
   it('falls back to the default provider for a ref that names none', () => {
-    assert.deepEqual(resolveModelSelection('deepseek-v4-flash-free'), {
-      providerID: 'opencode',
-      pool: ['opencode/deepseek-v4-flash-free'],
-    });
+    assert.deepEqual(resolveModelSelection('deepseek-v4-flash-free'), [
+      'opencode/deepseek-v4-flash-free',
+    ]);
   });
 
   it('uses the provider catalog default when no model is given', () => {
-    assert.deepEqual(resolveModelSelection(), {
-      providerID: 'opencode',
-      pool: ['opencode/deepseek-v4-flash-free'],
-    });
-    assert.deepEqual(resolveModelSelection('', 'devin'), {
-      providerID: 'devin',
-      pool: ['devin/default'],
-    });
+    assert.deepEqual(resolveModelSelection(), ['opencode/deepseek-v4-flash-free']);
+    assert.deepEqual(resolveModelSelection('', 'devin'), ['devin/default']);
     assert.throws(
       () => resolveModelSelection('', 'openai-compatible'),
       /Missing model for provider "openai-compatible"/,
@@ -97,30 +87,26 @@ describe('resolveModelSelection', () => {
   });
 
   it('leaves every configured provider default naming its own provider', () => {
-    for (const [providerID, cfg] of Object.entries(PROVIDERS)) {
+    for (const cfg of Object.values(PROVIDERS)) {
       if (!cfg.defaultModel) continue;
-      assert.deepEqual(resolveModelSelection(cfg.defaultModel), {
-        providerID,
-        pool: [cfg.defaultModel],
-      });
+      assert.deepEqual(resolveModelSelection(cfg.defaultModel), [cfg.defaultModel]);
     }
   });
 });
 
 describe('resolveModelSelection with a legacy provider input', () => {
   it('pins the provider and absorbs one matching prefix', () => {
-    assert.deepEqual(resolveModelSelection('deepseek-v4-flash-free, opencode/b', 'opencode'), {
-      providerID: 'opencode',
-      pool: ['opencode/deepseek-v4-flash-free', 'opencode/b'],
-    });
+    assert.deepEqual(resolveModelSelection('deepseek-v4-flash-free, opencode/b', 'opencode'), [
+      'opencode/deepseek-v4-flash-free',
+      'opencode/b',
+    ]);
   });
 
   it('keeps a non-matching slash prefix inside the model id', () => {
     // Catalog ids carry publisher prefixes; a pin stops them reading as providers.
-    assert.deepEqual(resolveModelSelection('moonshotai/kimi-k2.6', 'nvidia'), {
-      providerID: 'nvidia',
-      pool: ['nvidia/moonshotai/kimi-k2.6'],
-    });
+    assert.deepEqual(resolveModelSelection('moonshotai/kimi-k2.6', 'nvidia'), [
+      'nvidia/moonshotai/kimi-k2.6',
+    ]);
   });
 
   it('rejects an unknown pinned provider', () => {
@@ -149,50 +135,36 @@ describe('pickPooledModel', () => {
 
 describe('resolveAuxModel', () => {
   it('keeps an unqualified aux model on the main provider', () => {
-    assert.deepEqual(resolveAuxModel('gpt-5.4-mini', 'openai'), {
-      pool: ['openai/gpt-5.4-mini'],
-      providerID: 'openai',
-    });
+    assert.deepEqual(resolveAuxModel('gpt-5.4-mini', 'openai'), ['openai/gpt-5.4-mini']);
   });
 
-  it('reports the main provider when no aux model is set', () => {
-    // Callers compare this against the main provider to decide whether the aux
-    // sessions need their own credential.
-    assert.deepEqual(resolveAuxModel(undefined, 'openai'), { pool: [], providerID: 'openai' });
-    assert.deepEqual(resolveAuxModel('  ', 'openai'), { pool: [], providerID: 'openai' });
+  it('returns an empty pool when no aux model is set', () => {
+    // An empty pool means the aux sessions reuse the main model and its credential.
+    assert.deepEqual(resolveAuxModel(undefined, 'openai'), []);
+    assert.deepEqual(resolveAuxModel('  ', 'openai'), []);
   });
 
   it('routes a qualified aux model to the provider it names', () => {
-    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'openai'), {
-      pool: ['google/gemini-2.5-flash'],
-      providerID: 'google',
-    });
+    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'openai'), [
+      'google/gemini-2.5-flash',
+    ]);
     assert.throws(() => resolveAuxModel('nope/m', 'openai'), /Unknown provider "nope"/);
   });
 
   it('accepts a pool on the same terms as the main model', () => {
-    assert.deepEqual(resolveAuxModel('opencode/a, opencode/b', 'openai'), {
-      pool: ['opencode/a', 'opencode/b'],
-      providerID: 'opencode',
-    });
-    assert.throws(
-      () => resolveAuxModel('opencode/a, devin/b', 'openai'),
-      /aux-model pool mixes providers/,
-    );
+    assert.deepEqual(resolveAuxModel('opencode/a, devin/b', 'openai'), ['opencode/a', 'devin/b']);
   });
 
   it('lets a legacy aux provider pin the model as before', () => {
     // The old resolver always pinned the aux model — to aux-provider, else the
     // main provider — so a legacy pin must still swallow a qualified ref rather
     // than let it route itself. Entries pass `aux-provider || provider` here.
-    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'openai', 'openrouter'), {
-      pool: ['openrouter/google/gemini-2.5-flash'],
-      providerID: 'openrouter',
-    });
-    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'opencode', 'opencode'), {
-      pool: ['opencode/google/gemini-2.5-flash'],
-      providerID: 'opencode',
-    });
+    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'openai', 'openrouter'), [
+      'openrouter/google/gemini-2.5-flash',
+    ]);
+    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'opencode', 'opencode'), [
+      'opencode/google/gemini-2.5-flash',
+    ]);
     assert.throws(() => resolveAuxModel('a', 'openai', 'nope'), /Unknown provider "nope"/);
   });
 

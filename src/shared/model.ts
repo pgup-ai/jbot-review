@@ -44,17 +44,13 @@ function parseModelRef(
     : { providerID: fallback, modelID: trimmed };
 }
 
-interface ModelSelection {
-  providerID: string;
-  /** Canonical `provider/model` candidates; one is picked per run. */
-  pool: string[];
-}
-
 /**
  * Every candidate is resolved up front so a typo fails the next run outright
- * instead of only the runs that happen to pick it.
+ * instead of only the runs that happen to pick it. Candidates may name
+ * different providers — only one runs per PR, and each provider's credential
+ * is resolved separately (see resolvePoolCredentials).
  */
-function resolveSelection(input: string, resolution: ProviderResolution): ModelSelection {
+function resolveSelection(input: string, resolution: ProviderResolution): string[] {
   const { pinned, label } = resolution;
   const pool = input
     .split(',')
@@ -63,28 +59,19 @@ function resolveSelection(input: string, resolution: ProviderResolution): ModelS
     .map((entry) => parseModelRef(entry, resolution));
   if (!pool.length) throw new Error(`Invalid ${label} "${input}"; expected at least one model.`);
 
-  const [first] = pool;
-  const mixed = pool.find((entry) => entry.providerID !== first.providerID);
-  if (mixed) {
-    // Resolved names, not bare ids: only they show a fallback provider the user
-    // never wrote.
-    throw new Error(
-      `The ${label} pool mixes providers: "${formatModelName(first)}" and ` +
-        `"${formatModelName(mixed)}". Every pooled model must name the same provider.`,
-    );
+  for (const entry of pool) {
+    // A pinned provider was named outright, so only a derived one cites its model.
+    providerConfig(entry.providerID, pinned ? undefined : formatModelName(entry));
   }
-  // A pinned provider was named outright, so only a derived one cites its model.
-  providerConfig(first.providerID, pinned ? undefined : formatModelName(first));
-
-  return { providerID: first.providerID, pool: pool.map(formatModelName) };
+  return pool.map(formatModelName);
 }
 
 /**
- * Resolves the main review pool and the provider serving it. `pinnedProviderID`
- * is the legacy provider input: when set it pins every candidate, otherwise the
- * provider comes from the refs, which must therefore agree on one.
+ * Resolves the main review pool. `pinnedProviderID` is the legacy provider
+ * input: when set it pins every candidate, otherwise each candidate's own
+ * first segment selects its provider.
  */
-export function resolveModelSelection(models?: string, pinnedProviderID?: string): ModelSelection {
+export function resolveModelSelection(models?: string, pinnedProviderID?: string): string[] {
   const pinned = pinnedProviderID?.trim();
   const input = models?.trim() || defaultModelOf(pinned || DEFAULT_PROVIDER_ID);
   return resolveSelection(input, { pinned, fallback: DEFAULT_PROVIDER_ID, label: 'model' });
@@ -112,17 +99,16 @@ export function pickPooledModel(pool: string[], seed: string): string {
  * `pinnedProviderID` is the legacy aux-provider input, falling back to the
  * legacy main provider input — either pins the aux model, because the old
  * resolver always pinned it (to aux-provider, else the main provider) and never
- * derived. An empty pool means "use the main model" and still reports the main
- * provider, so callers can compare the two to decide whether separate
- * credentials apply.
+ * derived. `mainProviderID` serves a ref that names no provider. An empty pool
+ * means "use the main model".
  */
 export function resolveAuxModel(
   auxModel: string | undefined,
   mainProviderID: string,
   pinnedProviderID?: string,
-): ModelSelection {
+): string[] {
   const input = auxModel?.trim();
-  if (!input) return { providerID: mainProviderID, pool: [] };
+  if (!input) return [];
   return resolveSelection(input, {
     pinned: pinnedProviderID?.trim(),
     fallback: mainProviderID,

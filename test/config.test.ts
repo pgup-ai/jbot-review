@@ -4,11 +4,13 @@ import { describe, it } from 'node:test';
 
 import {
   PROVIDERS,
+  auxModelOptionsFor,
   defaultModelOptions,
   modelSupportsPromptCache,
   needsAuxOpencodeConfig,
   providerConfig,
   providerCredentialSources,
+  resolvePoolCredentials,
   resolveProviderBaseURL,
   resolveProviderCredential,
 } from '../src/shared/config.ts';
@@ -141,6 +143,23 @@ describe('provider configuration resolution', () => {
       workflow,
       /auto-approve: \$\{\{ needs\.command\.outputs\.auto_approve \|\| vars\.JBOT_AUTO_APPROVE \|\| 'false' \}\}/,
     );
+  });
+
+  it('gives the aux model its own options unless it shares the main entry', () => {
+    // Identity is provider-scoped: same id on another provider is routed
+    // separately, so it still needs its own effort.
+    assert.equal(auxModelOptionsFor('openai', 'gpt-5', 'openai', 'gpt-5'), undefined);
+    assert.deepEqual(auxModelOptionsFor('openai', 'gpt-5', 'openai', 'gpt-5-mini'), {
+      reasoningEffort: 'low',
+    });
+    assert.deepEqual(auxModelOptionsFor('openai', 'gpt-5', 'openrouter', 'gpt-5'), {
+      reasoningEffort: 'low',
+    });
+    // Provider guards still apply to the aux default.
+    assert.deepEqual(auxModelOptionsFor('openai', 'm', 'poolside', 'laguna-s-2.1'), {
+      reasoningEffort: 'default',
+    });
+    assert.deepEqual(auxModelOptionsFor('openai', 'm', 'openai-compatible', 'x'), {});
   });
 
   it('registers cross-provider config and distinct models on a shared custom provider', () => {
@@ -312,6 +331,54 @@ describe('openai-compatible custom provider', () => {
           },
         ]),
       /Missing model for custom provider/,
+    );
+  });
+});
+
+describe('resolvePoolCredentials', () => {
+  const keys =
+    (present: string[]) =>
+    ({ env }: { env: string }) =>
+      present.includes(env) ? `${env}-value` : undefined;
+
+  it('resolves one credential per provider a mixed pool draws on', () => {
+    const credentials = resolvePoolCredentials(
+      ['opencode/a', 'opencode/b', 'deepseek/c'],
+      keys(['OPENCODE_API_KEY', 'DEEPSEEK_API_KEY']),
+    );
+
+    assert.deepEqual([...credentials.keys()], ['opencode', 'deepseek']);
+    assert.equal(credentials.get('deepseek')?.apiKey, 'DEEPSEEK_API_KEY-value');
+    // Only providers with a custom endpoint carry one.
+    assert.equal(credentials.get('opencode')?.baseURL, undefined);
+  });
+
+  it('names the provider, the model that required it, and how to set it', () => {
+    assert.throws(
+      () => resolvePoolCredentials(['opencode/a', 'deepseek/c'], keys(['OPENCODE_API_KEY'])),
+      /Missing key for provider "deepseek", required by pooled model "deepseek\/c"\. Pass "deepseek-api-key" or DEEPSEEK_API_KEY\./,
+    );
+  });
+
+  it('appends a caller hint, so local review can say no GitHub token is needed', () => {
+    assert.throws(
+      () => resolvePoolCredentials(['deepseek/c'], keys([]), ' Set it in .env.'),
+      /DEEPSEEK_API_KEY\. Set it in \.env\./,
+    );
+  });
+
+  it("carries a custom provider's base URL, and rejects a missing one", () => {
+    const custom = keys(['JBOT_OPENAI_COMPATIBLE_API_KEY', 'JBOT_OPENAI_COMPATIBLE_BASE_URL']);
+    assert.equal(
+      resolvePoolCredentials(['openai-compatible/m'], ({ env }) =>
+        env === 'JBOT_OPENAI_COMPATIBLE_BASE_URL' ? 'https://proxy.example/v1' : custom({ env }),
+      ).get('openai-compatible')?.baseURL,
+      'https://proxy.example/v1',
+    );
+    assert.throws(
+      () =>
+        resolvePoolCredentials(['openai-compatible/m'], keys(['JBOT_OPENAI_COMPATIBLE_API_KEY'])),
+      /Missing base URL for provider "openai-compatible"/,
     );
   });
 });
