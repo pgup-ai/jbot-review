@@ -1028,7 +1028,8 @@ describe('swallowedProviderWarnings', () => {
 
     assert.equal(rest.length, 0);
     assert.match(warning, /"opencode\/devin\/glm-5\.2" sends model id "devin\/glm-5\.2"/);
-    assert.match(warning, /Drop provider\/aux-provider/);
+    // No pin is needed to reach this, so the remedy must not assume one.
+    assert.match(warning, /To review on "devin", name the model under it instead/);
   });
 
   it('flags a slashless CLI-backend id too', () => {
