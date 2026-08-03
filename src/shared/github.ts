@@ -297,6 +297,10 @@ export async function listPriorJbotThreads(
   repo: string,
   pullNumber: number,
 ): Promise<PriorJbotThreads> {
+  // GitHub's GraphQL node estimator budgets 500k nodes per request, counted
+  // multiplicatively from the `first` args: 100 threads × 100 comments ×
+  // reactors(first: N) must stay under it. N=50 estimated to 510,100 and the
+  // whole lookup was rejected (dogfooded 2026-08-03); N=10 estimates ~110k.
   const query = `
     query JbotReviewThreads($owner: String!, $repo: String!, $number: Int!, $after: String) {
       viewer {
@@ -325,7 +329,7 @@ export async function listPriorJbotThreads(
                   }
                   reactionGroups {
                     content
-                    reactors(first: 50) {
+                    reactors(first: 10) {
                       nodes {
                         __typename
                       }

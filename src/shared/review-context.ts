@@ -350,7 +350,8 @@ const LINKED_ISSUE_OMISSION_RESERVE_BYTES = 96;
  * trailing line discloses the total.
  */
 export function formatLinkedIssues(issues: LinkedIssue[], omittedCount = 0): string {
-  if (issues.length === 0) return '';
+  // All-omitted (e.g. every closing reference is cross-repo) still discloses.
+  if (issues.length === 0 && omittedCount === 0) return '';
   const intro = '## Linked issues\n\nGitHub records this PR as closing these issues.';
   const sections = [intro];
   const cost = (section: string) => Buffer.byteLength(`\n\n${section}`, 'utf8');

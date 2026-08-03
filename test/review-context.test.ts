@@ -460,6 +460,10 @@ describe('buildReviewContext', () => {
     assert.ok(Buffer.byteLength(giantTitle, 'utf8') <= MAX_LINKED_ISSUES_BYTES);
     assert.match(giantTitle, /\(1 closing issue\(s\) not shown/);
 
+    // All-omitted (e.g. only cross-repo closing refs) still discloses; no refs → no block.
+    assert.match(formatLinkedIssues([], 2), /\(2 closing issue\(s\) not shown/);
+    assert.equal(formatLinkedIssues([], 0), '');
+
     assert.match(
       buildReviewContext({
         ...baseParams,

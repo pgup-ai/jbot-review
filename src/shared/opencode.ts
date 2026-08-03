@@ -361,6 +361,15 @@ export async function startOpencode(
     promptCache?: boolean;
     baseURL?: string;
     additionalProviderKeys?: OpencodeProviderConfig[];
+    /**
+     * The scrub mutates process-global env for the spawn window (the SDK
+     * offers no env injection), so it is only safe in a single-run process
+     * where nothing else reads env concurrently. The multi-run app disables
+     * it: a sibling run's credential reads (gateway token, provider keys)
+     * would race the window. Restoring earlier is not an option — the child
+     * must provably have spawned, or the scrub silently stops scrubbing.
+     */
+    scrubEnv?: boolean;
   } = {},
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
   // Serialize against other startOpencode calls so the chdir → spawn → restore
@@ -412,11 +421,13 @@ export async function startOpencode(
         /* best effort */
       }
     };
-    for (const key of sessionEnvDenyKeys(Object.keys(process.env))) {
-      const value = process.env[key];
-      if (value === undefined) continue;
-      scrubbedEnv.set(key, value);
-      delete process.env[key];
+    if (options.scrubEnv !== false) {
+      for (const key of sessionEnvDenyKeys(Object.keys(process.env))) {
+        const value = process.env[key];
+        if (value === undefined) continue;
+        scrubbedEnv.set(key, value);
+        delete process.env[key];
+      }
     }
     if (scrubbedEnv.size > 0) {
       log(`Withheld ${scrubbedEnv.size} credential env var(s) from the opencode child.`);

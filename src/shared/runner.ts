@@ -587,6 +587,13 @@ function missingOctokit(): Octokit {
 
 export interface ReviewRunOptions {
   enhancedContext?: boolean;
+  /**
+   * Withhold credential env vars from the opencode child (default on). The
+   * scrub mutates process-global env for the spawn window, so a process that
+   * runs REVIEWS CONCURRENTLY (the webhook app) must turn it off — a sibling
+   * run's env reads would race the window.
+   */
+  scrubSessionEnv?: boolean;
   /** SDK routing override; blank defers to JBOT_SDK_ENGINE, then auto. */
   sdkEngine?: string;
   dryRun?: boolean;
@@ -1518,6 +1525,7 @@ async function runReviewPipeline(params: {
             ? promptCachePolicy.providerPromptCache
             : promptCachePolicy.auxProviderPromptCache,
           port: options.opencodePort > 0 ? options.opencodePort : undefined,
+          scrubEnv: options.scrubSessionEnv !== false,
           additionalProviderKeys: auxNeedsOpencodeConfig
             ? [
                 {
@@ -2343,6 +2351,7 @@ export function normalizeOptions(
   const maxPasses = 1 + COUNTED_LENS_KEYS.length;
   return {
     enhancedContext: options?.enhancedContext ?? false,
+    scrubSessionEnv: options?.scrubSessionEnv ?? true,
     sdkEngine: options?.sdkEngine ?? '',
     dryRun: options?.dryRun ?? false,
     autoApprove: options?.autoApprove ?? false,

@@ -123,6 +123,9 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
         // the webhook app has no per-run inputs, so expose env knobs.
         options: {
           enhancedContext: true,
+          // The app runs reviews concurrently; the env scrub's spawn window
+          // would race sibling runs' credential reads (see ReviewRunOptions).
+          scrubSessionEnv: false,
           reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 1),
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
           auxModel,
