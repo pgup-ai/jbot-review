@@ -9,6 +9,13 @@ export interface ReviewCommit {
   author?: string;
 }
 
+/** Same-repo issue this PR closes — intent input for the claims-verification pass. */
+export interface LinkedIssue {
+  number: number;
+  title: string;
+  body: string;
+}
+
 export interface DiffScope {
   baseRef?: string;
   baseSha?: string;
@@ -321,6 +328,67 @@ export interface BuildReviewContextParams {
   checkSummary: string;
   guidelines: string;
   diffScope?: DiffScope;
+  linkedIssues?: LinkedIssue[];
+  /** Closing issues the fetch dropped (cap, cross-repo) — disclosed in the block. */
+  linkedIssuesOmitted?: number;
+}
+
+// Issue bodies are author-controlled and unbounded like the PR body; all linked
+// issues share one cap (invariant #4).
+export const MAX_LINKED_ISSUES_BYTES = 4 * 1024;
+const LINKED_ISSUE_TRUNCATION_NOTICE =
+  '\n[Issue body truncated to keep the review prompt bounded.]';
+// Room held back for the trailing omission line so it always fits.
+const LINKED_ISSUE_OMISSION_RESERVE_BYTES = 96;
+
+/**
+ * Data-only block (the instruction to review against it lives in prompt.ts).
+ * Every emitted byte — headings, bodies, placeholders, notices, joiners —
+ * charges the shared budget, so the rendered block never exceeds
+ * MAX_LINKED_ISSUES_BYTES. `omittedCount` carries issues the fetch already
+ * dropped (cap, cross-repo); issues that don't fit here add to it, and one
+ * trailing line discloses the total.
+ */
+export function formatLinkedIssues(issues: LinkedIssue[], omittedCount = 0): string {
+  // All-omitted (e.g. every closing reference is cross-repo) still discloses.
+  if (issues.length === 0 && omittedCount === 0) return '';
+  const intro = '## Linked issues\n\nGitHub records this PR as closing these issues.';
+  const sections = [intro];
+  const cost = (section: string) => Buffer.byteLength(`\n\n${section}`, 'utf8');
+  let omitted = omittedCount;
+  let remaining =
+    MAX_LINKED_ISSUES_BYTES -
+    Buffer.byteLength(intro, 'utf8') -
+    LINKED_ISSUE_OMISSION_RESERVE_BYTES;
+  for (const issue of issues) {
+    const heading = `### #${issue.number}: ${issue.title || '(untitled)'}`;
+    const body = issue.body.trim();
+    const full = `${heading}\n${body || '(no body)'}`;
+    if (cost(full) <= remaining) {
+      sections.push(full);
+      remaining -= cost(full);
+      continue;
+    }
+    const bodyBudget = remaining - cost(`${heading}\n${LINKED_ISSUE_TRUNCATION_NOTICE}`);
+    if (body && bodyBudget > 0) {
+      const buffer = Buffer.from(body, 'utf8');
+      const truncated = `${heading}\n${buffer.toString(
+        'utf8',
+        0,
+        findUtf8Boundary(buffer, bodyBudget),
+      )}${LINKED_ISSUE_TRUNCATION_NOTICE}`;
+      sections.push(truncated);
+      remaining -= cost(truncated);
+    } else {
+      omitted += 1;
+    }
+  }
+  if (omitted > 0) {
+    sections.push(
+      `(${omitted} closing issue(s) not shown: issue cap, cross-repo, or byte budget.)`,
+    );
+  }
+  return sections.join('\n\n');
 }
 
 // Author-controlled and unbounded upstream; cap like every injected block (invariant #4).
@@ -348,6 +416,12 @@ export function buildReviewContext(params: BuildReviewContextParams): string {
   const diffScopeText = params.diffScope ? formatDiffScope(params.diffScope) : '';
   if (diffScopeText) pullRequestLines.push(diffScopeText);
   sections.push(pullRequestLines.join('\n'));
+
+  const linkedIssuesBlock = formatLinkedIssues(
+    params.linkedIssues ?? [],
+    params.linkedIssuesOmitted ?? 0,
+  );
+  if (linkedIssuesBlock) sections.push(linkedIssuesBlock);
 
   sections.push(
     [

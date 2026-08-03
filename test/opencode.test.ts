@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildConfig, parseChangesSinceLastReviewSummary } from '../src/shared/opencode.ts';
+import {
+  buildConfig,
+  parseChangesSinceLastReviewSummary,
+  sessionEnvDenyKeys,
+} from '../src/shared/opencode.ts';
 
 const noop = () => {};
 
@@ -23,6 +27,54 @@ describe('parseChangesSinceLastReviewSummary', () => {
   it('returns empty string when summary is missing or not a string', () => {
     assert.equal(parseChangesSinceLastReviewSummary('{"findings":[]}', 'changes-since', noop), '');
     assert.equal(parseChangesSinceLastReviewSummary('{"summary":42}', 'changes-since', noop), '');
+  });
+});
+
+describe('sessionEnvDenyKeys', () => {
+  it('strips action inputs, GitHub tokens, and credential-suffixed vars — nothing else', () => {
+    const keys = [
+      'INPUT_GITHUB-TOKEN',
+      'INPUT_MODEL',
+      'GITHUB_TOKEN',
+      'GH_TOKEN',
+      'OPENROUTER_API_KEY',
+      'KILO_AUTH_CONTENT',
+      'CODEX_AUTH_JSON',
+      'COMMANDCODE_ACCESS_KEY',
+      'AWS_ACCESS_KEY_ID',
+      'APP_WEBHOOK_SECRET',
+      'GITHUB_APP_PRIVATE_KEY',
+      'SERVICE_PASSWORD',
+      // Credential-bearing names that no fixed suffix list catches.
+      'STRIPE_SECRET_KEY',
+      'API_KEY',
+      'DATABASE_DSN',
+      'GCP_CREDENTIALS',
+      'PATH',
+      'HOME',
+      'JBOT_OPENCODE_PORT',
+      // Ends in a credential WORD only as a prefix — must survive.
+      'TOKENIZERS_PARALLELISM',
+      'KEYCHAIN_PATH',
+    ];
+    assert.deepEqual(sessionEnvDenyKeys(keys), [
+      'INPUT_GITHUB-TOKEN',
+      'INPUT_MODEL',
+      'GITHUB_TOKEN',
+      'GH_TOKEN',
+      'OPENROUTER_API_KEY',
+      'KILO_AUTH_CONTENT',
+      'CODEX_AUTH_JSON',
+      'COMMANDCODE_ACCESS_KEY',
+      'AWS_ACCESS_KEY_ID',
+      'APP_WEBHOOK_SECRET',
+      'GITHUB_APP_PRIVATE_KEY',
+      'SERVICE_PASSWORD',
+      'STRIPE_SECRET_KEY',
+      'API_KEY',
+      'DATABASE_DSN',
+      'GCP_CREDENTIALS',
+    ]);
   });
 });
 

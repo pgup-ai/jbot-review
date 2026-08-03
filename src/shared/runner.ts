@@ -161,6 +161,7 @@ import {
   formatDiffScope,
   formatContextBudget,
   truncatePrBody,
+  type LinkedIssue,
   type ReviewCommit,
 } from './review-context.ts';
 import { planReviewFanout, planIncrementalLenses } from './fanout.ts';
@@ -170,6 +171,7 @@ import {
   compareCommitFiles,
   listPrComments,
   listPrCommits,
+  listClosingIssues,
   getCheckStatusSummary,
   formatFindingLabel,
   formatFindingLocation,
@@ -585,6 +587,13 @@ function missingOctokit(): Octokit {
 
 export interface ReviewRunOptions {
   enhancedContext?: boolean;
+  /**
+   * Withhold credential env vars from the opencode child (default on). The
+   * scrub mutates process-global env for the spawn window, so a process that
+   * runs REVIEWS CONCURRENTLY (the webhook app) must turn it off — a sibling
+   * run's env reads would race the window.
+   */
+  scrubSessionEnv?: boolean;
   /** SDK routing override; blank defers to JBOT_SDK_ENGINE, then auto. */
   sdkEngine?: string;
   dryRun?: boolean;
@@ -911,10 +920,25 @@ async function runReviewPipeline(params: {
     threads: allPriorJbotThreads,
     reviewGroups: priorJbotReviewGroups,
     unresolvedAddressedThreadIds,
+    outcomes: priorThreadOutcomes,
     lookupSucceeded: priorThreadStateKnown,
   } = localDiff
-    ? { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [], lookupSucceeded: true }
+    ? {
+        threads: [],
+        reviewGroups: [],
+        unresolvedAddressedThreadIds: [],
+        outcomes: [],
+        lookupSucceeded: true,
+      }
     : await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
+  if (telemetry.enabled && priorThreadOutcomes.length > 0) {
+    // rawFiles (pre noise-filter) is the full current PR diff membership set.
+    const inDiff = new Set(rawFiles.map((file) => file.filename));
+    for (const outcome of priorThreadOutcomes) {
+      telemetry.recordOutcome({ ...outcome, fileInDiff: inDiff.has(outcome.path) });
+    }
+    log(`Outcome telemetry: recorded ${priorThreadOutcomes.length} prior finding thread(s).`);
+  }
   const finalizePriorResolvedReviews = async (resolvedThisRun: readonly string[]) => {
     if (options.dryRun) return;
     await finalizeResolvedReviews({
@@ -1110,6 +1134,9 @@ async function runReviewPipeline(params: {
     const commits = localDiff
       ? localDiff.commits
       : await listPrCommits(octokit, owner, repo, pullNumber);
+    const { issues: linkedIssues, omitted: linkedIssuesOmitted } = localDiff
+      ? { issues: [], omitted: 0 }
+      : await safeListClosingIssues(octokit, owner, repo, pullNumber, log);
     // Belt-and-braces: local mode never reaches GitHub for checks (the local
     // driver also passes no headSha, so the fallback text stays literally true).
     const checkSummary =
@@ -1130,6 +1157,8 @@ async function runReviewPipeline(params: {
       // of being buried mid-context.
       guidelines: '',
       diffScope,
+      linkedIssues,
+      linkedIssuesOmitted,
     });
     coreContext = `${coreContext}\n\n${summaryScopeBlock}`;
     coreContext = `${coreContext}\n\n${reviewFocusBlock}`;
@@ -1474,15 +1503,14 @@ async function runReviewPipeline(params: {
     piBackend = createPiBackend(piRuntime.runtime);
   }
 
+  let auxOpencodeBootError: unknown;
   if (needsOpencode) {
     const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
-    if (!opencodeApiKey) {
-      piRuntime?.stop();
-      cleanupCliHomes();
-      throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
-    }
-    log('Starting opencode server');
     try {
+      if (!opencodeApiKey) {
+        throw new Error(`Missing API key for provider "${opencodeProviderID}".`);
+      }
+      log('Starting opencode server');
       opencodeRuntime = await startOpencode(
         workspace,
         opencodeProviderID,
@@ -1496,6 +1524,7 @@ async function runReviewPipeline(params: {
             ? promptCachePolicy.providerPromptCache
             : promptCachePolicy.auxProviderPromptCache,
           port: options.opencodePort > 0 ? options.opencodePort : undefined,
+          scrubEnv: options.scrubSessionEnv !== false,
           additionalProviderKeys: auxNeedsOpencodeConfig
             ? [
                 {
@@ -1509,12 +1538,24 @@ async function runReviewPipeline(params: {
             : undefined,
         },
       );
+      opencodeBackend = createOpencodeBackend(opencodeRuntime.client);
     } catch (error) {
-      piRuntime?.stop();
-      cleanupCliHomes();
-      throw error;
+      if (mainOnOpencode) {
+        piRuntime?.stop();
+        cleanupCliHomes();
+        throw error;
+      }
+      // Opencode serves only aux roles here — invariant #3: a broken aux
+      // backend must never fail the run. The auxSessionsEnabled gate below
+      // keeps every aux session off; main review continues.
+      auxOpencodeBootError = error;
+      recordCoverage({ session: 'aux-opencode-boot', state: 'failed', error });
+      log(
+        `Auxiliary opencode backend unavailable; lens/guideline/addressed/changes-since/verification sessions are disabled for this run (fail-open): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
-    opencodeBackend = createOpencodeBackend(opencodeRuntime.client);
   }
 
   const cliBackends: Record<CliBackendID, ReviewBackend | undefined> = {
@@ -1547,7 +1588,10 @@ async function runReviewPipeline(params: {
       ? requireSdkBackend(piBackend, 'pi', 'aux')
       : auxOnPoolside
         ? requireSdkBackend(auxPoolsideBackend, 'poolside', 'aux')
-        : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
+        : auxOpencodeBootError
+          ? // Fail-open stand-in only: auxSessionsEnabled keeps it undispatched.
+            mainBaseBackend
+          : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
   const mainBackend = limitReviewBackendSessions(
     mainBaseBackend,
     'main',
@@ -1560,6 +1604,10 @@ async function runReviewPipeline(params: {
     sessionSlots,
     auxBaseBackend === grokBackend ? grokSessionSlots : undefined,
   );
+  // Single gate for every aux session (lenses, guideline, addressed,
+  // changes-since, verification): an incomplete embedded diff and a failed
+  // aux-only opencode boot disable them the same way (invariant #3).
+  const auxSessionsEnabled = auxHasCompleteEmbeddedDiff && !auxOpencodeBootError;
   // Which engine each model ran on, for the review footer (main wins on
   // collision — same model ⇒ same engine anyway).
   const engineByModel: Record<string, string> = {
@@ -1698,9 +1746,9 @@ async function runReviewPipeline(params: {
             return null;
           })
         : null;
-    const guidelineCandidate = effectiveGuidelinePass && auxHasCompleteEmbeddedDiff;
+    const guidelineCandidate = effectiveGuidelinePass && auxSessionsEnabled;
     const candidateLensKeys = selectLensKeys(
-      auxHasCompleteEmbeddedDiff ? effectiveReviewPasses : 1,
+      auxSessionsEnabled ? effectiveReviewPasses : 1,
       changedFiles,
       changeShape,
     );
@@ -1801,7 +1849,7 @@ async function runReviewPipeline(params: {
         backend: auxBackend,
         model: auxModel,
         prContext: auxPrContext,
-        priorJbotThreads: auxHasCompleteEmbeddedDiff ? priorJbotThreads : [],
+        priorJbotThreads: auxSessionsEnabled ? priorJbotThreads : [],
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -1842,7 +1890,7 @@ async function runReviewPipeline(params: {
         headSha,
         enabled:
           shouldSummarizeChangesSinceLastReview(allPriorReviewComments, headSha) &&
-          auxHasCompleteEmbeddedDiff,
+          auxSessionsEnabled,
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -1947,7 +1995,7 @@ async function runReviewPipeline(params: {
       prContext: auxPrContext,
       timeoutMs: computeVerificationTimeoutMs(options.timeBudgetMinutes, Date.now() - runStartedAt),
       findings: suppression.findings,
-      enabled: options.verifyFindings && auxHasCompleteEmbeddedDiff,
+      enabled: options.verifyFindings && auxSessionsEnabled,
       log,
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
@@ -2321,6 +2369,7 @@ export function normalizeOptions(
   const maxPasses = 1 + COUNTED_LENS_KEYS.length;
   return {
     enhancedContext: options?.enhancedContext ?? false,
+    scrubSessionEnv: options?.scrubSessionEnv ?? true,
     sdkEngine: options?.sdkEngine ?? '',
     dryRun: options?.dryRun ?? false,
     autoApprove: options?.autoApprove ?? false,
@@ -3057,8 +3106,33 @@ async function safeListPriorJbotThreads(
       threads: [],
       reviewGroups: [],
       unresolvedAddressedThreadIds: [],
+      outcomes: [],
       lookupSucceeded: false,
     };
+  }
+}
+
+/** Intent context is a recall supplement — its lookup must never fail the run. */
+async function safeListClosingIssues(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  log: (msg: string) => void,
+): Promise<{ issues: LinkedIssue[]; omitted: number }> {
+  try {
+    const result = await listClosingIssues(octokit, owner, repo, pullNumber);
+    if (result.issues.length > 0) {
+      log(
+        `Linked issues for intent context: ${result.issues
+          .map((issue) => `#${issue.number}`)
+          .join(', ')}${result.omitted > 0 ? ` (+${result.omitted} not embedded)` : ''}.`,
+      );
+    }
+    return result;
+  } catch (error) {
+    log(`Linked-issue lookup skipped: ${error instanceof Error ? error.message : String(error)}`);
+    return { issues: [], omitted: 0 };
   }
 }
 

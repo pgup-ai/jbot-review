@@ -118,6 +118,28 @@ const BASH_PERMISSIONS = {
 } as const;
 
 /**
+ * Env vars withheld from the opencode server — and therefore from every
+ * session's bash children, which inherit its environment. The Action maps ALL
+ * inputs to INPUT_* (the write-scoped GitHub token plus every provider key),
+ * and app/local modes hold credential-suffixed vars; sessions need none of
+ * them, since provider auth travels inside the opencode config. With these
+ * gone, "prompt injection runs `env`" stops yielding tokens that act OUTSIDE
+ * the container (post as the bot, spend provider credits) — the exfil surface
+ * the bash accident-filter above explicitly does not close.
+ */
+export function sessionEnvDenyKeys(keys: string[]): string[] {
+  // Match the trailing WORD, not a fixed suffix list: `STRIPE_SECRET_KEY` ends
+  // in KEY (not SECRET), and a bare `API_KEY`/`TOKEN` has no leading segment.
+  // `(^|_)` also covers GITHUB_TOKEN/GH_TOKEN without naming them.
+  const CREDENTIAL_NAME =
+    /(^|_)(KEY|KEY_ID|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|AUTH_CONTENT|AUTH_JSON|DSN)$/;
+  return keys.filter((key) => {
+    const upper = key.toUpperCase();
+    return upper.startsWith('INPUT_') || CREDENTIAL_NAME.test(upper);
+  });
+}
+
+/**
  * Builds the opencode config object that embeds the API key for the selected
  * provider, plus any secondary providers needed by aux-model sessions. This is
  * the official way to authenticate opencode (replaces the old "set env var"
@@ -337,6 +359,15 @@ export async function startOpencode(
     promptCache?: boolean;
     baseURL?: string;
     additionalProviderKeys?: OpencodeProviderConfig[];
+    /**
+     * The scrub mutates process-global env for the spawn window (the SDK
+     * offers no env injection), so it is only safe in a single-run process
+     * where nothing else reads env concurrently. The multi-run app disables
+     * it: a sibling run's credential reads (gateway token, provider keys)
+     * would race the window. Restoring earlier is not an option — the child
+     * must provably have spawned, or the scrub silently stops scrubbing.
+     */
+    scrubEnv?: boolean;
   } = {},
 ): Promise<{ client: OpencodeClient; stop: () => void }> {
   // Serialize against other startOpencode calls so the chdir → spawn → restore
@@ -361,7 +392,14 @@ export async function startOpencode(
     }
   };
   let lockReleased = false;
+  // Scrubbed only within this serialized critical section (backend setup runs
+  // before any session dispatch), restored the moment the child has spawned —
+  // the child copies its environment at spawn, so the parent's restore never
+  // reaches it.
+  const scrubbedEnv = new Map<string, string>();
   const restoreAndRelease = () => {
+    for (const [key, value] of scrubbedEnv) process.env[key] = value;
+    scrubbedEnv.clear();
     restoreCwd();
     if (!lockReleased) {
       lockReleased = true;
@@ -381,6 +419,15 @@ export async function startOpencode(
         /* best effort */
       }
     };
+    if (options.scrubEnv !== false) {
+      for (const key of sessionEnvDenyKeys(Object.keys(process.env))) {
+        scrubbedEnv.set(key, process.env[key]!);
+        delete process.env[key];
+      }
+    }
+    if (scrubbedEnv.size > 0) {
+      log(`Withheld ${scrubbedEnv.size} credential env var(s) from the opencode child.`);
+    }
     const config = buildConfig(
       providerID,
       modelID,

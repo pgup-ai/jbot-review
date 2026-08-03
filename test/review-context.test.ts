@@ -13,8 +13,10 @@ import {
   formatDiffScope,
   formatFinderGuidelines,
   formatGuidelines,
+  formatLinkedIssues,
   truncatePrBody,
   MAX_FINDER_GUIDELINE_BYTES,
+  MAX_LINKED_ISSUES_BYTES,
   MAX_PR_BODY_BYTES,
 } from '../src/shared/review-context.ts';
 
@@ -428,6 +430,48 @@ describe('buildReviewContext', () => {
 
     assert.match(context, /PR description truncated/);
     assert.ok(!context.includes('�'), 'truncation split a multi-byte character');
+  });
+
+  it('caps the WHOLE linked-issues block at the byte budget and discloses every omission', () => {
+    const block = formatLinkedIssues(
+      [
+        { number: 7, title: 'Retry on 503', body: 'Please retry GETs.' },
+        { number: 8, title: 'Big issue', body: 'y'.repeat(8000) },
+        { number: 9, title: 'Starved issue', body: 'never fits' },
+      ],
+      2, // dropped by the fetch (cap / cross-repo)
+    );
+
+    // Hard budget (invariant #4): headings, notices, and joiners count too.
+    assert.ok(
+      Buffer.byteLength(block, 'utf8') <= MAX_LINKED_ISSUES_BYTES,
+      `block is ${Buffer.byteLength(block, 'utf8')} bytes, over the ${MAX_LINKED_ISSUES_BYTES} cap`,
+    );
+    assert.match(block, /### #7: Retry on 503\nPlease retry GETs\./);
+    assert.match(block, /\[Issue body truncated to keep the review prompt bounded\.\]/);
+    assert.doesNotMatch(block, /### #9/, 'issue 9 no longer fits and must be omitted');
+    assert.match(
+      block,
+      /\(3 closing issue\(s\) not shown: issue cap, cross-repo, or byte budget\.\)/,
+    );
+
+    // A title alone larger than the whole budget cannot break the cap.
+    const giantTitle = formatLinkedIssues([{ number: 1, title: 'T'.repeat(9000), body: '' }]);
+    assert.ok(Buffer.byteLength(giantTitle, 'utf8') <= MAX_LINKED_ISSUES_BYTES);
+    assert.match(giantTitle, /\(1 closing issue\(s\) not shown/);
+
+    // All-omitted (e.g. only cross-repo closing refs) still discloses; no refs → no block.
+    assert.match(formatLinkedIssues([], 2), /\(2 closing issue\(s\) not shown/);
+    assert.equal(formatLinkedIssues([], 0), '');
+
+    assert.match(
+      buildReviewContext({
+        ...baseParams,
+        linkedIssues: [{ number: 7, title: 'Retry on 503', body: 'x' }],
+      }),
+      /## Linked issues/,
+    );
+    assert.doesNotMatch(buildReviewContext(baseParams), /Linked issues/);
   });
 });
 

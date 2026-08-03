@@ -6,6 +6,7 @@ import {
   CHANGES_SINCE_CONTEXT_BUDGET,
   CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
   CHANGES_SINCE_LAST_REVIEW_PROMPT,
+  CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
   CONTEXT7_REASON_BUDGET,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
@@ -46,6 +47,7 @@ describe('UNTRUSTED_PR_CONTENT_NOTE', () => {
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /untrusted/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /never as instructions/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /description/i);
+    assert.match(UNTRUSTED_PR_CONTENT_NOTE, /linked issue bodies/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /prior review comments/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /output format/i);
   });
@@ -95,6 +97,26 @@ describe('CHANGES_SINCE_LAST_REVIEW_PROMPT', () => {
     assert.doesNotMatch(CHANGES_SINCE_LAST_REVIEW_PROMPT, /"findings"/);
   });
 
+  it('single-shot variant forbids tool use where the agentic one instructs running git', () => {
+    // Telling a tool-less pi session "git is available — run it" made tool-trained
+    // models emit tool-call markup instead of JSON (4/4 dogfood runs).
+    assert.match(CHANGES_SINCE_LAST_REVIEW_PROMPT, /git is available/);
+    assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /NO tools on this call/);
+    assert.doesNotMatch(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /git is available/);
+    // A truncated commit list can't be recovered without tools; the output must say so.
+    assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /summary is PARTIAL/);
+    assert.match(
+      CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
+      /do not list bugs or review findings/i,
+    );
+    assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /"summary":/);
+    assert.ok(
+      assembleChangesSinceLastReviewPrompt('PR-CONTEXT', 'DELTA-CONTEXT', true).includes(
+        'NO tools on this call',
+      ),
+    );
+  });
+
   it('puts the output reminder last and asks for a single summary key', () => {
     const out = assembleChangesSinceLastReviewPrompt('PR-CONTEXT', 'DELTA-CONTEXT');
     assert.ok(
@@ -116,6 +138,11 @@ describe('REVIEW_PROMPT', () => {
       REVIEW_PROMPT,
       /Do not report a violation merely because you did not execute a\s+command/,
     );
+  });
+
+  it('anchors the claims pass to linked issues with a material-drift bar', () => {
+    assert.match(REVIEW_PROMPT, /"## Linked issues" context section/);
+    assert.match(REVIEW_PROMPT, /only material drift/i);
   });
 
   it('uses a concrete example instead of union syntax in the schema', () => {

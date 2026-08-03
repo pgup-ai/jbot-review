@@ -3,7 +3,8 @@ import { paginateRest } from '@octokit/plugin-paginate-rest';
 import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 
 import type { Finding } from './types.ts';
-import type { ReviewCommit } from './review-context.ts';
+import type { LinkedIssue, ReviewCommit } from './review-context.ts';
+import type { PriorThreadOutcome } from './telemetry.ts';
 import {
   decideApprovalContinuity,
   decideAutoApproval,
@@ -227,6 +228,10 @@ interface ReviewThreadsResponse {
               author?: {
                 login: string;
               } | null;
+              reactionGroups?: Array<{
+                content: string;
+                reactors: { nodes?: Array<{ __typename: string } | null> | null };
+              }> | null;
             } | null> | null;
           };
         } | null>;
@@ -264,6 +269,12 @@ export interface PriorJbotThreads {
    * mechanical resolve retry, no re-reply.
    */
   unresolvedAddressedThreadIds: string[];
+  /**
+   * Observed human-outcome state of EVERY prior jbot finding thread — including
+   * the addressed/resolved ones the review context omits. Outcome telemetry
+   * input, independent of includePriorComments.
+   */
+  outcomes: PriorThreadOutcome[];
 }
 
 /**
@@ -286,6 +297,10 @@ export async function listPriorJbotThreads(
   repo: string,
   pullNumber: number,
 ): Promise<PriorJbotThreads> {
+  // GitHub's GraphQL node estimator budgets 500k nodes per request, counted
+  // multiplicatively from the `first` args: 100 threads × 100 comments ×
+  // reactors(first: N) must stay under it. N=50 estimated to 510,100 and the
+  // whole lookup was rejected (dogfooded 2026-08-03); N=10 estimates ~110k.
   const query = `
     query JbotReviewThreads($owner: String!, $repo: String!, $number: Int!, $after: String) {
       viewer {
@@ -312,6 +327,14 @@ export async function listPriorJbotThreads(
                   author {
                     login
                   }
+                  reactionGroups {
+                    content
+                    reactors(first: 10) {
+                      nodes {
+                        __typename
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -323,6 +346,7 @@ export async function listPriorJbotThreads(
 
   const threads: PriorJbotThread[] = [];
   const unresolvedAddressedThreadIds: string[] = [];
+  const outcomes: PriorThreadOutcome[] = [];
   let commentState: JbotReviewCommentState | undefined;
   let after: string | null = null;
   do {
@@ -334,7 +358,7 @@ export async function listPriorJbotThreads(
     })) as ReviewThreadsResponse;
     const viewerLogin = response.viewer.login;
     const page = response.repository?.pullRequest?.reviewThreads;
-    if (!page) return { threads, reviewGroups: [], unresolvedAddressedThreadIds };
+    if (!page) return { threads, reviewGroups: [], unresolvedAddressedThreadIds, outcomes };
     commentState ??= await listJbotReviewCommentState(
       octokit,
       owner,
@@ -379,6 +403,28 @@ export async function listPriorJbotThreads(
         comments.some((comment) =>
           isBotAddressedReply(comment.author?.login, comment.body, viewerLogin),
         ) || state.addressedTopLevelIds.has(topLevel.databaseId);
+      // Before the disposition gates: outcomes cover skip/resolve-only threads too.
+      // A bot's 👍 is not a human outcome — mirrors the [bot] exclusion in humanReplies.
+      const count = (content: string) =>
+        topLevel.reactionGroups
+          ?.find((group) => group.content === content)
+          ?.reactors.nodes?.filter((reactor) => reactor?.__typename === 'User').length ?? 0;
+      outcomes.push({
+        threadId: thread.id,
+        path: thread.path,
+        line: thread.line ?? thread.originalLine ?? undefined,
+        resolved: thread.isResolved,
+        addressed,
+        humanReplies: comments.filter(
+          (comment) =>
+            comment !== topLevel &&
+            comment.author?.login !== viewerLogin &&
+            !comment.author?.login?.endsWith('[bot]'),
+        ).length,
+        thumbsUp: count('THUMBS_UP'),
+        thumbsDown: count('THUMBS_DOWN'),
+        confused: count('CONFUSED'),
+      });
       const disposition = classifyPriorJbotThread({ addressed, isResolved: thread.isResolved });
       if (disposition === 'skip') continue;
       if (disposition === 'resolve-only') {
@@ -422,7 +468,83 @@ export async function listPriorJbotThreads(
   const reviewGroups = commentState
     ? [...commentState.reviewGroupsById.values()].filter((review) => review.threads.length > 0)
     : [];
-  return { threads, reviewGroups, unresolvedAddressedThreadIds };
+  return { threads, reviewGroups, unresolvedAddressedThreadIds, outcomes };
+}
+
+/** Same-repo issues GitHub records this PR as closing (closing keywords or
+ * manual links) — intent input for the claims-verification pass. Cross-repo
+ * references are dropped (the query over-fetches to leave headroom for that);
+ * the formatter budgets the bytes. `omitted` counts every closing reference
+ * not returned — beyond the cap or cross-repo — so the context block can
+ * disclose that its list is incomplete (invariant #4). */
+const MAX_LINKED_ISSUES = 3;
+
+// Aux-context lookup: bounded like blast-radius' git grep — a stalled request
+// must fail open in seconds, not at undici's multi-minute defaults.
+const LINKED_ISSUES_TIMEOUT_MS = 10_000;
+
+export async function listClosingIssues(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+): Promise<{ issues: LinkedIssue[]; omitted: number }> {
+  const response = (await octokit.graphql(
+    `
+      query ClosingIssues($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) {
+            closingIssuesReferences(first: 10) {
+              totalCount
+              nodes {
+                number
+                title
+                body
+                repository {
+                  name
+                  owner {
+                    login
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `,
+    {
+      owner,
+      repo,
+      number: pullNumber,
+      request: { signal: AbortSignal.timeout(LINKED_ISSUES_TIMEOUT_MS) },
+    },
+  )) as {
+    repository?: {
+      pullRequest?: {
+        closingIssuesReferences?: {
+          totalCount?: number;
+          nodes?: Array<{
+            number: number;
+            title: string;
+            body?: string | null;
+            repository: { name: string; owner: { login: string } };
+          } | null> | null;
+        } | null;
+      } | null;
+    } | null;
+  };
+  const refs = response.repository?.pullRequest?.closingIssuesReferences;
+  const nodes = refs?.nodes ?? [];
+  const issues = nodes
+    .filter((node): node is NonNullable<typeof node> => Boolean(node))
+    .filter(
+      (node) =>
+        node.repository.owner.login.toLowerCase() === owner.toLowerCase() &&
+        node.repository.name.toLowerCase() === repo.toLowerCase(),
+    )
+    .slice(0, MAX_LINKED_ISSUES)
+    .map((node) => ({ number: node.number, title: node.title, body: node.body ?? '' }));
+  return { issues, omitted: (refs?.totalCount ?? nodes.length) - issues.length };
 }
 
 async function listJbotReviewCommentState(

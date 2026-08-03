@@ -962,7 +962,7 @@ export async function runPiChangesSinceLastReview(
     const raw = await promptPiSession(
       session,
       model,
-      assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+      assembleChangesSinceLastReviewPrompt(prContext, deltaContext, true),
       label,
       log,
       timeoutMs,
