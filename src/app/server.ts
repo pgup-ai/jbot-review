@@ -26,7 +26,7 @@ const cfg = providerConfig(provider);
 const { model: auxModel, providerID: auxProviderID } = resolveAuxModel(
   process.env.JBOT_REVIEW_AUX_MODEL,
   provider,
-  process.env.JBOT_AUX_PROVIDER,
+  process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
 );
 const auxCfg = auxProviderID !== provider ? providerConfig(auxProviderID) : undefined;
 const apiKey = resolveProviderCredential(cfg, ({ env }) => process.env[env]);

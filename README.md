@@ -539,7 +539,7 @@ pass it through the workflow. Leave it unset to use `opencode`'s default model
 ```yaml
 - uses: pgup-ai/jbot-review-action@v0
   with:
-    provider: ${{ vars.JBOT_REVIEW_PROVIDER || 'opencode' }}
+    provider: ${{ vars.JBOT_REVIEW_PROVIDER || '' }}
     model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
     aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
     aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
@@ -620,15 +620,19 @@ block.
 model: opencode/deepseek-v4-flash-free,opencode/glm-5-free,opencode/kimi-k2.5-free
 ```
 
-**Legacy `provider` / `aux-provider`** still work unchanged. When either is set
-it _pins_ the provider for its model input: an unprefixed id belongs to it, a
-matching `provider/` prefix is stripped, and any other slash prefix stays part
-of the model id (`provider: nvidia` + `model: moonshotai/kimi-k2.6` →
-`nvidia/moonshotai/kimi-k2.6`). Set them only to keep an existing configuration
-working; new setups should qualify the model instead. The one behavior change on
-dropping them: a slash-containing model id whose first segment happens to name a
-provider is now read as that provider, so qualify such ids fully (or keep the
-pin) when migrating.
+**Legacy `provider` / `aux-provider`** still work unchanged. Setting either one
+_pins_ the provider: an unprefixed id belongs to it, a matching `provider/`
+prefix is stripped, and any other slash prefix stays part of the model id
+(`provider: nvidia` + `model: moonshotai/kimi-k2.6` →
+`nvidia/moonshotai/kimi-k2.6`). `provider` pins `aux-model` too when
+`aux-provider` is unset, which is what the previous resolver did — so a run that
+sets either input keeps today's behavior for **both** models, and only a run
+setting neither derives anything.
+
+Set them only to keep an existing configuration working; new setups should
+qualify both models and drop both inputs. Migrate them together: qualifying
+`aux-model` while `provider` is still set leaves it pinned, and dropping
+`provider` while a model id is still unqualified falls back to `opencode`.
 
 For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic

@@ -156,9 +156,16 @@ describe('resolveAuxModel', () => {
   });
 
   it('lets a legacy aux provider pin the model as before', () => {
+    // The old resolver always pinned the aux model — to aux-provider, else the
+    // main provider — so a legacy pin must still swallow a qualified ref rather
+    // than let it route itself. Entries pass `aux-provider || provider` here.
     assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'openai', 'openrouter'), {
       model: 'openrouter/google/gemini-2.5-flash',
       providerID: 'openrouter',
+    });
+    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'opencode', 'opencode'), {
+      model: 'opencode/google/gemini-2.5-flash',
+      providerID: 'opencode',
     });
     assert.throws(() => resolveAuxModel('a', 'openai', 'nope'), /Unknown provider "nope"/);
   });

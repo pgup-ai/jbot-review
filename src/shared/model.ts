@@ -103,9 +103,12 @@ export function pickPooledModel(pool: string[], seed: string): string {
 
 /**
  * Resolves the auxiliary model. `pinnedProviderID` is the legacy aux-provider
- * input; without one an unqualified ref stays on the main provider and a
- * qualified one names its own. An absent aux model reports the main provider,
- * so callers can compare the two to decide whether separate credentials apply.
+ * input, falling back to the legacy main provider input — either one pins the
+ * aux model, because the old resolver always pinned it (to aux-provider, else
+ * the main provider) and never derived. With neither set an unqualified ref
+ * stays on the main provider and a qualified one names its own. An absent aux
+ * model reports the main provider, so callers can compare the two to decide
+ * whether separate credentials apply.
  */
 export function resolveAuxModel(
   auxModel: string | undefined,

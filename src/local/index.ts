@@ -296,7 +296,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   const { model: auxModel, providerID: auxProviderID } = resolveAuxModel(
     process.env.JBOT_REVIEW_AUX_MODEL,
     provider,
-    process.env.JBOT_AUX_PROVIDER,
+    process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
   );
   const auxCfg = auxProviderID !== provider ? providerConfig(auxProviderID) : undefined;
 

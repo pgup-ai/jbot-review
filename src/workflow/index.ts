@@ -21,11 +21,12 @@ async function main(): Promise<void> {
   const failOnError = parseBooleanInput('fail-on-error', true);
   const token = core.getInput('github-token', { required: true });
   const threadResolutionToken = core.getInput('thread-resolution-token').trim();
+  const providerInput = getInputOrEnv('provider', 'JBOT_REVIEW_PROVIDER');
   // Resolved before the PR lookup so a bad pool fails without spending an API
   // call; the pick needs the head sha, so it waits until that is known.
   const { providerID: provider, pool: modelPool } = resolveModelSelection(
     getInputOrEnv('model', 'JBOT_REVIEW_MODEL'),
-    getInputOrEnv('provider', 'JBOT_REVIEW_PROVIDER'),
+    providerInput,
   );
   const cfg = providerConfig(provider);
 
@@ -43,7 +44,7 @@ async function main(): Promise<void> {
   const { model: auxModel, providerID: auxProviderID } = resolveAuxModel(
     getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL'),
     provider,
-    getInputOrEnv('aux-provider', 'JBOT_AUX_PROVIDER'),
+    getInputOrEnv('aux-provider', 'JBOT_AUX_PROVIDER') || providerInput,
   );
   const auxCfg = auxProviderID !== provider ? providerConfig(auxProviderID) : undefined;
   const auxApiKey = auxCfg
