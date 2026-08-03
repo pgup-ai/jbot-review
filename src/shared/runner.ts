@@ -1942,14 +1942,23 @@ async function runReviewPipeline(params: {
         )}.`,
       );
     }
-    // Each falls back to its own empty result, which is the same value these
-    // sessions produce when they fail open on their own.
-    const lensFindingLists = await settleWithinGrace(lensPasses, [], log);
-    // The dedicated parallel session is the single owner of addressed-thread
-    // verification; the main review no longer reports them.
-    const verifiedAddressedPriorComments = await settleWithinGrace(addressedPriorCheck, [], log);
-    const complianceFindings = await settleWithinGrace(guidelineComplianceCheck, [], log);
-    const changesSinceText = await settleWithinGrace(changesSinceLastReview, '', log);
+    // Started together, not awaited in turn: each grace begins when its call is
+    // made, so awaiting them one by one would give the group N graces of tail
+    // rather than one. Each falls back to its own empty result — the same value
+    // these sessions produce when they fail open on their own.
+    const [
+      lensFindingLists,
+      // The dedicated parallel session is the single owner of addressed-thread
+      // verification; the main review no longer reports them.
+      verifiedAddressedPriorComments,
+      complianceFindings,
+      changesSinceText,
+    ] = await Promise.all([
+      settleWithinGrace(lensPasses, [], log),
+      settleWithinGrace(addressedPriorCheck, [], log),
+      settleWithinGrace(guidelineComplianceCheck, [], log),
+      settleWithinGrace(changesSinceLastReview, '', log),
+    ]);
     // Gate confidence BEFORE deduping so each finding carries its effective
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
