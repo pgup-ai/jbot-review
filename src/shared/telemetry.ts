@@ -61,6 +61,7 @@ export interface PriorThreadOutcome {
   addressed: boolean;
   /** Replies not authored by the bot (or another [bot] account). */
   humanReplies: number;
+  /** Tallies from a capped reactor sample (bots excluded) — signal, not an exact census. */
   thumbsUp: number;
   thumbsDown: number;
   confused: number;
