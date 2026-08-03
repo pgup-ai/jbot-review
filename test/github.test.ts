@@ -763,6 +763,19 @@ describe('resolved review finalization', () => {
 
     assert.deepEqual(result.threads, []);
     assert.deepEqual(result.unresolvedAddressedThreadIds, []);
+    // Outcomes cover even the skip-classified threads the review context omits.
+    assert.deepEqual(
+      result.outcomes.map(({ threadId, addressed, resolved, humanReplies }) => ({
+        threadId,
+        addressed,
+        resolved,
+        humanReplies,
+      })),
+      [
+        { threadId: 'PRRT_resolved', addressed: true, resolved: true, humanReplies: 0 },
+        { threadId: 'PRRT_file', addressed: true, resolved: true, humanReplies: 0 },
+      ],
+    );
     assert.deepEqual(minimizationVariables, { ids: ['PRR_77'] });
     assert.deepEqual(result.reviewGroups, [
       {
@@ -780,6 +793,78 @@ describe('resolved review finalization', () => {
       selectResolvedJbotReviewsToFinalize(result.reviewGroups, []).map((review) => review.id),
       [77],
     );
+  });
+});
+
+describe('prior thread outcomes', () => {
+  it('counts human replies and reaction totals, excluding bot accounts', async () => {
+    const octokit = {
+      rest: { pulls: { listReviews: {}, listReviewComments: {} } },
+      paginate: async () => [],
+      graphql: async () => ({
+        viewer: { login: 'github-actions' },
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [
+                {
+                  id: 'PRRT_live',
+                  isResolved: false,
+                  path: 'src/x.ts',
+                  line: 7,
+                  originalLine: 7,
+                  comments: {
+                    nodes: [
+                      {
+                        databaseId: 300,
+                        body: 'finding\n\n<!-- jbot-review:finding -->',
+                        url: 'https://github.com/acme/widget/pull/1#discussion_r300',
+                        author: { login: 'github-actions[bot]' },
+                        reactionGroups: [
+                          { content: 'THUMBS_UP', reactors: { totalCount: 2 } },
+                          { content: 'THUMBS_DOWN', reactors: { totalCount: 1 } },
+                          { content: 'HEART', reactors: { totalCount: 5 } },
+                        ],
+                      },
+                      {
+                        databaseId: 301,
+                        body: 'this is a false positive',
+                        url: 'https://github.com/acme/widget/pull/1#discussion_r301',
+                        author: { login: 'alice' },
+                      },
+                      {
+                        databaseId: 302,
+                        body: 'noted',
+                        url: 'https://github.com/acme/widget/pull/1#discussion_r302',
+                        author: { login: 'dependabot[bot]' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    };
+
+    const result = await listPriorJbotThreads(octokit as unknown as Octokit, 'acme', 'widget', 1);
+
+    assert.equal(result.threads.length, 1, 'the live thread still reaches review context');
+    assert.deepEqual(result.outcomes, [
+      {
+        threadId: 'PRRT_live',
+        path: 'src/x.ts',
+        line: 7,
+        resolved: false,
+        addressed: false,
+        humanReplies: 1,
+        thumbsUp: 2,
+        thumbsDown: 1,
+        confused: 0,
+      },
+    ]);
   });
 });
 

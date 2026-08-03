@@ -3,7 +3,8 @@ import { paginateRest } from '@octokit/plugin-paginate-rest';
 import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 
 import type { Finding } from './types.ts';
-import type { ReviewCommit } from './review-context.ts';
+import type { LinkedIssue, ReviewCommit } from './review-context.ts';
+import type { PriorThreadOutcome } from './telemetry.ts';
 import {
   decideApprovalContinuity,
   decideAutoApproval,
@@ -227,6 +228,10 @@ interface ReviewThreadsResponse {
               author?: {
                 login: string;
               } | null;
+              reactionGroups?: Array<{
+                content: string;
+                reactors: { totalCount: number };
+              }> | null;
             } | null> | null;
           };
         } | null>;
@@ -264,6 +269,12 @@ export interface PriorJbotThreads {
    * mechanical resolve retry, no re-reply.
    */
   unresolvedAddressedThreadIds: string[];
+  /**
+   * Observed human-outcome state of EVERY prior jbot finding thread — including
+   * the addressed/resolved ones the review context omits. Outcome telemetry
+   * input, independent of includePriorComments.
+   */
+  outcomes: PriorThreadOutcome[];
 }
 
 /**
@@ -312,6 +323,12 @@ export async function listPriorJbotThreads(
                   author {
                     login
                   }
+                  reactionGroups {
+                    content
+                    reactors {
+                      totalCount
+                    }
+                  }
                 }
               }
             }
@@ -323,6 +340,7 @@ export async function listPriorJbotThreads(
 
   const threads: PriorJbotThread[] = [];
   const unresolvedAddressedThreadIds: string[] = [];
+  const outcomes: PriorThreadOutcome[] = [];
   let commentState: JbotReviewCommentState | undefined;
   let after: string | null = null;
   do {
@@ -334,7 +352,7 @@ export async function listPriorJbotThreads(
     })) as ReviewThreadsResponse;
     const viewerLogin = response.viewer.login;
     const page = response.repository?.pullRequest?.reviewThreads;
-    if (!page) return { threads, reviewGroups: [], unresolvedAddressedThreadIds };
+    if (!page) return { threads, reviewGroups: [], unresolvedAddressedThreadIds, outcomes };
     commentState ??= await listJbotReviewCommentState(
       octokit,
       owner,
@@ -379,6 +397,26 @@ export async function listPriorJbotThreads(
         comments.some((comment) =>
           isBotAddressedReply(comment.author?.login, comment.body, viewerLogin),
         ) || state.addressedTopLevelIds.has(topLevel.databaseId);
+      // Before the disposition gates: outcomes cover skip/resolve-only threads too.
+      const count = (content: string) =>
+        topLevel.reactionGroups?.find((group) => group.content === content)?.reactors.totalCount ??
+        0;
+      outcomes.push({
+        threadId: thread.id,
+        path: thread.path,
+        line: thread.line ?? thread.originalLine ?? undefined,
+        resolved: thread.isResolved,
+        addressed,
+        humanReplies: comments.filter(
+          (comment) =>
+            comment !== topLevel &&
+            comment.author?.login !== viewerLogin &&
+            !comment.author?.login?.endsWith('[bot]'),
+        ).length,
+        thumbsUp: count('THUMBS_UP'),
+        thumbsDown: count('THUMBS_DOWN'),
+        confused: count('CONFUSED'),
+      });
       const disposition = classifyPriorJbotThread({ addressed, isResolved: thread.isResolved });
       if (disposition === 'skip') continue;
       if (disposition === 'resolve-only') {
@@ -422,7 +460,68 @@ export async function listPriorJbotThreads(
   const reviewGroups = commentState
     ? [...commentState.reviewGroupsById.values()].filter((review) => review.threads.length > 0)
     : [];
-  return { threads, reviewGroups, unresolvedAddressedThreadIds };
+  return { threads, reviewGroups, unresolvedAddressedThreadIds, outcomes };
+}
+
+/** Same-repo issues GitHub records this PR as closing (closing keywords or
+ * manual links) — intent input for the claims-verification pass. Cross-repo
+ * references are dropped (the query over-fetches to leave headroom for that);
+ * the formatter budgets the bytes. */
+const MAX_LINKED_ISSUES = 3;
+
+export async function listClosingIssues(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+): Promise<LinkedIssue[]> {
+  const response = (await octokit.graphql(
+    `
+      query ClosingIssues($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) {
+            closingIssuesReferences(first: 10) {
+              nodes {
+                number
+                title
+                body
+                repository {
+                  name
+                  owner {
+                    login
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `,
+    { owner, repo, number: pullNumber },
+  )) as {
+    repository?: {
+      pullRequest?: {
+        closingIssuesReferences?: {
+          nodes?: Array<{
+            number: number;
+            title: string;
+            body?: string | null;
+            repository: { name: string; owner: { login: string } };
+          } | null> | null;
+        } | null;
+      } | null;
+    } | null;
+  };
+  const nodes = response.repository?.pullRequest?.closingIssuesReferences?.nodes ?? [];
+  return nodes
+    .filter((node): node is NonNullable<typeof node> => Boolean(node))
+    .filter(
+      (node) =>
+        node.repository.owner.login.toLowerCase() === owner.toLowerCase() &&
+        node.repository.name.toLowerCase() === repo.toLowerCase(),
+    )
+    .slice(0, MAX_LINKED_ISSUES)
+    .map((node) => ({ number: node.number, title: node.title, body: node.body ?? '' }));
 }
 
 async function listJbotReviewCommentState(

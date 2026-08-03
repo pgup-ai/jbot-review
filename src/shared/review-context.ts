@@ -9,6 +9,13 @@ export interface ReviewCommit {
   author?: string;
 }
 
+/** Same-repo issue this PR closes — intent input for the claims-verification pass. */
+export interface LinkedIssue {
+  number: number;
+  title: string;
+  body: string;
+}
+
 export interface DiffScope {
   baseRef?: string;
   baseSha?: string;
@@ -321,6 +328,46 @@ export interface BuildReviewContextParams {
   checkSummary: string;
   guidelines: string;
   diffScope?: DiffScope;
+  linkedIssues?: LinkedIssue[];
+}
+
+// Issue bodies are author-controlled and unbounded like the PR body; all linked
+// issues share one cap (invariant #4).
+export const MAX_LINKED_ISSUES_BYTES = 4 * 1024;
+const LINKED_ISSUE_TRUNCATION_NOTICE =
+  '\n[Issue body truncated to keep the review prompt bounded.]';
+
+/**
+ * Data-only block (the instruction to review against it lives in prompt.ts).
+ * Bodies are emitted in order until the shared budget runs out; every
+ * truncation or omission is disclosed inline.
+ */
+export function formatLinkedIssues(issues: LinkedIssue[]): string {
+  if (issues.length === 0) return '';
+  const sections = ['## Linked issues\n\nGitHub records this PR as closing these issues.'];
+  let remaining = MAX_LINKED_ISSUES_BYTES;
+  for (const issue of issues) {
+    const heading = `### #${issue.number}: ${issue.title || '(untitled)'}`;
+    const body = issue.body.trim();
+    const bytes = Buffer.byteLength(body, 'utf8');
+    if (remaining <= 0) {
+      sections.push(`${heading}\n(body omitted: linked-issue budget reached)`);
+    } else if (bytes <= remaining) {
+      sections.push(`${heading}\n${body || '(no body)'}`);
+      remaining -= bytes;
+    } else {
+      const buffer = Buffer.from(body, 'utf8');
+      const budget = Math.max(
+        0,
+        remaining - Buffer.byteLength(LINKED_ISSUE_TRUNCATION_NOTICE, 'utf8'),
+      );
+      sections.push(
+        `${heading}\n${buffer.toString('utf8', 0, findUtf8Boundary(buffer, budget))}${LINKED_ISSUE_TRUNCATION_NOTICE}`,
+      );
+      remaining = 0;
+    }
+  }
+  return sections.join('\n\n');
 }
 
 // Author-controlled and unbounded upstream; cap like every injected block (invariant #4).
@@ -348,6 +395,9 @@ export function buildReviewContext(params: BuildReviewContextParams): string {
   const diffScopeText = params.diffScope ? formatDiffScope(params.diffScope) : '';
   if (diffScopeText) pullRequestLines.push(diffScopeText);
   sections.push(pullRequestLines.join('\n'));
+
+  const linkedIssuesBlock = formatLinkedIssues(params.linkedIssues ?? []);
+  if (linkedIssuesBlock) sections.push(linkedIssuesBlock);
 
   sections.push(
     [

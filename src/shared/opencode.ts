@@ -118,6 +118,29 @@ const BASH_PERMISSIONS = {
 } as const;
 
 /**
+ * Env vars withheld from the opencode server — and therefore from every
+ * session's bash children, which inherit its environment. The Action maps ALL
+ * inputs to INPUT_* (the write-scoped GitHub token plus every provider key),
+ * and app/local modes hold credential-suffixed vars; sessions need none of
+ * them, since provider auth travels inside the opencode config. With these
+ * gone, "prompt injection runs `env`" stops yielding tokens that act OUTSIDE
+ * the container (post as the bot, spend provider credits) — the exfil surface
+ * the bash accident-filter above explicitly does not close.
+ */
+export function sessionEnvDenyKeys(keys: string[]): string[] {
+  const CREDENTIAL_SUFFIX = /(_API_KEY|_TOKEN|_SECRET|_PASSWORD|_PRIVATE_KEY|_AUTH_CONTENT)$/;
+  return keys.filter((key) => {
+    const upper = key.toUpperCase();
+    return (
+      upper.startsWith('INPUT_') ||
+      upper === 'GITHUB_TOKEN' ||
+      upper === 'GH_TOKEN' ||
+      CREDENTIAL_SUFFIX.test(upper)
+    );
+  });
+}
+
+/**
  * Builds the opencode config object that embeds the API key for the selected
  * provider, plus any secondary providers needed by aux-model sessions. This is
  * the official way to authenticate opencode (replaces the old "set env var"
@@ -361,7 +384,14 @@ export async function startOpencode(
     }
   };
   let lockReleased = false;
+  // Scrubbed only within this serialized critical section (backend setup runs
+  // before any session dispatch), restored the moment the child has spawned —
+  // the child copies its environment at spawn, so the parent's restore never
+  // reaches it.
+  const scrubbedEnv = new Map<string, string>();
   const restoreAndRelease = () => {
+    for (const [key, value] of scrubbedEnv) process.env[key] = value;
+    scrubbedEnv.clear();
     restoreCwd();
     if (!lockReleased) {
       lockReleased = true;
@@ -381,6 +411,15 @@ export async function startOpencode(
         /* best effort */
       }
     };
+    for (const key of sessionEnvDenyKeys(Object.keys(process.env))) {
+      const value = process.env[key];
+      if (value === undefined) continue;
+      scrubbedEnv.set(key, value);
+      delete process.env[key];
+    }
+    if (scrubbedEnv.size > 0) {
+      log(`Withheld ${scrubbedEnv.size} credential env var(s) from the opencode child.`);
+    }
     const config = buildConfig(
       providerID,
       modelID,

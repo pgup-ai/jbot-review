@@ -161,6 +161,7 @@ import {
   formatDiffScope,
   formatContextBudget,
   truncatePrBody,
+  type LinkedIssue,
   type ReviewCommit,
 } from './review-context.ts';
 import { planReviewFanout, planIncrementalLenses } from './fanout.ts';
@@ -170,6 +171,7 @@ import {
   compareCommitFiles,
   listPrComments,
   listPrCommits,
+  listClosingIssues,
   getCheckStatusSummary,
   formatFindingLabel,
   formatFindingLocation,
@@ -911,10 +913,25 @@ async function runReviewPipeline(params: {
     threads: allPriorJbotThreads,
     reviewGroups: priorJbotReviewGroups,
     unresolvedAddressedThreadIds,
+    outcomes: priorThreadOutcomes,
     lookupSucceeded: priorThreadStateKnown,
   } = localDiff
-    ? { threads: [], reviewGroups: [], unresolvedAddressedThreadIds: [], lookupSucceeded: true }
+    ? {
+        threads: [],
+        reviewGroups: [],
+        unresolvedAddressedThreadIds: [],
+        outcomes: [],
+        lookupSucceeded: true,
+      }
     : await safeListPriorJbotThreads(octokit, owner, repo, pullNumber, log);
+  if (telemetry.enabled && priorThreadOutcomes.length > 0) {
+    // rawFiles (pre noise-filter) answers "does the current diff still touch it".
+    const changedNow = new Set(rawFiles.map((file) => file.filename));
+    for (const outcome of priorThreadOutcomes) {
+      telemetry.recordOutcome({ ...outcome, fileChangedSince: changedNow.has(outcome.path) });
+    }
+    log(`Outcome telemetry: recorded ${priorThreadOutcomes.length} prior finding thread(s).`);
+  }
   const finalizePriorResolvedReviews = async (resolvedThisRun: readonly string[]) => {
     if (options.dryRun) return;
     await finalizeResolvedReviews({
@@ -1110,6 +1127,9 @@ async function runReviewPipeline(params: {
     const commits = localDiff
       ? localDiff.commits
       : await listPrCommits(octokit, owner, repo, pullNumber);
+    const linkedIssues = localDiff
+      ? []
+      : await safeListClosingIssues(octokit, owner, repo, pullNumber, log);
     // Belt-and-braces: local mode never reaches GitHub for checks (the local
     // driver also passes no headSha, so the fallback text stays literally true).
     const checkSummary =
@@ -1130,6 +1150,7 @@ async function runReviewPipeline(params: {
       // of being buried mid-context.
       guidelines: '',
       diffScope,
+      linkedIssues,
     });
     coreContext = `${coreContext}\n\n${summaryScopeBlock}`;
     coreContext = `${coreContext}\n\n${reviewFocusBlock}`;
@@ -3057,8 +3078,31 @@ async function safeListPriorJbotThreads(
       threads: [],
       reviewGroups: [],
       unresolvedAddressedThreadIds: [],
+      outcomes: [],
       lookupSucceeded: false,
     };
+  }
+}
+
+/** Intent context is a recall supplement — its lookup must never fail the run. */
+async function safeListClosingIssues(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  log: (msg: string) => void,
+): Promise<LinkedIssue[]> {
+  try {
+    const issues = await listClosingIssues(octokit, owner, repo, pullNumber);
+    if (issues.length > 0) {
+      log(
+        `Linked issues for intent context: ${issues.map((issue) => `#${issue.number}`).join(', ')}.`,
+      );
+    }
+    return issues;
+  } catch (error) {
+    log(`Linked-issue lookup skipped: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
   }
 }
 

@@ -429,6 +429,23 @@ describe('buildReviewContext', () => {
     assert.match(context, /PR description truncated/);
     assert.ok(!context.includes('�'), 'truncation split a multi-byte character');
   });
+
+  it('embeds linked issues under one shared byte budget with disclosed omissions', () => {
+    const context = buildReviewContext({
+      ...baseParams,
+      linkedIssues: [
+        { number: 7, title: 'Retry on 503', body: 'Please retry GETs.' },
+        { number: 8, title: 'Big issue', body: 'y'.repeat(8000) },
+        { number: 9, title: 'Starved issue', body: 'never fits' },
+      ],
+    });
+
+    assert.match(context, /## Linked issues/);
+    assert.match(context, /### #7: Retry on 503\nPlease retry GETs\./);
+    assert.match(context, /\[Issue body truncated to keep the review prompt bounded\.\]/);
+    assert.match(context, /### #9: Starved issue\n\(body omitted: linked-issue budget reached\)/);
+    assert.doesNotMatch(buildReviewContext(baseParams), /Linked issues/);
+  });
 });
 
 describe('discoverGuidelineDocs', () => {

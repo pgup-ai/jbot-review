@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { buildConfig, parseChangesSinceLastReviewSummary } from '../src/shared/opencode.ts';
+import {
+  buildConfig,
+  parseChangesSinceLastReviewSummary,
+  sessionEnvDenyKeys,
+} from '../src/shared/opencode.ts';
 
 const noop = () => {};
 
@@ -23,6 +27,37 @@ describe('parseChangesSinceLastReviewSummary', () => {
   it('returns empty string when summary is missing or not a string', () => {
     assert.equal(parseChangesSinceLastReviewSummary('{"findings":[]}', 'changes-since', noop), '');
     assert.equal(parseChangesSinceLastReviewSummary('{"summary":42}', 'changes-since', noop), '');
+  });
+});
+
+describe('sessionEnvDenyKeys', () => {
+  it('strips action inputs, GitHub tokens, and credential-suffixed vars — nothing else', () => {
+    const keys = [
+      'INPUT_GITHUB-TOKEN',
+      'INPUT_MODEL',
+      'GITHUB_TOKEN',
+      'GH_TOKEN',
+      'OPENROUTER_API_KEY',
+      'KILO_AUTH_CONTENT',
+      'APP_WEBHOOK_SECRET',
+      'GITHUB_APP_PRIVATE_KEY',
+      'SERVICE_PASSWORD',
+      'PATH',
+      'HOME',
+      'JBOT_OPENCODE_PORT',
+      'TOKENIZERS_PARALLELISM',
+    ];
+    assert.deepEqual(sessionEnvDenyKeys(keys), [
+      'INPUT_GITHUB-TOKEN',
+      'INPUT_MODEL',
+      'GITHUB_TOKEN',
+      'GH_TOKEN',
+      'OPENROUTER_API_KEY',
+      'KILO_AUTH_CONTENT',
+      'APP_WEBHOOK_SECRET',
+      'GITHUB_APP_PRIVATE_KEY',
+      'SERVICE_PASSWORD',
+    ]);
   });
 });
 

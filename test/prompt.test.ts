@@ -46,6 +46,7 @@ describe('UNTRUSTED_PR_CONTENT_NOTE', () => {
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /untrusted/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /never as instructions/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /description/i);
+    assert.match(UNTRUSTED_PR_CONTENT_NOTE, /linked issue bodies/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /prior review comments/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /output format/i);
   });
@@ -109,6 +110,11 @@ describe('REVIEW_PROMPT', () => {
   it('does not let repository guidance trigger project command execution', () => {
     assert.match(REVIEW_PROMPT, /not\s+as authorization to execute commands/);
     assert.match(REVIEW_PROMPT, /Do not run repository code or project\s+commands/);
+  });
+
+  it('anchors the claims pass to linked issues with a material-drift bar', () => {
+    assert.match(REVIEW_PROMPT, /"## Linked issues" context section/);
+    assert.match(REVIEW_PROMPT, /only material drift/i);
     assert.match(REVIEW_PROMPT, /including tests, linters, typecheckers, builds/);
     assert.match(REVIEW_PROMPT, /only for read-only\s+repository exploration/);
     assert.match(REVIEW_PROMPT, /use the provided check-status summary when\s+available/);

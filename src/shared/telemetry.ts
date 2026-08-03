@@ -45,6 +45,33 @@ export interface SessionTelemetryRow {
   costUsd?: number;
 }
 
+/**
+ * Observed state of one PRIOR run's posted finding thread, captured at run
+ * start from the thread fetch the suppression pass already pays for. These are
+ * the human-outcome labels (fixed / endorsed / pushed back / ignored) the eval
+ * flywheel needs. Booleans and counters only — reply text never persists, the
+ * same floor as coverage errors.
+ */
+export interface PriorThreadOutcome {
+  threadId: string;
+  path: string;
+  line?: number;
+  resolved: boolean;
+  /** A bot addressed-reply or addressed marker exists on the thread. */
+  addressed: boolean;
+  /** Replies not authored by the bot (or another [bot] account). */
+  humanReplies: number;
+  thumbsUp: number;
+  thumbsDown: number;
+  confused: number;
+}
+
+export interface OutcomeTelemetryRow extends PriorThreadOutcome {
+  kind: 'outcome';
+  /** The current PR diff still touches this thread's file. */
+  fileChangedSince: boolean;
+}
+
 export interface FindingRouting {
   inline: Finding[];
   fileLevel: Finding[];
@@ -127,6 +154,8 @@ export interface TelemetryRecorder {
   /** Record the terminal routing of the surviving findings. */
   route(routing: FindingRouting): void;
   recordSession(row: SessionTelemetryRow): void;
+  /** Record a prior finding thread's observed human outcome (one row per thread). */
+  recordOutcome(row: Omit<OutcomeTelemetryRow, 'kind'>): void;
   /** Open the run header row; identity fields only, sealed at start. */
   beginRun(meta: RunTelemetryMeta): void;
   /** Close the run header with its terminal state and wall clock. */
@@ -142,6 +171,7 @@ const DISABLED: TelemetryRecorder = {
   snapshot: () => undefined,
   route: () => undefined,
   recordSession: () => undefined,
+  recordOutcome: () => undefined,
   beginRun: () => undefined,
   finishRun: () => undefined,
   recordCoverage: () => undefined,
@@ -176,6 +206,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   // honest as the model's original output rather than mutating it.
   const routedLine = new Map<string, number>();
   const sessions: SessionTelemetryRow[] = [];
+  const outcomes: OutcomeTelemetryRow[] = [];
   let run:
     | (RunTelemetryMeta & { terminalState?: RunTerminalState; elapsedMs?: number })
     | undefined;
@@ -226,6 +257,9 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     recordSession(row) {
       sessions.push({ kind: 'session', ...row });
     },
+    recordOutcome(row) {
+      outcomes.push({ kind: 'outcome', ...row });
+    },
     beginRun(meta) {
       run = { ...meta };
     },
@@ -253,7 +287,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     },
     toJsonl() {
       const header = run ? [{ kind: 'run', schemaVersion: 1, ...run }] : [];
-      const lines = [...header, ...coverage, ...this.findingRows(), ...sessions];
+      const lines = [...header, ...coverage, ...outcomes, ...this.findingRows(), ...sessions];
       return lines.map((l) => JSON.stringify(l)).join('\n');
     },
   };
@@ -321,4 +355,65 @@ function deriveRow(
     verifyUncertain,
     disposition,
   };
+}
+
+/** Per-area rollup of thread outcomes — the guideline-candidates report rows. */
+export interface GuidelineCandidateArea {
+  /** Top-level path segment ('src', 'docs', …) or the filename for root files. */
+  area: string;
+  threads: number;
+  /** Explicit disagreement: a 👎, or human replies on a thread nobody fixed or closed. */
+  pushback: number;
+  /** Explicit agreement: addressed, or a 👍. */
+  endorsed: number;
+  /** No human signal at all and the file has not changed since — likely noise. */
+  ignored: number;
+  addressed: number;
+  resolved: number;
+}
+
+/**
+ * Rows are per-run observations of the same threads; only the LAST observation
+ * of each threadId counts (pass rows in run order). Signal classes overlap
+ * deliberately — a thread can collect both a 👍 and a 👎.
+ */
+export function aggregateOutcomeRows(rows: OutcomeTelemetryRow[]): GuidelineCandidateArea[] {
+  const latest = new Map<string, OutcomeTelemetryRow>();
+  for (const row of rows) latest.set(row.threadId, row);
+
+  const areas = new Map<string, GuidelineCandidateArea>();
+  for (const row of latest.values()) {
+    const area = row.path.includes('/') ? row.path.split('/')[0] : row.path;
+    const entry = areas.get(area) ?? {
+      area,
+      threads: 0,
+      pushback: 0,
+      endorsed: 0,
+      ignored: 0,
+      addressed: 0,
+      resolved: 0,
+    };
+    entry.threads += 1;
+    const reactions = row.thumbsUp + row.thumbsDown + row.confused;
+    if (row.thumbsDown > 0 || (row.humanReplies > 0 && !row.addressed && !row.resolved)) {
+      entry.pushback += 1;
+    }
+    if (row.addressed || row.thumbsUp > 0) entry.endorsed += 1;
+    if (
+      row.humanReplies === 0 &&
+      reactions === 0 &&
+      !row.addressed &&
+      !row.resolved &&
+      !row.fileChangedSince
+    ) {
+      entry.ignored += 1;
+    }
+    if (row.addressed) entry.addressed += 1;
+    if (row.resolved) entry.resolved += 1;
+    areas.set(area, entry);
+  }
+
+  return [...areas.values()].sort(
+    (a, b) => b.pushback - a.pushback || b.threads - a.threads || a.area.localeCompare(b.area),
+  );
 }
