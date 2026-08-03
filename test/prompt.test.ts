@@ -103,6 +103,8 @@ describe('CHANGES_SINCE_LAST_REVIEW_PROMPT', () => {
     assert.match(CHANGES_SINCE_LAST_REVIEW_PROMPT, /git is available/);
     assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /NO tools on this call/);
     assert.doesNotMatch(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /git is available/);
+    // A truncated commit list can't be recovered without tools; the output must say so.
+    assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /summary is PARTIAL/);
     assert.match(
       CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
       /do not list bugs or review findings/i,

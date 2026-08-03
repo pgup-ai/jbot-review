@@ -764,6 +764,7 @@ export const CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT = `You are writing a s
 ## How to work
 
 - You have NO tools on this call — do not run, plan, or emit commands. The "Changes since last review" section below gives the last reviewed head, the current head, and the subjects of the commits added between them; summarize from that list alone (the git command it shows is reproduction info for humans).
+- If that section says more commits were omitted, your summary is PARTIAL: end it with a bullet stating how many further commits it does not cover.
 - Summarize ONLY what changed between the last reviewed head and the current head. Do not restate the whole PR or re-describe unchanged code.
 - Be concise and scannable: a few Markdown bullet points, one per meaningful change. Collapse trivial churn (formatting, rebases, merges) into a single bullet.
 - Describe changes factually. Do not list bugs or review findings, and do not pass judgement on correctness — findings are produced separately.
