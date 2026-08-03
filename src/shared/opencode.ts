@@ -128,16 +128,14 @@ const BASH_PERMISSIONS = {
  * the bash accident-filter above explicitly does not close.
  */
 export function sessionEnvDenyKeys(keys: string[]): string[] {
-  const CREDENTIAL_SUFFIX =
-    /(_API_KEY|_TOKEN|_SECRET|_PASSWORD|_PRIVATE_KEY|_AUTH_CONTENT|_AUTH_JSON|_ACCESS_KEY(?:_ID)?)$/;
+  // Match the trailing WORD, not a fixed suffix list: `STRIPE_SECRET_KEY` ends
+  // in KEY (not SECRET), and a bare `API_KEY`/`TOKEN` has no leading segment.
+  // `(^|_)` also covers GITHUB_TOKEN/GH_TOKEN without naming them.
+  const CREDENTIAL_NAME =
+    /(^|_)(KEY|KEY_ID|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|AUTH_CONTENT|AUTH_JSON|DSN)$/;
   return keys.filter((key) => {
     const upper = key.toUpperCase();
-    return (
-      upper.startsWith('INPUT_') ||
-      upper === 'GITHUB_TOKEN' ||
-      upper === 'GH_TOKEN' ||
-      CREDENTIAL_SUFFIX.test(upper)
-    );
+    return upper.startsWith('INPUT_') || CREDENTIAL_NAME.test(upper);
   });
 }
 

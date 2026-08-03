@@ -88,12 +88,15 @@ describe('outcome rows', () => {
 
   it('aggregates per area with last-observation-wins and overlapping signal classes', () => {
     const rows: OutcomeTelemetryRow[] = [
-      // T1's early pushback observation is superseded by the addressed one.
+      // T1's earlier observation is superseded by the addressed one.
       { kind: 'outcome', ...outcome({ threadId: 'T1', humanReplies: 1 }) },
       { kind: 'outcome', ...outcome({ threadId: 'T1', humanReplies: 1, addressed: true }) },
       // T2 sits in the current diff yet stays ignored — diff membership is not a human signal.
       { kind: 'outcome', ...outcome({ threadId: 'T2', path: 'src/b.ts', fileInDiff: true }) },
       { kind: 'outcome', ...outcome({ threadId: 'T3', path: 'README.md', thumbsDown: 1 }) },
+      // An unresolved reply is 'discussed', never 'pushback': its text is unread,
+      // so "good catch, will fix" and a rebuttal are indistinguishable here.
+      { kind: 'outcome', ...outcome({ threadId: 'T4', path: 'docs/x.md', humanReplies: 2 }) },
     ];
 
     assert.deepEqual(aggregateOutcomeRows(rows), [
@@ -101,12 +104,32 @@ describe('outcome rows', () => {
         area: 'README.md',
         threads: 1,
         pushback: 1,
+        discussed: 0,
         endorsed: 0,
         ignored: 0,
         addressed: 0,
         resolved: 0,
       },
-      { area: 'src', threads: 2, pushback: 0, endorsed: 1, ignored: 1, addressed: 1, resolved: 0 },
+      {
+        area: 'src',
+        threads: 2,
+        pushback: 0,
+        discussed: 1,
+        endorsed: 1,
+        ignored: 1,
+        addressed: 1,
+        resolved: 0,
+      },
+      {
+        area: 'docs',
+        threads: 1,
+        pushback: 0,
+        discussed: 1,
+        endorsed: 0,
+        ignored: 0,
+        addressed: 0,
+        resolved: 0,
+      },
     ]);
   });
 });

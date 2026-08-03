@@ -45,10 +45,17 @@ describe('sessionEnvDenyKeys', () => {
       'APP_WEBHOOK_SECRET',
       'GITHUB_APP_PRIVATE_KEY',
       'SERVICE_PASSWORD',
+      // Credential-bearing names that no fixed suffix list catches.
+      'STRIPE_SECRET_KEY',
+      'API_KEY',
+      'DATABASE_DSN',
+      'GCP_CREDENTIALS',
       'PATH',
       'HOME',
       'JBOT_OPENCODE_PORT',
+      // Ends in a credential WORD only as a prefix — must survive.
       'TOKENIZERS_PARALLELISM',
+      'KEYCHAIN_PATH',
     ];
     assert.deepEqual(sessionEnvDenyKeys(keys), [
       'INPUT_GITHUB-TOKEN',
@@ -63,6 +70,10 @@ describe('sessionEnvDenyKeys', () => {
       'APP_WEBHOOK_SECRET',
       'GITHUB_APP_PRIVATE_KEY',
       'SERVICE_PASSWORD',
+      'STRIPE_SECRET_KEY',
+      'API_KEY',
+      'DATABASE_DSN',
+      'GCP_CREDENTIALS',
     ]);
   });
 });

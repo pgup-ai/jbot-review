@@ -63,11 +63,11 @@ function main(): void {
   }
 
   console.log(
-    `  ${'area'.padEnd(24)} ${'threads'.padStart(7)} ${'pushback'.padStart(8)} ${'endorsed'.padStart(8)} ${'ignored'.padStart(7)} ${'addressed'.padStart(9)} ${'resolved'.padStart(8)}`,
+    `  ${'area'.padEnd(24)} ${'threads'.padStart(7)} ${'pushback'.padStart(8)} ${'discussed'.padStart(9)} ${'endorsed'.padStart(8)} ${'ignored'.padStart(7)} ${'addressed'.padStart(9)} ${'resolved'.padStart(8)}`,
   );
   for (const area of areas) {
     console.log(
-      `  ${area.area.padEnd(24)} ${String(area.threads).padStart(7)} ${String(area.pushback).padStart(8)} ${String(area.endorsed).padStart(8)} ${String(area.ignored).padStart(7)} ${String(area.addressed).padStart(9)} ${String(area.resolved).padStart(8)}`,
+      `  ${area.area.padEnd(24)} ${String(area.threads).padStart(7)} ${String(area.pushback).padStart(8)} ${String(area.discussed).padStart(9)} ${String(area.endorsed).padStart(8)} ${String(area.ignored).padStart(7)} ${String(area.addressed).padStart(9)} ${String(area.resolved).padStart(8)}`,
     );
   }
 
@@ -84,6 +84,7 @@ function main(): void {
     'guideline bullet in the reviewed repo (AGENTS.md / REVIEW.md) saying when NOT to flag;',
   );
   console.log('high-ignored areas suggest noise worth demoting the same way.');
+  console.log('discussed counts replies without reading them — open those threads before judging.');
 }
 
 main();

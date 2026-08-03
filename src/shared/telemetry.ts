@@ -367,8 +367,10 @@ export interface GuidelineCandidateArea {
   /** Top-level path segment ('src', 'docs', …) or the filename for root files. */
   area: string;
   threads: number;
-  /** Explicit disagreement: a 👎, or human replies on a thread nobody fixed or closed. */
+  /** Explicit negative reaction: 👎 or 😕. */
   pushback: number;
+  /** A human replied. Valence unknown — agreement and rebuttal look identical here. */
+  discussed: number;
   /** Explicit agreement: addressed, or a 👍. */
   endorsed: number;
   /** No human signal at all, never addressed or resolved — likely noise. */
@@ -381,6 +383,10 @@ export interface GuidelineCandidateArea {
  * Rows are per-run observations of the same threads; only the LAST observation
  * of each threadId counts (pass rows in run order). Signal classes overlap
  * deliberately — a thread can collect both a 👍 and a 👎.
+ *
+ * Reply TEXT is never read, so replies stay their own neutral class: treating
+ * an unaddressed reply as disagreement mislabels "good catch, will fix" the
+ * moment the next run observes the thread before the fix lands.
  */
 export function aggregateOutcomeRows(rows: OutcomeTelemetryRow[]): GuidelineCandidateArea[] {
   const latest = new Map<string, OutcomeTelemetryRow>();
@@ -393,6 +399,7 @@ export function aggregateOutcomeRows(rows: OutcomeTelemetryRow[]): GuidelineCand
       area,
       threads: 0,
       pushback: 0,
+      discussed: 0,
       endorsed: 0,
       ignored: 0,
       addressed: 0,
@@ -400,9 +407,8 @@ export function aggregateOutcomeRows(rows: OutcomeTelemetryRow[]): GuidelineCand
     };
     entry.threads += 1;
     const reactions = row.thumbsUp + row.thumbsDown + row.confused;
-    if (row.thumbsDown > 0 || (row.humanReplies > 0 && !row.addressed && !row.resolved)) {
-      entry.pushback += 1;
-    }
+    if (row.thumbsDown > 0 || row.confused > 0) entry.pushback += 1;
+    if (row.humanReplies > 0) entry.discussed += 1;
     if (row.addressed || row.thumbsUp > 0) entry.endorsed += 1;
     if (row.humanReplies === 0 && reactions === 0 && !row.addressed && !row.resolved) {
       entry.ignored += 1;
@@ -413,6 +419,10 @@ export function aggregateOutcomeRows(rows: OutcomeTelemetryRow[]): GuidelineCand
   }
 
   return [...areas.values()].sort(
-    (a, b) => b.pushback - a.pushback || b.threads - a.threads || a.area.localeCompare(b.area),
+    (a, b) =>
+      b.pushback - a.pushback ||
+      b.discussed - a.discussed ||
+      b.threads - a.threads ||
+      a.area.localeCompare(b.area),
   );
 }
