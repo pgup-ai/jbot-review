@@ -110,14 +110,14 @@ describe('REVIEW_PROMPT', () => {
   it('does not let repository guidance trigger project command execution', () => {
     assert.match(REVIEW_PROMPT, /not\s+as authorization to execute commands/);
     assert.match(REVIEW_PROMPT, /Do not run repository code or project\s+commands/);
+    assert.match(REVIEW_PROMPT, /including tests, linters, typecheckers, builds/);
+    assert.match(REVIEW_PROMPT, /only for read-only\s+repository exploration/);
+    assert.match(REVIEW_PROMPT, /use the provided check-status summary when\s+available/);
   });
 
   it('anchors the claims pass to linked issues with a material-drift bar', () => {
     assert.match(REVIEW_PROMPT, /"## Linked issues" context section/);
     assert.match(REVIEW_PROMPT, /only material drift/i);
-    assert.match(REVIEW_PROMPT, /including tests, linters, typecheckers, builds/);
-    assert.match(REVIEW_PROMPT, /only for read-only\s+repository exploration/);
-    assert.match(REVIEW_PROMPT, /use the provided check-status summary when\s+available/);
     assert.match(
       REVIEW_PROMPT,
       /Do not report a violation merely because you did not execute a\s+command/,

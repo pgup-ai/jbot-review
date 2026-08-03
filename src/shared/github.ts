@@ -400,8 +400,7 @@ export async function listPriorJbotThreads(
           isBotAddressedReply(comment.author?.login, comment.body, viewerLogin),
         ) || state.addressedTopLevelIds.has(topLevel.databaseId);
       // Before the disposition gates: outcomes cover skip/resolve-only threads too.
-      // Only User-typed reactors count — a bot's 👍 is not a human outcome,
-      // mirroring the [bot] exclusion in humanReplies below.
+      // A bot's 👍 is not a human outcome — mirrors the [bot] exclusion in humanReplies.
       const count = (content: string) =>
         topLevel.reactionGroups
           ?.find((group) => group.content === content)
