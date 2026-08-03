@@ -35,18 +35,20 @@ export function resolveProviderCredential(
   return '';
 }
 
-export function resolveProviderModel(
-  providerID: string,
-  config: ProviderConfig,
-  value?: string,
-): string {
-  const model = value?.trim() || config.defaultModel;
-  if (!model) {
+/**
+ * Looks a provider up by id. `source` names the model ref the id was derived
+ * from, so a run that dropped its provider input but kept an unqualified model
+ * gets told where the unknown id came from.
+ */
+export function providerConfig(providerID: string, source?: string): ProviderConfig {
+  const config = PROVIDERS[providerID];
+  if (!config) {
     throw new Error(
-      `Missing model for provider "${providerID}". Pass model/JBOT_REVIEW_MODEL (MODEL outside the Action).`,
+      `Unknown provider "${providerID}"${source ? ` derived from model "${source}"` : ''}. ` +
+        `Supported: ${Object.keys(PROVIDERS).join(', ')}.`,
     );
   }
-  return model;
+  return config;
 }
 
 export function defaultModelOptions(providerID: string): Record<string, unknown> {

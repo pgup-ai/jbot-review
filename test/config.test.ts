@@ -7,10 +7,10 @@ import {
   defaultModelOptions,
   modelSupportsPromptCache,
   needsAuxOpencodeConfig,
+  providerConfig,
   providerCredentialSources,
   resolveProviderBaseURL,
   resolveProviderCredential,
-  resolveProviderModel,
 } from '../src/shared/config.ts';
 import { buildConfig } from '../src/shared/opencode.ts';
 
@@ -87,8 +87,13 @@ describe('provider credentials', () => {
 });
 
 describe('provider configuration resolution', () => {
-  it('uses a provider default when the model input is blank', () => {
-    assert.equal(resolveProviderModel('openai', PROVIDERS.openai, '  '), 'openai/gpt-5.4-nano');
+  it('looks providers up by id and names the model an unknown id came from', () => {
+    assert.equal(providerConfig('openai'), PROVIDERS.openai);
+    assert.throws(() => providerConfig('nope'), /Unknown provider "nope"\. Supported: opencode/);
+    assert.throws(
+      () => providerConfig('nope', 'nope/m'),
+      /Unknown provider "nope" derived from model "nope\/m"/,
+    );
   });
 
   it('rejects malformed base URLs as non-absolute', () => {
@@ -195,14 +200,6 @@ describe('openai-compatible custom provider', () => {
     assert.equal('custom' in PROVIDERS.openai, false);
     assert.deepEqual(defaultModelOptions('openai-compatible'), {});
     assert.deepEqual(defaultModelOptions('openai'), { reasoningEffort: 'medium' });
-    assert.throws(
-      () => resolveProviderModel('openai-compatible', provider, ''),
-      /Missing model for provider "openai-compatible"/,
-    );
-    assert.equal(
-      resolveProviderModel('openai-compatible', provider, 'custom-model'),
-      'custom-model',
-    );
   });
 
   it('requires and validates an HTTP(S) base URL', () => {

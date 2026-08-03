@@ -7,13 +7,7 @@ import {
   resolvePromptCachePolicy,
 } from '../src/shared/config.ts';
 import { parseModelName } from '@symma/protocol';
-import {
-  formatModelName,
-  pickPooledModel,
-  resolveAuxModelName,
-  resolveModelName,
-  resolveModelPool,
-} from '../src/shared/model.ts';
+import { pickPooledModel, resolveAuxModel, resolveModelSelection } from '../src/shared/model.ts';
 
 describe('parseModelName', () => {
   it('keeps the first segment as provider and the remaining path as model id', () => {
@@ -24,154 +18,108 @@ describe('parseModelName', () => {
   });
 });
 
-describe('resolveModelName', () => {
-  it('treats an unprefixed model as belonging to the selected provider', () => {
-    assert.deepEqual(resolveModelName('opencode', 'deepseek-v4-flash-free'), {
-      providerID: 'opencode',
-      modelID: 'deepseek-v4-flash-free',
+describe('resolveModelSelection', () => {
+  it('derives the provider from the first segment and keeps the rest as the model id', () => {
+    // Only the first segment routes, so these stay distinct routes to what may
+    // be the same underlying model.
+    assert.deepEqual(resolveModelSelection('kilo/zai/glm-5.2'), {
+      providerID: 'kilo',
+      pool: ['kilo/zai/glm-5.2'],
     });
-  });
-
-  it('treats an already selected-provider-prefixed model the same way', () => {
-    assert.deepEqual(resolveModelName('opencode', 'opencode/deepseek-v4-flash-free'), {
-      providerID: 'opencode',
-      modelID: 'deepseek-v4-flash-free',
-    });
-  });
-
-  it('allows provider catalog model ids with slash-containing publisher prefixes', () => {
-    assert.deepEqual(resolveModelName('nvidia', 'moonshotai/kimi-k2.6'), {
-      providerID: 'nvidia',
-      modelID: 'moonshotai/kimi-k2.6',
-    });
-  });
-
-  it('resolves Devin CLI model ids against the devin provider', () => {
-    assert.deepEqual(resolveModelName('devin', 'glm-5.2'), {
+    assert.deepEqual(resolveModelSelection('devin/glm-5.2'), {
       providerID: 'devin',
-      modelID: 'glm-5.2',
+      pool: ['devin/glm-5.2'],
     });
   });
 
-  it('resolves CommandCode CLI model ids against the commandcode provider', () => {
-    assert.deepEqual(resolveModelName('commandcode', 'Qwen/Qwen3.7-Max'), {
-      providerID: 'commandcode',
-      modelID: 'Qwen/Qwen3.7-Max',
+  it('resolves a comma-separated pool of same-provider refs', () => {
+    assert.deepEqual(resolveModelSelection(' opencode/a , opencode/b/c ,, opencode/d '), {
+      providerID: 'opencode',
+      pool: ['opencode/a', 'opencode/b/c', 'opencode/d'],
     });
   });
 
-  it('formats resolved models into the canonical provider/model id string', () => {
-    assert.equal(
-      formatModelName(resolveModelName('nvidia', 'moonshotai/kimi-k2.6')),
-      'nvidia/moonshotai/kimi-k2.6',
+  it('rejects a pool that spans providers, naming the resolved candidates', () => {
+    assert.throws(
+      () => resolveModelSelection('opencode/a, devin/b'),
+      /mixes providers: "opencode\/a" and "devin\/b"/,
+    );
+    // An unqualified candidate took the default provider; the resolved form is
+    // what shows the user where the second provider came from.
+    assert.throws(
+      () => resolveModelSelection('devin/glm-5.2, glm-5.2'),
+      /mixes providers: "devin\/glm-5\.2" and "opencode\/glm-5\.2"/,
     );
   });
 
-  it('normalizes every configured provider default without changing provider selection', () => {
+  it('names the offending model when the derived provider is unknown', () => {
+    assert.throws(
+      () => resolveModelSelection('moonshotai/kimi-k2.6'),
+      /Unknown provider "moonshotai" derived from model "moonshotai\/kimi-k2\.6"/,
+    );
+  });
+
+  it('falls back to the default provider for a ref that names none', () => {
+    assert.deepEqual(resolveModelSelection('deepseek-v4-flash-free'), {
+      providerID: 'opencode',
+      pool: ['opencode/deepseek-v4-flash-free'],
+    });
+  });
+
+  it('uses the provider catalog default when no model is given', () => {
+    assert.deepEqual(resolveModelSelection(), {
+      providerID: 'opencode',
+      pool: ['opencode/deepseek-v4-flash-free'],
+    });
+    assert.deepEqual(resolveModelSelection('', 'devin'), {
+      providerID: 'devin',
+      pool: ['devin/default'],
+    });
+    assert.throws(
+      () => resolveModelSelection('', 'openai-compatible'),
+      /Missing model for provider "openai-compatible"/,
+    );
+  });
+
+  it('rejects malformed refs on both the derived and pinned paths', () => {
+    assert.throws(() => resolveModelSelection('opencode/'), /expected "provider\/model"/);
+    assert.throws(() => resolveModelSelection(' , '), /expected at least one model/);
+    // A pin must not absorb a leading slash into the model id as `opencode//x`.
+    assert.throws(() => resolveModelSelection('/deepseek'), /a non-empty model id/);
+    assert.throws(() => resolveModelSelection('/deepseek', 'opencode'), /a non-empty model id/);
+    assert.throws(() => resolveAuxModel('/m', 'openai', 'openai'), /a non-empty model id/);
+    assert.throws(() => resolveModelSelection('opencode/', 'opencode'), /a non-empty model id/);
+  });
+
+  it('leaves every configured provider default naming its own provider', () => {
     for (const [providerID, cfg] of Object.entries(PROVIDERS)) {
       if (!cfg.defaultModel) continue;
-      const resolved = resolveModelName(providerID, cfg.defaultModel);
-
-      assert.equal(resolved.providerID, providerID);
-      assert.notEqual(resolved.modelID, '');
-      assert.equal(formatModelName(resolved), cfg.defaultModel);
+      assert.deepEqual(resolveModelSelection(cfg.defaultModel), {
+        providerID,
+        pool: [cfg.defaultModel],
+      });
     }
-  });
-
-  it('configures Z.AI Coding Plan with the direct Z.AI key surface', () => {
-    assert.deepEqual(PROVIDERS['zai-coding-plan'], {
-      defaultModel: 'zai-coding-plan/glm-5.2',
-      keyEnv: 'ZAI_API_KEY',
-      keyInput: 'zai-api-key',
-      models: {
-        'glm-5': { promptCache: false },
-        'glm-5.1': { promptCache: false },
-        'glm-5.2': { promptCache: false },
-      },
-    });
-  });
-
-  it('configures Gemini with the direct Gemini key surface', () => {
-    assert.deepEqual(PROVIDERS.google, {
-      defaultModel: 'google/gemini-2.5-flash',
-      keyEnv: 'GEMINI_API_KEY',
-      keyInput: 'gemini-api-key',
-    });
-  });
-
-  it('configures Devin with the Windsurf key surface', () => {
-    assert.deepEqual(PROVIDERS.devin, {
-      defaultModel: 'devin/default',
-      keyEnv: 'DEVIN_WINDSURF_API_KEY',
-      keyInput: 'devin-windsurf-api-key',
-      models: {
-        default: { promptCache: false },
-      },
-    });
-  });
-
-  it('configures CommandCode with the CLI access-key surface', () => {
-    assert.deepEqual(PROVIDERS.commandcode, {
-      defaultModel: 'commandcode/default',
-      keyEnv: 'COMMANDCODE_ACCESS_KEY',
-      keyInput: 'commandcode-access-key',
-      models: {
-        default: { promptCache: false },
-      },
-    });
-  });
-
-  it('configures Qoder with its PAT and automatic model tier', () => {
-    assert.deepEqual(PROVIDERS.qoder, {
-      defaultModel: 'qoder/auto',
-      keyEnv: 'QODER_PERSONAL_ACCESS_TOKEN',
-      keyInput: 'qoder-token',
-      models: {
-        auto: { promptCache: false },
-      },
-    });
-  });
-
-  it('configures Grok Build separately from the xAI API provider', () => {
-    assert.deepEqual(PROVIDERS.grok, {
-      defaultModel: 'grok/default',
-      keyEnv: 'GROK_AUTH_JSON',
-      keyInput: 'grok-auth',
-      fallbackKey: { env: 'XAI_API_KEY', input: 'xai-api-key' },
-      models: {
-        default: { promptCache: false },
-      },
-    });
-    assert.equal(PROVIDERS.xai.keyEnv, 'XAI_API_KEY');
-    assert.equal(PROVIDERS.xai.keyInput, 'xai-api-key');
-  });
-
-  it('rejects an empty selected-provider-prefixed model id', () => {
-    assert.throws(() => resolveModelName('opencode', 'opencode/'), /expected a non-empty model id/);
-  });
-
-  it('rejects a comma, so only pooled inputs can carry one', () => {
-    assert.throws(() => resolveModelName('opencode', 'a, b'), /one model id, not a list/);
-    assert.throws(() => resolveAuxModelName('opencode', 'a, b'), /one model id, not a list/);
   });
 });
 
-describe('resolveModelPool', () => {
-  it('splits a comma-separated pool into canonical provider-qualified names', () => {
-    assert.deepEqual(resolveModelPool('opencode', ' a , opencode/b ,, c/d '), [
-      'opencode/a',
-      'opencode/b',
-      'opencode/c/d',
-    ]);
-    assert.deepEqual(resolveModelPool('opencode', 'opencode/solo'), ['opencode/solo']);
+describe('resolveModelSelection with a legacy provider input', () => {
+  it('pins the provider and absorbs one matching prefix', () => {
+    assert.deepEqual(resolveModelSelection('deepseek-v4-flash-free, opencode/b', 'opencode'), {
+      providerID: 'opencode',
+      pool: ['opencode/deepseek-v4-flash-free', 'opencode/b'],
+    });
   });
 
-  it('rejects a pool whose candidates are not all usable', () => {
-    assert.throws(
-      () => resolveModelPool('opencode', 'a, opencode/, b'),
-      /expected a non-empty model id/,
-    );
-    assert.throws(() => resolveModelPool('opencode', ' , '), /expected at least one model/);
+  it('keeps a non-matching slash prefix inside the model id', () => {
+    // Catalog ids carry publisher prefixes; a pin stops them reading as providers.
+    assert.deepEqual(resolveModelSelection('moonshotai/kimi-k2.6', 'nvidia'), {
+      providerID: 'nvidia',
+      pool: ['nvidia/moonshotai/kimi-k2.6'],
+    });
+  });
+
+  it('rejects an unknown pinned provider', () => {
+    assert.throws(() => resolveModelSelection('a', 'nope'), /Unknown provider "nope"\. Supported:/);
   });
 });
 
@@ -194,16 +142,46 @@ describe('pickPooledModel', () => {
   });
 });
 
-describe('resolveAuxModelName', () => {
-  it('defaults aux models to the main provider', () => {
-    assert.equal(resolveAuxModelName('openai', 'gpt-5.4-mini'), 'openai/gpt-5.4-mini');
+describe('resolveAuxModel', () => {
+  it('keeps an unqualified aux model on the main provider', () => {
+    assert.deepEqual(resolveAuxModel('gpt-5.4-mini', 'openai'), {
+      model: 'openai/gpt-5.4-mini',
+      providerID: 'openai',
+    });
   });
 
-  it('uses an explicit aux provider when present', () => {
-    assert.equal(
-      resolveAuxModelName('openai', 'google/gemini-2.5-flash', 'openrouter'),
-      'openrouter/google/gemini-2.5-flash',
-    );
+  it('reports the main provider when no aux model is set', () => {
+    // Callers compare this against the main provider to decide whether the aux
+    // sessions need their own credential.
+    assert.deepEqual(resolveAuxModel(undefined, 'openai'), { model: '', providerID: 'openai' });
+    assert.deepEqual(resolveAuxModel('  ', 'openai'), { model: '', providerID: 'openai' });
+  });
+
+  it('routes a qualified aux model to the provider it names', () => {
+    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'openai'), {
+      model: 'google/gemini-2.5-flash',
+      providerID: 'google',
+    });
+    assert.throws(() => resolveAuxModel('nope/m', 'openai'), /Unknown provider "nope"/);
+  });
+
+  it('lets a legacy aux provider pin the model as before', () => {
+    // The old resolver always pinned the aux model — to aux-provider, else the
+    // main provider — so a legacy pin must still swallow a qualified ref rather
+    // than let it route itself. Entries pass `aux-provider || provider` here.
+    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'openai', 'openrouter'), {
+      model: 'openrouter/google/gemini-2.5-flash',
+      providerID: 'openrouter',
+    });
+    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'opencode', 'opencode'), {
+      model: 'opencode/google/gemini-2.5-flash',
+      providerID: 'opencode',
+    });
+    assert.throws(() => resolveAuxModel('a', 'openai', 'nope'), /Unknown provider "nope"/);
+  });
+
+  it('rejects a pool handed to the single-model aux input', () => {
+    assert.throws(() => resolveAuxModel('a, b', 'opencode'), /one model id, not a list/);
   });
 });
 
