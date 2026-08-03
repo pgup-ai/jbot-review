@@ -1,11 +1,8 @@
 import { createHash } from 'node:crypto';
 
-import { providerConfig } from './config.ts';
+import { type ParsedModel, parseModelName } from '@symma/protocol';
 
-interface ParsedModel {
-  providerID: string;
-  modelID: string;
-}
+import { providerConfig } from './config.ts';
 
 const DEFAULT_PROVIDER_ID = 'opencode';
 
@@ -29,20 +26,22 @@ function parseModelRef(model: string, { pinned, fallback }: ProviderResolution):
   if (trimmed.includes(',')) {
     throw new Error(`Invalid model "${model}"; expected one model id, not a list.`);
   }
-
-  const slash = trimmed.indexOf('/');
-  const parsed = pinned
-    ? {
-        providerID: pinned,
-        modelID: trimmed.startsWith(`${pinned}/`) ? trimmed.slice(pinned.length + 1) : trimmed,
-      }
-    : slash < 0
-      ? { providerID: fallback, modelID: trimmed }
-      : { providerID: trimmed.slice(0, slash), modelID: trimmed.slice(slash + 1) };
-  if (!parsed.providerID || !parsed.modelID) {
+  // Ahead of the split: a pinned provider would otherwise absorb a leading
+  // slash into the model id as `provider//id` instead of rejecting it.
+  if (!trimmed || trimmed.startsWith('/')) {
     throw new Error(`Invalid model "${model}"; expected a non-empty model id.`);
   }
-  return parsed;
+
+  if (pinned) {
+    const modelID = trimmed.startsWith(`${pinned}/`) ? trimmed.slice(pinned.length + 1) : trimmed;
+    if (!modelID) throw new Error(`Invalid model "${model}"; expected a non-empty model id.`);
+    return { providerID: pinned, modelID };
+  }
+  // Derived refs go through the protocol parser, so this boundary and every
+  // downstream consumer of the ref share one grammar.
+  return trimmed.includes('/')
+    ? parseModelName(trimmed)
+    : { providerID: fallback, modelID: trimmed };
 }
 
 interface ModelSelection {
@@ -72,9 +71,11 @@ export function resolveModelSelection(models?: string, pinnedProviderID?: string
   const [first] = pool;
   const mixed = pool.find((entry) => entry.providerID !== first.providerID);
   if (mixed) {
+    // Resolved names, not bare ids: only they show a fallback provider the user
+    // never wrote.
     throw new Error(
-      `Model pool mixes providers "${first.providerID}" and "${mixed.providerID}"; ` +
-        'every pooled model must name the same provider.',
+      `Model pool mixes providers: "${formatModelName(first)}" and "${formatModelName(mixed)}". ` +
+        'Every pooled model must name the same provider.',
     );
   }
   // A pinned provider was named outright, so only a derived one cites its model.

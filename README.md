@@ -155,8 +155,8 @@ you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY
 `CLINE_AUTH_JSON`, `GROK_AUTH_JSON`, `KILO_AUTH_CONTENT`, `ANTHROPIC_API_KEY`, or
 `JBOT_OPENAI_COMPATIBLE_API_KEY`. Configure `JBOT_OPENAI_COMPATIBLE_BASE_URL`
 as an Actions variable when using the generic `openai-compatible` provider.
-Empty provider key inputs are ignored; if a cross-provider auxiliary model has
-no key for the selected aux provider, it reuses the review provider API key.
+Empty provider key inputs are ignored; an auxiliary model on a different
+provider needs that provider's own key, which is never reused across providers.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
 
 **CLI-backend credentials — where to get each one.** Unlike the model-provider keys
@@ -357,7 +357,7 @@ the review itself is unaffected._
 | `review-passes`           | `1`                | Total review passes (1–3). Passes beyond the first add focused recall lenses (cross-hunk interactions, then security/data-integrity) in parallel on the aux model; findings merge and dedupe. Raise to 2-3 for maximum recall.                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `dynamic-fanout`          | `true`             | Scale the recall-supplement fan-out (extra lens passes + the guideline-compliance pass) to the diff's risk and size: a small, low-risk change (≤3 files, ≤60 added lines, no security/data/API/infra path or build/CI tooling like `package.json`/`action.yml`/workflows, no dependency-manifest change, no large deletion) runs the general pass only and skips the guideline pass; everything else runs the full requested fan-out. The requested config is the ceiling — this only ever reduces it, and never gates the main full-diff review or `verify-findings`. Set `false` to force the full requested fan-out on every PR.                         |
 | `verify-findings`         | `true`             | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `aux-model`               | unset              | Model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification), as `provider/model`; an id naming no provider stays on the main provider. Lets the main review run on a stronger tier while supporting checks stay cheap and fast. When it names another provider, that provider's key input/env var is used if supplied; otherwise aux sessions reuse the review provider API key.                                                                                                                                                                                                                             |
+| `aux-model`               | unset              | Model for the auxiliary sessions (lens passes, addressed-thread check, guideline compliance, verification), as `provider/model`; an id naming no provider stays on the main provider. Lets the main review run on a stronger tier while supporting checks stay cheap and fast. When it names **another** provider, that provider's own key input/env var is required — a key is never reused across providers.                                                                                                                                                                                                                                              |
 | `aux-provider`            | from `aux-model`   | Deprecated — qualify `aux-model` instead; pins the aux provider when set (`JBOT_AUX_PROVIDER`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `review-shards`           | `1`                | Parallel shards for the main review. `1` = no sharding, one full-diff session (default). `0` = auto from diff size, capped at 4. `N` = pin N shards. Sharding only speeds review up on providers that serve concurrent sessions; on free/throttled tiers the shards serialize on one key (see `max-concurrent-sessions`), so single-session is the better default. Either way the review covers the complete diff; raise it on paid concurrent tiers, or for very large PRs where smaller per-shard context helps depth.                                                                                                                                    |
 | `time-budget-minutes`     | `30`               | Wall-clock target (`0` = no budget). Finder sessions get the full budget (minus a 30s posting reserve) as their deadline; shard retries and verification use whatever remains, or are skipped (fail-open). An auxiliary session (lens, addressed-thread, guideline, verification) over its deadline is aborted and fails open — degrading only its own coverage, never the run. A main review shard that still fails after its retry aborts the run rather than posting partial coverage.                                                                                                                                                                   |
@@ -569,10 +569,9 @@ pass it through the workflow. Leave it unset to use `opencode`'s default model
     thread-resolution-token: ${{ secrets.JBOT_REVIEW_THREAD_RESOLUTION_TOKEN }}
 ```
 
-The action reads the key matching the selected `provider`. When `aux-model` uses
-a different opencode-backed provider, the action uses the aux provider's key
-input/env var if it is supplied; otherwise it reuses the review provider API key
-for the aux provider. CLI backends cannot reuse opencode-provider keys, and
+The action reads the key matching the main model's provider. When `aux-model`
+names a different provider, that provider's own key input/env var is required —
+a key is never reused across providers. CLI backends cannot reuse opencode-provider keys, and
 opencode-backed providers cannot reuse CLI backend keys such as
 `DEVIN_WINDSURF_API_KEY` or `COMMANDCODE_ACCESS_KEY`, so mixed CLI/opencode-backed
 main+aux configurations must pass both keys. Future provider changes can be made
@@ -624,10 +623,9 @@ model: opencode/deepseek-v4-flash-free,opencode/glm-5-free,opencode/kimi-k2.5-fr
 _pins_ the provider: an unprefixed id belongs to it, a matching `provider/`
 prefix is stripped, and any other slash prefix stays part of the model id
 (`provider: nvidia` + `model: moonshotai/kimi-k2.6` →
-`nvidia/moonshotai/kimi-k2.6`). `provider` pins `aux-model` too when
-`aux-provider` is unset, which is what the previous resolver did — so a run that
-sets either input keeps today's behavior for **both** models, and only a run
-setting neither derives anything.
+`nvidia/moonshotai/kimi-k2.6`). `provider` pins **both** models — it also pins
+`aux-model` when `aux-provider` is unset, which is what the previous resolver
+did. `aux-provider` pins only the aux model, leaving the main one to derive.
 
 Set them only to keep an existing configuration working; new setups should
 qualify both models and drop both inputs. Migrate them together: qualifying
@@ -671,6 +669,7 @@ documentation lookup.
 | `kimi-api-key`               | No       | —                     | Used when the main or aux model names `kimi-for-coding`                                                                  |
 | `xai-api-key`                | No       | —                     | Used by `xai`, or by `grok` when `grok-auth` is empty                                                                    |
 | `fireworks-api-key`          | No       | —                     | Used when the main or aux model names `fireworks-ai`                                                                     |
+| `mimo-api-key`               | No       | —                     | Used when the main or aux model names `xiaomi-token-plan-sgp`                                                            |
 | `devin-windsurf-api-key`     | No       | —                     | Used when the main or aux model names `devin`                                                                            |
 | `commandcode-access-key`     | No       | —                     | Used when the main or aux model names `commandcode`                                                                      |
 | `cursor-api-key`             | No       | —                     | Used when the main or aux model names `cursor`                                                                           |

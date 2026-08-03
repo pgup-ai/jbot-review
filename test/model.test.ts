@@ -39,10 +39,16 @@ describe('resolveModelSelection', () => {
     });
   });
 
-  it('rejects a pool that spans providers', () => {
+  it('rejects a pool that spans providers, naming the resolved candidates', () => {
     assert.throws(
       () => resolveModelSelection('opencode/a, devin/b'),
-      /mixes providers "opencode" and "devin"/,
+      /mixes providers: "opencode\/a" and "devin\/b"/,
+    );
+    // An unqualified candidate took the default provider; the resolved form is
+    // what shows the user where the second provider came from.
+    assert.throws(
+      () => resolveModelSelection('devin/glm-5.2, glm-5.2'),
+      /mixes providers: "devin\/glm-5\.2" and "opencode\/glm-5\.2"/,
     );
   });
 
@@ -75,10 +81,14 @@ describe('resolveModelSelection', () => {
     );
   });
 
-  it('rejects malformed refs', () => {
-    assert.throws(() => resolveModelSelection('opencode/'), /expected a non-empty model id/);
-    assert.throws(() => resolveModelSelection('/deepseek'), /expected a non-empty model id/);
+  it('rejects malformed refs on both the derived and pinned paths', () => {
+    assert.throws(() => resolveModelSelection('opencode/'), /expected "provider\/model"/);
     assert.throws(() => resolveModelSelection(' , '), /expected at least one model/);
+    // A pin must not absorb a leading slash into the model id as `opencode//x`.
+    assert.throws(() => resolveModelSelection('/deepseek'), /a non-empty model id/);
+    assert.throws(() => resolveModelSelection('/deepseek', 'opencode'), /a non-empty model id/);
+    assert.throws(() => resolveAuxModel('/m', 'openai', 'openai'), /a non-empty model id/);
+    assert.throws(() => resolveModelSelection('opencode/', 'opencode'), /a non-empty model id/);
   });
 
   it('leaves every configured provider default naming its own provider', () => {
