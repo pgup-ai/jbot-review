@@ -144,6 +144,9 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),
           reviewTelemetry: parseEnvBoolean('JBOT_REVIEW_TELEMETRY', true),
           evidenceQuotes: parseEnvBoolean('JBOT_EVIDENCE_QUOTES', true),
+          // Opt-in here, unlike the Action's RUNNER_TEMP default: this host is
+          // long-lived with no per-job wipe or actions/cache retention behind
+          // it, so the operator picks a path they prune.
           shardCachePath: process.env.JBOT_SHARD_CACHE_DIR?.trim() ?? '',
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),

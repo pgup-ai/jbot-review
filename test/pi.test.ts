@@ -6,6 +6,8 @@ import { describe, it } from 'node:test';
 
 import {
   PI_MIN_NODE_VERSION,
+  runPiReview,
+  type PiRuntime,
   capPiDiffOutput,
   piGitDiffArgs,
   resolveWithinWorkspace,
@@ -394,5 +396,99 @@ describe('capPiDiffOutput', () => {
     const capped = capPiDiffOutput('a' + '\u00e9'.repeat(100), 100);
     assert.ok(capped.startsWith('a' + '\u00e9'.repeat(49) + '\n'));
     assert.ok(!capped.includes('\uFFFD'));
+  });
+});
+
+describe('createPiSession teardown race', () => {
+  // A session whose creation resolves after stop() swept the registry must not
+  // go on to prompt a torn-down runtime.
+  const review = JSON.stringify({ summary: 'ok', findings: [] });
+  const fakeRuntime = (stopped: boolean, events: string[]): PiRuntime =>
+    ({
+      sdk: {
+        createAgentSession: async () => {
+          const session = {
+            messages: [] as unknown[],
+            prompt: async () => {
+              events.push('prompted');
+              session.messages.push({ role: 'assistant', content: review });
+            },
+            abort: async () => void events.push('aborted'),
+            dispose: () => events.push('disposed'),
+          };
+          return { session };
+        },
+        SessionManager: { inMemory: () => ({}) },
+        SettingsManager: { inMemory: () => ({}) },
+      },
+      modelRuntime: { getModel: () => ({}) },
+      workspace: '/tmp/ws',
+      mainModel: 'deepseek/deepseek-v4-flash',
+      readTool: {},
+      activeSessions: new Set(),
+      stopped,
+    }) as unknown as PiRuntime;
+
+  it('aborts and disposes the newborn session instead of prompting it', async () => {
+    const events: string[] = [];
+    await assert.rejects(
+      runPiReview(fakeRuntime(true, events), 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}),
+      /stopped during session creation/,
+    );
+    // Order matters: aborting after disposal would fail against a dead session.
+    assert.deepEqual(events, ['aborted', 'disposed']);
+  });
+
+  it('still disposes when abort throws synchronously', async () => {
+    const events: string[] = [];
+    const runtime = fakeRuntime(true, events);
+    // Disposal must sit outside the abort's try/catch, or an SDK that throws
+    // before returning a promise leaks the session.
+    runtime.sdk.createAgentSession = async () => ({
+      session: {
+        prompt: async () => {},
+        abort: () => {
+          throw new Error('sync abort failure');
+        },
+        dispose: () => events.push('disposed'),
+      },
+    });
+    await assert.rejects(
+      runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}),
+      /stopped during session creation/,
+    );
+    assert.deepEqual(events, ['disposed']);
+  });
+
+  it('does not wait on a hanging abort before failing the call', async () => {
+    const runtime = fakeRuntime(true, []);
+    // A session whose abort never settles: the call must still fail promptly,
+    // or a wedged provider delays the whole review (and the process exit).
+    runtime.sdk.createAgentSession = async () => ({
+      session: {
+        prompt: async () => {},
+        abort: () => new Promise<void>(() => {}),
+        dispose: () => {},
+      },
+    });
+    const startedAt = Date.now();
+    await assert.rejects(
+      runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}),
+      /stopped during session creation/,
+    );
+    assert.ok(Date.now() - startedAt < 1_000, 'awaited the hanging abort');
+  });
+
+  it('leaves a live runtime prompting normally', async () => {
+    const events: string[] = [];
+    const result = await runPiReview(
+      fakeRuntime(false, events),
+      'deepseek/deepseek-v4-flash',
+      'ctx',
+      '',
+      () => {},
+    );
+    assert.equal(result.summary, 'ok');
+    assert.deepEqual(events, ['prompted', 'disposed']);
   });
 });

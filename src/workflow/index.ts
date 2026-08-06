@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 
@@ -64,9 +66,12 @@ async function main(): Promise<void> {
     maxConcurrentSessions: parseNumberInput('max-concurrent-sessions', 3),
     reviewTelemetry: parseBooleanInput('review-telemetry', true),
     evidenceQuotes: parseBooleanInput('evidence-quotes', true),
-    // Env-only, no action input: a shard cache is only sound on persistent,
-    // operator-controlled runners, and the path must live outside the checkout.
-    shardCachePath: process.env.JBOT_SHARD_CACHE_DIR?.trim() ?? '',
+    // Env-only, no action input. Defaults into RUNNER_TEMP: outside the
+    // checkout (workspace-internal dirs are rejected as forgeable) and where
+    // the workflow's actions/cache pair persists it. Empty value disables.
+    shardCachePath:
+      process.env.JBOT_SHARD_CACHE_DIR?.trim() ??
+      (process.env.RUNNER_TEMP ? join(process.env.RUNNER_TEMP, 'jbot-shard-cache') : ''),
   };
   const pullTarget = getPullRequestTarget();
   for (const warning of swallowedProviderWarnings([...modelPool, ...auxProbe])) {
