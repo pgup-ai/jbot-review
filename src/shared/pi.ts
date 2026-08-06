@@ -636,10 +636,13 @@ export async function startPi(
     runtime,
     stop: () => {
       runtime.stopped = true;
-      // Fire-and-forget: cancelling the in-flight call is what lets the
-      // process exit; abortPiSessionBestEffort never rejects.
+      // Deliberately not abortPiSessionBestEffort: nothing awaits these, so its
+      // timeout would leave a referenced timer holding the loop open — the very
+      // thing aborting is meant to release. The abandonment is already logged.
       for (const session of runtime.activeSessions) {
-        void abortPiSessionBestEffort(session, 'abandoned', log);
+        void Promise.resolve()
+          .then(() => session.abort())
+          .catch(() => undefined);
       }
       removeIsolationDir();
     },

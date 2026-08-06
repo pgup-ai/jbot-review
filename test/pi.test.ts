@@ -6,6 +6,8 @@ import { describe, it } from 'node:test';
 
 import {
   PI_MIN_NODE_VERSION,
+  runPiReview,
+  type PiRuntime,
   capPiDiffOutput,
   piGitDiffArgs,
   resolveWithinWorkspace,
@@ -394,5 +396,58 @@ describe('capPiDiffOutput', () => {
     const capped = capPiDiffOutput('a' + '\u00e9'.repeat(100), 100);
     assert.ok(capped.startsWith('a' + '\u00e9'.repeat(49) + '\n'));
     assert.ok(!capped.includes('\uFFFD'));
+  });
+});
+
+describe('createPiSession teardown race', () => {
+  // A session whose creation resolves after stop() swept the registry must not
+  // go on to prompt a torn-down runtime.
+  const review = JSON.stringify({ summary: 'ok', findings: [] });
+  const fakeRuntime = (stopped: boolean, events: string[]): PiRuntime =>
+    ({
+      sdk: {
+        createAgentSession: async () => {
+          const session = {
+            messages: [] as unknown[],
+            prompt: async () => {
+              events.push('prompted');
+              session.messages.push({ role: 'assistant', content: review });
+            },
+            abort: async () => void events.push('aborted'),
+            dispose: () => events.push('disposed'),
+          };
+          return { session };
+        },
+        SessionManager: { inMemory: () => ({}) },
+        SettingsManager: { inMemory: () => ({}) },
+      },
+      modelRuntime: { getModel: () => ({}) },
+      workspace: '/tmp/ws',
+      mainModel: 'deepseek/deepseek-v4-flash',
+      readTool: {},
+      activeSessions: new Set(),
+      stopped,
+    }) as unknown as PiRuntime;
+
+  it('aborts and disposes the newborn session instead of prompting it', async () => {
+    const events: string[] = [];
+    await assert.rejects(
+      runPiReview(fakeRuntime(true, events), 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}),
+      /stopped during session creation/,
+    );
+    assert.deepEqual(events, ['aborted', 'disposed']);
+  });
+
+  it('leaves a live runtime prompting normally', async () => {
+    const events: string[] = [];
+    const result = await runPiReview(
+      fakeRuntime(false, events),
+      'deepseek/deepseek-v4-flash',
+      'ctx',
+      '',
+      () => {},
+    );
+    assert.equal(result.summary, 'ok');
+    assert.deepEqual(events, ['prompted', 'disposed']);
   });
 });
