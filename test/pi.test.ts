@@ -435,8 +435,8 @@ describe('createPiSession teardown race', () => {
       runPiReview(fakeRuntime(true, events), 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}),
       /stopped during session creation/,
     );
-    // Order is scheduling detail: dispose is sync, the abort a microtask.
-    assert.deepEqual([...events].sort(), ['aborted', 'disposed']);
+    // Order matters: aborting after disposal would fail against a dead session.
+    assert.deepEqual(events, ['aborted', 'disposed']);
   });
 
   it('does not wait on a hanging abort before failing the call', async () => {

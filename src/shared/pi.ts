@@ -780,9 +780,13 @@ function abandonPiSession(
   label: string,
   log: (msg: string) => void,
 ): void {
-  void Promise.resolve()
-    .then(() => session.abort())
-    .catch(() => undefined);
+  // Called synchronously, not off a microtask: disposal below would otherwise
+  // land first and leave the abort to fail against an already-disposed session.
+  try {
+    void Promise.resolve(session.abort()).catch(() => undefined);
+  } catch {
+    /* best-effort; the session is disposed either way */
+  }
   disposePiSession(runtime, session, label, log);
 }
 
