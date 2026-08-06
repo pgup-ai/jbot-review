@@ -50,6 +50,24 @@ describe('limitReviewBackendSessions', () => {
     assert.deepEqual(priorities, ['high', 'normal']);
   });
 
+  it('acquires verification slots at high priority even on the aux backend', async () => {
+    const priorities: SemaphorePriority[] = [];
+    const slots: SessionSlots = {
+      acquire: async (priority = 'normal') => {
+        priorities.push(priority);
+        return () => undefined;
+      },
+    };
+    const aux = limitReviewBackendSessions(makeBackend(), 'aux', slots, slots);
+
+    await aux.runFindingVerification('model', 'context', [], noLog);
+    await aux.runGuidelineComplianceCheck('model', 'context', '', noLog);
+
+    // Provider + global acquisition both inherit the override; the other aux
+    // calls keep the role priority.
+    assert.deepEqual(priorities, ['high', 'high', 'normal', 'normal']);
+  });
+
   it('takes and hands off a provider slot before the global slot', async () => {
     const events: string[] = [];
     const slots = (name: string): SessionSlots => ({

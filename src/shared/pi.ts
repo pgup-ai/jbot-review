@@ -503,6 +503,12 @@ export interface PiRuntime {
   thinkingLevel?: string;
   gitDiffTool?: unknown;
   readTool: unknown;
+  /**
+   * Sessions created but not yet disposed. Teardown aborts them: a session
+   * abandoned past the settle grace otherwise keeps its in-flight provider
+   * call — and the event loop — alive well after the review has posted.
+   */
+  activeSessions: Set<PiAgentSessionLike>;
 }
 
 function requirePiProvider(providerID: string): string {
@@ -611,20 +617,25 @@ export async function startPi(
     /* model listing is a log nicety only */
   }
 
+  const runtime: PiRuntime = {
+    sdk,
+    modelRuntime,
+    loader,
+    workspace,
+    mainModel: `${providerID}/${modelID}`,
+    readTool: createPiReadTool(sdk, workspace),
+    activeSessions: new Set(),
+    ...(thinkingLevel ? { thinkingLevel } : {}),
+    ...(options.diffScope
+      ? { gitDiffTool: createPiGitDiffTool(sdk, workspace, options.diffScope) }
+      : {}),
+  };
   return {
-    runtime: {
-      sdk,
-      modelRuntime,
-      loader,
-      workspace,
-      mainModel: `${providerID}/${modelID}`,
-      readTool: createPiReadTool(sdk, workspace),
-      ...(thinkingLevel ? { thinkingLevel } : {}),
-      ...(options.diffScope
-        ? { gitDiffTool: createPiGitDiffTool(sdk, workspace, options.diffScope) }
-        : {}),
+    runtime,
+    stop: () => {
+      abortPiSessions(runtime.activeSessions);
+      removeIsolationDir();
     },
-    stop: removeIsolationDir,
   };
 }
 
@@ -665,7 +676,20 @@ async function createPiSession(
       ? { thinkingLevel: runtime.thinkingLevel }
       : {}),
   });
+  runtime.activeSessions.add(session);
   return session;
+}
+
+/**
+ * Fire-and-forget abort of every still-active session: cancelling the
+ * in-flight call is what lets the process exit; nothing waits on the result.
+ */
+export function abortPiSessions(sessions: Iterable<Pick<PiAgentSessionLike, 'abort'>>): void {
+  for (const session of sessions) {
+    void Promise.resolve()
+      .then(() => session.abort())
+      .catch(() => undefined);
+  }
 }
 
 function piSessionMessages(session: PiAgentSessionLike): unknown[] {
@@ -744,10 +768,12 @@ async function abortPiSessionBestEffort(
 }
 
 function disposePiSession(
+  runtime: PiRuntime,
   session: PiAgentSessionLike,
   label: string,
   log: (msg: string) => void,
 ): void {
+  runtime.activeSessions.delete(session);
   const failed = (error: unknown) =>
     log(
       `(pi ${label} session dispose failed: ${error instanceof Error ? error.message : String(error)})`,
@@ -810,7 +836,7 @@ export async function runPiReview(
       return parseReview(repaired, `${label}-repair`, log, { strict: true });
     }
   } finally {
-    disposePiSession(session, label, log);
+    disposePiSession(runtime, session, label, log);
   }
 }
 
@@ -903,7 +929,7 @@ export async function runPiAddressedPriorCommentsCheck(
       (result) => result.addressedPriorComments,
     );
   } finally {
-    disposePiSession(session, label, log);
+    disposePiSession(runtime, session, label, log);
   }
 }
 
@@ -939,7 +965,7 @@ export async function runPiGuidelineComplianceCheck(
       (result) => result.findings,
     );
   } finally {
-    disposePiSession(session, label, log);
+    disposePiSession(runtime, session, label, log);
   }
 }
 
@@ -970,7 +996,7 @@ export async function runPiChangesSinceLastReview(
     );
     return parseChangesSinceLastReviewSummary(raw, label, log);
   } finally {
-    disposePiSession(session, label, log);
+    disposePiSession(runtime, session, label, log);
   }
 }
 
@@ -998,6 +1024,6 @@ export async function runPiFindingVerification(
     const raw = await promptPiSession(session, model, prompt, label, log, timeoutMs, onTokenUsage);
     return parseFindingVerdicts(raw, findings.length, log);
   } finally {
-    disposePiSession(session, label, log);
+    disposePiSession(runtime, session, label, log);
   }
 }

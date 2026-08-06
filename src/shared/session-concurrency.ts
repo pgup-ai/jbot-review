@@ -60,8 +60,11 @@ export function limitReviewBackendSessions(
   providerSlots?: SessionSlots,
 ): ReviewBackend {
   if (!globalSlots && !providerSlots) return backend;
-  const priority = role === 'main' ? 'high' : 'normal';
-  const withSlots = async <T>(run: () => Promise<T>): Promise<T> => {
+  const rolePriority = role === 'main' ? 'high' : 'normal';
+  const withSlots = async <T>(
+    run: () => Promise<T>,
+    priority: SemaphorePriority = rolePriority,
+  ): Promise<T> => {
     let providerRelease: (() => void) | undefined;
     let globalRelease: (() => void) | undefined;
     try {
@@ -84,7 +87,10 @@ export function limitReviewBackendSessions(
       withSlots(() => backend.runAddressedPriorCommentsCheck(...args)),
     runGuidelineComplianceCheck: (...args) =>
       withSlots(() => backend.runGuidelineComplianceCheck(...args)),
-    runFindingVerification: (...args) => withSlots(() => backend.runFindingVerification(...args)),
+    // The one auxiliary call the posting path awaits: never queue it behind
+    // recall sessions still holding slots past the settle grace.
+    runFindingVerification: (...args) =>
+      withSlots(() => backend.runFindingVerification(...args), 'high'),
     runChangesSinceLastReview: (...args) =>
       withSlots(() => backend.runChangesSinceLastReview(...args)),
   };

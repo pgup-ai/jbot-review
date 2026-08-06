@@ -183,6 +183,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+          # Caches the npm store only (keyed on package-lock.json) — the review
+          # image is still built fresh from this checkout every run.
+          cache: npm
       - run: npm ci
       - run: npm run build
       - uses: docker/setup-buildx-action@v3
@@ -212,6 +215,17 @@ jobs:
           # which must not cost the whole review.
           [ -n "$sha" ] || sha=$(gh api "repos/${{ github.repository }}/pulls/$PR" --jq .base.sha || true)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      # Same-head re-runs (a manual re-run after an infra failure) reuse
+      # completed shard results instead of re-billing them. Entries are
+      # content-addressed (head, model, exact prompt bytes), so restoring
+      # another head's cache is a harmless miss — full-diff coverage holds.
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/jbot-shard-cache
+          key: jbot-shard-${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}-${{ github.event.pull_request.head.sha || github.run_id }}
+          restore-keys: |
+            jbot-shard-${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}-${{ github.event.pull_request.head.sha || github.run_id }}-
+            jbot-shard-${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}-
       - uses: ./
         # Observer tee: streams ACP session frames to the live viewer.
         # Fail-open by design, and a no-op when the secrets are absent (forks):
@@ -296,3 +310,13 @@ jobs:
           path: .jbot-review/telemetry.jsonl
           if-no-files-found: ignore
           retention-days: 14
+      - name: Save shard cache
+        # always(): the failed run is the whole point — its completed shards
+        # are what the re-run reuses. Run-scoped key suffix: cache keys are
+        # immutable, and each save carries the accumulated dir forward.
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/jbot-shard-cache
+          key: jbot-shard-${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}-${{ github.event.pull_request.head.sha || github.run_id }}-${{ github.run_id }}-${{ github.run_attempt }}
