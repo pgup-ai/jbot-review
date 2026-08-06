@@ -439,6 +439,27 @@ describe('createPiSession teardown race', () => {
     assert.deepEqual(events, ['aborted', 'disposed']);
   });
 
+  it('still disposes when abort throws synchronously', async () => {
+    const events: string[] = [];
+    const runtime = fakeRuntime(true, events);
+    // Disposal must sit outside the abort's try/catch, or an SDK that throws
+    // before returning a promise leaks the session.
+    runtime.sdk.createAgentSession = async () => ({
+      session: {
+        prompt: async () => {},
+        abort: () => {
+          throw new Error('sync abort failure');
+        },
+        dispose: () => events.push('disposed'),
+      },
+    });
+    await assert.rejects(
+      runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}),
+      /stopped during session creation/,
+    );
+    assert.deepEqual(events, ['disposed']);
+  });
+
   it('does not wait on a hanging abort before failing the call', async () => {
     const runtime = fakeRuntime(true, []);
     // A session whose abort never settles: the call must still fail promptly,
