@@ -63,8 +63,6 @@ describe('limitReviewBackendSessions', () => {
     await aux.runFindingVerification('model', 'context', [], noLog);
     await aux.runGuidelineComplianceCheck('model', 'context', '', noLog);
 
-    // Provider + global acquisition both inherit the override; the other aux
-    // calls keep the role priority.
     assert.deepEqual(priorities, ['high', 'high', 'normal', 'normal']);
   });
 

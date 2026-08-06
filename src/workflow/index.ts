@@ -67,9 +67,8 @@ async function main(): Promise<void> {
     reviewTelemetry: parseBooleanInput('review-telemetry', true),
     evidenceQuotes: parseBooleanInput('evidence-quotes', true),
     // Env-only, no action input. Defaults into RUNNER_TEMP: outside the
-    // checkout (a workspace-internal dir is rejected as forgeable) and the
-    // path the workflow's actions/cache pair persists, so a same-head re-run
-    // reuses completed shards. Set JBOT_SHARD_CACHE_DIR= (empty) to disable.
+    // checkout (workspace-internal dirs are rejected as forgeable) and where
+    // the workflow's actions/cache pair persists it. Empty value disables.
     shardCachePath:
       process.env.JBOT_SHARD_CACHE_DIR?.trim() ??
       (process.env.RUNNER_TEMP ? join(process.env.RUNNER_TEMP, 'jbot-shard-cache') : ''),

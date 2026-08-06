@@ -504,9 +504,8 @@ export interface PiRuntime {
   gitDiffTool?: unknown;
   readTool: unknown;
   /**
-   * Sessions created but not yet disposed. Teardown aborts them: a session
-   * abandoned past the settle grace otherwise keeps its in-flight provider
-   * call — and the event loop — alive well after the review has posted.
+   * Created-but-not-disposed sessions; teardown aborts them so a prompt
+   * abandoned past the settle grace can't hold the event loop past posting.
    */
   activeSessions: Set<PiAgentSessionLike>;
 }
@@ -633,7 +632,11 @@ export async function startPi(
   return {
     runtime,
     stop: () => {
-      abortPiSessions(runtime.activeSessions);
+      // Fire-and-forget: cancelling the in-flight call is what lets the
+      // process exit; abortPiSessionBestEffort never rejects.
+      for (const session of runtime.activeSessions) {
+        void abortPiSessionBestEffort(session, 'abandoned', log);
+      }
       removeIsolationDir();
     },
   };
@@ -678,18 +681,6 @@ async function createPiSession(
   });
   runtime.activeSessions.add(session);
   return session;
-}
-
-/**
- * Fire-and-forget abort of every still-active session: cancelling the
- * in-flight call is what lets the process exit; nothing waits on the result.
- */
-export function abortPiSessions(sessions: Iterable<Pick<PiAgentSessionLike, 'abort'>>): void {
-  for (const session of sessions) {
-    void Promise.resolve()
-      .then(() => session.abort())
-      .catch(() => undefined);
-  }
 }
 
 function piSessionMessages(session: PiAgentSessionLike): unknown[] {

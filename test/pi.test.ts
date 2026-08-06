@@ -6,7 +6,6 @@ import { describe, it } from 'node:test';
 
 import {
   PI_MIN_NODE_VERSION,
-  abortPiSessions,
   capPiDiffOutput,
   piGitDiffArgs,
   resolveWithinWorkspace,
@@ -395,25 +394,5 @@ describe('capPiDiffOutput', () => {
     const capped = capPiDiffOutput('a' + '\u00e9'.repeat(100), 100);
     assert.ok(capped.startsWith('a' + '\u00e9'.repeat(49) + '\n'));
     assert.ok(!capped.includes('\uFFFD'));
-  });
-});
-
-describe('abortPiSessions', () => {
-  it('aborts every session and swallows sync throws and rejections', async () => {
-    const aborted: string[] = [];
-    abortPiSessions([
-      { abort: async () => void aborted.push('a') },
-      {
-        abort: () => {
-          throw new Error('sync');
-        },
-      },
-      { abort: async () => Promise.reject(new Error('async')) },
-      { abort: async () => void aborted.push('b') },
-    ]);
-    // Fire-and-forget: settle the microtask queue, then assert nothing threw
-    // past the helper and the healthy sessions were all aborted.
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.deepEqual(aborted, ['a', 'b']);
   });
 });
