@@ -508,6 +508,8 @@ export interface PiRuntime {
    * abandoned past the settle grace can't hold the event loop past posting.
    */
   activeSessions: Set<PiAgentSessionLike>;
+  /** Set by stop(); a session born after the teardown sweep aborts itself. */
+  stopped: boolean;
 }
 
 function requirePiProvider(providerID: string): string {
@@ -624,6 +626,7 @@ export async function startPi(
     mainModel: `${providerID}/${modelID}`,
     readTool: createPiReadTool(sdk, workspace),
     activeSessions: new Set(),
+    stopped: false,
     ...(thinkingLevel ? { thinkingLevel } : {}),
     ...(options.diffScope
       ? { gitDiffTool: createPiGitDiffTool(sdk, workspace, options.diffScope) }
@@ -632,6 +635,7 @@ export async function startPi(
   return {
     runtime,
     stop: () => {
+      runtime.stopped = true;
       // Fire-and-forget: cancelling the in-flight call is what lets the
       // process exit; abortPiSessionBestEffort never rejects.
       for (const session of runtime.activeSessions) {
@@ -680,6 +684,13 @@ async function createPiSession(
       : {}),
   });
   runtime.activeSessions.add(session);
+  // stop() may have swept the registry while createAgentSession was pending
+  // (an abandoned caller racing teardown): abort the newborn session and fail
+  // the call into the aux fail-open path rather than prompting post-teardown.
+  if (runtime.stopped) {
+    await abortPiSessionBestEffort(session, 'post-stop', () => undefined);
+    throw new Error('pi engine stopped during session creation');
+  }
   return session;
 }
 
