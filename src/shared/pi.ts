@@ -639,10 +639,13 @@ export async function startPi(
       // Deliberately not abortPiSessionBestEffort: nothing awaits these, so its
       // timeout would leave a referenced timer holding the loop open — the very
       // thing aborting is meant to release. The abandonment is already logged.
+      // Dispose here too rather than trusting the abandoned caller's finally,
+      // which only runs if the abort actually settles its prompt.
       for (const session of runtime.activeSessions) {
         void Promise.resolve()
           .then(() => session.abort())
           .catch(() => undefined);
+        disposePiSession(runtime, session, 'abandoned', log);
       }
       removeIsolationDir();
     },
@@ -780,7 +783,9 @@ function disposePiSession(
   label: string,
   log: (msg: string) => void,
 ): void {
-  runtime.activeSessions.delete(session);
+  // Idempotent: teardown disposes abandoned sessions, whose own callers still
+  // run this from their finally once the abort settles their prompt.
+  if (!runtime.activeSessions.delete(session)) return;
   const failed = (error: unknown) =>
     log(
       `(pi ${label} session dispose failed: ${error instanceof Error ? error.message : String(error)})`,
