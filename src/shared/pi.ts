@@ -689,6 +689,8 @@ async function createPiSession(
   // the call into the aux fail-open path rather than prompting post-teardown.
   if (runtime.stopped) {
     await abortPiSessionBestEffort(session, 'post-stop', () => undefined);
+    // The throw skips the caller's dispose finally, so pair it here.
+    disposePiSession(runtime, session, 'post-stop', () => undefined);
     throw new Error('pi engine stopped during session creation');
   }
   return session;
