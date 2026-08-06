@@ -2,6 +2,9 @@ name: build-and-push
 on:
   push:
     branches: [main]
+  # Recovery hatch: when Actions drops the push event (as it did for #138 and
+  # #139), :latest silently keeps serving older code with no run to re-run.
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
