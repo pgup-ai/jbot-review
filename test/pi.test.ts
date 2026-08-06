@@ -435,7 +435,27 @@ describe('createPiSession teardown race', () => {
       runPiReview(fakeRuntime(true, events), 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}),
       /stopped during session creation/,
     );
-    assert.deepEqual(events, ['aborted', 'disposed']);
+    // Order is scheduling detail: dispose is sync, the abort a microtask.
+    assert.deepEqual([...events].sort(), ['aborted', 'disposed']);
+  });
+
+  it('does not wait on a hanging abort before failing the call', async () => {
+    const runtime = fakeRuntime(true, []);
+    // A session whose abort never settles: the call must still fail promptly,
+    // or a wedged provider delays the whole review (and the process exit).
+    runtime.sdk.createAgentSession = async () => ({
+      session: {
+        prompt: async () => {},
+        abort: () => new Promise<void>(() => {}),
+        dispose: () => {},
+      },
+    });
+    const startedAt = Date.now();
+    await assert.rejects(
+      runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}),
+      /stopped during session creation/,
+    );
+    assert.ok(Date.now() - startedAt < 1_000, 'awaited the hanging abort');
   });
 
   it('leaves a live runtime prompting normally', async () => {

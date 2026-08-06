@@ -636,16 +636,8 @@ export async function startPi(
     runtime,
     stop: () => {
       runtime.stopped = true;
-      // Deliberately not abortPiSessionBestEffort: nothing awaits these, so its
-      // timeout would leave a referenced timer holding the loop open — the very
-      // thing aborting is meant to release. The abandonment is already logged.
-      // Dispose here too rather than trusting the abandoned caller's finally,
-      // which only runs if the abort actually settles its prompt.
       for (const session of runtime.activeSessions) {
-        void Promise.resolve()
-          .then(() => session.abort())
-          .catch(() => undefined);
-        disposePiSession(runtime, session, 'abandoned', log);
+        abandonPiSession(runtime, session, 'abandoned', log);
       }
       removeIsolationDir();
     },
@@ -694,9 +686,8 @@ async function createPiSession(
   // (an abandoned caller racing teardown): abort the newborn session and fail
   // the call into the aux fail-open path rather than prompting post-teardown.
   if (runtime.stopped) {
-    await abortPiSessionBestEffort(session, 'post-stop', () => undefined);
-    // The throw skips the caller's dispose finally, so pair it here.
-    disposePiSession(runtime, session, 'post-stop', () => undefined);
+    // The throw skips the caller's dispose finally, so release it here.
+    abandonPiSession(runtime, session, 'post-stop', () => undefined);
     throw new Error('pi engine stopped during session creation');
   }
   return session;
@@ -775,6 +766,24 @@ async function abortPiSessionBestEffort(
       `(failed to abort pi ${label} session: ${error instanceof Error ? error.message : String(error)})`,
     );
   }
+}
+
+/**
+ * Releases a session nothing is waiting on (teardown, or one born after the
+ * teardown sweep). Never awaits the abort: abortPiSessionBestEffort's timeout
+ * would hold a referenced timer — and the caller — for up to PI_ABORT_TIMEOUT_MS
+ * on a hanging abort, which is the delay aborting exists to release.
+ */
+function abandonPiSession(
+  runtime: PiRuntime,
+  session: PiAgentSessionLike,
+  label: string,
+  log: (msg: string) => void,
+): void {
+  void Promise.resolve()
+    .then(() => session.abort())
+    .catch(() => undefined);
+  disposePiSession(runtime, session, label, log);
 }
 
 function disposePiSession(
