@@ -8,7 +8,10 @@ import { pathToFileURL } from 'node:url';
 // differently — a drive letter, a space in the checkout path.
 const MODULE = pathToFileURL(join(process.cwd(), 'src/shared/exit.ts')).href;
 
-function runDriver(source: string): Promise<{ code: number | null; out: string; ms: number }> {
+function runDriver(
+  source: string,
+  { readStdout = true } = {},
+): Promise<{ code: number | null; out: string; ms: number }> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-'], {
@@ -16,9 +19,10 @@ function runDriver(source: string): Promise<{ code: number | null; out: string; 
     });
     let out = '';
     child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      out += chunk;
-    });
+    if (readStdout)
+      child.stdout.on('data', (chunk: string) => {
+        out += chunk;
+      });
     // Regressing this guard means a child that never exits; failing on one is
     // the point, hanging on it is not.
     const kill = setTimeout(() => child.kill('SIGKILL'), 10_000);
@@ -49,6 +53,19 @@ describe('exitOnLingeringHandles', () => {
       exitOnLingeringHandles(() => {}, 300);
     `);
     assert.equal(leakedClean.code, 0);
+
+    // Piped to a parent that never reads: once the buffer fills, the drain the
+    // exit waits on can never complete, and the guard must go down anyway.
+    const wedged = await runDriver(
+      `
+      import { exitOnLingeringHandles } from '${MODULE}';
+      process.stdout.write('x'.repeat(1 << 20));
+      exitOnLingeringHandles(() => {}, 300);
+    `,
+      { readStdout: false },
+    );
+    assert.equal(wedged.code, 0);
+    assert.ok(wedged.ms < 5_000, `exited despite a wedged stdout in ${wedged.ms}ms`);
 
     // Same guard, nothing leaking: the timer is unref'd, so this must not wait
     // it out — that would add the grace to every run.

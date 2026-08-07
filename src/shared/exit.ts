@@ -1,4 +1,5 @@
 const LINGER_GRACE_MS = 10_000;
+const DRAIN_MS = 1_000;
 
 /**
  * Forces the process down if it is still alive `graceMs` after the run
@@ -20,9 +21,12 @@ export function exitOnLingeringHandles(
     log(
       `Run finished but the process is still alive ${graceMs / 1000}s later; forcing exit. Open handles: ${process.getActiveResourcesInfo().join(', ')}`,
     );
+    const exit = () => process.exit(process.exitCode ?? 0);
     // A container's stdout is a pipe, where writes are async: exiting before it
-    // drains would drop the line above — the only evidence of what leaked.
-    process.stdout.write('', () => process.exit(process.exitCode ?? 0));
+    // drains would drop the line above — the only evidence of what leaked. But
+    // a pipe nobody reads never drains, so the exit cannot wait on it alone.
+    process.stdout.write('', exit);
+    setTimeout(exit, DRAIN_MS).unref();
   }, graceMs);
   timer.unref();
 }
