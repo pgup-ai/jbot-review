@@ -752,6 +752,10 @@ npm run review:local
   `JBOT_DYNAMIC_FANOUT`, `JBOT_MODEL_OPTIONS`, `JBOT_PROMPT_CACHE`,
   `JBOT_SKIP_DOC_ONLY`, `JBOT_MAX_CONCURRENT_SESSIONS`, `JBOT_REVIEW_TELEMETRY`,
   `JBOT_EVIDENCE_QUOTES`, `JBOT_REVIEW_AUX_MODEL`,
+  `JBOT_CONTEXT_TRIM` (off by default; drops supplementary context blocks —
+  blast radius, prior jbot threads, summary scope, review focus, in that order —
+  to hold the assembled-context soft cap. An unmeasured recall trade kept as an
+  A/B arm: run it against an untrimmed side before believing either result),
   `JBOT_SDK_ENGINE` (see
   [Provider configuration](#provider-configuration-in-repo)). The
   opencode server uses a free ephemeral port automatically;

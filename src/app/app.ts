@@ -148,6 +148,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           // long-lived with no per-job wipe or actions/cache retention behind
           // it, so the operator picks a path they prune.
           shardCachePath: process.env.JBOT_SHARD_CACHE_DIR?.trim() ?? '',
+          contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });

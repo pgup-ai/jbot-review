@@ -580,6 +580,12 @@ export function buildReviewPlaybookBlock(
   return lines.join('\n');
 }
 
+/** Invariant #4 disclosure for the blocks context-trim.ts dropped. */
+export function buildContextTrimNotice(dropped: string[]): string {
+  if (dropped.length === 0) return '';
+  return `_Supplementary context omitted to keep the review prompt focused: ${dropped.join(', ')}._`;
+}
+
 function formatPlaybook(playbook: ReviewPlaybook): string {
   return [
     '',

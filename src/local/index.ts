@@ -556,6 +556,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
       maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),
       reviewTelemetry: parseEnvBoolean('JBOT_REVIEW_TELEMETRY', true),
       evidenceQuotes: parseEnvBoolean('JBOT_EVIDENCE_QUOTES', true),
+      contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
       ...(opencodePort ? { opencodePort } : {}),
       onReviewResult: (result) => {
         reviewResult = result;

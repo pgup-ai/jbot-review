@@ -73,6 +73,8 @@ async function main(): Promise<void> {
     shardCachePath:
       process.env.JBOT_SHARD_CACHE_DIR?.trim() ??
       (process.env.RUNNER_TEMP ? join(process.env.RUNNER_TEMP, 'jbot-shard-cache') : ''),
+    // Env-only while it is an A/B arm; no action input until the data lands.
+    contextTrim: process.env.JBOT_CONTEXT_TRIM?.trim() === 'true',
   };
   const pullTarget = getPullRequestTarget();
   for (const warning of swallowedProviderWarnings([...modelPool, ...auxProbe])) {

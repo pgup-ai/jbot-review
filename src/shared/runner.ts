@@ -20,12 +20,14 @@ import {
   suppressPreviouslyReported,
 } from './filter.ts';
 import {
+  ASSEMBLED_CONTEXT_WARN_BYTES,
   assembledContextWarning,
   createTelemetryRecorder,
   type RunTerminalState,
   type SessionCoverageRecorder,
   type TelemetryRecorder,
 } from './telemetry.ts';
+import { trimContextBlocks } from './context-trim.ts';
 import {
   backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
@@ -86,6 +88,7 @@ import {
   UNTRUSTED_PR_CONTENT_NOTE,
   buildChangesSinceContextBlock,
   buildContext7PromptBlock,
+  buildContextTrimNotice,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
   selectLensKeys,
@@ -162,6 +165,7 @@ import {
   formatDiffScope,
   formatContextBudget,
   truncatePrBody,
+  MAX_FINDER_GUIDELINE_BYTES,
   type LinkedIssue,
   type ReviewCommit,
 } from './review-context.ts';
@@ -613,6 +617,12 @@ export interface ReviewRunOptions {
    * is therefore off ('') unless an operator configures a path.
    */
   shardCachePath?: string;
+  /**
+   * Drop supplementary context blocks to hold the assembled-context soft cap.
+   * Off by default: an unmeasured recall trade, kept as an A/B arm until
+   * finding-level telemetry says which side wins.
+   */
+  contextTrim?: boolean;
   /**
    * Model for the auxiliary sessions (addressed-check, guideline compliance,
    * finding verification). Lets the main review run on a stronger tier while
@@ -1163,10 +1173,31 @@ async function runReviewPipeline(params: {
       linkedIssues,
       linkedIssuesOmitted,
     });
-    coreContext = `${coreContext}\n\n${summaryScopeBlock}`;
-    coreContext = `${coreContext}\n\n${reviewFocusBlock}`;
-    if (priorJbotThreadBlock) coreContext = `${coreContext}\n\n${priorJbotThreadBlock}`;
-    if (blastRadiusBlock) coreContext = `${coreContext}\n\n${blastRadiusBlock}`;
+    // Priorities are drop order, not prompt order: blast radius is best-effort
+    // grep output, and prior threads only nudge the model — suppression itself
+    // is enforced in filter.ts (#2), so losing the block costs no correctness.
+    const supplementary = [
+      { name: 'summary scope', text: summaryScopeBlock, priority: 2 },
+      { name: 'review focus', text: reviewFocusBlock, priority: 3 },
+      { name: 'prior jbot threads', text: priorJbotThreadBlock, priority: 1 },
+      { name: 'blast radius', text: blastRadiusBlock, priority: 0 },
+    ];
+    // Guidelines are charged at the finder budget rather than their live size:
+    // the compliance pass carries the full set, so the real string is not what
+    // this session receives, and a fixed denominator keeps the trim deterministic.
+    const { kept, dropped } = trimContextBlocks(
+      supplementary,
+      options.contextTrim
+        ? ASSEMBLED_CONTEXT_WARN_BYTES -
+            MAX_FINDER_GUIDELINE_BYTES -
+            Buffer.byteLength(coreContext, 'utf8') -
+            Buffer.byteLength(diffHunksBlock, 'utf8')
+        : Infinity,
+    );
+    if (dropped.length > 0) log(`Context trim dropped: ${dropped.join(', ')}`);
+    coreContext = [coreContext, ...kept.map((block) => block.text), buildContextTrimNotice(dropped)]
+      .filter(Boolean)
+      .join('\n\n');
   } else {
     const commentsBlock =
       priorComments.length > 0
@@ -2415,6 +2446,7 @@ export function normalizeOptions(
     context7ApiKey: options?.context7ApiKey ?? '',
     guidelinePass: options?.guidelinePass ?? true,
     shardCachePath: options?.shardCachePath ?? '',
+    contextTrim: options?.contextTrim ?? false,
     auxModel: options?.auxModel ?? '',
     auxApiKey: options?.auxApiKey ?? '',
     auxBaseURL: options?.auxBaseURL ?? '',
