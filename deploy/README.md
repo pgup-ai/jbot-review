@@ -32,8 +32,10 @@ the worker executes untrusted PR code via opencode's `bash`.)
 
 ## Prerequisites
 
-- A VPS with **Node 20**, **git**, and **opencode** (`npm i -g opencode-ai@latest`).
-  The existing CloudCone box (`ssh jbot-vps`, `/opt/jbot-review`) already has these.
+- A VPS with **Node 22.19+** (the `engines` floor the pi SDK sets), **git**, and
+  **opencode** (`npm i -g opencode-ai@latest`). The existing CloudCone box
+  (`ssh jbot-vps`, `/opt/jbot-review`) has git and opencode; check `node -v`
+  against the floor before deploying.
 - The **control plane reachable over HTTPS** — the `jbot-review-app` API exposing
   `/internal/jobs/*` (deployed to Render, or fronted by a `cloudflared` tunnel for
   local testing). The worker **rejects non-`https://`** URLs (localhost allowed).

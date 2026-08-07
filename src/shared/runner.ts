@@ -1258,6 +1258,14 @@ async function runReviewPipeline(params: {
     rmSync(codexHome, { recursive: true, force: true });
     codexHome = undefined;
   };
+  // Cleaned like a credential home: symma links the auth in, and the link
+  // becomes a copy where the filesystem has no symlinks.
+  let codexRunHome: string | undefined;
+  const cleanupCodexRunHome = (): void => {
+    if (!codexRunHome) return;
+    rmSync(codexRunHome, { recursive: true, force: true });
+    codexRunHome = undefined;
+  };
   let clineHome: string | undefined;
   const cleanupClineHome = (): void => {
     if (!clineHome) return;
@@ -1278,6 +1286,7 @@ async function runReviewPipeline(params: {
     for (const cleanup of [
       cleanupCommandCodeHome,
       cleanupCodexHome,
+      cleanupCodexRunHome,
       cleanupClineHome,
       cleanupGrokHome,
     ]) {
@@ -1357,6 +1366,7 @@ async function runReviewPipeline(params: {
     let authPath: string;
     try {
       codexHome = mkdtempSync(join(tmpdir(), 'jbot-codex-home-'));
+      codexRunHome = mkdtempSync(join(tmpdir(), 'jbot-codex-run-'));
       guardCliHomes();
       authPath = writeCodexAuth(codexAuth, codexHome);
     } catch (error) {
@@ -1365,7 +1375,7 @@ async function runReviewPipeline(params: {
     }
     log(`Codex CLI auth configured at ${authPath}.`);
     log('Codex CLI token usage is unavailable; review metadata may omit those sessions.');
-    codexBackend = createAcpBackend(codexAcpSpec(codexHome), workspace);
+    codexBackend = createAcpBackend(codexAcpSpec(codexHome, codexRunHome), workspace);
   }
 
   if (mainCliBackend === CLINE_PROVIDER_ID || auxCliBackend === CLINE_PROVIDER_ID) {

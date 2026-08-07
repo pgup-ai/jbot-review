@@ -59,6 +59,13 @@ export interface JbotReviewGroup {
   threads: Array<{ id: string; isResolved: boolean }>;
 }
 
+/**
+ * Narrowed rather than widened: these ids are map keys and marker text, and a
+ * bigint key never matches its number twin. The union is forward-looking —
+ * octokit parses plain JSON, so ids arrive as numbers and this is identity.
+ */
+const asId = (id: number | bigint): number => Number(id);
+
 export type Verdict = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
 
 interface ReviewDecision {
@@ -564,7 +571,7 @@ async function listJbotReviewCommentState(
     (review) =>
       isViewerActor(review.user?.login, viewerLogin) && isJbotReviewBody(review.body ?? ''),
   );
-  const jbotReviewIds = new Set(jbotReviews.map((review) => review.id));
+  const jbotReviewIds = new Set(jbotReviews.map((review) => asId(review.id)));
   const reviewNodes = jbotReviews.length
     ? ((await octokit.graphql(
         `
@@ -585,9 +592,9 @@ async function listJbotReviewCommentState(
   );
   const reviewGroupsById = new Map(
     jbotReviews.map((review) => [
-      review.id,
+      asId(review.id),
       {
-        id: review.id,
+        id: asId(review.id),
         nodeId: review.node_id,
         body: review.body ?? '',
         isMinimized: minimizedReviewNodeIds.has(review.node_id),
@@ -598,7 +605,7 @@ async function listJbotReviewCommentState(
   const linkedReviewIdByCommentId = new Map<number, number>();
   for (const review of jbotReviews) {
     for (const commentId of parseLinkedCommentIds(review.body ?? '')) {
-      linkedReviewIdByCommentId.set(commentId, review.id);
+      linkedReviewIdByCommentId.set(commentId, asId(review.id));
     }
   }
 
@@ -613,13 +620,14 @@ async function listJbotReviewCommentState(
   for (const comment of comments) {
     const reviewId = comment.pull_request_review_id;
     if (!isViewerActor(comment.user?.login, viewerLogin) || comment.in_reply_to_id) continue;
-    if (reviewId !== null && reviewId !== undefined && jbotReviewIds.has(reviewId)) {
-      reviewIdByTopLevelId.set(comment.id, reviewId);
+    const commentId = asId(comment.id);
+    if (reviewId !== null && reviewId !== undefined && jbotReviewIds.has(asId(reviewId))) {
+      reviewIdByTopLevelId.set(commentId, asId(reviewId));
       continue;
     }
-    const linkedReviewId = linkedReviewIdByCommentId.get(comment.id);
+    const linkedReviewId = linkedReviewIdByCommentId.get(commentId);
     if (linkedReviewId !== undefined && hasInternalMarker(comment.body, FINDING_MARKER)) {
-      reviewIdByTopLevelId.set(comment.id, linkedReviewId);
+      reviewIdByTopLevelId.set(commentId, linkedReviewId);
     }
   }
   const addressedTopLevelIds = new Set(
@@ -630,7 +638,7 @@ async function listJbotReviewCommentState(
           comment.in_reply_to_id !== null &&
           comment.in_reply_to_id !== undefined,
       )
-      .map((comment) => comment.in_reply_to_id as number),
+      .map((comment) => asId(comment.in_reply_to_id as number | bigint)),
   );
 
   return { addressedTopLevelIds, reviewIdByTopLevelId, reviewGroupsById };
@@ -849,7 +857,7 @@ export async function postReview(
           side: 'RIGHT',
           body: formatFindingCommentBody(finding),
         });
-        salvagedIds.push(response.data.id);
+        salvagedIds.push(asId(response.data.id));
       } catch {
         /* this one could not anchor; counted below */
       }
@@ -943,19 +951,12 @@ export async function postFileLevelComment(
     subject_type: 'file',
     body: formatFindingCommentBody(finding),
   });
-  return response.data.id;
+  return asId(response.data.id);
 }
 
 /** The fixed set of reaction contents GitHub accepts (no ✅ / checkmark). */
 export type PrReactionContent =
-  | '+1'
-  | '-1'
-  | 'laugh'
-  | 'confused'
-  | 'heart'
-  | 'hooray'
-  | 'rocket'
-  | 'eyes';
+  '+1' | '-1' | 'laugh' | 'confused' | 'heart' | 'hooray' | 'rocket' | 'eyes';
 
 async function getViewerLogin(octokit: Octokit): Promise<string> {
   const response = (await octokit.graphql('query { viewer { login } }')) as {

@@ -62,19 +62,20 @@ const maxSessions =
     ? Number(process.env.JBOT_COMPANION_MAX_SESSIONS)
     : 2;
 
+const stateDir = join(homedir(), '.local', 'share', 'jbot-companion');
+
 /**
  * Signing key for this machine, generated once and kept at 0600. The private
  * half never leaves here: signing at the companion is what makes the journal
  * tamper-evident against the relay rather than merely by it.
  */
 function loadSigningKeys(): { privateKey: string; publicKey: string } {
-  const dir = join(homedir(), '.local', 'share', 'jbot-companion');
-  const path = join(dir, 'signing-key.pem');
+  const path = join(stateDir, 'signing-key.pem');
   // The public half sits beside it as a file the operator can copy off this
   // machine: a journal audit that distrusts the gateway needs a key that never
   // came from the gateway, and this is that channel.
   const publish = (publicKey: string): void =>
-    writeFileSync(join(dir, 'signing-key.pub.pem'), publicKey, { mode: 0o644 });
+    writeFileSync(join(stateDir, 'signing-key.pub.pem'), publicKey, { mode: 0o644 });
   if (existsSync(path)) {
     const privateKey = readFileSync(path, 'utf8');
     const publicKey = publicKeyFrom(privateKey);
@@ -82,7 +83,7 @@ function loadSigningKeys(): { privateKey: string; publicKey: string } {
     return { privateKey, publicKey };
   }
   const keys = generateSigningKeys();
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   // Written elsewhere then linked into place: `wx` alone would expose the path
   // before the PEM is complete, and a racing start could read half a key. The
   // link fails if another start won, and that winner's key is the one used.
@@ -142,7 +143,9 @@ function resolveAgent(entry: string): { name: string; spec: AcpAgentSpec } | str
     case 'codex': {
       const home = join(homedir(), '.codex');
       if (!existsSync(codexAuthPath(home))) return `codex: no auth at ${codexAuthPath(home)}`;
-      return { name: entry, spec: codexAcpSpec(home) };
+      // Only auth.json is read out of the member's home — but that holds because
+      // we pass no `open`; a named workspace makes their home the live CODEX_HOME.
+      return { name: entry, spec: codexAcpSpec(home, join(stateDir, 'codex-home')) };
     }
     case 'devin': {
       if (!existsSync(devinCredentialsPath(homedir())))
