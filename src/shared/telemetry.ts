@@ -213,8 +213,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   const sessions: SessionTelemetryRow[] = [];
   const outcomes: OutcomeTelemetryRow[] = [];
   let run:
-    | (RunTelemetryMeta & { terminalState?: RunTerminalState; elapsedMs?: number })
-    | undefined;
+    (RunTelemetryMeta & { terminalState?: RunTerminalState; elapsedMs?: number }) | undefined;
   const coverage: Record<string, unknown>[] = [];
 
   const idsOf = (findings: Finding[]): Set<string> =>
