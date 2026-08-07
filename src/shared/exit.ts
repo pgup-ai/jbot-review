@@ -5,8 +5,10 @@ const LINGER_GRACE_MS = 10_000;
  * finished, naming what held it open. A review drives third-party CLIs and
  * their servers, so it can end with a handle it does not own still open — an
  * orphaned grandchild on a stdio pipe — and Node then waits on that forever,
- * keeping a container alive long past a decided verdict. Unref'd, so a clean
- * run still exits the moment it is done.
+ * keeping a container alive long past a decided verdict. Unref'd, so a run
+ * that can exit still exits the moment it is done. Success is not exempt — an
+ * unfinishable container is as dead as a failed one — and `process.exitCode`
+ * carries the verdict through the exit.
  *
  * Single-run entries only: the webhook app is meant to outlive a run.
  */

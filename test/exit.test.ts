@@ -41,6 +41,15 @@ describe('exitOnLingeringHandles', () => {
     assert.equal(leaked.code, 1, 'the run verdict survives the forced exit');
     assert.match(leaked.out, /forcing exit\. Open handles: \w/, 'names what held the process');
 
+    // A leak on a run that SUCCEEDED is forced down just the same, and stays a
+    // success — the exit must not invent a failure the review never reported.
+    const leakedClean = await runDriver(`
+      import { exitOnLingeringHandles } from '${MODULE}';
+      setInterval(() => {}, 1_000);
+      exitOnLingeringHandles(() => {}, 300);
+    `);
+    assert.equal(leakedClean.code, 0);
+
     // Same guard, nothing leaking: the timer is unref'd, so this must not wait
     // it out — that would add the grace to every run.
     const clean = await runDriver(`
