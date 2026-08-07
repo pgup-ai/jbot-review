@@ -27,7 +27,7 @@ import {
   type SessionCoverageRecorder,
   type TelemetryRecorder,
 } from './telemetry.ts';
-import { trimContextBlocks } from './context-trim.ts';
+import { buildSupplementaryBlocks, trimContextBlocks } from './context-trim.ts';
 import {
   backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
@@ -165,7 +165,6 @@ import {
   formatDiffScope,
   formatContextBudget,
   truncatePrBody,
-  MAX_FINDER_GUIDELINE_BYTES,
   type LinkedIssue,
   type ReviewCommit,
 } from './review-context.ts';
@@ -1173,23 +1172,32 @@ async function runReviewPipeline(params: {
       linkedIssues,
       linkedIssuesOmitted,
     });
-    // Priorities are drop order, not prompt order: blast radius is best-effort
-    // grep output, and prior threads only nudge the model — suppression itself
-    // is enforced in filter.ts (#2), so losing the block costs no correctness.
-    const supplementary = [
-      { name: 'summary scope', text: summaryScopeBlock, priority: 2 },
-      { name: 'review focus', text: reviewFocusBlock, priority: 3 },
-      { name: 'prior jbot threads', text: priorJbotThreadBlock, priority: 1 },
-      { name: 'blast radius', text: blastRadiusBlock, priority: 0 },
-    ];
-    // Guidelines are charged at the finder budget rather than their live size:
-    // the compliance pass carries the full set, so the real string is not what
-    // this session receives, and a fixed denominator keeps the trim deterministic.
+    const supplementary = buildSupplementaryBlocks({
+      summaryScope: summaryScopeBlock,
+      reviewFocus: reviewFocusBlock,
+      priorJbotThreads: priorJbotThreadBlock,
+      blastRadius: blastRadiusBlock,
+    });
+    // Live bytes of the guideline slice this session will carry. Exact when the
+    // pass is already off (finders widen to the full set, and the decision only
+    // ever goes false from here), and when it stays on. It under-counts only if
+    // aux dies later and widens finders back — itself a degraded path (#3).
+    const mainGuidelineBytes = Buffer.byteLength(
+      effectiveGuidelinePass ? finderGuidelines : guidelines,
+      'utf8',
+    );
+    // Bytes appended after the trim still land in the same prompt: the untrusted
+    // note prepended below, and the omission notice at its widest (every block
+    // named). Reserved rather than discovered, so one pass holds the cap.
+    const reservedBytes =
+      Buffer.byteLength(UNTRUSTED_PR_CONTENT_NOTE, 'utf8') +
+      Buffer.byteLength(buildContextTrimNotice(supplementary.map((block) => block.name)), 'utf8');
     const { kept, dropped } = trimContextBlocks(
       supplementary,
       options.contextTrim
         ? ASSEMBLED_CONTEXT_WARN_BYTES -
-            MAX_FINDER_GUIDELINE_BYTES -
+            mainGuidelineBytes -
+            reservedBytes -
             Buffer.byteLength(coreContext, 'utf8') -
             Buffer.byteLength(diffHunksBlock, 'utf8')
         : Infinity,
