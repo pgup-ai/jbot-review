@@ -7,7 +7,7 @@ import type { InstallationAccessTokenAuthentication } from '@octokit/auth-app';
 import { createAppOctokit } from './auth.ts';
 import { clonePr } from './clone.ts';
 import { runPrReview } from '../shared/runner.ts';
-import { defaultModelOptions, type ProviderCredential } from '../shared/config.ts';
+import { defaultModelOptions, parseEnvBoolean, type ProviderCredential } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 import { pickAuxModel, pickPooledModel, resolveAuxModel } from '../shared/model.ts';
 import { enqueue } from './queue.ts';
@@ -53,19 +53,6 @@ export function parseEnvInt(name: string, defaultValue: number): number {
   if (!raw) return defaultValue;
   const value = Number(raw);
   return Number.isInteger(value) && value >= 0 ? value : defaultValue;
-}
-
-/**
- * Boolean env knob. Only the exact lowercased string `'false'` disables;
- * unset or anything else keeps the default-on behavior, mirroring the
- * workflow's `parseBooleanInput` "unset and 'true' both enable" semantics.
- */
-export function parseEnvBoolean(name: string, defaultValue: boolean): boolean {
-  const raw = process.env[name]?.trim().toLowerCase();
-  if (!raw) return defaultValue;
-  if (raw === 'false') return false;
-  if (raw === 'true') return true;
-  return defaultValue;
 }
 
 export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
@@ -148,6 +135,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           // long-lived with no per-job wipe or actions/cache retention behind
           // it, so the operator picks a path they prune.
           shardCachePath: process.env.JBOT_SHARD_CACHE_DIR?.trim() ?? '',
+          contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });

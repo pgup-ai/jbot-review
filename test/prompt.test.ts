@@ -25,6 +25,7 @@ import {
   assembleReviewPrompt,
   buildChangesSinceContextBlock,
   buildContext7PromptBlock,
+  buildContextTrimNotice,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
   formatFindingsForVerification,
@@ -655,6 +656,16 @@ describe('buildReviewFocusBlock', () => {
     const block = buildReviewFocusBlock(['src/util/helpers.ts']);
 
     assert.match(block, /General correctness:/);
+  });
+});
+
+describe('buildContextTrimNotice', () => {
+  it('names the dropped blocks and stays empty when nothing dropped', () => {
+    assert.equal(buildContextTrimNotice([]), '');
+    assert.match(
+      buildContextTrimNotice(['blast radius', 'summary scope']),
+      /blast radius, summary scope/,
+    );
   });
 });
 
