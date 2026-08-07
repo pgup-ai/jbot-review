@@ -8,6 +8,7 @@ import { parseModelName } from '@symma/protocol';
 
 import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
 import { parseContext7Mode } from '../shared/context7.ts';
+import { exitOnLingeringHandles } from '../shared/exit.ts';
 import {
   pickAuxModel,
   pickPooledModel,
@@ -239,6 +240,8 @@ function parseSeverityInput(name: string, defaultValue: Severity): Severity {
   return value as Severity;
 }
 
-main().catch((error) => {
-  core.setFailed(error instanceof Error ? error.message : String(error));
-});
+main()
+  .catch((error) => {
+    core.setFailed(error instanceof Error ? error.message : String(error));
+  })
+  .finally(() => exitOnLingeringHandles((msg) => core.warning(msg)));

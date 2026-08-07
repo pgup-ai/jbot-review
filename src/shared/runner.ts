@@ -2307,6 +2307,9 @@ async function runReviewPipeline(params: {
  * Public entry: runs the review pipeline and, when the observer is enabled
  * (`JBOT_OBSERVER_URL`), reports the run's verdict and flushes the tee. All
  * observer calls are no-ops otherwise, so this wrapper is free for normal runs.
+ *
+ * Everything a run still needs must finish before this resolves: single-run
+ * entries arm `exitOnLingeringHandles` on settle, and that is a kill clock.
  */
 export async function runPrReview(params: Parameters<typeof runReviewPipeline>[0]): Promise<void> {
   setRunName(`pr-${params.owner}-${params.repo}-${params.pullNumber}`);
