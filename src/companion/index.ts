@@ -143,7 +143,8 @@ function resolveAgent(entry: string): { name: string; spec: AcpAgentSpec } | str
     case 'codex': {
       const home = join(homedir(), '.codex');
       if (!existsSync(codexAuthPath(home))) return `codex: no auth at ${codexAuthPath(home)}`;
-      // The member's own home is read, never written: symma's config goes to ours.
+      // Only auth.json is read out of the member's home — but that holds because
+      // we pass no `open`; a named workspace makes their home the live CODEX_HOME.
       return { name: entry, spec: codexAcpSpec(home, join(stateDir, 'codex-home')) };
     }
     case 'devin': {

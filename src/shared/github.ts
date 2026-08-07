@@ -61,8 +61,8 @@ export interface JbotReviewGroup {
 
 /**
  * Narrowed rather than widened: these ids are map keys and marker text, and a
- * bigint key never matches its number twin. GitHub types them ahead of ids
- * outgrowing 2^53; live ones are ~1e9.
+ * bigint key never matches its number twin. The union is forward-looking —
+ * octokit parses plain JSON, so ids arrive as numbers and this is identity.
  */
 const asId = (id: number | bigint): number => Number(id);
 
