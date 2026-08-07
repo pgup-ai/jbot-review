@@ -1806,6 +1806,14 @@ async function runReviewPipeline(params: {
     // back to the full set so no doc is seen by zero sessions.
     const guidelinesForPrompt = incrementalLenses.guidelinePass ? finderGuidelines : guidelines;
 
+    // Embedded-only main backends carry the 512KB block buildShardPlans renders
+    // for them, not the 40KB default. Shared with the budget log so both report
+    // the diff the main session actually receives.
+    const mainDiffBlock =
+      mainRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks
+        ? embeddedOnlyBackendDiffHunks.text
+        : diffHunksBlock;
+
     // Trimmed here, not at assembly: every other byte of a shard prompt is now
     // final, so the budget is exact rather than estimated. Only the main shards
     // get the trimmed context — aux sessions keep the full one, since the
@@ -1821,14 +1829,7 @@ async function runReviewPipeline(params: {
           'utf8',
         ) -
         Buffer.byteLength(baseCoreContext, 'utf8') -
-        // Embedded-only main backends carry the 512KB block buildShardPlans
-        // renders for them, not the 40KB default.
-        Buffer.byteLength(
-          mainRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks
-            ? embeddedOnlyBackendDiffHunks.text
-            : diffHunksBlock,
-          'utf8',
-        )
+        Buffer.byteLength(mainDiffBlock, 'utf8')
       : Infinity;
     const { kept, dropped } = trimContextBlocks(supplementaryBlocks, trimBudget);
     if (dropped.length > 0) log(`Context trim dropped: ${dropped.join(', ')}`);
@@ -1892,7 +1893,7 @@ async function runReviewPipeline(params: {
       formatContextBudget([
         { name: 'guidelines', text: guidelinesForPrompt },
         { name: 'core', text: mainCoreContext },
-        { name: 'diff', text: diffHunksBlock },
+        { name: 'diff', text: mainDiffBlock },
         { name: 'context7', text: context7Block },
       ]),
     );
