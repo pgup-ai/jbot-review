@@ -28,6 +28,7 @@ import {
   type TelemetryRecorder,
 } from './telemetry.ts';
 import { buildSupplementaryBlocks, trimContextBlocks } from './context-trim.ts';
+import type { ContextBlock } from './context-trim.ts';
 import {
   backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
@@ -1142,6 +1143,9 @@ async function runReviewPipeline(params: {
   // full block. Hunks always go last — closest to the output reminder, where
   // small models attend most.
   let coreContext: string;
+  // Populated on the enhanced path only; the basic branch has no droppable set.
+  let baseCoreContext = '';
+  let supplementaryBlocks: ContextBlock[] = [];
   if (options.enhancedContext) {
     const commits = localDiff
       ? localDiff.commits
@@ -1172,40 +1176,16 @@ async function runReviewPipeline(params: {
       linkedIssues,
       linkedIssuesOmitted,
     });
-    const supplementary = buildSupplementaryBlocks({
+    // Kept separate so the trim can rebuild without them once the real guideline
+    // slice and Context7 block are known; this full form is what aux sessions get.
+    supplementaryBlocks = buildSupplementaryBlocks({
       summaryScope: summaryScopeBlock,
       reviewFocus: reviewFocusBlock,
       priorJbotThreads: priorJbotThreadBlock,
       blastRadius: blastRadiusBlock,
     });
-    // Live bytes of the guideline slice this session will carry. Exact when the
-    // pass is already off (finders widen to the full set, and the decision only
-    // ever goes false from here), and when it stays on. It under-counts only if
-    // aux dies later and widens finders back — itself a degraded path (#3).
-    const mainGuidelineBytes = Buffer.byteLength(
-      effectiveGuidelinePass ? finderGuidelines : guidelines,
-      'utf8',
-    );
-    // Bytes appended after the trim still land in the same prompt: the untrusted
-    // note prepended below, and the omission notice at its widest (every block
-    // named). Reserved rather than discovered, so one pass holds the cap.
-    const reservedBytes =
-      Buffer.byteLength(UNTRUSTED_PR_CONTENT_NOTE, 'utf8') +
-      Buffer.byteLength(buildContextTrimNotice(supplementary.map((block) => block.name)), 'utf8');
-    const { kept, dropped } = trimContextBlocks(
-      supplementary,
-      options.contextTrim
-        ? ASSEMBLED_CONTEXT_WARN_BYTES -
-            mainGuidelineBytes -
-            reservedBytes -
-            Buffer.byteLength(coreContext, 'utf8') -
-            Buffer.byteLength(diffHunksBlock, 'utf8')
-        : Infinity,
-    );
-    if (dropped.length > 0) log(`Context trim dropped: ${dropped.join(', ')}`);
-    coreContext = [coreContext, ...kept.map((block) => block.text), buildContextTrimNotice(dropped)]
-      .filter(Boolean)
-      .join('\n\n');
+    baseCoreContext = coreContext;
+    coreContext = joinContext(coreContext, ...supplementaryBlocks.map((block) => block.text));
   } else {
     const commentsBlock =
       priorComments.length > 0
@@ -1777,18 +1757,6 @@ async function runReviewPipeline(params: {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }
 
-    const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
-    const shardPlans = buildShardPlans({
-      coreContext,
-      fullDiffBlock: diffHunksBlock,
-      context7Block,
-      shards,
-      requireCompleteEmbeddedDiff: mainRequiresCompleteEmbeddedDiff,
-      diffHunksOptions: mainRequiresCompleteEmbeddedDiff
-        ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
-        : undefined,
-    });
-
     // On a re-review, drop the recall supplements whose trigger class the
     // incremental delta (since the last reviewed head) doesn't touch. Best-effort
     // and dynamic-fanout-gated; a null delta (first review, fetch failure, or
@@ -1838,6 +1806,47 @@ async function runReviewPipeline(params: {
     // back to the full set so no doc is seen by zero sessions.
     const guidelinesForPrompt = incrementalLenses.guidelinePass ? finderGuidelines : guidelines;
 
+    // Trimmed here, not at assembly: every other byte of a shard prompt is now
+    // final, so the budget is exact rather than estimated. Only the main shards
+    // get the trimmed context — aux sessions keep the full one, since the
+    // dilution this targets is the finder's (#3 keeps them independent).
+    const trimBudget = options.contextTrim
+      ? ASSEMBLED_CONTEXT_WARN_BYTES -
+        Buffer.byteLength(guidelinesForPrompt, 'utf8') -
+        Buffer.byteLength(context7Block, 'utf8') -
+        Buffer.byteLength(UNTRUSTED_PR_CONTENT_NOTE, 'utf8') -
+        // The notice at its widest, so the reserve holds whatever gets dropped.
+        Buffer.byteLength(
+          buildContextTrimNotice(supplementaryBlocks.map((block) => block.name)),
+          'utf8',
+        ) -
+        Buffer.byteLength(baseCoreContext, 'utf8') -
+        Buffer.byteLength(diffHunksBlock, 'utf8')
+      : Infinity;
+    const { kept, dropped } = trimContextBlocks(supplementaryBlocks, trimBudget);
+    if (dropped.length > 0) log(`Context trim dropped: ${dropped.join(', ')}`);
+    const mainCoreContext =
+      dropped.length === 0
+        ? coreContext
+        : joinContext(
+            UNTRUSTED_PR_CONTENT_NOTE,
+            baseCoreContext,
+            ...kept.map((block) => block.text),
+            buildContextTrimNotice(dropped),
+          );
+
+    const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
+    const shardPlans = buildShardPlans({
+      coreContext: mainCoreContext,
+      fullDiffBlock: diffHunksBlock,
+      context7Block,
+      shards,
+      requireCompleteEmbeddedDiff: mainRequiresCompleteEmbeddedDiff,
+      diffHunksOptions: mainRequiresCompleteEmbeddedDiff
+        ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
+        : undefined,
+    });
+
     // Opt-in via an operator-configured directory, NEVER a path inside the
     // reviewed checkout: the workspace is the PR author's tree, so a cache
     // read from it would let a PR commit a forged "clean" result for its own
@@ -1875,7 +1884,7 @@ async function runReviewPipeline(params: {
     log(
       formatContextBudget([
         { name: 'guidelines', text: guidelinesForPrompt },
-        { name: 'core', text: coreContext },
+        { name: 'core', text: mainCoreContext },
         { name: 'diff', text: diffHunksBlock },
         { name: 'context7', text: context7Block },
       ]),

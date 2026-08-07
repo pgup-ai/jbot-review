@@ -580,6 +580,14 @@ export function buildReviewPlaybookBlock(
   return lines.join('\n');
 }
 
+/** Labels the trim notice names back to the model; context-trim.ts owns their order. */
+export const SUPPLEMENTARY_BLOCK_NAMES = {
+  summaryScope: 'summary scope',
+  reviewFocus: 'review focus',
+  priorJbotThreads: 'prior jbot threads',
+  blastRadius: 'blast radius',
+} as const;
+
 /** Invariant #4 disclosure for the blocks context-trim.ts dropped. */
 export function buildContextTrimNotice(dropped: string[]): string {
   if (dropped.length === 0) return '';

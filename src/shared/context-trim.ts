@@ -7,6 +7,8 @@
  * they are the signal the dilution drowns (PR #11). Pure; runner.ts wires it (#10).
  */
 
+import { SUPPLEMENTARY_BLOCK_NAMES } from './prompt.ts';
+
 export interface ContextBlock {
   name: string;
   text: string;
@@ -37,10 +39,14 @@ export function buildSupplementaryBlocks(blocks: {
   blastRadius: string;
 }): ContextBlock[] {
   return [
-    { name: 'summary scope', text: blocks.summaryScope, priority: 2 },
-    { name: 'review focus', text: blocks.reviewFocus, priority: 3 },
-    { name: 'prior jbot threads', text: blocks.priorJbotThreads, priority: 1 },
-    { name: 'blast radius', text: blocks.blastRadius, priority: 0 },
+    { name: SUPPLEMENTARY_BLOCK_NAMES.summaryScope, text: blocks.summaryScope, priority: 2 },
+    { name: SUPPLEMENTARY_BLOCK_NAMES.reviewFocus, text: blocks.reviewFocus, priority: 3 },
+    {
+      name: SUPPLEMENTARY_BLOCK_NAMES.priorJbotThreads,
+      text: blocks.priorJbotThreads,
+      priority: 1,
+    },
+    { name: SUPPLEMENTARY_BLOCK_NAMES.blastRadius, text: blocks.blastRadius, priority: 0 },
   ];
 }
 
