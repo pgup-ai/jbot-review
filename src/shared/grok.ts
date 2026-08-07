@@ -26,7 +26,6 @@ const GROK_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const GROK_AUTH_CHECK_TIMEOUT_MS = 30_000;
 const GROK_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const GROK_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
-const GROK_MAX_TURNS = 12;
 const GROK_CONFIG = '[cli]\nauto_update = false\n';
 
 export const GROK_MAX_PROMPT_BYTES = 1024 * 1024;
@@ -101,8 +100,6 @@ export function buildGrokCliArgs(input: GrokCliArgsInput): string[] {
     '',
     '--disallowed-tools',
     'Bash,Edit,Read,Grep,MCPTool,WebFetch',
-    '--max-turns',
-    String(GROK_MAX_TURNS),
     '--prompt-file',
     input.promptFile,
     '--output-format',

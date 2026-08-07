@@ -25,8 +25,6 @@ const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const COMMANDCODE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 const COMMANDCODE_MODEL_LIST_TIMEOUT_MS = 60_000;
-// CommandCode's default 10-turn limit can abort larger review prompts.
-const COMMANDCODE_MAX_TURNS = 20;
 
 export const COMMANDCODE_PROVIDER_ID = 'commandcode';
 // The command-code npm package exposes cmd, cmdc, commandcode, and command-code.
@@ -79,8 +77,8 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
     '--skip-onboarding',
     '--permission-mode',
     'plan',
-    '--max-turns',
-    String(COMMANDCODE_MAX_TURNS),
+    // No --max-turns: a pin here went stale once, capping review at 20 after
+    // the CLI's own default moved 10 -> 100. The prompt timeout is the bound.
   ];
   if (modelID !== 'default') args.push('--model', modelID);
   return args;
