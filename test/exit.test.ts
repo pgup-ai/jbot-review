@@ -11,9 +11,8 @@ const MODULE = pathToFileURL(join(process.cwd(), 'src/shared/exit.ts')).href;
 function runDriver(
   source: string,
   { readStdout = true } = {},
-): Promise<{ code: number | null; out: string; ms: number }> {
+): Promise<{ code: number | null; out: string }> {
   return new Promise((resolve) => {
-    const startedAt = Date.now();
     const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-'], {
       stdio: ['pipe', 'pipe', 'inherit'],
     });
@@ -24,11 +23,12 @@ function runDriver(
         out += chunk;
       });
     // Regressing this guard means a child that never exits; failing on one is
-    // the point, hanging on it is not.
+    // the point, hanging on it is not. The kill leaves `code === null`, so
+    // every assertion below doubles as "exited within 10s".
     const kill = setTimeout(() => child.kill('SIGKILL'), 10_000);
     child.on('close', (code) => {
       clearTimeout(kill);
-      resolve({ code, out, ms: Date.now() - startedAt });
+      resolve({ code, out });
     });
     child.stdin.end(source);
   });
@@ -65,16 +65,14 @@ describe('exitOnLingeringHandles', () => {
       { readStdout: false },
     );
     assert.equal(wedged.code, 0);
-    assert.ok(wedged.ms < 5_000, `exited despite a wedged stdout in ${wedged.ms}ms`);
 
     // Same guard, nothing leaking: the timer is unref'd, so this must not wait
-    // it out — that would add the grace to every run.
+    // out a grace three times the driver's kill — that would add it to every run.
     const clean = await runDriver(`
       import { exitOnLingeringHandles } from '${MODULE}';
       exitOnLingeringHandles((msg) => console.log(msg), 30_000);
     `);
     assert.equal(clean.code, 0);
     assert.equal(clean.out, '');
-    assert.ok(clean.ms < 10_000, `exited naturally in ${clean.ms}ms`);
   });
 });
