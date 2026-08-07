@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { pathToFileURL } from 'node:url';
 
-const MODULE = join(process.cwd(), 'src/shared/exit.ts');
+// An ESM specifier is a URL, so a raw path breaks on anything a URL reads
+// differently — a drive letter, a space in the checkout path.
+const MODULE = pathToFileURL(join(process.cwd(), 'src/shared/exit.ts')).href;
 
 function runDriver(source: string): Promise<{ code: number | null; out: string; ms: number }> {
   return new Promise((resolve) => {
@@ -16,7 +19,13 @@ function runDriver(source: string): Promise<{ code: number | null; out: string; 
     child.stdout.on('data', (chunk: string) => {
       out += chunk;
     });
-    child.on('close', (code) => resolve({ code, out, ms: Date.now() - startedAt }));
+    // Regressing this guard means a child that never exits; failing on one is
+    // the point, hanging on it is not.
+    const kill = setTimeout(() => child.kill('SIGKILL'), 10_000);
+    child.on('close', (code) => {
+      clearTimeout(kill);
+      resolve({ code, out, ms: Date.now() - startedAt });
+    });
     child.stdin.end(source);
   });
 }
@@ -30,7 +39,7 @@ describe('exitOnLingeringHandles', () => {
       exitOnLingeringHandles((msg) => console.log(msg), 300);
     `);
     assert.equal(leaked.code, 1, 'the run verdict survives the forced exit');
-    assert.match(leaked.out, /Timeout/, 'names the handles that kept the process alive');
+    assert.match(leaked.out, /forcing exit\. Open handles: \w/, 'names what held the process');
 
     // Same guard, nothing leaking: the timer is unref'd, so this must not wait
     // it out — that would add the grace to every run.

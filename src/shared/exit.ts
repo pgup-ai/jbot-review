@@ -18,7 +18,9 @@ export function exitOnLingeringHandles(
     log(
       `Run finished but the process is still alive ${graceMs / 1000}s later; forcing exit. Open handles: ${process.getActiveResourcesInfo().join(', ')}`,
     );
-    process.exit(process.exitCode ?? 0);
+    // A container's stdout is a pipe, where writes are async: exiting before it
+    // drains would drop the line above — the only evidence of what leaked.
+    process.stdout.write('', () => process.exit(process.exitCode ?? 0));
   }, graceMs);
   timer.unref();
 }
