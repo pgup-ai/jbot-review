@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 
-import { defaultModelOptions, resolvePoolCredentials } from '../shared/config.ts';
+import { defaultModelOptions, parseEnvBoolean, resolvePoolCredentials } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 
 import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
@@ -74,7 +74,7 @@ async function main(): Promise<void> {
       process.env.JBOT_SHARD_CACHE_DIR?.trim() ??
       (process.env.RUNNER_TEMP ? join(process.env.RUNNER_TEMP, 'jbot-shard-cache') : ''),
     // Env-only while it is an A/B arm; no action input until the data lands.
-    contextTrim: process.env.JBOT_CONTEXT_TRIM?.trim().toLowerCase() === 'true',
+    contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
   };
   const pullTarget = getPullRequestTarget();
   for (const warning of swallowedProviderWarnings([...modelPool, ...auxProbe])) {

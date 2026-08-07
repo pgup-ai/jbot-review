@@ -1821,7 +1821,14 @@ async function runReviewPipeline(params: {
           'utf8',
         ) -
         Buffer.byteLength(baseCoreContext, 'utf8') -
-        Buffer.byteLength(diffHunksBlock, 'utf8')
+        // Embedded-only main backends carry the 512KB block buildShardPlans
+        // renders for them, not the 40KB default.
+        Buffer.byteLength(
+          mainRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks
+            ? embeddedOnlyBackendDiffHunks.text
+            : diffHunksBlock,
+          'utf8',
+        )
       : Infinity;
     const { kept, dropped } = trimContextBlocks(supplementaryBlocks, trimBudget);
     if (dropped.length > 0) log(`Context trim dropped: ${dropped.join(', ')}`);

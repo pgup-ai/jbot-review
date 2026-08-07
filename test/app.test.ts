@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
-import { parseEnvBoolean, parseEnvInt } from '../src/app/app.ts';
+import { parseEnvInt } from '../src/app/app.ts';
+import { parseEnvBoolean } from '../src/shared/config.ts';
 
 const OLD_ENV = { ...process.env };
 

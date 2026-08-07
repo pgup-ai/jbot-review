@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { parseEnvBoolean, parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
+import { parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
 import { gatewayRoutedModels, localRunId, remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
 import {
   backendRequiresCompleteEmbeddedDiff,
@@ -17,7 +17,7 @@ import {
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_ACP_BIN, CODEX_PROVIDER_ID } from '@symma/protocol';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
-import { defaultModelOptions, resolvePoolCredentials } from '../shared/config.ts';
+import { defaultModelOptions, parseEnvBoolean, resolvePoolCredentials } from '../shared/config.ts';
 import {
   CURSOR_CLI_BIN,
   CURSOR_PROVIDER_ID,

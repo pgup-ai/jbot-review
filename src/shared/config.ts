@@ -444,3 +444,16 @@ export function resolvePromptCachePolicy(input: PromptCachePolicyInput): PromptC
       input.auxModel !== input.mainModel,
   };
 }
+
+/**
+ * Boolean env knob, shared by every entry point so a flag cannot mean different
+ * things in each. Only the exact lowercased `'false'` disables; unset or
+ * anything else keeps the default, mirroring the workflow's parseBooleanInput.
+ */
+export function parseEnvBoolean(name: string, defaultValue: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) return defaultValue;
+  if (raw === 'false') return false;
+  if (raw === 'true') return true;
+  return defaultValue;
+}
