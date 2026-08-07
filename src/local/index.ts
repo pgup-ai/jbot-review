@@ -24,6 +24,7 @@ import {
   DEVIN_CLI_BIN,
   DEVIN_PROVIDER_ID,
 } from '@symma/protocol';
+import { exitOnLingeringHandles } from '../shared/exit.ts';
 import { isNoiseFile } from '../shared/filter.ts';
 import { observerEnabled, setRunName } from '../shared/observer.ts';
 import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
@@ -582,10 +583,12 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
 
 if (loadDotEnv()) log('Loaded .env');
 // Run verdict + observer flush live in runPrReview; here we only surface the
-// error and set the exit code.
-main().catch((error: unknown) => {
-  console.error(
-    `[jbot-review] Local review failed: ${error instanceof Error ? error.message : String(error)}`,
-  );
-  process.exitCode = 1;
-});
+// error, set the exit code, and guarantee the process actually ends.
+main()
+  .catch((error: unknown) => {
+    console.error(
+      `[jbot-review] Local review failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exitCode = 1;
+  })
+  .finally(() => exitOnLingeringHandles(log));
