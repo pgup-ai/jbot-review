@@ -5,6 +5,9 @@ a checked-out repo; structured JSON findings become diff-anchored GitHub
 review comments. This file is the single source of truth for agents working
 in this repo; `CLAUDE.md` just points here.
 
+Repo skills live under `.agents/skills`: use `jbot-review-de-slop` for a hostile
+cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
+
 ## Commands
 
 - `npm test` — all tests (node:test via tsx); single file: `node --import tsx --test test/<file>.test.ts`
