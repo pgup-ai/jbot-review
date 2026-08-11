@@ -22,7 +22,7 @@ Keep only code, tests, docs, and configuration that earn their place.
 5. Delete or simplify:
    - one-use helpers, wrappers, types, options, or files that do not reduce complexity
    - duplicate validation, impossible-state guards, rethrow-only catches, and speculative fallbacks
-   - assertions weakened or deleted inside existing tests to make a change pass; the fix is restoring them unless the PR states the behavior change that invalidates them
+   - assertions weakened or deleted inside existing tests to make a change pass; restore them when the contract is unchanged, or update them to assert the new contract when the PR states that behavior change — a rationale alone never discharges the assertion
    - provider-specific branches where an existing backend primitive or shared policy fits
    - repeated docs/config text, unused exports, and unrelated cleanup
 6. Search before keeping new logic. Prefer existing prompt assembly, parsing, process timeout, concurrency, config, filtering, and cleanup primitives.
