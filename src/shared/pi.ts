@@ -23,7 +23,7 @@ import {
   assembleReviewPrompt,
   buildJsonRepairPrompt,
 } from './prompt.ts';
-import { isFiniteNumber, isRecord } from './text.ts';
+import { isFiniteNumber, isRecord, truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 /**
@@ -258,7 +258,13 @@ export function capPiDiffOutput(text: string, maxBytes = PI_DIFF_TOOL_MAX_BYTES)
   return `${capped}\n\n_[output truncated at ${Math.floor(maxBytes / 1024)}KB]_`;
 }
 
-type PiMessageLike = { role?: unknown; content?: unknown; usage?: unknown };
+type PiMessageLike = {
+  role?: unknown;
+  content?: unknown;
+  usage?: unknown;
+  stopReason?: unknown;
+  errorMessage?: unknown;
+};
 
 /**
  * Totals usage across EVERY assistant turn in `messages`. A tool-using prompt
@@ -332,6 +338,17 @@ export function extractPiFinalText(messages: unknown): string {
     .map((part) => part.text)
     .join('\n\n')
     .trim();
+}
+
+function piContentTypes(content: unknown): string {
+  if (typeof content === 'string') return 'text=1';
+  if (!Array.isArray(content) || content.length === 0) return 'none';
+  const counts = new Map<string, number>();
+  for (const part of content) {
+    const type = isRecord(part) && typeof part.type === 'string' ? part.type : 'unknown';
+    counts.set(type, (counts.get(type) ?? 0) + 1);
+  }
+  return [...counts].map(([type, count]) => `${type}=${count}`).join(', ');
 }
 
 // Structural views of the pi SDK surface this module uses. Local types keep
@@ -727,6 +744,7 @@ async function promptPiSession(
   }
   const allMessages = piSessionMessages(session);
   const messages = allMessages.slice(priorTurns);
+  const finalMessage = lastAssistantMessage(messages);
   const raw = extractPiFinalText(messages);
   // Bill every assistant turn this prompt produced (a tool-using prompt spans
   // several), and only this prompt's — see piTurnUsageSince.
@@ -745,7 +763,20 @@ async function promptPiSession(
     );
     onTokenUsage?.(usage, model, label);
   }
-  if (!raw) log(`${label} response contained no text output`);
+  if (finalMessage?.stopReason === 'error' || finalMessage?.stopReason === 'aborted') {
+    const detail =
+      typeof finalMessage.errorMessage === 'string' && finalMessage.errorMessage.trim()
+        ? truncateForLog(finalMessage.errorMessage.replace(/\s+/g, ' ').trim(), 1000)
+        : 'unknown provider error';
+    throw new Error(
+      `pi ${label} prompt ${finalMessage.stopReason} (${model}; content types: ${piContentTypes(finalMessage.content)}): ${detail}`,
+    );
+  }
+  if (!raw) {
+    log(
+      `${label} response contained no text output (stopReason=${String(finalMessage?.stopReason ?? 'unknown')}; content types: ${piContentTypes(finalMessage?.content)})`,
+    );
+  }
   return raw;
 }
 
