@@ -497,28 +497,30 @@ describe('Pi review sessions', () => {
   });
 
   it('surfaces terminal provider errors without exposing hidden reasoning or attempting JSON repair', async () => {
-    const events: string[] = [];
-    const runtime = fakeRuntime(false, events, [
-      {
-        role: 'assistant',
-        content: [{ type: 'thinking', thinking: 'private reasoning' }],
-        usage: { input: 10, output: 3 },
-        stopReason: 'error',
-        errorMessage: '429\nFreeUsageLimitError',
-      },
-    ]);
-    await assert.rejects(
-      runPiReview(runtime, 'opencode/deepseek-v4-flash-free', 'ctx', '', () => {}),
-      (error: unknown) => {
-        assert.ok(error instanceof Error);
-        assert.match(error.message, /prompt error/);
-        assert.match(error.message, /content types: thinking=1/);
-        assert.match(error.message, /429 FreeUsageLimitError/);
-        assert.doesNotMatch(error.message, /private reasoning/);
-        return true;
-      },
-    );
-    assert.deepEqual(events, ['prompted', 'disposed']);
+    for (const stopReason of ['error', 'aborted']) {
+      const events: string[] = [];
+      const runtime = fakeRuntime(false, events, [
+        {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: 'private reasoning' }],
+          usage: { input: 10, output: 3 },
+          stopReason,
+          errorMessage: '429\nFreeUsageLimitError',
+        },
+      ]);
+      await assert.rejects(
+        runPiReview(runtime, 'opencode/deepseek-v4-flash-free', 'ctx', '', () => {}),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(error.message, new RegExp(`prompt ${stopReason}`));
+          assert.match(error.message, /content types: thinking=1/);
+          assert.match(error.message, /429 FreeUsageLimitError/);
+          assert.doesNotMatch(error.message, /private reasoning/);
+          return true;
+        },
+      );
+      assert.deepEqual(events, ['prompted', 'disposed']);
+    }
   });
 
   it('reports thinking-only output and keeps the existing JSON repair path', async () => {
@@ -540,8 +542,9 @@ describe('Pi review sessions', () => {
     );
     assert.equal(result.summary, 'ok');
     assert.ok(
-      logs.includes(
-        'review response contained no text output (stopReason=stop; content types: thinking=1)',
+      logs.some(
+        (message) =>
+          message.includes('stopReason=stop') && message.includes('content types: thinking=1'),
       ),
     );
     assert.deepEqual(events, ['prompted', 'prompted', 'disposed']);
