@@ -544,7 +544,9 @@ describe('Pi review sessions', () => {
     assert.ok(
       logs.some(
         (message) =>
-          message.includes('stopReason=stop') && message.includes('content types: thinking=1'),
+          message.includes('response contained no text output') &&
+          message.includes('stopReason=stop') &&
+          message.includes('content types: thinking=1'),
       ),
     );
     assert.deepEqual(events, ['prompted', 'prompted', 'disposed']);
