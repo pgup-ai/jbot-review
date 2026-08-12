@@ -399,11 +399,15 @@ describe('capPiDiffOutput', () => {
   });
 });
 
-describe('createPiSession teardown race', () => {
+describe('Pi review sessions', () => {
   // A session whose creation resolves after stop() swept the registry must not
   // go on to prompt a torn-down runtime.
-  const review = JSON.stringify({ summary: 'ok', findings: [] });
-  const fakeRuntime = (stopped: boolean, events: string[]): PiRuntime =>
+  const reviewResultJson = JSON.stringify({ summary: 'ok', findings: [] });
+  const fakeRuntime = (
+    stopped: boolean,
+    events: string[],
+    responses: unknown[] = [{ role: 'assistant', content: reviewResultJson }],
+  ): PiRuntime =>
     ({
       sdk: {
         createAgentSession: async () => {
@@ -411,7 +415,7 @@ describe('createPiSession teardown race', () => {
             messages: [] as unknown[],
             prompt: async () => {
               events.push('prompted');
-              session.messages.push({ role: 'assistant', content: review });
+              session.messages.push(responses.shift());
             },
             abort: async () => void events.push('aborted'),
             dispose: () => events.push('disposed'),
@@ -490,5 +494,61 @@ describe('createPiSession teardown race', () => {
     );
     assert.equal(result.summary, 'ok');
     assert.deepEqual(events, ['prompted', 'disposed']);
+  });
+
+  it('surfaces terminal provider errors without exposing hidden reasoning or attempting JSON repair', async () => {
+    for (const stopReason of ['error', 'aborted']) {
+      const events: string[] = [];
+      const runtime = fakeRuntime(false, events, [
+        {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: 'private reasoning' }],
+          usage: { input: 10, output: 3 },
+          stopReason,
+          errorMessage: '429\nFreeUsageLimitError',
+        },
+      ]);
+      await assert.rejects(
+        runPiReview(runtime, 'opencode/deepseek-v4-flash-free', 'ctx', '', () => {}),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.match(error.message, new RegExp(`prompt ${stopReason}`));
+          assert.match(error.message, /content types: thinking=1/);
+          assert.match(error.message, /429 FreeUsageLimitError/);
+          assert.doesNotMatch(error.message, /private reasoning/);
+          return true;
+        },
+      );
+      assert.deepEqual(events, ['prompted', 'disposed']);
+    }
+  });
+
+  it('reports thinking-only output and keeps the existing JSON repair path', async () => {
+    const events: string[] = [];
+    const logs: string[] = [];
+    const result = await runPiReview(
+      fakeRuntime(false, events, [
+        {
+          role: 'assistant',
+          content: [{ type: 'thinking', thinking: 'private reasoning' }],
+          stopReason: 'stop',
+        },
+        { role: 'assistant', content: reviewResultJson, stopReason: 'stop' },
+      ]),
+      'opencode/deepseek-v4-flash-free',
+      'ctx',
+      '',
+      (message) => logs.push(message),
+    );
+    assert.equal(result.summary, 'ok');
+    assert.ok(
+      logs.some(
+        (message) =>
+          message.includes('response contained no text output') &&
+          message.includes('stopReason=stop') &&
+          message.includes('content types: thinking=1'),
+      ),
+    );
+    assert.deepEqual(events, ['prompted', 'prompted', 'disposed']);
   });
 });
