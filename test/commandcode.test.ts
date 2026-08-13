@@ -43,6 +43,8 @@ describe('CommandCode CLI provider helpers', () => {
       '--skip-onboarding',
       '--permission-mode',
       'plan',
+      '--max-turns',
+      '1000',
     ]);
   });
 
@@ -53,6 +55,8 @@ describe('CommandCode CLI provider helpers', () => {
       '--skip-onboarding',
       '--permission-mode',
       'plan',
+      '--max-turns',
+      '1000',
       '--model',
       'Qwen/Qwen3.7-Max',
     ]);
