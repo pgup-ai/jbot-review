@@ -98,8 +98,12 @@ async function main(): Promise<void> {
       `Event: ${github.context.eventName}  PR: #${pull.number}  Action: ${github.context.payload.action ?? 'manual'}`,
     );
 
-    const model = pickPooledModel(modelPool, pull.head.sha);
-    if (modelPool.length > 1) core.info(`Model pool of ${modelPool.length}: picked ${model}`);
+    const model = pickPooledModel(modelPool, pull.head.sha, github.context.runAttempt);
+    if (modelPool.length > 1) {
+      core.info(
+        `Model pool of ${modelPool.length}: picked ${model} for workflow attempt ${github.context.runAttempt}`,
+      );
+    }
     // The pick decides the provider, so both its credential and the provider a
     // bare aux ref belongs to are only known here.
     const { providerID } = parseModelName(model);

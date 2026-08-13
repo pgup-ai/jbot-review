@@ -87,12 +87,10 @@ function defaultModelOf(providerID: string): string {
   return defaultModel;
 }
 
-/**
- * Seeded, not random: re-reviewing the same commit has to reproduce. The seed is
- * hashed rather than read as a number so callers can pass any stable string.
- */
-export function pickPooledModel(pool: string[], seed: string): string {
-  return pool[createHash('sha256').update(seed).digest().readUInt32BE(0) % pool.length];
+/** Stable first picks spread load; reruns advance past a failing candidate. */
+export function pickPooledModel(pool: string[], seed: string, attempt = 1): string {
+  const first = createHash('sha256').update(seed).digest().readUInt32BE(0) % pool.length;
+  return pool[(first + attempt - 1) % pool.length];
 }
 
 /**
