@@ -77,6 +77,7 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
     // keeps the session read-only.
     '--trust',
     '--skip-onboarding',
+    '--no-auto-update',
     '--permission-mode',
     'plan',
     '--max-turns',

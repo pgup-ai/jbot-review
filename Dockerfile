@@ -15,10 +15,11 @@ RUN npm config set fetch-retries 5 \
 # adapter (which bundles its own @openai/codex); --version verifies they run
 # on Node 24. Pinned exactly: with @latest the buildx layer cache froze whatever version
 # the last cache bust happened to grab — bump versions here deliberately instead.
-RUN npm install -g opencode-ai@1.18.4 command-code@0.40.17 cline@3.0.46 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 @agentclientprotocol/codex-acp@1.1.7 \
+# CommandCode hard-codes selectable model IDs, so bump its pin when it rejects a new model.
+RUN npm install -g opencode-ai@1.18.4 command-code@1.22.0 cline@3.0.46 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 @agentclientprotocol/codex-acp@1.1.7 \
   && npm cache clean --force \
   && opencode --version \
-  && command-code --version \
+  && command-code --no-auto-update --version \
   && cline --version \
   && grok --version \
   && kilo --version \
