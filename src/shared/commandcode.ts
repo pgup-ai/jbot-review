@@ -29,6 +29,7 @@ const COMMANDCODE_MODEL_LIST_TIMEOUT_MS = 60_000;
 const COMMANDCODE_MAX_TURNS = 1000;
 
 export const COMMANDCODE_PROVIDER_ID = 'commandcode';
+export const COMMANDCODE_MODEL_LIST_ARGS = ['--no-auto-update', '--list-models'];
 // The command-code npm package exposes cmd, cmdc, commandcode, and command-code.
 // Use the long alias so Windows local runs do not accidentally invoke cmd.exe.
 export const COMMANDCODE_CLI_BIN = 'command-code';
@@ -77,6 +78,7 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
     // keeps the session read-only.
     '--trust',
     '--skip-onboarding',
+    '--no-auto-update',
     '--permission-mode',
     'plan',
     '--max-turns',
@@ -239,7 +241,7 @@ export async function runCommandCodeFindingVerification(
 }
 
 export async function listCommandCodeModels(workspace: string, home?: string): Promise<string[]> {
-  const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, ['--list-models'], {
+  const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, COMMANDCODE_MODEL_LIST_ARGS, {
     cwd: workspace,
     input: '',
     env: commandCodeEnvForHome(home),

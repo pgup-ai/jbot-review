@@ -29,7 +29,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `fireworks-ai`          | Models.dev           |      16 | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` |
 | `poolside`              | Models.dev           |       4 | `poolside/laguna-s-2.1`                                    |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                            |
-| `commandcode`           | CLI snapshot         |      36 | `commandcode/default`                                      |
+| `commandcode`           | CLI snapshot         |      54 | `commandcode/default`                                      |
 | `cursor`                | CLI snapshot         |     175 | `cursor/default`                                           |
 | `qoder`                 | CLI snapshot         |      14 | `qoder/auto`                                               |
 | `codex`                 | CLI snapshot         |       6 | `codex/default`                                            |
@@ -799,16 +799,17 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@0.40.17`](https://www.npmjs.com/package/command-code) authenticated catalog.
-- Refresh/list: `command-code --list-models`.
-- Note: The command returns the models available to the current CommandCode account.
+- Source: Docker-pinned npm package [`command-code@1.22.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Refresh/list: `command-code --no-auto-update --list-models`.
+- Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
-36 J-Bot model values:
+54 J-Bot model values:
 
 - `commandcode/claude-fable-5`
 - `commandcode/claude-haiku-4-5`
 - `commandcode/claude-opus-4-7`
 - `commandcode/claude-opus-4-8`
+- `commandcode/claude-opus-5`
 - `commandcode/claude-sonnet-4-6`
 - `commandcode/claude-sonnet-5`
 - `commandcode/deepseek/deepseek-v4-flash`
@@ -816,31 +817,48 @@ The CLI does not expose a complete list.
 - `commandcode/default` **(default)**
 - `commandcode/google/gemini-3.1-flash-lite`
 - `commandcode/google/gemini-3.5-flash`
+- `commandcode/google/gemini-3.5-flash-lite`
+- `commandcode/google/gemini-3.6-flash`
 - `commandcode/gpt-5.3-codex`
 - `commandcode/gpt-5.4`
 - `commandcode/gpt-5.4-mini`
 - `commandcode/gpt-5.5`
-- `commandcode/MiniMaxAI/MiniMax-M2.5`
-- `commandcode/MiniMaxAI/MiniMax-M2.7`
-- `commandcode/MiniMaxAI/MiniMax-M3`
-- `commandcode/moonshotai/Kimi-K2.5`
-- `commandcode/moonshotai/Kimi-K2.6`
-- `commandcode/moonshotai/Kimi-K2.7-Code`
-- `commandcode/moonshotai/Kimi-K2.7-Code-Highspeed`
+- `commandcode/gpt-5.6-luna`
+- `commandcode/gpt-5.6-sol`
+- `commandcode/gpt-5.6-terra`
+- `commandcode/meta/muse-spark-1.1`
+- `commandcode/meta/muse-spark-1.2`
+- `commandcode/meta/muse-spark-1.2-contributor`
+- `commandcode/minimaxai/minimax-m2.5`
+- `commandcode/minimaxai/minimax-m2.7`
+- `commandcode/minimaxai/minimax-m3`
+- `commandcode/moonshotai/kimi-k2.5`
+- `commandcode/moonshotai/kimi-k2.6`
+- `commandcode/moonshotai/kimi-k2.7-code`
+- `commandcode/moonshotai/kimi-k2.7-code-highspeed`
+- `commandcode/moonshotai/kimi-k3`
 - `commandcode/nvidia/nemotron-3-ultra-550b-a55b`
-- `commandcode/Qwen/Qwen3.6-Max-Preview`
-- `commandcode/Qwen/Qwen3.6-Plus`
-- `commandcode/Qwen/Qwen3.7-Max`
-- `commandcode/Qwen/Qwen3.7-Plus`
+- `commandcode/poolside/laguna-s-2.1-free`
+- `commandcode/qwen/qwen3.6-max-preview`
+- `commandcode/qwen/qwen3.6-plus`
+- `commandcode/qwen/qwen3.7-flash`
+- `commandcode/qwen/qwen3.7-max`
+- `commandcode/qwen/qwen3.7-plus`
+- `commandcode/qwen/qwen3.8-max`
 - `commandcode/sakana/fugu-ultra`
-- `commandcode/stepfun/Step-3.5-Flash`
-- `commandcode/stepfun/Step-3.7-Flash`
+- `commandcode/stepfun/step-3.5-flash`
+- `commandcode/stepfun/step-3.7-flash`
+- `commandcode/tencent/hy3-paid`
+- `commandcode/thinkingmachines/inkling`
+- `commandcode/thinkingmachines/inkling-small`
+- `commandcode/xai/grok-4.5`
+- `commandcode/xai/grok-4.6`
 - `commandcode/xiaomi/mimo-v2.5`
 - `commandcode/xiaomi/mimo-v2.5-pro`
-- `commandcode/zai-org/GLM-5`
-- `commandcode/zai-org/GLM-5.1`
-- `commandcode/zai-org/GLM-5.2`
-- `commandcode/zai-org/GLM-5.2-Fast`
+- `commandcode/zai-org/glm-5`
+- `commandcode/zai-org/glm-5.1`
+- `commandcode/zai-org/glm-5.2`
+- `commandcode/zai-org/glm-5.2-fast`
 
 ### `cursor`
 

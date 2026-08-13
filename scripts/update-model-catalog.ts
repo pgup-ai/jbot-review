@@ -6,7 +6,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { format } from 'prettier';
 
-import { parseCommandCodeModelList } from '../src/shared/commandcode.ts';
+import {
+  COMMANDCODE_MODEL_LIST_ARGS,
+  parseCommandCodeModelList,
+} from '../src/shared/commandcode.ts';
 import { PROVIDERS } from '../src/shared/config.ts';
 import { parseCursorModelList, parseKiloModelList } from '@symma/protocol';
 
@@ -178,7 +181,7 @@ async function loadClinePassModels(): Promise<string[]> {
 
 async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   const commandCodeModels = parseCommandCodeModelList(
-    npmCliOutput('command-code', 'command-code', ['--list-models']),
+    npmCliOutput('command-code', 'command-code', COMMANDCODE_MODEL_LIST_ARGS),
   );
   const cursorModels = parseCursorModelList(
     run('cursor-agent', ['models'], 'Cursor model catalog'),
@@ -215,9 +218,9 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
       enumerable: false,
     },
     commandcode: {
-      discovery: '`command-code --list-models`',
+      discovery: '`command-code --no-auto-update --list-models`',
       source: `${npmSource('command-code')} authenticated catalog`,
-      note: 'The command returns the models available to the current CommandCode account.',
+      note: 'CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.',
       models: withDefault(
         'commandcode',
         commandCodeModels.map((model) => `commandcode/${model}`),
