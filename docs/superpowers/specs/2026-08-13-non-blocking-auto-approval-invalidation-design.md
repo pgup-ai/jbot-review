@@ -12,7 +12,7 @@ Enabling **Require approval of the most recent reviewable push** is a prerequisi
 
 Same-head reruns retain an existing J-Bot approval. J-Bot still refuses to post another approval when the pull request is closed, draft, not mergeable, changes head during review, has new findings, or has unresolved J-Bot findings. A same-head rerun that newly finds an issue does not invalidate the existing approval; this is the deliberate tradeoff that avoids giving J-Bot a blocking veto without review-dismissal authority.
 
-Consumer workflows continue to own repository policy. FMS Frontend separately replaces the obsolete `INPUT_AUTO-APPROVE` environment bridge with the wrapper's declared `with: auto-approve` input. J-Bot does not duplicate CI gates or require review-dismissal authority.
+Consumer workflows continue to own repository policy. FMS Frontend separately replaces the obsolete `INPUT_AUTO-APPROVE` environment bridge with the wrapper's declared `with: auto-approve` input. J-Bot does not duplicate CI gates and never calls review-dismissal APIs.
 
 ## Error handling
 
@@ -22,4 +22,4 @@ An ambiguous approval-posting failure or failed post-approval continuity check f
 
 - Runner-level tests cover old-head approval startup and same-head non-clean reruns, proving the review proceeds and no `REQUEST_CHANGES` review is created.
 - Approval tests preserve exact-head approval and duplicate suppression. Ambiguous approval submission and failed post-approval continuity checks remain fatal without posting a compensating review.
-- J-Bot's canonical workflow contract test continues to require `with: auto-approve`. FMS Frontend validates its consumer workflow independently with YAML parsing and `actionlint`.
+- J-Bot's canonical workflow contract test continues to require `with: auto-approve`. FMS Frontend validates its consumer workflow independently with YAML parsing, `actionlint`, and an assertion that the action step has the `with: auto-approve` binding and no `INPUT_AUTO-APPROVE` bridge.
