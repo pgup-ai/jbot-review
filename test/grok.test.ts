@@ -94,7 +94,7 @@ describe('Grok Build CLI provider helpers', () => {
       '--disallowed-tools',
       'Bash,Edit,Read,Grep,MCPTool,WebFetch',
       '--max-turns',
-      '12',
+      '1000',
       '--prompt-file',
       '/tmp/prompt',
       '--output-format',
