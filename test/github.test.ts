@@ -16,14 +16,11 @@ import {
   postReview,
   selectResolvedJbotReviewsToFinalize,
   updateReviewBody,
-  withdrawJbotApprovalForReviewedHead,
-  withdrawStaleJbotApproval,
   type JbotReviewGroup,
   type Octokit,
   type PriorJbotThread,
 } from '../src/shared/github.ts';
 import {
-  approvalWithdrawalReason,
   decideApprovalContinuity,
   decideAutoApproval,
   isDefinitiveApprovalRejection,
@@ -93,17 +90,6 @@ describe('auto approval', () => {
     ({ rest: { pulls } }) as unknown as Octokit;
   const postApproval = (octokit: Octokit) =>
     postApprovalReview(octokit, 'acme', 'widget', 12, 'review body', 'headsha');
-  const withdrawStale = (octokit: Octokit) =>
-    withdrawStaleJbotApproval(octokit, 'acme', 'widget', 12, 'headsha');
-  const withdrawReviewedHead = (octokit: Octokit) =>
-    withdrawJbotApprovalForReviewedHead(
-      octokit,
-      'acme',
-      'widget',
-      12,
-      'headsha',
-      'the latest review found new findings',
-    );
 
   it('requires the exact open, non-draft, mergeable reviewed head', () => {
     assert.deepEqual(decideAutoApproval(eligible), { status: 'eligible' });
@@ -120,41 +106,6 @@ describe('auto approval', () => {
         reviewedHeadSha: 'headsha',
       }),
       { status: 'eligible' },
-    );
-  });
-
-  it('withdraws only for verified unsafe review state', () => {
-    assert.equal(
-      approvalWithdrawalReason({
-        findingCount: 1,
-        openThreadCount: 0,
-        threadStateKnown: false,
-      }),
-      'the latest review found new findings',
-    );
-    assert.equal(
-      approvalWithdrawalReason({
-        findingCount: 0,
-        openThreadCount: 1,
-        threadStateKnown: true,
-      }),
-      'open jbot findings remain',
-    );
-    assert.equal(
-      approvalWithdrawalReason({
-        findingCount: 0,
-        openThreadCount: 0,
-        threadStateKnown: false,
-      }),
-      undefined,
-    );
-    assert.equal(
-      approvalWithdrawalReason({
-        findingCount: 0,
-        openThreadCount: 0,
-        threadStateKnown: true,
-      }),
-      undefined,
     );
   });
 
@@ -274,105 +225,6 @@ describe('auto approval', () => {
     );
   });
 
-  it('withdraws the latest jbot approval when it belongs to an older head', async () => {
-    const listReviews = {};
-    let request: Record<string, unknown> | undefined;
-    const review = {
-      user: { login: 'github-actions[bot]' },
-      body: '## J-Bot Code Review\n\n<!-- jbot-review:review -->',
-    };
-    const octokit = {
-      rest: {
-        pulls: {
-          listReviews,
-          createReview: async (params: Record<string, unknown>) => {
-            request = params;
-          },
-        },
-      },
-      paginate: async () => [
-        { ...review, state: 'APPROVED', commit_id: 'old-head' },
-        { ...review, state: 'COMMENTED', commit_id: 'headsha' },
-      ],
-      graphql: async () => ({ viewer: { login: 'github-actions' } }),
-    };
-
-    assert.equal(await withdrawStale(octokit as unknown as Octokit), true);
-    assert.equal(request?.event, 'REQUEST_CHANGES');
-    assert.equal(request?.commit_id, 'headsha');
-    assert.match(String(request?.body), /head changed after review/);
-    assert.match(String(request?.body), /jbot-review:review/);
-  });
-
-  it('keeps same-head and already-superseded approvals unchanged', async () => {
-    const listReviews = {};
-    let reviews = [
-      {
-        state: 'APPROVED',
-        commit_id: 'headsha',
-        user: { login: 'github-actions[bot]' },
-        body: '<!-- jbot-review:review -->',
-      },
-    ];
-    let createCalls = 0;
-    const octokit = {
-      rest: {
-        pulls: {
-          listReviews,
-          createReview: async () => {
-            createCalls++;
-          },
-        },
-      },
-      paginate: async () => reviews,
-      graphql: async () => ({ viewer: { login: 'github-actions' } }),
-    };
-
-    assert.equal(await withdrawStale(octokit as unknown as Octokit), false);
-
-    reviews = [
-      { ...reviews[0], commit_id: 'old-head' },
-      { ...reviews[0], state: 'CHANGES_REQUESTED', commit_id: 'headsha' },
-    ];
-    assert.equal(await withdrawStale(octokit as unknown as Octokit), false);
-    assert.equal(createCalls, 0);
-  });
-
-  it('withdraws an approval when the reviewed head has new findings', async () => {
-    const listReviews = {};
-    const requests: Array<Record<string, unknown>> = [];
-    const review = {
-      state: 'APPROVED',
-      commit_id: 'headsha',
-      user: { login: 'github-actions[bot]' },
-      body: '<!-- jbot-review:review -->',
-    };
-    let reviews = [review];
-    const octokit = {
-      rest: {
-        pulls: {
-          listReviews,
-          createReview: async (params: Record<string, unknown>) => {
-            requests.push(params);
-          },
-        },
-      },
-      paginate: async () => reviews,
-      graphql: async () => ({ viewer: { login: 'github-actions' } }),
-    };
-
-    assert.equal(await withdrawReviewedHead(octokit as unknown as Octokit), true);
-    assert.equal(requests[0]?.event, 'REQUEST_CHANGES');
-    assert.equal(requests[0]?.commit_id, 'headsha');
-    assert.match(String(requests[0]?.body), /latest review found new findings/);
-
-    reviews = [{ ...review, commit_id: 'newer-head' }];
-    assert.equal(await withdrawReviewedHead(octokit as unknown as Octokit), false);
-    reviews = [{ ...review, state: 'CHANGES_REQUESTED' }];
-    assert.equal(await withdrawReviewedHead(octokit as unknown as Octokit), false);
-    assert.equal(requests.length, 1);
-  });
-
   it('pins approval to the reviewed commit and keeps the review marker', async () => {
     let request: Record<string, unknown> | undefined;
     const octokit = approvalOctokit({
@@ -412,7 +264,7 @@ describe('auto approval', () => {
     assert.equal(requests[0]?.event, 'APPROVE');
   });
 
-  it('replaces a raced approval with changes requested on the current head', async () => {
+  it('fails a raced approval without posting a blocking review', async () => {
     const requests: Array<Record<string, unknown>> = [];
     const octokit = approvalOctokit({
       createReview: async (params: Record<string, unknown>) => {
@@ -423,15 +275,13 @@ describe('auto approval', () => {
 
     await assert.rejects(postApproval(octokit), /head changed during review/);
 
-    assert.equal(requests[0]?.event, 'APPROVE');
-    assert.equal(requests[0]?.commit_id, 'headsha');
-    assert.equal(requests[1]?.event, 'REQUEST_CHANGES');
-    assert.equal(requests[1]?.commit_id, 'new-head');
-    assert.match(String(requests[1]?.body), /Auto-approval withdrawn/);
-    assert.match(String(requests[1]?.body), /jbot-review:review/);
+    assert.deepEqual(
+      requests.map((request) => request.event),
+      ['APPROVE'],
+    );
   });
 
-  it('withdraws approval when the pull request cannot be revalidated', async () => {
+  it('fails when the pull request cannot be revalidated without another review', async () => {
     const requests: Array<Record<string, unknown>> = [];
     const octokit = approvalOctokit({
       createReview: async (params: Record<string, unknown>) => {
@@ -444,12 +294,13 @@ describe('auto approval', () => {
 
     await assert.rejects(postApproval(octokit), /could not be revalidated/);
 
-    assert.equal(requests[0]?.event, 'APPROVE');
-    assert.equal(requests[1]?.event, 'REQUEST_CHANGES');
-    assert.equal(requests[1]?.commit_id, 'headsha');
+    assert.deepEqual(
+      requests.map((request) => request.event),
+      ['APPROVE'],
+    );
   });
 
-  it('withdraws when GitHub does not confirm whether approval was posted', async () => {
+  it('fails when GitHub does not confirm approval without another review', async () => {
     const requests: Array<Record<string, unknown>> = [];
     let reviewCalls = 0;
     const octokit = approvalOctokit({
@@ -462,28 +313,10 @@ describe('auto approval', () => {
 
     await assert.rejects(postApproval(octokit), /did not confirm whether the approval was posted/);
 
-    assert.equal(requests[0]?.event, 'APPROVE');
-    assert.equal(requests[1]?.event, 'REQUEST_CHANGES');
-    assert.equal(requests[1]?.commit_id, 'headsha');
-  });
-
-  it('does not downgrade a failed withdrawal to the clean-comment fallback', async () => {
-    const withdrawalFailure = { status: 422 };
-    let reviewCalls = 0;
-    const octokit = approvalOctokit({
-      createReview: async () => {
-        reviewCalls++;
-        if (reviewCalls === 2) throw withdrawalFailure;
-      },
-      get: async () => pullResponse('new-head'),
-    });
-
-    await assert.rejects(postApproval(octokit), (error: unknown) => {
-      assert.match(String(error), /may still be active/);
-      assert.equal((error as Error).cause, withdrawalFailure);
-      assert.equal(isDefinitiveApprovalRejection(error), false);
-      return true;
-    });
+    assert.deepEqual(
+      requests.map((request) => request.event),
+      ['APPROVE'],
+    );
   });
 
   it('falls back only for definitive GitHub approval rejections', () => {

@@ -339,7 +339,12 @@ balance:
 comment. With `auto-approve: true`, a clean run approves the exact reviewed
 head only when every prior jbot thread is resolved and GitHub reports the PR
 open, non-draft, and mergeable. CI, required reviews, and every other merge
-requirement remain GitHub's responsibility. The 🚀 reaction means **the PR has
+requirement remain GitHub's responsibility. Jbot never submits a blocking
+`REQUEST_CHANGES` review or calls the review-dismissal API. Auto-approval is
+safe to enable only when the repository requires approval of the most recent
+reviewable push, so an older approval cannot cover a new head. A same-head
+re-run leaves an existing approval intact even when new or open findings remain.
+The 🚀 reaction means **the PR has
 no open jbot findings** — it is
 added only when a real review leaves zero new findings _and_ every prior
 finding thread is resolved, and removed when a review starts. So 🚀-present
@@ -709,8 +714,8 @@ documentation lookup.
 `jbot-review` posts `COMMENT` reviews for findings and never uses
 `REQUEST_CHANGES` as a finding verdict. With `auto-approve: true`, an eligible
 clean run posts an `APPROVE` review for the exact reviewed head. If GitHub cannot
-confirm that approval remains safe, jbot supersedes it with `REQUEST_CHANGES`
-and fails the run. The review body includes advisory merge guidance:
+confirm that approval remains safe, jbot fails the run without posting a blocking
+review. The review body includes advisory merge guidance:
 
 - `Needs changes before approval` when any `P0`, `P1`, or `P2` finding is present.
 - `Mergeable with non-blocking comments` when only `P3` or `nit` findings are present.

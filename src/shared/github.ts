@@ -66,7 +66,7 @@ export interface JbotReviewGroup {
  */
 const asId = (id: number | bigint): number => Number(id);
 
-export type Verdict = 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
+export type Verdict = 'APPROVE' | 'COMMENT';
 
 interface ReviewDecision {
   state: string;
@@ -677,46 +677,6 @@ export async function checkAutoApprovalEligibility(
   return decision;
 }
 
-export async function withdrawStaleJbotApproval(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  pullNumber: number,
-  currentHeadSha: string,
-): Promise<boolean> {
-  const latestDecision = await getLatestJbotDecision(octokit, owner, repo, pullNumber);
-  if (latestDecision?.state !== 'APPROVED' || latestDecision.commit_id === currentHeadSha) {
-    return false;
-  }
-
-  await postApprovalWithdrawal(
-    octokit,
-    owner,
-    repo,
-    pullNumber,
-    'the pull request head changed after review',
-    currentHeadSha,
-  );
-  return true;
-}
-
-export async function withdrawJbotApprovalForReviewedHead(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  pullNumber: number,
-  reviewedHeadSha: string,
-  reason: string,
-): Promise<boolean> {
-  const latestDecision = await getLatestJbotDecision(octokit, owner, repo, pullNumber);
-  if (latestDecision?.state !== 'APPROVED' || latestDecision.commit_id !== reviewedHeadSha) {
-    return false;
-  }
-
-  await postApprovalWithdrawal(octokit, owner, repo, pullNumber, reason, reviewedHeadSha);
-  return true;
-}
-
 export async function postApprovalReview(
   octokit: Octokit,
   owner: string,
@@ -725,22 +685,6 @@ export async function postApprovalReview(
   body: string,
   headSha: string,
 ): Promise<void> {
-  const withdrawApproval = async (reason: string, currentHeadSha = headSha): Promise<never> => {
-    // Dismissing a submitted review can require admin access. A newer
-    // REQUEST_CHANGES review supersedes this bot's approval with the existing token.
-    try {
-      await postApprovalWithdrawal(octokit, owner, repo, pullNumber, reason, currentHeadSha);
-    } catch (error) {
-      throw new Error(
-        `Auto-approval may still be active: failed to withdraw it because ${reason}.`,
-        {
-          cause: error,
-        },
-      );
-    }
-    throw new Error(`Auto-approval was withdrawn because ${reason}.`);
-  };
-
   try {
     await octokit.rest.pulls.createReview({
       owner,
@@ -752,48 +696,27 @@ export async function postApprovalReview(
     });
   } catch (error) {
     if (isDefinitiveApprovalRejection(error)) throw error;
-    await withdrawApproval('GitHub did not confirm whether the approval was posted');
+    throw new Error('GitHub did not confirm whether the approval was posted.', {
+      cause: error,
+    });
   }
 
-  let currentHeadSha: string | undefined;
-  let blockedReason: string;
-  try {
-    const pull = await octokit.rest.pulls.get({
-      owner,
-      repo,
-      pull_number: pullNumber,
+  const pull = await octokit.rest.pulls
+    .get({ owner, repo, pull_number: pullNumber })
+    .catch((error: unknown) => {
+      throw new Error('The pull request state could not be revalidated after auto-approval.', {
+        cause: error,
+      });
     });
-    currentHeadSha = pull.data.head.sha;
-    const decision = decideApprovalContinuity({
-      state: pull.data.state,
-      draft: pull.data.draft === true,
-      headSha: currentHeadSha,
-      reviewedHeadSha: headSha,
-    });
-    if (decision.status === 'eligible') return;
-    blockedReason = decision.reason;
-  } catch {
-    blockedReason = 'the pull request state could not be revalidated after approval';
-  }
-  await withdrawApproval(blockedReason, currentHeadSha);
-}
-
-async function postApprovalWithdrawal(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  pullNumber: number,
-  reason: string,
-  headSha: string,
-): Promise<void> {
-  await octokit.rest.pulls.createReview({
-    owner,
-    repo,
-    pull_number: pullNumber,
-    commit_id: headSha,
-    event: 'REQUEST_CHANGES',
-    body: formatReviewBody(`Auto-approval withdrawn because ${reason}.`, 0),
+  const decision = decideApprovalContinuity({
+    state: pull.data.state,
+    draft: pull.data.draft === true,
+    headSha: pull.data.head.sha,
+    reviewedHeadSha: headSha,
   });
+  if (decision.status === 'blocked') {
+    throw new Error(`Auto-approval continuity check failed because ${decision.reason}.`);
+  }
 }
 
 /**
