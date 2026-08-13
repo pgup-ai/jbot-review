@@ -273,7 +273,7 @@ describe('auto approval', () => {
       get: async () => pullResponse('new-head'),
     });
 
-    await assert.rejects(postApproval(octokit), /head changed during review/);
+    await assert.rejects(postApproval(octokit), /may still be active:.*head changed during review/);
 
     assert.deepEqual(
       requests.map((request) => request.event),
@@ -292,7 +292,7 @@ describe('auto approval', () => {
       },
     });
 
-    await assert.rejects(postApproval(octokit), /could not be revalidated/);
+    await assert.rejects(postApproval(octokit), /may still be active:.*could not be revalidated/);
 
     assert.deepEqual(
       requests.map((request) => request.event),
@@ -311,7 +311,10 @@ describe('auto approval', () => {
       },
     });
 
-    await assert.rejects(postApproval(octokit), /did not confirm whether the approval was posted/);
+    await assert.rejects(
+      postApproval(octokit),
+      /may still be active:.*did not confirm it was posted/,
+    );
 
     assert.deepEqual(
       requests.map((request) => request.event),

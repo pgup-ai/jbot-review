@@ -696,7 +696,7 @@ export async function postApprovalReview(
     });
   } catch (error) {
     if (isDefinitiveApprovalRejection(error)) throw error;
-    throw new Error('GitHub did not confirm whether the approval was posted.', {
+    throw new Error('Auto-approval may still be active: GitHub did not confirm it was posted.', {
       cause: error,
     });
   }
@@ -704,9 +704,12 @@ export async function postApprovalReview(
   const pull = await octokit.rest.pulls
     .get({ owner, repo, pull_number: pullNumber })
     .catch((error: unknown) => {
-      throw new Error('The pull request state could not be revalidated after auto-approval.', {
-        cause: error,
-      });
+      throw new Error(
+        'Auto-approval may still be active: the pull request could not be revalidated.',
+        {
+          cause: error,
+        },
+      );
     });
   const decision = decideApprovalContinuity({
     state: pull.data.state,
@@ -715,7 +718,7 @@ export async function postApprovalReview(
     reviewedHeadSha: headSha,
   });
   if (decision.status === 'blocked') {
-    throw new Error(`Auto-approval continuity check failed because ${decision.reason}.`);
+    throw new Error(`Auto-approval may still be active: ${decision.reason}.`);
   }
 }
 
