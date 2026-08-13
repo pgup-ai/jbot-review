@@ -186,8 +186,6 @@ import {
   postReview,
   checkAutoApprovalEligibility,
   postApprovalReview,
-  withdrawJbotApprovalForReviewedHead,
-  withdrawStaleJbotApproval,
   decideVerdict,
   listPriorJbotThreads,
   formatPriorJbotThreadsForPrompt,
@@ -204,11 +202,7 @@ import {
   type PriorJbotThread,
   type PriorJbotThreads,
 } from './github.ts';
-import {
-  approvalWithdrawalReason,
-  isDefinitiveApprovalRejection,
-  type AutoApprovalDecision,
-} from './approval.ts';
+import { isDefinitiveApprovalRejection, type AutoApprovalDecision } from './approval.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
@@ -801,15 +795,6 @@ async function runReviewPipeline(params: {
   }
   if (!localDiff && !headSha) {
     throw new Error('runPrReview requires headSha for GitHub-backed reviews.');
-  }
-  if (!localDiff && !options.dryRun && options.autoApprove) {
-    try {
-      const withdrawn = await withdrawStaleJbotApproval(octokit, owner, repo, pullNumber, headSha!);
-      if (withdrawn) log('Withdrew a stale jbot approval from an older head.');
-    } catch (error) {
-      await safeRemoveReviewReaction(octokit, owner, repo, pullNumber, log);
-      throw error;
-    }
   }
   const runStartedAt = Date.now();
   const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes);
@@ -2162,27 +2147,6 @@ async function runReviewPipeline(params: {
       }
       finishTelemetry('completed');
       return;
-    }
-
-    if (options.autoApprove) {
-      const openThreadsBeforePosting =
-        openFindingThreadIds(allPriorJbotThreads, []).length + unresolvedAddressedThreadIds.length;
-      const withdrawalReason = approvalWithdrawalReason({
-        findingCount: verifiedFindings.length,
-        openThreadCount: openThreadsBeforePosting,
-        threadStateKnown: priorThreadStateKnown,
-      });
-      if (withdrawalReason) {
-        const withdrawn = await withdrawJbotApprovalForReviewedHead(
-          octokit,
-          owner,
-          repo,
-          pullNumber,
-          headSha!,
-          withdrawalReason,
-        );
-        if (withdrawn) log(`Withdrew the existing jbot approval because ${withdrawalReason}.`);
-      }
     }
 
     // Don't post a redundant "all clear" comment on a re-run.
