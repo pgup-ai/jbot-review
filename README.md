@@ -606,12 +606,13 @@ are two distinct routes to what may be the same underlying model, and NVIDIA's
 publisher-prefixed ids stay intact as `nvidia/moonshotai/kimi-k2.6`. A model id
 with no provider segment falls back to `opencode`.
 
-A comma-separated `model` is a pool: each run reviews with one candidate, chosen
-by hashing the PR head sha. Load spreads across the pool as PRs and pushes come
-in, while re-reviewing the same commit always picks the same model, so a rerun
-reproduces. Every candidate is validated before the review starts, so a typo
-fails the next run outright rather than only the runs that happen to pick it.
-The chosen model is logged and appears in the posted review's metadata block.
+A comma-separated `model` is a pool. A workflow run's first attempt chooses one
+candidate by hashing the PR head sha; each rerun attempt advances to the next
+candidate and wraps at the end. New runs for the same head start from the
+same candidate, so the initial choice stays reproducible while reruns can bypass
+a failing model. Every candidate is validated before the review starts, so a
+typo fails the next run outright rather than only the runs that happen to pick
+it. The chosen model is logged and appears in the posted review's metadata block.
 
 **Candidates may name different providers.** Only one runs per PR, and each
 provider's key is resolved separately, so a pool can mix them:

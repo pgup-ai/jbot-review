@@ -115,11 +115,15 @@ describe('resolveModelSelection with a legacy provider input', () => {
 });
 
 describe('pickPooledModel', () => {
-  it('picks one entry per seed, stable for that seed and spread across seeds', () => {
+  it('picks a stable first entry, advances on later attempts, and spreads across seeds', () => {
     const pool = ['opencode/a', 'opencode/b', 'opencode/c'];
     const seed = 'e3f0c1a9b7d24e6f8a0b1c2d3e4f5a6b7c8d9e0f';
+    const first = pickPooledModel(pool, seed);
 
-    assert.equal(pickPooledModel(pool, seed), pickPooledModel(pool, seed));
+    assert.equal(first, 'opencode/b');
+    assert.equal(first, pickPooledModel(pool, seed, 1));
+    assert.equal(pickPooledModel(pool, seed, 2), 'opencode/c');
+    assert.equal(pickPooledModel(pool, seed, pool.length + 1), first);
     assert.deepEqual(
       [
         ...new Set(Array.from({ length: 60 }, (_, i) => pickPooledModel(pool, `${seed}${i}`))),
