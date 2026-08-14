@@ -32,12 +32,14 @@ RUN npm install -g @qoder-ai/qodercli@1.0.43 \
   && qodercli --version
 
 # Devin CLI (optional devin provider); strip the installer's interactive setup step.
-RUN curl -fsSL https://cli.devin.ai/install.sh -o /tmp/devin-install.sh \
+ARG DEVIN_CLI_VERSION=3000.4.25
+RUN curl -fsSL "https://static.devin.ai/cli/${DEVIN_CLI_VERSION}/setup.sh" -o /tmp/devin-install.sh \
   && grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install.sh \
   && sed '/"\$VERSION_DIR\/bin\/\$COMPILED_BIN_NAME" setup/d' /tmp/devin-install.sh > /tmp/devin-install-no-setup.sh \
   && ! grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install-no-setup.sh \
   && bash /tmp/devin-install-no-setup.sh \
   && test -x /root/.local/bin/devin \
+  && /root/.local/bin/devin --version | grep -Fq "devin ${DEVIN_CLI_VERSION} " \
   && rm -f /tmp/devin-install.sh /tmp/devin-install-no-setup.sh
 
 # Cursor CLI (optional cursor provider); installer saved to disk, not piped to bash

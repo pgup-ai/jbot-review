@@ -317,12 +317,48 @@ function parseCommandCodeUsage(value: unknown): PromptTokenUsage | undefined {
   return { input, output, reasoning: 0, cacheRead, cacheWrite };
 }
 
+function parseCommandCodeJsonString(value: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === 'string' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function recoverCommandCodeRunEnd(line: string): Record<string, unknown> | undefined {
+  const prefix =
+    /^\{\s*"type"\s*:\s*"event"\s*,\s*"event"\s*:\s*\{\s*"type"\s*:\s*"run_end"\s*,\s*"result"\s*:\s*\{\s*"finalText"\s*:\s*("(?:\\.|[^"\\])*")/.exec(
+      line,
+    );
+  if (!prefix) return undefined;
+  const finalText = parseCommandCodeJsonString(prefix[1]);
+  if (finalText === undefined) return undefined;
+
+  let usage: unknown;
+  const remainder = line.slice(prefix[0].length);
+  const usageMatch = /,\s*"usage"\s*:\s*(\{[^{}]*\})/.exec(remainder);
+  if (usageMatch) {
+    try {
+      usage = JSON.parse(usageMatch[1]);
+    } catch {
+      usage = undefined;
+    }
+  }
+  const nextState = /,\s*"nextState"\s*:\s*\{\s*"sessionId"\s*:\s*("(?:\\.|[^"\\])*")/.exec(
+    remainder,
+  );
+  const sessionId = nextState ? parseCommandCodeJsonString(nextState[1]) : undefined;
+  return { finalText, ...(usage ? { usage } : {}), ...(sessionId ? { sessionId } : {}) };
+}
+
 export function parseCommandCodeJsonOutput(output: string): {
   finalText: string;
   sessionId?: string;
   usage?: PromptTokenUsage;
 } {
   let result: Record<string, unknown> | undefined;
+  let recoveredRunEnd: Record<string, unknown> | undefined;
   let invalidLine: string | undefined;
   for (const rawLine of output.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -332,12 +368,14 @@ export function parseCommandCodeJsonOutput(output: string): {
       frame = JSON.parse(line);
     } catch {
       invalidLine ??= line;
+      recoveredRunEnd ??= recoverCommandCodeRunEnd(line);
       continue;
     }
     if (!isRecord(frame)) continue;
     if (frame.type === 'result') result = frame;
   }
-  if (!result) {
+  const finalResult = result ?? recoveredRunEnd;
+  if (!finalResult) {
     if (invalidLine) {
       throw new Error(
         `CommandCode returned invalid JSON output: ${truncateForLog(invalidLine, 1000)}`,
@@ -345,16 +383,16 @@ export function parseCommandCodeJsonOutput(output: string): {
     }
     throw new Error('CommandCode JSON output contained no result frame');
   }
-  if (result.subtype !== 'success') {
+  if (result && result.subtype !== 'success') {
     throw new Error(`CommandCode JSON result was ${String(result.subtype ?? 'unknown')}`);
   }
-  if (typeof result.finalText !== 'string') {
+  if (typeof finalResult.finalText !== 'string') {
     throw new Error('CommandCode JSON result contained no finalText');
   }
-  const usage = parseCommandCodeUsage(result.usage);
+  const usage = parseCommandCodeUsage(finalResult.usage);
   return {
-    finalText: result.finalText,
-    ...(typeof result.sessionId === 'string' ? { sessionId: result.sessionId } : {}),
+    finalText: finalResult.finalText,
+    ...(typeof finalResult.sessionId === 'string' ? { sessionId: finalResult.sessionId } : {}),
     ...(usage ? { usage } : {}),
   };
 }

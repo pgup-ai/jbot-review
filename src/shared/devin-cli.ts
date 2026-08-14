@@ -65,10 +65,10 @@ export function parseDevinCliOutput(output: string): { response: string; setupOn
   }
   const lines = text.split(/\r?\n/);
   if (lines[0]?.trim() !== 'Welcome to Devin CLI!') {
-    return { response: output, setupOnly: false };
+    return { response: text, setupOnly: false };
   }
   const marker = lines.findIndex((line) => line.startsWith("You're all set. Run "));
-  if (marker < 0) return { response: output, setupOnly: false };
+  if (marker < 0) return { response: text, setupOnly: false };
   const response = lines
     .slice(marker + 1)
     .join('\n')

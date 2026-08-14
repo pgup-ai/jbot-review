@@ -151,6 +151,26 @@ describe('CommandCode CLI provider helpers', () => {
       sessionId: 'session-1',
       usage: { input: 100, output: 20, reasoning: 0, cacheRead: 30, cacheWrite: 40 },
     });
+
+    const finalText = '{"summary":"recovered","findings":[]}';
+    assert.deepEqual(
+      parseCommandCodeJsonOutput(
+        `{"type":"event","event":{"type":"run_end","result":{"finalText":${JSON.stringify(
+          finalText,
+        )},"usage":{"inputTokens":297159,"outputTokens":19247,"cacheReadTokens":191556,"cacheWriteTokens":0},"nextState":{"sessionId":"session-2","messages":[`,
+      ),
+      {
+        finalText,
+        sessionId: 'session-2',
+        usage: {
+          input: 297159,
+          output: 19247,
+          reasoning: 0,
+          cacheRead: 191556,
+          cacheWrite: 0,
+        },
+      },
+    );
   });
 
   it('keeps a successful CommandCode result when usage is unavailable', () => {

@@ -94,6 +94,10 @@ describe('Devin CLI provider helpers', () => {
       parseDevinCliOutput("Welcome to Devin CLI!\nLogged in.\nYou're all set. Run devin."),
       { response: '', setupOnly: true },
     );
+    assert.deepEqual(parseDevinCliOutput('\u001b[32m{"summary":"ok"}\u001b[0m'), {
+      response: '{"summary":"ok"}',
+      setupOnly: false,
+    });
   });
 
   it('truncates repair context by bytes with an omission notice', () => {
