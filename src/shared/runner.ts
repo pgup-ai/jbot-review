@@ -838,6 +838,9 @@ async function runReviewPipeline(params: {
       reasoningTokens: usage.reasoning,
       cacheReadTokens: usage.cacheRead,
       ...(isFiniteNumber(usage.costUsd) ? { costUsd: usage.costUsd } : {}),
+      ...(isFiniteNumber(usage.estimatedCostUsd)
+        ? { estimatedCostUsd: usage.estimatedCostUsd }
+        : {}),
     });
   };
   telemetry.beginRun({
@@ -1357,7 +1360,7 @@ async function runReviewPipeline(params: {
       throw error;
     }
     log(`CommandCode CLI auth configured at ${authPath}.`);
-    log('CommandCode CLI token usage is unavailable; review metadata may omit those sessions.');
+    log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
     commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome);
   }
 
@@ -3110,6 +3113,7 @@ export interface ReviewTokenUsage {
   cacheRead: number;
   cacheWrite: number;
   costUsd?: number;
+  estimatedCostUsd?: number;
   creditCost?: number;
   acuCost?: number;
 }
@@ -3131,6 +3135,9 @@ function createReviewTokenUsageAccumulator(): {
       total.cacheWrite += usage.cacheWrite;
       if (isFiniteNumber(usage.costUsd)) {
         total.costUsd = (total.costUsd ?? 0) + usage.costUsd;
+      }
+      if (isFiniteNumber(usage.estimatedCostUsd)) {
+        total.estimatedCostUsd = (total.estimatedCostUsd ?? 0) + usage.estimatedCostUsd;
       }
       if (isFiniteNumber(usage.creditCost)) {
         total.creditCost = (total.creditCost ?? 0) + usage.creditCost;
@@ -3637,6 +3644,9 @@ export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewToke
     `cache read=${tokenUsage.cacheRead}`,
     `cache write=${tokenUsage.cacheWrite}`,
     ...(isFiniteNumber(tokenUsage.costUsd) ? [`cost usd=${tokenUsage.costUsd.toFixed(4)}`] : []),
+    ...(isFiniteNumber(tokenUsage.estimatedCostUsd)
+      ? [`estimated cost usd=${tokenUsage.estimatedCostUsd.toFixed(4)}`]
+      : []),
     ...(isFiniteNumber(tokenUsage.creditCost)
       ? [`credit cost=${formatUsageCost(tokenUsage.creditCost)}`]
       : []),

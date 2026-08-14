@@ -1,6 +1,6 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { parseModelName } from '@symma/protocol';
 import {
@@ -16,9 +16,11 @@ import {
   parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,
   parseReview,
+  type PromptTokenUsage,
   type TokenUsageRecorder,
 } from './opencode.ts';
 import { spawnWithTimeout, truncateForLog } from '@symma/protocol';
+import { isFiniteNumber, isRecord } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
@@ -79,6 +81,8 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
     '--trust',
     '--skip-onboarding',
     '--no-auto-update',
+    '--output-format',
+    'json',
     '--permission-mode',
     'plan',
     '--max-turns',
@@ -103,7 +107,6 @@ export async function runCommandCodeReview(
     home?: string;
   } = {},
 ): Promise<ReviewResult> {
-  void options.onTokenUsage;
   const label = options.label ?? 'review';
   const prompt = assembleReviewPrompt(
     prContext,
@@ -121,6 +124,7 @@ export async function runCommandCodeReview(
     label,
     log,
     options.timeoutMs,
+    options.onTokenUsage,
     options.home,
   );
   try {
@@ -143,6 +147,7 @@ export async function runCommandCodeReview(
       `${label}-repair`,
       log,
       options.timeoutMs,
+      options.onTokenUsage,
       options.home,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
@@ -158,7 +163,6 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
 ): Promise<AddressedPriorComment[]> {
-  void onTokenUsage;
   const raw = await runCommandCodePrompt(
     workspace,
     model,
@@ -166,6 +170,7 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
     'addressed-prior-comments',
     log,
     timeoutMs,
+    onTokenUsage,
     home,
   );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
@@ -181,7 +186,6 @@ export async function runCommandCodeGuidelineComplianceCheck(
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
 ): Promise<Finding[]> {
-  void onTokenUsage;
   const raw = await runCommandCodePrompt(
     workspace,
     model,
@@ -189,6 +193,7 @@ export async function runCommandCodeGuidelineComplianceCheck(
     'guideline-compliance',
     log,
     timeoutMs,
+    onTokenUsage,
     home,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
@@ -204,7 +209,6 @@ export async function runCommandCodeChangesSinceLastReview(
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
 ): Promise<string> {
-  void onTokenUsage;
   const raw = await runCommandCodePrompt(
     workspace,
     model,
@@ -212,6 +216,7 @@ export async function runCommandCodeChangesSinceLastReview(
     'changes-since-last-review',
     log,
     timeoutMs,
+    onTokenUsage,
     home,
   );
   return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
@@ -227,7 +232,6 @@ export async function runCommandCodeFindingVerification(
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
 ): Promise<FindingVerdict[] | undefined> {
-  void onTokenUsage;
   const raw = await runCommandCodePrompt(
     workspace,
     model,
@@ -235,6 +239,7 @@ export async function runCommandCodeFindingVerification(
     'finding-verification',
     log,
     timeoutMs,
+    onTokenUsage,
     home,
   );
   return parseFindingVerdicts(raw, findings.length, log);
@@ -297,6 +302,90 @@ export function classifyCommandCodePromptFailure(
   return undefined;
 }
 
+function parseCommandCodeUsage(value: unknown): PromptTokenUsage | undefined {
+  if (!isRecord(value)) return undefined;
+  const fields = [
+    value.inputTokens,
+    value.outputTokens,
+    value.cacheReadTokens,
+    value.cacheWriteTokens,
+  ];
+  if (!fields.every((field) => isFiniteNumber(field) && field >= 0)) return undefined;
+  const [input, output, cacheRead, cacheWrite] = fields as number[];
+  return { input, output, reasoning: 0, cacheRead, cacheWrite };
+}
+
+export function parseCommandCodeJsonOutput(output: string): {
+  finalText: string;
+  sessionId?: string;
+  usage?: PromptTokenUsage;
+} {
+  let result: Record<string, unknown> | undefined;
+  for (const rawLine of output.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    let frame: unknown;
+    try {
+      frame = JSON.parse(line);
+    } catch {
+      throw new Error(`CommandCode returned invalid JSON output: ${truncateForLog(line, 1000)}`);
+    }
+    if (isRecord(frame) && frame.type === 'result') result = frame;
+  }
+  if (!result) throw new Error('CommandCode JSON output contained no result frame');
+  if (result.subtype !== 'success') {
+    throw new Error(`CommandCode JSON result was ${String(result.subtype ?? 'unknown')}`);
+  }
+  if (typeof result.finalText !== 'string') {
+    throw new Error('CommandCode JSON result contained no finalText');
+  }
+  const usage = parseCommandCodeUsage(result.usage);
+  return {
+    finalText: result.finalText,
+    ...(typeof result.sessionId === 'string' ? { sessionId: result.sessionId } : {}),
+    ...(usage ? { usage } : {}),
+  };
+}
+
+export function parseCommandCodeSessionEstimatedCost(jsonl: string): number | undefined {
+  let total: number | undefined;
+  for (const line of jsonl.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const entry: unknown = JSON.parse(line);
+      if (
+        !isRecord(entry) ||
+        entry.type !== 'message' ||
+        !isRecord(entry.message) ||
+        entry.message.role !== 'assistant' ||
+        !isRecord(entry.usage)
+      ) {
+        continue;
+      }
+      const cost = entry.usage.costUsd;
+      if (isFiniteNumber(cost) && cost >= 0) total = (total ?? 0) + cost;
+    } catch {
+      continue;
+    }
+  }
+  return total;
+}
+
+function commandCodeSessionEstimatedCost(home: string, sessionId: string): number | undefined {
+  try {
+    const root = join(home, '.commandcode', 'projects');
+    const filename = `${sessionId}.jsonl`;
+    const relative = readdirSync(root, { recursive: true, encoding: 'utf8' }).find(
+      (entry) => basename(entry) === filename,
+    );
+    return relative
+      ? parseCommandCodeSessionEstimatedCost(readFileSync(join(root, relative), 'utf8'))
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function runCommandCodePrompt(
   workspace: string,
   model: string,
@@ -304,6 +393,7 @@ async function runCommandCodePrompt(
   label: string,
   log: (msg: string) => void,
   timeoutMs = COMMANDCODE_PROMPT_TIMEOUT_MS,
+  onTokenUsage?: TokenUsageRecorder,
   home?: string,
 ): Promise<string> {
   const args = buildCommandCodeCliArgs({ model });
@@ -320,10 +410,29 @@ async function runCommandCodePrompt(
       formatCommandCodePromptFailure(label, result.exitCode, result.stderr || result.stdout),
     );
   }
+  const parsed = parseCommandCodeJsonOutput(result.stdout);
+  const estimatedCostUsd =
+    home && parsed.sessionId ? commandCodeSessionEstimatedCost(home, parsed.sessionId) : undefined;
+  const usage = parsed.usage
+    ? {
+        ...parsed.usage,
+        ...(isFiniteNumber(estimatedCostUsd) ? { estimatedCostUsd } : {}),
+      }
+    : undefined;
+  if (usage) {
+    log(
+      `${label} tokens: input=${usage.input} output=${usage.output} reasoning=${usage.reasoning} cache(read=${usage.cacheRead} write=${usage.cacheWrite})${
+        isFiniteNumber(usage.estimatedCostUsd)
+          ? ` estimated-cost=$${usage.estimatedCostUsd.toFixed(4)}`
+          : ''
+      }`,
+    );
+    onTokenUsage?.(usage, model, label);
+  }
   log(
-    `${label} prompt complete via commandcode: stdout=${result.stdout.length} chars stderr=${result.stderr.length} chars`,
+    `${label} prompt complete via commandcode: result=${parsed.finalText.length} chars stderr=${result.stderr.length} chars`,
   );
-  return result.stdout;
+  return parsed.finalText;
 }
 
 function formatCommandCodePromptFailure(

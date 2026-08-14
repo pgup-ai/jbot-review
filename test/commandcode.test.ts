@@ -11,7 +11,9 @@ import {
   commandCodeAuthPath,
   formatCommandCodePromptTimeoutMessage,
   isCommandCodeProvider,
+  parseCommandCodeJsonOutput,
   parseCommandCodeModelList,
+  parseCommandCodeSessionEstimatedCost,
   writeCommandCodeAuth,
 } from '../src/shared/commandcode.ts';
 import { truncateUtf8WithNotice } from '../src/shared/prompt.ts';
@@ -42,6 +44,8 @@ describe('CommandCode CLI provider helpers', () => {
       '--trust',
       '--skip-onboarding',
       '--no-auto-update',
+      '--output-format',
+      'json',
       '--permission-mode',
       'plan',
       '--max-turns',
@@ -55,6 +59,8 @@ describe('CommandCode CLI provider helpers', () => {
       '--trust',
       '--skip-onboarding',
       '--no-auto-update',
+      '--output-format',
+      'json',
       '--permission-mode',
       'plan',
       '--max-turns',
@@ -116,6 +122,78 @@ describe('CommandCode CLI provider helpers', () => {
       ),
       ['zai-org/GLM-5.2', 'Qwen/Qwen3.7-Max', 'gpt-5.5'],
     );
+  });
+
+  it('parses final text and token totals from CommandCode NDJSON output', () => {
+    const result = parseCommandCodeJsonOutput(
+      [
+        JSON.stringify({ type: 'event', event: { type: 'tool_running' } }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          sessionId: 'session-1',
+          usage: {
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheReadTokens: 30,
+            cacheWriteTokens: 40,
+          },
+          durationMs: 1000,
+          finalText: '{"summary":"ok","findings":[]}',
+        }),
+      ].join('\n'),
+    );
+
+    assert.deepEqual(result, {
+      finalText: '{"summary":"ok","findings":[]}',
+      sessionId: 'session-1',
+      usage: { input: 100, output: 20, reasoning: 0, cacheRead: 30, cacheWrite: 40 },
+    });
+  });
+
+  it('keeps a successful CommandCode result when usage is unavailable', () => {
+    assert.deepEqual(
+      parseCommandCodeJsonOutput(
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          usage: { inputTokens: 1 },
+          finalText: 'ok',
+        }),
+      ),
+      { finalText: 'ok' },
+    );
+  });
+
+  it('rejects CommandCode output without a successful result frame', () => {
+    assert.throws(
+      () =>
+        parseCommandCodeJsonOutput(
+          JSON.stringify({ type: 'result', subtype: 'error', finalText: '' }),
+        ),
+      /CommandCode JSON result was error/,
+    );
+    assert.throws(
+      () => parseCommandCodeJsonOutput(JSON.stringify({ type: 'event', event: {} })),
+      /contained no result frame/,
+    );
+  });
+
+  it('sums locally estimated costs from CommandCode session entries', () => {
+    assert.equal(
+      parseCommandCodeSessionEstimatedCost(
+        [
+          '{"type":"header"}',
+          '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":0.125}}',
+          'corrupt line',
+          '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":0.375}}',
+          '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":-1}}',
+          '{"type":"message","message":{"role":"user"},"usage":{"costUsd":10}}',
+        ].join('\n'),
+      ),
+      0.5,
+    );
+    assert.equal(parseCommandCodeSessionEstimatedCost('{"type":"header"}'), undefined);
   });
 
   it('classifies CommandCode rate-limit failures from CLI output', () => {

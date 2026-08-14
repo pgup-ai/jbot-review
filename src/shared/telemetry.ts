@@ -43,6 +43,7 @@ export interface SessionTelemetryRow {
   reasoningTokens?: number;
   cacheReadTokens?: number;
   costUsd?: number;
+  estimatedCostUsd?: number;
 }
 
 /**

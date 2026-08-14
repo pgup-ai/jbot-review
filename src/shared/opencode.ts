@@ -245,6 +245,7 @@ export interface PromptTokenUsage {
   cacheRead: number;
   cacheWrite: number;
   costUsd?: number;
+  estimatedCostUsd?: number;
   creditCost?: number;
   acuCost?: number;
 }
