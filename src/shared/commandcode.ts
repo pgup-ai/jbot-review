@@ -1,6 +1,8 @@
-import { chmodSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, createReadStream, mkdirSync, writeFileSync } from 'node:fs';
+import { opendir } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 
 import { parseModelName } from '@symma/protocol';
 import {
@@ -350,40 +352,56 @@ export function parseCommandCodeJsonOutput(output: string): {
 export function parseCommandCodeSessionEstimatedCost(jsonl: string): number | undefined {
   let total: number | undefined;
   for (const line of jsonl.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    try {
-      const entry: unknown = JSON.parse(line);
-      if (
-        !isRecord(entry) ||
-        entry.type !== 'message' ||
-        !isRecord(entry.message) ||
-        entry.message.role !== 'assistant' ||
-        !isRecord(entry.usage)
-      ) {
-        continue;
-      }
-      const cost = entry.usage.costUsd;
-      if (isFiniteNumber(cost) && cost >= 0) total = (total ?? 0) + cost;
-    } catch {
-      continue;
-    }
+    const cost = parseCommandCodeSessionEntryEstimatedCost(line);
+    if (cost !== undefined) total = (total ?? 0) + cost;
   }
   return total;
 }
 
-export function commandCodeSessionEstimatedCost(
+function parseCommandCodeSessionEntryEstimatedCost(line: string): number | undefined {
+  if (!line.trim()) return undefined;
+  try {
+    const entry: unknown = JSON.parse(line);
+    if (
+      !isRecord(entry) ||
+      entry.type !== 'message' ||
+      !isRecord(entry.message) ||
+      entry.message.role !== 'assistant' ||
+      !isRecord(entry.usage)
+    ) {
+      return undefined;
+    }
+    const cost = entry.usage.costUsd;
+    return isFiniteNumber(cost) && cost >= 0 ? cost : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function commandCodeSessionEstimatedCost(
   home: string,
   sessionId: string,
-): number | undefined {
+): Promise<number | undefined> {
   try {
     const root = join(home, '.commandcode', 'projects');
     const filename = `${sessionId}.jsonl`;
-    const relative = readdirSync(root, { recursive: true, encoding: 'utf8' }).find(
-      (entry) => basename(entry) === filename,
-    );
-    return relative
-      ? parseCommandCodeSessionEstimatedCost(readFileSync(join(root, relative), 'utf8'))
-      : undefined;
+    const directory = await opendir(root, { recursive: true });
+    let transcript: string | undefined;
+    for await (const entry of directory) {
+      if (entry.isFile() && entry.name === filename) {
+        transcript = join(entry.parentPath, entry.name);
+        break;
+      }
+    }
+    if (!transcript) return undefined;
+
+    let total: number | undefined;
+    const lines = createInterface({ input: createReadStream(transcript), crlfDelay: Infinity });
+    for await (const line of lines) {
+      const cost = parseCommandCodeSessionEntryEstimatedCost(line);
+      if (cost !== undefined) total = (total ?? 0) + cost;
+    }
+    return total;
   } catch {
     return undefined;
   }
@@ -415,7 +433,9 @@ async function runCommandCodePrompt(
   }
   const parsed = parseCommandCodeJsonOutput(result.stdout);
   const estimatedCostUsd =
-    home && parsed.sessionId ? commandCodeSessionEstimatedCost(home, parsed.sessionId) : undefined;
+    home && parsed.sessionId
+      ? await commandCodeSessionEstimatedCost(home, parsed.sessionId)
+      : undefined;
   const usage = parsed.usage
     ? {
         ...parsed.usage,

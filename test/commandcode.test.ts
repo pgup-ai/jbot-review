@@ -197,19 +197,25 @@ describe('CommandCode CLI provider helpers', () => {
     assert.equal(parseCommandCodeSessionEstimatedCost('{"type":"header"}'), undefined);
   });
 
-  it('discovers a nested session transcript and fails open when it is absent', () => {
+  it('discovers a nested session transcript and fails open when it is absent', async () => {
     const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
     try {
       const sessions = join(home, '.commandcode', 'projects', 'repo');
       mkdirSync(sessions, { recursive: true });
       writeFileSync(
         join(sessions, 'session-1.jsonl'),
-        '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":0.5}}',
+        [
+          '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":0.2}}',
+          '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":0.3}}',
+        ].join('\n'),
       );
 
-      assert.equal(commandCodeSessionEstimatedCost(home, 'session-1'), 0.5);
-      assert.equal(commandCodeSessionEstimatedCost(home, 'missing'), undefined);
-      assert.equal(commandCodeSessionEstimatedCost(join(home, 'missing'), 'session-1'), undefined);
+      assert.equal(await commandCodeSessionEstimatedCost(home, 'session-1'), 0.5);
+      assert.equal(await commandCodeSessionEstimatedCost(home, 'missing'), undefined);
+      assert.equal(
+        await commandCodeSessionEstimatedCost(join(home, 'missing'), 'session-1'),
+        undefined,
+      );
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
