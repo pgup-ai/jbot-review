@@ -12,6 +12,7 @@ import {
 } from '@symma/protocol';
 import {
   buildDevinCliArgs,
+  buildDevinCliConfig,
   devinEnvForHome,
   parseDevinCliOutput,
 } from '../src/shared/devin-cli.ts';
@@ -102,11 +103,25 @@ describe('Devin CLI provider helpers', () => {
       response: '{"summary":"ok"}',
       setupOnly: false,
     });
+  });
 
-    const env = devinEnvForHome('/tmp/devin-home');
-    assert.equal(env.HOME, '/tmp/devin-home');
-    assert.equal(env.XDG_CONFIG_HOME, undefined);
-    assert.equal(env.XDG_DATA_HOME, undefined);
+  it('isolates the Devin child environment and disables background updates', () => {
+    assert.equal(buildDevinCliConfig().auto_update, false);
+    const saved = { ...process.env };
+    try {
+      process.env.DEVIN_TEST_TOKEN = 'secret';
+      process.env.INPUT_DEVIN_TEST = 'secret';
+      process.env.DEVIN_TEST_SAFE = 'kept';
+      const env = devinEnvForHome('/tmp/devin-home');
+      assert.equal(env.HOME, '/tmp/devin-home');
+      assert.equal(env.DEVIN_TEST_TOKEN, undefined);
+      assert.equal(env.INPUT_DEVIN_TEST, undefined);
+      assert.equal(env.DEVIN_TEST_SAFE, 'kept');
+      assert.equal(env.XDG_CONFIG_HOME, undefined);
+      assert.equal(env.XDG_DATA_HOME, undefined);
+    } finally {
+      process.env = saved;
+    }
   });
 
   it('truncates repair context by bytes with an omission notice', () => {

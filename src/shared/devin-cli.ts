@@ -24,6 +24,7 @@ import {
   parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,
   parseReview,
+  sessionEnvDenyKeys,
 } from './opencode.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 
@@ -47,6 +48,10 @@ export function buildDevinCliArgs(model: string, promptFile: string, configFile:
   if (modelID !== 'default') args.push('--model', modelID);
   args.push('-p');
   return args;
+}
+
+export function buildDevinCliConfig() {
+  return { ...buildDevinReadOnlyConfig(), auto_update: false };
 }
 
 export function parseDevinCliOutput(output: string): { response: string; setupOnly: boolean } {
@@ -92,7 +97,7 @@ async function runDevinPrompt(
   try {
     writeDevinCredentials(apiKey, dir);
     writeFileSync(promptFile, prompt, { mode: 0o600 });
-    writeFileSync(configFile, JSON.stringify(buildDevinReadOnlyConfig()), { mode: 0o600 });
+    writeFileSync(configFile, JSON.stringify(buildDevinCliConfig()), { mode: 0o600 });
     log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
     for (let attempt = 0; ; attempt += 1) {
       const result = await spawnWithTimeout(
@@ -133,6 +138,7 @@ async function runDevinPrompt(
 
 export function devinEnvForHome(home: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+  for (const key of sessionEnvDenyKeys(Object.keys(env))) delete env[key];
   delete env.XDG_CONFIG_HOME;
   delete env.XDG_DATA_HOME;
   return env;

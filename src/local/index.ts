@@ -239,7 +239,7 @@ const INSTALL_HINTS: Record<string, string> = {
   [GROK_CLI_BIN]: 'npm i -g @xai-official/grok',
   [KILO_CLI_BIN]: 'npm i -g @kilocode/cli',
   [CURSOR_CLI_BIN]: 'curl -fsSL https://cursor.com/install | sh',
-  [DEVIN_CLI_BIN]: 'curl -fsSL https://cli.devin.ai/install.sh | sh',
+  [DEVIN_CLI_BIN]: 'curl -fsSL https://static.devin.ai/cli/3000.4.25/setup.sh | sh',
 };
 
 /** The runner writes telemetry under the workspace, which is the throwaway
