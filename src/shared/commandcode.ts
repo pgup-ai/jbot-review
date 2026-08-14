@@ -397,15 +397,6 @@ export function parseCommandCodeJsonOutput(output: string): {
   };
 }
 
-export function parseCommandCodeSessionEstimatedCost(jsonl: string): number | undefined {
-  let total: number | undefined;
-  for (const line of jsonl.split(/\r?\n/)) {
-    const cost = parseCommandCodeSessionEntryEstimatedCost(line);
-    if (cost !== undefined) total = (total ?? 0) + cost;
-  }
-  return total;
-}
-
 function parseCommandCodeSessionEntryEstimatedCost(line: string): number | undefined {
   if (!line.trim()) return undefined;
   try {

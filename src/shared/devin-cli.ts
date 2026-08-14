@@ -6,6 +6,7 @@ import {
   buildDevinReadOnlyConfig,
   DEVIN_CLI_BIN,
   DEVIN_PROVIDER_ID,
+  onFatalSignal,
   parseModelName,
   spawnWithTimeout,
   truncateForLog,
@@ -92,6 +93,7 @@ async function runDevinPrompt(
   timeoutMs = DEVIN_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 'jbot-devin-session-'));
+  const unregister = onFatalSignal(() => rmSync(dir, { recursive: true, force: true }));
   const promptFile = join(dir, 'prompt.txt');
   const configFile = join(dir, 'config.json');
   try {
@@ -132,6 +134,7 @@ async function runDevinPrompt(
       return output.response;
     }
   } finally {
+    unregister();
     rmSync(dir, { recursive: true, force: true });
   }
 }

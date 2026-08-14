@@ -112,6 +112,8 @@ describe('Devin CLI provider helpers', () => {
       process.env.DEVIN_TEST_TOKEN = 'secret';
       process.env.INPUT_DEVIN_TEST = 'secret';
       process.env.DEVIN_TEST_SAFE = 'kept';
+      process.env.XDG_CONFIG_HOME = '/tmp/ambient-config';
+      process.env.XDG_DATA_HOME = '/tmp/ambient-data';
       const env = devinEnvForHome('/tmp/devin-home');
       assert.equal(env.HOME, '/tmp/devin-home');
       assert.equal(env.DEVIN_TEST_TOKEN, undefined);

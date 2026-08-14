@@ -14,7 +14,6 @@ import {
   isCommandCodeProvider,
   parseCommandCodeJsonOutput,
   parseCommandCodeModelList,
-  parseCommandCodeSessionEstimatedCost,
   writeCommandCodeAuth,
 } from '../src/shared/commandcode.ts';
 import { truncateUtf8WithNotice } from '../src/shared/prompt.ts';
@@ -201,23 +200,6 @@ describe('CommandCode CLI provider helpers', () => {
     );
   });
 
-  it('sums locally estimated costs from CommandCode session entries', () => {
-    assert.equal(
-      parseCommandCodeSessionEstimatedCost(
-        [
-          '{"type":"header"}',
-          '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":0.125}}',
-          'corrupt line',
-          '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":0.375}}',
-          '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":-1}}',
-          '{"type":"message","message":{"role":"user"},"usage":{"costUsd":10}}',
-        ].join('\n'),
-      ),
-      0.5,
-    );
-    assert.equal(parseCommandCodeSessionEstimatedCost('{"type":"header"}'), undefined);
-  });
-
   it('discovers a nested session transcript and fails open when it is absent', async () => {
     const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
     try {
@@ -226,8 +208,12 @@ describe('CommandCode CLI provider helpers', () => {
       writeFileSync(
         join(sessions, 'session-1.jsonl'),
         [
+          '{"type":"header"}',
           '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":0.2}}',
+          'corrupt line',
           '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":0.3}}',
+          '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":-1}}',
+          '{"type":"message","message":{"role":"user"},"usage":{"costUsd":10}}',
         ].join('\n'),
       );
 
