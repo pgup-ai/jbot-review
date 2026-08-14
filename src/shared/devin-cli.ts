@@ -78,6 +78,7 @@ export function parseDevinCliOutput(output: string): { response: string; setupOn
 
 async function runDevinPrompt(
   workspace: string,
+  home: string,
   model: string,
   prompt: string,
   label: string,
@@ -97,6 +98,7 @@ async function runDevinPrompt(
         buildDevinCliArgs(model, promptFile, configFile),
         {
           cwd: workspace,
+          env: devinEnvForHome(home),
           timeoutMs,
           timeoutMessage: `devin ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s`,
         },
@@ -127,7 +129,14 @@ async function runDevinPrompt(
   }
 }
 
-export function createDevinCliBackend(workspace: string): ReviewBackend {
+export function devinEnvForHome(home: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+  delete env.XDG_CONFIG_HOME;
+  delete env.XDG_DATA_HOME;
+  return env;
+}
+
+export function createDevinCliBackend(workspace: string, home: string): ReviewBackend {
   return {
     name: DEVIN_PROVIDER_ID,
     async runReview(model, prContext, guidelines, log, options = {}) {
@@ -141,7 +150,15 @@ export function createDevinCliBackend(workspace: string): ReviewBackend {
       log(
         `Prompt assembled (${label}, devin-cli): ${prompt.length} chars, guidelines=${!!guidelines}`,
       );
-      const raw = await runDevinPrompt(workspace, model, prompt, label, log, options.timeoutMs);
+      const raw = await runDevinPrompt(
+        workspace,
+        home,
+        model,
+        prompt,
+        label,
+        log,
+        options.timeoutMs,
+      );
       try {
         return parseReview(raw, label, log, { strict: true });
       } catch (error) {
@@ -149,6 +166,7 @@ export function createDevinCliBackend(workspace: string): ReviewBackend {
         log(`${label} response unparseable; sending one JSON repair prompt via devin: ${message}`);
         const repaired = await runDevinPrompt(
           workspace,
+          home,
           model,
           buildJsonRepairFollowupPrompt({
             originalPrompt: prompt,
@@ -167,6 +185,7 @@ export function createDevinCliBackend(workspace: string): ReviewBackend {
     async runAddressedPriorCommentsCheck(model, prContext, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
+        home,
         model,
         assembleAddressedPriorCommentsPrompt(prContext),
         'addressed-prior-comments',
@@ -178,6 +197,7 @@ export function createDevinCliBackend(workspace: string): ReviewBackend {
     async runGuidelineComplianceCheck(model, prContext, guidelines, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
+        home,
         model,
         assembleGuidelineCompliancePrompt(prContext, guidelines),
         'guideline-compliance',
@@ -189,6 +209,7 @@ export function createDevinCliBackend(workspace: string): ReviewBackend {
     async runFindingVerification(model, prContext, findings, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
+        home,
         model,
         assembleFindingVerificationPrompt(prContext, findings),
         'finding-verification',
@@ -200,6 +221,7 @@ export function createDevinCliBackend(workspace: string): ReviewBackend {
     async runChangesSinceLastReview(model, prContext, deltaContext, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
+        home,
         model,
         assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
         'changes-since-last-review',

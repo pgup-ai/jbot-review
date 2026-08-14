@@ -10,7 +10,11 @@ import {
   isDevinProvider,
   writeDevinCredentials,
 } from '@symma/protocol';
-import { buildDevinCliArgs, parseDevinCliOutput } from '../src/shared/devin-cli.ts';
+import {
+  buildDevinCliArgs,
+  devinEnvForHome,
+  parseDevinCliOutput,
+} from '../src/shared/devin-cli.ts';
 import { truncateUtf8WithNotice } from '../src/shared/prompt.ts';
 
 describe('Devin CLI provider helpers', () => {
@@ -98,6 +102,11 @@ describe('Devin CLI provider helpers', () => {
       response: '{"summary":"ok"}',
       setupOnly: false,
     });
+
+    const env = devinEnvForHome('/tmp/devin-home');
+    assert.equal(env.HOME, '/tmp/devin-home');
+    assert.equal(env.XDG_CONFIG_HOME, undefined);
+    assert.equal(env.XDG_DATA_HOME, undefined);
   });
 
   it('truncates repair context by bytes with an omission notice', () => {
