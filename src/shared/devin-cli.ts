@@ -9,6 +9,7 @@ import {
   parseModelName,
   spawnWithTimeout,
   truncateForLog,
+  writeDevinCredentials,
 } from '@symma/protocol';
 
 import {
@@ -78,7 +79,7 @@ export function parseDevinCliOutput(output: string): { response: string; setupOn
 
 async function runDevinPrompt(
   workspace: string,
-  home: string,
+  apiKey: string,
   model: string,
   prompt: string,
   label: string,
@@ -88,17 +89,18 @@ async function runDevinPrompt(
   const dir = mkdtempSync(join(tmpdir(), 'jbot-devin-session-'));
   const promptFile = join(dir, 'prompt.txt');
   const configFile = join(dir, 'config.json');
-  writeFileSync(promptFile, prompt, { mode: 0o600 });
-  writeFileSync(configFile, JSON.stringify(buildDevinReadOnlyConfig()), { mode: 0o600 });
-  log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
   try {
+    writeDevinCredentials(apiKey, dir);
+    writeFileSync(promptFile, prompt, { mode: 0o600 });
+    writeFileSync(configFile, JSON.stringify(buildDevinReadOnlyConfig()), { mode: 0o600 });
+    log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
     for (let attempt = 0; ; attempt += 1) {
       const result = await spawnWithTimeout(
         DEVIN_CLI_BIN,
         buildDevinCliArgs(model, promptFile, configFile),
         {
           cwd: workspace,
-          env: devinEnvForHome(home),
+          env: devinEnvForHome(dir),
           timeoutMs,
           timeoutMessage: `devin ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s`,
         },
@@ -136,7 +138,7 @@ export function devinEnvForHome(home: string): NodeJS.ProcessEnv {
   return env;
 }
 
-export function createDevinCliBackend(workspace: string, home: string): ReviewBackend {
+export function createDevinCliBackend(workspace: string, apiKey: string): ReviewBackend {
   return {
     name: DEVIN_PROVIDER_ID,
     async runReview(model, prContext, guidelines, log, options = {}) {
@@ -152,7 +154,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
       );
       const raw = await runDevinPrompt(
         workspace,
-        home,
+        apiKey,
         model,
         prompt,
         label,
@@ -166,7 +168,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
         log(`${label} response unparseable; sending one JSON repair prompt via devin: ${message}`);
         const repaired = await runDevinPrompt(
           workspace,
-          home,
+          apiKey,
           model,
           buildJsonRepairFollowupPrompt({
             originalPrompt: prompt,
@@ -185,7 +187,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
     async runAddressedPriorCommentsCheck(model, prContext, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
-        home,
+        apiKey,
         model,
         assembleAddressedPriorCommentsPrompt(prContext),
         'addressed-prior-comments',
@@ -197,7 +199,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
     async runGuidelineComplianceCheck(model, prContext, guidelines, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
-        home,
+        apiKey,
         model,
         assembleGuidelineCompliancePrompt(prContext, guidelines),
         'guideline-compliance',
@@ -209,7 +211,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
     async runFindingVerification(model, prContext, findings, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
-        home,
+        apiKey,
         model,
         assembleFindingVerificationPrompt(prContext, findings),
         'finding-verification',
@@ -221,7 +223,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
     async runChangesSinceLastReview(model, prContext, deltaContext, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
-        home,
+        apiKey,
         model,
         assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
         'changes-since-last-review',
