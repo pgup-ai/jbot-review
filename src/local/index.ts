@@ -310,9 +310,8 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   // The companion checks out repo@ref, and both are optional. With neither it
   // works in an empty workspace, so the worktree diff stands — there is nothing
   // to align with. With both, the diff has to describe that same commit.
-  const gateway = remoteAcpConfigFromEnv();
   const routed =
-    !preview && gateway && gatewayRoutedModels([model, auxModel]) ? gateway : undefined;
+    !preview && gatewayRoutedModels([model, auxModel]) ? remoteAcpConfigFromEnv() : undefined;
   if (routed?.repo && !routed.ref) {
     throw new Error(
       'JBOT_ACP_GATEWAY_REPO is set without JBOT_ACP_GATEWAY_REF: the companion would review a ' +

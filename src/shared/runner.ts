@@ -1217,17 +1217,17 @@ async function runReviewPipeline(params: {
   // honor one global cap. Disable opencode's older process-global limiter to
   // avoid double-limiting OpenCode sessions inside this runner path.
   configureSessionConcurrency(0);
-  const remoteAcp = remoteAcpConfigFromEnv();
-  // Fail before any model spend if the endpoint can't serve this run, and cap
-  // sessions at what the companion accepts — its limit is typically lower than
-  // jbot's, and the excess would be refused mid-review.
-  let sessionCap = options.maxConcurrentSessions;
   // Only the selected providers the gateway actually serves; a gateway
   // configured alongside an opencode/pi/other-CLI run must not touch it.
   const routedAgents = [...new Set([mainCliBackend, auxCliBackend])].filter(
     (id): id is CliBackendID =>
       Boolean(id) && (ACP_GATEWAY_PROVIDERS as readonly string[]).includes(id as string),
   );
+  const remoteAcp = routedAgents.length > 0 ? remoteAcpConfigFromEnv() : undefined;
+  // Fail before any model spend if the endpoint can't serve this run, and cap
+  // sessions at what the companion accepts — its limit is typically lower than
+  // jbot's, and the excess would be refused mid-review.
+  let sessionCap = options.maxConcurrentSessions;
   if (remoteAcp && routedAgents.length > 0) {
     for (const agent of routedAgents) {
       const { freeSessions } = await checkGatewayEndpointReady(remoteAcp, agent);
