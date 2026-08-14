@@ -43,7 +43,7 @@ import {
 } from './shard-cache.ts';
 import { closeObserver, reportRun, setRunName } from './observer.ts';
 import { createAcpBackend } from './acp.ts';
-import { codexAcpSpec, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from '@symma/protocol';
+import { codexAcpSpec, cursorAcpSpec, kiloAcpSpec } from '@symma/protocol';
 import {
   ACP_GATEWAY_PROVIDERS,
   createRemoteAcpBackend,
@@ -113,6 +113,7 @@ import {
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
 import { DEVIN_PROVIDER_ID, writeDevinCredentials } from '@symma/protocol';
+import { createDevinCliBackend } from './devin-cli.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
   listCommandCodeModels,
@@ -1324,7 +1325,8 @@ async function runReviewPipeline(params: {
     }
     const credentialsPath = writeDevinCredentials(devinApiKey);
     log(`Devin CLI credentials configured at ${credentialsPath}.`);
-    devinBackend = createAcpBackend(devinAcpSpec(), workspace);
+    log('Devin CLI token usage is unavailable for these sessions.');
+    devinBackend = createDevinCliBackend(workspace);
   }
 
   if (

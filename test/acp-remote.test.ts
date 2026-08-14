@@ -52,13 +52,16 @@ async function waitFor<T>(probe: () => Promise<T | undefined>, what: string): Pr
 }
 
 describe('remote acp backend', () => {
-  it('reads config only when fully specified', () => {
+  it('uses the gateway URL as the remote-routing switch', () => {
     const saved = { ...process.env };
     try {
       delete process.env.JBOT_ACP_GATEWAY_URL;
       assert.equal(remoteAcpConfigFromEnv(), undefined);
       process.env.JBOT_ACP_GATEWAY_URL = 'https://gw.example/';
-      assert.equal(remoteAcpConfigFromEnv(), undefined, 'token and endpoint still missing');
+      assert.throws(
+        () => remoteAcpConfigFromEnv(),
+        /also set JBOT_ACP_GATEWAY_TOKEN and JBOT_ACP_GATEWAY_ENDPOINT/,
+      );
       process.env.JBOT_ACP_GATEWAY_TOKEN = 't';
       process.env.JBOT_ACP_GATEWAY_ENDPOINT = 'laptop';
       process.env.JBOT_ACP_GATEWAY_RUN = 'pr/42 run';

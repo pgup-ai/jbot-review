@@ -128,6 +128,7 @@ describe('CommandCode CLI provider helpers', () => {
   it('parses final text and token totals from CommandCode NDJSON output', () => {
     const result = parseCommandCodeJsonOutput(
       [
+        '{"type":"event","event":',
         JSON.stringify({ type: 'event', event: { type: 'tool_running' } }),
         JSON.stringify({
           type: 'result',

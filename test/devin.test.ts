@@ -10,6 +10,7 @@ import {
   isDevinProvider,
   writeDevinCredentials,
 } from '@symma/protocol';
+import { buildDevinCliArgs, parseDevinCliOutput } from '../src/shared/devin-cli.ts';
 import { truncateUtf8WithNotice } from '../src/shared/prompt.ts';
 
 describe('Devin CLI provider helpers', () => {
@@ -61,6 +62,38 @@ describe('Devin CLI provider helpers', () => {
         deny: ['edit', 'write', 'Write(**)', 'Write(/**)'],
       },
     });
+  });
+
+  it('runs Devin headlessly in its sandbox with the selected model', () => {
+    assert.deepEqual(buildDevinCliArgs('devin/swe-1.7', '/tmp/prompt', '/tmp/config'), [
+      '--sandbox',
+      '--respect-workspace-trust',
+      'false',
+      '--permission-mode',
+      'auto',
+      '--config',
+      '/tmp/config',
+      '--prompt-file',
+      '/tmp/prompt',
+      '--model',
+      'swe-1.7',
+      '-p',
+    ]);
+    assert.equal(
+      buildDevinCliArgs('devin/default', '/tmp/prompt', '/tmp/config').includes('--model'),
+      false,
+    );
+
+    assert.deepEqual(
+      parseDevinCliOutput(
+        "\u001b[1mWelcome to Devin CLI!\u001b[0m\nLogged in.\nYou're all set. Run devin.\nOK",
+      ),
+      { response: 'OK', setupOnly: false },
+    );
+    assert.deepEqual(
+      parseDevinCliOutput("Welcome to Devin CLI!\nLogged in.\nYou're all set. Run devin."),
+      { response: '', setupOnly: true },
+    );
   });
 
   it('truncates repair context by bytes with an omission notice', () => {

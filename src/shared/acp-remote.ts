@@ -49,13 +49,19 @@ export function gatewayRoutedModels(models: (string | undefined)[]): boolean {
   );
 }
 
-/** Present only when all three required vars are set; the agent comes from the
- * selected provider, so no separate agent var. */
+/** The gateway URL opts into remote ACP routing; its credentials are then required. */
 export function remoteAcpConfigFromEnv(): Omit<RemoteAcpConfig, 'agent'> | undefined {
   const gateway = process.env.JBOT_ACP_GATEWAY_URL?.trim();
+  if (!gateway) return undefined;
   const token = process.env.JBOT_ACP_GATEWAY_TOKEN?.trim();
   const endpoint = process.env.JBOT_ACP_GATEWAY_ENDPOINT?.trim();
-  if (!gateway || !token || !endpoint) return undefined;
+  if (!token || !endpoint) {
+    const missing = [
+      !token && 'JBOT_ACP_GATEWAY_TOKEN',
+      !endpoint && 'JBOT_ACP_GATEWAY_ENDPOINT',
+    ].filter(Boolean);
+    throw new Error(`JBOT_ACP_GATEWAY_URL enables ACP routing; also set ${missing.join(' and ')}.`);
+  }
   const rawRun =
     process.env.JBOT_ACP_GATEWAY_RUN?.trim() || process.env.JBOT_OBSERVER_RUN?.trim() || 'jbot';
   return {

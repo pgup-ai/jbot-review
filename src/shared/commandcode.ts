@@ -323,6 +323,7 @@ export function parseCommandCodeJsonOutput(output: string): {
   usage?: PromptTokenUsage;
 } {
   let result: Record<string, unknown> | undefined;
+  let invalidLine: string | undefined;
   for (const rawLine of output.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) continue;
@@ -330,11 +331,20 @@ export function parseCommandCodeJsonOutput(output: string): {
     try {
       frame = JSON.parse(line);
     } catch {
-      throw new Error(`CommandCode returned invalid JSON output: ${truncateForLog(line, 1000)}`);
+      invalidLine ??= line;
+      continue;
     }
-    if (isRecord(frame) && frame.type === 'result') result = frame;
+    if (!isRecord(frame)) continue;
+    if (frame.type === 'result') result = frame;
   }
-  if (!result) throw new Error('CommandCode JSON output contained no result frame');
+  if (!result) {
+    if (invalidLine) {
+      throw new Error(
+        `CommandCode returned invalid JSON output: ${truncateForLog(invalidLine, 1000)}`,
+      );
+    }
+    throw new Error('CommandCode JSON output contained no result frame');
+  }
   if (result.subtype !== 'success') {
     throw new Error(`CommandCode JSON result was ${String(result.subtype ?? 'unknown')}`);
   }
