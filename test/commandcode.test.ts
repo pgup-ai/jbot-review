@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -9,6 +9,7 @@ import {
   classifyCommandCodePromptFailure,
   commandCodeEnvForHome,
   commandCodeAuthPath,
+  commandCodeSessionEstimatedCost,
   formatCommandCodePromptTimeoutMessage,
   isCommandCodeProvider,
   parseCommandCodeJsonOutput,
@@ -194,6 +195,24 @@ describe('CommandCode CLI provider helpers', () => {
       0.5,
     );
     assert.equal(parseCommandCodeSessionEstimatedCost('{"type":"header"}'), undefined);
+  });
+
+  it('discovers a nested session transcript and fails open when it is absent', () => {
+    const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
+    try {
+      const sessions = join(home, '.commandcode', 'projects', 'repo');
+      mkdirSync(sessions, { recursive: true });
+      writeFileSync(
+        join(sessions, 'session-1.jsonl'),
+        '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":0.5}}',
+      );
+
+      assert.equal(commandCodeSessionEstimatedCost(home, 'session-1'), 0.5);
+      assert.equal(commandCodeSessionEstimatedCost(home, 'missing'), undefined);
+      assert.equal(commandCodeSessionEstimatedCost(join(home, 'missing'), 'session-1'), undefined);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('classifies CommandCode rate-limit failures from CLI output', () => {

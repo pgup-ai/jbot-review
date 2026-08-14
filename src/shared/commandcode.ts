@@ -371,7 +371,10 @@ export function parseCommandCodeSessionEstimatedCost(jsonl: string): number | un
   return total;
 }
 
-function commandCodeSessionEstimatedCost(home: string, sessionId: string): number | undefined {
+export function commandCodeSessionEstimatedCost(
+  home: string,
+  sessionId: string,
+): number | undefined {
   try {
     const root = join(home, '.commandcode', 'projects');
     const filename = `${sessionId}.jsonl`;
