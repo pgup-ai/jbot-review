@@ -33,6 +33,14 @@ const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const DEVIN_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const DEVIN_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 
+function removeDevinHome(dir: string, log: (msg: string) => void): void {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    log(`Could not remove isolated Devin home: ${String(error)}`);
+  }
+}
+
 export function buildDevinCliArgs(model: string, promptFile: string, configFile: string): string[] {
   const { modelID } = parseModelName(model);
   const args = [
@@ -93,7 +101,7 @@ async function runDevinPrompt(
   timeoutMs = DEVIN_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), 'jbot-devin-session-'));
-  const unregister = onFatalSignal(() => rmSync(dir, { recursive: true, force: true }));
+  const unregister = onFatalSignal(() => removeDevinHome(dir, log));
   const promptFile = join(dir, 'prompt.txt');
   const configFile = join(dir, 'config.json');
   try {
@@ -135,7 +143,7 @@ async function runDevinPrompt(
     }
   } finally {
     unregister();
-    rmSync(dir, { recursive: true, force: true });
+    removeDevinHome(dir, log);
   }
 }
 
