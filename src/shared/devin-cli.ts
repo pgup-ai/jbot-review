@@ -1,6 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify, stripVTControlCharacters } from 'node:util';
 
 import {
   buildDevinReadOnlyConfig,
@@ -20,6 +22,7 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
+  withDevinIsolatedWorkspace,
 } from './prompt.ts';
 import {
   parseChangesSinceLastReviewSummary,
@@ -32,6 +35,42 @@ import type { ReviewBackend } from './session-concurrency.ts';
 const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const DEVIN_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const DEVIN_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
+const execFileAsync = promisify(execFile);
+let linuxSandboxCheck: Promise<void> | undefined;
+
+async function ensureDevinSandboxAvailable(): Promise<void> {
+  if (process.platform !== 'linux') return;
+  linuxSandboxCheck ??= Promise.all([
+    execFileAsync(
+      'bwrap',
+      [
+        '--unshare-user',
+        '--uid',
+        '0',
+        '--gid',
+        '0',
+        '--ro-bind',
+        '/',
+        '/',
+        '--proc',
+        '/proc',
+        '--dev',
+        '/dev',
+        '/bin/true',
+      ],
+      { timeout: 5_000 },
+    ),
+    execFileAsync('socat', ['-V'], { timeout: 5_000 }),
+  ])
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      throw new Error(
+        'Devin CLI cannot start its Linux sandbox. Install bubblewrap and socat and enable unprivileged user namespaces; standard Docker actions require JBOT_ACP_GATEWAY_URL instead.',
+        { cause: error },
+      );
+    });
+  return linuxSandboxCheck;
+}
 
 function removeDevinHome(dir: string, log: (msg: string) => void): void {
   try {
@@ -59,25 +98,29 @@ export function buildDevinCliArgs(model: string, promptFile: string, configFile:
   return args;
 }
 
-export function buildDevinCliConfig() {
-  return { ...buildDevinReadOnlyConfig(), auto_update: false };
+export function buildDevinCliConfig(home: string) {
+  const config = buildDevinReadOnlyConfig();
+  return {
+    ...config,
+    permissions: {
+      ...config.permissions,
+      deny: [...config.permissions.deny, `Read(${home}/**)`],
+    },
+    read_config_from: {
+      agents_standard: false,
+      cursor: false,
+      windsurf: false,
+      claude: false,
+      opencode: false,
+      vscode: false,
+      zed: false,
+    },
+    auto_update: false,
+  };
 }
 
 export function parseDevinCliOutput(output: string): { response: string; setupOnly: boolean } {
-  let text = '';
-  for (let index = 0; index < output.length; index += 1) {
-    if (output.charCodeAt(index) !== 0x1b || output[index + 1] !== '[') {
-      text += output[index];
-      continue;
-    }
-    let end = index + 2;
-    while (end < output.length && output.charCodeAt(end) < 0x40) end += 1;
-    if (end >= output.length) {
-      text += output.slice(index);
-      break;
-    }
-    index = end;
-  }
+  const text = stripVTControlCharacters(output);
   const lines = text.split(/\r?\n/);
   if (lines[0]?.trim() !== 'Welcome to Devin CLI!') {
     return { response: text, setupOnly: false };
@@ -100,22 +143,40 @@ async function runDevinPrompt(
   log: (msg: string) => void,
   timeoutMs = DEVIN_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), 'jbot-devin-session-'));
-  const unregister = onFatalSignal(() => removeDevinHome(dir, log));
-  const promptFile = join(dir, 'prompt.txt');
-  const configFile = join(dir, 'config.json');
+  const root = mkdtempSync(join(tmpdir(), 'jbot-devin-session-'));
+  const unregister = onFatalSignal(() => removeDevinHome(root, log));
+  const home = join(root, 'home');
+  const sandboxWorkspace = join(root, 'sandbox');
+  const promptFile = join(home, 'prompt.txt');
+  const configFile = join(home, 'config.json');
   try {
-    writeDevinCredentials(apiKey, dir);
+    await ensureDevinSandboxAvailable();
+    mkdirSync(home, { mode: 0o700 });
+    mkdirSync(sandboxWorkspace, { mode: 0o700 });
+    symlinkSync(workspace, join(sandboxWorkspace, 'repository'), 'dir');
+    const { stdout: gitDirOutput } = await execFileAsync(
+      'git',
+      ['-C', workspace, 'rev-parse', '--absolute-git-dir'],
+      { timeout: 5_000, maxBuffer: 64 * 1024 },
+    );
+    const gitDir = gitDirOutput.trim();
+    if (!gitDir) throw new Error('Could not resolve the repository git directory for Devin.');
+    writeDevinCredentials(apiKey, home);
     writeFileSync(promptFile, prompt, { mode: 0o600 });
-    writeFileSync(configFile, JSON.stringify(buildDevinCliConfig()), { mode: 0o600 });
+    writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home)), { mode: 0o600 });
     log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
     for (let attempt = 0; ; attempt += 1) {
       const result = await spawnWithTimeout(
         DEVIN_CLI_BIN,
         buildDevinCliArgs(model, promptFile, configFile),
         {
-          cwd: workspace,
-          env: devinEnvForHome(dir),
+          cwd: sandboxWorkspace,
+          env: {
+            ...devinEnvForHome(home),
+            GIT_DIR: gitDir,
+            GIT_WORK_TREE: workspace,
+            GIT_OPTIONAL_LOCKS: '0',
+          },
           timeoutMs,
           timeoutMessage: `devin ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s`,
         },
@@ -143,7 +204,7 @@ async function runDevinPrompt(
     }
   } finally {
     unregister();
-    removeDevinHome(dir, log);
+    removeDevinHome(root, log);
   }
 }
 
@@ -161,7 +222,7 @@ export function createDevinCliBackend(workspace: string, apiKey: string): Review
     async runReview(model, prContext, guidelines, log, options = {}) {
       const label = options.label ?? 'review';
       const prompt = assembleReviewPrompt(
-        prContext,
+        withDevinIsolatedWorkspace(prContext),
         guidelines,
         options.lensAddendum ?? '',
         options.evidenceQuotes ?? false,
@@ -206,7 +267,7 @@ export function createDevinCliBackend(workspace: string, apiKey: string): Review
         workspace,
         apiKey,
         model,
-        assembleAddressedPriorCommentsPrompt(prContext),
+        assembleAddressedPriorCommentsPrompt(withDevinIsolatedWorkspace(prContext)),
         'addressed-prior-comments',
         log,
         timeoutMs,
@@ -218,7 +279,7 @@ export function createDevinCliBackend(workspace: string, apiKey: string): Review
         workspace,
         apiKey,
         model,
-        assembleGuidelineCompliancePrompt(prContext, guidelines),
+        assembleGuidelineCompliancePrompt(withDevinIsolatedWorkspace(prContext), guidelines),
         'guideline-compliance',
         log,
         timeoutMs,
@@ -230,7 +291,7 @@ export function createDevinCliBackend(workspace: string, apiKey: string): Review
         workspace,
         apiKey,
         model,
-        assembleFindingVerificationPrompt(prContext, findings),
+        assembleFindingVerificationPrompt(withDevinIsolatedWorkspace(prContext), findings),
         'finding-verification',
         log,
         timeoutMs,
@@ -242,7 +303,7 @@ export function createDevinCliBackend(workspace: string, apiKey: string): Review
         workspace,
         apiKey,
         model,
-        assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+        assembleChangesSinceLastReviewPrompt(withDevinIsolatedWorkspace(prContext), deltaContext),
         'changes-since-last-review',
         log,
         timeoutMs,

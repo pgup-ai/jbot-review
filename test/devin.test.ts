@@ -106,7 +106,16 @@ describe('Devin CLI provider helpers', () => {
   });
 
   it('isolates the Devin child environment and disables background updates', () => {
-    assert.equal(buildDevinCliConfig().auto_update, false);
+    const config = buildDevinCliConfig('/tmp/devin-home');
+    assert.equal(config.auto_update, false);
+    assert.deepEqual(config.permissions.deny, [
+      'edit',
+      'write',
+      'Write(**)',
+      'Write(/**)',
+      'Read(/tmp/devin-home/**)',
+    ]);
+    assert.deepEqual(Object.values(config.read_config_from), Array(7).fill(false));
     const saved = { ...process.env };
     try {
       process.env.DEVIN_TEST_TOKEN = 'secret';

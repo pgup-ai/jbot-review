@@ -2,8 +2,9 @@
 FROM node:24-slim
 
 # git: review shells out to it. curl: used by the provider installers below.
+# bubblewrap + socat: Devin CLI's Linux process sandbox.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git \
+  && apt-get install -y --no-install-recommends bubblewrap ca-certificates curl git socat \
   && rm -rf /var/lib/apt/lists/*
 
 # Retry npm fetches so a transient registry ECONNRESET doesn't fail the build.

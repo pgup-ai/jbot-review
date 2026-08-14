@@ -427,7 +427,11 @@ caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions
 only.
 
 **CLI and ACP routing.** Without `JBOT_ACP_GATEWAY_URL`, `devin` runs through
-its headless CLI with an OS sandbox and a temporary read-only permissions file.
+its headless CLI from an empty sandbox workspace, with the checkout exposed
+read-only and repository-controlled Devin configuration excluded.
+Linux direct mode requires working user namespaces in addition to `bubblewrap`
+and `socat`; standard Docker actions do not expose them, so use the ACP gateway
+for `devin` there.
 Setting that URL routes gateway-supported providers (`devin`, `cursor`,
 `codex`, `kilo`) to a remote companion over the
 [Agent Client Protocol](https://agentclientprotocol.com); the gateway token and

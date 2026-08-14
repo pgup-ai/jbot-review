@@ -30,7 +30,18 @@ import {
   buildShardAssignmentBlock,
   formatFindingsForVerification,
   selectLensKeys,
+  withDevinIsolatedWorkspace,
 } from '../src/shared/prompt.ts';
+
+describe('DEVIN_ISOLATED_WORKSPACE_CONTEXT', () => {
+  it('routes file reads through the isolated read-only checkout mount', () => {
+    const context = withDevinIsolatedWorkspace('PR-CONTEXT');
+    assert.equal(context.startsWith('PR-CONTEXT\n\n'), true);
+    assert.match(context, /repository-controlled agent configuration cannot load/);
+    assert.match(context, /read-only at `repository\/`/);
+    assert.match(context, /ordinary `git` commands already target that worktree\.$/);
+  });
+});
 
 describe('QODER_REVIEW_SYSTEM_PROMPT', () => {
   it('pins Qoder sessions to read-only repository review', () => {
