@@ -522,7 +522,8 @@ Use `provider: commandcode` with `commandcode-access-key` /
 `COMMANDCODE_ACCESS_KEY` for the CommandCode CLI backend. The Docker image
 includes the CommandCode CLI, but `.commandcode/auth.json` is written under an
 isolated temporary HOME only when the main or active auxiliary provider is
-`commandcode`, then removed after the run.
+`commandcode`, then removed after the run. Skill discovery and tools are disabled;
+reviews use the context and diff embedded by J-Bot.
 Use `provider: cursor` with `cursor-api-key` / `CURSOR_API_KEY` for the Cursor
 CLI backend. The Docker image includes the Cursor CLI (`cursor-agent`), which
 reads the key from the environment — no credential file — and runs read-only via

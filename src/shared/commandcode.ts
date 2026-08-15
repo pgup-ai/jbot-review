@@ -12,6 +12,7 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
+  NO_TOOLS_REVIEW_DIRECTIVE,
   type VerifiableFinding,
 } from './prompt.ts';
 import {
@@ -29,7 +30,7 @@ const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const COMMANDCODE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 const COMMANDCODE_MODEL_LIST_TIMEOUT_MS = 60_000;
-// Print mode defaults to 10; keep the wall-clock timeout as the practical bound.
+// Keep the wall-clock timeout as the practical bound for long reviews.
 const COMMANDCODE_MAX_TURNS = 1000;
 
 export const COMMANDCODE_PROVIDER_ID = 'commandcode';
@@ -48,6 +49,14 @@ export function commandCodeAuthPath(home = process.env.HOME || homedir()): strin
   return join(home, '.commandcode', 'auth.json');
 }
 
+function chmodCommandCodeFile(path: string): void {
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    /* best effort on filesystems that do not support chmod */
+  }
+}
+
 export function writeCommandCodeAuth(
   accessKey: string,
   home = process.env.HOME || homedir(),
@@ -62,11 +71,17 @@ export function writeCommandCodeAuth(
   const path = commandCodeAuthPath(home);
   mkdirSync(join(home, '.commandcode'), { recursive: true, mode: 0o700 });
   writeFileSync(path, `${JSON.stringify({ apiKey: key }, null, 2)}\n`, { mode: 0o600 });
-  try {
-    chmodSync(path, 0o600);
-  } catch {
-    /* best effort on filesystems that do not support chmod */
-  }
+  chmodCommandCodeFile(path);
+  return path;
+}
+
+export function writeCommandCodeReadOnlySettings(home: string): string {
+  const path = join(home, '.commandcode', 'settings.json');
+  mkdirSync(join(home, '.commandcode'), { recursive: true, mode: 0o700 });
+  writeFileSync(path, `${JSON.stringify({ permissions: { deny: ['*'] } }, null, 2)}\n`, {
+    mode: 0o600,
+  });
+  chmodCommandCodeFile(path);
   return path;
 }
 
@@ -82,6 +97,7 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
     // keeps the session read-only.
     '--trust',
     '--skip-onboarding',
+    '--no-skills',
     '--no-auto-update',
     '--output-format',
     'json',
@@ -92,6 +108,10 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
   ];
   if (modelID !== 'default') args.push('--model', modelID);
   return args;
+}
+
+export function buildCommandCodePrompt(prompt: string): string {
+  return `${NO_TOOLS_REVIEW_DIRECTIVE}\n\n${prompt}`;
 }
 
 export async function runCommandCodeReview(
@@ -460,7 +480,7 @@ async function runCommandCodePrompt(
   log(`Calling ${label} prompt (agent=commandcode-cli, model=${model})`);
   const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, args, {
     cwd: workspace,
-    input: prompt,
+    input: buildCommandCodePrompt(prompt),
     env: commandCodeEnvForHome(home),
     timeoutMs,
     timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),

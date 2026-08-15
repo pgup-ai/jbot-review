@@ -123,6 +123,7 @@ import {
   runCommandCodeChangesSinceLastReview,
   runCommandCodeReview,
   writeCommandCodeAuth,
+  writeCommandCodeReadOnlySettings,
 } from './commandcode.ts';
 import {
   CODEX_PROVIDER_ID,
@@ -1356,12 +1357,14 @@ async function runReviewPipeline(params: {
       commandCodeHome = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
       guardCliHomes();
       authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
+      writeCommandCodeReadOnlySettings(commandCodeHome);
     } catch (error) {
       cleanupCliHomes();
       throw error;
     }
     log(`CommandCode CLI auth configured at ${authPath}.`);
     log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
+    log('CommandCode reviews run with skills and tools disabled.');
     commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome);
   }
 
