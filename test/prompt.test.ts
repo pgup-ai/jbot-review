@@ -31,16 +31,25 @@ import {
   formatFindingsForVerification,
   selectLensKeys,
   withDevinIsolatedWorkspace,
+  withNoToolsReviewDirective,
 } from '../src/shared/prompt.ts';
 
 describe('DEVIN_ISOLATED_WORKSPACE_CONTEXT', () => {
-  it('routes file reads through the isolated read-only checkout mount', () => {
+  it('routes file reads through the isolated checkout path', () => {
     const context = withDevinIsolatedWorkspace('PR-CONTEXT');
     assert.equal(context.startsWith('PR-CONTEXT\n\n'), true);
     assert.match(context, /repository-controlled agent configuration cannot load/);
-    assert.match(context, /read-only at `repository\/`/);
+    assert.match(context, /available at `repository\/`/);
     assert.match(context, /Prefix direct file paths with `repository\/`/);
     assert.match(context, /ordinary `git` commands already target that worktree\.$/);
+  });
+});
+
+describe('NO_TOOLS_REVIEW_DIRECTIVE', () => {
+  it('precedes the embedded review prompt', () => {
+    const prompt = withNoToolsReviewDirective('PROMPT');
+    assert.match(prompt, /^## Tool use disabled/);
+    assert.match(prompt, /\n\nPROMPT$/);
   });
 });
 

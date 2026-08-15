@@ -36,41 +36,6 @@ const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const DEVIN_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const DEVIN_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 const execFileAsync = promisify(execFile);
-let linuxSandboxCheck: Promise<void> | undefined;
-
-async function ensureDevinSandboxAvailable(): Promise<void> {
-  if (process.platform !== 'linux') return;
-  linuxSandboxCheck ??= Promise.all([
-    execFileAsync(
-      'bwrap',
-      [
-        '--unshare-user',
-        '--uid',
-        '0',
-        '--gid',
-        '0',
-        '--ro-bind',
-        '/',
-        '/',
-        '--proc',
-        '/proc',
-        '--dev',
-        '/dev',
-        '/bin/true',
-      ],
-      { timeout: 5_000 },
-    ),
-    execFileAsync('socat', ['-V'], { timeout: 5_000 }),
-  ])
-    .then(() => undefined)
-    .catch((error: unknown) => {
-      throw new Error(
-        'Devin CLI cannot start its Linux sandbox. Install bubblewrap and socat and enable unprivileged user namespaces; standard Docker actions require JBOT_ACP_GATEWAY_URL instead.',
-        { cause: error },
-      );
-    });
-  return linuxSandboxCheck;
-}
 
 function removeDevinHome(dir: string, log: (msg: string) => void): void {
   try {
@@ -83,7 +48,6 @@ function removeDevinHome(dir: string, log: (msg: string) => void): void {
 export function buildDevinCliArgs(model: string, promptFile: string, configFile: string): string[] {
   const { modelID } = parseModelName(model);
   const args = [
-    '--sandbox',
     '--respect-workspace-trust',
     'false',
     '--permission-mode',
@@ -146,14 +110,13 @@ async function runDevinPrompt(
   const root = mkdtempSync(join(tmpdir(), 'jbot-devin-session-'));
   const unregister = onFatalSignal(() => removeDevinHome(root, log));
   const home = join(root, 'home');
-  const sandboxWorkspace = join(root, 'sandbox');
+  const isolatedWorkspace = join(root, 'workspace');
   const promptFile = join(home, 'prompt.txt');
   const configFile = join(home, 'config.json');
   try {
-    await ensureDevinSandboxAvailable();
     mkdirSync(home, { mode: 0o700 });
-    mkdirSync(sandboxWorkspace, { mode: 0o700 });
-    symlinkSync(workspace, join(sandboxWorkspace, 'repository'), 'dir');
+    mkdirSync(isolatedWorkspace, { mode: 0o700 });
+    symlinkSync(workspace, join(isolatedWorkspace, 'repository'), 'dir');
     const { stdout: gitDirOutput } = await execFileAsync(
       'git',
       ['-C', workspace, 'rev-parse', '--absolute-git-dir'],
@@ -170,7 +133,7 @@ async function runDevinPrompt(
         DEVIN_CLI_BIN,
         buildDevinCliArgs(model, promptFile, configFile),
         {
-          cwd: sandboxWorkspace,
+          cwd: isolatedWorkspace,
           env: {
             ...devinEnvForHome(home),
             GIT_DIR: gitDir,

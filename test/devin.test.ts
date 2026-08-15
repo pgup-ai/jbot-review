@@ -69,9 +69,8 @@ describe('Devin CLI provider helpers', () => {
     });
   });
 
-  it('runs Devin headlessly in its sandbox with the selected model', () => {
+  it('runs Devin headlessly with the selected model', () => {
     assert.deepEqual(buildDevinCliArgs('devin/swe-1.7', '/tmp/prompt', '/tmp/config'), [
-      '--sandbox',
       '--respect-workspace-trust',
       'false',
       '--permission-mode',

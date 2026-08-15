@@ -6,7 +6,6 @@ import { describe, it } from 'node:test';
 
 import {
   buildCommandCodeCliArgs,
-  buildCommandCodePrompt,
   classifyCommandCodePromptFailure,
   commandCodeEnvForHome,
   commandCodeAuthPath,
@@ -74,7 +73,7 @@ describe('CommandCode CLI provider helpers', () => {
     ]);
   });
 
-  it('denies tools and tells the model to use the embedded review context', () => {
+  it('denies all CommandCode tools', () => {
     const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
     try {
       const path = writeCommandCodeReadOnlySettings(home);
@@ -84,8 +83,6 @@ describe('CommandCode CLI provider helpers', () => {
       assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
         permissions: { deny: ['*'] },
       });
-      assert.match(buildCommandCodePrompt('PROMPT'), /^## Tool use disabled/);
-      assert.match(buildCommandCodePrompt('PROMPT'), /\n\nPROMPT$/);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

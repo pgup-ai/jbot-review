@@ -12,7 +12,7 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
-  NO_TOOLS_REVIEW_DIRECTIVE,
+  withNoToolsReviewDirective,
   type VerifiableFinding,
 } from './prompt.ts';
 import {
@@ -108,10 +108,6 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
   ];
   if (modelID !== 'default') args.push('--model', modelID);
   return args;
-}
-
-export function buildCommandCodePrompt(prompt: string): string {
-  return `${NO_TOOLS_REVIEW_DIRECTIVE}\n\n${prompt}`;
 }
 
 export async function runCommandCodeReview(
@@ -480,7 +476,7 @@ async function runCommandCodePrompt(
   log(`Calling ${label} prompt (agent=commandcode-cli, model=${model})`);
   const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, args, {
     cwd: workspace,
-    input: buildCommandCodePrompt(prompt),
+    input: withNoToolsReviewDirective(prompt),
     env: commandCodeEnvForHome(home),
     timeoutMs,
     timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
