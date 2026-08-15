@@ -1,8 +1,7 @@
-import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify, stripVTControlCharacters } from 'node:util';
+import { stripVTControlCharacters } from 'node:util';
 
 import {
   buildDevinReadOnlyConfig,
@@ -21,7 +20,6 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
-  withDevinIsolatedWorkspace,
 } from './prompt.ts';
 import {
   parseChangesSinceLastReviewSummary,
@@ -34,7 +32,6 @@ import type { ReviewBackend } from './session-concurrency.ts';
 const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const DEVIN_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const DEVIN_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
-const execFileAsync = promisify(execFile);
 
 function removeDevinSession(dir: string, log: (msg: string) => void): void {
   try {
@@ -108,19 +105,9 @@ async function runDevinPrompt(
 ): Promise<string> {
   const root = mkdtempSync(join(tmpdir(), 'jbot-devin-session-'));
   const unregister = onFatalSignal(() => removeDevinSession(root, log));
-  const isolatedWorkspace = join(root, 'workspace');
   const promptFile = join(root, 'prompt.txt');
   const configFile = join(root, 'config.json');
   try {
-    mkdirSync(isolatedWorkspace, { mode: 0o700 });
-    symlinkSync(workspace, join(isolatedWorkspace, 'repository'), 'dir');
-    const { stdout: gitDirOutput } = await execFileAsync(
-      'git',
-      ['-C', workspace, 'rev-parse', '--absolute-git-dir'],
-      { timeout: 5_000, maxBuffer: 64 * 1024 },
-    );
-    const gitDir = gitDirOutput.trim();
-    if (!gitDir) throw new Error('Could not resolve the repository git directory for Devin.');
     writeFileSync(promptFile, prompt, { mode: 0o600 });
     writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home)), { mode: 0o600 });
     log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
@@ -129,13 +116,8 @@ async function runDevinPrompt(
         DEVIN_CLI_BIN,
         buildDevinCliArgs(model, promptFile, configFile),
         {
-          cwd: isolatedWorkspace,
-          env: {
-            ...devinEnvForHome(home),
-            GIT_DIR: gitDir,
-            GIT_WORK_TREE: workspace,
-            GIT_OPTIONAL_LOCKS: '0',
-          },
+          cwd: workspace,
+          env: devinEnvForHome(home),
           timeoutMs,
           timeoutMessage: `devin ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s`,
         },
@@ -186,7 +168,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
     async runReview(model, prContext, guidelines, log, options = {}) {
       const label = options.label ?? 'review';
       const prompt = assembleReviewPrompt(
-        withDevinIsolatedWorkspace(prContext),
+        prContext,
         guidelines,
         options.lensAddendum ?? '',
         options.evidenceQuotes ?? false,
@@ -231,7 +213,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
         workspace,
         home,
         model,
-        assembleAddressedPriorCommentsPrompt(withDevinIsolatedWorkspace(prContext)),
+        assembleAddressedPriorCommentsPrompt(prContext),
         'addressed-prior-comments',
         log,
         timeoutMs,
@@ -243,7 +225,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
         workspace,
         home,
         model,
-        assembleGuidelineCompliancePrompt(withDevinIsolatedWorkspace(prContext), guidelines),
+        assembleGuidelineCompliancePrompt(prContext, guidelines),
         'guideline-compliance',
         log,
         timeoutMs,
@@ -255,7 +237,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
         workspace,
         home,
         model,
-        assembleFindingVerificationPrompt(withDevinIsolatedWorkspace(prContext), findings),
+        assembleFindingVerificationPrompt(prContext, findings),
         'finding-verification',
         log,
         timeoutMs,
@@ -267,7 +249,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
         workspace,
         home,
         model,
-        assembleChangesSinceLastReviewPrompt(withDevinIsolatedWorkspace(prContext), deltaContext),
+        assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
         'changes-since-last-review',
         log,
         timeoutMs,

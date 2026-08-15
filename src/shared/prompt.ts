@@ -835,14 +835,6 @@ export function assembleReviewPrompt(
   return parts.join('\n\n');
 }
 
-const DEVIN_ISOLATED_WORKSPACE_CONTEXT = `## Repository access
-
-The Devin process starts outside the checkout so repository-controlled agent configuration cannot load. The repository is available at \`repository/\`. Prefix direct file paths with \`repository/\`; ordinary \`git\` commands already target that worktree.`;
-
-export function withDevinIsolatedWorkspace(prContext: string): string {
-  return [prContext, DEVIN_ISOLATED_WORKSPACE_CONTEXT].join('\n\n');
-}
-
 /**
  * Optional block injected into the review context ONLY when the Context7 docs
  * MCP is active. Points the model at the tool for its highest-value use:

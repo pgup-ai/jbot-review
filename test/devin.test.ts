@@ -139,20 +139,25 @@ describe('Devin CLI provider helpers', () => {
     }
   });
 
-  it('reuses one Devin home across prompt sessions', async () => {
+  it('reuses one Devin home and workspace across prompt sessions', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-devin-test-'));
     const home = join(root, 'home');
+    const workspace = join(root, 'workspace');
     const executable = join(root, 'devin');
     const previousPath = process.env.PATH!;
     mkdirSync(home);
+    mkdirSync(workspace);
     writeFileSync(
       executable,
       `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
-const marker = path.join(process.env.HOME, 'setup-complete');
-if (!fs.existsSync(marker)) {
-  fs.writeFileSync(marker, '');
+const markers = [
+  path.join(process.env.HOME, 'setup-complete'),
+  path.join(process.cwd(), 'setup-complete'),
+];
+if (markers.some((marker) => !fs.existsSync(marker))) {
+  for (const marker of markers) fs.writeFileSync(marker, '');
   process.stdout.write("Welcome to Devin CLI!\\nYou're all set. Run devin.\\n");
 } else {
   process.stdout.write('{"summary":"ok","findings":[]}');
@@ -163,7 +168,7 @@ if (!fs.existsSync(marker)) {
     try {
       process.env.PATH = `${root}:${previousPath}`;
       const logs: string[] = [];
-      const backend = createDevinCliBackend(process.cwd(), home);
+      const backend = createDevinCliBackend(workspace, home);
 
       await backend.runReview('devin/default', 'context', '', (message) => logs.push(message));
       await backend.runReview('devin/default', 'context', '', (message) => logs.push(message));
