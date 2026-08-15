@@ -39,6 +39,7 @@ describe('DEVIN_ISOLATED_WORKSPACE_CONTEXT', () => {
     assert.equal(context.startsWith('PR-CONTEXT\n\n'), true);
     assert.match(context, /repository-controlled agent configuration cannot load/);
     assert.match(context, /read-only at `repository\/`/);
+    assert.match(context, /Prefix direct file paths with `repository\/`/);
     assert.match(context, /ordinary `git` commands already target that worktree\.$/);
   });
 });
