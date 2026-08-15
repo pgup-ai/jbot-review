@@ -47,7 +47,7 @@ export function buildDevinCliArgs(model: string, promptFile: string, configFile:
     '--respect-workspace-trust',
     'false',
     '--permission-mode',
-    'auto',
+    'dangerous',
     '--config',
     configFile,
     '--prompt-file',

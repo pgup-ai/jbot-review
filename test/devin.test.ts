@@ -75,7 +75,7 @@ describe('Devin CLI provider helpers', () => {
       '--respect-workspace-trust',
       'false',
       '--permission-mode',
-      'auto',
+      'dangerous',
       '--config',
       '/tmp/config',
       '--prompt-file',
