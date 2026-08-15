@@ -102,6 +102,11 @@ export async function checkGatewayEndpointReady(
   }
 }
 
+export function gatewaySessionCap(currentCap: number, freeSessions: number): number {
+  if (freeSessions === 0) throw new Error('ACP gateway endpoint has no free session capacity.');
+  return currentCap === 0 ? freeSessions : Math.min(currentCap, freeSessions);
+}
+
 // No tee on a relayed session: the companion signs and journals it itself, so
 // teeing here would duplicate every frame unsigned. Journaling it twice is a
 // bug this repo already shipped once.

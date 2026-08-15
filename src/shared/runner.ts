@@ -46,9 +46,10 @@ import { createAcpBackend } from './acp.ts';
 import { codexAcpSpec, cursorAcpSpec, kiloAcpSpec } from '@symma/protocol';
 import {
   ACP_GATEWAY_PROVIDERS,
-  createRemoteAcpBackend,
-  remoteAcpConfigFromEnv,
   checkGatewayEndpointReady,
+  createRemoteAcpBackend,
+  gatewaySessionCap,
+  remoteAcpConfigFromEnv,
 } from './acp-remote.ts';
 import {
   piModelAvailable,
@@ -1232,7 +1233,7 @@ async function runReviewPipeline(params: {
   if (remoteAcp && routedAgents.length > 0) {
     for (const agent of routedAgents) {
       const { freeSessions } = await checkGatewayEndpointReady(remoteAcp, agent);
-      if (sessionCap === 0 || freeSessions < sessionCap) sessionCap = freeSessions;
+      sessionCap = gatewaySessionCap(sessionCap, freeSessions);
     }
     log(
       `ACP gateway: routing ${routedAgents.join(', ')} to ${remoteAcp.endpoint} via ${remoteAcp.gateway}`,
