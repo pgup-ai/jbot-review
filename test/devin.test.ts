@@ -108,7 +108,6 @@ describe('Devin CLI provider helpers', () => {
   it('isolates the Devin child environment and disables background updates', () => {
     const config = buildDevinCliConfig('/tmp/devin-home');
     assert.equal(config.auto_update, false);
-    assert.equal(config.shell.setup_complete, true);
     assert.deepEqual(config.permissions.deny, [
       'edit',
       'write',
@@ -140,7 +139,7 @@ describe('Devin CLI provider helpers', () => {
     }
   });
 
-  it('skips Devin onboarding on the first prompt session', async () => {
+  it('reuses Devin onboarding state across prompt sessions', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-devin-test-'));
     const home = join(root, 'home');
     const workspace = join(root, 'workspace');
@@ -174,7 +173,7 @@ if (!config.shell?.setup_complete) {
       await backend.runReview('devin/default', 'context', '', (message) => logs.push(message));
       await backend.runReview('devin/default', 'context', '', (message) => logs.push(message));
 
-      assert.equal(logs.filter((message) => message.includes('first-run setup')).length, 0);
+      assert.equal(logs.filter((message) => message.includes('first-run setup')).length, 1);
     } finally {
       process.env.PATH = previousPath;
       rmSync(root, { recursive: true, force: true });
