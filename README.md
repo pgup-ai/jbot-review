@@ -426,17 +426,15 @@ tool serves any hunks past the embed budget), and manage provider prompt
 caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions
 only.
 
-**ACP engine.** The `cursor`, `devin`, and `codex` backends run over the
-[Agent Client Protocol](https://agentclientprotocol.com) — one stdio JSON-RPC
-driver instead of each CLI's bespoke headless mode. Read-only is layered: a
-client-side permission policy (mutating tool kinds rejected; bash allowed per
-the review invariants), a REQUIRED plan session mode for cursor and devin —
-the session fails closed if plan mode is missing or cannot be set — plus
-agent-side config (codex runs under `sandbox_mode = "read-only"`; devin gets
-the argv driver's read-only permissions config in a per-spawn HOME).
-`devin` ignores its CLI model flags in ACP mode, so jbot selects the model
-through the session's ACP model config option — ids like `devin/glm-5-2`
-(dotted `devin/glm-5.2` and display names also match).
+**CLI and ACP routing.** Without `JBOT_ACP_GATEWAY_URL`, `devin` runs through
+its headless CLI from an isolated temporary workspace, with repository-controlled
+Devin configuration excluded and a per-session permission config that denies
+edit and write operations.
+Setting that URL routes gateway-supported providers (`devin`, `cursor`,
+`codex`, `kilo`) to a remote companion over the
+[Agent Client Protocol](https://agentclientprotocol.com); the gateway token and
+endpoint are then required. Remote read-only enforcement combines the ACP
+permission policy with each agent's read-only configuration.
 `cline` stays on its argv driver: its ACP mode currently returns empty turns
 ([cline/cline#11015](https://github.com/cline/cline/issues/11015)). The
 opencode server engine keeps serving SDK providers directly — its ACP mode
@@ -522,7 +520,8 @@ Use `provider: commandcode` with `commandcode-access-key` /
 `COMMANDCODE_ACCESS_KEY` for the CommandCode CLI backend. The Docker image
 includes the CommandCode CLI, but `.commandcode/auth.json` is written under an
 isolated temporary HOME only when the main or active auxiliary provider is
-`commandcode`, then removed after the run.
+`commandcode`, then removed after the run. Skill discovery and tools are disabled;
+reviews use the context and diff embedded by J-Bot.
 Use `provider: cursor` with `cursor-api-key` / `CURSOR_API_KEY` for the Cursor
 CLI backend. The Docker image includes the Cursor CLI (`cursor-agent`), which
 reads the key from the environment — no credential file — and runs read-only via
@@ -858,9 +857,10 @@ curl -s -H "authorization: Bearer <JBOT_GATEWAY_TOKEN>" https://observer.example
 
 ### Client (the machine running the review)
 
-Three vars, all required to enable routing. `JBOT_ACP_GATEWAY_TOKEN` is the
-gateway's `JBOT_GATEWAY_TOKEN` — the same value the viewer URL carries, and a
-different credential from the companion's.
+`JBOT_ACP_GATEWAY_URL` enables remote routing. Once set,
+`JBOT_ACP_GATEWAY_TOKEN` and `JBOT_ACP_GATEWAY_ENDPOINT` are required. The
+token is the gateway's `JBOT_GATEWAY_TOKEN` — the same value the viewer URL
+carries, and a different credential from the companion's.
 
 ```sh
 JBOT_ACP_GATEWAY_URL=https://observer.example.com JBOT_ACP_GATEWAY_TOKEN=<gateway token> JBOT_ACP_GATEWAY_ENDPOINT=laptop MODEL=devin/default npm run review:local

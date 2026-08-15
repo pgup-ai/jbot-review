@@ -16,7 +16,7 @@ RUN npm config set fetch-retries 5 \
 # on Node 24. Pinned exactly: with @latest the buildx layer cache froze whatever version
 # the last cache bust happened to grab — bump versions here deliberately instead.
 # CommandCode hard-codes selectable model IDs, so bump its pin when it rejects a new model.
-RUN npm install -g opencode-ai@1.18.4 command-code@1.22.0 cline@3.0.46 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 @agentclientprotocol/codex-acp@1.1.7 \
+RUN npm install -g opencode-ai@1.18.4 command-code@1.25.0 cline@3.0.46 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 @agentclientprotocol/codex-acp@1.1.7 \
   && npm cache clean --force \
   && opencode --version \
   && command-code --no-auto-update --version \
@@ -32,12 +32,14 @@ RUN npm install -g @qoder-ai/qodercli@1.0.43 \
   && qodercli --version
 
 # Devin CLI (optional devin provider); strip the installer's interactive setup step.
-RUN curl -fsSL https://cli.devin.ai/install.sh -o /tmp/devin-install.sh \
+ARG DEVIN_CLI_VERSION=3000.4.25
+RUN curl -fsSL "https://static.devin.ai/cli/${DEVIN_CLI_VERSION}/setup.sh" -o /tmp/devin-install.sh \
   && grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install.sh \
   && sed '/"\$VERSION_DIR\/bin\/\$COMPILED_BIN_NAME" setup/d' /tmp/devin-install.sh > /tmp/devin-install-no-setup.sh \
   && ! grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install-no-setup.sh \
   && bash /tmp/devin-install-no-setup.sh \
   && test -x /root/.local/bin/devin \
+  && /root/.local/bin/devin --version | grep -Fq "devin ${DEVIN_CLI_VERSION} " \
   && rm -f /tmp/devin-install.sh /tmp/devin-install-no-setup.sh
 
 # Cursor CLI (optional cursor provider); installer saved to disk, not piped to bash

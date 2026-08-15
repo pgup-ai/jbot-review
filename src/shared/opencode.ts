@@ -245,6 +245,7 @@ export interface PromptTokenUsage {
   cacheRead: number;
   cacheWrite: number;
   costUsd?: number;
+  estimatedCostUsd?: number;
   creditCost?: number;
   acuCost?: number;
 }
@@ -1165,8 +1166,8 @@ export function parseReview(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log(`${label} response was not valid JSON: ${message}`);
-    log(`${label} response preview:\n${truncateForLog(raw, 2000)}`);
-    if (options.strict) throw new Error(`opencode ${label} returned unparseable JSON: ${message}`);
+    log(`${label} response preview:\n${truncateForLog(raw, 2000) || '<empty>'}`);
+    if (options.strict) throw new Error(`${label} returned unparseable JSON: ${message}`);
     return {
       summary: 'The reviewer returned an unparseable response.',
       findings: [],
@@ -1180,7 +1181,7 @@ export function parseReview(
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     log(`${label} response was valid JSON but not an object.`);
     if (options.strict) {
-      throw new Error(`opencode ${label} returned a non-object JSON root`);
+      throw new Error(`${label} returned a non-object JSON root`);
     }
     return {
       summary: 'The reviewer returned an unparseable response.',

@@ -30,7 +30,16 @@ import {
   buildShardAssignmentBlock,
   formatFindingsForVerification,
   selectLensKeys,
+  withNoToolsReviewDirective,
 } from '../src/shared/prompt.ts';
+
+describe('NO_TOOLS_REVIEW_DIRECTIVE', () => {
+  it('precedes the embedded review prompt', () => {
+    const prompt = withNoToolsReviewDirective('PROMPT');
+    assert.match(prompt, /^## Tool use disabled/);
+    assert.match(prompt, /\n\nPROMPT$/);
+  });
+});
 
 describe('QODER_REVIEW_SYSTEM_PROMPT', () => {
   it('pins Qoder sessions to read-only repository review', () => {

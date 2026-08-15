@@ -43,12 +43,13 @@ import {
 } from './shard-cache.ts';
 import { closeObserver, reportRun, setRunName } from './observer.ts';
 import { createAcpBackend } from './acp.ts';
-import { codexAcpSpec, cursorAcpSpec, devinAcpSpec, kiloAcpSpec } from '@symma/protocol';
+import { codexAcpSpec, cursorAcpSpec, kiloAcpSpec } from '@symma/protocol';
 import {
   ACP_GATEWAY_PROVIDERS,
+  checkAuxGatewayEndpointReady,
+  checkGatewayEndpointReady,
   createRemoteAcpBackend,
   remoteAcpConfigFromEnv,
-  checkGatewayEndpointReady,
 } from './acp-remote.ts';
 import {
   piModelAvailable,
@@ -113,6 +114,7 @@ import {
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
 import { DEVIN_PROVIDER_ID, writeDevinCredentials } from '@symma/protocol';
+import { createDevinCliBackend } from './devin-cli.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
   listCommandCodeModels,
@@ -122,6 +124,7 @@ import {
   runCommandCodeChangesSinceLastReview,
   runCommandCodeReview,
   writeCommandCodeAuth,
+  writeCommandCodeReadOnlySettings,
 } from './commandcode.ts';
 import {
   CODEX_PROVIDER_ID,
@@ -838,6 +841,9 @@ async function runReviewPipeline(params: {
       reasoningTokens: usage.reasoning,
       cacheReadTokens: usage.cacheRead,
       ...(isFiniteNumber(usage.costUsd) ? { costUsd: usage.costUsd } : {}),
+      ...(isFiniteNumber(usage.estimatedCostUsd)
+        ? { estimatedCostUsd: usage.estimatedCostUsd }
+        : {}),
     });
   };
   telemetry.beginRun({
@@ -1213,21 +1219,39 @@ async function runReviewPipeline(params: {
   // honor one global cap. Disable opencode's older process-global limiter to
   // avoid double-limiting OpenCode sessions inside this runner path.
   configureSessionConcurrency(0);
-  const remoteAcp = remoteAcpConfigFromEnv();
-  // Fail before any model spend if the endpoint can't serve this run, and cap
-  // sessions at what the companion accepts — its limit is typically lower than
-  // jbot's, and the excess would be refused mid-review.
-  let sessionCap = options.maxConcurrentSessions;
   // Only the selected providers the gateway actually serves; a gateway
   // configured alongside an opencode/pi/other-CLI run must not touch it.
   const routedAgents = [...new Set([mainCliBackend, auxCliBackend])].filter(
     (id): id is CliBackendID =>
       Boolean(id) && (ACP_GATEWAY_PROVIDERS as readonly string[]).includes(id as string),
   );
+  const remoteAcp = routedAgents.length > 0 ? remoteAcpConfigFromEnv() : undefined;
+  // A missing main endpoint is fatal; an auxiliary-only endpoint fails open.
+  // Cap sessions at the companion's available capacity.
+  let sessionCap = options.maxConcurrentSessions;
+  let auxGatewayPreflightError: unknown;
   if (remoteAcp && routedAgents.length > 0) {
-    for (const agent of routedAgents) {
-      const { freeSessions } = await checkGatewayEndpointReady(remoteAcp, agent);
+    const mainGatewayAgent =
+      mainCliBackend && routedAgents.includes(mainCliBackend) ? mainCliBackend : undefined;
+    const auxGatewayAgent =
+      auxCliBackend && routedAgents.includes(auxCliBackend) ? auxCliBackend : undefined;
+    if (mainGatewayAgent) {
+      const { freeSessions } = await checkGatewayEndpointReady(remoteAcp, mainGatewayAgent);
       if (sessionCap === 0 || freeSessions < sessionCap) sessionCap = freeSessions;
+    }
+    if (auxGatewayAgent && auxGatewayAgent !== mainGatewayAgent) {
+      const ready = await checkAuxGatewayEndpointReady(remoteAcp, auxGatewayAgent);
+      if ('error' in ready) {
+        auxGatewayPreflightError = ready.error;
+        recordCoverage({ session: 'aux-gateway-preflight', state: 'failed', error: ready.error });
+        log(
+          `Auxiliary ACP gateway backend unavailable; auxiliary sessions are disabled for this run (fail-open): ${
+            ready.error instanceof Error ? ready.error.message : String(ready.error)
+          }`,
+        );
+      } else if (sessionCap === 0 || ready.freeSessions < sessionCap) {
+        sessionCap = ready.freeSessions;
+      }
     }
     log(
       `ACP gateway: routing ${routedAgents.join(', ')} to ${remoteAcp.endpoint} via ${remoteAcp.gateway}`,
@@ -1247,9 +1271,15 @@ async function runReviewPipeline(params: {
   let codexBackend: ReviewBackend | undefined;
   let clineBackend: ReviewBackend | undefined;
   let grokBackend: ReviewBackend | undefined;
-  let grokSessionSlots: Semaphore | undefined;
+  const serializedBackends = new Map<ReviewBackend, Semaphore>();
   let kiloBackend: ReviewBackend | undefined;
   let qoderBackend: ReviewBackend | undefined;
+  let devinHome: string | undefined;
+  const cleanupDevinHome = (): void => {
+    if (!devinHome) return;
+    rmSync(devinHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    devinHome = undefined;
+  };
   let commandCodeHome: string | undefined;
   const cleanupCommandCodeHome = (): void => {
     if (!commandCodeHome) return;
@@ -1288,6 +1318,7 @@ async function runReviewPipeline(params: {
     // Independently: force only suppresses a missing path, so one failed
     // removal would otherwise leave the remaining credential homes on disk.
     for (const cleanup of [
+      cleanupDevinHome,
       cleanupCommandCodeHome,
       cleanupCodexHome,
       cleanupCodexRunHome,
@@ -1319,9 +1350,19 @@ async function runReviewPipeline(params: {
       cleanupCliHomes();
       throw new Error(`Missing API key for ${DEVIN_PROVIDER_ID} provider.`);
     }
-    const credentialsPath = writeDevinCredentials(devinApiKey);
+    let credentialsPath: string;
+    try {
+      devinHome = mkdtempSync(join(tmpdir(), 'jbot-devin-home-'));
+      guardCliHomes();
+      credentialsPath = writeDevinCredentials(devinApiKey, devinHome);
+      devinBackend = createDevinCliBackend(workspace, devinHome);
+    } catch (error) {
+      cleanupCliHomes();
+      throw error;
+    }
     log(`Devin CLI credentials configured at ${credentialsPath}.`);
-    devinBackend = createAcpBackend(devinAcpSpec(), workspace);
+    log('Devin CLI token usage is unavailable for these sessions.');
+    serializedBackends.set(devinBackend, new Semaphore(1));
   }
 
   if (
@@ -1352,12 +1393,14 @@ async function runReviewPipeline(params: {
       commandCodeHome = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
       guardCliHomes();
       authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
+      writeCommandCodeReadOnlySettings(commandCodeHome);
     } catch (error) {
       cleanupCliHomes();
       throw error;
     }
     log(`CommandCode CLI auth configured at ${authPath}.`);
-    log('CommandCode CLI token usage is unavailable; review metadata may omit those sessions.');
+    log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
+    log('CommandCode reviews run with skills and tools disabled.');
     commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome);
   }
 
@@ -1430,7 +1473,7 @@ async function runReviewPipeline(params: {
     );
     grokBackend = createGrokBackend(runtime);
     // Grok mutates shared auth state, so its sessions cannot overlap.
-    grokSessionSlots = new Semaphore(1);
+    serializedBackends.set(grokBackend, new Semaphore(1));
   }
 
   if (!remoteAcp && (mainCliBackend === KILO_PROVIDER_ID || auxCliBackend === KILO_PROVIDER_ID)) {
@@ -1621,18 +1664,19 @@ async function runReviewPipeline(params: {
     mainBaseBackend,
     'main',
     sessionSlots,
-    mainBaseBackend === grokBackend ? grokSessionSlots : undefined,
+    serializedBackends.get(mainBaseBackend),
   );
   const auxBackend = limitReviewBackendSessions(
     auxBaseBackend,
     'aux',
     sessionSlots,
-    auxBaseBackend === grokBackend ? grokSessionSlots : undefined,
+    serializedBackends.get(auxBaseBackend),
   );
   // Single gate for every aux session (lenses, guideline, addressed,
   // changes-since, verification): an incomplete embedded diff and a failed
   // aux-only opencode boot disable them the same way (invariant #3).
-  const auxSessionsEnabled = auxHasCompleteEmbeddedDiff && !auxOpencodeBootError;
+  const auxSessionsEnabled =
+    auxHasCompleteEmbeddedDiff && !auxOpencodeBootError && !auxGatewayPreflightError;
   // Which engine each model ran on, for the review footer (main wins on
   // collision — same model ⇒ same engine anyway).
   const engineByModel: Record<string, string> = {
@@ -3110,6 +3154,7 @@ export interface ReviewTokenUsage {
   cacheRead: number;
   cacheWrite: number;
   costUsd?: number;
+  estimatedCostUsd?: number;
   creditCost?: number;
   acuCost?: number;
 }
@@ -3131,6 +3176,9 @@ function createReviewTokenUsageAccumulator(): {
       total.cacheWrite += usage.cacheWrite;
       if (isFiniteNumber(usage.costUsd)) {
         total.costUsd = (total.costUsd ?? 0) + usage.costUsd;
+      }
+      if (isFiniteNumber(usage.estimatedCostUsd)) {
+        total.estimatedCostUsd = (total.estimatedCostUsd ?? 0) + usage.estimatedCostUsd;
       }
       if (isFiniteNumber(usage.creditCost)) {
         total.creditCost = (total.creditCost ?? 0) + usage.creditCost;
@@ -3637,6 +3685,9 @@ export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewToke
     `cache read=${tokenUsage.cacheRead}`,
     `cache write=${tokenUsage.cacheWrite}`,
     ...(isFiniteNumber(tokenUsage.costUsd) ? [`cost usd=${tokenUsage.costUsd.toFixed(4)}`] : []),
+    ...(isFiniteNumber(tokenUsage.estimatedCostUsd)
+      ? [`estimated cost usd=${tokenUsage.estimatedCostUsd.toFixed(4)}`]
+      : []),
     ...(isFiniteNumber(tokenUsage.creditCost)
       ? [`credit cost=${formatUsageCost(tokenUsage.creditCost)}`]
       : []),

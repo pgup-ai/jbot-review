@@ -29,7 +29,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `fireworks-ai`          | Models.dev           |      16 | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` |
 | `poolside`              | Models.dev           |       4 | `poolside/laguna-s-2.1`                                    |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                            |
-| `commandcode`           | CLI snapshot         |      54 | `commandcode/default`                                      |
+| `commandcode`           | CLI snapshot         |      56 | `commandcode/default`                                      |
 | `cursor`                | CLI snapshot         |     175 | `cursor/default`                                           |
 | `qoder`                 | CLI snapshot         |      14 | `qoder/auto`                                               |
 | `codex`                 | CLI snapshot         |       6 | `codex/default`                                            |
@@ -799,11 +799,11 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.22.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Source: Docker-pinned npm package [`command-code@1.25.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
-54 J-Bot model values:
+56 J-Bot model values:
 
 - `commandcode/claude-fable-5`
 - `commandcode/claude-haiku-4-5`
@@ -819,6 +819,7 @@ The CLI does not expose a complete list.
 - `commandcode/google/gemini-3.5-flash`
 - `commandcode/google/gemini-3.5-flash-lite`
 - `commandcode/google/gemini-3.6-flash`
+- `commandcode/google/gemini-3.7-flash`
 - `commandcode/gpt-5.3-codex`
 - `commandcode/gpt-5.4`
 - `commandcode/gpt-5.4-mini`
@@ -859,6 +860,7 @@ The CLI does not expose a complete list.
 - `commandcode/zai-org/glm-5.1`
 - `commandcode/zai-org/glm-5.2`
 - `commandcode/zai-org/glm-5.2-fast`
+- `commandcode/zai-org/glm-5.3`
 
 ### `cursor`
 

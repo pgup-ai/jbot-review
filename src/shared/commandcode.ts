@@ -1,6 +1,8 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, createReadStream, mkdirSync, writeFileSync } from 'node:fs';
+import { opendir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 
 import { parseModelName } from '@symma/protocol';
 import {
@@ -10,22 +12,25 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
+  withNoToolsReviewDirective,
   type VerifiableFinding,
 } from './prompt.ts';
 import {
   parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,
   parseReview,
+  type PromptTokenUsage,
   type TokenUsageRecorder,
 } from './opencode.ts';
 import { spawnWithTimeout, truncateForLog } from '@symma/protocol';
+import { isFiniteNumber, isRecord } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const COMMANDCODE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 const COMMANDCODE_MODEL_LIST_TIMEOUT_MS = 60_000;
-// Print mode defaults to 10; keep the wall-clock timeout as the practical bound.
+// Keep the wall-clock timeout as the practical bound for long reviews.
 const COMMANDCODE_MAX_TURNS = 1000;
 
 export const COMMANDCODE_PROVIDER_ID = 'commandcode';
@@ -44,6 +49,14 @@ export function commandCodeAuthPath(home = process.env.HOME || homedir()): strin
   return join(home, '.commandcode', 'auth.json');
 }
 
+function chmodCommandCodeFile(path: string): void {
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    /* best effort on filesystems that do not support chmod */
+  }
+}
+
 export function writeCommandCodeAuth(
   accessKey: string,
   home = process.env.HOME || homedir(),
@@ -58,11 +71,17 @@ export function writeCommandCodeAuth(
   const path = commandCodeAuthPath(home);
   mkdirSync(join(home, '.commandcode'), { recursive: true, mode: 0o700 });
   writeFileSync(path, `${JSON.stringify({ apiKey: key }, null, 2)}\n`, { mode: 0o600 });
-  try {
-    chmodSync(path, 0o600);
-  } catch {
-    /* best effort on filesystems that do not support chmod */
-  }
+  chmodCommandCodeFile(path);
+  return path;
+}
+
+export function writeCommandCodeReadOnlySettings(home: string): string {
+  const path = join(home, '.commandcode', 'settings.json');
+  mkdirSync(join(home, '.commandcode'), { recursive: true, mode: 0o700 });
+  writeFileSync(path, `${JSON.stringify({ permissions: { deny: ['*'] } }, null, 2)}\n`, {
+    mode: 0o600,
+  });
+  chmodCommandCodeFile(path);
   return path;
 }
 
@@ -78,7 +97,10 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
     // keeps the session read-only.
     '--trust',
     '--skip-onboarding',
+    '--no-skills',
     '--no-auto-update',
+    '--output-format',
+    'json',
     '--permission-mode',
     'plan',
     '--max-turns',
@@ -103,7 +125,6 @@ export async function runCommandCodeReview(
     home?: string;
   } = {},
 ): Promise<ReviewResult> {
-  void options.onTokenUsage;
   const label = options.label ?? 'review';
   const prompt = assembleReviewPrompt(
     prContext,
@@ -121,6 +142,7 @@ export async function runCommandCodeReview(
     label,
     log,
     options.timeoutMs,
+    options.onTokenUsage,
     options.home,
   );
   try {
@@ -143,6 +165,7 @@ export async function runCommandCodeReview(
       `${label}-repair`,
       log,
       options.timeoutMs,
+      options.onTokenUsage,
       options.home,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
@@ -158,7 +181,6 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
 ): Promise<AddressedPriorComment[]> {
-  void onTokenUsage;
   const raw = await runCommandCodePrompt(
     workspace,
     model,
@@ -166,6 +188,7 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
     'addressed-prior-comments',
     log,
     timeoutMs,
+    onTokenUsage,
     home,
   );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
@@ -181,7 +204,6 @@ export async function runCommandCodeGuidelineComplianceCheck(
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
 ): Promise<Finding[]> {
-  void onTokenUsage;
   const raw = await runCommandCodePrompt(
     workspace,
     model,
@@ -189,6 +211,7 @@ export async function runCommandCodeGuidelineComplianceCheck(
     'guideline-compliance',
     log,
     timeoutMs,
+    onTokenUsage,
     home,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
@@ -204,7 +227,6 @@ export async function runCommandCodeChangesSinceLastReview(
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
 ): Promise<string> {
-  void onTokenUsage;
   const raw = await runCommandCodePrompt(
     workspace,
     model,
@@ -212,6 +234,7 @@ export async function runCommandCodeChangesSinceLastReview(
     'changes-since-last-review',
     log,
     timeoutMs,
+    onTokenUsage,
     home,
   );
   return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
@@ -227,7 +250,6 @@ export async function runCommandCodeFindingVerification(
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
 ): Promise<FindingVerdict[] | undefined> {
-  void onTokenUsage;
   const raw = await runCommandCodePrompt(
     workspace,
     model,
@@ -235,6 +257,7 @@ export async function runCommandCodeFindingVerification(
     'finding-verification',
     log,
     timeoutMs,
+    onTokenUsage,
     home,
   );
   return parseFindingVerdicts(raw, findings.length, log);
@@ -297,6 +320,148 @@ export function classifyCommandCodePromptFailure(
   return undefined;
 }
 
+function parseCommandCodeUsage(value: unknown): PromptTokenUsage | undefined {
+  if (!isRecord(value)) return undefined;
+  const fields = [
+    value.inputTokens,
+    value.outputTokens,
+    value.cacheReadTokens,
+    value.cacheWriteTokens,
+  ];
+  if (!fields.every((field) => isFiniteNumber(field) && field >= 0)) return undefined;
+  const [input, output, cacheRead, cacheWrite] = fields as number[];
+  return { input, output, reasoning: 0, cacheRead, cacheWrite };
+}
+
+function parseCommandCodeJsonString(value: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return typeof parsed === 'string' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function recoverCommandCodeRunEnd(line: string): Record<string, unknown> | undefined {
+  const prefix =
+    /^\{\s*"type"\s*:\s*"event"\s*,\s*"event"\s*:\s*\{\s*"type"\s*:\s*"run_end"\s*,\s*"result"\s*:\s*\{\s*"finalText"\s*:\s*("(?:\\.|[^"\\])*")/.exec(
+      line,
+    );
+  if (!prefix) return undefined;
+  const finalText = parseCommandCodeJsonString(prefix[1]);
+  if (finalText === undefined) return undefined;
+
+  let usage: unknown;
+  const remainder = line.slice(prefix[0].length);
+  const usageMatch = /,\s*"usage"\s*:\s*(\{[^{}]*\})/.exec(remainder);
+  if (usageMatch) {
+    try {
+      usage = JSON.parse(usageMatch[1]);
+    } catch {
+      usage = undefined;
+    }
+  }
+  const nextState = /,\s*"nextState"\s*:\s*\{\s*"sessionId"\s*:\s*("(?:\\.|[^"\\])*")/.exec(
+    remainder,
+  );
+  const sessionId = nextState ? parseCommandCodeJsonString(nextState[1]) : undefined;
+  return { finalText, ...(usage ? { usage } : {}), ...(sessionId ? { sessionId } : {}) };
+}
+
+export function parseCommandCodeJsonOutput(output: string): {
+  finalText: string;
+  sessionId?: string;
+  usage?: PromptTokenUsage;
+} {
+  let result: Record<string, unknown> | undefined;
+  let recoveredRunEnd: Record<string, unknown> | undefined;
+  let invalidLine: string | undefined;
+  for (const rawLine of output.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    let frame: unknown;
+    try {
+      frame = JSON.parse(line);
+    } catch {
+      invalidLine ??= line;
+      recoveredRunEnd ??= recoverCommandCodeRunEnd(line);
+      continue;
+    }
+    if (!isRecord(frame)) continue;
+    if (frame.type === 'result') result = frame;
+  }
+  const finalResult = result ?? recoveredRunEnd;
+  if (!finalResult) {
+    if (invalidLine) {
+      throw new Error(
+        `CommandCode returned invalid JSON output: ${truncateForLog(invalidLine, 1000)}`,
+      );
+    }
+    throw new Error('CommandCode JSON output contained no result frame');
+  }
+  if (result && result.subtype !== 'success') {
+    throw new Error(`CommandCode JSON result was ${String(result.subtype ?? 'unknown')}`);
+  }
+  if (typeof finalResult.finalText !== 'string') {
+    throw new Error('CommandCode JSON result contained no finalText');
+  }
+  const usage = parseCommandCodeUsage(finalResult.usage);
+  return {
+    finalText: finalResult.finalText,
+    ...(typeof finalResult.sessionId === 'string' ? { sessionId: finalResult.sessionId } : {}),
+    ...(usage ? { usage } : {}),
+  };
+}
+
+function parseCommandCodeSessionEntryEstimatedCost(line: string): number | undefined {
+  if (!line.trim()) return undefined;
+  try {
+    const entry: unknown = JSON.parse(line);
+    if (
+      !isRecord(entry) ||
+      entry.type !== 'message' ||
+      !isRecord(entry.message) ||
+      entry.message.role !== 'assistant' ||
+      !isRecord(entry.usage)
+    ) {
+      return undefined;
+    }
+    const cost = entry.usage.costUsd;
+    return isFiniteNumber(cost) && cost >= 0 ? cost : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function commandCodeSessionEstimatedCost(
+  home: string,
+  sessionId: string,
+): Promise<number | undefined> {
+  try {
+    const root = join(home, '.commandcode', 'projects');
+    const filename = `${sessionId}.jsonl`;
+    const directory = await opendir(root, { recursive: true });
+    let transcript: string | undefined;
+    for await (const entry of directory) {
+      if (entry.isFile() && entry.name === filename) {
+        transcript = join(entry.parentPath, entry.name);
+        break;
+      }
+    }
+    if (!transcript) return undefined;
+
+    let total: number | undefined;
+    const lines = createInterface({ input: createReadStream(transcript), crlfDelay: Infinity });
+    for await (const line of lines) {
+      const cost = parseCommandCodeSessionEntryEstimatedCost(line);
+      if (cost !== undefined) total = (total ?? 0) + cost;
+    }
+    return total;
+  } catch {
+    return undefined;
+  }
+}
+
 async function runCommandCodePrompt(
   workspace: string,
   model: string,
@@ -304,13 +469,14 @@ async function runCommandCodePrompt(
   label: string,
   log: (msg: string) => void,
   timeoutMs = COMMANDCODE_PROMPT_TIMEOUT_MS,
+  onTokenUsage?: TokenUsageRecorder,
   home?: string,
 ): Promise<string> {
   const args = buildCommandCodeCliArgs({ model });
   log(`Calling ${label} prompt (agent=commandcode-cli, model=${model})`);
   const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, args, {
     cwd: workspace,
-    input: prompt,
+    input: withNoToolsReviewDirective(prompt),
     env: commandCodeEnvForHome(home),
     timeoutMs,
     timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
@@ -320,10 +486,31 @@ async function runCommandCodePrompt(
       formatCommandCodePromptFailure(label, result.exitCode, result.stderr || result.stdout),
     );
   }
+  const parsed = parseCommandCodeJsonOutput(result.stdout);
+  const estimatedCostUsd =
+    home && parsed.sessionId
+      ? await commandCodeSessionEstimatedCost(home, parsed.sessionId)
+      : undefined;
+  const usage = parsed.usage
+    ? {
+        ...parsed.usage,
+        ...(isFiniteNumber(estimatedCostUsd) ? { estimatedCostUsd } : {}),
+      }
+    : undefined;
+  if (usage) {
+    log(
+      `${label} tokens: input=${usage.input} output=${usage.output} reasoning=${usage.reasoning} cache(read=${usage.cacheRead} write=${usage.cacheWrite})${
+        isFiniteNumber(usage.estimatedCostUsd)
+          ? ` estimated-cost=$${usage.estimatedCostUsd.toFixed(4)}`
+          : ''
+      }`,
+    );
+    onTokenUsage?.(usage, model, label);
+  }
   log(
-    `${label} prompt complete via commandcode: stdout=${result.stdout.length} chars stderr=${result.stderr.length} chars`,
+    `${label} prompt complete via commandcode: result=${parsed.finalText.length} chars stderr=${result.stderr.length} chars`,
   );
-  return result.stdout;
+  return parsed.finalText;
 }
 
 function formatCommandCodePromptFailure(

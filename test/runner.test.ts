@@ -275,6 +275,7 @@ describe('renderReviewMetadataBlock', () => {
       cacheRead: 40,
       cacheWrite: 50,
       costUsd: 1.23456,
+      estimatedCostUsd: 0.75,
       creditCost: 2.5,
       acuCost: 3,
     }).join('\n');
@@ -289,6 +290,7 @@ describe('renderReviewMetadataBlock', () => {
     assert.match(block, /cache read=40/);
     assert.match(block, /cache write=50/);
     assert.match(block, /cost usd=1\.2346/);
+    assert.match(block, /estimated cost usd=0\.7500/);
     assert.match(block, /credit cost=2\.5000/);
     assert.match(block, /acu cost=3/);
   });
@@ -329,12 +331,14 @@ describe('renderReviewMetadataBlock', () => {
       cacheRead: 40,
       cacheWrite: 50,
       costUsd: Infinity,
+      estimatedCostUsd: Infinity,
       creditCost: NaN,
       acuCost: -Infinity,
     }).join('\n');
 
     assert.match(block, /input=100/);
     assert.doesNotMatch(block, /cost usd=/);
+    assert.doesNotMatch(block, /estimated cost usd=/);
     assert.doesNotMatch(block, /credit cost=/);
     assert.doesNotMatch(block, /acu cost=/);
   });

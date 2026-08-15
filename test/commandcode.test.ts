@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -9,10 +9,13 @@ import {
   classifyCommandCodePromptFailure,
   commandCodeEnvForHome,
   commandCodeAuthPath,
+  commandCodeSessionEstimatedCost,
   formatCommandCodePromptTimeoutMessage,
   isCommandCodeProvider,
+  parseCommandCodeJsonOutput,
   parseCommandCodeModelList,
   writeCommandCodeAuth,
+  writeCommandCodeReadOnlySettings,
 } from '../src/shared/commandcode.ts';
 import { truncateUtf8WithNotice } from '../src/shared/prompt.ts';
 
@@ -41,7 +44,10 @@ describe('CommandCode CLI provider helpers', () => {
       '-p',
       '--trust',
       '--skip-onboarding',
+      '--no-skills',
       '--no-auto-update',
+      '--output-format',
+      'json',
       '--permission-mode',
       'plan',
       '--max-turns',
@@ -54,7 +60,10 @@ describe('CommandCode CLI provider helpers', () => {
       '-p',
       '--trust',
       '--skip-onboarding',
+      '--no-skills',
       '--no-auto-update',
+      '--output-format',
+      'json',
       '--permission-mode',
       'plan',
       '--max-turns',
@@ -62,6 +71,21 @@ describe('CommandCode CLI provider helpers', () => {
       '--model',
       'Qwen/Qwen3.7-Max',
     ]);
+  });
+
+  it('denies all CommandCode tools', () => {
+    const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
+    try {
+      const path = writeCommandCodeReadOnlySettings(home);
+
+      assert.equal(path, join(home, '.commandcode', 'settings.json'));
+      assert.equal(statSync(path).mode & 0o777, 0o600);
+      assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
+        permissions: { deny: ['*'] },
+      });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('keeps ambient API-key auth from overriding the temp auth file', () => {
@@ -116,6 +140,110 @@ describe('CommandCode CLI provider helpers', () => {
       ),
       ['zai-org/GLM-5.2', 'Qwen/Qwen3.7-Max', 'gpt-5.5'],
     );
+  });
+
+  it('parses final text and token totals from CommandCode NDJSON output', () => {
+    const result = parseCommandCodeJsonOutput(
+      [
+        '{"type":"event","event":',
+        JSON.stringify({ type: 'event', event: { type: 'tool_running' } }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          sessionId: 'session-1',
+          usage: {
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheReadTokens: 30,
+            cacheWriteTokens: 40,
+          },
+          durationMs: 1000,
+          finalText: '{"summary":"ok","findings":[]}',
+        }),
+      ].join('\n'),
+    );
+
+    assert.deepEqual(result, {
+      finalText: '{"summary":"ok","findings":[]}',
+      sessionId: 'session-1',
+      usage: { input: 100, output: 20, reasoning: 0, cacheRead: 30, cacheWrite: 40 },
+    });
+
+    const finalText = '{"summary":"recovered","findings":[]}';
+    assert.deepEqual(
+      parseCommandCodeJsonOutput(
+        `{"type":"event","event":{"type":"run_end","result":{"finalText":${JSON.stringify(
+          finalText,
+        )},"usage":{"inputTokens":297159,"outputTokens":19247,"cacheReadTokens":191556,"cacheWriteTokens":0},"nextState":{"sessionId":"session-2","messages":[`,
+      ),
+      {
+        finalText,
+        sessionId: 'session-2',
+        usage: {
+          input: 297159,
+          output: 19247,
+          reasoning: 0,
+          cacheRead: 191556,
+          cacheWrite: 0,
+        },
+      },
+    );
+  });
+
+  it('keeps a successful CommandCode result when usage is unavailable', () => {
+    assert.deepEqual(
+      parseCommandCodeJsonOutput(
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          usage: { inputTokens: 1 },
+          finalText: 'ok',
+        }),
+      ),
+      { finalText: 'ok' },
+    );
+  });
+
+  it('rejects CommandCode output without a successful result frame', () => {
+    assert.throws(
+      () =>
+        parseCommandCodeJsonOutput(
+          JSON.stringify({ type: 'result', subtype: 'error', finalText: '' }),
+        ),
+      /CommandCode JSON result was error/,
+    );
+    assert.throws(
+      () => parseCommandCodeJsonOutput(JSON.stringify({ type: 'event', event: {} })),
+      /contained no result frame/,
+    );
+  });
+
+  it('discovers a nested session transcript and fails open when it is absent', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
+    try {
+      const sessions = join(home, '.commandcode', 'projects', 'repo');
+      mkdirSync(sessions, { recursive: true });
+      writeFileSync(
+        join(sessions, 'session-1.jsonl'),
+        [
+          '{"type":"header"}',
+          '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":0.2}}',
+          'corrupt line',
+          '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":0.3}}',
+          '{"type":"message","message":{"role":"assistant"},"usage":{"costUsd":-1}}',
+          '{"type":"message","message":{"role":"user"},"usage":{"costUsd":10}}',
+        ].join('\n'),
+      );
+
+      assert.equal(await commandCodeSessionEstimatedCost(home, 'session-1'), 0.5);
+      assert.equal(await commandCodeSessionEstimatedCost(home, 'missing'), undefined);
+      assert.equal(
+        await commandCodeSessionEstimatedCost(join(home, 'missing'), 'session-1'),
+        undefined,
+      );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('classifies CommandCode rate-limit failures from CLI output', () => {

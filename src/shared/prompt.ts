@@ -348,7 +348,7 @@ about something absent and carries no evidence. If you cannot quote the code a
 finding is about, it likely lacks a concrete trigger; reconsider whether it
 belongs.`;
 
-// Prepended for prompt-bound backends (cline) whose read-only mode denies every tool
+// Prepended for prompt-bound backends whose read-only mode denies every tool
 // call: without it they stall asking to run the git/grep steps the base prompt assumes.
 export const NO_TOOLS_REVIEW_DIRECTIVE = `## Tool use disabled
 
@@ -358,6 +358,10 @@ instructions mention exploring the repo, running the git diff command, or
 grepping for callers, treat it as already done and review only the diff hunks
 and context in this prompt. Respond with the required JSON computed directly
 from that embedded context.`;
+
+export function withNoToolsReviewDirective(prompt: string): string {
+  return `${NO_TOOLS_REVIEW_DIRECTIVE}\n\n${prompt}`;
+}
 
 /**
  * System prompt for pi-engine sessions, standing in for the opencode plan

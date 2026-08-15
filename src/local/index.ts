@@ -239,7 +239,7 @@ const INSTALL_HINTS: Record<string, string> = {
   [GROK_CLI_BIN]: 'npm i -g @xai-official/grok',
   [KILO_CLI_BIN]: 'npm i -g @kilocode/cli',
   [CURSOR_CLI_BIN]: 'curl -fsSL https://cursor.com/install | sh',
-  [DEVIN_CLI_BIN]: 'curl -fsSL https://cli.devin.ai/install.sh | sh',
+  [DEVIN_CLI_BIN]: 'curl -fsSL https://static.devin.ai/cli/3000.4.25/setup.sh | sh',
 };
 
 /** The runner writes telemetry under the workspace, which is the throwaway
@@ -310,9 +310,8 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   // The companion checks out repo@ref, and both are optional. With neither it
   // works in an empty workspace, so the worktree diff stands — there is nothing
   // to align with. With both, the diff has to describe that same commit.
-  const gateway = remoteAcpConfigFromEnv();
   const routed =
-    !preview && gateway && gatewayRoutedModels([model, auxModel]) ? gateway : undefined;
+    !preview && gatewayRoutedModels([model, auxModel]) ? remoteAcpConfigFromEnv() : undefined;
   if (routed?.repo && !routed.ref) {
     throw new Error(
       'JBOT_ACP_GATEWAY_REPO is set without JBOT_ACP_GATEWAY_REF: the companion would review a ' +

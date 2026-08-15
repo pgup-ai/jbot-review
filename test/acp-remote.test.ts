@@ -7,6 +7,7 @@ import { describe, it } from 'node:test';
 
 import { checkGatewayEndpointReady as checkEndpointReady } from '../src/shared/acp-remote.ts';
 import {
+  checkAuxGatewayEndpointReady,
   createRemoteAcpBackend,
   gatewayRoutedModels,
   localRunId,
@@ -52,13 +53,16 @@ async function waitFor<T>(probe: () => Promise<T | undefined>, what: string): Pr
 }
 
 describe('remote acp backend', () => {
-  it('reads config only when fully specified', () => {
+  it('uses the gateway URL as the remote-routing switch', () => {
     const saved = { ...process.env };
     try {
       delete process.env.JBOT_ACP_GATEWAY_URL;
       assert.equal(remoteAcpConfigFromEnv(), undefined);
       process.env.JBOT_ACP_GATEWAY_URL = 'https://gw.example/';
-      assert.equal(remoteAcpConfigFromEnv(), undefined, 'token and endpoint still missing');
+      assert.throws(
+        () => remoteAcpConfigFromEnv(),
+        /also set JBOT_ACP_GATEWAY_TOKEN and JBOT_ACP_GATEWAY_ENDPOINT/,
+      );
       process.env.JBOT_ACP_GATEWAY_TOKEN = 't';
       process.env.JBOT_ACP_GATEWAY_ENDPOINT = 'laptop';
       process.env.JBOT_ACP_GATEWAY_RUN = 'pr/42 run';
@@ -120,6 +124,8 @@ describe('remote acp backend', () => {
       const config = { gateway: base, token: 'client-tok', endpoint: 'box', runId: 'run-remote' };
       assert.equal((await checkEndpointReady(config, 'probe')).freeSessions, 2, 'idle: all free');
       await assert.rejects(() => checkEndpointReady(config, 'kilo'), /does not offer agent "kilo"/);
+      const auxReady = await checkAuxGatewayEndpointReady(config, 'kilo');
+      assert.equal('error' in auxReady, true);
       await assert.rejects(
         () => checkEndpointReady({ ...config, endpoint: 'ghost' }, 'probe'),
         /is offline/,
