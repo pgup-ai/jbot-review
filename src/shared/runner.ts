@@ -1336,13 +1336,13 @@ async function runReviewPipeline(params: {
       devinHome = mkdtempSync(join(tmpdir(), 'jbot-devin-home-'));
       guardCliHomes();
       credentialsPath = writeDevinCredentials(devinApiKey, devinHome);
+      devinBackend = createDevinCliBackend(workspace, devinHome);
     } catch (error) {
       cleanupCliHomes();
       throw error;
     }
     log(`Devin CLI credentials configured at ${credentialsPath}.`);
     log('Devin CLI token usage is unavailable for these sessions.');
-    devinBackend = createDevinCliBackend(workspace, devinHome);
     serializedBackends.set(devinBackend, new Semaphore(1));
   }
 

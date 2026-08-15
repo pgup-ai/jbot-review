@@ -97,6 +97,7 @@ export function parseDevinCliOutput(output: string): { response: string; setupOn
 async function runDevinPrompt(
   workspace: string,
   home: string,
+  configFile: string,
   model: string,
   prompt: string,
   label: string,
@@ -106,10 +107,8 @@ async function runDevinPrompt(
   const root = mkdtempSync(join(tmpdir(), 'jbot-devin-session-'));
   const unregister = onFatalSignal(() => removeDevinSession(root, log));
   const promptFile = join(root, 'prompt.txt');
-  const configFile = join(root, 'config.json');
   try {
     writeFileSync(promptFile, prompt, { mode: 0o600 });
-    writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home)), { mode: 0o600 });
     log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
     for (let attempt = 0; ; attempt += 1) {
       const result = await spawnWithTimeout(
@@ -163,6 +162,8 @@ export function devinEnvForHome(home: string): NodeJS.ProcessEnv {
 }
 
 export function createDevinCliBackend(workspace: string, home: string): ReviewBackend {
+  const configFile = join(home, 'config.json');
+  writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home)), { mode: 0o600 });
   return {
     name: DEVIN_PROVIDER_ID,
     async runReview(model, prContext, guidelines, log, options = {}) {
@@ -179,6 +180,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
       const raw = await runDevinPrompt(
         workspace,
         home,
+        configFile,
         model,
         prompt,
         label,
@@ -193,6 +195,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
         const repaired = await runDevinPrompt(
           workspace,
           home,
+          configFile,
           model,
           buildJsonRepairFollowupPrompt({
             originalPrompt: prompt,
@@ -212,6 +215,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
       const raw = await runDevinPrompt(
         workspace,
         home,
+        configFile,
         model,
         assembleAddressedPriorCommentsPrompt(prContext),
         'addressed-prior-comments',
@@ -224,6 +228,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
       const raw = await runDevinPrompt(
         workspace,
         home,
+        configFile,
         model,
         assembleGuidelineCompliancePrompt(prContext, guidelines),
         'guideline-compliance',
@@ -236,6 +241,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
       const raw = await runDevinPrompt(
         workspace,
         home,
+        configFile,
         model,
         assembleFindingVerificationPrompt(prContext, findings),
         'finding-verification',
@@ -248,6 +254,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
       const raw = await runDevinPrompt(
         workspace,
         home,
+        configFile,
         model,
         assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
         'changes-since-last-review',

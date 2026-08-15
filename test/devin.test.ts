@@ -139,7 +139,7 @@ describe('Devin CLI provider helpers', () => {
     }
   });
 
-  it('reuses one Devin home and workspace across prompt sessions', async () => {
+  it('reuses Devin onboarding state across prompt sessions', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-devin-test-'));
     const home = join(root, 'home');
     const workspace = join(root, 'workspace');
@@ -151,13 +151,12 @@ describe('Devin CLI provider helpers', () => {
       executable,
       `#!/usr/bin/env node
 const fs = require('node:fs');
-const path = require('node:path');
-const markers = [
-  path.join(process.env.HOME, 'setup-complete'),
-  path.join(process.cwd(), 'setup-complete'),
-];
-if (markers.some((marker) => !fs.existsSync(marker))) {
-  for (const marker of markers) fs.writeFileSync(marker, '');
+const configIndex = process.argv.indexOf('--config');
+const configPath = process.argv[configIndex + 1];
+const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+if (!config.shell?.setup_complete) {
+  config.shell = { setup_complete: true };
+  fs.writeFileSync(configPath, JSON.stringify(config));
   process.stdout.write("Welcome to Devin CLI!\\nYou're all set. Run devin.\\n");
 } else {
   process.stdout.write('{"summary":"ok","findings":[]}');
