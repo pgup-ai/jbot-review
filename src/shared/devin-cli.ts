@@ -12,7 +12,6 @@ import {
   parseModelName,
   spawnWithTimeout,
   truncateForLog,
-  writeDevinCredentials,
 } from '@symma/protocol';
 
 import {
@@ -37,11 +36,11 @@ const DEVIN_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const DEVIN_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 const execFileAsync = promisify(execFile);
 
-function removeDevinHome(dir: string, log: (msg: string) => void): void {
+function removeDevinSession(dir: string, log: (msg: string) => void): void {
   try {
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch (error) {
-    log(`Could not remove isolated Devin home: ${String(error)}`);
+    log(`Could not remove isolated Devin session: ${String(error)}`);
   }
 }
 
@@ -100,7 +99,7 @@ export function parseDevinCliOutput(output: string): { response: string; setupOn
 
 async function runDevinPrompt(
   workspace: string,
-  apiKey: string,
+  home: string,
   model: string,
   prompt: string,
   label: string,
@@ -108,13 +107,11 @@ async function runDevinPrompt(
   timeoutMs = DEVIN_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
   const root = mkdtempSync(join(tmpdir(), 'jbot-devin-session-'));
-  const unregister = onFatalSignal(() => removeDevinHome(root, log));
-  const home = join(root, 'home');
+  const unregister = onFatalSignal(() => removeDevinSession(root, log));
   const isolatedWorkspace = join(root, 'workspace');
-  const promptFile = join(home, 'prompt.txt');
-  const configFile = join(home, 'config.json');
+  const promptFile = join(root, 'prompt.txt');
+  const configFile = join(root, 'config.json');
   try {
-    mkdirSync(home, { mode: 0o700 });
     mkdirSync(isolatedWorkspace, { mode: 0o700 });
     symlinkSync(workspace, join(isolatedWorkspace, 'repository'), 'dir');
     const { stdout: gitDirOutput } = await execFileAsync(
@@ -124,7 +121,6 @@ async function runDevinPrompt(
     );
     const gitDir = gitDirOutput.trim();
     if (!gitDir) throw new Error('Could not resolve the repository git directory for Devin.');
-    writeDevinCredentials(apiKey, home);
     writeFileSync(promptFile, prompt, { mode: 0o600 });
     writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home)), { mode: 0o600 });
     log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
@@ -163,11 +159,14 @@ async function runDevinPrompt(
       log(
         `${label} prompt complete via devin: stdout=${result.stdout.length} chars stderr=${result.stderr.length} chars`,
       );
+      if (!output.response && result.stderr) {
+        log(`${label} returned empty stdout; stderr: ${truncateForLog(result.stderr, 1000)}`);
+      }
       return output.response;
     }
   } finally {
     unregister();
-    removeDevinHome(root, log);
+    removeDevinSession(root, log);
   }
 }
 
@@ -181,7 +180,7 @@ export function devinEnvForHome(home: string): NodeJS.ProcessEnv {
   return env;
 }
 
-export function createDevinCliBackend(workspace: string, apiKey: string): ReviewBackend {
+export function createDevinCliBackend(workspace: string, home: string): ReviewBackend {
   return {
     name: DEVIN_PROVIDER_ID,
     async runReview(model, prContext, guidelines, log, options = {}) {
@@ -197,7 +196,7 @@ export function createDevinCliBackend(workspace: string, apiKey: string): Review
       );
       const raw = await runDevinPrompt(
         workspace,
-        apiKey,
+        home,
         model,
         prompt,
         label,
@@ -211,7 +210,7 @@ export function createDevinCliBackend(workspace: string, apiKey: string): Review
         log(`${label} response unparseable; sending one JSON repair prompt via devin: ${message}`);
         const repaired = await runDevinPrompt(
           workspace,
-          apiKey,
+          home,
           model,
           buildJsonRepairFollowupPrompt({
             originalPrompt: prompt,
@@ -230,7 +229,7 @@ export function createDevinCliBackend(workspace: string, apiKey: string): Review
     async runAddressedPriorCommentsCheck(model, prContext, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
-        apiKey,
+        home,
         model,
         assembleAddressedPriorCommentsPrompt(withDevinIsolatedWorkspace(prContext)),
         'addressed-prior-comments',
@@ -242,7 +241,7 @@ export function createDevinCliBackend(workspace: string, apiKey: string): Review
     async runGuidelineComplianceCheck(model, prContext, guidelines, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
-        apiKey,
+        home,
         model,
         assembleGuidelineCompliancePrompt(withDevinIsolatedWorkspace(prContext), guidelines),
         'guideline-compliance',
@@ -254,7 +253,7 @@ export function createDevinCliBackend(workspace: string, apiKey: string): Review
     async runFindingVerification(model, prContext, findings, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
-        apiKey,
+        home,
         model,
         assembleFindingVerificationPrompt(withDevinIsolatedWorkspace(prContext), findings),
         'finding-verification',
@@ -266,7 +265,7 @@ export function createDevinCliBackend(workspace: string, apiKey: string): Review
     async runChangesSinceLastReview(model, prContext, deltaContext, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
-        apiKey,
+        home,
         model,
         assembleChangesSinceLastReviewPrompt(withDevinIsolatedWorkspace(prContext), deltaContext),
         'changes-since-last-review',

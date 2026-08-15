@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, statSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, statSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -13,6 +13,7 @@ import {
 import {
   buildDevinCliArgs,
   buildDevinCliConfig,
+  createDevinCliBackend,
   devinEnvForHome,
   parseDevinCliOutput,
 } from '../src/shared/devin-cli.ts';
@@ -135,6 +136,42 @@ describe('Devin CLI provider helpers', () => {
       assert.equal(env.XDG_RUNTIME_DIR, undefined);
     } finally {
       process.env = saved;
+    }
+  });
+
+  it('reuses one Devin home across prompt sessions', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-devin-test-'));
+    const home = join(root, 'home');
+    const executable = join(root, 'devin');
+    const previousPath = process.env.PATH!;
+    mkdirSync(home);
+    writeFileSync(
+      executable,
+      `#!/usr/bin/env node
+const fs = require('node:fs');
+const path = require('node:path');
+const marker = path.join(process.env.HOME, 'setup-complete');
+if (!fs.existsSync(marker)) {
+  fs.writeFileSync(marker, '');
+  process.stdout.write("Welcome to Devin CLI!\\nYou're all set. Run devin.\\n");
+} else {
+  process.stdout.write('{"summary":"ok","findings":[]}');
+}
+`,
+      { mode: 0o700 },
+    );
+    try {
+      process.env.PATH = `${root}:${previousPath}`;
+      const logs: string[] = [];
+      const backend = createDevinCliBackend(process.cwd(), home);
+
+      await backend.runReview('devin/default', 'context', '', (message) => logs.push(message));
+      await backend.runReview('devin/default', 'context', '', (message) => logs.push(message));
+
+      assert.equal(logs.filter((message) => message.includes('first-run setup')).length, 1);
+    } finally {
+      process.env.PATH = previousPath;
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

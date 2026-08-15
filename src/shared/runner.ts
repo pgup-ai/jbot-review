@@ -112,7 +112,7 @@ import {
   Semaphore,
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
-import { DEVIN_PROVIDER_ID } from '@symma/protocol';
+import { DEVIN_PROVIDER_ID, writeDevinCredentials } from '@symma/protocol';
 import { createDevinCliBackend } from './devin-cli.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
@@ -1255,6 +1255,12 @@ async function runReviewPipeline(params: {
   let grokSessionSlots: Semaphore | undefined;
   let kiloBackend: ReviewBackend | undefined;
   let qoderBackend: ReviewBackend | undefined;
+  let devinHome: string | undefined;
+  const cleanupDevinHome = (): void => {
+    if (!devinHome) return;
+    rmSync(devinHome, { recursive: true, force: true });
+    devinHome = undefined;
+  };
   let commandCodeHome: string | undefined;
   const cleanupCommandCodeHome = (): void => {
     if (!commandCodeHome) return;
@@ -1293,6 +1299,7 @@ async function runReviewPipeline(params: {
     // Independently: force only suppresses a missing path, so one failed
     // removal would otherwise leave the remaining credential homes on disk.
     for (const cleanup of [
+      cleanupDevinHome,
       cleanupCommandCodeHome,
       cleanupCodexHome,
       cleanupCodexRunHome,
@@ -1324,9 +1331,18 @@ async function runReviewPipeline(params: {
       cleanupCliHomes();
       throw new Error(`Missing API key for ${DEVIN_PROVIDER_ID} provider.`);
     }
-    log('Devin CLI credentials use isolated per-prompt homes.');
+    let credentialsPath: string;
+    try {
+      devinHome = mkdtempSync(join(tmpdir(), 'jbot-devin-home-'));
+      guardCliHomes();
+      credentialsPath = writeDevinCredentials(devinApiKey, devinHome);
+    } catch (error) {
+      cleanupCliHomes();
+      throw error;
+    }
+    log(`Devin CLI credentials configured at ${credentialsPath}.`);
     log('Devin CLI token usage is unavailable for these sessions.');
-    devinBackend = createDevinCliBackend(workspace, devinApiKey);
+    devinBackend = createDevinCliBackend(workspace, devinHome);
   }
 
   if (
