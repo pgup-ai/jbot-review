@@ -799,11 +799,11 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.25.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Source: Docker-pinned npm package [`command-code@1.22.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
-56 J-Bot model values:
+54 J-Bot model values:
 
 - `commandcode/claude-fable-5`
 - `commandcode/claude-haiku-4-5`
@@ -819,7 +819,6 @@ The CLI does not expose a complete list.
 - `commandcode/google/gemini-3.5-flash`
 - `commandcode/google/gemini-3.5-flash-lite`
 - `commandcode/google/gemini-3.6-flash`
-- `commandcode/google/gemini-3.7-flash`
 - `commandcode/gpt-5.3-codex`
 - `commandcode/gpt-5.4`
 - `commandcode/gpt-5.4-mini`
@@ -860,7 +859,6 @@ The CLI does not expose a complete list.
 - `commandcode/zai-org/glm-5.1`
 - `commandcode/zai-org/glm-5.2`
 - `commandcode/zai-org/glm-5.2-fast`
-- `commandcode/zai-org/glm-5.3`
 
 ### `cursor`
 
