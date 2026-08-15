@@ -6,18 +6,15 @@ import { describe, it } from 'node:test';
 
 import {
   buildCommandCodeCliArgs,
-  buildCommandCodePrompt,
   classifyCommandCodePromptFailure,
   commandCodeEnvForHome,
   commandCodeAuthPath,
-  commandCodeSettingsPath,
   commandCodeSessionEstimatedCost,
   formatCommandCodePromptTimeoutMessage,
   isCommandCodeProvider,
   parseCommandCodeJsonOutput,
   parseCommandCodeModelList,
   writeCommandCodeAuth,
-  writeCommandCodeReadOnlySettings,
 } from '../src/shared/commandcode.ts';
 import { truncateUtf8WithNotice } from '../src/shared/prompt.ts';
 
@@ -46,14 +43,13 @@ describe('CommandCode CLI provider helpers', () => {
       '-p',
       '--trust',
       '--skip-onboarding',
-      '--no-skills',
       '--no-auto-update',
       '--output-format',
       'json',
       '--permission-mode',
       'plan',
       '--max-turns',
-      '4',
+      '1000',
     ]);
   });
 
@@ -62,37 +58,16 @@ describe('CommandCode CLI provider helpers', () => {
       '-p',
       '--trust',
       '--skip-onboarding',
-      '--no-skills',
       '--no-auto-update',
       '--output-format',
       'json',
       '--permission-mode',
       'plan',
       '--max-turns',
-      '4',
+      '1000',
       '--model',
       'Qwen/Qwen3.7-Max',
     ]);
-  });
-
-  it('writes deny-all settings and prepends the no-tools directive', () => {
-    const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
-    try {
-      const path = writeCommandCodeReadOnlySettings(home);
-
-      assert.equal(path, commandCodeSettingsPath(home));
-      assert.equal(statSync(path).mode & 0o777, 0o600);
-      assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
-        permissions: {
-          deny: ['*'],
-          disableBypass: 'disable',
-        },
-      });
-      assert.match(buildCommandCodePrompt('PROMPT'), /^## Tool use disabled/);
-      assert.match(buildCommandCodePrompt('PROMPT'), /\n\nPROMPT$/);
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
   });
 
   it('keeps ambient API-key auth from overriding the temp auth file', () => {

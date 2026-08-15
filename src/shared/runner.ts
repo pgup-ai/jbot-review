@@ -123,7 +123,6 @@ import {
   runCommandCodeChangesSinceLastReview,
   runCommandCodeReview,
   writeCommandCodeAuth,
-  writeCommandCodeReadOnlySettings,
 } from './commandcode.ts';
 import {
   CODEX_PROVIDER_ID,
@@ -353,8 +352,7 @@ function createPoolsideBackend(
   };
 }
 
-function createCommandCodeBackend(home: string): ReviewBackend {
-  const workspace = join(home, 'workspace');
+function createCommandCodeBackend(workspace: string, home: string): ReviewBackend {
   return {
     name: COMMANDCODE_PROVIDER_ID,
     runReview: (model, prContext, guidelines, log, options) =>
@@ -1357,17 +1355,14 @@ async function runReviewPipeline(params: {
     try {
       commandCodeHome = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
       guardCliHomes();
-      mkdirSync(join(commandCodeHome, 'workspace'), { mode: 0o700 });
       authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
-      writeCommandCodeReadOnlySettings(commandCodeHome);
-      commandCodeBackend = createCommandCodeBackend(commandCodeHome);
     } catch (error) {
       cleanupCliHomes();
       throw error;
     }
     log(`CommandCode CLI auth configured at ${authPath}.`);
     log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
-    log('CommandCode reviews run tool-free from an empty workspace using the embedded diff.');
+    commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome);
   }
 
   if (!remoteAcp && (mainCliBackend === CODEX_PROVIDER_ID || auxCliBackend === CODEX_PROVIDER_ID)) {
