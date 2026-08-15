@@ -46,9 +46,9 @@ import { createAcpBackend } from './acp.ts';
 import { codexAcpSpec, cursorAcpSpec, kiloAcpSpec } from '@symma/protocol';
 import {
   ACP_GATEWAY_PROVIDERS,
+  checkAuxGatewayEndpointReady,
   checkGatewayEndpointReady,
   createRemoteAcpBackend,
-  gatewaySessionCap,
   remoteAcpConfigFromEnv,
 } from './acp-remote.ts';
 import {
@@ -1230,10 +1230,29 @@ async function runReviewPipeline(params: {
   // sessions at what the companion accepts — its limit is typically lower than
   // jbot's, and the excess would be refused mid-review.
   let sessionCap = options.maxConcurrentSessions;
+  let auxGatewayPreflightError: unknown;
   if (remoteAcp && routedAgents.length > 0) {
-    for (const agent of routedAgents) {
-      const { freeSessions } = await checkGatewayEndpointReady(remoteAcp, agent);
-      sessionCap = gatewaySessionCap(sessionCap, freeSessions);
+    const mainGatewayAgent =
+      mainCliBackend && routedAgents.includes(mainCliBackend) ? mainCliBackend : undefined;
+    const auxGatewayAgent =
+      auxCliBackend && routedAgents.includes(auxCliBackend) ? auxCliBackend : undefined;
+    if (mainGatewayAgent) {
+      const { freeSessions } = await checkGatewayEndpointReady(remoteAcp, mainGatewayAgent);
+      if (sessionCap === 0 || freeSessions < sessionCap) sessionCap = freeSessions;
+    }
+    if (auxGatewayAgent && auxGatewayAgent !== mainGatewayAgent) {
+      const ready = await checkAuxGatewayEndpointReady(remoteAcp, auxGatewayAgent);
+      if ('error' in ready) {
+        auxGatewayPreflightError = ready.error;
+        recordCoverage({ session: 'aux-gateway-preflight', state: 'failed', error: ready.error });
+        log(
+          `Auxiliary ACP gateway backend unavailable; auxiliary sessions are disabled for this run (fail-open): ${
+            ready.error instanceof Error ? ready.error.message : String(ready.error)
+          }`,
+        );
+      } else if (sessionCap === 0 || ready.freeSessions < sessionCap) {
+        sessionCap = ready.freeSessions;
+      }
     }
     log(
       `ACP gateway: routing ${routedAgents.join(', ')} to ${remoteAcp.endpoint} via ${remoteAcp.gateway}`,
@@ -1657,7 +1676,8 @@ async function runReviewPipeline(params: {
   // Single gate for every aux session (lenses, guideline, addressed,
   // changes-since, verification): an incomplete embedded diff and a failed
   // aux-only opencode boot disable them the same way (invariant #3).
-  const auxSessionsEnabled = auxHasCompleteEmbeddedDiff && !auxOpencodeBootError;
+  const auxSessionsEnabled =
+    auxHasCompleteEmbeddedDiff && !auxOpencodeBootError && !auxGatewayPreflightError;
   // Which engine each model ran on, for the review footer (main wins on
   // collision — same model ⇒ same engine anyway).
   const engineByModel: Record<string, string> = {

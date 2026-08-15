@@ -7,22 +7,13 @@ import { describe, it } from 'node:test';
 
 import { checkGatewayEndpointReady as checkEndpointReady } from '../src/shared/acp-remote.ts';
 import {
+  checkAuxGatewayEndpointReady,
   createRemoteAcpBackend,
-  gatewaySessionCap,
   gatewayRoutedModels,
   localRunId,
   remoteAcpConfigFromEnv,
 } from '../src/shared/acp-remote.ts';
 import { readJournalLines } from '../src/gateway/journal.ts';
-
-describe('gatewaySessionCap', () => {
-  it('caps configured concurrency and rejects an endpoint with no capacity', () => {
-    assert.equal(gatewaySessionCap(0, 2), 2);
-    assert.equal(gatewaySessionCap(3, 2), 2);
-    assert.equal(gatewaySessionCap(1, 2), 1);
-    assert.throws(() => gatewaySessionCap(3, 0), /no free session capacity/);
-  });
-});
 
 // Answers the ACP handshake and returns a review payload, so the backend is
 // exercised over the real gateway + companion rather than a stub transport.
@@ -133,6 +124,8 @@ describe('remote acp backend', () => {
       const config = { gateway: base, token: 'client-tok', endpoint: 'box', runId: 'run-remote' };
       assert.equal((await checkEndpointReady(config, 'probe')).freeSessions, 2, 'idle: all free');
       await assert.rejects(() => checkEndpointReady(config, 'kilo'), /does not offer agent "kilo"/);
+      const auxReady = await checkAuxGatewayEndpointReady(config, 'kilo');
+      assert.equal('error' in auxReady, true);
       await assert.rejects(
         () => checkEndpointReady({ ...config, endpoint: 'ghost' }, 'probe'),
         /is offline/,

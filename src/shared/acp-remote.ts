@@ -102,9 +102,15 @@ export async function checkGatewayEndpointReady(
   }
 }
 
-export function gatewaySessionCap(currentCap: number, freeSessions: number): number {
-  if (freeSessions === 0) throw new Error('ACP gateway endpoint has no free session capacity.');
-  return currentCap === 0 ? freeSessions : Math.min(currentCap, freeSessions);
+export async function checkAuxGatewayEndpointReady(
+  config: Omit<RemoteAcpConfig, 'agent'>,
+  agent: string,
+): Promise<{ freeSessions: number } | { error: unknown }> {
+  try {
+    return await checkGatewayEndpointReady(config, agent);
+  } catch (error) {
+    return { error };
+  }
 }
 
 // No tee on a relayed session: the companion signs and journals it itself, so
