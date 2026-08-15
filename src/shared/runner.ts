@@ -1226,9 +1226,8 @@ async function runReviewPipeline(params: {
       Boolean(id) && (ACP_GATEWAY_PROVIDERS as readonly string[]).includes(id as string),
   );
   const remoteAcp = routedAgents.length > 0 ? remoteAcpConfigFromEnv() : undefined;
-  // Fail before any model spend if the endpoint can't serve this run, and cap
-  // sessions at what the companion accepts — its limit is typically lower than
-  // jbot's, and the excess would be refused mid-review.
+  // A missing main endpoint is fatal; an auxiliary-only endpoint fails open.
+  // Cap sessions at the companion's available capacity.
   let sessionCap = options.maxConcurrentSessions;
   let auxGatewayPreflightError: unknown;
   if (remoteAcp && routedAgents.length > 0) {
