@@ -1252,13 +1252,13 @@ async function runReviewPipeline(params: {
   let codexBackend: ReviewBackend | undefined;
   let clineBackend: ReviewBackend | undefined;
   let grokBackend: ReviewBackend | undefined;
-  let grokSessionSlots: Semaphore | undefined;
+  const serializedBackends = new Map<ReviewBackend, Semaphore>();
   let kiloBackend: ReviewBackend | undefined;
   let qoderBackend: ReviewBackend | undefined;
   let devinHome: string | undefined;
   const cleanupDevinHome = (): void => {
     if (!devinHome) return;
-    rmSync(devinHome, { recursive: true, force: true });
+    rmSync(devinHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     devinHome = undefined;
   };
   let commandCodeHome: string | undefined;
@@ -1343,6 +1343,7 @@ async function runReviewPipeline(params: {
     log(`Devin CLI credentials configured at ${credentialsPath}.`);
     log('Devin CLI token usage is unavailable for these sessions.');
     devinBackend = createDevinCliBackend(workspace, devinHome);
+    serializedBackends.set(devinBackend, new Semaphore(1));
   }
 
   if (
@@ -1453,7 +1454,7 @@ async function runReviewPipeline(params: {
     );
     grokBackend = createGrokBackend(runtime);
     // Grok mutates shared auth state, so its sessions cannot overlap.
-    grokSessionSlots = new Semaphore(1);
+    serializedBackends.set(grokBackend, new Semaphore(1));
   }
 
   if (!remoteAcp && (mainCliBackend === KILO_PROVIDER_ID || auxCliBackend === KILO_PROVIDER_ID)) {
@@ -1644,13 +1645,13 @@ async function runReviewPipeline(params: {
     mainBaseBackend,
     'main',
     sessionSlots,
-    mainBaseBackend === grokBackend ? grokSessionSlots : undefined,
+    serializedBackends.get(mainBaseBackend),
   );
   const auxBackend = limitReviewBackendSessions(
     auxBaseBackend,
     'aux',
     sessionSlots,
-    auxBaseBackend === grokBackend ? grokSessionSlots : undefined,
+    serializedBackends.get(auxBaseBackend),
   );
   // Single gate for every aux session (lenses, guideline, addressed,
   // changes-since, verification): an incomplete embedded diff and a failed
