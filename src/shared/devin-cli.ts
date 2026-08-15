@@ -75,6 +75,7 @@ export function buildDevinCliConfig(home: string) {
       vscode: false,
       zed: false,
     },
+    shell: { setup_complete: true },
     auto_update: false,
   };
 }
