@@ -151,6 +151,7 @@ describe('Devin CLI provider helpers', () => {
       executable,
       `#!/usr/bin/env node
 const fs = require('node:fs');
+if (process.env.GIT_OPTIONAL_LOCKS !== '0') process.exit(2);
 const configIndex = process.argv.indexOf('--config');
 const configPath = process.argv[configIndex + 1];
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));

@@ -116,7 +116,7 @@ async function runDevinPrompt(
         buildDevinCliArgs(model, promptFile, configFile),
         {
           cwd: workspace,
-          env: devinEnvForHome(home),
+          env: { ...devinEnvForHome(home), GIT_OPTIONAL_LOCKS: '0' },
           timeoutMs,
           timeoutMessage: `devin ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s`,
         },
