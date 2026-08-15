@@ -100,10 +100,12 @@ describe('parseReview', () => {
   });
 
   it('throws in strict mode on unparseable output', () => {
+    const logs: string[] = [];
     assert.throws(
-      () => parseReview('not json at all', 'review', noLog, { strict: true }),
-      /unparseable JSON/,
+      () => parseReview('', 'review', (message) => logs.push(message), { strict: true }),
+      /^Error: review returned unparseable JSON: empty response$/,
     );
+    assert.equal(logs.at(-1), 'review response preview:\n<empty>');
   });
 
   it('rejects a non-object JSON root in strict mode instead of returning an empty review', () => {
