@@ -123,6 +123,8 @@ describe('Devin CLI provider helpers', () => {
       process.env.DEVIN_TEST_SAFE = 'kept';
       process.env.XDG_CONFIG_HOME = '/tmp/ambient-config';
       process.env.XDG_DATA_HOME = '/tmp/ambient-data';
+      process.env.XDG_CACHE_HOME = '/tmp/ambient-cache';
+      process.env.XDG_RUNTIME_DIR = '/tmp/ambient-runtime';
       const env = devinEnvForHome('/tmp/devin-home');
       assert.equal(env.HOME, '/tmp/devin-home');
       assert.equal(env.DEVIN_TEST_TOKEN, undefined);
@@ -130,6 +132,8 @@ describe('Devin CLI provider helpers', () => {
       assert.equal(env.DEVIN_TEST_SAFE, 'kept');
       assert.equal(env.XDG_CONFIG_HOME, undefined);
       assert.equal(env.XDG_DATA_HOME, undefined);
+      assert.equal(env.XDG_CACHE_HOME, undefined);
+      assert.equal(env.XDG_RUNTIME_DIR, undefined);
     } finally {
       process.env = saved;
     }

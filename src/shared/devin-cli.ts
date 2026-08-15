@@ -213,6 +213,8 @@ export function devinEnvForHome(home: string): NodeJS.ProcessEnv {
   for (const key of sessionEnvDenyKeys(Object.keys(env))) delete env[key];
   delete env.XDG_CONFIG_HOME;
   delete env.XDG_DATA_HOME;
+  delete env.XDG_CACHE_HOME;
+  delete env.XDG_RUNTIME_DIR;
   return env;
 }
 
