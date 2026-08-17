@@ -154,7 +154,7 @@ import {
 } from './grok.ts';
 import {
   DIM_PROVIDER_ID,
-  assertValidDimAuth,
+  decodeDimBundle,
   runDimAddressedPriorCommentsCheck,
   runDimChangesSinceLastReview,
   runDimFindingVerification,
@@ -1576,7 +1576,7 @@ async function runReviewPipeline(params: {
     qoderBackend = createQoderBackend(workspace, qoderToken);
   }
 
-  if (!remoteAcp && (mainCliBackend === DIM_PROVIDER_ID || auxCliBackend === DIM_PROVIDER_ID)) {
+  if (mainCliBackend === DIM_PROVIDER_ID || auxCliBackend === DIM_PROVIDER_ID) {
     const dimAuth = backendSelection.dimAuth;
     if (!dimAuth) {
       cleanupCliHomes();
@@ -1584,10 +1584,10 @@ async function runReviewPipeline(params: {
     }
     let runtime: DimRuntime;
     try {
-      const auth = assertValidDimAuth(dimAuth); // fail fast on a malformed secret
+      const bundle = decodeDimBundle(dimAuth); // fail fast on a malformed secret
       dimHome = mkdtempSync(join(tmpdir(), 'jbot-dim-home-'));
       guardCliHomes();
-      runtime = { parent: dimHome, auth };
+      runtime = { parent: dimHome, bundle };
     } catch (error) {
       cleanupCliHomes();
       throw error;

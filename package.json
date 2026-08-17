@@ -19,7 +19,8 @@
     "env:minify-auth": "tsx scripts/minify-env-auth.ts",
     "findings:dispositions": "tsx scripts/finding-dispositions.ts",
     "guidelines:candidates": "tsx scripts/guideline-candidates.ts",
-    "companion": "tsx src/companion/index.ts"
+    "companion": "tsx src/companion/index.ts",
+    "dim:bundle": "tsx scripts/dim-bundle.ts"
   },
   "engines": {
     "node": ">=22.19.0"

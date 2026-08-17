@@ -32,8 +32,8 @@ RUN npm install -g @qoder-ai/qodercli@1.0.43 \
   && qodercli --version
 
 # DimAgent, likewise in its own layer — its platform binary unpacks to ~305MB,
-# five times Qoder's. `dim help`, not `dim --help`: the latter is not a help
-# flag and falls through to reading stdin.
+# five times Qoder's. Smoke-tested with `dim version`: `dim --help` is not a
+# help flag and falls through to reading stdin.
 RUN npm install -g dimcode@0.3.15 \
   && npm cache clean --force \
   && dim version

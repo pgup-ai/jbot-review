@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { join } from 'node:path';
 
 import { parseModelName, spawnWithTimeout, truncateForLog } from '@symma/protocol';
@@ -34,6 +35,12 @@ export const DIM_CLI_BIN = 'dim';
  * through those. This set drops `write`/`edit` and `skill`; the last matters
  * because dim discovers repo-local skills from `.agents/skills` and `./skills`,
  * which are PR-author-controlled.
+ *
+ * `exec` stays, because exploring the checkout is the point. It is safe to keep
+ * only in combination with the args below: measured under `--policy read-only`,
+ * a shell write (`echo x > f`) and network (`curl`) are DECLINED, and adding
+ * `--mode plan` also declines `git commit`/`git reset --hard` while leaving
+ * `git log`/`git diff`/`git grep` allowed.
  */
 const DIM_ALLOWED_TOOLS = 'read,glob,grep,exec';
 
@@ -50,24 +57,41 @@ function dimAuthPath(home: string): string {
   return join(home, 'auth.json');
 }
 
-/** Validates the secret at setup and returns it minified for the per-spawn copies. */
-export function assertValidDimAuth(credential: string): string {
+/**
+ * The secret carries TWO files, because either alone is useless: `auth.json`
+ * authenticates but leaves dim with "No connected provider" — the provider
+ * connection lives in `dimcode.sqlite`, and no CLI command reconstructs it
+ * (`provider enable`/`switch` both refuse for the OAuth provider). They must
+ * also be refreshed together, so one blob keeps them from drifting apart.
+ * `scripts/dim-bundle.ts` builds it from a local `dim auth login`.
+ */
+export interface DimBundle {
+  auth: string;
+  /** base64 of `dimcode.sqlite`, pruned to the one provider in use. */
+  store: string;
+}
+
+export function encodeDimBundle(bundle: DimBundle): string {
+  return gzipSync(Buffer.from(JSON.stringify(bundle), 'utf8')).toString('base64');
+}
+
+/** Validates the secret at setup so a malformed one fails before any session. */
+export function decodeDimBundle(credential: string): DimBundle {
   const content = credential.trim();
   if (!content) {
-    throw new Error('Missing dim credential. Set dim-auth/DIM_AUTH_JSON.');
+    throw new Error('Missing dim credential. Set dim-auth/DIM_AUTH_BUNDLE.');
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(content);
+    parsed = JSON.parse(gunzipSync(Buffer.from(content, 'base64')).toString('utf8'));
   } catch {
-    throw new Error(
-      'Invalid DIM_AUTH_JSON: expected the JSON contents of ~/.dimcode/v2/auth.json.',
-    );
+    throw new Error('Invalid DIM_AUTH_BUNDLE: expected the base64 blob from `npm run dim:bundle`.');
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error('Invalid DIM_AUTH_JSON: expected a JSON object.');
+  const bundle = parsed as Partial<DimBundle>;
+  if (typeof bundle?.auth !== 'string' || typeof bundle?.store !== 'string') {
+    throw new Error('Invalid DIM_AUTH_BUNDLE: missing auth or store.');
   }
-  return JSON.stringify(parsed);
+  return { auth: bundle.auth, store: bundle.store };
 }
 
 /**
@@ -77,9 +101,14 @@ export function assertValidDimAuth(credential: string): string {
  * parent is what the runner registers for signal cleanup; this only has to
  * remove its own directory on the happy path.
  */
-function createDimSessionHome(parent: string, auth: string): string {
+function createDimSessionHome(parent: string, bundle: DimBundle): string {
   const home = mkdtempSync(join(parent, 'session-'));
-  writeFileSync(dimAuthPath(home), `${auth}\n`, { mode: 0o600 });
+  writeFileSync(dimAuthPath(home), `${bundle.auth}\n`, { mode: 0o600 });
+  // The store nests under v2/ while auth.json sits at the root — see dimAuthPath.
+  mkdirSync(join(home, 'v2'), { recursive: true, mode: 0o700 });
+  writeFileSync(join(home, 'v2', 'dimcode.sqlite'), Buffer.from(bundle.store, 'base64'), {
+    mode: 0o600,
+  });
   return home;
 }
 
@@ -149,7 +178,7 @@ export function dimEnvForHome(home: string | undefined): NodeJS.ProcessEnv {
 /** Parent dir for per-spawn homes, plus the validated secret they each copy. */
 export interface DimRuntime {
   parent: string;
-  auth: string;
+  bundle: DimBundle;
 }
 
 interface DimRunOutcome {
@@ -343,8 +372,8 @@ async function runDimPrompt(
   const timeoutMs = options.timeoutMs ?? DIM_PROMPT_TIMEOUT_MS;
   const runtime = options.runtime;
   if (!runtime)
-    throw new Error('Missing dim runtime. A validated auth and parent dir are required.');
-  const home = createDimSessionHome(runtime.parent, runtime.auth);
+    throw new Error('Missing dim runtime. A decoded bundle and parent dir are required.');
+  const home = createDimSessionHome(runtime.parent, runtime.bundle);
   log(`Calling ${label} prompt (agent=dim-cli, model=${model})`);
   let result;
   try {

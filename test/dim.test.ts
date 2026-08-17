@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
-  assertValidDimAuth,
   buildDimCliArgs,
+  decodeDimBundle,
   dimEnvForHome,
+  encodeDimBundle,
   parseDimEventStream,
 } from '../src/shared/dim.ts';
 
@@ -81,15 +82,18 @@ describe('parseDimEventStream', () => {
   });
 });
 
-describe('assertValidDimAuth', () => {
-  it('minifies a valid blob and rejects anything that is not a JSON object', () => {
-    assert.equal(
-      assertValidDimAuth('{\n "tokens": { "refresh_token": "rt" }\n}'),
-      '{"tokens":{"refresh_token":"rt"}}',
+describe('dim bundle', () => {
+  it('round-trips both files and rejects a malformed secret', () => {
+    // Carrying the store is what separates a working secret from "No connected
+    // provider", so a bundle missing either half must fail at setup, not mid-run.
+    const bundle = { auth: '{"tokens":{"refresh_token":"rt"}}', store: 'c3FsaXRl' };
+    assert.deepEqual(decodeDimBundle(encodeDimBundle(bundle)), bundle);
+    assert.throws(() => decodeDimBundle('  '), /Missing dim credential/);
+    assert.throws(() => decodeDimBundle('not-base64-gzip'), /Invalid DIM_AUTH_BUNDLE/);
+    assert.throws(
+      () => decodeDimBundle(encodeDimBundle({ auth: 'a' } as never)),
+      /missing auth or store/,
     );
-    assert.throws(() => assertValidDimAuth('  '), /Missing dim credential/);
-    assert.throws(() => assertValidDimAuth('not json'), /Invalid DIM_AUTH_JSON/);
-    assert.throws(() => assertValidDimAuth('[1]'), /expected a JSON object/);
   });
 });
 
