@@ -9,6 +9,7 @@ import {
 
 import { isContext7QuotaError } from './context7.ts';
 import { PROVIDERS } from './config.ts';
+import { BASH_PERMISSIONS } from './shell-policy.ts';
 import { parseModelName } from '@symma/protocol';
 import {
   assembleAddressedPriorCommentsPrompt,
@@ -93,33 +94,6 @@ function buildProviderEntry(params: {
 }
 
 /**
- * Bash guardrail — an ACCIDENT filter, NOT a security boundary. Measured
- * (2026-07-09, opencode 1.17): the literal forms are blocked, but one-step
- * rewrites walk straight through — `git -c core.pager=cat commit` evades
- * `git commit*`, `sh -c "rm x"` evades `rm*`, and `echo x > f` needs no denied
- * command name at all. So this stops a well-behaved model that reaches for
- * `git stash`/`git checkout` to orient itself (the real, observed failure mode,
- * and the one that would clobber a developer's uncommitted work in local mode).
- * It does NOT stop an injected one. Isolation — the ephemeral CI container and
- * the app's temp clone — remains the actual boundary; never relax another layer
- * because this exists.
- *
- * The `*: allow` catch-all is load-bearing: opencode defaults UNMATCHED commands
- * to "ask" once a rule map exists, which would hang a headless run.
- */
-const BASH_PERMISSIONS = {
-  '*': 'allow',
-  'git commit*': 'deny',
-  'git push*': 'deny',
-  'git checkout*': 'deny',
-  'git reset*': 'deny',
-  'git clean*': 'deny',
-  'git stash*': 'deny',
-  'git restore*': 'deny',
-  'rm*': 'deny',
-} as const;
-
-/**
  * Env vars withheld from the opencode server — and therefore from every
  * session's bash children, which inherit its environment. The Action maps ALL
  * inputs to INPUT_* (the write-scoped GitHub token plus every provider key),
@@ -151,7 +125,7 @@ export function sessionEnvDenyKeys(keys: string[]): string[] {
  * agent: edits are denied outright (never "ask" — an interactive prompt
  * would hang a headless run), and file access outside the workspace is
  * denied. Bash stays allowed: the review needs git diff/log/grep, filtered
- * by BASH_PERMISSIONS below.
+ * by the shared BASH_PERMISSIONS accident filter.
  *
  * `modelOptions` pass through opencode to the provider SDK, scoped to the model
  * they are attached to — the lever for capping reasoning spend (e.g.
