@@ -152,6 +152,15 @@ import {
   runGrokReview,
   type GrokRuntime,
 } from './grok.ts';
+import {
+  DIM_PROVIDER_ID,
+  configureDimHome,
+  runDimAddressedPriorCommentsCheck,
+  runDimChangesSinceLastReview,
+  runDimFindingVerification,
+  runDimGuidelineComplianceCheck,
+  runDimReview,
+} from './dim.ts';
 import { assertValidKiloAuth, KILO_PROVIDER_ID, listKiloModels } from '@symma/protocol';
 import {
   QODER_PROVIDER_ID,
@@ -493,6 +502,57 @@ function createGrokBackend(runtime: GrokRuntime): ReviewBackend {
         timeoutMs,
         onTokenUsage,
         runtime,
+      ),
+  };
+}
+
+function createDimBackend(workspace: string, home: string): ReviewBackend {
+  return {
+    name: DIM_PROVIDER_ID,
+    runReview: (model, prContext, guidelines, log, options) =>
+      runDimReview(workspace, model, prContext, guidelines, log, { ...options, home }),
+    runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
+      runDimAddressedPriorCommentsCheck(
+        workspace,
+        model,
+        prContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        home,
+      ),
+    runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
+      runDimGuidelineComplianceCheck(
+        workspace,
+        model,
+        prContext,
+        guidelines,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        home,
+      ),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+      runDimFindingVerification(
+        workspace,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        home,
+      ),
+    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runDimChangesSinceLastReview(
+        workspace,
+        model,
+        prContext,
+        deltaContext,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        home,
       ),
   };
 }
@@ -1274,6 +1334,7 @@ async function runReviewPipeline(params: {
   const serializedBackends = new Map<ReviewBackend, Semaphore>();
   let kiloBackend: ReviewBackend | undefined;
   let qoderBackend: ReviewBackend | undefined;
+  let dimBackend: ReviewBackend | undefined;
   let devinHome: string | undefined;
   const cleanupDevinHome = (): void => {
     if (!devinHome) return;
@@ -1312,6 +1373,12 @@ async function runReviewPipeline(params: {
     rmSync(grokHome, { recursive: true, force: true });
     grokHome = undefined;
   };
+  let dimHome: string | undefined;
+  const cleanupDimHome = (): void => {
+    if (!dimHome) return;
+    rmSync(dimHome, { recursive: true, force: true });
+    dimHome = undefined;
+  };
   // Multiple CLI homes can be live at once (e.g. main=codex, aux=commandcode), so
   // clean every one at every downstream failure/exit point.
   const cleanupCliHomes = (): void => {
@@ -1324,6 +1391,7 @@ async function runReviewPipeline(params: {
       cleanupCodexRunHome,
       cleanupClineHome,
       cleanupGrokHome,
+      cleanupDimHome,
     ]) {
       try {
         cleanup();
@@ -1507,6 +1575,26 @@ async function runReviewPipeline(params: {
     qoderBackend = createQoderBackend(workspace, qoderToken);
   }
 
+  if (!remoteAcp && (mainCliBackend === DIM_PROVIDER_ID || auxCliBackend === DIM_PROVIDER_ID)) {
+    const dimAuth = backendSelection.dimAuth;
+    if (!dimAuth) {
+      cleanupCliHomes();
+      throw new Error(`Missing auth for ${DIM_PROVIDER_ID} provider.`);
+    }
+    let authPath: string;
+    try {
+      dimHome = mkdtempSync(join(tmpdir(), 'jbot-dim-home-'));
+      guardCliHomes();
+      authPath = configureDimHome(dimAuth, dimHome);
+    } catch (error) {
+      cleanupCliHomes();
+      throw error;
+    }
+    log(`dim CLI auth configured at ${authPath}.`);
+    log('dim reviews run in plan mode with read/glob/grep/exec only; writes and skills are off.');
+    dimBackend = createDimBackend(workspace, dimHome);
+  }
+
   // Both SDK roles on one engine but different providers: the aux provider gets
   // its own entry in that engine's credential map, so it MUST have its own key.
   // Falling back to the main key would hand the main provider's secret to a
@@ -1635,6 +1723,7 @@ async function runReviewPipeline(params: {
     [GROK_PROVIDER_ID]: grokBackend,
     [KILO_PROVIDER_ID]: kiloBackend,
     [QODER_PROVIDER_ID]: qoderBackend,
+    [DIM_PROVIDER_ID]: dimBackend,
   };
   // The gateway serves these providers instead of a local CLI; their local
   // construction above is skipped for the same reason.

@@ -28,6 +28,7 @@ import { exitOnLingeringHandles } from '../shared/exit.ts';
 import { isNoiseFile } from '../shared/filter.ts';
 import { observerEnabled, setRunName } from '../shared/observer.ts';
 import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
+import { DIM_CLI_BIN, DIM_PROVIDER_ID } from '../shared/dim.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID, parseModelName } from '@symma/protocol';
 import {
   pickAuxModel,
@@ -227,6 +228,7 @@ const CLI_BINS: Record<CliBackendID, string | null> = {
   [KILO_PROVIDER_ID]: KILO_CLI_BIN,
   // The Agent SDK resolves its bundled, overridden, or global runtime itself.
   [QODER_PROVIDER_ID]: null,
+  [DIM_PROVIDER_ID]: DIM_CLI_BIN,
 };
 
 // Install hints mirror the Dockerfile's installer lines — the source of truth
@@ -238,6 +240,7 @@ const INSTALL_HINTS: Record<string, string> = {
   [CLINE_CLI_BIN]: 'npm i -g cline',
   [GROK_CLI_BIN]: 'npm i -g @xai-official/grok',
   [KILO_CLI_BIN]: 'npm i -g @kilocode/cli',
+  [DIM_CLI_BIN]: 'npm i -g dimcode',
   [CURSOR_CLI_BIN]: 'curl -fsSL https://cursor.com/install | sh',
   [DEVIN_CLI_BIN]: 'curl -fsSL https://static.devin.ai/cli/3000.4.25/setup.sh | sh',
 };

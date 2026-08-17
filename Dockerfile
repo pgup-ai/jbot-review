@@ -31,6 +31,13 @@ RUN npm install -g @qoder-ai/qodercli@1.0.43 \
   && npm cache clean --force \
   && qodercli --version
 
+# DimAgent, likewise in its own layer — its platform binary unpacks to ~305MB,
+# five times Qoder's. `dim help`, not `dim --help`: the latter is not a help
+# flag and falls through to reading stdin.
+RUN npm install -g dimcode@0.3.15 \
+  && npm cache clean --force \
+  && dim version
+
 # Devin CLI (optional devin provider); strip the installer's interactive setup step.
 ARG DEVIN_CLI_VERSION=3000.4.25
 RUN curl -fsSL "https://static.devin.ai/cli/${DEVIN_CLI_VERSION}/setup.sh" -o /tmp/devin-install.sh \
