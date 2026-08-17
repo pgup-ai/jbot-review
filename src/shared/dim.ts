@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { parseModelName, spawnWithTimeout, truncateForLog } from '@symma/protocol';
@@ -50,7 +50,8 @@ function dimAuthPath(home: string): string {
   return join(home, 'auth.json');
 }
 
-export function configureDimHome(credential: string, home: string): string {
+/** Validates the secret at setup and returns it minified for the per-spawn copies. */
+export function assertValidDimAuth(credential: string): string {
   const content = credential.trim();
   if (!content) {
     throw new Error('Missing dim credential. Set dim-auth/DIM_AUTH_JSON.');
@@ -66,10 +67,20 @@ export function configureDimHome(credential: string, home: string): string {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error('Invalid DIM_AUTH_JSON: expected a JSON object.');
   }
-  mkdirSync(home, { recursive: true, mode: 0o700 });
-  const path = dimAuthPath(home);
-  writeFileSync(path, `${JSON.stringify(parsed)}\n`, { mode: 0o600 });
-  return path;
+  return JSON.stringify(parsed);
+}
+
+/**
+ * One throwaway home per spawn, under the run's parent dir. dim keeps its whole
+ * store in a single `dimcode.sqlite`, so concurrent sessions sharing a home die
+ * on "database is locked" — the same race kilo (an opencode fork) hits. The
+ * parent is what the runner registers for signal cleanup; this only has to
+ * remove its own directory on the happy path.
+ */
+function createDimSessionHome(parent: string, auth: string): string {
+  const home = mkdtempSync(join(parent, 'session-'));
+  writeFileSync(dimAuthPath(home), `${auth}\n`, { mode: 0o600 });
+  return home;
 }
 
 /** Splits jbot's `dim/<dimProvider>/<model>` tail into dim's own two flags. */
@@ -135,6 +146,12 @@ export function dimEnvForHome(home: string | undefined): NodeJS.ProcessEnv {
   return env;
 }
 
+/** Parent dir for per-spawn homes, plus the validated secret they each copy. */
+export interface DimRuntime {
+  parent: string;
+  auth: string;
+}
+
 interface DimRunOutcome {
   text: string;
   usage?: PromptTokenUsage;
@@ -197,7 +214,7 @@ export async function runDimReview(
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
-    home?: string;
+    runtime?: DimRuntime;
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
@@ -239,7 +256,7 @@ export async function runDimAddressedPriorCommentsCheck(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: DimRuntime,
 ): Promise<AddressedPriorComment[]> {
   const raw = await runDimPrompt(
     workspace,
@@ -247,7 +264,7 @@ export async function runDimAddressedPriorCommentsCheck(
     assembleAddressedPriorCommentsPrompt(prContext),
     'addressed-prior-comments',
     log,
-    { timeoutMs, onTokenUsage, home },
+    { timeoutMs, onTokenUsage, runtime },
   );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
 }
@@ -260,7 +277,7 @@ export async function runDimGuidelineComplianceCheck(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: DimRuntime,
 ): Promise<Finding[]> {
   const raw = await runDimPrompt(
     workspace,
@@ -268,7 +285,7 @@ export async function runDimGuidelineComplianceCheck(
     assembleGuidelineCompliancePrompt(prContext, guidelines),
     'guideline-compliance',
     log,
-    { timeoutMs, onTokenUsage, home },
+    { timeoutMs, onTokenUsage, runtime },
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
 }
@@ -281,7 +298,7 @@ export async function runDimChangesSinceLastReview(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: DimRuntime,
 ): Promise<string> {
   const raw = await runDimPrompt(
     workspace,
@@ -289,7 +306,7 @@ export async function runDimChangesSinceLastReview(
     assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
     'changes-since-last-review',
     log,
-    { timeoutMs, onTokenUsage, home },
+    { timeoutMs, onTokenUsage, runtime },
   );
   return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
 }
@@ -302,7 +319,7 @@ export async function runDimFindingVerification(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: DimRuntime,
 ): Promise<FindingVerdict[] | undefined> {
   const raw = await runDimPrompt(
     workspace,
@@ -310,7 +327,7 @@ export async function runDimFindingVerification(
     assembleFindingVerificationPrompt(prContext, findings, true),
     'finding-verification',
     log,
-    { timeoutMs, onTokenUsage, home },
+    { timeoutMs, onTokenUsage, runtime },
   );
   return parseFindingVerdicts(raw, findings.length, log);
 }
@@ -321,18 +338,26 @@ async function runDimPrompt(
   prompt: string,
   label: string,
   log: (msg: string) => void,
-  options: { timeoutMs?: number; onTokenUsage?: TokenUsageRecorder; home?: string },
+  options: { timeoutMs?: number; onTokenUsage?: TokenUsageRecorder; runtime?: DimRuntime },
 ): Promise<string> {
   const timeoutMs = options.timeoutMs ?? DIM_PROMPT_TIMEOUT_MS;
-  const env = dimEnvForHome(options.home);
+  const runtime = options.runtime;
+  if (!runtime)
+    throw new Error('Missing dim runtime. A validated auth and parent dir are required.');
+  const home = createDimSessionHome(runtime.parent, runtime.auth);
   log(`Calling ${label} prompt (agent=dim-cli, model=${model})`);
-  const result = await spawnWithTimeout(DIM_CLI_BIN, buildDimCliArgs(model), {
-    cwd: workspace,
-    env,
-    input: prompt,
-    timeoutMs,
-    timeoutMessage: `dim ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s (model=${model})`,
-  });
+  let result;
+  try {
+    result = await spawnWithTimeout(DIM_CLI_BIN, buildDimCliArgs(model), {
+      cwd: workspace,
+      env: dimEnvForHome(home),
+      input: prompt,
+      timeoutMs,
+      timeoutMessage: `dim ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s (model=${model})`,
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
   const { text, usage, failure } = parseDimEventStream(result.stdout);
   if (usage) options.onTokenUsage?.(usage, model, label);
   if (result.exitCode !== 0 || failure) {

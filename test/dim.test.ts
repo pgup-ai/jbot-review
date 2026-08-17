@@ -1,12 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
+  assertValidDimAuth,
   buildDimCliArgs,
-  configureDimHome,
   dimEnvForHome,
   parseDimEventStream,
 } from '../src/shared/dim.ts';
@@ -84,35 +81,15 @@ describe('parseDimEventStream', () => {
   });
 });
 
-describe('configureDimHome', () => {
-  const withHome = (fn: (home: string) => void): void => {
-    const home = mkdtempSync(join(tmpdir(), 'jbot-dim-test-'));
-    try {
-      fn(home);
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
-  };
-
-  it('writes auth.json at the home ROOT, not under v2/, with 0600', () => {
-    withHome((home) => {
-      // dim resolves its OAuth store from $DIMCODE_HOME verbatim while the
-      // sqlite/config tree nests under v2/; the v2 path reads as unauthenticated.
-      const path = configureDimHome('{"tokens":{"refresh_token":"rt"}}', home);
-      assert.equal(path, join(home, 'auth.json'));
-      assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
-        tokens: { refresh_token: 'rt' },
-      });
-      assert.equal(statSync(path).mode & 0o777, 0o600);
-    });
-  });
-
-  it('rejects a missing or non-object credential', () => {
-    withHome((home) => {
-      assert.throws(() => configureDimHome('  ', home), /Missing dim credential/);
-      assert.throws(() => configureDimHome('not json', home), /Invalid DIM_AUTH_JSON/);
-      assert.throws(() => configureDimHome('[1]', home), /expected a JSON object/);
-    });
+describe('assertValidDimAuth', () => {
+  it('minifies a valid blob and rejects anything that is not a JSON object', () => {
+    assert.equal(
+      assertValidDimAuth('{\n "tokens": { "refresh_token": "rt" }\n}'),
+      '{"tokens":{"refresh_token":"rt"}}',
+    );
+    assert.throws(() => assertValidDimAuth('  '), /Missing dim credential/);
+    assert.throws(() => assertValidDimAuth('not json'), /Invalid DIM_AUTH_JSON/);
+    assert.throws(() => assertValidDimAuth('[1]'), /expected a JSON object/);
   });
 });
 

@@ -154,12 +154,13 @@ import {
 } from './grok.ts';
 import {
   DIM_PROVIDER_ID,
-  configureDimHome,
+  assertValidDimAuth,
   runDimAddressedPriorCommentsCheck,
   runDimChangesSinceLastReview,
   runDimFindingVerification,
   runDimGuidelineComplianceCheck,
   runDimReview,
+  type DimRuntime,
 } from './dim.ts';
 import { assertValidKiloAuth, KILO_PROVIDER_ID, listKiloModels } from '@symma/protocol';
 import {
@@ -506,11 +507,11 @@ function createGrokBackend(runtime: GrokRuntime): ReviewBackend {
   };
 }
 
-function createDimBackend(workspace: string, home: string): ReviewBackend {
+function createDimBackend(workspace: string, runtime: DimRuntime): ReviewBackend {
   return {
     name: DIM_PROVIDER_ID,
     runReview: (model, prContext, guidelines, log, options) =>
-      runDimReview(workspace, model, prContext, guidelines, log, { ...options, home }),
+      runDimReview(workspace, model, prContext, guidelines, log, { ...options, runtime }),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
       runDimAddressedPriorCommentsCheck(
         workspace,
@@ -519,7 +520,7 @@ function createDimBackend(workspace: string, home: string): ReviewBackend {
         log,
         timeoutMs,
         onTokenUsage,
-        home,
+        runtime,
       ),
     runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
       runDimGuidelineComplianceCheck(
@@ -530,7 +531,7 @@ function createDimBackend(workspace: string, home: string): ReviewBackend {
         log,
         timeoutMs,
         onTokenUsage,
-        home,
+        runtime,
       ),
     runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
       runDimFindingVerification(
@@ -541,7 +542,7 @@ function createDimBackend(workspace: string, home: string): ReviewBackend {
         log,
         timeoutMs,
         onTokenUsage,
-        home,
+        runtime,
       ),
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
       runDimChangesSinceLastReview(
@@ -552,7 +553,7 @@ function createDimBackend(workspace: string, home: string): ReviewBackend {
         log,
         timeoutMs,
         onTokenUsage,
-        home,
+        runtime,
       ),
   };
 }
@@ -1581,18 +1582,21 @@ async function runReviewPipeline(params: {
       cleanupCliHomes();
       throw new Error(`Missing auth for ${DIM_PROVIDER_ID} provider.`);
     }
-    let authPath: string;
+    let runtime: DimRuntime;
     try {
+      const auth = assertValidDimAuth(dimAuth); // fail fast on a malformed secret
       dimHome = mkdtempSync(join(tmpdir(), 'jbot-dim-home-'));
       guardCliHomes();
-      authPath = configureDimHome(dimAuth, dimHome);
+      runtime = { parent: dimHome, auth };
     } catch (error) {
       cleanupCliHomes();
       throw error;
     }
-    log(`dim CLI auth configured at ${authPath}.`);
+    log(
+      `dim CLI sessions get a per-spawn home under ${dimHome} (its SQLite store cannot be shared).`,
+    );
     log('dim reviews run in plan mode with read/glob/grep/exec only; writes and skills are off.');
-    dimBackend = createDimBackend(workspace, dimHome);
+    dimBackend = createDimBackend(workspace, runtime);
   }
 
   // Both SDK roles on one engine but different providers: the aux provider gets
