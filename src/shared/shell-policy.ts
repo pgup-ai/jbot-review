@@ -10,9 +10,11 @@
  * the app's temp clone — remains the actual boundary; never relax another layer
  * because this exists.
  *
- * Subcommands whose common form is a READ — `git branch`, `git tag`,
- * `git worktree list` — are absent deliberately: denying them would block the
- * read, and their mutating flags are not an accident a model falls into.
+ * `git branch` and `git tag` are absent deliberately: their mutation is a FLAG
+ * (`-D`, `-d`), so denying the subcommand would block the read too, and a model
+ * does not reach for `-D` by accident. Where the mutation has its own
+ * subcommand name (`git submodule update`, `git worktree remove`) it is denied
+ * outright — that costs no read.
  *
  * The `*: allow` catch-all is load-bearing: opencode defaults UNMATCHED commands
  * to "ask" once a rule map exists, which would hang a headless run.
@@ -30,13 +32,19 @@ export const BASH_PERMISSIONS = {
   'git rm*': 'deny',
   'git mv*': 'deny',
   'git rebase*': 'deny',
-  // Split, not `git merge*`: that glob also swallows the read-only
-  // `git merge-base`, `git merge-tree`, and `git merge-file`.
-  'git merge': 'deny',
+  // Not `git merge*`: that glob also swallows the read-only `git merge-base`
+  // and `git merge-tree`. No bare `git merge` rule either — opencode does not
+  // document whether a wildcard-free pattern is anchored, and a prefix match
+  // would deny those same reads; bare `git merge` falls to the catch-all.
   'git merge *': 'deny',
+  // Writes <current-file> in place unless given -p/--stdout.
+  'git merge-file*': 'deny',
   'git cherry-pick*': 'deny',
   'git revert*': 'deny',
   'git apply*': 'deny',
   'git am*': 'deny',
+  'git submodule update*': 'deny',
+  'git submodule deinit*': 'deny',
+  'git worktree remove*': 'deny',
   'rm*': 'deny',
 } as const;

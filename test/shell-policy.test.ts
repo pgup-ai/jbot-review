@@ -39,11 +39,14 @@ describe('BASH_PERMISSIONS', () => {
       'git mv a b',
       'git rebase main',
       'git merge origin/main',
-      'git merge',
+      'git merge-file cur.txt base.txt other.txt',
       'git cherry-pick abc123',
       'git revert HEAD',
       'git apply patch.diff',
       'git am patch.mbox',
+      'git submodule update --init',
+      'git submodule deinit lib',
+      'git worktree remove --force wt',
       'rm -rf src',
     ]) {
       assert.ok(isDenied(command), `expected deny for: ${command}`);
@@ -60,14 +63,15 @@ describe('BASH_PERMISSIONS', () => {
       'git rev-parse HEAD',
       'git blame src/index.ts',
       'git ls-files',
-      // Read-only siblings an over-broad `git merge*`/`git cherry*` would swallow.
+      'git branch',
+      'git tag',
+      // Reads an over-broad `git merge*`/`git cherry*`/`git submodule*`/
+      // `git worktree*` would swallow.
       'git merge-base main HEAD',
       'git merge-tree main HEAD',
       'git cherry main',
-      'git branch',
-      'git tag',
-      'git worktree list',
       'git submodule status',
+      'git worktree list',
       'grep -rn foo src',
     ]) {
       assert.ok(!isDenied(command), `must not deny: ${command}`);
