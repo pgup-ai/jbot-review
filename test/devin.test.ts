@@ -139,44 +139,73 @@ describe('Devin CLI provider helpers', () => {
     }
   });
 
-  it('reuses Devin onboarding state across prompt sessions', async () => {
+  function fakeDevin(script: string) {
     const root = mkdtempSync(join(tmpdir(), 'jbot-devin-test-'));
     const home = join(root, 'home');
     const workspace = join(root, 'workspace');
-    const executable = join(root, 'devin');
     const previousPath = process.env.PATH!;
     mkdirSync(home);
     mkdirSync(workspace);
     writeFileSync(
-      executable,
+      join(root, 'devin'),
       `#!/usr/bin/env node
 const fs = require('node:fs');
 if (process.env.GIT_OPTIONAL_LOCKS !== '0') process.exit(2);
-const configIndex = process.argv.indexOf('--config');
-const configPath = process.argv[configIndex + 1];
-const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-if (!config.shell?.setup_complete) {
-  config.shell = { setup_complete: true };
-  fs.writeFileSync(configPath, JSON.stringify(config));
-  process.stdout.write("Welcome to Devin CLI!\\nYou're all set. Run devin.\\n");
-} else {
-  process.stdout.write('{"summary":"ok","findings":[]}');
-}
+const config = JSON.parse(
+  fs.readFileSync(process.argv[process.argv.indexOf('--config') + 1], 'utf8'),
+);
+const stamp = ${JSON.stringify(join(root, 'onboarded'))};
+const banner = "Welcome to Devin CLI!\\nYou're all set. Run devin.\\n";
+${script}
 `,
       { mode: 0o700 },
     );
+    process.env.PATH = `${root}:${previousPath}`;
+    const logs: string[] = [];
+    return {
+      backend: createDevinCliBackend(workspace, home),
+      logs,
+      log: (message: string) => logs.push(message),
+      restore() {
+        process.env.PATH = previousPath;
+        rmSync(root, { recursive: true, force: true });
+      },
+    };
+  }
+
+  it('skips Devin first-run onboarding via the pre-seeded config', async () => {
+    const fake = fakeDevin(`
+if (config.shell?.setup_complete) process.stdout.write('{"summary":"ok","findings":[]}');
+else process.stdout.write(banner);
+`);
     try {
-      process.env.PATH = `${root}:${previousPath}`;
-      const logs: string[] = [];
-      const backend = createDevinCliBackend(workspace, home);
+      const review = await fake.backend.runReview('devin/default', 'context', '', fake.log);
 
-      await backend.runReview('devin/default', 'context', '', (message) => logs.push(message));
-      await backend.runReview('devin/default', 'context', '', (message) => logs.push(message));
-
-      assert.equal(logs.filter((message) => message.includes('first-run setup')).length, 1);
+      assert.equal(review.summary, 'ok');
+      assert.equal(
+        fake.logs.some((message) => message.includes('first-run setup')),
+        false,
+      );
     } finally {
-      process.env.PATH = previousPath;
-      rmSync(root, { recursive: true, force: true });
+      fake.restore();
+    }
+  });
+
+  it('still retries once if Devin onboards despite the seeded config', async () => {
+    const fake = fakeDevin(`
+if (fs.existsSync(stamp)) process.stdout.write('{"summary":"ok","findings":[]}');
+else {
+  fs.writeFileSync(stamp, '');
+  process.stdout.write(banner);
+}
+`);
+    try {
+      const review = await fake.backend.runReview('devin/default', 'context', '', fake.log);
+
+      assert.equal(review.summary, 'ok');
+      assert.equal(fake.logs.filter((message) => message.includes('first-run setup')).length, 1);
+    } finally {
+      fake.restore();
     }
   });
 
