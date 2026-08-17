@@ -76,6 +76,8 @@ export function buildDevinCliConfig(home: string) {
       zed: false,
     },
     auto_update: false,
+    // Without this, each run's fresh home wastes a CLI launch on first-run onboarding.
+    shell: { setup_complete: true },
   };
 }
 
