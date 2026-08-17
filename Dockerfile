@@ -63,6 +63,14 @@ RUN set -eux; \
   rm -f /tmp/cursor-install.sh
 ENV PATH="/root/.local/bin:${PATH}"
 
+# Both are spawned by bare name, and an image PATH is advisory: a caller that
+# supplies its own PATH (Depot CI passes --env-file) drops the line above and
+# the spawn fails ENOENT, so publish them on the default PATH too.
+RUN ln -s /root/.local/bin/devin /usr/local/bin/devin \
+  && ln -s /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent \
+  && env PATH=/usr/local/bin:/usr/bin:/bin devin --version >/dev/null \
+  && env PATH=/usr/local/bin:/usr/bin:/bin cursor-agent --help >/dev/null
+
 WORKDIR /app
 
 COPY package.json package-lock.json ./
