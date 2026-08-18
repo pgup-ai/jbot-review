@@ -35,6 +35,8 @@ const DROPPED_TABLES = [
 ];
 
 const provider = process.argv[2] ?? 'dimcode-api-oauth';
+// dim's DEFAULT home is `~/.dimcode/v2`, so auth.json sits beside the store
+// here. Under a DIMCODE_HOME override the two split apart — see dimAuthPath.
 const source = join(homedir(), '.dimcode', 'v2');
 
 for (const file of ['auth.json', 'dimcode.sqlite']) {
@@ -48,33 +50,47 @@ for (const file of ['auth.json', 'dimcode.sqlite']) {
   }
 }
 
-const work = mkdtempSync(join(tmpdir(), 'jbot-dim-bundle-'));
-try {
-  const store = join(work, 'dimcode.sqlite');
-  copyFileSync(join(source, 'dimcode.sqlite'), store);
-  const db = new DatabaseSync(store);
-  for (const table of DROPPED_TABLES) db.exec(`DELETE FROM ${table}`);
-  const kept = db.prepare('SELECT COUNT(*) AS n FROM providers WHERE providerId = ?').get(provider);
-  if (!(kept as { n: number }).n) {
-    console.error(`Provider "${provider}" is not connected locally. Run \`dim provider list\`.`);
-    process.exit(1);
-  }
-  db.prepare('DELETE FROM providers WHERE providerId <> ?').run(provider);
-  db.exec('VACUUM');
-  db.close();
+function build(): string {
+  const work = mkdtempSync(join(tmpdir(), 'jbot-dim-bundle-'));
+  try {
+    const store = join(work, 'dimcode.sqlite');
+    copyFileSync(join(source, 'dimcode.sqlite'), store);
+    const db = new DatabaseSync(store);
+    for (const table of DROPPED_TABLES) db.exec(`DELETE FROM ${table}`);
+    const kept = db
+      .prepare('SELECT COUNT(*) AS n FROM providers WHERE providerId = ?')
+      .get(provider);
+    if (!(kept as { n: number }).n) {
+      throw new Error(
+        `Provider "${provider}" is not connected locally. Run \`dim provider list\`.`,
+      );
+    }
+    db.prepare('DELETE FROM providers WHERE providerId <> ?').run(provider);
+    db.exec('VACUUM');
+    db.close();
 
-  const bundle = encodeDimBundle({
-    auth: readFileSync(join(source, 'auth.json'), 'utf8').trim(),
-    store: readFileSync(store).toString('base64'),
-  });
-  if (bundle.length > GITHUB_SECRET_LIMIT) {
-    console.error(
-      `Bundle is ${bundle.length} bytes, over the ${GITHUB_SECRET_LIMIT}-byte GitHub secret cap.`,
-    );
-    process.exit(1);
+    const bundle = encodeDimBundle({
+      auth: readFileSync(join(source, 'auth.json'), 'utf8').trim(),
+      store: readFileSync(store).toString('base64'),
+    });
+    if (bundle.length > GITHUB_SECRET_LIMIT) {
+      throw new Error(
+        `Bundle is ${bundle.length} bytes, over the ${GITHUB_SECRET_LIMIT}-byte GitHub secret cap.`,
+      );
+    }
+    return bundle;
+  } finally {
+    // Throw, never process.exit, above: exit skips this and strands a copy of
+    // the operator's provider store — the very secret being packaged — in TMPDIR.
+    rmSync(work, { recursive: true, force: true });
   }
+}
+
+try {
+  const bundle = build();
   console.error(`DIM_AUTH_BUNDLE (${bundle.length} bytes, provider ${provider}):`);
   console.log(bundle);
-} finally {
-  rmSync(work, { recursive: true, force: true });
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
 }

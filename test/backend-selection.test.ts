@@ -422,6 +422,29 @@ describe('selectReviewBackends', () => {
     );
   });
 
+  it('routes dim through its own CLI backend for either role', () => {
+    const mainDim = selectReviewBackends({
+      ...base,
+      providerID: 'dim',
+      modelID: 'dimcode-api-oauth/deepseek-v4-flash',
+      apiKey: 'dim-bundle',
+      auxApiKey: 'opencode-key',
+    });
+    assert.equal(mainDim.mainCliBackend, 'dim');
+    assert.equal(mainDim.needsOpencode, true);
+    assert.equal(mainDim.dimAuth, 'dim-bundle');
+
+    const auxDim = selectReviewBackends({
+      ...base,
+      auxProviderID: 'dim',
+      auxModelID: 'dimcode-api-oauth/deepseek-v4-flash',
+      auxApiKey: 'dim-bundle',
+    });
+    assert.equal(auxDim.auxCliBackend, 'dim');
+    assert.equal(auxDim.dimAuth, 'dim-bundle');
+    assert.equal(auxDim.opencodeApiKey, 'main-key');
+  });
+
   it('routes Grok Build independently from the xAI API provider', () => {
     const mainGrok = selectReviewBackends({
       ...base,

@@ -36,11 +36,9 @@ export const DIM_CLI_BIN = 'dim';
  * because dim discovers repo-local skills from `.agents/skills` and `./skills`,
  * which are PR-author-controlled.
  *
- * `exec` stays, because exploring the checkout is the point. It is safe to keep
- * only in combination with the args below: measured under `--policy read-only`,
- * a shell write (`echo x > f`) and network (`curl`) are DECLINED, and adding
- * `--mode plan` also declines `git commit`/`git reset --hard` while leaving
- * `git log`/`git diff`/`git grep` allowed.
+ * `exec` stays, because exploring the checkout is the point. Measured safe only
+ * alongside the args below: `--policy read-only` declines a shell write
+ * (`echo x > f`) and network (`curl`).
  */
 const DIM_ALLOWED_TOOLS = 'read,glob,grep,exec';
 
@@ -75,7 +73,6 @@ export function encodeDimBundle(bundle: DimBundle): string {
   return gzipSync(Buffer.from(JSON.stringify(bundle), 'utf8')).toString('base64');
 }
 
-/** Validates the secret at setup so a malformed one fails before any session. */
 export function decodeDimBundle(credential: string): DimBundle {
   const content = credential.trim();
   if (!content) {
@@ -97,9 +94,7 @@ export function decodeDimBundle(credential: string): DimBundle {
 /**
  * One throwaway home per spawn, under the run's parent dir. dim keeps its whole
  * store in a single `dimcode.sqlite`, so concurrent sessions sharing a home die
- * on "database is locked" — the same race kilo (an opencode fork) hits. The
- * parent is what the runner registers for signal cleanup; this only has to
- * remove its own directory on the happy path.
+ * on "database is locked" — the same race kilo (an opencode fork) hits.
  */
 function createDimSessionHome(parent: string, bundle: DimBundle): string {
   const home = mkdtempSync(join(parent, 'session-'));
@@ -175,7 +170,6 @@ export function dimEnvForHome(home: string | undefined): NodeJS.ProcessEnv {
   return env;
 }
 
-/** Parent dir for per-spawn homes, plus the validated secret they each copy. */
 export interface DimRuntime {
   parent: string;
   bundle: DimBundle;
