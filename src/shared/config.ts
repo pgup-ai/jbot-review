@@ -370,6 +370,18 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       default: { promptCache: false },
     },
   },
+  // DimAgent CLI. Auth via DIM_AUTH_BUNDLE from `npm run dim:bundle`; its own plan
+  // has no API key. JBOT_REVIEW_MODEL: `dim/<dimProvider>/<model>` — run
+  // `dim model list` for the catalog.
+  dim: {
+    defaultModel: 'dim/dimcode-api-oauth/deepseek-v4-flash',
+    keyEnv: 'DIM_AUTH_BUNDLE',
+    keyInput: 'dim-auth',
+    models: {
+      // dim CLI is not driven through opencode, so prompt-cache options do not apply.
+      default: { promptCache: false },
+    },
+  },
   // Laguna S 2.1 works through Poolside's chat-completions endpoint when
   // named explicitly, despite being absent from its advertised model catalog.
   poolside: {
@@ -393,7 +405,8 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     providerID === 'cline' ||
     providerID === 'cline-pass' ||
     providerID === 'grok' ||
-    providerID === 'kilo'
+    providerID === 'kilo' ||
+    providerID === 'dim'
   )
     return false;
   if (PROVIDERS[providerID]?.promptCache === false) return false;

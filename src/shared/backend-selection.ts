@@ -1,6 +1,7 @@
 import { parseModelName } from '@symma/protocol';
 
 import { CLINE_PROVIDER_ID, isClineProvider } from './cline.ts';
+import { DIM_PROVIDER_ID, isDimProvider } from './dim.ts';
 import { CODEX_PROVIDER_ID, isCodexProvider } from '@symma/protocol';
 import { COMMANDCODE_PROVIDER_ID, isCommandCodeProvider } from './commandcode.ts';
 import {
@@ -23,7 +24,8 @@ export type CliBackendID =
   | typeof CLINE_PROVIDER_ID
   | typeof GROK_PROVIDER_ID
   | typeof KILO_PROVIDER_ID
-  | typeof QODER_PROVIDER_ID;
+  | typeof QODER_PROVIDER_ID
+  | typeof DIM_PROVIDER_ID;
 
 export interface ReviewBackendSelectionInput {
   providerID: string;
@@ -71,6 +73,7 @@ export interface ReviewBackendSelection {
   clineAuth: string;
   grokAuth: string;
   kiloAuth: string;
+  dimAuth: string;
   qoderToken?: string;
   opencodeProviderID: string;
   opencodeModelID: string;
@@ -134,6 +137,7 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
     clineAuth: keyFor(CLINE_PROVIDER_ID),
     grokAuth: keyFor(GROK_PROVIDER_ID),
     kiloAuth: keyFor(KILO_PROVIDER_ID),
+    dimAuth: keyFor(DIM_PROVIDER_ID),
     ...(mainCliBackend === QODER_PROVIDER_ID || auxCliBackend === QODER_PROVIDER_ID
       ? { qoderToken: keyFor(QODER_PROVIDER_ID) }
       : {}),
@@ -163,6 +167,7 @@ function cliBackendForProvider(providerID: string): CliBackendID | undefined {
   if (isGrokProvider(providerID)) return GROK_PROVIDER_ID;
   if (isKiloProvider(providerID)) return KILO_PROVIDER_ID;
   if (isQoderProvider(providerID)) return QODER_PROVIDER_ID;
+  if (isDimProvider(providerID)) return DIM_PROVIDER_ID;
   return undefined;
 }
 

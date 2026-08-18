@@ -31,6 +31,14 @@ RUN npm install -g @qoder-ai/qodercli@1.0.43 \
   && npm cache clean --force \
   && qodercli --version
 
+# DimAgent, likewise in its own layer. Its linux-x64 binary unpacks to ~305MB —
+# the largest single CLI here, ahead of kilo (203MB) and opencode (170MB), and
+# roughly a third of the image's CLI payload. Smoke-tested with `dim version`:
+# `dim --help` is not a help flag and falls through to reading stdin.
+RUN npm install -g dimcode@0.3.15 \
+  && npm cache clean --force \
+  && DIMCODE_DISABLE_AUTOUPDATE=1 dim version
+
 # Devin CLI (optional devin provider); strip the installer's interactive setup step.
 ARG DEVIN_CLI_VERSION=3000.4.25
 RUN curl -fsSL "https://static.devin.ai/cli/${DEVIN_CLI_VERSION}/setup.sh" -o /tmp/devin-install.sh \

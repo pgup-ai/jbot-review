@@ -1667,6 +1667,19 @@ The CLI does not expose a complete list.
 - `kilo/z-ai/glm-5.2`
 - `kilo/z-ai/glm-5v-turbo`
 
+### `dim`
+
+- Source: Docker-pinned npm package [`dimcode@0.3.15`](https://www.npmjs.com/package/dimcode) live catalog.
+- Refresh/list: `dim model list --json`.
+- Note: dim's own plan is OAuth-only (no API key). Authenticate with `dim auth login --device-login --provider dimcode-api-oauth`, then run `npm run dim:bundle` and carry its output as `DIM_AUTH_BUNDLE`. The bundle holds `auth.json` AND the pruned provider store — `auth.json` alone leaves dim with "No connected provider".
+
+4 J-Bot model values:
+
+- `dim/dimcode-api-oauth/deepseek-v4-flash`
+- `dim/dimcode-api-oauth/deepseek-v4-pro`
+- `dim/dimcode-api-oauth/glm-5.2`
+- `dim/dimcode-api-oauth/seed-2.0-mini`
+
 ## Custom providers
 
 ### `openai-compatible`

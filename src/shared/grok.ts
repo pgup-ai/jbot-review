@@ -20,6 +20,7 @@ import {
   type TokenUsageRecorder,
 } from './opencode.ts';
 import { spawnWithTimeout, truncateForLog } from '@symma/protocol';
+import { CLI_ENV_ALLOWLIST } from './shell-policy.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const GROK_PROMPT_TIMEOUT_MS = 20 * 60_000;
@@ -114,31 +115,13 @@ export function buildGrokCliArgs(input: GrokCliArgsInput): string[] {
   return args;
 }
 
-const GROK_ENV_KEYS = [
-  'PATH',
-  'LANG',
-  'LC_ALL',
-  'LC_CTYPE',
-  'TMPDIR',
-  'TMP',
-  'TEMP',
-  'SSL_CERT_FILE',
-  'SSL_CERT_DIR',
-  'NODE_EXTRA_CA_CERTS',
-  'HTTPS_PROXY',
-  'HTTP_PROXY',
-  'ALL_PROXY',
-  'NO_PROXY',
-  'CI',
-] as const;
-
 export function grokEnvForHome(home: string | undefined, apiKey?: string): NodeJS.ProcessEnv {
   const value = home?.trim();
   if (!value) {
     throw new Error('Missing Grok home. A temp HOME is required for auth.');
   }
   const env: NodeJS.ProcessEnv = {};
-  for (const key of GROK_ENV_KEYS) {
+  for (const key of CLI_ENV_ALLOWLIST) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
   env.HOME = value;
