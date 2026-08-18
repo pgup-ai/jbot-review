@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { parseModelName, spawnWithTimeout, truncateForLog } from '@symma/protocol';
 import {
@@ -38,10 +38,15 @@ export const DIM_CLI_BIN = 'dim';
  *
  * `exec` stays, because exploring the checkout is the point. Measured alongside
  * the args below: `--policy read-only` declines a shell write (`echo x > f`) and
- * network (`curl`). It does NOT confine reads — `read` returns files outside the
- * cwd (measured), and dim has no `external_directory` deny like opencode's. With
- * writes and network closed there is no exfil channel, so the container stays the
- * boundary, per the same call already made for devin.
+ * network (`curl`).
+ *
+ * It does NOT confine reads: `read` returns files outside the cwd (measured), and
+ * dim has no `external_directory` deny like opencode's — `--tools` cannot express
+ * a path scope and `--disallowed-tools` is ignored. Denying `curl` does not make
+ * that safe, because the model API call is itself the channel: anything read can
+ * be echoed into the response. In CI the ephemeral container bounds what exists
+ * to read; `review:local` has no such bound and is only as safe as the branch
+ * being reviewed — which for self-review is the operator's own code.
  */
 const DIM_ALLOWED_TOOLS = 'read,glob,grep,exec';
 
@@ -50,12 +55,12 @@ export function isDimProvider(providerID: string): boolean {
 }
 
 /**
- * dim reads its OAuth token store from `$DIMCODE_HOME/auth.json` — the override
- * root, NOT the `v2/` subdir that everything else (sqlite, config, logs) nests
- * under. Mirroring the source layout yields a silent "Not authenticated".
+ * dim splits its two files across one home: the OAuth token store sits at the
+ * root while the sqlite store (and config, logs) nests under `v2/`. Putting
+ * `auth.json` under `v2/` yields a silent "Not authenticated".
  */
-function dimAuthPath(home: string): string {
-  return join(home, 'auth.json');
+export function dimHomePaths(home: string): { auth: string; store: string } {
+  return { auth: join(home, 'auth.json'), store: join(home, 'v2', 'dimcode.sqlite') };
 }
 
 /**
@@ -90,11 +95,7 @@ export function decodeDimBundle(credential: string): DimBundle {
     throw new Error('Invalid DIM_AUTH_BUNDLE: expected the base64 blob from `npm run dim:bundle`.');
   }
   const bundle = parsed as Partial<DimBundle>;
-  if (
-    typeof bundle?.auth !== 'string' ||
-    typeof bundle?.store !== 'string' ||
-    typeof bundle?.provider !== 'string'
-  ) {
+  if (!bundle?.auth || !bundle?.store || !bundle?.provider) {
     throw new Error('Invalid DIM_AUTH_BUNDLE: missing auth, store, or provider.');
   }
   return { auth: bundle.auth, store: bundle.store, provider: bundle.provider };
@@ -107,12 +108,10 @@ export function decodeDimBundle(credential: string): DimBundle {
  */
 function createDimSessionHome(parent: string, bundle: DimBundle): string {
   const home = mkdtempSync(join(parent, 'session-'));
-  writeFileSync(dimAuthPath(home), `${bundle.auth}\n`, { mode: 0o600 });
-  // The store nests under v2/ while auth.json sits at the root — see dimAuthPath.
-  mkdirSync(join(home, 'v2'), { recursive: true, mode: 0o700 });
-  writeFileSync(join(home, 'v2', 'dimcode.sqlite'), Buffer.from(bundle.store, 'base64'), {
-    mode: 0o600,
-  });
+  const paths = dimHomePaths(home);
+  writeFileSync(paths.auth, `${bundle.auth}\n`, { mode: 0o600 });
+  mkdirSync(dirname(paths.store), { recursive: true, mode: 0o700 });
+  writeFileSync(paths.store, Buffer.from(bundle.store, 'base64'), { mode: 0o600 });
   return home;
 }
 

@@ -5,6 +5,7 @@ import {
   buildDimCliArgs,
   decodeDimBundle,
   dimEnvForHome,
+  dimHomePaths,
   encodeDimBundle,
   parseDimEventStream,
 } from '../src/shared/dim.ts';
@@ -100,6 +101,21 @@ describe('dim bundle', () => {
       () => decodeDimBundle(encodeDimBundle({ auth: 'a' } as never)),
       /missing auth, store, or provider/,
     );
+    // All-empty fields typecheck but would materialize empty files and fail
+    // opaquely inside dim, so they must be rejected here.
+    assert.throws(
+      () => decodeDimBundle(encodeDimBundle({ auth: '', store: '', provider: '' })),
+      /missing auth, store, or provider/,
+    );
+  });
+
+  it('keeps auth.json at the home root and the store under v2/', () => {
+    // Swapping these is a silent "Not authenticated", so both the session writer
+    // and scripts/dim-bundle.ts read the layout from here.
+    assert.deepEqual(dimHomePaths('/h'), {
+      auth: '/h/auth.json',
+      store: '/h/v2/dimcode.sqlite',
+    });
   });
 });
 

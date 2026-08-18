@@ -15,7 +15,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { encodeDimBundle } from '../src/shared/dim.ts';
+import { dimHomePaths, encodeDimBundle } from '../src/shared/dim.ts';
 
 const GITHUB_SECRET_LIMIT = 48 * 1024;
 // Bulky and none of CI's business; the provider row is all dim needs carried.
@@ -35,16 +35,13 @@ const DROPPED_TABLES = [
 ];
 
 const provider = process.argv[2] ?? 'dimcode-api-oauth';
-// dim's DEFAULT home is `~/.dimcode/v2`, where auth.json sits beside the store.
-// Under a DIMCODE_HOME override they split: auth.json at the override root, the
-// store still under v2/ — the same layout dimAuthPath describes.
+// With no override dim's home IS `~/.dimcode/v2`, so both files sit there; an
+// override splits them per dimHomePaths.
 const override = process.env.DIMCODE_HOME?.trim();
-const authFile = override
-  ? join(override, 'auth.json')
-  : join(homedir(), '.dimcode', 'v2', 'auth.json');
-const storeFile = override
-  ? join(override, 'v2', 'dimcode.sqlite')
-  : join(homedir(), '.dimcode', 'v2', 'dimcode.sqlite');
+const defaultHome = join(homedir(), '.dimcode', 'v2');
+const { auth: authFile, store: storeFile } = override
+  ? dimHomePaths(override)
+  : { auth: join(defaultHome, 'auth.json'), store: join(defaultHome, 'dimcode.sqlite') };
 
 for (const file of [authFile, storeFile]) {
   try {
