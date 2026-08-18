@@ -71,5 +71,12 @@ export const CLI_ENV_ALLOWLIST = [
   'HTTP_PROXY',
   'ALL_PROXY',
   'NO_PROXY',
+  // Lowercase forms are a real convention, not an alias: curl and many CLIs read
+  // these and ignore the uppercase ones, so a proxy configured only this way
+  // would silently lose routing.
+  'https_proxy',
+  'http_proxy',
+  'all_proxy',
+  'no_proxy',
   'CI',
 ] as const;

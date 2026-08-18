@@ -12,6 +12,7 @@ import {
 } from '@qoder-ai/qoder-agent-sdk';
 
 import { parseModelName } from '@symma/protocol';
+import { CLI_ENV_ALLOWLIST } from './shell-policy.ts';
 import {
   formatTokenUsage,
   parseChangesSinceLastReviewSummary,
@@ -52,28 +53,6 @@ const QODER_DENIED_TOOLS = [
   'mcp__*',
 ];
 
-const QODER_ENV_KEYS = [
-  'PATH',
-  'LANG',
-  'LC_ALL',
-  'LC_CTYPE',
-  'TMPDIR',
-  'TMP',
-  'TEMP',
-  'SSL_CERT_FILE',
-  'SSL_CERT_DIR',
-  'NODE_EXTRA_CA_CERTS',
-  'HTTPS_PROXY',
-  'HTTP_PROXY',
-  'ALL_PROXY',
-  'NO_PROXY',
-  'https_proxy',
-  'http_proxy',
-  'all_proxy',
-  'no_proxy',
-  'CI',
-] as const;
-
 export function isQoderProvider(providerID: string): boolean {
   return providerID === QODER_PROVIDER_ID;
 }
@@ -95,7 +74,7 @@ export function assertQoderToken(token: string): string {
 
 export function qoderEnvForHome(home: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
-  for (const key of QODER_ENV_KEYS) {
+  for (const key of CLI_ENV_ALLOWLIST) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
   env.HOME = home;
