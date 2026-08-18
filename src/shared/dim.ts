@@ -229,9 +229,10 @@ export function parseDimEventStream(stdout: string): DimRunOutcome {
     usage = {
       input: num(raw.promptTokens),
       output: num(raw.completionTokens),
+      // dim reports no reasoning-token breakout and no cost of any kind.
       reasoning: 0,
       cacheRead: num(raw.cacheReadTokens),
-      cacheWrite: 0,
+      cacheWrite: num(raw.cacheWriteTokens),
     };
   }
   return { text: text.trim(), usage, failure };
