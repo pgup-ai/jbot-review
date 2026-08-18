@@ -6,6 +6,7 @@ import {
   decodeDimBundle,
   dimEnvForHome,
   dimHomePaths,
+  dimProviderMismatch,
   encodeDimBundle,
   parseDimEventStream,
 } from '../src/shared/dim.ts';
@@ -110,6 +111,16 @@ describe('dim bundle', () => {
     assert.throws(
       () => decodeDimBundle(encodeDimBundle({ auth: 1, store: {}, provider: [] } as never)),
       /missing auth, store, or provider/,
+    );
+  });
+
+  it('rejects a model whose provider the pruned store cannot serve', () => {
+    const bundle = { auth: 'a', store: 'b', provider: 'dimcode-api-oauth' };
+    assert.equal(dimProviderMismatch('dim/dimcode-api-oauth/deepseek-v4-flash', bundle), undefined);
+    assert.equal(dimProviderMismatch('dim/default', bundle), undefined);
+    assert.match(
+      dimProviderMismatch('dim/other-provider/some-model', bundle) ?? '',
+      /carries only "dimcode-api-oauth".*dim:bundle -- other-provider/s,
     );
   });
 

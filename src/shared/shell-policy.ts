@@ -48,3 +48,28 @@ export const BASH_PERMISSIONS = {
   'git worktree remove*': 'deny',
   'rm*': 'deny',
 } as const;
+
+/**
+ * Env a CLI backend's child may inherit. Everything else is dropped, so
+ * "prompt injection runs `env`" yields no provider key or GitHub token — an
+ * allowlist, unlike `sessionEnvDenyKeys`, because a new credential var must not
+ * reach a child just because nobody remembered to deny it. Shared so a new
+ * proxy/locale/cert var is added once rather than per backend.
+ */
+export const CLI_ENV_ALLOWLIST = [
+  'PATH',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NODE_EXTRA_CA_CERTS',
+  'HTTPS_PROXY',
+  'HTTP_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+  'CI',
+] as const;

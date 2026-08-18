@@ -19,6 +19,7 @@ import {
   type PromptTokenUsage,
   type TokenUsageRecorder,
 } from './opencode.ts';
+import { CLI_ENV_ALLOWLIST } from './shell-policy.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const DIM_PROMPT_TIMEOUT_MS = 20 * 60_000;
@@ -125,6 +126,19 @@ function parseDimModel(model: string): { provider?: string; model?: string } {
   return { provider: modelID.slice(0, slash), model: modelID.slice(slash + 1) };
 }
 
+/**
+ * The store is pruned to one provider, so a model naming another cannot work.
+ * Caught before the spawn, where dim would only say "No connected provider".
+ */
+export function dimProviderMismatch(model: string, bundle: DimBundle): string | undefined {
+  const requested = parseDimModel(model).provider;
+  if (!requested || requested === bundle.provider) return undefined;
+  return (
+    `model requests provider "${requested}" but DIM_AUTH_BUNDLE carries only ` +
+    `"${bundle.provider}". Rebuild it with: npm run dim:bundle -- ${requested}`
+  );
+}
+
 export function buildDimCliArgs(model: string): string[] {
   const args = [
     'exec',
@@ -145,31 +159,13 @@ export function buildDimCliArgs(model: string): string[] {
   return args;
 }
 
-const DIM_ENV_KEYS = [
-  'PATH',
-  'LANG',
-  'LC_ALL',
-  'LC_CTYPE',
-  'TMPDIR',
-  'TMP',
-  'TEMP',
-  'SSL_CERT_FILE',
-  'SSL_CERT_DIR',
-  'NODE_EXTRA_CA_CERTS',
-  'HTTPS_PROXY',
-  'HTTP_PROXY',
-  'ALL_PROXY',
-  'NO_PROXY',
-  'CI',
-] as const;
-
 export function dimEnvForHome(home: string | undefined): NodeJS.ProcessEnv {
   const value = home?.trim();
   if (!value) {
     throw new Error('Missing dim home. A temp DIMCODE_HOME is required for auth.');
   }
   const env: NodeJS.ProcessEnv = {};
-  for (const key of DIM_ENV_KEYS) {
+  for (const key of CLI_ENV_ALLOWLIST) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
   env.HOME = value;
@@ -380,13 +376,8 @@ async function runDimPrompt(
   const runtime = options.runtime;
   if (!runtime)
     throw new Error('Missing dim runtime. A decoded bundle and parent dir are required.');
-  const requested = parseDimModel(model).provider;
-  if (requested && requested !== runtime.bundle.provider) {
-    throw new Error(
-      `dim ${label}: model requests provider "${requested}" but DIM_AUTH_BUNDLE carries only ` +
-        `"${runtime.bundle.provider}". Rebuild it with: npm run dim:bundle -- ${requested}`,
-    );
-  }
+  const mismatch = dimProviderMismatch(model, runtime.bundle);
+  if (mismatch) throw new Error(`dim ${label}: ${mismatch}`);
   const home = createDimSessionHome(runtime.parent, runtime.bundle);
   log(`Calling ${label} prompt (agent=dim-cli, model=${model})`);
   let result;
