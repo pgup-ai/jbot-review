@@ -31,9 +31,10 @@ RUN npm install -g @qoder-ai/qodercli@1.0.43 \
   && npm cache clean --force \
   && qodercli --version
 
-# DimAgent, likewise in its own layer — its platform binary unpacks to ~305MB,
-# five times Qoder's. Smoke-tested with `dim version`: `dim --help` is not a
-# help flag and falls through to reading stdin.
+# DimAgent, likewise in its own layer. Its linux-x64 binary unpacks to ~305MB —
+# the largest single CLI here, ahead of kilo (203MB) and opencode (170MB), and
+# roughly a third of the image's CLI payload. Smoke-tested with `dim version`:
+# `dim --help` is not a help flag and falls through to reading stdin.
 RUN npm install -g dimcode@0.3.15 \
   && npm cache clean --force \
   && DIMCODE_DISABLE_AUTOUPDATE=1 dim version
