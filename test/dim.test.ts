@@ -101,10 +101,14 @@ describe('dim bundle', () => {
       () => decodeDimBundle(encodeDimBundle({ auth: 'a' } as never)),
       /missing auth, store, or provider/,
     );
-    // All-empty fields typecheck but would materialize empty files and fail
-    // opaquely inside dim, so they must be rejected here.
+    // Empty and truthy-non-string both reach dim as garbage — an empty file, or a
+    // Buffer.from throw — so both must be rejected here instead.
     assert.throws(
       () => decodeDimBundle(encodeDimBundle({ auth: '', store: '', provider: '' })),
+      /missing auth, store, or provider/,
+    );
+    assert.throws(
+      () => decodeDimBundle(encodeDimBundle({ auth: 1, store: {}, provider: [] } as never)),
       /missing auth, store, or provider/,
     );
   });

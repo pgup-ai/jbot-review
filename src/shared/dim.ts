@@ -95,7 +95,8 @@ export function decodeDimBundle(credential: string): DimBundle {
     throw new Error('Invalid DIM_AUTH_BUNDLE: expected the base64 blob from `npm run dim:bundle`.');
   }
   const bundle = parsed as Partial<DimBundle>;
-  if (!bundle?.auth || !bundle?.store || !bundle?.provider) {
+  const present = (value: unknown): value is string => typeof value === 'string' && value !== '';
+  if (!present(bundle?.auth) || !present(bundle?.store) || !present(bundle?.provider)) {
     throw new Error('Invalid DIM_AUTH_BUNDLE: missing auth, store, or provider.');
   }
   return { auth: bundle.auth, store: bundle.store, provider: bundle.provider };
