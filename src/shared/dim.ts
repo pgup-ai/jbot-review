@@ -36,9 +36,12 @@ export const DIM_CLI_BIN = 'dim';
  * because dim discovers repo-local skills from `.agents/skills` and `./skills`,
  * which are PR-author-controlled.
  *
- * `exec` stays, because exploring the checkout is the point. Measured safe only
- * alongside the args below: `--policy read-only` declines a shell write
- * (`echo x > f`) and network (`curl`).
+ * `exec` stays, because exploring the checkout is the point. Measured alongside
+ * the args below: `--policy read-only` declines a shell write (`echo x > f`) and
+ * network (`curl`). It does NOT confine reads — `read` returns files outside the
+ * cwd (measured), and dim has no `external_directory` deny like opencode's. With
+ * writes and network closed there is no exfil channel, so the container stays the
+ * boundary, per the same call already made for devin.
  */
 const DIM_ALLOWED_TOOLS = 'read,glob,grep,exec';
 
@@ -65,8 +68,10 @@ function dimAuthPath(home: string): string {
  */
 export interface DimBundle {
   auth: string;
-  /** base64 of `dimcode.sqlite`, pruned to the one provider in use. */
+  /** base64 of `dimcode.sqlite`, pruned to `provider` alone. */
   store: string;
+  /** The one dim provider the store still carries a connection row for. */
+  provider: string;
 }
 
 export function encodeDimBundle(bundle: DimBundle): string {
@@ -85,10 +90,14 @@ export function decodeDimBundle(credential: string): DimBundle {
     throw new Error('Invalid DIM_AUTH_BUNDLE: expected the base64 blob from `npm run dim:bundle`.');
   }
   const bundle = parsed as Partial<DimBundle>;
-  if (typeof bundle?.auth !== 'string' || typeof bundle?.store !== 'string') {
-    throw new Error('Invalid DIM_AUTH_BUNDLE: missing auth or store.');
+  if (
+    typeof bundle?.auth !== 'string' ||
+    typeof bundle?.store !== 'string' ||
+    typeof bundle?.provider !== 'string'
+  ) {
+    throw new Error('Invalid DIM_AUTH_BUNDLE: missing auth, store, or provider.');
   }
-  return { auth: bundle.auth, store: bundle.store };
+  return { auth: bundle.auth, store: bundle.store, provider: bundle.provider };
 }
 
 /**
@@ -165,6 +174,9 @@ export function dimEnvForHome(home: string | undefined): NodeJS.ProcessEnv {
   }
   env.HOME = value;
   env.DIMCODE_HOME = value;
+  // Without this, a read like `git status` refreshes the shared index — a write
+  // to the checkout, and a race between parallel sessions.
+  env.GIT_OPTIONAL_LOCKS = '0';
   // The CLI self-updates by default, which would drift from the pinned image.
   env.DIMCODE_DISABLE_AUTOUPDATE = '1';
   return env;
@@ -367,6 +379,13 @@ async function runDimPrompt(
   const runtime = options.runtime;
   if (!runtime)
     throw new Error('Missing dim runtime. A decoded bundle and parent dir are required.');
+  const requested = parseDimModel(model).provider;
+  if (requested && requested !== runtime.bundle.provider) {
+    throw new Error(
+      `dim ${label}: model requests provider "${requested}" but DIM_AUTH_BUNDLE carries only ` +
+        `"${runtime.bundle.provider}". Rebuild it with: npm run dim:bundle -- ${requested}`,
+    );
+  }
   const home = createDimSessionHome(runtime.parent, runtime.bundle);
   log(`Calling ${label} prompt (agent=dim-cli, model=${model})`);
   let result;
@@ -379,7 +398,12 @@ async function runDimPrompt(
       timeoutMessage: `dim ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s (model=${model})`,
     });
   } finally {
-    rmSync(home, { recursive: true, force: true });
+    try {
+      rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (error) {
+      // Never let teardown replace the error being unwound.
+      log(`dim ${label}: session home teardown failed: ${String(error)}`);
+    }
   }
   const { text, usage, failure } = parseDimEventStream(result.stdout);
   if (usage) options.onTokenUsage?.(usage, model, label);

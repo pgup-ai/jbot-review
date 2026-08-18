@@ -1377,7 +1377,7 @@ async function runReviewPipeline(params: {
   let dimHome: string | undefined;
   const cleanupDimHome = (): void => {
     if (!dimHome) return;
-    rmSync(dimHome, { recursive: true, force: true });
+    rmSync(dimHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     dimHome = undefined;
   };
   // Multiple CLI homes can be live at once (e.g. main=codex, aux=commandcode), so

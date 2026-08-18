@@ -79,6 +79,8 @@ describe('parseDimEventStream', () => {
       }),
     ].join('\n');
     assert.equal(parseDimEventStream(stdout).failure, 'Provider error: boom');
+    const noMessage = event('run:ended', { status: 'failed', reason: 'timeout' });
+    assert.equal(parseDimEventStream(noMessage).failure, 'run failed (timeout)');
   });
 });
 
@@ -86,24 +88,34 @@ describe('dim bundle', () => {
   it('round-trips both files and rejects a malformed secret', () => {
     // Carrying the store is what separates a working secret from "No connected
     // provider", so a bundle missing either half must fail at setup, not mid-run.
-    const bundle = { auth: '{"tokens":{"refresh_token":"rt"}}', store: 'c3FsaXRl' };
+    const bundle = {
+      auth: '{"tokens":{"refresh_token":"rt"}}',
+      store: 'c3FsaXRl',
+      provider: 'dimcode-api-oauth',
+    };
     assert.deepEqual(decodeDimBundle(encodeDimBundle(bundle)), bundle);
     assert.throws(() => decodeDimBundle('  '), /Missing dim credential/);
     assert.throws(() => decodeDimBundle('not-base64-gzip'), /Invalid DIM_AUTH_BUNDLE/);
     assert.throws(
       () => decodeDimBundle(encodeDimBundle({ auth: 'a' } as never)),
-      /missing auth or store/,
+      /missing auth, store, or provider/,
     );
   });
 });
 
 describe('dimEnvForHome', () => {
   it('carries an allowlist plus the home, and disables self-update', () => {
-    const env = dimEnvForHome('/tmp/dim-home');
-    assert.equal(env.DIMCODE_HOME, '/tmp/dim-home');
-    assert.equal(env.DIMCODE_DISABLE_AUTOUPDATE, '1');
-    // Ambient provider credentials must not reach the child.
-    assert.ok(!Object.keys(env).some((key) => /(^|_)(KEY|TOKEN|SECRET)$/.test(key)));
+    process.env.OPENAI_API_KEY = 'ambient-secret';
+    try {
+      const env = dimEnvForHome('/tmp/dim-home');
+      assert.equal(env.DIMCODE_HOME, '/tmp/dim-home');
+      assert.equal(env.DIMCODE_DISABLE_AUTOUPDATE, '1');
+      assert.equal(env.GIT_OPTIONAL_LOCKS, '0');
+      // An ambient key present in this process must not reach the child.
+      assert.equal(env.OPENAI_API_KEY, undefined);
+    } finally {
+      delete process.env.OPENAI_API_KEY;
+    }
   });
 
   it('refuses to run without a home rather than falling back to the real one', () => {

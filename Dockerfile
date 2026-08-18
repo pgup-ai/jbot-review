@@ -36,7 +36,7 @@ RUN npm install -g @qoder-ai/qodercli@1.0.43 \
 # help flag and falls through to reading stdin.
 RUN npm install -g dimcode@0.3.15 \
   && npm cache clean --force \
-  && dim version
+  && DIMCODE_DISABLE_AUTOUPDATE=1 dim version
 
 # Devin CLI (optional devin provider); strip the installer's interactive setup step.
 ARG DEVIN_CLI_VERSION=3000.4.25

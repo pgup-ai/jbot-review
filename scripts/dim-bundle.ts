@@ -35,17 +35,22 @@ const DROPPED_TABLES = [
 ];
 
 const provider = process.argv[2] ?? 'dimcode-api-oauth';
-// dim's DEFAULT home is `~/.dimcode/v2`, so auth.json sits beside the store
-// here. Under a DIMCODE_HOME override the two split apart — see dimAuthPath.
-const source = join(homedir(), '.dimcode', 'v2');
+// dim's DEFAULT home is `~/.dimcode/v2`, where auth.json sits beside the store.
+// Under a DIMCODE_HOME override they split: auth.json at the override root, the
+// store still under v2/ — the same layout dimAuthPath describes.
+const override = process.env.DIMCODE_HOME?.trim();
+const authFile = override
+  ? join(override, 'auth.json')
+  : join(homedir(), '.dimcode', 'v2', 'auth.json');
+const storeFile = override
+  ? join(override, 'v2', 'dimcode.sqlite')
+  : join(homedir(), '.dimcode', 'v2', 'dimcode.sqlite');
 
-for (const file of ['auth.json', 'dimcode.sqlite']) {
+for (const file of [authFile, storeFile]) {
   try {
-    statSync(join(source, file));
+    statSync(file);
   } catch {
-    console.error(
-      `Missing ${join(source, file)}. Run: dim auth login --device-login --provider ${provider}`,
-    );
+    console.error(`Missing ${file}. Run: dim auth login --device-login --provider ${provider}`);
     process.exit(1);
   }
 }
@@ -54,7 +59,7 @@ function build(): string {
   const work = mkdtempSync(join(tmpdir(), 'jbot-dim-bundle-'));
   try {
     const store = join(work, 'dimcode.sqlite');
-    copyFileSync(join(source, 'dimcode.sqlite'), store);
+    copyFileSync(storeFile, store);
     const db = new DatabaseSync(store);
     for (const table of DROPPED_TABLES) db.exec(`DELETE FROM ${table}`);
     const kept = db
@@ -70,8 +75,9 @@ function build(): string {
     db.close();
 
     const bundle = encodeDimBundle({
-      auth: readFileSync(join(source, 'auth.json'), 'utf8').trim(),
+      auth: readFileSync(authFile, 'utf8').trim(),
       store: readFileSync(store).toString('base64'),
+      provider,
     });
     if (bundle.length > GITHUB_SECRET_LIMIT) {
       throw new Error(
@@ -82,7 +88,11 @@ function build(): string {
   } finally {
     // Throw, never process.exit, above: exit skips this and strands a copy of
     // the operator's provider store — the very secret being packaged — in TMPDIR.
-    rmSync(work, { recursive: true, force: true });
+    try {
+      rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (error) {
+      console.error(`WARNING: could not remove ${work}: ${String(error)}`);
+    }
   }
 }
 
