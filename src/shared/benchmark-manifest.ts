@@ -38,7 +38,6 @@ export interface BenchmarkCase {
   repository?: string;
   base: string;
   head: string;
-  tags?: string[];
 }
 
 export interface BenchmarkManifest {
@@ -187,12 +186,6 @@ export function validateBenchmarkManifest(value: unknown): BenchmarkManifest {
     }
     if (!candidate.expectedClean && candidate.expectedFindings.length === 0) {
       throw new Error(`Non-clean case ${candidate.id} must declare an expected finding.`);
-    }
-    if (
-      candidate.tags !== undefined &&
-      (!Array.isArray(candidate.tags) || candidate.tags.some((tag) => typeof tag !== 'string'))
-    ) {
-      throw new Error(`Case ${candidate.id} has invalid tags.`);
     }
     const expectedIds = new Set<string>();
     for (const finding of candidate.expectedFindings) {

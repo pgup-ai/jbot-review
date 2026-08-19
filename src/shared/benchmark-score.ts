@@ -314,16 +314,15 @@ export function scoreBenchmark(
   };
 }
 
-function stable(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stable);
+export function benchmarkCanonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(benchmarkCanonicalJson).join(',')}]`;
   if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, entry]) => [key, stable(entry)]),
-    );
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${benchmarkCanonicalJson(entry)}`)
+      .join(',')}}`;
   }
-  return value;
+  return JSON.stringify(value);
 }
 
 function flatten(value: unknown, prefix = ''): Map<string, string> {
@@ -338,7 +337,7 @@ function flatten(value: unknown, prefix = ''): Map<string, string> {
       }, new Map<string, string>());
     }
   }
-  return new Map([[prefix, JSON.stringify(stable(value))]]);
+  return new Map([[prefix, benchmarkCanonicalJson(value)]]);
 }
 
 export function benchmarkConfigurationDifferences(

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   assertBenchmarkComparable,
+  benchmarkCanonicalJson,
   benchmarkConfigurationDifferences,
   scoreBenchmark,
   type BenchmarkCaseRun,
@@ -165,6 +166,10 @@ describe('scoreBenchmark', () => {
 });
 
 describe('assertBenchmarkComparable', () => {
+  it('canonicalizes object keys with deterministic code-point ordering', () => {
+    assert.equal(benchmarkCanonicalJson({ z: 1, ä: 2, a: 3 }), '{"a":3,"z":1,"ä":2}');
+  });
+
   const control: BenchmarkConfiguration = {
     model: 'provider/model',
     modelRevision: '2026-08-01',

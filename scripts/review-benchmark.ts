@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   appendFileSync,
@@ -17,13 +17,15 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
+import { onFatalSignal } from '@symma/protocol';
+
 import {
   BENCHMARK_SCHEMA_VERSION,
+  benchmarkCanonicalJson,
   scoreBenchmark,
   type BenchmarkCaseRun,
   type BenchmarkCacheState,
   type BenchmarkDiffSize,
-  type BenchmarkObservedFinding,
   type BenchmarkRiskTier,
 } from '../src/shared/benchmark-score.ts';
 import {
@@ -34,24 +36,17 @@ import {
   type BenchmarkCase,
   type BenchmarkManifest,
 } from '../src/shared/benchmark-manifest.ts';
-import { VALID_SEVERITIES } from '../src/shared/types.ts';
+import {
+  classifyBenchmarkProcessFailure,
+  emptyBenchmarkProgramMetrics,
+  isBenchmarkRunnerOutput,
+  parseBenchmarkTelemetry,
+  type BenchmarkFailureClass,
+  type BenchmarkProgramMetrics,
+  type BenchmarkRunnerOutput,
+} from '../src/shared/benchmark-runner.ts';
 
 const execFileAsync = promisify(execFile);
-
-interface RunnerOutput {
-  findings: BenchmarkObservedFinding[];
-  telemetry?: string;
-  costUsd?: number;
-}
-
-interface ProgramMetrics {
-  inputTokens: number;
-  outputTokens: number;
-  reasoningTokens: number;
-  cacheReadTokens: number;
-  costUsd: number;
-  sessions: number;
-}
 
 interface CaseRow extends BenchmarkCaseRun {
   schemaVersion: number;
@@ -63,27 +58,8 @@ interface CaseRow extends BenchmarkCaseRun {
   exitCode: number | null;
   signal: string | null;
   timedOut: boolean;
-  failureClass:
-    | 'setup'
-    | 'timeout'
-    | 'runner-exit'
-    | 'signal'
-    | 'spawn'
-    | 'invalid-output'
-    | 'missing-output'
-    | null;
-  program: ProgramMetrics;
-}
-
-function emptyProgramMetrics(): ProgramMetrics {
-  return {
-    inputTokens: 0,
-    outputTokens: 0,
-    reasoningTokens: 0,
-    cacheReadTokens: 0,
-    costUsd: 0,
-    sessions: 0,
-  };
+  failureClass: BenchmarkFailureClass | null;
+  program: BenchmarkProgramMetrics;
 }
 
 function usage(): never {
@@ -103,20 +79,9 @@ function readManifest(path: string): BenchmarkManifest {
   return validateBenchmarkManifest(JSON.parse(readFileSync(path, 'utf8')));
 }
 
-function stable(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
-  if (value && typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${stable(entry)}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
-
 function computeCorpusHash(manifest: BenchmarkManifest, manifestDir: string): string {
   const hash = createHash('sha256');
-  hash.update(stable(manifest.cases));
+  hash.update(benchmarkCanonicalJson(manifest.cases));
   for (const fixture of [...new Set(manifest.cases.map((item) => item.fixturePath).filter(Boolean))]
     .map((path) => resolve(manifestDir, path!))
     .sort()) {
@@ -142,76 +107,41 @@ function expand(value: string, paths: Record<string, string>): string {
   );
 }
 
-function parseTelemetry(telemetry: string | undefined): ProgramMetrics {
-  const metrics = emptyProgramMetrics();
-  if (!telemetry) return metrics;
-  for (const line of telemetry.split('\n').filter(Boolean)) {
-    let row: Record<string, unknown>;
-    try {
-      row = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    if (row.kind !== 'session') continue;
-    metrics.sessions += 1;
-    for (const key of [
-      'inputTokens',
-      'outputTokens',
-      'reasoningTokens',
-      'cacheReadTokens',
-    ] as const) {
-      if (typeof row[key] === 'number' && Number.isFinite(row[key]) && row[key] >= 0) {
-        metrics[key] += row[key];
-      }
-    }
-    const cost =
-      typeof row.costUsd === 'number'
-        ? row.costUsd
-        : typeof row.estimatedCostUsd === 'number'
-          ? row.estimatedCostUsd
-          : 0;
-    if (Number.isFinite(cost) && cost >= 0) metrics.costUsd += cost;
-  }
-  return metrics;
-}
-
-function validRunnerOutput(value: unknown): value is RunnerOutput {
-  if (!value || typeof value !== 'object') return false;
-  const output = value as RunnerOutput;
-  if (output.telemetry !== undefined && typeof output.telemetry !== 'string') return false;
-  if (output.costUsd !== undefined && (!Number.isFinite(output.costUsd) || output.costUsd < 0)) {
-    return false;
-  }
-  return (
-    Array.isArray(output.findings) &&
-    output.findings.every(
-      (finding) =>
-        typeof finding.path === 'string' &&
-        Number.isInteger(finding.line) &&
-        finding.line >= 0 &&
-        VALID_SEVERITIES.has(finding.severity) &&
-        typeof finding.title === 'string' &&
-        (finding.fingerprint === undefined || typeof finding.fingerprint === 'string') &&
-        (finding.expectedFindingId === undefined ||
-          typeof finding.expectedFindingId === 'string') &&
-        (finding.retained === undefined || typeof finding.retained === 'boolean') &&
-        (finding.anchored === undefined || typeof finding.anchored === 'boolean'),
-    )
-  );
-}
-
 async function prepareWorkspace(
   benchmarkCase: BenchmarkCase,
   manifestDir: string,
   root: string,
-): Promise<{ workspace: string; fixture: string; cleanup: () => Promise<void> }> {
+): Promise<{ workspace: string; fixture: string; cleanup: () => void }> {
   const workspace = join(root, 'workspace');
-  if (benchmarkCase.repository) {
-    const repository = resolve(manifestDir, benchmarkCase.repository);
-    const cleanup = async (): Promise<void> => {
-      await execFileAsync('git', ['-C', repository, 'worktree', 'remove', '--force', workspace]);
-    };
+  const repository = benchmarkCase.repository
+    ? resolve(manifestDir, benchmarkCase.repository)
+    : undefined;
+  const discard = (): void => {
+    if (repository) {
+      const removal = spawnSync(
+        'git',
+        ['-C', repository, 'worktree', 'remove', '--force', workspace],
+        {
+          stdio: 'ignore',
+        },
+      );
+      if (removal.error || removal.status !== 0) {
+        console.warn(`warning: worktree cleanup failed for ${benchmarkCase.id}.`);
+      }
+    }
     try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      console.warn(`warning: temporary directory cleanup failed for ${benchmarkCase.id}.`);
+    }
+  };
+  const unregister = onFatalSignal(discard);
+  const cleanup = (): void => {
+    unregister();
+    discard();
+  };
+  try {
+    if (repository) {
       await execFileAsync('git', [
         '-C',
         repository,
@@ -222,20 +152,18 @@ async function prepareWorkspace(
         workspace,
         benchmarkCase.head,
       ]);
-    } catch (error) {
-      try {
-        await cleanup();
-      } catch {}
-      throw error;
+      return { workspace, fixture: '', cleanup };
     }
-    return { workspace, fixture: '', cleanup };
-  }
 
-  mkdirSync(workspace, { recursive: true });
-  const source = resolve(manifestDir, benchmarkCase.fixturePath!);
-  const fixture = join(workspace, 'fixture.json');
-  cpSync(source, fixture, { recursive: true });
-  return { workspace, fixture, cleanup: async () => undefined };
+    mkdirSync(workspace, { recursive: true });
+    const source = resolve(manifestDir, benchmarkCase.fixturePath!);
+    const fixture = join(workspace, 'fixture.json');
+    cpSync(source, fixture, { recursive: true });
+    return { workspace, fixture, cleanup };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 }
 
 async function runCase(
@@ -251,7 +179,7 @@ async function runCase(
   const home = join(root, 'home');
   const output = join(root, 'result.json');
   mkdirSync(home, { recursive: true });
-  let cleanup: (() => Promise<void>) | undefined;
+  let cleanup: (() => void) | undefined;
   try {
     const setupStarted = performance.now();
     let checkout: Awaited<ReturnType<typeof prepareWorkspace>>;
@@ -279,7 +207,7 @@ async function runCase(
         signal: null,
         timedOut: false,
         failureClass: 'setup',
-        program: emptyProgramMetrics(),
+        program: emptyBenchmarkProgramMetrics(),
       };
     }
     cleanup = checkout.cleanup;
@@ -296,7 +224,6 @@ async function runCase(
       XDG_DATA_HOME: join(home, '.local', 'share'),
       JBOT_BENCHMARK_DRY_RUN: 'true',
       JBOT_BENCHMARK_OUTPUT: output,
-      JBOT_BENCHMARK_ARM: side,
       JBOT_BENCHMARK_CASE: benchmarkCase.id,
       JBOT_BENCHMARK_FIXTURE: checkout.fixture,
       JBOT_LOCAL_BASE: benchmarkCase.base,
@@ -316,29 +243,15 @@ async function runCase(
         timeout: manifest.timeoutMs,
       });
     } catch (error) {
-      const failure = error as NodeJS.ErrnoException & {
-        code?: string | number;
-        signal?: string;
-        killed?: boolean;
-      };
-      exitCode = typeof failure.code === 'number' ? failure.code : null;
-      timedOut = Boolean(failure.killed);
-      signal = failure.signal ?? (timedOut ? 'SIGTERM' : null);
-      failureClass = timedOut
-        ? 'timeout'
-        : failure.signal
-          ? 'signal'
-          : typeof failure.code === 'number'
-            ? 'runner-exit'
-            : 'spawn';
+      ({ exitCode, signal, timedOut, failureClass } = classifyBenchmarkProcessFailure(error));
     }
     const latencyMs = performance.now() - started;
 
-    let result: RunnerOutput | undefined;
+    let result: BenchmarkRunnerOutput | undefined;
     if (existsSync(output)) {
       try {
         const parsed: unknown = JSON.parse(readFileSync(output, 'utf8'));
-        if (!validRunnerOutput(parsed)) throw new Error('invalid benchmark runner output');
+        if (!isBenchmarkRunnerOutput(parsed)) throw new Error('invalid benchmark runner output');
         result = parsed;
       } catch {
         if (failureClass === null) {
@@ -351,7 +264,7 @@ async function runCase(
       failureClass = 'missing-output';
     }
 
-    const program = parseTelemetry(result?.telemetry);
+    const program = parseBenchmarkTelemetry(result?.telemetry);
     const row: CaseRow = {
       schemaVersion: BENCHMARK_SCHEMA_VERSION,
       arm: side,
@@ -376,21 +289,12 @@ async function runCase(
     };
     return row;
   } finally {
-    try {
-      await cleanup?.();
-    } catch {
-      console.warn(`warning: worktree cleanup failed for ${benchmarkCase.id}.`);
-    }
-    try {
-      rmSync(root, { recursive: true, force: true });
-    } catch {
-      console.warn(`warning: temporary directory cleanup failed for ${benchmarkCase.id}.`);
-    }
+    cleanup?.();
   }
 }
 
-function sumProgram(rows: CaseRow[]): ProgramMetrics {
-  return rows.reduce<ProgramMetrics>(
+function sumProgram(rows: CaseRow[]): BenchmarkProgramMetrics {
+  return rows.reduce<BenchmarkProgramMetrics>(
     (sum, row) => ({
       inputTokens: sum.inputTokens + row.program.inputTokens,
       outputTokens: sum.outputTokens + row.program.outputTokens,
@@ -411,9 +315,7 @@ function sumProgram(rows: CaseRow[]): ProgramMetrics {
 }
 
 function summarize(rows: CaseRow[]) {
-  const successful = rows.filter(
-    (row) => row.exitCode === 0 && !row.timedOut && row.failureClass === null,
-  );
+  const successful = rows.filter((row) => row.failureClass === null);
   const score = (subset: CaseRow[]) => scoreBenchmark(subset);
   return {
     runs: rows.length,

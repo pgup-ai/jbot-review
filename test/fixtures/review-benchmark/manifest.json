@@ -3,7 +3,7 @@
   "name": "phase0-fixture-replay-baseline",
   "repetitions": 3,
   "timeoutMs": 10000,
-  "corpusHash": "sha256:b7a109b31c30f1d6f4c72d05733eac0baa9efc9251b8dbedb4e5c1283b3aeacd",
+  "corpusHash": "sha256:589ac69c5ccb299ac15840e45d0a0a2b152fcf850229d9ca3265ee019aee3849",
   "runner": {
     "command": [
       "${projectRoot}/node_modules/.bin/tsx",
@@ -24,7 +24,7 @@
         "temperature": 0
       },
       "promptVersion": "sha256:dad657bcb21b1e4e3f267b6d1891f9c56f7096aec41b15e28297169f0aaad8a9",
-      "corpusHash": "sha256:b7a109b31c30f1d6f4c72d05733eac0baa9efc9251b8dbedb4e5c1283b3aeacd",
+      "corpusHash": "sha256:589ac69c5ccb299ac15840e45d0a0a2b152fcf850229d9ca3265ee019aee3849",
       "config": {
         "benchmarkAdapterMode": "control"
       }
@@ -42,7 +42,7 @@
         "temperature": 0
       },
       "promptVersion": "sha256:dad657bcb21b1e4e3f267b6d1891f9c56f7096aec41b15e28297169f0aaad8a9",
-      "corpusHash": "sha256:b7a109b31c30f1d6f4c72d05733eac0baa9efc9251b8dbedb4e5c1283b3aeacd",
+      "corpusHash": "sha256:589ac69c5ccb299ac15840e45d0a0a2b152fcf850229d9ca3265ee019aee3849",
       "config": {
         "benchmarkAdapterMode": "treatment"
       }
@@ -69,8 +69,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-01",
-      "tags": ["security", "defect"]
+      "head": "fixture-head-v1-01"
     },
     {
       "id": "clean-auth-guard",
@@ -81,8 +80,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-02",
-      "tags": ["security", "clean"]
+      "head": "fixture-head-v1-02"
     },
     {
       "id": "tenant-scope-leak",
@@ -104,8 +102,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-03",
-      "tags": ["data", "defect"]
+      "head": "fixture-head-v1-03"
     },
     {
       "id": "clean-tenant-query",
@@ -116,8 +113,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-04",
-      "tags": ["data", "clean"]
+      "head": "fixture-head-v1-04"
     },
     {
       "id": "lost-update-race",
@@ -139,8 +135,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-05",
-      "tags": ["concurrency", "defect"]
+      "head": "fixture-head-v1-05"
     },
     {
       "id": "clean-transaction-lock",
@@ -151,8 +146,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-06",
-      "tags": ["concurrency", "clean"]
+      "head": "fixture-head-v1-06"
     },
     {
       "id": "api-nullability-break",
@@ -174,8 +168,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-07",
-      "tags": ["api", "defect"]
+      "head": "fixture-head-v1-07"
     },
     {
       "id": "clean-api-extension",
@@ -186,8 +179,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-08",
-      "tags": ["api", "clean"]
+      "head": "fixture-head-v1-08"
     },
     {
       "id": "stale-frontend-state",
@@ -209,8 +201,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-09",
-      "tags": ["frontend", "defect"]
+      "head": "fixture-head-v1-09"
     },
     {
       "id": "clean-frontend-copy",
@@ -221,8 +212,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-10",
-      "tags": ["frontend", "clean"]
+      "head": "fixture-head-v1-10"
     },
     {
       "id": "workflow-write-escalation",
@@ -244,8 +234,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-11",
-      "tags": ["infrastructure", "defect"]
+      "head": "fixture-head-v1-11"
     },
     {
       "id": "clean-cache-key-change",
@@ -256,8 +245,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-12",
-      "tags": ["infrastructure", "clean"]
+      "head": "fixture-head-v1-12"
     },
     {
       "id": "missing-regression-assertion",
@@ -279,8 +267,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-13",
-      "tags": ["tests", "defect"]
+      "head": "fixture-head-v1-13"
     },
     {
       "id": "clean-test-refactor",
@@ -291,8 +278,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-14",
-      "tags": ["tests", "clean"]
+      "head": "fixture-head-v1-14"
     },
     {
       "id": "incorrect-doc-example",
@@ -314,8 +300,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-15",
-      "tags": ["docs", "defect"]
+      "head": "fixture-head-v1-15"
     },
     {
       "id": "clean-doc-typo",
@@ -326,8 +311,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-16",
-      "tags": ["docs", "clean"]
+      "head": "fixture-head-v1-16"
     },
     {
       "id": "generated-source-edit",
@@ -349,8 +333,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-17",
-      "tags": ["generated", "defect"]
+      "head": "fixture-head-v1-17"
     },
     {
       "id": "clean-lockfile-refresh",
@@ -361,8 +344,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-18",
-      "tags": ["generated", "clean"]
+      "head": "fixture-head-v1-18"
     },
     {
       "id": "large-file-boundary",
@@ -384,8 +366,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-19",
-      "tags": ["large-single-file", "defect"]
+      "head": "fixture-head-v1-19"
     },
     {
       "id": "clean-large-generated-map",
@@ -396,8 +377,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-20",
-      "tags": ["large-single-file", "clean"]
+      "head": "fixture-head-v1-20"
     },
     {
       "id": "cross-package-contract",
@@ -419,8 +399,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-21",
-      "tags": ["broad-multi-package", "defect"]
+      "head": "fixture-head-v1-21"
     },
     {
       "id": "clean-package-reorganization",
@@ -431,8 +410,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-22",
-      "tags": ["broad-multi-package", "clean"]
+      "head": "fixture-head-v1-22"
     },
     {
       "id": "caller-callee-mismatch",
@@ -458,8 +436,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-23",
-      "tags": ["cross-file", "defect"]
+      "head": "fixture-head-v1-23"
     },
     {
       "id": "clean-symbol-rename",
@@ -470,8 +447,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-24",
-      "tags": ["cross-file", "clean"]
+      "head": "fixture-head-v1-24"
     },
     {
       "id": "secret-log-exposure",
@@ -493,8 +469,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-25",
-      "tags": ["security", "defect"]
+      "head": "fixture-head-v1-25"
     },
     {
       "id": "clean-redacted-logging",
@@ -505,8 +480,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-26",
-      "tags": ["security", "clean"]
+      "head": "fixture-head-v1-26"
     },
     {
       "id": "quadratic-hot-path",
@@ -528,8 +502,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-27",
-      "tags": ["performance", "defect"]
+      "head": "fixture-head-v1-27"
     },
     {
       "id": "clean-loop-simplification",
@@ -540,8 +513,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-28",
-      "tags": ["performance", "clean"]
+      "head": "fixture-head-v1-28"
     },
     {
       "id": "unsafe-default-config",
@@ -563,8 +535,7 @@
       ],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-29",
-      "tags": ["configuration", "defect"]
+      "head": "fixture-head-v1-29"
     },
     {
       "id": "clean-config-comment",
@@ -575,8 +546,7 @@
       "expectedFindings": [],
       "fixturePath": "corpus.json",
       "base": "fixture-base-v1",
-      "head": "fixture-head-v1-30",
-      "tags": ["configuration", "clean"]
+      "head": "fixture-head-v1-30"
     }
   ]
 }
