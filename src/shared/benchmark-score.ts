@@ -1,8 +1,8 @@
 import type { Severity } from './types.ts';
 
 export const BENCHMARK_SCHEMA_VERSION = 1;
-export const BENCHMARK_BOOTSTRAP_SEED = 0x4a424f54;
-export const BENCHMARK_BOOTSTRAP_SAMPLES = 2_000;
+const BENCHMARK_BOOTSTRAP_SEED = 0x4a424f54;
+const BENCHMARK_BOOTSTRAP_SAMPLES = 2_000;
 
 export type BenchmarkRiskTier = 'low' | 'medium' | 'high' | 'critical';
 export type BenchmarkCacheState = 'uncached' | 'cached-same-head' | 'cached-cross-run';
@@ -139,16 +139,12 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
       expected.anchors.some(
         (anchor) => anchor.path === finding.path && anchor.line === finding.line,
       );
-    const explicitCandidate = finding.expectedFindingId
+    const expected = finding.expectedFindingId
       ? expectedById.get(finding.expectedFindingId)
-      : undefined;
-    const explicit =
-      explicitCandidate && anchorMatches(explicitCandidate) ? explicitCandidate : undefined;
-    const automatic = run.expectedFindings.find(
-      (expected) => !matchedExpected.has(expected.id) && anchorMatches(expected),
-    );
-    const expected = explicit ?? automatic;
-    if (!expected || matchedExpected.has(expected.id)) continue;
+      : run.expectedFindings.find(
+          (candidate) => !matchedExpected.has(candidate.id) && anchorMatches(candidate),
+        );
+    if (!expected || matchedExpected.has(expected.id) || !anchorMatches(expected)) continue;
     matchedExpected.add(expected.id);
     matched += 1;
     matchedWeight += SEVERITY_WEIGHT[expected.severity];
@@ -360,6 +356,8 @@ export function assertBenchmarkComparable(
   control: BenchmarkConfiguration,
   treatment: BenchmarkConfiguration,
   declaredTreatmentVariables: string[],
+  controlEnv: Record<string, string> = {},
+  treatmentEnv: Record<string, string> = {},
 ): void {
   const required: Array<keyof BenchmarkConfiguration> = [
     'model',
@@ -378,7 +376,11 @@ export function assertBenchmarkComparable(
     }
   }
   const declared = new Set(declaredTreatmentVariables);
-  const differences = benchmarkConfigurationDifferences(control, treatment);
+  const envKeys = [...new Set([...Object.keys(controlEnv), ...Object.keys(treatmentEnv)])];
+  const differences = [
+    ...benchmarkConfigurationDifferences(control, treatment),
+    ...envKeys.filter((key) => controlEnv[key] !== treatmentEnv[key]).map((key) => `env.${key}`),
+  ].sort();
   const undeclared = differences.filter((difference) => !declared.has(difference));
   if (undeclared.length > 0) {
     throw new Error(

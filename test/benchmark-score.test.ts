@@ -115,6 +115,39 @@ describe('scoreBenchmark', () => {
     assert.equal(score.precision.value, 0);
   });
 
+  it('does not reassign a duplicate explicit match to another expectation', () => {
+    const score = scoreBenchmark(
+      [
+        {
+          ...runs[0],
+          expectedFindings: [expected('first', 'P1', 10), expected('second', 'P2', 10)],
+          findings: [
+            {
+              path: 'src/a.ts',
+              line: 10,
+              severity: 'P1',
+              title: 'First report',
+              fingerprint: 'first-report',
+              expectedFindingId: 'first',
+            },
+            {
+              path: 'src/a.ts',
+              line: 10,
+              severity: 'P1',
+              title: 'Duplicate report',
+              fingerprint: 'duplicate-report',
+              expectedFindingId: 'first',
+            },
+          ],
+        },
+      ],
+      { bootstrapSamples: 0 },
+    );
+    assert.equal(score.matchedFindings, 1);
+    assert.equal(score.severityWeightedRecall.value, 2 / 3);
+    assert.equal(score.precision.value, 1 / 2);
+  });
+
   it('returns null for metrics whose denominators do not exist', () => {
     const score = scoreBenchmark([], { bootstrapSamples: 0 });
     assert.equal(score.severityWeightedRecall.value, null);
@@ -151,6 +184,15 @@ describe('assertBenchmarkComparable', () => {
     ]);
     assert.doesNotThrow(() =>
       assertBenchmarkComparable(control, treatment, ['config.reviewShards']),
+    );
+    assert.doesNotThrow(() =>
+      assertBenchmarkComparable(
+        control,
+        treatment,
+        ['config.reviewShards', 'env.JBOT_REVIEW_SHARDS'],
+        { JBOT_REVIEW_SHARDS: '1' },
+        { JBOT_REVIEW_SHARDS: '2' },
+      ),
     );
   });
 
