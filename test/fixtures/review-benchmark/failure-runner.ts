@@ -7,8 +7,8 @@ if (!output || !mode || process.env.JBOT_BENCHMARK_DRY_RUN !== 'true') {
 }
 
 if (mode === 'timeout') {
+  writeFileSync(output, '{');
   await new Promise((resolve) => setTimeout(resolve, 5_000));
-  writeFileSync(output, '{"findings":[]}\n');
 } else if (mode === 'runner-exit') {
   process.exitCode = 7;
 } else if (mode === 'invalid-output') {

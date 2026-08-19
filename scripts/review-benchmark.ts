@@ -63,8 +63,20 @@ interface CaseRow extends BenchmarkCaseRun {
   exitCode: number | null;
   signal: string | null;
   timedOut: boolean;
-  failureClass: 'timeout' | 'runner-exit' | 'spawn' | 'invalid-output' | 'missing-output' | null;
+  failureClass:
+    'setup' | 'timeout' | 'runner-exit' | 'spawn' | 'invalid-output' | 'missing-output' | null;
   program: ProgramMetrics;
+}
+
+function emptyProgramMetrics(): ProgramMetrics {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    costUsd: 0,
+    sessions: 0,
+  };
 }
 
 function usage(): never {
@@ -88,7 +100,7 @@ function stable(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stable).join(',')}]`;
   if (value && typeof value === 'object') {
     return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([key, entry]) => `${JSON.stringify(key)}:${stable(entry)}`)
       .join(',')}}`;
   }
@@ -124,14 +136,7 @@ function expand(value: string, paths: Record<string, string>): string {
 }
 
 function parseTelemetry(telemetry: string | undefined): ProgramMetrics {
-  const metrics: ProgramMetrics = {
-    inputTokens: 0,
-    outputTokens: 0,
-    reasoningTokens: 0,
-    cacheReadTokens: 0,
-    costUsd: 0,
-    sessions: 0,
-  };
+  const metrics = emptyProgramMetrics();
   if (!telemetry) return metrics;
   for (const line of telemetry.split('\n').filter(Boolean)) {
     let row: Record<string, unknown>;
@@ -241,7 +246,35 @@ async function runCase(
   mkdirSync(home, { recursive: true });
   let cleanup: (() => Promise<void>) | undefined;
   try {
-    const checkout = await prepareWorkspace(benchmarkCase, manifestDir, root);
+    const setupStarted = performance.now();
+    let checkout: Awaited<ReturnType<typeof prepareWorkspace>>;
+    try {
+      checkout = await prepareWorkspace(benchmarkCase, manifestDir, root);
+    } catch {
+      console.warn(`warning: workspace setup failed for ${benchmarkCase.id}.`);
+      return {
+        schemaVersion: BENCHMARK_SCHEMA_VERSION,
+        arm: side,
+        armName: arm.name,
+        repetition,
+        base: benchmarkCase.base,
+        head: benchmarkCase.head,
+        caseId: benchmarkCase.id,
+        riskTier: benchmarkCase.riskTier,
+        cacheState: benchmarkCase.cacheState,
+        diffSize: benchmarkCase.diffSize,
+        expectedClean: benchmarkCase.expectedClean,
+        expectedFindings: benchmarkCase.expectedFindings,
+        findings: [],
+        latencyMs: performance.now() - setupStarted,
+        costUsd: 0,
+        exitCode: null,
+        signal: null,
+        timedOut: false,
+        failureClass: 'setup',
+        program: emptyProgramMetrics(),
+      };
+    }
     cleanup = checkout.cleanup;
     const paths = { projectRoot, workspace: checkout.workspace, output, fixture: checkout.fixture };
     const command = manifest.runner.command.map((value) => expand(value, paths));
@@ -299,8 +332,10 @@ async function runCase(
         if (!validRunnerOutput(parsed)) throw new Error('invalid benchmark runner output');
         result = parsed;
       } catch {
-        exitCode = exitCode || 1;
-        failureClass = 'invalid-output';
+        if (failureClass === null) {
+          exitCode = 1;
+          failureClass = 'invalid-output';
+        }
       }
     } else if (exitCode === 0) {
       exitCode = 1;
@@ -443,7 +478,7 @@ async function main(): Promise<void> {
         rows.push(row);
         appendFileSync(casesPath, `${JSON.stringify(row)}\n`);
         console.log(
-          `${side.padEnd(9)} ${benchmarkCase.id} #${repetition}: exit=${row.exitCode ?? row.signal} ${Math.round(row.latencyMs)}ms`,
+          `${side.padEnd(9)} ${benchmarkCase.id} #${repetition}: exit=${row.exitCode ?? row.signal ?? row.failureClass} ${Math.round(row.latencyMs)}ms`,
         );
       }
     }

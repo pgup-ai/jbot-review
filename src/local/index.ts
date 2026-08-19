@@ -274,6 +274,11 @@ async function main(): Promise<void> {
 }
 
 async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void> {
+  const benchmarkOutput = process.env.JBOT_BENCHMARK_OUTPUT?.trim();
+  if (benchmarkOutput && process.env.JBOT_BENCHMARK_DRY_RUN !== 'true') {
+    throw new Error('JBOT_BENCHMARK_OUTPUT requires JBOT_BENCHMARK_DRY_RUN=true.');
+  }
+
   // Name the run after the branch under review. CI gets a unique id from the
   // workflow run and attempt; locally there is none, and without one every
   // local review collapses into the gateway's `jbot` fallback together — one
@@ -574,13 +579,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     return;
   }
 
-  const benchmarkOutput = process.env.JBOT_BENCHMARK_OUTPUT?.trim();
-  if (benchmarkOutput) {
-    if (process.env.JBOT_BENCHMARK_DRY_RUN !== 'true') {
-      throw new Error('JBOT_BENCHMARK_OUTPUT requires JBOT_BENCHMARK_DRY_RUN=true.');
-    }
-    writeFileSync(benchmarkOutput, `${JSON.stringify(reviewResult)}\n`);
-  }
+  if (benchmarkOutput) writeFileSync(benchmarkOutput, `${JSON.stringify(reviewResult)}\n`);
 
   const report = renderReport(reviewResult, { branch, baseRef, mergeBase, model });
   console.log(`\n${report}`);
