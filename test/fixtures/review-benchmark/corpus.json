@@ -1,0 +1,628 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "auth-bypass",
+      "findings": [
+        {
+          "path": "src/security.ts",
+          "line": 10,
+          "severity": "P0",
+          "title": "Seeded auth-bypass",
+          "fingerprint": "auth-bypass-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1000,
+          "outputTokens": 120,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 500,
+          "costUsd": 0.001
+        }
+      ]
+    },
+    {
+      "id": "clean-auth-guard",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1007,
+          "outputTokens": 121,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 503,
+          "costUsd": 0.00101
+        }
+      ]
+    },
+    {
+      "id": "tenant-scope-leak",
+      "findings": [
+        {
+          "path": "src/data.ts",
+          "line": 12,
+          "severity": "P1",
+          "title": "Seeded tenant-scope-leak",
+          "fingerprint": "tenant-scope-leak-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1014,
+          "outputTokens": 122,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 506,
+          "costUsd": 0.00102
+        }
+      ]
+    },
+    {
+      "id": "clean-tenant-query",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1021,
+          "outputTokens": 123,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 509,
+          "costUsd": 0.00103
+        }
+      ]
+    },
+    {
+      "id": "lost-update-race",
+      "findings": [
+        {
+          "path": "src/concurrency.ts",
+          "line": 14,
+          "severity": "P1",
+          "title": "Seeded lost-update-race",
+          "fingerprint": "lost-update-race-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1028,
+          "outputTokens": 124,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 512,
+          "costUsd": 0.00104
+        }
+      ]
+    },
+    {
+      "id": "clean-transaction-lock",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1035,
+          "outputTokens": 125,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 515,
+          "costUsd": 0.00105
+        }
+      ]
+    },
+    {
+      "id": "api-nullability-break",
+      "findings": [
+        {
+          "path": "src/api.ts",
+          "line": 16,
+          "severity": "P1",
+          "title": "Seeded api-nullability-break",
+          "fingerprint": "api-nullability-break-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1042,
+          "outputTokens": 126,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 518,
+          "costUsd": 0.00106
+        }
+      ]
+    },
+    {
+      "id": "clean-api-extension",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1049,
+          "outputTokens": 127,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 521,
+          "costUsd": 0.00107
+        }
+      ]
+    },
+    {
+      "id": "stale-frontend-state",
+      "findings": [
+        {
+          "path": "src/frontend.ts",
+          "line": 18,
+          "severity": "P2",
+          "title": "Seeded stale-frontend-state",
+          "fingerprint": "stale-frontend-state-finding"
+        },
+        {
+          "path": "src/frontend.ts",
+          "line": 18,
+          "severity": "P2",
+          "title": "Duplicate seeded stale state",
+          "fingerprint": "stale-frontend-state-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1056,
+          "outputTokens": 128,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 524,
+          "costUsd": 0.00108
+        }
+      ]
+    },
+    {
+      "id": "clean-frontend-copy",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1063,
+          "outputTokens": 129,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 527,
+          "costUsd": 0.00109
+        }
+      ]
+    },
+    {
+      "id": "workflow-write-escalation",
+      "findings": [
+        {
+          "path": "src/infrastructure.ts",
+          "line": 20,
+          "severity": "P1",
+          "title": "Seeded workflow-write-escalation",
+          "fingerprint": "workflow-write-escalation-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1070,
+          "outputTokens": 130,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 530,
+          "costUsd": 0.0011
+        }
+      ]
+    },
+    {
+      "id": "clean-cache-key-change",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1077,
+          "outputTokens": 131,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 533,
+          "costUsd": 0.00111
+        }
+      ]
+    },
+    {
+      "id": "missing-regression-assertion",
+      "findings": [
+        {
+          "path": "src/tests.ts",
+          "line": 22,
+          "severity": "P2",
+          "title": "Seeded missing-regression-assertion",
+          "fingerprint": "missing-regression-assertion-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1084,
+          "outputTokens": 132,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 536,
+          "costUsd": 0.00112
+        }
+      ]
+    },
+    {
+      "id": "clean-test-refactor",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1091,
+          "outputTokens": 133,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 539,
+          "costUsd": 0.00113
+        }
+      ]
+    },
+    {
+      "id": "incorrect-doc-example",
+      "findings": [
+        {
+          "path": "src/docs.ts",
+          "line": 24,
+          "severity": "P3",
+          "title": "Seeded incorrect-doc-example",
+          "fingerprint": "incorrect-doc-example-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1098,
+          "outputTokens": 134,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 542,
+          "costUsd": 0.00114
+        }
+      ]
+    },
+    {
+      "id": "clean-doc-typo",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1105,
+          "outputTokens": 135,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 545,
+          "costUsd": 0.00115
+        }
+      ]
+    },
+    {
+      "id": "generated-source-edit",
+      "findings": [
+        {
+          "path": "src/generated.ts",
+          "line": 26,
+          "severity": "P2",
+          "title": "Seeded generated-source-edit",
+          "fingerprint": "generated-source-edit-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1112,
+          "outputTokens": 136,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 548,
+          "costUsd": 0.00116
+        }
+      ]
+    },
+    {
+      "id": "clean-lockfile-refresh",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1119,
+          "outputTokens": 137,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 551,
+          "costUsd": 0.00117
+        }
+      ]
+    },
+    {
+      "id": "large-file-boundary",
+      "findings": [
+        {
+          "path": "src/large-single-file.ts",
+          "line": 28,
+          "severity": "P1",
+          "title": "Seeded large-file-boundary",
+          "fingerprint": "large-file-boundary-finding"
+        },
+        {
+          "path": "src/unrelated.ts",
+          "line": 0,
+          "severity": "P2",
+          "title": "Unanchored noise",
+          "fingerprint": "large-noise",
+          "anchored": false
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1126,
+          "outputTokens": 138,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 554,
+          "costUsd": 0.00118
+        }
+      ]
+    },
+    {
+      "id": "clean-large-generated-map",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1133,
+          "outputTokens": 139,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 557,
+          "costUsd": 0.00119
+        }
+      ]
+    },
+    {
+      "id": "cross-package-contract",
+      "findings": [
+        {
+          "path": "src/broad-multi-package.ts",
+          "line": 30,
+          "severity": "P1",
+          "title": "Seeded cross-package-contract",
+          "fingerprint": "cross-package-contract-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1140,
+          "outputTokens": 140,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 560,
+          "costUsd": 0.0012
+        }
+      ]
+    },
+    {
+      "id": "clean-package-reorganization",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1147,
+          "outputTokens": 141,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 563,
+          "costUsd": 0.00121
+        }
+      ]
+    },
+    {
+      "id": "caller-callee-mismatch",
+      "findings": [
+        {
+          "path": "src/cross-file.ts",
+          "line": 32,
+          "severity": "P1",
+          "title": "Seeded caller-callee-mismatch",
+          "fingerprint": "caller-callee-mismatch-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1154,
+          "outputTokens": 142,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 566,
+          "costUsd": 0.00122
+        }
+      ]
+    },
+    {
+      "id": "clean-symbol-rename",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1161,
+          "outputTokens": 143,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 569,
+          "costUsd": 0.00123
+        }
+      ]
+    },
+    {
+      "id": "secret-log-exposure",
+      "findings": [
+        {
+          "path": "src/security.ts",
+          "line": 34,
+          "severity": "P0",
+          "title": "Seeded secret-log-exposure",
+          "fingerprint": "secret-log-exposure-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1168,
+          "outputTokens": 144,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 572,
+          "costUsd": 0.00124
+        }
+      ]
+    },
+    {
+      "id": "clean-redacted-logging",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1175,
+          "outputTokens": 145,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 575,
+          "costUsd": 0.00125
+        }
+      ]
+    },
+    {
+      "id": "quadratic-hot-path",
+      "findings": [
+        {
+          "path": "src/performance.ts",
+          "line": 36,
+          "severity": "P1",
+          "title": "Seeded quadratic-hot-path",
+          "fingerprint": "quadratic-hot-path-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1182,
+          "outputTokens": 146,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 578,
+          "costUsd": 0.00126
+        }
+      ]
+    },
+    {
+      "id": "clean-loop-simplification",
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1189,
+          "outputTokens": 147,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 581,
+          "costUsd": 0.00127
+        }
+      ]
+    },
+    {
+      "id": "unsafe-default-config",
+      "findings": [
+        {
+          "path": "src/configuration.ts",
+          "line": 38,
+          "severity": "P1",
+          "title": "Seeded unsafe-default-config",
+          "fingerprint": "unsafe-default-config-finding"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1196,
+          "outputTokens": 148,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 584,
+          "costUsd": 0.00128
+        }
+      ]
+    },
+    {
+      "id": "clean-config-comment",
+      "findings": [
+        {
+          "path": "config/app.yml",
+          "line": 2,
+          "severity": "P3",
+          "title": "Fixture false positive",
+          "fingerprint": "clean-config-fp"
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1203,
+          "outputTokens": 149,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 587,
+          "costUsd": 0.00129
+        }
+      ]
+    }
+  ]
+}

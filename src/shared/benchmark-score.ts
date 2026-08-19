@@ -1,0 +1,394 @@
+import type { Severity } from './types.ts';
+
+export const BENCHMARK_SCHEMA_VERSION = 1;
+export const BENCHMARK_BOOTSTRAP_SEED = 0x4a424f54;
+export const BENCHMARK_BOOTSTRAP_SAMPLES = 2_000;
+
+export type BenchmarkRiskTier = 'low' | 'medium' | 'high' | 'critical';
+export type BenchmarkCacheState = 'uncached' | 'cached-same-head' | 'cached-cross-run';
+export type BenchmarkDiffSize = 'small' | 'medium' | 'large' | 'very-large';
+
+export interface BenchmarkAnchor {
+  path: string;
+  line: number;
+}
+
+export interface BenchmarkExpectedFinding {
+  id: string;
+  severity: Severity;
+  anchors: BenchmarkAnchor[];
+}
+
+export interface BenchmarkObservedFinding extends BenchmarkAnchor {
+  severity: Severity;
+  title: string;
+  /** Stable semantic identity supplied by an adapter; falls back to path/line/title. */
+  fingerprint?: string;
+  /** Optional adjudicated match. Automatic matching otherwise uses allowed anchors. */
+  expectedFindingId?: string;
+  /** Whether the posting pipeline retained this finding. Defaults to true. */
+  retained?: boolean;
+  /** Whether the claimed location is a valid diff anchor. Defaults to line > 0. */
+  anchored?: boolean;
+}
+
+export interface BenchmarkCaseRun {
+  caseId: string;
+  riskTier: BenchmarkRiskTier;
+  cacheState?: BenchmarkCacheState;
+  diffSize?: BenchmarkDiffSize;
+  expectedClean: boolean;
+  expectedFindings: BenchmarkExpectedFinding[];
+  findings: BenchmarkObservedFinding[];
+  latencyMs: number;
+  costUsd?: number;
+}
+
+export interface BenchmarkInterval {
+  low: number;
+  high: number;
+}
+
+export interface BenchmarkMetric {
+  value: number | null;
+  ci95: BenchmarkInterval | null;
+}
+
+export interface BenchmarkScore {
+  cases: number;
+  expectedFindings: number;
+  retainedFindings: number;
+  matchedFindings: number;
+  severityWeightedRecall: BenchmarkMetric;
+  precision: BenchmarkMetric;
+  cleanFalsePositiveRate: BenchmarkMetric;
+  anchorRate: BenchmarkMetric;
+  duplicateRate: BenchmarkMetric;
+  latencyMs: {
+    median: BenchmarkMetric;
+    p90: BenchmarkMetric;
+    p95: BenchmarkMetric;
+  };
+  costPerRetainedFindingUsd: BenchmarkMetric;
+}
+
+export interface BenchmarkConfiguration {
+  model: string;
+  modelRevision: string;
+  engine: string;
+  engineVersion: string;
+  reasoningEffort: string;
+  sampling: Record<string, unknown>;
+  promptVersion: string;
+  corpusHash: string;
+  config: Record<string, unknown>;
+}
+
+const SEVERITY_WEIGHT: Record<Severity, number> = {
+  P0: 16,
+  P1: 8,
+  P2: 4,
+  P3: 1,
+  nit: 0,
+};
+
+interface CaseContribution {
+  expectedWeight: number;
+  matchedWeight: number;
+  retained: number;
+  matched: number;
+  clean: number;
+  cleanWithFinding: number;
+  anchored: number;
+  observed: number;
+  duplicates: number;
+  latencyMs: number;
+  costUsd: number;
+}
+
+function findingKey(finding: BenchmarkObservedFinding): string {
+  return (
+    finding.fingerprint ??
+    `${finding.path}:${finding.line}:${finding.title.trim().toLocaleLowerCase('en-US')}`
+  );
+}
+
+function scoreCase(run: BenchmarkCaseRun): CaseContribution {
+  const expectedById = new Map(run.expectedFindings.map((finding) => [finding.id, finding]));
+  const matchedExpected = new Set<string>();
+  const groups = new Map<string, BenchmarkObservedFinding[]>();
+  for (const finding of run.findings) {
+    const key = findingKey(finding);
+    const group = groups.get(key);
+    if (group) group.push(finding);
+    else groups.set(key, [finding]);
+  }
+  let retained = 0;
+  let matched = 0;
+  let matchedWeight = 0;
+  let anchored = 0;
+  const duplicates = run.findings.length - groups.size;
+
+  for (const group of groups.values()) {
+    const finding = group.find((candidate) => candidate.retained !== false);
+    if (!finding) continue;
+    retained += 1;
+    if (finding.anchored ?? finding.line > 0) anchored += 1;
+
+    const anchorMatches = (expected: BenchmarkExpectedFinding): boolean =>
+      expected.anchors.some(
+        (anchor) => anchor.path === finding.path && anchor.line === finding.line,
+      );
+    const explicitCandidate = finding.expectedFindingId
+      ? expectedById.get(finding.expectedFindingId)
+      : undefined;
+    const explicit =
+      explicitCandidate && anchorMatches(explicitCandidate) ? explicitCandidate : undefined;
+    const automatic = run.expectedFindings.find(
+      (expected) => !matchedExpected.has(expected.id) && anchorMatches(expected),
+    );
+    const expected = explicit ?? automatic;
+    if (!expected || matchedExpected.has(expected.id)) continue;
+    matchedExpected.add(expected.id);
+    matched += 1;
+    matchedWeight += SEVERITY_WEIGHT[expected.severity];
+  }
+
+  return {
+    expectedWeight: run.expectedFindings.reduce(
+      (sum, finding) => sum + SEVERITY_WEIGHT[finding.severity],
+      0,
+    ),
+    matchedWeight,
+    retained,
+    matched,
+    clean: run.expectedClean ? 1 : 0,
+    cleanWithFinding: run.expectedClean && retained > 0 ? 1 : 0,
+    anchored,
+    observed: run.findings.length,
+    duplicates,
+    latencyMs: run.latencyMs,
+    costUsd: run.costUsd ?? 0,
+  };
+}
+
+function ratio(numerator: number, denominator: number): number | null {
+  return denominator === 0 ? null : numerator / denominator;
+}
+
+function percentile(values: number[], quantile: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const position = (sorted.length - 1) * quantile;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+}
+
+function aggregate(contributions: CaseContribution[]) {
+  const sum = (pick: (value: CaseContribution) => number): number =>
+    contributions.reduce((total, value) => total + pick(value), 0);
+  const retained = sum((value) => value.retained);
+  return {
+    severityWeightedRecall: ratio(
+      sum((value) => value.matchedWeight),
+      sum((value) => value.expectedWeight),
+    ),
+    precision: ratio(
+      sum((value) => value.matched),
+      retained,
+    ),
+    cleanFalsePositiveRate: ratio(
+      sum((value) => value.cleanWithFinding),
+      sum((value) => value.clean),
+    ),
+    anchorRate: ratio(
+      sum((value) => value.anchored),
+      retained,
+    ),
+    duplicateRate: ratio(
+      sum((value) => value.duplicates),
+      sum((value) => value.observed),
+    ),
+    medianLatencyMs: percentile(
+      contributions.map((value) => value.latencyMs),
+      0.5,
+    ),
+    p90LatencyMs: percentile(
+      contributions.map((value) => value.latencyMs),
+      0.9,
+    ),
+    p95LatencyMs: percentile(
+      contributions.map((value) => value.latencyMs),
+      0.95,
+    ),
+    costPerRetainedFindingUsd: ratio(
+      sum((value) => value.costUsd),
+      retained,
+    ),
+  };
+}
+
+type Aggregate = ReturnType<typeof aggregate>;
+type MetricName = keyof Aggregate;
+
+function random(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+function bootstrapIntervals(
+  contributions: CaseContribution[],
+  samples: number,
+  seed: number,
+): Record<MetricName, BenchmarkInterval | null> {
+  const names = Object.keys(aggregate(contributions)) as MetricName[];
+  const values = Object.fromEntries(names.map((name) => [name, [] as number[]])) as Record<
+    MetricName,
+    number[]
+  >;
+  if (contributions.length === 0 || samples <= 0) {
+    return Object.fromEntries(names.map((name) => [name, null])) as Record<
+      MetricName,
+      BenchmarkInterval | null
+    >;
+  }
+
+  const next = random(seed);
+  for (let sample = 0; sample < samples; sample += 1) {
+    const resampled = Array.from(
+      { length: contributions.length },
+      () => contributions[Math.floor(next() * contributions.length)],
+    );
+    const metrics = aggregate(resampled);
+    for (const name of names) {
+      const value = metrics[name];
+      if (value !== null) values[name].push(value);
+    }
+  }
+
+  return Object.fromEntries(
+    names.map((name) => {
+      const low = percentile(values[name], 0.025);
+      const high = percentile(values[name], 0.975);
+      return [name, low === null || high === null ? null : { low, high }];
+    }),
+  ) as Record<MetricName, BenchmarkInterval | null>;
+}
+
+export function scoreBenchmark(
+  runs: BenchmarkCaseRun[],
+  options: { bootstrapSamples?: number; seed?: number } = {},
+): BenchmarkScore {
+  const contributions = runs.map(scoreCase);
+  const metrics = aggregate(contributions);
+  const intervals = bootstrapIntervals(
+    contributions,
+    options.bootstrapSamples ?? BENCHMARK_BOOTSTRAP_SAMPLES,
+    options.seed ?? BENCHMARK_BOOTSTRAP_SEED,
+  );
+  const metric = (name: MetricName): BenchmarkMetric => ({
+    value: metrics[name],
+    ci95: intervals[name],
+  });
+
+  return {
+    cases: runs.length,
+    expectedFindings: runs.reduce((sum, run) => sum + run.expectedFindings.length, 0),
+    retainedFindings: contributions.reduce((sum, value) => sum + value.retained, 0),
+    matchedFindings: contributions.reduce((sum, value) => sum + value.matched, 0),
+    severityWeightedRecall: metric('severityWeightedRecall'),
+    precision: metric('precision'),
+    cleanFalsePositiveRate: metric('cleanFalsePositiveRate'),
+    anchorRate: metric('anchorRate'),
+    duplicateRate: metric('duplicateRate'),
+    latencyMs: {
+      median: metric('medianLatencyMs'),
+      p90: metric('p90LatencyMs'),
+      p95: metric('p95LatencyMs'),
+    },
+    costPerRetainedFindingUsd: metric('costPerRetainedFindingUsd'),
+  };
+}
+
+function stable(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stable);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, entry]) => [key, stable(entry)]),
+    );
+  }
+  return value;
+}
+
+function flatten(value: unknown, prefix = ''): Map<string, string> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length > 0) {
+      return entries.reduce((result, [key, entry]) => {
+        for (const [path, serialized] of flatten(entry, prefix ? `${prefix}.${key}` : key)) {
+          result.set(path, serialized);
+        }
+        return result;
+      }, new Map<string, string>());
+    }
+  }
+  return new Map([[prefix, JSON.stringify(stable(value))]]);
+}
+
+export function benchmarkConfigurationDifferences(
+  control: BenchmarkConfiguration,
+  treatment: BenchmarkConfiguration,
+): string[] {
+  const left = flatten(control);
+  const right = flatten(treatment);
+  return [...new Set([...left.keys(), ...right.keys()])]
+    .filter((key) => left.get(key) !== right.get(key))
+    .sort();
+}
+
+export function assertBenchmarkComparable(
+  control: BenchmarkConfiguration,
+  treatment: BenchmarkConfiguration,
+  declaredTreatmentVariables: string[],
+): void {
+  const required: Array<keyof BenchmarkConfiguration> = [
+    'model',
+    'modelRevision',
+    'engine',
+    'engineVersion',
+    'reasoningEffort',
+    'promptVersion',
+    'corpusHash',
+  ];
+  for (const side of [control, treatment]) {
+    for (const field of required) {
+      if (typeof side[field] !== 'string' || !side[field].trim()) {
+        throw new Error(`Benchmark configuration requires a non-empty ${field}.`);
+      }
+    }
+  }
+  const declared = new Set(declaredTreatmentVariables);
+  const differences = benchmarkConfigurationDifferences(control, treatment);
+  const undeclared = differences.filter((difference) => !declared.has(difference));
+  if (undeclared.length > 0) {
+    throw new Error(
+      `Benchmark arms are not comparable; undeclared difference(s): ${undeclared.join(', ')}.`,
+    );
+  }
+  const unchanged = declaredTreatmentVariables.filter(
+    (variable) => !differences.includes(variable),
+  );
+  if (unchanged.length > 0) {
+    throw new Error(`Declared treatment variable(s) did not change: ${unchanged.join(', ')}.`);
+  }
+}

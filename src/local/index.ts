@@ -574,6 +574,14 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     return;
   }
 
+  const benchmarkOutput = process.env.JBOT_BENCHMARK_OUTPUT?.trim();
+  if (benchmarkOutput) {
+    if (process.env.JBOT_BENCHMARK_DRY_RUN !== 'true') {
+      throw new Error('JBOT_BENCHMARK_OUTPUT requires JBOT_BENCHMARK_DRY_RUN=true.');
+    }
+    writeFileSync(benchmarkOutput, `${JSON.stringify(reviewResult)}\n`);
+  }
+
   const report = renderReport(reviewResult, { branch, baseRef, mergeBase, model });
   console.log(`\n${report}`);
   if (parseEnvBoolean('JBOT_LOCAL_REPORT', false)) {
