@@ -64,7 +64,14 @@ interface CaseRow extends BenchmarkCaseRun {
   signal: string | null;
   timedOut: boolean;
   failureClass:
-    'setup' | 'timeout' | 'runner-exit' | 'spawn' | 'invalid-output' | 'missing-output' | null;
+    | 'setup'
+    | 'timeout'
+    | 'runner-exit'
+    | 'signal'
+    | 'spawn'
+    | 'invalid-output'
+    | 'missing-output'
+    | null;
   program: ProgramMetrics;
 }
 
@@ -319,9 +326,11 @@ async function runCase(
       signal = failure.signal ?? (timedOut ? 'SIGTERM' : null);
       failureClass = timedOut
         ? 'timeout'
-        : typeof failure.code === 'number'
-          ? 'runner-exit'
-          : 'spawn';
+        : failure.signal
+          ? 'signal'
+          : typeof failure.code === 'number'
+            ? 'runner-exit'
+            : 'spawn';
     }
     const latencyMs = performance.now() - started;
 

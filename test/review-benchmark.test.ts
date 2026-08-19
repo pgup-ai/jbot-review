@@ -21,6 +21,16 @@ describe('review-benchmark', () => {
     assert.throws(() => validateBenchmarkManifest(manifest), /env\.JBOT_REASONING_EFFORT/);
   });
 
+  it('rejects non-clean cases without expected findings', () => {
+    const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8')) as {
+      cases: { id: string; expectedClean: boolean; expectedFindings: unknown[] }[];
+    };
+    const benchmarkCase = manifest.cases.find((candidate) => !candidate.expectedClean);
+    assert.ok(benchmarkCase);
+    benchmarkCase.expectedFindings = [];
+    assert.throws(() => validateBenchmarkManifest(manifest), /must declare an expected finding/);
+  });
+
   it('rejects an undeclared reasoning mismatch before executing a runner', () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-benchmark-test-'));
     try {
@@ -58,6 +68,7 @@ describe('review-benchmark', () => {
     const expected = {
       timeout: 'timeout',
       'runner-exit': 'runner-exit',
+      signal: 'signal',
       'invalid-output': 'invalid-output',
       'missing-output': 'missing-output',
       spawn: 'spawn',
@@ -74,6 +85,12 @@ describe('review-benchmark', () => {
         };
         if (mode === 'spawn') {
           manifest.runner.command = ['/jbot-review-missing-benchmark-runner'];
+        } else if (mode === 'signal') {
+          manifest.runner.command = [
+            process.execPath,
+            '-e',
+            "process.kill(process.pid, 'SIGTERM')",
+          ];
         } else {
           manifest.control.env = { JBOT_TEST_RUNNER_MODE: mode };
           manifest.treatment.env = { JBOT_TEST_RUNNER_MODE: mode };
@@ -98,7 +115,11 @@ describe('review-benchmark', () => {
           `${mode}: ${JSON.stringify(rows)}`,
         );
         assert.ok(rows.every((row) => row.timedOut === (mode === 'timeout')));
-        assert.ok(rows.every((row) => row.signal === (mode === 'timeout' ? 'SIGTERM' : null)));
+        assert.ok(
+          rows.every(
+            (row) => row.signal === (mode === 'timeout' || mode === 'signal' ? 'SIGTERM' : null),
+          ),
+        );
         const summary = JSON.parse(readFileSync(join(output, 'summary.json'), 'utf8')) as {
           control: { successfulRuns: number; failedRuns: number; score: { cases: number } };
           treatment: { successfulRuns: number; failedRuns: number; score: { cases: number } };

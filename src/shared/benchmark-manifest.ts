@@ -185,6 +185,9 @@ export function validateBenchmarkManifest(value: unknown): BenchmarkManifest {
     if (candidate.expectedClean && candidate.expectedFindings.length > 0) {
       throw new Error(`Clean case ${candidate.id} cannot declare expected findings.`);
     }
+    if (!candidate.expectedClean && candidate.expectedFindings.length === 0) {
+      throw new Error(`Non-clean case ${candidate.id} must declare an expected finding.`);
+    }
     if (
       candidate.tags !== undefined &&
       (!Array.isArray(candidate.tags) || candidate.tags.some((tag) => typeof tag !== 'string'))
