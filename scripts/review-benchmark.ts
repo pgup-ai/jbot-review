@@ -178,7 +178,6 @@ async function runCase(
   const root = await mkdtemp(join(tmpdir(), 'jbot-review-benchmark-'));
   const home = join(root, 'home');
   const output = join(root, 'result.json');
-  mkdirSync(home, { recursive: true });
   let cleanup: (() => void) | undefined;
   try {
     const setupStarted = performance.now();
@@ -211,6 +210,7 @@ async function runCase(
       };
     }
     cleanup = checkout.cleanup;
+    mkdirSync(home, { recursive: true });
     const paths = { projectRoot, workspace: checkout.workspace, output, fixture: checkout.fixture };
     const command = manifest.runner.command.map((value) => expand(value, paths));
     const env: NodeJS.ProcessEnv = { ...process.env };
