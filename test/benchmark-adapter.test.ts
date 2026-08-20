@@ -259,6 +259,7 @@ describe('competitor benchmark adapters', () => {
     );
     assert.equal(artifactPath({ uri: 'a.ts' }, 'C:\\workspace'), 'a.ts');
     assert.equal(artifactPath({ uri: 'file:///workspace/src%2Fa.ts' }, '/workspace'), '');
+    assert.equal(artifactPath({ uri: 'https://example.com/src/a.ts' }, '/workspace'), '');
   });
 
   it('excludes model, endpoint, reasoning, or sampling mismatches from rankings', () => {
