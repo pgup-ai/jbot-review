@@ -931,9 +931,12 @@ async function runReviewPipeline(params: {
   const tokenUsage = createReviewTokenUsageAccumulator();
   const telemetry = createTelemetryRecorder(options.reviewTelemetry);
   const phases = createPhaseTelemetryTracker(telemetry);
-  const toolTelemetry = createToolTelemetryAccumulator(telemetry, randomUUID());
-  const backendToolTelemetry = telemetry.enabled ? toolTelemetry : undefined;
-  const sessionTelemetry = telemetry.enabled ? { phases, tools: toolTelemetry } : undefined;
+  const backendToolTelemetry = telemetry.enabled
+    ? createToolTelemetryAccumulator(telemetry, randomUUID())
+    : undefined;
+  const sessionTelemetry = backendToolTelemetry
+    ? { phases, tools: backendToolTelemetry }
+    : undefined;
   const contextAssemblyDone = phases.start({ phase: 'context-assembly', scope: 'run' });
   const recordTokenUsage: TokenUsageRecorder = (usage, usageModel, label) => {
     tokenUsage.add(usage, usageModel);
@@ -2086,7 +2089,9 @@ async function runReviewPipeline(params: {
       phase: 'main-execution',
       scope: 'run',
       backend: mainBackend.name,
-      inputBytes: Buffer.byteLength(mainCoreContext) + Buffer.byteLength(mainDiffBlock),
+      ...(telemetry.enabled
+        ? { inputBytes: Buffer.byteLength(mainCoreContext) + Buffer.byteLength(mainDiffBlock) }
+        : {}),
     });
     // Submit every main shard before auxiliary work. Priority ordering also
     // keeps a later main-shard retry ahead of queued auxiliary sessions.
@@ -2188,7 +2193,9 @@ async function runReviewPipeline(params: {
     const { summary, findings } = await mainReview;
     mainExecutionDone(
       'completed',
-      Buffer.byteLength(summary) + Buffer.byteLength(JSON.stringify(findings)),
+      telemetry.enabled
+        ? Buffer.byteLength(summary) + Buffer.byteLength(JSON.stringify(findings))
+        : undefined,
     );
     const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
       lensPasses,
@@ -2274,7 +2281,10 @@ async function runReviewPipeline(params: {
         `Suppressed ${suppression.suppressedCount} finding(s) already covered by prior jbot-review threads.`,
       );
     }
-    initialFilteringDone('completed', Buffer.byteLength(JSON.stringify(suppression.findings)));
+    initialFilteringDone(
+      'completed',
+      telemetry.enabled ? Buffer.byteLength(JSON.stringify(suppression.findings)) : undefined,
+    );
     const verificationDone = phases.start({ phase: 'verification', scope: 'run' });
     const verifiedFindings = await verifyBlockingFindings({
       backend: auxBackend,
@@ -2287,7 +2297,10 @@ async function runReviewPipeline(params: {
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
     });
-    verificationDone('completed', Buffer.byteLength(JSON.stringify(verifiedFindings)));
+    verificationDone(
+      'completed',
+      telemetry.enabled ? Buffer.byteLength(JSON.stringify(verifiedFindings)) : undefined,
+    );
     telemetry.snapshot('verified', verifiedFindings);
     const finalFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
     const filteredFindings = filterFindings(verifiedFindings, options);
@@ -2314,7 +2327,10 @@ async function runReviewPipeline(params: {
       anchorMissed,
     });
     const verdict = decideVerdict(filteredFindings);
-    finalFilteringDone('completed', Buffer.byteLength(JSON.stringify(filteredFindings)));
+    finalFilteringDone(
+      'completed',
+      telemetry.enabled ? Buffer.byteLength(JSON.stringify(filteredFindings)) : undefined,
+    );
     const postingDone = phases.start({ phase: 'posting', scope: 'run' });
 
     // Report the final filtered findings + summary on EVERY completed review (dry-run or

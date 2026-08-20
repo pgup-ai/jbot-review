@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -493,12 +493,13 @@ function createPiReadTool(
         inputBytes: serializedBytes(params),
         ...(requested ? { identity: requested, identityKind: 'path' as const } : {}),
       });
-      const target = resolveWithinWorkspace(workspace, requested);
+      const target = requested ? resolveWithinWorkspace(workspace, requested) : undefined;
       if (!target) {
         const text = `Refused: "${requested}" is outside the repository.`;
         finish?.({
           success: false,
-          failureClass: requested ? 'denied' : 'invalid-input',
+          failureClass:
+            requested && existsSync(resolve(workspace, requested)) ? 'denied' : 'invalid-input',
           outputBytesBeforeCap: 0,
           outputBytesAfterCap: Buffer.byteLength(text),
         });

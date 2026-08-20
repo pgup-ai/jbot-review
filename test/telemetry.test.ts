@@ -13,6 +13,7 @@ import {
   MAX_TOOL_TELEMETRY_ROWS,
   classifyReadonlyTool,
   createToolTelemetryAccumulator,
+  toolIdentity,
 } from '../src/shared/tool-telemetry.ts';
 import type { Finding, Severity } from '../src/shared/types.ts';
 
@@ -71,6 +72,15 @@ describe('phase and tool telemetry', () => {
     assert.equal(classifyReadonlyTool('web_search'), 'external-docs');
     assert.equal(classifyReadonlyTool('context7_query_docs'), 'external-docs');
     assert.equal(classifyReadonlyTool('context7_read_doc'), 'external-docs');
+    assert.equal(
+      classifyReadonlyTool('bash', { command: 'git diff main...HEAD' }),
+      'diff-recovery',
+    );
+    assert.equal(classifyReadonlyTool('bash', { command: 'git status --short' }), 'other-readonly');
+    assert.deepEqual(toolIdentity('list', { pattern: 'src/**/*.ts' }), {
+      identity: 'src/**/*.ts',
+      identityKind: 'query',
+    });
   });
 
   it('closes every phase exactly once with its terminal reason', () => {
@@ -417,7 +427,7 @@ describe('run and coverage telemetry', () => {
       .split('\n')
       .map((line) => JSON.parse(line));
     assert.equal(lines[0].kind, 'run');
-    assert.equal(lines[0].schemaVersion, 1);
+    assert.equal(lines[0].schemaVersion, 2);
     assert.equal(lines[0].headSha, 'head');
     assert.equal(lines[0].terminalState, 'completed');
     assert.equal(lines[0].elapsedMs, 123_456);

@@ -29,7 +29,7 @@ import {
 } from './opencode.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 
-export const DEVIN_CLI_TELEMETRY_CAPABILITY = 'opaque' as const;
+const DEVIN_CLI_TELEMETRY_CAPABILITY = 'opaque' as const;
 
 const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const DEVIN_REPAIR_PROMPT_BUDGET_BYTES = 80_000;

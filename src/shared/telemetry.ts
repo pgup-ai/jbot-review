@@ -402,7 +402,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
       });
     },
     toJsonl() {
-      const header = run ? [{ kind: 'run', schemaVersion: 1, ...run }] : [];
+      const header = run ? [{ kind: 'run', schemaVersion: 2, ...run }] : [];
       const lines = [
         ...header,
         ...phases,

@@ -16,7 +16,7 @@ interface Rate {
   numerator: number;
   denominator: number;
   rate: number | null;
-  status: 'reported' | 'insufficient-sample' | 'zero-denominator';
+  status: 'reported' | 'insufficient-sample' | 'zero-denominator' | 'truncated';
 }
 
 export function distribution(values: number[]): Distribution {
@@ -31,13 +31,18 @@ export function guardedRate(
   numerator: number,
   denominator: number,
   sampleCount = denominator,
+  complete = true,
 ): Rate {
   return {
     numerator,
     denominator,
-    rate: sampleCount >= MIN_RATE_SAMPLE && denominator > 0 ? numerator / denominator : null,
-    status:
-      sampleCount < MIN_RATE_SAMPLE
+    rate:
+      complete && sampleCount >= MIN_RATE_SAMPLE && denominator > 0
+        ? numerator / denominator
+        : null,
+    status: !complete
+      ? 'truncated'
+      : sampleCount < MIN_RATE_SAMPLE
         ? 'insufficient-sample'
         : denominator > 0
           ? 'reported'
@@ -92,9 +97,16 @@ export function aggregatePerformance(rows: Row[]): Record<string, unknown> {
     (row) => row.toolClass === 'file-read' && row.duplicate === true,
   ).length;
   const reads = tools.filter((row) => row.toolClass === 'file-read').length;
-  const repairSessions = sessions.filter(
-    (row) => typeof row.session === 'string' && row.session.endsWith('-repair'),
+  const retryRepairSessions = sessions.filter(
+    (row) =>
+      typeof row.session === 'string' &&
+      (row.session.endsWith('-repair') || row.session.endsWith('-retry')),
   ).length;
+  const droppedToolRows = explorations.reduce(
+    (sum, row) => sum + (number(row, 'droppedToolRows') ?? 0),
+    0,
+  );
+  const completeToolRows = droppedToolRows === 0;
   const retained = new Set([
     'posted-inline',
     'posted-file-level',
@@ -170,23 +182,36 @@ export function aggregatePerformance(rows: Row[]): Record<string, unknown> {
     tools: {
       calls: tools.length,
       outputBytes: toolBytes,
-      duplicateReadRate: guardedRate(duplicateReads, reads),
-      diffRecoveryCallRate: guardedRate(diffTools.length, tools.length),
+      droppedRows: droppedToolRows,
+      duplicateReadRate: guardedRate(duplicateReads, reads, reads, completeToolRows),
+      diffRecoveryCallRate: guardedRate(
+        diffTools.length,
+        tools.length,
+        tools.length,
+        completeToolRows,
+      ),
       diffRecoveryByteRate: guardedRate(
         diffTools.reduce((sum, row) => sum + (number(row, 'outputBytesAfterCap') ?? 0), 0),
         toolBytes,
         tools.length,
+        completeToolRows,
       ),
-      repeatedDiffRecoveryCallRate: guardedRate(repeatedDiffTools.length, diffTools.length),
+      repeatedDiffRecoveryCallRate: guardedRate(
+        repeatedDiffTools.length,
+        diffTools.length,
+        diffTools.length,
+        completeToolRows,
+      ),
       repeatedDiffRecoveryByteRate: guardedRate(
         repeatedDiffTools.reduce((sum, row) => sum + (number(row, 'outputBytesAfterCap') ?? 0), 0),
         diffTools.reduce((sum, row) => sum + (number(row, 'outputBytesAfterCap') ?? 0), 0),
         diffTools.length,
+        completeToolRows,
       ),
     },
     turns: distribution(explorations.flatMap((row) => number(row, 'turnCount') ?? [])),
     cacheReadTokens: sessions.reduce((sum, row) => sum + (number(row, 'cacheReadTokens') ?? 0), 0),
-    retryRepairRate: guardedRate(repairSessions, sessions.length),
+    retryRepairRate: guardedRate(retryRepairSessions, sessions.length),
     retainedFindings: findings.filter((row) => retained.has(String(row.disposition))).length,
     backendCohorts: cohorts,
     modelCohorts,
@@ -194,13 +219,24 @@ export function aggregatePerformance(rows: Row[]): Record<string, unknown> {
   };
 }
 
+export function parseTelemetryJsonl(
+  input: string,
+  source = 0,
+  warn: (message: string) => void = console.warn,
+): Row[] {
+  return input.split('\n').flatMap((line, index) => {
+    if (!line.trim()) return [];
+    try {
+      return [{ ...(JSON.parse(line) as Row), _source: source }];
+    } catch {
+      warn(`Skipped malformed telemetry row ${index + 1}.`);
+      return [];
+    }
+  });
+}
+
 function parseFiles(paths: string[]): Row[] {
-  return paths.flatMap((path, source) =>
-    readFileSync(path, 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => ({ ...(JSON.parse(line) as Row), _source: source })),
-  );
+  return paths.flatMap((path, source) => parseTelemetryJsonl(readFileSync(path, 'utf8'), source));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

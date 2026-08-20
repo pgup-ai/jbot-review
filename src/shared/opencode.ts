@@ -66,7 +66,7 @@ export function recordOpencodeToolParts(
     ) {
       continue;
     }
-    const toolClass = classifyReadonlyTool(part.tool);
+    const toolClass = classifyReadonlyTool(part.tool, part.state.input);
     const identity = toolIdentity(toolClass, part.state.input);
     const finish = telemetry.startTool({
       session,
@@ -80,11 +80,12 @@ export function recordOpencodeToolParts(
         : {}),
     });
     const output = part.state.status === 'completed' ? part.state.output : part.state.error;
+    const outputBytes = serializedBytes(output);
     finish({
       success: part.state.status === 'completed',
       ...(part.state.status === 'error' ? { failureClass: 'execution' as const } : {}),
-      outputBytesBeforeCap: serializedBytes(output),
-      outputBytesAfterCap: serializedBytes(output),
+      outputBytesBeforeCap: outputBytes,
+      outputBytesAfterCap: outputBytes,
       durationMs: Math.max(part.state.time.end - part.state.time.start, 0),
     });
   }
@@ -97,6 +98,17 @@ export function recordOpencodeToolParts(
     stopReason: 'completed',
     ...(turnCount > 0 ? { turnCount } : {}),
   });
+}
+
+export function observedAssistantParts(
+  messages: ReadonlyArray<{ info: { id: string }; parts?: ReadonlyArray<Part> }>,
+  afterMessageID?: string,
+): ReadonlyArray<Part> {
+  if (!afterMessageID) return messages.flatMap((message) => message.parts ?? []);
+  const afterIndex = messages.findIndex((message) => message.info.id === afterMessageID);
+  return afterIndex < 0
+    ? []
+    : messages.slice(afterIndex + 1).flatMap((message) => message.parts ?? []);
 }
 
 export interface ProviderKeyConfig {
@@ -1139,13 +1151,10 @@ async function getLatestAssistantMessage(
   );
   const latest = messages.at(-1);
   if (!latest) return undefined;
-  const afterIndex = afterMessageID
-    ? messages.findIndex((message) => message.info.id === afterMessageID)
-    : -1;
   return {
     info: latest.info,
     parts: latest.parts ?? [],
-    observedParts: messages.slice(afterIndex + 1).flatMap((message) => message.parts ?? []),
+    observedParts: observedAssistantParts(messages, afterMessageID),
   };
 }
 

@@ -215,13 +215,14 @@ const MAX_DIM_TOOL_EVENTS = 256;
  * `message:*` carry ids only — and the terminal `run:ended` holds both the
  * status and the run's token usage.
  */
-export function parseDimEventStream(stdout: string): DimRunOutcome {
+export function parseDimEventStream(stdout: string, observeTools = true): DimRunOutcome {
   let text = '';
   let usage: PromptTokenUsage | undefined;
   let failure: string | undefined;
-  let turnCount: number | undefined;
   const toolEvents: DimToolObservation[] = [];
-  const pendingTools = new Map<string, { name: string; input?: unknown; startedAt?: number }>();
+  const pendingTools = observeTools
+    ? new Map<string, { name: string; input?: unknown; startedAt?: number }>()
+    : undefined;
   for (const line of stdout.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed.startsWith('{')) continue;
@@ -236,26 +237,36 @@ export function parseDimEventStream(stdout: string): DimRunOutcome {
       text += payload.delta;
       continue;
     }
-    if (event.eventType === 'tool:started') {
+    if (observeTools && event.eventType === 'tool:started') {
       const id = typeof payload.toolCallId === 'string' ? payload.toolCallId : '';
-      if (id && pendingTools.size < MAX_DIM_TOOL_EVENTS) {
+      if (id && pendingTools && pendingTools.size < MAX_DIM_TOOL_EVENTS) {
+        const startedAt =
+          typeof event.createdAt === 'string' ? Date.parse(event.createdAt) : undefined;
         pendingTools.set(id, {
           name: typeof payload.toolName === 'string' ? payload.toolName : 'unknown',
           ...(payload.toolInput !== undefined ? { input: payload.toolInput } : {}),
-          ...(typeof event.timestamp === 'number' ? { startedAt: event.timestamp } : {}),
+          ...(typeof startedAt === 'number' && Number.isFinite(startedAt) ? { startedAt } : {}),
         });
       }
       continue;
     }
     if (
+      observeTools &&
       toolEvents.length < MAX_DIM_TOOL_EVENTS &&
       (event.eventType === 'tool:completed' ||
         event.eventType === 'tool:failed' ||
         event.eventType === 'tool:declined')
     ) {
       const id = typeof payload.toolCallId === 'string' ? payload.toolCallId : '';
-      const started = pendingTools.get(id);
-      const duration = payload.durationMs ?? payload.duration_ms;
+      const started = pendingTools?.get(id);
+      const completedAt =
+        typeof event.createdAt === 'string' ? Date.parse(event.createdAt) : undefined;
+      const duration =
+        started?.startedAt !== undefined &&
+        typeof completedAt === 'number' &&
+        Number.isFinite(completedAt)
+          ? Math.max(completedAt - started.startedAt, 0)
+          : undefined;
       toolEvents.push({
         name:
           typeof payload.toolName === 'string' ? payload.toolName : (started?.name ?? 'unknown'),
@@ -267,18 +278,12 @@ export function parseDimEventStream(stdout: string): DimRunOutcome {
           : event.eventType === 'tool:failed'
             ? { failureClass: 'execution' as const }
             : {}),
-        ...(typeof duration === 'number'
-          ? { durationMs: duration }
-          : started?.startedAt !== undefined && typeof event.timestamp === 'number'
-            ? { durationMs: Math.max(event.timestamp - started.startedAt, 0) }
-            : {}),
+        ...(duration !== undefined ? { durationMs: duration } : {}),
       });
-      pendingTools.delete(id);
+      pendingTools?.delete(id);
       continue;
     }
     if (event.eventType !== 'run:ended') continue;
-    const turns = payload.numTurns ?? payload.num_turns ?? payload.turns;
-    if (typeof turns === 'number' && Number.isFinite(turns) && turns >= 0) turnCount = turns;
     if (payload.status !== 'completed') {
       const error = (payload.error ?? {}) as Record<string, unknown>;
       failure =
@@ -297,7 +302,7 @@ export function parseDimEventStream(stdout: string): DimRunOutcome {
       cacheWrite: num(raw.cacheWriteTokens),
     };
   }
-  return { text: text.trim(), usage, failure, turnCount, toolEvents };
+  return { text: text.trim(), usage, failure, toolEvents };
 }
 
 export async function runDimReview(
@@ -463,9 +468,12 @@ async function runDimPrompt(
       log(`dim ${label}: session home teardown failed: ${String(error)}`);
     }
   }
-  const { text, usage, failure, turnCount, toolEvents } = parseDimEventStream(result.stdout);
+  const { text, usage, failure, turnCount, toolEvents } = parseDimEventStream(
+    result.stdout,
+    Boolean(runtime.toolTelemetry),
+  );
   for (const event of toolEvents) {
-    const toolClass = classifyReadonlyTool(event.name);
+    const toolClass = classifyReadonlyTool(event.name, event.input);
     const bytes = serializedBytes(event.output);
     const finish = runtime.toolTelemetry?.startTool({
       session: label,

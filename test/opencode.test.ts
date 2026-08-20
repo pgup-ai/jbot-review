@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   buildConfig,
+  observedAssistantParts,
   parseChangesSinceLastReviewSummary,
   recordOpencodeToolParts,
   sessionEnvDenyKeys,
@@ -50,6 +51,14 @@ describe('OpenCode tool telemetry', () => {
       'whole',
     );
     assert.equal(rows.find((row) => row.kind === 'exploration').turnCount, 1);
+
+    const messages = [
+      { info: { id: 'old' }, parts: [{ type: 'step-finish' }] },
+      { info: { id: 'new' }, parts: [{ type: 'step-finish' }] },
+    ] as never;
+    assert.equal(observedAssistantParts(messages).length, 2);
+    assert.equal(observedAssistantParts(messages, 'old').length, 1);
+    assert.deepEqual(observedAssistantParts(messages, 'missing'), []);
   });
 });
 

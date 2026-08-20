@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import {
@@ -47,38 +48,21 @@ describe('buildDimCliArgs', () => {
 });
 
 describe('dim event telemetry', () => {
-  it('captures bounded emitted tool and turn metadata and leaves it unavailable when absent', () => {
-    const withMetadata = parseDimEventStream(
-      [
-        event('tool:started', {
-          toolCallId: 'call-1',
-          toolName: 'grep',
-          toolInput: { pattern: 'needle' },
-        }),
-        event('tool:completed', {
-          toolCallId: 'call-1',
-          toolName: 'grep',
-          toolResult: 'match',
-          durationMs: 7,
-        }),
-        event('run:ended', { status: 'completed', numTurns: 3, usage: {} }),
-      ].join('\n'),
-    );
-    assert.equal(withMetadata.turnCount, 3);
-    assert.deepEqual(withMetadata.toolEvents, [
+  it('pins the sanitized Dim 0.3.15 JSONL contract and leaves turns unavailable', () => {
+    const stdout = readFileSync(new URL('fixtures/dim-events.jsonl', import.meta.url), 'utf8');
+    const observed = parseDimEventStream(stdout);
+    assert.equal(observed.turnCount, undefined);
+    assert.equal(observed.text, 'OK');
+    assert.deepEqual(observed.toolEvents, [
       {
-        name: 'grep',
-        input: { pattern: 'needle' },
-        output: 'match',
+        name: 'read',
+        input: { path: 'package.json' },
+        output: { content: 'sanitized', isError: false, structuredContent: {} },
         success: true,
-        durationMs: 7,
+        durationMs: 5,
       },
     ]);
-    const withoutMetadata = parseDimEventStream(
-      event('run:ended', { status: 'completed', usage: {} }),
-    );
-    assert.equal(withoutMetadata.turnCount, undefined);
-    assert.deepEqual(withoutMetadata.toolEvents, []);
+    assert.deepEqual(parseDimEventStream(stdout, false).toolEvents, []);
   });
 });
 

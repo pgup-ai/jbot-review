@@ -12,7 +12,7 @@ import type { ReviewBackend } from './session-concurrency.ts';
 /** Run ids become directory names in the journal, so they are clamped here. */
 const RUN_ID_MAX_LENGTH = 128;
 
-export const REMOTE_ACP_TELEMETRY_CAPABILITY = 'opaque' as const;
+const REMOTE_ACP_TELEMETRY_CAPABILITY = 'opaque' as const;
 
 /**
  * Run id for a local review. CI takes one from the workflow run and attempt;

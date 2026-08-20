@@ -11,7 +11,7 @@ import type {
 } from './telemetry.ts';
 
 export const MAX_TOOL_TELEMETRY_ROWS = 2_048;
-export const MAX_TOOL_IDENTITIES = 4_096;
+const MAX_TOOL_IDENTITIES = 4_096;
 
 export interface ToolTelemetryStart {
   session: string;
@@ -180,8 +180,15 @@ export function createToolTelemetryAccumulator(
   };
 }
 
-export function classifyReadonlyTool(name: string): ToolTelemetryClass {
+export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemetryClass {
   const normalized = name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '_');
+  const command =
+    normalized === 'bash' && input && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>).command
+      : undefined;
+  if (typeof command === 'string' && /\bgit\s+diff(?:\s|$)/i.test(command)) {
+    return 'diff-recovery';
+  }
   if (normalized === 'git_diff' || normalized.includes('diff')) return 'diff-recovery';
   if (
     normalized.includes('web') ||
@@ -220,13 +227,19 @@ export function toolIdentity(
     for (const key of keys) if (typeof value[key] === 'string') return value[key].trim();
     return undefined;
   };
-  if (toolClass === 'file-read' || toolClass === 'list' || toolClass === 'diff-recovery') {
+  if (toolClass === 'file-read' || toolClass === 'diff-recovery') {
     const path = firstString('path', 'file', 'filePath', 'directory');
     return path
       ? { identity: path, identityKind: 'path' }
       : toolClass === 'diff-recovery'
         ? { identity: 'whole-diff', identityKind: 'scope' }
         : {};
+  }
+  if (toolClass === 'list') {
+    const path = firstString('path', 'file', 'filePath', 'directory');
+    if (path) return { identity: path, identityKind: 'path' };
+    const pattern = firstString('pattern');
+    return pattern ? { identity: pattern, identityKind: 'query' } : {};
   }
   if (toolClass === 'search' || toolClass === 'external-docs') {
     const query = firstString('query', 'pattern', 'search', 'text');

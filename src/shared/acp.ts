@@ -33,7 +33,7 @@ import {
 const ACP_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const ACP_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 
-export const LOCAL_ACP_TELEMETRY_CAPABILITY = 'observable' as const;
+const LOCAL_ACP_TELEMETRY_CAPABILITY = 'observable' as const;
 
 /** Delivers one assembled prompt to an agent and returns its final text. */
 type AcpPromptRunner = (
@@ -49,15 +49,19 @@ export function createAcpBackend(
   workspace: string,
   toolTelemetry?: ToolTelemetryAccumulator,
 ): ReviewBackend {
-  return createAcpReviewBackend(`acp:${spec.id}`, (model, prompt, label, log, timeoutMs) =>
-    runLocalAcpPrompt(spec, workspace, model, prompt, label, log, {
-      timeoutMs,
-      tee: composeAcpTees(
-        makeSessionTee(spec.id, label, model),
-        toolTelemetry ? createAcpTelemetryTee(toolTelemetry, `acp:${spec.id}`, label) : undefined,
-      ),
-    }),
-  );
+  return createAcpReviewBackend(`acp:${spec.id}`, async (model, prompt, label, log, timeoutMs) => {
+    const telemetryTee = toolTelemetry
+      ? createAcpTelemetryTee(toolTelemetry, `acp:${spec.id}`, label)
+      : undefined;
+    try {
+      return await runLocalAcpPrompt(spec, workspace, model, prompt, label, log, {
+        timeoutMs,
+        tee: composeAcpTees(makeSessionTee(spec.id, label, model), telemetryTee?.tee),
+      });
+    } finally {
+      telemetryTee?.finishPending();
+    }
+  });
 }
 
 function composeAcpTees(
@@ -76,9 +80,12 @@ export function createAcpTelemetryTee(
   telemetry: ToolTelemetryAccumulator,
   backend: string,
   session: string,
-): (dir: 'out' | 'in', frame: Record<string, unknown>) => void {
+): {
+  tee: (dir: 'out' | 'in', frame: Record<string, unknown>) => void;
+  finishPending: () => void;
+} {
   const pending = new Map<string, (finish: ToolTelemetryFinish) => void>();
-  return (dir, frame) => {
+  const tee = (dir: 'out' | 'in', frame: Record<string, unknown>): void => {
     if (dir !== 'in' || frame.method !== 'session/update') return;
     const params = isObject(frame.params) ? frame.params : {};
     const update = isObject(params.update) ? params.update : {};
@@ -90,7 +97,7 @@ export function createAcpTelemetryTee(
     if (!finish) {
       const name = String(update.kind ?? update.title ?? update.name ?? 'unknown');
       const input = update.rawInput ?? update.input;
-      const toolClass = classifyReadonlyTool(name);
+      const toolClass = classifyReadonlyTool(name, input);
       finish = telemetry.startTool({
         session,
         backend,
@@ -113,6 +120,20 @@ export function createAcpTelemetryTee(
       ...(typeof update.durationMs === 'number' ? { durationMs: update.durationMs } : {}),
     });
     pending.delete(id);
+  };
+  return {
+    tee,
+    finishPending: () => {
+      for (const finish of pending.values()) {
+        finish({
+          success: false,
+          failureClass: 'unknown',
+          outputBytesBeforeCap: 0,
+          outputBytesAfterCap: 0,
+        });
+      }
+      pending.clear();
+    },
   };
 }
 

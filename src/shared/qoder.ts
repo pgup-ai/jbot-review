@@ -321,7 +321,7 @@ export function observeQoderToolMessage(
       const tool = typeof block.name === 'string' ? block.name : 'unknown';
       const id = typeof block.id === 'string' ? block.id : '';
       if (!id || pending.has(id)) continue;
-      const toolClass = classifyReadonlyTool(tool);
+      const toolClass = classifyReadonlyTool(tool, block.input);
       const identity = toolIdentity(toolClass, block.input);
       pending.set(
         id,
@@ -383,6 +383,17 @@ async function runQoderPrompt(
   let session: Query | undefined;
   let timer: NodeJS.Timeout | undefined;
   const pendingTools = new Map<string, (finish: ToolTelemetryFinish) => void>();
+  const finishPendingTools = (): void => {
+    for (const finish of pendingTools.values()) {
+      finish({
+        success: false,
+        failureClass: 'unknown',
+        outputBytesBeforeCap: 0,
+        outputBytesAfterCap: 0,
+      });
+    }
+    pendingTools.clear();
+  };
   log(`Calling ${label} prompt (agent=qoder-cli, model=${model})`);
   try {
     session = query({
@@ -401,18 +412,13 @@ async function runQoderPrompt(
         if (message.type === 'result') result = message;
       }
     } catch (error) {
-      if (!result) throw error;
+      if (!result) {
+        finishPendingTools();
+        throw error;
+      }
     }
+    finishPendingTools();
     if (!result) throw new Error(`qoder ${label} produced no result event`);
-    for (const finish of pendingTools.values()) {
-      finish({
-        success: false,
-        failureClass: 'unknown',
-        outputBytesBeforeCap: 0,
-        outputBytesAfterCap: 0,
-      });
-    }
-    pendingTools.clear();
     toolTelemetry?.finishSession({
       session: label,
       backend: QODER_PROVIDER_ID,
