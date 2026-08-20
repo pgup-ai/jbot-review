@@ -11,6 +11,7 @@ import {
 } from '../src/shared/telemetry.ts';
 import {
   MAX_TOOL_TELEMETRY_ROWS,
+  classifyReadonlyTool,
   createToolTelemetryAccumulator,
 } from '../src/shared/tool-telemetry.ts';
 import type { Finding, Severity } from '../src/shared/types.ts';
@@ -66,6 +67,12 @@ describe('createTelemetryRecorder (disabled = inert)', () => {
 });
 
 describe('phase and tool telemetry', () => {
+  it('classifies external documentation tools before generic searches', () => {
+    assert.equal(classifyReadonlyTool('web_search'), 'external-docs');
+    assert.equal(classifyReadonlyTool('context7_query_docs'), 'external-docs');
+    assert.equal(classifyReadonlyTool('context7_read_doc'), 'external-docs');
+  });
+
   it('closes every phase exactly once with its terminal reason', () => {
     const rec = createTelemetryRecorder(true);
     let now = 10;

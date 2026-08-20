@@ -65,10 +65,24 @@ export function aggregatePerformance(rows: Row[]): Record<string, unknown> {
     typeof row[key] === 'number' && Number.isFinite(row[key]) ? row[key] : undefined;
   const phaseTime = Object.fromEntries(
     [...group(phases, 'phase')].flatMap(([phase, values]) =>
-      [...group(values, 'scope')].map(([scope, scoped]) => [
-        `${scope}:${phase}`,
-        distribution(scoped.flatMap((row) => number(row, 'durationMs') ?? [])),
-      ]),
+      [...group(values, 'scope')].map(([scope, scoped]) => {
+        const durations =
+          scope === 'run'
+            ? [
+                ...scoped
+                  .reduce((totals, row) => {
+                    const source = row._source ?? 0;
+                    totals.set(
+                      source,
+                      (totals.get(source) ?? 0) + (number(row, 'durationMs') ?? 0),
+                    );
+                    return totals;
+                  }, new Map<number, number>())
+                  .values(),
+              ]
+            : scoped.flatMap((row) => number(row, 'durationMs') ?? []);
+        return [`${scope}:${phase}`, distribution(durations)];
+      }),
     ),
   );
   const toolBytes = tools.reduce((sum, row) => sum + (number(row, 'outputBytesAfterCap') ?? 0), 0);
@@ -79,7 +93,7 @@ export function aggregatePerformance(rows: Row[]): Record<string, unknown> {
   ).length;
   const reads = tools.filter((row) => row.toolClass === 'file-read').length;
   const repairSessions = sessions.filter(
-    (row) => typeof row.label === 'string' && row.label.endsWith('-repair'),
+    (row) => typeof row.session === 'string' && row.session.endsWith('-repair'),
   ).length;
   const retained = new Set([
     'posted-inline',
@@ -109,7 +123,7 @@ export function aggregatePerformance(rows: Row[]): Record<string, unknown> {
           0,
         ),
         repairRate: guardedRate(
-          values.filter((row) => typeof row.label === 'string' && row.label.endsWith('-repair'))
+          values.filter((row) => typeof row.session === 'string' && row.session.endsWith('-repair'))
             .length,
           values.length,
         ),

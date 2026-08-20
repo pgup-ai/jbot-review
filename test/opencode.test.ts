@@ -28,6 +28,16 @@ describe('OpenCode tool telemetry', () => {
           time: { start: 10, end: 25 },
         },
       },
+      {
+        type: 'tool',
+        tool: 'git_diff',
+        state: {
+          status: 'completed',
+          input: {},
+          output: 'private diff',
+          time: { start: 20, end: 30 },
+        },
+      },
       { type: 'step-finish' },
     ] as never);
 
@@ -35,6 +45,10 @@ describe('OpenCode tool telemetry', () => {
     assert.doesNotMatch(jsonl, /secret\.ts|private source|salt/);
     const rows = jsonl.split('\n').map((line) => JSON.parse(line));
     assert.equal(rows.find((row) => row.kind === 'tool').durationMs, 15);
+    assert.equal(
+      rows.find((row) => row.kind === 'tool' && row.toolClass === 'diff-recovery').diffScope,
+      'whole',
+    );
     assert.equal(rows.find((row) => row.kind === 'exploration').turnCount, 1);
   });
 });

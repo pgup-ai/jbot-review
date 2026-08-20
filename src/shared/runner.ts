@@ -977,7 +977,7 @@ async function runReviewPipeline(params: {
     if (telemetryDone) return;
     telemetryDone = true;
     telemetryTerminalState = state;
-    phases.finishOpen(state === 'failed' ? 'failed' : 'completed');
+    if (!teardownPending) phases.finishOpen(state === 'failed' ? 'failed' : 'completed');
     telemetry.finishRun(state, Date.now() - runStartedAt);
     if (!teardownPending) emitTelemetry();
   };
@@ -2555,12 +2555,12 @@ async function runReviewPipeline(params: {
       cleanupCliHomes();
       teardownCompleted = true;
     } finally {
+      teardownDone(teardownCompleted ? 'completed' : 'failed');
+      phases.finishOpen(teardownCompleted ? 'aborted' : 'failed');
       if (!teardownCompleted) {
         telemetryDone = true;
         telemetryTerminalState = 'failed';
-        phases.finishOpen('failed');
       }
-      teardownDone(teardownCompleted ? 'completed' : 'failed');
       teardownPending = false;
       if (telemetryTerminalState) {
         telemetry.finishRun(telemetryTerminalState, Date.now() - runStartedAt);

@@ -26,7 +26,9 @@ describe('review performance aggregation', () => {
   it('aggregates phases, tools, turns, cache, repairs, retained findings, and cohorts', () => {
     const report = aggregatePerformance([
       { kind: 'run', elapsedMs: 100 },
-      { kind: 'phase', scope: 'run', phase: 'posting', durationMs: 100 },
+      { kind: 'phase', scope: 'run', phase: 'filtering', durationMs: 10 },
+      { kind: 'phase', scope: 'run', phase: 'filtering', durationMs: 15 },
+      { kind: 'phase', scope: 'run', phase: 'posting', durationMs: 75 },
       {
         kind: 'tool',
         toolClass: 'diff-recovery',
@@ -40,7 +42,7 @@ describe('review performance aggregation', () => {
         toolCalls: 1,
         toolOutputBytes: 50,
       },
-      { kind: 'session', label: 'review-repair', cacheReadTokens: 30 },
+      { kind: 'session', session: 'review-repair', cacheReadTokens: 30 },
       { kind: 'finding', disposition: 'posted-inline' },
     ]) as {
       phaseTime: Record<string, { p50: number }>;
@@ -48,16 +50,18 @@ describe('review performance aggregation', () => {
       tools: { outputBytes: number };
       turns: { p50: number };
       cacheReadTokens: number;
-      retryRepairRate: { rate: number | null };
+      retryRepairRate: { numerator: number; rate: number | null };
       retainedFindings: number;
       backendCohorts: Record<string, { toolCalls: number }>;
     };
 
-    assert.equal(report.phaseTime['run:posting'].p50, 100);
+    assert.equal(report.phaseTime['run:filtering'].p50, 25);
+    assert.equal(report.phaseTime['run:posting'].p50, 75);
     assert.equal(report.phaseReconciliation.gapMs.p50, 0);
     assert.equal(report.tools.outputBytes, 50);
     assert.equal(report.turns.p50, 2);
     assert.equal(report.cacheReadTokens, 30);
+    assert.equal(report.retryRepairRate.numerator, 1);
     assert.equal(report.retryRepairRate.rate, null);
     assert.equal(report.retainedFindings, 1);
     assert.equal(report.backendCohorts.pi.toolCalls, 1);

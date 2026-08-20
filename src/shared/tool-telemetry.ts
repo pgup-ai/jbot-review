@@ -183,19 +183,19 @@ export function createToolTelemetryAccumulator(
 export function classifyReadonlyTool(name: string): ToolTelemetryClass {
   const normalized = name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '_');
   if (normalized === 'git_diff' || normalized.includes('diff')) return 'diff-recovery';
-  if (normalized.includes('read')) return 'file-read';
-  if (normalized.includes('grep') || normalized.includes('search') || normalized === 'find') {
-    return 'search';
-  }
-  if (normalized.includes('glob') || normalized.includes('list') || normalized.includes('tree')) {
-    return 'list';
-  }
   if (
     normalized.includes('web') ||
     normalized.includes('context7') ||
     normalized.includes('docs')
   ) {
     return 'external-docs';
+  }
+  if (normalized.includes('read')) return 'file-read';
+  if (normalized.includes('grep') || normalized.includes('search') || normalized === 'find') {
+    return 'search';
+  }
+  if (normalized.includes('glob') || normalized.includes('list') || normalized.includes('tree')) {
+    return 'list';
   }
   return 'other-readonly';
 }

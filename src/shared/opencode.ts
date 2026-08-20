@@ -76,10 +76,10 @@ export function recordOpencodeToolParts(
       inputBytes: serializedBytes(part.state.input),
       ...identity,
       ...(toolClass === 'diff-recovery'
-        ? { diffScope: identity.identity ? ('path' as const) : ('whole' as const) }
+        ? { diffScope: identity.identityKind === 'path' ? ('path' as const) : ('whole' as const) }
         : {}),
     });
-    const output = part.state.status === 'completed' ? part.state.output : '';
+    const output = part.state.status === 'completed' ? part.state.output : part.state.error;
     finish({
       success: part.state.status === 'completed',
       ...(part.state.status === 'error' ? { failureClass: 'execution' as const } : {}),
