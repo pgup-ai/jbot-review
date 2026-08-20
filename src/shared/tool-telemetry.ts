@@ -183,7 +183,10 @@ export function createToolTelemetryAccumulator(
 export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemetryClass {
   const normalized = name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '_');
   const command =
-    normalized === 'bash' && input && typeof input === 'object' && !Array.isArray(input)
+    (normalized === 'bash' || normalized === 'exec') &&
+    input &&
+    typeof input === 'object' &&
+    !Array.isArray(input)
       ? (input as Record<string, unknown>).command
       : undefined;
   if (typeof command === 'string' && /\bgit\s+diff(?:\s|$)/i.test(command)) {

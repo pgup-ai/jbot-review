@@ -204,7 +204,6 @@ interface DimRunOutcome {
   text: string;
   usage?: PromptTokenUsage;
   failure?: string;
-  turnCount?: number;
   toolEvents: DimToolObservation[];
 }
 
@@ -468,7 +467,7 @@ async function runDimPrompt(
       log(`dim ${label}: session home teardown failed: ${String(error)}`);
     }
   }
-  const { text, usage, failure, turnCount, toolEvents } = parseDimEventStream(
+  const { text, usage, failure, toolEvents } = parseDimEventStream(
     result.stdout,
     Boolean(runtime.toolTelemetry),
   );
@@ -497,7 +496,6 @@ async function runDimPrompt(
     capability: DIM_TELEMETRY_CAPABILITY,
     budgetTier: 'observe-only',
     stopReason: result.exitCode !== 0 || failure ? 'failed' : 'completed',
-    ...(turnCount !== undefined ? { turnCount } : {}),
   });
   if (usage) options.onTokenUsage?.(usage, model, label);
   if (result.exitCode !== 0 || failure) {

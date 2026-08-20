@@ -76,6 +76,7 @@ describe('phase and tool telemetry', () => {
       classifyReadonlyTool('bash', { command: 'git diff main...HEAD' }),
       'diff-recovery',
     );
+    assert.equal(classifyReadonlyTool('exec', { command: 'git diff --stat' }), 'diff-recovery');
     assert.equal(classifyReadonlyTool('bash', { command: 'git status --short' }), 'other-readonly');
     assert.deepEqual(toolIdentity('list', { pattern: 'src/**/*.ts' }), {
       identity: 'src/**/*.ts',
