@@ -188,6 +188,18 @@ export function sessionEnvDenyKeys(keys: string[]): string[] {
   });
 }
 
+export function takeOpencodeProxyEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const proxy = env.JBOT_OPENCODE_HTTPS_PROXY?.trim();
+  const noProxy = env.JBOT_OPENCODE_NO_PROXY?.trim();
+  delete env.JBOT_OPENCODE_HTTPS_PROXY;
+  delete env.JBOT_OPENCODE_NO_PROXY;
+  if (!proxy) return {};
+  return {
+    HTTPS_PROXY: proxy,
+    NO_PROXY: noProxy || 'localhost,127.0.0.1',
+  };
+}
+
 /**
  * Builds the opencode config object that embeds the API key for the selected
  * provider, plus any secondary providers needed by aux-model sessions. This is
@@ -418,6 +430,7 @@ export async function startOpencode(
     promptCache?: boolean;
     baseURL?: string;
     additionalProviderKeys?: OpencodeProviderConfig[];
+    proxyEnv?: NodeJS.ProcessEnv;
     /**
      * The scrub mutates process-global env for the spawn window (the SDK
      * offers no env injection), so it is only safe in a single-run process
@@ -456,9 +469,15 @@ export async function startOpencode(
   // the child copies its environment at spawn, so the parent's restore never
   // reaches it.
   const scrubbedEnv = new Map<string, string>();
+  const scopedEnv = new Map<string, string | undefined>();
   const restoreAndRelease = () => {
     for (const [key, value] of scrubbedEnv) process.env[key] = value;
     scrubbedEnv.clear();
+    for (const [key, value] of scopedEnv) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    scopedEnv.clear();
     restoreCwd();
     if (!lockReleased) {
       lockReleased = true;
@@ -478,6 +497,10 @@ export async function startOpencode(
         /* best effort */
       }
     };
+    for (const [key, value] of Object.entries(options.proxyEnv ?? {})) {
+      scopedEnv.set(key, process.env[key]);
+      process.env[key] = value;
+    }
     if (options.scrubEnv !== false) {
       for (const key of sessionEnvDenyKeys(Object.keys(process.env))) {
         scrubbedEnv.set(key, process.env[key]!);
