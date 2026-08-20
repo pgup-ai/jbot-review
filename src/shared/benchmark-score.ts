@@ -209,7 +209,7 @@ export function characterizeBenchmarkVariance(runs: BenchmarkCaseRun[]): Benchma
         );
       }
     }
-    const median = percentile(
+    const median = benchmarkPercentile(
       group.map((run) => run.latencyMs),
       0.5,
     );
@@ -224,8 +224,8 @@ export function characterizeBenchmarkVariance(runs: BenchmarkCaseRun[]): Benchma
     cases: grouped.size,
     minRepetitions,
     maxRepetitions,
-    findingAgreement: percentile(agreements, 0.5),
-    latencyRelativeMad: percentile(relativeDeviations, 0.5),
+    findingAgreement: benchmarkPercentile(agreements, 0.5),
+    latencyRelativeMad: benchmarkPercentile(relativeDeviations, 0.5),
   };
 }
 
@@ -319,7 +319,7 @@ function ratio(numerator: number, denominator: number): number | null {
   return denominator === 0 ? null : numerator / denominator;
 }
 
-function percentile(values: number[], quantile: number): number | null {
+export function benchmarkPercentile(values: number[], quantile: number): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const position = (sorted.length - 1) * quantile;
@@ -362,15 +362,15 @@ function aggregate(contributions: CaseContribution[]) {
       sum((value) => value.evidenceSupported),
       sum((value) => value.evidenceObserved),
     ),
-    medianLatencyMs: percentile(
+    medianLatencyMs: benchmarkPercentile(
       contributions.map((value) => value.latencyMs),
       0.5,
     ),
-    p90LatencyMs: percentile(
+    p90LatencyMs: benchmarkPercentile(
       contributions.map((value) => value.latencyMs),
       0.9,
     ),
-    p95LatencyMs: percentile(
+    p95LatencyMs: benchmarkPercentile(
       contributions.map((value) => value.latencyMs),
       0.95,
     ),
@@ -384,7 +384,7 @@ function aggregate(contributions: CaseContribution[]) {
 type Aggregate = ReturnType<typeof aggregate>;
 type MetricName = keyof Aggregate;
 
-function random(seed: number): () => number {
+export function benchmarkRandom(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
     state += 0x6d2b79f5;
@@ -412,7 +412,7 @@ function bootstrapIntervals(
     >;
   }
 
-  const next = random(seed);
+  const next = benchmarkRandom(seed);
   for (let sample = 0; sample < samples; sample += 1) {
     const resampled = Array.from(
       { length: contributions.length },
@@ -427,8 +427,8 @@ function bootstrapIntervals(
 
   return Object.fromEntries(
     names.map((name) => {
-      const low = percentile(values[name], 0.025);
-      const high = percentile(values[name], 0.975);
+      const low = benchmarkPercentile(values[name], 0.025);
+      const high = benchmarkPercentile(values[name], 0.975);
       return [name, low === null || high === null ? null : { low, high }];
     }),
   ) as Record<MetricName, BenchmarkInterval | null>;

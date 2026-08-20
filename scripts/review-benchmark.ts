@@ -29,6 +29,7 @@ import {
   type BenchmarkDiffSize,
   type BenchmarkRiskTier,
 } from '../src/shared/benchmark-score.ts';
+import { pairBenchmarkRuns, summarizePairedBenchmark } from '../src/shared/benchmark-paired.ts';
 import {
   validateAdjudicatedBenchmarkRows,
   type BenchmarkCaseRow,
@@ -542,6 +543,10 @@ async function main(): Promise<void> {
       treatmentFailedRuns: treatmentSummary.failedRuns,
     },
   );
+  // The pooled p50 a latency gate reads is set by which case lands at the median
+  // rank, so it barely responds to a uniform per-case shift. Pair the arms too,
+  // and report what effect this sample could actually have resolved.
+  const pairedLatency = summarizePairedBenchmark(pairBenchmarkRuns(rows));
   const summary = {
     schemaVersion: BENCHMARK_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
@@ -563,9 +568,19 @@ async function main(): Promise<void> {
       ...treatmentSummary,
     },
     qualityGate,
+    pairedLatency,
   };
   writeFileSync(join(outputDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
   console.log(`Wrote ${join(outputDir, 'summary.json')} and ${casesPath}.`);
+  if (pairedLatency.minimumDetectableEffect === null) {
+    console.warn(
+      `Paired latency: ${pairedLatency.pairs} pairs cannot detect any effect in the ladder at 80% power; a latency gate is unanswerable at this sample size.`,
+    );
+  } else {
+    console.log(
+      `Paired latency: median ${pairedLatency.medianRelativeDelta?.toFixed(1)}% (p=${pairedLatency.permutationP?.toFixed(4)}), smallest detectable effect ${pairedLatency.minimumDetectableEffect}%.`,
+    );
+  }
 }
 
 main().catch((error: unknown) => {
