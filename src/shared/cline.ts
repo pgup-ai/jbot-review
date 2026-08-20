@@ -205,6 +205,7 @@ export async function runClineReview(
   options: {
     lensAddendum?: string;
     evidenceQuotes?: boolean;
+    embeddedFirstPrompt?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
@@ -224,6 +225,7 @@ export async function runClineReview(
     guidelinesForArgv,
     options.lensAddendum ?? '',
     options.evidenceQuotes ?? false,
+    options.embeddedFirstPrompt ?? false,
   );
   log(`Prompt assembled (${label}, cline): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const raw = await runClinePrompt(

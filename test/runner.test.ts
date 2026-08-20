@@ -72,6 +72,23 @@ describe('buildShardPlans cache-stable prefix', () => {
     assert.doesNotMatch(prefix, /reviewer 1\b/);
     assert.doesNotMatch(prefix, /reviewer 2\b/);
   });
+
+  it('uses treatment shard instructions only when enabled', () => {
+    const base = {
+      coreContext: 'core',
+      fullDiffBlock: '',
+      context7Block: '',
+      shards: [[{ filename: 'src/a.ts' }], [{ filename: 'src/b.ts' }]],
+    };
+
+    const control = buildShardPlans(base);
+    const treatment = buildShardPlans({ ...base, embeddedFirstPrompt: true });
+
+    assert.match(control[0].context, /follow symbols wherever they lead/);
+    assert.doesNotMatch(control[0].context, /repository exploration policy/);
+    assert.match(treatment[0].context, /one-hop default and expansion trigger/);
+    assert.match(treatment[0].context, /repository exploration policy/);
+  });
 });
 
 describe('buildSummaryScopeBlock', () => {
@@ -681,6 +698,11 @@ describe('normalizeOptions defaults', () => {
     // Security property: a default-on cache would read from the PR-controlled
     // workspace, letting a PR forge its own cached "clean" shard result.
     assert.equal(normalizeOptions(undefined).shardCachePath, '');
+  });
+
+  it('keeps the embedded-first treatment opt-in', () => {
+    assert.equal(normalizeOptions(undefined).embeddedFirstPrompt, false);
+    assert.equal(normalizeOptions({ embeddedFirstPrompt: true }).embeddedFirstPrompt, true);
   });
 
   it('runs the guideline pass by default in every entry mode, with a working opt-out', () => {

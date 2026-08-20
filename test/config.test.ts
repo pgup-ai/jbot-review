@@ -7,6 +7,7 @@ import {
   auxModelOptionsFor,
   defaultModelOptions,
   modelSupportsPromptCache,
+  supportedModelOptions,
   needsAuxOpencodeConfig,
   providerConfig,
   providerCredentialSources,
@@ -52,6 +53,30 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
   it('disables prompt caching for mimo (unverified endpoint), keeps it for other providers', () => {
     assert.equal(modelSupportsPromptCache('xiaomi-token-plan-sgp', 'mimo-v2.5-pro'), false);
     assert.equal(modelSupportsPromptCache('openai', 'gpt-5.4-nano'), true);
+  });
+
+  it('drops a reasoning effort the model would reject', () => {
+    // opencode/x-preview-f-free 400s on the main pass's `medium`, and the error
+    // is not retryable, so the option must never reach the provider.
+    assert.deepEqual(
+      supportedModelOptions('opencode', 'x-preview-f-free', { reasoningEffort: 'medium' }),
+      {},
+    );
+    assert.deepEqual(
+      supportedModelOptions('opencode', 'x-preview-f-free', {
+        reasoningEffort: 'high',
+        temperature: 0,
+      }),
+      { reasoningEffort: 'high', temperature: 0 },
+    );
+    // Models without a declared list keep whatever they were given.
+    assert.deepEqual(
+      supportedModelOptions('openai', 'gpt-5.4-nano', { reasoningEffort: 'medium' }),
+      {
+        reasoningEffort: 'medium',
+      },
+    );
+    assert.equal(supportedModelOptions('opencode', 'x-preview-f-free', undefined), undefined);
   });
 });
 

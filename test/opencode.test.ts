@@ -182,6 +182,66 @@ describe('aux model options', () => {
     });
   });
 
+  it('drops a rejected reasoning effort on the main and the aux entry alike', () => {
+    // x-preview-f-free hard-400s on `medium`. The aux entry is assembled
+    // outside buildProviderEntry, so it needs the same filter; with the effort
+    // dropped it carries nothing and earns no entry at all.
+    const aux = buildConfig('opencode', 'deepseek-v4-flash-free', 'k', undefined, true, [
+      {
+        providerID: 'opencode',
+        apiKey: 'k',
+        modelID: 'x-preview-f-free',
+        modelOptions: { reasoningEffort: 'medium' },
+      },
+    ]);
+    assert.equal(
+      (aux as { provider: Record<string, { models?: Record<string, unknown> }> }).provider.opencode
+        .models,
+      undefined,
+    );
+
+    // The main entry is built by buildProviderEntry, which filters the same way.
+    const main = buildConfig(
+      'opencode',
+      'x-preview-f-free',
+      'k',
+      { reasoningEffort: 'medium' },
+      true,
+    );
+    assert.equal(
+      (main as { provider: Record<string, { models?: Record<string, unknown> }> }).provider.opencode
+        .models,
+      undefined,
+    );
+    const mainKept = buildConfig(
+      'opencode',
+      'x-preview-f-free',
+      'k',
+      { reasoningEffort: 'high' },
+      true,
+    );
+    assert.deepEqual(
+      (mainKept as { provider: Record<string, { models: Record<string, unknown> }> }).provider
+        .opencode.models,
+      { 'x-preview-f-free': { options: { reasoningEffort: 'high' } } },
+    );
+
+    // A supported effort still reaches the aux entry.
+    const kept = buildConfig('opencode', 'deepseek-v4-flash-free', 'k', undefined, true, [
+      {
+        providerID: 'opencode',
+        apiKey: 'k',
+        modelID: 'x-preview-f-free',
+        modelOptions: { reasoningEffort: 'low' },
+      },
+    ]);
+    assert.deepEqual(
+      (kept as { provider: Record<string, { models: Record<string, unknown> }> }).provider.opencode
+        .models,
+      { 'x-preview-f-free': { options: { reasoningEffort: 'low' } } },
+    );
+  });
+
   it('adds no entry for a same-provider aux model with nothing of its own', () => {
     const config = buildConfig('opencode', 'main-model', 'k', undefined, true, [
       { providerID: 'opencode', apiKey: 'k', modelID: 'aux-model' },

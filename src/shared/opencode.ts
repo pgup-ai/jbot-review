@@ -8,7 +8,7 @@ import {
 } from '@opencode-ai/sdk';
 
 import { isContext7QuotaError } from './context7.ts';
-import { PROVIDERS } from './config.ts';
+import { PROVIDERS, supportedModelOptions } from './config.ts';
 import { BASH_PERMISSIONS } from './shell-policy.ts';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -138,7 +138,8 @@ function buildProviderEntry(params: {
   modelID: string;
   modelOptions?: Record<string, unknown>;
 }): ProviderEntry {
-  const { providerID, apiKey, baseURL, promptCache, modelID, modelOptions } = params;
+  const { providerID, apiKey, baseURL, promptCache, modelID } = params;
+  const modelOptions = supportedModelOptions(providerID, modelID, params.modelOptions);
   const hasModelOptions = Boolean(modelOptions && Object.keys(modelOptions).length > 0);
   const options = {
     apiKey,
@@ -251,7 +252,11 @@ export function buildConfig(
     if (!providerKey.providerID) continue;
     if (providerKey.providerID === providerID) {
       const custom = PROVIDERS[providerID]?.custom;
-      const auxOptions = providerKey.modelOptions;
+      const auxOptions = supportedModelOptions(
+        providerID,
+        providerKey.modelID ?? '',
+        providerKey.modelOptions,
+      );
       const hasAuxOptions = Boolean(auxOptions && Object.keys(auxOptions).length > 0);
       // A same-provider aux model needs its own entry only to carry a name
       // (custom providers) or options of its own; otherwise the provider entry
@@ -692,6 +697,7 @@ export async function runReview(
   options: {
     lensAddendum?: string;
     evidenceQuotes?: boolean;
+    embeddedFirstPrompt?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
@@ -703,6 +709,7 @@ export async function runReview(
     guidelines,
     options.lensAddendum ?? '',
     options.evidenceQuotes ?? false,
+    options.embeddedFirstPrompt ?? false,
   );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
 

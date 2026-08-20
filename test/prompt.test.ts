@@ -8,9 +8,12 @@ import {
   CHANGES_SINCE_LAST_REVIEW_PROMPT,
   CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
   CONTEXT7_REASON_BUDGET,
+  EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
+  EMBEDDED_FIRST_REVIEW_PROMPT,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
+  NO_TOOLS_REVIEW_DIRECTIVE,
   PI_REVIEW_SYSTEM_PROMPT,
   QODER_REVIEW_SYSTEM_PROMPT,
   REVIEW_LENSES,
@@ -34,6 +37,16 @@ import {
 } from '../src/shared/prompt.ts';
 
 describe('NO_TOOLS_REVIEW_DIRECTIVE', () => {
+  it('keeps the tool-less review contract', () => {
+    for (const rule of [
+      /Use no tools for this review/,
+      /do not read files, search the repository, or run\s+git or shell commands/,
+      /treat it as already done and review only the diff hunks/,
+    ]) {
+      assert.match(NO_TOOLS_REVIEW_DIRECTIVE, rule);
+    }
+  });
+
   it('precedes the embedded review prompt', () => {
     const prompt = withNoToolsReviewDirective('PROMPT');
     assert.match(prompt, /^## Tool use disabled/);
@@ -261,9 +274,68 @@ describe('REVIEW_PROMPT', () => {
     assert.match(REVIEW_PROMPT, /or 0 for a\s+file-level finding on a changed file/);
   });
 
-  it('mentions the embedded diff hunks as a starting point', () => {
-    assert.match(REVIEW_PROMPT, /"Diff hunks" section/);
-    assert.match(REVIEW_PROMPT, /not the boundary of your\s+investigation/);
+  it('treats embedded hunks as authoritative without redundant diff reads', () => {
+    assert.match(
+      EMBEDDED_FIRST_REVIEW_PROMPT,
+      /fully embedded hunk.*authoritative and already\s+read/is,
+    );
+    assert.match(
+      EMBEDDED_FIRST_REVIEW_PROMPT,
+      /Do not run `git diff` or reread changed code solely to reproduce content\s+that is already embedded/,
+    );
+    assert.doesNotMatch(EMBEDDED_FIRST_REVIEW_PROMPT, /starting point, not the boundary/i);
+  });
+
+  it('defines one bounded repository-exploration policy', () => {
+    const headings =
+      EMBEDDED_FIRST_REVIEW_PROMPT.match(/^## Repository exploration policy$/gm) ?? [];
+    assert.equal(headings.length, 1);
+    const policy = EMBEDDED_FIRST_REVIEW_PROMPT.split('## Repository exploration policy')[1]?.split(
+      '\n## ',
+    )[0];
+    assert.ok(policy);
+    assert.match(policy, /omitted or truncated/);
+    assert.match(
+      policy,
+      /direct caller, callee, contract, or test relation tied to a changed\s+symbol/,
+    );
+    assert.match(policy, /evidence for a concrete candidate finding/);
+    assert.match(policy, /one dependency hop by default/);
+    assert.match(policy, /first hop reveals\s+a concrete trigger/);
+  });
+
+  it('states each exploration rule once', () => {
+    for (const rule of [
+      'solely to reproduce content',
+      'Before any broad repository search',
+      'one dependency hop by default',
+      'Do not keep exploring solely for completeness',
+    ]) {
+      assert.equal(EMBEDDED_FIRST_REVIEW_PROMPT.split(rule).length - 1, 1, rule);
+    }
+  });
+
+  it('consults changed-symbol usage before a justified broad search', () => {
+    const policy = EMBEDDED_FIRST_REVIEW_PROMPT.split('## Repository exploration policy')[1]?.split(
+      '\n## ',
+    )[0];
+    assert.ok(policy);
+    assert.match(
+      policy,
+      /Before any broad repository search, consult the "Changed symbol usage"\s+manifest/,
+    );
+    assert.match(
+      policy,
+      /manifest is absent, explicitly\s+incomplete, or current evidence identifies a relation it missed/,
+    );
+  });
+
+  it('stops after coverage and material uncertainty resolution', () => {
+    assert.match(
+      EMBEDDED_FIRST_REVIEW_PROMPT,
+      /Once every changed hunk is covered and material uncertainties are resolved,\s+return the final JSON/,
+    );
+    assert.match(EMBEDDED_FIRST_REVIEW_PROMPT, /Do not keep exploring solely for completeness/);
   });
 });
 
@@ -478,6 +550,18 @@ describe('assembleReviewPrompt', () => {
     assert.ok(prompt.indexOf('PR_CONTEXT_SENTINEL') < prompt.indexOf('## Final output reminder'));
   });
 
+  it('selects the embedded-first prompt only when explicitly enabled', () => {
+    const control = assembleReviewPrompt('PR', '', '', false);
+    const treatment = assembleReviewPrompt('PR', '', '', false, true);
+
+    assert.ok(control.startsWith(REVIEW_PROMPT));
+    assert.match(control, /starting point, not the boundary/i);
+    assert.doesNotMatch(control, /## Repository exploration policy/);
+    assert.ok(treatment.startsWith(EMBEDDED_FIRST_REVIEW_PROMPT));
+    assert.match(treatment, /## Repository exploration policy/);
+    assert.ok(treatment.endsWith(REVIEW_OUTPUT_REMINDER));
+  });
+
   it('omits the guidelines section when guidelines are empty', () => {
     const prompt = assembleReviewPrompt('PR_CONTEXT_SENTINEL', '');
 
@@ -585,6 +669,14 @@ describe('buildShardAssignmentBlock', () => {
     assert.match(block, /full checkout and the complete changed-file list are available/);
   });
 
+  it('uses bounded exploration wording only for the treatment', () => {
+    const treatment = buildShardAssignmentBlock(['src/a.ts'], 0, 2, true);
+
+    assert.match(treatment, /one-hop default and expansion trigger/);
+    assert.match(treatment, /Apply the repository exploration policy/);
+    assert.doesNotMatch(treatment, /wherever they lead/);
+  });
+
   it('scopes the summary verdict to own files and forbids shard/assignment vocab', () => {
     assert.match(block, /report only issues you found in your assigned files/i);
     assert.match(block, /return an empty string if you found none/i);
@@ -688,5 +780,19 @@ describe('PI_REVIEW_SYSTEM_PROMPT', () => {
     // it only exists when a base revision is known.
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /outside it are refused/);
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /when available/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /where instructions mention running/);
+  });
+
+  it('limits treatment diff recovery to path-scoped coverage gaps', () => {
+    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /Use git_diff only to recover a hunk/);
+    assert.match(
+      EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
+      /explicitly identifies as omitted or truncated/,
+    );
+    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /prefer a path-scoped request/);
+    assert.doesNotMatch(
+      EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
+      /where instructions mention running/,
+    );
   });
 });

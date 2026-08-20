@@ -30,6 +30,12 @@ import {
   type BenchmarkRiskTier,
 } from '../src/shared/benchmark-score.ts';
 import {
+  LARGEST_SCANNED_EFFECT,
+  benchmarkArmOrder,
+  pairBenchmarkRuns,
+  summarizePairedBenchmark,
+} from '../src/shared/benchmark-paired.ts';
+import {
   validateAdjudicatedBenchmarkRows,
   type BenchmarkCaseRow,
 } from '../src/shared/benchmark-rescore.ts';
@@ -506,10 +512,8 @@ async function main(): Promise<void> {
   } else {
     for (const benchmarkCase of benchmarkCases) {
       for (let repetition = 1; repetition <= repetitions; repetition += 1) {
-        for (const [side, arm] of [
-          ['control', manifest.control],
-          ['treatment', manifest.treatment],
-        ] as const) {
+        for (const side of benchmarkArmOrder(benchmarkCase.id, repetition)) {
+          const arm = side === 'control' ? manifest.control : manifest.treatment;
           const row = await runCase(
             benchmarkCase,
             side,
@@ -542,6 +546,9 @@ async function main(): Promise<void> {
       treatmentFailedRuns: treatmentSummary.failedRuns,
     },
   );
+  // The pooled p50 a latency gate reads barely responds to a uniform per-case
+  // shift, so also report the paired effect and what this sample could resolve.
+  const pairedLatency = summarizePairedBenchmark(pairBenchmarkRuns(rows));
   const summary = {
     schemaVersion: BENCHMARK_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
@@ -563,9 +570,23 @@ async function main(): Promise<void> {
       ...treatmentSummary,
     },
     qualityGate,
+    pairedLatency,
   };
   writeFileSync(join(outputDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
   console.log(`Wrote ${join(outputDir, 'summary.json')} and ${casesPath}.`);
+  const { pairs, medianRelativeDelta, permutationP, minimumDetectableEffect } = pairedLatency;
+  if (medianRelativeDelta === null || permutationP === null) {
+    console.warn(`Paired latency: ${pairs} pair(s) is too few to compare the arms.`);
+  } else {
+    const paired = `Paired latency: median ${medianRelativeDelta.toFixed(1)}% (p=${permutationP.toFixed(4)})`;
+    if (minimumDetectableEffect === null) {
+      console.warn(
+        `${paired}; no effect up to ${LARGEST_SCANNED_EFFECT}% reaches 80% power at ${pairs} pairs, so a latency gate is unanswerable.`,
+      );
+    } else {
+      console.log(`${paired}, smallest detectable effect ${minimumDetectableEffect}%.`);
+    }
+  }
 }
 
 main().catch((error: unknown) => {

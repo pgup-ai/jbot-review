@@ -571,6 +571,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
       reviewTelemetry: parseEnvBoolean('JBOT_REVIEW_TELEMETRY', true),
       evidenceQuotes: parseEnvBoolean('JBOT_EVIDENCE_QUOTES', true),
       contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
+      embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', false),
       ...(opencodePort ? { opencodePort } : {}),
       onReviewResult: (result) => {
         reviewResult = result;

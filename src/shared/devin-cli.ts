@@ -178,6 +178,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
         guidelines,
         options.lensAddendum ?? '',
         options.evidenceQuotes ?? false,
+        options.embeddedFirstPrompt ?? false,
       );
       log(
         `Prompt assembled (${label}, devin-cli): ${prompt.length} chars, guidelines=${!!guidelines}`,

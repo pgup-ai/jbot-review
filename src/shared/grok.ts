@@ -192,6 +192,7 @@ export async function runGrokReview(
   options: {
     lensAddendum?: string;
     evidenceQuotes?: boolean;
+    embeddedFirstPrompt?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
@@ -205,6 +206,7 @@ export async function runGrokReview(
     guidelines,
     options.lensAddendum ?? '',
     options.evidenceQuotes ?? false,
+    options.embeddedFirstPrompt ?? false,
   );
   log(`Prompt assembled (${label}, grok): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const raw = await runGrokPrompt(model, prompt, label, log, options.runtime, options.timeoutMs);

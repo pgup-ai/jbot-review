@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
+import { supportedModelOptions } from './config.ts';
 import { GIT_DIFF_ARGS } from './git.ts';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -16,6 +17,7 @@ import {
 } from './opencode.ts';
 import type { PromptTokenUsage, ProviderKeyConfig, TokenUsageRecorder } from './opencode.ts';
 import {
+  EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
   PI_REVIEW_SYSTEM_PROMPT,
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
@@ -584,6 +586,8 @@ export interface PiRuntime {
   sdk: PiSdkLike;
   modelRuntime: PiModelRuntimeLike;
   loader: PiResourceLoaderLike;
+  /** Embedded-first system prompt, for review and lens sessions only. */
+  reviewLoader?: PiResourceLoaderLike;
   workspace: string;
   /** Full `provider/model` — a bare model ID collides across providers. */
   mainModel: string;
@@ -642,6 +646,7 @@ export async function startPi(
     additionalProviderKeys?: ProviderKeyConfig[];
     diffScope?: PiDiffScope;
     toolTelemetry?: ToolTelemetryAccumulator;
+    embeddedFirstPrompt?: boolean;
   } = {},
 ): Promise<{ runtime: PiRuntime; stop: () => void }> {
   const piID = requirePiProvider(providerID);
@@ -661,20 +666,32 @@ export async function startPi(
   // server would accumulate leaked /tmp/jbot-pi-loader-* dirs).
   const isolationDir = mkdtempSync(join(tmpdir(), 'jbot-pi-loader-'));
   const removeIsolationDir = () => rmSync(isolationDir, { recursive: true, force: true });
-  let loader: PiResourceLoaderLike;
-  try {
-    loader = new sdk.DefaultResourceLoader({
+  // A loader's system prompt is fixed, so the embedded-first variant needs its
+  // own: it confines git_diff to coverage recovery, while the addressed and
+  // guideline aux prompts still ask for a full git diff.
+  const buildLoader = (systemPrompt: string): PiResourceLoaderLike =>
+    new sdk.DefaultResourceLoader({
       cwd: isolationDir,
       agentDir: join(isolationDir, 'agent'),
-      systemPromptOverride: () => PI_REVIEW_SYSTEM_PROMPT,
+      systemPromptOverride: () => systemPrompt,
     });
+  let loader: PiResourceLoaderLike;
+  let reviewLoader: PiResourceLoaderLike | undefined;
+  try {
+    loader = buildLoader(PI_REVIEW_SYSTEM_PROMPT);
     await loader.reload();
+    if (options.embeddedFirstPrompt) {
+      reviewLoader = buildLoader(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT);
+      await reviewLoader.reload();
+    }
   } catch (error) {
     removeIsolationDir();
     throw error;
   }
 
-  const thinkingLevel = piThinkingLevel(options.modelOptions);
+  const thinkingLevel = piThinkingLevel(
+    supportedModelOptions(providerID, modelID, options.modelOptions),
+  );
   const ignoredOptions = Object.keys(options.modelOptions ?? {}).filter(
     (key) => key !== 'reasoningEffort',
   );
@@ -711,6 +728,7 @@ export async function startPi(
     sdk,
     modelRuntime,
     loader,
+    ...(reviewLoader ? { reviewLoader } : {}),
     workspace,
     mainModel: `${providerID}/${modelID}`,
     readTool: createPiReadTool(sdk, workspace, options.toolTelemetry),
@@ -757,6 +775,8 @@ async function createPiSession(
   runtime: PiRuntime,
   model: string,
   singleShot: boolean,
+  /** Only the review and lens sessions carry the matching embedded-first user prompt. */
+  reviewSession = false,
 ): Promise<PiAgentSessionLike> {
   const { providerID, modelID } = parseModelName(model);
   const modelRef = requirePiModel(runtime.modelRuntime, providerID, modelID);
@@ -769,7 +789,7 @@ async function createPiSession(
     // registers (verified live). Single-shot sessions get no tools at all.
     ...(singleShot ? { noTools: 'all' } : piCustomToolConfig(runtime)),
     modelRuntime: runtime.modelRuntime,
-    resourceLoader: runtime.loader,
+    resourceLoader: reviewSession && runtime.reviewLoader ? runtime.reviewLoader : runtime.loader,
     sessionManager: runtime.sdk.SessionManager.inMemory(),
     settingsManager: runtime.sdk.SettingsManager.inMemory({}),
     // modelOptions are main-model-only, matching the opencode engine. Compare
@@ -969,6 +989,7 @@ export async function runPiReview(
   options: {
     lensAddendum?: string;
     evidenceQuotes?: boolean;
+    embeddedFirstPrompt?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
@@ -980,9 +1001,10 @@ export async function runPiReview(
     guidelines,
     options.lensAddendum ?? '',
     options.evidenceQuotes ?? false,
+    options.embeddedFirstPrompt ?? false,
   );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
-  const session = await createPiSession(runtime, model, false);
+  const session = await createPiSession(runtime, model, false, true);
   try {
     const raw = await promptPiSession(
       session,

@@ -178,12 +178,27 @@ export interface ModelConfig {
    * when omitted; false entries are seeded from Models.dev family metadata.
    */
   promptCache?: boolean;
+  /**
+   * Reasoning efforts this model accepts. Omitted means every effort is fine;
+   * a request outside the list is dropped so the provider applies its own
+   * default rather than rejecting the call.
+   */
+  reasoningEfforts?: readonly string[];
 }
 
 const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
   'glm-5.1': { promptCache: false },
   'glm-5.2': { promptCache: false },
   'glm-5': { promptCache: false },
+} satisfies Record<string, ModelConfig>;
+
+/**
+ * Models that always reason and accept only these efforts: the main pass's
+ * `medium` is a hard 400 ("[1210] This model always engages in thinking and
+ * cannot be disabled; please use low, high, or max"), which no retry recovers.
+ */
+const ALWAYS_THINKING_MODELS = {
+  'x-preview-f-free': { reasoningEfforts: ['low', 'high', 'max'] },
 } satisfies Record<string, ModelConfig>;
 
 // See https://models.dev/ for opencode-backed model catalogs. CLI backends
@@ -193,6 +208,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'opencode/deepseek-v4-flash-free',
     keyEnv: 'OPENCODE_API_KEY',
     keyInput: 'opencode-api-key',
+    models: ALWAYS_THINKING_MODELS,
   },
   'opencode-go': {
     defaultModel: 'opencode-go/deepseek-v4-flash',
@@ -411,6 +427,23 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     return false;
   if (PROVIDERS[providerID]?.promptCache === false) return false;
   return PROVIDERS[providerID]?.models?.[modelID]?.promptCache !== false;
+}
+
+/**
+ * Drops a `reasoningEffort` the model would reject. Model options are resolved
+ * per provider before a pool entry is chosen, so this is the first point that
+ * knows both the model and the effort.
+ */
+export function supportedModelOptions(
+  providerID: string,
+  modelID: string,
+  modelOptions?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const supported = PROVIDERS[providerID]?.models?.[modelID]?.reasoningEfforts;
+  const effort = modelOptions?.reasoningEffort;
+  if (!supported || typeof effort !== 'string' || supported.includes(effort)) return modelOptions;
+  const { reasoningEffort: _dropped, ...rest } = modelOptions!;
+  return rest;
 }
 
 export interface PromptCachePolicyInput {

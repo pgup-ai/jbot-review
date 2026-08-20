@@ -721,6 +721,8 @@ export interface ReviewRunOptions {
    * finding-level telemetry says which side wins.
    */
   contextTrim?: boolean;
+  /** Env-only Phase 3 prompt treatment. Default false until its A/B gates pass. */
+  embeddedFirstPrompt?: boolean;
   /**
    * Model for the auxiliary sessions (addressed-check, guideline compliance,
    * finding verification). Lets the main review run on a stronger tier while
@@ -1705,6 +1707,7 @@ async function runReviewPipeline(params: {
             ? [{ providerID: auxProviderID, apiKey: options.auxApiKey }]
             : undefined,
           toolTelemetry: backendToolTelemetry,
+          embeddedFirstPrompt: options.embeddedFirstPrompt,
           // Shell-less pi sessions recover omitted/truncated hunks through the
           // read-only git_diff tool (invariant 1); base and diff form mirror
           // the run's diff scope.
@@ -2042,6 +2045,7 @@ async function runReviewPipeline(params: {
       diffHunksOptions: mainRequiresCompleteEmbeddedDiff
         ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
         : undefined,
+      embeddedFirstPrompt: options.embeddedFirstPrompt,
     });
 
     // Opt-in via an operator-configured directory, NEVER a path inside the
@@ -2074,6 +2078,7 @@ async function runReviewPipeline(params: {
               engine: mainBackend.name,
               modelOptions: options.modelOptions,
               baseURL,
+              ...(options.embeddedFirstPrompt ? { embeddedFirstPrompt: true } : {}),
             }),
           }
         : undefined;
@@ -2112,6 +2117,7 @@ async function runReviewPipeline(params: {
         ? () => disableContext7Mcp(opencodeRuntime!.client, log)
         : undefined,
       evidenceQuotes: options.evidenceQuotes,
+      embeddedFirstPrompt: options.embeddedFirstPrompt,
       log,
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
@@ -2187,6 +2193,7 @@ async function runReviewPipeline(params: {
         lensKeys: incrementalLenses.lensKeys,
         timeoutMs: finderTimeoutMs,
         evidenceQuotes: options.evidenceQuotes,
+        embeddedFirstPrompt: options.embeddedFirstPrompt,
         log,
         onTokenUsage: recordTokenUsage,
         onCoverage: recordCoverage,
@@ -2693,6 +2700,7 @@ export function normalizeOptions(
     guidelinePass: options?.guidelinePass ?? true,
     shardCachePath: options?.shardCachePath ?? '',
     contextTrim: options?.contextTrim ?? false,
+    embeddedFirstPrompt: options?.embeddedFirstPrompt ?? false,
     auxModel: options?.auxModel ?? '',
     auxApiKey: options?.auxApiKey ?? '',
     auxBaseURL: options?.auxBaseURL ?? '',
@@ -2825,6 +2833,7 @@ function startLensPasses(params: {
   lensKeys: string[];
   timeoutMs?: number;
   evidenceQuotes?: boolean;
+  embeddedFirstPrompt?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
@@ -2843,6 +2852,7 @@ function startLensPasses(params: {
           timeoutMs: params.timeoutMs,
           onTokenUsage: params.onTokenUsage,
           evidenceQuotes: params.evidenceQuotes,
+          embeddedFirstPrompt: params.embeddedFirstPrompt,
         })
         .then((result) => {
           params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
@@ -3065,6 +3075,7 @@ export function buildShardPlans(params: {
   shards: ReturnType<typeof shardFilesForReview>;
   requireCompleteEmbeddedDiff?: boolean;
   diffHunksOptions?: DiffHunksOptions;
+  embeddedFirstPrompt?: boolean;
 }): ShardPlan[] {
   const {
     coreContext,
@@ -3093,7 +3104,12 @@ export function buildShardPlans(params: {
   }
   return shards.map((shard, index) => {
     const assignedFiles = shard.map((file) => file.filename);
-    const assignment = buildShardAssignmentBlock(assignedFiles, index, shards.length);
+    const assignment = buildShardAssignmentBlock(
+      assignedFiles,
+      index,
+      shards.length,
+      params.embeddedFirstPrompt,
+    );
     const diffResult = buildDiffHunksBlockWithMetadata(shard, diffHunksOptions);
     if (requireCompleteEmbeddedDiff) {
       assertCompleteEmbeddedDiff(diffResult, `review-shard-${index + 1}`);
@@ -3146,6 +3162,7 @@ async function runShardedReview(params: {
   context7ApiKey: string;
   disableContext7?: () => Promise<void>;
   evidenceQuotes?: boolean;
+  embeddedFirstPrompt?: boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
@@ -3217,6 +3234,7 @@ async function runShardedReview(params: {
           timeoutMs,
           onTokenUsage: params.onTokenUsage,
           evidenceQuotes: params.evidenceQuotes,
+          embeddedFirstPrompt: params.embeddedFirstPrompt,
         });
         persist(result, primaryFingerprint);
         cover('completed');
@@ -3288,6 +3306,7 @@ async function runShardedReview(params: {
               timeoutMs: retryTimeoutMs,
               onTokenUsage: params.onTokenUsage,
               evidenceQuotes: params.evidenceQuotes,
+              embeddedFirstPrompt: params.embeddedFirstPrompt,
             },
           );
           persist(result, retryFingerprint);

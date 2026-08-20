@@ -3,7 +3,7 @@ import { paginateRest } from '@octokit/plugin-paginate-rest';
 import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 import type { Octokit } from '../shared/github.ts';
 import { clonePr } from '../app/clone.ts';
-import { defaultModelOptions } from '../shared/config.ts';
+import { defaultModelOptions, parseEnvBoolean } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 import { runPrReview } from '../shared/runner.ts';
 import type { Severity } from '../shared/types.ts';
@@ -77,6 +77,7 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         reviewShards: 1,
         timeBudgetMinutes: 30,
         modelOptions: defaultModelOptions(parseModelName(job.model).providerID),
+        embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', false),
         onReviewResult: (r) => {
           const counts: Partial<Record<Severity, number>> = {};
           for (const f of r.findings) counts[f.severity] = (counts[f.severity] ?? 0) + 1;
