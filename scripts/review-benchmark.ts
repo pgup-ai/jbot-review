@@ -58,6 +58,14 @@ import {
 import { benchmarkArgument } from './benchmark-args.ts';
 
 const execFileAsync = promisify(execFile);
+const GIT_REPOSITORY_ENV = new Set([
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+]);
 
 function usage(): never {
   console.error(
@@ -179,11 +187,15 @@ async function prepareWorkspace(
   }
 }
 
-function writeFixtureFile(workspace: string, path: string, content: string): void {
+function writeFixtureFile(workspace: string, path: string, content: string | null): void {
   const destination = resolve(workspace, path);
   const local = relative(workspace, destination);
   if (!local || local.startsWith('..') || isAbsolute(local)) {
     throw new Error(`Fixture path escapes the benchmark workspace: ${path}.`);
+  }
+  if (content === null) {
+    rmSync(destination, { force: true });
+    return;
   }
   mkdirSync(dirname(destination), { recursive: true });
   writeFileSync(destination, content);
@@ -201,7 +213,9 @@ function fixtureGitEnvironment(home: string): NodeJS.ProcessEnv {
     GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z',
   };
   for (const key of Object.keys(env)) {
-    if (/^GIT_CONFIG_(?:COUNT|KEY_|VALUE_|PARAMETERS$)/.test(key)) delete env[key];
+    if (/^GIT_CONFIG_(?:COUNT|KEY_|VALUE_|PARAMETERS$)/.test(key) || GIT_REPOSITORY_ENV.has(key)) {
+      delete env[key];
+    }
   }
   return env;
 }

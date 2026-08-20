@@ -16,7 +16,7 @@ const competitorConfig = benchmarkArgument('competitor-config');
 const output = benchmarkArgument('output');
 if (!adapter || !input || !controlConfig || !competitorConfig || !output) {
   throw new Error(
-    'usage: review-competitor-adapter.ts --adapter <benchmark-json|github-review|sarif> --input <json> --control-config <json> --competitor-config <json> --output <json>',
+    'usage: review-competitor-adapter.ts --adapter <benchmark-json|github-review|sarif> --input <json> --control-config <json> --competitor-config <json> --output <json> [--repository-root <directory>]',
   );
 }
 
@@ -30,7 +30,9 @@ writeFileSync(
   `${JSON.stringify(
     {
       adapter,
-      findings: normalizeCompetitorFindings(adapter, parse(input)),
+      findings: normalizeCompetitorFindings(adapter, parse(input), {
+        repositoryRoot: resolve(benchmarkArgument('repository-root') ?? '.'),
+      }),
       rankingEligible: comparability.sameModelComparable,
       comparability,
     },

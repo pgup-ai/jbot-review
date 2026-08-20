@@ -99,6 +99,31 @@ function validateRow(
   ) {
     throw new Error(`Invalid execution data for adjudicated benchmark case ${benchmarkCase.id}.`);
   }
+  let executionConsistent: boolean;
+  switch (row.failureClass) {
+    case null:
+      executionConsistent = row.exitCode === 0 && row.signal === null && !row.timedOut;
+      break;
+    case 'timeout':
+      executionConsistent = row.timedOut && row.signal !== null;
+      break;
+    case 'signal':
+      executionConsistent = !row.timedOut && row.signal !== null;
+      break;
+    case 'runner-exit':
+    case 'invalid-output':
+    case 'missing-output':
+      executionConsistent =
+        !row.timedOut && row.signal === null && row.exitCode !== null && row.exitCode !== 0;
+      break;
+    default:
+      executionConsistent = !row.timedOut && row.signal === null && row.exitCode === null;
+  }
+  if (!executionConsistent) {
+    throw new Error(
+      `Contradictory execution data for adjudicated benchmark case ${benchmarkCase.id}.`,
+    );
+  }
   if (!isRecord(row.program)) {
     throw new Error(`Invalid program metrics for adjudicated benchmark case ${benchmarkCase.id}.`);
   }

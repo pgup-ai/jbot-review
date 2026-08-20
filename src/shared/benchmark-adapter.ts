@@ -1,3 +1,6 @@
+import { isAbsolute, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { benchmarkCanonicalJson, type BenchmarkObservedFinding } from './benchmark-score.ts';
 import { VALID_SEVERITIES, type Severity } from './types.ts';
 
@@ -14,6 +17,10 @@ export interface CompetitorModelConfiguration {
 interface CompetitorComparability {
   sameModelComparable: boolean;
   mismatches: string[];
+}
+
+interface CompetitorAdapterOptions {
+  repositoryRoot?: string;
 }
 
 const SEVERITY_ALIASES: Record<string, Severity> = {
@@ -91,6 +98,65 @@ function sarifMessage(
   return messageString(ruleStrings?.[id]) ?? messageString(globalStrings?.[id]) ?? id;
 }
 
+function sarifBaseUri(
+  run: Record<string, unknown>,
+  id: string,
+  seen = new Set<string>(),
+): string | undefined {
+  if (seen.has(id) || !isRecord(run.originalUriBaseIds)) return undefined;
+  seen.add(id);
+  const entry = run.originalUriBaseIds[id];
+  if (!isRecord(entry) || typeof entry.uri !== 'string') return undefined;
+  if (typeof entry.uriBaseId !== 'string') return entry.uri;
+  const base = sarifBaseUri(run, entry.uriBaseId, seen);
+  if (!base) return undefined;
+  try {
+    return new URL(entry.uri, base).href;
+  } catch {
+    return undefined;
+  }
+}
+
+function repositoryPath(path: string, repositoryRoot?: string): string {
+  const absolute = isAbsolute(path);
+  const local = absolute && repositoryRoot ? relative(resolve(repositoryRoot), path) : path;
+  const portable = local.replaceAll('\\', '/').replace(/^\.\//, '');
+  return !portable ||
+    (absolute && !repositoryRoot) ||
+    portable.startsWith('/') ||
+    portable.split('/').includes('..')
+    ? ''
+    : portable;
+}
+
+function sarifArtifactPath(
+  run: Record<string, unknown>,
+  artifact: Record<string, unknown> | undefined,
+  repositoryRoot?: string,
+): string {
+  if (!artifact || typeof artifact.uri !== 'string') return '';
+  let uri = artifact.uri;
+  if (typeof artifact.uriBaseId === 'string') {
+    const base = sarifBaseUri(run, artifact.uriBaseId);
+    if (!base) return '';
+    try {
+      uri = new URL(uri, base).href;
+    } catch {
+      return '';
+    }
+  }
+  try {
+    const parsed = new URL(uri);
+    return parsed.protocol === 'file:' ? repositoryPath(fileURLToPath(parsed), repositoryRoot) : '';
+  } catch {
+    try {
+      return repositoryPath(decodeURIComponent(uri.split(/[?#]/, 1)[0]), repositoryRoot);
+    } catch {
+      return '';
+    }
+  }
+}
+
 function observedFinding(value: unknown): BenchmarkObservedFinding | undefined {
   if (
     !isRecord(value) ||
@@ -160,7 +226,10 @@ function normalizeGitHubReview(input: unknown): BenchmarkObservedFinding[] {
   });
 }
 
-function normalizeSarif(input: unknown): BenchmarkObservedFinding[] {
+function normalizeSarif(
+  input: unknown,
+  options: CompetitorAdapterOptions,
+): BenchmarkObservedFinding[] {
   if (!isRecord(input) || !Array.isArray(input.runs)) throw new Error('sarif input requires runs.');
   const findings: BenchmarkObservedFinding[] = [];
   const severity: Record<string, Severity> = { error: 'P1', warning: 'P2', note: 'P3', none: 'P3' };
@@ -181,7 +250,11 @@ function normalizeSarif(input: unknown): BenchmarkObservedFinding[] {
       const artifact = isRecord(physical) ? physical.artifactLocation : undefined;
       const region = isRecord(physical) ? physical.region : undefined;
       const message = sarifMessage(run, result);
-      const path = isRecord(artifact) && typeof artifact.uri === 'string' ? artifact.uri : '';
+      const path = sarifArtifactPath(
+        run,
+        isRecord(artifact) ? artifact : undefined,
+        options.repositoryRoot,
+      );
       const line =
         isRecord(region) && Number.isInteger(region.startLine) ? (region.startLine as number) : 0;
       const title = message ?? result.ruleId;
@@ -211,10 +284,11 @@ function normalizeSarif(input: unknown): BenchmarkObservedFinding[] {
 export function normalizeCompetitorFindings(
   adapter: CompetitorAdapter,
   input: unknown,
+  options: CompetitorAdapterOptions = {},
 ): BenchmarkObservedFinding[] {
   if (adapter === 'benchmark-json') return normalizeBenchmarkJson(input);
   if (adapter === 'github-review') return normalizeGitHubReview(input);
-  if (adapter === 'sarif') return normalizeSarif(input);
+  if (adapter === 'sarif') return normalizeSarif(input, options);
   throw new Error(`Unsupported competitor adapter: ${String(adapter)}.`);
 }
 

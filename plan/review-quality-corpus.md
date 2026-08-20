@@ -80,6 +80,8 @@ accept benchmark JSON, GitHub review-comment JSON, or SARIF and do not invoke
 or modify the competitor. Every export must include model, revision, endpoint,
 reasoning, and sampling metadata for both control and competitor. Any mismatch
 sets `rankingEligible` to false and is disclosed in the output.
+SARIF file URIs and URI bases are resolved against `--repository-root`, which
+defaults to the current directory.
 
 Default-policy changes must pass the full corpus. Missing any seeded P0/P1 or
 regressing precision or severity-weighted recall by more than two percentage

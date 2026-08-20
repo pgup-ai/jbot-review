@@ -66,7 +66,7 @@ describe('synthetic benchmark fixtures', () => {
         },
       ],
     };
-    assert.equal(materializeBenchmarkFixture(fixture, 'insert')[0].base, '');
-    assert.equal(materializeBenchmarkFixture(fixture, 'delete')[0].head, '');
+    assert.equal(materializeBenchmarkFixture(fixture, 'insert')[0].base, null);
+    assert.equal(materializeBenchmarkFixture(fixture, 'delete')[0].head, null);
   });
 });

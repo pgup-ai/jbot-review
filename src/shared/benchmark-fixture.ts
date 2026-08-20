@@ -12,8 +12,8 @@ interface SyntheticFixtureShape {
 
 interface MaterializedFixtureFile {
   path: string;
-  base: string;
-  head: string;
+  base: string | null;
+  head: string | null;
 }
 
 interface ParsedFixtureFile extends MaterializedFixtureFile {
@@ -100,8 +100,8 @@ function materializePatch(file: SyntheticFixtureFile): ParsedFixtureFile {
   if (!active) throw new Error(`Fixture ${file.path} requires a valid unified-diff hunk.`);
   return {
     path: file.path,
-    base: base.length > 0 ? `${base.join('\n')}\n` : '',
-    head: head.length > 0 ? `${head.join('\n')}\n` : '',
+    base: base.length > 0 ? `${base.join('\n')}\n` : null,
+    head: head.length > 0 ? `${head.join('\n')}\n` : null,
     additions,
     deletions,
   };
@@ -124,8 +124,8 @@ function fixtureShape(value: unknown, caseId: string): SyntheticFixtureShape {
   return value as unknown as SyntheticFixtureShape;
 }
 
-function appendLine(content: string, line: string): string {
-  return `${content}${line}\n`;
+function appendLine(content: string | null, line: string): string {
+  return `${content ?? ''}${line}\n`;
 }
 
 function materializeShape(

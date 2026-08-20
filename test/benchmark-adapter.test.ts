@@ -101,6 +101,35 @@ describe('competitor benchmark adapters', () => {
         },
       ],
     );
+    assert.deepEqual(
+      normalizeCompetitorFindings(
+        'sarif',
+        {
+          runs: [
+            {
+              originalUriBaseIds: { SRCROOT: { uri: 'file:///workspace/' } },
+              results: [
+                {
+                  ruleId: 'encoded-path',
+                  level: 'warning',
+                  message: { text: 'Encoded path' },
+                  locations: [
+                    {
+                      physicalLocation: {
+                        artifactLocation: { uri: 'src/a%20b.ts', uriBaseId: 'SRCROOT' },
+                        region: { startLine: 4 },
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { repositoryRoot: '/workspace' },
+      )[0].path,
+      'src/a b.ts',
+    );
     const repeatedRule = normalizeCompetitorFindings('sarif', {
       runs: [
         {
