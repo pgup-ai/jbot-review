@@ -19,9 +19,10 @@ import {
 import { runPrReview } from '../shared/runner.ts';
 import type { Octokit } from '../shared/github.ts';
 import { VALID_SEVERITIES, type Severity } from '../shared/types.ts';
+import { sdkEngineForProxy, verifyOpencodeProxy } from './proxy.ts';
 
 async function main(): Promise<void> {
-  const opencodeProxyEnv = takeOpencodeProxyEnv(process.env);
+  const requestedOpencodeProxyEnv = takeOpencodeProxyEnv(process.env);
   // Pessimistic default so even a validation throw (outside the try below)
   // leaves a readable terminal-state; overwritten on success.
   core.setOutput('terminal-state', 'failed');
@@ -50,7 +51,7 @@ async function main(): Promise<void> {
   );
   const options = {
     enhancedContext: true,
-    opencodeProxyEnv,
+    opencodeProxyEnv: {},
     sdkEngine: getInputOrEnv('sdk-engine', 'JBOT_SDK_ENGINE') || 'auto',
     dryRun: parseBooleanInput('dry-run', false),
     autoApprove: parseBooleanInput('auto-approve', false),
@@ -84,9 +85,6 @@ async function main(): Promise<void> {
     core.warning(warning);
   }
   core.info(`Model: ${modelPool.join(', ')}`);
-  core.info(
-    `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModelInput || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,
-  );
 
   const octokit = github.getOctokit(token) as unknown as Octokit;
   const threadResolutionOctokit = threadResolutionToken
@@ -99,6 +97,15 @@ async function main(): Promise<void> {
     const pull = await resolvePullRequest(octokit, owner, repo, pullTarget);
     core.info(
       `Event: ${github.context.eventName}  PR: #${pull.number}  Action: ${github.context.payload.action ?? 'manual'}`,
+    );
+    options.opencodeProxyEnv = await verifyOpencodeProxy(
+      requestedOpencodeProxyEnv,
+      pull.head.repo?.full_name === `${owner}/${repo}`,
+      core,
+    );
+    options.sdkEngine = sdkEngineForProxy(options.sdkEngine, options.opencodeProxyEnv);
+    core.info(
+      `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModelInput || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,
     );
 
     const model = pickPooledModel(modelPool, pull.head.sha, github.context.runAttempt);
