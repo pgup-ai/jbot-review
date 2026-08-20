@@ -283,8 +283,10 @@ async function runCase(
         manifest.runner.fixtureMode,
         gitEnv,
       );
-    } catch {
-      console.warn(`warning: workspace setup failed for ${benchmarkCase.id}.`);
+    } catch (error) {
+      console.warn(
+        `warning: workspace setup failed for ${benchmarkCase.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return {
         schemaVersion: BENCHMARK_SCHEMA_VERSION,
         arm: side,

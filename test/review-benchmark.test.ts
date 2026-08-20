@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -440,7 +440,7 @@ describe('review-benchmark', () => {
       writeFileSync(join(root, 'corpus.json'), noOpCorpus);
       writeFileSync(manifestPath, JSON.stringify(source));
       const noOpOutput = join(root, 'no-op-output');
-      execFileSync(
+      const noOpRun = spawnSync(
         TSX,
         [
           join(ROOT, 'scripts/review-benchmark.ts'),
@@ -451,6 +451,8 @@ describe('review-benchmark', () => {
         ],
         { encoding: 'utf8', stdio: 'pipe' },
       );
+      assert.equal(noOpRun.status, 0, noOpRun.stderr);
+      assert.match(noOpRun.stderr, /Fixture same\.ts materializes no change\./);
       const noOpSummary = JSON.parse(readFileSync(join(noOpOutput, 'summary.json'), 'utf8')) as {
         control: { failedRuns: number };
         treatment: { failedRuns: number };
