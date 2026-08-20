@@ -200,6 +200,32 @@ describe('aux model options', () => {
       undefined,
     );
 
+    // The main entry is built by buildProviderEntry, which filters the same way.
+    const main = buildConfig(
+      'opencode',
+      'x-preview-f-free',
+      'k',
+      { reasoningEffort: 'medium' },
+      true,
+    );
+    assert.equal(
+      (main as { provider: Record<string, { models?: Record<string, unknown> }> }).provider.opencode
+        .models,
+      undefined,
+    );
+    const mainKept = buildConfig(
+      'opencode',
+      'x-preview-f-free',
+      'k',
+      { reasoningEffort: 'high' },
+      true,
+    );
+    assert.deepEqual(
+      (mainKept as { provider: Record<string, { models: Record<string, unknown> }> }).provider
+        .opencode.models,
+      { 'x-preview-f-free': { options: { reasoningEffort: 'high' } } },
+    );
+
     // A supported effort still reaches the aux entry.
     const kept = buildConfig('opencode', 'deepseek-v4-flash-free', 'k', undefined, true, [
       {

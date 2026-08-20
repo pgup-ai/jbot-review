@@ -510,9 +510,9 @@ async function main(): Promise<void> {
   if (adjudicatedCasesArg) {
     for (const row of rows) appendFileSync(casesPath, `${JSON.stringify(row)}\n`);
   } else {
-    for (const [caseIndex, benchmarkCase] of benchmarkCases.entries()) {
+    for (const benchmarkCase of benchmarkCases) {
       for (let repetition = 1; repetition <= repetitions; repetition += 1) {
-        for (const side of benchmarkArmOrder(caseIndex, repetition)) {
+        for (const side of benchmarkArmOrder(benchmarkCase.id, repetition)) {
           const arm = side === 'control' ? manifest.control : manifest.treatment;
           const row = await runCase(
             benchmarkCase,

@@ -71,16 +71,23 @@ describe('pairBenchmarkRuns', () => {
 });
 
 describe('benchmarkArmOrder', () => {
-  it('balances which arm runs first so order is not the treatment', () => {
-    const leaders = [];
-    for (let caseIndex = 0; caseIndex < 6; caseIndex += 1) {
-      for (let repetition = 1; repetition <= 2; repetition += 1) {
-        const order = benchmarkArmOrder(caseIndex, repetition);
-        assert.deepEqual([...order].sort(), ['control', 'treatment']);
-        leaders.push(order[0]);
-      }
+  it('assigns a stable leader per case without tracking position', () => {
+    const ids = Array.from({ length: 200 }, (_, index) => `case-${index}`);
+    const leaders = ids.map((id) => benchmarkArmOrder(id, 1)[0]);
+
+    for (const order of ids.map((id) => benchmarkArmOrder(id, 1))) {
+      assert.deepEqual([...order].sort(), ['control', 'treatment']);
     }
-    assert.equal(leaders.filter((arm) => arm === 'control').length, leaders.length / 2);
+    // Deterministic: the same case and repetition always lead with the same arm.
+    assert.deepEqual(benchmarkArmOrder('case-7', 2), benchmarkArmOrder('case-7', 2));
+    // A repetition is its own draw, so a case is not pinned to one arm.
+    const perCase = [1, 2, 3, 4].map((rep) => benchmarkArmOrder('case-7', rep)[0]);
+    assert.ok(new Set(perCase).size > 1);
+    // Roughly balanced, and not the index parity a positional rule would give.
+    const controlFirst = leaders.filter((arm) => arm === 'control').length;
+    assert.ok(controlFirst > 70 && controlFirst < 130, `control led ${controlFirst}/200`);
+    const parity = ids.map((_, index) => (index % 2 === 0 ? 'control' : 'treatment'));
+    assert.notDeepEqual(leaders, parity);
   });
 });
 

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { benchmarkPercentile, benchmarkRandom, type BenchmarkInterval } from './benchmark-score.ts';
 import type { BenchmarkCaseRow } from './benchmark-rescore.ts';
 
@@ -24,14 +26,20 @@ export const LARGEST_SCANNED_EFFECT = EFFECT_LADDER[EFFECT_LADDER.length - 1];
  * Which arm runs first for a pair. Running control first every time confounds
  * the arm label with execution order, so provider warm-up, throttling, or load
  * drift inside a pair reads as a treatment effect and breaks the
- * exchangeability the permutation test assumes. Alternating balances order
- * across the sample and keeps a run reproducible.
+ * exchangeability the permutation test assumes.
+ *
+ * Allocation hashes the case id rather than alternating on position: a parity
+ * rule ties the favoured arm to a case's index, which correlates with anything
+ * else that alternates. Balance is then approximate rather than exact, which
+ * costs a little power and buys independence. The inputs are both already in
+ * every output row, so an assignment is recomputable without persisting it.
  */
 export function benchmarkArmOrder(
-  caseIndex: number,
+  caseId: string,
   repetition: number,
 ): readonly ('control' | 'treatment')[] {
-  return (caseIndex + repetition) % 2 === 0 ? ['control', 'treatment'] : ['treatment', 'control'];
+  const digest = createHash('sha256').update(`${caseId}:${repetition}`).digest();
+  return digest[0] % 2 === 0 ? ['control', 'treatment'] : ['treatment', 'control'];
 }
 
 export interface BenchmarkPair {
