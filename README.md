@@ -102,6 +102,7 @@ jobs:
           provider: ${{ vars.JBOT_REVIEW_PROVIDER || '' }}
           model: ${{ vars.JBOT_REVIEW_MODEL || '' }}
           sdk-engine: ${{ vars.JBOT_SDK_ENGINE || '' }}
+          opencode-proxy-url: ${{ secrets.OPENCODE_PROXY_URL }}
           aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
           auto-approve: ${{ vars.JBOT_AUTO_APPROVE || 'false' }}
           aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
@@ -291,6 +292,7 @@ auxiliary providers without editing the workflow.
     provider: ${{ inputs.provider || vars.JBOT_REVIEW_PROVIDER || '' }}
     model: ${{ inputs.model || vars.JBOT_REVIEW_MODEL || '' }}
     sdk-engine: ${{ vars.JBOT_SDK_ENGINE || '' }}
+    opencode-proxy-url: ${{ secrets.OPENCODE_PROXY_URL }}
     aux-provider: ${{ vars.JBOT_AUX_PROVIDER || '' }}
     aux-model: ${{ vars.JBOT_REVIEW_AUX_MODEL || '' }}
     pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] }}
@@ -671,6 +673,7 @@ documentation lookup.
 | `provider`                   | No       | from `model`          | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                                                                                              |
 | `model`                      | No       | `opencode` default    | `provider/model` reference, or a comma-separated pool that may span providers; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL`                                                     |
 | `sdk-engine`                 | No       | `auto`                | `auto` uses pi for cataloged models; `opencode` pins SDK sessions to opencode                                                                                                                          |
+| `opencode-proxy-url`         | No       | —                     | Optional HTTP/HTTPS proxy URL for OpenCode; verified against `api.ipify.org`, ignored for fork-head PRs, and skipped without failing the review when unavailable                                       |
 | `aux-provider`               | No       | from `aux-model`      | Deprecated — qualify `aux-model` instead; pins the aux provider when set (`JBOT_AUX_PROVIDER`)                                                                                                         |
 | `aux-model`                  | No       | Main model            | `provider/model` reference, or a pool that may span providers; a bare id follows `aux-provider`, else the deprecated `provider` pin, else the picked main model; can come from `JBOT_REVIEW_AUX_MODEL` |
 | `opencode-api-key`           | No       | —                     | Used when the main or aux model names `opencode`/`opencode-go`                                                                                                                                         |
