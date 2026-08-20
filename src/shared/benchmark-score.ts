@@ -520,12 +520,14 @@ export function evaluateBenchmarkQualityGate(
     treatment: treatment.semanticAdjudication,
   };
   const reasons: string[] = [];
+  const controlSuccessfulRunKeys = new Set(completion?.controlSuccessfulRunKeys);
   const treatmentSuccessfulRunKeys = new Set(completion?.treatmentSuccessfulRunKeys);
   if (
     completion &&
     (completion.controlFailedRuns > 0 ||
       completion.treatmentFailedRuns > 0 ||
-      completion.controlSuccessfulRunKeys.some((key) => !treatmentSuccessfulRunKeys.has(key)))
+      controlSuccessfulRunKeys.size !== treatmentSuccessfulRunKeys.size ||
+      [...controlSuccessfulRunKeys].some((key) => !treatmentSuccessfulRunKeys.has(key)))
   ) {
     reasons.push('benchmark arms did not complete a comparable run population');
   }

@@ -306,6 +306,14 @@ describe('scoreBenchmark', () => {
     assert.ok(
       evaluateBenchmarkQualityGate(control, control, 0.02, {
         controlSuccessfulRunKeys: ['case-a:1'],
+        treatmentSuccessfulRunKeys: ['case-a:1', 'case-b:1'],
+        controlFailedRuns: 0,
+        treatmentFailedRuns: 0,
+      }).reasons.includes('benchmark arms did not complete a comparable run population'),
+    );
+    assert.ok(
+      evaluateBenchmarkQualityGate(control, control, 0.02, {
+        controlSuccessfulRunKeys: ['case-a:1'],
         treatmentSuccessfulRunKeys: ['case-b:1'],
         controlFailedRuns: 0,
         treatmentFailedRuns: 0,
@@ -317,6 +325,14 @@ describe('scoreBenchmark', () => {
         treatmentSuccessfulRunKeys: ['case-a:1', 'case-b:1'],
         controlFailedRuns: 1,
         treatmentFailedRuns: 0,
+      }).reasons.includes('benchmark arms did not complete a comparable run population'),
+    );
+    assert.ok(
+      evaluateBenchmarkQualityGate(control, control, 0.02, {
+        controlSuccessfulRunKeys: ['case-a:1'],
+        treatmentSuccessfulRunKeys: ['case-a:1'],
+        controlFailedRuns: 0,
+        treatmentFailedRuns: 1,
       }).reasons.includes('benchmark arms did not complete a comparable run population'),
     );
   });
