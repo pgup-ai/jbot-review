@@ -15,6 +15,7 @@ import {
   type BenchmarkCategory,
   type BenchmarkReleaseSubset,
 } from './benchmark-corpus.ts';
+import { isNonArrayRecord as isRecord } from './text.ts';
 import { VALID_SEVERITIES, type Severity } from './types.ts';
 
 const GITHUB_TOKEN_KEYS = new Set([
@@ -66,10 +67,6 @@ export interface BenchmarkManifest {
   control: BenchmarkArm;
   treatment: BenchmarkArm;
   cases: BenchmarkCase[];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export function parseBenchmarkPositiveInteger(value: unknown, label: string): number {

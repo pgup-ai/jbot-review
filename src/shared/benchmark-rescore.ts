@@ -10,6 +10,7 @@ import {
   type BenchmarkFailureClass,
   type BenchmarkProgramMetrics,
 } from './benchmark-runner.ts';
+import { isNonArrayRecord as isRecord } from './text.ts';
 
 export interface BenchmarkCaseRow extends BenchmarkCaseRun {
   schemaVersion: number;
@@ -37,10 +38,6 @@ const FAILURE_CLASSES = new Set<BenchmarkFailureClass>([
 const PROGRAM_METRICS = Object.keys(
   emptyBenchmarkProgramMetrics(),
 ) as (keyof BenchmarkProgramMetrics)[];
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;

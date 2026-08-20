@@ -2,6 +2,7 @@ import { isAbsolute, relative, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { benchmarkCanonicalJson, type BenchmarkObservedFinding } from './benchmark-score.ts';
+import { isNonArrayRecord as isRecord } from './text.ts';
 import { VALID_SEVERITIES, type Severity } from './types.ts';
 
 export type CompetitorAdapter = 'benchmark-json' | 'github-review' | 'sarif';
@@ -41,10 +42,6 @@ const SEVERITY_ALIASES: Record<string, Severity> = {
   informational: 'P3',
   nit: 'nit',
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
 
 function normalizeSeverity(value: unknown): Severity | undefined {
   return typeof value === 'string' ? SEVERITY_ALIASES[value.trim().toLowerCase()] : undefined;

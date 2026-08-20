@@ -92,6 +92,26 @@ describe('historical benchmark adjudication', () => {
       )[0].expectedFindingId,
       'finding-1',
     );
+    assert.deepEqual(
+      adjudicateHistoricalCandidates(
+        [candidate],
+        [
+          {
+            candidateId: candidate.candidateId,
+            adjudicatorId: 'a',
+            decision: 'rejected',
+            expectedFindingId: 'finding-1',
+          },
+          { candidateId: candidate.candidateId, adjudicatorId: 'b', decision: 'rejected' },
+        ],
+      )[0],
+      {
+        candidateId: candidate.candidateId,
+        status: 'adjudicated',
+        decision: 'rejected',
+        labelCount: 2,
+      },
+    );
     assert.throws(
       () =>
         adjudicateHistoricalCandidates(

@@ -199,7 +199,11 @@ export function adjudicateHistoricalCandidates(
       return { candidateId: candidate.candidateId, status: 'pending', labelCount: group.length };
     }
     const decisions = new Set(group.map((label) => label.decision));
-    const expectedIds = new Set(group.map((label) => label.expectedFindingId?.trim() ?? ''));
+    const expectedIds = new Set(
+      group
+        .filter((label) => label.decision === 'accepted')
+        .map((label) => label.expectedFindingId?.trim() ?? ''),
+    );
     if (decisions.size !== 1 || decisions.has('uncertain') || expectedIds.size > 1) {
       return {
         candidateId: candidate.candidateId,
@@ -212,7 +216,9 @@ export function adjudicateHistoricalCandidates(
       candidateId: candidate.candidateId,
       status: 'adjudicated',
       decision: first.decision as 'accepted' | 'rejected',
-      ...(first.expectedFindingId ? { expectedFindingId: first.expectedFindingId.trim() } : {}),
+      ...(first.decision === 'accepted' && first.expectedFindingId
+        ? { expectedFindingId: first.expectedFindingId.trim() }
+        : {}),
       labelCount: group.length,
     };
   });

@@ -1,4 +1,5 @@
 import { type BenchmarkObservedFinding } from './benchmark-score.ts';
+import { isNonArrayRecord as isRecord } from './text.ts';
 import { VALID_SEVERITIES, type Severity } from './types.ts';
 
 export type BenchmarkFailureClass =
@@ -17,10 +18,6 @@ export interface BenchmarkProgramMetrics {
   cacheReadTokens: number;
   costUsd: number;
   sessions: number;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export function emptyBenchmarkProgramMetrics(): BenchmarkProgramMetrics {

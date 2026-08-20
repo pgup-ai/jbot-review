@@ -1,3 +1,5 @@
+import { isNonArrayRecord as isRecord } from './text.ts';
+
 interface SyntheticFixtureFile {
   path: string;
   patch: string;
@@ -24,10 +26,6 @@ interface MaterializedFixtureFile {
 interface ParsedFixtureFile extends MaterializedFixtureFile {
   additions: number;
   deletions: number;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function validPath(path: string): boolean {
