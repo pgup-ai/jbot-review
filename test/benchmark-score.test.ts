@@ -74,6 +74,11 @@ describe('scoreBenchmark', () => {
     assert.equal(score.duplicateRate.value, 1 / 3);
     assert.equal(score.triggerCompleteness.value, 1);
     assert.equal(score.evidenceSupportRate.value, 1);
+    assert.deepEqual(score.semanticAdjudication, {
+      complete: false,
+      adjudicatedFindings: 1,
+      retainedFindings: 2,
+    });
     assert.equal(score.latencyMs.median.value, 200);
     assert.equal(score.latencyMs.p90.value, 280);
     assert.equal(score.latencyMs.p95.value, 290);
@@ -134,6 +139,7 @@ describe('scoreBenchmark', () => {
     );
     assert.equal(score.matchedFindings, 0);
     assert.equal(score.severityWeightedRecall.value, 0);
+    assert.equal(score.semanticAdjudication.complete, false);
   });
 
   it('does not let an adjudicated id bypass the allowed anchors', () => {
@@ -246,7 +252,16 @@ describe('scoreBenchmark', () => {
         { ...corpus[0], findings: [] },
         {
           ...corpus[1],
-          findings: [{ path: 'src/clean.ts', line: 3, severity: 'P2', title: 'Generic suspicion' }],
+          findings: [
+            {
+              path: 'src/clean.ts',
+              line: 3,
+              severity: 'P2',
+              title: 'Generic suspicion',
+              triggerComplete: false,
+              evidenceSupported: false,
+            },
+          ],
         },
       ],
       { bootstrapSamples: 0 },
@@ -255,6 +270,28 @@ describe('scoreBenchmark', () => {
     assert.equal(gate.passed, false);
     assert.ok(gate.reasons.some((reason) => reason.includes('P0/P1')));
     assert.equal(treatment.cleanFalsePositiveRate.value, 1);
+  });
+
+  it('defers the quality gate until retained findings are adjudicated', () => {
+    const score = scoreBenchmark(
+      [
+        {
+          ...runs[0],
+          expectedFindings: [expected('p1', 'P1', 10)],
+          findings: [{ path: 'src/a.ts', line: 10, severity: 'P1', title: 'Raw finding' }],
+        },
+      ],
+      { bootstrapSamples: 0 },
+    );
+    assert.deepEqual(evaluateBenchmarkQualityGate(score, score), {
+      status: 'adjudication-required',
+      passed: null,
+      reasons: ['semantic adjudication is incomplete'],
+      semanticAdjudication: {
+        control: { complete: false, adjudicatedFindings: 0, retainedFindings: 1 },
+        treatment: { complete: false, adjudicatedFindings: 0, retainedFindings: 1 },
+      },
+    });
   });
 
   it('characterizes repeated control finding and latency variance', () => {

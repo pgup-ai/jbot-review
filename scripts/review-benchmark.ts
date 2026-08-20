@@ -479,6 +479,7 @@ async function main(): Promise<void> {
     treatmentSummary.failedRuns > 0 ||
     treatmentSummary.successfulRuns !== controlSummary.successfulRuns
   ) {
+    qualityGate.status = 'failed';
     qualityGate.passed = false;
     qualityGate.reasons.push('treatment did not complete the control run population');
   }

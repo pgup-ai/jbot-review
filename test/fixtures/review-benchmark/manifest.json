@@ -3,7 +3,7 @@
   "name": "phase2-quality-corpus",
   "repetitions": 3,
   "timeoutMs": 10000,
-  "corpusHash": "sha256:6e834a18fe9f611ad741c175a4aaa7f70647826c8f81b54ad869c3f6b474c330",
+  "corpusHash": "sha256:906d16c348a6aad5b91cb4fa8d5de4e622fbb80059f1ece827cbad14a427c840",
   "qualityCorpus": true,
   "runner": {
     "command": [
@@ -26,7 +26,7 @@
         "temperature": 0
       },
       "promptVersion": "sha256:dad657bcb21b1e4e3f267b6d1891f9c56f7096aec41b15e28297169f0aaad8a9",
-      "corpusHash": "sha256:6e834a18fe9f611ad741c175a4aaa7f70647826c8f81b54ad869c3f6b474c330",
+      "corpusHash": "sha256:906d16c348a6aad5b91cb4fa8d5de4e622fbb80059f1ece827cbad14a427c840",
       "config": {
         "benchmarkAdapterMode": "control"
       }
@@ -44,7 +44,7 @@
         "temperature": 0
       },
       "promptVersion": "sha256:dad657bcb21b1e4e3f267b6d1891f9c56f7096aec41b15e28297169f0aaad8a9",
-      "corpusHash": "sha256:6e834a18fe9f611ad741c175a4aaa7f70647826c8f81b54ad869c3f6b474c330",
+      "corpusHash": "sha256:906d16c348a6aad5b91cb4fa8d5de4e622fbb80059f1ece827cbad14a427c840",
       "config": {
         "benchmarkAdapterMode": "treatment"
       }

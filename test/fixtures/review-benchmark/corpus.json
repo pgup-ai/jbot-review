@@ -387,7 +387,7 @@
       "files": [
         {
           "path": ".github/workflows/review.yml",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+permissions: write-all       \n"
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+permissions: write-all        \n"
         },
         {
           "path": "docs/permissions.md",
@@ -430,7 +430,7 @@
       "files": [
         {
           "path": ".github/workflows/review.yml",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+permissions:\n  contents: read\n"
+          "patch": "@@ -10,1 +10,2 @@\n-old behavior\n+permissions:\n+  contents: read\n"
         },
         {
           "path": "docs/permissions.md",

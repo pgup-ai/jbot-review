@@ -88,7 +88,10 @@ points fails the quality gate regardless of latency improvement.
 Recall credit is fail-closed: a retained finding must carry an adjudicated
 `expectedFindingId` and affirmative trigger/evidence checks in addition to an
 allowed anchor and severity. Raw local or competitor output remains unmatched
-until that semantic adjudication is supplied. Variance uses the adjudicated ID,
-an adapter fingerprint, or the source anchor in that order, so title rewording
-alone does not look like stochastic disagreement. Locationless SARIF results
-remain unanchored false positives instead of disappearing from precision.
+until that semantic adjudication is supplied. The quality gate reports
+`status: "adjudication-required"` and `passed: null` while either arm has
+unadjudicated retained findings, so raw output is not misreported as a quality
+failure. Variance uses the adjudicated ID, an adapter fingerprint, or the source
+anchor in that order, so title rewording alone does not look like stochastic
+disagreement. Locationless SARIF results remain unanchored false positives
+instead of disappearing from precision.

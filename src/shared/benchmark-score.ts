@@ -80,6 +80,11 @@ export interface BenchmarkScore {
   duplicateRate: BenchmarkMetric;
   triggerCompleteness: BenchmarkMetric;
   evidenceSupportRate: BenchmarkMetric;
+  semanticAdjudication: {
+    complete: boolean;
+    adjudicatedFindings: number;
+    retainedFindings: number;
+  };
   missedBySeverity: Record<Severity, number>;
   latencyMs: {
     median: BenchmarkMetric;
@@ -123,6 +128,7 @@ interface CaseContribution {
   triggerObserved: number;
   evidenceSupported: number;
   evidenceObserved: number;
+  semanticallyAdjudicated: number;
   missedBySeverity: Record<Severity, number>;
   latencyMs: number;
   costUsd: number;
@@ -238,6 +244,7 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
   let triggerObserved = 0;
   let evidenceSupported = 0;
   let evidenceObserved = 0;
+  let semanticallyAdjudicated = 0;
   const duplicates = run.findings.length - groups.size;
 
   for (const group of groups.values()) {
@@ -245,6 +252,15 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
     if (!finding) continue;
     retained += 1;
     if (finding.anchored ?? finding.line > 0) anchored += 1;
+    if (
+      finding.triggerComplete !== undefined &&
+      finding.evidenceSupported !== undefined &&
+      (finding.triggerComplete === false ||
+        finding.evidenceSupported === false ||
+        (finding.expectedFindingId !== undefined && expectedById.has(finding.expectedFindingId)))
+    ) {
+      semanticallyAdjudicated += 1;
+    }
 
     const anchorMatches = (expected: BenchmarkExpectedFinding): boolean =>
       expected.anchors.some(
@@ -295,6 +311,7 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
     triggerObserved,
     evidenceSupported,
     evidenceObserved,
+    semanticallyAdjudicated,
     missedBySeverity,
     latencyMs: run.latencyMs,
     costUsd: run.costUsd ?? 0,
@@ -435,11 +452,16 @@ export function scoreBenchmark(
     value: metrics[name],
     ci95: intervals[name],
   });
+  const retainedFindings = contributions.reduce((sum, value) => sum + value.retained, 0);
+  const adjudicatedFindings = contributions.reduce(
+    (sum, value) => sum + value.semanticallyAdjudicated,
+    0,
+  );
 
   return {
     cases: runs.length,
     expectedFindings: runs.reduce((sum, run) => sum + run.expectedFindings.length, 0),
-    retainedFindings: contributions.reduce((sum, value) => sum + value.retained, 0),
+    retainedFindings,
     matchedFindings: contributions.reduce((sum, value) => sum + value.matched, 0),
     severityWeightedRecall: metric('severityWeightedRecall'),
     precision: metric('precision'),
@@ -448,6 +470,11 @@ export function scoreBenchmark(
     duplicateRate: metric('duplicateRate'),
     triggerCompleteness: metric('triggerCompleteness'),
     evidenceSupportRate: metric('evidenceSupportRate'),
+    semanticAdjudication: {
+      complete: retainedFindings === adjudicatedFindings,
+      adjudicatedFindings,
+      retainedFindings,
+    },
     missedBySeverity: Object.fromEntries(
       SEVERITY_ORDER.map((severity) => [
         severity,
@@ -464,8 +491,13 @@ export function scoreBenchmark(
 }
 
 interface BenchmarkQualityGate {
-  passed: boolean;
+  status: 'passed' | 'failed' | 'adjudication-required';
+  passed: boolean | null;
   reasons: string[];
+  semanticAdjudication: {
+    control: BenchmarkScore['semanticAdjudication'];
+    treatment: BenchmarkScore['semanticAdjudication'];
+  };
 }
 
 export function evaluateBenchmarkQualityGate(
@@ -473,6 +505,18 @@ export function evaluateBenchmarkQualityGate(
   treatment: BenchmarkScore,
   tolerance = 0.02,
 ): BenchmarkQualityGate {
+  const semanticAdjudication = {
+    control: control.semanticAdjudication,
+    treatment: treatment.semanticAdjudication,
+  };
+  if (!control.semanticAdjudication.complete || !treatment.semanticAdjudication.complete) {
+    return {
+      status: 'adjudication-required',
+      passed: null,
+      reasons: ['semantic adjudication is incomplete'],
+      semanticAdjudication,
+    };
+  }
   const reasons: string[] = [];
   if (treatment.missedBySeverity.P0 > 0 || treatment.missedBySeverity.P1 > 0) {
     reasons.push('treatment missed a seeded P0/P1 finding');
@@ -493,7 +537,12 @@ export function evaluateBenchmarkQualityGate(
       reasons.push(`${label} regressed by more than ${tolerance * 100} percentage points`);
     }
   }
-  return { passed: reasons.length === 0, reasons };
+  return {
+    status: reasons.length === 0 ? 'passed' : 'failed',
+    passed: reasons.length === 0,
+    reasons,
+    semanticAdjudication,
+  };
 }
 
 export function benchmarkCanonicalJson(value: unknown): string {

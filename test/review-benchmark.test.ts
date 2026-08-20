@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { validateBenchmarkManifest } from '../src/shared/benchmark-manifest.ts';
+import { materializeBenchmarkFixture } from '../src/shared/benchmark-fixture.ts';
 import { benchmarkCanonicalJson } from '../src/shared/benchmark-score.ts';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -56,6 +57,9 @@ describe('review-benchmark', () => {
         seeded.files.map((file) => [file.path, file.patch.length]),
         clean.files.map((file) => [file.path, file.patch.length]),
       );
+    }
+    for (const candidate of manifest.cases) {
+      assert.doesNotThrow(() => materializeBenchmarkFixture(fixture, candidate.id), candidate.id);
     }
   });
 
@@ -158,12 +162,24 @@ describe('review-benchmark', () => {
       const summary = JSON.parse(readFileSync(join(output, 'summary.json'), 'utf8')) as {
         subset: string;
         subsetCases: number;
-        qualityGate: { passed: boolean; reasons: string[] };
+        qualityGate: {
+          status: string;
+          passed: boolean | null;
+          reasons: string[];
+          semanticAdjudication: {
+            control: { complete: boolean };
+            treatment: { complete: boolean };
+          };
+        };
         control: { variance: { status: string } };
       };
       assert.equal(summary.subset, 'smoke');
       assert.equal(summary.subsetCases, 12);
-      assert.deepEqual(summary.qualityGate, { passed: true, reasons: [] });
+      assert.equal(summary.qualityGate.status, 'passed');
+      assert.equal(summary.qualityGate.passed, true);
+      assert.deepEqual(summary.qualityGate.reasons, []);
+      assert.equal(summary.qualityGate.semanticAdjudication.control.complete, true);
+      assert.equal(summary.qualityGate.semanticAdjudication.treatment.complete, true);
       assert.equal(summary.control.variance.status, 'insufficient-repetitions');
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -216,10 +232,11 @@ describe('review-benchmark', () => {
       const summary = JSON.parse(readFileSync(join(output, 'summary.json'), 'utf8')) as {
         control: { successfulRuns: number };
         treatment: { successfulRuns: number };
-        qualityGate: { passed: boolean };
+        qualityGate: { status: string; passed: boolean | null };
       };
       assert.equal(summary.control.successfulRuns, 1);
       assert.equal(summary.treatment.successfulRuns, 1);
+      assert.equal(summary.qualityGate.status, 'passed');
       assert.equal(summary.qualityGate.passed, true);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -295,7 +312,7 @@ describe('review-benchmark', () => {
             timedOutRuns: number;
             score: { cases: number };
           };
-          qualityGate: { passed: boolean; reasons: string[] };
+          qualityGate: { status: string; passed: boolean | null; reasons: string[] };
         };
         for (const arm of [summary.control, summary.treatment]) {
           assert.equal(arm.successfulRuns, 0);
@@ -303,6 +320,7 @@ describe('review-benchmark', () => {
           assert.equal(arm.timedOutRuns, mode === 'timeout' ? 1 : 0);
           assert.equal(arm.score.cases, 0);
         }
+        assert.equal(summary.qualityGate.status, 'failed');
         assert.equal(summary.qualityGate.passed, false);
         assert.match(summary.qualityGate.reasons[0], /did not complete/);
       } finally {
