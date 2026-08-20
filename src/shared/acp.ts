@@ -253,6 +253,7 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
         guidelines,
         options.lensAddendum ?? '',
         options.evidenceQuotes ?? false,
+        options.embeddedFirstPrompt ?? false,
       );
       log(
         `Prompt assembled (${label}, ${name}): ${prompt.length} chars, guidelines=${!!guidelines}`,

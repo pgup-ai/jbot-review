@@ -75,6 +75,7 @@ export async function runPoolsideReview(
   options: {
     lensAddendum?: string;
     evidenceQuotes?: boolean;
+    embeddedFirstPrompt?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
@@ -86,6 +87,7 @@ export async function runPoolsideReview(
     guidelines,
     options.lensAddendum ?? '',
     options.evidenceQuotes ?? false,
+    options.embeddedFirstPrompt ?? false,
   );
   log(`Prompt assembled (${label}, poolside): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const raw = await runPoolsidePrompt({

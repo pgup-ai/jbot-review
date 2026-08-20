@@ -313,6 +313,7 @@ export async function runDimReview(
   options: {
     lensAddendum?: string;
     evidenceQuotes?: boolean;
+    embeddedFirstPrompt?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
@@ -325,6 +326,7 @@ export async function runDimReview(
     guidelines,
     options.lensAddendum ?? '',
     options.evidenceQuotes ?? false,
+    options.embeddedFirstPrompt ?? false,
   );
   log(`Prompt assembled (${label}, dim): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const raw = await runDimPrompt(workspace, model, prompt, label, log, options);

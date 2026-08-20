@@ -21,6 +21,7 @@ export interface ReviewBackend {
       timeoutMs?: number;
       onTokenUsage?: TokenUsageRecorder;
       evidenceQuotes?: boolean;
+      embeddedFirstPrompt?: boolean;
     },
   ): Promise<ReviewResult>;
   runAddressedPriorCommentsCheck(

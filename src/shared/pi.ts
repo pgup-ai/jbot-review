@@ -16,6 +16,7 @@ import {
 } from './opencode.ts';
 import type { PromptTokenUsage, ProviderKeyConfig, TokenUsageRecorder } from './opencode.ts';
 import {
+  EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
   PI_REVIEW_SYSTEM_PROMPT,
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
@@ -642,6 +643,7 @@ export async function startPi(
     additionalProviderKeys?: ProviderKeyConfig[];
     diffScope?: PiDiffScope;
     toolTelemetry?: ToolTelemetryAccumulator;
+    embeddedFirstPrompt?: boolean;
   } = {},
 ): Promise<{ runtime: PiRuntime; stop: () => void }> {
   const piID = requirePiProvider(providerID);
@@ -666,7 +668,10 @@ export async function startPi(
     loader = new sdk.DefaultResourceLoader({
       cwd: isolationDir,
       agentDir: join(isolationDir, 'agent'),
-      systemPromptOverride: () => PI_REVIEW_SYSTEM_PROMPT,
+      systemPromptOverride: () =>
+        options.embeddedFirstPrompt
+          ? EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT
+          : PI_REVIEW_SYSTEM_PROMPT,
     });
     await loader.reload();
   } catch (error) {
@@ -969,6 +974,7 @@ export async function runPiReview(
   options: {
     lensAddendum?: string;
     evidenceQuotes?: boolean;
+    embeddedFirstPrompt?: boolean;
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
@@ -980,6 +986,7 @@ export async function runPiReview(
     guidelines,
     options.lensAddendum ?? '',
     options.evidenceQuotes ?? false,
+    options.embeddedFirstPrompt ?? false,
   );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const session = await createPiSession(runtime, model, false);

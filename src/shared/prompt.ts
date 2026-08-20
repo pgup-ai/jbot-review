@@ -324,6 +324,92 @@ Field constraints:
 - If there are no issues, "findings" must be an empty array. Do not invent
   issues.`;
 
+const EMBEDDED_FIRST_EXPLORATION_POLICY = `## Repository exploration policy
+
+Treat every fully embedded hunk in "Diff hunks" as authoritative and already
+read. Do not run \`git diff\` or reread changed code solely to reproduce content
+that is already embedded.
+
+Use repository tools only for one of these purposes:
+
+1. Recover a hunk explicitly identified as omitted or truncated, preferring a
+   path-scoped diff for the named file.
+2. Check a direct caller, callee, contract, or test relation tied to a changed
+   symbol.
+3. Confirm evidence for a concrete candidate finding.
+
+Before any broad repository search, consult the "Changed symbol usage"
+manifest. Search more broadly only when that manifest is absent, explicitly
+incomplete, or current evidence identifies a relation it missed. Stay within
+one dependency hop by default; expand farther only when the first hop reveals
+a concrete trigger such as a broken contract or unresolved candidate finding.
+
+Once every changed hunk is covered and material uncertainties are resolved,
+return the final JSON. Do not keep exploring solely for completeness.`;
+
+function replacePromptSection(prompt: string, current: string, replacement: string): string {
+  const start = prompt.indexOf(current);
+  if (start < 0 || prompt.indexOf(current, start + current.length) >= 0) {
+    throw new Error('Embedded-first prompt edit must match exactly once.');
+  }
+  return `${prompt.slice(0, start)}${replacement}${prompt.slice(start + current.length)}`;
+}
+
+/** Prompt-only Phase 3 treatment. REVIEW_PROMPT remains the production control. */
+export const EMBEDDED_FIRST_REVIEW_PROMPT = [
+  [
+    `- The "Pull request" section below identifies the PR base and head and the
+  exact git diff command that shows what this PR changes. Review only that
+  diff. Cross-reference changes against their callers, definitions, and tests.
+- A "Diff hunks" section below may embed the patches for the highest-risk
+  changed files. They are a starting point, not the boundary of your
+  investigation: for any truncated or omitted file, run the git diff command.`,
+    `- The "Pull request" section below identifies the PR base and head and the
+  exact git diff command that defines what this PR changes. Review only that
+  diff. Follow the repository exploration policy before using the command.
+- A "Diff hunks" section below embeds changed code for review and identifies
+  any omitted or truncated coverage.`,
+  ],
+  [
+    `${REVIEW_COMMAND_POLICY}\n\n## Mandatory coverage protocol`,
+    `${REVIEW_COMMAND_POLICY}\n\n${EMBEDDED_FIRST_EXPLORATION_POLICY}\n\n## Mandatory coverage protocol`,
+  ],
+  [
+    `1. Read the file's full diff hunks.
+2. For each changed or new function, type, or constant: find its callers and
+   callees — including UNCHANGED code elsewhere in the file or repo — and
+   verify the change does not break their assumptions. A new gate, early
+   return, narrowed type, or changed default frequently breaks an unchanged
+   code path far from the diff. Use grep on the symbol name; a "Changed
+   symbol usage" section below may list known call sites to start from.`,
+    `1. Cover the file's full diff hunks under the repository exploration policy.
+2. For each changed or new function, type, or constant: find its callers and
+   callees — including UNCHANGED code elsewhere in the file or repo — and
+   verify the change does not break their assumptions. A new gate, early
+   return, narrowed type, or changed default frequently breaks an unchanged
+   code path far from the diff.`,
+  ],
+  [
+    `- Before accepting a new helper, type, or abstraction, search the repo for an
+  existing one that already does the job; flag duplication and point to the
+  existing code.`,
+    `- Before accepting a new helper, type, or abstraction, search the repo for an
+  existing one that already does the job when a concrete duplication question
+  remains after applying the repository exploration policy; flag duplication
+  and point to the existing code.`,
+  ],
+  [
+    `P1, or P2 findings — verify the trigger path first (read the caller, check
+the type, grep the symbol) and upgrade confidence, or downgrade severity.`,
+    `P1, or P2 findings — verify the trigger path first (read the caller, check
+the type, confirm the relevant relation) and upgrade confidence, or downgrade
+severity.`,
+  ],
+].reduce(
+  (prompt, [current, replacement]) => replacePromptSection(prompt, current, replacement),
+  REVIEW_PROMPT,
+);
+
 export const REVIEW_OUTPUT_REMINDER = `## Final output reminder
 
 Respond now with one raw JSON object with exactly two top-level keys,
@@ -370,6 +456,11 @@ export function withNoToolsReviewDirective(prompt: string): string {
  */
 export const PI_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer operating inside a checked-out git repository.
 You have no shell. Your tools are read-only and confined to this repository — paths outside it are refused: read_file reads a repo file by repo-relative path, and a git_diff tool (when available) shows the change under review, optionally scoped to a path. The diff under review is also embedded in the user message; if a git_diff tool is available, use it where instructions mention running the git diff command.
+You cannot modify the workspace, and must not attempt to.
+Follow the task instructions in the user message exactly; reply with only the requested output.`;
+
+export const EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer operating inside a checked-out git repository.
+You have no shell. Your tools are read-only and confined to this repository — paths outside it are refused: read_file reads a repo file by repo-relative path, and a git_diff tool (when available) shows the change under review, optionally scoped to a path. The diff under review is also embedded in the user message. Use git_diff only to recover a hunk the user message explicitly identifies as omitted or truncated, and prefer a path-scoped request for that named file.
 You cannot modify the workspace, and must not attempt to.
 Follow the task instructions in the user message exactly; reply with only the requested output.`;
 
@@ -706,7 +797,17 @@ export function buildShardAssignmentBlock(
   assignedFiles: string[],
   shardIndex: number,
   shardCount: number,
+  embeddedFirstPrompt = false,
 ): string {
+  const explorationRules = embeddedFirstPrompt
+    ? [
+        '- Review every assigned file in full depth, including direct interactions with unchanged code and with OTHER changed files. Apply the one-hop default and expansion trigger from the repository exploration policy.',
+        '- Apply the repository exploration policy to the embedded hunks and any explicit coverage gaps.',
+      ]
+    : [
+        '- Review every assigned file in full depth, including its interactions with unchanged code and with OTHER changed files (the full checkout and the complete changed-file list are available — follow symbols wherever they lead).',
+        '- The diff hunks below cover your assigned files; use the git diff command for anything else you need to read.',
+      ];
   return [
     '## Your assigned files',
     `This review is split across ${shardCount} parallel reviewers; you are reviewer ${shardIndex + 1}.`,
@@ -714,9 +815,9 @@ export function buildShardAssignmentBlock(
     ...assignedFiles.map((file) => `- ${file}`),
     '',
     'Rules for this split:',
-    '- Review every assigned file in full depth, including its interactions with unchanged code and with OTHER changed files (the full checkout and the complete changed-file list are available — follow symbols wherever they lead).',
+    explorationRules[0],
     '- Anchor findings ONLY in your assigned files. Issues you notice that anchor in another changed file are owned by a parallel reviewer; do not report them.',
-    '- The diff hunks below cover your assigned files; use the git diff command for anything else you need to read.',
+    explorationRules[1],
     '- In the "summary" field, report only issues you found in your assigned files — return an empty string if you found none; another reviewer covers the rest. Do not narrate clean files, do not restate PR-wide observations, and do not title your summary with shard or assignment wording (e.g. "Review of assigned files", "reviewer 1") — all summaries are merged into one shared review comment.',
   ].join('\n');
 }
@@ -823,8 +924,9 @@ export function assembleReviewPrompt(
   guidelines: string,
   lensAddendum = '',
   evidenceQuotes = false,
+  embeddedFirstPrompt = false,
 ): string {
-  const parts = [REVIEW_PROMPT];
+  const parts = [embeddedFirstPrompt ? EMBEDDED_FIRST_REVIEW_PROMPT : REVIEW_PROMPT];
   if (guidelines) {
     parts.push('## Repository review guidelines\n', guidelines);
   }
