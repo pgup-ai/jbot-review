@@ -234,7 +234,8 @@ function normalizeBenchmarkJson(input: unknown): BenchmarkObservedFinding[] {
 
 function normalizeGitHubReview(input: unknown): BenchmarkObservedFinding[] {
   if (!Array.isArray(input)) throw new Error('github-review input must be an array.');
-  return input.map((entry) => {
+  const findings: BenchmarkObservedFinding[] = [];
+  for (const entry of input) {
     if (!isRecord(entry)) throw new Error('github-review input contains an invalid comment.');
     const bodyFinding = githubBodyFinding(entry.body);
     const finding = observedFinding({
@@ -246,11 +247,9 @@ function normalizeGitHubReview(input: unknown): BenchmarkObservedFinding[] {
       fingerprint:
         typeof entry.id === 'string' || typeof entry.id === 'number' ? String(entry.id) : undefined,
     });
-    if (!finding) {
-      throw new Error('github-review comments require path, line, severity, and title.');
-    }
-    return finding;
-  });
+    if (finding) findings.push(finding);
+  }
+  return findings;
 }
 
 function normalizeSarif(

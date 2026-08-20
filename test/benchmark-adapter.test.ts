@@ -33,6 +33,7 @@ describe('competitor benchmark adapters', () => {
     );
     assert.deepEqual(
       normalizeCompetitorFindings('github-review', [
+        { id: 1, body: 'Review summary without a finding.' },
         {
           id: 2,
           path: 'src/b.ts',

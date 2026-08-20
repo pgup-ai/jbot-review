@@ -73,6 +73,7 @@ export interface BenchmarkScore {
   expectedFindings: number;
   retainedFindings: number;
   matchedFindings: number;
+  cleanFalsePositiveCases: string[];
   severityWeightedRecall: BenchmarkMetric;
   precision: BenchmarkMetric;
   cleanFalsePositiveRate: BenchmarkMetric;
@@ -158,6 +159,18 @@ function varianceFindingKey(finding: BenchmarkObservedFinding): string {
   return finding.expectedFindingId ?? finding.fingerprint ?? `${finding.path}:${finding.line}`;
 }
 
+function varianceFindingKeys(findings: BenchmarkObservedFinding[]): string[] {
+  const counts = new Map<string, number>();
+  return findings
+    .filter((finding) => finding.retained !== false)
+    .map((finding) => {
+      const key = varianceFindingKey(finding);
+      const occurrence = (counts.get(key) ?? 0) + 1;
+      counts.set(key, occurrence);
+      return `${key}\0${occurrence}`;
+    });
+}
+
 interface BenchmarkVariance {
   status: 'reportable' | 'insufficient-repetitions';
   cases: number;
@@ -190,16 +203,8 @@ export function characterizeBenchmarkVariance(runs: BenchmarkCaseRun[]): Benchma
       for (let right = left + 1; right < group.length; right += 1) {
         agreements.push(
           jaccard(
-            new Set(
-              group[left].findings
-                .filter((finding) => finding.retained !== false)
-                .map(varianceFindingKey),
-            ),
-            new Set(
-              group[right].findings
-                .filter((finding) => finding.retained !== false)
-                .map(varianceFindingKey),
-            ),
+            new Set(varianceFindingKeys(group[left].findings)),
+            new Set(varianceFindingKeys(group[right].findings)),
           ),
         );
       }
@@ -253,8 +258,14 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
     if (finding.triggerComplete !== undefined && finding.evidenceSupported !== undefined) {
       semanticallyAdjudicated += 1;
     }
-    if (finding.triggerComplete !== undefined) triggerObserved += 1;
-    if (finding.evidenceSupported !== undefined) evidenceObserved += 1;
+    if (finding.triggerComplete !== undefined) {
+      triggerObserved += 1;
+      if (finding.triggerComplete) triggerComplete += 1;
+    }
+    if (finding.evidenceSupported !== undefined) {
+      evidenceObserved += 1;
+      if (finding.evidenceSupported) evidenceSupported += 1;
+    }
 
     const anchorMatches = (expected: BenchmarkExpectedFinding): boolean =>
       expected.anchors.some(
@@ -265,8 +276,6 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
       : undefined;
     if (!expected || matchedExpected.has(expected.id) || !anchorMatches(expected)) continue;
     if (!severityWithinRange(finding.severity, expected.severityRange)) continue;
-    if (finding.triggerComplete) triggerComplete += 1;
-    if (finding.evidenceSupported) evidenceSupported += 1;
     if (finding.triggerComplete !== true || finding.evidenceSupported !== true) continue;
     matchedExpected.add(expected.id);
     matched += 1;
@@ -451,6 +460,13 @@ export function scoreBenchmark(
     expectedFindings: runs.reduce((sum, run) => sum + run.expectedFindings.length, 0),
     retainedFindings,
     matchedFindings: contributions.reduce((sum, value) => sum + value.matched, 0),
+    cleanFalsePositiveCases: [
+      ...new Set(
+        runs
+          .filter((run, index) => run.expectedClean && contributions[index].retained > 0)
+          .map((run) => run.caseId),
+      ),
+    ].sort(),
     severityWeightedRecall: metric('severityWeightedRecall'),
     precision: metric('precision'),
     cleanFalsePositiveRate: metric('cleanFalsePositiveRate'),
@@ -531,10 +547,13 @@ export function evaluateBenchmarkQualityGate(
   }
   if (
     control.cleanFalsePositiveRate.value !== null &&
-    treatment.cleanFalsePositiveRate.value !== null &&
-    treatment.cleanFalsePositiveRate.value > control.cleanFalsePositiveRate.value
+    treatment.cleanFalsePositiveRate.value !== null
   ) {
-    reasons.push('treatment introduced a new clean false positive');
+    const controlCases = new Set(control.cleanFalsePositiveCases);
+    const newCase = treatment.cleanFalsePositiveCases.some((caseId) => !controlCases.has(caseId));
+    if (newCase || treatment.cleanFalsePositiveRate.value > control.cleanFalsePositiveRate.value) {
+      reasons.push('treatment introduced a new clean false positive');
+    }
   }
   for (const [label, controlValue, treatmentValue] of [
     [

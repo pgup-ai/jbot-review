@@ -247,22 +247,18 @@ describe('scoreBenchmark', () => {
       },
     ];
     const control = scoreBenchmark(corpus, { bootstrapSamples: 0 });
+    const falsePositive = {
+      path: 'src/clean.ts',
+      line: 3,
+      severity: 'P2' as const,
+      title: 'Generic suspicion',
+      triggerComplete: false,
+      evidenceSupported: false,
+    };
     const treatment = scoreBenchmark(
       [
         { ...corpus[0], findings: [] },
-        {
-          ...corpus[1],
-          findings: [
-            {
-              path: 'src/clean.ts',
-              line: 3,
-              severity: 'P2',
-              title: 'Generic suspicion',
-              triggerComplete: false,
-              evidenceSupported: false,
-            },
-          ],
-        },
+        { ...corpus[1], findings: [falsePositive] },
       ],
       { bootstrapSamples: 0 },
     );
@@ -274,6 +270,27 @@ describe('scoreBenchmark', () => {
     const noCleanControl = scoreBenchmark([corpus[0]], { bootstrapSamples: 0 });
     assert.ok(
       !evaluateBenchmarkQualityGate(noCleanControl, treatment).reasons.includes(
+        'treatment introduced a new clean false positive',
+      ),
+    );
+    const cleanA = {
+      ...corpus[1],
+      caseId: 'clean-a',
+      findings: [falsePositive],
+    };
+    const cleanB = { ...corpus[1], caseId: 'clean-b' };
+    const movedControl = scoreBenchmark([cleanA, cleanB], { bootstrapSamples: 0 });
+    const movedTreatment = scoreBenchmark(
+      [
+        { ...cleanA, findings: [] },
+        { ...cleanB, findings: cleanA.findings },
+      ],
+      { bootstrapSamples: 0 },
+    );
+    assert.equal(movedControl.cleanFalsePositiveRate.value, 0.5);
+    assert.equal(movedTreatment.cleanFalsePositiveRate.value, 0.5);
+    assert.ok(
+      evaluateBenchmarkQualityGate(movedControl, movedTreatment).reasons.includes(
         'treatment introduced a new clean false positive',
       ),
     );
@@ -326,8 +343,8 @@ describe('scoreBenchmark', () => {
       { bootstrapSamples: 0 },
     );
     assert.equal(acceptedUnmapped.semanticAdjudication.complete, true);
-    assert.equal(acceptedUnmapped.triggerCompleteness.value, 0);
-    assert.equal(acceptedUnmapped.evidenceSupportRate.value, 0);
+    assert.equal(acceptedUnmapped.triggerCompleteness.value, 1);
+    assert.equal(acceptedUnmapped.evidenceSupportRate.value, 1);
   });
 
   it('characterizes repeated control finding and latency variance', () => {
@@ -345,6 +362,22 @@ describe('scoreBenchmark', () => {
       findings: [{ path: 'src/a.ts', line: 10, severity: 'P1' as const, title }],
     }));
     assert.equal(characterizeBenchmarkVariance(reworded).findingAgreement, 1);
+    assert.equal(
+      characterizeBenchmarkVariance([
+        {
+          ...runs[0],
+          findings: [
+            { path: 'src/a.ts', line: 10, severity: 'P1', title: 'First finding' },
+            { path: 'src/a.ts', line: 10, severity: 'P2', title: 'Second finding' },
+          ],
+        },
+        {
+          ...runs[0],
+          findings: [{ path: 'src/a.ts', line: 10, severity: 'P1', title: 'Reworded finding' }],
+        },
+      ]).findingAgreement,
+      0.5,
+    );
   });
 });
 
