@@ -1,0 +1,15 @@
+[
+  {
+    "candidateId": "1eb9f8d6b79dd6041e3ee9612c8118bb5ff8cd35c10dcec1bb625684d7c7ad6b",
+    "status": "adjudicated",
+    "decision": "accepted",
+    "expectedFindingId": "dim-exec-diff-classification-finding",
+    "labelCount": 1
+  },
+  {
+    "candidateId": "8832657e5973633d44e8e7cc5220d6df1cad180c7c0d7c7d0649e773e355a703",
+    "status": "adjudicated",
+    "decision": "rejected",
+    "labelCount": 2
+  }
+]

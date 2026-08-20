@@ -21,3 +21,7 @@ export function truncateForLog(value: string, maxChars: number): string {
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
+
+export function isNonArrayRecord(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && !Array.isArray(value);
+}

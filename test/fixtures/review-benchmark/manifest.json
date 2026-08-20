@@ -1,48 +1,50 @@
 {
-  "schemaVersion": 1,
-  "name": "phase0-fixture-replay-baseline",
+  "schemaVersion": 2,
+  "name": "phase2-quality-corpus",
   "repetitions": 3,
   "timeoutMs": 10000,
-  "corpusHash": "sha256:589ac69c5ccb299ac15840e45d0a0a2b152fcf850229d9ca3265ee019aee3849",
+  "corpusHash": "sha256:0922596007e29b4a93ce114fd170aeaa5685d12650b921bb595d44eb65ef7197",
+  "qualityCorpus": true,
   "runner": {
     "command": [
       "${projectRoot}/node_modules/.bin/tsx",
       "${projectRoot}/test/fixtures/review-benchmark/replay-runner.ts"
     ],
-    "cwd": "project"
+    "cwd": "project",
+    "fixtureMode": "replay"
   },
   "declaredTreatmentVariables": ["config.benchmarkAdapterMode"],
   "control": {
-    "name": "CTRL-main-fixture-replay",
+    "name": "CTRL-phase2-quality-corpus",
     "configuration": {
       "model": "fixture/replay",
-      "modelRevision": "phase0-v1",
+      "modelRevision": "phase2-v1",
       "engine": "fixture-replay",
-      "engineVersion": "1",
+      "engineVersion": "2",
       "reasoningEffort": "deterministic",
       "sampling": {
         "temperature": 0
       },
       "promptVersion": "sha256:dad657bcb21b1e4e3f267b6d1891f9c56f7096aec41b15e28297169f0aaad8a9",
-      "corpusHash": "sha256:589ac69c5ccb299ac15840e45d0a0a2b152fcf850229d9ca3265ee019aee3849",
+      "corpusHash": "sha256:0922596007e29b4a93ce114fd170aeaa5685d12650b921bb595d44eb65ef7197",
       "config": {
         "benchmarkAdapterMode": "control"
       }
     }
   },
   "treatment": {
-    "name": "TREAT-phase0-harness-validation",
+    "name": "TREAT-phase2-harness-validation",
     "configuration": {
       "model": "fixture/replay",
-      "modelRevision": "phase0-v1",
+      "modelRevision": "phase2-v1",
       "engine": "fixture-replay",
-      "engineVersion": "1",
+      "engineVersion": "2",
       "reasoningEffort": "deterministic",
       "sampling": {
         "temperature": 0
       },
       "promptVersion": "sha256:dad657bcb21b1e4e3f267b6d1891f9c56f7096aec41b15e28297169f0aaad8a9",
-      "corpusHash": "sha256:589ac69c5ccb299ac15840e45d0a0a2b152fcf850229d9ca3265ee019aee3849",
+      "corpusHash": "sha256:0922596007e29b4a93ce114fd170aeaa5685d12650b921bb595d44eb65ef7197",
       "config": {
         "benchmarkAdapterMode": "treatment"
       }
@@ -50,503 +52,3020 @@
   },
   "cases": [
     {
-      "id": "auth-bypass",
-      "riskTier": "critical",
+      "id": "dim-exec-diff-classification",
+      "riskTier": "medium",
       "cacheState": "uncached",
       "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-01",
+      "head": "fixture-defect-phase2-01",
       "expectedClean": false,
       "expectedFindings": [
         {
-          "id": "auth-bypass-finding",
-          "severity": "P0",
+          "id": "dim-exec-diff-classification-finding",
+          "severity": "P3",
+          "severityRange": {
+            "highest": "P3",
+            "lowest": "P3"
+          },
           "anchors": [
             {
-              "path": "src/security.ts",
-              "line": 10
+              "path": "src/shared/tool-telemetry.ts",
+              "line": 2
+            },
+            {
+              "path": "src/shared/dim.ts",
+              "line": 2
             }
+          ],
+          "trigger": "Dim exec commands running git diff are classified as generic reads.",
+          "acceptableFindings": [
+            "Report the dim-exec-diff-classification behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/shared/dim.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Using a read-only tool does not make repeated embedded-diff recovery measurable."
           ]
         }
       ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-01"
+      "categories": ["seeded-defect", "tool-exploration", "historical-accepted"],
+      "subsets": ["smoke", "core", "full"],
+      "counterfactualCaseId": "clean-dim-exec-diff-classification"
     },
     {
-      "id": "clean-auth-guard",
-      "riskTier": "low",
+      "id": "clean-dim-exec-diff-classification",
+      "riskTier": "medium",
       "cacheState": "uncached",
       "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-01",
+      "head": "fixture-clean-phase2-01",
       "expectedClean": true,
       "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-02"
+      "categories": ["clean", "tool-exploration"],
+      "subsets": ["smoke", "core", "full"],
+      "counterfactualOf": "dim-exec-diff-classification"
     },
     {
       "id": "tenant-scope-leak",
       "riskTier": "critical",
       "cacheState": "uncached",
       "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-02",
+      "head": "fixture-defect-phase2-02",
       "expectedClean": false,
       "expectedFindings": [
         {
           "id": "tenant-scope-leak-finding",
           "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
           "anchors": [
             {
-              "path": "src/data.ts",
-              "line": 12
+              "path": "src/tenants.ts",
+              "line": 2
+            },
+            {
+              "path": "src/session.ts",
+              "line": 2
             }
-          ]
+          ],
+          "trigger": "The query omits the active tenant identifier.",
+          "acceptableFindings": [
+            "Report the tenant-scope-leak behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/session.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["A globally unique row id does not replace tenant scoping."]
         }
       ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-03"
+      "categories": ["seeded-defect", "data"],
+      "subsets": ["smoke", "core", "full"],
+      "counterfactualCaseId": "clean-tenant-scope-leak"
     },
     {
-      "id": "clean-tenant-query",
-      "riskTier": "low",
+      "id": "clean-tenant-scope-leak",
+      "riskTier": "critical",
       "cacheState": "uncached",
       "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-02",
+      "head": "fixture-clean-phase2-02",
       "expectedClean": true,
       "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-04"
+      "categories": ["clean", "data"],
+      "subsets": ["smoke", "core", "full"],
+      "counterfactualOf": "tenant-scope-leak"
     },
     {
       "id": "lost-update-race",
       "riskTier": "high",
       "cacheState": "uncached",
       "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-03",
+      "head": "fixture-defect-phase2-03",
       "expectedClean": false,
       "expectedFindings": [
         {
           "id": "lost-update-race-finding",
           "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
           "anchors": [
             {
-              "path": "src/concurrency.ts",
-              "line": 14
+              "path": "src/balance.ts",
+              "line": 2
+            },
+            {
+              "path": "test/balance.concurrent.test.ts",
+              "line": 2
             }
+          ],
+          "trigger": "A read-modify-write update runs without a lock or compare-and-swap.",
+          "acceptableFindings": [
+            "Report the lost-update-race behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "test/balance.concurrent.test.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Single-request tests do not rule out concurrent lost updates."
           ]
         }
       ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-05"
+      "categories": ["seeded-defect", "concurrency"],
+      "subsets": ["smoke", "core", "full"],
+      "counterfactualCaseId": "clean-lost-update-race"
     },
     {
-      "id": "clean-transaction-lock",
-      "riskTier": "medium",
-      "cacheState": "uncached",
-      "diffSize": "small",
-      "expectedClean": true,
-      "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-06"
-    },
-    {
-      "id": "api-nullability-break",
+      "id": "clean-lost-update-race",
       "riskTier": "high",
       "cacheState": "uncached",
       "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-03",
+      "head": "fixture-clean-phase2-03",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "concurrency"],
+      "subsets": ["smoke", "core", "full"],
+      "counterfactualOf": "lost-update-race"
+    },
+    {
+      "id": "api-caller-contract",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-04",
+      "head": "fixture-defect-phase2-04",
       "expectedClean": false,
       "expectedFindings": [
         {
-          "id": "api-nullability-break-finding",
+          "id": "api-caller-contract-finding",
           "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
           "anchors": [
             {
               "path": "src/api.ts",
-              "line": 16
+              "line": 2
+            },
+            {
+              "path": "src/client.ts",
+              "line": 2
             }
+          ],
+          "trigger": "The return type becomes nullable while a caller dereferences it unconditionally.",
+          "acceptableFindings": [
+            "Report the api-caller-contract behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/client.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Type assertions in the caller do not restore the runtime contract."
           ]
         }
       ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-07"
+      "categories": ["seeded-defect", "cross-file-contract", "tool-exploration"],
+      "subsets": ["smoke", "core", "full"],
+      "counterfactualCaseId": "clean-api-caller-contract"
     },
     {
-      "id": "clean-api-extension",
-      "riskTier": "medium",
+      "id": "clean-api-caller-contract",
+      "riskTier": "high",
       "cacheState": "uncached",
       "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-04",
+      "head": "fixture-clean-phase2-04",
       "expectedClean": true,
       "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-08"
+      "categories": ["clean", "cross-file-contract", "tool-exploration"],
+      "subsets": ["smoke", "core", "full"],
+      "counterfactualOf": "api-caller-contract"
     },
     {
-      "id": "stale-frontend-state",
+      "id": "frontend-stale-state",
       "riskTier": "medium",
       "cacheState": "uncached",
       "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-05",
+      "head": "fixture-defect-phase2-05",
       "expectedClean": false,
       "expectedFindings": [
         {
-          "id": "stale-frontend-state-finding",
+          "id": "frontend-stale-state-finding",
           "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
           "anchors": [
             {
-              "path": "src/frontend.ts",
-              "line": 18
+              "path": "src/use-account.ts",
+              "line": 2
+            },
+            {
+              "path": "src/account-panel.tsx",
+              "line": 2
             }
+          ],
+          "trigger": "The query key omits the selected account id.",
+          "acceptableFindings": [
+            "Report the frontend-stale-state behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/account-panel.tsx",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Component rerenders do not invalidate an unchanged query key."
           ]
         }
       ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-09"
+      "categories": ["seeded-defect", "frontend"],
+      "subsets": ["smoke", "core", "full"],
+      "counterfactualCaseId": "clean-frontend-stale-state"
     },
     {
-      "id": "clean-frontend-copy",
-      "riskTier": "low",
+      "id": "clean-frontend-stale-state",
+      "riskTier": "medium",
       "cacheState": "uncached",
       "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-05",
+      "head": "fixture-clean-phase2-05",
       "expectedClean": true,
       "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-10"
+      "categories": ["clean", "frontend"],
+      "subsets": ["smoke", "core", "full"],
+      "counterfactualOf": "frontend-stale-state"
     },
     {
-      "id": "workflow-write-escalation",
+      "id": "workflow-permission-escalation",
       "riskTier": "critical",
       "cacheState": "uncached",
       "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-06",
+      "head": "fixture-defect-phase2-06",
       "expectedClean": false,
       "expectedFindings": [
         {
-          "id": "workflow-write-escalation-finding",
+          "id": "workflow-permission-escalation-finding",
           "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
           "anchors": [
             {
-              "path": "src/infrastructure.ts",
-              "line": 20
+              "path": ".github/workflows/review.yml",
+              "line": 2
+            },
+            {
+              "path": "docs/permissions.md",
+              "line": 2
             }
+          ],
+          "trigger": "The pull-request workflow grants write permission to untrusted code.",
+          "acceptableFindings": [
+            "Report the workflow-permission-escalation behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "docs/permissions.md",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "A private repository does not make pull-request code trusted."
           ]
         }
       ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-11"
+      "categories": ["seeded-defect", "infrastructure"],
+      "subsets": ["smoke", "core", "full"],
+      "counterfactualCaseId": "clean-workflow-permission-escalation"
     },
     {
-      "id": "clean-cache-key-change",
-      "riskTier": "medium",
+      "id": "clean-workflow-permission-escalation",
+      "riskTier": "critical",
       "cacheState": "uncached",
       "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-06",
+      "head": "fixture-clean-phase2-06",
       "expectedClean": true,
       "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-12"
+      "categories": ["clean", "infrastructure"],
+      "subsets": ["smoke", "core", "full"],
+      "counterfactualOf": "workflow-permission-escalation"
     },
     {
       "id": "missing-regression-assertion",
       "riskTier": "medium",
       "cacheState": "uncached",
       "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-07",
+      "head": "fixture-defect-phase2-07",
       "expectedClean": false,
       "expectedFindings": [
         {
           "id": "missing-regression-assertion-finding",
           "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
           "anchors": [
             {
-              "path": "src/tests.ts",
-              "line": 22
+              "path": "test/parser.test.ts",
+              "line": 2
+            },
+            {
+              "path": "src/parser.ts",
+              "line": 2
             }
-          ]
+          ],
+          "trigger": "The regression test executes the path but never asserts the fixed value.",
+          "acceptableFindings": [
+            "Report the missing-regression-assertion behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/parser.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["A non-throwing call does not verify the parsed result."]
         }
       ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-13"
+      "categories": ["seeded-defect", "tests"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-missing-regression-assertion"
     },
     {
-      "id": "clean-test-refactor",
-      "riskTier": "low",
+      "id": "clean-missing-regression-assertion",
+      "riskTier": "medium",
       "cacheState": "uncached",
       "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-07",
+      "head": "fixture-clean-phase2-07",
       "expectedClean": true,
       "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-14"
+      "categories": ["clean", "tests"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "missing-regression-assertion"
     },
     {
-      "id": "incorrect-doc-example",
+      "id": "docs-deprecated-command",
       "riskTier": "low",
       "cacheState": "uncached",
       "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-08",
+      "head": "fixture-defect-phase2-08",
       "expectedClean": false,
       "expectedFindings": [
         {
-          "id": "incorrect-doc-example-finding",
+          "id": "docs-deprecated-command-finding",
           "severity": "P3",
+          "severityRange": {
+            "highest": "P3",
+            "lowest": "P3"
+          },
           "anchors": [
             {
-              "path": "src/docs.ts",
-              "line": 24
+              "path": "docs/setup.md",
+              "line": 2
+            },
+            {
+              "path": "package.json",
+              "line": 2
             }
+          ],
+          "trigger": "The example invokes a command removed from package scripts.",
+          "acceptableFindings": [
+            "Report the docs-deprecated-command behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "package.json",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Historical familiarity does not make a removed command executable."
           ]
         }
       ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-15"
+      "categories": ["seeded-defect", "docs"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-docs-deprecated-command"
     },
     {
-      "id": "clean-doc-typo",
+      "id": "clean-docs-deprecated-command",
       "riskTier": "low",
       "cacheState": "uncached",
       "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-08",
+      "head": "fixture-clean-phase2-08",
       "expectedClean": true,
       "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-16"
+      "categories": ["clean", "docs"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "docs-deprecated-command"
     },
     {
       "id": "generated-source-edit",
       "riskTier": "medium",
       "cacheState": "uncached",
-      "diffSize": "medium",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-09",
+      "head": "fixture-defect-phase2-09",
       "expectedClean": false,
       "expectedFindings": [
         {
           "id": "generated-source-edit-finding",
           "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
           "anchors": [
             {
-              "path": "src/generated.ts",
-              "line": 26
-            }
-          ]
-        }
-      ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-17"
-    },
-    {
-      "id": "clean-lockfile-refresh",
-      "riskTier": "low",
-      "cacheState": "uncached",
-      "diffSize": "medium",
-      "expectedClean": true,
-      "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-18"
-    },
-    {
-      "id": "large-file-boundary",
-      "riskTier": "high",
-      "cacheState": "uncached",
-      "diffSize": "large",
-      "expectedClean": false,
-      "expectedFindings": [
-        {
-          "id": "large-file-boundary-finding",
-          "severity": "P1",
-          "anchors": [
-            {
-              "path": "src/large-single-file.ts",
-              "line": 28
-            }
-          ]
-        }
-      ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-19"
-    },
-    {
-      "id": "clean-large-generated-map",
-      "riskTier": "low",
-      "cacheState": "uncached",
-      "diffSize": "large",
-      "expectedClean": true,
-      "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-20"
-    },
-    {
-      "id": "cross-package-contract",
-      "riskTier": "high",
-      "cacheState": "uncached",
-      "diffSize": "large",
-      "expectedClean": false,
-      "expectedFindings": [
-        {
-          "id": "cross-package-contract-finding",
-          "severity": "P1",
-          "anchors": [
-            {
-              "path": "src/broad-multi-package.ts",
-              "line": 30
-            }
-          ]
-        }
-      ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-21"
-    },
-    {
-      "id": "clean-package-reorganization",
-      "riskTier": "medium",
-      "cacheState": "uncached",
-      "diffSize": "large",
-      "expectedClean": true,
-      "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-22"
-    },
-    {
-      "id": "caller-callee-mismatch",
-      "riskTier": "high",
-      "cacheState": "uncached",
-      "diffSize": "large",
-      "expectedClean": false,
-      "expectedFindings": [
-        {
-          "id": "caller-callee-mismatch-finding",
-          "severity": "P1",
-          "anchors": [
-            {
-              "path": "src/cross-file.ts",
-              "line": 32
+              "path": "generated/client.ts",
+              "line": 2
             },
             {
-              "path": "src/caller.ts",
-              "line": 44
+              "path": "schema/client.json",
+              "line": 2
             }
+          ],
+          "trigger": "The generated client changed without its source schema.",
+          "acceptableFindings": [
+            "Report the generated-source-edit behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "schema/client.json",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "A generated banner does not prove the source artifact was updated."
           ]
         }
       ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-23"
+      "categories": ["seeded-defect", "generated-noise"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-generated-source-edit"
     },
     {
-      "id": "clean-symbol-rename",
+      "id": "clean-generated-source-edit",
       "riskTier": "medium",
       "cacheState": "uncached",
       "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-09",
+      "head": "fixture-clean-phase2-09",
       "expectedClean": true,
       "expectedFindings": [],
+      "categories": ["clean", "generated-noise"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "generated-source-edit"
+    },
+    {
+      "id": "large-parser-boundary",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
       "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-24"
+      "base": "fixture-base-phase2-10",
+      "head": "fixture-defect-phase2-10",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "large-parser-boundary-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/large-parser.ts",
+              "line": 2
+            },
+            {
+              "path": "test/large-parser.test.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "The final byte is skipped by a strict less-than boundary.",
+          "acceptableFindings": [
+            "Report the large-parser-boundary behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "test/large-parser.test.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["Typical multi-byte fixtures do not cover a one-byte tail."]
+        }
+      ],
+      "categories": ["seeded-defect", "large-single-file"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-large-parser-boundary"
+    },
+    {
+      "id": "clean-large-parser-boundary",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-10",
+      "head": "fixture-clean-phase2-10",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "large-single-file"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "large-parser-boundary"
+    },
+    {
+      "id": "package-export-drift",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-11",
+      "head": "fixture-defect-phase2-11",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "package-export-drift-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "packages/core/package.json",
+              "line": 2
+            },
+            {
+              "path": "packages/app/src/index.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "A package export is removed while another workspace still imports it.",
+          "acceptableFindings": [
+            "Report the package-export-drift behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "packages/app/src/index.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Workspace hoisting does not restore a removed export map entry."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "broad-multi-package"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-package-export-drift"
+    },
+    {
+      "id": "clean-package-export-drift",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-11",
+      "head": "fixture-clean-phase2-11",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "broad-multi-package"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "package-export-drift"
+    },
+    {
+      "id": "caller-null-contract",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-12",
+      "head": "fixture-defect-phase2-12",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "caller-null-contract-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/service.ts",
+              "line": 2
+            },
+            {
+              "path": "src/controller.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "A callee now returns undefined on a path its caller treats as total.",
+          "acceptableFindings": [
+            "Report the caller-null-contract behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/controller.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "The caller type annotation does not validate runtime values."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "cross-file-contract", "tool-exploration"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-caller-null-contract"
+    },
+    {
+      "id": "clean-caller-null-contract",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-12",
+      "head": "fixture-clean-phase2-12",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "cross-file-contract", "tool-exploration"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "caller-null-contract"
     },
     {
       "id": "secret-log-exposure",
       "riskTier": "critical",
       "cacheState": "uncached",
-      "diffSize": "large",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-13",
+      "head": "fixture-defect-phase2-13",
       "expectedClean": false,
       "expectedFindings": [
         {
           "id": "secret-log-exposure-finding",
           "severity": "P0",
+          "severityRange": {
+            "highest": "P0",
+            "lowest": "P1"
+          },
           "anchors": [
             {
-              "path": "src/security.ts",
-              "line": 34
+              "path": "src/logger.ts",
+              "line": 2
+            },
+            {
+              "path": "src/config.ts",
+              "line": 2
             }
+          ],
+          "trigger": "A credential is interpolated into an error log.",
+          "acceptableFindings": [
+            "Report the secret-log-exposure behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/config.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Debug level does not prevent secrets from reaching log storage."
           ]
         }
       ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-25"
+      "categories": ["seeded-defect", "security"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-secret-log-exposure"
     },
     {
-      "id": "clean-redacted-logging",
-      "riskTier": "low",
+      "id": "clean-secret-log-exposure",
+      "riskTier": "critical",
       "cacheState": "uncached",
-      "diffSize": "large",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-13",
+      "head": "fixture-clean-phase2-13",
       "expectedClean": true,
       "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-26"
+      "categories": ["clean", "security"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "secret-log-exposure"
     },
     {
       "id": "quadratic-hot-path",
-      "riskTier": "high",
+      "riskTier": "medium",
       "cacheState": "uncached",
-      "diffSize": "very-large",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-14",
+      "head": "fixture-defect-phase2-14",
       "expectedClean": false,
       "expectedFindings": [
         {
           "id": "quadratic-hot-path-finding",
-          "severity": "P1",
+          "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
           "anchors": [
             {
-              "path": "src/performance.ts",
-              "line": 36
+              "path": "src/merge.ts",
+              "line": 2
+            },
+            {
+              "path": "test/merge.perf.test.ts",
+              "line": 2
             }
-          ]
+          ],
+          "trigger": "A linear search runs for every item in a large collection.",
+          "acceptableFindings": [
+            "Report the quadratic-hot-path behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "test/merge.perf.test.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["Small fixtures do not bound production collection size."]
         }
       ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-27"
+      "categories": ["seeded-defect", "data"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-quadratic-hot-path"
     },
     {
-      "id": "clean-loop-simplification",
-      "riskTier": "low",
+      "id": "clean-quadratic-hot-path",
+      "riskTier": "medium",
       "cacheState": "uncached",
-      "diffSize": "very-large",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-14",
+      "head": "fixture-clean-phase2-14",
       "expectedClean": true,
       "expectedFindings": [],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-28"
+      "categories": ["clean", "data"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "quadratic-hot-path"
     },
     {
-      "id": "unsafe-default-config",
+      "id": "unsafe-config-default",
       "riskTier": "high",
       "cacheState": "uncached",
-      "diffSize": "very-large",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-15",
+      "head": "fixture-defect-phase2-15",
       "expectedClean": false,
       "expectedFindings": [
         {
-          "id": "unsafe-default-config-finding",
+          "id": "unsafe-config-default-finding",
           "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
           "anchors": [
             {
-              "path": "src/configuration.ts",
-              "line": 38
+              "path": "src/config.ts",
+              "line": 2
+            },
+            {
+              "path": "docs/config.md",
+              "line": 2
             }
+          ],
+          "trigger": "The fallback enables an unsafe mode when configuration is absent.",
+          "acceptableFindings": [
+            "Report the unsafe-config-default behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "docs/config.md",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Ease of local setup does not justify a production-open default."
           ]
         }
       ],
-      "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-29"
+      "categories": ["seeded-defect", "infrastructure"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-unsafe-config-default"
     },
     {
-      "id": "clean-config-comment",
-      "riskTier": "low",
+      "id": "clean-unsafe-config-default",
+      "riskTier": "high",
       "cacheState": "uncached",
-      "diffSize": "very-large",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-15",
+      "head": "fixture-clean-phase2-15",
       "expectedClean": true,
       "expectedFindings": [],
+      "categories": ["clean", "infrastructure"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "unsafe-config-default"
+    },
+    {
+      "id": "csrf-check-removed",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "large",
       "fixturePath": "corpus.json",
-      "base": "fixture-base-v1",
-      "head": "fixture-head-v1-30"
+      "base": "fixture-base-phase2-16",
+      "head": "fixture-defect-phase2-16",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "csrf-check-removed-finding",
+          "severity": "P0",
+          "severityRange": {
+            "highest": "P0",
+            "lowest": "P1"
+          },
+          "anchors": [
+            {
+              "path": "src/webhook.ts",
+              "line": 2
+            },
+            {
+              "path": "test/webhook.test.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "State-changing requests no longer verify the anti-forgery token.",
+          "acceptableFindings": [
+            "Report the csrf-check-removed behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "test/webhook.test.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Same-site cookies alone do not validate the request origin."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "security"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-csrf-check-removed"
+    },
+    {
+      "id": "clean-csrf-check-removed",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-16",
+      "head": "fixture-clean-phase2-16",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "security"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "csrf-check-removed"
+    },
+    {
+      "id": "sql-tenant-filter",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-17",
+      "head": "fixture-defect-phase2-17",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "sql-tenant-filter-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/report.sql.ts",
+              "line": 2
+            },
+            {
+              "path": "src/tenant-context.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "The aggregate query drops its organization predicate.",
+          "acceptableFindings": [
+            "Report the sql-tenant-filter behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/tenant-context.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "An organization-scoped caller does not alter an unscoped SQL query."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "data"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-sql-tenant-filter"
+    },
+    {
+      "id": "clean-sql-tenant-filter",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-17",
+      "head": "fixture-clean-phase2-17",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "data"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "sql-tenant-filter"
+    },
+    {
+      "id": "lock-order-inversion",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-18",
+      "head": "fixture-defect-phase2-18",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "lock-order-inversion-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/locks.ts",
+              "line": 2
+            },
+            {
+              "path": "src/worker.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "The new path acquires shared locks in the reverse order.",
+          "acceptableFindings": [
+            "Report the lock-order-inversion behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/worker.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["Low contention does not remove the deadlock cycle."]
+        }
+      ],
+      "categories": ["seeded-defect", "concurrency"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-lock-order-inversion"
+    },
+    {
+      "id": "clean-lock-order-inversion",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-18",
+      "head": "fixture-clean-phase2-18",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "concurrency"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "lock-order-inversion"
+    },
+    {
+      "id": "stale-query-key",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-19",
+      "head": "fixture-defect-phase2-19",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "stale-query-key-finding",
+          "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
+          "anchors": [
+            {
+              "path": "src/use-project.ts",
+              "line": 2
+            },
+            {
+              "path": "src/project-page.tsx",
+              "line": 2
+            }
+          ],
+          "trigger": "The project query cache ignores the route parameter.",
+          "acceptableFindings": [
+            "Report the stale-query-key behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/project-page.tsx",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Unmounting is not guaranteed during same-page route changes."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "frontend"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-stale-query-key"
+    },
+    {
+      "id": "clean-stale-query-key",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-19",
+      "head": "fixture-clean-phase2-19",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "frontend"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "stale-query-key"
+    },
+    {
+      "id": "cache-key-poisoning",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-20",
+      "head": "fixture-defect-phase2-20",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "cache-key-poisoning-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/cache.ts",
+              "line": 2
+            },
+            {
+              "path": "src/repository.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "The cache key omits the repository identity.",
+          "acceptableFindings": [
+            "Report the cache-key-poisoning behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/repository.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Commit hashes are not a namespace boundary across repositories."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "infrastructure"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-cache-key-poisoning"
+    },
+    {
+      "id": "clean-cache-key-poisoning",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-20",
+      "head": "fixture-clean-phase2-20",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "infrastructure"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "cache-key-poisoning"
+    },
+    {
+      "id": "timezone-flaky-test",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-21",
+      "head": "fixture-defect-phase2-21",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "timezone-flaky-test-finding",
+          "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
+          "anchors": [
+            {
+              "path": "test/date.test.ts",
+              "line": 2
+            },
+            {
+              "path": "src/date.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "The assertion depends on the machine timezone.",
+          "acceptableFindings": [
+            "Report the timezone-flaky-test behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/date.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["CI currently using UTC does not make the test portable."]
+        }
+      ],
+      "categories": ["seeded-defect", "tests"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-timezone-flaky-test"
+    },
+    {
+      "id": "clean-timezone-flaky-test",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-21",
+      "head": "fixture-clean-phase2-21",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "tests"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "timezone-flaky-test"
+    },
+    {
+      "id": "docs-wrong-env-default",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-22",
+      "head": "fixture-defect-phase2-22",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "docs-wrong-env-default-finding",
+          "severity": "P3",
+          "severityRange": {
+            "highest": "P3",
+            "lowest": "P3"
+          },
+          "anchors": [
+            {
+              "path": "docs/configuration.md",
+              "line": 2
+            },
+            {
+              "path": "src/config.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "Documentation states the opposite of the runtime default.",
+          "acceptableFindings": [
+            "Report the docs-wrong-env-default behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/config.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["An old release default is not the current contract."]
+        }
+      ],
+      "categories": ["seeded-defect", "docs"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-docs-wrong-env-default"
+    },
+    {
+      "id": "clean-docs-wrong-env-default",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-22",
+      "head": "fixture-clean-phase2-22",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "docs"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "docs-wrong-env-default"
+    },
+    {
+      "id": "generated-schema-hand-edit",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-23",
+      "head": "fixture-defect-phase2-23",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "generated-schema-hand-edit-finding",
+          "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
+          "anchors": [
+            {
+              "path": "generated/schema.ts",
+              "line": 2
+            },
+            {
+              "path": "schema/source.yml",
+              "line": 2
+            }
+          ],
+          "trigger": "A generated schema is hand-edited without changing its source.",
+          "acceptableFindings": [
+            "Report the generated-schema-hand-edit behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "schema/source.yml",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "The generated output compiling does not make regeneration durable."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "generated-noise"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-generated-schema-hand-edit"
+    },
+    {
+      "id": "clean-generated-schema-hand-edit",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-23",
+      "head": "fixture-clean-phase2-23",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "generated-noise"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "generated-schema-hand-edit"
+    },
+    {
+      "id": "large-switch-fallthrough",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-24",
+      "head": "fixture-defect-phase2-24",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "large-switch-fallthrough-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/large-reducer.ts",
+              "line": 3
+            },
+            {
+              "path": "test/reducer.test.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "A new switch branch falls through into destructive cleanup.",
+          "acceptableFindings": [
+            "Report the large-switch-fallthrough behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "test/reducer.test.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["The next branch being rare does not prevent fallthrough."]
+        }
+      ],
+      "categories": ["seeded-defect", "large-single-file"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-large-switch-fallthrough"
+    },
+    {
+      "id": "clean-large-switch-fallthrough",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-24",
+      "head": "fixture-clean-phase2-24",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "large-single-file"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "large-switch-fallthrough"
+    },
+    {
+      "id": "workspace-version-skew",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-25",
+      "head": "fixture-defect-phase2-25",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "workspace-version-skew-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "packages/a/package.json",
+              "line": 2
+            },
+            {
+              "path": "packages/b/package.json",
+              "line": 2
+            }
+          ],
+          "trigger": "Only one side of a shared protocol dependency is upgraded.",
+          "acceptableFindings": [
+            "Report the workspace-version-skew behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "packages/b/package.json",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "A lockfile cannot make incompatible declared protocols equivalent."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "broad-multi-package"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-workspace-version-skew"
+    },
+    {
+      "id": "clean-workspace-version-skew",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-25",
+      "head": "fixture-clean-phase2-25",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "broad-multi-package"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "workspace-version-skew"
+    },
+    {
+      "id": "deleted-caller-guard",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-26",
+      "head": "fixture-defect-phase2-26",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "deleted-caller-guard-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/validator.ts",
+              "line": 2
+            },
+            {
+              "path": "src/importer.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "A callee guard is removed while callers still pass unvalidated input.",
+          "acceptableFindings": [
+            "Report the deleted-caller-guard behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/importer.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Upstream validation in one caller does not cover all exported callers."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "cross-file-contract", "tool-exploration"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-deleted-caller-guard"
+    },
+    {
+      "id": "clean-deleted-caller-guard",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-26",
+      "head": "fixture-clean-phase2-26",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "cross-file-contract", "tool-exploration"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "deleted-caller-guard"
+    },
+    {
+      "id": "path-traversal",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-27",
+      "head": "fixture-defect-phase2-27",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "path-traversal-finding",
+          "severity": "P0",
+          "severityRange": {
+            "highest": "P0",
+            "lowest": "P1"
+          },
+          "anchors": [
+            {
+              "path": "src/archive.ts",
+              "line": 2
+            },
+            {
+              "path": "test/archive.test.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "Archive entry paths are joined without containment validation.",
+          "acceptableFindings": [
+            "Report the path-traversal behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "test/archive.test.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Removing leading slashes does not stop parent-directory traversal."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "security"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-path-traversal"
+    },
+    {
+      "id": "clean-path-traversal",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-27",
+      "head": "fixture-clean-phase2-27",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "security"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "path-traversal"
+    },
+    {
+      "id": "transaction-boundary",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-28",
+      "head": "fixture-defect-phase2-28",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "transaction-boundary-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/orders.ts",
+              "line": 2
+            },
+            {
+              "path": "src/payments.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "Related writes are split across separate transactions.",
+          "acceptableFindings": [
+            "Report the transaction-boundary behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/payments.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["Retries do not make partially committed state atomic."]
+        }
+      ],
+      "categories": ["seeded-defect", "data"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-transaction-boundary"
+    },
+    {
+      "id": "clean-transaction-boundary",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-28",
+      "head": "fixture-clean-phase2-28",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "data"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "transaction-boundary"
+    },
+    {
+      "id": "async-double-settle",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-29",
+      "head": "fixture-defect-phase2-29",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "async-double-settle-finding",
+          "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
+          "anchors": [
+            {
+              "path": "src/queue.ts",
+              "line": 2
+            },
+            {
+              "path": "test/queue.test.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "Both timeout and completion paths can settle the same job.",
+          "acceptableFindings": [
+            "Report the async-double-settle behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "test/queue.test.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Promises ignoring later settlement does not prevent side effects."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "concurrency"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-async-double-settle"
+    },
+    {
+      "id": "clean-async-double-settle",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-29",
+      "head": "fixture-clean-phase2-29",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "concurrency"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "async-double-settle"
+    },
+    {
+      "id": "hydration-mismatch",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-30",
+      "head": "fixture-defect-phase2-30",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "hydration-mismatch-finding",
+          "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
+          "anchors": [
+            {
+              "path": "src/banner.tsx",
+              "line": 2
+            },
+            {
+              "path": "src/server-flags.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "Render output reads a browser-only value during initial hydration.",
+          "acceptableFindings": [
+            "Report the hydration-mismatch behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/server-flags.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["Client-only intent does not stop server rendering."]
+        }
+      ],
+      "categories": ["seeded-defect", "frontend"],
+      "subsets": ["core", "full"],
+      "counterfactualCaseId": "clean-hydration-mismatch"
+    },
+    {
+      "id": "clean-hydration-mismatch",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-30",
+      "head": "fixture-clean-phase2-30",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "frontend"],
+      "subsets": ["core", "full"],
+      "counterfactualOf": "hydration-mismatch"
+    },
+    {
+      "id": "oidc-permission-scope",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-31",
+      "head": "fixture-defect-phase2-31",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "oidc-permission-scope-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": ".github/workflows/deploy.yml",
+              "line": 2
+            },
+            {
+              "path": "infra/iam.tf",
+              "line": 2
+            }
+          ],
+          "trigger": "OIDC deployment permissions are granted to every pull request.",
+          "acceptableFindings": [
+            "Report the oidc-permission-scope behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "infra/iam.tf",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Environment protection is not implied by id-token permission."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "infrastructure"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-oidc-permission-scope"
+    },
+    {
+      "id": "clean-oidc-permission-scope",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-31",
+      "head": "fixture-clean-phase2-31",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "infrastructure"],
+      "subsets": ["full"],
+      "counterfactualOf": "oidc-permission-scope"
+    },
+    {
+      "id": "test-false-positive",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-32",
+      "head": "fixture-defect-phase2-32",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "test-false-positive-finding",
+          "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
+          "anchors": [
+            {
+              "path": "test/errors.test.ts",
+              "line": 2
+            },
+            {
+              "path": "src/errors.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "The test accepts any thrown error instead of the required class.",
+          "acceptableFindings": [
+            "Report the test-false-positive behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/errors.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["Any failure is not evidence of the intended validation."]
+        }
+      ],
+      "categories": ["seeded-defect", "tests"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-test-false-positive"
+    },
+    {
+      "id": "clean-test-false-positive",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-32",
+      "head": "fixture-clean-phase2-32",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "tests"],
+      "subsets": ["full"],
+      "counterfactualOf": "test-false-positive"
+    },
+    {
+      "id": "docs-copy-paste-path",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-33",
+      "head": "fixture-defect-phase2-33",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "docs-copy-paste-path-finding",
+          "severity": "P3",
+          "severityRange": {
+            "highest": "P3",
+            "lowest": "P3"
+          },
+          "anchors": [
+            {
+              "path": "docs/migration.md",
+              "line": 2
+            },
+            {
+              "path": "packages/new/package.json",
+              "line": 2
+            }
+          ],
+          "trigger": "A copied example still references the old package path.",
+          "acceptableFindings": [
+            "Report the docs-copy-paste-path behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "packages/new/package.json",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["A compatibility package is not declared in the new setup."]
+        }
+      ],
+      "categories": ["seeded-defect", "docs"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-docs-copy-paste-path"
+    },
+    {
+      "id": "clean-docs-copy-paste-path",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-33",
+      "head": "fixture-clean-phase2-33",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "docs"],
+      "subsets": ["full"],
+      "counterfactualOf": "docs-copy-paste-path"
+    },
+    {
+      "id": "shared-session-finalization",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-34",
+      "head": "fixture-defect-phase2-34",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "shared-session-finalization-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/shared/session-concurrency.ts",
+              "line": 2
+            },
+            {
+              "path": "src/shared/acp.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "The shared wrapper exits without finalizing session telemetry.",
+          "acceptableFindings": [
+            "Report the shared-session-finalization behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/shared/acp.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "A backend-local pending-tool flush is not a second session-finalization owner."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "tool-exploration"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-shared-session-finalization"
+    },
+    {
+      "id": "clean-shared-session-finalization",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-34",
+      "head": "fixture-clean-phase2-34",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "tool-exploration", "historical-rejected"],
+      "subsets": ["full"],
+      "counterfactualOf": "shared-session-finalization"
+    },
+    {
+      "id": "large-regex-backtracking",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-35",
+      "head": "fixture-defect-phase2-35",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "large-regex-backtracking-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/large-validator.ts",
+              "line": 2
+            },
+            {
+              "path": "test/validator.perf.test.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "A nested repetition makes adversarial input catastrophically backtrack.",
+          "acceptableFindings": [
+            "Report the large-regex-backtracking behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "test/validator.perf.test.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["Normal-length samples do not bound adversarial runtime."]
+        }
+      ],
+      "categories": ["seeded-defect", "large-single-file"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-large-regex-backtracking"
+    },
+    {
+      "id": "clean-large-regex-backtracking",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-35",
+      "head": "fixture-clean-phase2-35",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "large-single-file"],
+      "subsets": ["full"],
+      "counterfactualOf": "large-regex-backtracking"
+    },
+    {
+      "id": "workspace-peer-break",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-36",
+      "head": "fixture-defect-phase2-36",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "workspace-peer-break-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "packages/plugin/package.json",
+              "line": 2
+            },
+            {
+              "path": "packages/host/package.json",
+              "line": 2
+            }
+          ],
+          "trigger": "A peer range excludes the host version shipped in the same change.",
+          "acceptableFindings": [
+            "Report the workspace-peer-break behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "packages/host/package.json",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Package-manager warnings do not restore runtime compatibility."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "broad-multi-package"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-workspace-peer-break"
+    },
+    {
+      "id": "clean-workspace-peer-break",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-36",
+      "head": "fixture-clean-phase2-36",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "broad-multi-package"],
+      "subsets": ["full"],
+      "counterfactualOf": "workspace-peer-break"
+    },
+    {
+      "id": "symbol-usage-miss",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-37",
+      "head": "fixture-defect-phase2-37",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "symbol-usage-miss-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/serializer.ts",
+              "line": 2
+            },
+            {
+              "path": "src/exporter.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "A changed exported symbol has an unchanged caller that relies on the old encoding.",
+          "acceptableFindings": [
+            "Report the symbol-usage-miss behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/exporter.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Updated direct tests do not cover unchanged downstream callers."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "cross-file-contract", "tool-exploration"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-symbol-usage-miss"
+    },
+    {
+      "id": "clean-symbol-usage-miss",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-37",
+      "head": "fixture-clean-phase2-37",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "cross-file-contract", "tool-exploration"],
+      "subsets": ["full"],
+      "counterfactualOf": "symbol-usage-miss"
+    },
+    {
+      "id": "authorization-order",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-38",
+      "head": "fixture-defect-phase2-38",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "authorization-order-finding",
+          "severity": "P0",
+          "severityRange": {
+            "highest": "P0",
+            "lowest": "P1"
+          },
+          "anchors": [
+            {
+              "path": "src/download.ts",
+              "line": 2
+            },
+            {
+              "path": "src/storage.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "Sensitive data is loaded before authorization is checked.",
+          "acceptableFindings": [
+            "Report the authorization-order behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/storage.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Discarding the response later does not undo the unauthorized read."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "security"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-authorization-order"
+    },
+    {
+      "id": "clean-authorization-order",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-38",
+      "head": "fixture-clean-phase2-38",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "security"],
+      "subsets": ["full"],
+      "counterfactualOf": "authorization-order"
+    },
+    {
+      "id": "decimal-precision-loss",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-39",
+      "head": "fixture-defect-phase2-39",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "decimal-precision-loss-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/money.ts",
+              "line": 2
+            },
+            {
+              "path": "test/money.test.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "Currency values are converted through binary floating point.",
+          "acceptableFindings": [
+            "Report the decimal-precision-loss behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "test/money.test.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Rounding at display time cannot recover intermediate precision."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "data"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-decimal-precision-loss"
+    },
+    {
+      "id": "clean-decimal-precision-loss",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-39",
+      "head": "fixture-clean-phase2-39",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "data"],
+      "subsets": ["full"],
+      "counterfactualOf": "decimal-precision-loss"
+    },
+    {
+      "id": "semaphore-leak",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-40",
+      "head": "fixture-defect-phase2-40",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "semaphore-leak-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/pool.ts",
+              "line": 2
+            },
+            {
+              "path": "test/pool.failure.test.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "A rejected task exits without releasing its permit.",
+          "acceptableFindings": [
+            "Report the semaphore-leak behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "test/pool.failure.test.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Successful-task coverage does not exercise permit cleanup."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "concurrency"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-semaphore-leak"
+    },
+    {
+      "id": "clean-semaphore-leak",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-40",
+      "head": "fixture-clean-phase2-40",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "concurrency"],
+      "subsets": ["full"],
+      "counterfactualOf": "semaphore-leak"
+    },
+    {
+      "id": "optimistic-rollback",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-41",
+      "head": "fixture-defect-phase2-41",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "optimistic-rollback-finding",
+          "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
+          "anchors": [
+            {
+              "path": "src/use-save.ts",
+              "line": 2
+            },
+            {
+              "path": "src/editor.tsx",
+              "line": 2
+            }
+          ],
+          "trigger": "A failed optimistic mutation leaves the stale value in cache.",
+          "acceptableFindings": [
+            "Report the optimistic-rollback behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/editor.tsx",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "A later refetch is not guaranteed after an offline failure."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "frontend"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-optimistic-rollback"
+    },
+    {
+      "id": "clean-optimistic-rollback",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-41",
+      "head": "fixture-clean-phase2-41",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "frontend"],
+      "subsets": ["full"],
+      "counterfactualOf": "optimistic-rollback"
+    },
+    {
+      "id": "deploy-healthcheck",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-42",
+      "head": "fixture-defect-phase2-42",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "deploy-healthcheck-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "infra/deployment.yml",
+              "line": 2
+            },
+            {
+              "path": "src/health.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "The readiness probe points at an endpoint removed in the same change.",
+          "acceptableFindings": [
+            "Report the deploy-healthcheck behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/health.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["A liveness probe does not substitute for readiness."]
+        }
+      ],
+      "categories": ["seeded-defect", "infrastructure"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-deploy-healthcheck"
+    },
+    {
+      "id": "clean-deploy-healthcheck",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-42",
+      "head": "fixture-clean-phase2-42",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "infrastructure"],
+      "subsets": ["full"],
+      "counterfactualOf": "deploy-healthcheck"
+    },
+    {
+      "id": "mock-contract-drift",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-43",
+      "head": "fixture-defect-phase2-43",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "mock-contract-drift-finding",
+          "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
+          "anchors": [
+            {
+              "path": "test/mock-api.ts",
+              "line": 2
+            },
+            {
+              "path": "src/api-client.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "The mock retains a field removed from the production response.",
+          "acceptableFindings": [
+            "Report the mock-contract-drift behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/api-client.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Passing mock-based tests does not validate the live response shape."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "tests"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-mock-contract-drift"
+    },
+    {
+      "id": "clean-mock-contract-drift",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-43",
+      "head": "fixture-clean-phase2-43",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "tests"],
+      "subsets": ["full"],
+      "counterfactualOf": "mock-contract-drift"
+    },
+    {
+      "id": "docs-unavailable-option",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-44",
+      "head": "fixture-defect-phase2-44",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "docs-unavailable-option-finding",
+          "severity": "P3",
+          "severityRange": {
+            "highest": "P3",
+            "lowest": "P3"
+          },
+          "anchors": [
+            {
+              "path": "docs/cli.md",
+              "line": 2
+            },
+            {
+              "path": "src/cli.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "The guide documents a flag the parser never registers.",
+          "acceptableFindings": [
+            "Report the docs-unavailable-option behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/cli.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["A similarly named environment variable is not a CLI flag."]
+        }
+      ],
+      "categories": ["seeded-defect", "docs"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-docs-unavailable-option"
+    },
+    {
+      "id": "clean-docs-unavailable-option",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-44",
+      "head": "fixture-clean-phase2-44",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "docs"],
+      "subsets": ["full"],
+      "counterfactualOf": "docs-unavailable-option"
+    },
+    {
+      "id": "generated-client-stale",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-45",
+      "head": "fixture-defect-phase2-45",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "generated-client-stale-finding",
+          "severity": "P2",
+          "severityRange": {
+            "highest": "P2",
+            "lowest": "P3"
+          },
+          "anchors": [
+            {
+              "path": "generated/api-client.ts",
+              "line": 2
+            },
+            {
+              "path": "openapi/api.yml",
+              "line": 2
+            }
+          ],
+          "trigger": "The generated client omits a newly required response field.",
+          "acceptableFindings": [
+            "Report the generated-client-stale behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "openapi/api.yml",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Structural typing does not synthesize a missing runtime field."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "generated-noise"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-generated-client-stale"
+    },
+    {
+      "id": "clean-generated-client-stale",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-45",
+      "head": "fixture-clean-phase2-45",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "generated-noise"],
+      "subsets": ["full"],
+      "counterfactualOf": "generated-client-stale"
+    },
+    {
+      "id": "large-file-off-by-one",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-46",
+      "head": "fixture-defect-phase2-46",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "large-file-off-by-one-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/large-index.ts",
+              "line": 2
+            },
+            {
+              "path": "test/large-index.test.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "The final element is excluded from the rebuilt index.",
+          "acceptableFindings": [
+            "Report the large-file-off-by-one behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "test/large-index.test.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["Most lookups succeeding does not cover the final entry."]
+        }
+      ],
+      "categories": ["seeded-defect", "large-single-file"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-large-file-off-by-one"
+    },
+    {
+      "id": "clean-large-file-off-by-one",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-46",
+      "head": "fixture-clean-phase2-46",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "large-single-file"],
+      "subsets": ["full"],
+      "counterfactualOf": "large-file-off-by-one"
+    },
+    {
+      "id": "package-cycle",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-47",
+      "head": "fixture-defect-phase2-47",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "package-cycle-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "packages/core/src/index.ts",
+              "line": 2
+            },
+            {
+              "path": "packages/ui/src/index.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "A new cross-package import closes a runtime dependency cycle.",
+          "acceptableFindings": [
+            "Report the package-cycle behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "packages/ui/src/index.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Type-only cycles elsewhere do not make this runtime cycle safe."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "broad-multi-package"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-package-cycle"
+    },
+    {
+      "id": "clean-package-cycle",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-47",
+      "head": "fixture-clean-phase2-47",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "broad-multi-package"],
+      "subsets": ["full"],
+      "counterfactualOf": "package-cycle"
+    },
+    {
+      "id": "caller-error-swallow",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-48",
+      "head": "fixture-defect-phase2-48",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "caller-error-swallow-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/provider.ts",
+              "line": 3
+            },
+            {
+              "path": "src/retry.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "A provider error is converted to empty success, preventing caller retry.",
+          "acceptableFindings": [
+            "Report the caller-error-swallow behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/retry.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "An empty result is a valid success value and cannot signal retry."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "cross-file-contract", "tool-exploration"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-caller-error-swallow"
+    },
+    {
+      "id": "clean-caller-error-swallow",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-48",
+      "head": "fixture-clean-phase2-48",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "cross-file-contract", "tool-exploration"],
+      "subsets": ["full"],
+      "counterfactualOf": "caller-error-swallow"
+    },
+    {
+      "id": "nonce-reuse",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-49",
+      "head": "fixture-defect-phase2-49",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "nonce-reuse-finding",
+          "severity": "P0",
+          "severityRange": {
+            "highest": "P0",
+            "lowest": "P1"
+          },
+          "anchors": [
+            {
+              "path": "src/encryption.ts",
+              "line": 2
+            },
+            {
+              "path": "test/encryption.test.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "Encryption reuses a constant nonce across messages.",
+          "acceptableFindings": [
+            "Report the nonce-reuse behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "test/encryption.test.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": ["Unique plaintext does not make nonce reuse safe."]
+        }
+      ],
+      "categories": ["seeded-defect", "security"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-nonce-reuse"
+    },
+    {
+      "id": "clean-nonce-reuse",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-49",
+      "head": "fixture-clean-phase2-49",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "security"],
+      "subsets": ["full"],
+      "counterfactualOf": "nonce-reuse"
+    },
+    {
+      "id": "idempotency-key-scope",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-50",
+      "head": "fixture-defect-phase2-50",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "idempotency-key-scope-finding",
+          "severity": "P1",
+          "severityRange": {
+            "highest": "P1",
+            "lowest": "P2"
+          },
+          "anchors": [
+            {
+              "path": "src/payments.ts",
+              "line": 2
+            },
+            {
+              "path": "src/request.ts",
+              "line": 2
+            }
+          ],
+          "trigger": "The idempotency key excludes the account identity.",
+          "acceptableFindings": [
+            "Report the idempotency-key-scope behavior at the changed implementation.",
+            "Report the same contract break at its affected caller or test evidence."
+          ],
+          "requiredEvidence": [
+            {
+              "path": "src/request.ts",
+              "relation": "Confirms the changed behavior affects another file."
+            }
+          ],
+          "disallowedInterpretations": [
+            "Client-generated uniqueness is not a cross-tenant namespace."
+          ]
+        }
+      ],
+      "categories": ["seeded-defect", "data"],
+      "subsets": ["full"],
+      "counterfactualCaseId": "clean-idempotency-key-scope"
+    },
+    {
+      "id": "clean-idempotency-key-scope",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-phase2-50",
+      "head": "fixture-clean-phase2-50",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "categories": ["clean", "data"],
+      "subsets": ["full"],
+      "counterfactualOf": "idempotency-key-scope"
     }
   ]
 }

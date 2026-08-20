@@ -55,7 +55,13 @@ import {
 } from '../shared/diff-context.ts';
 import { planReviewFanout } from '../shared/fanout.ts';
 import { selectLensKeys } from '../shared/prompt.ts';
-import { loadDotEnv, parseOwnerRepo, renderReport, renderReviewPreview } from './util.ts';
+import {
+  benchmarkReviewOutput,
+  loadDotEnv,
+  parseOwnerRepo,
+  renderReport,
+  renderReviewPreview,
+} from './util.ts';
 
 /**
  * Local review driver (`npm run review:local`): runs the real review pipeline
@@ -526,6 +532,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   const remoteUrl = await gitOrEmpty(['remote', 'get-url', 'origin']);
   const { owner, repo } = parseOwnerRepo(remoteUrl) ?? { owner: 'local', repo: 'local' };
   const commits = await localCommits(mergeBase);
+  const workspace = isolated?.path ?? process.cwd();
 
   log(`Reviewing ${reviewable.length} changed file(s) on ${branch} with ${model}.`);
 
@@ -539,7 +546,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     pullNumber: 0,
     pullTitle: subject || `Local review of ${branch}`,
     pullBody: body,
-    workspace: isolated?.path ?? process.cwd(),
+    workspace,
     model,
     apiKey,
     baseURL,
@@ -579,7 +586,14 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     return;
   }
 
-  if (benchmarkOutput) writeFileSync(benchmarkOutput, `${JSON.stringify(reviewResult)}\n`);
+  if (benchmarkOutput) {
+    writeFileSync(
+      benchmarkOutput,
+      `${JSON.stringify(
+        benchmarkReviewOutput(reviewResult, join(workspace, REPORT_DIR, 'telemetry.jsonl')),
+      )}\n`,
+    );
+  }
 
   const report = renderReport(reviewResult, { branch, baseRef, mergeBase, model });
   console.log(`\n${report}`);

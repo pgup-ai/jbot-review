@@ -1,6 +1,6 @@
 import type { Severity } from './types.ts';
 
-export const BENCHMARK_SCHEMA_VERSION = 1;
+export const BENCHMARK_SCHEMA_VERSION = 2;
 const BENCHMARK_BOOTSTRAP_SEED = 0x4a424f54;
 const BENCHMARK_BOOTSTRAP_SAMPLES = 2_000;
 
@@ -16,7 +16,18 @@ export interface BenchmarkAnchor {
 export interface BenchmarkExpectedFinding {
   id: string;
   severity: Severity;
+  severityRange: {
+    highest: Severity;
+    lowest: Severity;
+  };
   anchors: BenchmarkAnchor[];
+  trigger: string;
+  acceptableFindings: string[];
+  requiredEvidence: Array<{
+    path: string;
+    relation: string;
+  }>;
+  disallowedInterpretations: string[];
 }
 
 export interface BenchmarkObservedFinding extends BenchmarkAnchor {
@@ -24,12 +35,15 @@ export interface BenchmarkObservedFinding extends BenchmarkAnchor {
   title: string;
   /** Stable semantic identity supplied by an adapter; falls back to path/line/title. */
   fingerprint?: string;
-  /** Optional adjudicated match. Automatic matching otherwise uses allowed anchors. */
+  /** Adjudicated semantic match required before recall credit is awarded. */
   expectedFindingId?: string;
   /** Whether the posting pipeline retained this finding. Defaults to true. */
   retained?: boolean;
   /** Whether the claimed location is a valid diff anchor. Defaults to line > 0. */
   anchored?: boolean;
+  /** Both adjudicated checks must be true before recall credit is awarded. */
+  triggerComplete?: boolean;
+  evidenceSupported?: boolean;
 }
 
 export interface BenchmarkCaseRun {
@@ -59,11 +73,20 @@ export interface BenchmarkScore {
   expectedFindings: number;
   retainedFindings: number;
   matchedFindings: number;
+  cleanFalsePositiveCases: string[];
   severityWeightedRecall: BenchmarkMetric;
   precision: BenchmarkMetric;
   cleanFalsePositiveRate: BenchmarkMetric;
   anchorRate: BenchmarkMetric;
   duplicateRate: BenchmarkMetric;
+  triggerCompleteness: BenchmarkMetric;
+  evidenceSupportRate: BenchmarkMetric;
+  semanticAdjudication: {
+    complete: boolean;
+    adjudicatedFindings: number;
+    retainedFindings: number;
+  };
+  missedBySeverity: Record<Severity, number>;
   latencyMs: {
     median: BenchmarkMetric;
     p90: BenchmarkMetric;
@@ -102,8 +125,27 @@ interface CaseContribution {
   anchored: number;
   observed: number;
   duplicates: number;
+  triggerComplete: number;
+  triggerObserved: number;
+  evidenceSupported: number;
+  evidenceObserved: number;
+  semanticallyAdjudicated: number;
+  missedBySeverity: Record<Severity, number>;
   latencyMs: number;
   costUsd: number;
+}
+
+const SEVERITY_ORDER: Severity[] = ['P0', 'P1', 'P2', 'P3', 'nit'];
+
+export function severityWithinRange(
+  severity: Severity,
+  range: BenchmarkExpectedFinding['severityRange'],
+): boolean {
+  const observed = SEVERITY_ORDER.indexOf(severity);
+  return (
+    observed >= SEVERITY_ORDER.indexOf(range.highest) &&
+    observed <= SEVERITY_ORDER.indexOf(range.lowest)
+  );
 }
 
 function findingKey(finding: BenchmarkObservedFinding): string {
@@ -111,6 +153,80 @@ function findingKey(finding: BenchmarkObservedFinding): string {
     finding.fingerprint ??
     `${finding.path}:${finding.line}:${finding.title.trim().toLocaleLowerCase('en-US')}`
   );
+}
+
+function varianceFindingKey(finding: BenchmarkObservedFinding): string {
+  return finding.expectedFindingId ?? finding.fingerprint ?? `${finding.path}:${finding.line}`;
+}
+
+function varianceFindingKeys(findings: BenchmarkObservedFinding[]): string[] {
+  const counts = new Map<string, number>();
+  return findings
+    .filter((finding) => finding.retained !== false)
+    .map((finding) => {
+      const key = varianceFindingKey(finding);
+      const occurrence = (counts.get(key) ?? 0) + 1;
+      counts.set(key, occurrence);
+      return `${key}\0${occurrence}`;
+    });
+}
+
+interface BenchmarkVariance {
+  status: 'reportable' | 'insufficient-repetitions';
+  cases: number;
+  minRepetitions: number;
+  maxRepetitions: number;
+  findingAgreement: number | null;
+  latencyRelativeMad: number | null;
+}
+
+function jaccard(left: Set<string>, right: Set<string>): number {
+  const union = new Set([...left, ...right]);
+  if (union.size === 0) return 1;
+  let intersection = 0;
+  for (const value of left) if (right.has(value)) intersection += 1;
+  return intersection / union.size;
+}
+
+export function characterizeBenchmarkVariance(runs: BenchmarkCaseRun[]): BenchmarkVariance {
+  const grouped = new Map<string, BenchmarkCaseRun[]>();
+  for (const run of runs) {
+    const group = grouped.get(run.caseId);
+    if (group) group.push(run);
+    else grouped.set(run.caseId, [run]);
+  }
+  const repetitions = [...grouped.values()].map((group) => group.length);
+  const agreements: number[] = [];
+  const relativeDeviations: number[] = [];
+  for (const group of grouped.values()) {
+    for (let left = 0; left < group.length; left += 1) {
+      for (let right = left + 1; right < group.length; right += 1) {
+        agreements.push(
+          jaccard(
+            new Set(varianceFindingKeys(group[left].findings)),
+            new Set(varianceFindingKeys(group[right].findings)),
+          ),
+        );
+      }
+    }
+    const median = percentile(
+      group.map((run) => run.latencyMs),
+      0.5,
+    );
+    if (median && median > 0) {
+      for (const run of group) relativeDeviations.push(Math.abs(run.latencyMs - median) / median);
+    }
+  }
+  const minRepetitions = repetitions.length > 0 ? Math.min(...repetitions) : 0;
+  const maxRepetitions = repetitions.length > 0 ? Math.max(...repetitions) : 0;
+  return {
+    status: minRepetitions >= 3 && maxRepetitions <= 5 ? 'reportable' : 'insufficient-repetitions',
+    cases: grouped.size,
+    minRepetitions,
+    maxRepetitions,
+    findingAgreement: percentile(agreements, 0.5),
+    latencyRelativeMad: percentile(relativeDeviations, 0.5),
+  };
 }
 
 function scoreCase(run: BenchmarkCaseRun): CaseContribution {
@@ -127,6 +243,11 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
   let matched = 0;
   let matchedWeight = 0;
   let anchored = 0;
+  let triggerComplete = 0;
+  let triggerObserved = 0;
+  let evidenceSupported = 0;
+  let evidenceObserved = 0;
+  let semanticallyAdjudicated = 0;
   const duplicates = run.findings.length - groups.size;
 
   for (const group of groups.values()) {
@@ -134,6 +255,17 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
     if (!finding) continue;
     retained += 1;
     if (finding.anchored ?? finding.line > 0) anchored += 1;
+    if (finding.triggerComplete !== undefined && finding.evidenceSupported !== undefined) {
+      semanticallyAdjudicated += 1;
+    }
+    if (finding.triggerComplete !== undefined) {
+      triggerObserved += 1;
+      if (finding.triggerComplete) triggerComplete += 1;
+    }
+    if (finding.evidenceSupported !== undefined) {
+      evidenceObserved += 1;
+      if (finding.evidenceSupported) evidenceSupported += 1;
+    }
 
     const anchorMatches = (expected: BenchmarkExpectedFinding): boolean =>
       expected.anchors.some(
@@ -141,14 +273,23 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
       );
     const expected = finding.expectedFindingId
       ? expectedById.get(finding.expectedFindingId)
-      : run.expectedFindings.find(
-          (candidate) => !matchedExpected.has(candidate.id) && anchorMatches(candidate),
-        );
+      : undefined;
     if (!expected || matchedExpected.has(expected.id) || !anchorMatches(expected)) continue;
+    if (!severityWithinRange(finding.severity, expected.severityRange)) continue;
+    if (finding.triggerComplete !== true || finding.evidenceSupported !== true) continue;
     matchedExpected.add(expected.id);
     matched += 1;
     matchedWeight += SEVERITY_WEIGHT[expected.severity];
   }
+
+  const missedBySeverity = Object.fromEntries(
+    SEVERITY_ORDER.map((severity) => [
+      severity,
+      run.expectedFindings.filter(
+        (finding) => finding.severity === severity && !matchedExpected.has(finding.id),
+      ).length,
+    ]),
+  ) as Record<Severity, number>;
 
   return {
     expectedWeight: run.expectedFindings.reduce(
@@ -163,6 +304,12 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
     anchored,
     observed: run.findings.length,
     duplicates,
+    triggerComplete,
+    triggerObserved,
+    evidenceSupported,
+    evidenceObserved,
+    semanticallyAdjudicated,
+    missedBySeverity,
     latencyMs: run.latencyMs,
     costUsd: run.costUsd ?? 0,
   };
@@ -206,6 +353,14 @@ function aggregate(contributions: CaseContribution[]) {
     duplicateRate: ratio(
       sum((value) => value.duplicates),
       sum((value) => value.observed),
+    ),
+    triggerCompleteness: ratio(
+      sum((value) => value.triggerComplete),
+      sum((value) => value.triggerObserved),
+    ),
+    evidenceSupportRate: ratio(
+      sum((value) => value.evidenceSupported),
+      sum((value) => value.evidenceObserved),
     ),
     medianLatencyMs: percentile(
       contributions.map((value) => value.latencyMs),
@@ -294,23 +449,138 @@ export function scoreBenchmark(
     value: metrics[name],
     ci95: intervals[name],
   });
+  const retainedFindings = contributions.reduce((sum, value) => sum + value.retained, 0);
+  const adjudicatedFindings = contributions.reduce(
+    (sum, value) => sum + value.semanticallyAdjudicated,
+    0,
+  );
 
   return {
     cases: runs.length,
     expectedFindings: runs.reduce((sum, run) => sum + run.expectedFindings.length, 0),
-    retainedFindings: contributions.reduce((sum, value) => sum + value.retained, 0),
+    retainedFindings,
     matchedFindings: contributions.reduce((sum, value) => sum + value.matched, 0),
+    cleanFalsePositiveCases: [
+      ...new Set(
+        runs
+          .filter((run, index) => run.expectedClean && contributions[index].retained > 0)
+          .map((run) => run.caseId),
+      ),
+    ].sort(),
     severityWeightedRecall: metric('severityWeightedRecall'),
     precision: metric('precision'),
     cleanFalsePositiveRate: metric('cleanFalsePositiveRate'),
     anchorRate: metric('anchorRate'),
     duplicateRate: metric('duplicateRate'),
+    triggerCompleteness: metric('triggerCompleteness'),
+    evidenceSupportRate: metric('evidenceSupportRate'),
+    semanticAdjudication: {
+      complete: retainedFindings === adjudicatedFindings,
+      adjudicatedFindings,
+      retainedFindings,
+    },
+    missedBySeverity: Object.fromEntries(
+      SEVERITY_ORDER.map((severity) => [
+        severity,
+        contributions.reduce((sum, value) => sum + value.missedBySeverity[severity], 0),
+      ]),
+    ) as Record<Severity, number>,
     latencyMs: {
       median: metric('medianLatencyMs'),
       p90: metric('p90LatencyMs'),
       p95: metric('p95LatencyMs'),
     },
     costPerRetainedFindingUsd: metric('costPerRetainedFindingUsd'),
+  };
+}
+
+interface BenchmarkQualityGate {
+  status: 'passed' | 'failed' | 'adjudication-required';
+  passed: boolean | null;
+  reasons: string[];
+  semanticAdjudication: {
+    control: BenchmarkScore['semanticAdjudication'];
+    treatment: BenchmarkScore['semanticAdjudication'];
+  };
+}
+
+export function evaluateBenchmarkQualityGate(
+  control: BenchmarkScore,
+  treatment: BenchmarkScore,
+  tolerance = 0.02,
+  completion?: {
+    controlSuccessfulRunKeys: readonly string[];
+    treatmentSuccessfulRunKeys: readonly string[];
+    controlFailedRuns: number;
+    treatmentFailedRuns: number;
+  },
+): BenchmarkQualityGate {
+  const semanticAdjudication = {
+    control: control.semanticAdjudication,
+    treatment: treatment.semanticAdjudication,
+  };
+  const reasons: string[] = [];
+  const controlSuccessfulRunKeys = new Set(completion?.controlSuccessfulRunKeys);
+  const treatmentSuccessfulRunKeys = new Set(completion?.treatmentSuccessfulRunKeys);
+  if (
+    completion &&
+    (completion.controlFailedRuns > 0 ||
+      completion.treatmentFailedRuns > 0 ||
+      controlSuccessfulRunKeys.size !== treatmentSuccessfulRunKeys.size ||
+      [...controlSuccessfulRunKeys].some((key) => !treatmentSuccessfulRunKeys.has(key)))
+  ) {
+    reasons.push('benchmark arms did not complete a comparable run population');
+  }
+  if (!control.semanticAdjudication.complete || !treatment.semanticAdjudication.complete) {
+    return {
+      status: 'adjudication-required',
+      passed: null,
+      reasons: ['semantic adjudication is incomplete'],
+      semanticAdjudication,
+    };
+  }
+  if (reasons.length > 0) {
+    return {
+      status: 'failed',
+      passed: false,
+      reasons,
+      semanticAdjudication,
+    };
+  }
+  if (treatment.missedBySeverity.P0 > 0 || treatment.missedBySeverity.P1 > 0) {
+    reasons.push('treatment missed a seeded P0/P1 finding');
+  }
+  if (
+    control.cleanFalsePositiveRate.value !== null &&
+    treatment.cleanFalsePositiveRate.value !== null
+  ) {
+    const controlCases = new Set(control.cleanFalsePositiveCases);
+    const newCase = treatment.cleanFalsePositiveCases.some((caseId) => !controlCases.has(caseId));
+    if (newCase || treatment.cleanFalsePositiveRate.value > control.cleanFalsePositiveRate.value) {
+      reasons.push('treatment introduced a new clean false positive');
+    }
+  }
+  for (const [label, controlValue, treatmentValue] of [
+    [
+      'severity-weighted recall',
+      control.severityWeightedRecall.value,
+      treatment.severityWeightedRecall.value,
+    ],
+    ['precision', control.precision.value, treatment.precision.value],
+  ] as const) {
+    if (
+      controlValue !== null &&
+      treatmentValue !== null &&
+      controlValue - treatmentValue > tolerance
+    ) {
+      reasons.push(`${label} regressed by more than ${tolerance * 100} percentage points`);
+    }
+  }
+  return {
+    status: reasons.length === 0 ? 'passed' : 'failed',
+    passed: reasons.length === 0,
+    reasons,
+    semanticAdjudication,
   };
 }
 
