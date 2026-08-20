@@ -73,6 +73,13 @@ describe('competitor benchmark adapters', () => {
         },
       ],
     );
+    assert.throws(
+      () =>
+        normalizeCompetitorFindings('github-review', [
+          { id: 5, body: '**P2** — Finding without a source path' },
+        ]),
+      /comment 5/,
+    );
     const finding = { path: 'src/a.ts', line: 4, severity: 'P2', title: 'Contract break' };
     assert.deepEqual(normalizeCompetitorFindings('benchmark-json', { findings: [finding] }), [
       finding,

@@ -46,13 +46,25 @@ describe('historical benchmark adjudication', () => {
     const candidate = importHistoricalFinding(signal);
     const one = adjudicateHistoricalCandidates(
       [candidate],
-      [{ candidateId: candidate.candidateId, adjudicatorId: 'a', decision: 'accepted' }],
+      [
+        {
+          candidateId: candidate.candidateId,
+          adjudicatorId: 'a',
+          decision: 'accepted',
+          expectedFindingId: 'finding-1',
+        },
+      ],
     );
     assert.equal(one[0].status, 'pending');
     const disagreement = adjudicateHistoricalCandidates(
       [candidate],
       [
-        { candidateId: candidate.candidateId, adjudicatorId: 'a', decision: 'accepted' },
+        {
+          candidateId: candidate.candidateId,
+          adjudicatorId: 'a',
+          decision: 'accepted',
+          expectedFindingId: 'finding-1',
+        },
         { candidateId: candidate.candidateId, adjudicatorId: 'b', decision: 'rejected' },
       ],
     );
@@ -67,7 +79,12 @@ describe('historical benchmark adjudication', () => {
             decision: 'accepted',
             expectedFindingId: 'finding-1',
           },
-          { candidateId: candidate.candidateId, adjudicatorId: 'b', decision: 'accepted' },
+          {
+            candidateId: candidate.candidateId,
+            adjudicatorId: 'b',
+            decision: 'accepted',
+            expectedFindingId: 'finding-2',
+          },
         ],
       )[0].status,
       'disagreement',
@@ -111,6 +128,17 @@ describe('historical benchmark adjudication', () => {
         decision: 'rejected',
         labelCount: 2,
       },
+    );
+    assert.throws(
+      () =>
+        adjudicateHistoricalCandidates(
+          [candidate],
+          [
+            { candidateId: candidate.candidateId, adjudicatorId: 'a', decision: 'accepted' },
+            { candidateId: candidate.candidateId, adjudicatorId: 'b', decision: 'accepted' },
+          ],
+        ),
+      /invalid/,
     );
     assert.throws(
       () =>

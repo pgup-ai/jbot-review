@@ -25,7 +25,10 @@ it('reads nonblank JSONL records and reports malformed line locations', () => {
     writeFileSync(path, '{"id":1}\r\n  \r\n{"id":2}\n');
     assert.deepEqual(readJsonLines(path), [{ id: 1 }, { id: 2 }]);
     writeFileSync(path, '{"id":1}\ninvalid\n');
-    assert.throws(() => readJsonLines(path), new RegExp(`${path}:2`));
+    assert.throws(
+      () => readJsonLines(path),
+      (error: unknown) => error instanceof Error && error.message.includes(`${path}:2`),
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

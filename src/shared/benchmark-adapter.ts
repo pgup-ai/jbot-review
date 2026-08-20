@@ -247,7 +247,13 @@ function normalizeGitHubReview(input: unknown): BenchmarkObservedFinding[] {
       fingerprint:
         typeof entry.id === 'string' || typeof entry.id === 'number' ? String(entry.id) : undefined,
     });
-    if (finding) findings.push(finding);
+    if (finding) {
+      findings.push(finding);
+    } else if (bodyFinding || entry.severity !== undefined || entry.title !== undefined) {
+      const id =
+        typeof entry.id === 'string' || typeof entry.id === 'number' ? String(entry.id) : 'unknown';
+      throw new Error(`github-review comment ${id} contains an invalid finding.`);
+    }
   }
   return findings;
 }

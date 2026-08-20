@@ -178,6 +178,7 @@ export function adjudicateHistoricalCandidates(
       !candidateIds.has(label.candidateId) ||
       !isNonEmptyString(label.adjudicatorId) ||
       !['accepted', 'rejected', 'uncertain'].includes(label.decision) ||
+      (label.decision === 'accepted' && !isNonEmptyString(label.expectedFindingId)) ||
       (label.expectedFindingId !== undefined && !isNonEmptyString(label.expectedFindingId)) ||
       labelKeys.has(key)
     ) {

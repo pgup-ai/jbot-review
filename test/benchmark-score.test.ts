@@ -294,6 +294,14 @@ describe('scoreBenchmark', () => {
         'treatment introduced a new clean false positive',
       ),
     );
+    assert.equal(
+      evaluateBenchmarkQualityGate(control, control, 0.02, {
+        controlSuccessfulRuns: 1,
+        treatmentSuccessfulRuns: 2,
+        treatmentFailedRuns: 0,
+      }).status,
+      'passed',
+    );
   });
 
   it('defers the quality gate until retained findings are adjudicated', () => {

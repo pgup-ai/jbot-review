@@ -522,7 +522,7 @@ export function evaluateBenchmarkQualityGate(
   if (
     completion &&
     (completion.treatmentFailedRuns > 0 ||
-      completion.treatmentSuccessfulRuns !== completion.controlSuccessfulRuns)
+      completion.treatmentSuccessfulRuns < completion.controlSuccessfulRuns)
   ) {
     reasons.push('treatment did not complete the control run population');
   }
