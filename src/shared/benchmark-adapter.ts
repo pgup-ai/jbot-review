@@ -16,8 +16,79 @@ interface CompetitorComparability {
   mismatches: string[];
 }
 
+const SEVERITY_ALIASES: Record<string, Severity> = {
+  p0: 'P0',
+  blocker: 'P0',
+  critical: 'P0',
+  p1: 'P1',
+  error: 'P1',
+  high: 'P1',
+  p2: 'P2',
+  medium: 'P2',
+  warning: 'P2',
+  p3: 'P3',
+  low: 'P3',
+  note: 'P3',
+  info: 'P3',
+  informational: 'P3',
+  nit: 'nit',
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeSeverity(value: unknown): Severity | undefined {
+  return typeof value === 'string' ? SEVERITY_ALIASES[value.trim().toLowerCase()] : undefined;
+}
+
+function githubBodyFinding(body: unknown): { severity: Severity; title: string } | undefined {
+  if (typeof body !== 'string') return undefined;
+  const match =
+    /^\s*\*\*(P[0-3]|nit|critical|high|medium|low|error|warning|note|info)(?:\s*[·:][^*]+)?\*\*(?:\s+\([^)]*\))?\s*(?:—|-|:)\s*([^\n]+)/i.exec(
+      body,
+    ) ??
+    /^\s*(?:#+\s*)?\[?(P[0-3]|nit|critical|high|medium|low|error|warning|note|info)\]?\s*(?:—|-|:)\s*([^\n]+)/im.exec(
+      body,
+    );
+  const severity = normalizeSeverity(match?.[1]);
+  const title = match?.[2]?.trim();
+  return severity && title ? { severity, title } : undefined;
+}
+
+function messageString(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  return typeof value.text === 'string'
+    ? value.text
+    : typeof value.markdown === 'string'
+      ? value.markdown
+      : undefined;
+}
+
+function sarifMessage(
+  run: Record<string, unknown>,
+  result: Record<string, unknown>,
+): string | undefined {
+  if (!isRecord(result.message)) return undefined;
+  if (typeof result.message.text === 'string') return result.message.text;
+  const id = typeof result.message.id === 'string' ? result.message.id : undefined;
+  if (!id) return undefined;
+  const tool = isRecord(run.tool) ? run.tool : undefined;
+  const driver = tool && isRecord(tool.driver) ? tool.driver : undefined;
+  const rules = driver && Array.isArray(driver.rules) ? driver.rules : [];
+  const rule = Number.isInteger(result.ruleIndex)
+    ? rules[result.ruleIndex as number]
+    : rules.find(
+        (candidate) =>
+          isRecord(candidate) &&
+          typeof result.ruleId === 'string' &&
+          candidate.id === result.ruleId,
+      );
+  const ruleStrings =
+    isRecord(rule) && isRecord(rule.messageStrings) ? rule.messageStrings : undefined;
+  const globalStrings =
+    driver && isRecord(driver.globalMessageStrings) ? driver.globalMessageStrings : undefined;
+  return messageString(ruleStrings?.[id]) ?? messageString(globalStrings?.[id]) ?? id;
 }
 
 function observedFinding(value: unknown): BenchmarkObservedFinding | undefined {
@@ -72,12 +143,15 @@ function normalizeGitHubReview(input: unknown): BenchmarkObservedFinding[] {
   if (!Array.isArray(input)) throw new Error('github-review input must be an array.');
   return input.map((entry) => {
     if (!isRecord(entry)) throw new Error('github-review input contains an invalid comment.');
+    const bodyFinding = githubBodyFinding(entry.body);
     const finding = observedFinding({
       path: entry.path,
-      line: entry.line,
-      severity: entry.severity,
-      title: entry.title,
-      fingerprint: entry.id,
+      line: entry.line ?? entry.original_line,
+      severity: normalizeSeverity(entry.severity) ?? bodyFinding?.severity,
+      title:
+        typeof entry.title === 'string' && entry.title.trim() ? entry.title : bodyFinding?.title,
+      fingerprint:
+        typeof entry.id === 'string' || typeof entry.id === 'number' ? String(entry.id) : undefined,
     });
     if (!finding) {
       throw new Error('github-review comments require path, line, severity, and title.');
@@ -106,11 +180,11 @@ function normalizeSarif(input: unknown): BenchmarkObservedFinding[] {
       const physical = isRecord(location) ? location.physicalLocation : undefined;
       const artifact = isRecord(physical) ? physical.artifactLocation : undefined;
       const region = isRecord(physical) ? physical.region : undefined;
-      const message = isRecord(result.message) ? result.message.text : undefined;
+      const message = sarifMessage(run, result);
       const path = isRecord(artifact) && typeof artifact.uri === 'string' ? artifact.uri : '';
       const line =
         isRecord(region) && Number.isInteger(region.startLine) ? (region.startLine as number) : 0;
-      const title = typeof message === 'string' ? message : result.ruleId;
+      const title = message ?? result.ruleId;
       const resultFingerprints = isRecord(result.partialFingerprints)
         ? result.partialFingerprints
         : isRecord(result.fingerprints)

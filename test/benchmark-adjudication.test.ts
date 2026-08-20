@@ -12,7 +12,7 @@ const hash = `sha256:${'a'.repeat(64)}`;
 const signal = {
   findingId: 'finding-1',
   sourceHash: hash,
-  caseId: 'case-1',
+  caseId: 'clean-treatment-case-1',
   severity: 'P1' as const,
   pathHash: hash,
   line: 10,
@@ -38,6 +38,7 @@ describe('historical benchmark adjudication', () => {
     assert.equal(blind.evidenceText, signal.evidenceText);
     assert.equal('sourceHash' in blind, false);
     assert.equal('outcomeCandidate' in blind, false);
+    assert.equal('caseId' in blind, false);
     assert.equal(candidate.outcomeCandidate, 'adjudication-required');
   });
 
@@ -81,6 +82,24 @@ describe('historical benchmark adjudication', () => {
           ],
         ),
       /duplicated/,
+    );
+    assert.throws(
+      () => importHistoricalFinding({ ...signal, findingId: 1 as unknown as string }),
+      /invalid/,
+    );
+    assert.throws(
+      () =>
+        adjudicateHistoricalCandidates(
+          [candidate],
+          [
+            {
+              candidateId: candidate.candidateId,
+              adjudicatorId: 1 as unknown as string,
+              decision: 'accepted',
+            },
+          ],
+        ),
+      /invalid/,
     );
   });
 });

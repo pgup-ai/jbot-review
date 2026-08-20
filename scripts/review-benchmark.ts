@@ -13,7 +13,7 @@ import {
 } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -25,11 +25,14 @@ import {
   characterizeBenchmarkVariance,
   evaluateBenchmarkQualityGate,
   scoreBenchmark,
-  type BenchmarkCaseRun,
   type BenchmarkCacheState,
   type BenchmarkDiffSize,
   type BenchmarkRiskTier,
 } from '../src/shared/benchmark-score.ts';
+import {
+  validateAdjudicatedBenchmarkRows,
+  type BenchmarkCaseRow,
+} from '../src/shared/benchmark-rescore.ts';
 import {
   BENCHMARK_RELEASE_SUBSETS,
   selectBenchmarkSubset,
@@ -49,7 +52,6 @@ import {
   emptyBenchmarkProgramMetrics,
   isBenchmarkRunnerOutput,
   parseBenchmarkTelemetry,
-  type BenchmarkFailureClass,
   type BenchmarkProgramMetrics,
   type BenchmarkRunnerOutput,
 } from '../src/shared/benchmark-runner.ts';
@@ -57,23 +59,9 @@ import { benchmarkArgument } from './benchmark-args.ts';
 
 const execFileAsync = promisify(execFile);
 
-interface CaseRow extends BenchmarkCaseRun {
-  schemaVersion: number;
-  arm: 'control' | 'treatment';
-  armName: string;
-  repetition: number;
-  base: string;
-  head: string;
-  exitCode: number | null;
-  signal: string | null;
-  timedOut: boolean;
-  failureClass: BenchmarkFailureClass | null;
-  program: BenchmarkProgramMetrics;
-}
-
 function usage(): never {
   console.error(
-    'usage: review-benchmark.ts --manifest <manifest.json> --output <directory> [--repetitions <n>] [--subset <smoke|core|full>]',
+    'usage: review-benchmark.ts --manifest <manifest.json> --output <directory> [--repetitions <n>] [--subset <smoke|core|full>] [--adjudicated-cases <cases.jsonl>]',
   );
   process.exit(2);
 }
@@ -188,7 +176,11 @@ async function prepareWorkspace(
 }
 
 function writeFixtureFile(workspace: string, path: string, content: string): void {
-  const destination = join(workspace, path);
+  const destination = resolve(workspace, path);
+  const local = relative(workspace, destination);
+  if (!local || local.startsWith('..') || isAbsolute(local)) {
+    throw new Error(`Fixture path escapes the benchmark workspace: ${path}.`);
+  }
   mkdirSync(dirname(destination), { recursive: true });
   writeFileSync(destination, content);
 }
@@ -238,7 +230,7 @@ async function runCase(
   manifest: BenchmarkManifest,
   manifestDir: string,
   projectRoot: string,
-): Promise<CaseRow> {
+): Promise<BenchmarkCaseRow> {
   const root = await mkdtemp(join(tmpdir(), 'jbot-review-benchmark-'));
   const home = join(root, 'home');
   const output = join(root, 'result.json');
@@ -303,7 +295,7 @@ async function runCase(
     let exitCode: number | null = 0;
     let signal: string | null = null;
     let timedOut = false;
-    let failureClass: CaseRow['failureClass'] = null;
+    let failureClass: BenchmarkCaseRow['failureClass'] = null;
     try {
       await execFileAsync(command[0], command.slice(1), {
         cwd: manifest.runner.cwd === 'project' ? projectRoot : checkout.workspace,
@@ -334,7 +326,7 @@ async function runCase(
     }
 
     const program = parseBenchmarkTelemetry(result?.telemetry);
-    const row: CaseRow = {
+    const row: BenchmarkCaseRow = {
       schemaVersion: BENCHMARK_SCHEMA_VERSION,
       arm: side,
       armName: arm.name,
@@ -362,7 +354,7 @@ async function runCase(
   }
 }
 
-function sumProgram(rows: CaseRow[]): BenchmarkProgramMetrics {
+function sumProgram(rows: BenchmarkCaseRow[]): BenchmarkProgramMetrics {
   return rows.reduce<BenchmarkProgramMetrics>(
     (sum, row) => ({
       inputTokens: sum.inputTokens + row.program.inputTokens,
@@ -383,9 +375,9 @@ function sumProgram(rows: CaseRow[]): BenchmarkProgramMetrics {
   );
 }
 
-function summarize(rows: CaseRow[]) {
+function summarize(rows: BenchmarkCaseRow[]) {
   const successful = rows.filter((row) => row.failureClass === null);
-  const score = (subset: CaseRow[]) => scoreBenchmark(subset);
+  const score = (subset: BenchmarkCaseRow[]) => scoreBenchmark(subset);
   return {
     runs: rows.length,
     successfulRuns: successful.length,
@@ -446,43 +438,59 @@ async function main(): Promise<void> {
   const casesPath = join(outputDir, 'cases.jsonl');
   writeFileSync(casesPath, '');
   const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-  const rows: CaseRow[] = [];
+  const adjudicatedCasesArg = benchmarkArgument('adjudicated-cases');
+  const rows: BenchmarkCaseRow[] = adjudicatedCasesArg
+    ? validateAdjudicatedBenchmarkRows(
+        readFileSync(resolve(adjudicatedCasesArg), 'utf8')
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as unknown),
+        benchmarkCases,
+        { control: manifest.control, treatment: manifest.treatment },
+        repetitions,
+      )
+    : [];
 
-  for (const benchmarkCase of benchmarkCases) {
-    for (let repetition = 1; repetition <= repetitions; repetition += 1) {
-      for (const [side, arm] of [
-        ['control', manifest.control],
-        ['treatment', manifest.treatment],
-      ] as const) {
-        const row = await runCase(
-          benchmarkCase,
-          side,
-          arm,
-          repetition,
-          manifest,
-          manifestDir,
-          projectRoot,
-        );
-        rows.push(row);
-        appendFileSync(casesPath, `${JSON.stringify(row)}\n`);
-        console.log(
-          `${side.padEnd(9)} ${benchmarkCase.id} #${repetition}: exit=${row.exitCode ?? row.signal ?? row.failureClass} ${Math.round(row.latencyMs)}ms`,
-        );
+  if (adjudicatedCasesArg) {
+    for (const row of rows) appendFileSync(casesPath, `${JSON.stringify(row)}\n`);
+  } else {
+    for (const benchmarkCase of benchmarkCases) {
+      for (let repetition = 1; repetition <= repetitions; repetition += 1) {
+        for (const [side, arm] of [
+          ['control', manifest.control],
+          ['treatment', manifest.treatment],
+        ] as const) {
+          const row = await runCase(
+            benchmarkCase,
+            side,
+            arm,
+            repetition,
+            manifest,
+            manifestDir,
+            projectRoot,
+          );
+          rows.push(row);
+          appendFileSync(casesPath, `${JSON.stringify(row)}\n`);
+          console.log(
+            `${side.padEnd(9)} ${benchmarkCase.id} #${repetition}: exit=${row.exitCode ?? row.signal ?? row.failureClass} ${Math.round(row.latencyMs)}ms`,
+          );
+        }
       }
     }
   }
 
   const controlSummary = summarize(rows.filter((row) => row.arm === 'control'));
   const treatmentSummary = summarize(rows.filter((row) => row.arm === 'treatment'));
-  const qualityGate = evaluateBenchmarkQualityGate(controlSummary.score, treatmentSummary.score);
-  if (
-    treatmentSummary.failedRuns > 0 ||
-    treatmentSummary.successfulRuns !== controlSummary.successfulRuns
-  ) {
-    qualityGate.status = 'failed';
-    qualityGate.passed = false;
-    qualityGate.reasons.push('treatment did not complete the control run population');
-  }
+  const qualityGate = evaluateBenchmarkQualityGate(
+    controlSummary.score,
+    treatmentSummary.score,
+    0.02,
+    {
+      controlSuccessfulRuns: controlSummary.successfulRuns,
+      treatmentSuccessfulRuns: treatmentSummary.successfulRuns,
+      treatmentFailedRuns: treatmentSummary.failedRuns,
+    },
+  );
   const summary = {
     schemaVersion: BENCHMARK_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),

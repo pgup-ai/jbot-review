@@ -19,6 +19,10 @@ describe('synthetic benchmark fixtures', () => {
     ]);
     fixture.cases[0].files[0].path = '../outside.ts';
     assert.throws(() => materializeBenchmarkFixture(fixture, 'case-1'), /invalid file/);
+    fixture.cases[0].files[0].path = '.git/hooks/pre-commit';
+    assert.throws(() => materializeBenchmarkFixture(fixture, 'case-1'), /invalid file/);
+    fixture.cases[0].files[0].path = '..\\outside.ts';
+    assert.throws(() => materializeBenchmarkFixture(fixture, 'case-1'), /invalid file/);
   });
 
   it('materializes every hunk without inserting hunk headers as source', () => {
@@ -27,7 +31,7 @@ describe('synthetic benchmark fixtures', () => {
         cases: [
           {
             id: 'multi-hunk',
-            shape: { files: 1, additions: 2, deletions: 2, patchBytes: 100 },
+            shape: { files: 2, additions: 4, deletions: 4, patchBytes: 100 },
             files: [
               {
                 path: 'src/a.ts',
@@ -45,5 +49,24 @@ describe('synthetic benchmark fixtures', () => {
     assert.equal(file.head.split('\n')[4], 'new-b');
     assert.doesNotMatch(file.base, /@@/);
     assert.doesNotMatch(file.head, /@@/);
+    assert.doesNotMatch(file.base, /base-/);
+    assert.doesNotMatch(file.head, /head-/);
+
+    const fixture = {
+      cases: [
+        {
+          id: 'insert',
+          shape: { files: 1, additions: 1, deletions: 0, patchBytes: 20 },
+          files: [{ path: 'new.ts', patch: '@@ -0,0 +1,1 @@\n+new\n' }],
+        },
+        {
+          id: 'delete',
+          shape: { files: 1, additions: 0, deletions: 1, patchBytes: 20 },
+          files: [{ path: 'old.ts', patch: '@@ -1,1 +0,0 @@\n-old\n' }],
+        },
+      ],
+    };
+    assert.equal(materializeBenchmarkFixture(fixture, 'insert')[0].base, '');
+    assert.equal(materializeBenchmarkFixture(fixture, 'delete')[0].head, '');
   });
 });

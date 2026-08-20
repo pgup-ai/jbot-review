@@ -292,6 +292,25 @@ describe('scoreBenchmark', () => {
         treatment: { complete: false, adjudicatedFindings: 0, retainedFindings: 1 },
       },
     });
+    const acceptedUnmapped = scoreBenchmark(
+      [
+        {
+          ...runs[1],
+          findings: [
+            {
+              path: 'src/clean.ts',
+              line: 3,
+              severity: 'P2',
+              title: 'Accepted unmapped finding',
+              triggerComplete: true,
+              evidenceSupported: true,
+            },
+          ],
+        },
+      ],
+      { bootstrapSamples: 0 },
+    );
+    assert.equal(acceptedUnmapped.semanticAdjudication.complete, true);
   });
 
   it('characterizes repeated control finding and latency variance', () => {

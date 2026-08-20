@@ -43,7 +43,6 @@ export interface HistoricalFindingCandidate {
 
 interface BlindAdjudicationCase {
   candidateId: string;
-  caseId: string;
   severity: Severity;
   pathHash: string;
   line: number;
@@ -70,6 +69,10 @@ function isSha256(value: unknown): value is string {
   return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/i.test(value);
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && Boolean(value.trim());
+}
+
 export function classifyHistoricalOutcome(
   signal: Pick<HistoricalFindingSignal, 'addressed' | 'resolved' | 'reactions' | 'humanReplyCount'>,
 ): HistoricalOutcomeCandidate {
@@ -89,10 +92,8 @@ export function importHistoricalFinding(
   signal: HistoricalFindingSignal,
 ): HistoricalFindingCandidate {
   if (
-    typeof signal.findingId !== 'string' ||
-    !signal.findingId ||
-    typeof signal.caseId !== 'string' ||
-    !signal.caseId ||
+    !isNonEmptyString(signal.findingId) ||
+    !isNonEmptyString(signal.caseId) ||
     !isSha256(signal.sourceHash) ||
     !isSha256(signal.pathHash) ||
     !VALID_SEVERITIES.has(signal.severity) ||
@@ -135,7 +136,6 @@ export function blindAdjudicationCase(
 ): BlindAdjudicationCase {
   return {
     candidateId: candidate.candidateId,
-    caseId: candidate.caseId,
     severity: candidate.severity,
     pathHash: candidate.pathHash,
     line: candidate.line,
@@ -150,8 +150,9 @@ export function adjudicateHistoricalCandidates(
 ): AdjudicationResult[] {
   for (const candidate of candidates) {
     if (
+      typeof candidate.candidateId !== 'string' ||
       !/^[a-f0-9]{64}$/i.test(candidate.candidateId) ||
-      !candidate.caseId ||
+      !isNonEmptyString(candidate.caseId) ||
       !isSha256(candidate.sourceHash) ||
       !isSha256(candidate.pathHash) ||
       !VALID_SEVERITIES.has(candidate.severity) ||
@@ -176,10 +177,9 @@ export function adjudicateHistoricalCandidates(
     const key = `${label.candidateId}\0${label.adjudicatorId}`;
     if (
       !candidateIds.has(label.candidateId) ||
-      !label.adjudicatorId ||
+      !isNonEmptyString(label.adjudicatorId) ||
       !['accepted', 'rejected', 'uncertain'].includes(label.decision) ||
-      (label.expectedFindingId !== undefined &&
-        (typeof label.expectedFindingId !== 'string' || !label.expectedFindingId)) ||
+      (label.expectedFindingId !== undefined && !isNonEmptyString(label.expectedFindingId)) ||
       labelKeys.has(key)
     ) {
       throw new Error('Adjudication label is invalid or duplicated.');

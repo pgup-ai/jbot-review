@@ -95,3 +95,16 @@ failure. Variance uses the adjudicated ID, an adapter fingerprint, or the source
 anchor in that order, so title rewording alone does not look like stochastic
 disagreement. Locationless SARIF results remain unanchored false positives
 instead of disappearing from precision.
+
+After adjudication, rescore the original run without invoking either reviewer:
+
+```sh
+npm run benchmark:review -- \
+  --manifest test/fixtures/review-benchmark/manifest.json \
+  --adjudicated-cases /path/to/adjudicated-cases.jsonl \
+  --output /path/to/rescored-results \
+  --subset full
+```
+
+The adjudicated input must preserve the complete selected run population and
+all manifest-owned metadata. Only finding adjudication fields should change.

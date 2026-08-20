@@ -213,14 +213,12 @@ export function characterizeBenchmarkVariance(runs: BenchmarkCaseRun[]): Benchma
     }
   }
   const minRepetitions = repetitions.length > 0 ? Math.min(...repetitions) : 0;
+  const maxRepetitions = repetitions.length > 0 ? Math.max(...repetitions) : 0;
   return {
-    status:
-      minRepetitions >= 3 && Math.max(0, ...repetitions) <= 5
-        ? 'reportable'
-        : 'insufficient-repetitions',
+    status: minRepetitions >= 3 && maxRepetitions <= 5 ? 'reportable' : 'insufficient-repetitions',
     cases: grouped.size,
     minRepetitions,
-    maxRepetitions: repetitions.length > 0 ? Math.max(...repetitions) : 0,
+    maxRepetitions,
     findingAgreement: percentile(agreements, 0.5),
     latencyRelativeMad: percentile(relativeDeviations, 0.5),
   };
@@ -252,13 +250,7 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
     if (!finding) continue;
     retained += 1;
     if (finding.anchored ?? finding.line > 0) anchored += 1;
-    if (
-      finding.triggerComplete !== undefined &&
-      finding.evidenceSupported !== undefined &&
-      (finding.triggerComplete === false ||
-        finding.evidenceSupported === false ||
-        (finding.expectedFindingId !== undefined && expectedById.has(finding.expectedFindingId)))
-    ) {
+    if (finding.triggerComplete !== undefined && finding.evidenceSupported !== undefined) {
       semanticallyAdjudicated += 1;
     }
 
@@ -504,11 +496,32 @@ export function evaluateBenchmarkQualityGate(
   control: BenchmarkScore,
   treatment: BenchmarkScore,
   tolerance = 0.02,
+  completion?: {
+    controlSuccessfulRuns: number;
+    treatmentSuccessfulRuns: number;
+    treatmentFailedRuns: number;
+  },
 ): BenchmarkQualityGate {
   const semanticAdjudication = {
     control: control.semanticAdjudication,
     treatment: treatment.semanticAdjudication,
   };
+  const reasons: string[] = [];
+  if (
+    completion &&
+    (completion.treatmentFailedRuns > 0 ||
+      completion.treatmentSuccessfulRuns !== completion.controlSuccessfulRuns)
+  ) {
+    reasons.push('treatment did not complete the control run population');
+  }
+  if (reasons.length > 0) {
+    return {
+      status: 'failed',
+      passed: false,
+      reasons,
+      semanticAdjudication,
+    };
+  }
   if (!control.semanticAdjudication.complete || !treatment.semanticAdjudication.complete) {
     return {
       status: 'adjudication-required',
@@ -517,7 +530,6 @@ export function evaluateBenchmarkQualityGate(
       semanticAdjudication,
     };
   }
-  const reasons: string[] = [];
   if (treatment.missedBySeverity.P0 > 0 || treatment.missedBySeverity.P1 > 0) {
     reasons.push('treatment missed a seeded P0/P1 finding');
   }

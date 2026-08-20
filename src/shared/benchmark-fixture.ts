@@ -26,7 +26,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function validPath(path: string): boolean {
-  return Boolean(path) && !path.startsWith('/') && !path.split('/').includes('..');
+  const segments = path.split('/');
+  return (
+    Boolean(path) &&
+    !path.startsWith('/') &&
+    !path.includes('\\') &&
+    !/^[a-z]:/i.test(path) &&
+    !segments.includes('..') &&
+    !segments.some((segment) => segment.toLowerCase() === '.git')
+  );
 }
 
 function hunkOffset(start: number): number {
@@ -92,8 +100,8 @@ function materializePatch(file: SyntheticFixtureFile): ParsedFixtureFile {
   if (!active) throw new Error(`Fixture ${file.path} requires a valid unified-diff hunk.`);
   return {
     path: file.path,
-    base: `${base.join('\n')}\n`,
-    head: `${head.join('\n')}\n`,
+    base: base.length > 0 ? `${base.join('\n')}\n` : '',
+    head: head.length > 0 ? `${head.join('\n')}\n` : '',
     additions,
     deletions,
   };
@@ -138,8 +146,9 @@ function materializeShape(
   }
   const fillerChanges = shape.additions - additions + shape.deletions - deletions;
   const width = Math.max(32, Math.ceil(shape.patchBytes / Math.max(1, fillerChanges)));
-  const fillerLine = (side: 'base' | 'head', index: number): string =>
-    `${side}-${index}-`.padEnd(width, side === 'base' ? 'b' : 'h');
+  const fillerLine = (side: 'base' | 'head'): string =>
+    ' '.repeat(side === 'base' ? width : width + 1);
+  const paddingFiles: ParsedFixtureFile[] = [];
 
   for (let index = 0; index < missingFiles; index += 1) {
     let suffix = index + 1;
@@ -149,23 +158,26 @@ function materializeShape(
       path = `benchmark-shape/filler-${String(suffix).padStart(3, '0')}.txt`;
     }
     paths.add(path);
-    files.push({
+    const file = {
       path,
-      base: `${fillerLine('base', deletions)}\n`,
-      head: `${fillerLine('head', additions)}\n`,
+      base: `${fillerLine('base')}\n`,
+      head: `${fillerLine('head')}\n`,
       additions: 1,
       deletions: 1,
-    });
+    };
+    files.push(file);
+    paddingFiles.push(file);
     additions += 1;
     deletions += 1;
   }
+  const paddingTargets = paddingFiles.length > 0 ? paddingFiles : files;
   for (let index = deletions; index < shape.deletions; index += 1) {
-    const file = files[index % files.length];
-    file.base = appendLine(file.base, fillerLine('base', index));
+    const file = paddingTargets[index % paddingTargets.length];
+    file.base = appendLine(file.base, fillerLine('base'));
   }
   for (let index = additions; index < shape.additions; index += 1) {
-    const file = files[index % files.length];
-    file.head = appendLine(file.head, fillerLine('head', index));
+    const file = paddingTargets[index % paddingTargets.length];
+    file.head = appendLine(file.head, fillerLine('head'));
   }
   return files.map(({ path, base, head }) => ({ path, base, head }));
 }

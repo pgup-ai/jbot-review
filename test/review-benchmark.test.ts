@@ -181,6 +181,56 @@ describe('review-benchmark', () => {
       assert.equal(summary.qualityGate.semanticAdjudication.control.complete, true);
       assert.equal(summary.qualityGate.semanticAdjudication.treatment.complete, true);
       assert.equal(summary.control.variance.status, 'insufficient-repetitions');
+
+      const rescoredOutput = join(root, 'rescored');
+      execFileSync(
+        TSX,
+        [
+          join(ROOT, 'scripts/review-benchmark.ts'),
+          '--manifest',
+          MANIFEST,
+          '--output',
+          rescoredOutput,
+          '--subset',
+          'smoke',
+          '--repetitions',
+          '1',
+          '--adjudicated-cases',
+          join(output, 'cases.jsonl'),
+        ],
+        { encoding: 'utf8', stdio: 'pipe' },
+      );
+      const rescored = JSON.parse(readFileSync(join(rescoredOutput, 'summary.json'), 'utf8')) as {
+        qualityGate: { status: string; passed: boolean | null };
+      };
+      assert.equal(rescored.qualityGate.status, 'passed');
+      assert.equal(rescored.qualityGate.passed, true);
+
+      const incompleteRows = readFileSync(join(output, 'cases.jsonl'), 'utf8').trim().split('\n');
+      incompleteRows.pop();
+      const incompletePath = join(root, 'incomplete.jsonl');
+      writeFileSync(incompletePath, `${incompleteRows.join('\n')}\n`);
+      assert.throws(
+        () =>
+          execFileSync(
+            TSX,
+            [
+              join(ROOT, 'scripts/review-benchmark.ts'),
+              '--manifest',
+              MANIFEST,
+              '--output',
+              join(root, 'incomplete-output'),
+              '--subset',
+              'smoke',
+              '--repetitions',
+              '1',
+              '--adjudicated-cases',
+              incompletePath,
+            ],
+            { encoding: 'utf8', stdio: 'pipe' },
+          ),
+        /expected 24/,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -322,7 +372,7 @@ describe('review-benchmark', () => {
         }
         assert.equal(summary.qualityGate.status, 'failed');
         assert.equal(summary.qualityGate.passed, false);
-        assert.match(summary.qualityGate.reasons[0], /did not complete/);
+        assert.ok(summary.qualityGate.reasons.some((reason) => /did not complete/.test(reason)));
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
