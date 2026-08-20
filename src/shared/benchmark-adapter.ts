@@ -143,6 +143,7 @@ function sarifArtifactPath(
 ): string {
   if (!artifact || typeof artifact.uri !== 'string') return '';
   let uri = artifact.uri;
+  if (win32.isAbsolute(uri)) return repositoryPath(uri, repositoryRoot);
   if (typeof artifact.uriBaseId === 'string') {
     const base = sarifBaseUri(run, artifact.uriBaseId);
     if (!base) return '';

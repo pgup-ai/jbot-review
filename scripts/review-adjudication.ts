@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
@@ -6,14 +6,7 @@ import {
   type AdjudicationLabel,
   type HistoricalFindingCandidate,
 } from '../src/shared/benchmark-adjudication.ts';
-import { benchmarkArgument } from './benchmark-args.ts';
-
-function jsonLines<T>(path: string): T[] {
-  return readFileSync(resolve(path), 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as T);
-}
+import { benchmarkArgument, readJsonLines } from './benchmark-args.ts';
 
 const candidatesPath = benchmarkArgument('candidates');
 const labelsPath = benchmarkArgument('labels');
@@ -25,8 +18,8 @@ if (!candidatesPath || !labelsPath || !output) {
 }
 
 const results = adjudicateHistoricalCandidates(
-  jsonLines<HistoricalFindingCandidate>(candidatesPath),
-  jsonLines<AdjudicationLabel>(labelsPath),
+  readJsonLines<HistoricalFindingCandidate>(candidatesPath),
+  readJsonLines<AdjudicationLabel>(labelsPath),
 );
 const outputDir = resolve(output);
 mkdirSync(outputDir, { recursive: true });

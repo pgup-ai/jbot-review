@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import {
@@ -6,7 +6,7 @@ import {
   importHistoricalFinding,
   type HistoricalFindingSignal,
 } from '../src/shared/benchmark-adjudication.ts';
-import { benchmarkArgument } from './benchmark-args.ts';
+import { benchmarkArgument, readJsonLines } from './benchmark-args.ts';
 
 const input = benchmarkArgument('input');
 const output = benchmarkArgument('output');
@@ -14,10 +14,7 @@ if (!input || !output) {
   throw new Error('usage: review-history-import.ts --input <signals.jsonl> --output <directory>');
 }
 
-const candidates = readFileSync(resolve(input), 'utf8')
-  .split('\n')
-  .filter(Boolean)
-  .map((line) => importHistoricalFinding(JSON.parse(line) as HistoricalFindingSignal));
+const candidates = readJsonLines<HistoricalFindingSignal>(input).map(importHistoricalFinding);
 const outputDir = resolve(output);
 mkdirSync(outputDir, { recursive: true });
 writeFileSync(

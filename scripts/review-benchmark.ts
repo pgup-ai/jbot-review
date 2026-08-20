@@ -55,7 +55,7 @@ import {
   type BenchmarkProgramMetrics,
   type BenchmarkRunnerOutput,
 } from '../src/shared/benchmark-runner.ts';
-import { benchmarkArgument } from './benchmark-args.ts';
+import { benchmarkArgument, readJsonLines } from './benchmark-args.ts';
 
 const execFileAsync = promisify(execFile);
 const GIT_REPOSITORY_ENV = new Set([
@@ -478,10 +478,7 @@ async function main(): Promise<void> {
   const adjudicatedCasesArg = benchmarkArgument('adjudicated-cases');
   const rows: BenchmarkCaseRow[] = adjudicatedCasesArg
     ? validateAdjudicatedBenchmarkRows(
-        readFileSync(resolve(adjudicatedCasesArg), 'utf8')
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => JSON.parse(line) as unknown),
+        readJsonLines<unknown>(adjudicatedCasesArg),
         benchmarkCases,
         { control: manifest.control, treatment: manifest.treatment },
         repetitions,

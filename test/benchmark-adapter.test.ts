@@ -258,6 +258,8 @@ describe('competitor benchmark adapters', () => {
       '',
     );
     assert.equal(artifactPath({ uri: 'a.ts' }, 'C:\\workspace'), 'a.ts');
+    assert.equal(artifactPath({ uri: 'C:\\workspace\\src\\a.ts' }, 'C:\\workspace'), 'src/a.ts');
+    assert.equal(artifactPath({ uri: 'C:/workspace/src/a.ts' }, 'C:\\workspace'), 'src/a.ts');
     assert.equal(artifactPath({ uri: 'file:///workspace/src%2Fa.ts' }, '/workspace'), '');
     assert.equal(artifactPath({ uri: 'https://example.com/src/a.ts' }, '/workspace'), '');
   });
