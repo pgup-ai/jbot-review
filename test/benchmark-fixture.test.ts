@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { materializeBenchmarkFixture } from '../src/shared/benchmark-fixture.ts';
@@ -68,5 +69,14 @@ describe('synthetic benchmark fixtures', () => {
     };
     assert.equal(materializeBenchmarkFixture(fixture, 'insert')[0].base, null);
     assert.equal(materializeBenchmarkFixture(fixture, 'delete')[0].head, null);
+
+    const corpus = JSON.parse(
+      readFileSync(new URL('fixtures/review-benchmark/corpus.json', import.meta.url), 'utf8'),
+    );
+    const callerContract = materializeBenchmarkFixture(corpus, 'caller-null-contract');
+    const service = callerContract.find((file) => file.path === 'src/service.ts');
+    const controller = callerContract.find((file) => file.path === 'src/controller.ts');
+    assert.match(service?.head ?? '', /export async function loadService/);
+    assert.match(controller?.head ?? '', /import \{ loadService \} from '\.\/service\.ts'/);
   });
 });

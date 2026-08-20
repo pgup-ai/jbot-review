@@ -3866,11 +3866,11 @@
     },
     "caller-null-contract": {
       "src/service.ts": {
-        "before": "export async function benchmarkContract() {",
+        "before": "export async function loadService(id: string) { const row: { name: string } | undefined = id ? { name: id } : undefined;",
         "after": "}"
       },
       "src/controller.ts": {
-        "before": "export async function benchmarkContract() {",
+        "before": "import { loadService } from './service.ts'; export async function controller(id: string) {",
         "after": "}"
       }
     },
