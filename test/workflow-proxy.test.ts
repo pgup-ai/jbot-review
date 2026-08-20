@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
-import { verifyOpencodeProxy } from '../src/workflow/proxy.ts';
+import { sdkEngineForProxy, verifyOpencodeProxy } from '../src/workflow/proxy.ts';
 
 const action = readFileSync(new URL('../action.yml', import.meta.url), 'utf8');
 const workflow = readFileSync(
@@ -36,6 +36,7 @@ describe('optional OpenCode proxy', () => {
       }),
       proxyEnv,
     );
+    assert.equal(sdkEngineForProxy('auto', proxyEnv), 'opencode');
   });
 
   it('fails open on failed or invalid egress checks', async () => {
@@ -48,6 +49,7 @@ describe('optional OpenCode proxy', () => {
     for (const response of ['', 'not-an-ip']) {
       assert.deepEqual(await verifyOpencodeProxy(proxyEnv, true, log, async () => response), {});
     }
+    assert.equal(sdkEngineForProxy('auto', {}), 'auto');
   });
 
   it('maps the public input to the scoped runtime contract', () => {
@@ -56,7 +58,16 @@ describe('optional OpenCode proxy', () => {
     assert.ok(input);
     assert.match(input, /default: ''/);
     assert.match(action, /JBOT_OPENCODE_HTTPS_PROXY: \$\{\{ inputs\.opencode-proxy-url \}\}/);
-    assert.match(workflow, /opencode-proxy-url: \$\{\{ secrets\.OPENCODE_PROXY_URL \}\}/);
+    assert.match(
+      workflow,
+      /EVENT_HEAD_REPO: \$\{\{ github\.event\.pull_request\.head\.repo\.full_name \}\}/,
+    );
+    assert.match(workflow, /\.head\.repo\.full_name \/\/ empty/);
+    assert.match(workflow, /\[ "\$head_repo" = "\$REPOSITORY" \]/);
+    assert.match(
+      workflow,
+      /opencode-proxy-url: \$\{\{ steps\.pr\.outputs\.same_repo == 'true' && secrets\.OPENCODE_PROXY_URL \|\| '' \}\}/,
+    );
     assert.doesNotMatch(workflow, /steps\.proxy_check|Check optional OpenCode proxy/);
   });
 });

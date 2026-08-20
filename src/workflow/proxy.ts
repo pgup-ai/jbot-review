@@ -11,6 +11,10 @@ type ProxyLogger = {
 
 type EgressCheck = (env: NodeJS.ProcessEnv) => Promise<string>;
 
+export function sdkEngineForProxy(sdkEngine: string, proxyEnv: NodeJS.ProcessEnv): string {
+  return proxyEnv.HTTPS_PROXY ? 'opencode' : sdkEngine;
+}
+
 async function checkProxyEgress(env: NodeJS.ProcessEnv): Promise<string> {
   const { stdout } = await execFileAsync(
     '/usr/bin/curl',

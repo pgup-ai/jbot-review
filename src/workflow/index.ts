@@ -19,7 +19,7 @@ import {
 import { runPrReview } from '../shared/runner.ts';
 import type { Octokit } from '../shared/github.ts';
 import { VALID_SEVERITIES, type Severity } from '../shared/types.ts';
-import { verifyOpencodeProxy } from './proxy.ts';
+import { sdkEngineForProxy, verifyOpencodeProxy } from './proxy.ts';
 
 async function main(): Promise<void> {
   const requestedOpencodeProxyEnv = takeOpencodeProxyEnv(process.env);
@@ -103,7 +103,7 @@ async function main(): Promise<void> {
       pull.head.repo?.full_name === `${owner}/${repo}`,
       core,
     );
-    if (options.opencodeProxyEnv.HTTPS_PROXY) options.sdkEngine = 'opencode';
+    options.sdkEngine = sdkEngineForProxy(options.sdkEngine, options.opencodeProxyEnv);
     core.info(
       `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModelInput || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout}`,
     );
