@@ -274,6 +274,7 @@ function normalizeSarif(
       ) {
         throw new Error('sarif input contains an invalid result.');
       }
+      if (typeof result.kind === 'string' && result.kind !== 'fail') continue;
       const location = Array.isArray(result.locations) ? result.locations[0] : undefined;
       const physical = isRecord(location) ? location.physicalLocation : undefined;
       const artifact = isRecord(physical) ? physical.artifactLocation : undefined;
@@ -298,11 +299,9 @@ function normalizeSarif(
       const level =
         typeof result.level === 'string'
           ? result.level
-          : typeof result.kind === 'string' && result.kind !== 'fail'
-            ? 'none'
-            : typeof defaultConfiguration?.level === 'string'
-              ? defaultConfiguration.level
-              : 'warning';
+          : typeof defaultConfiguration?.level === 'string'
+            ? defaultConfiguration.level
+            : 'warning';
       const resultFingerprints = isRecord(result.partialFingerprints)
         ? result.partialFingerprints
         : isRecord(result.fingerprints)
