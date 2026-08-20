@@ -63,6 +63,20 @@ describe('dim event telemetry', () => {
       },
     ]);
     assert.deepEqual(parseDimEventStream(stdout, false).toolEvents, []);
+    const invalidTiming = [
+      JSON.stringify({
+        eventType: 'tool:started',
+        createdAt: 'invalid',
+        payload: { toolCallId: 'call-1', toolName: 'read' },
+      }),
+      JSON.stringify({
+        eventType: 'tool:completed',
+        payload: { toolCallId: 'call-1', toolName: 'read' },
+      }),
+    ].join('\n');
+    assert.deepEqual(parseDimEventStream(invalidTiming).toolEvents, [
+      { name: 'read', success: true },
+    ]);
   });
 });
 

@@ -97,7 +97,7 @@ export function aggregatePerformance(rows: Row[]): Record<string, unknown> {
     (row) => row.toolClass === 'file-read' && row.duplicate === true,
   ).length;
   const reads = tools.filter((row) => row.toolClass === 'file-read').length;
-  const retryRepairSessions = sessions.filter(
+  const retryRepairAttemptCount = explorations.filter(
     (row) =>
       typeof row.session === 'string' &&
       (row.session.endsWith('-repair') || row.session.endsWith('-retry')),
@@ -211,7 +211,7 @@ export function aggregatePerformance(rows: Row[]): Record<string, unknown> {
     },
     turns: distribution(explorations.flatMap((row) => number(row, 'turnCount') ?? [])),
     cacheReadTokens: sessions.reduce((sum, row) => sum + (number(row, 'cacheReadTokens') ?? 0), 0),
-    retryRepairRate: guardedRate(retryRepairSessions, sessions.length),
+    retryRepairRate: guardedRate(retryRepairAttemptCount, explorations.length),
     retainedFindings: findings.filter((row) => retained.has(String(row.disposition))).length,
     backendCohorts: cohorts,
     modelCohorts,
