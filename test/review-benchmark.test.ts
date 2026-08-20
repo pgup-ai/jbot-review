@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import {
   chmodSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -239,6 +240,7 @@ describe('review-benchmark', () => {
           ),
         /expected 24/,
       );
+      assert.equal(existsSync(join(root, 'incomplete-output')), false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

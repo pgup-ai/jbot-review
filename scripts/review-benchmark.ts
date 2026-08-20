@@ -474,9 +474,6 @@ async function main(): Promise<void> {
   if (existsSync(join(outputDir, 'summary.json')) || existsSync(join(outputDir, 'cases.jsonl'))) {
     throw new Error(`Output directory already contains benchmark results: ${outputDir}.`);
   }
-  mkdirSync(outputDir, { recursive: true });
-  const casesPath = join(outputDir, 'cases.jsonl');
-  writeFileSync(casesPath, '');
   const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const adjudicatedCasesArg = benchmarkArgument('adjudicated-cases');
   const rows: BenchmarkCaseRow[] = adjudicatedCasesArg
@@ -490,6 +487,9 @@ async function main(): Promise<void> {
         repetitions,
       )
     : [];
+  mkdirSync(outputDir, { recursive: true });
+  const casesPath = join(outputDir, 'cases.jsonl');
+  writeFileSync(casesPath, '');
 
   if (adjudicatedCasesArg) {
     for (const row of rows) appendFileSync(casesPath, `${JSON.stringify(row)}\n`);
