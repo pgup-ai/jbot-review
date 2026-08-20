@@ -168,6 +168,10 @@ describe('scoreBenchmark', () => {
 describe('assertBenchmarkComparable', () => {
   it('canonicalizes object keys with deterministic code-point ordering', () => {
     assert.equal(benchmarkCanonicalJson({ z: 1, ä: 2, a: 3 }), '{"a":3,"z":1,"ä":2}');
+    assert.equal(
+      benchmarkCanonicalJson({ '\u{10000}': 1, '\uE000': 2 }),
+      '{"\uE000":2,"\u{10000}":1}',
+    );
   });
 
   const control: BenchmarkConfiguration = {

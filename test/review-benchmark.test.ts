@@ -120,13 +120,19 @@ describe('review-benchmark', () => {
             (row) => row.signal === (mode === 'timeout' || mode === 'signal' ? 'SIGTERM' : null),
           ),
         );
-        const summary = JSON.parse(readFileSync(join(output, 'summary.json'), 'utf8')) as {
-          control: { successfulRuns: number; failedRuns: number; score: { cases: number } };
-          treatment: { successfulRuns: number; failedRuns: number; score: { cases: number } };
-        };
+        const summary = JSON.parse(readFileSync(join(output, 'summary.json'), 'utf8')) as Record<
+          'control' | 'treatment',
+          {
+            successfulRuns: number;
+            failedRuns: number;
+            timedOutRuns: number;
+            score: { cases: number };
+          }
+        >;
         for (const arm of [summary.control, summary.treatment]) {
           assert.equal(arm.successfulRuns, 0);
           assert.equal(arm.failedRuns, 1);
+          assert.equal(arm.timedOutRuns, mode === 'timeout' ? 1 : 0);
           assert.equal(arm.score.cases, 0);
         }
       } finally {

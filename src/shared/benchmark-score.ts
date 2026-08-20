@@ -318,11 +318,24 @@ export function benchmarkCanonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(benchmarkCanonicalJson).join(',')}]`;
   if (value && typeof value === 'object') {
     return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .sort(([a], [b]) => compareCodePoints(a, b))
       .map(([key, entry]) => `${JSON.stringify(key)}:${benchmarkCanonicalJson(entry)}`)
       .join(',')}}`;
   }
   return JSON.stringify(value);
+}
+
+function compareCodePoints(left: string, right: string): number {
+  let leftIndex = 0;
+  let rightIndex = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    const leftPoint = left.codePointAt(leftIndex)!;
+    const rightPoint = right.codePointAt(rightIndex)!;
+    if (leftPoint !== rightPoint) return leftPoint - rightPoint;
+    leftIndex += leftPoint > 0xffff ? 2 : 1;
+    rightIndex += rightPoint > 0xffff ? 2 : 1;
+  }
+  return leftIndex < left.length ? 1 : rightIndex < right.length ? -1 : 0;
 }
 
 function flatten(value: unknown, prefix = ''): Map<string, string> {
