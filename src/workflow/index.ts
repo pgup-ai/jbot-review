@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   );
   const options = {
     enhancedContext: true,
-    opencodeProxyEnv: {} as NodeJS.ProcessEnv,
+    opencodeProxyEnv: {},
     sdkEngine: getInputOrEnv('sdk-engine', 'JBOT_SDK_ENGINE') || 'auto',
     dryRun: parseBooleanInput('dry-run', false),
     autoApprove: parseBooleanInput('auto-approve', false),
