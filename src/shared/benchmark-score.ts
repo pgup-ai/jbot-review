@@ -530,8 +530,9 @@ export function evaluateBenchmarkQualityGate(
     reasons.push('treatment missed a seeded P0/P1 finding');
   }
   if (
+    control.cleanFalsePositiveRate.value !== null &&
     treatment.cleanFalsePositiveRate.value !== null &&
-    treatment.cleanFalsePositiveRate.value > (control.cleanFalsePositiveRate.value ?? 0)
+    treatment.cleanFalsePositiveRate.value > control.cleanFalsePositiveRate.value
   ) {
     reasons.push('treatment introduced a new clean false positive');
   }

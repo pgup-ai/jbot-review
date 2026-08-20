@@ -175,13 +175,22 @@ function materializeShape(
   const fillerLine = (side: 'base' | 'head'): string =>
     ' '.repeat(side === 'base' ? width : width + 1);
   const paddingFiles: ParsedFixtureFile[] = [];
+  const packageRoots = [
+    ...new Set(
+      files
+        .map((file) => /^packages\/[^/]+\//.exec(file.path)?.[0])
+        .filter((path): path is string => path !== undefined),
+    ),
+  ];
+  const fillerDirectories = packageRoots.length > 1 ? packageRoots : ['benchmark-shape/'];
 
   for (let index = 0; index < missingFiles; index += 1) {
     let suffix = index + 1;
-    let path = `benchmark-shape/filler-${String(suffix).padStart(3, '0')}.txt`;
+    const directory = fillerDirectories[index % fillerDirectories.length];
+    let path = `${directory}filler-${String(suffix).padStart(3, '0')}.txt`;
     while (paths.has(path)) {
       suffix += 1;
-      path = `benchmark-shape/filler-${String(suffix).padStart(3, '0')}.txt`;
+      path = `${directory}filler-${String(suffix).padStart(3, '0')}.txt`;
     }
     paths.add(path);
     const file = {

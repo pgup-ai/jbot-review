@@ -271,6 +271,12 @@ describe('scoreBenchmark', () => {
     assert.ok(gate.reasons.some((reason) => reason.includes('P0/P1')));
     assert.ok(gate.reasons.includes('treatment introduced a new clean false positive'));
     assert.equal(treatment.cleanFalsePositiveRate.value, 1);
+    const noCleanControl = scoreBenchmark([corpus[0]], { bootstrapSamples: 0 });
+    assert.ok(
+      !evaluateBenchmarkQualityGate(noCleanControl, treatment).reasons.includes(
+        'treatment introduced a new clean false positive',
+      ),
+    );
   });
 
   it('defers the quality gate until retained findings are adjudicated', () => {

@@ -69,6 +69,13 @@ describe('review-benchmark', () => {
     }
     for (const candidate of manifest.cases) {
       const files = materializeBenchmarkFixture(fixture, candidate.id);
+      if (candidate.categories.includes('broad-multi-package')) {
+        assert.ok(
+          new Set(files.map((file) => /^packages\/[^/]+\//.exec(file.path)?.[0]).filter(Boolean))
+            .size > 1,
+          candidate.id,
+        );
+      }
       assert.ok(
         files.every(
           (file) =>
@@ -99,6 +106,12 @@ describe('review-benchmark', () => {
         }
       }
     }
+    const apiCaller = materializeBenchmarkFixture(fixture, 'api-caller-contract');
+    assert.match(apiCaller.find((file) => file.path === 'src/api.ts')!.head!, /getCached/);
+    assert.match(
+      apiCaller.find((file) => file.path === 'src/client.ts')!.head!,
+      /import \{ getCached \}/,
+    );
   });
 
   it('rejects undeclared executable environment differences', () => {

@@ -3786,11 +3786,11 @@
     },
     "api-caller-contract": {
       "src/api.ts": {
-        "before": "export async function benchmarkContract() {",
+        "before": "const cache = new Map<string, { name: string }>(); export async function getCached(key: string) {",
         "after": "}"
       },
       "src/client.ts": {
-        "before": "export async function benchmarkContract() {",
+        "before": "import { getCached } from './api.ts'; export async function readName(key: string) {",
         "after": "}"
       }
     },
