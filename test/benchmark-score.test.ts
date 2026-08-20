@@ -296,11 +296,18 @@ describe('scoreBenchmark', () => {
     );
     assert.equal(
       evaluateBenchmarkQualityGate(control, control, 0.02, {
-        controlSuccessfulRuns: 1,
-        treatmentSuccessfulRuns: 2,
+        controlSuccessfulRunKeys: ['case-a:1'],
+        treatmentSuccessfulRunKeys: ['case-a:1', 'case-b:1'],
         treatmentFailedRuns: 0,
       }).status,
       'passed',
+    );
+    assert.ok(
+      evaluateBenchmarkQualityGate(control, control, 0.02, {
+        controlSuccessfulRunKeys: ['case-a:1'],
+        treatmentSuccessfulRunKeys: ['case-b:1'],
+        treatmentFailedRuns: 0,
+      }).reasons.includes('treatment did not complete the control run population'),
     );
   });
 
@@ -326,8 +333,8 @@ describe('scoreBenchmark', () => {
     });
     assert.equal(
       evaluateBenchmarkQualityGate(score, score, 0.02, {
-        controlSuccessfulRuns: 1,
-        treatmentSuccessfulRuns: 0,
+        controlSuccessfulRunKeys: ['case-a:1'],
+        treatmentSuccessfulRunKeys: [],
         treatmentFailedRuns: 1,
       }).status,
       'adjudication-required',

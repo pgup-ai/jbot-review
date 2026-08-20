@@ -333,6 +333,8 @@ describe('review-benchmark', () => {
       mkdirSync(hooks);
       writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\nexit 1\n');
       chmodSync(join(hooks, 'pre-commit'), 0o755);
+      const ambientGitDir = join(root, 'ambient-git-dir');
+      writeFileSync(ambientGitDir, 'not a git directory');
       const output = join(root, 'output');
       execFileSync(
         TSX,
@@ -345,6 +347,7 @@ describe('review-benchmark', () => {
             GIT_CONFIG_COUNT: '1',
             GIT_CONFIG_KEY_0: 'core.hooksPath',
             GIT_CONFIG_VALUE_0: hooks,
+            GIT_DIR: ambientGitDir,
           },
         },
       );

@@ -111,6 +111,7 @@ async function prepareWorkspace(
   manifestDir: string,
   root: string,
   fixtureMode: BenchmarkManifest['runner']['fixtureMode'],
+  gitEnv: NodeJS.ProcessEnv,
 ): Promise<{ workspace: string; fixture: string; base?: string; cleanup: () => void }> {
   const workspace = join(root, 'workspace');
   const repository = benchmarkCase.repository
@@ -123,6 +124,7 @@ async function prepareWorkspace(
         ['-C', repository, 'worktree', 'remove', '--force', workspace],
         {
           stdio: 'ignore',
+          env: gitEnv,
         },
       );
       if (removal.error || removal.status !== 0) {
@@ -142,16 +144,11 @@ async function prepareWorkspace(
   };
   try {
     if (repository) {
-      await execFileAsync('git', [
-        '-C',
-        repository,
-        'worktree',
-        'add',
-        '--detach',
-        '--quiet',
-        workspace,
-        benchmarkCase.head,
-      ]);
+      await execFileAsync(
+        'git',
+        ['-C', repository, 'worktree', 'add', '--detach', '--quiet', workspace, benchmarkCase.head],
+        { env: gitEnv },
+      );
       return { workspace, fixture: '', cleanup };
     }
 
@@ -160,9 +157,6 @@ async function prepareWorkspace(
       ? resolvePrivateCase(benchmarkCase.privateCaseHash)
       : resolve(manifestDir, benchmarkCase.fixturePath!);
     if (fixtureMode === 'git') {
-      const gitHome = join(root, 'git-home');
-      mkdirSync(join(gitHome, 'templates'), { recursive: true });
-      const gitEnv = fixtureGitEnvironment(gitHome);
       const files = materializeBenchmarkFixture(
         JSON.parse(readFileSync(source, 'utf8')),
         benchmarkCase.id,
@@ -276,6 +270,9 @@ async function runCase(
   const output = join(root, 'result.json');
   let cleanup: (() => void) | undefined;
   try {
+    const gitHome = join(root, 'git-home');
+    mkdirSync(join(gitHome, 'templates'), { recursive: true });
+    const gitEnv = fixtureGitEnvironment(gitHome);
     const setupStarted = performance.now();
     let checkout: Awaited<ReturnType<typeof prepareWorkspace>>;
     try {
@@ -284,6 +281,7 @@ async function runCase(
         manifestDir,
         root,
         manifest.runner.fixtureMode,
+        gitEnv,
       );
     } catch {
       console.warn(`warning: workspace setup failed for ${benchmarkCase.id}.`);
@@ -314,7 +312,7 @@ async function runCase(
     mkdirSync(home, { recursive: true });
     const paths = { projectRoot, workspace: checkout.workspace, output, fixture: checkout.fixture };
     const command = manifest.runner.command.map((value) => expand(value, paths));
-    const env: NodeJS.ProcessEnv = { ...process.env };
+    const env: NodeJS.ProcessEnv = { ...gitEnv };
     for (const key of Object.keys(env)) {
       if (isBenchmarkGitHubCredential(key)) delete env[key];
     }
@@ -446,6 +444,13 @@ function summarize(rows: BenchmarkCaseRow[]) {
   };
 }
 
+function successfulRunKeys(rows: BenchmarkCaseRow[]): string[] {
+  return rows
+    .filter((row) => row.failureClass === null)
+    .map((row) => benchmarkCanonicalJson([row.caseId, row.repetition]))
+    .sort();
+}
+
 async function main(): Promise<void> {
   const manifestArg = benchmarkArgument('manifest');
   const outputArg = benchmarkArgument('output');
@@ -529,8 +534,8 @@ async function main(): Promise<void> {
     treatmentSummary.score,
     0.02,
     {
-      controlSuccessfulRuns: controlSummary.successfulRuns,
-      treatmentSuccessfulRuns: treatmentSummary.successfulRuns,
+      controlSuccessfulRunKeys: successfulRunKeys(rows.filter((row) => row.arm === 'control')),
+      treatmentSuccessfulRunKeys: successfulRunKeys(rows.filter((row) => row.arm === 'treatment')),
       treatmentFailedRuns: treatmentSummary.failedRuns,
     },
   );
