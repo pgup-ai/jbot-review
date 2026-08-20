@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { pairBenchmarkRuns, summarizePairedBenchmark } from '../src/shared/benchmark-paired.ts';
+import {
+  benchmarkArmOrder,
+  pairBenchmarkRuns,
+  summarizePairedBenchmark,
+} from '../src/shared/benchmark-paired.ts';
 import type { BenchmarkCaseRow } from '../src/shared/benchmark-rescore.ts';
 
 const row = (
@@ -63,6 +67,20 @@ describe('pairBenchmarkRuns', () => {
         ['a', 2, -25],
       ],
     );
+  });
+});
+
+describe('benchmarkArmOrder', () => {
+  it('balances which arm runs first so order is not the treatment', () => {
+    const leaders = [];
+    for (let caseIndex = 0; caseIndex < 6; caseIndex += 1) {
+      for (let repetition = 1; repetition <= 2; repetition += 1) {
+        const order = benchmarkArmOrder(caseIndex, repetition);
+        assert.deepEqual([...order].sort(), ['control', 'treatment']);
+        leaders.push(order[0]);
+      }
+    }
+    assert.equal(leaders.filter((arm) => arm === 'control').length, leaders.length / 2);
   });
 });
 

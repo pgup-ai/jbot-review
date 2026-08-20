@@ -8,7 +8,8 @@ Do not graduate the embedded-first prompt. Keep it available only through
 The treatment reduced repository-tool work and improved tail latency. It did
 not meet the predefined duplicate-diff or QLT-003 gates. The p50 latency gate is
 recorded as unresolved rather than failed: paired, the run improves latency at
-p=0.04, but its sample resolves only a 25% effect against a 10% gate (see "Why
+p=0.04, but its sample resolves only a 25% effect against a 10% gate and ran
+both arms in a fixed order (see "Why
 the p50 result is unresolved").
 
 ## Contract
@@ -57,12 +58,20 @@ difficulty from the comparison. `summarizePairedBenchmark` reports this run as:
 | ------------------------- | --------------: |
 | Paired median             |          -16.2% |
 | 95% CI                    | [-25.0%, +7.8%] |
-| Permutation p             |          0.0443 |
+| Permutation p             |          0.0429 |
 | Treatment faster          |        22 of 36 |
 | Minimum detectable effect |             25% |
 
-The improvement is real at the 0.05 level, so the -0.1% gate reading measures
-the estimator rather than the prompt. It is still not a graduation: the design
+The improvement clears the 0.05 level, so the -0.1% gate reading measures the
+estimator rather than the prompt.
+
+One caveat applies to this run specifically: it executed control first for
+every pair, so the arm label was confounded with execution order and any
+provider warm-up inside a pair would read as a treatment gain. Prompt-cache
+reads were near-identical across arms (449,088 vs 432,320 tokens), which rules
+that channel out but not throttling or load drift. The harness now alternates
+which arm leads (`benchmarkArmOrder`), so later runs do not carry this
+qualification. It is still not a graduation: the design
 resolves a 25% effect while the gate asks for 10%, and a significant result
 from an underpowered design overstates the effect, so -16.2% is an upper
 estimate. Re-run on a larger sample before setting a number.

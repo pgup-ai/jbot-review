@@ -31,6 +31,7 @@ import {
 } from '../src/shared/benchmark-score.ts';
 import {
   LARGEST_SCANNED_EFFECT,
+  benchmarkArmOrder,
   pairBenchmarkRuns,
   summarizePairedBenchmark,
 } from '../src/shared/benchmark-paired.ts';
@@ -509,12 +510,10 @@ async function main(): Promise<void> {
   if (adjudicatedCasesArg) {
     for (const row of rows) appendFileSync(casesPath, `${JSON.stringify(row)}\n`);
   } else {
-    for (const benchmarkCase of benchmarkCases) {
+    for (const [caseIndex, benchmarkCase] of benchmarkCases.entries()) {
       for (let repetition = 1; repetition <= repetitions; repetition += 1) {
-        for (const [side, arm] of [
-          ['control', manifest.control],
-          ['treatment', manifest.treatment],
-        ] as const) {
+        for (const side of benchmarkArmOrder(caseIndex, repetition)) {
+          const arm = side === 'control' ? manifest.control : manifest.treatment;
           const row = await runCase(
             benchmarkCase,
             side,

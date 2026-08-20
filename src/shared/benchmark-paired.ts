@@ -5,7 +5,13 @@ const PERMUTATIONS = 10_000;
 /** Coarser resolution inside power trials, which run the test thousands of times. */
 const POWER_PERMUTATIONS = 200;
 const BOOTSTRAP_SAMPLES = 2_000;
-const SEED = 0x5eed;
+/**
+ * One stream per estimator: sharing one makes each result depend on how many
+ * draws the previous estimator happened to take.
+ */
+const BOOTSTRAP_SEED = 0x5eed;
+const PERMUTATION_SEED = 0x5eef;
+const POWER_SEED = 0x5ef1;
 const TARGET_POWER = 0.8;
 
 /** Candidate effects scanned for the minimum detectable effect, in percent. */
@@ -13,6 +19,20 @@ const EFFECT_LADDER = [2, 5, 7.5, 10, 15, 20, 25, 30, 40, 50];
 
 /** A null minimumDetectableEffect means nothing up to this cleared 80% power. */
 export const LARGEST_SCANNED_EFFECT = EFFECT_LADDER[EFFECT_LADDER.length - 1];
+
+/**
+ * Which arm runs first for a pair. Running control first every time confounds
+ * the arm label with execution order, so provider warm-up, throttling, or load
+ * drift inside a pair reads as a treatment effect and breaks the
+ * exchangeability the permutation test assumes. Alternating balances order
+ * across the sample and keeps a run reproducible.
+ */
+export function benchmarkArmOrder(
+  caseIndex: number,
+  repetition: number,
+): readonly ('control' | 'treatment')[] {
+  return (caseIndex + repetition) % 2 === 0 ? ['control', 'treatment'] : ['treatment', 'control'];
+}
 
 export interface BenchmarkPair {
   caseId: string;
@@ -169,12 +189,15 @@ export function summarizePairedBenchmark(pairs: readonly BenchmarkPair[]): Paire
   }
   const deltas = pairs.map((pair) => pair.relativeDelta);
   const logs = logRatios(pairs);
-  const next = benchmarkRandom(SEED);
+  const bootstrap = benchmarkRandom(BOOTSTRAP_SEED);
   const resampled: number[] = [];
   for (let sample = 0; sample < BOOTSTRAP_SAMPLES; sample += 1) {
     resampled.push(
       median(
-        Array.from({ length: deltas.length }, () => deltas[Math.floor(next() * deltas.length)]),
+        Array.from(
+          { length: deltas.length },
+          () => deltas[Math.floor(bootstrap() * deltas.length)],
+        ),
       ),
     );
   }
@@ -184,8 +207,8 @@ export function summarizePairedBenchmark(pairs: readonly BenchmarkPair[]): Paire
     pairs: pairs.length,
     medianRelativeDelta: median(deltas),
     ci95: low === null || high === null ? null : { low, high },
-    permutationP: permutationP(logs, next, PERMUTATIONS),
+    permutationP: permutationP(logs, benchmarkRandom(PERMUTATION_SEED), PERMUTATIONS),
     treatmentFaster: pairs.filter((pair) => pair.treatmentMs < pair.controlMs).length,
-    minimumDetectableEffect: minimumDetectableEffect(logs, next),
+    minimumDetectableEffect: minimumDetectableEffect(logs, benchmarkRandom(POWER_SEED)),
   };
 }
