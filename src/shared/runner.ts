@@ -695,6 +695,8 @@ export interface ReviewRunOptions {
    * run's env reads would race the window.
    */
   scrubSessionEnv?: boolean;
+  /** Environment scoped to the opencode child process. */
+  opencodeProxyEnv?: NodeJS.ProcessEnv;
   /** SDK routing override; blank defers to JBOT_SDK_ENGINE, then auto. */
   sdkEngine?: string;
   dryRun?: boolean;
@@ -1745,6 +1747,7 @@ async function runReviewPipeline(params: {
             : promptCachePolicy.auxProviderPromptCache,
           port: options.opencodePort > 0 ? options.opencodePort : undefined,
           scrubEnv: options.scrubSessionEnv !== false,
+          proxyEnv: options.opencodeProxyEnv,
           additionalProviderKeys: auxNeedsOpencodeConfig
             ? [
                 {
@@ -2678,6 +2681,7 @@ export function normalizeOptions(
   return {
     enhancedContext: options?.enhancedContext ?? false,
     scrubSessionEnv: options?.scrubSessionEnv ?? true,
+    opencodeProxyEnv: options?.opencodeProxyEnv ?? {},
     sdkEngine: options?.sdkEngine ?? '',
     dryRun: options?.dryRun ?? false,
     autoApprove: options?.autoApprove ?? false,

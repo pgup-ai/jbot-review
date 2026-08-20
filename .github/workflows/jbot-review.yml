@@ -208,18 +208,32 @@ jobs:
           # only COPY dist/ rebuilds. No cache-to — PRs read, don't write.
           cache-from: type=registry,ref=ghcr.io/pgup-ai/jbot-review:buildcache
       # issue_comment and workflow_dispatch carry no pull_request payload, so
-      # the base the companion deepens to has to be looked up for those events.
-      - id: base
+      # resolve both values before any secret reaches the PR-built image.
+      - id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}
           EVENT_BASE: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          sha="$EVENT_BASE"
-          # Fail open: without a base the companion just keeps its initial depth,
-          # which must not cost the whole review.
-          [ -n "$sha" ] || sha=$(gh api "repos/${{ github.repository }}/pulls/$PR" --jq .base.sha || true)
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          base="$EVENT_BASE"
+          head_repo="$EVENT_HEAD_REPO"
+          if [ -z "$base" ] || [ -z "$head_repo" ]; then
+            metadata=$(gh api "repos/$REPOSITORY/pulls/$PR" || true)
+            [ -n "$base" ] || base=$(jq -r '.base.sha // empty' <<< "$metadata")
+            [ -n "$head_repo" ] || head_repo=$(jq -r '.head.repo.full_name // empty' <<< "$metadata")
+          fi
+          {
+            # Missing base stays fail-open for companion history; missing
+            # ownership stays fail-closed for the optional proxy credential.
+            echo "base=$base"
+            if [ "$head_repo" = "$REPOSITORY" ]; then
+              echo "same_repo=true"
+            else
+              echo "same_repo=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
       # Same-head re-runs reuse completed shard results instead of re-billing
       # them. Entries are content-addressed (head, model, exact prompt bytes),
       # so a cross-head restore is a harmless miss — full-diff coverage holds.
@@ -232,6 +246,7 @@ jobs:
             jbot-shard-${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}-
       - name: Check optional OpenCode proxy
         id: proxy_check
+        if: steps.pr.outputs.same_repo == 'true'
         env:
           HTTPS_PROXY: ${{ secrets.OPENCODE_PROXY_URL }}
           NO_PROXY: localhost,127.0.0.1
@@ -266,8 +281,8 @@ jobs:
         # Fail-open by design, and a no-op when the secrets are absent (forks):
         # an empty JBOT_OBSERVER_URL leaves the tee disabled.
         env:
-          HTTPS_PROXY: ${{ steps.proxy_check.outputs.enabled == 'true' && secrets.OPENCODE_PROXY_URL || '' }}
-          NO_PROXY: localhost,127.0.0.1
+          JBOT_OPENCODE_HTTPS_PROXY: ${{ steps.proxy_check.outputs.enabled == 'true' && secrets.OPENCODE_PROXY_URL || '' }}
+          JBOT_OPENCODE_NO_PROXY: localhost,127.0.0.1
           JBOT_OBSERVER_URL: ${{ secrets.OBSERVER_HOSTNAME && format('https://{0}', secrets.OBSERVER_HOSTNAME) || '' }}
           JBOT_OBSERVER_TOKEN: ${{ secrets.JBOT_OBSERVER_TOKEN }}
           # ACP gateway thin client: when set, ACP providers run on a remote
@@ -282,7 +297,7 @@ jobs:
           # Same resolution the checkout step uses: pull_request carries the
           # head SHA, while issue_comment/workflow_dispatch resolve the PR ref.
           JBOT_ACP_GATEWAY_REF: ${{ github.event.pull_request.head.sha || format('refs/pull/{0}/head', inputs['pr-number'] || github.event.issue.number) }}
-          JBOT_ACP_GATEWAY_BASE: ${{ steps.base.outputs.sha }}
+          JBOT_ACP_GATEWAY_BASE: ${{ steps.pr.outputs.base }}
           # One run id per invocation (run+attempt), not per PR: re-reviews of a
           # PR share a runId otherwise, and the gateway's append+seq-dedup
           # journal then drops the newer transcript as already-seen.
