@@ -31,10 +31,10 @@ const results = adjudicateHistoricalCandidates(
 const outputDir = resolve(output);
 mkdirSync(outputDir, { recursive: true });
 writeFileSync(resolve(outputDir, 'results.json'), `${JSON.stringify(results, null, 2)}\n`);
+const disagreements = results
+  .filter((result) => result.status === 'disagreement')
+  .map((result) => JSON.stringify(result));
 writeFileSync(
   resolve(outputDir, 'disagreements.jsonl'),
-  results
-    .filter((result) => result.status === 'disagreement')
-    .map((result) => JSON.stringify(result))
-    .join('\n') + (results.some((result) => result.status === 'disagreement') ? '\n' : ''),
+  disagreements.length > 0 ? `${disagreements.join('\n')}\n` : '',
 );

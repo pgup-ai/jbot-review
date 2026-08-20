@@ -324,9 +324,9 @@ export function assessCompetitorComparability(
       throw new Error('Competitor configuration requires sampling.');
     }
   }
-  const mismatches = (['model', 'modelRevision', 'endpoint', 'reasoningEffort'] as const)
-    .filter((field) => control[field] !== competitor[field])
-    .map(String);
+  const mismatches: string[] = (
+    ['model', 'modelRevision', 'endpoint', 'reasoningEffort'] as const
+  ).filter((field) => control[field] !== competitor[field]);
   if (benchmarkCanonicalJson(control.sampling) !== benchmarkCanonicalJson(competitor.sampling)) {
     mismatches.push('sampling');
   }
