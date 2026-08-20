@@ -29,7 +29,11 @@ import {
   type BenchmarkDiffSize,
   type BenchmarkRiskTier,
 } from '../src/shared/benchmark-score.ts';
-import { pairBenchmarkRuns, summarizePairedBenchmark } from '../src/shared/benchmark-paired.ts';
+import {
+  LARGEST_SCANNED_EFFECT,
+  pairBenchmarkRuns,
+  summarizePairedBenchmark,
+} from '../src/shared/benchmark-paired.ts';
 import {
   validateAdjudicatedBenchmarkRows,
   type BenchmarkCaseRow,
@@ -571,14 +575,18 @@ async function main(): Promise<void> {
   };
   writeFileSync(join(outputDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
   console.log(`Wrote ${join(outputDir, 'summary.json')} and ${casesPath}.`);
-  const { medianRelativeDelta, permutationP, minimumDetectableEffect } = pairedLatency;
-  const paired = `Paired latency: median ${medianRelativeDelta?.toFixed(1)}% (p=${permutationP?.toFixed(4)})`;
-  if (minimumDetectableEffect === null) {
-    console.warn(
-      `${paired}; ${pairedLatency.pairs} pairs detect no effect at 80% power, so a latency gate is unanswerable.`,
-    );
+  const { pairs, medianRelativeDelta, permutationP, minimumDetectableEffect } = pairedLatency;
+  if (medianRelativeDelta === null || permutationP === null) {
+    console.warn(`Paired latency: ${pairs} pair(s) is too few to compare the arms.`);
   } else {
-    console.log(`${paired}, smallest detectable effect ${minimumDetectableEffect}%.`);
+    const paired = `Paired latency: median ${medianRelativeDelta.toFixed(1)}% (p=${permutationP.toFixed(4)})`;
+    if (minimumDetectableEffect === null) {
+      console.warn(
+        `${paired}; no effect up to ${LARGEST_SCANNED_EFFECT}% reaches 80% power at ${pairs} pairs, so a latency gate is unanswerable.`,
+      );
+    } else {
+      console.log(`${paired}, smallest detectable effect ${minimumDetectableEffect}%.`);
+    }
   }
 }
 

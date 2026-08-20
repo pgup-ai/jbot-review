@@ -252,7 +252,11 @@ export function buildConfig(
     if (!providerKey.providerID) continue;
     if (providerKey.providerID === providerID) {
       const custom = PROVIDERS[providerID]?.custom;
-      const auxOptions = providerKey.modelOptions;
+      const auxOptions = supportedModelOptions(
+        providerID,
+        providerKey.modelID ?? '',
+        providerKey.modelOptions,
+      );
       const hasAuxOptions = Boolean(auxOptions && Object.keys(auxOptions).length > 0);
       // A same-provider aux model needs its own entry only to carry a name
       // (custom providers) or options of its own; otherwise the provider entry

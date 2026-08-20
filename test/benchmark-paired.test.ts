@@ -92,6 +92,46 @@ describe('summarizePairedBenchmark', () => {
     assert.ok(summary.permutationP !== null && summary.permutationP < 0.05);
   });
 
+  it('treats an arm swap the way its permutation test does', () => {
+    // Swapping arms maps (T-C)/C to -d/(1+d), not -d, so a sign-flipped
+    // relative delta simulates no real relabelling; log ratios negate exactly.
+    const samples: [string, number, number, number][] = [
+      ['a', 1, 1_000, 700],
+      ['b', 1, 5_000, 4_000],
+      ['c', 1, 40_000, 52_000],
+    ];
+    const forward = pairBenchmarkRuns(rowsFrom(samples));
+    const swapped = pairBenchmarkRuns(
+      rowsFrom(samples.map(([c, r, control, treatment]) => [c, r, treatment, control])),
+    );
+    for (const [index, pair] of forward.entries()) {
+      const mirrored = swapped[index];
+      assert.ok(
+        Math.abs(
+          Math.log(pair.treatmentMs / pair.controlMs) +
+            Math.log(mirrored.treatmentMs / mirrored.controlMs),
+        ) < 1e-12,
+      );
+      // The naive sign flip the test must not use.
+      assert.ok(Math.abs(pair.relativeDelta + mirrored.relativeDelta) > 1e-6);
+    }
+
+    const p = summarizePairedBenchmark(forward).permutationP;
+    assert.equal(p, summarizePairedBenchmark(swapped).permutationP);
+  });
+
+  it('drops a pair with a zero latency on either arm', () => {
+    const pairs = pairBenchmarkRuns([
+      ...rowsFrom([['a', 1, 1_000, 800]]),
+      ...rowsFrom([['b', 1, 1_000, 0]]),
+      ...rowsFrom([['c', 1, 0, 800]]),
+    ]);
+    assert.deepEqual(
+      pairs.map((pair) => pair.caseId),
+      ['a'],
+    );
+  });
+
   it('reports no effect when the arms are indistinguishable', () => {
     const summary = summarizePairedBenchmark(
       pairBenchmarkRuns(

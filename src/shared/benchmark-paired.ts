@@ -11,6 +11,9 @@ const TARGET_POWER = 0.8;
 /** Candidate effects scanned for the minimum detectable effect, in percent. */
 const EFFECT_LADDER = [2, 5, 7.5, 10, 15, 20, 25, 30, 40, 50];
 
+/** A null minimumDetectableEffect means nothing up to this cleared 80% power. */
+export const LARGEST_SCANNED_EFFECT = EFFECT_LADDER[EFFECT_LADDER.length - 1];
+
 export interface BenchmarkPair {
   caseId: string;
   repetition: number;
@@ -50,8 +53,9 @@ export function pairBenchmarkRuns(rows: readonly BenchmarkCaseRow[]): BenchmarkP
     const treatment = arms.treatment.get(key);
     if (!treatment) continue;
     const controlMs = control.latencyMs;
-    if (controlMs <= 0) continue;
     const treatmentMs = treatment.latencyMs;
+    // A zero on either arm has no ratio to test, and the schema permits one.
+    if (controlMs <= 0 || treatmentMs <= 0) continue;
     pairs.push({
       caseId: control.caseId,
       repetition: control.repetition,
@@ -92,13 +96,27 @@ function signedRankStatistic(deltas: readonly number[]): number {
   return statistic;
 }
 
-function permutationP(deltas: readonly number[], next: () => number, permutations: number): number {
-  const observed = Math.abs(signedRankStatistic(deltas));
+/**
+ * Swapping arms turns `(T - C) / C` into `-d / (1 + d)`, not `-d`, so flipping
+ * the sign of a relative delta simulates no real relabelling. `log(T / C)`
+ * negates exactly under a swap, which is what makes the permutation valid.
+ */
+function logRatios(pairs: readonly BenchmarkPair[]): number[] {
+  return pairs.map((pair) => Math.log(pair.treatmentMs / pair.controlMs));
+}
+
+/** A percentage improvement as the log-space shift the permutation test sees. */
+function logShift(effectPercent: number): number {
+  return Math.log(1 - effectPercent / 100);
+}
+
+function permutationP(values: readonly number[], next: () => number, permutations: number): number {
+  const observed = Math.abs(signedRankStatistic(values));
   let extreme = 0;
-  const flipped: number[] = Array.from({ length: deltas.length }, () => 0);
+  const flipped: number[] = Array.from({ length: values.length }, () => 0);
   for (let sample = 0; sample < permutations; sample += 1) {
-    for (let index = 0; index < deltas.length; index += 1) {
-      flipped[index] = next() < 0.5 ? deltas[index] : -deltas[index];
+    for (let index = 0; index < values.length; index += 1) {
+      flipped[index] = next() < 0.5 ? values[index] : -values[index];
     }
     if (Math.abs(signedRankStatistic(flipped)) >= observed) extreme += 1;
   }
@@ -107,32 +125,33 @@ function permutationP(deltas: readonly number[], next: () => number, permutation
 }
 
 /**
- * Rejection rate for a true effect of `effect` percent. Centring before shifting
- * keeps this sample's spread but drops its observed effect, so the answer
- * describes the design rather than restating the measurement.
+ * Rejection rate for a true effect of `effect` percent. Centring before
+ * shifting keeps this sample's spread but drops its observed effect, so the
+ * answer describes the design rather than restating the measurement.
  */
 function power(
-  deltas: readonly number[],
+  logRatios: readonly number[],
   effect: number,
   next: () => number,
   trials: number,
 ): number {
-  const centre = median(deltas);
-  const centred = deltas.map((delta) => delta - centre);
+  const centre = median(logRatios);
+  const centred = logRatios.map((value) => value - centre);
+  const shift = logShift(effect);
   let detected = 0;
-  const sample: number[] = Array.from({ length: deltas.length }, () => 0);
+  const sample: number[] = Array.from({ length: logRatios.length }, () => 0);
   for (let trial = 0; trial < trials; trial += 1) {
-    for (let index = 0; index < deltas.length; index += 1) {
-      sample[index] = centred[Math.floor(next() * centred.length)] - effect;
+    for (let index = 0; index < logRatios.length; index += 1) {
+      sample[index] = centred[Math.floor(next() * centred.length)] + shift;
     }
     if (permutationP(sample, next, POWER_PERMUTATIONS) < 0.05) detected += 1;
   }
   return detected / trials;
 }
 
-function minimumDetectableEffect(deltas: readonly number[], next: () => number): number | null {
+function minimumDetectableEffect(logRatios: readonly number[], next: () => number): number | null {
   for (const effect of EFFECT_LADDER) {
-    if (power(deltas, effect, next, 60) >= TARGET_POWER) return effect;
+    if (power(logRatios, effect, next, 60) >= TARGET_POWER) return effect;
   }
   return null;
 }
@@ -149,6 +168,7 @@ export function summarizePairedBenchmark(pairs: readonly BenchmarkPair[]): Paire
     };
   }
   const deltas = pairs.map((pair) => pair.relativeDelta);
+  const logs = logRatios(pairs);
   const next = benchmarkRandom(SEED);
   const resampled: number[] = [];
   for (let sample = 0; sample < BOOTSTRAP_SAMPLES; sample += 1) {
@@ -164,8 +184,8 @@ export function summarizePairedBenchmark(pairs: readonly BenchmarkPair[]): Paire
     pairs: pairs.length,
     medianRelativeDelta: median(deltas),
     ci95: low === null || high === null ? null : { low, high },
-    permutationP: permutationP(deltas, next, PERMUTATIONS),
+    permutationP: permutationP(logs, next, PERMUTATIONS),
     treatmentFaster: pairs.filter((pair) => pair.treatmentMs < pair.controlMs).length,
-    minimumDetectableEffect: minimumDetectableEffect(deltas, next),
+    minimumDetectableEffect: minimumDetectableEffect(logs, next),
   };
 }

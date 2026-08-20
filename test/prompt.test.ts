@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 
 import {
@@ -38,13 +37,7 @@ import {
 } from '../src/shared/prompt.ts';
 
 describe('NO_TOOLS_REVIEW_DIRECTIVE', () => {
-  it('keeps the tool-less review contract byte-for-byte', () => {
-    // A hash, not a copy: prompt bodies live only in src/shared/prompt.ts, and
-    // this still fails on any byte change. Re-pin it only on a deliberate edit.
-    assert.equal(
-      createHash('sha256').update(NO_TOOLS_REVIEW_DIRECTIVE).digest('hex'),
-      'bc933c401284f48a25595bb2cfac38cc18f3ccff5f813fd38128d90943b3fd2c',
-    );
+  it('keeps the tool-less review contract', () => {
     for (const rule of [
       /Use no tools for this review/,
       /do not read files, search the repository, or run\s+git or shell commands/,

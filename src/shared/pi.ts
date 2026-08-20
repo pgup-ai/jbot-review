@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
+import { supportedModelOptions } from './config.ts';
 import { GIT_DIFF_ARGS } from './git.ts';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -688,7 +689,9 @@ export async function startPi(
     throw error;
   }
 
-  const thinkingLevel = piThinkingLevel(options.modelOptions);
+  const thinkingLevel = piThinkingLevel(
+    supportedModelOptions(providerID, modelID, options.modelOptions),
+  );
   const ignoredOptions = Object.keys(options.modelOptions ?? {}).filter(
     (key) => key !== 'reasoningEffort',
   );

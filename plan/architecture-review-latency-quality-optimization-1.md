@@ -168,7 +168,7 @@ Completion criteria for Phase 3:
 
 **Phase status:** Experimental. The treatment did not pass TASK-035's
 duplicate-diff or QLT-003 gates, and its p50 gate is unresolved: that run could
-only resolve a 30% effect while the gate asks for 10%. See
+only resolve a 25% effect while the gate asks for 10%. See
 `plan/review-prompt-embedded-first-phase3-ab.md`.
 
 - The prompt states exactly one exploration policy and does not simultaneously require redundant diff rereads.
