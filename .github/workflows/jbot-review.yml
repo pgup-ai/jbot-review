@@ -244,45 +244,11 @@ jobs:
           restore-keys: |
             jbot-shard-${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}-${{ github.event.pull_request.head.sha || github.run_id }}-
             jbot-shard-${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}-
-      - name: Check optional OpenCode proxy
-        id: proxy_check
-        if: steps.pr.outputs.same_repo == 'true'
-        env:
-          HTTPS_PROXY: ${{ secrets.OPENCODE_PROXY_URL }}
-          NO_PROXY: localhost,127.0.0.1
-        run: |
-          if [ -z "$HTTPS_PROXY" ]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "OpenCode proxy is not configured; continuing without it"
-            exit 0
-          fi
-
-          if proxy_ip="$(
-            docker run --rm \
-              --env HTTPS_PROXY \
-              --env NO_PROXY \
-              --entrypoint curl \
-              ghcr.io/pgup-ai/jbot-review:latest \
-              --fail \
-              --silent \
-              --connect-timeout 5 \
-              --max-time 15 \
-              https://api.ipify.org \
-              2>/dev/null
-          )" && [ -n "$proxy_ip" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-            echo "OpenCode proxy verified; egress: $proxy_ip"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::OpenCode proxy verification failed; continuing without it"
-          fi
       - uses: ./
         # Observer tee: streams ACP session frames to the live viewer.
         # Fail-open by design, and a no-op when the secrets are absent (forks):
         # an empty JBOT_OBSERVER_URL leaves the tee disabled.
         env:
-          JBOT_OPENCODE_HTTPS_PROXY: ${{ steps.proxy_check.outputs.enabled == 'true' && secrets.OPENCODE_PROXY_URL || '' }}
-          JBOT_OPENCODE_NO_PROXY: localhost,127.0.0.1
           JBOT_OBSERVER_URL: ${{ secrets.OBSERVER_HOSTNAME && format('https://{0}', secrets.OBSERVER_HOSTNAME) || '' }}
           JBOT_OBSERVER_TOKEN: ${{ secrets.JBOT_OBSERVER_TOKEN }}
           # ACP gateway thin client: when set, ACP providers run on a remote
@@ -306,7 +272,8 @@ jobs:
           # Precedence: /jbot comment flag > dispatch input > repo variable > default.
           provider: ${{ needs.command.outputs.provider || inputs.provider || vars.JBOT_REVIEW_PROVIDER || '' }}
           model: ${{ needs.command.outputs.model || inputs.model || vars.JBOT_REVIEW_MODEL || '' }}
-          sdk-engine: ${{ steps.proxy_check.outputs.enabled == 'true' && 'opencode' || vars.JBOT_SDK_ENGINE || '' }}
+          sdk-engine: ${{ vars.JBOT_SDK_ENGINE || '' }}
+          opencode-proxy-url: ${{ steps.pr.outputs.same_repo == 'true' && secrets.OPENCODE_PROXY_URL || '' }}
           pr-number: ${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}
           dry-run: ${{ inputs['dry-run'] || 'false' }}
           auto-approve: ${{ needs.command.outputs.auto_approve || vars.JBOT_AUTO_APPROVE || 'false' }}
