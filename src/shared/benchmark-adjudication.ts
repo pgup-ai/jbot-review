@@ -97,7 +97,6 @@ export function importHistoricalFinding(
     !isSha256(signal.sourceHash) ||
     !isSha256(signal.pathHash) ||
     !VALID_SEVERITIES.has(signal.severity) ||
-    typeof signal.line !== 'number' ||
     !Number.isInteger(signal.line) ||
     signal.line < 0 ||
     typeof signal.findingText !== 'string' ||

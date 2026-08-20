@@ -36,6 +36,7 @@ const SEVERITY_ALIASES: Record<string, Severity> = {
   p3: 'P3',
   low: 'P3',
   note: 'P3',
+  none: 'P3',
   info: 'P3',
   informational: 'P3',
   nit: 'nit',
@@ -250,7 +251,6 @@ function normalizeSarif(
 ): BenchmarkObservedFinding[] {
   if (!isRecord(input) || !Array.isArray(input.runs)) throw new Error('sarif input requires runs.');
   const findings: BenchmarkObservedFinding[] = [];
-  const severity: Record<string, Severity> = { error: 'P1', warning: 'P2', note: 'P3', none: 'P3' };
   for (const run of input.runs) {
     if (!isRecord(run) || (run.results !== undefined && !Array.isArray(run.results))) {
       throw new Error('sarif input contains an invalid run.');
@@ -284,7 +284,7 @@ function normalizeSarif(
       const finding = observedFinding({
         path,
         line,
-        severity: severity[typeof result.level === 'string' ? result.level : 'warning'],
+        severity: normalizeSeverity(typeof result.level === 'string' ? result.level : 'warning'),
         title,
         anchored: Boolean(path) && line > 0,
         fingerprint:
