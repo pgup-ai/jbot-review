@@ -144,6 +144,12 @@ describe('takeOpencodeProxyEnv', () => {
       NO_PROXY: 'localhost,127.0.0.1',
     });
     assert.deepEqual(env, { PATH: '/bin' });
+    const defaultBypass = { JBOT_OPENCODE_HTTPS_PROXY: 'http://proxy.example:50100' };
+    assert.deepEqual(takeOpencodeProxyEnv(defaultBypass), {
+      HTTPS_PROXY: 'http://proxy.example:50100',
+      NO_PROXY: 'localhost,127.0.0.1',
+    });
+    assert.deepEqual(defaultBypass, {});
     assert.deepEqual(takeOpencodeProxyEnv({}), {});
   });
 });
