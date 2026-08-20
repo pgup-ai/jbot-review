@@ -511,6 +511,7 @@ export function evaluateBenchmarkQualityGate(
   completion?: {
     controlSuccessfulRunKeys: readonly string[];
     treatmentSuccessfulRunKeys: readonly string[];
+    controlFailedRuns: number;
     treatmentFailedRuns: number;
   },
 ): BenchmarkQualityGate {
@@ -522,10 +523,11 @@ export function evaluateBenchmarkQualityGate(
   const treatmentSuccessfulRunKeys = new Set(completion?.treatmentSuccessfulRunKeys);
   if (
     completion &&
-    (completion.treatmentFailedRuns > 0 ||
+    (completion.controlFailedRuns > 0 ||
+      completion.treatmentFailedRuns > 0 ||
       completion.controlSuccessfulRunKeys.some((key) => !treatmentSuccessfulRunKeys.has(key)))
   ) {
-    reasons.push('treatment did not complete the control run population');
+    reasons.push('benchmark arms did not complete a comparable run population');
   }
   if (!control.semanticAdjudication.complete || !treatment.semanticAdjudication.complete) {
     return {

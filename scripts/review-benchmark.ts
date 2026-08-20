@@ -536,6 +536,7 @@ async function main(): Promise<void> {
     {
       controlSuccessfulRunKeys: successfulRunKeys(rows.filter((row) => row.arm === 'control')),
       treatmentSuccessfulRunKeys: successfulRunKeys(rows.filter((row) => row.arm === 'treatment')),
+      controlFailedRuns: controlSummary.failedRuns,
       treatmentFailedRuns: treatmentSummary.failedRuns,
     },
   );
