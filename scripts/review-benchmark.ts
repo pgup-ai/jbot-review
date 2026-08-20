@@ -152,18 +152,22 @@ async function prepareWorkspace(
       ? resolvePrivateCase(benchmarkCase.privateCaseHash)
       : resolve(manifestDir, benchmarkCase.fixturePath!);
     if (fixtureMode === 'git') {
+      const gitHome = join(root, 'git-home');
+      mkdirSync(join(gitHome, 'templates'), { recursive: true });
+      const gitEnv = fixtureGitEnvironment(gitHome);
       const files = materializeBenchmarkFixture(
         JSON.parse(readFileSync(source, 'utf8')),
         benchmarkCase.id,
       );
       for (const file of files) writeFixtureFile(workspace, file.path, file.base);
-      await execFileAsync('git', ['-C', workspace, 'init', '--quiet']);
-      await commitFixture(workspace, 'base');
+      const git = fixtureGitPrefix(workspace, gitEnv);
+      await execFileAsync('git', [...git, 'init', '--quiet'], { env: gitEnv });
+      await commitFixture(workspace, 'base', gitEnv);
       const base = (
-        await execFileAsync('git', ['-C', workspace, 'rev-parse', 'HEAD'])
+        await execFileAsync('git', [...git, 'rev-parse', 'HEAD'], { env: gitEnv })
       ).stdout.trim();
       for (const file of files) writeFixtureFile(workspace, file.path, file.head);
-      await commitFixture(workspace, 'head');
+      await commitFixture(workspace, 'head', gitEnv);
       return { workspace, fixture: '', base, cleanup };
     }
     const fixture = join(workspace, 'fixture.json');
@@ -185,18 +189,38 @@ function writeFixtureFile(workspace: string, path: string, content: string): voi
   writeFileSync(destination, content);
 }
 
-async function commitFixture(workspace: string, message: string): Promise<void> {
-  const env = {
+function fixtureGitEnvironment(home: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
+    HOME: home,
+    XDG_CONFIG_HOME: join(home, '.config'),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: join(home, '.gitconfig'),
+    GIT_TEMPLATE_DIR: join(home, 'templates'),
     GIT_AUTHOR_DATE: '2000-01-01T00:00:00Z',
     GIT_COMMITTER_DATE: '2000-01-01T00:00:00Z',
   };
-  await execFileAsync('git', ['-C', workspace, 'add', '--all'], { env });
+  for (const key of Object.keys(env)) {
+    if (/^GIT_CONFIG_(?:COUNT|KEY_|VALUE_|PARAMETERS$)/.test(key)) delete env[key];
+  }
+  return env;
+}
+
+function fixtureGitPrefix(workspace: string, env: NodeJS.ProcessEnv): string[] {
+  return ['-c', `core.hooksPath=${env.GIT_TEMPLATE_DIR}`, '-C', workspace];
+}
+
+async function commitFixture(
+  workspace: string,
+  message: string,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  const prefix = fixtureGitPrefix(workspace, env);
+  await execFileAsync('git', [...prefix, 'add', '--all'], { env });
   await execFileAsync(
     'git',
     [
-      '-C',
-      workspace,
+      ...prefix,
       '-c',
       'user.name=J-Bot Benchmark',
       '-c',

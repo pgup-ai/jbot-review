@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
@@ -273,11 +281,24 @@ describe('review-benchmark', () => {
       writeFileSync(join(root, 'corpus.json'), corpus);
       const manifestPath = join(root, 'manifest.json');
       writeFileSync(manifestPath, JSON.stringify(source));
+      const hooks = join(root, 'ambient-hooks');
+      mkdirSync(hooks);
+      writeFileSync(join(hooks, 'pre-commit'), '#!/bin/sh\nexit 1\n');
+      chmodSync(join(hooks, 'pre-commit'), 0o755);
       const output = join(root, 'output');
       execFileSync(
         TSX,
         [join(ROOT, 'scripts/review-benchmark.ts'), '--manifest', manifestPath, '--output', output],
-        { encoding: 'utf8', stdio: 'pipe' },
+        {
+          encoding: 'utf8',
+          stdio: 'pipe',
+          env: {
+            ...process.env,
+            GIT_CONFIG_COUNT: '1',
+            GIT_CONFIG_KEY_0: 'core.hooksPath',
+            GIT_CONFIG_VALUE_0: hooks,
+          },
+        },
       );
       const summary = JSON.parse(readFileSync(join(output, 'summary.json'), 'utf8')) as {
         control: { successfulRuns: number };

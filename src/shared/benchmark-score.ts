@@ -253,6 +253,8 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
     if (finding.triggerComplete !== undefined && finding.evidenceSupported !== undefined) {
       semanticallyAdjudicated += 1;
     }
+    if (finding.triggerComplete !== undefined) triggerObserved += 1;
+    if (finding.evidenceSupported !== undefined) evidenceObserved += 1;
 
     const anchorMatches = (expected: BenchmarkExpectedFinding): boolean =>
       expected.anchors.some(
@@ -263,14 +265,8 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
       : undefined;
     if (!expected || matchedExpected.has(expected.id) || !anchorMatches(expected)) continue;
     if (!severityWithinRange(finding.severity, expected.severityRange)) continue;
-    if (finding.triggerComplete !== undefined) {
-      triggerObserved += 1;
-      if (finding.triggerComplete) triggerComplete += 1;
-    }
-    if (finding.evidenceSupported !== undefined) {
-      evidenceObserved += 1;
-      if (finding.evidenceSupported) evidenceSupported += 1;
-    }
+    if (finding.triggerComplete) triggerComplete += 1;
+    if (finding.evidenceSupported) evidenceSupported += 1;
     if (finding.triggerComplete !== true || finding.evidenceSupported !== true) continue;
     matchedExpected.add(expected.id);
     matched += 1;

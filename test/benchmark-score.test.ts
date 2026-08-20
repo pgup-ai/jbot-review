@@ -311,6 +311,8 @@ describe('scoreBenchmark', () => {
       { bootstrapSamples: 0 },
     );
     assert.equal(acceptedUnmapped.semanticAdjudication.complete, true);
+    assert.equal(acceptedUnmapped.triggerCompleteness.value, 0);
+    assert.equal(acceptedUnmapped.evidenceSupportRate.value, 0);
   });
 
   it('characterizes repeated control finding and latency variance', () => {
