@@ -6,15 +6,10 @@ import {
   importHistoricalFinding,
   type HistoricalFindingSignal,
 } from '../src/shared/benchmark-adjudication.ts';
+import { benchmarkArgument } from './benchmark-args.ts';
 
-function argument(name: string): string | undefined {
-  const index = process.argv.indexOf(`--${name}`);
-  if (index >= 0) return process.argv[index + 1];
-  return process.argv.find((value) => value.startsWith(`--${name}=`))?.slice(name.length + 3);
-}
-
-const input = argument('input');
-const output = argument('output');
+const input = benchmarkArgument('input');
+const output = benchmarkArgument('output');
 if (!input || !output) {
   throw new Error('usage: review-history-import.ts --input <signals.jsonl> --output <directory>');
 }

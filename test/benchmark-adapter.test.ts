@@ -57,14 +57,43 @@ describe('competitor benchmark adapters', () => {
           },
         ],
       }),
-      [{ ...finding, fingerprint: 'contract' }],
+      [{ ...finding, anchored: true, fingerprint: 'contract:src/a.ts:4:Contract break' }],
     );
     assert.deepEqual(
       normalizeCompetitorFindings('sarif', {
         runs: [{ results: [{ ruleId: 'global', level: 'warning', message: { text: 'Global' } }] }],
       }),
-      [{ path: '', line: 0, severity: 'P2', title: 'Global', fingerprint: 'global' }],
+      [
+        {
+          path: '',
+          line: 0,
+          severity: 'P2',
+          title: 'Global',
+          anchored: false,
+          fingerprint: 'global::0:Global',
+        },
+      ],
     );
+    const repeatedRule = normalizeCompetitorFindings('sarif', {
+      runs: [
+        {
+          results: [4, 8].map((startLine) => ({
+            ruleId: 'contract',
+            level: 'warning',
+            message: { text: 'Contract break' },
+            locations: [
+              {
+                physicalLocation: {
+                  artifactLocation: { uri: 'src/a.ts' },
+                  region: { startLine },
+                },
+              },
+            ],
+          })),
+        },
+      ],
+    });
+    assert.notEqual(repeatedRule[0].fingerprint, repeatedRule[1].fingerprint);
   });
 
   it('excludes model, endpoint, reasoning, or sampling mismatches from rankings', () => {

@@ -35,13 +35,13 @@ export interface BenchmarkObservedFinding extends BenchmarkAnchor {
   title: string;
   /** Stable semantic identity supplied by an adapter; falls back to path/line/title. */
   fingerprint?: string;
-  /** Optional adjudicated match. Automatic matching otherwise uses allowed anchors. */
+  /** Adjudicated semantic match required before recall credit is awarded. */
   expectedFindingId?: string;
   /** Whether the posting pipeline retained this finding. Defaults to true. */
   retained?: boolean;
   /** Whether the claimed location is a valid diff anchor. Defaults to line > 0. */
   anchored?: boolean;
-  /** Adjudicated semantic checks; absent means the adapter cannot expose the metric. */
+  /** Both adjudicated checks must be true before recall credit is awarded. */
   triggerComplete?: boolean;
   evidenceSupported?: boolean;
 }
@@ -148,6 +148,10 @@ function findingKey(finding: BenchmarkObservedFinding): string {
   );
 }
 
+function varianceFindingKey(finding: BenchmarkObservedFinding): string {
+  return finding.expectedFindingId ?? finding.fingerprint ?? `${finding.path}:${finding.line}`;
+}
+
 interface BenchmarkVariance {
   status: 'reportable' | 'insufficient-repetitions';
   cases: number;
@@ -181,10 +185,14 @@ export function characterizeBenchmarkVariance(runs: BenchmarkCaseRun[]): Benchma
         agreements.push(
           jaccard(
             new Set(
-              group[left].findings.filter((finding) => finding.retained !== false).map(findingKey),
+              group[left].findings
+                .filter((finding) => finding.retained !== false)
+                .map(varianceFindingKey),
             ),
             new Set(
-              group[right].findings.filter((finding) => finding.retained !== false).map(findingKey),
+              group[right].findings
+                .filter((finding) => finding.retained !== false)
+                .map(varianceFindingKey),
             ),
           ),
         );
@@ -244,14 +252,9 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
       );
     const expected = finding.expectedFindingId
       ? expectedById.get(finding.expectedFindingId)
-      : run.expectedFindings.find(
-          (candidate) => !matchedExpected.has(candidate.id) && anchorMatches(candidate),
-        );
+      : undefined;
     if (!expected || matchedExpected.has(expected.id) || !anchorMatches(expected)) continue;
     if (!severityWithinRange(finding.severity, expected.severityRange)) continue;
-    matchedExpected.add(expected.id);
-    matched += 1;
-    matchedWeight += SEVERITY_WEIGHT[expected.severity];
     if (finding.triggerComplete !== undefined) {
       triggerObserved += 1;
       if (finding.triggerComplete) triggerComplete += 1;
@@ -260,6 +263,10 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
       evidenceObserved += 1;
       if (finding.evidenceSupported) evidenceSupported += 1;
     }
+    if (finding.triggerComplete !== true || finding.evidenceSupported !== true) continue;
+    matchedExpected.add(expected.id);
+    matched += 1;
+    matchedWeight += SEVERITY_WEIGHT[expected.severity];
   }
 
   const missedBySeverity = Object.fromEntries(

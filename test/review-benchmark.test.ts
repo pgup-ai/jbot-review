@@ -180,7 +180,7 @@ describe('review-benchmark', () => {
         runner: { command: string[]; cwd: string; fixtureMode: string };
         control: { configuration: { corpusHash: string } };
         treatment: { configuration: { corpusHash: string } };
-        cases: unknown[];
+        cases: Array<{ id: string }>;
       };
       source.qualityCorpus = false;
       source.repetitions = 1;
@@ -192,7 +192,9 @@ describe('review-benchmark', () => {
         cwd: 'workspace',
         fixtureMode: 'git',
       };
-      source.cases = [source.cases[0]];
+      const largeCase = source.cases.find((candidate) => candidate.id === 'generated-source-edit');
+      assert.ok(largeCase);
+      source.cases = [largeCase];
       const corpus = readFileSync(join(ROOT, 'test/fixtures/review-benchmark/corpus.json'));
       const hash = createHash('sha256')
         .update(benchmarkCanonicalJson(source.cases))

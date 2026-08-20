@@ -6,12 +6,7 @@ import {
   type AdjudicationLabel,
   type HistoricalFindingCandidate,
 } from '../src/shared/benchmark-adjudication.ts';
-
-function argument(name: string): string | undefined {
-  const index = process.argv.indexOf(`--${name}`);
-  if (index >= 0) return process.argv[index + 1];
-  return process.argv.find((value) => value.startsWith(`--${name}=`))?.slice(name.length + 3);
-}
+import { benchmarkArgument } from './benchmark-args.ts';
 
 function jsonLines<T>(path: string): T[] {
   return readFileSync(resolve(path), 'utf8')
@@ -20,9 +15,9 @@ function jsonLines<T>(path: string): T[] {
     .map((line) => JSON.parse(line) as T);
 }
 
-const candidatesPath = argument('candidates');
-const labelsPath = argument('labels');
-const output = argument('output');
+const candidatesPath = benchmarkArgument('candidates');
+const labelsPath = benchmarkArgument('labels');
+const output = benchmarkArgument('output');
 if (!candidatesPath || !labelsPath || !output) {
   throw new Error(
     'usage: review-adjudication.ts --candidates <candidates.jsonl> --labels <labels.jsonl> --output <directory>',

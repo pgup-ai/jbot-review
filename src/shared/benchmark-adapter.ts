@@ -28,7 +28,13 @@ function observedFinding(value: unknown): BenchmarkObservedFinding | undefined {
     (value.line as number) < 0 ||
     typeof value.title !== 'string' ||
     typeof value.severity !== 'string' ||
-    !VALID_SEVERITIES.has(value.severity as Severity)
+    !VALID_SEVERITIES.has(value.severity as Severity) ||
+    (value.fingerprint !== undefined && typeof value.fingerprint !== 'string') ||
+    (value.expectedFindingId !== undefined && typeof value.expectedFindingId !== 'string') ||
+    (value.retained !== undefined && typeof value.retained !== 'boolean') ||
+    (value.anchored !== undefined && typeof value.anchored !== 'boolean') ||
+    (value.triggerComplete !== undefined && typeof value.triggerComplete !== 'boolean') ||
+    (value.evidenceSupported !== undefined && typeof value.evidenceSupported !== 'boolean')
   ) {
     return undefined;
   }
@@ -38,6 +44,17 @@ function observedFinding(value: unknown): BenchmarkObservedFinding | undefined {
     title: value.title,
     severity: value.severity as Severity,
     ...(typeof value.fingerprint === 'string' ? { fingerprint: value.fingerprint } : {}),
+    ...(typeof value.expectedFindingId === 'string'
+      ? { expectedFindingId: value.expectedFindingId }
+      : {}),
+    ...(typeof value.retained === 'boolean' ? { retained: value.retained } : {}),
+    ...(typeof value.anchored === 'boolean' ? { anchored: value.anchored } : {}),
+    ...(typeof value.triggerComplete === 'boolean'
+      ? { triggerComplete: value.triggerComplete }
+      : {}),
+    ...(typeof value.evidenceSupported === 'boolean'
+      ? { evidenceSupported: value.evidenceSupported }
+      : {}),
   };
 }
 
@@ -90,12 +107,25 @@ function normalizeSarif(input: unknown): BenchmarkObservedFinding[] {
       const artifact = isRecord(physical) ? physical.artifactLocation : undefined;
       const region = isRecord(physical) ? physical.region : undefined;
       const message = isRecord(result.message) ? result.message.text : undefined;
+      const path = isRecord(artifact) && typeof artifact.uri === 'string' ? artifact.uri : '';
+      const line =
+        isRecord(region) && Number.isInteger(region.startLine) ? (region.startLine as number) : 0;
+      const title = typeof message === 'string' ? message : result.ruleId;
+      const resultFingerprints = isRecord(result.partialFingerprints)
+        ? result.partialFingerprints
+        : isRecord(result.fingerprints)
+          ? result.fingerprints
+          : undefined;
       const finding = observedFinding({
-        path: isRecord(artifact) && typeof artifact.uri === 'string' ? artifact.uri : '',
-        line: isRecord(region) && Number.isInteger(region.startLine) ? region.startLine : 0,
+        path,
+        line,
         severity: severity[typeof result.level === 'string' ? result.level : 'warning'],
-        title: typeof message === 'string' ? message : result.ruleId,
-        fingerprint: result.ruleId,
+        title,
+        anchored: Boolean(path) && line > 0,
+        fingerprint:
+          resultFingerprints && Object.keys(resultFingerprints).length > 0
+            ? `sarif:${benchmarkCanonicalJson(resultFingerprints)}`
+            : `${String(result.ruleId ?? 'result')}:${path}:${line}:${String(title)}`,
       });
       if (!finding) throw new Error('sarif result is missing a supported location or severity.');
       findings.push(finding);

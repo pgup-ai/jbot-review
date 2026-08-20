@@ -7,18 +7,13 @@ import {
   type CompetitorAdapter,
   type CompetitorModelConfiguration,
 } from '../src/shared/benchmark-adapter.ts';
+import { benchmarkArgument } from './benchmark-args.ts';
 
-function argument(name: string): string | undefined {
-  const index = process.argv.indexOf(`--${name}`);
-  if (index >= 0) return process.argv[index + 1];
-  return process.argv.find((value) => value.startsWith(`--${name}=`))?.slice(name.length + 3);
-}
-
-const adapter = argument('adapter') as CompetitorAdapter | undefined;
-const input = argument('input');
-const controlConfig = argument('control-config');
-const competitorConfig = argument('competitor-config');
-const output = argument('output');
+const adapter = benchmarkArgument('adapter') as CompetitorAdapter | undefined;
+const input = benchmarkArgument('input');
+const controlConfig = benchmarkArgument('control-config');
+const competitorConfig = benchmarkArgument('competitor-config');
+const output = benchmarkArgument('output');
 if (!adapter || !input || !controlConfig || !competitorConfig || !output) {
   throw new Error(
     'usage: review-competitor-adapter.ts --adapter <benchmark-json|github-review|sarif> --input <json> --control-config <json> --competitor-config <json> --output <json>',

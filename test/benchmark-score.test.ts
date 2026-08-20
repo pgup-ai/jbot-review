@@ -45,6 +45,7 @@ describe('scoreBenchmark', () => {
           severity: 'P1',
           title: 'Same bug',
           fingerprint: 'bug',
+          expectedFindingId: 'p1',
           triggerComplete: true,
           evidenceSupported: true,
         },
@@ -100,6 +101,8 @@ describe('scoreBenchmark', () => {
               severity: 'P1',
               title: 'Contract break',
               expectedFindingId: 'p1',
+              triggerComplete: true,
+              evidenceSupported: true,
             },
           ],
         },
@@ -108,6 +111,29 @@ describe('scoreBenchmark', () => {
     );
     assert.equal(score.severityWeightedRecall.value, 1);
     assert.equal(score.precision.value, 1);
+  });
+
+  it('requires adjudicated trigger and evidence checks before matching an anchor', () => {
+    const score = scoreBenchmark(
+      [
+        {
+          ...runs[0],
+          expectedFindings: [expected('p1', 'P1', 10)],
+          findings: [
+            {
+              path: 'src/a.ts',
+              line: 10,
+              severity: 'P1',
+              title: 'Generic suspicion',
+              expectedFindingId: 'p1',
+            },
+          ],
+        },
+      ],
+      { bootstrapSamples: 0 },
+    );
+    assert.equal(score.matchedFindings, 0);
+    assert.equal(score.severityWeightedRecall.value, 0);
   });
 
   it('does not let an adjudicated id bypass the allowed anchors', () => {
@@ -147,6 +173,8 @@ describe('scoreBenchmark', () => {
               title: 'First report',
               fingerprint: 'first-report',
               expectedFindingId: 'first',
+              triggerComplete: true,
+              evidenceSupported: true,
             },
             {
               path: 'src/a.ts',
@@ -155,6 +183,8 @@ describe('scoreBenchmark', () => {
               title: 'Duplicate report',
               fingerprint: 'duplicate-report',
               expectedFindingId: 'first',
+              triggerComplete: true,
+              evidenceSupported: true,
             },
           ],
         },
@@ -194,6 +224,9 @@ describe('scoreBenchmark', () => {
             line: 10,
             severity: 'P1',
             title: 'Caller contract break',
+            expectedFindingId: 'caller-break',
+            triggerComplete: true,
+            evidenceSupported: true,
           },
         ],
         latencyMs: 100,
@@ -234,6 +267,11 @@ describe('scoreBenchmark', () => {
       findingAgreement: 1,
       latencyRelativeMad: 0.1,
     });
+    const reworded = ['First wording', 'Second wording', 'Third wording'].map((title) => ({
+      ...runs[0],
+      findings: [{ path: 'src/a.ts', line: 10, severity: 'P1' as const, title }],
+    }));
+    assert.equal(characterizeBenchmarkVariance(reworded).findingAgreement, 1);
   });
 });
 

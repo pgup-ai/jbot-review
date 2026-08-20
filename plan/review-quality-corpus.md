@@ -15,8 +15,9 @@ The committed manifest uses `fixtureMode: "replay"` for deterministic CI
 contract checks. Real experiments copy that manifest, set `fixtureMode` to
 `"git"`, run `${projectRoot}/src/local/index.ts` from `workspace`, and replace
 the fixture model/config tuple with the exact provider configuration under
-test. Git mode materializes each synthetic patch as isolated base/head commits
-and exercises the normal local dry-run review pipeline without GitHub posting.
+test. Git mode materializes each synthetic patch as isolated base/head commits,
+expands its declared file, line, and byte shape, and exercises the normal local
+dry-run review pipeline without GitHub posting.
 
 Each defect records:
 
@@ -83,3 +84,11 @@ sets `rankingEligible` to false and is disclosed in the output.
 Default-policy changes must pass the full corpus. Missing any seeded P0/P1 or
 regressing precision or severity-weighted recall by more than two percentage
 points fails the quality gate regardless of latency improvement.
+
+Recall credit is fail-closed: a retained finding must carry an adjudicated
+`expectedFindingId` and affirmative trigger/evidence checks in addition to an
+allowed anchor and severity. Raw local or competitor output remains unmatched
+until that semantic adjudication is supplied. Variance uses the adjudicated ID,
+an adapter fingerprint, or the source anchor in that order, so title rewording
+alone does not look like stochastic disagreement. Locationless SARIF results
+remain unanchored false positives instead of disappearing from precision.

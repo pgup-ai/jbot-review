@@ -53,6 +53,7 @@ import {
   type BenchmarkProgramMetrics,
   type BenchmarkRunnerOutput,
 } from '../src/shared/benchmark-runner.ts';
+import { benchmarkArgument } from './benchmark-args.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -75,12 +76,6 @@ function usage(): never {
     'usage: review-benchmark.ts --manifest <manifest.json> --output <directory> [--repetitions <n>] [--subset <smoke|core|full>]',
   );
   process.exit(2);
-}
-
-function argument(name: string): string | undefined {
-  const index = process.argv.indexOf(`--${name}`);
-  if (index >= 0) return process.argv[index + 1];
-  return process.argv.find((value) => value.startsWith(`--${name}=`))?.slice(name.length + 3);
 }
 
 function readManifest(path: string): BenchmarkManifest {
@@ -420,8 +415,8 @@ function summarize(rows: CaseRow[]) {
 }
 
 async function main(): Promise<void> {
-  const manifestArg = argument('manifest');
-  const outputArg = argument('output');
+  const manifestArg = benchmarkArgument('manifest');
+  const outputArg = benchmarkArgument('output');
   if (!manifestArg || !outputArg) usage();
   const manifestPath = resolve(manifestArg);
   const outputDir = resolve(outputArg);
@@ -433,11 +428,11 @@ async function main(): Promise<void> {
       `Corpus hash mismatch: manifest=${manifest.corpusHash}, computed=${computedCorpusHash}.`,
     );
   }
-  const repetitionsArg = argument('repetitions');
+  const repetitionsArg = benchmarkArgument('repetitions');
   const repetitions = repetitionsArg
     ? parseBenchmarkPositiveInteger(repetitionsArg, '--repetitions')
     : manifest.repetitions;
-  const subsetArg = argument('subset') ?? 'full';
+  const subsetArg = benchmarkArgument('subset') ?? 'full';
   if (!BENCHMARK_RELEASE_SUBSETS.includes(subsetArg as BenchmarkReleaseSubset)) {
     throw new Error(`Unsupported benchmark subset: ${subsetArg}.`);
   }

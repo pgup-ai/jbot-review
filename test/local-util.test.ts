@@ -5,11 +5,30 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
+  benchmarkReviewOutput,
   loadDotEnv,
   parseOwnerRepo,
   renderReport,
   renderReviewPreview,
 } from '../src/local/util.ts';
+
+describe('benchmarkReviewOutput', () => {
+  it('includes only telemetry from the supplied workspace when present', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-benchmark-output-'));
+    const result = { summary: '', findings: [], addressedPriorComments: [] };
+    try {
+      const telemetry = join(dir, 'telemetry.jsonl');
+      assert.deepEqual(benchmarkReviewOutput(result, telemetry), result);
+      writeFileSync(telemetry, '{"kind":"session"}\n');
+      assert.deepEqual(benchmarkReviewOutput(result, telemetry), {
+        ...result,
+        telemetry: '{"kind":"session"}\n',
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('loadDotEnv', () => {
   it('parses assignments, comments, quotes, and export prefixes without overriding real env', () => {

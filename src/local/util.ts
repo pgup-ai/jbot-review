@@ -51,6 +51,16 @@ export function parseOwnerRepo(remoteUrl: string): { owner: string; repo: string
   return match ? { owner: match[1], repo: match[2] } : null;
 }
 
+export function benchmarkReviewOutput(
+  result: ReviewResult,
+  telemetryPath: string,
+): ReviewResult & { telemetry?: string } {
+  return {
+    ...result,
+    ...(existsSync(telemetryPath) ? { telemetry: readFileSync(telemetryPath, 'utf8') } : {}),
+  };
+}
+
 export function renderReport(
   result: ReviewResult,
   meta: { branch: string; baseRef: string; mergeBase: string; model: string },
