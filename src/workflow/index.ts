@@ -9,6 +9,7 @@ import { parseModelName } from '@symma/protocol';
 import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
 import { parseContext7Mode } from '../shared/context7.ts';
 import { exitOnLingeringHandles } from '../shared/exit.ts';
+import { takeOpencodeProxyEnv } from '../shared/opencode.ts';
 import {
   pickAuxModel,
   pickPooledModel,
@@ -20,6 +21,7 @@ import type { Octokit } from '../shared/github.ts';
 import { VALID_SEVERITIES, type Severity } from '../shared/types.ts';
 
 async function main(): Promise<void> {
+  const opencodeProxyEnv = takeOpencodeProxyEnv(process.env);
   // Pessimistic default so even a validation throw (outside the try below)
   // leaves a readable terminal-state; overwritten on success.
   core.setOutput('terminal-state', 'failed');
@@ -48,6 +50,7 @@ async function main(): Promise<void> {
   );
   const options = {
     enhancedContext: true,
+    opencodeProxyEnv,
     sdkEngine: getInputOrEnv('sdk-engine', 'JBOT_SDK_ENGINE') || 'auto',
     dryRun: parseBooleanInput('dry-run', false),
     autoApprove: parseBooleanInput('auto-approve', false),

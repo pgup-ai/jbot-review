@@ -7,6 +7,7 @@ import {
   parseChangesSinceLastReviewSummary,
   recordOpencodeToolParts,
   sessionEnvDenyKeys,
+  takeOpencodeProxyEnv,
 } from '../src/shared/opencode.ts';
 import { BASH_PERMISSIONS } from '../src/shared/shell-policy.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
@@ -128,6 +129,28 @@ describe('sessionEnvDenyKeys', () => {
       'DATABASE_DSN',
       'GCP_CREDENTIALS',
     ]);
+  });
+});
+
+describe('takeOpencodeProxyEnv', () => {
+  it('removes the internal values and returns only the OpenCode child environment', () => {
+    const env = {
+      JBOT_OPENCODE_HTTPS_PROXY: ' http://proxy.example:50100 ',
+      JBOT_OPENCODE_NO_PROXY: ' localhost,127.0.0.1 ',
+      PATH: '/bin',
+    };
+    assert.deepEqual(takeOpencodeProxyEnv(env), {
+      HTTPS_PROXY: 'http://proxy.example:50100',
+      NO_PROXY: 'localhost,127.0.0.1',
+    });
+    assert.deepEqual(env, { PATH: '/bin' });
+    const defaultBypass = { JBOT_OPENCODE_HTTPS_PROXY: 'http://proxy.example:50100' };
+    assert.deepEqual(takeOpencodeProxyEnv(defaultBypass), {
+      HTTPS_PROXY: 'http://proxy.example:50100',
+      NO_PROXY: 'localhost,127.0.0.1',
+    });
+    assert.deepEqual(defaultBypass, {});
+    assert.deepEqual(takeOpencodeProxyEnv({}), {});
   });
 });
 

@@ -113,7 +113,7 @@ describe('provider configuration resolution', () => {
     assert.doesNotMatch(input, /^\s+default:/m);
   });
 
-  it('exposes SDK routing as an Action input without masking the env fallback', () => {
+  it('exposes SDK routing as an Action input and preserves the env fallback', () => {
     const action = readFileSync(new URL('../action.yml', import.meta.url), 'utf8');
     const workflow = readFileSync(
       new URL('../.github/workflows/jbot-review.yml', import.meta.url),
@@ -124,7 +124,10 @@ describe('provider configuration resolution', () => {
     assert.ok(input);
     assert.match(input, /default: ''/);
     assert.match(action, /INPUT_SDK-ENGINE: \$\{\{ inputs\.sdk-engine \}\}/);
-    assert.match(workflow, /sdk-engine: \$\{\{ vars\.JBOT_SDK_ENGINE \|\| '' \}\}/);
+    assert.match(
+      workflow,
+      /sdk-engine: \$\{\{ steps\.proxy_check\.outputs\.enabled == 'true' && 'opencode' \|\| vars\.JBOT_SDK_ENGINE \|\| '' \}\}/,
+    );
   });
 
   it('keeps auto approval off unless the Action input is explicitly enabled', () => {
