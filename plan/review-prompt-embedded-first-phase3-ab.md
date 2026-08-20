@@ -5,8 +5,10 @@
 Do not graduate the embedded-first prompt. Keep it available only through
 `JBOT_EMBEDDED_FIRST_PROMPT=true`; the default review flow remains the control.
 
-The treatment reduced repository-tool work and improved tail latency, but it
-did not meet the predefined duplicate-diff, p50 latency, or QLT-003 gates.
+The treatment reduced repository-tool work and improved tail latency. It did
+not meet the predefined duplicate-diff or QLT-003 gates. The p50 latency gate
+was not answerable at this sample size, so it is recorded as unresolved rather
+than failed (see "Why the p50 result is unresolved").
 
 ## Contract
 
@@ -21,13 +23,13 @@ did not meet the predefined duplicate-diff, p50 latency, or QLT-003 gates.
 - Treatment prompt: `sha256:654ac023aa277992213e02f29007710967b265c1a072b4f97cd4554bd90abfa0`
 - Declared treatment variables: prompt source root and prompt version only
 
-All 113 retained findings were semantically adjudicated before rescoring.
+Semantic adjudication covered all 113 retained findings before rescoring.
 
 ## Results
 
 | Metric                    |   Control | Treatment | Decision                                              |
 | ------------------------- | --------: | --------: | ----------------------------------------------------- |
-| Main-session p50          | 22,126 ms | 22,103 ms | 0.1% faster; fails the 10% gate                       |
+| Main-session p50          | 22,126 ms | 22,103 ms | 0.1% faster; the gate is underpowered here            |
 | Main-session p90          | 42,197 ms | 32,171 ms | 23.8% faster                                          |
 | Main-session p95          | 46,207 ms | 40,171 ms | 13.1% faster                                          |
 | Repository tool calls     |       171 |       122 | 28.7% fewer                                           |
@@ -43,6 +45,26 @@ The scorer also rejected the treatment because one treatment run introduced a
 new clean-case false positive. Trigger completeness and evidence support were
 100% in both arms.
 
+## Why the p50 result is unresolved
+
+The gate reads a pooled p50 over 12 cases whose cost differs several-fold, so
+the median tracks whichever case family lands at the median rank instead of a
+uniform per-case shift. Pairing the arms by (caseId, repetition) removes case
+difficulty from the comparison. `summarizePairedBenchmark` reports this run as:
+
+| Statistic                 |           Value |
+| ------------------------- | --------------: |
+| Paired median             |          -16.2% |
+| 95% CI                    | [-25.0%, +7.8%] |
+| Permutation p             |          0.1091 |
+| Treatment faster          |        22 of 36 |
+| Minimum detectable effect |             30% |
+
+The last row decides it. The design could only resolve a 30% effect while the
+gate asks for 10%, so this run could never answer the question either way. The
+-0.1% reading is an artifact of the estimator, not evidence that the prompt
+does nothing. Re-run on a larger sample before drawing a latency conclusion.
+
 ## Pi compatibility probe
 
 A one-repetition Pi probe completed 11 of 12 cases per arm before the run
@@ -53,9 +75,10 @@ completed sessions, treatment main-session p50 moved from 16,101 ms to
 
 ## Rollback and follow-up
 
-Rollback is immediate: leave `JBOT_EMBEDDED_FIRST_PROMPT` unset or set it to
-`false`. The control prompt, Pi system prompt, no-tools directive, and shard
+To roll back, leave `JBOT_EMBEDDED_FIRST_PROMPT` unset or set it to `false`.
+The control prompt, Pi system prompt, no-tools directive, and shard
 instructions remain byte-identical to `main` when the flag is off. Re-run the
-experiment on a corpus with measurable duplicate diff recovery before
-considering graduation; do not add hard exploration budgets until Phase 4's
-separate gates are satisfied.
+experiment on the `core` subset, which supplies 60 pairs against this run's 36,
+and on a corpus with measurable duplicate diff recovery before considering
+graduation. Do not add hard exploration budgets until Phase 4's separate gates
+are satisfied.

@@ -27,25 +27,16 @@ export interface PairedBenchmarkSummary {
   /** Two-sided p-value from swapping arm labels within pairs, which is exchangeable under the null. */
   permutationP: number | null;
   treatmentFaster: number;
-  /**
-   * Smallest effect this sample could detect at 80% power. A gate asking for a
-   * smaller improvement than this cannot be answered by the run, whatever the
-   * point estimate says.
-   */
+  /** Smallest effect detectable at 80% power; a gate below it is unanswerable. */
   minimumDetectableEffect: number | null;
 }
 
 /**
- * Pairs arms by (caseId, repetition). An unpaired pooled median over a corpus
- * whose cases differ several-fold in cost is set by which case lands at the
- * median rank, not by a uniform per-case shift; pairing removes case difficulty
- * from the comparison. Runs that failed, or whose partner failed, are dropped so
- * both arms contribute the same population.
+ * Pairs arms by (caseId, repetition) so case difficulty cancels: a pooled median
+ * over cases differing several-fold in cost tracks the median case, not a
+ * uniform shift. Failed runs drop with their partner, keeping arms equal.
  */
-export function pairBenchmarkRuns(
-  rows: readonly BenchmarkCaseRow[],
-  latencyOf: (row: BenchmarkCaseRow) => number = (row) => row.latencyMs,
-): BenchmarkPair[] {
+export function pairBenchmarkRuns(rows: readonly BenchmarkCaseRow[]): BenchmarkPair[] {
   const arms = {
     control: new Map<string, BenchmarkCaseRow>(),
     treatment: new Map<string, BenchmarkCaseRow>(),
@@ -58,9 +49,9 @@ export function pairBenchmarkRuns(
   for (const [key, control] of [...arms.control].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     const treatment = arms.treatment.get(key);
     if (!treatment) continue;
-    const controlMs = latencyOf(control);
+    const controlMs = control.latencyMs;
     if (controlMs <= 0) continue;
-    const treatmentMs = latencyOf(treatment);
+    const treatmentMs = treatment.latencyMs;
     pairs.push({
       caseId: control.caseId,
       repetition: control.repetition,
@@ -77,11 +68,9 @@ function median(values: readonly number[]): number {
 }
 
 /**
- * Wilcoxon signed-rank statistic: ranks pairs by |delta| and sums the ranks
- * carrying the delta's sign. Rank-based, so a single runaway run cannot
- * dominate it the way it would a mean, but unlike a median it still uses
- * magnitude — a median-based test cannot resolve even a unanimous effect at
- * realistic pair counts. Exact zeros carry no direction and are dropped.
+ * Wilcoxon signed-rank: outlier-resistant like a median, but it uses magnitude,
+ * which a median-based test needs — that one cannot resolve even a unanimous
+ * effect at realistic pair counts. Exact zeros carry no direction.
  */
 function signedRankStatistic(deltas: readonly number[]): number {
   const ordered = deltas
@@ -118,10 +107,9 @@ function permutationP(deltas: readonly number[], next: () => number, permutation
 }
 
 /**
- * Rejection rate for a true effect of `effect` percent, holding this sample's
- * dispersion fixed. Centring the observed deltas before shifting keeps the
- * spread and drops the observed effect, so the result describes the design
- * rather than restating the measurement.
+ * Rejection rate for a true effect of `effect` percent. Centring before shifting
+ * keeps this sample's spread but drops its observed effect, so the answer
+ * describes the design rather than restating the measurement.
  */
 function power(
   deltas: readonly number[],

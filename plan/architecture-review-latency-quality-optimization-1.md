@@ -162,12 +162,13 @@ Completion criteria for Phase 2:
 | TASK-032 | P1 / Latency M, Quality + / S | Preserve `NO_TOOLS_REVIEW_DIRECTIVE` behavior byte-for-byte for tool-less backends except for changes required to prevent contradictory instructions. Add a regression snapshot proving tool-less routes still review only embedded context.                                                                                                                            | TASK-029                     | Yes                 | 2026-08-20 |
 | TASK-033 | P1 / Latency M, Quality + / S | Require the model to consult the existing `Changed symbol usage` manifest before issuing a broad search. Permit a broader search only when the manifest is absent, explicitly incomplete, or evidence identifies a missing relation.                                                                                                                                    | TASK-029                     | Yes                 | 2026-08-20 |
 | TASK-034 | P0 / Latency 0, Quality + / S | Extend `test/prompt.test.ts` with structural assertions for authoritative embedded hunks, recovery exceptions, one-hop adjacency, concrete-hypothesis tool use, stop condition, output-reminder-last order, and no duplicate rule statements.                                                                                                                           | TASK-028 through TASK-033    | Yes                 | 2026-08-20 |
-| TASK-035 | P1 / Latency H, Quality 0 / S | Run a prompt-only A/B with all code-side enforcement disabled. Graduate the prompt change only if duplicate diff-read bytes fall at least 50%, p50 main-session latency improves at least 10%, and QLT-003/004 pass.                                                                                                                                                    | TASK-034, TASK-019, TASK-025 | Yes (not graduated) | 2026-08-20 |
+| TASK-035 | P1 / Latency H, Quality 0 / S | Run a prompt-only A/B with all code-side enforcement disabled. Graduate the prompt change only if duplicate diff-read bytes fall at least 50%, p50 main-session latency improves at least 10%, and QLT-003/004 pass. Size the sample so its minimum detectable effect clears the latency gate before reading the result.                                                | TASK-034, TASK-019, TASK-025 | Yes (not graduated) | 2026-08-20 |
 
 Completion criteria for Phase 3:
 
-**Phase status:** Experimental; the treatment did not pass TASK-035's
-graduation gates. See
+**Phase status:** Experimental. The treatment did not pass TASK-035's
+duplicate-diff or QLT-003 gates, and its p50 gate is unresolved: that run could
+only resolve a 30% effect while the gate asks for 10%. See
 `plan/review-prompt-embedded-first-phase3-ab.md`.
 
 - The prompt states exactly one exploration policy and does not simultaneously require redundant diff rereads.

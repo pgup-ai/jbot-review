@@ -438,7 +438,6 @@ describe('Pi review sessions', () => {
       stopped,
     }) as unknown as PiRuntime;
 
-  // Records the resource loader each session is created with.
   const recordingRuntime = (loaders: unknown[], embeddedFirst: boolean): PiRuntime => {
     const runtime = fakeRuntime(false, [], []);
     runtime.loader = { id: 'control' } as unknown as PiRuntime['loader'];

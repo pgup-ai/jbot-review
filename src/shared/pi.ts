@@ -666,9 +666,8 @@ export async function startPi(
   const isolationDir = mkdtempSync(join(tmpdir(), 'jbot-pi-loader-'));
   const removeIsolationDir = () => rmSync(isolationDir, { recursive: true, force: true });
   // A loader's system prompt is fixed, so the embedded-first variant needs its
-  // own: it permits git_diff only for coverage recovery, while the addressed
-  // and guideline aux prompts still ask for a full git diff. Both loaders share
-  // the isolation dir — only the system prompt differs.
+  // own: it confines git_diff to coverage recovery, while the addressed and
+  // guideline aux prompts still ask for a full git diff.
   const buildLoader = (systemPrompt: string): PiResourceLoaderLike =>
     new sdk.DefaultResourceLoader({
       cwd: isolationDir,

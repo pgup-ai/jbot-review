@@ -64,11 +64,6 @@ describe('pairBenchmarkRuns', () => {
       ],
     );
   });
-
-  it('reads latency through an override so a caller can pair on the main-session phase', () => {
-    const pairs = pairBenchmarkRuns(rowsFrom([['a', 1, 100, 80]]), () => 42);
-    assert.equal(pairs[0].relativeDelta, 0);
-  });
 });
 
 describe('summarizePairedBenchmark', () => {
