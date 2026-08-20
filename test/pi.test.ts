@@ -7,6 +7,8 @@ import { describe, it } from 'node:test';
 import {
   PI_MIN_NODE_VERSION,
   PI_TELEMETRY_CAPABILITY,
+  runPiAddressedPriorCommentsCheck,
+  runPiGuidelineComplianceCheck,
   runPiReview,
   type PiRuntime,
   capPiDiffOutput,
@@ -435,6 +437,48 @@ describe('Pi review sessions', () => {
       activeSessions: new Set(),
       stopped,
     }) as unknown as PiRuntime;
+
+  // Records the resource loader each session is created with.
+  const recordingRuntime = (loaders: unknown[], embeddedFirst: boolean): PiRuntime => {
+    const runtime = fakeRuntime(false, [], []);
+    runtime.loader = { id: 'control' } as unknown as PiRuntime['loader'];
+    if (embeddedFirst) {
+      runtime.reviewLoader = { id: 'embedded-first' } as unknown as PiRuntime['loader'];
+    }
+    runtime.sdk.createAgentSession = async ({ resourceLoader }: { resourceLoader: unknown }) => {
+      loaders.push(resourceLoader);
+      const session = {
+        messages: [] as unknown[],
+        prompt: async () => {
+          session.messages.push({
+            role: 'assistant',
+            content: JSON.stringify({ summary: 'ok', findings: [], addressedPriorComments: [] }),
+          });
+        },
+        abort: async () => {},
+        dispose: () => {},
+      };
+      return { session };
+    };
+    return runtime;
+  };
+
+  it('gives the embedded-first system prompt to review sessions only', async () => {
+    // The aux prompts still tell the model to run a full git diff, so they must
+    // not inherit a system prompt that allows git_diff only for hunk recovery.
+    const model = 'deepseek/deepseek-v4-flash';
+    const enabled: unknown[] = [];
+    const runtime = recordingRuntime(enabled, true);
+    await runPiReview(runtime, model, 'ctx', '', () => {});
+    await runPiAddressedPriorCommentsCheck(runtime, model, 'ctx', () => {});
+    await runPiGuidelineComplianceCheck(runtime, model, 'ctx', 'guidelines', () => {});
+    assert.deepEqual(enabled, [runtime.reviewLoader, runtime.loader, runtime.loader]);
+
+    const disabled: unknown[] = [];
+    const control = recordingRuntime(disabled, false);
+    await runPiReview(control, model, 'ctx', '', () => {});
+    assert.deepEqual(disabled, [control.loader]);
+  });
 
   it('aborts and disposes the newborn session instead of prompting it', async () => {
     const events: string[] = [];
