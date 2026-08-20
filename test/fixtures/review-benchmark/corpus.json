@@ -12,17 +12,17 @@
       "files": [
         {
           "path": "src/shared/tool-telemetry.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+normalized === 'bash' && inspect(command)                           \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+normalized === 'bash' && inspect(command)                           \n"
         },
         {
           "path": "src/shared/dim.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 01\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return classifyTool({ tool: 'exec', command: 'git diff --stat' });\n"
         }
       ],
       "findings": [
         {
           "path": "src/shared/tool-telemetry.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P3",
           "title": "Seeded dim-exec-diff-classification",
           "fingerprint": "dim-exec-diff-classification-finding",
@@ -55,11 +55,11 @@
       "files": [
         {
           "path": "src/shared/tool-telemetry.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+(normalized === 'bash' || normalized === 'exec') && inspect(command)\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+(normalized === 'bash' || normalized === 'exec') && inspect(command)\n"
         },
         {
           "path": "src/shared/dim.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 01\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return classifyTool({ tool: 'exec', command: 'git diff --stat' });\n"
         }
       ],
       "findings": [],
@@ -87,17 +87,17 @@
       "files": [
         {
           "path": "src/tenants.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return db.invoice.findMany({ where: { status } });          \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return db.invoice.findMany({ where: { status } });          \n"
         },
         {
           "path": "src/session.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 02\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return listInvoices({ tenantId: session.tenantId, status });\n"
         }
       ],
       "findings": [
         {
           "path": "src/tenants.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded tenant-scope-leak",
           "fingerprint": "tenant-scope-leak-finding",
@@ -130,11 +130,11 @@
       "files": [
         {
           "path": "src/tenants.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return db.invoice.findMany({ where: { tenantId, status } });\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return db.invoice.findMany({ where: { tenantId, status } });\n"
         },
         {
           "path": "src/session.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 02\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return listInvoices({ tenantId: session.tenantId, status });\n"
         }
       ],
       "findings": [],
@@ -162,17 +162,17 @@
       "files": [
         {
           "path": "src/balance.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await saveBalance(id, current + delta);     \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await saveBalance(id, current + delta);     \n"
         },
         {
           "path": "test/balance.concurrent.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 03\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await Promise.all([increment('account', 1), increment('account', 1)]);\n"
         }
       ],
       "findings": [
         {
           "path": "src/balance.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded lost-update-race",
           "fingerprint": "lost-update-race-finding",
@@ -205,11 +205,11 @@
       "files": [
         {
           "path": "src/balance.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await incrementBalanceAtomically(id, delta);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await incrementBalanceAtomically(id, delta);\n"
         },
         {
           "path": "test/balance.concurrent.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 03\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await Promise.all([increment('account', 1), increment('account', 1)]);\n"
         }
       ],
       "findings": [],
@@ -237,17 +237,17 @@
       "files": [
         {
           "path": "src/api.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return cache.get(key);                     \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return cache.get(key);                     \n"
         },
         {
           "path": "src/client.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 04\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const result = await getCached(key); return result.name;\n"
         }
       ],
       "findings": [
         {
           "path": "src/api.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded api-caller-contract",
           "fingerprint": "api-caller-contract-finding",
@@ -280,11 +280,11 @@
       "files": [
         {
           "path": "src/api.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return cache.get(key) ?? loadRequired(key);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return cache.get(key) ?? loadRequired(key);\n"
         },
         {
           "path": "src/client.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 04\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const result = await getCached(key); return result.name;\n"
         }
       ],
       "findings": [],
@@ -312,17 +312,17 @@
       "files": [
         {
           "path": "src/use-account.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+useQuery({ queryKey: ['account'], queryFn });           \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+useQuery({ queryKey: ['account'], queryFn });           \n"
         },
         {
           "path": "src/account-panel.tsx",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 05\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return <AccountPanel accountId={selectedAccountId} />;\n"
         }
       ],
       "findings": [
         {
           "path": "src/use-account.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded frontend-stale-state",
           "fingerprint": "frontend-stale-state-finding",
@@ -355,11 +355,11 @@
       "files": [
         {
           "path": "src/use-account.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+useQuery({ queryKey: ['account', accountId], queryFn });\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+useQuery({ queryKey: ['account', accountId], queryFn });\n"
         },
         {
           "path": "src/account-panel.tsx",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 05\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return <AccountPanel accountId={selectedAccountId} />;\n"
         }
       ],
       "findings": [],
@@ -387,17 +387,17 @@
       "files": [
         {
           "path": ".github/workflows/review.yml",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+permissions: write-all        \n"
+          "patch": "@@ -2,1 +2,1 @@\n-permissions: {}\n+permissions: write-all        \n"
         },
         {
           "path": "docs/permissions.md",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 06\n"
+          "patch": "@@ -2,1 +2,1 @@\n-Pull-request reviews require repository contents.\n+Pull-request reviews execute untrusted code with read-only repository access.\n"
         }
       ],
       "findings": [
         {
           "path": ".github/workflows/review.yml",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded workflow-permission-escalation",
           "fingerprint": "workflow-permission-escalation-finding",
@@ -430,11 +430,11 @@
       "files": [
         {
           "path": ".github/workflows/review.yml",
-          "patch": "@@ -10,1 +10,2 @@\n-old behavior\n+permissions:\n+  contents: read\n"
+          "patch": "@@ -2,1 +2,2 @@\n-permissions: {}\n+permissions:\n+  contents: read\n"
         },
         {
           "path": "docs/permissions.md",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 06\n"
+          "patch": "@@ -2,1 +2,1 @@\n-Pull-request reviews require repository contents.\n+Pull-request reviews execute untrusted code with read-only repository access.\n"
         }
       ],
       "findings": [],
@@ -462,17 +462,17 @@
       "files": [
         {
           "path": "test/parser.test.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+parse(input);                            \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+parse(input);                            \n"
         },
         {
           "path": "src/parser.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 07\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return input.trim();\n"
         }
       ],
       "findings": [
         {
           "path": "test/parser.test.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded missing-regression-assertion",
           "fingerprint": "missing-regression-assertion-finding",
@@ -505,11 +505,11 @@
       "files": [
         {
           "path": "test/parser.test.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+assert.deepEqual(parse(input), expected);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.deepEqual(parse(input), expected);\n"
         },
         {
           "path": "src/parser.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 07\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return input.trim();\n"
         }
       ],
       "findings": [],
@@ -537,17 +537,17 @@
       "files": [
         {
           "path": "docs/setup.md",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+npm run setup:legacy\n"
+          "patch": "@@ -2,1 +2,1 @@\n-npm install\n+npm run setup:legacy\n"
         },
         {
           "path": "package.json",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 08\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"setup:legacy\": \"node legacy.js\"\n+\"setup\": \"node setup.js\"\n"
         }
       ],
       "findings": [
         {
           "path": "docs/setup.md",
-          "line": 10,
+          "line": 2,
           "severity": "P3",
           "title": "Seeded docs-deprecated-command",
           "fingerprint": "docs-deprecated-command-finding",
@@ -580,11 +580,11 @@
       "files": [
         {
           "path": "docs/setup.md",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+npm run setup       \n"
+          "patch": "@@ -2,1 +2,1 @@\n-npm install\n+npm run setup       \n"
         },
         {
           "path": "package.json",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 08\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"setup:legacy\": \"node legacy.js\"\n+\"setup\": \"node setup.js\"\n"
         }
       ],
       "findings": [],
@@ -612,17 +612,17 @@
       "files": [
         {
           "path": "generated/client.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+export const version = 3;\n"
+          "patch": "@@ -2,1 +2,1 @@\n-export const version = 1;\n+export const version = 3;\n"
         },
         {
           "path": "schema/client.json",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 09\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"version\": 1\n+\"version\": 2\n"
         }
       ],
       "findings": [
         {
           "path": "generated/client.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded generated-source-edit",
           "fingerprint": "generated-source-edit-finding",
@@ -655,11 +655,11 @@
       "files": [
         {
           "path": "generated/client.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+export const version = 2;\n"
+          "patch": "@@ -2,1 +2,1 @@\n-export const version = 1;\n+export const version = 2;\n"
         },
         {
           "path": "schema/client.json",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 09\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"version\": 1\n+\"version\": 2\n"
         }
       ],
       "findings": [],
@@ -687,17 +687,17 @@
       "files": [
         {
           "path": "src/large-parser.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+while (offset < length - 1) read();\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+while (offset < length - 1) read();\n"
         },
         {
           "path": "test/large-parser.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 10\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.equal(parse(bytes).at(-1), expectedLastByte);\n"
         }
       ],
       "findings": [
         {
           "path": "src/large-parser.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded large-parser-boundary",
           "fingerprint": "large-parser-boundary-finding",
@@ -730,11 +730,11 @@
       "files": [
         {
           "path": "src/large-parser.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+while (offset < length) read();    \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+while (offset < length) read();    \n"
         },
         {
           "path": "test/large-parser.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 10\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.equal(parse(bytes).at(-1), expectedLastByte);\n"
         }
       ],
       "findings": [],
@@ -762,17 +762,17 @@
       "files": [
         {
           "path": "packages/core/package.json",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+\"./legacy\": null             \n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"./legacy\": \"./src/old-legacy.ts\"\n+\"./legacy\": null             \n"
         },
         {
           "path": "packages/app/src/index.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 11\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return import('@acme/core/legacy');\n"
         }
       ],
       "findings": [
         {
           "path": "packages/core/package.json",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded package-export-drift",
           "fingerprint": "package-export-drift-finding",
@@ -805,11 +805,11 @@
       "files": [
         {
           "path": "packages/core/package.json",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+\"./legacy\": \"./src/legacy.ts\"\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"./legacy\": \"./src/old-legacy.ts\"\n+\"./legacy\": \"./src/legacy.ts\"\n"
         },
         {
           "path": "packages/app/src/index.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 11\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return import('@acme/core/legacy');\n"
         }
       ],
       "findings": [],
@@ -837,17 +837,17 @@
       "files": [
         {
           "path": "src/service.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+if (!row) return undefined;         \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+if (!row) return undefined;         \n"
         },
         {
           "path": "src/controller.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 12\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const value = await loadService(id); return value.name;\n"
         }
       ],
       "findings": [
         {
           "path": "src/service.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded caller-null-contract",
           "fingerprint": "caller-null-contract-finding",
@@ -880,11 +880,11 @@
       "files": [
         {
           "path": "src/service.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+if (!row) throw new NotFoundError();\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+if (!row) throw new NotFoundError();\n"
         },
         {
           "path": "src/controller.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 12\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const value = await loadService(id); return value.name;\n"
         }
       ],
       "findings": [],
@@ -912,17 +912,17 @@
       "files": [
         {
           "path": "src/logger.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+log(`token=${token}`);                \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+log(`token=${token}`);                \n"
         },
         {
           "path": "src/config.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 13\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return loadTokenFromEnvironment();\n"
         }
       ],
       "findings": [
         {
           "path": "src/logger.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P0",
           "title": "Seeded secret-log-exposure",
           "fingerprint": "secret-log-exposure-finding",
@@ -955,11 +955,11 @@
       "files": [
         {
           "path": "src/logger.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+log('provider authentication failed');\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+log('provider authentication failed');\n"
         },
         {
           "path": "src/config.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 13\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return loadTokenFromEnvironment();\n"
         }
       ],
       "findings": [],
@@ -987,17 +987,17 @@
       "files": [
         {
           "path": "src/merge.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+items.map((item) => rows.find((row) => row.id === item.id));\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+items.map((item) => rows.find((row) => row.id === item.id));\n"
         },
         {
           "path": "test/merge.perf.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 14\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.equal(mergeFixture(largeItems).length, largeItems.length);\n"
         }
       ],
       "findings": [
         {
           "path": "src/merge.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded quadratic-hot-path",
           "fingerprint": "quadratic-hot-path-finding",
@@ -1030,11 +1030,11 @@
       "files": [
         {
           "path": "src/merge.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+items.map((item) => rowsById.get(item.id));                 \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+items.map((item) => rowsById.get(item.id));                 \n"
         },
         {
           "path": "test/merge.perf.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 14\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.equal(mergeFixture(largeItems).length, largeItems.length);\n"
         }
       ],
       "findings": [],
@@ -1062,17 +1062,17 @@
       "files": [
         {
           "path": "src/config.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const enforceAuth = env.ENFORCE_AUTH !== 'false';\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const enforceAuth = env.ENFORCE_AUTH === 'true';  \n"
         },
         {
           "path": "docs/config.md",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 15\n"
+          "patch": "@@ -2,1 +2,1 @@\n-Authentication is configurable.\n+ENFORCE_AUTH must remain enabled when the setting is absent.\n"
         }
       ],
       "findings": [
         {
           "path": "src/config.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded unsafe-config-default",
           "fingerprint": "unsafe-config-default-finding",
@@ -1105,11 +1105,11 @@
       "files": [
         {
           "path": "src/config.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const enforceAuth = env.ENFORCE_AUTH === 'true'; \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const enforceAuth = env.ENFORCE_AUTH !== 'false'; \n"
         },
         {
           "path": "docs/config.md",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 15\n"
+          "patch": "@@ -2,1 +2,1 @@\n-Authentication is configurable.\n+ENFORCE_AUTH must remain enabled when the setting is absent.\n"
         }
       ],
       "findings": [],
@@ -1137,17 +1137,17 @@
       "files": [
         {
           "path": "src/webhook.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return applyMutation(body);                     \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return applyMutation(body);                     \n"
         },
         {
           "path": "test/webhook.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 16\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.throws(() => mutateWithoutCsrf(), CsrfError);\n"
         }
       ],
       "findings": [
         {
           "path": "src/webhook.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P0",
           "title": "Seeded csrf-check-removed",
           "fingerprint": "csrf-check-removed-finding",
@@ -1180,11 +1180,11 @@
       "files": [
         {
           "path": "src/webhook.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+verifyCsrf(request); return applyMutation(body);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+verifyCsrf(request); return applyMutation(body);\n"
         },
         {
           "path": "test/webhook.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 16\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.throws(() => mutateWithoutCsrf(), CsrfError);\n"
         }
       ],
       "findings": [],
@@ -1212,17 +1212,17 @@
       "files": [
         {
           "path": "src/report.sql.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+WHERE created_at >= $1                         \n"
+          "patch": "@@ -2,1 +2,1 @@\n-WHERE organization_id = $1\n+WHERE created_at >= $1                         \n"
         },
         {
           "path": "src/tenant-context.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 17\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return tenantContext.organizationId;\n"
         }
       ],
       "findings": [
         {
           "path": "src/report.sql.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded sql-tenant-filter",
           "fingerprint": "sql-tenant-filter-finding",
@@ -1255,11 +1255,11 @@
       "files": [
         {
           "path": "src/report.sql.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+WHERE organization_id = $1 AND created_at >= $2\n"
+          "patch": "@@ -2,1 +2,1 @@\n-WHERE organization_id = $1\n+WHERE organization_id = $1 AND created_at >= $2\n"
         },
         {
           "path": "src/tenant-context.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 17\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return tenantContext.organizationId;\n"
         }
       ],
       "findings": [],
@@ -1287,17 +1287,17 @@
       "files": [
         {
           "path": "src/locks.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await lock(b); await lock(a);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await lock(b); await lock(a);\n"
         },
         {
           "path": "src/worker.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 18\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await processWithLocks(['a', 'b']);\n"
         }
       ],
       "findings": [
         {
           "path": "src/locks.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded lock-order-inversion",
           "fingerprint": "lock-order-inversion-finding",
@@ -1330,11 +1330,11 @@
       "files": [
         {
           "path": "src/locks.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await lock(a); await lock(b);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await lock(a); await lock(b);\n"
         },
         {
           "path": "src/worker.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 18\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await processWithLocks(['a', 'b']);\n"
         }
       ],
       "findings": [],
@@ -1362,17 +1362,17 @@
       "files": [
         {
           "path": "src/use-project.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+queryKey: ['project']           \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+queryKey: ['project']           \n"
         },
         {
           "path": "src/project-page.tsx",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 19\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return <ProjectPage projectId={route.projectId} />;\n"
         }
       ],
       "findings": [
         {
           "path": "src/use-project.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded stale-query-key",
           "fingerprint": "stale-query-key-finding",
@@ -1405,11 +1405,11 @@
       "files": [
         {
           "path": "src/use-project.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+queryKey: ['project', projectId]\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+queryKey: ['project', projectId]\n"
         },
         {
           "path": "src/project-page.tsx",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 19\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return <ProjectPage projectId={route.projectId} />;\n"
         }
       ],
       "findings": [],
@@ -1437,17 +1437,17 @@
       "files": [
         {
           "path": "src/cache.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const key = `${headSha}`;              \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const key = `${headSha}`;              \n"
         },
         {
           "path": "src/repository.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 20\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return reviewRepository(repository, headSha);\n"
         }
       ],
       "findings": [
         {
           "path": "src/cache.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded cache-key-poisoning",
           "fingerprint": "cache-key-poisoning-finding",
@@ -1480,11 +1480,11 @@
       "files": [
         {
           "path": "src/cache.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const key = `${repository}:${headSha}`;\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const key = `${repository}:${headSha}`;\n"
         },
         {
           "path": "src/repository.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 20\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return reviewRepository(repository, headSha);\n"
         }
       ],
       "findings": [],
@@ -1512,17 +1512,17 @@
       "files": [
         {
           "path": "test/date.test.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+assert.equal(format(date), '08:00');   \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.equal(format(date), '08:00');   \n"
         },
         {
           "path": "src/date.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 21\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return new Intl.DateTimeFormat().format(date);\n"
         }
       ],
       "findings": [
         {
           "path": "test/date.test.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded timezone-flaky-test",
           "fingerprint": "timezone-flaky-test-finding",
@@ -1555,11 +1555,11 @@
       "files": [
         {
           "path": "test/date.test.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+assert.equal(formatUtc(date), '08:00');\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.equal(formatUtc(date), '08:00');\n"
         },
         {
           "path": "src/date.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 21\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return new Intl.DateTimeFormat().format(date);\n"
         }
       ],
       "findings": [],
@@ -1587,17 +1587,17 @@
       "files": [
         {
           "path": "docs/configuration.md",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+FEATURE_X defaults to enabled. \n"
+          "patch": "@@ -2,1 +2,1 @@\n-FEATURE_X follows the deployment setting.\n+FEATURE_X defaults to enabled. \n"
         },
         {
           "path": "src/config.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 22\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return !FEATURE_X_DEFAULT;\n+return FEATURE_X_DEFAULT;\n"
         }
       ],
       "findings": [
         {
           "path": "docs/configuration.md",
-          "line": 10,
+          "line": 2,
           "severity": "P3",
           "title": "Seeded docs-wrong-env-default",
           "fingerprint": "docs-wrong-env-default-finding",
@@ -1630,11 +1630,11 @@
       "files": [
         {
           "path": "docs/configuration.md",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+FEATURE_X defaults to disabled.\n"
+          "patch": "@@ -2,1 +2,1 @@\n-FEATURE_X follows the deployment setting.\n+FEATURE_X defaults to disabled.\n"
         },
         {
           "path": "src/config.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 22\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return !FEATURE_X_DEFAULT;\n+return FEATURE_X_DEFAULT;\n"
         }
       ],
       "findings": [],
@@ -1662,17 +1662,17 @@
       "files": [
         {
           "path": "generated/schema.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+status: 'new'   \n"
+          "patch": "@@ -2,1 +2,1 @@\n-status: 'legacy'\n+status: 'new'   \n"
         },
         {
           "path": "schema/source.yml",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 23\n"
+          "patch": "@@ -2,1 +2,1 @@\n-status: legacy\n+status: stable\n"
         }
       ],
       "findings": [
         {
           "path": "generated/schema.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded generated-schema-hand-edit",
           "fingerprint": "generated-schema-hand-edit-finding",
@@ -1705,11 +1705,11 @@
       "files": [
         {
           "path": "generated/schema.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+status: 'stable'\n"
+          "patch": "@@ -2,1 +2,1 @@\n-status: 'legacy'\n+status: 'stable'\n"
         },
         {
           "path": "schema/source.yml",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 23\n"
+          "patch": "@@ -2,1 +2,1 @@\n-status: legacy\n+status: stable\n"
         }
       ],
       "findings": [],
@@ -1737,17 +1737,17 @@
       "files": [
         {
           "path": "src/large-reducer.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+case 'retain': keep();       \n"
+          "patch": "@@ -3,1 +3,1 @@\n-case 'retain': legacy(); break;\n+case 'retain': keep();       \n"
         },
         {
           "path": "test/reducer.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 24\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.equal(reduce({ type: 'retain' }), 'kept');\n"
         }
       ],
       "findings": [
         {
           "path": "src/large-reducer.ts",
-          "line": 10,
+          "line": 3,
           "severity": "P1",
           "title": "Seeded large-switch-fallthrough",
           "fingerprint": "large-switch-fallthrough-finding",
@@ -1780,11 +1780,11 @@
       "files": [
         {
           "path": "src/large-reducer.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+case 'retain': keep(); break;\n"
+          "patch": "@@ -3,1 +3,1 @@\n-case 'retain': legacy(); break;\n+case 'retain': keep(); break;\n"
         },
         {
           "path": "test/reducer.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 24\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.equal(reduce({ type: 'retain' }), 'kept');\n"
         }
       ],
       "findings": [],
@@ -1812,17 +1812,17 @@
       "files": [
         {
           "path": "packages/a/package.json",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+\"@acme/protocol\": \"2\"\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"@acme/protocol\": \"0\"\n+\"@acme/protocol\": \"2\"\n"
         },
         {
           "path": "packages/b/package.json",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 25\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"@acme/protocol\": \"0\"\n+\"@acme/protocol\": \"1\"\n"
         }
       ],
       "findings": [
         {
           "path": "packages/a/package.json",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded workspace-version-skew",
           "fingerprint": "workspace-version-skew-finding",
@@ -1855,11 +1855,11 @@
       "files": [
         {
           "path": "packages/a/package.json",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+\"@acme/protocol\": \"1\"\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"@acme/protocol\": \"0\"\n+\"@acme/protocol\": \"1\"\n"
         },
         {
           "path": "packages/b/package.json",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 25\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"@acme/protocol\": \"0\"\n+\"@acme/protocol\": \"1\"\n"
         }
       ],
       "findings": [],
@@ -1887,17 +1887,17 @@
       "files": [
         {
           "path": "src/validator.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return decode(value);                                        \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return decode(value);                                        \n"
         },
         {
           "path": "src/importer.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 26\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return importRow(untrustedValue);\n"
         }
       ],
       "findings": [
         {
           "path": "src/validator.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded deleted-caller-guard",
           "fingerprint": "deleted-caller-guard-finding",
@@ -1930,11 +1930,11 @@
       "files": [
         {
           "path": "src/validator.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+if (!isEncoded(value)) throw invalid(); return decode(value);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+if (!isEncoded(value)) throw invalid(); return decode(value);\n"
         },
         {
           "path": "src/importer.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 26\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return importRow(untrustedValue);\n"
         }
       ],
       "findings": [],
@@ -1962,17 +1962,17 @@
       "files": [
         {
           "path": "src/archive.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+write(join(root, entry.name), entry.body);     \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+write(join(root, entry.name), entry.body);     \n"
         },
         {
           "path": "test/archive.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 27\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.throws(() => extract('../escape'), PathTraversalError);\n"
         }
       ],
       "findings": [
         {
           "path": "src/archive.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P0",
           "title": "Seeded path-traversal",
           "fingerprint": "path-traversal-finding",
@@ -2005,11 +2005,11 @@
       "files": [
         {
           "path": "src/archive.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+write(safeChild(root, entry.name), entry.body);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+write(safeChild(root, entry.name), entry.body);\n"
         },
         {
           "path": "test/archive.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 27\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.throws(() => extract('../escape'), PathTraversalError);\n"
         }
       ],
       "findings": [],
@@ -2037,17 +2037,17 @@
       "files": [
         {
           "path": "src/orders.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await saveOrder(order); await charge(order);          \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await saveOrder(order); await charge(order);          \n"
         },
         {
           "path": "src/payments.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 28\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return chargeOrder(order);\n"
         }
       ],
       "findings": [
         {
           "path": "src/orders.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded transaction-boundary",
           "fingerprint": "transaction-boundary-finding",
@@ -2080,11 +2080,11 @@
       "files": [
         {
           "path": "src/orders.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await db.transaction(() => saveOrderAndCharge(order));\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await db.transaction(() => saveOrderAndCharge(order));\n"
         },
         {
           "path": "src/payments.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 28\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return chargeOrder(order);\n"
         }
       ],
       "findings": [],
@@ -2112,17 +2112,17 @@
       "files": [
         {
           "path": "src/queue.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+timer.onTimeout(reject); worker.onDone(resolve);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+timer.onTimeout(reject); worker.onDone(resolve);\n"
         },
         {
           "path": "test/queue.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 29\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await expectSingleSettlement(job);\n"
         }
       ],
       "findings": [
         {
           "path": "src/queue.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded async-double-settle",
           "fingerprint": "async-double-settle-finding",
@@ -2155,11 +2155,11 @@
       "files": [
         {
           "path": "src/queue.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+settleOnce(timer, worker, resolve, reject);     \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+settleOnce(timer, worker, resolve, reject);     \n"
         },
         {
           "path": "test/queue.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 29\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await expectSingleSettlement(job);\n"
         }
       ],
       "findings": [],
@@ -2187,17 +2187,17 @@
       "files": [
         {
           "path": "src/banner.tsx",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return <span>{window.innerWidth}</span>;\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return <span>{window.innerWidth}</span>;\n"
         },
         {
           "path": "src/server-flags.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 30\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return serverWidth;\n"
         }
       ],
       "findings": [
         {
           "path": "src/banner.tsx",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded hydration-mismatch",
           "fingerprint": "hydration-mismatch-finding",
@@ -2230,11 +2230,11 @@
       "files": [
         {
           "path": "src/banner.tsx",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return <span>{widthAfterMount}</span>;  \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return <span>{widthAfterMount}</span>;  \n"
         },
         {
           "path": "src/server-flags.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 30\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return serverWidth;\n"
         }
       ],
       "findings": [],
@@ -2262,17 +2262,17 @@
       "files": [
         {
           "path": ".github/workflows/deploy.yml",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+if: github.event_name == 'pull_request'\n"
+          "patch": "@@ -2,1 +2,1 @@\n-if: github.event_name == 'workflow_dispatch'\n+if: github.event_name == 'pull_request'\n"
         },
         {
           "path": "infra/iam.tf",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 31\n"
+          "patch": "@@ -2,1 +2,1 @@\n-attribute_condition = \"true\"\n+attribute_condition = \"assertion.ref == 'refs/heads/main'\"\n"
         }
       ],
       "findings": [
         {
           "path": ".github/workflows/deploy.yml",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded oidc-permission-scope",
           "fingerprint": "oidc-permission-scope-finding",
@@ -2305,11 +2305,11 @@
       "files": [
         {
           "path": ".github/workflows/deploy.yml",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+if: github.ref == 'refs/heads/main'    \n"
+          "patch": "@@ -2,1 +2,1 @@\n-if: github.event_name == 'workflow_dispatch'\n+if: github.ref == 'refs/heads/main'    \n"
         },
         {
           "path": "infra/iam.tf",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 31\n"
+          "patch": "@@ -2,1 +2,1 @@\n-attribute_condition = \"true\"\n+attribute_condition = \"assertion.ref == 'refs/heads/main'\"\n"
         }
       ],
       "findings": [],
@@ -2337,17 +2337,17 @@
       "files": [
         {
           "path": "test/errors.test.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+assert.throws(run);               \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.throws(run);               \n"
         },
         {
           "path": "src/errors.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 32\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+throw new ExpectedError('fixture failure');\n"
         }
       ],
       "findings": [
         {
           "path": "test/errors.test.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded test-false-positive",
           "fingerprint": "test-false-positive-finding",
@@ -2380,11 +2380,11 @@
       "files": [
         {
           "path": "test/errors.test.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+assert.throws(run, ExpectedError);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.throws(run, ExpectedError);\n"
         },
         {
           "path": "src/errors.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 32\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+throw new ExpectedError('fixture failure');\n"
         }
       ],
       "findings": [],
@@ -2412,17 +2412,17 @@
       "files": [
         {
           "path": "docs/migration.md",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+import { run } from \"@acme/old\";\n"
+          "patch": "@@ -2,1 +2,1 @@\n-import { run } from \"@acme/legacy\";\n+import { run } from \"@acme/old\";\n"
         },
         {
           "path": "packages/new/package.json",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 33\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"package\": \"@acme/old\"\n+\"package\": \"@acme/new\"\n"
         }
       ],
       "findings": [
         {
           "path": "docs/migration.md",
-          "line": 10,
+          "line": 2,
           "severity": "P3",
           "title": "Seeded docs-copy-paste-path",
           "fingerprint": "docs-copy-paste-path-finding",
@@ -2455,11 +2455,11 @@
       "files": [
         {
           "path": "docs/migration.md",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+import { run } from \"@acme/new\";\n"
+          "patch": "@@ -2,1 +2,1 @@\n-import { run } from \"@acme/legacy\";\n+import { run } from \"@acme/new\";\n"
         },
         {
           "path": "packages/new/package.json",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 33\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"package\": \"@acme/old\"\n+\"package\": \"@acme/new\"\n"
         }
       ],
       "findings": [],
@@ -2487,17 +2487,17 @@
       "files": [
         {
           "path": "src/shared/session-concurrency.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return await backend.review(input);                                     \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return await backend.review(input);                                     \n"
         },
         {
           "path": "src/shared/acp.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 34\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return backendReview(input);\n"
         }
       ],
       "findings": [
         {
           "path": "src/shared/session-concurrency.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded shared-session-finalization",
           "fingerprint": "shared-session-finalization-finding",
@@ -2530,11 +2530,11 @@
       "files": [
         {
           "path": "src/shared/session-concurrency.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+try { return await backend.review(input); } finally { finishSession(); }\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+try { return await backend.review(input); } finally { finishSession(); }\n"
         },
         {
           "path": "src/shared/acp.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 34\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return backendReview(input);\n"
         }
       ],
       "findings": [],
@@ -2562,17 +2562,17 @@
       "files": [
         {
           "path": "src/large-validator.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const pattern = /^(a+)+$/;\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const pattern = /^(a+)+$/;\n"
         },
         {
           "path": "test/validator.perf.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 35\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assertFastReject('a'.repeat(10000));\n"
         }
       ],
       "findings": [
         {
           "path": "src/large-validator.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded large-regex-backtracking",
           "fingerprint": "large-regex-backtracking-finding",
@@ -2605,11 +2605,11 @@
       "files": [
         {
           "path": "src/large-validator.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const pattern = /^a+$/;   \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const pattern = /^a+$/;   \n"
         },
         {
           "path": "test/validator.perf.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 35\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assertFastReject('a'.repeat(10000));\n"
         }
       ],
       "findings": [],
@@ -2637,17 +2637,17 @@
       "files": [
         {
           "path": "packages/plugin/package.json",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+\"host\": \"^1\"\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"host\": \"*\"\n+\"host\": \"^1\"\n"
         },
         {
           "path": "packages/host/package.json",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 36\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"version\": \"1.0.0\"\n+\"version\": \"2.0.0\"\n"
         }
       ],
       "findings": [
         {
           "path": "packages/plugin/package.json",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded workspace-peer-break",
           "fingerprint": "workspace-peer-break-finding",
@@ -2680,11 +2680,11 @@
       "files": [
         {
           "path": "packages/plugin/package.json",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+\"host\": \"^2\"\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"host\": \"*\"\n+\"host\": \"^2\"\n"
         },
         {
           "path": "packages/host/package.json",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 36\n"
+          "patch": "@@ -2,1 +2,1 @@\n-\"version\": \"1.0.0\"\n+\"version\": \"2.0.0\"\n"
         }
       ],
       "findings": [],
@@ -2712,17 +2712,17 @@
       "files": [
         {
           "path": "src/serializer.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return encodeV2(value);        \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return encodeV2(value);        \n"
         },
         {
           "path": "src/exporter.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 37\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return decodeV1(serialize(value));\n"
         }
       ],
       "findings": [
         {
           "path": "src/serializer.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded symbol-usage-miss",
           "fingerprint": "symbol-usage-miss-finding",
@@ -2755,11 +2755,11 @@
       "files": [
         {
           "path": "src/serializer.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return encodeCompatible(value);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return encodeCompatible(value);\n"
         },
         {
           "path": "src/exporter.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 37\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return decodeV1(serialize(value));\n"
         }
       ],
       "findings": [],
@@ -2787,17 +2787,17 @@
       "files": [
         {
           "path": "src/download.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const file = await load(id); authorize(user, file);      \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const file = await load(id); authorize(user, file);      \n"
         },
         {
           "path": "src/storage.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 38\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return loadFromStorage(id);\n"
         }
       ],
       "findings": [
         {
           "path": "src/download.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P0",
           "title": "Seeded authorization-order",
           "fingerprint": "authorization-order-finding",
@@ -2830,11 +2830,11 @@
       "files": [
         {
           "path": "src/download.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+authorizeMetadata(user, id); const file = await load(id);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+authorizeMetadata(user, id); const file = await load(id);\n"
         },
         {
           "path": "src/storage.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 38\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return loadFromStorage(id);\n"
         }
       ],
       "findings": [],
@@ -2862,17 +2862,17 @@
       "files": [
         {
           "path": "src/money.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return Number(amount) * rate;    \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return Number(amount) * rate;    \n"
         },
         {
           "path": "test/money.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 39\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.equal(calculate('0.1', '0.2'), '0.02');\n"
         }
       ],
       "findings": [
         {
           "path": "src/money.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded decimal-precision-loss",
           "fingerprint": "decimal-precision-loss-finding",
@@ -2905,11 +2905,11 @@
       "files": [
         {
           "path": "src/money.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return decimal(amount).mul(rate);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return decimal(amount).mul(rate);\n"
         },
         {
           "path": "test/money.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 39\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.equal(calculate('0.1', '0.2'), '0.02');\n"
         }
       ],
       "findings": [],
@@ -2937,17 +2937,17 @@
       "files": [
         {
           "path": "src/pool.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await runTask(); release();                    \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await runTask(); release();                    \n"
         },
         {
           "path": "test/pool.failure.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 40\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await assert.rejects(() => runPooledFailure());\n"
         }
       ],
       "findings": [
         {
           "path": "src/pool.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded semaphore-leak",
           "fingerprint": "semaphore-leak-finding",
@@ -2980,11 +2980,11 @@
       "files": [
         {
           "path": "src/pool.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+try { await runTask(); } finally { release(); }\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+try { await runTask(); } finally { release(); }\n"
         },
         {
           "path": "test/pool.failure.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 40\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+await assert.rejects(() => runPooledFailure());\n"
         }
       ],
       "findings": [],
@@ -3012,17 +3012,17 @@
       "files": [
         {
           "path": "src/use-save.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+onMutate: applyDraft                          \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+onMutate: applyDraft                          \n"
         },
         {
           "path": "src/editor.tsx",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 41\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return <Editor value={cachedDraft} />;\n"
         }
       ],
       "findings": [
         {
           "path": "src/use-save.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded optimistic-rollback",
           "fingerprint": "optimistic-rollback-finding",
@@ -3055,11 +3055,11 @@
       "files": [
         {
           "path": "src/use-save.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+onMutate: applyDraft, onError: restoreSnapshot\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+onMutate: applyDraft, onError: restoreSnapshot\n"
         },
         {
           "path": "src/editor.tsx",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 41\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return <Editor value={cachedDraft} />;\n"
         }
       ],
       "findings": [],
@@ -3087,17 +3087,17 @@
       "files": [
         {
           "path": "infra/deployment.yml",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+path: /ready       \n"
+          "patch": "@@ -2,1 +2,1 @@\n-path: /health\n+path: /ready       \n"
         },
         {
           "path": "src/health.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 42\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return readinessPath === '/ready';\n+return readinessPath === '/health/ready';\n"
         }
       ],
       "findings": [
         {
           "path": "infra/deployment.yml",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded deploy-healthcheck",
           "fingerprint": "deploy-healthcheck-finding",
@@ -3130,11 +3130,11 @@
       "files": [
         {
           "path": "infra/deployment.yml",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+path: /health/ready\n"
+          "patch": "@@ -2,1 +2,1 @@\n-path: /health\n+path: /health/ready\n"
         },
         {
           "path": "src/health.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 42\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return readinessPath === '/ready';\n+return readinessPath === '/health/ready';\n"
         }
       ],
       "findings": [],
@@ -3162,17 +3162,17 @@
       "files": [
         {
           "path": "test/mock-api.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return { id, legacyName }; \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return { id, legacyName }; \n"
         },
         {
           "path": "src/api-client.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 43\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return parseApiResponse({ id, displayName });\n"
         }
       ],
       "findings": [
         {
           "path": "test/mock-api.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded mock-contract-drift",
           "fingerprint": "mock-contract-drift-finding",
@@ -3205,11 +3205,11 @@
       "files": [
         {
           "path": "test/mock-api.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return { id, displayName };\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return { id, displayName };\n"
         },
         {
           "path": "src/api-client.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 43\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return parseApiResponse({ id, displayName });\n"
         }
       ],
       "findings": [],
@@ -3237,17 +3237,17 @@
       "files": [
         {
           "path": "docs/cli.md",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+tool run --fast-mode\n"
+          "patch": "@@ -2,1 +2,1 @@\n-tool run\n+tool run --fast-mode\n"
         },
         {
           "path": "src/cli.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 44\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return parser.options.includes('--fast-mode');\n+return parser.options.includes('--mode');\n"
         }
       ],
       "findings": [
         {
           "path": "docs/cli.md",
-          "line": 10,
+          "line": 2,
           "severity": "P3",
           "title": "Seeded docs-unavailable-option",
           "fingerprint": "docs-unavailable-option-finding",
@@ -3280,11 +3280,11 @@
       "files": [
         {
           "path": "docs/cli.md",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+tool run --mode fast\n"
+          "patch": "@@ -2,1 +2,1 @@\n-tool run\n+tool run --mode fast\n"
         },
         {
           "path": "src/cli.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 44\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return parser.options.includes('--fast-mode');\n+return parser.options.includes('--mode');\n"
         }
       ],
       "findings": [],
@@ -3312,17 +3312,17 @@
       "files": [
         {
           "path": "generated/api-client.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+type Response = { id: string };                  \n"
+          "patch": "@@ -2,1 +2,1 @@\n-type Response = { legacyId: string };\n+type Response = { id: string };                  \n"
         },
         {
           "path": "openapi/api.yml",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 45\n"
+          "patch": "@@ -2,1 +2,1 @@\n-revision: { type: string, required: false }\n+revision: { type: string }\n"
         }
       ],
       "findings": [
         {
           "path": "generated/api-client.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P2",
           "title": "Seeded generated-client-stale",
           "fingerprint": "generated-client-stale-finding",
@@ -3355,11 +3355,11 @@
       "files": [
         {
           "path": "generated/api-client.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+type Response = { id: string; revision: string };\n"
+          "patch": "@@ -2,1 +2,1 @@\n-type Response = { legacyId: string };\n+type Response = { id: string; revision: string };\n"
         },
         {
           "path": "openapi/api.yml",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 45\n"
+          "patch": "@@ -2,1 +2,1 @@\n-revision: { type: string, required: false }\n+revision: { type: string }\n"
         }
       ],
       "findings": [],
@@ -3387,17 +3387,17 @@
       "files": [
         {
           "path": "src/large-index.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+for (let i = 0; i < items.length - 1; i++) add(items[i]);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+for (let i = 0; i < items.length - 1; i++) add(items[i]);\n"
         },
         {
           "path": "test/large-index.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 46\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.deepEqual(rebuildIndex(items), items);\n"
         }
       ],
       "findings": [
         {
           "path": "src/large-index.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded large-file-off-by-one",
           "fingerprint": "large-file-off-by-one-finding",
@@ -3430,11 +3430,11 @@
       "files": [
         {
           "path": "src/large-index.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+for (let i = 0; i < items.length; i++) add(items[i]);    \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+for (let i = 0; i < items.length; i++) add(items[i]);    \n"
         },
         {
           "path": "test/large-index.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 46\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.deepEqual(rebuildIndex(items), items);\n"
         }
       ],
       "findings": [],
@@ -3462,17 +3462,17 @@
       "files": [
         {
           "path": "packages/core/src/index.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+export { theme } from \"@acme/ui\";\n"
+          "patch": "@@ -2,1 +2,1 @@\n-export { theme } from \"./legacy-theme\";\n+export { theme } from \"@acme/ui\";\n"
         },
         {
           "path": "packages/ui/src/index.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 47\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return import('@acme/core');\n"
         }
       ],
       "findings": [
         {
           "path": "packages/core/src/index.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded package-cycle",
           "fingerprint": "package-cycle-finding",
@@ -3505,11 +3505,11 @@
       "files": [
         {
           "path": "packages/core/src/index.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+export { theme } from \"./theme\"; \n"
+          "patch": "@@ -2,1 +2,1 @@\n-export { theme } from \"./legacy-theme\";\n+export { theme } from \"./theme\"; \n"
         },
         {
           "path": "packages/ui/src/index.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 47\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return import('@acme/core');\n"
         }
       ],
       "findings": [],
@@ -3537,17 +3537,17 @@
       "files": [
         {
           "path": "src/provider.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+catch { return []; }                    \n"
+          "patch": "@@ -3,1 +3,1 @@\n-catch (error) { throw error; }\n+catch { return []; }                    \n"
         },
         {
           "path": "src/retry.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 48\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return retry(() => providerCall());\n"
         }
       ],
       "findings": [
         {
           "path": "src/provider.ts",
-          "line": 10,
+          "line": 3,
           "severity": "P1",
           "title": "Seeded caller-error-swallow",
           "fingerprint": "caller-error-swallow-finding",
@@ -3580,11 +3580,11 @@
       "files": [
         {
           "path": "src/provider.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+catch (error) { throw classify(error); }\n"
+          "patch": "@@ -3,1 +3,1 @@\n-catch (error) { throw error; }\n+catch (error) { throw classify(error); }\n"
         },
         {
           "path": "src/retry.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 48\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return retry(() => providerCall());\n"
         }
       ],
       "findings": [],
@@ -3612,17 +3612,17 @@
       "files": [
         {
           "path": "src/encryption.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+encrypt(key, ZERO_NONCE, plaintext);   \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+encrypt(key, ZERO_NONCE, plaintext);   \n"
         },
         {
           "path": "test/encryption.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 49\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.notEqual(encrypt('a').nonce, encrypt('b').nonce);\n"
         }
       ],
       "findings": [
         {
           "path": "src/encryption.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P0",
           "title": "Seeded nonce-reuse",
           "fingerprint": "nonce-reuse-finding",
@@ -3655,11 +3655,11 @@
       "files": [
         {
           "path": "src/encryption.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+encrypt(key, randomNonce(), plaintext);\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+encrypt(key, randomNonce(), plaintext);\n"
         },
         {
           "path": "test/encryption.test.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 49\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+assert.notEqual(encrypt('a').nonce, encrypt('b').nonce);\n"
         }
       ],
       "findings": [],
@@ -3687,17 +3687,17 @@
       "files": [
         {
           "path": "src/payments.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const key = request.idempotencyKey;                  \n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const key = request.idempotencyKey;                  \n"
         },
         {
           "path": "src/request.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 50\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return pay({ accountId, idempotencyKey });\n"
         }
       ],
       "findings": [
         {
           "path": "src/payments.ts",
-          "line": 10,
+          "line": 2,
           "severity": "P1",
           "title": "Seeded idempotency-key-scope",
           "fingerprint": "idempotency-key-scope-finding",
@@ -3730,11 +3730,11 @@
       "files": [
         {
           "path": "src/payments.ts",
-          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const key = `${accountId}:${request.idempotencyKey}`;\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+const key = `${accountId}:${request.idempotencyKey}`;\n"
         },
         {
           "path": "src/request.ts",
-          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 50\n"
+          "patch": "@@ -2,1 +2,1 @@\n-return previousBehavior();\n+return pay({ accountId, idempotencyKey });\n"
         }
       ],
       "findings": [],
@@ -3751,5 +3751,508 @@
         }
       ]
     }
-  ]
+  ],
+  "qualityCorpus": true,
+  "gitContexts": {
+    "dim-exec-diff-classification": {
+      "src/shared/tool-telemetry.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/shared/dim.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "tenant-scope-leak": {
+      "src/tenants.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/session.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "lost-update-race": {
+      "src/balance.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "test/balance.concurrent.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "api-caller-contract": {
+      "src/api.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/client.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "frontend-stale-state": {
+      "src/use-account.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/account-panel.tsx": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "workflow-permission-escalation": {
+      ".github/workflows/review.yml": {
+        "before": "# Contract fixture",
+        "after": ""
+      },
+      "docs/permissions.md": {
+        "before": "# Contract fixture",
+        "after": ""
+      }
+    },
+    "missing-regression-assertion": {
+      "test/parser.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/parser.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "docs-deprecated-command": {
+      "docs/setup.md": {
+        "before": "# Contract fixture",
+        "after": ""
+      },
+      "package.json": {
+        "before": "{",
+        "after": "}"
+      }
+    },
+    "generated-source-edit": {
+      "generated/client.ts": {
+        "before": "// Contract fixture",
+        "after": ""
+      },
+      "schema/client.json": {
+        "before": "{",
+        "after": "}"
+      }
+    },
+    "large-parser-boundary": {
+      "src/large-parser.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "test/large-parser.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "package-export-drift": {
+      "packages/core/package.json": {
+        "before": "{",
+        "after": "}"
+      },
+      "packages/app/src/index.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "caller-null-contract": {
+      "src/service.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/controller.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "secret-log-exposure": {
+      "src/logger.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/config.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "quadratic-hot-path": {
+      "src/merge.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "test/merge.perf.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "unsafe-config-default": {
+      "src/config.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "docs/config.md": {
+        "before": "# Contract fixture",
+        "after": ""
+      }
+    },
+    "csrf-check-removed": {
+      "src/webhook.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "test/webhook.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "sql-tenant-filter": {
+      "src/report.sql.ts": {
+        "before": "export const benchmarkQuery = `",
+        "after": "`;"
+      },
+      "src/tenant-context.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "lock-order-inversion": {
+      "src/locks.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/worker.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "stale-query-key": {
+      "src/use-project.ts": {
+        "before": "export const benchmarkContract = {",
+        "after": "};"
+      },
+      "src/project-page.tsx": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "cache-key-poisoning": {
+      "src/cache.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/repository.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "timezone-flaky-test": {
+      "test/date.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/date.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "docs-wrong-env-default": {
+      "docs/configuration.md": {
+        "before": "# Contract fixture",
+        "after": ""
+      },
+      "src/config.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "generated-schema-hand-edit": {
+      "generated/schema.ts": {
+        "before": "export const benchmarkContract = {",
+        "after": "};"
+      },
+      "schema/source.yml": {
+        "before": "# Contract fixture",
+        "after": ""
+      }
+    },
+    "large-switch-fallthrough": {
+      "src/large-reducer.ts": {
+        "before": "export function benchmarkContract(action: string) {\n  switch (action) {",
+        "after": "  }\n}"
+      },
+      "test/reducer.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "workspace-version-skew": {
+      "packages/a/package.json": {
+        "before": "{",
+        "after": "}"
+      },
+      "packages/b/package.json": {
+        "before": "{",
+        "after": "}"
+      }
+    },
+    "deleted-caller-guard": {
+      "src/validator.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/importer.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "path-traversal": {
+      "src/archive.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "test/archive.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "transaction-boundary": {
+      "src/orders.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/payments.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "async-double-settle": {
+      "src/queue.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "test/queue.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "hydration-mismatch": {
+      "src/banner.tsx": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/server-flags.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "oidc-permission-scope": {
+      ".github/workflows/deploy.yml": {
+        "before": "# Contract fixture",
+        "after": ""
+      },
+      "infra/iam.tf": {
+        "before": "# Contract fixture",
+        "after": ""
+      }
+    },
+    "test-false-positive": {
+      "test/errors.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/errors.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "docs-copy-paste-path": {
+      "docs/migration.md": {
+        "before": "# Contract fixture",
+        "after": ""
+      },
+      "packages/new/package.json": {
+        "before": "{",
+        "after": "}"
+      }
+    },
+    "shared-session-finalization": {
+      "src/shared/session-concurrency.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/shared/acp.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "large-regex-backtracking": {
+      "src/large-validator.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "test/validator.perf.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "workspace-peer-break": {
+      "packages/plugin/package.json": {
+        "before": "{",
+        "after": "}"
+      },
+      "packages/host/package.json": {
+        "before": "{",
+        "after": "}"
+      }
+    },
+    "symbol-usage-miss": {
+      "src/serializer.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/exporter.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "authorization-order": {
+      "src/download.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/storage.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "decimal-precision-loss": {
+      "src/money.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "test/money.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "semaphore-leak": {
+      "src/pool.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "test/pool.failure.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "optimistic-rollback": {
+      "src/use-save.ts": {
+        "before": "export const benchmarkContract = {",
+        "after": "};"
+      },
+      "src/editor.tsx": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "deploy-healthcheck": {
+      "infra/deployment.yml": {
+        "before": "# Contract fixture",
+        "after": ""
+      },
+      "src/health.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "mock-contract-drift": {
+      "test/mock-api.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/api-client.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "docs-unavailable-option": {
+      "docs/cli.md": {
+        "before": "# Contract fixture",
+        "after": ""
+      },
+      "src/cli.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "generated-client-stale": {
+      "generated/api-client.ts": {
+        "before": "// Contract fixture",
+        "after": ""
+      },
+      "openapi/api.yml": {
+        "before": "# Contract fixture",
+        "after": ""
+      }
+    },
+    "large-file-off-by-one": {
+      "src/large-index.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "test/large-index.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "package-cycle": {
+      "packages/core/src/index.ts": {
+        "before": "// Contract fixture",
+        "after": ""
+      },
+      "packages/ui/src/index.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "caller-error-swallow": {
+      "src/provider.ts": {
+        "before": "export async function benchmarkContract() {\n  try { await providerCall(); }",
+        "after": "}"
+      },
+      "src/retry.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "nonce-reuse": {
+      "src/encryption.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "test/encryption.test.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    },
+    "idempotency-key-scope": {
+      "src/payments.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      },
+      "src/request.ts": {
+        "before": "export async function benchmarkContract() {",
+        "after": "}"
+      }
+    }
+  }
 }

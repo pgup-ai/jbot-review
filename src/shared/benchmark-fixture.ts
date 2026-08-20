@@ -3,6 +3,11 @@ interface SyntheticFixtureFile {
   patch: string;
 }
 
+interface SyntheticFixtureContext {
+  before: string;
+  after: string;
+}
+
 interface SyntheticFixtureShape {
   files: number;
   additions: number;
@@ -41,9 +46,16 @@ function hunkOffset(start: number): number {
   return start === 0 ? 0 : start - 1;
 }
 
-function materializePatch(file: SyntheticFixtureFile): ParsedFixtureFile {
-  const base: string[] = [];
-  const head: string[] = [];
+function contextLines(content: string): string[] {
+  return content ? content.replace(/\n$/, '').split('\n') : [];
+}
+
+function materializePatch(
+  file: SyntheticFixtureFile,
+  context?: SyntheticFixtureContext,
+): ParsedFixtureFile {
+  const base = contextLines(context?.before ?? '');
+  const head = [...base];
   let additions = 0;
   let deletions = 0;
   let expectedBase = 0;
@@ -98,6 +110,20 @@ function materializePatch(file: SyntheticFixtureFile): ParsedFixtureFile {
   }
   finishHunk();
   if (!active) throw new Error(`Fixture ${file.path} requires a valid unified-diff hunk.`);
+  const after = contextLines(context?.after ?? '');
+  base.push(...after);
+  head.push(...after);
+  if (
+    [...base, ...head].some(
+      (line) =>
+        line === 'old behavior' || line === 'old evidence' || /^counterpart \d+$/.test(line),
+    )
+  ) {
+    throw new Error(`Fixture ${file.path} contains placeholder source.`);
+  }
+  if (base.join('\n') === head.join('\n')) {
+    throw new Error(`Fixture ${file.path} materializes no change.`);
+  }
   return {
     path: file.path,
     base: base.length > 0 ? `${base.join('\n')}\n` : null,
@@ -195,6 +221,11 @@ export function materializeBenchmarkFixture(
   if (!candidate || !Array.isArray(candidate.files) || candidate.files.length === 0) {
     throw new Error(`Synthetic benchmark fixture case not found: ${caseId}.`);
   }
+  const family = caseId.replace(/^clean-/, '');
+  const contexts = isRecord(value.gitContexts) ? value.gitContexts[family] : undefined;
+  if (value.qualityCorpus === true && !isRecord(contexts)) {
+    throw new Error(`Synthetic benchmark fixture ${caseId} requires git contexts.`);
+  }
   const paths = new Set<string>();
   const files = candidate.files.map((file) => {
     if (
@@ -207,7 +238,24 @@ export function materializeBenchmarkFixture(
       throw new Error(`Synthetic benchmark fixture ${caseId} has an invalid file.`);
     }
     paths.add(file.path);
-    return materializePatch(file as unknown as SyntheticFixtureFile);
+    const context = isRecord(contexts) ? contexts[file.path] : undefined;
+    if (value.qualityCorpus === true && !isRecord(context)) {
+      throw new Error(`Synthetic benchmark fixture ${caseId} lacks context for ${file.path}.`);
+    }
+    if (
+      context !== undefined &&
+      (!isRecord(context) ||
+        typeof context.before !== 'string' ||
+        typeof context.after !== 'string')
+    ) {
+      throw new Error(
+        `Synthetic benchmark fixture ${caseId} has invalid context for ${file.path}.`,
+      );
+    }
+    return materializePatch(
+      file as unknown as SyntheticFixtureFile,
+      context as unknown as SyntheticFixtureContext | undefined,
+    );
   });
   return materializeShape(files, fixtureShape(candidate.shape, caseId), paths, caseId);
 }

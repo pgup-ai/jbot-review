@@ -55,14 +55,17 @@ const row: BenchmarkCaseRow = {
 };
 
 it('rejects duplicate, contradictory, and incomplete rescore execution data', () => {
+  const treatment = { ...row, arm: 'treatment', armName: 'treatment' } as const;
+  const baseline = [row, treatment];
   assert.throws(
-    () => validateAdjudicatedBenchmarkRows([row, row], [benchmarkCase], arms, 1),
+    () => validateAdjudicatedBenchmarkRows([row, row], baseline, [benchmarkCase], arms, 1),
     /Duplicate adjudicated benchmark row/,
   );
   assert.throws(
     () =>
       validateAdjudicatedBenchmarkRows(
         [row, { ...row, arm: 'treatment', armName: 'treatment', exitCode: 1 }],
+        baseline,
         [benchmarkCase],
         arms,
         1,
@@ -73,6 +76,7 @@ it('rejects duplicate, contradictory, and incomplete rescore execution data', ()
     () =>
       validateAdjudicatedBenchmarkRows(
         [row, { ...row, arm: 'treatment', armName: 'treatment', failureClass: 'runner-exit' }],
+        baseline,
         [benchmarkCase],
         arms,
         1,
@@ -85,12 +89,52 @@ it('rejects duplicate, contradictory, and incomplete rescore execution data', ()
     () =>
       validateAdjudicatedBenchmarkRows(
         [missingFailureClass, { ...row, arm: 'treatment', armName: 'treatment' }],
+        baseline,
         [benchmarkCase],
         arms,
         1,
       ),
     /Invalid execution data/,
   );
+});
+
+it('permits only finding adjudication changes from the original run', () => {
+  const sourceFinding = { path: 'a.ts', line: 1, severity: 'P2', title: 'Finding' } as const;
+  const treatment = { ...row, arm: 'treatment', armName: 'treatment' } as const;
+  const baseline = [{ ...row, findings: [sourceFinding] }, treatment];
+  assert.doesNotThrow(() =>
+    validateAdjudicatedBenchmarkRows(
+      [
+        {
+          ...row,
+          findings: [
+            {
+              ...sourceFinding,
+              expectedFindingId: 'expected',
+              triggerComplete: true,
+              evidenceSupported: true,
+            },
+          ],
+        },
+        treatment,
+      ],
+      baseline,
+      [benchmarkCase],
+      arms,
+      1,
+    ),
+  );
+  for (const changed of [
+    { ...row, findings: [{ ...sourceFinding, title: 'Edited' }] },
+    { ...row, findings: [sourceFinding], latencyMs: 2 },
+    { ...row, findings: [sourceFinding], exitCode: 1, failureClass: 'runner-exit' as const },
+  ]) {
+    assert.throws(
+      () =>
+        validateAdjudicatedBenchmarkRows([changed, treatment], baseline, [benchmarkCase], arms, 1),
+      /changed original run data/,
+    );
+  }
 });
 
 it('validates every process failure execution state', () => {
@@ -121,6 +165,7 @@ it('validates every process failure execution state', () => {
     assert.doesNotThrow(() =>
       validateAdjudicatedBenchmarkRows(
         [{ ...row, failureClass: candidate.failureClass, ...candidate.valid }, treatment],
+        [{ ...row, failureClass: candidate.failureClass, ...candidate.valid }, treatment],
         [benchmarkCase],
         arms,
         1,
@@ -129,6 +174,7 @@ it('validates every process failure execution state', () => {
     assert.throws(
       () =>
         validateAdjudicatedBenchmarkRows(
+          [{ ...row, failureClass: candidate.failureClass, ...candidate.invalid }, treatment],
           [{ ...row, failureClass: candidate.failureClass, ...candidate.invalid }, treatment],
           [benchmarkCase],
           arms,

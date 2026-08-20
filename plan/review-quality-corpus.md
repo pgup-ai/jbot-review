@@ -104,9 +104,10 @@ After adjudication, rescore the original run without invoking either reviewer:
 npm run benchmark:review -- \
   --manifest test/fixtures/review-benchmark/manifest.json \
   --adjudicated-cases /path/to/adjudicated-cases.jsonl \
+  --baseline-cases /path/to/original-run/cases.jsonl \
   --output /path/to/rescored-results \
   --subset full
 ```
 
-The adjudicated input must preserve the complete selected run population and
-all manifest-owned metadata. Only finding adjudication fields should change.
+The benchmark verifies the adjudicated rows against the original run. Only
+`expectedFindingId`, `triggerComplete`, and `evidenceSupported` may change.

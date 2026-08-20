@@ -14,8 +14,16 @@ export function benchmarkArgument(name: string, argv = process.argv): string | u
 }
 
 export function readJsonLines<T>(path: string): T[] {
-  return readFileSync(resolve(path), 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as T);
+  const resolved = resolve(path);
+  const values: T[] = [];
+  for (const [index, line] of readFileSync(resolved, 'utf8').split('\n').entries()) {
+    if (!line.trim()) continue;
+    try {
+      values.push(JSON.parse(line) as T);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Invalid JSON in ${resolved}:${index + 1}: ${detail}`);
+    }
+  }
+  return values;
 }

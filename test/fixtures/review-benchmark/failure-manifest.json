@@ -3,7 +3,7 @@
   "name": "runner-failure-classification",
   "repetitions": 1,
   "timeoutMs": 1000,
-  "corpusHash": "sha256:59f87308678e1553ad05c6d2b885d33c5f19c762dc0ae2755845fe85aa5665fc",
+  "corpusHash": "sha256:7e7fcda3d0b03bc876c0749aa9cb2a21b10c9696042c0bea657637b930a324a9",
   "qualityCorpus": false,
   "runner": {
     "command": [
@@ -26,7 +26,7 @@
         "temperature": 0
       },
       "promptVersion": "failure-fixture-v2",
-      "corpusHash": "sha256:59f87308678e1553ad05c6d2b885d33c5f19c762dc0ae2755845fe85aa5665fc",
+      "corpusHash": "sha256:7e7fcda3d0b03bc876c0749aa9cb2a21b10c9696042c0bea657637b930a324a9",
       "config": {
         "benchmarkAdapterMode": "control"
       }
@@ -44,7 +44,7 @@
         "temperature": 0
       },
       "promptVersion": "failure-fixture-v2",
-      "corpusHash": "sha256:59f87308678e1553ad05c6d2b885d33c5f19c762dc0ae2755845fe85aa5665fc",
+      "corpusHash": "sha256:7e7fcda3d0b03bc876c0749aa9cb2a21b10c9696042c0bea657637b930a324a9",
       "config": {
         "benchmarkAdapterMode": "treatment"
       }
@@ -60,7 +60,7 @@
       "expectedFindings": [],
       "categories": ["clean"],
       "subsets": ["full"],
-      "fixturePath": "corpus.json",
+      "fixturePath": "failure-corpus.json",
       "base": "fixture-base",
       "head": "fixture-head"
     }

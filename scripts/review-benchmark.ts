@@ -69,7 +69,7 @@ const GIT_REPOSITORY_ENV = new Set([
 
 function usage(): never {
   console.error(
-    'usage: review-benchmark.ts --manifest <manifest.json> --output <directory> [--repetitions <n>] [--subset <smoke|core|full>] [--adjudicated-cases <cases.jsonl>]',
+    'usage: review-benchmark.ts --manifest <manifest.json> --output <directory> [--repetitions <n>] [--subset <smoke|core|full>] [--adjudicated-cases <cases.jsonl> --baseline-cases <cases.jsonl>]',
   );
   process.exit(2);
 }
@@ -476,14 +476,20 @@ async function main(): Promise<void> {
   }
   const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const adjudicatedCasesArg = benchmarkArgument('adjudicated-cases');
-  const rows: BenchmarkCaseRow[] = adjudicatedCasesArg
-    ? validateAdjudicatedBenchmarkRows(
-        readJsonLines<unknown>(adjudicatedCasesArg),
-        benchmarkCases,
-        { control: manifest.control, treatment: manifest.treatment },
-        repetitions,
-      )
-    : [];
+  const baselineCasesArg = benchmarkArgument('baseline-cases');
+  if (Boolean(adjudicatedCasesArg) !== Boolean(baselineCasesArg)) {
+    throw new Error('--adjudicated-cases and --baseline-cases must be provided together.');
+  }
+  const rows: BenchmarkCaseRow[] =
+    adjudicatedCasesArg && baselineCasesArg
+      ? validateAdjudicatedBenchmarkRows(
+          readJsonLines<unknown>(adjudicatedCasesArg),
+          readJsonLines<unknown>(baselineCasesArg),
+          benchmarkCases,
+          { control: manifest.control, treatment: manifest.treatment },
+          repetitions,
+        )
+      : [];
   mkdirSync(outputDir, { recursive: true });
   const casesPath = join(outputDir, 'cases.jsonl');
   writeFileSync(casesPath, '');

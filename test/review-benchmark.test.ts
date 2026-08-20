@@ -68,7 +68,36 @@ describe('review-benchmark', () => {
       );
     }
     for (const candidate of manifest.cases) {
-      assert.doesNotThrow(() => materializeBenchmarkFixture(fixture, candidate.id), candidate.id);
+      const files = materializeBenchmarkFixture(fixture, candidate.id);
+      assert.ok(
+        files.every(
+          (file) =>
+            !`${file.base ?? ''}${file.head ?? ''}`.match(
+              /(^|\n)(old behavior|old evidence|counterpart \d+)(\n|$)/,
+            ),
+        ),
+        candidate.id,
+      );
+      for (const expected of candidate.expectedFindings) {
+        for (const anchor of expected.anchors) {
+          const file = files.find((candidate) => candidate.path === anchor.path);
+          assert.ok(file?.base && file.head, `${candidate.id}:${anchor.path}`);
+          assert.notEqual(
+            file.base.split('\n')[anchor.line - 1],
+            file.head.split('\n')[anchor.line - 1],
+            `${candidate.id}:${anchor.path}`,
+          );
+        }
+        for (const evidence of expected.requiredEvidence) {
+          const anchor = expected.anchors.find((candidate) => candidate.path === evidence.path);
+          const file = files.find((candidate) => candidate.path === evidence.path);
+          assert.ok(anchor && file?.head, `${candidate.id}:${evidence.path}`);
+          assert.ok(
+            file.head.split('\n')[anchor.line - 1]?.trim(),
+            `${candidate.id}:${evidence.path}`,
+          );
+        }
+      }
     }
   });
 
@@ -206,6 +235,8 @@ describe('review-benchmark', () => {
           '1',
           '--adjudicated-cases',
           join(output, 'cases.jsonl'),
+          '--baseline-cases',
+          join(output, 'cases.jsonl'),
         ],
         { encoding: 'utf8', stdio: 'pipe' },
       );
@@ -235,6 +266,8 @@ describe('review-benchmark', () => {
               '1',
               '--adjudicated-cases',
               incompletePath,
+              '--baseline-cases',
+              join(output, 'cases.jsonl'),
             ],
             { encoding: 'utf8', stdio: 'pipe' },
           ),
@@ -447,7 +480,10 @@ describe('review-benchmark', () => {
         if (mode === 'timeout') manifest.timeoutMs = 50;
         const path = join(root, 'manifest.json');
         const output = join(root, 'output');
-        cpSync(join(ROOT, 'test/fixtures/review-benchmark/corpus.json'), join(root, 'corpus.json'));
+        cpSync(
+          join(ROOT, 'test/fixtures/review-benchmark/failure-corpus.json'),
+          join(root, 'failure-corpus.json'),
+        );
         writeFileSync(path, JSON.stringify(manifest));
         execFileSync(
           TSX,

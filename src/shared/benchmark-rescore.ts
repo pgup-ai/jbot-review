@@ -5,6 +5,7 @@ import {
   type BenchmarkCaseRun,
 } from './benchmark-score.ts';
 import {
+  emptyBenchmarkProgramMetrics,
   isBenchmarkRunnerOutput,
   type BenchmarkFailureClass,
   type BenchmarkProgramMetrics,
@@ -33,14 +34,9 @@ const FAILURE_CLASSES = new Set<BenchmarkFailureClass>([
   'invalid-output',
   'missing-output',
 ]);
-const PROGRAM_METRICS = [
-  'inputTokens',
-  'outputTokens',
-  'reasoningTokens',
-  'cacheReadTokens',
-  'costUsd',
-  'sessions',
-] as const;
+const PROGRAM_METRICS = Object.keys(
+  emptyBenchmarkProgramMetrics(),
+) as (keyof BenchmarkProgramMetrics)[];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -134,7 +130,24 @@ function validateRow(
   return row as unknown as BenchmarkCaseRow;
 }
 
-export function validateAdjudicatedBenchmarkRows(
+function rowKey(row: BenchmarkCaseRow): string {
+  return `${row.arm}:${row.caseId}:${row.repetition}`;
+}
+
+function withoutAdjudication(row: BenchmarkCaseRow): BenchmarkCaseRow {
+  return {
+    ...row,
+    findings: row.findings.map((finding) => {
+      const immutable = { ...finding };
+      delete immutable.expectedFindingId;
+      delete immutable.triggerComplete;
+      delete immutable.evidenceSupported;
+      return immutable;
+    }),
+  };
+}
+
+function validateRows(
   values: unknown[],
   benchmarkCases: BenchmarkCase[],
   arms: Record<'control' | 'treatment', BenchmarkArm>,
@@ -144,7 +157,7 @@ export function validateAdjudicatedBenchmarkRows(
   const rows = values.map((value) => validateRow(value, cases, arms, repetitions));
   const keys = new Set<string>();
   for (const row of rows) {
-    const key = `${row.arm}:${row.caseId}:${row.repetition}`;
+    const key = rowKey(row);
     if (keys.has(key)) throw new Error(`Duplicate adjudicated benchmark row ${key}.`);
     keys.add(key);
   }
@@ -153,6 +166,29 @@ export function validateAdjudicatedBenchmarkRows(
     throw new Error(
       `Adjudicated benchmark input has ${rows.length} rows; expected ${expectedRows}.`,
     );
+  }
+  return rows;
+}
+
+export function validateAdjudicatedBenchmarkRows(
+  values: unknown[],
+  baselineValues: unknown[],
+  benchmarkCases: BenchmarkCase[],
+  arms: Record<'control' | 'treatment', BenchmarkArm>,
+  repetitions: number,
+): BenchmarkCaseRow[] {
+  const rows = validateRows(values, benchmarkCases, arms, repetitions);
+  const baseline = validateRows(baselineValues, benchmarkCases, arms, repetitions);
+  const baselineByKey = new Map(baseline.map((row) => [rowKey(row), row]));
+  for (const row of rows) {
+    const source = baselineByKey.get(rowKey(row));
+    if (
+      !source ||
+      benchmarkCanonicalJson(withoutAdjudication(row)) !==
+        benchmarkCanonicalJson(withoutAdjudication(source))
+    ) {
+      throw new Error(`Adjudicated benchmark row changed original run data: ${rowKey(row)}.`);
+    }
   }
   return rows;
 }
