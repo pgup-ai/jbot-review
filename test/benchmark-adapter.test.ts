@@ -174,6 +174,65 @@ describe('competitor benchmark adapters', () => {
     );
   });
 
+  it('resolves nested SARIF URI bases and rejects invalid paths', () => {
+    const result = (uriBaseId: string) => ({
+      ruleId: uriBaseId,
+      level: 'warning',
+      message: { text: uriBaseId },
+      locations: [
+        {
+          physicalLocation: {
+            artifactLocation: { uri: 'a.ts', uriBaseId },
+            region: { startLine: 1 },
+          },
+        },
+      ],
+    });
+    const findings = normalizeCompetitorFindings(
+      'sarif',
+      {
+        runs: [
+          {
+            originalUriBaseIds: {
+              ROOT: { uri: 'file:///workspace/' },
+              SRC: { uri: 'src/', uriBaseId: 'ROOT' },
+              CYCLE_A: { uri: 'a/', uriBaseId: 'CYCLE_B' },
+              CYCLE_B: { uri: 'b/', uriBaseId: 'CYCLE_A' },
+              MALFORMED: { uri: 'not a URL' },
+            },
+            results: [result('SRC'), result('MISSING'), result('CYCLE_A'), result('MALFORMED')],
+          },
+        ],
+      },
+      { repositoryRoot: '/workspace' },
+    );
+    assert.deepEqual(
+      findings.map(({ path, anchored }) => ({ path, anchored })),
+      [
+        { path: 'src/a.ts', anchored: true },
+        { path: '', anchored: false },
+        { path: '', anchored: false },
+        { path: '', anchored: false },
+      ],
+    );
+
+    const windowsFinding = (base: string) =>
+      normalizeCompetitorFindings(
+        'sarif',
+        {
+          runs: [
+            {
+              originalUriBaseIds: { ROOT: { uri: base } },
+              results: [result('ROOT')],
+            },
+          ],
+        },
+        { repositoryRoot: 'C:\\workspace' },
+      )[0].path;
+    assert.equal(windowsFinding('file:///C:/workspace/'), 'a.ts');
+    assert.equal(windowsFinding('file:///D:/outside/'), '');
+  });
+
   it('excludes model, endpoint, reasoning, or sampling mismatches from rankings', () => {
     assert.deepEqual(assessCompetitorComparability(configuration, configuration), {
       sameModelComparable: true,

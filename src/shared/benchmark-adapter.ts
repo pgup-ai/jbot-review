@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { benchmarkCanonicalJson, type BenchmarkObservedFinding } from './benchmark-score.ts';
@@ -118,11 +118,17 @@ function sarifBaseUri(
 }
 
 function repositoryPath(path: string, repositoryRoot?: string): string {
-  const absolute = isAbsolute(path);
-  const local = absolute && repositoryRoot ? relative(resolve(repositoryRoot), path) : path;
+  const windowsPath = win32.isAbsolute(path);
+  const windowsRoot = repositoryRoot ? win32.isAbsolute(repositoryRoot) : false;
+  if (repositoryRoot && windowsPath !== windowsRoot) return '';
+  const pathApi = windowsPath ? win32 : { isAbsolute, relative, resolve };
+  const absolute = pathApi.isAbsolute(path);
+  const local =
+    absolute && repositoryRoot ? pathApi.relative(pathApi.resolve(repositoryRoot), path) : path;
   const portable = local.replaceAll('\\', '/').replace(/^\.\//, '');
   return !portable ||
     (absolute && !repositoryRoot) ||
+    pathApi.isAbsolute(local) ||
     portable.startsWith('/') ||
     portable.split('/').includes('..')
     ? ''
@@ -147,7 +153,14 @@ function sarifArtifactPath(
   }
   try {
     const parsed = new URL(uri);
-    return parsed.protocol === 'file:' ? repositoryPath(fileURLToPath(parsed), repositoryRoot) : '';
+    if (parsed.protocol !== 'file:') return '';
+    const filePath = fileURLToPath(parsed);
+    return repositoryPath(
+      repositoryRoot && win32.isAbsolute(repositoryRoot) && /^\/[a-z]:\//i.test(filePath)
+        ? filePath.slice(1)
+        : filePath,
+      repositoryRoot,
+    );
   } catch {
     try {
       return repositoryPath(decodeURIComponent(uri.split(/[?#]/, 1)[0]), repositoryRoot);

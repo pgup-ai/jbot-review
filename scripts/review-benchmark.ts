@@ -243,6 +243,7 @@ async function commitFixture(
       'commit.gpgSign=false',
       'commit',
       '--quiet',
+      '--allow-empty',
       '-m',
       message,
     ],

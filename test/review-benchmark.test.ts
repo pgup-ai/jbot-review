@@ -254,7 +254,7 @@ describe('review-benchmark', () => {
         runner: { command: string[]; cwd: string; fixtureMode: string };
         control: { configuration: { corpusHash: string } };
         treatment: { configuration: { corpusHash: string } };
-        cases: Array<{ id: string }>;
+        cases: Array<Record<string, unknown> & { id: string }>;
       };
       source.qualityCorpus = false;
       source.repetitions = 1;
@@ -309,6 +309,61 @@ describe('review-benchmark', () => {
       assert.equal(summary.treatment.successfulRuns, 1);
       assert.equal(summary.qualityGate.status, 'passed');
       assert.equal(summary.qualityGate.passed, true);
+
+      const additionCase = {
+        ...largeCase,
+        expectedClean: true,
+        expectedFindings: [],
+        categories: ['clean'],
+        subsets: ['full'],
+      };
+      delete additionCase.counterfactualCaseId;
+      source.cases = [additionCase];
+      source.runner.command = [
+        process.execPath,
+        '-e',
+        "require('node:fs').writeFileSync(process.env.JBOT_BENCHMARK_OUTPUT, '{\"findings\":[]}\\n')",
+      ];
+      const additionCorpus = Buffer.from(
+        JSON.stringify({
+          cases: [
+            {
+              id: additionCase.id,
+              shape: { files: 1, additions: 1, deletions: 0, patchBytes: 20 },
+              files: [{ path: 'new.ts', patch: '@@ -0,0 +1,1 @@\n+new\n' }],
+              findings: [],
+              telemetry: [],
+            },
+          ],
+        }),
+      );
+      const additionHash = createHash('sha256')
+        .update(benchmarkCanonicalJson(source.cases))
+        .update('')
+        .update(additionCorpus)
+        .digest('hex');
+      source.corpusHash = `sha256:${additionHash}`;
+      source.control.configuration.corpusHash = source.corpusHash;
+      source.treatment.configuration.corpusHash = source.corpusHash;
+      writeFileSync(join(root, 'corpus.json'), additionCorpus);
+      writeFileSync(manifestPath, JSON.stringify(source));
+      const additionOutput = join(root, 'addition-output');
+      execFileSync(
+        TSX,
+        [
+          join(ROOT, 'scripts/review-benchmark.ts'),
+          '--manifest',
+          manifestPath,
+          '--output',
+          additionOutput,
+        ],
+        { encoding: 'utf8', stdio: 'pipe' },
+      );
+      const additionSummary = JSON.parse(
+        readFileSync(join(additionOutput, 'summary.json'), 'utf8'),
+      ) as { control: { successfulRuns: number }; treatment: { successfulRuns: number } };
+      assert.equal(additionSummary.control.successfulRuns, 1);
+      assert.equal(additionSummary.treatment.successfulRuns, 1);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

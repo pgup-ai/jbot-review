@@ -92,3 +92,49 @@ it('rejects duplicate, contradictory, and incomplete rescore execution data', ()
     /Invalid execution data/,
   );
 });
+
+it('validates every process failure execution state', () => {
+  const cases = [
+    {
+      failureClass: 'timeout',
+      valid: { exitCode: null, signal: 'SIGTERM', timedOut: true },
+      invalid: { exitCode: null, signal: null, timedOut: true },
+    },
+    {
+      failureClass: 'signal',
+      valid: { exitCode: null, signal: 'SIGTERM', timedOut: false },
+      invalid: { exitCode: null, signal: 'SIGTERM', timedOut: true },
+    },
+    {
+      failureClass: 'setup',
+      valid: { exitCode: null, signal: null, timedOut: false },
+      invalid: { exitCode: 1, signal: null, timedOut: false },
+    },
+    {
+      failureClass: 'spawn',
+      valid: { exitCode: null, signal: null, timedOut: false },
+      invalid: { exitCode: 1, signal: null, timedOut: false },
+    },
+  ] as const;
+  for (const candidate of cases) {
+    const treatment = { ...row, arm: 'treatment', armName: 'treatment' } as const;
+    assert.doesNotThrow(() =>
+      validateAdjudicatedBenchmarkRows(
+        [{ ...row, failureClass: candidate.failureClass, ...candidate.valid }, treatment],
+        [benchmarkCase],
+        arms,
+        1,
+      ),
+    );
+    assert.throws(
+      () =>
+        validateAdjudicatedBenchmarkRows(
+          [{ ...row, failureClass: candidate.failureClass, ...candidate.invalid }, treatment],
+          [benchmarkCase],
+          arms,
+          1,
+        ),
+      /Contradictory execution data/,
+    );
+  }
+});
