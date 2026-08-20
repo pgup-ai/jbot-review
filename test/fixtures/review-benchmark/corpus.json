@@ -1,15 +1,34 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "cases": [
     {
-      "id": "auth-bypass",
+      "id": "dim-exec-diff-classification",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/shared/tool-telemetry.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+normalized === 'bash' && inspect(command)                           \n"
+        },
+        {
+          "path": "src/shared/dim.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 01\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/security.ts",
+          "path": "src/shared/tool-telemetry.ts",
           "line": 10,
-          "severity": "P0",
-          "title": "Seeded auth-bypass",
-          "fingerprint": "auth-bypass-finding"
+          "severity": "P3",
+          "title": "Seeded dim-exec-diff-classification",
+          "fingerprint": "dim-exec-diff-classification-finding",
+          "expectedFindingId": "dim-exec-diff-classification-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -26,7 +45,98 @@
       ]
     },
     {
-      "id": "clean-auth-guard",
+      "id": "clean-dim-exec-diff-classification",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/shared/tool-telemetry.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+(normalized === 'bash' || normalized === 'exec') && inspect(command)\n"
+        },
+        {
+          "path": "src/shared/dim.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 01\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1000,
+          "outputTokens": 120,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 500,
+          "costUsd": 0.001
+        }
+      ]
+    },
+    {
+      "id": "tenant-scope-leak",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/tenants.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return db.invoice.findMany({ where: { status } });          \n"
+        },
+        {
+          "path": "src/session.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 02\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/tenants.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded tenant-scope-leak",
+          "fingerprint": "tenant-scope-leak-finding",
+          "expectedFindingId": "tenant-scope-leak-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1007,
+          "outputTokens": 121,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 503,
+          "costUsd": 0.00101
+        }
+      ]
+    },
+    {
+      "id": "clean-tenant-scope-leak",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/tenants.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return db.invoice.findMany({ where: { tenantId, status } });\n"
+        },
+        {
+          "path": "src/session.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 02\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -42,14 +152,33 @@
       ]
     },
     {
-      "id": "tenant-scope-leak",
+      "id": "lost-update-race",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/balance.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await saveBalance(id, current + delta);     \n"
+        },
+        {
+          "path": "test/balance.concurrent.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 03\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/data.ts",
-          "line": 12,
+          "path": "src/balance.ts",
+          "line": 10,
           "severity": "P1",
-          "title": "Seeded tenant-scope-leak",
-          "fingerprint": "tenant-scope-leak-finding"
+          "title": "Seeded lost-update-race",
+          "fingerprint": "lost-update-race-finding",
+          "expectedFindingId": "lost-update-race-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -66,7 +195,98 @@
       ]
     },
     {
-      "id": "clean-tenant-query",
+      "id": "clean-lost-update-race",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/balance.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await incrementBalanceAtomically(id, delta);\n"
+        },
+        {
+          "path": "test/balance.concurrent.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 03\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1014,
+          "outputTokens": 122,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 506,
+          "costUsd": 0.00102
+        }
+      ]
+    },
+    {
+      "id": "api-caller-contract",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/api.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return cache.get(key);                     \n"
+        },
+        {
+          "path": "src/client.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 04\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/api.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded api-caller-contract",
+          "fingerprint": "api-caller-contract-finding",
+          "expectedFindingId": "api-caller-contract-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1021,
+          "outputTokens": 123,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 509,
+          "costUsd": 0.00103
+        }
+      ]
+    },
+    {
+      "id": "clean-api-caller-contract",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/api.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return cache.get(key) ?? loadRequired(key);\n"
+        },
+        {
+          "path": "src/client.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 04\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -82,14 +302,33 @@
       ]
     },
     {
-      "id": "lost-update-race",
+      "id": "frontend-stale-state",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/use-account.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+useQuery({ queryKey: ['account'], queryFn });           \n"
+        },
+        {
+          "path": "src/account-panel.tsx",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 05\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/concurrency.ts",
-          "line": 14,
-          "severity": "P1",
-          "title": "Seeded lost-update-race",
-          "fingerprint": "lost-update-race-finding"
+          "path": "src/use-account.ts",
+          "line": 10,
+          "severity": "P2",
+          "title": "Seeded frontend-stale-state",
+          "fingerprint": "frontend-stale-state-finding",
+          "expectedFindingId": "frontend-stale-state-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -101,12 +340,103 @@
           "outputTokens": 124,
           "reasoningTokens": 0,
           "cacheReadTokens": 512,
-          "costUsd": 0.00104
+          "costUsd": 0.0010400000000000001
         }
       ]
     },
     {
-      "id": "clean-transaction-lock",
+      "id": "clean-frontend-stale-state",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/use-account.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+useQuery({ queryKey: ['account', accountId], queryFn });\n"
+        },
+        {
+          "path": "src/account-panel.tsx",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 05\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1028,
+          "outputTokens": 124,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 512,
+          "costUsd": 0.0010400000000000001
+        }
+      ]
+    },
+    {
+      "id": "workflow-permission-escalation",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": ".github/workflows/review.yml",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+permissions: write-all       \n"
+        },
+        {
+          "path": "docs/permissions.md",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 06\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": ".github/workflows/review.yml",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded workflow-permission-escalation",
+          "fingerprint": "workflow-permission-escalation-finding",
+          "expectedFindingId": "workflow-permission-escalation-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1035,
+          "outputTokens": 125,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 515,
+          "costUsd": 0.00105
+        }
+      ]
+    },
+    {
+      "id": "clean-workflow-permission-escalation",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": ".github/workflows/review.yml",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+permissions:\n  contents: read\n"
+        },
+        {
+          "path": "docs/permissions.md",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 06\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -122,14 +452,33 @@
       ]
     },
     {
-      "id": "api-nullability-break",
+      "id": "missing-regression-assertion",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "test/parser.test.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+parse(input);                            \n"
+        },
+        {
+          "path": "src/parser.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 07\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/api.ts",
-          "line": 16,
-          "severity": "P1",
-          "title": "Seeded api-nullability-break",
-          "fingerprint": "api-nullability-break-finding"
+          "path": "test/parser.test.ts",
+          "line": 10,
+          "severity": "P2",
+          "title": "Seeded missing-regression-assertion",
+          "fingerprint": "missing-regression-assertion-finding",
+          "expectedFindingId": "missing-regression-assertion-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -146,7 +495,98 @@
       ]
     },
     {
-      "id": "clean-api-extension",
+      "id": "clean-missing-regression-assertion",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "test/parser.test.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+assert.deepEqual(parse(input), expected);\n"
+        },
+        {
+          "path": "src/parser.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 07\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1042,
+          "outputTokens": 126,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 518,
+          "costUsd": 0.00106
+        }
+      ]
+    },
+    {
+      "id": "docs-deprecated-command",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "docs/setup.md",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+npm run setup:legacy\n"
+        },
+        {
+          "path": "package.json",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 08\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "docs/setup.md",
+          "line": 10,
+          "severity": "P3",
+          "title": "Seeded docs-deprecated-command",
+          "fingerprint": "docs-deprecated-command-finding",
+          "expectedFindingId": "docs-deprecated-command-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1049,
+          "outputTokens": 127,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 521,
+          "costUsd": 0.00107
+        }
+      ]
+    },
+    {
+      "id": "clean-docs-deprecated-command",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "docs/setup.md",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+npm run setup       \n"
+        },
+        {
+          "path": "package.json",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 08\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -162,21 +602,33 @@
       ]
     },
     {
-      "id": "stale-frontend-state",
-      "findings": [
+      "id": "generated-source-edit",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
         {
-          "path": "src/frontend.ts",
-          "line": 18,
-          "severity": "P2",
-          "title": "Seeded stale-frontend-state",
-          "fingerprint": "stale-frontend-state-finding"
+          "path": "generated/client.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+export const version = 3;\n"
         },
         {
-          "path": "src/frontend.ts",
-          "line": 18,
+          "path": "schema/client.json",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 09\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "generated/client.ts",
+          "line": 10,
           "severity": "P2",
-          "title": "Duplicate seeded stale state",
-          "fingerprint": "stale-frontend-state-finding"
+          "title": "Seeded generated-source-edit",
+          "fingerprint": "generated-source-edit-finding",
+          "expectedFindingId": "generated-source-edit-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -193,7 +645,98 @@
       ]
     },
     {
-      "id": "clean-frontend-copy",
+      "id": "clean-generated-source-edit",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "generated/client.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+export const version = 2;\n"
+        },
+        {
+          "path": "schema/client.json",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 09\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1056,
+          "outputTokens": 128,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 524,
+          "costUsd": 0.00108
+        }
+      ]
+    },
+    {
+      "id": "large-parser-boundary",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/large-parser.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+while (offset < length - 1) read();\n"
+        },
+        {
+          "path": "test/large-parser.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 10\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/large-parser.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded large-parser-boundary",
+          "fingerprint": "large-parser-boundary-finding",
+          "expectedFindingId": "large-parser-boundary-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1063,
+          "outputTokens": 129,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 527,
+          "costUsd": 0.00109
+        }
+      ]
+    },
+    {
+      "id": "clean-large-parser-boundary",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/large-parser.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+while (offset < length) read();    \n"
+        },
+        {
+          "path": "test/large-parser.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 10\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -209,14 +752,33 @@
       ]
     },
     {
-      "id": "workflow-write-escalation",
+      "id": "package-export-drift",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "packages/core/package.json",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+\"./legacy\": null             \n"
+        },
+        {
+          "path": "packages/app/src/index.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 11\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/infrastructure.ts",
-          "line": 20,
+          "path": "packages/core/package.json",
+          "line": 10,
           "severity": "P1",
-          "title": "Seeded workflow-write-escalation",
-          "fingerprint": "workflow-write-escalation-finding"
+          "title": "Seeded package-export-drift",
+          "fingerprint": "package-export-drift-finding",
+          "expectedFindingId": "package-export-drift-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -233,7 +795,98 @@
       ]
     },
     {
-      "id": "clean-cache-key-change",
+      "id": "clean-package-export-drift",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "packages/core/package.json",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+\"./legacy\": \"./src/legacy.ts\"\n"
+        },
+        {
+          "path": "packages/app/src/index.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 11\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1070,
+          "outputTokens": 130,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 530,
+          "costUsd": 0.0011
+        }
+      ]
+    },
+    {
+      "id": "caller-null-contract",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/service.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+if (!row) return undefined;         \n"
+        },
+        {
+          "path": "src/controller.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 12\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/service.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded caller-null-contract",
+          "fingerprint": "caller-null-contract-finding",
+          "expectedFindingId": "caller-null-contract-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1077,
+          "outputTokens": 131,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 533,
+          "costUsd": 0.00111
+        }
+      ]
+    },
+    {
+      "id": "clean-caller-null-contract",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/service.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+if (!row) throw new NotFoundError();\n"
+        },
+        {
+          "path": "src/controller.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 12\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -249,14 +902,33 @@
       ]
     },
     {
-      "id": "missing-regression-assertion",
+      "id": "secret-log-exposure",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/logger.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+log(`token=${token}`);                \n"
+        },
+        {
+          "path": "src/config.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 13\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/tests.ts",
-          "line": 22,
-          "severity": "P2",
-          "title": "Seeded missing-regression-assertion",
-          "fingerprint": "missing-regression-assertion-finding"
+          "path": "src/logger.ts",
+          "line": 10,
+          "severity": "P0",
+          "title": "Seeded secret-log-exposure",
+          "fingerprint": "secret-log-exposure-finding",
+          "expectedFindingId": "secret-log-exposure-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -268,12 +940,103 @@
           "outputTokens": 132,
           "reasoningTokens": 0,
           "cacheReadTokens": 536,
-          "costUsd": 0.00112
+          "costUsd": 0.0011200000000000001
         }
       ]
     },
     {
-      "id": "clean-test-refactor",
+      "id": "clean-secret-log-exposure",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/logger.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+log('provider authentication failed');\n"
+        },
+        {
+          "path": "src/config.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 13\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1084,
+          "outputTokens": 132,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 536,
+          "costUsd": 0.0011200000000000001
+        }
+      ]
+    },
+    {
+      "id": "quadratic-hot-path",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/merge.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+items.map((item) => rows.find((row) => row.id === item.id));\n"
+        },
+        {
+          "path": "test/merge.perf.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 14\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/merge.ts",
+          "line": 10,
+          "severity": "P2",
+          "title": "Seeded quadratic-hot-path",
+          "fingerprint": "quadratic-hot-path-finding",
+          "expectedFindingId": "quadratic-hot-path-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1091,
+          "outputTokens": 133,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 539,
+          "costUsd": 0.00113
+        }
+      ]
+    },
+    {
+      "id": "clean-quadratic-hot-path",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/merge.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+items.map((item) => rowsById.get(item.id));                 \n"
+        },
+        {
+          "path": "test/merge.perf.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 14\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -289,14 +1052,33 @@
       ]
     },
     {
-      "id": "incorrect-doc-example",
+      "id": "unsafe-config-default",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/config.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const enforceAuth = env.ENFORCE_AUTH !== 'false';\n"
+        },
+        {
+          "path": "docs/config.md",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 15\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/docs.ts",
-          "line": 24,
-          "severity": "P3",
-          "title": "Seeded incorrect-doc-example",
-          "fingerprint": "incorrect-doc-example-finding"
+          "path": "src/config.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded unsafe-config-default",
+          "fingerprint": "unsafe-config-default-finding",
+          "expectedFindingId": "unsafe-config-default-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -313,7 +1095,98 @@
       ]
     },
     {
-      "id": "clean-doc-typo",
+      "id": "clean-unsafe-config-default",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/config.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const enforceAuth = env.ENFORCE_AUTH === 'true'; \n"
+        },
+        {
+          "path": "docs/config.md",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 15\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1098,
+          "outputTokens": 134,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 542,
+          "costUsd": 0.00114
+        }
+      ]
+    },
+    {
+      "id": "csrf-check-removed",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "src/webhook.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return applyMutation(body);                     \n"
+        },
+        {
+          "path": "test/webhook.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 16\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/webhook.ts",
+          "line": 10,
+          "severity": "P0",
+          "title": "Seeded csrf-check-removed",
+          "fingerprint": "csrf-check-removed-finding",
+          "expectedFindingId": "csrf-check-removed-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1105,
+          "outputTokens": 135,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 545,
+          "costUsd": 0.00115
+        }
+      ]
+    },
+    {
+      "id": "clean-csrf-check-removed",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "src/webhook.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+verifyCsrf(request); return applyMutation(body);\n"
+        },
+        {
+          "path": "test/webhook.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 16\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -329,14 +1202,33 @@
       ]
     },
     {
-      "id": "generated-source-edit",
+      "id": "sql-tenant-filter",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "src/report.sql.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+WHERE created_at >= $1                         \n"
+        },
+        {
+          "path": "src/tenant-context.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 17\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/generated.ts",
-          "line": 26,
-          "severity": "P2",
-          "title": "Seeded generated-source-edit",
-          "fingerprint": "generated-source-edit-finding"
+          "path": "src/report.sql.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded sql-tenant-filter",
+          "fingerprint": "sql-tenant-filter-finding",
+          "expectedFindingId": "sql-tenant-filter-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -353,7 +1245,98 @@
       ]
     },
     {
-      "id": "clean-lockfile-refresh",
+      "id": "clean-sql-tenant-filter",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "src/report.sql.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+WHERE organization_id = $1 AND created_at >= $2\n"
+        },
+        {
+          "path": "src/tenant-context.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 17\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1112,
+          "outputTokens": 136,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 548,
+          "costUsd": 0.00116
+        }
+      ]
+    },
+    {
+      "id": "lock-order-inversion",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/locks.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await lock(b); await lock(a);\n"
+        },
+        {
+          "path": "src/worker.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 18\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/locks.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded lock-order-inversion",
+          "fingerprint": "lock-order-inversion-finding",
+          "expectedFindingId": "lock-order-inversion-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1119,
+          "outputTokens": 137,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 551,
+          "costUsd": 0.00117
+        }
+      ]
+    },
+    {
+      "id": "clean-lock-order-inversion",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/locks.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await lock(a); await lock(b);\n"
+        },
+        {
+          "path": "src/worker.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 18\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -369,22 +1352,33 @@
       ]
     },
     {
-      "id": "large-file-boundary",
-      "findings": [
+      "id": "stale-query-key",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
         {
-          "path": "src/large-single-file.ts",
-          "line": 28,
-          "severity": "P1",
-          "title": "Seeded large-file-boundary",
-          "fingerprint": "large-file-boundary-finding"
+          "path": "src/use-project.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+queryKey: ['project']           \n"
         },
         {
-          "path": "src/unrelated.ts",
-          "line": 0,
+          "path": "src/project-page.tsx",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 19\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/use-project.ts",
+          "line": 10,
           "severity": "P2",
-          "title": "Unanchored noise",
-          "fingerprint": "large-noise",
-          "anchored": false
+          "title": "Seeded stale-query-key",
+          "fingerprint": "stale-query-key-finding",
+          "expectedFindingId": "stale-query-key-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -401,7 +1395,98 @@
       ]
     },
     {
-      "id": "clean-large-generated-map",
+      "id": "clean-stale-query-key",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/use-project.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+queryKey: ['project', projectId]\n"
+        },
+        {
+          "path": "src/project-page.tsx",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 19\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1126,
+          "outputTokens": 138,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 554,
+          "costUsd": 0.00118
+        }
+      ]
+    },
+    {
+      "id": "cache-key-poisoning",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/cache.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const key = `${headSha}`;              \n"
+        },
+        {
+          "path": "src/repository.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 20\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/cache.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded cache-key-poisoning",
+          "fingerprint": "cache-key-poisoning-finding",
+          "expectedFindingId": "cache-key-poisoning-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1133,
+          "outputTokens": 139,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 557,
+          "costUsd": 0.00119
+        }
+      ]
+    },
+    {
+      "id": "clean-cache-key-poisoning",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/cache.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const key = `${repository}:${headSha}`;\n"
+        },
+        {
+          "path": "src/repository.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 20\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -417,14 +1502,33 @@
       ]
     },
     {
-      "id": "cross-package-contract",
+      "id": "timezone-flaky-test",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "test/date.test.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+assert.equal(format(date), '08:00');   \n"
+        },
+        {
+          "path": "src/date.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 21\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/broad-multi-package.ts",
-          "line": 30,
-          "severity": "P1",
-          "title": "Seeded cross-package-contract",
-          "fingerprint": "cross-package-contract-finding"
+          "path": "test/date.test.ts",
+          "line": 10,
+          "severity": "P2",
+          "title": "Seeded timezone-flaky-test",
+          "fingerprint": "timezone-flaky-test-finding",
+          "expectedFindingId": "timezone-flaky-test-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -436,12 +1540,103 @@
           "outputTokens": 140,
           "reasoningTokens": 0,
           "cacheReadTokens": 560,
-          "costUsd": 0.0012
+          "costUsd": 0.0012000000000000001
         }
       ]
     },
     {
-      "id": "clean-package-reorganization",
+      "id": "clean-timezone-flaky-test",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "test/date.test.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+assert.equal(formatUtc(date), '08:00');\n"
+        },
+        {
+          "path": "src/date.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 21\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1140,
+          "outputTokens": 140,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 560,
+          "costUsd": 0.0012000000000000001
+        }
+      ]
+    },
+    {
+      "id": "docs-wrong-env-default",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "docs/configuration.md",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+FEATURE_X defaults to enabled. \n"
+        },
+        {
+          "path": "src/config.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 22\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "docs/configuration.md",
+          "line": 10,
+          "severity": "P3",
+          "title": "Seeded docs-wrong-env-default",
+          "fingerprint": "docs-wrong-env-default-finding",
+          "expectedFindingId": "docs-wrong-env-default-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1147,
+          "outputTokens": 141,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 563,
+          "costUsd": 0.0012100000000000001
+        }
+      ]
+    },
+    {
+      "id": "clean-docs-wrong-env-default",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "docs/configuration.md",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+FEATURE_X defaults to disabled.\n"
+        },
+        {
+          "path": "src/config.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 22\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -452,19 +1647,38 @@
           "outputTokens": 141,
           "reasoningTokens": 0,
           "cacheReadTokens": 563,
-          "costUsd": 0.00121
+          "costUsd": 0.0012100000000000001
         }
       ]
     },
     {
-      "id": "caller-callee-mismatch",
+      "id": "generated-schema-hand-edit",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "generated/schema.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+status: 'new'   \n"
+        },
+        {
+          "path": "schema/source.yml",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 23\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/cross-file.ts",
-          "line": 32,
-          "severity": "P1",
-          "title": "Seeded caller-callee-mismatch",
-          "fingerprint": "caller-callee-mismatch-finding"
+          "path": "generated/schema.ts",
+          "line": 10,
+          "severity": "P2",
+          "title": "Seeded generated-schema-hand-edit",
+          "fingerprint": "generated-schema-hand-edit-finding",
+          "expectedFindingId": "generated-schema-hand-edit-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -481,7 +1695,98 @@
       ]
     },
     {
-      "id": "clean-symbol-rename",
+      "id": "clean-generated-schema-hand-edit",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "generated/schema.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+status: 'stable'\n"
+        },
+        {
+          "path": "schema/source.yml",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 23\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1154,
+          "outputTokens": 142,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 566,
+          "costUsd": 0.00122
+        }
+      ]
+    },
+    {
+      "id": "large-switch-fallthrough",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/large-reducer.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+case 'retain': keep();       \n"
+        },
+        {
+          "path": "test/reducer.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 24\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/large-reducer.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded large-switch-fallthrough",
+          "fingerprint": "large-switch-fallthrough-finding",
+          "expectedFindingId": "large-switch-fallthrough-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1161,
+          "outputTokens": 143,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 569,
+          "costUsd": 0.00123
+        }
+      ]
+    },
+    {
+      "id": "clean-large-switch-fallthrough",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/large-reducer.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+case 'retain': keep(); break;\n"
+        },
+        {
+          "path": "test/reducer.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 24\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -497,14 +1802,33 @@
       ]
     },
     {
-      "id": "secret-log-exposure",
+      "id": "workspace-version-skew",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "packages/a/package.json",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+\"@acme/protocol\": \"2\"\n"
+        },
+        {
+          "path": "packages/b/package.json",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 25\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/security.ts",
-          "line": 34,
-          "severity": "P0",
-          "title": "Seeded secret-log-exposure",
-          "fingerprint": "secret-log-exposure-finding"
+          "path": "packages/a/package.json",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded workspace-version-skew",
+          "fingerprint": "workspace-version-skew-finding",
+          "expectedFindingId": "workspace-version-skew-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -521,7 +1845,98 @@
       ]
     },
     {
-      "id": "clean-redacted-logging",
+      "id": "clean-workspace-version-skew",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "packages/a/package.json",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+\"@acme/protocol\": \"1\"\n"
+        },
+        {
+          "path": "packages/b/package.json",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 25\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1168,
+          "outputTokens": 144,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 572,
+          "costUsd": 0.00124
+        }
+      ]
+    },
+    {
+      "id": "deleted-caller-guard",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/validator.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return decode(value);                                        \n"
+        },
+        {
+          "path": "src/importer.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 26\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/validator.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded deleted-caller-guard",
+          "fingerprint": "deleted-caller-guard-finding",
+          "expectedFindingId": "deleted-caller-guard-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1175,
+          "outputTokens": 145,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 575,
+          "costUsd": 0.00125
+        }
+      ]
+    },
+    {
+      "id": "clean-deleted-caller-guard",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/validator.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+if (!isEncoded(value)) throw invalid(); return decode(value);\n"
+        },
+        {
+          "path": "src/importer.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 26\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -537,14 +1952,33 @@
       ]
     },
     {
-      "id": "quadratic-hot-path",
+      "id": "path-traversal",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/archive.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+write(join(root, entry.name), entry.body);     \n"
+        },
+        {
+          "path": "test/archive.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 27\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/performance.ts",
-          "line": 36,
-          "severity": "P1",
-          "title": "Seeded quadratic-hot-path",
-          "fingerprint": "quadratic-hot-path-finding"
+          "path": "src/archive.ts",
+          "line": 10,
+          "severity": "P0",
+          "title": "Seeded path-traversal",
+          "fingerprint": "path-traversal-finding",
+          "expectedFindingId": "path-traversal-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -561,7 +1995,98 @@
       ]
     },
     {
-      "id": "clean-loop-simplification",
+      "id": "clean-path-traversal",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/archive.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+write(safeChild(root, entry.name), entry.body);\n"
+        },
+        {
+          "path": "test/archive.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 27\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1182,
+          "outputTokens": 146,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 578,
+          "costUsd": 0.00126
+        }
+      ]
+    },
+    {
+      "id": "transaction-boundary",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/orders.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await saveOrder(order); await charge(order);          \n"
+        },
+        {
+          "path": "src/payments.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 28\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/orders.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded transaction-boundary",
+          "fingerprint": "transaction-boundary-finding",
+          "expectedFindingId": "transaction-boundary-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1189,
+          "outputTokens": 147,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 581,
+          "costUsd": 0.00127
+        }
+      ]
+    },
+    {
+      "id": "clean-transaction-boundary",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/orders.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await db.transaction(() => saveOrderAndCharge(order));\n"
+        },
+        {
+          "path": "src/payments.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 28\n"
+        }
+      ],
       "findings": [],
       "telemetry": [
         {
@@ -577,14 +2102,33 @@
       ]
     },
     {
-      "id": "unsafe-default-config",
+      "id": "async-double-settle",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "src/queue.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+timer.onTimeout(reject); worker.onDone(resolve);\n"
+        },
+        {
+          "path": "test/queue.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 29\n"
+        }
+      ],
       "findings": [
         {
-          "path": "src/configuration.ts",
-          "line": 38,
-          "severity": "P1",
-          "title": "Seeded unsafe-default-config",
-          "fingerprint": "unsafe-default-config-finding"
+          "path": "src/queue.ts",
+          "line": 10,
+          "severity": "P2",
+          "title": "Seeded async-double-settle",
+          "fingerprint": "async-double-settle-finding",
+          "expectedFindingId": "async-double-settle-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -596,19 +2140,70 @@
           "outputTokens": 148,
           "reasoningTokens": 0,
           "cacheReadTokens": 584,
-          "costUsd": 0.00128
+          "costUsd": 0.0012799999999999999
         }
       ]
     },
     {
-      "id": "clean-config-comment",
+      "id": "clean-async-double-settle",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "src/queue.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+settleOnce(timer, worker, resolve, reject);     \n"
+        },
+        {
+          "path": "test/queue.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 29\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1196,
+          "outputTokens": 148,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 584,
+          "costUsd": 0.0012799999999999999
+        }
+      ]
+    },
+    {
+      "id": "hydration-mismatch",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/banner.tsx",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return <span>{window.innerWidth}</span>;\n"
+        },
+        {
+          "path": "src/server-flags.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 30\n"
+        }
+      ],
       "findings": [
         {
-          "path": "config/app.yml",
-          "line": 2,
-          "severity": "P3",
-          "title": "Fixture false positive",
-          "fingerprint": "clean-config-fp"
+          "path": "src/banner.tsx",
+          "line": 10,
+          "severity": "P2",
+          "title": "Seeded hydration-mismatch",
+          "fingerprint": "hydration-mismatch-finding",
+          "expectedFindingId": "hydration-mismatch-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
         }
       ],
       "telemetry": [
@@ -621,6 +2216,1538 @@
           "reasoningTokens": 0,
           "cacheReadTokens": 587,
           "costUsd": 0.00129
+        }
+      ]
+    },
+    {
+      "id": "clean-hydration-mismatch",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/banner.tsx",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return <span>{widthAfterMount}</span>;  \n"
+        },
+        {
+          "path": "src/server-flags.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 30\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1203,
+          "outputTokens": 149,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 587,
+          "costUsd": 0.00129
+        }
+      ]
+    },
+    {
+      "id": "oidc-permission-scope",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": ".github/workflows/deploy.yml",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+if: github.event_name == 'pull_request'\n"
+        },
+        {
+          "path": "infra/iam.tf",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 31\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": ".github/workflows/deploy.yml",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded oidc-permission-scope",
+          "fingerprint": "oidc-permission-scope-finding",
+          "expectedFindingId": "oidc-permission-scope-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1210,
+          "outputTokens": 150,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 590,
+          "costUsd": 0.0013
+        }
+      ]
+    },
+    {
+      "id": "clean-oidc-permission-scope",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": ".github/workflows/deploy.yml",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+if: github.ref == 'refs/heads/main'    \n"
+        },
+        {
+          "path": "infra/iam.tf",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 31\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1210,
+          "outputTokens": 150,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 590,
+          "costUsd": 0.0013
+        }
+      ]
+    },
+    {
+      "id": "test-false-positive",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "test/errors.test.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+assert.throws(run);               \n"
+        },
+        {
+          "path": "src/errors.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 32\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "test/errors.test.ts",
+          "line": 10,
+          "severity": "P2",
+          "title": "Seeded test-false-positive",
+          "fingerprint": "test-false-positive-finding",
+          "expectedFindingId": "test-false-positive-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1217,
+          "outputTokens": 151,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 593,
+          "costUsd": 0.00131
+        }
+      ]
+    },
+    {
+      "id": "clean-test-false-positive",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "test/errors.test.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+assert.throws(run, ExpectedError);\n"
+        },
+        {
+          "path": "src/errors.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 32\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1217,
+          "outputTokens": 151,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 593,
+          "costUsd": 0.00131
+        }
+      ]
+    },
+    {
+      "id": "docs-copy-paste-path",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "docs/migration.md",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+import { run } from \"@acme/old\";\n"
+        },
+        {
+          "path": "packages/new/package.json",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 33\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "docs/migration.md",
+          "line": 10,
+          "severity": "P3",
+          "title": "Seeded docs-copy-paste-path",
+          "fingerprint": "docs-copy-paste-path-finding",
+          "expectedFindingId": "docs-copy-paste-path-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1224,
+          "outputTokens": 152,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 596,
+          "costUsd": 0.00132
+        }
+      ]
+    },
+    {
+      "id": "clean-docs-copy-paste-path",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "docs/migration.md",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+import { run } from \"@acme/new\";\n"
+        },
+        {
+          "path": "packages/new/package.json",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 33\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1224,
+          "outputTokens": 152,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 596,
+          "costUsd": 0.00132
+        }
+      ]
+    },
+    {
+      "id": "shared-session-finalization",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "src/shared/session-concurrency.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return await backend.review(input);                                     \n"
+        },
+        {
+          "path": "src/shared/acp.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 34\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/shared/session-concurrency.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded shared-session-finalization",
+          "fingerprint": "shared-session-finalization-finding",
+          "expectedFindingId": "shared-session-finalization-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1231,
+          "outputTokens": 153,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 599,
+          "costUsd": 0.00133
+        }
+      ]
+    },
+    {
+      "id": "clean-shared-session-finalization",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "src/shared/session-concurrency.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+try { return await backend.review(input); } finally { finishSession(); }\n"
+        },
+        {
+          "path": "src/shared/acp.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 34\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1231,
+          "outputTokens": 153,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 599,
+          "costUsd": 0.00133
+        }
+      ]
+    },
+    {
+      "id": "large-regex-backtracking",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/large-validator.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const pattern = /^(a+)+$/;\n"
+        },
+        {
+          "path": "test/validator.perf.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 35\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/large-validator.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded large-regex-backtracking",
+          "fingerprint": "large-regex-backtracking-finding",
+          "expectedFindingId": "large-regex-backtracking-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1238,
+          "outputTokens": 154,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 602,
+          "costUsd": 0.00134
+        }
+      ]
+    },
+    {
+      "id": "clean-large-regex-backtracking",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/large-validator.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const pattern = /^a+$/;   \n"
+        },
+        {
+          "path": "test/validator.perf.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 35\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1238,
+          "outputTokens": 154,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 602,
+          "costUsd": 0.00134
+        }
+      ]
+    },
+    {
+      "id": "workspace-peer-break",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "packages/plugin/package.json",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+\"host\": \"^1\"\n"
+        },
+        {
+          "path": "packages/host/package.json",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 36\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "packages/plugin/package.json",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded workspace-peer-break",
+          "fingerprint": "workspace-peer-break-finding",
+          "expectedFindingId": "workspace-peer-break-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1245,
+          "outputTokens": 155,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 605,
+          "costUsd": 0.00135
+        }
+      ]
+    },
+    {
+      "id": "clean-workspace-peer-break",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "packages/plugin/package.json",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+\"host\": \"^2\"\n"
+        },
+        {
+          "path": "packages/host/package.json",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 36\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1245,
+          "outputTokens": 155,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 605,
+          "costUsd": 0.00135
+        }
+      ]
+    },
+    {
+      "id": "symbol-usage-miss",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/serializer.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return encodeV2(value);        \n"
+        },
+        {
+          "path": "src/exporter.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 37\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/serializer.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded symbol-usage-miss",
+          "fingerprint": "symbol-usage-miss-finding",
+          "expectedFindingId": "symbol-usage-miss-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1252,
+          "outputTokens": 156,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 608,
+          "costUsd": 0.00136
+        }
+      ]
+    },
+    {
+      "id": "clean-symbol-usage-miss",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/serializer.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return encodeCompatible(value);\n"
+        },
+        {
+          "path": "src/exporter.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 37\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1252,
+          "outputTokens": 156,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 608,
+          "costUsd": 0.00136
+        }
+      ]
+    },
+    {
+      "id": "authorization-order",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/download.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const file = await load(id); authorize(user, file);      \n"
+        },
+        {
+          "path": "src/storage.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 38\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/download.ts",
+          "line": 10,
+          "severity": "P0",
+          "title": "Seeded authorization-order",
+          "fingerprint": "authorization-order-finding",
+          "expectedFindingId": "authorization-order-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1259,
+          "outputTokens": 157,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 611,
+          "costUsd": 0.0013700000000000001
+        }
+      ]
+    },
+    {
+      "id": "clean-authorization-order",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "src/download.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+authorizeMetadata(user, id); const file = await load(id);\n"
+        },
+        {
+          "path": "src/storage.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 38\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1259,
+          "outputTokens": 157,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 611,
+          "costUsd": 0.0013700000000000001
+        }
+      ]
+    },
+    {
+      "id": "decimal-precision-loss",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/money.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return Number(amount) * rate;    \n"
+        },
+        {
+          "path": "test/money.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 39\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/money.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded decimal-precision-loss",
+          "fingerprint": "decimal-precision-loss-finding",
+          "expectedFindingId": "decimal-precision-loss-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1266,
+          "outputTokens": 158,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 614,
+          "costUsd": 0.0013800000000000002
+        }
+      ]
+    },
+    {
+      "id": "clean-decimal-precision-loss",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/money.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return decimal(amount).mul(rate);\n"
+        },
+        {
+          "path": "test/money.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 39\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1266,
+          "outputTokens": 158,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 614,
+          "costUsd": 0.0013800000000000002
+        }
+      ]
+    },
+    {
+      "id": "semaphore-leak",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "src/pool.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+await runTask(); release();                    \n"
+        },
+        {
+          "path": "test/pool.failure.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 40\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/pool.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded semaphore-leak",
+          "fingerprint": "semaphore-leak-finding",
+          "expectedFindingId": "semaphore-leak-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1273,
+          "outputTokens": 159,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 617,
+          "costUsd": 0.00139
+        }
+      ]
+    },
+    {
+      "id": "clean-semaphore-leak",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "src/pool.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+try { await runTask(); } finally { release(); }\n"
+        },
+        {
+          "path": "test/pool.failure.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 40\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1273,
+          "outputTokens": 159,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 617,
+          "costUsd": 0.00139
+        }
+      ]
+    },
+    {
+      "id": "optimistic-rollback",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/use-save.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+onMutate: applyDraft                          \n"
+        },
+        {
+          "path": "src/editor.tsx",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 41\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/use-save.ts",
+          "line": 10,
+          "severity": "P2",
+          "title": "Seeded optimistic-rollback",
+          "fingerprint": "optimistic-rollback-finding",
+          "expectedFindingId": "optimistic-rollback-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1280,
+          "outputTokens": 160,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 620,
+          "costUsd": 0.0014
+        }
+      ]
+    },
+    {
+      "id": "clean-optimistic-rollback",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/use-save.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+onMutate: applyDraft, onError: restoreSnapshot\n"
+        },
+        {
+          "path": "src/editor.tsx",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 41\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1280,
+          "outputTokens": 160,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 620,
+          "costUsd": 0.0014
+        }
+      ]
+    },
+    {
+      "id": "deploy-healthcheck",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "infra/deployment.yml",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+path: /ready       \n"
+        },
+        {
+          "path": "src/health.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 42\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "infra/deployment.yml",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded deploy-healthcheck",
+          "fingerprint": "deploy-healthcheck-finding",
+          "expectedFindingId": "deploy-healthcheck-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1287,
+          "outputTokens": 161,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 623,
+          "costUsd": 0.00141
+        }
+      ]
+    },
+    {
+      "id": "clean-deploy-healthcheck",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "infra/deployment.yml",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+path: /health/ready\n"
+        },
+        {
+          "path": "src/health.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 42\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1287,
+          "outputTokens": 161,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 623,
+          "costUsd": 0.00141
+        }
+      ]
+    },
+    {
+      "id": "mock-contract-drift",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "test/mock-api.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return { id, legacyName }; \n"
+        },
+        {
+          "path": "src/api-client.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 43\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "test/mock-api.ts",
+          "line": 10,
+          "severity": "P2",
+          "title": "Seeded mock-contract-drift",
+          "fingerprint": "mock-contract-drift-finding",
+          "expectedFindingId": "mock-contract-drift-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1294,
+          "outputTokens": 162,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 626,
+          "costUsd": 0.00142
+        }
+      ]
+    },
+    {
+      "id": "clean-mock-contract-drift",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "test/mock-api.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+return { id, displayName };\n"
+        },
+        {
+          "path": "src/api-client.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 43\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1294,
+          "outputTokens": 162,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 626,
+          "costUsd": 0.00142
+        }
+      ]
+    },
+    {
+      "id": "docs-unavailable-option",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "docs/cli.md",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+tool run --fast-mode\n"
+        },
+        {
+          "path": "src/cli.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 44\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "docs/cli.md",
+          "line": 10,
+          "severity": "P3",
+          "title": "Seeded docs-unavailable-option",
+          "fingerprint": "docs-unavailable-option-finding",
+          "expectedFindingId": "docs-unavailable-option-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1301,
+          "outputTokens": 163,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 629,
+          "costUsd": 0.00143
+        }
+      ]
+    },
+    {
+      "id": "clean-docs-unavailable-option",
+      "shape": {
+        "files": 2,
+        "additions": 12,
+        "deletions": 4,
+        "patchBytes": 4000
+      },
+      "files": [
+        {
+          "path": "docs/cli.md",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+tool run --mode fast\n"
+        },
+        {
+          "path": "src/cli.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 44\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1301,
+          "outputTokens": 163,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 629,
+          "costUsd": 0.00143
+        }
+      ]
+    },
+    {
+      "id": "generated-client-stale",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "generated/api-client.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+type Response = { id: string };                  \n"
+        },
+        {
+          "path": "openapi/api.yml",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 45\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "generated/api-client.ts",
+          "line": 10,
+          "severity": "P2",
+          "title": "Seeded generated-client-stale",
+          "fingerprint": "generated-client-stale-finding",
+          "expectedFindingId": "generated-client-stale-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1308,
+          "outputTokens": 164,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 632,
+          "costUsd": 0.00144
+        }
+      ]
+    },
+    {
+      "id": "clean-generated-client-stale",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "generated/api-client.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+type Response = { id: string; revision: string };\n"
+        },
+        {
+          "path": "openapi/api.yml",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 45\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1308,
+          "outputTokens": 164,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 632,
+          "costUsd": 0.00144
+        }
+      ]
+    },
+    {
+      "id": "large-file-off-by-one",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/large-index.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+for (let i = 0; i < items.length - 1; i++) add(items[i]);\n"
+        },
+        {
+          "path": "test/large-index.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 46\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/large-index.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded large-file-off-by-one",
+          "fingerprint": "large-file-off-by-one-finding",
+          "expectedFindingId": "large-file-off-by-one-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1315,
+          "outputTokens": 165,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 635,
+          "costUsd": 0.00145
+        }
+      ]
+    },
+    {
+      "id": "clean-large-file-off-by-one",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/large-index.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+for (let i = 0; i < items.length; i++) add(items[i]);    \n"
+        },
+        {
+          "path": "test/large-index.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 46\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1315,
+          "outputTokens": 165,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 635,
+          "costUsd": 0.00145
+        }
+      ]
+    },
+    {
+      "id": "package-cycle",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "packages/core/src/index.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+export { theme } from \"@acme/ui\";\n"
+        },
+        {
+          "path": "packages/ui/src/index.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 47\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "packages/core/src/index.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded package-cycle",
+          "fingerprint": "package-cycle-finding",
+          "expectedFindingId": "package-cycle-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1322,
+          "outputTokens": 166,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 638,
+          "costUsd": 0.00146
+        }
+      ]
+    },
+    {
+      "id": "clean-package-cycle",
+      "shape": {
+        "files": 18,
+        "additions": 800,
+        "deletions": 200,
+        "patchBytes": 100000
+      },
+      "files": [
+        {
+          "path": "packages/core/src/index.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+export { theme } from \"./theme\"; \n"
+        },
+        {
+          "path": "packages/ui/src/index.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 47\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1322,
+          "outputTokens": 166,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 638,
+          "costUsd": 0.00146
+        }
+      ]
+    },
+    {
+      "id": "caller-error-swallow",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/provider.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+catch { return []; }                    \n"
+        },
+        {
+          "path": "src/retry.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 48\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/provider.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded caller-error-swallow",
+          "fingerprint": "caller-error-swallow-finding",
+          "expectedFindingId": "caller-error-swallow-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1329,
+          "outputTokens": 167,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 641,
+          "costUsd": 0.00147
+        }
+      ]
+    },
+    {
+      "id": "clean-caller-error-swallow",
+      "shape": {
+        "files": 42,
+        "additions": 1500,
+        "deletions": 400,
+        "patchBytes": 220000
+      },
+      "files": [
+        {
+          "path": "src/provider.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+catch (error) { throw classify(error); }\n"
+        },
+        {
+          "path": "src/retry.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 48\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1329,
+          "outputTokens": 167,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 641,
+          "costUsd": 0.00147
+        }
+      ]
+    },
+    {
+      "id": "nonce-reuse",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/encryption.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+encrypt(key, ZERO_NONCE, plaintext);   \n"
+        },
+        {
+          "path": "test/encryption.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 49\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/encryption.ts",
+          "line": 10,
+          "severity": "P0",
+          "title": "Seeded nonce-reuse",
+          "fingerprint": "nonce-reuse-finding",
+          "expectedFindingId": "nonce-reuse-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1336,
+          "outputTokens": 168,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 644,
+          "costUsd": 0.00148
+        }
+      ]
+    },
+    {
+      "id": "clean-nonce-reuse",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/encryption.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+encrypt(key, randomNonce(), plaintext);\n"
+        },
+        {
+          "path": "test/encryption.test.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 49\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1336,
+          "outputTokens": 168,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 644,
+          "costUsd": 0.00148
+        }
+      ]
+    },
+    {
+      "id": "idempotency-key-scope",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/payments.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const key = request.idempotencyKey;                  \n"
+        },
+        {
+          "path": "src/request.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 50\n"
+        }
+      ],
+      "findings": [
+        {
+          "path": "src/payments.ts",
+          "line": 10,
+          "severity": "P1",
+          "title": "Seeded idempotency-key-scope",
+          "fingerprint": "idempotency-key-scope-finding",
+          "expectedFindingId": "idempotency-key-scope-finding",
+          "triggerComplete": true,
+          "evidenceSupported": true
+        }
+      ],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1343,
+          "outputTokens": 169,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 647,
+          "costUsd": 0.00149
+        }
+      ]
+    },
+    {
+      "id": "clean-idempotency-key-scope",
+      "shape": {
+        "files": 6,
+        "additions": 120,
+        "deletions": 30,
+        "patchBytes": 24000
+      },
+      "files": [
+        {
+          "path": "src/payments.ts",
+          "patch": "@@ -10,1 +10,1 @@\n-old behavior\n+const key = `${accountId}:${request.idempotencyKey}`;\n"
+        },
+        {
+          "path": "src/request.ts",
+          "patch": "@@ -5,1 +5,1 @@\n-old evidence\n+counterpart 50\n"
+        }
+      ],
+      "findings": [],
+      "telemetry": [
+        {
+          "kind": "session",
+          "session": "fixture-review",
+          "model": "fixture/replay",
+          "inputTokens": 1343,
+          "outputTokens": 169,
+          "reasoningTokens": 0,
+          "cacheReadTokens": 647,
+          "costUsd": 0.00149
         }
       ]
     }

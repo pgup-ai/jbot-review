@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -579,7 +579,16 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     return;
   }
 
-  if (benchmarkOutput) writeFileSync(benchmarkOutput, `${JSON.stringify(reviewResult)}\n`);
+  if (benchmarkOutput) {
+    const telemetryPath = join(REPORT_DIR, 'telemetry.jsonl');
+    writeFileSync(
+      benchmarkOutput,
+      `${JSON.stringify({
+        ...reviewResult,
+        ...(existsSync(telemetryPath) ? { telemetry: readFileSync(telemetryPath, 'utf8') } : {}),
+      })}\n`,
+    );
+  }
 
   const report = renderReport(reviewResult, { branch, baseRef, mergeBase, model });
   console.log(`\n${report}`);

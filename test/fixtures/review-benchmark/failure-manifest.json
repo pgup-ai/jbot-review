@@ -1,15 +1,17 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "name": "runner-failure-classification",
   "repetitions": 1,
   "timeoutMs": 1000,
-  "corpusHash": "sha256:e8ccaca8c17b3d15c24f17a570ba37d08c7644e2e23029a51d2febe78a0a03f1",
+  "corpusHash": "sha256:735145311e36b98aa0883e88db99c047b4e0ef94cd8f81005e57715bacfde1db",
+  "qualityCorpus": false,
   "runner": {
     "command": [
       "${projectRoot}/node_modules/.bin/tsx",
       "${projectRoot}/test/fixtures/review-benchmark/failure-runner.ts"
     ],
-    "cwd": "project"
+    "cwd": "project",
+    "fixtureMode": "replay"
   },
   "declaredTreatmentVariables": ["config.benchmarkAdapterMode"],
   "control": {
@@ -18,12 +20,16 @@
       "model": "fixture/failure",
       "modelRevision": "1",
       "engine": "fixture",
-      "engineVersion": "1",
+      "engineVersion": "2",
       "reasoningEffort": "deterministic",
-      "sampling": { "temperature": 0 },
-      "promptVersion": "failure-fixture-v1",
-      "corpusHash": "sha256:e8ccaca8c17b3d15c24f17a570ba37d08c7644e2e23029a51d2febe78a0a03f1",
-      "config": { "benchmarkAdapterMode": "control" }
+      "sampling": {
+        "temperature": 0
+      },
+      "promptVersion": "failure-fixture-v2",
+      "corpusHash": "sha256:735145311e36b98aa0883e88db99c047b4e0ef94cd8f81005e57715bacfde1db",
+      "config": {
+        "benchmarkAdapterMode": "control"
+      }
     }
   },
   "treatment": {
@@ -32,12 +38,16 @@
       "model": "fixture/failure",
       "modelRevision": "1",
       "engine": "fixture",
-      "engineVersion": "1",
+      "engineVersion": "2",
       "reasoningEffort": "deterministic",
-      "sampling": { "temperature": 0 },
-      "promptVersion": "failure-fixture-v1",
-      "corpusHash": "sha256:e8ccaca8c17b3d15c24f17a570ba37d08c7644e2e23029a51d2febe78a0a03f1",
-      "config": { "benchmarkAdapterMode": "treatment" }
+      "sampling": {
+        "temperature": 0
+      },
+      "promptVersion": "failure-fixture-v2",
+      "corpusHash": "sha256:735145311e36b98aa0883e88db99c047b4e0ef94cd8f81005e57715bacfde1db",
+      "config": {
+        "benchmarkAdapterMode": "treatment"
+      }
     }
   },
   "cases": [
@@ -48,6 +58,8 @@
       "diffSize": "small",
       "expectedClean": true,
       "expectedFindings": [],
+      "categories": ["clean"],
+      "subsets": ["full"],
       "fixturePath": "corpus.json",
       "base": "fixture-base",
       "head": "fixture-head"

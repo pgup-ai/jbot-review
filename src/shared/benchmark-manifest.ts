@@ -6,7 +6,15 @@ import {
   type BenchmarkDiffSize,
   type BenchmarkExpectedFinding,
   type BenchmarkRiskTier,
+  severityWithinRange,
 } from './benchmark-score.ts';
+import {
+  assertBenchmarkCategoryCoverage,
+  validateBenchmarkCorpusMetadata,
+  validateBenchmarkCounterfactuals,
+  type BenchmarkCategory,
+  type BenchmarkReleaseSubset,
+} from './benchmark-corpus.ts';
 import { VALID_SEVERITIES, type Severity } from './types.ts';
 
 const GITHUB_TOKEN_KEYS = new Set([
@@ -19,6 +27,7 @@ const GITHUB_TOKEN_KEYS = new Set([
 interface BenchmarkRunner {
   command: string[];
   cwd: 'project' | 'workspace';
+  fixtureMode: 'replay' | 'git';
 }
 
 export interface BenchmarkArm {
@@ -34,8 +43,13 @@ export interface BenchmarkCase {
   diffSize: BenchmarkDiffSize;
   expectedClean: boolean;
   expectedFindings: BenchmarkExpectedFinding[];
+  categories: BenchmarkCategory[];
+  subsets: BenchmarkReleaseSubset[];
+  counterfactualCaseId?: string;
+  counterfactualOf?: string;
   fixturePath?: string;
   repository?: string;
+  privateCaseHash?: string;
   base: string;
   head: string;
 }
@@ -46,6 +60,7 @@ export interface BenchmarkManifest {
   repetitions: number;
   timeoutMs: number;
   corpusHash: string;
+  qualityCorpus: boolean;
   runner: BenchmarkRunner;
   declaredTreatmentVariables: string[];
   control: BenchmarkArm;
@@ -122,6 +137,9 @@ export function validateBenchmarkManifest(value: unknown): BenchmarkManifest {
   if (value.runner.cwd !== 'project' && value.runner.cwd !== 'workspace') {
     throw new Error('Manifest runner.cwd must be project or workspace.');
   }
+  if (value.runner.fixtureMode !== 'replay' && value.runner.fixtureMode !== 'git') {
+    throw new Error('Manifest runner.fixtureMode must be replay or git.');
+  }
   if (
     !Array.isArray(value.declaredTreatmentVariables) ||
     value.declaredTreatmentVariables.length === 0 ||
@@ -147,8 +165,13 @@ export function validateBenchmarkManifest(value: unknown): BenchmarkManifest {
       typeof candidate.fixturePath === 'string' && Boolean(candidate.fixturePath.trim());
     const hasRepository =
       typeof candidate.repository === 'string' && Boolean(candidate.repository.trim());
-    if (hasFixture === hasRepository) {
-      throw new Error(`Case ${candidate.id} requires exactly one fixturePath or repository.`);
+    const hasPrivateHash =
+      typeof candidate.privateCaseHash === 'string' &&
+      /^sha256:[a-f0-9]{64}$/i.test(candidate.privateCaseHash);
+    if ([hasFixture, hasRepository, hasPrivateHash].filter(Boolean).length !== 1) {
+      throw new Error(
+        `Case ${candidate.id} requires exactly one fixturePath, repository, or privateCaseHash.`,
+      );
     }
     if (
       typeof candidate.base !== 'string' ||
@@ -159,7 +182,7 @@ export function validateBenchmarkManifest(value: unknown): BenchmarkManifest {
       throw new Error(`Case ${candidate.id} requires base and head identifiers.`);
     }
     if (
-      hasRepository &&
+      (hasRepository || hasPrivateHash) &&
       (!/^[a-f0-9]{40}$/i.test(candidate.base) || !/^[a-f0-9]{40}$/i.test(candidate.head))
     ) {
       throw new Error(`Repository case ${candidate.id} requires immutable base/head SHAs.`);
@@ -181,6 +204,7 @@ export function validateBenchmarkManifest(value: unknown): BenchmarkManifest {
     ) {
       throw new Error(`Case ${candidate.id} requires expectedClean and expectedFindings.`);
     }
+    validateBenchmarkCorpusMetadata(candidate);
     if (candidate.expectedClean && candidate.expectedFindings.length > 0) {
       throw new Error(`Clean case ${candidate.id} cannot declare expected findings.`);
     }
@@ -196,6 +220,37 @@ export function validateBenchmarkManifest(value: unknown): BenchmarkManifest {
         expectedIds.has(finding.id) ||
         typeof finding.severity !== 'string' ||
         !VALID_SEVERITIES.has(finding.severity as Severity) ||
+        !isRecord(finding.severityRange) ||
+        typeof finding.severityRange.highest !== 'string' ||
+        !VALID_SEVERITIES.has(finding.severityRange.highest as Severity) ||
+        typeof finding.severityRange.lowest !== 'string' ||
+        !VALID_SEVERITIES.has(finding.severityRange.lowest as Severity) ||
+        !severityWithinRange(finding.severity as Severity, {
+          highest: finding.severityRange.highest as Severity,
+          lowest: finding.severityRange.lowest as Severity,
+        }) ||
+        typeof finding.trigger !== 'string' ||
+        !finding.trigger.trim() ||
+        !Array.isArray(finding.acceptableFindings) ||
+        finding.acceptableFindings.length === 0 ||
+        finding.acceptableFindings.some(
+          (interpretation) => typeof interpretation !== 'string' || !interpretation.trim(),
+        ) ||
+        !Array.isArray(finding.requiredEvidence) ||
+        finding.requiredEvidence.length === 0 ||
+        finding.requiredEvidence.some(
+          (evidence) =>
+            !isRecord(evidence) ||
+            typeof evidence.path !== 'string' ||
+            !evidence.path.trim() ||
+            typeof evidence.relation !== 'string' ||
+            !evidence.relation.trim(),
+        ) ||
+        !Array.isArray(finding.disallowedInterpretations) ||
+        finding.disallowedInterpretations.length === 0 ||
+        finding.disallowedInterpretations.some(
+          (interpretation) => typeof interpretation !== 'string' || !interpretation.trim(),
+        ) ||
         !Array.isArray(finding.anchors) ||
         finding.anchors.length === 0 ||
         finding.anchors.some(
@@ -209,8 +264,32 @@ export function validateBenchmarkManifest(value: unknown): BenchmarkManifest {
       ) {
         throw new Error(`Case ${candidate.id} has an invalid expected finding.`);
       }
+      const anchors = finding.anchors as Array<{ path: string; line: number }>;
+      const requiredEvidence = finding.requiredEvidence as Array<{
+        path: string;
+        relation: string;
+      }>;
+      if (
+        value.qualityCorpus === true &&
+        (finding.acceptableFindings.length < 2 ||
+          !requiredEvidence.some((evidence) => evidence.path !== anchors[0].path))
+      ) {
+        throw new Error(
+          `Case ${candidate.id} expected findings require alternatives and cross-file evidence.`,
+        );
+      }
       expectedIds.add(finding.id);
     }
+  }
+
+  if (typeof value.qualityCorpus !== 'boolean') {
+    throw new Error('Manifest requires qualityCorpus.');
+  }
+  if (value.qualityCorpus) {
+    const cases = value.cases as unknown as BenchmarkCase[];
+    if (cases.length < 100) throw new Error('Quality corpus requires at least 100 cases.');
+    assertBenchmarkCategoryCoverage(cases);
+    validateBenchmarkCounterfactuals(cases);
   }
 
   const control = validateArm(value.control, 'control');

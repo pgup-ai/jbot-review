@@ -123,7 +123,9 @@ export function isBenchmarkRunnerOutput(value: unknown): value is BenchmarkRunne
         (finding.expectedFindingId === undefined ||
           typeof finding.expectedFindingId === 'string') &&
         (finding.retained === undefined || typeof finding.retained === 'boolean') &&
-        (finding.anchored === undefined || typeof finding.anchored === 'boolean'),
+        (finding.anchored === undefined || typeof finding.anchored === 'boolean') &&
+        (finding.triggerComplete === undefined || typeof finding.triggerComplete === 'boolean') &&
+        (finding.evidenceSupported === undefined || typeof finding.evidenceSupported === 'boolean'),
     )
   );
 }

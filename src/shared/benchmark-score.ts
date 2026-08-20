@@ -1,6 +1,6 @@
 import type { Severity } from './types.ts';
 
-export const BENCHMARK_SCHEMA_VERSION = 1;
+export const BENCHMARK_SCHEMA_VERSION = 2;
 const BENCHMARK_BOOTSTRAP_SEED = 0x4a424f54;
 const BENCHMARK_BOOTSTRAP_SAMPLES = 2_000;
 
@@ -16,7 +16,18 @@ export interface BenchmarkAnchor {
 export interface BenchmarkExpectedFinding {
   id: string;
   severity: Severity;
+  severityRange: {
+    highest: Severity;
+    lowest: Severity;
+  };
   anchors: BenchmarkAnchor[];
+  trigger: string;
+  acceptableFindings: string[];
+  requiredEvidence: Array<{
+    path: string;
+    relation: string;
+  }>;
+  disallowedInterpretations: string[];
 }
 
 export interface BenchmarkObservedFinding extends BenchmarkAnchor {
@@ -30,6 +41,9 @@ export interface BenchmarkObservedFinding extends BenchmarkAnchor {
   retained?: boolean;
   /** Whether the claimed location is a valid diff anchor. Defaults to line > 0. */
   anchored?: boolean;
+  /** Adjudicated semantic checks; absent means the adapter cannot expose the metric. */
+  triggerComplete?: boolean;
+  evidenceSupported?: boolean;
 }
 
 export interface BenchmarkCaseRun {
@@ -64,6 +78,9 @@ export interface BenchmarkScore {
   cleanFalsePositiveRate: BenchmarkMetric;
   anchorRate: BenchmarkMetric;
   duplicateRate: BenchmarkMetric;
+  triggerCompleteness: BenchmarkMetric;
+  evidenceSupportRate: BenchmarkMetric;
+  missedBySeverity: Record<Severity, number>;
   latencyMs: {
     median: BenchmarkMetric;
     p90: BenchmarkMetric;
@@ -102,8 +119,26 @@ interface CaseContribution {
   anchored: number;
   observed: number;
   duplicates: number;
+  triggerComplete: number;
+  triggerObserved: number;
+  evidenceSupported: number;
+  evidenceObserved: number;
+  missedBySeverity: Record<Severity, number>;
   latencyMs: number;
   costUsd: number;
+}
+
+const SEVERITY_ORDER: Severity[] = ['P0', 'P1', 'P2', 'P3', 'nit'];
+
+export function severityWithinRange(
+  severity: Severity,
+  range: BenchmarkExpectedFinding['severityRange'],
+): boolean {
+  const observed = SEVERITY_ORDER.indexOf(severity);
+  return (
+    observed >= SEVERITY_ORDER.indexOf(range.highest) &&
+    observed <= SEVERITY_ORDER.indexOf(range.lowest)
+  );
 }
 
 function findingKey(finding: BenchmarkObservedFinding): string {
@@ -111,6 +146,70 @@ function findingKey(finding: BenchmarkObservedFinding): string {
     finding.fingerprint ??
     `${finding.path}:${finding.line}:${finding.title.trim().toLocaleLowerCase('en-US')}`
   );
+}
+
+interface BenchmarkVariance {
+  status: 'reportable' | 'insufficient-repetitions';
+  cases: number;
+  minRepetitions: number;
+  maxRepetitions: number;
+  findingAgreement: number | null;
+  latencyRelativeMad: number | null;
+}
+
+function jaccard(left: Set<string>, right: Set<string>): number {
+  const union = new Set([...left, ...right]);
+  if (union.size === 0) return 1;
+  let intersection = 0;
+  for (const value of left) if (right.has(value)) intersection += 1;
+  return intersection / union.size;
+}
+
+export function characterizeBenchmarkVariance(runs: BenchmarkCaseRun[]): BenchmarkVariance {
+  const grouped = new Map<string, BenchmarkCaseRun[]>();
+  for (const run of runs) {
+    const group = grouped.get(run.caseId);
+    if (group) group.push(run);
+    else grouped.set(run.caseId, [run]);
+  }
+  const repetitions = [...grouped.values()].map((group) => group.length);
+  const agreements: number[] = [];
+  const relativeDeviations: number[] = [];
+  for (const group of grouped.values()) {
+    for (let left = 0; left < group.length; left += 1) {
+      for (let right = left + 1; right < group.length; right += 1) {
+        agreements.push(
+          jaccard(
+            new Set(
+              group[left].findings.filter((finding) => finding.retained !== false).map(findingKey),
+            ),
+            new Set(
+              group[right].findings.filter((finding) => finding.retained !== false).map(findingKey),
+            ),
+          ),
+        );
+      }
+    }
+    const median = percentile(
+      group.map((run) => run.latencyMs),
+      0.5,
+    );
+    if (median && median > 0) {
+      for (const run of group) relativeDeviations.push(Math.abs(run.latencyMs - median) / median);
+    }
+  }
+  const minRepetitions = repetitions.length > 0 ? Math.min(...repetitions) : 0;
+  return {
+    status:
+      minRepetitions >= 3 && Math.max(0, ...repetitions) <= 5
+        ? 'reportable'
+        : 'insufficient-repetitions',
+    cases: grouped.size,
+    minRepetitions,
+    maxRepetitions: repetitions.length > 0 ? Math.max(...repetitions) : 0,
+    findingAgreement: percentile(agreements, 0.5),
+    latencyRelativeMad: percentile(relativeDeviations, 0.5),
+  };
 }
 
 function scoreCase(run: BenchmarkCaseRun): CaseContribution {
@@ -127,6 +226,10 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
   let matched = 0;
   let matchedWeight = 0;
   let anchored = 0;
+  let triggerComplete = 0;
+  let triggerObserved = 0;
+  let evidenceSupported = 0;
+  let evidenceObserved = 0;
   const duplicates = run.findings.length - groups.size;
 
   for (const group of groups.values()) {
@@ -145,10 +248,28 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
           (candidate) => !matchedExpected.has(candidate.id) && anchorMatches(candidate),
         );
     if (!expected || matchedExpected.has(expected.id) || !anchorMatches(expected)) continue;
+    if (!severityWithinRange(finding.severity, expected.severityRange)) continue;
     matchedExpected.add(expected.id);
     matched += 1;
     matchedWeight += SEVERITY_WEIGHT[expected.severity];
+    if (finding.triggerComplete !== undefined) {
+      triggerObserved += 1;
+      if (finding.triggerComplete) triggerComplete += 1;
+    }
+    if (finding.evidenceSupported !== undefined) {
+      evidenceObserved += 1;
+      if (finding.evidenceSupported) evidenceSupported += 1;
+    }
   }
+
+  const missedBySeverity = Object.fromEntries(
+    SEVERITY_ORDER.map((severity) => [
+      severity,
+      run.expectedFindings.filter(
+        (finding) => finding.severity === severity && !matchedExpected.has(finding.id),
+      ).length,
+    ]),
+  ) as Record<Severity, number>;
 
   return {
     expectedWeight: run.expectedFindings.reduce(
@@ -163,6 +284,11 @@ function scoreCase(run: BenchmarkCaseRun): CaseContribution {
     anchored,
     observed: run.findings.length,
     duplicates,
+    triggerComplete,
+    triggerObserved,
+    evidenceSupported,
+    evidenceObserved,
+    missedBySeverity,
     latencyMs: run.latencyMs,
     costUsd: run.costUsd ?? 0,
   };
@@ -206,6 +332,14 @@ function aggregate(contributions: CaseContribution[]) {
     duplicateRate: ratio(
       sum((value) => value.duplicates),
       sum((value) => value.observed),
+    ),
+    triggerCompleteness: ratio(
+      sum((value) => value.triggerComplete),
+      sum((value) => value.triggerObserved),
+    ),
+    evidenceSupportRate: ratio(
+      sum((value) => value.evidenceSupported),
+      sum((value) => value.evidenceObserved),
     ),
     medianLatencyMs: percentile(
       contributions.map((value) => value.latencyMs),
@@ -305,6 +439,14 @@ export function scoreBenchmark(
     cleanFalsePositiveRate: metric('cleanFalsePositiveRate'),
     anchorRate: metric('anchorRate'),
     duplicateRate: metric('duplicateRate'),
+    triggerCompleteness: metric('triggerCompleteness'),
+    evidenceSupportRate: metric('evidenceSupportRate'),
+    missedBySeverity: Object.fromEntries(
+      SEVERITY_ORDER.map((severity) => [
+        severity,
+        contributions.reduce((sum, value) => sum + value.missedBySeverity[severity], 0),
+      ]),
+    ) as Record<Severity, number>,
     latencyMs: {
       median: metric('medianLatencyMs'),
       p90: metric('p90LatencyMs'),
@@ -312,6 +454,39 @@ export function scoreBenchmark(
     },
     costPerRetainedFindingUsd: metric('costPerRetainedFindingUsd'),
   };
+}
+
+interface BenchmarkQualityGate {
+  passed: boolean;
+  reasons: string[];
+}
+
+export function evaluateBenchmarkQualityGate(
+  control: BenchmarkScore,
+  treatment: BenchmarkScore,
+  tolerance = 0.02,
+): BenchmarkQualityGate {
+  const reasons: string[] = [];
+  if (treatment.missedBySeverity.P0 > 0 || treatment.missedBySeverity.P1 > 0) {
+    reasons.push('treatment missed a seeded P0/P1 finding');
+  }
+  for (const [label, controlValue, treatmentValue] of [
+    [
+      'severity-weighted recall',
+      control.severityWeightedRecall.value,
+      treatment.severityWeightedRecall.value,
+    ],
+    ['precision', control.precision.value, treatment.precision.value],
+  ] as const) {
+    if (
+      controlValue !== null &&
+      treatmentValue !== null &&
+      controlValue - treatmentValue > tolerance
+    ) {
+      reasons.push(`${label} regressed by more than ${tolerance * 100} percentage points`);
+    }
+  }
+  return { passed: reasons.length === 0, reasons };
 }
 
 export function benchmarkCanonicalJson(value: unknown): string {

@@ -5,6 +5,8 @@ import {
   assertBenchmarkComparable,
   benchmarkCanonicalJson,
   benchmarkConfigurationDifferences,
+  characterizeBenchmarkVariance,
+  evaluateBenchmarkQualityGate,
   scoreBenchmark,
   type BenchmarkCaseRun,
   type BenchmarkConfiguration,
@@ -13,7 +15,12 @@ import {
 const expected = (id: string, severity: 'P0' | 'P1' | 'P2' | 'P3', line: number) => ({
   id,
   severity,
+  severityRange: { highest: severity, lowest: severity },
   anchors: [{ path: 'src/a.ts', line }],
+  trigger: `Trigger ${id}`,
+  acceptableFindings: [`Report ${id}`],
+  requiredEvidence: [{ path: 'src/caller.ts', relation: 'Affected caller' }],
+  disallowedInterpretations: ['Do not report unrelated style.'],
 });
 
 describe('scoreBenchmark', () => {
@@ -32,7 +39,15 @@ describe('scoreBenchmark', () => {
           fingerprint: 'bug',
           retained: false,
         },
-        { path: 'src/a.ts', line: 10, severity: 'P1', title: 'Same bug', fingerprint: 'bug' },
+        {
+          path: 'src/a.ts',
+          line: 10,
+          severity: 'P1',
+          title: 'Same bug',
+          fingerprint: 'bug',
+          triggerComplete: true,
+          evidenceSupported: true,
+        },
         { path: 'src/a.ts', line: 99, severity: 'P2', title: 'Noise', anchored: false },
       ],
       latencyMs: 100,
@@ -56,6 +71,8 @@ describe('scoreBenchmark', () => {
     assert.equal(score.cleanFalsePositiveRate.value, 0);
     assert.equal(score.anchorRate.value, 1 / 2);
     assert.equal(score.duplicateRate.value, 1 / 3);
+    assert.equal(score.triggerCompleteness.value, 1);
+    assert.equal(score.evidenceSupportRate.value, 1);
     assert.equal(score.latencyMs.median.value, 200);
     assert.equal(score.latencyMs.p90.value, 280);
     assert.equal(score.latencyMs.p95.value, 290);
@@ -162,6 +179,61 @@ describe('scoreBenchmark', () => {
     const second = scoreBenchmark(runs, { bootstrapSamples: 100, seed: 123 });
     assert.deepEqual(first, second);
     assert.ok(first.latencyMs.median.ci95);
+  });
+
+  it('fails the quality gate for a removed cross-file check and clean false positive', () => {
+    const corpus: BenchmarkCaseRun[] = [
+      {
+        caseId: 'cross-file',
+        riskTier: 'high',
+        expectedClean: false,
+        expectedFindings: [expected('caller-break', 'P1', 10)],
+        findings: [
+          {
+            path: 'src/a.ts',
+            line: 10,
+            severity: 'P1',
+            title: 'Caller contract break',
+          },
+        ],
+        latencyMs: 100,
+      },
+      {
+        caseId: 'clean-counterfactual',
+        riskTier: 'low',
+        expectedClean: true,
+        expectedFindings: [],
+        findings: [],
+        latencyMs: 100,
+      },
+    ];
+    const control = scoreBenchmark(corpus, { bootstrapSamples: 0 });
+    const treatment = scoreBenchmark(
+      [
+        { ...corpus[0], findings: [] },
+        {
+          ...corpus[1],
+          findings: [{ path: 'src/clean.ts', line: 3, severity: 'P2', title: 'Generic suspicion' }],
+        },
+      ],
+      { bootstrapSamples: 0 },
+    );
+    const gate = evaluateBenchmarkQualityGate(control, treatment);
+    assert.equal(gate.passed, false);
+    assert.ok(gate.reasons.some((reason) => reason.includes('P0/P1')));
+    assert.equal(treatment.cleanFalsePositiveRate.value, 1);
+  });
+
+  it('characterizes repeated control finding and latency variance', () => {
+    const repeated = [100, 110, 90].map((latencyMs) => ({ ...runs[0], latencyMs }));
+    assert.deepEqual(characterizeBenchmarkVariance(repeated), {
+      status: 'reportable',
+      cases: 1,
+      minRepetitions: 3,
+      maxRepetitions: 3,
+      findingAgreement: 1,
+      latencyRelativeMad: 0.1,
+    });
   });
 });
 
