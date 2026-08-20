@@ -8,7 +8,7 @@ import {
 } from '@opencode-ai/sdk';
 
 import { isContext7QuotaError } from './context7.ts';
-import { PROVIDERS } from './config.ts';
+import { PROVIDERS, supportedModelOptions } from './config.ts';
 import { BASH_PERMISSIONS } from './shell-policy.ts';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -138,7 +138,8 @@ function buildProviderEntry(params: {
   modelID: string;
   modelOptions?: Record<string, unknown>;
 }): ProviderEntry {
-  const { providerID, apiKey, baseURL, promptCache, modelID, modelOptions } = params;
+  const { providerID, apiKey, baseURL, promptCache, modelID } = params;
+  const modelOptions = supportedModelOptions(providerID, modelID, params.modelOptions);
   const hasModelOptions = Boolean(modelOptions && Object.keys(modelOptions).length > 0);
   const options = {
     apiKey,
