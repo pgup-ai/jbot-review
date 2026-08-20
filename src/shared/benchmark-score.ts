@@ -529,6 +529,12 @@ export function evaluateBenchmarkQualityGate(
   if (treatment.missedBySeverity.P0 > 0 || treatment.missedBySeverity.P1 > 0) {
     reasons.push('treatment missed a seeded P0/P1 finding');
   }
+  if (
+    treatment.cleanFalsePositiveRate.value !== null &&
+    treatment.cleanFalsePositiveRate.value > (control.cleanFalsePositiveRate.value ?? 0)
+  ) {
+    reasons.push('treatment introduced a new clean false positive');
+  }
   for (const [label, controlValue, treatmentValue] of [
     [
       'severity-weighted recall',

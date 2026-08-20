@@ -86,14 +86,19 @@ function validateRow(
     throw new Error(`Invalid adjudicated findings for case ${benchmarkCase.id}.`);
   }
   const expectedFindingIds = new Set(benchmarkCase.expectedFindings.map((finding) => finding.id));
-  const unknownExpectedFindingId = (row.findings as BenchmarkCaseRun['findings']).find(
-    (finding) =>
-      finding.expectedFindingId !== undefined && !expectedFindingIds.has(finding.expectedFindingId),
-  )?.expectedFindingId;
-  if (unknownExpectedFindingId !== undefined) {
-    throw new Error(
-      `Unknown expected finding ${unknownExpectedFindingId} for adjudicated benchmark case ${benchmarkCase.id}.`,
-    );
+  for (const finding of row.findings as BenchmarkCaseRun['findings']) {
+    const id = finding.expectedFindingId;
+    if (id === undefined) continue;
+    if (id !== id.trim()) {
+      throw new Error(
+        `expectedFindingId must not include leading or trailing whitespace for adjudicated benchmark case ${benchmarkCase.id}.`,
+      );
+    }
+    if (!expectedFindingIds.has(id)) {
+      throw new Error(
+        `Unknown expected finding ${id} for adjudicated benchmark case ${benchmarkCase.id}.`,
+      );
+    }
   }
   if (
     !isNonNegativeNumber(row.latencyMs) ||

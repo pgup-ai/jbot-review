@@ -269,6 +269,7 @@ describe('scoreBenchmark', () => {
     const gate = evaluateBenchmarkQualityGate(control, treatment);
     assert.equal(gate.passed, false);
     assert.ok(gate.reasons.some((reason) => reason.includes('P0/P1')));
+    assert.ok(gate.reasons.includes('treatment introduced a new clean false positive'));
     assert.equal(treatment.cleanFalsePositiveRate.value, 1);
   });
 

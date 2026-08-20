@@ -134,23 +134,22 @@ it('permits only finding adjudication changes from the original run', () => {
       1,
     ),
   );
-  assert.throws(
-    () =>
-      validateAdjudicatedBenchmarkRows(
-        [
-          {
-            ...row,
-            findings: [{ ...sourceFinding, expectedFindingId: 'unknown' }],
-          },
-          treatment,
-        ],
-        baseline,
-        [benchmarkCase],
-        arms,
-        1,
-      ),
-    /Unknown expected finding unknown/,
-  );
+  for (const [expectedFindingId, error] of [
+    ['unknown', /Unknown expected finding unknown/],
+    [' expected ', /must not include leading or trailing whitespace/],
+  ] as const) {
+    assert.throws(
+      () =>
+        validateAdjudicatedBenchmarkRows(
+          [{ ...row, findings: [{ ...sourceFinding, expectedFindingId }] }, treatment],
+          baseline,
+          [benchmarkCase],
+          arms,
+          1,
+        ),
+      error,
+    );
+  }
   for (const changed of [
     { ...row, findings: [{ ...sourceFinding, title: 'Edited' }] },
     { ...row, findings: [sourceFinding], latencyMs: 2 },

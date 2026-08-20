@@ -72,6 +72,26 @@ describe('historical benchmark adjudication', () => {
       )[0].status,
       'disagreement',
     );
+    assert.equal(
+      adjudicateHistoricalCandidates(
+        [candidate],
+        [
+          {
+            candidateId: candidate.candidateId,
+            adjudicatorId: 'a',
+            decision: 'accepted',
+            expectedFindingId: ' finding-1 ',
+          },
+          {
+            candidateId: candidate.candidateId,
+            adjudicatorId: 'b',
+            decision: 'accepted',
+            expectedFindingId: 'finding-1',
+          },
+        ],
+      )[0].expectedFindingId,
+      'finding-1',
+    );
     assert.throws(
       () =>
         adjudicateHistoricalCandidates(
