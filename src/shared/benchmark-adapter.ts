@@ -242,7 +242,7 @@ function normalizeGitHubReview(input: unknown): BenchmarkObservedFinding[] {
     const bodyFinding = githubBodyFinding(entry.body);
     const finding = observedFinding({
       path: entry.path,
-      line: entry.line ?? entry.original_line,
+      line: entry.line ?? entry.original_line ?? 0,
       severity: normalizeSeverity(entry.severity) ?? bodyFinding?.severity,
       title:
         typeof entry.title === 'string' && entry.title.trim() ? entry.title : bodyFinding?.title,

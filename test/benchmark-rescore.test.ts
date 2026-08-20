@@ -7,14 +7,24 @@ import {
   type BenchmarkCaseRow,
 } from '../src/shared/benchmark-rescore.ts';
 
+const expectedFinding = {
+  id: 'expected',
+  severity: 'P2',
+  severityRange: { highest: 'P2', lowest: 'P2' },
+  anchors: [{ path: 'a.ts', line: 1 }],
+  trigger: 'Trigger',
+  acceptableFindings: ['Finding'],
+  requiredEvidence: [],
+  disallowedInterpretations: [],
+} as const;
 const benchmarkCase: BenchmarkCase = {
   id: 'case-1',
   riskTier: 'low',
   cacheState: 'uncached',
   diffSize: 'small',
-  expectedClean: true,
-  expectedFindings: [],
-  categories: ['clean'],
+  expectedClean: false,
+  expectedFindings: [expectedFinding],
+  categories: ['seeded-defect'],
   subsets: ['full'],
   fixturePath: 'fixture.json',
   base: 'base',
@@ -35,8 +45,8 @@ const row: BenchmarkCaseRow = {
   riskTier: 'low',
   cacheState: 'uncached',
   diffSize: 'small',
-  expectedClean: true,
-  expectedFindings: [],
+  expectedClean: false,
+  expectedFindings: [expectedFinding],
   findings: [],
   latencyMs: 1,
   costUsd: 0,
@@ -123,6 +133,23 @@ it('permits only finding adjudication changes from the original run', () => {
       arms,
       1,
     ),
+  );
+  assert.throws(
+    () =>
+      validateAdjudicatedBenchmarkRows(
+        [
+          {
+            ...row,
+            findings: [{ ...sourceFinding, expectedFindingId: 'unknown' }],
+          },
+          treatment,
+        ],
+        baseline,
+        [benchmarkCase],
+        arms,
+        1,
+      ),
+    /Unknown expected finding unknown/,
   );
   for (const changed of [
     { ...row, findings: [{ ...sourceFinding, title: 'Edited' }] },

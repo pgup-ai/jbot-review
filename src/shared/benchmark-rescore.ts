@@ -85,6 +85,16 @@ function validateRow(
   if (!isBenchmarkRunnerOutput({ findings: row.findings })) {
     throw new Error(`Invalid adjudicated findings for case ${benchmarkCase.id}.`);
   }
+  const expectedFindingIds = new Set(benchmarkCase.expectedFindings.map((finding) => finding.id));
+  const unknownExpectedFindingId = (row.findings as BenchmarkCaseRun['findings']).find(
+    (finding) =>
+      finding.expectedFindingId !== undefined && !expectedFindingIds.has(finding.expectedFindingId),
+  )?.expectedFindingId;
+  if (unknownExpectedFindingId !== undefined) {
+    throw new Error(
+      `Unknown expected finding ${unknownExpectedFindingId} for adjudicated benchmark case ${benchmarkCase.id}.`,
+    );
+  }
   if (
     !isNonNegativeNumber(row.latencyMs) ||
     (row.costUsd !== undefined && !isNonNegativeNumber(row.costUsd)) ||

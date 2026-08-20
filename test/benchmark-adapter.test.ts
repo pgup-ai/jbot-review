@@ -46,6 +46,13 @@ describe('competitor benchmark adapters', () => {
           original_line: 9,
           body: '**P1 · bug** (*conf: high*) — Parsed from the comment body\n\nDetails',
         },
+        {
+          id: 4,
+          path: 'src/d.ts',
+          line: null,
+          original_line: null,
+          body: '**P3** — File-level note',
+        },
       ]),
       [
         { fingerprint: '2', path: 'src/b.ts', line: 7, severity: 'P2', title: 'Raw warning' },
@@ -55,6 +62,13 @@ describe('competitor benchmark adapters', () => {
           line: 9,
           severity: 'P1',
           title: 'Parsed from the comment body',
+        },
+        {
+          fingerprint: '4',
+          path: 'src/d.ts',
+          line: 0,
+          severity: 'P3',
+          title: 'File-level note',
         },
       ],
     );
