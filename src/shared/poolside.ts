@@ -26,6 +26,7 @@ const POOLSIDE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const POOLSIDE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 
 export const POOLSIDE_PROVIDER_ID = 'poolside';
+export const POOLSIDE_TELEMETRY_CAPABILITY = 'opaque' as const;
 
 export function isPoolsideProvider(providerID: string): boolean {
   return providerID === POOLSIDE_PROVIDER_ID;

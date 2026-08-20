@@ -1,8 +1,15 @@
 import type { SemaphorePriority, TokenUsageRecorder } from './opencode.ts';
+import {
+  classifyTelemetryStopReason,
+  type BackendTelemetryCapability,
+  type PhaseTelemetryTracker,
+} from './telemetry.ts';
+import type { ToolTelemetryAccumulator } from './tool-telemetry.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 export interface ReviewBackend {
   name: string;
+  observability?: BackendTelemetryCapability;
   runReview(
     model: string,
     prContext: string,
@@ -58,19 +65,66 @@ export function limitReviewBackendSessions(
   role: 'main' | 'aux',
   globalSlots: SessionSlots | undefined,
   providerSlots?: SessionSlots,
+  telemetry?: { phases: PhaseTelemetryTracker; tools: ToolTelemetryAccumulator },
 ): ReviewBackend {
-  if (!globalSlots && !providerSlots) return backend;
+  if (!globalSlots && !providerSlots && !telemetry) return backend;
   const rolePriority = role === 'main' ? 'high' : 'normal';
   const withSlots = async <T>(
+    session: string,
     run: () => Promise<T>,
     priority: SemaphorePriority = rolePriority,
+    budgetTier: 'single-shot' | 'observe-only' = 'observe-only',
   ): Promise<T> => {
     let providerRelease: (() => void) | undefined;
     let globalRelease: (() => void) | undefined;
+    const queueDone = telemetry?.phases.start({
+      phase: role === 'main' ? 'main-queue' : 'auxiliary-queue',
+      scope: 'session',
+      session,
+      backend: backend.name,
+    });
     try {
       providerRelease = providerSlots ? await providerSlots.acquire(priority) : undefined;
       globalRelease = globalSlots ? await globalSlots.acquire(priority) : undefined;
-      return await run();
+      queueDone?.();
+      const executionDone = telemetry?.phases.start({
+        phase: role === 'main' ? 'main-execution' : 'auxiliary-execution',
+        scope: 'session',
+        session,
+        backend: backend.name,
+      });
+      try {
+        const result = await run();
+        executionDone?.();
+        telemetry?.tools.finishSession({
+          session,
+          backend: backend.name,
+          capability: backend.observability ?? 'opaque',
+          budgetTier,
+          stopReason: 'completed',
+          ...((backend.observability ?? 'opaque') === 'opaque'
+            ? { explorationMode: 'unavailable' as const }
+            : {}),
+        });
+        return result;
+      } catch (error) {
+        const stopReason = classifyTelemetryStopReason(error);
+        executionDone?.(stopReason);
+        telemetry?.tools.finishSession({
+          session,
+          backend: backend.name,
+          capability: backend.observability ?? 'opaque',
+          budgetTier,
+          stopReason,
+          ...((backend.observability ?? 'opaque') === 'opaque'
+            ? { explorationMode: 'unavailable' as const }
+            : {}),
+        });
+        throw error;
+      }
+    } catch (error) {
+      queueDone?.(classifyTelemetryStopReason(error));
+      throw error;
     } finally {
       providerRelease?.();
       // Let the next provider waiter enter the global priority queue before releasing the global slot.
@@ -82,16 +136,22 @@ export function limitReviewBackendSessions(
   };
   return {
     name: backend.name,
-    runReview: (...args) => withSlots(() => backend.runReview(...args)),
+    observability: backend.observability,
+    runReview: (...args) => withSlots(args[4]?.label ?? 'review', () => backend.runReview(...args)),
     runAddressedPriorCommentsCheck: (...args) =>
-      withSlots(() => backend.runAddressedPriorCommentsCheck(...args)),
+      withSlots('addressed-prior-comments', () => backend.runAddressedPriorCommentsCheck(...args)),
     runGuidelineComplianceCheck: (...args) =>
-      withSlots(() => backend.runGuidelineComplianceCheck(...args)),
+      withSlots('guideline-compliance', () => backend.runGuidelineComplianceCheck(...args)),
     // The one auxiliary call the posting path awaits: never queue it behind
     // recall sessions still holding slots past the settle grace.
     runFindingVerification: (...args) =>
-      withSlots(() => backend.runFindingVerification(...args), 'high'),
+      withSlots(
+        'finding-verification',
+        () => backend.runFindingVerification(...args),
+        'high',
+        'single-shot',
+      ),
     runChangesSinceLastReview: (...args) =>
-      withSlots(() => backend.runChangesSinceLastReview(...args)),
+      withSlots('changes-since-last-review', () => backend.runChangesSinceLastReview(...args)),
   };
 }

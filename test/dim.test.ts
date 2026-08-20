@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import {
@@ -43,6 +44,39 @@ describe('buildDimCliArgs', () => {
     // A bare id stays unqualified rather than inventing a dim provider.
     assert.deepEqual(buildDimCliArgs('dim/glm-5.2').slice(9), ['--model', 'glm-5.2']);
     assert.deepEqual(buildDimCliArgs('dim/default').slice(9), []);
+  });
+});
+
+describe('dim event telemetry', () => {
+  it('pins the sanitized Dim 0.3.15 JSONL contract and leaves turns unavailable', () => {
+    const stdout = readFileSync(new URL('fixtures/dim-events.jsonl', import.meta.url), 'utf8');
+    const observed = parseDimEventStream(stdout);
+    assert.equal(observed.turnCount, undefined);
+    assert.equal(observed.text, 'OK');
+    assert.deepEqual(observed.toolEvents, [
+      {
+        name: 'read',
+        input: { path: 'package.json' },
+        output: { content: 'sanitized', isError: false, structuredContent: {} },
+        success: true,
+        durationMs: 5,
+      },
+    ]);
+    assert.deepEqual(parseDimEventStream(stdout, false).toolEvents, []);
+    const invalidTiming = [
+      JSON.stringify({
+        eventType: 'tool:started',
+        createdAt: 'invalid',
+        payload: { toolCallId: 'call-1', toolName: 'read' },
+      }),
+      JSON.stringify({
+        eventType: 'tool:completed',
+        payload: { toolCallId: 'call-1', toolName: 'read' },
+      }),
+    ].join('\n');
+    assert.deepEqual(parseDimEventStream(invalidTiming).toolEvents, [
+      { name: 'read', success: true },
+    ]);
   });
 });
 

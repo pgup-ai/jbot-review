@@ -8,7 +8,9 @@ import { after, describe, it } from 'node:test';
 
 import { respondToPermissionRequest } from '@symma/protocol';
 
-import { createAcpBackend } from '../src/shared/acp.ts';
+import { createAcpBackend, createAcpTelemetryTee } from '../src/shared/acp.ts';
+import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
+import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'jbot-acp-backend-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -52,6 +54,59 @@ const specFor = (path: string) =>
     args: () => [path],
     env: () => ({ env: { ...process.env } }),
   }) as never;
+
+describe('ACP tool telemetry', () => {
+  it('observes protocol tool frames while retaining no frame content', () => {
+    const recorder = createTelemetryRecorder(true);
+    const telemetry = createToolTelemetryAccumulator(recorder, 'salt');
+    const observation = createAcpTelemetryTee(telemetry, 'acp:probe', 'review');
+    const tee = observation.tee;
+    tee('in', {
+      method: 'session/update',
+      params: {
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: '1',
+          kind: 'read',
+          rawInput: { path: 'secret.ts' },
+          status: 'pending',
+        },
+      },
+    });
+    tee('in', {
+      method: 'session/update',
+      params: {
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: '1',
+          rawOutput: 'private source',
+          status: 'completed',
+        },
+      },
+    });
+    tee('in', {
+      method: 'session/update',
+      params: {
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: '2',
+          kind: 'grep',
+          rawInput: { pattern: 'private query' },
+          status: 'pending',
+        },
+      },
+    });
+    observation.finishPending();
+
+    const jsonl = recorder.toJsonl();
+    assert.doesNotMatch(jsonl, /secret\.ts|private source|private query|salt/);
+    const rows = jsonl.split('\n').map((line) => JSON.parse(line));
+    assert.equal(rows[0].toolClass, 'file-read');
+    assert.equal(rows[0].capability, 'observable');
+    assert.equal(rows[1].toolClass, 'search');
+    assert.equal(rows[1].failureClass, 'unknown');
+  });
+});
 
 // An agent whose FIRST spawn answers `firstTurn` and later spawns answer with
 // the review JSON, capturing the follow-up prompt. Sessions are one-shot

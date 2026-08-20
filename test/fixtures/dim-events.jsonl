@@ -1,0 +1,4 @@
+{"sequence":1,"eventType":"tool:started","createdAt":"2026-08-20T01:58:20.124Z","payload":{"toolCallId":"call-sanitized","toolName":"read","toolInput":{"path":"package.json"}}}
+{"sequence":2,"eventType":"tool:completed","createdAt":"2026-08-20T01:58:20.129Z","payload":{"toolCallId":"call-sanitized","toolName":"read","toolResult":{"content":"sanitized","isError":false,"structuredContent":{}}}}
+{"sequence":3,"eventType":"text:delta","createdAt":"2026-08-20T01:58:21.419Z","payload":{"delta":"OK"}}
+{"sequence":4,"eventType":"run:ended","createdAt":"2026-08-20T01:58:21.420Z","payload":{"status":"completed"}}

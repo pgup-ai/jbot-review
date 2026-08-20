@@ -34,6 +34,7 @@ const GROK_CONFIG = '[cli]\nauto_update = false\n';
 
 export const GROK_MAX_PROMPT_BYTES = 1024 * 1024;
 export const GROK_PROVIDER_ID = 'grok';
+export const GROK_TELEMETRY_CAPABILITY = 'opaque' as const;
 export const GROK_CLI_BIN = 'grok';
 
 export type GrokRuntime =

@@ -22,6 +22,7 @@ import {
 import {
   ASSEMBLED_CONTEXT_WARN_BYTES,
   assembledContextWarning,
+  createPhaseTelemetryTracker,
   createTelemetryRecorder,
   type RunTerminalState,
   type SessionCoverageRecorder,
@@ -61,6 +62,7 @@ import {
   runPiGuidelineComplianceCheck,
   runPiReview,
   startPi,
+  PI_TELEMETRY_CAPABILITY,
   type PiRuntime,
 } from './pi.ts';
 import {
@@ -71,6 +73,7 @@ import {
   runPoolsideFindingVerification,
   runPoolsideGuidelineComplianceCheck,
   runPoolsideReview,
+  POOLSIDE_TELEMETRY_CAPABILITY,
 } from './poolside.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
@@ -111,12 +114,15 @@ import {
   disableContext7Mcp,
   formatContext7Error,
   Semaphore,
+  OPENCODE_TELEMETRY_CAPABILITY,
+  configureOpencodeTelemetry,
 } from './opencode.ts';
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
 import { DEVIN_PROVIDER_ID, writeDevinCredentials } from '@symma/protocol';
 import { createDevinCliBackend } from './devin-cli.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
+  COMMANDCODE_TELEMETRY_CAPABILITY,
   listCommandCodeModels,
   runCommandCodeAddressedPriorCommentsCheck,
   runCommandCodeFindingVerification,
@@ -134,6 +140,7 @@ import {
 } from '@symma/protocol';
 import {
   CLINE_PROVIDER_ID,
+  CLINE_TELEMETRY_CAPABILITY,
   runClineAddressedPriorCommentsCheck,
   runClineChangesSinceLastReview,
   runClineFindingVerification,
@@ -143,6 +150,7 @@ import {
 } from './cline.ts';
 import {
   GROK_PROVIDER_ID,
+  GROK_TELEMETRY_CAPABILITY,
   assertGrokAuthenticated,
   configureGrokHome,
   runGrokAddressedPriorCommentsCheck,
@@ -154,6 +162,7 @@ import {
 } from './grok.ts';
 import {
   DIM_PROVIDER_ID,
+  DIM_TELEMETRY_CAPABILITY,
   decodeDimBundle,
   runDimAddressedPriorCommentsCheck,
   runDimChangesSinceLastReview,
@@ -165,12 +174,14 @@ import {
 import { assertValidKiloAuth, KILO_PROVIDER_ID, listKiloModels } from '@symma/protocol';
 import {
   QODER_PROVIDER_ID,
+  QODER_TELEMETRY_CAPABILITY,
   runQoderAddressedPriorCommentsCheck,
   runQoderChangesSinceLastReview,
   runQoderFindingVerification,
   runQoderGuidelineComplianceCheck,
   runQoderReview,
 } from './qoder.ts';
+import { createToolTelemetryAccumulator, type ToolTelemetryAccumulator } from './tool-telemetry.ts';
 import {
   buildReviewContext,
   discoverGuidelineDocs,
@@ -229,9 +240,12 @@ export const EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
 
 function createOpencodeBackend(
   client: Awaited<ReturnType<typeof startOpencode>>['client'],
+  toolTelemetry?: ToolTelemetryAccumulator,
 ): ReviewBackend {
+  if (toolTelemetry) configureOpencodeTelemetry(client, toolTelemetry);
   return {
     name: 'opencode',
+    observability: OPENCODE_TELEMETRY_CAPABILITY,
     runReview: (model, prContext, guidelines, log, options) =>
       runOpencodeReview(client, model, prContext, guidelines, log, options),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
@@ -279,6 +293,7 @@ function createOpencodeBackend(
 function createPiBackend(runtime: PiRuntime): ReviewBackend {
   return {
     name: 'pi',
+    observability: PI_TELEMETRY_CAPABILITY,
     runReview: (model, prContext, guidelines, log, options) =>
       runPiReview(runtime, model, prContext, guidelines, log, options),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
@@ -316,6 +331,7 @@ function createPoolsideBackend(
   const reasoningEffort = poolsideReasoningEffort(modelOptions);
   return {
     name: 'poolside',
+    observability: POOLSIDE_TELEMETRY_CAPABILITY,
     runReview: (model, prContext, guidelines, log, options) =>
       runPoolsideReview(key, reasoningEffort, model, prContext, guidelines, log, options),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
@@ -367,6 +383,7 @@ function createPoolsideBackend(
 function createCommandCodeBackend(workspace: string, home: string): ReviewBackend {
   return {
     name: COMMANDCODE_PROVIDER_ID,
+    observability: COMMANDCODE_TELEMETRY_CAPABILITY,
     runReview: (model, prContext, guidelines, log, options) =>
       runCommandCodeReview(workspace, model, prContext, guidelines, log, {
         ...options,
@@ -421,6 +438,7 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
 function createClineBackend(workspace: string, clineHome: string): ReviewBackend {
   return {
     name: CLINE_PROVIDER_ID,
+    observability: CLINE_TELEMETRY_CAPABILITY,
     runReview: (model, prContext, guidelines, log, options) =>
       runClineReview(workspace, model, prContext, guidelines, log, {
         ...options,
@@ -475,6 +493,7 @@ function createClineBackend(workspace: string, clineHome: string): ReviewBackend
 function createGrokBackend(runtime: GrokRuntime): ReviewBackend {
   return {
     name: GROK_PROVIDER_ID,
+    observability: GROK_TELEMETRY_CAPABILITY,
     runReview: (model, prContext, guidelines, log, options) =>
       runGrokReview(model, prContext, guidelines, log, {
         ...options,
@@ -507,9 +526,15 @@ function createGrokBackend(runtime: GrokRuntime): ReviewBackend {
   };
 }
 
-function createDimBackend(workspace: string, runtime: DimRuntime): ReviewBackend {
+function createDimBackend(
+  workspace: string,
+  runtime: DimRuntime,
+  toolTelemetry?: ToolTelemetryAccumulator,
+): ReviewBackend {
+  if (toolTelemetry) runtime.toolTelemetry = toolTelemetry;
   return {
     name: DIM_PROVIDER_ID,
+    observability: DIM_TELEMETRY_CAPABILITY,
     runReview: (model, prContext, guidelines, log, options) =>
       runDimReview(workspace, model, prContext, guidelines, log, { ...options, runtime }),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
@@ -558,11 +583,20 @@ function createDimBackend(workspace: string, runtime: DimRuntime): ReviewBackend
   };
 }
 
-function createQoderBackend(workspace: string, token: string): ReviewBackend {
+function createQoderBackend(
+  workspace: string,
+  token: string,
+  toolTelemetry?: ToolTelemetryAccumulator,
+): ReviewBackend {
   return {
     name: QODER_PROVIDER_ID,
+    observability: QODER_TELEMETRY_CAPABILITY,
     runReview: (model, prContext, guidelines, log, options) =>
-      runQoderReview(workspace, model, prContext, guidelines, log, { ...options, token }),
+      runQoderReview(workspace, model, prContext, guidelines, log, {
+        ...options,
+        token,
+        toolTelemetry,
+      }),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
       runQoderAddressedPriorCommentsCheck(
         workspace,
@@ -572,6 +606,7 @@ function createQoderBackend(workspace: string, token: string): ReviewBackend {
         timeoutMs,
         onTokenUsage,
         token,
+        toolTelemetry,
       ),
     runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
       runQoderGuidelineComplianceCheck(
@@ -583,6 +618,7 @@ function createQoderBackend(workspace: string, token: string): ReviewBackend {
         timeoutMs,
         onTokenUsage,
         token,
+        toolTelemetry,
       ),
     runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
       runQoderFindingVerification(
@@ -594,6 +630,7 @@ function createQoderBackend(workspace: string, token: string): ReviewBackend {
         timeoutMs,
         onTokenUsage,
         token,
+        toolTelemetry,
       ),
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
       runQoderChangesSinceLastReview(
@@ -605,6 +642,7 @@ function createQoderBackend(workspace: string, token: string): ReviewBackend {
         timeoutMs,
         onTokenUsage,
         token,
+        toolTelemetry,
       ),
   };
 }
@@ -892,6 +930,14 @@ async function runReviewPipeline(params: {
   }
   const tokenUsage = createReviewTokenUsageAccumulator();
   const telemetry = createTelemetryRecorder(options.reviewTelemetry);
+  const phases = createPhaseTelemetryTracker(telemetry);
+  const backendToolTelemetry = telemetry.enabled
+    ? createToolTelemetryAccumulator(telemetry, randomUUID())
+    : undefined;
+  const sessionTelemetry = backendToolTelemetry
+    ? { phases, tools: backendToolTelemetry }
+    : undefined;
+  const contextAssemblyDone = phases.start({ phase: 'context-assembly', scope: 'run' });
   const recordTokenUsage: TokenUsageRecorder = (usage, usageModel, label) => {
     tokenUsage.add(usage, usageModel);
     telemetry.recordSession({
@@ -922,11 +968,21 @@ async function runReviewPipeline(params: {
     return session;
   };
   let telemetryDone = false;
+  let telemetryTerminalState: RunTerminalState | undefined;
+  let telemetryEmitted = false;
+  let teardownPending = false;
+  const emitTelemetry = () => {
+    if (telemetryEmitted) return;
+    telemetryEmitted = true;
+    emitReviewTelemetry(telemetry, workspace, log);
+  };
   const finishTelemetry = (state: RunTerminalState) => {
     if (telemetryDone) return;
     telemetryDone = true;
+    telemetryTerminalState = state;
+    if (!teardownPending) phases.finishOpen(state === 'failed' ? 'failed' : 'completed');
     telemetry.finishRun(state, Date.now() - runStartedAt);
-    emitReviewTelemetry(telemetry, workspace, log);
+    if (!teardownPending) emitTelemetry();
   };
   if (params.telemetryLifecycle) {
     // Installed AFTER the recorder exists so runPrReview's catch can finalize
@@ -1448,7 +1504,7 @@ async function runReviewPipeline(params: {
     log(
       'Cursor CLI authenticated via CURSOR_API_KEY; token usage is unavailable for those sessions.',
     );
-    cursorBackend = createAcpBackend(cursorAcpSpec(cursorApiKey), workspace);
+    cursorBackend = createAcpBackend(cursorAcpSpec(cursorApiKey), workspace, backendToolTelemetry);
   }
 
   if (mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID) {
@@ -1491,7 +1547,11 @@ async function runReviewPipeline(params: {
     }
     log(`Codex CLI auth configured at ${authPath}.`);
     log('Codex CLI token usage is unavailable; review metadata may omit those sessions.');
-    codexBackend = createAcpBackend(codexAcpSpec(codexHome, codexRunHome), workspace);
+    codexBackend = createAcpBackend(
+      codexAcpSpec(codexHome, codexRunHome),
+      workspace,
+      backendToolTelemetry,
+    );
   }
 
   if (mainCliBackend === CLINE_PROVIDER_ID || auxCliBackend === CLINE_PROVIDER_ID) {
@@ -1561,7 +1621,7 @@ async function runReviewPipeline(params: {
     // session self-manages a temp HOME/XDG for kilo's SQLite data dir.
     log('Kilo CLI auth configured via KILO_AUTH_CONTENT (env-injected; per-session temp HOME).');
     log('Kilo CLI token usage is unavailable; review metadata may omit those sessions.');
-    kiloBackend = createAcpBackend(kiloAcpSpec(kiloAuth), workspace);
+    kiloBackend = createAcpBackend(kiloAcpSpec(kiloAuth), workspace, backendToolTelemetry);
   }
 
   if (mainCliBackend === QODER_PROVIDER_ID || auxCliBackend === QODER_PROVIDER_ID) {
@@ -1573,7 +1633,7 @@ async function runReviewPipeline(params: {
     log(
       'Qoder CLI authenticated via a per-session PAT payload; user/project settings, hooks, MCP, writes, shell, web, and subagents are disabled.',
     );
-    qoderBackend = createQoderBackend(workspace, qoderToken);
+    qoderBackend = createQoderBackend(workspace, qoderToken, backendToolTelemetry);
   }
 
   if (mainCliBackend === DIM_PROVIDER_ID || auxCliBackend === DIM_PROVIDER_ID) {
@@ -1596,7 +1656,7 @@ async function runReviewPipeline(params: {
       `dim CLI sessions get a per-spawn home under ${dimHome} (its SQLite store cannot be shared).`,
     );
     log('dim reviews run in plan mode with read/glob/grep/exec only; writes and skills are off.');
-    dimBackend = createDimBackend(workspace, runtime);
+    dimBackend = createDimBackend(workspace, runtime, backendToolTelemetry);
   }
 
   // Both SDK roles on one engine but different providers: the aux provider gets
@@ -1642,6 +1702,7 @@ async function runReviewPipeline(params: {
           additionalProviderKeys: auxNeedsOwnKey
             ? [{ providerID: auxProviderID, apiKey: options.auxApiKey }]
             : undefined,
+          toolTelemetry: backendToolTelemetry,
           // Shell-less pi sessions recover omitted/truncated hunks through the
           // read-only git_diff tool (invariant 1); base and diff form mirror
           // the run's diff scope.
@@ -1698,7 +1759,7 @@ async function runReviewPipeline(params: {
             : undefined,
         },
       );
-      opencodeBackend = createOpencodeBackend(opencodeRuntime.client);
+      opencodeBackend = createOpencodeBackend(opencodeRuntime.client, backendToolTelemetry);
     } catch (error) {
       if (mainOnOpencode) {
         piRuntime?.stop();
@@ -1758,12 +1819,14 @@ async function runReviewPipeline(params: {
     'main',
     sessionSlots,
     serializedBackends.get(mainBaseBackend),
+    sessionTelemetry,
   );
   const auxBackend = limitReviewBackendSessions(
     auxBaseBackend,
     'aux',
     sessionSlots,
     serializedBackends.get(auxBaseBackend),
+    sessionTelemetry,
   );
   // Single gate for every aux session (lenses, guideline, addressed,
   // changes-since, verification): an incomplete embedded diff and a failed
@@ -1792,6 +1855,7 @@ async function runReviewPipeline(params: {
       log(`pi teardown failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
+  teardownPending = true;
   try {
     if (commandCodeBackend) {
       try {
@@ -2020,6 +2084,15 @@ async function runReviewPipeline(params: {
       ]),
     );
     log(`Running review (${shardPlans.length} shard(s))`);
+    contextAssemblyDone();
+    const mainExecutionDone = phases.start({
+      phase: 'main-execution',
+      scope: 'run',
+      backend: mainBackend.name,
+      ...(telemetry.enabled
+        ? { inputBytes: Buffer.byteLength(mainCoreContext) + Buffer.byteLength(mainDiffBlock) }
+        : {}),
+    });
     // Submit every main shard before auxiliary work. Priority ordering also
     // keeps a later main-shard retry ahead of queued auxiliary sessions.
     const mainReview = runShardedReview({
@@ -2118,6 +2191,12 @@ async function runReviewPipeline(params: {
     );
 
     const { summary, findings } = await mainReview;
+    mainExecutionDone(
+      'completed',
+      telemetry.enabled
+        ? Buffer.byteLength(summary) + Buffer.byteLength(JSON.stringify(findings))
+        : undefined,
+    );
     const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
       lensPasses,
       addressedPriorCheck,
@@ -2135,6 +2214,7 @@ async function runReviewPipeline(params: {
     // made, so awaiting them one by one would give the group N graces of tail
     // rather than one. Each falls back to its own empty result — the same value
     // these sessions produce when they fail open on their own.
+    const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
     const [
       lensFindingLists,
       // The dedicated parallel session is the single owner of addressed-thread
@@ -2148,12 +2228,14 @@ async function runReviewPipeline(params: {
       settleWithinGrace(guidelineComplianceCheck, [], log),
       settleWithinGrace(changesSinceLastReview, '', log),
     ]);
+    graceDone();
     // Gate confidence BEFORE deduping so each finding carries its effective
     // severity into collision resolution; otherwise a low-confidence main
     // finding could win a path:line collision and then be demoted to P3,
     // dropping a stronger compliance finding at the same location.
     // Tag findings with telemetry ids per source session; a disabled recorder
     // returns the lists untouched.
+    const initialFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
     const producedLists = [
       telemetry.produced('main-review', findings),
       ...lensFindingLists.map((list, i) =>
@@ -2199,6 +2281,11 @@ async function runReviewPipeline(params: {
         `Suppressed ${suppression.suppressedCount} finding(s) already covered by prior jbot-review threads.`,
       );
     }
+    initialFilteringDone(
+      'completed',
+      telemetry.enabled ? Buffer.byteLength(JSON.stringify(suppression.findings)) : undefined,
+    );
+    const verificationDone = phases.start({ phase: 'verification', scope: 'run' });
     const verifiedFindings = await verifyBlockingFindings({
       backend: auxBackend,
       model: auxModel,
@@ -2210,7 +2297,12 @@ async function runReviewPipeline(params: {
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
     });
+    verificationDone(
+      'completed',
+      telemetry.enabled ? Buffer.byteLength(JSON.stringify(verifiedFindings)) : undefined,
+    );
     telemetry.snapshot('verified', verifiedFindings);
+    const finalFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
     const filteredFindings = filterFindings(verifiedFindings, options);
     telemetry.snapshot('filtered', filteredFindings);
     log(
@@ -2235,6 +2327,11 @@ async function runReviewPipeline(params: {
       anchorMissed,
     });
     const verdict = decideVerdict(filteredFindings);
+    finalFilteringDone(
+      'completed',
+      telemetry.enabled ? Buffer.byteLength(JSON.stringify(filteredFindings)) : undefined,
+    );
+    const postingDone = phases.start({ phase: 'posting', scope: 'run' });
 
     // Report the final filtered findings + summary on EVERY completed review (dry-run or
     // real post), so a caller can forward per-severity counts (the worker → check-run gate).
@@ -2282,6 +2379,7 @@ async function runReviewPipeline(params: {
             .join('\n')}`,
         );
       }
+      postingDone();
       finishTelemetry('completed');
       return;
     }
@@ -2463,10 +2561,28 @@ async function runReviewPipeline(params: {
       log('Open findings remain; not adding the review-done reaction.');
     }
 
+    postingDone();
     finishTelemetry('completed');
   } finally {
-    stop();
-    cleanupCliHomes();
+    const teardownDone = phases.start({ phase: 'teardown', scope: 'run' });
+    let teardownCompleted = false;
+    try {
+      stop();
+      cleanupCliHomes();
+      teardownCompleted = true;
+    } finally {
+      teardownDone(teardownCompleted ? 'completed' : 'failed');
+      phases.finishOpen(teardownCompleted ? 'aborted' : 'failed');
+      if (!teardownCompleted) {
+        telemetryDone = true;
+        telemetryTerminalState = 'failed';
+      }
+      teardownPending = false;
+      if (telemetryTerminalState) {
+        telemetry.finishRun(telemetryTerminalState, Date.now() - runStartedAt);
+        emitTelemetry();
+      }
+    }
   }
 }
 

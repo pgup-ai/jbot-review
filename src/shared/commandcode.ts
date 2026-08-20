@@ -34,6 +34,7 @@ const COMMANDCODE_MODEL_LIST_TIMEOUT_MS = 60_000;
 const COMMANDCODE_MAX_TURNS = 1000;
 
 export const COMMANDCODE_PROVIDER_ID = 'commandcode';
+export const COMMANDCODE_TELEMETRY_CAPABILITY = 'opaque' as const;
 export const COMMANDCODE_MODEL_LIST_ARGS = ['--no-auto-update', '--list-models'];
 // The command-code npm package exposes cmd, cmdc, commandcode, and command-code.
 // Use the long alias so Windows local runs do not accidentally invoke cmd.exe.

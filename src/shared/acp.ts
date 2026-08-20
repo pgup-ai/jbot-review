@@ -22,9 +22,18 @@ import {
 import type { ReviewBackend } from './session-concurrency.ts';
 import { makeSessionTee } from './observer.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
+import {
+  classifyReadonlyTool,
+  serializedBytes,
+  toolIdentity,
+  type ToolTelemetryAccumulator,
+  type ToolTelemetryFinish,
+} from './tool-telemetry.ts';
 
 const ACP_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const ACP_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
+
+const LOCAL_ACP_TELEMETRY_CAPABILITY = 'observable' as const;
 
 /** Delivers one assembled prompt to an agent and returns its final text. */
 type AcpPromptRunner = (
@@ -35,13 +44,101 @@ type AcpPromptRunner = (
   timeoutMs?: number,
 ) => Promise<string>;
 
-export function createAcpBackend(spec: AcpAgentSpec, workspace: string): ReviewBackend {
-  return createAcpReviewBackend(`acp:${spec.id}`, (model, prompt, label, log, timeoutMs) =>
-    runLocalAcpPrompt(spec, workspace, model, prompt, label, log, {
-      timeoutMs,
-      tee: makeSessionTee(spec.id, label, model),
-    }),
-  );
+export function createAcpBackend(
+  spec: AcpAgentSpec,
+  workspace: string,
+  toolTelemetry?: ToolTelemetryAccumulator,
+): ReviewBackend {
+  return createAcpReviewBackend(`acp:${spec.id}`, async (model, prompt, label, log, timeoutMs) => {
+    const telemetryTee = toolTelemetry
+      ? createAcpTelemetryTee(toolTelemetry, `acp:${spec.id}`, label)
+      : undefined;
+    try {
+      return await runLocalAcpPrompt(spec, workspace, model, prompt, label, log, {
+        timeoutMs,
+        tee: composeAcpTees(makeSessionTee(spec.id, label, model), telemetryTee?.tee),
+      });
+    } finally {
+      telemetryTee?.finishPending();
+    }
+  });
+}
+
+function composeAcpTees(
+  first?: (dir: 'out' | 'in', frame: Record<string, unknown>) => void,
+  second?: (dir: 'out' | 'in', frame: Record<string, unknown>) => void,
+): ((dir: 'out' | 'in', frame: Record<string, unknown>) => void) | undefined {
+  if (!first) return second;
+  if (!second) return first;
+  return (dir, frame) => {
+    first(dir, frame);
+    second(dir, frame);
+  };
+}
+
+export function createAcpTelemetryTee(
+  telemetry: ToolTelemetryAccumulator,
+  backend: string,
+  session: string,
+): {
+  tee: (dir: 'out' | 'in', frame: Record<string, unknown>) => void;
+  finishPending: () => void;
+} {
+  const pending = new Map<string, (finish: ToolTelemetryFinish) => void>();
+  const tee = (dir: 'out' | 'in', frame: Record<string, unknown>): void => {
+    if (dir !== 'in' || frame.method !== 'session/update') return;
+    const params = isObject(frame.params) ? frame.params : {};
+    const update = isObject(params.update) ? params.update : {};
+    const kind = update.sessionUpdate;
+    if (kind !== 'tool_call' && kind !== 'tool_call_update') return;
+    const id = String(update.toolCallId ?? update.id ?? '');
+    if (!id) return;
+    let finish = pending.get(id);
+    if (!finish) {
+      const name = String(update.kind ?? update.title ?? update.name ?? 'unknown');
+      const input = update.rawInput ?? update.input;
+      const toolClass = classifyReadonlyTool(name, input);
+      finish = telemetry.startTool({
+        session,
+        backend,
+        capability: LOCAL_ACP_TELEMETRY_CAPABILITY,
+        toolClass,
+        inputBytes: serializedBytes(input),
+        ...toolIdentity(toolClass, input),
+      });
+      pending.set(id, finish);
+    }
+    const status = String(update.status ?? '').toLowerCase();
+    if (!['completed', 'failed', 'error', 'cancelled', 'canceled'].includes(status)) return;
+    const output = update.rawOutput ?? update.output ?? update.content;
+    const bytes = serializedBytes(output);
+    finish({
+      success: status === 'completed',
+      ...(status === 'completed' ? {} : { failureClass: 'execution' as const }),
+      outputBytesBeforeCap: bytes,
+      outputBytesAfterCap: bytes,
+      ...(typeof update.durationMs === 'number' ? { durationMs: update.durationMs } : {}),
+    });
+    pending.delete(id);
+  };
+  return {
+    tee,
+    finishPending: () => {
+      for (const finish of pending.values()) {
+        finish({
+          success: false,
+          failureClass: 'unknown',
+          outputBytesBeforeCap: 0,
+          outputBytesAfterCap: 0,
+        });
+      }
+      pending.clear();
+    },
+  };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Every backend method reduces to "send a prompt, parse the reply", so local
@@ -146,6 +243,7 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
 
   return {
     name,
+    observability: LOCAL_ACP_TELEMETRY_CAPABILITY,
     async runReview(model, prContext, guidelines, log, options = {}): Promise<ReviewResult> {
       // ACP carries usage in usage_update, but mirror the other CLI backends and skip it.
       void options.onTokenUsage;

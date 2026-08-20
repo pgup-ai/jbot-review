@@ -8,6 +8,7 @@ import {
   type NonNullableUsage,
   type Options,
   type Query,
+  type SDKMessage,
   type SDKResultMessage,
 } from '@qoder-ai/qoder-agent-sdk';
 
@@ -33,12 +34,20 @@ import {
 } from './prompt.ts';
 import { truncateForLog } from '@symma/protocol';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
+import {
+  classifyReadonlyTool,
+  serializedBytes,
+  toolIdentity,
+  type ToolTelemetryAccumulator,
+  type ToolTelemetryFinish,
+} from './tool-telemetry.ts';
 
 const QODER_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const QODER_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const QODER_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 
 export const QODER_PROVIDER_ID = 'qoder';
+export const QODER_TELEMETRY_CAPABILITY = 'observable' as const;
 
 const QODER_READ_TOOLS = ['Read', 'Grep', 'Glob'];
 const QODER_DENIED_TOOLS = [
@@ -153,6 +162,7 @@ export async function runQoderReview(
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
     token?: string;
+    toolTelemetry?: ToolTelemetryAccumulator;
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
@@ -172,6 +182,7 @@ export async function runQoderReview(
     options.token,
     options.timeoutMs,
     options.onTokenUsage,
+    options.toolTelemetry,
   );
   try {
     return parseReview(raw, label, log, { strict: true });
@@ -193,6 +204,7 @@ export async function runQoderReview(
       options.token,
       options.timeoutMs,
       options.onTokenUsage,
+      options.toolTelemetry,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
@@ -206,6 +218,7 @@ export async function runQoderAddressedPriorCommentsCheck(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   token?: string,
+  toolTelemetry?: ToolTelemetryAccumulator,
 ): Promise<AddressedPriorComment[]> {
   const raw = await runQoderPrompt(
     workspace,
@@ -216,6 +229,7 @@ export async function runQoderAddressedPriorCommentsCheck(
     token,
     timeoutMs,
     onTokenUsage,
+    toolTelemetry,
   );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
 }
@@ -229,6 +243,7 @@ export async function runQoderGuidelineComplianceCheck(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   token?: string,
+  toolTelemetry?: ToolTelemetryAccumulator,
 ): Promise<Finding[]> {
   const raw = await runQoderPrompt(
     workspace,
@@ -239,6 +254,7 @@ export async function runQoderGuidelineComplianceCheck(
     token,
     timeoutMs,
     onTokenUsage,
+    toolTelemetry,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
 }
@@ -252,6 +268,7 @@ export async function runQoderChangesSinceLastReview(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   token?: string,
+  toolTelemetry?: ToolTelemetryAccumulator,
 ): Promise<string> {
   const raw = await runQoderPrompt(
     workspace,
@@ -262,6 +279,7 @@ export async function runQoderChangesSinceLastReview(
     token,
     timeoutMs,
     onTokenUsage,
+    toolTelemetry,
   );
   return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
 }
@@ -275,6 +293,7 @@ export async function runQoderFindingVerification(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   token?: string,
+  toolTelemetry?: ToolTelemetryAccumulator,
 ): Promise<FindingVerdict[] | undefined> {
   const raw = await runQoderPrompt(
     workspace,
@@ -285,8 +304,65 @@ export async function runQoderFindingVerification(
     token,
     timeoutMs,
     onTokenUsage,
+    toolTelemetry,
   );
   return parseFindingVerdicts(raw, findings.length, log);
+}
+
+export function observeQoderToolMessage(
+  telemetry: ToolTelemetryAccumulator,
+  session: string,
+  pending: Map<string, (finish: ToolTelemetryFinish) => void>,
+  message: SDKMessage,
+): void {
+  if (message.type === 'assistant' && Array.isArray(message.message.content)) {
+    for (const block of message.message.content) {
+      if (!block || typeof block !== 'object' || block.type !== 'tool_use') continue;
+      const tool = typeof block.name === 'string' ? block.name : 'unknown';
+      const id = typeof block.id === 'string' ? block.id : '';
+      if (!id || pending.has(id)) continue;
+      const toolClass = classifyReadonlyTool(tool, block.input);
+      const identity = toolIdentity(toolClass, block.input);
+      pending.set(
+        id,
+        telemetry.startTool({
+          session,
+          backend: QODER_PROVIDER_ID,
+          capability: QODER_TELEMETRY_CAPABILITY,
+          toolClass,
+          inputBytes: serializedBytes(block.input),
+          ...identity,
+        }),
+      );
+    }
+    return;
+  }
+  if (message.type === 'system' && message.subtype === 'permission_denied') {
+    const finish = pending.get(message.tool_use_id);
+    finish?.({
+      success: false,
+      failureClass: 'denied',
+      outputBytesBeforeCap: 0,
+      outputBytesAfterCap: 0,
+    });
+    pending.delete(message.tool_use_id);
+    return;
+  }
+  if (message.type !== 'user' || !Array.isArray(message.message.content)) return;
+  for (const block of message.message.content) {
+    if (!block || typeof block !== 'object' || block.type !== 'tool_result') continue;
+    const id = typeof block.tool_use_id === 'string' ? block.tool_use_id : '';
+    const finish = pending.get(id);
+    if (!finish) continue;
+    const bytes = serializedBytes(block.content);
+    finish({
+      success: block.is_error !== true,
+      ...(block.is_error === true ? { failureClass: 'execution' as const } : {}),
+      outputBytesBeforeCap: bytes,
+      outputBytesAfterCap: bytes,
+    });
+    pending.delete(id);
+  }
 }
 
 async function runQoderPrompt(
@@ -298,6 +374,7 @@ async function runQoderPrompt(
   token: string | undefined,
   timeoutMs = QODER_PROMPT_TIMEOUT_MS,
   onTokenUsage?: TokenUsageRecorder,
+  toolTelemetry?: ToolTelemetryAccumulator,
 ): Promise<string> {
   const home = mkdtempSync(join(tmpdir(), 'jbot-qoder-'));
   const abortController = new AbortController();
@@ -305,6 +382,18 @@ async function runQoderPrompt(
   let result: SDKResultMessage | undefined;
   let session: Query | undefined;
   let timer: NodeJS.Timeout | undefined;
+  const pendingTools = new Map<string, (finish: ToolTelemetryFinish) => void>();
+  const finishPendingTools = (): void => {
+    for (const finish of pendingTools.values()) {
+      finish({
+        success: false,
+        failureClass: 'unknown',
+        outputBytesBeforeCap: 0,
+        outputBytesAfterCap: 0,
+      });
+    }
+    pendingTools.clear();
+  };
   log(`Calling ${label} prompt (agent=qoder-cli, model=${model})`);
   try {
     session = query({
@@ -319,15 +408,28 @@ async function runQoderPrompt(
     timer.unref();
     try {
       for await (const message of session) {
+        if (toolTelemetry) observeQoderToolMessage(toolTelemetry, label, pendingTools, message);
         if (message.type === 'result') result = message;
       }
     } catch (error) {
-      if (!result) throw error;
+      if (!result) {
+        finishPendingTools();
+        throw error;
+      }
     }
-    if (timedOut && result?.subtype !== 'success') {
+    finishPendingTools();
+    if (!result) throw new Error(`qoder ${label} produced no result event`);
+    toolTelemetry?.finishSession({
+      session: label,
+      backend: QODER_PROVIDER_ID,
+      capability: QODER_TELEMETRY_CAPABILITY,
+      budgetTier: 'observe-only',
+      stopReason: result.subtype === 'success' ? 'completed' : timedOut ? 'timeout' : 'failed',
+      turnCount: result.num_turns,
+    });
+    if (timedOut && result.subtype !== 'success') {
       throw new Error(formatQoderPromptTimeoutMessage(label, model, timeoutMs));
     }
-    if (!result) throw new Error(`qoder ${label} produced no result event`);
     if (result.subtype !== 'success') {
       throw new Error(
         `qoder ${label} failed (${result.subtype}): ${truncateForLog(result.errors.join('; '), 1000)}`,

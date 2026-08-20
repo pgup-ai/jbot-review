@@ -21,6 +21,12 @@ import {
 } from './prompt.ts';
 import { isFiniteNumber, isRecord } from './text.ts';
 import {
+  classifyReadonlyTool,
+  serializedBytes,
+  toolIdentity,
+  type ToolTelemetryAccumulator,
+} from './tool-telemetry.ts';
+import {
   sanitizeFinding,
   type AddressedPriorComment,
   type Finding,
@@ -33,10 +39,77 @@ const MODEL_LIST_TIMEOUT_MS = 5_000;
 const PROMPT_TIMEOUT_MS = 15 * 60_000;
 const PROMPT_POLL_INTERVAL_MS = 2_000;
 const PROMPT_POLL_REQUEST_TIMEOUT_MS = 10_000;
+const opencodeToolTelemetry = new WeakMap<object, ToolTelemetryAccumulator>();
 const PROMPT_PROGRESS_LOG_MS = 60_000;
 const CONTEXT7_MCP_NAME = 'context7';
 const CONTEXT7_MCP_URL = 'https://mcp.context7.com/mcp';
 const CONTEXT7_MCP_TIMEOUT_MS = 15_000;
+
+export const OPENCODE_TELEMETRY_CAPABILITY = 'observable' as const;
+
+export function configureOpencodeTelemetry(
+  client: OpencodeClient,
+  telemetry: ToolTelemetryAccumulator,
+): void {
+  opencodeToolTelemetry.set(client, telemetry);
+}
+
+export function recordOpencodeToolParts(
+  telemetry: ToolTelemetryAccumulator,
+  session: string,
+  parts: ReadonlyArray<Part>,
+): void {
+  for (const part of parts) {
+    if (
+      part.type !== 'tool' ||
+      (part.state.status !== 'completed' && part.state.status !== 'error')
+    ) {
+      continue;
+    }
+    const toolClass = classifyReadonlyTool(part.tool, part.state.input);
+    const identity = toolIdentity(toolClass, part.state.input);
+    const finish = telemetry.startTool({
+      session,
+      backend: 'opencode',
+      capability: OPENCODE_TELEMETRY_CAPABILITY,
+      toolClass,
+      inputBytes: serializedBytes(part.state.input),
+      ...identity,
+      ...(toolClass === 'diff-recovery'
+        ? { diffScope: identity.identityKind === 'path' ? ('path' as const) : ('whole' as const) }
+        : {}),
+    });
+    const output = part.state.status === 'completed' ? part.state.output : part.state.error;
+    const outputBytes = serializedBytes(output);
+    finish({
+      success: part.state.status === 'completed',
+      ...(part.state.status === 'error' ? { failureClass: 'execution' as const } : {}),
+      outputBytesBeforeCap: outputBytes,
+      outputBytesAfterCap: outputBytes,
+      durationMs: Math.max(part.state.time.end - part.state.time.start, 0),
+    });
+  }
+  const turnCount = parts.filter((part) => part.type === 'step-finish').length;
+  telemetry.finishSession({
+    session,
+    backend: 'opencode',
+    capability: OPENCODE_TELEMETRY_CAPABILITY,
+    budgetTier: 'observe-only',
+    stopReason: 'completed',
+    ...(turnCount > 0 ? { turnCount } : {}),
+  });
+}
+
+export function observedAssistantParts(
+  messages: ReadonlyArray<{ info: { id: string }; parts?: ReadonlyArray<Part> }>,
+  afterMessageID?: string,
+): ReadonlyArray<Part> {
+  if (!afterMessageID) return messages.flatMap((message) => message.parts ?? []);
+  const afterIndex = messages.findIndex((message) => message.info.id === afterMessageID);
+  return afterIndex < 0
+    ? []
+    : messages.slice(afterIndex + 1).flatMap((message) => message.parts ?? []);
+}
 
 export interface ProviderKeyConfig {
   providerID: string;
@@ -953,6 +1026,8 @@ async function promptInSessionHoldingSlot(
   }
 
   const parts = data.parts;
+  const telemetry = opencodeToolTelemetry.get(client);
+  if (telemetry) recordOpencodeToolParts(telemetry, label, data.observedParts);
   log(
     `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
   );
@@ -960,7 +1035,9 @@ async function promptInSessionHoldingSlot(
   const usage = extractPromptTokenUsage(data.info);
   if (usage) onTokenUsage?.(usage, model, label);
 
-  const textParts = parts.filter((p) => p.type === 'text' && p.text);
+  const textParts = parts.filter(
+    (part): part is Extract<Part, { type: 'text' }> => part.type === 'text' && Boolean(part.text),
+  );
   // No text part (e.g. the model exhausted its budget on reasoning) must
   // surface as a parse failure so the repair loop fires — defaulting to
   // '{}' would silently score the session as "no findings".
@@ -1003,13 +1080,17 @@ async function waitForAssistantMessage(
   log: (msg: string) => void,
   ignoreMessageID?: string,
   timeoutMs = PROMPT_TIMEOUT_MS,
-): Promise<{ info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> }> {
+): Promise<{
+  info: AssistantMessage;
+  parts: ReadonlyArray<Part>;
+  observedParts: ReadonlyArray<Part>;
+}> {
   const startedAt = Date.now();
   let lastStatus = 'unknown';
   let lastProgressLogAt = startedAt;
 
   while (Date.now() - startedAt < timeoutMs) {
-    const latest = await getLatestAssistantMessage(client, sessionID, label);
+    const latest = await getLatestAssistantMessage(client, sessionID, label, ignoreMessageID);
     const message = latest && latest.info.id === ignoreMessageID ? undefined : latest;
     if (message?.info.error) {
       throw new Error(`opencode ${label} prompt failed: ${formatUnknownError(message.info.error)}`);
@@ -1021,6 +1102,7 @@ async function waitForAssistantMessage(
       return {
         info: message.info,
         parts: message.parts,
+        observedParts: message.observedParts,
       };
     }
 
@@ -1046,8 +1128,14 @@ async function getLatestAssistantMessage(
   client: OpencodeClient,
   sessionID: string,
   label: string,
+  afterMessageID?: string,
 ): Promise<
-  { info: AssistantMessage; parts: ReadonlyArray<{ type: string; text?: string }> } | undefined
+  | {
+      info: AssistantMessage;
+      parts: ReadonlyArray<Part>;
+      observedParts: ReadonlyArray<Part>;
+    }
+  | undefined
 > {
   const result = await withTimeout(
     client.session.messages({ path: { id: sessionID }, query: queryDirectory(client) }),
@@ -1057,15 +1145,17 @@ async function getLatestAssistantMessage(
   const error = getResultError(result);
   if (error) throw new Error(`opencode ${label} message polling failed: ${error}`);
 
-  const messages = result.data ?? [];
-  for (const message of [...messages].reverse()) {
-    if (message.info.role !== 'assistant') continue;
-    return {
-      info: message.info,
-      parts: (message.parts ?? []).map(toTextReadablePart),
-    };
-  }
-  return undefined;
+  const messages = (result.data ?? []).filter(
+    (message): message is typeof message & { info: AssistantMessage } =>
+      message.info.role === 'assistant',
+  );
+  const latest = messages.at(-1);
+  if (!latest) return undefined;
+  return {
+    info: latest.info,
+    parts: latest.parts ?? [],
+    observedParts: observedAssistantParts(messages, afterMessageID),
+  };
 }
 
 async function getSessionStatus(
@@ -1082,10 +1172,6 @@ async function getSessionStatus(
   if (error) throw new Error(`opencode ${label} status polling failed: ${error}`);
   const statuses = result.data;
   return statuses?.[sessionID];
-}
-
-function toTextReadablePart(part: Part): { type: string; text?: string } {
-  return part.type === 'text' ? { type: part.type, text: part.text } : { type: part.type };
 }
 
 function queryDirectory(client: OpencodeClient): { directory: string } | undefined {

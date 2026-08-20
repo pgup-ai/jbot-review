@@ -21,6 +21,12 @@ import {
 } from './opencode.ts';
 import { CLI_ENV_ALLOWLIST } from './shell-policy.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
+import {
+  classifyReadonlyTool,
+  serializedBytes,
+  toolIdentity,
+  type ToolTelemetryAccumulator,
+} from './tool-telemetry.ts';
 
 const DIM_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const DIM_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
@@ -28,6 +34,7 @@ const DIM_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 
 export const DIM_PROVIDER_ID = 'dim';
 export const DIM_CLI_BIN = 'dim';
+export const DIM_TELEMETRY_CAPABILITY = 'observable' as const;
 
 /**
  * Tool allowlist for review sessions. `--tools` is the ONLY per-tool lever that
@@ -181,23 +188,40 @@ export function dimEnvForHome(home: string | undefined): NodeJS.ProcessEnv {
 export interface DimRuntime {
   parent: string;
   bundle: DimBundle;
+  toolTelemetry?: ToolTelemetryAccumulator;
+}
+
+export interface DimToolObservation {
+  name: string;
+  input?: unknown;
+  output?: unknown;
+  success: boolean;
+  failureClass?: 'denied' | 'execution';
+  durationMs?: number;
 }
 
 interface DimRunOutcome {
   text: string;
   usage?: PromptTokenUsage;
   failure?: string;
+  toolEvents: DimToolObservation[];
 }
+
+const MAX_DIM_TOOL_EVENTS = 256;
 
 /**
  * Reads dim's `--json` JSONL. Assistant text arrives as `text:delta` chunks —
  * `message:*` carry ids only — and the terminal `run:ended` holds both the
  * status and the run's token usage.
  */
-export function parseDimEventStream(stdout: string): DimRunOutcome {
+export function parseDimEventStream(stdout: string, observeTools = true): DimRunOutcome {
   let text = '';
   let usage: PromptTokenUsage | undefined;
   let failure: string | undefined;
+  const toolEvents: DimToolObservation[] = [];
+  const pendingTools = observeTools
+    ? new Map<string, { name: string; input?: unknown; startedAt?: number }>()
+    : undefined;
   for (const line of stdout.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed.startsWith('{')) continue;
@@ -210,6 +234,52 @@ export function parseDimEventStream(stdout: string): DimRunOutcome {
     const payload = (event.payload ?? {}) as Record<string, unknown>;
     if (event.eventType === 'text:delta' && typeof payload.delta === 'string') {
       text += payload.delta;
+      continue;
+    }
+    if (observeTools && event.eventType === 'tool:started') {
+      const id = typeof payload.toolCallId === 'string' ? payload.toolCallId : '';
+      if (id && pendingTools && pendingTools.size < MAX_DIM_TOOL_EVENTS) {
+        const startedAt =
+          typeof event.createdAt === 'string' ? Date.parse(event.createdAt) : undefined;
+        pendingTools.set(id, {
+          name: typeof payload.toolName === 'string' ? payload.toolName : 'unknown',
+          ...(payload.toolInput !== undefined ? { input: payload.toolInput } : {}),
+          ...(typeof startedAt === 'number' && Number.isFinite(startedAt) ? { startedAt } : {}),
+        });
+      }
+      continue;
+    }
+    if (
+      observeTools &&
+      toolEvents.length < MAX_DIM_TOOL_EVENTS &&
+      (event.eventType === 'tool:completed' ||
+        event.eventType === 'tool:failed' ||
+        event.eventType === 'tool:declined')
+    ) {
+      const id = typeof payload.toolCallId === 'string' ? payload.toolCallId : '';
+      const started = pendingTools?.get(id);
+      const completedAt =
+        typeof event.createdAt === 'string' ? Date.parse(event.createdAt) : undefined;
+      const duration =
+        started?.startedAt !== undefined &&
+        typeof completedAt === 'number' &&
+        Number.isFinite(completedAt)
+          ? Math.max(completedAt - started.startedAt, 0)
+          : undefined;
+      toolEvents.push({
+        name:
+          typeof payload.toolName === 'string' ? payload.toolName : (started?.name ?? 'unknown'),
+        ...(started?.input !== undefined ? { input: started.input } : {}),
+        ...(payload.toolResult !== undefined ? { output: payload.toolResult } : {}),
+        success: event.eventType === 'tool:completed',
+        ...(event.eventType === 'tool:declined'
+          ? { failureClass: 'denied' as const }
+          : event.eventType === 'tool:failed'
+            ? { failureClass: 'execution' as const }
+            : {}),
+        ...(duration !== undefined ? { durationMs: duration } : {}),
+      });
+      pendingTools?.delete(id);
       continue;
     }
     if (event.eventType !== 'run:ended') continue;
@@ -231,7 +301,7 @@ export function parseDimEventStream(stdout: string): DimRunOutcome {
       cacheWrite: num(raw.cacheWriteTokens),
     };
   }
-  return { text: text.trim(), usage, failure };
+  return { text: text.trim(), usage, failure, toolEvents };
 }
 
 export async function runDimReview(
@@ -397,7 +467,36 @@ async function runDimPrompt(
       log(`dim ${label}: session home teardown failed: ${String(error)}`);
     }
   }
-  const { text, usage, failure } = parseDimEventStream(result.stdout);
+  const { text, usage, failure, toolEvents } = parseDimEventStream(
+    result.stdout,
+    Boolean(runtime.toolTelemetry),
+  );
+  for (const event of toolEvents) {
+    const toolClass = classifyReadonlyTool(event.name, event.input);
+    const bytes = serializedBytes(event.output);
+    const finish = runtime.toolTelemetry?.startTool({
+      session: label,
+      backend: DIM_PROVIDER_ID,
+      capability: DIM_TELEMETRY_CAPABILITY,
+      toolClass,
+      inputBytes: serializedBytes(event.input),
+      ...toolIdentity(toolClass, event.input),
+    });
+    finish?.({
+      success: event.success,
+      ...(event.failureClass ? { failureClass: event.failureClass } : {}),
+      outputBytesBeforeCap: bytes,
+      outputBytesAfterCap: bytes,
+      ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+    });
+  }
+  runtime.toolTelemetry?.finishSession({
+    session: label,
+    backend: DIM_PROVIDER_ID,
+    capability: DIM_TELEMETRY_CAPABILITY,
+    budgetTier: 'observe-only',
+    stopReason: result.exitCode !== 0 || failure ? 'failed' : 'completed',
+  });
   if (usage) options.onTokenUsage?.(usage, model, label);
   if (result.exitCode !== 0 || failure) {
     throw new Error(

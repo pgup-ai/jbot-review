@@ -7,6 +7,8 @@ import {
   type SessionSlots,
 } from '../src/shared/session-concurrency.ts';
 import { Semaphore, type SemaphorePriority } from '../src/shared/opencode.ts';
+import { createPhaseTelemetryTracker, createTelemetryRecorder } from '../src/shared/telemetry.ts';
+import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts';
 
 const noLog = (): void => undefined;
 
@@ -132,5 +134,48 @@ describe('limitReviewBackendSessions', () => {
     await Promise.all([first, second, auxiliary]);
 
     assert.deepEqual(order, ['main-1', 'main-2', 'aux']);
+  });
+
+  it('emits complete queue/execution terminal rows on success and timeout', async () => {
+    const recorder = createTelemetryRecorder(true);
+    const telemetry = {
+      phases: createPhaseTelemetryTracker(recorder),
+      tools: createToolTelemetryAccumulator(recorder, 'salt'),
+    };
+    await limitReviewBackendSessions(
+      makeBackend(),
+      'main',
+      undefined,
+      undefined,
+      telemetry,
+    ).runReview('model', 'context', '', noLog, { label: 'success' });
+    const timeoutBackend = makeBackend(() => {
+      throw new Error('prompt timed out');
+    });
+    await assert.rejects(
+      limitReviewBackendSessions(timeoutBackend, 'aux', undefined, undefined, telemetry).runReview(
+        'model',
+        'context',
+        '',
+        noLog,
+        { label: 'timeout' },
+      ),
+      /timed out/,
+    );
+
+    const phases = recorder
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((row) => row.kind === 'phase');
+    assert.deepEqual(
+      phases.map((row) => [row.session, row.phase, row.stopReason]),
+      [
+        ['success', 'main-queue', 'completed'],
+        ['success', 'main-execution', 'completed'],
+        ['timeout', 'auxiliary-queue', 'completed'],
+        ['timeout', 'auxiliary-execution', 'timeout'],
+      ],
+    );
   });
 });

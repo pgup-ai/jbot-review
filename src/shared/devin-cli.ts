@@ -29,6 +29,8 @@ import {
 } from './opencode.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 
+const DEVIN_CLI_TELEMETRY_CAPABILITY = 'opaque' as const;
+
 const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const DEVIN_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const DEVIN_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
@@ -168,6 +170,7 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
   writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home)), { mode: 0o600 });
   return {
     name: DEVIN_PROVIDER_ID,
+    observability: DEVIN_CLI_TELEMETRY_CAPABILITY,
     async runReview(model, prContext, guidelines, log, options = {}) {
       const label = options.label ?? 'review';
       const prompt = assembleReviewPrompt(

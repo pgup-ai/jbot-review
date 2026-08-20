@@ -3,12 +3,64 @@ import { describe, it } from 'node:test';
 
 import {
   buildConfig,
+  observedAssistantParts,
   parseChangesSinceLastReviewSummary,
+  recordOpencodeToolParts,
   sessionEnvDenyKeys,
 } from '../src/shared/opencode.ts';
 import { BASH_PERMISSIONS } from '../src/shared/shell-policy.ts';
+import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
+import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts';
 
 const noop = () => {};
+
+describe('OpenCode tool telemetry', () => {
+  it('reads terminal SDK tool parts without retaining their input or output', () => {
+    const recorder = createTelemetryRecorder(true);
+    const telemetry = createToolTelemetryAccumulator(recorder, 'salt');
+    recordOpencodeToolParts(telemetry, 'review', [
+      {
+        type: 'tool',
+        tool: 'read',
+        state: {
+          status: 'completed',
+          input: { path: 'secret.ts' },
+          output: 'private source',
+          time: { start: 10, end: 25 },
+        },
+      },
+      {
+        type: 'tool',
+        tool: 'git_diff',
+        state: {
+          status: 'completed',
+          input: {},
+          output: 'private diff',
+          time: { start: 20, end: 30 },
+        },
+      },
+      { type: 'step-finish' },
+    ] as never);
+
+    const jsonl = recorder.toJsonl();
+    assert.doesNotMatch(jsonl, /secret\.ts|private source|salt/);
+    const rows = jsonl.split('\n').map((line) => JSON.parse(line));
+    assert.equal(rows.find((row) => row.kind === 'tool').durationMs, 15);
+    assert.equal(
+      rows.find((row) => row.kind === 'tool' && row.toolClass === 'diff-recovery').diffScope,
+      'whole',
+    );
+    assert.equal(rows.find((row) => row.kind === 'exploration').turnCount, 1);
+
+    const messages = [
+      { info: { id: 'old' }, parts: [{ type: 'step-finish' }] },
+      { info: { id: 'new' }, parts: [{ type: 'step-finish' }] },
+    ] as never;
+    assert.equal(observedAssistantParts(messages).length, 2);
+    assert.equal(observedAssistantParts(messages, 'old').length, 1);
+    assert.deepEqual(observedAssistantParts(messages, 'missing'), []);
+  });
+});
 
 describe('parseChangesSinceLastReviewSummary', () => {
   it('extracts the summary string from a valid object', () => {

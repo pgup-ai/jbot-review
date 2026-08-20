@@ -14,6 +14,7 @@
     "dev": "tsx src/app/server.ts",
     "review:local": "tsx src/local/index.ts",
     "benchmark:review": "tsx scripts/review-benchmark.ts",
+    "performance:review": "tsx scripts/review-performance.ts",
     "gateway": "tsx src/gateway/server.ts",
     "gateway:demo": "tsx src/gateway/demo.ts",
     "models:update": "tsx scripts/update-model-catalog.ts",
