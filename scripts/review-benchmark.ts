@@ -170,7 +170,7 @@ async function prepareWorkspace(
       for (const file of files) writeFixtureFile(workspace, file.path, file.base);
       const git = fixtureGitPrefix(workspace, gitEnv);
       await execFileAsync('git', [...git, 'init', '--quiet'], { env: gitEnv });
-      await commitFixture(workspace, 'base', gitEnv);
+      await commitFixture(workspace, 'base', gitEnv, true);
       const base = (
         await execFileAsync('git', [...git, 'rev-parse', 'HEAD'], { env: gitEnv })
       ).stdout.trim();
@@ -228,6 +228,7 @@ async function commitFixture(
   workspace: string,
   message: string,
   env: NodeJS.ProcessEnv,
+  allowEmpty = false,
 ): Promise<void> {
   const prefix = fixtureGitPrefix(workspace, env);
   await execFileAsync('git', [...prefix, 'add', '--all'], { env });
@@ -243,7 +244,7 @@ async function commitFixture(
       'commit.gpgSign=false',
       'commit',
       '--quiet',
-      '--allow-empty',
+      ...(allowEmpty ? ['--allow-empty'] : []),
       '-m',
       message,
     ],

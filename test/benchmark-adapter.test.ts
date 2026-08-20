@@ -216,21 +216,49 @@ describe('competitor benchmark adapters', () => {
       ],
     );
 
-    const windowsFinding = (base: string) =>
+    const artifactPath = (
+      artifactLocation: { uri: string; uriBaseId?: string },
+      repositoryRoot: string,
+      originalUriBaseIds?: Record<string, unknown>,
+    ) =>
       normalizeCompetitorFindings(
         'sarif',
         {
           runs: [
             {
-              originalUriBaseIds: { ROOT: { uri: base } },
-              results: [result('ROOT')],
+              ...(originalUriBaseIds ? { originalUriBaseIds } : {}),
+              results: [
+                {
+                  ...result('ROOT'),
+                  locations: [
+                    {
+                      physicalLocation: {
+                        artifactLocation,
+                        region: { startLine: 1 },
+                      },
+                    },
+                  ],
+                },
+              ],
             },
           ],
         },
-        { repositoryRoot: 'C:\\workspace' },
+        { repositoryRoot },
       )[0].path;
-    assert.equal(windowsFinding('file:///C:/workspace/'), 'a.ts');
-    assert.equal(windowsFinding('file:///D:/outside/'), '');
+    assert.equal(
+      artifactPath({ uri: 'a.ts', uriBaseId: 'ROOT' }, 'C:\\workspace', {
+        ROOT: { uri: 'file:///C:/workspace/' },
+      }),
+      'a.ts',
+    );
+    assert.equal(
+      artifactPath({ uri: 'a.ts', uriBaseId: 'ROOT' }, 'C:\\workspace', {
+        ROOT: { uri: 'file:///D:/outside/' },
+      }),
+      '',
+    );
+    assert.equal(artifactPath({ uri: 'a.ts' }, 'C:\\workspace'), 'a.ts');
+    assert.equal(artifactPath({ uri: 'file:///workspace/src%2Fa.ts' }, '/workspace'), '');
   });
 
   it('excludes model, endpoint, reasoning, or sampling mismatches from rankings', () => {

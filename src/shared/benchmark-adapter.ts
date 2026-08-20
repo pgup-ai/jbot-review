@@ -120,9 +120,9 @@ function sarifBaseUri(
 function repositoryPath(path: string, repositoryRoot?: string): string {
   const windowsPath = win32.isAbsolute(path);
   const windowsRoot = repositoryRoot ? win32.isAbsolute(repositoryRoot) : false;
-  if (repositoryRoot && windowsPath !== windowsRoot) return '';
+  const absolute = windowsPath || isAbsolute(path);
+  if (absolute && repositoryRoot && windowsPath !== windowsRoot) return '';
   const pathApi = windowsPath ? win32 : { isAbsolute, relative, resolve };
-  const absolute = pathApi.isAbsolute(path);
   const local =
     absolute && repositoryRoot ? pathApi.relative(pathApi.resolve(repositoryRoot), path) : path;
   const portable = local.replaceAll('\\', '/').replace(/^\.\//, '');
@@ -151,9 +151,18 @@ function sarifArtifactPath(
       return '';
     }
   }
+  let parsed: URL;
   try {
-    const parsed = new URL(uri);
-    if (parsed.protocol !== 'file:') return '';
+    parsed = new URL(uri);
+  } catch {
+    try {
+      return repositoryPath(decodeURIComponent(uri.split(/[?#]/, 1)[0]), repositoryRoot);
+    } catch {
+      return '';
+    }
+  }
+  if (parsed.protocol !== 'file:') return '';
+  try {
     const filePath = fileURLToPath(parsed);
     return repositoryPath(
       repositoryRoot && win32.isAbsolute(repositoryRoot) && /^\/[a-z]:\//i.test(filePath)
@@ -162,11 +171,7 @@ function sarifArtifactPath(
       repositoryRoot,
     );
   } catch {
-    try {
-      return repositoryPath(decodeURIComponent(uri.split(/[?#]/, 1)[0]), repositoryRoot);
-    } catch {
-      return '';
-    }
+    return '';
   }
 }
 

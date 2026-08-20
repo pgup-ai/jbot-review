@@ -292,6 +292,14 @@ describe('scoreBenchmark', () => {
         treatment: { complete: false, adjudicatedFindings: 0, retainedFindings: 1 },
       },
     });
+    assert.equal(
+      evaluateBenchmarkQualityGate(score, score, 0.02, {
+        controlSuccessfulRuns: 1,
+        treatmentSuccessfulRuns: 0,
+        treatmentFailedRuns: 1,
+      }).status,
+      'adjudication-required',
+    );
     const acceptedUnmapped = scoreBenchmark(
       [
         {

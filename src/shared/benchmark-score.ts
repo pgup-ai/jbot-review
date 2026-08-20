@@ -510,19 +510,19 @@ export function evaluateBenchmarkQualityGate(
   ) {
     reasons.push('treatment did not complete the control run population');
   }
-  if (reasons.length > 0) {
-    return {
-      status: 'failed',
-      passed: false,
-      reasons,
-      semanticAdjudication,
-    };
-  }
   if (!control.semanticAdjudication.complete || !treatment.semanticAdjudication.complete) {
     return {
       status: 'adjudication-required',
       passed: null,
       reasons: ['semantic adjudication is incomplete'],
+      semanticAdjudication,
+    };
+  }
+  if (reasons.length > 0) {
+    return {
+      status: 'failed',
+      passed: false,
+      reasons,
       semanticAdjudication,
     };
   }

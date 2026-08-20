@@ -364,6 +364,48 @@ describe('review-benchmark', () => {
       ) as { control: { successfulRuns: number }; treatment: { successfulRuns: number } };
       assert.equal(additionSummary.control.successfulRuns, 1);
       assert.equal(additionSummary.treatment.successfulRuns, 1);
+
+      const noOpCorpus = Buffer.from(
+        JSON.stringify({
+          cases: [
+            {
+              id: additionCase.id,
+              shape: { files: 1, additions: 0, deletions: 0, patchBytes: 20 },
+              files: [{ path: 'same.ts', patch: '@@ -1,1 +1,1 @@\n unchanged\n' }],
+              findings: [],
+              telemetry: [],
+            },
+          ],
+        }),
+      );
+      const noOpHash = createHash('sha256')
+        .update(benchmarkCanonicalJson(source.cases))
+        .update('')
+        .update(noOpCorpus)
+        .digest('hex');
+      source.corpusHash = `sha256:${noOpHash}`;
+      source.control.configuration.corpusHash = source.corpusHash;
+      source.treatment.configuration.corpusHash = source.corpusHash;
+      writeFileSync(join(root, 'corpus.json'), noOpCorpus);
+      writeFileSync(manifestPath, JSON.stringify(source));
+      const noOpOutput = join(root, 'no-op-output');
+      execFileSync(
+        TSX,
+        [
+          join(ROOT, 'scripts/review-benchmark.ts'),
+          '--manifest',
+          manifestPath,
+          '--output',
+          noOpOutput,
+        ],
+        { encoding: 'utf8', stdio: 'pipe' },
+      );
+      const noOpSummary = JSON.parse(readFileSync(join(noOpOutput, 'summary.json'), 'utf8')) as {
+        control: { failedRuns: number };
+        treatment: { failedRuns: number };
+      };
+      assert.equal(noOpSummary.control.failedRuns, 1);
+      assert.equal(noOpSummary.treatment.failedRuns, 1);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

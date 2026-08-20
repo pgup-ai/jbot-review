@@ -4,5 +4,8 @@ export function benchmarkArgument(name: string, argv = process.argv): string | u
     const value = argv[index + 1];
     return value && !value.startsWith('--') ? value : undefined;
   }
-  return argv.find((value) => value.startsWith(`--${name}=`))?.slice(name.length + 3);
+  const value = argv
+    .find((candidate) => candidate.startsWith(`--${name}=`))
+    ?.slice(name.length + 3);
+  return value && !value.startsWith('--') ? value : undefined;
 }
