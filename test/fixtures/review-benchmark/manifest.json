@@ -1,0 +1,552 @@
+{
+  "schemaVersion": 1,
+  "name": "phase0-fixture-replay-baseline",
+  "repetitions": 3,
+  "timeoutMs": 10000,
+  "corpusHash": "sha256:589ac69c5ccb299ac15840e45d0a0a2b152fcf850229d9ca3265ee019aee3849",
+  "runner": {
+    "command": [
+      "${projectRoot}/node_modules/.bin/tsx",
+      "${projectRoot}/test/fixtures/review-benchmark/replay-runner.ts"
+    ],
+    "cwd": "project"
+  },
+  "declaredTreatmentVariables": ["config.benchmarkAdapterMode"],
+  "control": {
+    "name": "CTRL-main-fixture-replay",
+    "configuration": {
+      "model": "fixture/replay",
+      "modelRevision": "phase0-v1",
+      "engine": "fixture-replay",
+      "engineVersion": "1",
+      "reasoningEffort": "deterministic",
+      "sampling": {
+        "temperature": 0
+      },
+      "promptVersion": "sha256:dad657bcb21b1e4e3f267b6d1891f9c56f7096aec41b15e28297169f0aaad8a9",
+      "corpusHash": "sha256:589ac69c5ccb299ac15840e45d0a0a2b152fcf850229d9ca3265ee019aee3849",
+      "config": {
+        "benchmarkAdapterMode": "control"
+      }
+    }
+  },
+  "treatment": {
+    "name": "TREAT-phase0-harness-validation",
+    "configuration": {
+      "model": "fixture/replay",
+      "modelRevision": "phase0-v1",
+      "engine": "fixture-replay",
+      "engineVersion": "1",
+      "reasoningEffort": "deterministic",
+      "sampling": {
+        "temperature": 0
+      },
+      "promptVersion": "sha256:dad657bcb21b1e4e3f267b6d1891f9c56f7096aec41b15e28297169f0aaad8a9",
+      "corpusHash": "sha256:589ac69c5ccb299ac15840e45d0a0a2b152fcf850229d9ca3265ee019aee3849",
+      "config": {
+        "benchmarkAdapterMode": "treatment"
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "auth-bypass",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "auth-bypass-finding",
+          "severity": "P0",
+          "anchors": [
+            {
+              "path": "src/security.ts",
+              "line": 10
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-01"
+    },
+    {
+      "id": "clean-auth-guard",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-02"
+    },
+    {
+      "id": "tenant-scope-leak",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "tenant-scope-leak-finding",
+          "severity": "P1",
+          "anchors": [
+            {
+              "path": "src/data.ts",
+              "line": 12
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-03"
+    },
+    {
+      "id": "clean-tenant-query",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-04"
+    },
+    {
+      "id": "lost-update-race",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "lost-update-race-finding",
+          "severity": "P1",
+          "anchors": [
+            {
+              "path": "src/concurrency.ts",
+              "line": 14
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-05"
+    },
+    {
+      "id": "clean-transaction-lock",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-06"
+    },
+    {
+      "id": "api-nullability-break",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "api-nullability-break-finding",
+          "severity": "P1",
+          "anchors": [
+            {
+              "path": "src/api.ts",
+              "line": 16
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-07"
+    },
+    {
+      "id": "clean-api-extension",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-08"
+    },
+    {
+      "id": "stale-frontend-state",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "stale-frontend-state-finding",
+          "severity": "P2",
+          "anchors": [
+            {
+              "path": "src/frontend.ts",
+              "line": 18
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-09"
+    },
+    {
+      "id": "clean-frontend-copy",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-10"
+    },
+    {
+      "id": "workflow-write-escalation",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "workflow-write-escalation-finding",
+          "severity": "P1",
+          "anchors": [
+            {
+              "path": "src/infrastructure.ts",
+              "line": 20
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-11"
+    },
+    {
+      "id": "clean-cache-key-change",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-12"
+    },
+    {
+      "id": "missing-regression-assertion",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "missing-regression-assertion-finding",
+          "severity": "P2",
+          "anchors": [
+            {
+              "path": "src/tests.ts",
+              "line": 22
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-13"
+    },
+    {
+      "id": "clean-test-refactor",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-14"
+    },
+    {
+      "id": "incorrect-doc-example",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "incorrect-doc-example-finding",
+          "severity": "P3",
+          "anchors": [
+            {
+              "path": "src/docs.ts",
+              "line": 24
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-15"
+    },
+    {
+      "id": "clean-doc-typo",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-16"
+    },
+    {
+      "id": "generated-source-edit",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "generated-source-edit-finding",
+          "severity": "P2",
+          "anchors": [
+            {
+              "path": "src/generated.ts",
+              "line": 26
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-17"
+    },
+    {
+      "id": "clean-lockfile-refresh",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "medium",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-18"
+    },
+    {
+      "id": "large-file-boundary",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "large-file-boundary-finding",
+          "severity": "P1",
+          "anchors": [
+            {
+              "path": "src/large-single-file.ts",
+              "line": 28
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-19"
+    },
+    {
+      "id": "clean-large-generated-map",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-20"
+    },
+    {
+      "id": "cross-package-contract",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "cross-package-contract-finding",
+          "severity": "P1",
+          "anchors": [
+            {
+              "path": "src/broad-multi-package.ts",
+              "line": 30
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-21"
+    },
+    {
+      "id": "clean-package-reorganization",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-22"
+    },
+    {
+      "id": "caller-callee-mismatch",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "caller-callee-mismatch-finding",
+          "severity": "P1",
+          "anchors": [
+            {
+              "path": "src/cross-file.ts",
+              "line": 32
+            },
+            {
+              "path": "src/caller.ts",
+              "line": 44
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-23"
+    },
+    {
+      "id": "clean-symbol-rename",
+      "riskTier": "medium",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-24"
+    },
+    {
+      "id": "secret-log-exposure",
+      "riskTier": "critical",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "secret-log-exposure-finding",
+          "severity": "P0",
+          "anchors": [
+            {
+              "path": "src/security.ts",
+              "line": 34
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-25"
+    },
+    {
+      "id": "clean-redacted-logging",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "large",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-26"
+    },
+    {
+      "id": "quadratic-hot-path",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "quadratic-hot-path-finding",
+          "severity": "P1",
+          "anchors": [
+            {
+              "path": "src/performance.ts",
+              "line": 36
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-27"
+    },
+    {
+      "id": "clean-loop-simplification",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-28"
+    },
+    {
+      "id": "unsafe-default-config",
+      "riskTier": "high",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "expectedClean": false,
+      "expectedFindings": [
+        {
+          "id": "unsafe-default-config-finding",
+          "severity": "P1",
+          "anchors": [
+            {
+              "path": "src/configuration.ts",
+              "line": 38
+            }
+          ]
+        }
+      ],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-29"
+    },
+    {
+      "id": "clean-config-comment",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "very-large",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base-v1",
+      "head": "fixture-head-v1-30"
+    }
+  ]
+}

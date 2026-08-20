@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "name": "runner-failure-classification",
+  "repetitions": 1,
+  "timeoutMs": 1000,
+  "corpusHash": "sha256:e8ccaca8c17b3d15c24f17a570ba37d08c7644e2e23029a51d2febe78a0a03f1",
+  "runner": {
+    "command": [
+      "${projectRoot}/node_modules/.bin/tsx",
+      "${projectRoot}/test/fixtures/review-benchmark/failure-runner.ts"
+    ],
+    "cwd": "project"
+  },
+  "declaredTreatmentVariables": ["config.benchmarkAdapterMode"],
+  "control": {
+    "name": "control",
+    "configuration": {
+      "model": "fixture/failure",
+      "modelRevision": "1",
+      "engine": "fixture",
+      "engineVersion": "1",
+      "reasoningEffort": "deterministic",
+      "sampling": { "temperature": 0 },
+      "promptVersion": "failure-fixture-v1",
+      "corpusHash": "sha256:e8ccaca8c17b3d15c24f17a570ba37d08c7644e2e23029a51d2febe78a0a03f1",
+      "config": { "benchmarkAdapterMode": "control" }
+    }
+  },
+  "treatment": {
+    "name": "treatment",
+    "configuration": {
+      "model": "fixture/failure",
+      "modelRevision": "1",
+      "engine": "fixture",
+      "engineVersion": "1",
+      "reasoningEffort": "deterministic",
+      "sampling": { "temperature": 0 },
+      "promptVersion": "failure-fixture-v1",
+      "corpusHash": "sha256:e8ccaca8c17b3d15c24f17a570ba37d08c7644e2e23029a51d2febe78a0a03f1",
+      "config": { "benchmarkAdapterMode": "treatment" }
+    }
+  },
+  "cases": [
+    {
+      "id": "runner-failure",
+      "riskTier": "low",
+      "cacheState": "uncached",
+      "diffSize": "small",
+      "expectedClean": true,
+      "expectedFindings": [],
+      "fixturePath": "corpus.json",
+      "base": "fixture-base",
+      "head": "fixture-head"
+    }
+  ]
+}
