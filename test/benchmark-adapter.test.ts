@@ -156,20 +156,38 @@ describe('competitor benchmark adapters', () => {
           {
             tool: {
               driver: {
-                rules: [{ id: 'contract', messageStrings: { primary: { text: 'Rule message' } } }],
+                rules: [
+                  {
+                    id: 'contract',
+                    defaultConfiguration: { level: 'error' },
+                    messageStrings: { primary: { text: 'Rule message' } },
+                  },
+                ],
                 globalMessageStrings: { global: { text: 'Global message' } },
               },
             },
+            artifacts: [{ location: { uri: 'src/indexed.ts' } }],
             results: [
-              { ruleIndex: 0, level: 'warning', message: { id: 'primary' } },
-              { level: 'note', message: { id: 'global' } },
+              {
+                ruleIndex: 0,
+                message: { id: 'primary' },
+                locations: [
+                  {
+                    physicalLocation: {
+                      artifactLocation: { index: 0 },
+                      region: { startLine: 6 },
+                    },
+                  },
+                ],
+              },
+              { kind: 'pass', message: { id: 'global' } },
             ],
           },
         ],
-      }).map(({ title, severity }) => ({ title, severity })),
+      }).map(({ title, severity, path }) => ({ title, severity, path })),
       [
-        { title: 'Rule message', severity: 'P2' },
-        { title: 'Global message', severity: 'P3' },
+        { title: 'Rule message', severity: 'P1', path: 'src/indexed.ts' },
+        { title: 'Global message', severity: 'P3', path: '' },
       ],
     );
   });

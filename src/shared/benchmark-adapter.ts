@@ -73,14 +73,10 @@ function messageString(value: unknown): string | undefined {
       : undefined;
 }
 
-function sarifMessage(
+function sarifRule(
   run: Record<string, unknown>,
   result: Record<string, unknown>,
-): string | undefined {
-  if (!isRecord(result.message)) return undefined;
-  if (typeof result.message.text === 'string') return result.message.text;
-  const id = typeof result.message.id === 'string' ? result.message.id : undefined;
-  if (!id) return undefined;
+): Record<string, unknown> | undefined {
   const tool = isRecord(run.tool) ? run.tool : undefined;
   const driver = tool && isRecord(tool.driver) ? tool.driver : undefined;
   const rules = driver && Array.isArray(driver.rules) ? driver.rules : [];
@@ -92,6 +88,20 @@ function sarifMessage(
           typeof result.ruleId === 'string' &&
           candidate.id === result.ruleId,
       );
+  return isRecord(rule) ? rule : undefined;
+}
+
+function sarifMessage(
+  run: Record<string, unknown>,
+  result: Record<string, unknown>,
+): string | undefined {
+  if (!isRecord(result.message)) return undefined;
+  if (typeof result.message.text === 'string') return result.message.text;
+  const id = typeof result.message.id === 'string' ? result.message.id : undefined;
+  if (!id) return undefined;
+  const tool = isRecord(run.tool) ? run.tool : undefined;
+  const driver = tool && isRecord(tool.driver) ? tool.driver : undefined;
+  const rule = sarifRule(run, result);
   const ruleStrings =
     isRecord(rule) && isRecord(rule.messageStrings) ? rule.messageStrings : undefined;
   const globalStrings =
@@ -269,14 +279,30 @@ function normalizeSarif(
       const artifact = isRecord(physical) ? physical.artifactLocation : undefined;
       const region = isRecord(physical) ? physical.region : undefined;
       const message = sarifMessage(run, result);
-      const path = sarifArtifactPath(
-        run,
-        isRecord(artifact) ? artifact : undefined,
-        options.repositoryRoot,
-      );
+      const artifactIndex = isRecord(artifact) ? artifact.index : undefined;
+      const indexedArtifact =
+        Number.isInteger(artifactIndex) && Array.isArray(run.artifacts)
+          ? run.artifacts[artifactIndex as number]
+          : undefined;
+      const indexedLocation = isRecord(indexedArtifact) ? indexedArtifact.location : undefined;
+      const resolvedArtifact = isRecord(artifact)
+        ? { ...(isRecord(indexedLocation) ? indexedLocation : {}), ...artifact }
+        : undefined;
+      const path = sarifArtifactPath(run, resolvedArtifact, options.repositoryRoot);
       const line =
         isRecord(region) && Number.isInteger(region.startLine) ? (region.startLine as number) : 0;
       const title = message ?? result.ruleId;
+      const rule = sarifRule(run, result);
+      const defaultConfiguration =
+        rule && isRecord(rule.defaultConfiguration) ? rule.defaultConfiguration : undefined;
+      const level =
+        typeof result.level === 'string'
+          ? result.level
+          : typeof result.kind === 'string' && result.kind !== 'fail'
+            ? 'none'
+            : typeof defaultConfiguration?.level === 'string'
+              ? defaultConfiguration.level
+              : 'warning';
       const resultFingerprints = isRecord(result.partialFingerprints)
         ? result.partialFingerprints
         : isRecord(result.fingerprints)
@@ -285,7 +311,7 @@ function normalizeSarif(
       const finding = observedFinding({
         path,
         line,
-        severity: normalizeSeverity(typeof result.level === 'string' ? result.level : 'warning'),
+        severity: normalizeSeverity(level),
         title,
         anchored: Boolean(path) && line > 0,
         fingerprint:
