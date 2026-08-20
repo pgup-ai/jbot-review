@@ -46,6 +46,87 @@ export interface SessionTelemetryRow {
   estimatedCostUsd?: number;
 }
 
+export type BackendTelemetryCapability = 'enforceable' | 'observable' | 'opaque';
+export type ExplorationMode =
+  'embedded-only' | 'diff-recovery' | 'adjacent-context' | 'mixed' | 'unavailable';
+export type ExplorationBudgetTier = 'single-shot' | 'observe-only';
+export type TelemetryStopReason = 'completed' | 'failed' | 'timeout' | 'aborted';
+export type ToolTelemetryClass =
+  'diff-recovery' | 'file-read' | 'search' | 'list' | 'external-docs' | 'other-readonly';
+
+export interface PhaseTelemetryRow {
+  kind: 'phase';
+  phase:
+    | 'context-assembly'
+    | 'main-queue'
+    | 'main-execution'
+    | 'auxiliary-queue'
+    | 'auxiliary-execution'
+    | 'grace-wait'
+    | 'filtering'
+    | 'verification'
+    | 'posting'
+    | 'teardown';
+  scope: 'run' | 'session';
+  durationMs: number;
+  stopReason: TelemetryStopReason;
+  session?: string;
+  backend?: string;
+  inputBytes?: number;
+  outputBytes?: number;
+}
+
+export interface ToolTelemetryRow {
+  kind: 'tool';
+  session: string;
+  backend: string;
+  toolClass: ToolTelemetryClass;
+  capability: BackendTelemetryCapability;
+  durationMs?: number;
+  inputBytes: number;
+  outputBytesBeforeCap: number;
+  outputBytesAfterCap: number;
+  duplicate: boolean;
+  success: boolean;
+  failureClass?: 'denied' | 'timeout' | 'execution' | 'invalid-input' | 'unknown';
+  diffScope?: 'whole' | 'path';
+}
+
+export interface ExplorationTelemetryRow {
+  kind: 'exploration';
+  session: string;
+  backend: string;
+  capability: BackendTelemetryCapability;
+  explorationMode: ExplorationMode;
+  budgetTier: ExplorationBudgetTier;
+  stopReason: TelemetryStopReason;
+  turnCountAvailable: boolean;
+  turnCount?: number;
+  toolCalls: number;
+  toolInputBytes: number;
+  toolOutputBytes: number;
+  uniquePathHashes: number;
+  uniqueQueryHashes: number;
+  duplicateReads: number;
+  repeatedSearches: number;
+  droppedToolRows: number;
+}
+
+export interface PhaseTelemetryStart {
+  phase: PhaseTelemetryRow['phase'];
+  scope: PhaseTelemetryRow['scope'];
+  session?: string;
+  backend?: string;
+  inputBytes?: number;
+}
+
+export interface PhaseTelemetryTracker {
+  start(
+    input: PhaseTelemetryStart,
+  ): (stopReason?: TelemetryStopReason, outputBytes?: number) => void;
+  finishOpen(stopReason: TelemetryStopReason): void;
+}
+
 /**
  * Observed state of one PRIOR run's posted finding thread, captured at run
  * start from the thread fetch the suppression pass already pays for. These are
@@ -134,6 +215,11 @@ function classifySessionError(error: unknown): SessionFailureClass {
   return 'unknown';
 }
 
+export function classifyTelemetryStopReason(error: unknown): TelemetryStopReason {
+  const failure = classifySessionError(error);
+  return failure === 'timeout' ? 'timeout' : failure === 'aborted' ? 'aborted' : 'failed';
+}
+
 /**
  * Soft byte gate for one session's assembled context (PR context + guidelines).
  * Log-only: every fragment already has a hard budget, but the 149KB dilution
@@ -160,6 +246,9 @@ export interface TelemetryRecorder {
   /** Record the terminal routing of the surviving findings. */
   route(routing: FindingRouting): void;
   recordSession(row: SessionTelemetryRow): void;
+  recordPhase(row: PhaseTelemetryRow): void;
+  recordTool(row: ToolTelemetryRow): void;
+  recordExploration(row: ExplorationTelemetryRow): void;
   /** Record a prior finding thread's observed human outcome (one row per thread). */
   recordOutcome(row: Omit<OutcomeTelemetryRow, 'kind'>): void;
   /** Open the run header row; identity fields only, sealed at start. */
@@ -177,6 +266,9 @@ const DISABLED: TelemetryRecorder = {
   snapshot: () => undefined,
   route: () => undefined,
   recordSession: () => undefined,
+  recordPhase: () => undefined,
+  recordTool: () => undefined,
+  recordExploration: () => undefined,
   recordOutcome: () => undefined,
   beginRun: () => undefined,
   finishRun: () => undefined,
@@ -212,6 +304,9 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   // honest as the model's original output rather than mutating it.
   const routedLine = new Map<string, number>();
   const sessions: SessionTelemetryRow[] = [];
+  const phases: PhaseTelemetryRow[] = [];
+  const tools: ToolTelemetryRow[] = [];
+  const exploration = new Map<string, ExplorationTelemetryRow>();
   const outcomes: OutcomeTelemetryRow[] = [];
   let run:
     (RunTelemetryMeta & { terminalState?: RunTerminalState; elapsedMs?: number }) | undefined;
@@ -262,6 +357,22 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     recordSession(row) {
       sessions.push({ kind: 'session', ...row });
     },
+    recordPhase(row) {
+      phases.push(row);
+    },
+    recordTool(row) {
+      tools.push(row);
+    },
+    recordExploration(row) {
+      const key = `${row.backend}\0${row.session}`;
+      const current = exploration.get(key);
+      exploration.set(
+        key,
+        current && current.turnCountAvailable && !row.turnCountAvailable
+          ? { ...row, turnCountAvailable: true, turnCount: current.turnCount }
+          : row,
+      );
+    },
     recordOutcome(row) {
       outcomes.push({ kind: 'outcome', ...row });
     },
@@ -292,8 +403,49 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     },
     toJsonl() {
       const header = run ? [{ kind: 'run', schemaVersion: 1, ...run }] : [];
-      const lines = [...header, ...coverage, ...outcomes, ...this.findingRows(), ...sessions];
+      const lines = [
+        ...header,
+        ...phases,
+        ...coverage,
+        ...outcomes,
+        ...this.findingRows(),
+        ...sessions,
+        ...tools,
+        ...exploration.values(),
+      ];
       return lines.map((l) => JSON.stringify(l)).join('\n');
+    },
+  };
+}
+
+export function createPhaseTelemetryTracker(
+  recorder: TelemetryRecorder,
+  now: () => number = Date.now,
+): PhaseTelemetryTracker {
+  if (!recorder.enabled) {
+    return { start: () => () => undefined, finishOpen: () => undefined };
+  }
+  const active = new Map<symbol, { input: PhaseTelemetryStart; startedAt: number }>();
+  const finish = (key: symbol, stopReason: TelemetryStopReason, outputBytes?: number): void => {
+    const phase = active.get(key);
+    if (!phase) return;
+    active.delete(key);
+    recorder.recordPhase({
+      kind: 'phase',
+      ...phase.input,
+      durationMs: Math.max(now() - phase.startedAt, 0),
+      stopReason,
+      ...(outputBytes !== undefined ? { outputBytes } : {}),
+    });
+  };
+  return {
+    start(input) {
+      const key = Symbol(input.phase);
+      active.set(key, { input, startedAt: now() });
+      return (stopReason = 'completed', outputBytes) => finish(key, stopReason, outputBytes);
+    },
+    finishOpen(stopReason) {
+      for (const key of active.keys()) finish(key, stopReason);
     },
   };
 }

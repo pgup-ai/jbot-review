@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
@@ -25,6 +26,12 @@ import {
 } from './prompt.ts';
 import { isFiniteNumber, isRecord, truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
+import { serializedBytes, type ToolTelemetryAccumulator } from './tool-telemetry.ts';
+import { classifyTelemetryStopReason } from './telemetry.ts';
+
+export const PI_TELEMETRY_CAPABILITY = 'enforceable' as const;
+const piTelemetryContext = new AsyncLocalStorage<{ session: string }>();
+const piSessionTelemetry = new WeakMap<object, ToolTelemetryAccumulator>();
 
 /**
  * pi SDK engine: in-process review sessions via @earendil-works/pi-coding-agent,
@@ -392,7 +399,12 @@ interface PiSdkLike {
  * could never see removals or unembedded hunks (invariant 1). The base ref and
  * diff form are runner-supplied — the model only chooses an optional pathspec.
  */
-function createPiGitDiffTool(sdk: PiSdkLike, workspace: string, scope: PiDiffScope): unknown {
+function createPiGitDiffTool(
+  sdk: PiSdkLike,
+  workspace: string,
+  scope: PiDiffScope,
+  telemetry?: ToolTelemetryAccumulator,
+): unknown {
   return sdk.defineTool({
     name: 'git_diff',
     description:
@@ -408,6 +420,17 @@ function createPiGitDiffTool(sdk: PiSdkLike, workspace: string, scope: PiDiffSco
     },
     execute: async (_id: unknown, params: unknown) => {
       const path = isRecord(params) && typeof params.path === 'string' ? params.path : undefined;
+      const finish = telemetry?.startTool({
+        session: piTelemetryContext.getStore()?.session ?? 'unknown',
+        backend: 'pi',
+        capability: PI_TELEMETRY_CAPABILITY,
+        toolClass: 'diff-recovery',
+        inputBytes: serializedBytes(params),
+        ...(path
+          ? { identity: path, identityKind: 'path' as const }
+          : { identity: 'whole-diff', identityKind: 'scope' as const }),
+        diffScope: path ? 'path' : 'whole',
+      });
       let text: string;
       try {
         const { stdout } = await execFileAsync('git', piGitDiffArgs(scope, path), {
@@ -416,10 +439,25 @@ function createPiGitDiffTool(sdk: PiSdkLike, workspace: string, scope: PiDiffSco
           timeout: PI_DIFF_TOOL_TIMEOUT_MS,
         });
         text = stdout.trim() ? capPiDiffOutput(stdout) : '(no changes for this path)';
+        finish?.({
+          success: true,
+          outputBytesBeforeCap: Buffer.byteLength(stdout),
+          outputBytesAfterCap: Buffer.byteLength(text),
+        });
       } catch (error) {
         // Surface the failure as tool output the model can react to; a throw
         // here would fail the whole session over a bad pathspec.
         text = `git diff failed: ${error instanceof Error ? error.message : String(error)}`;
+        finish?.({
+          success: false,
+          failureClass:
+            (isRecord(error) && error.killed === true) ||
+            classifyTelemetryStopReason(error) === 'timeout'
+              ? 'timeout'
+              : 'execution',
+          outputBytesBeforeCap: 0,
+          outputBytesAfterCap: Buffer.byteLength(text),
+        });
       }
       return { content: [{ type: 'text', text }], details: {} };
     },
@@ -431,7 +469,11 @@ function createPiGitDiffTool(sdk: PiSdkLike, workspace: string, scope: PiDiffSco
  * and `..` paths with no sandbox). Refuses anything resolving outside the
  * workspace, so a prompt-injected diff cannot read host files.
  */
-function createPiReadTool(sdk: PiSdkLike, workspace: string): unknown {
+function createPiReadTool(
+  sdk: PiSdkLike,
+  workspace: string,
+  telemetry?: ToolTelemetryAccumulator,
+): unknown {
   return sdk.defineTool({
     name: 'read_file',
     description:
@@ -443,18 +485,45 @@ function createPiReadTool(sdk: PiSdkLike, workspace: string): unknown {
     },
     execute: async (_id: unknown, params: unknown) => {
       const requested = isRecord(params) && typeof params.path === 'string' ? params.path : '';
+      const finish = telemetry?.startTool({
+        session: piTelemetryContext.getStore()?.session ?? 'unknown',
+        backend: 'pi',
+        capability: PI_TELEMETRY_CAPABILITY,
+        toolClass: 'file-read',
+        inputBytes: serializedBytes(params),
+        ...(requested ? { identity: requested, identityKind: 'path' as const } : {}),
+      });
       const target = resolveWithinWorkspace(workspace, requested);
       if (!target) {
+        const text = `Refused: "${requested}" is outside the repository.`;
+        finish?.({
+          success: false,
+          failureClass: requested ? 'denied' : 'invalid-input',
+          outputBytesBeforeCap: 0,
+          outputBytesAfterCap: Buffer.byteLength(text),
+        });
         return {
-          content: [{ type: 'text', text: `Refused: "${requested}" is outside the repository.` }],
+          content: [{ type: 'text', text }],
           details: {},
         };
       }
       let text: string;
       try {
-        text = capPiDiffOutput(readFileSync(target, 'utf8'));
+        const raw = readFileSync(target, 'utf8');
+        text = capPiDiffOutput(raw);
+        finish?.({
+          success: true,
+          outputBytesBeforeCap: Buffer.byteLength(raw),
+          outputBytesAfterCap: Buffer.byteLength(text),
+        });
       } catch (error) {
         text = `read failed: ${error instanceof Error ? error.message : String(error)}`;
+        finish?.({
+          success: false,
+          failureClass: 'execution',
+          outputBytesBeforeCap: 0,
+          outputBytesAfterCap: Buffer.byteLength(text),
+        });
       }
       return { content: [{ type: 'text', text }], details: {} };
     },
@@ -520,6 +589,7 @@ export interface PiRuntime {
   thinkingLevel?: string;
   gitDiffTool?: unknown;
   readTool: unknown;
+  toolTelemetry?: ToolTelemetryAccumulator;
   /**
    * Created-but-not-disposed sessions; teardown aborts them so a prompt
    * abandoned past the settle grace can't hold the event loop past posting.
@@ -570,6 +640,7 @@ export async function startPi(
     modelOptions?: Record<string, unknown>;
     additionalProviderKeys?: ProviderKeyConfig[];
     diffScope?: PiDiffScope;
+    toolTelemetry?: ToolTelemetryAccumulator;
   } = {},
 ): Promise<{ runtime: PiRuntime; stop: () => void }> {
   const piID = requirePiProvider(providerID);
@@ -641,12 +712,20 @@ export async function startPi(
     loader,
     workspace,
     mainModel: `${providerID}/${modelID}`,
-    readTool: createPiReadTool(sdk, workspace),
+    readTool: createPiReadTool(sdk, workspace, options.toolTelemetry),
+    ...(options.toolTelemetry ? { toolTelemetry: options.toolTelemetry } : {}),
     activeSessions: new Set(),
     stopped: false,
     ...(thinkingLevel ? { thinkingLevel } : {}),
     ...(options.diffScope
-      ? { gitDiffTool: createPiGitDiffTool(sdk, workspace, options.diffScope) }
+      ? {
+          gitDiffTool: createPiGitDiffTool(
+            sdk,
+            workspace,
+            options.diffScope,
+            options.toolTelemetry,
+          ),
+        }
       : {}),
   };
   return {
@@ -699,6 +778,7 @@ async function createPiSession(
       : {}),
   });
   runtime.activeSessions.add(session);
+  if (runtime.toolTelemetry) piSessionTelemetry.set(session, runtime.toolTelemetry);
   // stop() may have swept the registry while createAgentSession was pending
   // (an abandoned caller racing teardown): abort the newborn session and fail
   // the call into the aux fail-open path rather than prompting post-teardown.
@@ -733,17 +813,28 @@ async function promptPiSession(
     // prompt() resolves when the full agent turn completes — no polling.
     // Template expansion stays off: prompts embed arbitrary diff text that
     // must never trigger pi's /template expansion.
-    await withTimeout(
-      session.prompt(prompt, { expandPromptTemplates: false }),
-      timeoutMs,
-      `pi ${label} prompt did not finish within ${Math.round(timeoutMs / 1000)}s`,
+    await piTelemetryContext.run({ session: label }, () =>
+      withTimeout(
+        session.prompt(prompt, { expandPromptTemplates: false }),
+        timeoutMs,
+        `pi ${label} prompt did not finish within ${Math.round(timeoutMs / 1000)}s`,
+      ),
     );
   } catch (error) {
+    piSessionTelemetry.get(session)?.finishSession({
+      session: label,
+      backend: 'pi',
+      capability: PI_TELEMETRY_CAPABILITY,
+      budgetTier: 'observe-only',
+      stopReason: classifyTelemetryStopReason(error),
+      turnCount: countPiAssistantTurns(piSessionMessages(session).slice(priorTurns)),
+    });
     await abortPiSessionBestEffort(session, label, log);
     throw error;
   }
   const allMessages = piSessionMessages(session);
   const messages = allMessages.slice(priorTurns);
+  const turnCount = countPiAssistantTurns(messages);
   const finalMessage = lastAssistantMessage(messages);
   const raw = extractPiFinalText(messages);
   // Bill every assistant turn this prompt produced (a tool-using prompt spans
@@ -768,16 +859,40 @@ async function promptPiSession(
       typeof finalMessage.errorMessage === 'string' && finalMessage.errorMessage.trim()
         ? truncateForLog(finalMessage.errorMessage.replace(/\s+/g, ' ').trim(), 1000)
         : 'unknown provider error';
-    throw new Error(
+    const error = new Error(
       `pi ${label} prompt ${finalMessage.stopReason} (${model}; content types: ${piContentTypes(finalMessage.content)}): ${detail}`,
     );
+    piSessionTelemetry.get(session)?.finishSession({
+      session: label,
+      backend: 'pi',
+      capability: PI_TELEMETRY_CAPABILITY,
+      budgetTier: 'observe-only',
+      stopReason: classifyTelemetryStopReason(error),
+      turnCount,
+    });
+    throw error;
   }
   if (!raw) {
     log(
       `${label} response contained no text output (stopReason=${String(finalMessage?.stopReason ?? 'unknown')}; content types: ${piContentTypes(finalMessage?.content)})`,
     );
   }
+  piSessionTelemetry.get(session)?.finishSession({
+    session: label,
+    backend: 'pi',
+    capability: PI_TELEMETRY_CAPABILITY,
+    budgetTier: 'observe-only',
+    stopReason: 'completed',
+    turnCount,
+  });
   return raw;
+}
+
+function countPiAssistantTurns(messages: unknown[]): number {
+  return messages.filter(
+    (message) =>
+      isRecord(message) && (message.role === 'assistant' || message.type === 'assistant'),
+  ).length;
 }
 
 async function abortPiSessionBestEffort(

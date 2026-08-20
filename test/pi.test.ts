@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 
 import {
   PI_MIN_NODE_VERSION,
+  PI_TELEMETRY_CAPABILITY,
   runPiReview,
   type PiRuntime,
   capPiDiffOutput,
@@ -24,6 +25,8 @@ import {
   resolvePiEngine,
 } from '../src/shared/pi.ts';
 import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
+import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
+import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts';
 
 describe('piSupportsProvider', () => {
   it('accepts every non-CLI jbot provider pi can also serve', () => {
@@ -494,6 +497,26 @@ describe('Pi review sessions', () => {
     );
     assert.equal(result.summary, 'ok');
     assert.deepEqual(events, ['prompted', 'disposed']);
+  });
+
+  it('reports the SDK-exposed turn count with enforceable tool capability', async () => {
+    const recorder = createTelemetryRecorder(true);
+    const runtime = fakeRuntime(
+      false,
+      [],
+      [{ role: 'assistant', content: reviewResultJson, stopReason: 'stop' }],
+    );
+    runtime.toolTelemetry = createToolTelemetryAccumulator(recorder, 'salt');
+    await runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {});
+
+    const exploration = recorder
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .find((row) => row.kind === 'exploration');
+    assert.equal(PI_TELEMETRY_CAPABILITY, 'enforceable');
+    assert.equal(exploration.turnCount, 1);
+    assert.equal(exploration.capability, 'enforceable');
   });
 
   it('surfaces terminal provider errors without exposing hidden reasoning or attempting JSON repair', async () => {

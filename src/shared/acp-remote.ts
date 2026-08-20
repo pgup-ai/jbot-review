@@ -12,6 +12,8 @@ import type { ReviewBackend } from './session-concurrency.ts';
 /** Run ids become directory names in the journal, so they are clamped here. */
 const RUN_ID_MAX_LENGTH = 128;
 
+export const REMOTE_ACP_TELEMETRY_CAPABILITY = 'opaque' as const;
+
 /**
  * Run id for a local review. CI takes one from the workflow run and attempt;
  * locally there is none, and without one every local review falls through to
@@ -117,7 +119,10 @@ export async function checkAuxGatewayEndpointReady(
 // teeing here would duplicate every frame unsigned. Journaling it twice is a
 // bug this repo already shipped once.
 export function createRemoteAcpBackend(config: RemoteAcpConfig): ReviewBackend {
-  return createAcpReviewBackend(`acp-gateway:${config.agent}@${config.endpoint}`, (...args) =>
-    runRemotePrompt(config, ...args),
+  const backend = createAcpReviewBackend(
+    `acp-gateway:${config.agent}@${config.endpoint}`,
+    (...args) => runRemotePrompt(config, ...args),
   );
+  backend.observability = REMOTE_ACP_TELEMETRY_CAPABILITY;
+  return backend;
 }

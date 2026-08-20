@@ -7,9 +7,66 @@ import {
   formatQoderPromptTimeoutMessage,
   isQoderProvider,
   mapQoderUsage,
+  observeQoderToolMessage,
   qoderEnvForHome,
   qoderModelID,
 } from '../src/shared/qoder.ts';
+import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
+import {
+  createToolTelemetryAccumulator,
+  type ToolTelemetryFinish,
+} from '../src/shared/tool-telemetry.ts';
+
+describe('Qoder tool telemetry', () => {
+  it('pairs SDK tool_use and tool_result blocks without persisting raw content', () => {
+    const recorder = createTelemetryRecorder(true);
+    const telemetry = createToolTelemetryAccumulator(recorder, 'salt');
+    const pending = new Map<string, (finish: ToolTelemetryFinish) => void>();
+    observeQoderToolMessage(telemetry, 'review', pending, {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 'call-1', name: 'Grep', input: { pattern: 'password' } }],
+      },
+    } as never);
+    observeQoderToolMessage(telemetry, 'review', pending, {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 'call-2', name: 'Read', input: { path: 'denied.ts' } }],
+      },
+    } as never);
+    observeQoderToolMessage(telemetry, 'review', pending, {
+      type: 'system',
+      subtype: 'permission_denied',
+      tool_use_id: 'call-2',
+    } as never);
+    observeQoderToolMessage(telemetry, 'review', pending, {
+      type: 'user',
+      message: {
+        content: [
+          { type: 'tool_result', tool_use_id: 'call-1', content: 'private match', is_error: false },
+        ],
+      },
+    } as never);
+    telemetry.finishSession({
+      session: 'review',
+      backend: 'qoder',
+      capability: 'observable',
+      budgetTier: 'observe-only',
+      stopReason: 'completed',
+      turnCount: 4,
+    });
+
+    const jsonl = recorder.toJsonl();
+    assert.doesNotMatch(jsonl, /password|private match|denied\.ts|salt/);
+    const rows = jsonl.split('\n').map((line) => JSON.parse(line));
+    assert.equal(rows.filter((row) => row.kind === 'tool' && row.toolClass === 'search').length, 1);
+    assert.equal(
+      rows.find((row) => row.kind === 'tool' && row.toolClass === 'file-read').failureClass,
+      'denied',
+    );
+    assert.equal(rows.find((row) => row.kind === 'exploration').turnCount, 4);
+  });
+});
 
 describe('Qoder CLI provider helpers', () => {
   it('matches only the explicit qoder provider id', () => {

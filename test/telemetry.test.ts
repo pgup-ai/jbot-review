@@ -5,9 +5,14 @@ import {
   ASSEMBLED_CONTEXT_WARN_BYTES,
   aggregateOutcomeRows,
   assembledContextWarning,
+  createPhaseTelemetryTracker,
   createTelemetryRecorder,
   type OutcomeTelemetryRow,
 } from '../src/shared/telemetry.ts';
+import {
+  MAX_TOOL_TELEMETRY_ROWS,
+  createToolTelemetryAccumulator,
+} from '../src/shared/tool-telemetry.ts';
 import type { Finding, Severity } from '../src/shared/types.ts';
 
 function finding(
@@ -47,9 +52,104 @@ describe('createTelemetryRecorder (disabled = inert)', () => {
     rec.beginRun({ runId: 'r', model: 'm' });
     rec.recordCoverage({ session: 's', state: 'completed' });
     rec.recordOutcome(outcome({ threadId: 'T1' }));
+    rec.recordPhase({
+      kind: 'phase',
+      phase: 'posting',
+      scope: 'run',
+      durationMs: 1,
+      stopReason: 'completed',
+    });
     rec.finishRun('completed', 1);
     assert.deepEqual(rec.findingRows(), []);
     assert.equal(rec.toJsonl(), '');
+  });
+});
+
+describe('phase and tool telemetry', () => {
+  it('closes every phase exactly once with its terminal reason', () => {
+    const rec = createTelemetryRecorder(true);
+    let now = 10;
+    const phases = createPhaseTelemetryTracker(rec, () => now);
+    const completed = phases.start({ phase: 'context-assembly', scope: 'run', inputBytes: 12 });
+    now = 30;
+    completed('completed', 8);
+    completed('failed');
+    const failed = phases.start({ phase: 'filtering', scope: 'run' });
+    now = 50;
+    failed('failed');
+    phases.start({ phase: 'posting', scope: 'run' });
+    now = 80;
+    phases.finishOpen('timeout');
+
+    const rows = rec
+      .toJsonl()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.deepEqual(
+      rows.map((row) => [row.phase, row.durationMs, row.stopReason]),
+      [
+        ['context-assembly', 20, 'completed'],
+        ['filtering', 20, 'failed'],
+        ['posting', 30, 'timeout'],
+      ],
+    );
+  });
+
+  it('bounds tool rows, detects salted duplicate identities, and persists no raw data', () => {
+    const rec = createTelemetryRecorder(true);
+    const tools = createToolTelemetryAccumulator(rec, 'per-run-salt', () => 100);
+    for (let i = 0; i < 2; i += 1) {
+      tools.startTool({
+        session: 'review',
+        backend: 'pi',
+        capability: 'enforceable',
+        toolClass: 'diff-recovery',
+        inputBytes: 2,
+        identity: 'whole-diff',
+        identityKind: 'scope',
+        diffScope: 'whole',
+      })({
+        success: true,
+        outputBytesBeforeCap: 200,
+        outputBytesAfterCap: 100,
+      });
+    }
+    for (let i = 0; i < MAX_TOOL_TELEMETRY_ROWS + 1; i += 1) {
+      tools.startTool({
+        session: 'review',
+        backend: 'pi',
+        capability: 'enforceable',
+        toolClass: 'file-read',
+        inputBytes: 20,
+        identity: i < 2 ? 'secret/path.ts' : `file-${i}.ts`,
+        identityKind: 'path',
+      })({
+        success: i !== 2,
+        ...(i === 2 ? { failureClass: 'execution' as const } : {}),
+        outputBytesBeforeCap: 100,
+        outputBytesAfterCap: 50,
+      });
+    }
+    tools.finishSession({
+      session: 'review',
+      backend: 'pi',
+      capability: 'enforceable',
+      budgetTier: 'observe-only',
+      stopReason: 'completed',
+      turnCount: 3,
+    });
+
+    const jsonl = rec.toJsonl();
+    assert.doesNotMatch(jsonl, /secret\/path|file-42|per-run-salt/);
+    const rows = jsonl.split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.equal(rows.filter((row) => row.kind === 'tool').length, MAX_TOOL_TELEMETRY_ROWS);
+    assert.equal(rows.filter((row) => row.kind === 'tool' && row.duplicate === true).length, 2);
+    const exploration = rows.find((row) => row.kind === 'exploration');
+    assert.equal(exploration?.toolCalls, MAX_TOOL_TELEMETRY_ROWS + 3);
+    assert.equal(exploration?.duplicateReads, 1);
+    assert.equal(exploration?.droppedToolRows, 3);
+    assert.equal(exploration?.turnCount, 3);
   });
 });
 

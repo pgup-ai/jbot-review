@@ -46,6 +46,42 @@ describe('buildDimCliArgs', () => {
   });
 });
 
+describe('dim event telemetry', () => {
+  it('captures bounded emitted tool and turn metadata and leaves it unavailable when absent', () => {
+    const withMetadata = parseDimEventStream(
+      [
+        event('tool:started', {
+          toolCallId: 'call-1',
+          toolName: 'grep',
+          toolInput: { pattern: 'needle' },
+        }),
+        event('tool:completed', {
+          toolCallId: 'call-1',
+          toolName: 'grep',
+          toolResult: 'match',
+          durationMs: 7,
+        }),
+        event('run:ended', { status: 'completed', numTurns: 3, usage: {} }),
+      ].join('\n'),
+    );
+    assert.equal(withMetadata.turnCount, 3);
+    assert.deepEqual(withMetadata.toolEvents, [
+      {
+        name: 'grep',
+        input: { pattern: 'needle' },
+        output: 'match',
+        success: true,
+        durationMs: 7,
+      },
+    ]);
+    const withoutMetadata = parseDimEventStream(
+      event('run:ended', { status: 'completed', usage: {} }),
+    );
+    assert.equal(withoutMetadata.turnCount, undefined);
+    assert.deepEqual(withoutMetadata.toolEvents, []);
+  });
+});
+
 describe('parseDimEventStream', () => {
   it('accumulates text:delta and reads usage off run:ended', () => {
     const stdout = [

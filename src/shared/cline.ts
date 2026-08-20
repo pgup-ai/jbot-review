@@ -33,6 +33,7 @@ const CLINE_GUIDELINE_BUDGET_BYTES = 24 * 1024;
 export const CLINE_MAX_ARGV_BYTES = 120 * 1024;
 
 export const CLINE_PROVIDER_ID = 'cline';
+export const CLINE_TELEMETRY_CAPABILITY = 'opaque' as const;
 /** Cline subscription billing mode; same backend as `cline`, different `--provider`. */
 export const CLINE_PASS_PROVIDER_ID = 'cline-pass';
 export const CLINE_CLI_BIN = 'cline';
