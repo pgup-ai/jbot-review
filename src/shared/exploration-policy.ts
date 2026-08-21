@@ -1,4 +1,8 @@
-import { EXPLORATION_SOFT_STOP_MESSAGE, explorationUnrelatedRecoveryMessage } from './prompt.ts';
+import {
+  EXPLORATION_NO_TOOLS_MESSAGE,
+  EXPLORATION_SOFT_STOP_MESSAGE,
+  explorationUnrelatedRecoveryMessage,
+} from './prompt.ts';
 import type { BackendTelemetryCapability } from './telemetry.ts';
 
 /**
@@ -57,6 +61,13 @@ export const EXPLORATION_LIMITS: Readonly<Record<ExplorationTier, ExplorationLim
     repeats: 2,
   },
 };
+
+/**
+ * Exempt recovery attempts allowed per gap. A capped diff leaves the gap open,
+ * so without a bound the same path could be re-requested forever outside the
+ * ordinary budget.
+ */
+const RECOVERY_ATTEMPTS_PER_GAP = 2;
 
 /** A single-shot session has no tools at all, so no budget can apply. */
 const SINGLE_SHOT_LIMITS: ExplorationLimits = {
@@ -161,6 +172,7 @@ export class ExplorationBudget {
   private readonly served = new Set<string>();
   private readonly repeated = new Map<string, number>();
   private readonly recovered = new Set<string>();
+  private readonly recoveryAttempts = new Map<string, number>();
   private softStopped = false;
 
   private readonly limits: ExplorationLimits;
@@ -191,7 +203,21 @@ export class ExplorationBudget {
 
   request(request: ExplorationRequest): ExplorationVerdict {
     if (this.plan.mode === 'single-shot') {
-      return { allow: false, exempt: false, refusal: 'no-tools', message: 'Tools are disabled.' };
+      return {
+        allow: false,
+        exempt: false,
+        refusal: 'no-tools',
+        message: EXPLORATION_NO_TOOLS_MESSAGE,
+      };
+    }
+    // Ahead of the soft stop on purpose: ordinary work running out must never
+    // starve a coverage gap the prompt admitted it could not embed.
+    if (request.kind === 'diff' && request.path && this.isExemptRecovery(request)) {
+      // Counted on the request rather than the result, so a call that fails
+      // downstream cannot retry forever outside the ordinary budget.
+      const { path } = request;
+      this.recoveryAttempts.set(path, (this.recoveryAttempts.get(path) ?? 0) + 1);
+      return { allow: true, exempt: true };
     }
     // A refusal after the soft stop must not read as a fresh warning.
     if (this.softStopped) {
@@ -202,7 +228,6 @@ export class ExplorationBudget {
         message: EXPLORATION_SOFT_STOP_MESSAGE,
       };
     }
-    if (this.isExemptRecovery(request)) return { allow: true, exempt: true };
     const unrelated = this.rejectsUnrelatedRecovery(request);
     if (unrelated) return unrelated;
 
@@ -225,9 +250,12 @@ export class ExplorationBudget {
   }
 
   /** Called once a permitted request has run, with what it actually returned. */
-  record(request: ExplorationRequest, outputBytes: number): void {
+  record(request: ExplorationRequest, outputBytes: number, truncated = false): void {
     if (this.isExemptRecovery(request) && request.kind === 'diff' && request.path) {
-      this.recovered.add(request.path);
+      // A capped response delivered only part of the file, so the gap stays
+      // open. RECOVERY_ATTEMPTS_PER_GAP bounds the retries, after which the
+      // path stops being exempt and falls to the ordinary budget.
+      if (!truncated) this.recovered.add(request.path);
       return;
     }
     const identity = requestIdentity(request);
@@ -248,6 +276,7 @@ export class ExplorationBudget {
     if (this.plan.mode !== 'coverage-recovery' || request.kind !== 'diff' || !request.path) {
       return false;
     }
+    if ((this.recoveryAttempts.get(request.path) ?? 0) >= RECOVERY_ATTEMPTS_PER_GAP) return false;
     return this.pendingGaps.includes(request.path);
   }
 

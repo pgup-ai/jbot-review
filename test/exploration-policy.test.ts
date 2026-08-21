@@ -159,6 +159,38 @@ describe('ExplorationBudget', () => {
     assert.equal(budget.request(ordinary).exempt, false);
   });
 
+  it('recovers a named gap even after ordinary work has soft-stopped', () => {
+    const budget = new ExplorationBudget(plan({ tier: 'minimal', omittedFiles: ['gap.ts'] }));
+    // Spend the ordinary allowance first.
+    for (let call = 0; call < EXPLORATION_LIMITS.minimal.adjacentFiles; call += 1) {
+      const request = { kind: 'read', path: `f${call}.ts` } as const;
+      budget.record(request, 10);
+    }
+    assert.equal(budget.request({ kind: 'read', path: 'more.ts' }).refusal, 'soft-stop');
+    assert.equal(budget.exhausted, true);
+
+    // The gap must still be reachable, or full-diff coverage is lost.
+    const recovery = budget.request({ kind: 'diff', path: 'gap.ts' });
+    assert.equal(recovery.allow, true);
+    assert.equal(recovery.exempt, true);
+  });
+
+  it('keeps a gap open when its recovery came back truncated, but bounds the retries', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['big.ts'] }));
+    const request = { kind: 'diff', path: 'big.ts' } as const;
+
+    assert.equal(budget.request(request).exempt, true);
+    budget.record(request, 48 * 1024, true);
+    // Only part of the file arrived, so the gap is not recovered.
+    assert.deepEqual(budget.pendingGaps, ['big.ts']);
+
+    assert.equal(budget.request(request).exempt, true);
+    budget.record(request, 48 * 1024, true);
+    // Retries are bounded: further requests stop being exempt rather than
+    // looping forever outside the ordinary budget.
+    assert.equal(budget.request(request).exempt, false);
+  });
+
   it('lets a served gap be re-read while its siblings are still outstanding', () => {
     const budget = new ExplorationBudget(plan({ omittedFiles: ['gap-a.ts', 'gap-b.ts'] }));
     const first = { kind: 'diff', path: 'gap-a.ts' } as const;

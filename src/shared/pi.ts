@@ -23,6 +23,7 @@ import {
 import type { PromptTokenUsage, ProviderKeyConfig, TokenUsageRecorder } from './opencode.ts';
 import {
   EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
+  EXPLORATION_SOFT_STOP_MESSAGE,
   PI_REVIEW_SYSTEM_PROMPT,
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
@@ -431,7 +432,7 @@ function refuseOverBudget(
   if (!budget) return undefined;
   const verdict = budget.request(request);
   if (verdict.allow) return undefined;
-  const text = verdict.message ?? 'Exploration budget reached.';
+  const text = verdict.message ?? EXPLORATION_SOFT_STOP_MESSAGE;
   finish?.({
     success: false,
     failureClass: 'budget',
@@ -442,8 +443,8 @@ function refuseOverBudget(
 }
 
 /** Charges a permitted call once its real output size is known. */
-function chargeBudget(request: ExplorationRequest, outputBytes: number): void {
-  piTelemetryContext.getStore()?.budget?.record(request, outputBytes);
+function chargeBudget(request: ExplorationRequest, outputBytes: number, truncated = false): void {
+  piTelemetryContext.getStore()?.budget?.record(request, outputBytes, truncated);
 }
 
 /** Exported for the budget-enforcement contract test. */
@@ -489,7 +490,13 @@ export function createPiGitDiffTool(
           timeout: PI_DIFF_TOOL_TIMEOUT_MS,
         });
         text = stdout.trim() ? capPiDiffOutput(stdout) : '(no changes for this path)';
-        chargeBudget({ kind: 'diff', ...(path ? { path } : {}) }, Buffer.byteLength(text));
+        // A capped diff delivered only part of the file, so the gap it was
+        // recovering stays open rather than counting as read.
+        chargeBudget(
+          { kind: 'diff', ...(path ? { path } : {}) },
+          Buffer.byteLength(text),
+          Buffer.byteLength(stdout) > PI_DIFF_TOOL_MAX_BYTES,
+        );
         finish?.({
           success: true,
           outputBytesBeforeCap: Buffer.byteLength(stdout),
