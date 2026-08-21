@@ -77,9 +77,9 @@ async function main(): Promise<void> {
     shardCachePath:
       process.env.JBOT_SHARD_CACHE_DIR?.trim() ??
       (process.env.RUNNER_TEMP ? join(process.env.RUNNER_TEMP, 'jbot-shard-cache') : ''),
-    // Env-only while these remain A/B arms; no action inputs until the data lands.
+    // Env rather than action inputs: neither belongs in the published contract.
     contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
-    embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', false),
+    embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
   };
   const pullTarget = getPullRequestTarget();
   for (const warning of swallowedProviderWarnings([...modelPool, ...auxProbe])) {
@@ -106,7 +106,7 @@ async function main(): Promise<void> {
     );
     options.sdkEngine = sdkEngineForProxy(options.sdkEngine, options.opencodeProxyEnv);
     core.info(
-      `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModelInput || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout} embeddedFirstPrompt=${options.embeddedFirstPrompt}`,
+      `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModelInput || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout} contextTrim=${options.contextTrim} embeddedFirstPrompt=${options.embeddedFirstPrompt}`,
     );
 
     const model = pickPooledModel(modelPool, pull.head.sha, github.context.runAttempt);

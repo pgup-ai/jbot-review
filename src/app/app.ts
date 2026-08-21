@@ -136,7 +136,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           // it, so the operator picks a path they prune.
           shardCachePath: process.env.JBOT_SHARD_CACHE_DIR?.trim() ?? '',
           contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
-          embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', false),
+          embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });
