@@ -375,15 +375,35 @@ Completion criteria for Phase 10:
 | TASK-100 | P1 / Latency H, Quality - risk / S | Run fixed-model A/B tests for supported reasoning levels (`medium` versus `low`, then `low` versus `minimal`) using identical prompts and corpus. Report reasoning tokens, main duration, recall, precision, and variance separately.                                       | TASK-025, TASK-058        |           |      |
 | TASK-101 | P1 / Latency H, Quality + / M      | Test risk-based reasoning: elevated effort for security/data/API/concurrency/large-deletion shards and lower effort for low-risk/test/docs/config shards, using the same model weights. Keep all shards fully reviewed.                                                     | TASK-067, TASK-100        |           |      |
 | TASK-102 | P2 / Latency M, Quality + / M      | Test escalation on uncertainty: begin at the graduated lower effort, then rerun only a shard that reports incomplete coverage, ambiguous high-risk contracts, parse failure, or a low-confidence blocking candidate. Do not use absence of findings alone as a skip signal. | TASK-100                  |           |      |
-| TASK-103 | P2 / Latency M, Quality + / M      | Test adaptive verification effort based on finding severity and evidence completeness while retaining verification for all blocking findings. Use a single batched verifier call unless data shows batching harms verdict quality.                                          | TASK-100                  |           |      |
+| TASK-103 | P2 / Latency M, Quality + / M      | Test adaptive verification effort based on finding severity and evidence completeness while retaining verification for all blocking findings. Use a single batched verifier call unless data shows batching harms verdict quality.                                          | TASK-100, TASK-157        |           |      |
 | TASK-104 | P0 / Latency 0, Quality + / S      | Add model-option fingerprinting and telemetry so reasoning arms cannot alias in local/provider caches or be reported as the same configuration accidentally.                                                                                                                | TASK-095, TASK-100        |           |      |
 | TASK-105 | P1 / Latency H, Quality 0 / S      | Graduate a lower-effort or adaptive arm only when QLT-003/004 pass across the full corpus and at least three real-PR canaries. Otherwise keep it as an operator experiment.                                                                                                 | TASK-100 through TASK-104 |           |      |
+| TASK-157 | P1 / Latency - risk, Quality + / S | Give verification its own reasoning effort instead of whatever the aux model entry happens to carry, and clamp an unsupported effort to the nearest supported tier rather than dropping it. Parity with the main pass is the floor.                                         | None                      |           |      |
+
+**Verification effort (TASK-157).** Verification runs on `auxModel`, which is the main
+model unless an aux model is configured, so its effort is an accident of an unrelated
+knob: main-pass effort by default, and the `low` from `defaultAuxModelOptions` the moment
+an operator sets a distinct aux model for lens throughput or cost. That `low` was argued
+from a lens spending its output budget on reasoning, never from verification, whose
+input is one narrow claim per finding and is bounded by `MAX_VERIFIED_FINDINGS`. A
+verifier reasoning below the finder cannot overturn the finder's reasoning errors, so
+parity is a floor rather than a tuning preference — today it holds only by coincidence.
+`supportedModelOptions` drops an unsupported effort instead of clamping it, so `medium`
+silently becomes the provider default on ladders like `['low', 'high', 'max']`. Rank
+`minimal` < `low` < `medium` < `high` < `max` and resolve a tie upward, so a ladder
+without `medium` cannot quietly reinstate `low`; clamp an out-of-range request to the
+ladder's end, and leave Poolside's provider-managed `default` outside the order. Effort
+above parity waits on TASK-079: verification runs last on the
+`computeVerificationTimeoutMs` remainder and fails open, so a slower verifier is skipped
+on exactly the large runs that most need it.
 
 Completion criteria for Phase 11:
 
 - Reasoning savings are measured separately from prompt/tool/sharding savings.
 - Same-model claims include exact reasoning configuration.
 - Escalation never converts a clean first pass into evidence that full coverage occurred when it did not.
+- Verification effort is set deliberately, not a side effect of the aux model choice.
+- No arm runs at an effort the model silently dropped.
 
 ### Implementation Phase 12 — Remove CI and packaging overhead outside inference
 
