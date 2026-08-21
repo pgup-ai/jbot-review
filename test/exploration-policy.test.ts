@@ -180,12 +180,12 @@ describe('ExplorationBudget', () => {
     const request = { kind: 'diff', path: 'big.ts' } as const;
 
     assert.equal(budget.request(request).exempt, true);
-    budget.record(request, 48 * 1024, { truncated: true, exempt: true });
+    budget.record(request, 48 * 1024, { exempt: true, complete: false });
     // Only part of the file arrived, so the gap is not recovered.
     assert.deepEqual(budget.pendingGaps, ['big.ts']);
 
     assert.equal(budget.request(request).exempt, true);
-    budget.record(request, 48 * 1024, { truncated: true, exempt: true });
+    budget.record(request, 48 * 1024, { exempt: true, complete: false });
     // Retries are bounded: further requests stop being exempt rather than
     // looping forever outside the ordinary budget.
     assert.equal(budget.request(request).exempt, false);
@@ -197,7 +197,7 @@ describe('ExplorationBudget', () => {
 
     // First attempt comes back capped, so the gap stays open.
     assert.equal(budget.request(request).exempt, true);
-    budget.record(request, 48 * 1024, { truncated: true, exempt: true });
+    budget.record(request, 48 * 1024, { exempt: true, complete: false });
     assert.deepEqual(budget.pendingGaps, ['big.ts']);
 
     // The second is the last allowed exempt attempt, and it returns in full.
@@ -209,6 +209,35 @@ describe('ExplorationBudget', () => {
 
     assert.deepEqual(budget.pendingGaps, []);
     assert.equal(budget.mode, 'embedded');
+  });
+
+  it('charges a permitted call that failed, so failures cannot run free', () => {
+    const budget = new ExplorationBudget(plan({ tier: 'minimal' }));
+    // Distinct queries, so the call budget is what runs out rather than the
+    // repeat rule. Every attempt fails and returns nothing.
+    for (let call = 0; call < EXPLORATION_LIMITS.minimal.ordinaryCalls; call += 1) {
+      const request = { kind: 'search', query: `boom${call}` } as const;
+      assert.equal(budget.request(request).allow, true, `attempt ${call}`);
+      budget.record(request, 0, { exempt: false, complete: false });
+    }
+    assert.equal(budget.request({ kind: 'search', query: 'boom-again' }).allow, false);
+
+    // Repeating one failing call is bounded by the repeat rule instead.
+    const repeating = new ExplorationBudget(plan({ tier: 'minimal' }));
+    const same = { kind: 'search', query: 'boom' } as const;
+    repeating.record(same, 0, { exempt: false, complete: false });
+    assert.equal(repeating.request(same).refusal, 'soft-stop');
+  });
+
+  it('does not mark a gap recovered when its recovery failed', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['gap.ts'] }));
+    const request = { kind: 'diff', path: 'gap.ts' } as const;
+
+    assert.equal(budget.request(request).exempt, true);
+    budget.record(request, 0, { exempt: true, complete: false });
+
+    assert.deepEqual(budget.pendingGaps, ['gap.ts']);
+    assert.equal(budget.mode, 'coverage-recovery');
   });
 
   it('lets a served gap be re-read while its siblings are still outstanding', () => {
@@ -291,6 +320,22 @@ describe('pi enforces the budget at its tool boundary', () => {
       assert.match(await textOf(read, { path: '../outside.ts' }), /outside the repository/);
       // The refusal spent nothing, so ordinary exploration still works.
       assert.doesNotMatch(await textOf(read, { path: 'a.ts' }), /budget|Answer now/i);
+    });
+  });
+
+  it('charges a failing tool call, so a broken path cannot run free', async () => {
+    // The workspace is not a git repo, so every git_diff below fails.
+    const diff = createPiGitDiffTool(sdk, workspace, { base: 'HEAD', worktree: true });
+    const budget = new ExplorationBudget(
+      planExploration({ tier: 'minimal', truncatedFiles: [], omittedFiles: [] }),
+    );
+
+    await withPiExplorationBudget(budget, async () => {
+      for (let call = 0; call < EXPLORATION_LIMITS.minimal.ordinaryCalls; call += 1) {
+        assert.match(await textOf(diff, { path: `missing${call}.ts` }), /git diff failed/);
+      }
+      // Without charging the failures the budget would still be untouched here.
+      assert.match(await textOf(diff, { path: 'one-more.ts' }), /Answer now/);
     });
   });
 

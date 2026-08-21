@@ -258,14 +258,14 @@ export class ExplorationBudget {
   record(
     request: ExplorationRequest,
     outputBytes: number,
-    options: { exempt: boolean; truncated?: boolean },
+    options: { exempt: boolean; complete?: boolean },
   ): void {
-    const { exempt, truncated = false } = options;
+    const { exempt, complete = true } = options;
     if (exempt && request.kind === 'diff' && request.path) {
-      // A capped response delivered only part of the file, so the gap stays
-      // open. RECOVERY_ATTEMPTS_PER_GAP bounds the retries, after which the
-      // path stops being exempt and falls to the ordinary budget.
-      if (!truncated) this.recovered.add(request.path);
+      // A capped or failed call delivered less than the whole file, so the gap
+      // stays open. RECOVERY_ATTEMPTS_PER_GAP bounds the retries, after which
+      // the path stops being exempt and falls to the ordinary budget.
+      if (complete) this.recovered.add(request.path);
       return;
     }
     const identity = requestIdentity(request);

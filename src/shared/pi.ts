@@ -446,7 +446,7 @@ function explorationVerdict(
 function chargeBudget(
   request: ExplorationRequest,
   outputBytes: number,
-  options: { truncated?: boolean; exempt: boolean },
+  options: { exempt: boolean; complete?: boolean },
 ): void {
   piTelemetryContext.getStore()?.budget?.record(request, outputBytes, options);
 }
@@ -498,8 +498,8 @@ export function createPiGitDiffTool(
         // A capped diff delivered only part of the file, so the gap it was
         // recovering stays open rather than counting as read.
         chargeBudget(diffRequest, Buffer.byteLength(text), {
-          truncated: Buffer.byteLength(stdout) > PI_DIFF_TOOL_MAX_BYTES,
           exempt: verdict.exempt,
+          complete: Buffer.byteLength(stdout) <= PI_DIFF_TOOL_MAX_BYTES,
         });
         finish?.({
           success: true,
@@ -510,6 +510,9 @@ export function createPiGitDiffTool(
         // Surface the failure as tool output the model can react to; a throw
         // here would fail the whole session over a bad pathspec.
         text = `git diff failed: ${error instanceof Error ? error.message : String(error)}`;
+        // A permitted attempt that failed still spent one: without this the
+        // same failing call moves no counter and can repeat forever.
+        chargeBudget(diffRequest, 0, { exempt: verdict.exempt, complete: false });
         finish?.({
           success: false,
           failureClass:
@@ -586,6 +589,7 @@ export function createPiReadTool(
         });
       } catch (error) {
         text = `read failed: ${error instanceof Error ? error.message : String(error)}`;
+        chargeBudget(readRequest, 0, { exempt: verdict.exempt, complete: false });
         finish?.({
           success: false,
           failureClass: 'execution',
@@ -1103,6 +1107,7 @@ export async function runPiReview(
         log,
         options.timeoutMs,
         options.onTokenUsage,
+        budget,
       );
       return parseReview(repaired, `${label}-repair`, log, { strict: true });
     }
@@ -1119,6 +1124,7 @@ async function repromptPiForJson(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  budget?: ExplorationBudget,
 ): Promise<string> {
   const message = parseError instanceof Error ? parseError.message : String(parseError);
   log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
@@ -1130,6 +1136,7 @@ async function repromptPiForJson(
     log,
     timeoutMs,
     onTokenUsage,
+    budget,
   );
 }
 
