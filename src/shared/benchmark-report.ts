@@ -6,22 +6,24 @@
  * one, and its evidence was mixed by cohort.
  */
 
-import { isRecord } from './text.ts';
+import { isFiniteNumber, isRecord } from './text.ts';
 
 export interface BenchmarkMergeGate {
   satisfied: boolean;
-  /** Human-readable names of what the report still owes. */
+  /** Human-readable reasons the report cannot license a default change. */
   missing: string[];
 }
 
 const isNonEmptyString = (value: unknown): boolean =>
   typeof value === 'string' && value.trim().length > 0;
 
-/** A configuration tuple pins the run to one model on one engine. */
+/** A configuration tuple pins the run to one model on one engine, sampled one way. */
 function describesConfiguration(arm: unknown): boolean {
   if (!isRecord(arm) || !isRecord(arm.configuration)) return false;
-  const { model, modelRevision, engine } = arm.configuration;
-  return [model, modelRevision, engine].every(isNonEmptyString);
+  const { model, modelRevision, engine, sampling, config } = arm.configuration;
+  return (
+    [model, modelRevision, engine].every(isNonEmptyString) && isRecord(sampling) && isRecord(config)
+  );
 }
 
 /** Runs that completed, which is what a sample size means for a comparison. */
@@ -49,13 +51,20 @@ export function checkBenchmarkMergeGate(summary: unknown): BenchmarkMergeGate {
   }
   // `adjudication-required` is not a quality result; it is the absence of one.
   const gate = summary.qualityGate;
-  if (!isRecord(gate) || gate.status === 'adjudication-required' || gate.passed === null) {
+  if (
+    !isRecord(gate) ||
+    gate.status === 'adjudication-required' ||
+    typeof gate.passed !== 'boolean'
+  ) {
     missing.push('quality result');
+  } else if (!gate.passed) {
+    // A complete report that says no. It still cannot license the change.
+    missing.push('a passing quality gate');
   }
   const paired = summary.pairedLatency;
-  if (!isRecord(paired) || paired.medianRelativeDelta === null) {
+  if (!isRecord(paired) || !isFiniteNumber(paired.medianRelativeDelta)) {
     missing.push('latency result');
-  } else if (paired.minimumDetectableEffect === null) {
+  } else if (!isFiniteNumber(paired.minimumDetectableEffect)) {
     // A sample that resolves nothing cannot support a latency claim, so the
     // report has to say so rather than quoting a point estimate.
     missing.push('a sample that can resolve any latency effect');

@@ -8,6 +8,8 @@ const arm = () => ({
     model: 'zai-coding-plan/glm-5.2',
     modelRevision: 'glm-5.2-2026-08-20',
     engine: 'opencode',
+    sampling: { temperature: 0 },
+    config: { reviewShards: 1 },
   },
   successfulRuns: 24,
 });
@@ -42,6 +44,42 @@ describe('checkBenchmarkMergeGate', () => {
     assert.deepEqual(missing({ control: { ...arm(), successfulRuns: 0 } }), [
       'sample size for both arms',
     ]);
+    // Naming the model without how it was sampled does not reproduce the run.
+    const identity = {
+      model: 'zai/glm-5.2',
+      modelRevision: 'glm-5.2-2026-08-20',
+      engine: 'opencode',
+    };
+    assert.deepEqual(missing({ treatment: { configuration: identity, successfulRuns: 24 } }), [
+      'model/config tuple for both arms',
+    ]);
+  });
+
+  it('reads an absent field as absent rather than as a result', () => {
+    // The gate reads arbitrary summary.json, so a field that was never written
+    // must not pass for one that was.
+    assert.deepEqual(checkBenchmarkMergeGate(summary({ qualityGate: {} })).missing, [
+      'quality result',
+    ]);
+    assert.deepEqual(checkBenchmarkMergeGate(summary({ pairedLatency: {} })).missing, [
+      'latency result',
+    ]);
+    assert.deepEqual(
+      checkBenchmarkMergeGate(summary({ pairedLatency: { medianRelativeDelta: -12.4 } })).missing,
+      ['a sample that can resolve any latency effect'],
+    );
+    assert.deepEqual(checkBenchmarkMergeGate(null), {
+      satisfied: false,
+      missing: ['a benchmark summary'],
+    });
+  });
+
+  it('rejects a quality gate that ran and failed, without calling it absent', () => {
+    assert.deepEqual(
+      checkBenchmarkMergeGate(summary({ qualityGate: { status: 'failed', passed: false } }))
+        .missing,
+      ['a passing quality gate'],
+    );
   });
 
   it('rejects an unadjudicated quality gate as no quality result', () => {
