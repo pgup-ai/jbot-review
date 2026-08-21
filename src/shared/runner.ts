@@ -2020,9 +2020,9 @@ async function runReviewPipeline(params: {
     // back to the full set so no doc is seen by zero sessions.
     const guidelinesForPrompt = incrementalLenses.guidelinePass ? finderGuidelines : guidelines;
 
-    // Embedded-only main backends carry the 512KB block buildShardPlans renders
-    // for them, not the 40KB default. Shared with the budget log so both report
-    // the diff the main session actually receives.
+    // Embedded-only main backends carry the unbounded block buildShardPlans
+    // renders for them, not the 40KB default. Shared with the budget log so
+    // both report the diff the main session actually receives.
     const mainDiffBlock =
       mainRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks
         ? embeddedOnlyBackendDiffHunks.text
