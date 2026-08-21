@@ -84,6 +84,81 @@ completed sessions, treatment main-session p50 moved from 16,101 ms to
 20,106 ms, tool calls fell from 52 to 43, and tool-output bytes fell from
 68,821 to 55,612. Both arms recorded zero diff-recovery bytes.
 
+## Verification on merged `main`
+
+Re-run after the merge, with both arms on the same checkout so
+`JBOT_EMBEDDED_FIRST_PROMPT` is the only declared variable besides the prompt
+hash. Smoke subset, 12 cases, 2 repetitions: 24 pairs and 48 runs per model,
+144 runs across the three models below. Failure rate 0/144, counting timeout, signal, setup,
+runner-exit, invalid-output, and missing-output as failures. Every quality
+figure below is run-level, with 12 defect runs and 12 clean runs per arm per
+model.
+
+| Metric                     | `muse-spark-1.2-contributor-free` | `mimo-v2.5-free` | `devin/glm-5.2` |
+| -------------------------- | --------------------------------: | ---------------: | --------------: |
+| Tool-output bytes          |                            -58.3% |           -35.7% |    no telemetry |
+| Tool calls                 |                            -23.0% |           -40.3% |    no telemetry |
+| Turns                      |                            -22.4% |           -36.4% |    no telemetry |
+| Generated tokens           |                             -6.4% |           +11.5% |    no telemetry |
+| Main-session paired median |                  -19.6% (p=0.040) |  -15.1% (p=0.90) |  +7.4% (p=0.88) |
+| Whole-run paired median    |                 -26.1% (p=0.0023) |   -8.3% (p=0.86) | -19.4% (p=0.14) |
+| Defect runs with a finding |                    12/12 -> 12/12 |   12/12 -> 12/12 |  12/12 -> 11/12 |
+| Clean runs with a finding  |                      8/12 -> 9/12 |    9/12 -> 10/12 |    9/12 -> 8/12 |
+
+`mimo-v2.5-free` ran on production-default model options, unlike the other two.
+Its unpaired p50 improves 28.2% while the paired test reports p=0.90, with the
+treatment faster in 14 of the 24 pairs and slower in 10. No pair was dropped.
+Reading the p50 alone would have claimed a speed-up the data does not support,
+in the opposite direction to the reading that made round 1 look flat.
+
+`devin/glm-5.2` reports `capability: "opaque"` with `turnCountAvailable:
+false`, so every tool counter is zero by construction and the byte gate cannot
+be evaluated there. Its two latency metrics also disagree in sign and neither
+reaches significance, so the honest reading is no detectable effect rather than
+a small one.
+
+Detection here counts a run as finding the defect when it returned at least one
+finding, which does NOT confirm the finding matches the seeded defect. These
+numbers therefore do not evidence QLT-003, which needs semantic adjudication
+and remains unsatisfied. Clean counterfactuals returned findings in 8-10 of 12
+runs in BOTH arms, so that precision problem predates the treatment.
+
+## Decision after verification
+
+The gate is per backend/model cohort, and the treatment clears it on three of
+the four cohorts that report telemetry. `deepseek-v4-flash-free` falls short at
+-13.7% against the 25% bar and is not graduated. `devin/glm-5.2` cannot
+evidence the gate at all and is judged on quality and failure rate alone, both
+of which it meets. No cohort shows a quality regression beyond one defect run
+on `devin/glm-5.2`, and none of these figures evidence QLT-003.
+
+Two cohorts come from earlier runs rather than the 144-run verification, so
+their populations differ; each row names its source.
+
+| Cohort                       | Tool bytes | 25% byte gate | Source            |
+| ---------------------------- | ---------: | ------------- | ----------------- |
+| `muse-spark-1.2-contributor` |     -58.3% | pass          | verification      |
+| `mimo-v2.5-free`             |     -35.7% | pass          | verification      |
+| `devin/glm-5.2`              |     opaque | unevaluable   | verification      |
+| `zai-coding-plan/glm-5.2`    |     -36.1% | pass          | round 1, 36 pairs |
+| `deepseek-v4-flash-free`     |     -13.7% | FAIL          | screen, 12 pairs  |
+
+Across the same five the tool-work reduction is the consistent effect and
+latency is not:
+
+| Model                        | Tool bytes |    Latency paired |
+| ---------------------------- | ---------: | ----------------: |
+| `muse-spark-1.2-contributor` |     -58.3% | -26.1% (p=0.0023) |
+| `zai-coding-plan/glm-5.2`    |     -36.1% |  -16.2% (p=0.043) |
+| `mimo-v2.5-free`             |     -35.7% |    -8.3% (p=0.86) |
+| `devin/glm-5.2`              |     opaque |    +7.4% (p=0.88) |
+| `deepseek-v4-flash-free`     |     -13.7% |  +16.3% (p=0.040) |
+
+The latency payoff appears only where the model does not spend the saved tool
+time generating instead: `mimo-v2.5-free` emitted 11.5% more tokens and
+`zai-coding-plan/glm-5.2` 4.4% more. That is the case for gating on the
+mechanism rather than on its downstream effect.
+
 ## Rollback and follow-up
 
 To roll back, leave `JBOT_EMBEDDED_FIRST_PROMPT` unset or set it to `false`.
