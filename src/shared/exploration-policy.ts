@@ -126,7 +126,9 @@ export function planExploration(params: {
   singleShot?: boolean;
 }): ExplorationPlan {
   if (params.singleShot) return { mode: 'single-shot', tier: params.tier, coverageGaps: [] };
-  const coverageGaps = [...new Set([...params.truncatedFiles, ...params.omittedFiles])].sort();
+  const coverageGaps = [
+    ...new Set([...params.truncatedFiles, ...params.omittedFiles].map(normalizePath)),
+  ].sort();
   return {
     mode: coverageGaps.length > 0 ? 'coverage-recovery' : 'embedded',
     tier: params.tier,
@@ -205,7 +207,8 @@ export class ExplorationBudget {
     return this.pendingGaps.length === 0 ? 'embedded' : 'coverage-recovery';
   }
 
-  request(request: ExplorationRequest): ExplorationVerdict {
+  request(raw: ExplorationRequest): ExplorationVerdict {
+    const request = normalizeRequest(raw);
     if (this.plan.mode === 'single-shot') {
       return {
         allow: false,
@@ -260,10 +263,11 @@ export class ExplorationBudget {
    * itself on the final allowed attempt.
    */
   record(
-    request: ExplorationRequest,
+    raw: ExplorationRequest,
     outputBytes: number,
     options: { exempt: boolean; complete?: boolean },
   ): void {
+    const request = normalizeRequest(raw);
     const { exempt, complete = true } = options;
     // Closing a gap turns on delivery, not on who paid: once the exempt
     // attempts are spent the same file arrives through the ordinary budget,
@@ -331,6 +335,26 @@ export class ExplorationBudget {
       message: EXPLORATION_SOFT_STOP_MESSAGE,
     };
   }
+}
+
+/**
+ * Coverage gaps come from git and are already repo-relative, but a model-supplied
+ * path is not. pi trims before running git, so an untrimmed path diffs fine while
+ * the budget fails to match it and refuses the gap as unrelated. Normalizing on
+ * the way in keeps recovery, repeat detection, and the adjacent set agreeing.
+ */
+function normalizePath(path: string): string {
+  return path.trim().replace(/^(?:\.\/)+/, '');
+}
+
+function normalizeRequest(request: ExplorationRequest): ExplorationRequest {
+  if (request.kind === 'search') return request;
+  if (request.kind === 'read') return { kind: 'read', path: normalizePath(request.path) };
+  if (request.path === undefined) return request;
+  // pi drops an empty pathspec, so a blank path is the whole diff; collapse it
+  // rather than leaving a second identity for the same request.
+  const path = normalizePath(request.path);
+  return path ? { kind: 'diff', path } : { kind: 'diff' };
 }
 
 function requestIdentity(request: ExplorationRequest): string {

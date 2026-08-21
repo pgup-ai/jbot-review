@@ -276,6 +276,39 @@ describe('ExplorationBudget', () => {
     assert.deepEqual(budget.pendingGaps, ['gap-b.ts']);
   });
 
+  it('matches a gap whatever shape the model spells its path in', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['a.ts'] }));
+
+    // pi trims before running git, so an untrimmed path diffs fine; the budget
+    // must not then refuse it as unrelated recovery.
+    const spaced = budget.request({ kind: 'diff', path: ' a.ts ' });
+    assert.equal(spaced.allow, true);
+    assert.equal(spaced.exempt, true);
+
+    const dotted = budget.request({ kind: 'diff', path: './a.ts' });
+    assert.equal(dotted.exempt, true);
+    budget.record({ kind: 'diff', path: './a.ts' }, 100, { exempt: true, complete: true });
+
+    assert.deepEqual(budget.pendingGaps, []);
+    assert.equal(budget.mode, 'embedded');
+  });
+
+  it('treats a blank diff path as the whole diff, like git does', () => {
+    const budget = new ExplorationBudget(plan({ tier: 'minimal' }));
+    budget.record({ kind: 'diff', path: '  ' }, 10, { exempt: false });
+
+    // minimal allows no repeats, so the unscoped form must be the same request.
+    assert.equal(budget.request({ kind: 'diff' }).refusal, 'soft-stop');
+  });
+
+  it('treats a differently spelled read as the same file', () => {
+    const budget = new ExplorationBudget(plan({ tier: 'minimal' }));
+    budget.record({ kind: 'read', path: './a.ts' }, 10, { exempt: false });
+
+    // minimal allows no repeats, so the same file under another spelling stops.
+    assert.equal(budget.request({ kind: 'read', path: 'a.ts' }).refusal, 'soft-stop');
+  });
+
   it('refuses recovery for a path the prompt never flagged', () => {
     const budget = new ExplorationBudget(plan({ omittedFiles: ['gap.ts'] }));
     const verdict = budget.request({ kind: 'diff', path: 'unrelated.ts' });
