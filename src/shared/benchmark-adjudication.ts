@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { isNonEmptyString } from './text.ts';
 import { VALID_SEVERITIES, type Severity } from './types.ts';
 
 const POSITIVE_REACTIONS = new Set(['+1', 'heart', 'hooray', 'rocket']);
@@ -67,10 +68,6 @@ interface AdjudicationResult {
 
 function isSha256(value: unknown): value is string {
   return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/i.test(value);
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && Boolean(value.trim());
 }
 
 export function classifyHistoricalOutcome(

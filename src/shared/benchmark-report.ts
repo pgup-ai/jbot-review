@@ -6,16 +6,13 @@
  * one, and its evidence was mixed by cohort.
  */
 
-import { isFiniteNumber, isRecord } from './text.ts';
+import { isFiniteNumber, isNonEmptyString, isRecord } from './text.ts';
 
 export interface BenchmarkMergeGate {
   satisfied: boolean;
   /** Human-readable reasons the report cannot license a default change. */
   missing: string[];
 }
-
-const isNonEmptyString = (value: unknown): boolean =>
-  typeof value === 'string' && value.trim().length > 0;
 
 /** A configuration tuple pins the run to one model on one engine, sampled one way. */
 function describesConfiguration(arm: unknown): boolean {
