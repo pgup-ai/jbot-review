@@ -40,9 +40,16 @@ import { classifyTelemetryStopReason } from './telemetry.ts';
 export const PI_TELEMETRY_CAPABILITY = 'enforceable' as const;
 const piTelemetryContext = new AsyncLocalStorage<{ session: string; budget?: ExplorationBudget }>();
 
-/** Runs `body` as pi does, so a test exercises the tools' real budget context. */
-export function withPiExplorationBudget<T>(budget: ExplorationBudget, body: () => T): T {
-  return piTelemetryContext.run({ session: 'test', budget }, body);
+/**
+ * Enters the same context `promptPiSession` does. Exported because the store is
+ * module-private and the tool budget cannot otherwise be exercised from a test.
+ */
+export function withPiExplorationBudget<T>(
+  session: string,
+  budget: ExplorationBudget,
+  body: () => T,
+): T {
+  return piTelemetryContext.run({ session, budget }, body);
 }
 const piSessionTelemetry = new WeakMap<object, ToolTelemetryAccumulator>();
 

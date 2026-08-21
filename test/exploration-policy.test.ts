@@ -11,8 +11,6 @@ import {
   enforcesExplorationBudget,
   planExploration,
   selectExplorationTier,
-  SOFT_FINISH_MIN_SESSIONS,
-  softFinishThresholds,
 } from '../src/shared/exploration-policy.ts';
 import {
   createPiGitDiffTool,
@@ -356,7 +354,7 @@ describe('pi enforces the budget at its tool boundary', () => {
       planExploration({ tier: 'minimal', truncatedFiles: [], omittedFiles: [] }),
     );
 
-    await withPiExplorationBudget(budget, async () => {
+    await withPiExplorationBudget('review', budget, async () => {
       for (let file = 0; file < EXPLORATION_LIMITS.minimal.adjacentFiles; file += 1) {
         writeFileSync(join(workspace, `f${file}.ts`), 'x\n');
         assert.doesNotMatch(await textOf(read, { path: `f${file}.ts` }), /budget/i);
@@ -372,7 +370,7 @@ describe('pi enforces the budget at its tool boundary', () => {
       planExploration({ tier: 'minimal', truncatedFiles: [], omittedFiles: [] }),
     );
 
-    await withPiExplorationBudget(budget, async () => {
+    await withPiExplorationBudget('review', budget, async () => {
       assert.match(await textOf(read, { path: '../outside.ts' }), /outside the repository/);
       // The refusal spent nothing, so ordinary exploration still works.
       assert.doesNotMatch(await textOf(read, { path: 'a.ts' }), /budget|Answer now/i);
@@ -386,7 +384,7 @@ describe('pi enforces the budget at its tool boundary', () => {
       planExploration({ tier: 'minimal', truncatedFiles: [], omittedFiles: [] }),
     );
 
-    await withPiExplorationBudget(budget, async () => {
+    await withPiExplorationBudget('review', budget, async () => {
       for (let call = 0; call < EXPLORATION_LIMITS.minimal.ordinaryCalls; call += 1) {
         assert.match(await textOf(diff, { path: `missing${call}.ts` }), /git diff failed/);
       }
@@ -401,7 +399,7 @@ describe('pi enforces the budget at its tool boundary', () => {
       planExploration({ tier: 'minimal', truncatedFiles: ['a.ts'], omittedFiles: [] }),
     );
 
-    await withPiExplorationBudget(budget, async () => {
+    await withPiExplorationBudget('review', budget, async () => {
       // Not a git repo here, so the diff fails — the point is that the budget
       // permitted the call rather than refusing it.
       assert.doesNotMatch(await textOf(diff, { path: 'a.ts' }), /budget|Answer now/i);
@@ -410,41 +408,74 @@ describe('pi enforces the budget at its tool boundary', () => {
   });
 });
 
-describe('softFinishThresholds', () => {
-  const samples = (backend: string, tier: 'minimal' | 'standard', turns: number[]) =>
-    turns.map((usefulTurns) => ({ backend, tier, usefulTurns }));
+describe('pi enforces the budget at its tool boundary', () => {
+  const sdk = { defineTool: (definition: unknown) => definition } as never;
+  type Tool = {
+    execute: (id: unknown, params: unknown) => Promise<{ content: { text: string }[] }>;
+  };
+  const textOf = async (tool: unknown, params: unknown) =>
+    (await (tool as Tool).execute('id', params)).content[0].text;
 
-  it('sets a threshold only for a cohort with enough sessions', () => {
-    const enough = samples(
-      'pi',
-      'standard',
-      Array.from({ length: SOFT_FINISH_MIN_SESSIONS }, (_, index) => (index % 10) + 1),
+  const workspace = mkdtempSync(join(tmpdir(), 'jbot-budget-'));
+  writeFileSync(join(workspace, 'a.ts'), 'export const a = 1;\n');
+  writeFileSync(join(workspace, 'b.ts'), 'export const b = 2;\n');
+
+  it('refuses a read once the budget is spent, and says so again after', async () => {
+    const read = createPiReadTool(sdk, workspace);
+    const budget = new ExplorationBudget(
+      planExploration({ tier: 'minimal', truncatedFiles: [], omittedFiles: [] }),
     );
-    const thin = samples('opencode', 'standard', [4, 5, 6]);
 
-    const thresholds = softFinishThresholds([...enough, ...thin]);
-
-    assert.equal(thresholds.has('opencode:standard'), false, 'a thin cohort gets no threshold');
-    const pi = thresholds.get('pi:standard');
-    assert.equal(pi?.sessions, SOFT_FINISH_MIN_SESSIONS);
-    assert.ok(pi !== undefined && pi.p90 <= pi.p99);
+    await withPiExplorationBudget('review', budget, async () => {
+      for (let file = 0; file < EXPLORATION_LIMITS.minimal.adjacentFiles; file += 1) {
+        writeFileSync(join(workspace, `f${file}.ts`), 'x\n');
+        assert.doesNotMatch(await textOf(read, { path: `f${file}.ts` }), /budget/i);
+      }
+      assert.match(await textOf(read, { path: 'a.ts' }), /Answer now/);
+      assert.match(await textOf(read, { path: 'b.ts' }), /refused/i);
+    });
   });
 
-  it('separates cohorts by backend and tier', () => {
-    const thresholds = softFinishThresholds([
-      ...samples(
-        'pi',
-        'standard',
-        Array.from({ length: 30 }, () => 2),
-      ),
-      ...samples(
-        'pi',
-        'minimal',
-        Array.from({ length: 30 }, () => 9),
-      ),
-    ]);
+  it('keeps a path outside the repo a permission denial, not a budget refusal', async () => {
+    const read = createPiReadTool(sdk, workspace);
+    const budget = new ExplorationBudget(
+      planExploration({ tier: 'minimal', truncatedFiles: [], omittedFiles: [] }),
+    );
 
-    assert.equal(thresholds.get('pi:standard')?.p90, 2);
-    assert.equal(thresholds.get('pi:minimal')?.p90, 9);
+    await withPiExplorationBudget('review', budget, async () => {
+      assert.match(await textOf(read, { path: '../outside.ts' }), /outside the repository/);
+      // The refusal spent nothing, so ordinary exploration still works.
+      assert.doesNotMatch(await textOf(read, { path: 'a.ts' }), /budget|Answer now/i);
+    });
+  });
+
+  it('charges a failing tool call, so a broken path cannot run free', async () => {
+    // The workspace is not a git repo, so every git_diff below fails.
+    const diff = createPiGitDiffTool(sdk, workspace, { base: 'HEAD', worktree: true });
+    const budget = new ExplorationBudget(
+      planExploration({ tier: 'minimal', truncatedFiles: [], omittedFiles: [] }),
+    );
+
+    await withPiExplorationBudget('review', budget, async () => {
+      for (let call = 0; call < EXPLORATION_LIMITS.minimal.ordinaryCalls; call += 1) {
+        assert.match(await textOf(diff, { path: `missing${call}.ts` }), /git diff failed/);
+      }
+      // Without charging the failures the budget would still be untouched here.
+      assert.match(await textOf(diff, { path: 'one-more.ts' }), /Answer now/);
+    });
+  });
+
+  it('lets a named coverage gap through git_diff without spending budget', async () => {
+    const diff = createPiGitDiffTool(sdk, workspace, { base: 'HEAD', worktree: true });
+    const budget = new ExplorationBudget(
+      planExploration({ tier: 'minimal', truncatedFiles: ['a.ts'], omittedFiles: [] }),
+    );
+
+    await withPiExplorationBudget('review', budget, async () => {
+      // Not a git repo here, so the diff fails — the point is that the budget
+      // permitted the call rather than refusing it.
+      assert.doesNotMatch(await textOf(diff, { path: 'a.ts' }), /budget|Answer now/i);
+      assert.match(await textOf(diff, { path: 'unrelated.ts' }), /limited to the omitted/);
+    });
   });
 });
