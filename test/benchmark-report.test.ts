@@ -53,6 +53,13 @@ describe('checkBenchmarkMergeGate', () => {
     assert.deepEqual(missing({ treatment: { configuration: identity, successfulRuns: 24 } }), [
       'model/config tuple for both arms',
     ]);
+    // An array is not a configuration record, however JSON.parse renders it.
+    assert.deepEqual(
+      missing({
+        treatment: { configuration: { ...arm().configuration, sampling: [] }, successfulRuns: 24 },
+      }),
+      ['model/config tuple for both arms'],
+    );
   });
 
   it('reads an absent field as absent rather than as a result', () => {

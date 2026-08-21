@@ -6,7 +6,7 @@
  * one, and its evidence was mixed by cohort.
  */
 
-import { isFiniteNumber, isNonEmptyString, isRecord } from './text.ts';
+import { isFiniteNumber, isNonArrayRecord as isRecord, isNonEmptyString } from './text.ts';
 
 export interface BenchmarkMergeGate {
   satisfied: boolean;
