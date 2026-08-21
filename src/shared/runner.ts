@@ -241,9 +241,17 @@ import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
 /** Blocking findings verified per run; the rest pass through unverified. */
 const MAX_VERIFIED_FINDINGS = 10;
+/**
+ * Unbounded on purpose. For a backend that can read the checkout a diff budget
+ * caps prompt size, and anything it drops the model fetches with git. For a
+ * backend that cannot, the same number caps coverage instead: a dropped file is
+ * never reviewed. Every changed file is embedded whole at any shard count, and
+ * an oversized PR fails loudly at the provider rather than being reviewed in
+ * part and reported as whole.
+ */
 export const EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
-  totalBudgetBytes: 512 * 1024,
-  perFileBudgetBytes: 512 * 1024,
+  totalBudgetBytes: Number.POSITIVE_INFINITY,
+  perFileBudgetBytes: Number.POSITIVE_INFINITY,
 };
 
 function createOpencodeBackend(
@@ -2012,9 +2020,9 @@ async function runReviewPipeline(params: {
     // back to the full set so no doc is seen by zero sessions.
     const guidelinesForPrompt = incrementalLenses.guidelinePass ? finderGuidelines : guidelines;
 
-    // Embedded-only main backends carry the 512KB block buildShardPlans renders
-    // for them, not the 40KB default. Shared with the budget log so both report
-    // the diff the main session actually receives.
+    // Embedded-only main backends carry the unbounded block buildShardPlans
+    // renders for them, not the 40KB default. Shared with the budget log so
+    // both report the diff the main session actually receives.
     const mainDiffBlock =
       mainRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks
         ? embeddedOnlyBackendDiffHunks.text
@@ -3162,7 +3170,7 @@ function assertCompleteEmbeddedDiff(
     `Embedded-only backend ${label} would receive an incomplete embedded diff (${formatFileList(
       incomplete,
     )}). ` +
-      'Refusing partial review coverage because the provider cannot read the checkout; use more shards or another provider for this PR.',
+      'The embed budget for these backends is unbounded, so this means it was reinstated somewhere; the provider cannot read the checkout, and partial coverage must never be reported as a whole review.',
   );
 }
 

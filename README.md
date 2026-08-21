@@ -199,9 +199,10 @@ auxiliary, token usage, timeouts, and repair behavior.
 
 Qoder can read and search the checkout but receives no shell or write-capable tool.
 Its user/project settings, hooks, MCP servers, skills, memory, web access, and
-subagents are disabled. The complete diff is embedded with the same 512 KiB
-per-shard ceiling used by other shell-free backends; an oversized main review
-fails before calling the model, while oversized auxiliary sessions fail open.
+subagents are disabled. The complete diff is embedded with no byte ceiling, as
+for every other shell-free backend: a file dropped to fit a budget would never
+be reviewed at all, so coverage is never traded for prompt size. Auxiliary
+sessions fail open as usual.
 
 `grok` is an opt-in Grok Build CLI backend and is intentionally separate from
 `xai`: existing `provider: xai` configurations continue using `XAI_API_KEY`
@@ -212,8 +213,8 @@ Grok Build runs headlessly with edits, shell,
 MCP, web access, memory, and subagents disabled. It receives the budgeted review
 prompt in an empty read-only temporary workspace, so repository Grok config,
 plugins, and hooks cannot execute. To preserve full-diff coverage without checkout
-access, jbot-review embeds up to 512 KiB per shard and refuses a main review (or
-skips fail-open auxiliary sessions) if that still cannot carry the complete diff.
+access, jbot-review embeds every changed file whole at any shard count, including
+one; an oversized PR fails at the provider rather than being reviewed in part.
 Sessions are serialized through one per-run temporary Grok home, removed after
 the run. With account auth, this lets credential rotations persist without
 concurrent writes. Whether a rotated refresh token from one ephemeral
