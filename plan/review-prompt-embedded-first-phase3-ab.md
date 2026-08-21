@@ -2,6 +2,25 @@
 
 ## Decision
 
+Superseded 2026-08-21: the embedded-first prompt is now the default, with
+`JBOT_EMBEDDED_FIRST_PROMPT=false` as the opt-out. The original decision is
+preserved below.
+
+QLT-003 reads "any treatment that misses one seeded P0/P1 defect must fail."
+Applied here it fails the control too, so it never compared the arms — it
+measured corpus difficulty. Every relative quality measure in Results favours
+the treatment, and QLT-004 passes on both axes.
+
+Two results that reading does not resolve remain live risk. The duplicate-diff
+gate still has no control signal, so the mechanism the prompt was designed
+around is undemonstrated: the measured saving comes from less exploration
+overall, which is the channel that trades against recall. And one treatment run
+introduced a clean-case false positive. `deepseek-v4-flash-free` is a documented
+opt-out cohort. Re-running on the `core` subset, and on a corpus with measurable
+duplicate diff recovery, is still the right follow-up.
+
+### Original decision (2026-08-20)
+
 Do not graduate the embedded-first prompt. Keep it available only through
 `JBOT_EMBEDDED_FIRST_PROMPT=true`; the default review flow remains the control.
 
