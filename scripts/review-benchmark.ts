@@ -29,6 +29,7 @@ import {
   type BenchmarkDiffSize,
   type BenchmarkRiskTier,
 } from '../src/shared/benchmark-score.ts';
+import { checkBenchmarkMergeGate } from '../src/shared/benchmark-report.ts';
 import {
   LARGEST_SCANNED_EFFECT,
   benchmarkArmOrder,
@@ -571,8 +572,19 @@ async function main(): Promise<void> {
     },
     qualityGate,
     pairedLatency,
+    ...(manifest.treatmentCommit ? { treatmentCommit: manifest.treatmentCommit } : {}),
+    ...(manifest.rollback ? { rollback: manifest.rollback } : {}),
   };
-  writeFileSync(join(outputDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
+  const mergeGate = checkBenchmarkMergeGate(summary);
+  writeFileSync(
+    join(outputDir, 'summary.json'),
+    `${JSON.stringify({ ...summary, mergeGate }, null, 2)}\n`,
+  );
+  if (!mergeGate.satisfied) {
+    console.warn(
+      `Merge gate (TASK-008) unmet; this run cannot justify a default change. Missing: ${mergeGate.missing.join(', ')}.`,
+    );
+  }
   console.log(`Wrote ${join(outputDir, 'summary.json')} and ${casesPath}.`);
   const { pairs, medianRelativeDelta, permutationP, minimumDetectableEffect } = pairedLatency;
   if (medianRelativeDelta === null || permutationP === null) {
