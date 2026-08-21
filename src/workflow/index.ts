@@ -77,9 +77,9 @@ async function main(): Promise<void> {
     shardCachePath:
       process.env.JBOT_SHARD_CACHE_DIR?.trim() ??
       (process.env.RUNNER_TEMP ? join(process.env.RUNNER_TEMP, 'jbot-shard-cache') : ''),
-    // Env-only while these remain A/B arms; no action inputs until the data lands.
+    // Env rather than action inputs: neither belongs in the published contract.
     contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
-    embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', false),
+    embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
   };
   const pullTarget = getPullRequestTarget();
   for (const warning of swallowedProviderWarnings([...modelPool, ...auxProbe])) {

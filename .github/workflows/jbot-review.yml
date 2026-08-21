@@ -268,7 +268,7 @@ jobs:
           # PR share a runId otherwise, and the gateway's append+seq-dedup
           # journal then drops the newer transcript as already-seen.
           JBOT_OBSERVER_RUN: ${{ github.repository }}-pr-${{ github.event.pull_request.number || inputs['pr-number'] || github.event.issue.number }}-${{ github.run_id }}-${{ github.run_attempt }}
-          # A/B arms; an unset variable arrives empty and reads as the control.
+          # Unset arrives empty and takes each arm's default: trim off, embedded-first on.
           JBOT_CONTEXT_TRIM: ${{ vars.JBOT_CONTEXT_TRIM }}
           JBOT_EMBEDDED_FIRST_PROMPT: ${{ vars.JBOT_EMBEDDED_FIRST_PROMPT }}
         with:

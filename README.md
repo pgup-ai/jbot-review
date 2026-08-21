@@ -376,10 +376,10 @@ the review itself is unaffected._
 | `review-telemetry`        | `true`             | Write per-finding disposition + per-session token telemetry to the gitignored `.jbot-review/telemetry.jsonl` (uploaded as a CI artifact by the dogfood workflow). Near-zero overhead; `false` disables.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `evidence-quotes`         | `true`             | Ask each finding for a verbatim quote of the changed line it flags. Grounds finding verification and lets a finding whose line anchor missed the diff be re-anchored to its quoted line instead of dropped. `false` restores the pre-evidence prompt byte-for-byte.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
-**Experimental arms (env, not inputs).** `JBOT_CONTEXT_TRIM` and
-`JBOT_EMBEDDED_FIRST_PROMPT` stay env-only until their data lands; the
-[local review](#local-review) knob list describes what each changes. Map them
-onto the `uses:` step to flip an arm from a repo variable without editing a
+**Prompt/context arms (env, not inputs).** `JBOT_EMBEDDED_FIRST_PROMPT` (on)
+and `JBOT_CONTEXT_TRIM` (off) are set by environment rather than action input;
+the [local review](#local-review) knob list describes what each changes. Map
+them onto the `uses:` step to switch one from a repo variable without editing a
 file:
 
 ```yaml
@@ -389,7 +389,7 @@ env:
 ```
 
 Only the literal `true`/`false` count; anything else, including an unset
-variable, is the control arm.
+variable, takes the default above.
 
 **Heavy-model recipe** (deep reviews from GPT‑5.x / Opus-class models with
 longer timeout headroom): set the main `model` to the heavy tier, then
@@ -782,11 +782,13 @@ npm run review:local
   diff or guideline set that already exceeds the cap on its own stays over it.
   An unmeasured recall trade kept as an A/B arm: run it against an untrimmed
   side before believing either result),
-  `JBOT_EMBEDDED_FIRST_PROMPT` (off by default; treats diff hunks already
+  `JBOT_EMBEDDED_FIRST_PROMPT` (**on** by default; treats diff hunks already
   embedded in the prompt as read and authoritative instead of re-running
-  `git diff` to reproduce them. Cuts tool work, but the latency win only lands
-  where the model does not spend the saved time generating more instead. Another
-  A/B arm, measured per model in
+  `git diff` to reproduce them. Cuts tool work roughly a third and improves tail
+  latency, at better measured recall and precision than the control. The win
+  only lands where the model does not spend the saved time generating more
+  instead: `deepseek-v4-flash-free` measured 16.3% slower whole-run (p=0.040),
+  so set `false` there. Per-model numbers in
   `plan/review-prompt-embedded-first-phase3-ab.md`),
   `JBOT_SDK_ENGINE` (see
   [Provider configuration](#provider-configuration-in-repo)). The

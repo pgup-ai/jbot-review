@@ -2700,7 +2700,7 @@ export function normalizeOptions(
     guidelinePass: options?.guidelinePass ?? true,
     shardCachePath: options?.shardCachePath ?? '',
     contextTrim: options?.contextTrim ?? false,
-    embeddedFirstPrompt: options?.embeddedFirstPrompt ?? false,
+    embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
     auxModel: options?.auxModel ?? '',
     auxApiKey: options?.auxApiKey ?? '',
     auxBaseURL: options?.auxBaseURL ?? '',

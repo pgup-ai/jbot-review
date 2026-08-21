@@ -700,9 +700,9 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions(undefined).shardCachePath, '');
   });
 
-  it('keeps the embedded-first treatment opt-in', () => {
-    assert.equal(normalizeOptions(undefined).embeddedFirstPrompt, false);
-    assert.equal(normalizeOptions({ embeddedFirstPrompt: true }).embeddedFirstPrompt, true);
+  it('runs the embedded-first prompt by default, with a working opt-out', () => {
+    assert.equal(normalizeOptions(undefined).embeddedFirstPrompt, true);
+    assert.equal(normalizeOptions({ embeddedFirstPrompt: false }).embeddedFirstPrompt, false);
   });
 
   it('runs the guideline pass by default in every entry mode, with a working opt-out', () => {
