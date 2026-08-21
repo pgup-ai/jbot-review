@@ -721,7 +721,7 @@ export interface ReviewRunOptions {
    * finding-level telemetry says which side wins.
    */
   contextTrim?: boolean;
-  /** Env-only Phase 3 prompt treatment. Default false until its A/B gates pass. */
+  /** Treat embedded diff hunks as already read. On; JBOT_EMBEDDED_FIRST_PROMPT=false opts out. */
   embeddedFirstPrompt?: boolean;
   /**
    * Model for the auxiliary sessions (addressed-check, guideline compliance,
