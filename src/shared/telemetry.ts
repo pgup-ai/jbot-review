@@ -49,7 +49,8 @@ export interface SessionTelemetryRow {
 export type BackendTelemetryCapability = 'enforceable' | 'observable' | 'opaque';
 export type ExplorationMode =
   'embedded-only' | 'diff-recovery' | 'adjacent-context' | 'mixed' | 'unavailable';
-export type ExplorationBudgetTier = 'single-shot' | 'observe-only';
+export type ExplorationBudgetTier =
+  'single-shot' | 'observe-only' | 'minimal' | 'standard' | 'elevated';
 export type TelemetryStopReason = 'completed' | 'failed' | 'timeout' | 'aborted';
 export type ToolTelemetryClass =
   'diff-recovery' | 'file-read' | 'search' | 'list' | 'external-docs' | 'other-readonly';
@@ -88,7 +89,7 @@ export interface ToolTelemetryRow {
   outputBytesAfterCap: number;
   duplicate: boolean;
   success: boolean;
-  failureClass?: 'denied' | 'timeout' | 'execution' | 'invalid-input' | 'unknown';
+  failureClass?: 'denied' | 'budget' | 'timeout' | 'execution' | 'invalid-input' | 'unknown';
   diffScope?: 'whole' | 'path';
 }
 
@@ -366,10 +367,20 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     recordExploration(row) {
       const key = `${row.backend}\0${row.session}`;
       const current = exploration.get(key);
+      // The concurrency wrapper finalizes after the backend and defaults to
+      // observe-only, so a later row must not erase what the backend recorded.
       exploration.set(
         key,
-        current && current.turnCountAvailable && !row.turnCountAvailable
-          ? { ...row, turnCountAvailable: true, turnCount: current.turnCount }
+        current
+          ? {
+              ...row,
+              ...(current.turnCountAvailable && !row.turnCountAvailable
+                ? { turnCountAvailable: true, turnCount: current.turnCount }
+                : {}),
+              ...(row.budgetTier === 'observe-only' && current.budgetTier !== 'observe-only'
+                ? { budgetTier: current.budgetTier }
+                : {}),
+            }
           : row,
       );
     },

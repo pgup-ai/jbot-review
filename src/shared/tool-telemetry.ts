@@ -28,7 +28,7 @@ export interface ToolTelemetryFinish {
   success: boolean;
   outputBytesBeforeCap: number;
   outputBytesAfterCap: number;
-  failureClass?: 'denied' | 'timeout' | 'execution' | 'invalid-input' | 'unknown';
+  failureClass?: 'denied' | 'budget' | 'timeout' | 'execution' | 'invalid-input' | 'unknown';
   durationMs?: number;
 }
 

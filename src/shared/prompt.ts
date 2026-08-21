@@ -410,6 +410,24 @@ severity.`,
   REVIEW_PROMPT,
 );
 
+/** Returned in place of a tool result once a session's exploration budget is spent. */
+export const EXPLORATION_SOFT_STOP_MESSAGE =
+  'Exploration budget reached. Answer now from the evidence you already have; further tool calls will be refused.';
+
+/** Returned to a session that has no tools at all. */
+export const EXPLORATION_NO_TOOLS_MESSAGE = 'Tools are disabled.';
+
+/** Paths named in a refusal before it starts listing a whole large PR back. */
+const EXPLORATION_REFUSAL_PATH_CAP = 10;
+
+/** Returned when a path-scoped diff names a file the prompt never flagged as omitted. */
+export function explorationUnrelatedRecoveryMessage(pendingGaps: readonly string[]): string {
+  const shown = pendingGaps.slice(0, EXPLORATION_REFUSAL_PATH_CAP);
+  const rest = pendingGaps.length - shown.length;
+  const list = rest > 0 ? `${shown.join(', ')} (and ${rest} more)` : shown.join(', ');
+  return `Recovery is limited to the omitted or truncated files: ${list}.`;
+}
+
 export const REVIEW_OUTPUT_REMINDER = `## Final output reminder
 
 Respond now with one raw JSON object with exactly two top-level keys,

@@ -1,3 +1,4 @@
+import type { ExplorationPlan } from './exploration-policy.ts';
 import type { SemaphorePriority, TokenUsageRecorder } from './opencode.ts';
 import {
   classifyTelemetryStopReason,
@@ -22,6 +23,8 @@ export interface ReviewBackend {
       onTokenUsage?: TokenUsageRecorder;
       evidenceQuotes?: boolean;
       embeddedFirstPrompt?: boolean;
+      /** Enforced only by backends whose capability is `enforceable`. */
+      exploration?: ExplorationPlan;
     },
   ): Promise<ReviewResult>;
   runAddressedPriorCommentsCheck(

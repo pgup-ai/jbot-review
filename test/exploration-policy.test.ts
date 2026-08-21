@@ -1,0 +1,418 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, it } from 'node:test';
+
+import {
+  EXPLORATION_LIMITS,
+  ExplorationBudget,
+  assertRecoverableCoverage,
+  enforcesExplorationBudget,
+  planExploration,
+  selectExplorationTier,
+} from '../src/shared/exploration-policy.ts';
+import {
+  createPiGitDiffTool,
+  createPiReadTool,
+  withPiExplorationBudget,
+} from '../src/shared/pi.ts';
+
+const plan = (over: Partial<Parameters<typeof planExploration>[0]> = {}) =>
+  planExploration({ tier: 'standard', truncatedFiles: [], omittedFiles: [], ...over });
+
+describe('planExploration', () => {
+  it('enters recovery only when the prompt admits a gap', () => {
+    assert.equal(plan().mode, 'embedded');
+    assert.equal(plan({ truncatedFiles: ['a.ts'] }).mode, 'coverage-recovery');
+    assert.equal(plan({ omittedFiles: ['b.ts'] }).mode, 'coverage-recovery');
+    assert.equal(plan({ singleShot: true, omittedFiles: ['b.ts'] }).mode, 'single-shot');
+
+    // Truncated and omitted overlap when a file is both; the gap list dedupes.
+    assert.deepEqual(
+      plan({ truncatedFiles: ['a.ts', 'b.ts'], omittedFiles: ['b.ts'] }).coverageGaps,
+      ['a.ts', 'b.ts'],
+    );
+    // A single-shot session has no tools, so it can carry no gap to recover.
+    assert.deepEqual(plan({ singleShot: true, omittedFiles: ['b.ts'] }).coverageGaps, []);
+  });
+});
+
+describe('selectExplorationTier', () => {
+  it('spends least on tests and most on risk or breadth', () => {
+    const tier = (over: Partial<Parameters<typeof selectExplorationTier>[0]>) =>
+      selectExplorationTier({ changedFiles: 3, touchesRiskyPath: false, testOnly: false, ...over });
+
+    assert.equal(tier({}), 'standard');
+    assert.equal(tier({ testOnly: true }), 'minimal');
+    assert.equal(tier({ touchesRiskyPath: true }), 'elevated');
+    assert.equal(tier({ changedFiles: 40 }), 'elevated');
+    // A test-only change stays minimal however broad or risky it looks.
+    assert.equal(tier({ testOnly: true, touchesRiskyPath: true, changedFiles: 40 }), 'minimal');
+  });
+});
+
+describe('enforcesExplorationBudget', () => {
+  it('is true only for a backend that can refuse a call', () => {
+    assert.equal(enforcesExplorationBudget('enforceable'), true);
+    // An observable backend reports tool use but cannot deny it, and an opaque
+    // one reports nothing; neither may be described as enforcing a budget.
+    assert.equal(enforcesExplorationBudget('observable'), false);
+    assert.equal(enforcesExplorationBudget('opaque'), false);
+    assert.equal(enforcesExplorationBudget(undefined), false);
+  });
+});
+
+describe('assertRecoverableCoverage', () => {
+  it('rejects a gap with no permitted recovery path', () => {
+    assert.doesNotThrow(() => assertRecoverableCoverage(plan()));
+    assert.doesNotThrow(() => assertRecoverableCoverage(plan({ omittedFiles: ['a.ts'] })));
+    assert.throws(
+      () =>
+        assertRecoverableCoverage({ mode: 'embedded', tier: 'standard', coverageGaps: ['a.ts'] }),
+      /coverage gap/,
+    );
+  });
+});
+
+describe('ExplorationBudget', () => {
+  it('spends ordinary calls and soft-stops once the tier runs out', () => {
+    // Searches, not reads: `minimal` allows fewer adjacent files than ordinary
+    // calls, so reads would trip the adjacent limit first and test that instead.
+    const budget = new ExplorationBudget(plan({ tier: 'minimal' }));
+    for (let call = 0; call < EXPLORATION_LIMITS.minimal.ordinaryCalls; call += 1) {
+      const request = { kind: 'search', query: `q${call}` } as const;
+      assert.equal(budget.request(request).allow, true, `call ${call}`);
+      budget.record(request, 10, { exempt: false });
+    }
+
+    const stopped = budget.request({ kind: 'search', query: 'one-too-many' });
+    assert.equal(stopped.allow, false);
+    assert.equal(stopped.refusal, 'soft-stop');
+    assert.match(stopped.message ?? '', /Answer now/);
+    assert.equal(budget.exhausted, true);
+
+    // The next call is a refusal, not a repeat of the warning.
+    assert.equal(budget.request({ kind: 'search', query: 'later' }).refusal, 'budget-exhausted');
+  });
+
+  it('stops on output bytes even while calls remain', () => {
+    const budget = new ExplorationBudget(plan({ tier: 'minimal' }));
+    const first = { kind: 'read', path: 'huge.ts' } as const;
+    assert.equal(budget.request(first).allow, true);
+    budget.record(first, EXPLORATION_LIMITS.minimal.toolOutputBytes, { exempt: false });
+
+    assert.equal(budget.request({ kind: 'read', path: 'next.ts' }).refusal, 'soft-stop');
+  });
+
+  it('stops a repeat past the tier allowance, for a read or an equivalent search', () => {
+    const minimal = new ExplorationBudget(plan({ tier: 'minimal' }));
+    const same = { kind: 'read', path: 'a.ts' } as const;
+    minimal.record(same, 10, { exempt: false });
+    // minimal allows no repeats at all.
+    assert.equal(minimal.request(same).refusal, 'soft-stop');
+
+    const searching = new ExplorationBudget(plan({ tier: 'minimal' }));
+    const query = { kind: 'search', query: 'handleRequest' } as const;
+    searching.record(query, 10, { exempt: false });
+    assert.equal(searching.request(query).refusal, 'soft-stop');
+
+    const standard = new ExplorationBudget(plan({ tier: 'standard' }));
+    standard.record(same, 10, { exempt: false });
+    assert.equal(standard.request(same).allow, true);
+    standard.record(same, 10, { exempt: false });
+    assert.equal(standard.request(same).refusal, 'soft-stop');
+  });
+
+  it('stops once the adjacent-file allowance is spent, counting reads only', () => {
+    const budget = new ExplorationBudget(plan({ tier: 'minimal' }));
+    for (let file = 0; file < EXPLORATION_LIMITS.minimal.adjacentFiles; file += 1) {
+      const request = { kind: 'read', path: `adj${file}.ts` } as const;
+      assert.equal(budget.request(request).allow, true);
+      budget.record(request, 10, { exempt: false });
+    }
+    assert.equal(budget.request({ kind: 'read', path: 'one-more.ts' }).refusal, 'soft-stop');
+  });
+
+  it('exempts recovery of a named gap and leaves recovery once every gap is served', () => {
+    const budget = new ExplorationBudget(
+      plan({ tier: 'minimal', omittedFiles: ['gap-a.ts', 'gap-b.ts'] }),
+    );
+    assert.equal(budget.mode, 'coverage-recovery');
+
+    // Recovering both gaps costs nothing, even at the smallest tier.
+    for (const path of ['gap-a.ts', 'gap-b.ts']) {
+      const request = { kind: 'diff', path } as const;
+      const verdict = budget.request(request);
+      assert.equal(verdict.allow, true);
+      assert.equal(verdict.exempt, true, path);
+      budget.record(request, 50_000, { exempt: true });
+    }
+
+    assert.deepEqual(budget.pendingGaps, []);
+    assert.equal(budget.mode, 'embedded');
+    // The full ordinary allowance survives the recovery.
+    const ordinary = { kind: 'read', path: 'after.ts' } as const;
+    assert.equal(budget.request(ordinary).allow, true);
+    assert.equal(budget.request(ordinary).exempt, false);
+  });
+
+  it('recovers a named gap even after ordinary work has soft-stopped', () => {
+    const budget = new ExplorationBudget(plan({ tier: 'minimal', omittedFiles: ['gap.ts'] }));
+    // Spend the ordinary allowance first.
+    for (let call = 0; call < EXPLORATION_LIMITS.minimal.adjacentFiles; call += 1) {
+      const request = { kind: 'read', path: `f${call}.ts` } as const;
+      budget.record(request, 10, { exempt: false });
+    }
+    assert.equal(budget.request({ kind: 'read', path: 'more.ts' }).refusal, 'soft-stop');
+    assert.equal(budget.exhausted, true);
+
+    // The gap must still be reachable, or full-diff coverage is lost.
+    const recovery = budget.request({ kind: 'diff', path: 'gap.ts' });
+    assert.equal(recovery.allow, true);
+    assert.equal(recovery.exempt, true);
+  });
+
+  it('keeps a gap open when its recovery came back truncated, but bounds the retries', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['big.ts'] }));
+    const request = { kind: 'diff', path: 'big.ts' } as const;
+
+    assert.equal(budget.request(request).exempt, true);
+    budget.record(request, 48 * 1024, { exempt: true, complete: false });
+    // Only part of the file arrived, so the gap is not recovered.
+    assert.deepEqual(budget.pendingGaps, ['big.ts']);
+
+    assert.equal(budget.request(request).exempt, true);
+    budget.record(request, 48 * 1024, { exempt: true, complete: false });
+    // Retries are bounded: further requests stop being exempt rather than
+    // looping forever outside the ordinary budget.
+    assert.equal(budget.request(request).exempt, false);
+  });
+
+  it('marks a gap recovered on its final allowed attempt', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['big.ts'] }));
+    const request = { kind: 'diff', path: 'big.ts' } as const;
+
+    // First attempt comes back capped, so the gap stays open.
+    assert.equal(budget.request(request).exempt, true);
+    budget.record(request, 48 * 1024, { exempt: true, complete: false });
+    assert.deepEqual(budget.pendingGaps, ['big.ts']);
+
+    // The second is the last allowed exempt attempt, and it returns in full.
+    // record() must honour that verdict rather than re-deriving it, or the gap
+    // stays pending forever and the call is charged as ordinary work.
+    const second = budget.request(request);
+    assert.equal(second.exempt, true);
+    budget.record(request, 100, { exempt: second.exempt });
+
+    assert.deepEqual(budget.pendingGaps, []);
+    assert.equal(budget.mode, 'embedded');
+  });
+
+  it('charges a permitted call that failed, so failures cannot run free', () => {
+    const budget = new ExplorationBudget(plan({ tier: 'minimal' }));
+    // Distinct queries, so the call budget is what runs out rather than the
+    // repeat rule. Every attempt fails and returns nothing.
+    for (let call = 0; call < EXPLORATION_LIMITS.minimal.ordinaryCalls; call += 1) {
+      const request = { kind: 'search', query: `boom${call}` } as const;
+      assert.equal(budget.request(request).allow, true, `attempt ${call}`);
+      budget.record(request, 0, { exempt: false, complete: false });
+    }
+    assert.equal(budget.request({ kind: 'search', query: 'boom-again' }).allow, false);
+
+    // Repeating one failing call is bounded by the repeat rule instead.
+    const repeating = new ExplorationBudget(plan({ tier: 'minimal' }));
+    const same = { kind: 'search', query: 'boom' } as const;
+    repeating.record(same, 0, { exempt: false, complete: false });
+    assert.equal(repeating.request(same).refusal, 'soft-stop');
+  });
+
+  it('does not mark a gap recovered when its recovery failed', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['gap.ts'] }));
+    const request = { kind: 'diff', path: 'gap.ts' } as const;
+
+    assert.equal(budget.request(request).exempt, true);
+    budget.record(request, 0, { exempt: true, complete: false });
+
+    assert.deepEqual(budget.pendingGaps, ['gap.ts']);
+    assert.equal(budget.mode, 'coverage-recovery');
+  });
+
+  it('closes a gap delivered by an ordinary retry after the exempt attempts run out', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['big.ts'] }));
+    const request = { kind: 'diff', path: 'big.ts' } as const;
+
+    // Both exempt attempts come back capped, so the gap is still open.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      assert.equal(budget.request(request).exempt, true, `attempt ${attempt}`);
+      budget.record(request, 48 * 1024, { exempt: true, complete: false });
+    }
+    const ordinary = budget.request(request);
+    assert.equal(ordinary.allow, true);
+    assert.equal(ordinary.exempt, false, 'the exempt allowance is spent');
+
+    // It arrives in full this time. Who paid for it does not change the fact
+    // that the gap is now covered; leaving it pending would refuse every other
+    // path-scoped diff for the rest of the session.
+    budget.record(request, 100, { exempt: false, complete: true });
+
+    assert.deepEqual(budget.pendingGaps, []);
+    assert.equal(budget.mode, 'embedded');
+    assert.equal(budget.request({ kind: 'diff', path: 'elsewhere.ts' }).allow, true);
+  });
+
+  it('lets a served gap be re-read while its siblings are still outstanding', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['gap-a.ts', 'gap-b.ts'] }));
+    const first = { kind: 'diff', path: 'gap-a.ts' } as const;
+    budget.record(first, 10, { exempt: true });
+
+    // gap-a is no longer pending, but it was named, so a re-read is ordinary
+    // work rather than an unrelated-recovery refusal.
+    const again = budget.request(first);
+    assert.equal(again.allow, true);
+    assert.equal(again.exempt, false);
+    assert.deepEqual(budget.pendingGaps, ['gap-b.ts']);
+  });
+
+  it('matches a gap whatever shape the model spells its path in', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['a.ts'] }));
+
+    // pi trims before running git, so an untrimmed path diffs fine; the budget
+    // must not then refuse it as unrelated recovery.
+    const spaced = budget.request({ kind: 'diff', path: ' a.ts ' });
+    assert.equal(spaced.allow, true);
+    assert.equal(spaced.exempt, true);
+
+    const dotted = budget.request({ kind: 'diff', path: './a.ts' });
+    assert.equal(dotted.exempt, true);
+    budget.record({ kind: 'diff', path: './a.ts' }, 100, { exempt: true, complete: true });
+
+    assert.deepEqual(budget.pendingGaps, []);
+    assert.equal(budget.mode, 'embedded');
+  });
+
+  it('treats a blank diff path as the whole diff, like git does', () => {
+    const budget = new ExplorationBudget(plan({ tier: 'minimal' }));
+    budget.record({ kind: 'diff', path: '  ' }, 10, { exempt: false });
+
+    // minimal allows no repeats, so the unscoped form must be the same request.
+    assert.equal(budget.request({ kind: 'diff' }).refusal, 'soft-stop');
+  });
+
+  it('treats a differently spaced query as the same search', () => {
+    const budget = new ExplorationBudget(plan({ tier: 'minimal' }));
+    budget.record({ kind: 'search', query: 'handleRequest' }, 10, { exempt: false });
+
+    // Trailing whitespace must not mint a fresh identity and reset the repeat
+    // allowance, which minimal sets to zero.
+    assert.equal(budget.request({ kind: 'search', query: 'handleRequest ' }).refusal, 'soft-stop');
+  });
+
+  it('treats a differently spelled read as the same file', () => {
+    const budget = new ExplorationBudget(plan({ tier: 'minimal' }));
+    budget.record({ kind: 'read', path: './a.ts' }, 10, { exempt: false });
+
+    // minimal allows no repeats, so the same file under another spelling stops.
+    assert.equal(budget.request({ kind: 'read', path: 'a.ts' }).refusal, 'soft-stop');
+  });
+
+  it('refuses recovery for a path the prompt never flagged', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['gap.ts'] }));
+    const verdict = budget.request({ kind: 'diff', path: 'unrelated.ts' });
+
+    assert.equal(verdict.allow, false);
+    assert.equal(verdict.refusal, 'unrelated-recovery');
+    assert.match(verdict.message ?? '', /gap\.ts/);
+    // A refusal is not a soft stop: the session may still explore normally.
+    assert.equal(budget.exhausted, false);
+  });
+
+  it('leaves a whole-diff request outside the recovery exemption', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['gap.ts'] }));
+    const whole = { kind: 'diff' } as const;
+
+    const verdict = budget.request(whole);
+    assert.equal(verdict.allow, true);
+    assert.equal(verdict.exempt, false, 'an unscoped diff is ordinary work, not recovery');
+  });
+
+  it('gives a single-shot session no tools at all', () => {
+    const budget = new ExplorationBudget(plan({ singleShot: true }));
+    const verdict = budget.request({ kind: 'read', path: 'a.ts' });
+
+    assert.equal(verdict.allow, false);
+    assert.equal(verdict.refusal, 'no-tools');
+  });
+});
+
+describe('pi enforces the budget at its tool boundary', () => {
+  const sdk = { defineTool: (definition: unknown) => definition } as never;
+  type Tool = {
+    execute: (id: unknown, params: unknown) => Promise<{ content: { text: string }[] }>;
+  };
+  const textOf = async (tool: unknown, params: unknown) =>
+    (await (tool as Tool).execute('id', params)).content[0].text;
+
+  const workspace = mkdtempSync(join(tmpdir(), 'jbot-budget-'));
+  writeFileSync(join(workspace, 'a.ts'), 'export const a = 1;\n');
+  writeFileSync(join(workspace, 'b.ts'), 'export const b = 2;\n');
+
+  it('refuses a read once the budget is spent, and says so again after', async () => {
+    const read = createPiReadTool(sdk, workspace);
+    const budget = new ExplorationBudget(
+      planExploration({ tier: 'minimal', truncatedFiles: [], omittedFiles: [] }),
+    );
+
+    await withPiExplorationBudget('review', budget, async () => {
+      for (let file = 0; file < EXPLORATION_LIMITS.minimal.adjacentFiles; file += 1) {
+        writeFileSync(join(workspace, `f${file}.ts`), 'x\n');
+        assert.doesNotMatch(await textOf(read, { path: `f${file}.ts` }), /budget/i);
+      }
+      assert.match(await textOf(read, { path: 'a.ts' }), /Answer now/);
+      assert.match(await textOf(read, { path: 'b.ts' }), /refused/i);
+    });
+  });
+
+  it('keeps a path outside the repo a permission denial, not a budget refusal', async () => {
+    const read = createPiReadTool(sdk, workspace);
+    const budget = new ExplorationBudget(
+      planExploration({ tier: 'minimal', truncatedFiles: [], omittedFiles: [] }),
+    );
+
+    await withPiExplorationBudget('review', budget, async () => {
+      assert.match(await textOf(read, { path: '../outside.ts' }), /outside the repository/);
+      // The refusal spent nothing, so ordinary exploration still works.
+      assert.doesNotMatch(await textOf(read, { path: 'a.ts' }), /budget|Answer now/i);
+    });
+  });
+
+  it('charges a failing tool call, so a broken path cannot run free', async () => {
+    // The workspace is not a git repo, so every git_diff below fails.
+    const diff = createPiGitDiffTool(sdk, workspace, { base: 'HEAD', worktree: true });
+    const budget = new ExplorationBudget(
+      planExploration({ tier: 'minimal', truncatedFiles: [], omittedFiles: [] }),
+    );
+
+    await withPiExplorationBudget('review', budget, async () => {
+      for (let call = 0; call < EXPLORATION_LIMITS.minimal.ordinaryCalls; call += 1) {
+        assert.match(await textOf(diff, { path: `missing${call}.ts` }), /git diff failed/);
+      }
+      // Without charging the failures the budget would still be untouched here.
+      assert.match(await textOf(diff, { path: 'one-more.ts' }), /Answer now/);
+    });
+  });
+
+  it('lets a named coverage gap through git_diff without spending budget', async () => {
+    const diff = createPiGitDiffTool(sdk, workspace, { base: 'HEAD', worktree: true });
+    const budget = new ExplorationBudget(
+      planExploration({ tier: 'minimal', truncatedFiles: ['a.ts'], omittedFiles: [] }),
+    );
+
+    await withPiExplorationBudget('review', budget, async () => {
+      // Not a git repo here, so the diff fails — the point is that the budget
+      // permitted the call rather than refusing it.
+      assert.doesNotMatch(await textOf(diff, { path: 'a.ts' }), /budget|Answer now/i);
+      assert.match(await textOf(diff, { path: 'unrelated.ts' }), /limited to the omitted/);
+    });
+  });
+});

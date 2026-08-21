@@ -171,6 +171,66 @@ describe('phase and tool telemetry', () => {
   });
 });
 
+describe('exploration row merging', () => {
+  it('keeps an enforced tier when the concurrency wrapper finalizes after it', () => {
+    const rec = createTelemetryRecorder(true);
+    const finish = {
+      session: 'review',
+      backend: 'pi',
+      capability: 'enforceable' as const,
+      stopReason: 'completed' as const,
+    };
+    // pi records the tier it enforced; the wrapper then finalizes the same
+    // session with its own observe-only default.
+    // Production shares one accumulator between the backend and the concurrency
+    // wrapper, so the wrapper's sparse row still carries the real counters:
+    // finishSession recomputes them rather than taking them from its caller.
+    const tools = createToolTelemetryAccumulator(rec, 'salt', () => 0);
+    tools.startTool({
+      session: 'review',
+      backend: 'pi',
+      capability: 'enforceable',
+      toolClass: 'file-read',
+      inputBytes: 10,
+      identity: 'a.ts',
+      identityKind: 'path',
+    })({ success: true, outputBytesBeforeCap: 900, outputBytesAfterCap: 900 });
+    tools.finishSession({ ...finish, budgetTier: 'standard', turnCount: 4 });
+    tools.finishSession({ ...finish, budgetTier: 'observe-only' });
+
+    const rows = rec
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const exploration = rows.filter((row) => row.kind === 'exploration');
+    assert.equal(exploration.length, 1);
+    assert.equal(exploration[0].budgetTier, 'standard');
+    assert.equal(exploration[0].turnCount, 4);
+    assert.equal(exploration[0].toolCalls, 1);
+    assert.equal(exploration[0].toolOutputBytes, 900);
+    assert.equal(exploration[0].uniquePathHashes, 1);
+  });
+
+  it('still takes a later tier that is not the wrapper default', () => {
+    const rec = createTelemetryRecorder(true);
+    const finish = {
+      session: 'review',
+      backend: 'pi',
+      capability: 'enforceable' as const,
+      stopReason: 'completed' as const,
+    };
+    const tools = createToolTelemetryAccumulator(rec, 'salt', () => 0);
+    tools.finishSession({ ...finish, budgetTier: 'observe-only' });
+    tools.finishSession({ ...finish, budgetTier: 'elevated' });
+
+    const rows = rec
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.equal(rows.filter((row) => row.kind === 'exploration')[0].budgetTier, 'elevated');
+  });
+});
+
 describe('outcome rows', () => {
   it('serializes outcome rows after coverage and preserves every counter', () => {
     const rec = createTelemetryRecorder(true);

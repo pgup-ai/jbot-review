@@ -160,6 +160,29 @@ const LARGE_DELETION_DOMINANCE = 3;
  */
 const TEST_ONLY_FILE = /(^|\/)(test|tests|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/i;
 
+/**
+ * A security-shaped file name. PATH_PATTERNS matches directories, so
+ * `src/app/auth.ts` would otherwise read as ordinary code; this stays local to
+ * tier selection rather than widening a taxonomy other callers share.
+ */
+const RISKY_FILE_NAME =
+  /(^|\/)(auth|authz|authn|security|permissions?|policies|secrets?)[.-][^/]*$/i;
+
+/**
+ * Whether the change touches a path the taxonomy treats as risky. Lives here
+ * beside PATH_PATTERNS so the orchestrator only wires the answer through.
+ */
+export function touchesRiskyPath(files: PrFile[]): boolean {
+  const risky = [
+    PATH_PATTERNS.security,
+    PATH_PATTERNS.data,
+    PATH_PATTERNS.api,
+    PATH_PATTERNS.infra,
+    RISKY_FILE_NAME,
+  ];
+  return files.some((file) => risky.some((pattern) => pattern.test(file.filename)));
+}
+
 export function classifyChangeShape(files: PrFile[]): ChangeShape {
   const filenames = files.map((file) => file.filename);
   const { added, removed } = diffLineCounts(files);

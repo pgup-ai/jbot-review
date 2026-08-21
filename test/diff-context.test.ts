@@ -6,6 +6,7 @@ import {
   buildDiffHunksBlock,
   buildDiffHunksBlockWithMetadata,
   classifyChangeShape,
+  touchesRiskyPath,
   diffLineCounts,
   diffRiskScore,
   isDocFile,
@@ -455,6 +456,27 @@ describe('classifyChangeShape', () => {
       largeDeletion: false,
       dependencyManifestChange: false,
     });
+  });
+});
+
+describe('touchesRiskyPath', () => {
+  const files = (...names: string[]) => names.map((filename) => ({ filename }) as never);
+
+  it('covers risky directories and security-shaped file names without catching lookalikes', () => {
+    assert.equal(touchesRiskyPath(files('src/shared/security/x.ts')), true);
+    assert.equal(touchesRiskyPath(files('api/routes/handler.ts')), true);
+    assert.equal(touchesRiskyPath(files('db/migrations/001.sql')), true);
+    assert.equal(touchesRiskyPath(files('infra/terraform/main.tf')), true);
+    // PATH_PATTERNS is directory-shaped, so these need the file-name rule.
+    assert.equal(touchesRiskyPath(files('src/app/auth.ts')), true);
+    assert.equal(touchesRiskyPath(files('src/auth-helpers.ts')), true);
+
+    assert.equal(touchesRiskyPath(files('src/util.ts')), false);
+    assert.equal(touchesRiskyPath([]), false);
+    // `author` and `authors/` are not security paths.
+    assert.equal(touchesRiskyPath(files('src/author.ts', 'src/authors/list.ts')), false);
+    // One risky file among ordinary ones is enough.
+    assert.equal(touchesRiskyPath(files('src/util.ts', 'src/app/auth.ts')), true);
   });
 });
 
