@@ -77,7 +77,7 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         reviewShards: 1,
         timeBudgetMinutes: 30,
         modelOptions: defaultModelOptions(parseModelName(job.model).providerID),
-        embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', false),
+        embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
         onReviewResult: (r) => {
           const counts: Partial<Record<Severity, number>> = {};
           for (const f of r.findings) counts[f.severity] = (counts[f.severity] ?? 0) + 1;

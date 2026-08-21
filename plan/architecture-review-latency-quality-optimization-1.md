@@ -167,12 +167,13 @@ Completion criteria for Phase 2:
 Completion criteria for Phase 3:
 
 **Phase status (2026-08-21):** Shipped as the default, opt out with
-`JBOT_EMBEDDED_FIRST_PROMPT=false`. The byte gate is met on three of the four
-telemetry-reporting cohorts; the fourth and the opaque one are documented
-opt-out cases rather than blockers. QLT-003 was read as blocking until it was
-noticed that the control fails it too, so it never compared the arms — see the
-superseding decision in `plan/review-prompt-embedded-first-phase3-ab.md`, where
-metrics and per-cohort verdicts live; do not restate them here.
+`JBOT_EMBEDDED_FIRST_PROMPT=false`. The byte gate is met on three of the
+four telemetry-reporting cohorts; `deepseek-v4-flash-free` is the documented
+opt-out, and the opaque cohort cannot evidence the gate at all. QLT-003 was
+read as blocking until it was noticed that the control fails it too, so it
+never compared the arms — see the superseding decision in
+`plan/review-prompt-embedded-first-phase3-ab.md`, where metrics and
+per-cohort verdicts live; do not restate them here.
 
 - The prompt states exactly one exploration policy and does not simultaneously require redundant diff rereads.
 - Tool-less backends remain functional and read-only.
