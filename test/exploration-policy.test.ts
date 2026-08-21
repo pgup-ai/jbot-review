@@ -240,6 +240,29 @@ describe('ExplorationBudget', () => {
     assert.equal(budget.mode, 'coverage-recovery');
   });
 
+  it('closes a gap delivered by an ordinary retry after the exempt attempts run out', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['big.ts'] }));
+    const request = { kind: 'diff', path: 'big.ts' } as const;
+
+    // Both exempt attempts come back capped, so the gap is still open.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      assert.equal(budget.request(request).exempt, true, `attempt ${attempt}`);
+      budget.record(request, 48 * 1024, { exempt: true, complete: false });
+    }
+    const ordinary = budget.request(request);
+    assert.equal(ordinary.allow, true);
+    assert.equal(ordinary.exempt, false, 'the exempt allowance is spent');
+
+    // It arrives in full this time. Who paid for it does not change the fact
+    // that the gap is now covered; leaving it pending would refuse every other
+    // path-scoped diff for the rest of the session.
+    budget.record(request, 100, { exempt: false, complete: true });
+
+    assert.deepEqual(budget.pendingGaps, []);
+    assert.equal(budget.mode, 'embedded');
+    assert.equal(budget.request({ kind: 'diff', path: 'elsewhere.ts' }).allow, true);
+  });
+
   it('lets a served gap be re-read while its siblings are still outstanding', () => {
     const budget = new ExplorationBudget(plan({ omittedFiles: ['gap-a.ts', 'gap-b.ts'] }));
     const first = { kind: 'diff', path: 'gap-a.ts' } as const;

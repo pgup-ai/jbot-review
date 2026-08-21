@@ -25,7 +25,11 @@ export interface ExplorationLimits {
   /** Calls that are not exempt coverage recovery. */
   ordinaryCalls: number;
   toolOutputBytes: number;
-  /** Distinct files reachable beyond the diff. */
+  /**
+   * Distinct files read in a session. Counts changed files too: the budget
+   * sees a path, not whether it is in the diff, so this bounds reads rather
+   * than distance from the change.
+   */
   adjacentFiles: number;
   /** Re-reads of a path, or repeats of a query, already served. */
   repeats: number;
@@ -261,13 +265,20 @@ export class ExplorationBudget {
     options: { exempt: boolean; complete?: boolean },
   ): void {
     const { exempt, complete = true } = options;
-    if (exempt && request.kind === 'diff' && request.path) {
-      // A capped or failed call delivered less than the whole file, so the gap
-      // stays open. RECOVERY_ATTEMPTS_PER_GAP bounds the retries, after which
-      // the path stops being exempt and falls to the ordinary budget.
-      if (complete) this.recovered.add(request.path);
-      return;
+    // Closing a gap turns on delivery, not on who paid: once the exempt
+    // attempts are spent the same file arrives through the ordinary budget,
+    // and a gap left pending there would block every other path-scoped diff
+    // for the rest of the session. A capped or failed call delivered less than
+    // the whole file, so it closes nothing.
+    if (
+      complete &&
+      request.kind === 'diff' &&
+      request.path &&
+      this.plan.coverageGaps.includes(request.path)
+    ) {
+      this.recovered.add(request.path);
     }
+    if (exempt) return;
     const identity = requestIdentity(request);
     if (this.served.has(identity)) {
       this.repeated.set(identity, (this.repeated.get(identity) ?? 0) + 1);
