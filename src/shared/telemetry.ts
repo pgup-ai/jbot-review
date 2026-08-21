@@ -49,7 +49,8 @@ export interface SessionTelemetryRow {
 export type BackendTelemetryCapability = 'enforceable' | 'observable' | 'opaque';
 export type ExplorationMode =
   'embedded-only' | 'diff-recovery' | 'adjacent-context' | 'mixed' | 'unavailable';
-export type ExplorationBudgetTier = 'single-shot' | 'observe-only';
+export type ExplorationBudgetTier =
+  'single-shot' | 'observe-only' | 'minimal' | 'standard' | 'elevated';
 export type TelemetryStopReason = 'completed' | 'failed' | 'timeout' | 'aborted';
 export type ToolTelemetryClass =
   'diff-recovery' | 'file-read' | 'search' | 'list' | 'external-docs' | 'other-readonly';
@@ -88,7 +89,7 @@ export interface ToolTelemetryRow {
   outputBytesAfterCap: number;
   duplicate: boolean;
   success: boolean;
-  failureClass?: 'denied' | 'timeout' | 'execution' | 'invalid-input' | 'unknown';
+  failureClass?: 'denied' | 'budget' | 'timeout' | 'execution' | 'invalid-input' | 'unknown';
   diffScope?: 'whole' | 'path';
 }
 

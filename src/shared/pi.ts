@@ -6,6 +6,11 @@ import { join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 import { supportedModelOptions } from './config.ts';
+import {
+  ExplorationBudget,
+  type ExplorationPlan,
+  type ExplorationRequest,
+} from './exploration-policy.ts';
 import { GIT_DIFF_ARGS } from './git.ts';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -32,7 +37,12 @@ import { serializedBytes, type ToolTelemetryAccumulator } from './tool-telemetry
 import { classifyTelemetryStopReason } from './telemetry.ts';
 
 export const PI_TELEMETRY_CAPABILITY = 'enforceable' as const;
-const piTelemetryContext = new AsyncLocalStorage<{ session: string }>();
+const piTelemetryContext = new AsyncLocalStorage<{ session: string; budget?: ExplorationBudget }>();
+
+/** Runs `body` as pi does, so a test exercises the tools' real budget context. */
+export function withPiExplorationBudget<T>(budget: ExplorationBudget, body: () => T): T {
+  return piTelemetryContext.run({ session: 'test', budget }, body);
+}
 const piSessionTelemetry = new WeakMap<object, ToolTelemetryAccumulator>();
 
 /**
@@ -401,7 +411,43 @@ interface PiSdkLike {
  * could never see removals or unembedded hunks (invariant 1). The base ref and
  * diff form are runner-supplied — the model only chooses an optional pathspec.
  */
-function createPiGitDiffTool(
+/**
+ * Returns the result to send instead of running the call, or undefined to
+ * proceed. A refusal reports `budget`, never `denied`: the path was permitted
+ * and the allowance simply ran out.
+ */
+function refuseOverBudget(
+  request: ExplorationRequest,
+  finish:
+    | ((result: {
+        success: boolean;
+        failureClass?: 'budget';
+        outputBytesBeforeCap: number;
+        outputBytesAfterCap: number;
+      }) => void)
+    | undefined,
+): { content: { type: string; text: string }[]; details: object } | undefined {
+  const budget = piTelemetryContext.getStore()?.budget;
+  if (!budget) return undefined;
+  const verdict = budget.request(request);
+  if (verdict.allow) return undefined;
+  const text = verdict.message ?? 'Exploration budget reached.';
+  finish?.({
+    success: false,
+    failureClass: 'budget',
+    outputBytesBeforeCap: 0,
+    outputBytesAfterCap: Buffer.byteLength(text),
+  });
+  return { content: [{ type: 'text', text }], details: {} };
+}
+
+/** Charges a permitted call once its real output size is known. */
+function chargeBudget(request: ExplorationRequest, outputBytes: number): void {
+  piTelemetryContext.getStore()?.budget?.record(request, outputBytes);
+}
+
+/** Exported for the budget-enforcement contract test. */
+export function createPiGitDiffTool(
   sdk: PiSdkLike,
   workspace: string,
   scope: PiDiffScope,
@@ -433,6 +479,8 @@ function createPiGitDiffTool(
           : { identity: 'whole-diff', identityKind: 'scope' as const }),
         diffScope: path ? 'path' : 'whole',
       });
+      const refused = refuseOverBudget({ kind: 'diff', ...(path ? { path } : {}) }, finish);
+      if (refused) return refused;
       let text: string;
       try {
         const { stdout } = await execFileAsync('git', piGitDiffArgs(scope, path), {
@@ -441,6 +489,7 @@ function createPiGitDiffTool(
           timeout: PI_DIFF_TOOL_TIMEOUT_MS,
         });
         text = stdout.trim() ? capPiDiffOutput(stdout) : '(no changes for this path)';
+        chargeBudget({ kind: 'diff', ...(path ? { path } : {}) }, Buffer.byteLength(text));
         finish?.({
           success: true,
           outputBytesBeforeCap: Buffer.byteLength(stdout),
@@ -471,7 +520,8 @@ function createPiGitDiffTool(
  * and `..` paths with no sandbox). Refuses anything resolving outside the
  * workspace, so a prompt-injected diff cannot read host files.
  */
-function createPiReadTool(
+/** Exported for the budget-enforcement contract test. */
+export function createPiReadTool(
   sdk: PiSdkLike,
   workspace: string,
   telemetry?: ToolTelemetryAccumulator,
@@ -510,10 +560,13 @@ function createPiReadTool(
           details: {},
         };
       }
+      const refused = refuseOverBudget({ kind: 'read', path: requested }, finish);
+      if (refused) return refused;
       let text: string;
       try {
         const raw = readFileSync(target, 'utf8');
         text = capPiDiffOutput(raw);
+        chargeBudget({ kind: 'read', path: requested }, Buffer.byteLength(text));
         finish?.({
           success: true,
           outputBytesBeforeCap: Buffer.byteLength(raw),
@@ -824,8 +877,16 @@ async function promptPiSession(
   log: (msg: string) => void,
   timeoutMs = PI_PROMPT_TIMEOUT_MS,
   onTokenUsage?: TokenUsageRecorder,
+  budget?: ExplorationBudget,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
+  // An unbudgeted session is observed, not enforced; say so rather than
+  // implying a tier that was never applied.
+  const enforcedTier = !budget
+    ? 'observe-only'
+    : budget.mode === 'single-shot'
+      ? 'single-shot'
+      : budget.tier;
   log(`Calling ${label} prompt (engine=pi, provider=${providerID} model=${modelID})`);
   // Sessions outlive a single prompt (the JSON repair re-prompts in place), so
   // only the turns appended by THIS prompt may be read or billed.
@@ -834,7 +895,7 @@ async function promptPiSession(
     // prompt() resolves when the full agent turn completes — no polling.
     // Template expansion stays off: prompts embed arbitrary diff text that
     // must never trigger pi's /template expansion.
-    await piTelemetryContext.run({ session: label }, () =>
+    await piTelemetryContext.run({ session: label, ...(budget ? { budget } : {}) }, () =>
       withTimeout(
         session.prompt(prompt, { expandPromptTemplates: false }),
         timeoutMs,
@@ -846,7 +907,7 @@ async function promptPiSession(
       session: label,
       backend: 'pi',
       capability: PI_TELEMETRY_CAPABILITY,
-      budgetTier: 'observe-only',
+      budgetTier: enforcedTier,
       stopReason: classifyTelemetryStopReason(error),
       turnCount: countPiAssistantTurns(piSessionMessages(session).slice(priorTurns)),
     });
@@ -887,7 +948,7 @@ async function promptPiSession(
       session: label,
       backend: 'pi',
       capability: PI_TELEMETRY_CAPABILITY,
-      budgetTier: 'observe-only',
+      budgetTier: enforcedTier,
       stopReason: classifyTelemetryStopReason(error),
       turnCount,
     });
@@ -902,7 +963,7 @@ async function promptPiSession(
     session: label,
     backend: 'pi',
     capability: PI_TELEMETRY_CAPABILITY,
-    budgetTier: 'observe-only',
+    budgetTier: enforcedTier,
     stopReason: 'completed',
     turnCount,
   });
@@ -993,9 +1054,12 @@ export async function runPiReview(
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
+    /** Absent leaves the session unbudgeted, matching pre-Phase-4 behavior. */
+    exploration?: ExplorationPlan;
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
+  const budget = options.exploration ? new ExplorationBudget(options.exploration) : undefined;
   const prompt = assembleReviewPrompt(
     prContext,
     guidelines,
@@ -1014,6 +1078,7 @@ export async function runPiReview(
       log,
       options.timeoutMs,
       options.onTokenUsage,
+      budget,
     );
     try {
       return parseReview(raw, label, log, { strict: true });

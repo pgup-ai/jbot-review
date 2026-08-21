@@ -78,8 +78,8 @@ import {
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   type DiffHunksOptions,
-  buildDiffHunksBlock,
   buildDiffHunksBlockWithMetadata,
+  PATH_PATTERNS,
   classifyChangeShape,
   isDocOnlyChange,
   shardFilesForReview,
@@ -193,6 +193,14 @@ import {
   type LinkedIssue,
   type ReviewCommit,
 } from './review-context.ts';
+import {
+  assertRecoverableCoverage,
+  enforcesExplorationBudget,
+  planExploration,
+  selectExplorationTier,
+  type ExplorationPlan,
+  type ExplorationTier,
+} from './exploration-policy.ts';
 import { planReviewFanout, planIncrementalLenses } from './fanout.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
@@ -1205,6 +1213,15 @@ async function runReviewPipeline(params: {
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
   const summaryScopeBlock = buildSummaryScopeBlock();
   const changeShape = classifyChangeShape(files);
+  const explorationTier = selectExplorationTier({
+    changedFiles: files.length,
+    touchesRiskyPath: files.some((file) =>
+      [PATH_PATTERNS.security, PATH_PATTERNS.data, PATH_PATTERNS.api, PATH_PATTERNS.infra].some(
+        (pattern) => pattern.test(file.filename),
+      ),
+    ),
+    testOnly: changeShape.testOnly,
+  });
   const reviewFocusBlock = buildReviewFocusBlock(changedFiles, changeShape);
   const fanout = options.dynamicFanout
     ? planReviewFanout({
@@ -1221,7 +1238,8 @@ async function runReviewPipeline(params: {
       `Dynamic fan-out: ${fanout.reason}; reviewPasses ${options.reviewPasses}→${effectiveReviewPasses}, guidelinePass ${options.guidelinePass}→${effectiveGuidelinePass} (main review + verify unchanged).`,
     );
   }
-  const diffHunksBlock = buildDiffHunksBlock(files);
+  const diffHunks = buildDiffHunksBlockWithMetadata(files);
+  const diffHunksBlock = diffHunks.text;
   if (diffHunksBlock) log(`Embedded diff hunks block: ${diffHunksBlock.length} chars.`);
   const mainRequiresCompleteEmbeddedDiff = backendRequiresCompleteEmbeddedDiff(
     providerID,
@@ -2039,6 +2057,8 @@ async function runReviewPipeline(params: {
     const shardPlans = buildShardPlans({
       coreContext: mainCoreContext,
       fullDiffBlock: diffHunksBlock,
+      fullDiffCoverage: diffHunks,
+      explorationTier,
       context7Block,
       shards,
       requireCompleteEmbeddedDiff: mainRequiresCompleteEmbeddedDiff,
@@ -3059,6 +3079,8 @@ interface ShardPlan {
   baseContext: string;
   /** Changed files this shard may anchor findings in. */
   assignedFiles: string[];
+  /** Budget and the coverage gaps this shard is allowed to recover. */
+  exploration: ExplorationPlan;
 }
 
 /**
@@ -3071,6 +3093,8 @@ interface ShardPlan {
 export function buildShardPlans(params: {
   coreContext: string;
   fullDiffBlock: string;
+  fullDiffCoverage: { truncatedFiles: string[]; omittedFiles: string[] };
+  explorationTier: ExplorationTier;
   context7Block: string;
   shards: ReturnType<typeof shardFilesForReview>;
   requireCompleteEmbeddedDiff?: boolean;
@@ -3080,15 +3104,22 @@ export function buildShardPlans(params: {
   const {
     coreContext,
     fullDiffBlock,
+    fullDiffCoverage,
+    explorationTier,
     context7Block,
     shards,
     requireCompleteEmbeddedDiff = false,
     diffHunksOptions,
   } = params;
+  const explorationFor = (result: { truncatedFiles: string[]; omittedFiles: string[] }) => {
+    const plan = planExploration({ tier: explorationTier, ...result });
+    assertRecoverableCoverage(plan);
+    return plan;
+  };
   if (shards.length <= 1) {
     const diffResult = requireCompleteEmbeddedDiff
       ? buildDiffHunksBlockWithMetadata(shards[0] ?? [], diffHunksOptions)
-      : { text: fullDiffBlock, truncatedFiles: [], omittedFiles: [] };
+      : { text: fullDiffBlock, ...fullDiffCoverage };
     if (requireCompleteEmbeddedDiff) {
       assertCompleteEmbeddedDiff(diffResult, 'review');
     }
@@ -3099,6 +3130,7 @@ export function buildShardPlans(params: {
         context: joinContext(baseContext, context7Block),
         baseContext,
         assignedFiles: (shards[0] ?? []).map((file) => file.filename),
+        exploration: explorationFor(diffResult),
       },
     ];
   }
@@ -3119,6 +3151,7 @@ export function buildShardPlans(params: {
       context: joinContext(coreContext, context7Block, assignment, diffResult.text),
       baseContext: joinContext(coreContext, assignment, diffResult.text),
       assignedFiles,
+      exploration: explorationFor(diffResult),
     };
   });
 }
@@ -3235,6 +3268,9 @@ async function runShardedReview(params: {
           onTokenUsage: params.onTokenUsage,
           evidenceQuotes: params.evidenceQuotes,
           embeddedFirstPrompt: params.embeddedFirstPrompt,
+          ...(enforcesExplorationBudget(backend.observability)
+            ? { exploration: plan.exploration }
+            : {}),
         });
         persist(result, primaryFingerprint);
         cover('completed');
@@ -3307,6 +3343,9 @@ async function runShardedReview(params: {
               onTokenUsage: params.onTokenUsage,
               evidenceQuotes: params.evidenceQuotes,
               embeddedFirstPrompt: params.embeddedFirstPrompt,
+              ...(enforcesExplorationBudget(backend.observability)
+                ? { exploration: plan.exploration }
+                : {}),
             },
           );
           persist(result, retryFingerprint);
