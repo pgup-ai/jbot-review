@@ -341,14 +341,17 @@ export class ExplorationBudget {
  * Coverage gaps come from git and are already repo-relative, but a model-supplied
  * path is not. pi trims before running git, so an untrimmed path diffs fine while
  * the budget fails to match it and refuses the gap as unrelated. Normalizing on
- * the way in keeps recovery, repeat detection, and the adjacent set agreeing.
+ * the way in keeps recovery, repeat detection, and the adjacent set agreeing on
+ * what one file, or one query, is.
  */
 function normalizePath(path: string): string {
   return path.trim().replace(/^(?:\.\/)+/, '');
 }
 
 function normalizeRequest(request: ExplorationRequest): ExplorationRequest {
-  if (request.kind === 'search') return request;
+  // A query is normalized too, or trailing whitespace mints a fresh identity
+  // and the repeat limiter never sees the same search twice.
+  if (request.kind === 'search') return { kind: 'search', query: request.query.trim() };
   if (request.kind === 'read') return { kind: 'read', path: normalizePath(request.path) };
   if (request.path === undefined) return request;
   // pi drops an empty pathspec, so a blank path is the whole diff; collapse it
