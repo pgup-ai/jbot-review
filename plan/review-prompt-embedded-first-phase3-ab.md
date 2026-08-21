@@ -91,14 +91,20 @@ Re-run after the merge, with both arms on the same checkout so
 hash. Smoke subset, 12 cases, 2 repetitions, 24 pairs per model, 96 runs, no
 failures.
 
-| Metric                     | `muse-spark-1.2-contributor-free` |   `devin/glm-5.2` |
-| -------------------------- | --------------------------------: | ----------------: |
-| Tool-output bytes          |                            -58.3% |      no telemetry |
-| Tool calls                 |                            -23.0% |      no telemetry |
-| Turns                      |                            -22.4% |      no telemetry |
-| Main-session paired median |                  -19.6% (p=0.040) |    +7.4% (p=0.88) |
-| Whole-run paired median    |                 -26.1% (p=0.0023) |   -19.4% (p=0.14) |
-| Seeded defects found       |                     6/6 both arms | 6/6, one rep miss |
+| Metric                     | `muse-spark-1.2-contributor-free` | `mimo-v2.5-free` |   `devin/glm-5.2` |
+| -------------------------- | --------------------------------: | ---------------: | ----------------: |
+| Tool-output bytes          |                            -58.3% |           -35.7% |      no telemetry |
+| Tool calls                 |                            -23.0% |           -40.3% |      no telemetry |
+| Turns                      |                            -22.4% |           -36.4% |      no telemetry |
+| Generated tokens           |                             -6.4% |           +11.5% |      no telemetry |
+| Main-session paired median |                  -19.6% (p=0.040) |  -15.1% (p=0.90) |    +7.4% (p=0.88) |
+| Whole-run paired median    |                 -26.1% (p=0.0023) |   -8.3% (p=0.86) |   -19.4% (p=0.14) |
+| Seeded defects found       |                     6/6 both arms |    6/6 both arms | 6/6, one rep miss |
+
+`mimo-v2.5-free` ran on production-default model options, unlike the other two.
+Its unpaired p50 improves 28.2% while the paired test reports p=0.90 on 14 of
+24 pairs: reading the p50 alone would have claimed a speed-up the data does not
+support, in the opposite direction to the reading that made round 1 look flat.
 
 `devin/glm-5.2` reports `capability: "opaque"` with `turnCountAvailable:
 false`, so every tool counter is zero by construction and the byte gate cannot
@@ -113,10 +119,26 @@ precision problem predates the treatment and is not evidence about it.
 
 ## Decision after verification
 
-The treatment passes the re-gated tool-byte bar on a backend that can report
-it, and shows no quality regression. It stays opt-in and per-model: the same
-flag buys nothing measurable on `devin/glm-5.2` and cost tool calls on
-`deepseek-v4-flash-free` earlier, so a global default is not supported.
+The treatment passes the re-gated tool-byte bar on every backend that can
+report one, and shows no quality regression anywhere. It stays opt-in and
+per-model: the flag buys nothing measurable on `devin/glm-5.2`, which cannot
+even evidence the gate, and cost tool calls on `deepseek-v4-flash-free`.
+
+Across five models the tool-work reduction is the consistent effect and latency
+is not:
+
+| Model                        | Tool bytes |    Latency paired |
+| ---------------------------- | ---------: | ----------------: |
+| `muse-spark-1.2-contributor` |     -58.3% | -26.1% (p=0.0023) |
+| `zai-coding-plan/glm-5.2`    |     -36.1% |  -16.2% (p=0.043) |
+| `mimo-v2.5-free`             |     -35.7% |    -8.3% (p=0.86) |
+| `devin/glm-5.2`              |     opaque |    +7.4% (p=0.88) |
+| `deepseek-v4-flash-free`     |     -13.7% |  +16.3% (p=0.040) |
+
+The latency payoff appears only where the model does not spend the saved tool
+time generating instead: `mimo-v2.5-free` emitted 11.5% more tokens and
+`zai-coding-plan/glm-5.2` 4.4% more. That is the case for gating on the
+mechanism rather than on its downstream effect.
 
 ## Rollback and follow-up
 
