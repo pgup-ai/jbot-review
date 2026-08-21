@@ -20,9 +20,11 @@ import {
   renderReviewMetadataBlock,
   settleWithinGrace,
   runPrReview,
+  EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
 } from '../src/shared/runner.ts';
+import { buildDiffHunksBlockWithMetadata } from '../src/shared/diff-context.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
-import type { Octokit } from '../src/shared/github.ts';
+import type { Octokit, PrFile } from '../src/shared/github.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 const PRIOR_JBOT_REVIEW = [
@@ -88,6 +90,26 @@ describe('buildShardPlans cache-stable prefix', () => {
     assert.doesNotMatch(control[0].context, /repository exploration policy/);
     assert.match(treatment[0].context, /one-hop default and expansion trigger/);
     assert.match(treatment[0].context, /repository exploration policy/);
+  });
+});
+
+describe('EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS', () => {
+  it('embeds every changed file whole however large the PR, in a single shard', () => {
+    const files: PrFile[] = Array.from({ length: 4 }, (_, index) => ({
+      filename: `huge-${index}.ts`,
+      patch: `@@ -0,0 +1,9000 @@\n${Array.from(
+        { length: 9000 },
+        (_, line) => `+const v${line} = '${'x'.repeat(80)}';`,
+      ).join('\n')}`,
+    }));
+
+    const result = buildDiffHunksBlockWithMetadata(files, EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS);
+
+    assert.deepEqual(result.truncatedFiles, []);
+    assert.deepEqual(result.omittedFiles, []);
+    // Multiple megabytes, far past any cap a prompt-size budget would impose.
+    assert.ok(Buffer.byteLength(result.text, 'utf8') > 2 * 1024 * 1024);
+    for (const file of files) assert.ok(result.text.includes(file.patch as string));
   });
 });
 
