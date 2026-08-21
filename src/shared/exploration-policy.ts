@@ -1,3 +1,4 @@
+import { EXPLORATION_SOFT_STOP_MESSAGE, explorationUnrelatedRecoveryMessage } from './prompt.ts';
 import type { BackendTelemetryCapability } from './telemetry.ts';
 
 /**
@@ -58,7 +59,7 @@ export const EXPLORATION_LIMITS: Readonly<Record<ExplorationTier, ExplorationLim
 };
 
 /** A single-shot session has no tools at all, so no budget can apply. */
-export const SINGLE_SHOT_LIMITS: ExplorationLimits = {
+const SINGLE_SHOT_LIMITS: ExplorationLimits = {
   ordinaryCalls: 0,
   toolOutputBytes: 0,
   adjacentFiles: 0,
@@ -149,9 +150,6 @@ export interface ExplorationVerdict {
   message?: string;
 }
 
-const SOFT_STOP_MESSAGE =
-  'Exploration budget reached. Answer now from the evidence you already have; further tool calls will be refused.';
-
 /**
  * Mutable per-session counters. Kept beside the pure decision rather than
  * inside a backend so every route enforces the same arithmetic.
@@ -201,7 +199,7 @@ export class ExplorationBudget {
         allow: false,
         exempt: false,
         refusal: 'budget-exhausted',
-        message: SOFT_STOP_MESSAGE,
+        message: EXPLORATION_SOFT_STOP_MESSAGE,
       };
     }
     if (this.isExemptRecovery(request)) return { allow: true, exempt: true };
@@ -262,17 +260,26 @@ export class ExplorationBudget {
   private rejectsUnrelatedRecovery(request: ExplorationRequest): ExplorationVerdict | undefined {
     const pending = this.pendingGaps;
     if (request.kind !== 'diff' || !request.path || pending.length === 0) return undefined;
+    // A gap already served is not unrelated: re-reading it spends ordinary
+    // budget like any other diff, rather than being refused while its siblings
+    // are still outstanding.
+    if (this.plan.coverageGaps.includes(request.path)) return undefined;
     return {
       allow: false,
       exempt: false,
       refusal: 'unrelated-recovery',
-      message: `Recovery is limited to the omitted or truncated files: ${pending.join(', ')}.`,
+      message: explorationUnrelatedRecoveryMessage(pending),
     };
   }
 
   private softStop(): ExplorationVerdict {
     this.softStopped = true;
-    return { allow: false, exempt: false, refusal: 'soft-stop', message: SOFT_STOP_MESSAGE };
+    return {
+      allow: false,
+      exempt: false,
+      refusal: 'soft-stop',
+      message: EXPLORATION_SOFT_STOP_MESSAGE,
+    };
   }
 }
 

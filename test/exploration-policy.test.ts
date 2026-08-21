@@ -159,6 +159,19 @@ describe('ExplorationBudget', () => {
     assert.equal(budget.request(ordinary).exempt, false);
   });
 
+  it('lets a served gap be re-read while its siblings are still outstanding', () => {
+    const budget = new ExplorationBudget(plan({ omittedFiles: ['gap-a.ts', 'gap-b.ts'] }));
+    const first = { kind: 'diff', path: 'gap-a.ts' } as const;
+    budget.record(first, 10);
+
+    // gap-a is no longer pending, but it was named, so a re-read is ordinary
+    // work rather than an unrelated-recovery refusal.
+    const again = budget.request(first);
+    assert.equal(again.allow, true);
+    assert.equal(again.exempt, false);
+    assert.deepEqual(budget.pendingGaps, ['gap-b.ts']);
+  });
+
   it('refuses recovery for a path the prompt never flagged', () => {
     const budget = new ExplorationBudget(plan({ omittedFiles: ['gap.ts'] }));
     const verdict = budget.request({ kind: 'diff', path: 'unrelated.ts' });

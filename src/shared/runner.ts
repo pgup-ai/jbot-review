@@ -79,10 +79,10 @@ import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   type DiffHunksOptions,
   buildDiffHunksBlockWithMetadata,
-  PATH_PATTERNS,
   classifyChangeShape,
   isDocOnlyChange,
   shardFilesForReview,
+  touchesRiskyPath,
 } from './diff-context.ts';
 import { auxModelOptionsFor, needsAuxOpencodeConfig, resolvePromptCachePolicy } from './config.ts';
 import { parseModelName } from '@symma/protocol';
@@ -1215,11 +1215,7 @@ async function runReviewPipeline(params: {
   const changeShape = classifyChangeShape(files);
   const explorationTier = selectExplorationTier({
     changedFiles: files.length,
-    touchesRiskyPath: files.some((file) =>
-      [PATH_PATTERNS.security, PATH_PATTERNS.data, PATH_PATTERNS.api, PATH_PATTERNS.infra].some(
-        (pattern) => pattern.test(file.filename),
-      ),
-    ),
+    touchesRiskyPath: touchesRiskyPath(files),
     testOnly: changeShape.testOnly,
   });
   const reviewFocusBlock = buildReviewFocusBlock(changedFiles, changeShape);

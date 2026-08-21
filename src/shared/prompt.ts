@@ -410,6 +410,15 @@ severity.`,
   REVIEW_PROMPT,
 );
 
+/** Returned in place of a tool result once a session's exploration budget is spent. */
+export const EXPLORATION_SOFT_STOP_MESSAGE =
+  'Exploration budget reached. Answer now from the evidence you already have; further tool calls will be refused.';
+
+/** Returned when a path-scoped diff names a file the prompt never flagged as omitted. */
+export function explorationUnrelatedRecoveryMessage(pendingGaps: readonly string[]): string {
+  return `Recovery is limited to the omitted or truncated files: ${pendingGaps.join(', ')}.`;
+}
+
 export const REVIEW_OUTPUT_REMINDER = `## Final output reminder
 
 Respond now with one raw JSON object with exactly two top-level keys,

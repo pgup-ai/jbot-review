@@ -171,6 +171,51 @@ describe('phase and tool telemetry', () => {
   });
 });
 
+describe('exploration row merging', () => {
+  it('keeps an enforced tier when the concurrency wrapper finalizes after it', () => {
+    const rec = createTelemetryRecorder(true);
+    const finish = {
+      session: 'review',
+      backend: 'pi',
+      capability: 'enforceable' as const,
+      stopReason: 'completed' as const,
+    };
+    // pi records the tier it enforced; the wrapper then finalizes the same
+    // session with its own observe-only default.
+    const tools = createToolTelemetryAccumulator(rec, 'salt', () => 0);
+    tools.finishSession({ ...finish, budgetTier: 'standard', turnCount: 4 });
+    tools.finishSession({ ...finish, budgetTier: 'observe-only' });
+
+    const rows = rec
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const exploration = rows.filter((row) => row.kind === 'exploration');
+    assert.equal(exploration.length, 1);
+    assert.equal(exploration[0].budgetTier, 'standard');
+    assert.equal(exploration[0].turnCount, 4);
+  });
+
+  it('still takes a later tier that is not the wrapper default', () => {
+    const rec = createTelemetryRecorder(true);
+    const finish = {
+      session: 'review',
+      backend: 'pi',
+      capability: 'enforceable' as const,
+      stopReason: 'completed' as const,
+    };
+    const tools = createToolTelemetryAccumulator(rec, 'salt', () => 0);
+    tools.finishSession({ ...finish, budgetTier: 'observe-only' });
+    tools.finishSession({ ...finish, budgetTier: 'elevated' });
+
+    const rows = rec
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.equal(rows.filter((row) => row.kind === 'exploration')[0].budgetTier, 'elevated');
+  });
+});
+
 describe('outcome rows', () => {
   it('serializes outcome rows after coverage and preserves every counter', () => {
     const rec = createTelemetryRecorder(true);
