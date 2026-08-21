@@ -390,6 +390,44 @@ export function shardFilesForReview(
   return shards.filter((shard) => shard.length > 0);
 }
 
+/**
+ * Smallest shard count at which every shard embeds its files complete.
+ *
+ * A backend that cannot read the checkout loses a dropped file entirely, so
+ * coverage has to drive the shard count rather than a fixed cap driving what
+ * gets dropped. Shards are probed with the real packer and the real renderer
+ * instead of an estimate, because the budget covers rendered bytes — headers
+ * and fences included — not raw patch size.
+ *
+ * Returns undefined when no count suffices, which means one file's own patch
+ * exceeds the per-file budget and no amount of splitting will seat it.
+ */
+export function shardsForCompleteEmbedding(
+  files: PrFile[],
+  options: DiffHunksOptions,
+): number | undefined {
+  const withPatch = files.filter((file) => file.patch);
+  if (withPatch.length === 0) return 1;
+  const totalBytes = withPatch.reduce(
+    (sum, file) => sum + Buffer.byteLength(file.patch as string, 'utf8'),
+    0,
+  );
+  const budget = options.totalBudgetBytes ?? Number.POSITIVE_INFINITY;
+  const fits = (count: number) =>
+    shardFilesForReview(files, { requestedShards: count }).every((shard) => {
+      const rendered = buildDiffHunksBlockWithMetadata(shard, options);
+      return rendered.truncatedFiles.length === 0 && rendered.omittedFiles.length === 0;
+    });
+
+  // Start from the byte-derived floor; rendering overhead means the answer is
+  // at or above it, never below.
+  const floor = Math.max(1, Math.ceil(totalBytes / budget));
+  for (let count = floor; count <= withPatch.length; count += 1) {
+    if (fits(count)) return count;
+  }
+  return undefined;
+}
+
 export interface DiffHunksOptions {
   totalBudgetBytes?: number;
   perFileBudgetBytes?: number;

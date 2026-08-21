@@ -82,6 +82,7 @@ import {
   classifyChangeShape,
   isDocOnlyChange,
   shardFilesForReview,
+  shardsForCompleteEmbedding,
   touchesRiskyPath,
 } from './diff-context.ts';
 import { auxModelOptionsFor, needsAuxOpencodeConfig, resolvePromptCachePolicy } from './config.ts';
@@ -2049,7 +2050,19 @@ async function runReviewPipeline(params: {
             buildContextTrimNotice(dropped),
           );
 
-    const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
+    // An embedded-only backend loses a dropped file outright, so coverage
+    // outranks the shard pin: raise it to whatever seats every file whole.
+    // The pin still governs ordinary backends, which can read the checkout.
+    const coverageShards = mainRequiresCompleteEmbeddedDiff
+      ? shardsForCompleteEmbedding(files, EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS)
+      : undefined;
+    const requestedShards = Math.max(options.reviewShards ?? 0, coverageShards ?? 0);
+    if (coverageShards && coverageShards > (options.reviewShards ?? 0)) {
+      log(
+        `Embedded-only backend needs ${coverageShards} shard(s) to embed every changed file; raising the requested ${options.reviewShards ?? 0}.`,
+      );
+    }
+    const shards = shardFilesForReview(files, { requestedShards });
     const shardPlans = buildShardPlans({
       coreContext: mainCoreContext,
       fullDiffBlock: diffHunksBlock,
@@ -3162,7 +3175,8 @@ function assertCompleteEmbeddedDiff(
     `Embedded-only backend ${label} would receive an incomplete embedded diff (${formatFileList(
       incomplete,
     )}). ` +
-      'Refusing partial review coverage because the provider cannot read the checkout; use more shards or another provider for this PR.',
+      'Refusing partial review coverage because the provider cannot read the checkout. ' +
+      'Sharding already scaled to fit every file, so a listed file exceeds the per-file embed budget on its own; review this PR with a provider that can read the checkout.',
   );
 }
 

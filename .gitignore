@@ -2,6 +2,9 @@ node_modules/
 dist/
 *.log
 .env
+# Any local copy of the env file carries the same live keys.
+.env.*
+!.env.example
 # Worker deploy config — real copy gitignored; commit only the .example
 deploy/jbot-review-worker.env.local
 .DS_Store

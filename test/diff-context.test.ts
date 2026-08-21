@@ -6,6 +6,8 @@ import {
   buildDiffHunksBlock,
   buildDiffHunksBlockWithMetadata,
   classifyChangeShape,
+  DEFAULT_MAX_REVIEW_SHARDS,
+  shardsForCompleteEmbedding,
   touchesRiskyPath,
   diffLineCounts,
   diffRiskScore,
@@ -456,6 +458,43 @@ describe('classifyChangeShape', () => {
       largeDeletion: false,
       dependencyManifestChange: false,
     });
+  });
+});
+
+describe('shardsForCompleteEmbedding', () => {
+  const budget = { totalBudgetBytes: 64 * 1024, perFileBudgetBytes: 64 * 1024 };
+  const file = (name: string, bytes: number) =>
+    ({ filename: name, patch: 'x'.repeat(bytes) }) as never;
+  const complete = (files: never[], count: number) =>
+    shardFilesForReview(files, { requestedShards: count }).every((shard) => {
+      const rendered = buildDiffHunksBlockWithMetadata(shard, budget);
+      return rendered.truncatedFiles.length === 0 && rendered.omittedFiles.length === 0;
+    });
+
+  it('one shard when everything already fits', () => {
+    assert.equal(shardsForCompleteEmbedding([file('a.ts', 100)], budget), 1);
+    assert.equal(shardsForCompleteEmbedding([], budget), 1);
+  });
+
+  it('scales past the auto cap so no file is dropped', () => {
+    // Ten files of 30 KiB against a 64 KiB budget: the auto path stops at
+    // DEFAULT_MAX_REVIEW_SHARDS and would drop files, so the count must exceed it.
+    const files = Array.from({ length: 10 }, (_, i) => file(`f${i}.ts`, 30 * 1024));
+    const count = shardsForCompleteEmbedding(files, budget);
+
+    assert.ok(count !== undefined);
+    assert.ok(count > DEFAULT_MAX_REVIEW_SHARDS, `only asked for ${count} shard(s)`);
+    assert.equal(complete(files, count), true);
+    // The union still covers every file exactly once.
+    const assigned = shardFilesForReview(files, { requestedShards: count }).flat();
+    assert.equal(assigned.length, files.length);
+    assert.equal(new Set(assigned.map((f) => f.filename)).size, files.length);
+  });
+
+  it('gives up when one file alone exceeds the budget', () => {
+    // Splitting cannot seat a single oversized patch, so the caller must fail
+    // loudly rather than shard forever.
+    assert.equal(shardsForCompleteEmbedding([file('huge.ts', 200 * 1024)], budget), undefined);
   });
 });
 
