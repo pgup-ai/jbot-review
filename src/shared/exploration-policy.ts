@@ -249,9 +249,19 @@ export class ExplorationBudget {
     return { allow: true, exempt: false };
   }
 
-  /** Called once a permitted request has run, with what it actually returned. */
-  record(request: ExplorationRequest, outputBytes: number, truncated = false): void {
-    if (this.isExemptRecovery(request) && request.kind === 'diff' && request.path) {
+  /**
+   * Called once a permitted request has run, carrying the verdict `request`
+   * returned. `exempt` is required rather than re-derived: the recovery
+   * attempt counter moves in `request`, so recomputing here disagrees with
+   * itself on the final allowed attempt.
+   */
+  record(
+    request: ExplorationRequest,
+    outputBytes: number,
+    options: { exempt: boolean; truncated?: boolean },
+  ): void {
+    const { exempt, truncated = false } = options;
+    if (exempt && request.kind === 'diff' && request.path) {
       // A capped response delivered only part of the file, so the gap stays
       // open. RECOVERY_ATTEMPTS_PER_GAP bounds the retries, after which the
       // path stops being exempt and falls to the ordinary budget.

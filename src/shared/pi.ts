@@ -417,7 +417,7 @@ interface PiSdkLike {
  * proceed. A refusal reports `budget`, never `denied`: the path was permitted
  * and the allowance simply ran out.
  */
-function refuseOverBudget(
+function explorationVerdict(
   request: ExplorationRequest,
   finish:
     | ((result: {
@@ -427,11 +427,11 @@ function refuseOverBudget(
         outputBytesAfterCap: number;
       }) => void)
     | undefined,
-): { content: { type: string; text: string }[]; details: object } | undefined {
+): { refused?: { content: { type: string; text: string }[]; details: object }; exempt: boolean } {
   const budget = piTelemetryContext.getStore()?.budget;
-  if (!budget) return undefined;
+  if (!budget) return { exempt: false };
   const verdict = budget.request(request);
-  if (verdict.allow) return undefined;
+  if (verdict.allow) return { exempt: verdict.exempt };
   const text = verdict.message ?? EXPLORATION_SOFT_STOP_MESSAGE;
   finish?.({
     success: false,
@@ -439,12 +439,16 @@ function refuseOverBudget(
     outputBytesBeforeCap: 0,
     outputBytesAfterCap: Buffer.byteLength(text),
   });
-  return { content: [{ type: 'text', text }], details: {} };
+  return { refused: { content: [{ type: 'text', text }], details: {} }, exempt: false };
 }
 
 /** Charges a permitted call once its real output size is known. */
-function chargeBudget(request: ExplorationRequest, outputBytes: number, truncated = false): void {
-  piTelemetryContext.getStore()?.budget?.record(request, outputBytes, truncated);
+function chargeBudget(
+  request: ExplorationRequest,
+  outputBytes: number,
+  options: { truncated?: boolean; exempt: boolean },
+): void {
+  piTelemetryContext.getStore()?.budget?.record(request, outputBytes, options);
 }
 
 /** Exported for the budget-enforcement contract test. */
@@ -480,8 +484,9 @@ export function createPiGitDiffTool(
           : { identity: 'whole-diff', identityKind: 'scope' as const }),
         diffScope: path ? 'path' : 'whole',
       });
-      const refused = refuseOverBudget({ kind: 'diff', ...(path ? { path } : {}) }, finish);
-      if (refused) return refused;
+      const diffRequest = { kind: 'diff', ...(path ? { path } : {}) } as const;
+      const verdict = explorationVerdict(diffRequest, finish);
+      if (verdict.refused) return verdict.refused;
       let text: string;
       try {
         const { stdout } = await execFileAsync('git', piGitDiffArgs(scope, path), {
@@ -492,11 +497,10 @@ export function createPiGitDiffTool(
         text = stdout.trim() ? capPiDiffOutput(stdout) : '(no changes for this path)';
         // A capped diff delivered only part of the file, so the gap it was
         // recovering stays open rather than counting as read.
-        chargeBudget(
-          { kind: 'diff', ...(path ? { path } : {}) },
-          Buffer.byteLength(text),
-          Buffer.byteLength(stdout) > PI_DIFF_TOOL_MAX_BYTES,
-        );
+        chargeBudget(diffRequest, Buffer.byteLength(text), {
+          truncated: Buffer.byteLength(stdout) > PI_DIFF_TOOL_MAX_BYTES,
+          exempt: verdict.exempt,
+        });
         finish?.({
           success: true,
           outputBytesBeforeCap: Buffer.byteLength(stdout),
@@ -567,13 +571,14 @@ export function createPiReadTool(
           details: {},
         };
       }
-      const refused = refuseOverBudget({ kind: 'read', path: requested }, finish);
-      if (refused) return refused;
+      const readRequest = { kind: 'read', path: requested } as const;
+      const verdict = explorationVerdict(readRequest, finish);
+      if (verdict.refused) return verdict.refused;
       let text: string;
       try {
         const raw = readFileSync(target, 'utf8');
         text = capPiDiffOutput(raw);
-        chargeBudget({ kind: 'read', path: requested }, Buffer.byteLength(text));
+        chargeBudget(readRequest, Buffer.byteLength(text), { exempt: verdict.exempt });
         finish?.({
           success: true,
           outputBytesBeforeCap: Buffer.byteLength(raw),
