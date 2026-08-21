@@ -23,6 +23,19 @@ function describesConfiguration(arm: unknown): boolean {
   );
 }
 
+/**
+ * The two verdicts the scorer emits. `adjudication-required`, an unknown
+ * status, and a status contradicting `passed` are each the absence of a result
+ * rather than one to weigh — a report edited to read `passed: true` under
+ * `status: 'failed'` is the case worth catching.
+ */
+function qualityVerdict(gate: unknown): 'passed' | 'failed' | null {
+  if (!isRecord(gate)) return null;
+  if (gate.status === 'passed' && gate.passed === true) return 'passed';
+  if (gate.status === 'failed' && gate.passed === false) return 'failed';
+  return null;
+}
+
 /** Runs that completed, which is what a sample size means for a comparison. */
 function countsSuccessfulRuns(arm: unknown): boolean {
   return isRecord(arm) && typeof arm.successfulRuns === 'number' && arm.successfulRuns > 0;
@@ -46,24 +59,23 @@ export function checkBenchmarkMergeGate(summary: unknown): BenchmarkMergeGate {
   if (!countsSuccessfulRuns(summary.control) || !countsSuccessfulRuns(summary.treatment)) {
     missing.push('sample size for both arms');
   }
-  // `adjudication-required` is not a quality result; it is the absence of one.
-  const gate = summary.qualityGate;
-  if (
-    !isRecord(gate) ||
-    gate.status === 'adjudication-required' ||
-    typeof gate.passed !== 'boolean'
-  ) {
+  const verdict = qualityVerdict(summary.qualityGate);
+  if (verdict === null) {
     missing.push('quality result');
-  } else if (!gate.passed) {
+  } else if (verdict === 'failed') {
     // A complete report that says no. It still cannot license the change.
     missing.push('a passing quality gate');
   }
   const paired = summary.pairedLatency;
   if (!isRecord(paired) || !isFiniteNumber(paired.medianRelativeDelta)) {
     missing.push('latency result');
-  } else if (!isFiniteNumber(paired.minimumDetectableEffect)) {
+  } else if (
+    !isFiniteNumber(paired.minimumDetectableEffect) ||
+    paired.minimumDetectableEffect <= 0
+  ) {
     // A sample that resolves nothing cannot support a latency claim, so the
-    // report has to say so rather than quoting a point estimate.
+    // report has to say so rather than quoting a point estimate. Zero reads as
+    // the opposite — perfect sensitivity — and the ladder never yields it.
     missing.push('a sample that can resolve any latency effect');
   }
 

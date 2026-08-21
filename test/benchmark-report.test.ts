@@ -75,6 +75,16 @@ describe('checkBenchmarkMergeGate', () => {
       checkBenchmarkMergeGate(summary({ pairedLatency: { medianRelativeDelta: -12.4 } })).missing,
       ['a sample that can resolve any latency effect'],
     );
+    // The effect ladder is strictly positive; 0 would read as the opposite of
+    // what it is, a sample sensitive to any effect at all.
+    for (const minimumDetectableEffect of [0, -1]) {
+      assert.deepEqual(
+        checkBenchmarkMergeGate(
+          summary({ pairedLatency: { medianRelativeDelta: -12.4, minimumDetectableEffect } }),
+        ).missing,
+        ['a sample that can resolve any latency effect'],
+      );
+    }
     assert.deepEqual(checkBenchmarkMergeGate(null), {
       satisfied: false,
       missing: ['a benchmark summary'],
@@ -89,13 +99,16 @@ describe('checkBenchmarkMergeGate', () => {
     );
   });
 
-  it('rejects an unadjudicated quality gate as no quality result', () => {
-    assert.deepEqual(
-      checkBenchmarkMergeGate(
-        summary({ qualityGate: { status: 'adjudication-required', passed: null } }),
-      ).missing,
-      ['quality result'],
-    );
+  it('accepts only the two verdicts the scorer emits', () => {
+    const gate = (qualityGate: unknown) =>
+      checkBenchmarkMergeGate(summary({ qualityGate })).missing;
+
+    assert.deepEqual(gate({ status: 'adjudication-required', passed: null }), ['quality result']);
+    // A status contradicting `passed` is the hand-edit the gate exists to catch.
+    assert.deepEqual(gate({ status: 'failed', passed: true }), ['quality result']);
+    assert.deepEqual(gate({ status: 'passed', passed: false }), ['quality result']);
+    assert.deepEqual(gate({ status: 'green', passed: true }), ['quality result']);
+    assert.deepEqual(gate({ passed: true }), ['quality result']);
   });
 
   it('rejects a latency claim its sample cannot resolve', () => {
