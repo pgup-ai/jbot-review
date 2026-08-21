@@ -167,17 +167,19 @@ Completion criteria for Phase 2:
 Completion criteria for Phase 3:
 
 **Phase status:** Experimental, and opt-in behind
-`JBOT_EMBEDDED_FIRST_PROMPT`. On merged `main` the treatment cuts tool-output
-bytes 58.3% on `opencode/muse-spark-1.2-contributor-free` and is 26.1% faster
-there (p=0.0023, 24 pairs), with every seeded defect still found. On
-`devin/glm-5.2` the same flag shows no detectable latency effect and no tool
-telemetry at all, so the benefit is model-specific and the flag stays per-model
-rather than global. See `plan/review-prompt-embedded-first-phase3-ab.md`.
+`JBOT_EMBEDDED_FIRST_PROMPT`. The byte gate is met on three of the four
+telemetry-reporting cohorts and the flag stays per-model rather than global.
+QLT-003 is still unsatisfied: the verification counts a run as detecting a
+defect when it returned any finding, which does not confirm the finding matches
+the seeded defect. Metrics and per-cohort verdicts live in
+`plan/review-prompt-embedded-first-phase3-ab.md`; do not restate them here.
 
 - The prompt states exactly one exploration policy and does not simultaneously require redundant diff rereads.
 - Tool-less backends remain functional and read-only.
 - The prompt-only arm passes the predefined quality gates before any hard budget is introduced.
-- Backends reporting `capability: "opaque"` cannot evidence the tool-byte gate; graduate them on quality and failure rate alone and record that the byte gate was unevaluable.
+- The byte gate is judged per backend/model cohort: every cohort selected for rollout must clear it on its own telemetry, and one cohort's pass never carries another.
+- Backends reporting `capability: "opaque"` cannot evidence the byte gate. Graduate them on QLT-003/004 plus a failure rate of zero over the run population, counting timeout, signal, setup, runner-exit, invalid-output, and missing-output failures, and record the byte gate as unevaluable.
+- Quality figures state whether they are case-level or run-level, name the arm and repetition count, and carry their denominators. Arms must complete comparable run populations.
 
 ### Implementation Phase 4 — Add enforceable exploration budgets and soft stopping
 
