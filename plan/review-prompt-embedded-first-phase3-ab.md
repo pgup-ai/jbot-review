@@ -84,6 +84,40 @@ completed sessions, treatment main-session p50 moved from 16,101 ms to
 20,106 ms, tool calls fell from 52 to 43, and tool-output bytes fell from
 68,821 to 55,612. Both arms recorded zero diff-recovery bytes.
 
+## Verification on merged `main`
+
+Re-run after the merge, with both arms on the same checkout so
+`JBOT_EMBEDDED_FIRST_PROMPT` is the only declared variable besides the prompt
+hash. Smoke subset, 12 cases, 2 repetitions, 24 pairs per model, 96 runs, no
+failures.
+
+| Metric                     | `muse-spark-1.2-contributor-free` |   `devin/glm-5.2` |
+| -------------------------- | --------------------------------: | ----------------: |
+| Tool-output bytes          |                            -58.3% |      no telemetry |
+| Tool calls                 |                            -23.0% |      no telemetry |
+| Turns                      |                            -22.4% |      no telemetry |
+| Main-session paired median |                  -19.6% (p=0.040) |    +7.4% (p=0.88) |
+| Whole-run paired median    |                 -26.1% (p=0.0023) |   -19.4% (p=0.14) |
+| Seeded defects found       |                     6/6 both arms | 6/6, one rep miss |
+
+`devin/glm-5.2` reports `capability: "opaque"` with `turnCountAvailable:
+false`, so every tool counter is zero by construction and the byte gate cannot
+be evaluated there. Its two latency metrics also disagree in sign and neither
+reaches significance, so the honest reading is no detectable effect rather than
+a small one.
+
+Detection here counts a case as found when the run returned at least one
+finding, which does not confirm the finding matches the seeded defect; the
+clean counterfactuals returned findings in 8-9 of 12 runs in BOTH arms, so that
+precision problem predates the treatment and is not evidence about it.
+
+## Decision after verification
+
+The treatment passes the re-gated tool-byte bar on a backend that can report
+it, and shows no quality regression. It stays opt-in and per-model: the same
+flag buys nothing measurable on `devin/glm-5.2` and cost tool calls on
+`deepseek-v4-flash-free` earlier, so a global default is not supported.
+
 ## Rollback and follow-up
 
 To roll back, leave `JBOT_EMBEDDED_FIRST_PROMPT` unset or set it to `false`.
