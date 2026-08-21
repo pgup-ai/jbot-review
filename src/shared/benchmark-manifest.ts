@@ -62,6 +62,9 @@ export interface BenchmarkManifest {
   timeoutMs: number;
   corpusHash: string;
   qualityCorpus: boolean;
+  /** Commit under test, and how to undo it. Required by the TASK-008 merge gate. */
+  treatmentCommit?: string;
+  rollback?: string;
   runner: BenchmarkRunner;
   declaredTreatmentVariables: string[];
   control: BenchmarkArm;
@@ -281,6 +284,12 @@ export function validateBenchmarkManifest(value: unknown): BenchmarkManifest {
 
   if (typeof value.qualityCorpus !== 'boolean') {
     throw new Error('Manifest requires qualityCorpus.');
+  }
+  for (const field of ['treatmentCommit', 'rollback'] as const) {
+    const supplied = value[field];
+    if (supplied !== undefined && (typeof supplied !== 'string' || !supplied.trim())) {
+      throw new Error(`Manifest ${field} must be a non-empty string when present.`);
+    }
   }
   if (value.qualityCorpus) {
     const cases = value.cases as unknown as BenchmarkCase[];

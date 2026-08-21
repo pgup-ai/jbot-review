@@ -2,6 +2,10 @@ export function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+export function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
 export function formatUsageCost(value: number): string {
   if (!Number.isFinite(value)) return String(value);
   return Number.isInteger(value) ? String(value) : value.toFixed(4);
