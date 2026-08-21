@@ -2,12 +2,17 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { checkBenchmarkMergeGate } from '../src/shared/benchmark-report.ts';
+import { REQUIRED_CONFIGURATION_FIELDS } from '../src/shared/benchmark-score.ts';
 
 const arm = () => ({
   configuration: {
     model: 'zai-coding-plan/glm-5.2',
     modelRevision: 'glm-5.2-2026-08-20',
     engine: 'opencode',
+    engineVersion: '1.18.21',
+    reasoningEffort: 'medium',
+    promptVersion: 'embedded-first-v2',
+    corpusHash: 'sha256:0922596007e29b4a93ce114fd170aeaa5685d12650b921bb595d44eb65ef7197',
     sampling: { temperature: 0 },
     config: { reviewShards: 1 },
   },
@@ -44,15 +49,16 @@ describe('checkBenchmarkMergeGate', () => {
     assert.deepEqual(missing({ control: { ...arm(), successfulRuns: 0 } }), [
       'sample size for both arms',
     ]);
-    // Naming the model without how it was sampled does not reproduce the run.
-    const identity = {
-      model: 'zai/glm-5.2',
-      modelRevision: 'glm-5.2-2026-08-20',
-      engine: 'opencode',
-    };
-    assert.deepEqual(missing({ treatment: { configuration: identity, successfulRuns: 24 } }), [
-      'model/config tuple for both arms',
-    ]);
+    // Every field the comparability contract demands, one at a time: a tuple it
+    // would reject is not a run the gate can call reproducible.
+    for (const field of REQUIRED_CONFIGURATION_FIELDS) {
+      const configuration = { ...arm().configuration, [field]: '  ' };
+      assert.deepEqual(
+        missing({ treatment: { configuration, successfulRuns: 24 } }),
+        ['model/config tuple for both arms'],
+        `blank ${field} passed the gate`,
+      );
+    }
     // An array is not a configuration record, however JSON.parse renders it.
     assert.deepEqual(
       missing({

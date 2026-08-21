@@ -107,6 +107,17 @@ export interface BenchmarkConfiguration {
   config: Record<string, unknown>;
 }
 
+/** The identity a run must state to be comparable with another. */
+export const REQUIRED_CONFIGURATION_FIELDS: readonly (keyof BenchmarkConfiguration)[] = [
+  'model',
+  'modelRevision',
+  'engine',
+  'engineVersion',
+  'reasoningEffort',
+  'promptVersion',
+  'corpusHash',
+];
+
 const SEVERITY_WEIGHT: Record<Severity, number> = {
   P0: 16,
   P1: 8,
@@ -641,17 +652,8 @@ export function assertBenchmarkComparable(
   controlEnv: Record<string, string> = {},
   treatmentEnv: Record<string, string> = {},
 ): void {
-  const required: Array<keyof BenchmarkConfiguration> = [
-    'model',
-    'modelRevision',
-    'engine',
-    'engineVersion',
-    'reasoningEffort',
-    'promptVersion',
-    'corpusHash',
-  ];
   for (const side of [control, treatment]) {
-    for (const field of required) {
+    for (const field of REQUIRED_CONFIGURATION_FIELDS) {
       if (typeof side[field] !== 'string' || !side[field].trim()) {
         throw new Error(`Benchmark configuration requires a non-empty ${field}.`);
       }

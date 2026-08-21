@@ -6,6 +6,7 @@
  * one, and its evidence was mixed by cohort.
  */
 
+import { REQUIRED_CONFIGURATION_FIELDS } from './benchmark-score.ts';
 import { isFiniteNumber, isNonArrayRecord as isRecord, isNonEmptyString } from './text.ts';
 
 export interface BenchmarkMergeGate {
@@ -14,12 +15,18 @@ export interface BenchmarkMergeGate {
   missing: string[];
 }
 
-/** A configuration tuple pins the run to one model on one engine, sampled one way. */
+/**
+ * The same identity `assertBenchmarkComparable` demands, plus how the run was
+ * sampled and configured. A tuple the comparability contract would reject is
+ * not a reproducible run, so the gate must not accept one either.
+ */
 function describesConfiguration(arm: unknown): boolean {
   if (!isRecord(arm) || !isRecord(arm.configuration)) return false;
-  const { model, modelRevision, engine, sampling, config } = arm.configuration;
+  const { configuration } = arm;
   return (
-    [model, modelRevision, engine].every(isNonEmptyString) && isRecord(sampling) && isRecord(config)
+    REQUIRED_CONFIGURATION_FIELDS.every((field) => isNonEmptyString(configuration[field])) &&
+    isRecord(configuration.sampling) &&
+    isRecord(configuration.config)
   );
 }
 
