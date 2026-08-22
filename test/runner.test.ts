@@ -336,6 +336,13 @@ describe('renderReviewMetadataBlock', () => {
     // The effort A/B arm identity; absent when the engine ignores the option
     // (the other cases below pass no effort and must not render the line).
     assert.match(block, /model=.*\nreasoning effort=low\n/);
+    // A non-token value must not reach the fenced block (markdown injection).
+    const injected = renderReviewMetadataBlock(
+      'opencode/deepseek-v4-flash-free',
+      { models: [], input: 1, output: 1, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+      'low\n```\n# pwned',
+    ).join('\n');
+    assert.doesNotMatch(injected, /reasoning effort|pwned/);
     assert.match(block, /input=100/);
     assert.match(block, /output=20/);
     assert.match(block, /reasoning=30/);

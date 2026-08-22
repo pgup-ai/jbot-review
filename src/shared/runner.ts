@@ -2544,7 +2544,12 @@ async function runReviewPipeline(params: {
         const aborted = auxBackend.abortSessionsByLabel
           ? auxBackend.abortSessionsByLabel(label, log)
           : undefined;
-        if (aborted === 0) continue;
+        if (aborted === 0) {
+          // Settled member of the group, or a prompt between registrations —
+          // either way its own terminal row lands when it settles.
+          log(`${label} had no in-flight session at grace expiry; no abandon row recorded.`);
+          continue;
+        }
         // Durable record (TASK-076): the abandoned session's own failure row
         // usually settles after telemetry has been emitted, so without this
         // an abandonment leaves no trace in the artifact.
@@ -4446,6 +4451,10 @@ export function renderReviewMetadataBlock(
   reasoningEffort?: string,
 ): string[] {
   if (!tokenUsage) return [];
+  // The stamp renders inside a fenced block; anything but a plain tier token
+  // (an operator-supplied oddity) is dropped rather than risking the fence.
+  const effort =
+    reasoningEffort && /^[A-Za-z0-9._-]{1,32}$/.test(reasoningEffort) ? reasoningEffort : undefined;
   const models = uniqueModels(model, tokenUsage.models);
   return [
     '',
@@ -4454,7 +4463,7 @@ export function renderReviewMetadataBlock(
     '',
     '```text',
     models.length === 1 ? `model=${models[0]}` : `models=${models.join(', ')}`,
-    ...(reasoningEffort ? [`reasoning effort=${reasoningEffort}`] : []),
+    ...(effort ? [`reasoning effort=${effort}`] : []),
     `input=${tokenUsage.input}`,
     `output=${tokenUsage.output}`,
     `reasoning=${tokenUsage.reasoning}`,
