@@ -825,6 +825,8 @@ async function repromptForJson(
       log,
       timeoutMs,
       onTokenUsage,
+      undefined,
+      label,
     );
   }
   log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
@@ -837,6 +839,8 @@ async function repromptForJson(
     log,
     timeoutMs,
     onTokenUsage,
+    undefined,
+    label,
   );
 }
 
@@ -1065,6 +1069,8 @@ async function promptPlanAgentInSession(
   timeoutMs = PROMPT_TIMEOUT_MS,
   onTokenUsage?: TokenUsageRecorder,
   tools?: Record<string, boolean>,
+  /** Grace-abort registry key; repair/continue prompts keep the BASE label. */
+  abortLabel = label,
 ): Promise<string> {
   const release = sessionSlots ? await sessionSlots.acquire() : undefined;
   try {
@@ -1078,6 +1084,7 @@ async function promptPlanAgentInSession(
       timeoutMs,
       onTokenUsage,
       tools,
+      abortLabel,
     );
   } finally {
     release?.();
@@ -1094,12 +1101,15 @@ async function promptInSessionHoldingSlot(
   timeoutMs: number,
   onTokenUsage?: TokenUsageRecorder,
   tools: Record<string, boolean> = READONLY_TOOLS,
+  abortLabel = label,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
   // Abortable only while a prompt is in flight (mirrors the pi registry's
   // dispose-time cleanup): a settled session left registered would eat a
-  // later same-label abort as a spurious failed-abort log line.
-  registerOpencodeSessionForAbort(client, label, sessionID);
+  // later same-label abort as a spurious failed-abort log line. Keyed by the
+  // BASE label — a repair/continue prompt must stay reachable by the runner's
+  // grace-expiry abort, which only knows base labels.
+  registerOpencodeSessionForAbort(client, abortLabel, sessionID);
   try {
     // A follow-up prompt in an existing session must not return the previous
     // completed assistant message: remember its id and wait for a NEWER one.
@@ -1168,7 +1178,7 @@ async function promptInSessionHoldingSlot(
     log(`Extracted ${label} text: ${raw.length} chars from ${textParts.length} text part(s)`);
     return raw;
   } finally {
-    unregisterOpencodeSessionForAbort(client, label, sessionID);
+    unregisterOpencodeSessionForAbort(client, abortLabel, sessionID);
   }
 }
 

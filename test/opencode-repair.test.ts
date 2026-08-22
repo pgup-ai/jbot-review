@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import {
+  abortOpencodeSessionsByLabel,
   Semaphore,
   buildConfig,
   extractPromptTokenUsage,
@@ -46,13 +47,16 @@ function makeFakeClient(
 ): {
   client: OpencodeClient;
   prompts: string[];
+  aborted: string[];
 } {
   const messages: FakeMessage[] = [];
   const prompts: string[] = [];
+  const aborted: string[] = [];
 
   const client = {
     session: {
       create: async () => ({ data: { id: 'session-1' } }),
+      abort: async ({ path }: { path: { id: string } }) => void aborted.push(path.id),
       promptAsync: async (request: { body: { parts: Array<{ text: string }> } }) => {
         prompts.push(request.body.parts[0].text);
         // index access, not `??`: a scripted null means "no text part" and
@@ -60,6 +64,9 @@ function makeFakeClient(
         const index = prompts.length - 1;
         const text = index < responses.length ? responses[index] : '{}';
         if (text instanceof Error) throw text;
+        // 'HANG' scripts a prompt that never produces a message: the poll
+        // loop waits until its timeout, keeping the prompt in flight.
+        if (text === 'HANG') return {};
         const parts = Array.isArray(text)
           ? text.map((part) => ({ type: 'text' as const, text: part }))
           : text === null
@@ -81,7 +88,7 @@ function makeFakeClient(
     },
   } as unknown as OpencodeClient;
 
-  return { client, prompts };
+  return { client, prompts, aborted };
 }
 
 const VALID_REVIEW = JSON.stringify({
@@ -173,6 +180,22 @@ describe('runReview JSON repair loop', () => {
     assert.equal(prompts.length, 2);
     assert.equal(prompts[1], CONTINUATION_NUDGE_PROMPT);
     assert.equal(result.findings.length, 1);
+  });
+
+  it('keeps the BASE label abortable while a repair prompt is in flight', async () => {
+    // The grace-expiry abort only knows base labels; a session mid-repair
+    // (label 'review-repair') must still be reachable — repair stragglers are
+    // exactly the historically observed straggler shape.
+    const { client, prompts, aborted } = makeFakeClient(['{"summary": "broken', 'HANG']);
+
+    const pending = runReview(client, 'prov/model', 'PR CONTEXT', '', noLog, {
+      timeoutMs: 400,
+    }).catch((error: unknown) => error);
+    while (prompts.length < 2) await new Promise((resolve) => setTimeout(resolve, 5));
+    abortOpencodeSessionsByLabel(client, 'review', noLog);
+    await pending;
+
+    assert.ok(aborted.includes('session-1'), `abort missed: ${JSON.stringify(aborted)}`);
   });
 
   it('fails the run when the recovery response is also malformed', async () => {
