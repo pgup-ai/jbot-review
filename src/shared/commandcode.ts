@@ -23,6 +23,7 @@ import {
   type TokenUsageRecorder,
 } from './opencode.ts';
 import { spawnWithTimeout, truncateForLog } from '@symma/protocol';
+import { clampReasoningEffort } from './config.ts';
 import { isFiniteNumber, isRecord } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
@@ -88,6 +89,7 @@ export function writeCommandCodeReadOnlySettings(home: string): string {
 
 export interface CommandCodeCliArgsInput {
   model: string;
+  effort?: string;
 }
 
 export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[] {
@@ -108,7 +110,58 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
     String(COMMANDCODE_MAX_TURNS),
   ];
   if (modelID !== 'default') args.push('--model', modelID);
+  if (input.effort) args.push('--effort', input.effort);
   return args;
+}
+
+// Probed 2026-08-22: `--effort` validates per model and exits nonzero on
+// values outside the model's set; muse-spark rejects the flag outright.
+const COMMANDCODE_MODEL_EFFORTS: Record<string, readonly string[]> = {
+  'deepseek/deepseek-v4-flash': ['high', 'max'],
+  'meta/muse-spark-1.2-contributor': [],
+};
+
+/**
+ * The `--effort` value for a session; undefined omits the flag. An explicit
+ * effort clamps to the nearest declared tier (one knob: "low" means "as low
+ * as this model goes"); the built-in defaults deliver only on an exact
+ * match, so a default `medium` is never silently promoted to a `high` floor.
+ */
+function commandCodeReasoningEffort(
+  model: string,
+  modelOptions: Record<string, unknown> | undefined,
+  explicit: boolean,
+): string | undefined {
+  const { modelID } = parseModelName(model);
+  const effort = modelOptions?.reasoningEffort;
+  const supported = COMMANDCODE_MODEL_EFFORTS[modelID];
+  if (typeof effort !== 'string' || !supported?.length) return undefined;
+  if (supported.includes(effort)) return effort;
+  return explicit ? clampReasoningEffort(effort, supported) : undefined;
+}
+
+/**
+ * Role-aware effort for one session: aux sessions run the built-in aux
+ * defaults (never clamped); main options and the verifier's floored
+ * override carry user intent, so they clamp when the options are explicit.
+ */
+export function commandCodeSessionEffort(
+  model: string,
+  override: Record<string, unknown> | undefined,
+  ctx: {
+    auxModel: string;
+    auxModelOptions?: Record<string, unknown>;
+    mainModelOptions?: Record<string, unknown>;
+    explicit: boolean;
+  },
+): string | undefined {
+  const auxCall =
+    override === undefined && model === ctx.auxModel && ctx.auxModelOptions !== undefined;
+  return commandCodeReasoningEffort(
+    model,
+    override ?? (auxCall ? ctx.auxModelOptions : ctx.mainModelOptions),
+    !auxCall && ctx.explicit,
+  );
 }
 
 export async function runCommandCodeReview(
@@ -125,6 +178,7 @@ export async function runCommandCodeReview(
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
     home?: string;
+    effort?: string;
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
@@ -147,6 +201,7 @@ export async function runCommandCodeReview(
     options.timeoutMs,
     options.onTokenUsage,
     options.home,
+    options.effort,
   );
   try {
     return parseReview(raw, label, log, { strict: true });
@@ -170,6 +225,7 @@ export async function runCommandCodeReview(
       options.timeoutMs,
       options.onTokenUsage,
       options.home,
+      options.effort,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
@@ -183,6 +239,7 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
+  effort?: string,
 ): Promise<AddressedPriorComment[]> {
   const raw = await runCommandCodePrompt(
     workspace,
@@ -193,6 +250,7 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
     timeoutMs,
     onTokenUsage,
     home,
+    effort,
   );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
 }
@@ -206,6 +264,7 @@ export async function runCommandCodeGuidelineComplianceCheck(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
+  effort?: string,
 ): Promise<Finding[]> {
   const raw = await runCommandCodePrompt(
     workspace,
@@ -216,6 +275,7 @@ export async function runCommandCodeGuidelineComplianceCheck(
     timeoutMs,
     onTokenUsage,
     home,
+    effort,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
 }
@@ -229,6 +289,7 @@ export async function runCommandCodeChangesSinceLastReview(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
+  effort?: string,
 ): Promise<string> {
   const raw = await runCommandCodePrompt(
     workspace,
@@ -239,6 +300,7 @@ export async function runCommandCodeChangesSinceLastReview(
     timeoutMs,
     onTokenUsage,
     home,
+    effort,
   );
   return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
 }
@@ -252,6 +314,7 @@ export async function runCommandCodeFindingVerification(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
+  effort?: string,
 ): Promise<FindingVerdict[] | undefined> {
   const raw = await runCommandCodePrompt(
     workspace,
@@ -262,6 +325,7 @@ export async function runCommandCodeFindingVerification(
     timeoutMs,
     onTokenUsage,
     home,
+    effort,
   );
   return parseFindingVerdicts(raw, findings.length, log);
 }
@@ -474,9 +538,12 @@ async function runCommandCodePrompt(
   timeoutMs = COMMANDCODE_PROMPT_TIMEOUT_MS,
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
+  effort?: string,
 ): Promise<string> {
-  const args = buildCommandCodeCliArgs({ model });
-  log(`Calling ${label} prompt (agent=commandcode-cli, model=${model})`);
+  const args = buildCommandCodeCliArgs({ model, effort });
+  log(
+    `Calling ${label} prompt (agent=commandcode-cli, model=${model}${effort ? `, effort=${effort}` : ''})`,
+  );
   const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, args, {
     cwd: workspace,
     input: withNoToolsReviewDirective(prompt),

@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 import {
   PROVIDERS,
   auxModelOptionsFor,
+  clampReasoningEffort,
   defaultModelOptions,
   modelSupportsPromptCache,
   supportedModelOptions,
@@ -14,6 +15,7 @@ import {
   resolvePoolCredentials,
   resolveProviderBaseURL,
   resolveProviderCredential,
+  verificationModelOptions,
 } from '../src/shared/config.ts';
 import { buildConfig } from '../src/shared/opencode.ts';
 
@@ -55,12 +57,18 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
     assert.equal(modelSupportsPromptCache('openai', 'gpt-5.4-nano'), true);
   });
 
-  it('drops a reasoning effort the model would reject', () => {
-    // opencode/x-preview-f-free 400s on the main pass's `medium`, and the error
-    // is not retryable, so the option must never reach the provider.
+  it('clamps a reasoning effort the model would reject to the nearest tier', () => {
+    // The provider 400s non-retryably on unsupported efforts; ties resolve UP
+    // so a ladder without `medium` cannot quietly reinstate a lower tier.
     assert.deepEqual(
       supportedModelOptions('opencode', 'x-preview-f-free', { reasoningEffort: 'medium' }),
-      {},
+      { reasoningEffort: 'high' },
+    );
+    // mimo collapses below medium (probed 2026-08-22): the aux default `low`
+    // must clamp up on every delivery path, the pi aux level included.
+    assert.deepEqual(
+      supportedModelOptions('opencode', 'mimo-v2.5-free', { reasoningEffort: 'low' }),
+      { reasoningEffort: 'medium' },
     );
     assert.deepEqual(
       supportedModelOptions('opencode', 'x-preview-f-free', {
@@ -68,6 +76,14 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
         temperature: 0,
       }),
       { reasoningEffort: 'high', temperature: 0 },
+    );
+    // Provider-managed values (poolside's 'default') stay outside the order and drop.
+    assert.deepEqual(
+      supportedModelOptions('opencode', 'x-preview-f-free', {
+        reasoningEffort: 'default',
+        temperature: 0,
+      }),
+      { temperature: 0 },
     );
     // Models without a declared list keep whatever they were given.
     assert.deepEqual(
@@ -77,6 +93,63 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
       },
     );
     assert.equal(supportedModelOptions('opencode', 'x-preview-f-free', undefined), undefined);
+  });
+
+  it('clamps out-of-range efforts to the ladder end and ignores unrankable ladder entries', () => {
+    assert.equal(clampReasoningEffort('minimal', ['low', 'high', 'max']), 'low');
+    assert.equal(clampReasoningEffort('max', ['minimal', 'low']), 'low');
+    assert.equal(clampReasoningEffort('medium', ['low', 'high', 'max']), 'high');
+    assert.equal(clampReasoningEffort('high', ['low', 'high']), 'high');
+    // Unrankable entries can't be chosen; an all-unrankable ladder means no clamp.
+    assert.equal(clampReasoningEffort('medium', ['low', 'turbo']), 'low');
+    assert.equal(clampReasoningEffort('medium', ['default']), undefined);
+    assert.equal(clampReasoningEffort('default', ['low', 'high']), undefined);
+    // pi's xhigh is rankable (between high and max), so an xhigh finder floors
+    // the verifier and an xhigh request clamps upward on ladders without it.
+    assert.deepEqual(
+      verificationModelOptions({ reasoningEffort: 'xhigh' }, { reasoningEffort: 'low' }),
+      { reasoningEffort: 'xhigh' },
+    );
+    assert.equal(clampReasoningEffort('xhigh', ['low', 'high', 'max']), 'max');
+  });
+});
+
+describe('verification effort floor (TASK-157)', () => {
+  it('floors the verifier at the main-pass effort, never lowering a higher aux effort', () => {
+    // Aux shares the main entry: no separate options, parity already holds.
+    assert.equal(verificationModelOptions({ reasoningEffort: 'medium' }, undefined), undefined);
+    // The defaultAuxModelOptions 'low' was argued from lens throughput, never
+    // from verification; the verifier gets main parity instead.
+    assert.deepEqual(
+      verificationModelOptions({ reasoningEffort: 'medium' }, { reasoningEffort: 'low' }),
+      { reasoningEffort: 'medium' },
+    );
+    assert.deepEqual(
+      verificationModelOptions({ reasoningEffort: 'medium' }, { reasoningEffort: 'high' }),
+      { reasoningEffort: 'high' },
+    );
+    // Custom providers carry no effort; the aux entry rides unchanged.
+    assert.deepEqual(verificationModelOptions({}, { reasoningEffort: 'low' }), {
+      reasoningEffort: 'low',
+    });
+    // Provider-managed main efforts ('default') are outside the order — no floor.
+    assert.deepEqual(
+      verificationModelOptions({ reasoningEffort: 'default' }, { reasoningEffort: 'low' }),
+      { reasoningEffort: 'low' },
+    );
+    // A provider-managed AUX effort is left alone too (poolside's 'default'):
+    // the floor never overwrites a value the provider manages itself.
+    assert.deepEqual(
+      verificationModelOptions({ reasoningEffort: 'medium' }, { reasoningEffort: 'default' }),
+      { reasoningEffort: 'default' },
+    );
+    // Effort-less aux entries stay effort-less: custom providers ({}) omit the
+    // key BY POLICY — arbitrary endpoints may reject provider-specific options,
+    // and an injected floor would 400 the verifier into fail-open.
+    assert.deepEqual(verificationModelOptions({ reasoningEffort: 'medium' }, { temperature: 0 }), {
+      temperature: 0,
+    });
+    assert.deepEqual(verificationModelOptions({ reasoningEffort: 'medium' }, {}), {});
   });
 });
 

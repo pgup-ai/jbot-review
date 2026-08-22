@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
 import {
+  abortOpencodeSessionsByLabel,
   Semaphore,
   buildConfig,
   extractPromptTokenUsage,
@@ -13,6 +14,7 @@ import {
   runReview,
   type SemaphorePriority,
 } from '../src/shared/opencode.ts';
+import { CONTINUATION_NUDGE_PROMPT } from '../src/shared/prompt.ts';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 
 const noLog = (): void => undefined;
@@ -45,13 +47,16 @@ function makeFakeClient(
 ): {
   client: OpencodeClient;
   prompts: string[];
+  aborted: string[];
 } {
   const messages: FakeMessage[] = [];
   const prompts: string[] = [];
+  const aborted: string[] = [];
 
   const client = {
     session: {
       create: async () => ({ data: { id: 'session-1' } }),
+      abort: async ({ path }: { path: { id: string } }) => void aborted.push(path.id),
       promptAsync: async (request: { body: { parts: Array<{ text: string }> } }) => {
         prompts.push(request.body.parts[0].text);
         // index access, not `??`: a scripted null means "no text part" and
@@ -59,6 +64,9 @@ function makeFakeClient(
         const index = prompts.length - 1;
         const text = index < responses.length ? responses[index] : '{}';
         if (text instanceof Error) throw text;
+        // 'HANG' scripts a prompt that never produces a message: the poll
+        // loop waits until its timeout, keeping the prompt in flight.
+        if (text === 'HANG') return {};
         const parts = Array.isArray(text)
           ? text.map((part) => ({ type: 'text' as const, text: part }))
           : text === null
@@ -80,7 +88,7 @@ function makeFakeClient(
     },
   } as unknown as OpencodeClient;
 
-  return { client, prompts };
+  return { client, prompts, aborted };
 }
 
 const VALID_REVIEW = JSON.stringify({
@@ -89,8 +97,21 @@ const VALID_REVIEW = JSON.stringify({
 });
 
 describe('runReview JSON repair loop', () => {
-  it('repairs a malformed response with one same-session re-prompt', async () => {
+  it('continues an abandoned turn with one same-session nudge, not a reformat', async () => {
+    // Delimiter-free text is an announcement/empty turn; asking it to
+    // reformat "as JSON" elicits an empty review instead of the work.
     const { client, prompts } = makeFakeClient(['this is not json at all, sorry', VALID_REVIEW]);
+
+    const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
+
+    assert.equal(prompts.length, 2);
+    assert.equal(prompts[1], CONTINUATION_NUDGE_PROMPT);
+    assert.equal(result.summary, 'ok after repair');
+    assert.equal(result.findings.length, 1);
+  });
+
+  it('repairs a malformed JSON attempt with one same-session re-prompt', async () => {
+    const { client, prompts } = makeFakeClient(['{"summary": "broken', VALID_REVIEW]);
 
     const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
 
@@ -98,7 +119,6 @@ describe('runReview JSON repair loop', () => {
     assert.match(prompts[1], /could not be parsed as JSON/);
     assert.match(prompts[1], /Parse error:/);
     assert.equal(result.summary, 'ok after repair');
-    assert.equal(result.findings.length, 1);
   });
 
   it('does not send a repair prompt when the first response parses', async () => {
@@ -149,20 +169,36 @@ describe('runReview JSON repair loop', () => {
     assert.equal(result.findings.length, 1);
   });
 
-  it('treats a reasoning-only response (no text part) as repairable, not as zero findings', async () => {
+  it('treats a reasoning-only response (no text part) as an abandoned turn, not zero findings', async () => {
     // Seen in production: a heavy reasoning model burned its budget and
     // finished with parts [step-start, reasoning, step-finish] — no text.
-    // That must trigger the repair loop, never silently parse as "{}".
+    // That must trigger the recovery loop, never silently parse as "{}".
     const { client, prompts } = makeFakeClient([null, VALID_REVIEW]);
 
     const result = await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog);
 
     assert.equal(prompts.length, 2);
-    assert.match(prompts[1], /could not be parsed as JSON/);
+    assert.equal(prompts[1], CONTINUATION_NUDGE_PROMPT);
     assert.equal(result.findings.length, 1);
   });
 
-  it('fails the run when the repair response is also malformed', async () => {
+  it('keeps the BASE label abortable while a repair prompt is in flight', async () => {
+    // The grace-expiry abort only knows base labels; a session mid-repair
+    // (label 'review-repair') must still be reachable — repair stragglers are
+    // exactly the historically observed straggler shape.
+    const { client, prompts, aborted } = makeFakeClient(['{"summary": "broken', 'HANG']);
+
+    const pending = runReview(client, 'prov/model', 'PR CONTEXT', '', noLog, {
+      timeoutMs: 400,
+    }).catch((error: unknown) => error);
+    while (prompts.length < 2) await new Promise((resolve) => setTimeout(resolve, 5));
+    abortOpencodeSessionsByLabel(client, 'review', noLog);
+    await pending;
+
+    assert.ok(aborted.includes('session-1'), `abort missed: ${JSON.stringify(aborted)}`);
+  });
+
+  it('fails the run when the recovery response is also malformed', async () => {
     const { client, prompts } = makeFakeClient(['garbage one', 'garbage two']);
 
     await assert.rejects(
@@ -180,7 +216,7 @@ const VALID_ADDRESSED = JSON.stringify({
 });
 
 describe('runGuidelineComplianceCheck JSON repair loop', () => {
-  it('repairs a malformed compliance response with one same-session re-prompt', async () => {
+  it('recovers an abandoned compliance turn with one same-session nudge', async () => {
     const { client, prompts } = makeFakeClient(['prose, not json', VALID_REVIEW]);
 
     const findings = await runGuidelineComplianceCheck(
@@ -192,7 +228,7 @@ describe('runGuidelineComplianceCheck JSON repair loop', () => {
     );
 
     assert.equal(prompts.length, 2);
-    assert.match(prompts[1], /could not be parsed as JSON/);
+    assert.equal(prompts[1], CONTINUATION_NUDGE_PROMPT);
     assert.equal(findings.length, 1);
   });
 
@@ -228,13 +264,13 @@ describe('runGuidelineComplianceCheck JSON repair loop', () => {
 });
 
 describe('runAddressedPriorCommentsCheck JSON repair loop', () => {
-  it('repairs a malformed addressed-check response with one same-session re-prompt', async () => {
+  it('recovers an abandoned addressed-check turn with one same-session nudge', async () => {
     const { client, prompts } = makeFakeClient(['prose, not json', VALID_ADDRESSED]);
 
     const addressed = await runAddressedPriorCommentsCheck(client, 'prov/model', 'CTX', noLog);
 
     assert.equal(prompts.length, 2);
-    assert.match(prompts[1], /could not be parsed as JSON/);
+    assert.equal(prompts[1], CONTINUATION_NUDGE_PROMPT);
     assert.deepEqual(addressed, [{ id: 'PRRT_abc', addressedByCommit: 'abc1234' }]);
   });
 

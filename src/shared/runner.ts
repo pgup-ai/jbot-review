@@ -11,6 +11,7 @@ import {
   anchorFindings,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
+  mergeVerdictsByLocation,
   resolveFindingAnchors,
   isNoiseFile,
   isPrCleanAfterRun,
@@ -31,6 +32,7 @@ import {
 import { buildSupplementaryBlocks, trimContextBlocks } from './context-trim.ts';
 import type { ContextBlock } from './context-trim.ts';
 import {
+  backendCanReadWorkspace,
   backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
   type CliBackendID,
@@ -53,6 +55,7 @@ import {
   remoteAcpConfigFromEnv,
 } from './acp-remote.ts';
 import {
+  abortPiSessionsByLabel,
   piModelAvailable,
   piSupportsProvider,
   resolvePiEngine,
@@ -61,6 +64,7 @@ import {
   runPiFindingVerification,
   runPiGuidelineComplianceCheck,
   runPiReview,
+  piThinkingLevel,
   startPi,
   PI_TELEMETRY_CAPABILITY,
   type PiRuntime,
@@ -84,7 +88,13 @@ import {
   shardFilesForReview,
   touchesRiskyPath,
 } from './diff-context.ts';
-import { auxModelOptionsFor, needsAuxOpencodeConfig, resolvePromptCachePolicy } from './config.ts';
+import {
+  auxModelOptionsFor,
+  needsAuxOpencodeConfig,
+  resolvePromptCachePolicy,
+  supportedModelOptions,
+  verificationModelOptions,
+} from './config.ts';
 import { parseModelName } from '@symma/protocol';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -101,6 +111,7 @@ import {
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
 import { onFatalSignal } from '@symma/protocol';
 import {
+  abortOpencodeSessionsByLabel,
   startOpencode,
   withTimeout,
   configureSessionConcurrency,
@@ -123,6 +134,7 @@ import { createDevinCliBackend } from './devin-cli.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
   COMMANDCODE_TELEMETRY_CAPABILITY,
+  commandCodeSessionEffort,
   listCommandCodeModels,
   runCommandCodeAddressedPriorCommentsCheck,
   runCommandCodeFindingVerification,
@@ -189,6 +201,7 @@ import {
   formatFinderGuidelines,
   formatDiffScope,
   formatContextBudget,
+  selectFinderGuidelineText,
   truncatePrBody,
   type LinkedIssue,
   type ReviewCommit,
@@ -212,6 +225,7 @@ import {
   getCheckStatusSummary,
   formatFindingLabel,
   formatFindingLocation,
+  getPullFreshness,
   postFileLevelComment,
   addPrReaction,
   removeOwnPrReaction,
@@ -235,7 +249,17 @@ import {
   type PriorJbotThreads,
 } from './github.ts';
 import { isDefinitiveApprovalRejection, type AutoApprovalDecision } from './approval.ts';
-import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
+import {
+  classifyMainShardFailure,
+  STALE_CHECK_MIN_ATTEMPT_MS,
+  StaleReviewError,
+} from './retry-policy.ts';
+import {
+  condenseSummary,
+  formatSummaryMarkdown,
+  ORPHANED_FINDINGS_HEADING,
+  renderOrphanedSection,
+} from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
@@ -262,6 +286,7 @@ function createOpencodeBackend(
   return {
     name: 'opencode',
     observability: OPENCODE_TELEMETRY_CAPABILITY,
+    abortSessionsByLabel: (label, log) => abortOpencodeSessionsByLabel(client, label, log),
     runReview: (model, prContext, guidelines, log, options) =>
       runOpencodeReview(client, model, prContext, guidelines, log, options),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
@@ -283,7 +308,15 @@ function createOpencodeBackend(
         timeoutMs,
         onTokenUsage,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      modelOptions,
+    ) =>
       runOpencodeFindingVerification(
         client,
         model,
@@ -292,6 +325,7 @@ function createOpencodeBackend(
         log,
         timeoutMs,
         onTokenUsage,
+        modelOptions,
       ),
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
       runOpencodeChangesSinceLastReview(
@@ -310,6 +344,7 @@ function createPiBackend(runtime: PiRuntime): ReviewBackend {
   return {
     name: 'pi',
     observability: PI_TELEMETRY_CAPABILITY,
+    abortSessionsByLabel: (label, log) => abortPiSessionsByLabel(runtime, label, log),
     runReview: (model, prContext, guidelines, log, options) =>
       runPiReview(runtime, model, prContext, guidelines, log, options),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
@@ -324,8 +359,25 @@ function createPiBackend(runtime: PiRuntime): ReviewBackend {
         timeoutMs,
         onTokenUsage,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      runPiFindingVerification(runtime, model, prContext, findings, log, timeoutMs, onTokenUsage),
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      modelOptions,
+    ) =>
+      runPiFindingVerification(
+        runtime,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        modelOptions,
+      ),
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
       runPiChangesSinceLastReview(
         runtime,
@@ -396,7 +448,11 @@ function createPoolsideBackend(
   };
 }
 
-function createCommandCodeBackend(workspace: string, home: string): ReviewBackend {
+function createCommandCodeBackend(
+  workspace: string,
+  home: string,
+  effortFor: (model: string, override?: Record<string, unknown>) => string | undefined,
+): ReviewBackend {
   return {
     name: COMMANDCODE_PROVIDER_ID,
     observability: COMMANDCODE_TELEMETRY_CAPABILITY,
@@ -404,6 +460,7 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
       runCommandCodeReview(workspace, model, prContext, guidelines, log, {
         ...options,
         home,
+        effort: effortFor(model),
       }),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
       runCommandCodeAddressedPriorCommentsCheck(
@@ -414,6 +471,7 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
         timeoutMs,
         onTokenUsage,
         home,
+        effortFor(model),
       ),
     runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
       runCommandCodeGuidelineComplianceCheck(
@@ -425,8 +483,17 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
         timeoutMs,
         onTokenUsage,
         home,
+        effortFor(model),
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      modelOptions,
+    ) =>
       runCommandCodeFindingVerification(
         workspace,
         model,
@@ -436,6 +503,7 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
         timeoutMs,
         onTokenUsage,
         home,
+        effortFor(model, modelOptions),
       ),
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
       runCommandCodeChangesSinceLastReview(
@@ -447,6 +515,7 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
         timeoutMs,
         onTokenUsage,
         home,
+        effortFor(model),
       ),
   };
 }
@@ -740,6 +809,27 @@ export interface ReviewRunOptions {
   /** Treat embedded diff hunks as already read. On; JBOT_EMBEDDED_FIRST_PROMPT=false opts out. */
   embeddedFirstPrompt?: boolean;
   /**
+   * Finder guideline text when the compliance pass is skipped: 'auto' keeps
+   * the relevance slice for tool-capable finders (omitted docs named for
+   * on-demand reads); 'full' restores the old widen-everywhere behavior
+   * (JBOT_GUIDELINE_WIDEN=full). Checkout-blind finders always widen.
+   */
+  guidelineWiden?: 'auto' | 'full';
+  /**
+   * TASK-079 arm: verify the main-settle finding snapshot concurrently with
+   * the aux settle grace (tail becomes max(grace, verify), not grace +
+   * verify). Late aux findings post unverified and are counted (TASK-080).
+   * Off by default. Not the rejected overlap-with-the-main-pass.
+   */
+  verifyOverlapGrace?: boolean;
+  /**
+   * TASK-065 arm: verification judges from a slim claim-checking context
+   * (title/body/diff scope, linked issues, changed files, full diff) instead
+   * of the whole finder context. Off by default — the verifier is a precision
+   * gate, so the flip waits on adjudicated benchmark evidence.
+   */
+  verifierSlimContext?: boolean;
+  /**
    * Model for the auxiliary sessions (addressed-check, guideline compliance,
    * finding verification). Lets the main review run on a stronger tier while
    * the mechanical checks stay on a cheap one. Empty = use the main model.
@@ -787,6 +877,11 @@ export interface ReviewRunOptions {
    * shares this.
    */
   modelOptions?: Record<string, unknown>;
+  /**
+   * True when `modelOptions` came from user input rather than the built-in
+   * defaults; only explicit efforts may clamp to a restricted model's tiers.
+   */
+  modelOptionsExplicit?: boolean;
   /**
    * Enable opencode prompt caching (provider `setCacheKey`). Default true:
    * parallel shards and re-reviews share a byte-identical prompt prefix, so
@@ -980,7 +1075,14 @@ async function runReviewPipeline(params: {
     model,
     ...(auxModel !== model ? { auxModel } : {}),
   });
-  const recordCoverage: SessionCoverageRecorder = (coverage) => telemetry.recordCoverage(coverage);
+  // Once a label is abandoned at grace expiry, its eager coverage row owns the
+  // terminal state: the abort settles the underlying promise promptly, whose
+  // own catch handler would otherwise append a second, conflicting row.
+  const abandonedAuxLabels = new Set<string>();
+  const recordCoverage: SessionCoverageRecorder = (coverage) => {
+    if (abandonedAuxLabels.has(coverage.session)) return;
+    telemetry.recordCoverage(coverage);
+  };
   const trackedAux: AuxiliarySession<unknown>[] = [];
   const trackAux = <T>(label: string, promise: Promise<T>): AuxiliarySession<T> => {
     const session = trackAuxiliarySession(label, promise);
@@ -1183,6 +1285,33 @@ async function runReviewPipeline(params: {
   const auxPoolsideKey = options.auxApiKey || (auxProviderID === providerID ? apiKey : '');
   const auxPoolsideBackend = auxOnPoolside ? createPoolsideBackend(auxPoolsideKey) : undefined;
 
+  const auxModelOptions = auxModelOptionsFor(providerID, modelID, auxProviderID, auxModelID);
+  const resolvedMainOptions = supportedModelOptions(providerID, modelID, options.modelOptions);
+  // TASK-157: the verifier floors at the main-pass effort. An identity return
+  // means the aux entry already delivers it, so no per-session override (and
+  // no opencode alias entry) is needed.
+  const verifyModelOptions = verificationModelOptions(resolvedMainOptions, auxModelOptions);
+  const verifierNeedsOwnOptions =
+    verifyModelOptions !== undefined && verifyModelOptions !== auxModelOptions;
+  const verifierSessionOptions = verifierNeedsOwnOptions
+    ? supportedModelOptions(auxProviderID, auxModelID, verifyModelOptions)
+    : undefined;
+  // Stamped into the posted review's metadata: the arm identity for effort
+  // A/Bs. Undefined wherever the main engine does not consume the option.
+  const mainReasoningEffort = (() => {
+    if (mainCliBackend === COMMANDCODE_PROVIDER_ID)
+      return commandCodeSessionEffort(model, undefined, {
+        auxModel,
+        auxModelOptions,
+        mainModelOptions: options.modelOptions,
+        explicit: options.modelOptionsExplicit ?? false,
+      });
+    if (mainCliBackend) return undefined;
+    if (mainOnPi) return piThinkingLevel(resolvedMainOptions);
+    const effort = resolvedMainOptions?.reasoningEffort;
+    return typeof effort === 'string' && effort !== 'default' ? effort : undefined;
+  })();
+
   const discoveredGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
   const guidelines = formatGuidelines(discoveredGuidelines);
   const finderGuidelines = formatFinderGuidelines(discoveredGuidelines, {
@@ -1212,7 +1341,16 @@ async function runReviewPipeline(params: {
     ? []
     : await listPrComments(octokit, owner, repo, pullNumber);
   const priorJbotReviewCount = allPriorReviewComments.filter(isJbotReviewBody).length;
-  const priorComments = options.includePriorComments ? allPriorReviewComments : [];
+  // jbot's own review bodies stay out of the flat context block — the
+  // structured prior-threads block already carries the inline findings —
+  // EXCEPT bodies with an outside-the-diff section: orphaned findings exist
+  // only in the review body, and dropping their sole carrier would re-post
+  // the same orphan on every re-review.
+  const priorComments = options.includePriorComments
+    ? allPriorReviewComments.filter(
+        (comment) => !isJbotReviewBody(comment) || comment.includes(ORPHANED_FINDINGS_HEADING),
+      )
+    : [];
   if (!options.includePriorComments) {
     log('Prior review comments excluded from review context by configuration.');
   }
@@ -1280,6 +1418,9 @@ async function runReviewPipeline(params: {
   // Populated on the enhanced path only; the basic branch has no droppable set.
   let baseCoreContext = '';
   let supplementaryBlocks: ContextBlock[] = [];
+  // Captured for the slim verifier contract (TASK-065); enhanced path only.
+  let slimVerifierIssueInputs:
+    { linkedIssues: LinkedIssue[]; linkedIssuesOmitted: number } | undefined;
   if (options.enhancedContext) {
     const commits = localDiff
       ? localDiff.commits
@@ -1320,6 +1461,7 @@ async function runReviewPipeline(params: {
     });
     baseCoreContext = coreContext;
     coreContext = joinContext(coreContext, ...supplementaryBlocks.map((block) => block.text));
+    slimVerifierIssueInputs = { linkedIssues, linkedIssuesOmitted };
   } else {
     const commentsBlock =
       priorComments.length > 0
@@ -1343,7 +1485,6 @@ async function runReviewPipeline(params: {
   // mark it once here so every session derived from coreContext (main + aux)
   // carries the guard. Static text, so it stays in the cache-stable prefix.
   coreContext = joinContext(UNTRUSTED_PR_CONTENT_NOTE, coreContext);
-  const basePrContext = joinContext(coreContext, diffHunksBlock);
   const auxHasCompleteEmbeddedDiff =
     !auxRequiresCompleteEmbeddedDiff || embeddedOnlyBackendIncompleteDiffFiles.length === 0;
   if (!auxHasCompleteEmbeddedDiff) {
@@ -1353,10 +1494,26 @@ async function runReviewPipeline(params: {
       )}). Main review continues without aux findings or verification.`,
     );
   }
-  const auxPrContext =
+  const auxDiffBlockText =
     auxRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks && auxHasCompleteEmbeddedDiff
-      ? joinContext(coreContext, embeddedOnlyBackendDiffHunks.text)
-      : basePrContext;
+      ? embeddedOnlyBackendDiffHunks.text
+      : diffHunksBlock;
+  const auxPrContext = joinContext(coreContext, auxDiffBlockText);
+  // TASK-065 arm (JBOT_VERIFIER_SLIM_CONTEXT): the verifier judges a handful
+  // of findings against the diff; the finder supplements around it are pure
+  // prefill. Same diff block as the aux path, so a slim verifier never judges
+  // from a diff the full context would have carried whole.
+  const verifierPrContext =
+    options.verifierSlimContext && slimVerifierIssueInputs
+      ? buildSlimVerifierContext({
+          pullTitle,
+          pullBody,
+          changedFiles,
+          diffScope,
+          ...slimVerifierIssueInputs,
+          auxDiffBlockText,
+        })
+      : auxPrContext;
 
   // Use a per-run limiter around every backend so mixed Devin/OpenCode runs
   // honor one global cap. Disable opencode's older process-global limiter to
@@ -1552,7 +1709,14 @@ async function runReviewPipeline(params: {
     log(`CommandCode CLI auth configured at ${authPath}.`);
     log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
     log('CommandCode reviews run with skills and tools disabled.');
-    commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome);
+    commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome, (m, override) =>
+      commandCodeSessionEffort(m, override, {
+        auxModel,
+        auxModelOptions,
+        mainModelOptions: options.modelOptions,
+        explicit: options.modelOptionsExplicit ?? false,
+      }),
+    );
   }
 
   if (!remoteAcp && (mainCliBackend === CODEX_PROVIDER_ID || auxCliBackend === CODEX_PROVIDER_ID)) {
@@ -1691,12 +1855,12 @@ async function runReviewPipeline(params: {
   // different vendor's endpoint (and fail auth there anyway).
   const auxNeedsOwnKey =
     auxProviderID !== providerID && ((mainOnPi && auxOnPi) || (mainOnOpencode && auxOnOpencode));
-  const auxModelOptions = auxModelOptionsFor(providerID, modelID, auxProviderID, auxModelID);
   const auxNeedsOpencodeConfig =
     mainOnOpencode &&
     auxOnOpencode &&
     (needsAuxOpencodeConfig(providerID, modelID, auxProviderID, auxModelID) ||
-      Boolean(auxModelOptions && Object.keys(auxModelOptions).length > 0));
+      Boolean(auxModelOptions && Object.keys(auxModelOptions).length > 0) ||
+      verifierNeedsOwnOptions);
   if (auxNeedsOwnKey && !options.auxApiKey) {
     cleanupCliHomes();
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
@@ -1719,10 +1883,15 @@ async function runReviewPipeline(params: {
         piConfig.apiKey,
         log,
         {
-          // pi's thinking level is runtime-wide, so a runtime shared by both
-          // roles follows the main model. One serving aux alone takes the aux
-          // effort instead of none.
+          // Levels are per session: main-model sessions take the main effort,
+          // a distinct aux model takes the aux default (a runtime serving aux
+          // alone sees the aux model as its main).
           modelOptions: mainOnPi ? options.modelOptions : auxModelOptions,
+          // Clamped like startPi clamps the main options — the raw aux `low`
+          // would resurrect mimo's below-floor collapse on shared runtimes.
+          auxThinkingLevel: piThinkingLevel(
+            supportedModelOptions(auxProviderID, auxModelID, auxModelOptions),
+          ),
           // pi's prompt caching is provider-managed (no setCacheKey knob);
           // resolvePromptCachePolicy applies to the opencode server only.
           additionalProviderKeys: auxNeedsOwnKey
@@ -1764,8 +1933,12 @@ async function runReviewPipeline(params: {
         log,
         {
           // Symmetric to the pi runtime below: when main is not on opencode the
-          // root model IS the aux model, so it carries the aux options.
+          // root model IS the aux model, so it carries the aux options — and
+          // the verifier alias, since verification runs on the aux model.
           modelOptions: mainOnOpencode ? options.modelOptions : auxModelOptions,
+          ...(!mainOnOpencode && verifierNeedsOwnOptions
+            ? { verificationModelOptions: verifyModelOptions }
+            : {}),
           baseURL: mainOnOpencode ? baseURL : options.auxBaseURL,
           promptCache: mainOnOpencode
             ? promptCachePolicy.providerPromptCache
@@ -1782,6 +1955,9 @@ async function runReviewPipeline(params: {
                   baseURL: auxNeedsOwnKey ? options.auxBaseURL : baseURL,
                   promptCache: promptCachePolicy.auxProviderPromptCache,
                   ...(auxModelOptions ? { modelOptions: auxModelOptions } : {}),
+                  ...(verifierNeedsOwnOptions
+                    ? { verificationModelOptions: verifyModelOptions }
+                    : {}),
                 },
               ]
             : undefined,
@@ -2013,12 +2189,16 @@ async function runReviewPipeline(params: {
       }
     }
 
-    // Finders get the capped, relevance-ranked slice ONLY while the compliance
-    // session will actually run and audit the full set in parallel — keyed on
-    // the session's own final enable, not the option. Any reason it stays off
-    // (option, aux embedded-diff overflow, trivial-delta trim) widens finders
-    // back to the full set so no doc is seen by zero sessions.
-    const guidelinesForPrompt = incrementalLenses.guidelinePass ? finderGuidelines : guidelines;
+    // Slice-vs-widen policy lives in selectFinderGuidelineText; keyed on the
+    // compliance session's own final enable, not the option.
+    const guidelinesForPrompt = selectFinderGuidelineText({
+      discovered: discoveredGuidelines,
+      forFiles: changedFiles,
+      complianceRuns: incrementalLenses.guidelinePass,
+      mainCanReadWorkspace: backendCanReadWorkspace(providerID, mainCliBackend),
+      widen: options.guidelineWiden,
+      full: guidelines,
+    });
 
     // Embedded-only main backends carry the unbounded block buildShardPlans
     // renders for them, not the 40KB default. Shared with the budget log so
@@ -2142,6 +2322,21 @@ async function runReviewPipeline(params: {
         : undefined,
       evidenceQuotes: options.evidenceQuotes,
       embeddedFirstPrompt: options.embeddedFirstPrompt,
+      // Local mode has no PR to go stale; GitHub runs re-check before a retry
+      // of a long attempt. Fetch failures fail open inside runShardedReview.
+      ...(!localDiff && headSha
+        ? {
+            staleCheck: async () => {
+              const fresh = await getPullFreshness(octokit, owner, repo, pullNumber);
+              if (fresh.merged) return new StaleReviewError('merged');
+              if (fresh.state === 'closed') return new StaleReviewError('closed');
+              if (fresh.headSha && fresh.headSha !== headSha) {
+                return new StaleReviewError('head-moved');
+              }
+              return undefined;
+            },
+          }
+        : {}),
       log,
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
@@ -2224,13 +2419,102 @@ async function runReviewPipeline(params: {
       }),
     );
 
-    const { summary, findings } = await mainReview;
+    let summary: string;
+    let findings: Finding[];
+    try {
+      ({ summary, findings } = await mainReview);
+    } catch (error) {
+      // TASK-155: the PR merged, closed, or moved mid-review — nothing this
+      // run produces can post against the reviewed state. Not a failure: the
+      // freshest-head run (or none) is the correct outcome.
+      if (error instanceof StaleReviewError) {
+        mainExecutionDone('failed');
+        log(`Review abandoned before retry: ${error.message}. Posting nothing.`);
+        recordCoverage({ session: 'stale-before-retry', state: 'skipped' });
+        finishTelemetry('skipped');
+        return;
+      }
+      throw error;
+    }
     mainExecutionDone(
       'completed',
       telemetry.enabled
         ? Buffer.byteLength(summary) + Buffer.byteLength(JSON.stringify(findings))
         : undefined,
     );
+    // TASK-079 overlap arm (see the option's doc). NOT the 2026-06-29-rejected
+    // overlap-with-main: this starts only after the main review settles. The
+    // pre-pass mirrors the final pure pipeline WITHOUT telemetry rows — the
+    // final pass below stays the single recorded pipeline.
+    // 'skipped' = serial verification would ALSO have posted unverified
+    // (exhausted budget, failed verifier) — bypass late counting. An empty
+    // snapshot still returns a mergeable outcome so late arrivals count.
+    const startOverlapVerification = async (): Promise<
+      { targets: Finding[]; verdicts: FindingVerdictList; snapshotBlocking: Finding[] } | 'skipped'
+    > => {
+      const session = 'finding-verification';
+      const lists: Finding[][] = [findings];
+      if (lensPasses.isSettled()) {
+        lists.push(...(await lensPasses.promise.catch(() => [] as Finding[][])));
+      }
+      if (guidelineComplianceCheck.isSettled()) {
+        lists.push(await guidelineComplianceCheck.promise.catch(() => [] as Finding[]));
+      }
+      // Deep-ish copies: resolveFindingAnchors mutates `line` in place, and
+      // these are the very objects the final pipeline re-anchors and counts —
+      // a mutated pre-pass would empty the final `reanchored` telemetry.
+      const gatedLists = lists.map(
+        (list) =>
+          demoteLowConfidenceBlockingFindings(list.map((finding) => ({ ...finding }))).findings,
+      );
+      for (const list of gatedLists) {
+        resolveFindingAnchors(list, addable, patchByPath, options.evidenceQuotes);
+      }
+      const settled = suppressPreviouslyReported(
+        dedupeFindings(...gatedLists),
+        priorJbotThreads,
+        headSha ? addable : undefined,
+      ).findings;
+      const snapshotBlocking = selectBlockingFindingIndexes(settled, settled.length).map(
+        (index) => settled[index],
+      );
+      const indexes = selectBlockingFindingIndexes(settled, MAX_VERIFIED_FINDINGS);
+      if (indexes.length === 0) {
+        recordCoverage({ session, state: 'skipped' });
+        return { targets: [], verdicts: [], snapshotBlocking };
+      }
+      const timeoutMs = computeVerificationTimeoutMs(
+        options.timeBudgetMinutes,
+        Date.now() - runStartedAt,
+      );
+      if (timeoutMs === 0) {
+        log(
+          'Skipping finding verification: time budget exhausted; posting findings unverified (fail-open).',
+        );
+        recordCoverage({ session, state: 'skipped' });
+        return 'skipped';
+      }
+      const targets = indexes.map((index) => settled[index]);
+      log(
+        `Verifying ${targets.length} blocking finding(s) concurrently with the aux settle grace.`,
+      );
+      const verdicts = await requestFindingVerdicts({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: verifierPrContext,
+        targets,
+        timeoutMs,
+        modelOptions: verifierSessionOptions,
+        log,
+        onTokenUsage: recordTokenUsage,
+        onCoverage: recordCoverage,
+      });
+      return verdicts ? { targets, verdicts, snapshotBlocking } : 'skipped';
+    };
+    const overlapVerification =
+      options.verifyOverlapGrace && options.verifyFindings && auxSessionsEnabled
+        ? startOverlapVerification().catch(() => 'skipped' as const)
+        : undefined;
     const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
       lensPasses,
       addressedPriorCheck,
@@ -2249,6 +2533,34 @@ async function runReviewPipeline(params: {
     // rather than one. Each falls back to its own empty result — the same value
     // these sessions produce when they fail open on their own.
     const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
+    // Aborts the underlying sessions where the backend supports it (pi +
+    // opencode today); see abortSessionsByLabel.
+    const abandonAuxSessions = (labels: string[]) => () => {
+      for (const label of labels) {
+        // An aggregated group (the lens passes) abandons as one: a member that
+        // already settled must not be re-marked failed, and the registry count
+        // is the truth. Backends without abort support can't tell, so they
+        // keep the unconditional row.
+        const aborted = auxBackend.abortSessionsByLabel
+          ? auxBackend.abortSessionsByLabel(label, log)
+          : undefined;
+        if (aborted === 0) {
+          // Settled member of the group, or a prompt between registrations —
+          // either way its own terminal row lands when it settles.
+          log(`${label} had no in-flight session at grace expiry; no abandon row recorded.`);
+          continue;
+        }
+        // Durable record (TASK-076): the abandoned session's own failure row
+        // usually settles after telemetry has been emitted, so without this
+        // an abandonment leaves no trace in the artifact.
+        recordCoverage({
+          session: label,
+          state: 'failed',
+          error: new Error(aborted === undefined ? 'abandoned-after-grace' : 'aborted-after-grace'),
+        });
+        abandonedAuxLabels.add(label);
+      }
+    };
     const [
       lensFindingLists,
       // The dedicated parallel session is the single owner of addressed-thread
@@ -2257,10 +2569,34 @@ async function runReviewPipeline(params: {
       complianceFindings,
       changesSinceText,
     ] = await Promise.all([
-      settleWithinGrace(lensPasses, [], log),
-      settleWithinGrace(addressedPriorCheck, [], log),
-      settleWithinGrace(guidelineComplianceCheck, [], log),
-      settleWithinGrace(changesSinceLastReview, '', log),
+      settleWithinGrace(
+        lensPasses,
+        [],
+        log,
+        AUXILIARY_SETTLE_GRACE_MS,
+        abandonAuxSessions(incrementalLenses.lensKeys.map((key) => `review-${key}`)),
+      ),
+      settleWithinGrace(
+        addressedPriorCheck,
+        [],
+        log,
+        AUXILIARY_SETTLE_GRACE_MS,
+        abandonAuxSessions(['addressed-prior-comments']),
+      ),
+      settleWithinGrace(
+        guidelineComplianceCheck,
+        [],
+        log,
+        AUXILIARY_SETTLE_GRACE_MS,
+        abandonAuxSessions(['guideline-compliance']),
+      ),
+      settleWithinGrace(
+        changesSinceLastReview,
+        '',
+        log,
+        AUXILIARY_SETTLE_GRACE_MS,
+        abandonAuxSessions(['changes-since-last-review']),
+      ),
     ]);
     graceDone();
     // Gate confidence BEFORE deduping so each finding carries its effective
@@ -2320,17 +2656,49 @@ async function runReviewPipeline(params: {
       telemetry.enabled ? Buffer.byteLength(JSON.stringify(suppression.findings)) : undefined,
     );
     const verificationDone = phases.start({ phase: 'verification', scope: 'run' });
-    const verifiedFindings = await verifyBlockingFindings({
-      backend: auxBackend,
-      model: auxModel,
-      prContext: auxPrContext,
-      timeoutMs: computeVerificationTimeoutMs(options.timeBudgetMinutes, Date.now() - runStartedAt),
-      findings: suppression.findings,
-      enabled: options.verifyFindings && auxSessionsEnabled,
-      log,
-      onTokenUsage: recordTokenUsage,
-      onCoverage: recordCoverage,
-    });
+    let verifiedFindings: Finding[];
+    if (overlapVerification) {
+      const outcome = await overlapVerification;
+      if (outcome !== 'skipped') {
+        const merge = mergeVerdictsByLocation(
+          suppression.findings,
+          outcome.targets,
+          outcome.verdicts,
+          outcome.snapshotBlocking,
+        );
+        logVerdictOutcomes(merge, log);
+        if (merge.lateUnverified.length > 0) {
+          // TASK-080's rejection signal: revisit the overlap arm if this is
+          // ever nonzero for P0/P1 in practice.
+          log(
+            `${merge.lateUnverified.length} blocking finding(s) arrived after the verification snapshot and post unverified (fail-open): ${merge.lateUnverified
+              .map(formatFindingLocation)
+              .join(', ')}`,
+          );
+          recordCoverage({ session: 'late-unverified-findings', state: 'completed' });
+        }
+        verifiedFindings = merge.findings;
+      } else {
+        // Fail-open, same as a broken serial verifier.
+        verifiedFindings = suppression.findings;
+      }
+    } else {
+      verifiedFindings = await verifyBlockingFindings({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: verifierPrContext,
+        timeoutMs: computeVerificationTimeoutMs(
+          options.timeBudgetMinutes,
+          Date.now() - runStartedAt,
+        ),
+        findings: suppression.findings,
+        enabled: options.verifyFindings && auxSessionsEnabled,
+        modelOptions: verifierSessionOptions,
+        log,
+        onTokenUsage: recordTokenUsage,
+        onCoverage: recordCoverage,
+      });
+    }
     verificationDone(
       'completed',
       telemetry.enabled ? Buffer.byteLength(JSON.stringify(verifiedFindings)) : undefined,
@@ -2395,6 +2763,7 @@ async function runReviewPipeline(params: {
         headSha,
         tokenUsage.snapshot(),
         engineByModel,
+        mainReasoningEffort,
       );
       log(
         `Dry run enabled; would post verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
@@ -2437,6 +2806,7 @@ async function runReviewPipeline(params: {
         headSha,
         tokenUsage.snapshot(),
         engineByModel,
+        mainReasoningEffort,
       );
     const postCurrentReviewIfNeeded = async (): Promise<void> => {
       if (!shouldPostComment) {
@@ -2725,6 +3095,9 @@ export function normalizeOptions(
     shardCachePath: options?.shardCachePath ?? '',
     contextTrim: options?.contextTrim ?? false,
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
+    guidelineWiden: options?.guidelineWiden ?? 'auto',
+    verifierSlimContext: options?.verifierSlimContext ?? false,
+    verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     auxModel: options?.auxModel ?? '',
     auxApiKey: options?.auxApiKey ?? '',
     auxBaseURL: options?.auxBaseURL ?? '',
@@ -2733,6 +3106,7 @@ export function normalizeOptions(
     timeBudgetMinutes: Math.max(options?.timeBudgetMinutes ?? 0, 0),
     reviewShards: Math.max(options?.reviewShards ?? 0, 0),
     modelOptions: options?.modelOptions ?? {},
+    modelOptionsExplicit: options?.modelOptionsExplicit ?? false,
     promptCache: options?.promptCache ?? true,
     skipDocOnly: options?.skipDocOnly ?? true,
     dynamicFanout: options?.dynamicFanout ?? true,
@@ -2946,16 +3320,20 @@ const GRACE_EXPIRED = 'jbot: auxiliary settle grace expired';
  * of grace — otherwise a settled rejection would abort the run through the
  * caller's Promise.all.
  *
- * Bounds the WAIT, not the session: an abandoned prompt runs on and keeps its
- * concurrency slot until teardown, so with every slot held the verifier can
- * still queue behind one. Cancelling it needs abort plumbing through every
- * backend; until then the cap is on how long the run waits for results.
+ * Bounds the wait AND, where the backend supports it, the session: once the
+ * fallback is settled, `onAbandon` fires so the caller can abort the
+ * underlying prompt (TASK-076/077) — otherwise it runs on and keeps its
+ * concurrency slot until teardown, and with every slot held the verifier can
+ * still queue behind one. Settle-first ordering is deliberate (RISK-007): a
+ * result racing the abort keeps the result, and aborting an
+ * already-completed session is a backend no-op.
  */
 export function settleWithinGrace<T>(
   session: AuxiliarySession<T>,
   fallback: T,
   log: (msg: string) => void,
   graceMs = AUXILIARY_SETTLE_GRACE_MS,
+  onAbandon?: () => void,
 ): Promise<T> {
   if (session.isSettled()) return session.promise.catch(() => fallback);
   return withTimeout(session.promise, graceMs, GRACE_EXPIRED).catch((error: unknown) => {
@@ -2965,6 +3343,7 @@ export function settleWithinGrace<T>(
       log(
         `${session.label} still running ${graceMs / 1000}s after the main review; abandoning it.`,
       );
+      if (!session.isSettled()) onAbandon?.();
     }
     return fallback;
   });
@@ -2983,6 +3362,8 @@ async function verifyBlockingFindings(params: {
   findings: Finding[];
   enabled: boolean;
   timeoutMs?: number;
+  /** TASK-157: the verifier's floored options when the aux entry lacks them. */
+  modelOptions?: Record<string, unknown>;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
@@ -3009,47 +3390,82 @@ async function verifyBlockingFindings(params: {
   const targets = selectedIndexes.map((index) => params.findings[index]);
   params.log(`Verifying ${targets.length} blocking finding(s) before posting.`);
 
+  const verdicts = await requestFindingVerdicts({ ...params, targets });
+  if (!verdicts) return params.findings;
+
+  const application = applyFindingVerdicts(params.findings, selectedIndexes, verdicts);
+  logVerdictOutcomes(application, params.log);
+  return application.findings;
+}
+
+/**
+ * One verifier session call with the shared fail-open contract: undefined on
+ * any failure or unusable output, with the coverage row recorded. Used by the
+ * serial path above and the grace-overlap path (TASK-079).
+ */
+async function requestFindingVerdicts(params: {
+  backend: ReviewBackend;
+  model: string;
+  prContext: string;
+  targets: Finding[];
+  timeoutMs?: number;
+  modelOptions?: Record<string, unknown>;
+  log: (msg: string) => void;
+  onTokenUsage?: TokenUsageRecorder;
+  onCoverage?: SessionCoverageRecorder;
+}): Promise<FindingVerdictList | undefined> {
+  const session = 'finding-verification';
   const startedAt = Date.now();
   let verdicts;
   try {
     verdicts = await params.backend.runFindingVerification(
       params.model,
       params.prContext,
-      targets,
+      params.targets,
       params.log,
       params.timeoutMs,
       params.onTokenUsage,
+      params.modelOptions,
     );
   } catch (error) {
     params.log(
       `(skipped finding verification: ${error instanceof Error ? error.message : String(error)})`,
     );
     params.onCoverage?.({ session, state: 'failed', error, durationMs: Date.now() - startedAt });
-    return params.findings;
+    return undefined;
   }
   if (!verdicts) {
     params.log('(finding verification output unusable; keeping findings unverified)');
     params.onCoverage?.({ session, state: 'failed', durationMs: Date.now() - startedAt });
-    return params.findings;
+    return undefined;
   }
   params.onCoverage?.({ session, state: 'completed', durationMs: Date.now() - startedAt });
+  return verdicts;
+}
 
-  const application = applyFindingVerdicts(params.findings, selectedIndexes, verdicts);
+type FindingVerdictList = NonNullable<Awaited<ReturnType<ReviewBackend['runFindingVerification']>>>;
+
+function logVerdictOutcomes(
+  application: {
+    dropped: Array<{ finding: Finding; reason?: string }>;
+    demoted: Array<{ finding: Finding; reason?: string }>;
+  },
+  log: (msg: string) => void,
+): void {
   for (const { finding, reason } of application.dropped) {
-    params.log(
+    log(
       `Dropped refuted finding ${formatFindingLocation(finding)} "${finding.title}".${
         reason ? ` Reason: ${reason}` : ''
       }`,
     );
   }
   for (const { finding, reason } of application.demoted) {
-    params.log(
+    log(
       `Demoted uncertain finding ${formatFindingLocation(finding)} "${finding.title}" to P3.${
         reason ? ` Reason: ${reason}` : ''
       }`,
     );
   }
-  return application.findings;
 }
 
 function filterFindings(findings: Finding[], options: NormalizedReviewRunOptions): Finding[] {
@@ -3186,7 +3602,47 @@ function incompleteDiffFiles(result: ReturnType<typeof buildDiffHunksBlockWithMe
  * do not. In sharded mode each shard's findings are clamped in code to its
  * assigned files so parallel shards cannot duplicate or poach each other.
  */
-async function runShardedReview(params: {
+/**
+ * The verifier's slim context (TASK-065, JBOT_VERIFIER_SLIM_CONTEXT): the
+ * claim-checking inputs — untrusted-input guard, PR title/body/diff scope,
+ * linked issues, changed files, and the SAME full diff block the aux path
+ * carries — without the commits, prior comments/threads, playbooks, and
+ * summary instructions the verifier never cites. Exported for tests.
+ */
+export function buildSlimVerifierContext(params: {
+  pullTitle: string;
+  pullBody: string;
+  changedFiles: string[];
+  diffScope?: Parameters<typeof buildReviewContext>[0]['diffScope'];
+  linkedIssues: LinkedIssue[];
+  linkedIssuesOmitted: number;
+  auxDiffBlockText: string;
+}): string {
+  return joinContext(
+    UNTRUSTED_PR_CONTENT_NOTE,
+    buildReviewContext({
+      pullTitle: params.pullTitle,
+      pullBody: params.pullBody,
+      changedFiles: params.changedFiles,
+      priorComments: [],
+      commits: [],
+      checkSummary: 'Omitted for verification.',
+      guidelines: '',
+      ...(params.diffScope ? { diffScope: params.diffScope } : {}),
+      linkedIssues: params.linkedIssues,
+      linkedIssuesOmitted: params.linkedIssuesOmitted,
+    }),
+    // Invariant #4: the slim contract names what it omitted.
+    [
+      '## Slim verification context',
+      'Omitted for verification: commits, prior review comments, prior finding threads, review playbooks, and summary instructions. The findings under review were produced with that context.',
+    ].join('\n'),
+    params.auxDiffBlockText,
+  );
+}
+
+/** Exported for retry-policy tests; runReviewPipeline is the only production caller. */
+export async function runShardedReview(params: {
   backend: ReviewBackend;
   model: string;
   guidelinesForPrompt: string;
@@ -3200,6 +3656,12 @@ async function runShardedReview(params: {
   disableContext7?: () => Promise<void>;
   evidenceQuotes?: boolean;
   embeddedFirstPrompt?: boolean;
+  /**
+   * TASK-155: re-checks PR state before a retry of a long attempt; a returned
+   * error aborts the run (thrown) instead of retrying against a stale head.
+   * Absent in local mode.
+   */
+  staleCheck?: () => Promise<StaleReviewError | undefined>;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
@@ -3215,6 +3677,20 @@ async function runShardedReview(params: {
     if (context7Disabled) return;
     context7Disabled = true;
     await params.disableContext7?.();
+  };
+  // Simultaneous shard failures share one freshness fetch, but a LATER
+  // failure re-checks: a head that moved after an earlier "fresh" answer must
+  // still cancel the retry. A broken fetch fails open (never blocks a retry).
+  let staleCheckInFlight: Promise<StaleReviewError | undefined> | undefined;
+  const checkStale = (): Promise<StaleReviewError | undefined> => {
+    if (!params.staleCheck) return Promise.resolve(undefined);
+    staleCheckInFlight ??= params
+      .staleCheck()
+      .catch(() => undefined)
+      .finally(() => {
+        staleCheckInFlight = undefined;
+      });
+    return staleCheckInFlight;
   };
 
   const outcomes: ShardOutcome[] = await Promise.all(
@@ -3301,6 +3777,12 @@ async function runShardedReview(params: {
         if (params.cache && retryFingerprint) {
           const cached = loadCachedShardResult(params.cache.dir, retryFingerprint);
           if (cached) {
+            // Unconditional, unlike the live retry's 60s gate (TASK-155's
+            // spec guards a model-window spend): the entry may come from a
+            // prior run, this costs one fail-open GET, and posting it against
+            // a merged, closed, or moved PR is as pointless as a live retry.
+            const stale = await checkStale();
+            if (stale) throw stale;
             log(`${plan.label}: reusing cached retry result (${retryFingerprint}).`);
             params.onCoverage?.({
               session: `${plan.label}-retry`,
@@ -3309,6 +3791,24 @@ async function runShardedReview(params: {
             });
             return { plan, result: cached };
           }
+        }
+        // TASK-150: a deterministic failure re-buys the identical error for up
+        // to another finder window; only plausibly-transient classes retry.
+        // Exception: the retry DIFFERS when Context7 was active (baseContext
+        // strips the block), so a context-length failure may fit there.
+        const { failureClass, retryable } = classifyMainShardFailure(error);
+        const retryPromptDiffers = params.context7Active;
+        if (!retryable && !(failureClass === 'context-length' && retryPromptDiffers)) {
+          log(
+            `${plan.label} failed with a non-retryable ${failureClass} error; skipping the retry.`,
+          );
+          return { plan, error };
+        }
+        // TASK-155: a long attempt leaves room for the PR to merge, close, or
+        // move; re-check before spending another window on a stale head.
+        if (Date.now() - startedAt > STALE_CHECK_MIN_ATTEMPT_MS) {
+          const stale = await checkStale();
+          if (stale) throw stale;
         }
         const retryTimeoutMs = computeRetryTimeoutMs(params.deadlineAt, Date.now(), timeoutMs);
         if (retryTimeoutMs === 0) {
@@ -3903,6 +4403,7 @@ export function buildBody(
   headSha?: string,
   tokenUsage?: ReviewTokenUsage,
   engineByModel?: Record<string, string>,
+  reasoningEffort?: string,
 ): string {
   const total = all.length;
   const lines = ['## J-Bot Code Review', ''];
@@ -3939,13 +4440,21 @@ export function buildBody(
   }
   const orphanedSection = renderOrphanedSection(orphaned);
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
-  lines.push(...renderReviewMetadataBlock(model, tokenUsage));
+  lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));
   lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
   return lines.join('\n');
 }
 
-export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewTokenUsage): string[] {
+export function renderReviewMetadataBlock(
+  model: string,
+  tokenUsage?: ReviewTokenUsage,
+  reasoningEffort?: string,
+): string[] {
   if (!tokenUsage) return [];
+  // The stamp renders inside a fenced block; anything but a plain tier token
+  // (an operator-supplied oddity) is dropped rather than risking the fence.
+  const effort =
+    reasoningEffort && /^[A-Za-z0-9._-]{1,32}$/.test(reasoningEffort) ? reasoningEffort : undefined;
   const models = uniqueModels(model, tokenUsage.models);
   return [
     '',
@@ -3954,6 +4463,7 @@ export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewToke
     '',
     '```text',
     models.length === 1 ? `model=${models[0]}` : `models=${models.join(', ')}`,
+    ...(effort ? [`reasoning effort=${effort}`] : []),
     `input=${tokenUsage.input}`,
     `output=${tokenUsage.output}`,
     `reasoning=${tokenUsage.reasoning}`,

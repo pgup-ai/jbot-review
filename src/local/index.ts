@@ -17,7 +17,12 @@ import {
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_ACP_BIN, CODEX_PROVIDER_ID } from '@symma/protocol';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
-import { defaultModelOptions, parseEnvBoolean, resolvePoolCredentials } from '../shared/config.ts';
+import {
+  defaultModelOptions,
+  parseEnvBoolean,
+  parseEnvGuidelineWiden,
+  resolvePoolCredentials,
+} from '../shared/config.ts';
 import {
   CURSOR_CLI_BIN,
   CURSOR_PROVIDER_ID,
@@ -565,6 +570,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
       reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
       dynamicFanout: parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),
       modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', defaultModelOptions(provider)),
+      modelOptionsExplicit: Boolean(process.env.JBOT_MODEL_OPTIONS?.trim()),
       promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),
       skipDocOnly: parseEnvBoolean('JBOT_SKIP_DOC_ONLY', true),
       maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),
@@ -572,6 +578,9 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
       evidenceQuotes: parseEnvBoolean('JBOT_EVIDENCE_QUOTES', true),
       contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
       embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
+      guidelineWiden: parseEnvGuidelineWiden('JBOT_GUIDELINE_WIDEN'),
+      verifierSlimContext: parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
+      verifyOverlapGrace: parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
       ...(opencodePort ? { opencodePort } : {}),
       onReviewResult: (result) => {
         reviewResult = result;

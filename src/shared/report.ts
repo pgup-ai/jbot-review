@@ -16,9 +16,11 @@ function findingLine(finding: Finding): string {
  * The "outside the diff" section: findings that could not be anchored inline,
  * listed flat with their full bodies (they are uncommon and self-contained).
  */
+export const ORPHANED_FINDINGS_HEADING = '### Findings (outside the diff)';
+
 export function renderOrphanedSection(orphaned: Finding[]): string[] {
   if (orphaned.length === 0) return [];
-  const lines = ['### Findings (outside the diff)', ''];
+  const lines = [ORPHANED_FINDINGS_HEADING, ''];
   for (const finding of orphaned) lines.push(findingLine(finding), `  ${finding.body}`);
   return lines;
 }

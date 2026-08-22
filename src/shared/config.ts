@@ -180,8 +180,8 @@ export interface ModelConfig {
   promptCache?: boolean;
   /**
    * Reasoning efforts this model accepts. Omitted means every effort is fine;
-   * a request outside the list is dropped so the provider applies its own
-   * default rather than rejecting the call.
+   * a request outside the list is clamped to the nearest supported tier
+   * (ties upward) so the provider never rejects the call (TASK-157).
    */
   reasoningEfforts?: readonly string[];
 }
@@ -193,12 +193,15 @@ const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
 } satisfies Record<string, ModelConfig>;
 
 /**
- * Models that always reason and accept only these efforts: the main pass's
- * `medium` is a hard 400 ("[1210] This model always engages in thinking and
- * cannot be disabled; please use low, high, or max"), which no retry recovers.
+ * Models whose declared efforts are the only ones that work. x-preview
+ * hard-400s on anything else ("[1210] This model always engages in thinking
+ * and cannot be disabled; please use low, high, or max"), which no retry
+ * recovers. mimo accepts `low` but silently collapses there (probed
+ * 2026-08-22: empty or wrong output; correct at medium/high).
  */
-const ALWAYS_THINKING_MODELS = {
+const EFFORT_RESTRICTED_MODELS = {
   'x-preview-f-free': { reasoningEfforts: ['low', 'high', 'max'] },
+  'mimo-v2.5-free': { reasoningEfforts: ['medium', 'high'] },
 } satisfies Record<string, ModelConfig>;
 
 // See https://models.dev/ for opencode-backed model catalogs. CLI backends
@@ -208,7 +211,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'opencode/deepseek-v4-flash-free',
     keyEnv: 'OPENCODE_API_KEY',
     keyInput: 'opencode-api-key',
-    models: ALWAYS_THINKING_MODELS,
+    models: EFFORT_RESTRICTED_MODELS,
   },
   'opencode-go': {
     defaultModel: 'opencode-go/deepseek-v4-flash',
@@ -429,10 +432,42 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
   return PROVIDERS[providerID]?.models?.[modelID]?.promptCache !== false;
 }
 
+// Provider-managed values (poolside's 'default') stay outside this order.
+const REASONING_EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+function effortRank(effort: string): number {
+  return REASONING_EFFORT_ORDER.indexOf(effort as (typeof REASONING_EFFORT_ORDER)[number]);
+}
+
 /**
- * Drops a `reasoningEffort` the model would reject. Model options are resolved
- * per provider before a pool entry is chosen, so this is the first point that
- * knows both the model and the effort.
+ * Nearest supported tier for a requested effort, ties resolved UPWARD so a
+ * ladder without `medium` cannot quietly reinstate a lower tier (TASK-157).
+ * Out-of-range requests clamp to the ladder's end; efforts outside the rank
+ * order (provider-managed values) return undefined — the caller drops them.
+ */
+export function clampReasoningEffort(
+  requested: string,
+  supported: readonly string[],
+): string | undefined {
+  const want = effortRank(requested);
+  if (want < 0) return undefined;
+  return supported
+    .filter((effort) => effortRank(effort) >= 0)
+    .reduce<string | undefined>((best, effort) => {
+      if (best === undefined) return effort;
+      const distance = Math.abs(effortRank(effort) - want);
+      const bestDistance = Math.abs(effortRank(best) - want);
+      if (distance < bestDistance) return effort;
+      return distance === bestDistance && effortRank(effort) > effortRank(best) ? effort : best;
+    }, undefined);
+}
+
+/**
+ * Clamps a `reasoningEffort` the model would reject to its nearest supported
+ * tier (the provider 400s on unsupported efforts, non-retryably), dropping it
+ * only when no tier is rankable. Model options are resolved per provider
+ * before a pool entry is chosen, so this is the first point that knows both
+ * the model and the effort.
  */
 export function supportedModelOptions(
   providerID: string,
@@ -442,8 +477,32 @@ export function supportedModelOptions(
   const supported = PROVIDERS[providerID]?.models?.[modelID]?.reasoningEfforts;
   const effort = modelOptions?.reasoningEffort;
   if (!supported || typeof effort !== 'string' || supported.includes(effort)) return modelOptions;
+  const clamped = clampReasoningEffort(effort, supported);
   const { reasoningEffort: _dropped, ...rest } = modelOptions!;
-  return rest;
+  return clamped ? { ...rest, reasoningEffort: clamped } : rest;
+}
+
+/**
+ * The verifier's model options (TASK-157): a verifier reasoning below the
+ * finder cannot overturn the finder's reasoning errors, so parity with the
+ * main pass is the floor. `undefined` aux options mean the verifier shares
+ * the main model entry, where parity already holds. Efforts outside the rank
+ * order (provider-managed) are left alone.
+ */
+export function verificationModelOptions(
+  mainOptions: Record<string, unknown> | undefined,
+  auxOptions: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!auxOptions) return undefined;
+  const mainEffort = mainOptions?.reasoningEffort;
+  if (typeof mainEffort !== 'string' || effortRank(mainEffort) < 0) return auxOptions;
+  const auxEffort = auxOptions.reasoningEffort;
+  // Floor only a RANKABLE aux effort below the main one. Provider-managed
+  // values (poolside 'default') and effort-less entries (custom providers
+  // omit the key by policy — arbitrary endpoints may reject it) stay as-is.
+  if (typeof auxEffort !== 'string' || effortRank(auxEffort) < 0) return auxOptions;
+  if (effortRank(auxEffort) >= effortRank(mainEffort)) return auxOptions;
+  return { ...auxOptions, reasoningEffort: mainEffort };
 }
 
 export interface PromptCachePolicyInput {
@@ -502,4 +561,9 @@ export function parseEnvBoolean(name: string, defaultValue: boolean): boolean {
   if (raw === 'false') return false;
   if (raw === 'true') return true;
   return defaultValue;
+}
+
+/** JBOT_GUIDELINE_WIDEN: only the exact 'full' restores widen-everywhere. */
+export function parseEnvGuidelineWiden(name: string): 'auto' | 'full' {
+  return process.env[name]?.trim().toLowerCase() === 'full' ? 'full' : 'auto';
 }

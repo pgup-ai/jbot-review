@@ -211,6 +211,64 @@ export interface VerdictApplication {
  * findings are dropped, uncertain ones demoted to advisory; a selected
  * finding with no verdict passes through unchanged (fail-open per finding).
  */
+export interface OverlapVerdictMerge extends VerdictApplication {
+  /** Blocking findings that arrived after the verification snapshot (posted unverified). */
+  lateUnverified: Finding[];
+}
+
+/**
+ * Applies grace-overlap verification verdicts (TASK-079) to the FINAL finding
+ * list, which can differ from the snapshot the verifier judged. Identity is
+ * path:line:title — the title keeps a verdict off any finding the verifier
+ * never judged (distinct file-level findings share line 0, and a stronger
+ * LATE finding can replace the judged one at its exact line). `lateUnverified`
+ * (TASK-080's rejection signal) counts blocking findings absent from the
+ * whole SNAPSHOT, not merely unselected by the verification cap — a capped
+ * snapshot finding was not late. Fail-open per finding, like
+ * `applyFindingVerdicts`.
+ */
+export function mergeVerdictsByLocation(
+  findings: Finding[],
+  verifiedTargets: Finding[],
+  verdicts: FindingVerdict[],
+  snapshotBlocking: Finding[],
+): OverlapVerdictMerge {
+  const verdictByPosition = new Map(verdicts.map((verdict) => [verdict.index, verdict]));
+  // JSON-encoded tuple: fields can carry ':' themselves, and a joined string
+  // would let "a:1"+2+"x" forge the identity of "a"+1+"2:x".
+  const identityOf = (finding: Finding) =>
+    JSON.stringify([finding.path, finding.line, finding.title]);
+  const verdictByIdentity = new Map<string, FindingVerdict | undefined>();
+  verifiedTargets.forEach((target, position) => {
+    verdictByIdentity.set(identityOf(target), verdictByPosition.get(position));
+  });
+  const snapshotIdentities = new Set(
+    [...snapshotBlocking, ...verifiedTargets].map((finding) => identityOf(finding)),
+  );
+
+  const dropped: VerdictApplication['dropped'] = [];
+  const demoted: VerdictApplication['demoted'] = [];
+  const lateUnverified: Finding[] = [];
+  const result = findings.flatMap((finding) => {
+    const identity = identityOf(finding);
+    if (!verdictByIdentity.has(identity)) {
+      if (BLOCKING_SEVERITIES.has(finding.severity) && !snapshotIdentities.has(identity)) {
+        lateUnverified.push(finding);
+      }
+      return [finding];
+    }
+    const verdict = verdictByIdentity.get(identity);
+    if (!verdict || verdict.verdict === 'confirmed') return [finding];
+    if (verdict.verdict === 'refuted') {
+      dropped.push({ finding, reason: verdict.reason });
+      return [];
+    }
+    demoted.push({ finding, reason: verdict.reason });
+    return [{ ...finding, severity: 'P3' as const }];
+  });
+  return { findings: result, dropped, demoted, lateUnverified };
+}
+
 export function applyFindingVerdicts(
   findings: Finding[],
   selectedIndexes: number[],

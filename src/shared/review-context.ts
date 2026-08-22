@@ -405,6 +405,41 @@ export function truncatePrBody(body: string): string {
   return buffer.toString('utf8', 0, findUtf8Boundary(buffer, budget)) + PR_BODY_TRUNCATION_NOTICE;
 }
 
+// These blocks grow with PR maturity and were the last uncapped ones
+// (invariant #4). Budgets sit alongside the PR-body/linked-issue caps above.
+export const MAX_CHANGED_FILES_BYTES = 8 * 1024;
+export const MAX_COMMITS_BYTES = 4 * 1024;
+export const MAX_PRIOR_COMMENTS_BYTES = 8 * 1024;
+// One runaway comment must not evict every other one from the capped block.
+const MAX_PRIOR_COMMENT_ENTRY_CHARS = 2_000;
+
+/**
+ * Keeps whole entries in order until the byte budget, then one disclosure
+ * line. The disclosure's widest form is reserved up front so it always fits.
+ */
+function capListSection(
+  header: string,
+  entries: string[],
+  budgetBytes: number,
+  omission: (omitted: number) => string,
+): string {
+  const lines = [header];
+  let used = Buffer.byteLength(header, 'utf8');
+  const reserve = Buffer.byteLength(`\n${omission(entries.length)}`, 'utf8');
+  let omitted = 0;
+  for (const [index, entry] of entries.entries()) {
+    const cost = Buffer.byteLength(`\n${entry}`, 'utf8');
+    if (used + cost + reserve > budgetBytes) {
+      omitted = entries.length - index;
+      break;
+    }
+    lines.push(entry);
+    used += cost;
+  }
+  if (omitted > 0) lines.push(omission(omitted));
+  return lines.join('\n');
+}
+
 export function buildReviewContext(params: BuildReviewContextParams): string {
   const sections: string[] = [];
 
@@ -424,36 +459,44 @@ export function buildReviewContext(params: BuildReviewContextParams): string {
   if (linkedIssuesBlock) sections.push(linkedIssuesBlock);
 
   sections.push(
-    [
-      '## Changed files',
-      params.changedFiles.length > 0
-        ? params.changedFiles.map((file) => `- ${file}`).join('\n')
-        : '(none)',
-    ].join('\n'),
+    params.changedFiles.length > 0
+      ? capListSection(
+          '## Changed files',
+          params.changedFiles.map((file) => `- ${file}`),
+          MAX_CHANGED_FILES_BYTES,
+          (omitted) =>
+            `(and ${omitted} more changed file(s) not listed to keep the prompt bounded; the diff itself is unaffected.)`,
+        )
+      : '## Changed files\n(none)',
   );
 
   sections.push(
-    [
-      '## Commits',
-      params.commits.length > 0
-        ? params.commits
-            .map((commit) => {
-              const author = commit.author ? ` (${commit.author})` : '';
-              return `- ${commit.sha.slice(0, 7)}${author}: ${commit.message}`;
-            })
-            .join('\n')
-        : '(none)',
-    ].join('\n'),
+    params.commits.length > 0
+      ? capListSection(
+          '## Commits',
+          params.commits.map((commit) => {
+            const author = commit.author ? ` (${commit.author})` : '';
+            return `- ${commit.sha.slice(0, 7)}${author}: ${commit.message}`;
+          }),
+          MAX_COMMITS_BYTES,
+          (omitted) => `(and ${omitted} more commit(s) not listed.)`,
+        )
+      : '## Commits\n(none)',
   );
 
   sections.push(['## Check status summary', params.checkSummary || '(unavailable)'].join('\n'));
 
   if (params.priorComments.length > 0) {
     sections.push(
-      [
+      capListSection(
         '## Prior review comments',
-        params.priorComments.map((comment) => `- ${comment}`).join('\n'),
-      ].join('\n'),
+        params.priorComments.map(
+          (comment) =>
+            `- ${comment.length > MAX_PRIOR_COMMENT_ENTRY_CHARS ? `${comment.slice(0, MAX_PRIOR_COMMENT_ENTRY_CHARS)}…` : comment}`,
+        ),
+        MAX_PRIOR_COMMENTS_BYTES,
+        (omitted) => `(and ${omitted} more prior review comment(s) not shown.)`,
+      ),
     );
   }
 
@@ -790,6 +833,8 @@ export function formatGuidelines(discovered: DiscoveredGuidelines): string {
  * spend attention on the diff, not on the full standards corpus.
  */
 export const MAX_FINDER_GUIDELINE_BYTES = 24 * 1024;
+// Rendered omitted-doc labels in the budget note (invariant #4 backstop).
+const MAX_OMITTED_LABEL_BYTES = 1024;
 
 /**
  * Relevance-ranked, byte-capped render for finder sessions (shards + lenses).
@@ -800,9 +845,10 @@ export const MAX_FINDER_GUIDELINE_BYTES = 24 * 1024;
  */
 export function formatFinderGuidelines(
   discovered: DiscoveredGuidelines,
-  options: { capBytes?: number; forFiles?: string[] } = {},
+  options: { capBytes?: number; forFiles?: string[]; complianceCovers?: boolean } = {},
 ): string {
   const capBytes = options.capBytes ?? MAX_FINDER_GUIDELINE_BYTES;
+  const complianceCovers = options.complianceCovers ?? true;
 
   // A rule that declared its own path scope and matches none of the changed
   // files ranks below everything else: demoted (first out under the cap),
@@ -850,15 +896,68 @@ export function formatFinderGuidelines(
     );
   }
   if (budgetNotes.length > 0) {
+    // When the compliance pass is skipped, "the full set is reviewed" would be
+    // false — name the omitted docs instead so a tool-capable finder can read
+    // any that apply. The label list is itself byte-capped: labels are not
+    // charged to any other budget, and a hostile repo could regrow the block
+    // through hundreds of long paths.
+    // Referenced-but-unloaded docs count too: the full rendering exposed
+    // their paths, and with compliance skipped no other session names them.
+    const omittedLabels = [
+      ...discovered.docs.filter((_, index) => !keptIndices.has(index)).map((doc) => doc.label),
+      ...discovered.referenced,
+    ];
+    const shownLabels: string[] = [];
+    let labelBytes = 0;
+    for (const label of omittedLabels) {
+      labelBytes += Buffer.byteLength(`${label}, `, 'utf8');
+      if (labelBytes > MAX_OMITTED_LABEL_BYTES) break;
+      shownLabels.push(label);
+    }
+    const hidden = omittedLabels.length - shownLabels.length;
+    const coverage = complianceCovers
+      ? 'The full set is reviewed by the separate guideline-compliance pass.'
+      : omittedLabels.length === 0
+        ? 'The guideline-compliance pass is not running this run.'
+        : shownLabels.length === 0
+          ? `The guideline-compliance pass is not running this run; ${omittedLabels.length} omitted file(s) not listed (label budget).`
+          : `The guideline-compliance pass is not running this run; omitted file(s): ${shownLabels.join(
+              ', ',
+            )}${hidden > 0 ? ` and ${hidden} more omitted file(s)` : ''}. Read any that apply to your changed files.`;
     sections.push(
-      [
-        '### Review guidance budget',
-        `${budgetNotes.join('; ')}. The full set is reviewed by the separate guideline-compliance pass.`,
-      ].join('\n'),
+      ['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n'),
     );
   }
 
   return sections.join('\n\n');
+}
+
+/**
+ * The guideline text a finder session receives. When the compliance pass runs
+ * it audits the full set in parallel, so finders keep the relevance-ranked
+ * slice — byte-identical to the slice used before this selector existed. When
+ * it is skipped, only backends that cannot read the checkout still widen to
+ * the full set ("no doc seen by zero sessions" is load-bearing only there);
+ * tool-capable finders keep the slice with the omitted docs named for
+ * on-demand reads. `widen: 'full'` (JBOT_GUIDELINE_WIDEN=full) restores the
+ * old widen-everywhere behavior.
+ */
+export function selectFinderGuidelineText(params: {
+  discovered: DiscoveredGuidelines;
+  forFiles: string[];
+  complianceRuns: boolean;
+  mainCanReadWorkspace: boolean;
+  widen: 'auto' | 'full';
+  full: string;
+}): string {
+  if (params.complianceRuns) {
+    return formatFinderGuidelines(params.discovered, { forFiles: params.forFiles });
+  }
+  if (params.widen === 'full' || !params.mainCanReadWorkspace) return params.full;
+  return formatFinderGuidelines(params.discovered, {
+    forFiles: params.forFiles,
+    complianceCovers: false,
+  });
 }
 
 function extractMarkdownDocumentReferences(markdown: string): string[] {
