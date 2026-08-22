@@ -68,6 +68,26 @@ describe('limitReviewBackendSessions', () => {
     assert.deepEqual(priorities, ['high', 'high', 'normal', 'normal']);
   });
 
+  it('passes the abort handle through the limiter (TASK-076)', () => {
+    const aborted: string[] = [];
+    const backend = {
+      ...makeBackend(),
+      abortSessionsByLabel: (label: string) => void aborted.push(label),
+    };
+    const limited = limitReviewBackendSessions(backend, 'aux', {
+      acquire: async () => () => undefined,
+    });
+
+    limited.abortSessionsByLabel?.('review-frontend', () => {});
+    assert.deepEqual(aborted, ['review-frontend']);
+    // Backends without the handle stay without it — callers can feature-test.
+    assert.equal(
+      limitReviewBackendSessions(makeBackend(), 'aux', { acquire: async () => () => undefined })
+        .abortSessionsByLabel,
+      undefined,
+    );
+  });
+
   it('passes the verifier model options through the limiter (TASK-157)', async () => {
     const seen: unknown[] = [];
     const backend = makeBackend();

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
+  abortPiSessionsByLabel,
   PI_MIN_NODE_VERSION,
   PI_TELEMETRY_CAPABILITY,
   runPiAddressedPriorCommentsCheck,
@@ -462,6 +463,40 @@ describe('Pi review sessions', () => {
     };
     return runtime;
   };
+
+  it('aborts an in-flight labeled session at grace abandonment (TASK-077)', async () => {
+    // Grace expiry used to bound only the WAIT: the abandoned session kept
+    // generating and held its slot until teardown. The label registry lets the
+    // runner abort it the moment its fallback is settled.
+    const events: string[] = [];
+    const runtime = fakeRuntime(false, events);
+    runtime.sdk.createAgentSession = async () => {
+      const session = {
+        messages: [] as unknown[],
+        prompt: () => new Promise<void>(() => {}),
+        abort: async () => void events.push('aborted'),
+        dispose: () => events.push('disposed'),
+      };
+      return { session };
+    };
+
+    const pending = runPiGuidelineComplianceCheck(
+      runtime,
+      'deepseek/deepseek-v4-flash',
+      'ctx',
+      'guidelines',
+      () => {},
+      200,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    abortPiSessionsByLabel(runtime, 'guideline-compliance', () => {});
+    assert.deepEqual(events, ['aborted', 'disposed']);
+    // Unknown labels are a no-op.
+    abortPiSessionsByLabel(runtime, 'no-such-label', () => {});
+    // The abandoned call still times out on its own; fail-open lives in the
+    // runner's aux wrapper, which converts this rejection into the fallback.
+    await assert.rejects(pending, /did not finish/);
+  });
 
   it('delivers the verifier effort as a per-session thinking level (TASK-157)', async () => {
     // pi's runtime thinking level is main-model-only; without the override a

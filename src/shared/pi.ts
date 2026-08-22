@@ -678,6 +678,11 @@ export interface PiRuntime {
   activeSessions: Set<PiAgentSessionLike>;
   /** Set by stop(); a session born after the teardown sweep aborts itself. */
   stopped: boolean;
+  /**
+   * In-flight sessions by prompt label, for the grace-expiry abort
+   * (TASK-077). Optional and lazily created so test fakes stay minimal.
+   */
+  sessionsByLabel?: Map<string, Set<PiAgentSessionLike>>;
 }
 
 function requirePiProvider(providerID: string): string {
@@ -855,6 +860,8 @@ async function createPiSession(
   reviewSession = false,
   /** Per-session override (TASK-157: the verifier's floored effort). */
   thinkingLevelOverride?: string,
+  /** Registers the session for the grace-expiry abort (TASK-077). */
+  label?: string,
 ): Promise<PiAgentSessionLike> {
   const { providerID, modelID } = parseModelName(model);
   const modelRef = requirePiModel(runtime.modelRuntime, providerID, modelID);
@@ -878,6 +885,12 @@ async function createPiSession(
     ...(thinkingLevel ? { thinkingLevel } : {}),
   });
   runtime.activeSessions.add(session);
+  if (label) {
+    const byLabel = (runtime.sessionsByLabel ??= new Map());
+    const labeled = byLabel.get(label) ?? new Set<PiAgentSessionLike>();
+    byLabel.set(label, labeled);
+    labeled.add(session);
+  }
   if (runtime.toolTelemetry) piSessionTelemetry.set(session, runtime.toolTelemetry);
   // stop() may have swept the registry while createAgentSession was pending
   // (an abandoned caller racing teardown): abort the newborn session and fail
@@ -1028,6 +1041,23 @@ async function abortPiSessionBestEffort(
  * would hold a referenced timer — and the caller — for up to PI_ABORT_TIMEOUT_MS
  * on a hanging abort, which is the delay aborting exists to release.
  */
+/**
+ * Best-effort abort of every in-flight session created under `label`, used
+ * when the settle grace abandons an auxiliary result (TASK-077): the fallback
+ * has already been settled, so the session's remaining work is pure waste —
+ * decode, a held concurrency slot, and process linger.
+ */
+export function abortPiSessionsByLabel(
+  runtime: PiRuntime,
+  label: string,
+  log: (msg: string) => void,
+): void {
+  const labeled = runtime.sessionsByLabel?.get(label);
+  if (!labeled || labeled.size === 0) return;
+  // Abandoning deletes only the visited element — safe during Set iteration.
+  for (const session of labeled) abandonPiSession(runtime, session, label, log);
+}
+
 function abandonPiSession(
   runtime: PiRuntime,
   session: PiAgentSessionLike,
@@ -1052,6 +1082,7 @@ function disposePiSession(
 ): void {
   // Idempotent: teardown disposes abandoned sessions, whose own callers still
   // run this from their finally once the abort settles their prompt.
+  runtime.sessionsByLabel?.get(label)?.delete(session);
   if (!runtime.activeSessions.delete(session)) return;
   const failed = (error: unknown) =>
     log(
@@ -1094,7 +1125,7 @@ export async function runPiReview(
     options.embeddedFirstPrompt ?? false,
   );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
-  const session = await createPiSession(runtime, model, false, true);
+  const session = await createPiSession(runtime, model, false, true, undefined, label);
   try {
     const raw = await promptPiSession(
       session,
@@ -1195,7 +1226,7 @@ export async function runPiAddressedPriorCommentsCheck(
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<AddressedPriorComment[]> {
   const label = 'addressed-prior-comments';
-  const session = await createPiSession(runtime, model, false);
+  const session = await createPiSession(runtime, model, false, false, undefined, label);
   try {
     const raw = await promptPiSession(
       session,
@@ -1231,7 +1262,7 @@ export async function runPiGuidelineComplianceCheck(
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<Finding[]> {
   const label = 'guideline-compliance';
-  const session = await createPiSession(runtime, model, false);
+  const session = await createPiSession(runtime, model, false, false, undefined, label);
   try {
     const raw = await promptPiSession(
       session,
@@ -1271,7 +1302,7 @@ export async function runPiChangesSinceLastReview(
   // git_diff only serves the full base...HEAD diff — offering it would let the
   // model describe old PR changes as new. The commit list is embedded in the
   // prompt, so it summarizes from that.
-  const session = await createPiSession(runtime, model, true);
+  const session = await createPiSession(runtime, model, true, false, undefined, label);
   try {
     const raw = await promptPiSession(
       session,
@@ -1310,7 +1341,7 @@ export async function runPiFindingVerification(
   const prompt = assembleFindingVerificationPrompt(prContext, findings, true);
   // TASK-157: the runner passes the verifier's floored options when the aux
   // entry does not already deliver them; pi maps them per session.
-  const session = await createPiSession(runtime, model, true, false, piThinkingLevel(modelOptions));
+  const session = await createPiSession(runtime, model, true, false, piThinkingLevel(modelOptions), label);
   try {
     const raw = await promptPiSession(session, model, prompt, label, log, timeoutMs, onTokenUsage);
     return parseFindingVerdicts(raw, findings.length, log);

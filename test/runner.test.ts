@@ -860,6 +860,29 @@ describe('settleWithinGrace', () => {
     assert.match(logs.join('\n'), /lens still running .* after the main review; abandoning it/);
   });
 
+  it('aborts the underlying session on abandonment, settle-first (TASK-076/077)', async () => {
+    // The fallback resolves before the abort fires (RISK-007), and sessions
+    // that settled on their own — success or failure — are never aborted.
+    const abandoned: string[] = [];
+    const stuck = new Promise<number[]>(() => {});
+    assert.deepEqual(
+      await settleWithinGrace(session(stuck), [], () => {}, 5, () => abandoned.push('stuck')),
+      [],
+    );
+    assert.deepEqual(abandoned, ['stuck']);
+
+    await settleWithinGrace(session(Promise.resolve([1])), [], () => {}, 1000, () =>
+      abandoned.push('done'),
+    );
+    const failed = Promise.reject(new Error('boom'));
+    failed.catch(() => {});
+    await settleWithinGrace(session(failed), [], () => {}, 1000, () => abandoned.push('failed'));
+    await settleWithinGrace(session(Promise.resolve(['kept']), true), [], () => {}, 0, () =>
+      abandoned.push('settled'),
+    );
+    assert.deepEqual(abandoned, ['stuck']);
+  });
+
   it('returns the real value when it lands inside the grace', async () => {
     const done = Promise.resolve([1]);
     assert.deepEqual(await settleWithinGrace(session(done), [], () => {}, 1000), [1]);

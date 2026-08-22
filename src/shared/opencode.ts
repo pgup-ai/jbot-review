@@ -1021,6 +1021,7 @@ async function promptPlanAgent(
   });
   const session = created.data;
   if (!session) throw new Error(`Failed to create ${label} session`);
+  registerOpencodeSessionForAbort(client, label, session.id);
   log(`${label} session created: ${session.id}`);
 
   const raw = await promptPlanAgentInSession(
@@ -1143,6 +1144,37 @@ async function promptInSessionHoldingSlot(
     log(`${label} response contained no text part (types: ${parts.map((p) => p.type).join(', ')})`);
   log(`Extracted ${label} text: ${raw.length} chars from ${textParts.length} text part(s)`);
   return raw;
+}
+
+/**
+ * Grace-abandon abort registry (TASK-076): sessions register at creation and
+ * stay registered — aborting a finished session is a server-side no-op, the
+ * set is cleared on the first abort, and the registry dies with the client.
+ */
+const abortableSessionsByLabel = new WeakMap<OpencodeClient, Map<string, Set<string>>>();
+
+export function registerOpencodeSessionForAbort(
+  client: OpencodeClient,
+  label: string,
+  sessionID: string,
+): void {
+  const byLabel = abortableSessionsByLabel.get(client) ?? new Map<string, Set<string>>();
+  abortableSessionsByLabel.set(client, byLabel);
+  const ids = byLabel.get(label) ?? new Set<string>();
+  byLabel.set(label, ids);
+  ids.add(sessionID);
+}
+
+/** Best-effort, fire-and-forget: used when the settle grace abandons a result. */
+export function abortOpencodeSessionsByLabel(
+  client: OpencodeClient,
+  label: string,
+  log: (msg: string) => void,
+): void {
+  const ids = abortableSessionsByLabel.get(client)?.get(label);
+  if (!ids || ids.size === 0) return;
+  for (const sessionID of ids) void abortSessionBestEffort(client, sessionID, label, log);
+  ids.clear();
 }
 
 async function abortSessionBestEffort(

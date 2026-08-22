@@ -2,12 +2,15 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  abortOpencodeSessionsByLabel,
   buildConfig,
   observedAssistantParts,
   parseChangesSinceLastReviewSummary,
   recordOpencodeToolParts,
   sessionEnvDenyKeys,
+  registerOpencodeSessionForAbort,
   takeOpencodeProxyEnv,
+  type OpencodeClient,
 } from '../src/shared/opencode.ts';
 import { BASH_PERMISSIONS } from '../src/shared/shell-policy.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
@@ -151,6 +154,24 @@ describe('takeOpencodeProxyEnv', () => {
     });
     assert.deepEqual(defaultBypass, {});
     assert.deepEqual(takeOpencodeProxyEnv({}), {});
+  });
+});
+
+describe('grace-abandon session abort (TASK-076)', () => {
+  it('aborts registered sessions by label and ignores unknown labels', async () => {
+    const aborted: string[] = [];
+    const client = {
+      session: {
+        abort: async ({ path }: { path: { id: string } }) => void aborted.push(path.id),
+      },
+    } as unknown as OpencodeClient;
+
+    registerOpencodeSessionForAbort(client, 'guideline-compliance', 'sess-1');
+    abortOpencodeSessionsByLabel(client, 'guideline-compliance', () => {});
+    abortOpencodeSessionsByLabel(client, 'no-such-label', () => {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.deepEqual(aborted, ['sess-1']);
   });
 });
 

@@ -53,6 +53,7 @@ import {
   remoteAcpConfigFromEnv,
 } from './acp-remote.ts';
 import {
+  abortPiSessionsByLabel,
   piModelAvailable,
   piSupportsProvider,
   resolvePiEngine,
@@ -107,6 +108,7 @@ import {
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
 import { onFatalSignal } from '@symma/protocol';
 import {
+  abortOpencodeSessionsByLabel,
   startOpencode,
   withTimeout,
   configureSessionConcurrency,
@@ -275,6 +277,7 @@ function createOpencodeBackend(
   return {
     name: 'opencode',
     observability: OPENCODE_TELEMETRY_CAPABILITY,
+    abortSessionsByLabel: (label, log) => abortOpencodeSessionsByLabel(client, label, log),
     runReview: (model, prContext, guidelines, log, options) =>
       runOpencodeReview(client, model, prContext, guidelines, log, options),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
@@ -324,6 +327,7 @@ function createPiBackend(runtime: PiRuntime): ReviewBackend {
   return {
     name: 'pi',
     observability: PI_TELEMETRY_CAPABILITY,
+    abortSessionsByLabel: (label, log) => abortPiSessionsByLabel(runtime, label, log),
     runReview: (model, prContext, guidelines, log, options) =>
       runPiReview(runtime, model, prContext, guidelines, log, options),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
@@ -2344,6 +2348,13 @@ async function runReviewPipeline(params: {
     // rather than one. Each falls back to its own empty result — the same value
     // these sessions produce when they fail open on their own.
     const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
+    // Abandonment aborts the underlying sessions where the backend supports it
+    // (pi + opencode today): the fallback is already settled, so everything
+    // the session still generates is waste — decode, a held slot the verifier
+    // can queue behind, and process linger.
+    const abandonAuxSessions = (labels: string[]) => () => {
+      for (const label of labels) auxBackend.abortSessionsByLabel?.(label, log);
+    };
     const [
       lensFindingLists,
       // The dedicated parallel session is the single owner of addressed-thread
@@ -2352,10 +2363,34 @@ async function runReviewPipeline(params: {
       complianceFindings,
       changesSinceText,
     ] = await Promise.all([
-      settleWithinGrace(lensPasses, [], log),
-      settleWithinGrace(addressedPriorCheck, [], log),
-      settleWithinGrace(guidelineComplianceCheck, [], log),
-      settleWithinGrace(changesSinceLastReview, '', log),
+      settleWithinGrace(
+        lensPasses,
+        [],
+        log,
+        AUXILIARY_SETTLE_GRACE_MS,
+        abandonAuxSessions(incrementalLenses.lensKeys.map((key) => `review-${key}`)),
+      ),
+      settleWithinGrace(
+        addressedPriorCheck,
+        [],
+        log,
+        AUXILIARY_SETTLE_GRACE_MS,
+        abandonAuxSessions(['addressed-prior-comments']),
+      ),
+      settleWithinGrace(
+        guidelineComplianceCheck,
+        [],
+        log,
+        AUXILIARY_SETTLE_GRACE_MS,
+        abandonAuxSessions(['guideline-compliance']),
+      ),
+      settleWithinGrace(
+        changesSinceLastReview,
+        '',
+        log,
+        AUXILIARY_SETTLE_GRACE_MS,
+        abandonAuxSessions(['changes-since-last-review']),
+      ),
     ]);
     graceDone();
     // Gate confidence BEFORE deduping so each finding carries its effective
@@ -3043,16 +3078,20 @@ const GRACE_EXPIRED = 'jbot: auxiliary settle grace expired';
  * of grace — otherwise a settled rejection would abort the run through the
  * caller's Promise.all.
  *
- * Bounds the WAIT, not the session: an abandoned prompt runs on and keeps its
- * concurrency slot until teardown, so with every slot held the verifier can
- * still queue behind one. Cancelling it needs abort plumbing through every
- * backend; until then the cap is on how long the run waits for results.
+ * Bounds the wait AND, where the backend supports it, the session: once the
+ * fallback is settled, `onAbandon` fires so the caller can abort the
+ * underlying prompt (TASK-076/077) — otherwise it runs on and keeps its
+ * concurrency slot until teardown, and with every slot held the verifier can
+ * still queue behind one. Settle-first ordering is deliberate (RISK-007): a
+ * result racing the abort keeps the result, and aborting an
+ * already-completed session is a backend no-op.
  */
 export function settleWithinGrace<T>(
   session: AuxiliarySession<T>,
   fallback: T,
   log: (msg: string) => void,
   graceMs = AUXILIARY_SETTLE_GRACE_MS,
+  onAbandon?: () => void,
 ): Promise<T> {
   if (session.isSettled()) return session.promise.catch(() => fallback);
   return withTimeout(session.promise, graceMs, GRACE_EXPIRED).catch((error: unknown) => {
@@ -3062,6 +3101,7 @@ export function settleWithinGrace<T>(
       log(
         `${session.label} still running ${graceMs / 1000}s after the main review; abandoning it.`,
       );
+      if (!session.isSettled()) onAbandon?.();
     }
     return fallback;
   });
