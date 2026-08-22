@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  ORPHANED_FINDINGS_HEADING,
   renderOrphanedSection,
   condenseSummary,
   formatSummaryMarkdown,
@@ -20,6 +21,17 @@ function f(overrides: Partial<Finding> = {}): Finding {
     ...overrides,
   };
 }
+
+test('renderOrphanedSection heads with the marker the prior-comment filter keys on', () => {
+  // The flat prior-comments block excludes jbot review bodies EXCEPT the ones
+  // carrying this section — inline findings live on as threads, but
+  // outside-the-diff findings exist only in the review body, and dropping
+  // them would re-post the same orphan on every re-review.
+  assert.equal(
+    renderOrphanedSection([{ path: 'a.ts', line: 0, severity: 'P2', title: 't', body: 'b' }])[0],
+    ORPHANED_FINDINGS_HEADING,
+  );
+});
 
 test('renderOrphanedSection: lists outside-diff findings flat with bodies', () => {
   const lines = renderOrphanedSection([

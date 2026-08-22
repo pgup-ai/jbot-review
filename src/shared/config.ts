@@ -494,14 +494,11 @@ export function verificationModelOptions(
   const mainEffort = mainOptions?.reasoningEffort;
   if (typeof mainEffort !== 'string' || effortRank(mainEffort) < 0) return auxOptions;
   const auxEffort = auxOptions.reasoningEffort;
-  // A provider-managed aux effort (poolside 'default') is outside the order
-  // and never overwritten; a rankable one at or above the floor stands.
-  if (
-    typeof auxEffort === 'string' &&
-    (effortRank(auxEffort) < 0 || effortRank(auxEffort) >= effortRank(mainEffort))
-  ) {
-    return auxOptions;
-  }
+  // Floor only a RANKABLE aux effort below the main one. Provider-managed
+  // values (poolside 'default') and effort-less entries (custom providers
+  // omit the key by policy — arbitrary endpoints may reject it) stay as-is.
+  if (typeof auxEffort !== 'string' || effortRank(auxEffort) < 0) return auxOptions;
+  if (effortRank(auxEffort) >= effortRank(mainEffort)) return auxOptions;
   return { ...auxOptions, reasoningEffort: mainEffort };
 }
 

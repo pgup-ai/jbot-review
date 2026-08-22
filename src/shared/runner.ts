@@ -32,6 +32,7 @@ import {
 import { buildSupplementaryBlocks, trimContextBlocks } from './context-trim.ts';
 import type { ContextBlock } from './context-trim.ts';
 import {
+  backendCanReadWorkspace,
   backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
   type CliBackendID,
@@ -251,7 +252,12 @@ import {
   STALE_CHECK_MIN_ATTEMPT_MS,
   StaleReviewError,
 } from './retry-policy.ts';
-import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
+import {
+  condenseSummary,
+  formatSummaryMarkdown,
+  ORPHANED_FINDINGS_HEADING,
+  renderOrphanedSection,
+} from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
@@ -1277,11 +1283,15 @@ async function runReviewPipeline(params: {
     ? []
     : await listPrComments(octokit, owner, repo, pullNumber);
   const priorJbotReviewCount = allPriorReviewComments.filter(isJbotReviewBody).length;
-  // jbot's own review bodies stay out of the flat context block: the
-  // structured prior-threads block already carries every prior finding, so
-  // including them here doubled the same text on mature PRs.
+  // jbot's own review bodies stay out of the flat context block — the
+  // structured prior-threads block already carries the inline findings —
+  // EXCEPT bodies with an outside-the-diff section: orphaned findings exist
+  // only in the review body, and dropping their sole carrier would re-post
+  // the same orphan on every re-review.
   const priorComments = options.includePriorComments
-    ? allPriorReviewComments.filter((comment) => !isJbotReviewBody(comment))
+    ? allPriorReviewComments.filter(
+        (comment) => !isJbotReviewBody(comment) || comment.includes(ORPHANED_FINDINGS_HEADING),
+      )
     : [];
   if (!options.includePriorComments) {
     log('Prior review comments excluded from review context by configuration.');
@@ -2128,7 +2138,7 @@ async function runReviewPipeline(params: {
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
       complianceRuns: incrementalLenses.guidelinePass,
-      mainCanReadWorkspace: !mainRequiresCompleteEmbeddedDiff,
+      mainCanReadWorkspace: backendCanReadWorkspace(providerID, mainCliBackend),
       widen: options.guidelineWiden,
       full: guidelines,
     });

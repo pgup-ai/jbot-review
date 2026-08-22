@@ -137,11 +137,13 @@ describe('verification effort floor (TASK-157)', () => {
       verificationModelOptions({ reasoningEffort: 'medium' }, { reasoningEffort: 'default' }),
       { reasoningEffort: 'default' },
     );
-    // An aux entry without an effort still gets the main floor, keeping its other keys.
+    // Effort-less aux entries stay effort-less: custom providers ({}) omit the
+    // key BY POLICY — arbitrary endpoints may reject provider-specific options,
+    // and an injected floor would 400 the verifier into fail-open.
     assert.deepEqual(verificationModelOptions({ reasoningEffort: 'medium' }, { temperature: 0 }), {
       temperature: 0,
-      reasoningEffort: 'medium',
     });
+    assert.deepEqual(verificationModelOptions({ reasoningEffort: 'medium' }, {}), {});
   });
 });
 
