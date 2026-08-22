@@ -193,12 +193,16 @@ const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
 } satisfies Record<string, ModelConfig>;
 
 /**
- * Models that always reason and accept only these efforts: the main pass's
- * `medium` is a hard 400 ("[1210] This model always engages in thinking and
- * cannot be disabled; please use low, high, or max"), which no retry recovers.
+ * Models whose declared efforts are the only ones that work. x-preview
+ * hard-400s on anything else ("[1210] This model always engages in thinking
+ * and cannot be disabled; please use low, high, or max"), which no retry
+ * recovers. mimo accepts `low` but collapses below its floor (probed
+ * 2026-08-22: empty completion once, 5 reasoning tokens and a wrong answer
+ * once; correct at medium/high) — silent quality loss instead of a 400.
  */
-const ALWAYS_THINKING_MODELS = {
+const EFFORT_RESTRICTED_MODELS = {
   'x-preview-f-free': { reasoningEfforts: ['low', 'high', 'max'] },
+  'mimo-v2.5-free': { reasoningEfforts: ['medium', 'high'] },
 } satisfies Record<string, ModelConfig>;
 
 // See https://models.dev/ for opencode-backed model catalogs. CLI backends
@@ -208,7 +212,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'opencode/deepseek-v4-flash-free',
     keyEnv: 'OPENCODE_API_KEY',
     keyInput: 'opencode-api-key',
-    models: ALWAYS_THINKING_MODELS,
+    models: EFFORT_RESTRICTED_MODELS,
   },
   'opencode-go': {
     defaultModel: 'opencode-go/deepseek-v4-flash',
