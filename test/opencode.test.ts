@@ -9,6 +9,7 @@ import {
   recordOpencodeToolParts,
   sessionEnvDenyKeys,
   registerOpencodeSessionForAbort,
+  unregisterOpencodeSessionForAbort,
   takeOpencodeProxyEnv,
   type OpencodeClient,
 } from '../src/shared/opencode.ts';
@@ -171,6 +172,14 @@ describe('grace-abandon session abort (TASK-076)', () => {
     abortOpencodeSessionsByLabel(client, 'no-such-label', () => {});
     await new Promise((resolve) => setTimeout(resolve, 0));
 
+    assert.deepEqual(aborted, ['sess-1']);
+
+    // A settled prompt unregisters (mirrors the pi registry): a later
+    // same-label abort must not fire at the finished session again.
+    registerOpencodeSessionForAbort(client, 'review-frontend', 'sess-2');
+    unregisterOpencodeSessionForAbort(client, 'review-frontend', 'sess-2');
+    abortOpencodeSessionsByLabel(client, 'review-frontend', () => {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
     assert.deepEqual(aborted, ['sess-1']);
   });
 });

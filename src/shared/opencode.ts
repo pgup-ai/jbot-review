@@ -1039,7 +1039,6 @@ async function promptPlanAgent(
   });
   const session = created.data;
   if (!session) throw new Error(`Failed to create ${label} session`);
-  registerOpencodeSessionForAbort(client, label, session.id);
   log(`${label} session created: ${session.id}`);
 
   const raw = await promptPlanAgentInSession(
@@ -1097,71 +1096,80 @@ async function promptInSessionHoldingSlot(
   tools: Record<string, boolean> = READONLY_TOOLS,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
-
-  // A follow-up prompt in an existing session must not return the previous
-  // completed assistant message: remember its id and wait for a NEWER one.
-  const previous = await getLatestAssistantMessage(client, sessionID, label);
-  const previousMessageID = previous?.info.id;
-
-  log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
-  const promptRes = await client.session.promptAsync({
-    path: { id: sessionID },
-    query: queryDirectory(client),
-    body: {
-      model: { providerID, modelID },
-      agent: 'plan',
-      // Defense-in-depth alongside the plan agent and the config-level
-      // permission.edit deny: mutating tools are always off. Default keeps
-      // bash/read on (the review needs git diff/log/grep); single-shot callers
-      // pass SINGLE_SHOT_TOOLS to turn exploration off for a one-call response.
-      tools,
-      parts: [{ type: 'text', text: prompt }],
-    },
-  });
-  const promptError = getResultError(promptRes);
-  if (promptError) throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
-
-  let data;
+  // Abortable only while a prompt is in flight (mirrors the pi registry's
+  // dispose-time cleanup): a settled session left registered would eat a
+  // later same-label abort as a spurious failed-abort log line.
+  registerOpencodeSessionForAbort(client, label, sessionID);
   try {
-    data = await waitForAssistantMessage(
-      client,
-      sessionID,
-      label,
-      log,
-      previousMessageID,
-      timeoutMs,
+    // A follow-up prompt in an existing session must not return the previous
+    // completed assistant message: remember its id and wait for a NEWER one.
+    const previous = await getLatestAssistantMessage(client, sessionID, label);
+    const previousMessageID = previous?.info.id;
+
+    log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
+    const promptRes = await client.session.promptAsync({
+      path: { id: sessionID },
+      query: queryDirectory(client),
+      body: {
+        model: { providerID, modelID },
+        agent: 'plan',
+        // Defense-in-depth alongside the plan agent and the config-level
+        // permission.edit deny: mutating tools are always off. Default keeps
+        // bash/read on (the review needs git diff/log/grep); single-shot callers
+        // pass SINGLE_SHOT_TOOLS to turn exploration off for a one-call response.
+        tools,
+        parts: [{ type: 'text', text: prompt }],
+      },
+    });
+    const promptError = getResultError(promptRes);
+    if (promptError) throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
+
+    let data;
+    try {
+      data = await waitForAssistantMessage(
+        client,
+        sessionID,
+        label,
+        log,
+        previousMessageID,
+        timeoutMs,
+      );
+    } catch (error) {
+      // A timed-out or failed wait leaves the session generating (and
+      // spending tokens) until the server shuts down; stop it now.
+      await abortSessionBestEffort(client, sessionID, label, log);
+      throw error;
+    }
+
+    const parts = data.parts;
+    const telemetry = opencodeToolTelemetry.get(client);
+    if (telemetry) recordOpencodeToolParts(telemetry, label, data.observedParts);
+    log(
+      `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
     );
-  } catch (error) {
-    // A timed-out or failed wait leaves the session generating (and
-    // spending tokens) until the server shuts down; stop it now.
-    await abortSessionBestEffort(client, sessionID, label, log);
-    throw error;
+    log(`${label} ${formatTokenUsage(data.info)}`);
+    const usage = extractPromptTokenUsage(data.info);
+    if (usage) onTokenUsage?.(usage, model, label);
+
+    const textParts = parts.filter(
+      (part): part is Extract<Part, { type: 'text' }> => part.type === 'text' && Boolean(part.text),
+    );
+    // No text part (e.g. the model exhausted its budget on reasoning) must
+    // surface as a parse failure so the repair loop fires — defaulting to
+    // '{}' would silently score the session as "no findings".
+    const raw = textParts
+      .map((p) => p.text)
+      .join('\n\n')
+      .trim();
+    if (!raw)
+      log(
+        `${label} response contained no text part (types: ${parts.map((p) => p.type).join(', ')})`,
+      );
+    log(`Extracted ${label} text: ${raw.length} chars from ${textParts.length} text part(s)`);
+    return raw;
+  } finally {
+    unregisterOpencodeSessionForAbort(client, label, sessionID);
   }
-
-  const parts = data.parts;
-  const telemetry = opencodeToolTelemetry.get(client);
-  if (telemetry) recordOpencodeToolParts(telemetry, label, data.observedParts);
-  log(
-    `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
-  );
-  log(`${label} ${formatTokenUsage(data.info)}`);
-  const usage = extractPromptTokenUsage(data.info);
-  if (usage) onTokenUsage?.(usage, model, label);
-
-  const textParts = parts.filter(
-    (part): part is Extract<Part, { type: 'text' }> => part.type === 'text' && Boolean(part.text),
-  );
-  // No text part (e.g. the model exhausted its budget on reasoning) must
-  // surface as a parse failure so the repair loop fires — defaulting to
-  // '{}' would silently score the session as "no findings".
-  const raw = textParts
-    .map((p) => p.text)
-    .join('\n\n')
-    .trim();
-  if (!raw)
-    log(`${label} response contained no text part (types: ${parts.map((p) => p.type).join(', ')})`);
-  log(`Extracted ${label} text: ${raw.length} chars from ${textParts.length} text part(s)`);
-  return raw;
 }
 
 /**
@@ -1181,6 +1189,14 @@ export function registerOpencodeSessionForAbort(
   const ids = byLabel.get(label) ?? new Set<string>();
   byLabel.set(label, ids);
   ids.add(sessionID);
+}
+
+export function unregisterOpencodeSessionForAbort(
+  client: OpencodeClient,
+  label: string,
+  sessionID: string,
+): void {
+  abortableSessionsByLabel.get(client)?.get(label)?.delete(sessionID);
 }
 
 /** Best-effort, fire-and-forget: used when the settle grace abandons a result. */
