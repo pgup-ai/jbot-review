@@ -28,6 +28,7 @@ import {
   piTurnUsageSince,
   resolvePiEngine,
 } from '../src/shared/pi.ts';
+import { CONTINUATION_NUDGE_PROMPT } from '../src/shared/prompt.ts';
 import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts';
@@ -463,6 +464,37 @@ describe('Pi review sessions', () => {
     };
     return runtime;
   };
+
+  it('sends a continuation, not a reformat, when the model only announces a plan', async () => {
+    // A same-session nudge resumes the announced work with the prefix cached;
+    // the JSON-repair wording would demand immediate JSON and get an empty
+    // review instead of the announced exploration.
+    const prompts: string[] = [];
+    const runtime = fakeRuntime(
+      false,
+      [],
+      [
+        { role: 'assistant', content: "I'll review this PR thoroughly. Let me start." },
+        { role: 'assistant', content: JSON.stringify({ summary: 'done', findings: [] }) },
+      ],
+    );
+    const inner = runtime.sdk.createAgentSession;
+    runtime.sdk.createAgentSession = async (args: unknown) => {
+      const created = await (inner as (a: unknown) => Promise<{ session: never }>)(args);
+      const session = created.session as { prompt: (p: string) => Promise<void> };
+      const original = session.prompt.bind(session);
+      session.prompt = (prompt: string) => {
+        prompts.push(prompt);
+        return original(prompt);
+      };
+      return created;
+    };
+
+    const result = await runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {});
+    assert.equal(result.summary, 'done');
+    assert.equal(prompts.length, 2);
+    assert.equal(prompts[1], CONTINUATION_NUDGE_PROMPT);
+  });
 
   it('aborts an in-flight labeled session at grace abandonment (TASK-077)', async () => {
     // The label registry lets the runner abort an abandoned session the

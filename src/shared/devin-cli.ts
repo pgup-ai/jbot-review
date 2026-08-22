@@ -1,3 +1,4 @@
+import type { ReviewResult } from './types.ts';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +15,8 @@ import {
 } from '@symma/protocol';
 
 import {
+  buildContinuationFollowupPrompt,
+  isNoAttemptReply,
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
@@ -193,11 +196,15 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
         log,
         options.timeoutMs,
       );
-      try {
-        return parseReview(raw, label, log, { strict: true });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        log(`${label} response unparseable; sending one JSON repair prompt via devin: ${message}`);
+      // Two recoveries, one attempt each, mirroring the ACP runner: a
+      // delimiter-free reply is an abandoned turn (glm-5.2 announces a plan
+      // and stops; the reformat prompt then returns an empty review), so it
+      // gets a continuation re-carrying the prompt; a malformed attempt gets
+      // the reformat repair. Spawns are one-shot, so both re-carry.
+      const repair = async (invalid: string, parseError: string): Promise<ReviewResult> => {
+        log(
+          `${label} response unparseable; sending one JSON repair prompt via devin: ${parseError}`,
+        );
         const repaired = await runDevinPrompt(
           workspace,
           home,
@@ -205,8 +212,8 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
           model,
           buildJsonRepairFollowupPrompt({
             originalPrompt: prompt,
-            invalidResponse: raw,
-            parseError: message,
+            invalidResponse: invalid,
+            parseError,
             promptBudgetBytes: DEVIN_REPAIR_PROMPT_BUDGET_BYTES,
             responseBudgetBytes: DEVIN_REPAIR_RESPONSE_BUDGET_BYTES,
           }),
@@ -215,6 +222,39 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
           options.timeoutMs,
         );
         return parseReview(repaired, `${label}-repair`, log, { strict: true });
+      };
+      if (isNoAttemptReply(raw)) {
+        log(`${label} ended its turn without attempting the task; sending one continuation prompt`);
+        const continued = await runDevinPrompt(
+          workspace,
+          home,
+          configFile,
+          model,
+          buildContinuationFollowupPrompt({
+            originalPrompt: prompt,
+            previousResponse: raw,
+            promptBudgetBytes: DEVIN_REPAIR_PROMPT_BUDGET_BYTES,
+            responseBudgetBytes: DEVIN_REPAIR_RESPONSE_BUDGET_BYTES,
+          }),
+          `${label}-continue`,
+          log,
+          options.timeoutMs,
+        );
+        if (isNoAttemptReply(continued)) {
+          throw new Error(
+            `${label}: the agent twice ended its turn without attempting the task (an announcement, then again after an explicit continuation). This model/CLI pairing appears unable to complete a session of this size in one turn — try more shards (review-shards: 0 for auto) or a different model/backend.`,
+          );
+        }
+        try {
+          return parseReview(continued, `${label}-continue`, log, { strict: true });
+        } catch (error) {
+          return repair(continued, error instanceof Error ? error.message : String(error));
+        }
+      }
+      try {
+        return parseReview(raw, label, log, { strict: true });
+      } catch (error) {
+        return repair(raw, error instanceof Error ? error.message : String(error));
       }
     },
     async runAddressedPriorCommentsCheck(model, prContext, log, timeoutMs) {

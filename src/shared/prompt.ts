@@ -1279,6 +1279,20 @@ export function assembleFindingVerificationPrompt(
  * the model can see its own malformed output in the conversation history.
  * One repair attempt is made before the run fails.
  */
+/**
+ * True when a reply contains no JSON delimiter at all — an abandoned turn (a
+ * plan announcement or empty text), not a malformed attempt. A continuation
+ * is the right recovery there: a reformat request just elicits another
+ * announcement or an empty review (observed with devin/glm-5.2, which spent
+ * 9 minutes on the repair prompt and returned a finding-free JSON).
+ */
+export function isNoAttemptReply(raw: string): boolean {
+  return !raw.includes('{') && !raw.includes('[');
+}
+
+/** In-session continuation for an announced-then-stopped turn (multi-turn engines). */
+export const CONTINUATION_NUDGE_PROMPT = `Continue: perform the review you described and finish the task now, in this turn. Do not reply with a plan or preamble again. When done, output ONLY the JSON object the original instructions specify.`;
+
 export function buildJsonRepairPrompt(parseError: string): string {
   return [
     'Your previous response could not be parsed as JSON.',

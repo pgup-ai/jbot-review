@@ -31,6 +31,8 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairPrompt,
+  CONTINUATION_NUDGE_PROMPT,
+  isNoAttemptReply,
 } from './prompt.ts';
 import { isFiniteNumber, isRecord, truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
@@ -1143,6 +1145,7 @@ export async function runPiReview(
       const repaired = await repromptPiForJson(
         session,
         model,
+        raw,
         error,
         label,
         log,
@@ -1160,6 +1163,7 @@ export async function runPiReview(
 async function repromptPiForJson(
   session: PiAgentSessionLike,
   model: string,
+  raw: string,
   parseError: unknown,
   label: string,
   log: (msg: string) => void,
@@ -1168,6 +1172,19 @@ async function repromptPiForJson(
   budget?: ExplorationBudget,
 ): Promise<string> {
   const message = parseError instanceof Error ? parseError.message : String(parseError);
+  if (isNoAttemptReply(raw)) {
+    log(`${label} ended its turn without attempting the task; sending one continuation prompt`);
+    return promptPiSession(
+      session,
+      model,
+      CONTINUATION_NUDGE_PROMPT,
+      `${label}-continue`,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      budget,
+    );
+  }
   log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
   return promptPiSession(
     session,
@@ -1202,6 +1219,7 @@ async function parsePiAuxWithRepair<T>(
       const repaired = await repromptPiForJson(
         session,
         model,
+        raw,
         error,
         label,
         log,

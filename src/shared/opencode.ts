@@ -18,6 +18,8 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairPrompt,
+  CONTINUATION_NUDGE_PROMPT,
+  isNoAttemptReply,
 } from './prompt.ts';
 import { isFiniteNumber, isRecord } from './text.ts';
 import {
@@ -783,6 +785,7 @@ export async function runReview(
       client,
       model,
       sessionID,
+      raw,
       error,
       label,
       log,
@@ -793,11 +796,17 @@ export async function runReview(
   }
 }
 
-/** One same-session JSON repair re-prompt, shared by the main and auxiliary sessions. */
+/**
+ * One same-session recovery re-prompt, shared by the main and auxiliary
+ * sessions: a continuation for an abandoned turn (announcement/empty — a
+ * reformat request there just elicits another announcement), the JSON repair
+ * for a malformed attempt.
+ */
 async function repromptForJson(
   client: OpencodeClient,
   model: string,
   sessionID: string,
+  raw: string,
   parseError: unknown,
   label: string,
   log: (msg: string) => void,
@@ -805,6 +814,19 @@ async function repromptForJson(
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<string> {
   const message = parseError instanceof Error ? parseError.message : String(parseError);
+  if (isNoAttemptReply(raw)) {
+    log(`${label} ended its turn without attempting the task; sending one continuation prompt`);
+    return promptPlanAgentInSession(
+      client,
+      model,
+      sessionID,
+      CONTINUATION_NUDGE_PROMPT,
+      `${label}-continue`,
+      log,
+      timeoutMs,
+      onTokenUsage,
+    );
+  }
   log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
   return promptPlanAgentInSession(
     client,
@@ -846,6 +868,7 @@ async function parseAuxSessionWithRepair<T>(
         client,
         model,
         sessionID,
+        raw,
         error,
         label,
         log,

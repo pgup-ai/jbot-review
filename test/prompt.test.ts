@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  CONTINUATION_NUDGE_PROMPT,
+  isNoAttemptReply,
   ADDRESSED_PRIOR_COMMENTS_PROMPT,
   CHANGES_SINCE_CONTEXT_BUDGET,
   CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
@@ -35,6 +37,21 @@ import {
   selectLensKeys,
   withNoToolsReviewDirective,
 } from '../src/shared/prompt.ts';
+
+describe('no-attempt reply recovery', () => {
+  it('classifies delimiter-free replies as abandoned turns and pins the nudge wording', () => {
+    // An announcement needs a CONTINUATION; a reformat request just elicits
+    // another announcement (observed with devin/glm-5.2: the repair returned
+    // an empty review after 9 minutes).
+    assert.equal(isNoAttemptReply("I'll review this PR thoroughly. Let me start."), true);
+    assert.equal(isNoAttemptReply(''), true);
+    assert.equal(isNoAttemptReply('{"summary": "broken'), false);
+    assert.equal(isNoAttemptReply('[1]'), false);
+    assert.match(CONTINUATION_NUDGE_PROMPT, /finish the task now, in this turn/);
+    assert.match(CONTINUATION_NUDGE_PROMPT, /Do not reply with a plan or preamble/);
+    assert.match(CONTINUATION_NUDGE_PROMPT, /ONLY the JSON/);
+  });
+});
 
 describe('NO_TOOLS_REVIEW_DIRECTIVE', () => {
   it('keeps the tool-less review contract', () => {
