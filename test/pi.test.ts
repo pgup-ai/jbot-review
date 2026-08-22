@@ -592,6 +592,20 @@ describe('Pi review sessions', () => {
     assert.deepEqual(events, ['aborted', 'disposed']);
   });
 
+  it('releases the newborn post-stop session under its registration label', async () => {
+    // Registration keys sessionsByLabel by the real label; abandoning under a
+    // synthetic one would leak the entry and feed later label aborts a
+    // disposed session.
+    const runtime = fakeRuntime(true, []);
+    await assert.rejects(
+      runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}),
+      /stopped during session creation/,
+    );
+    for (const [label, sessions] of runtime.sessionsByLabel ?? []) {
+      assert.equal(sessions.size, 0, `leaked session under label "${label}"`);
+    }
+  });
+
   it('still disposes when abort throws synchronously', async () => {
     const events: string[] = [];
     const runtime = fakeRuntime(true, events);

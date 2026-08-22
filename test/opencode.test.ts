@@ -168,8 +168,16 @@ describe('grace-abandon session abort (TASK-076)', () => {
     } as unknown as OpencodeClient;
 
     registerOpencodeSessionForAbort(client, 'guideline-compliance', 'sess-1');
-    abortOpencodeSessionsByLabel(client, 'guideline-compliance', () => {});
-    abortOpencodeSessionsByLabel(client, 'no-such-label', () => {});
+    // The count gates the caller's aborted-after-grace coverage row: 0 means
+    // the label had already settled and must not be re-marked failed.
+    assert.equal(
+      abortOpencodeSessionsByLabel(client, 'guideline-compliance', () => {}),
+      1,
+    );
+    assert.equal(
+      abortOpencodeSessionsByLabel(client, 'no-such-label', () => {}),
+      0,
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     assert.deepEqual(aborted, ['sess-1']);
@@ -178,7 +186,10 @@ describe('grace-abandon session abort (TASK-076)', () => {
     // same-label abort must not fire at the finished session again.
     registerOpencodeSessionForAbort(client, 'review-frontend', 'sess-2');
     unregisterOpencodeSessionForAbort(client, 'review-frontend', 'sess-2');
-    abortOpencodeSessionsByLabel(client, 'review-frontend', () => {});
+    assert.equal(
+      abortOpencodeSessionsByLabel(client, 'review-frontend', () => {}),
+      0,
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.deepEqual(aborted, ['sess-1']);
   });

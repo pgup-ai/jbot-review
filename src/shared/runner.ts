@@ -2513,6 +2513,14 @@ async function runReviewPipeline(params: {
     // opencode today); see abortSessionsByLabel.
     const abandonAuxSessions = (labels: string[]) => () => {
       for (const label of labels) {
+        // An aggregated group (the lens passes) abandons as one: a member that
+        // already settled must not be re-marked failed, and the registry count
+        // is the truth. Backends without abort support can't tell, so they
+        // keep the unconditional row.
+        const aborted = auxBackend.abortSessionsByLabel
+          ? auxBackend.abortSessionsByLabel(label, log)
+          : undefined;
+        if (aborted === 0) continue;
         // Durable record (TASK-076): the abandoned session's own failure row
         // usually settles after telemetry has been emitted, so without this
         // an abandonment leaves no trace in the artifact.
@@ -2521,7 +2529,6 @@ async function runReviewPipeline(params: {
           state: 'failed',
           error: new Error('aborted-after-grace'),
         });
-        auxBackend.abortSessionsByLabel?.(label, log);
       }
     };
     const [

@@ -902,8 +902,9 @@ async function createPiSession(
   // (an abandoned caller racing teardown): abort the newborn session and fail
   // the call into the aux fail-open path rather than prompting post-teardown.
   if (runtime.stopped) {
-    // The throw skips the caller's dispose finally, so release it here.
-    abandonPiSession(runtime, session, 'post-stop', () => undefined);
+    // The throw skips the caller's dispose finally, so release it here — under
+    // the registration label, or the sessionsByLabel entry leaks.
+    abandonPiSession(runtime, session, label ?? 'post-stop', () => undefined);
     throw new Error('pi engine stopped during session creation');
   }
   return session;
@@ -1051,11 +1052,13 @@ export function abortPiSessionsByLabel(
   runtime: PiRuntime,
   label: string,
   log: (msg: string) => void,
-): void {
+): number {
   const labeled = runtime.sessionsByLabel?.get(label);
-  if (!labeled || labeled.size === 0) return;
+  if (!labeled || labeled.size === 0) return 0;
+  const count = labeled.size;
   // Abandoning deletes only the visited element — safe during Set iteration.
   for (const session of labeled) abandonPiSession(runtime, session, label, log);
+  return count;
 }
 
 /**

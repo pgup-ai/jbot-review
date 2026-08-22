@@ -67,9 +67,11 @@ export interface ReviewBackend {
   /**
    * TASK-076: best-effort abort of this backend's in-flight sessions for a
    * prompt label, called when the settle grace abandons an auxiliary result.
-   * Absent on backends without abort support; callers feature-test.
+   * Absent on backends without abort support; callers feature-test. Returns
+   * the number of sessions signalled: 0 means everything under the label had
+   * already settled.
    */
-  abortSessionsByLabel?(label: string, log: (msg: string) => void): void;
+  abortSessionsByLabel?(label: string, log: (msg: string) => void): number;
 }
 
 export interface SessionSlots {

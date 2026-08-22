@@ -1209,16 +1209,22 @@ export function unregisterOpencodeSessionForAbort(
   abortableSessionsByLabel.get(client)?.get(label)?.delete(sessionID);
 }
 
-/** Best-effort, fire-and-forget: used when the settle grace abandons a result. */
+/**
+ * Best-effort, fire-and-forget: used when the settle grace abandons a result.
+ * Returns how many sessions were signalled — 0 means the label's prompts had
+ * already settled, so the caller must not record it as abandoned.
+ */
 export function abortOpencodeSessionsByLabel(
   client: OpencodeClient,
   label: string,
   log: (msg: string) => void,
-): void {
+): number {
   const ids = abortableSessionsByLabel.get(client)?.get(label);
-  if (!ids || ids.size === 0) return;
+  if (!ids || ids.size === 0) return 0;
+  const count = ids.size;
   for (const sessionID of ids) void abortSessionBestEffort(client, sessionID, label, log);
   ids.clear();
+  return count;
 }
 
 async function abortSessionBestEffort(
