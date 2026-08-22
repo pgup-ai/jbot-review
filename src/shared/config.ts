@@ -180,8 +180,8 @@ export interface ModelConfig {
   promptCache?: boolean;
   /**
    * Reasoning efforts this model accepts. Omitted means every effort is fine;
-   * a request outside the list is dropped so the provider applies its own
-   * default rather than rejecting the call.
+   * a request outside the list is clamped to the nearest supported tier
+   * (ties upward) so the provider never rejects the call (TASK-157).
    */
   reasoningEfforts?: readonly string[];
 }
@@ -556,4 +556,9 @@ export function parseEnvBoolean(name: string, defaultValue: boolean): boolean {
   if (raw === 'false') return false;
   if (raw === 'true') return true;
   return defaultValue;
+}
+
+/** JBOT_GUIDELINE_WIDEN: only the exact 'full' restores widen-everywhere. */
+export function parseEnvGuidelineWiden(name: string): 'auto' | 'full' {
+  return process.env[name]?.trim().toLowerCase() === 'full' ? 'full' : 'auto';
 }

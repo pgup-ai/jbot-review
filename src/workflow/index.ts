@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 
-import { defaultModelOptions, parseEnvBoolean, resolvePoolCredentials } from '../shared/config.ts';
+import { defaultModelOptions, parseEnvBoolean, parseEnvGuidelineWiden, resolvePoolCredentials } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 
 import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
@@ -80,6 +80,7 @@ async function main(): Promise<void> {
     // Env rather than action inputs: neither belongs in the published contract.
     contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
     embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
+    guidelineWiden: parseEnvGuidelineWiden('JBOT_GUIDELINE_WIDEN'),
   };
   const pullTarget = getPullRequestTarget();
   for (const warning of swallowedProviderWarnings([...modelPool, ...auxProbe])) {

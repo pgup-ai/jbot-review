@@ -195,6 +195,7 @@ import {
   formatFinderGuidelines,
   formatDiffScope,
   formatContextBudget,
+  selectFinderGuidelineText,
   truncatePrBody,
   type LinkedIssue,
   type ReviewCommit,
@@ -755,6 +756,13 @@ export interface ReviewRunOptions {
   contextTrim?: boolean;
   /** Treat embedded diff hunks as already read. On; JBOT_EMBEDDED_FIRST_PROMPT=false opts out. */
   embeddedFirstPrompt?: boolean;
+  /**
+   * Finder guideline text when the compliance pass is skipped: 'auto' keeps
+   * the relevance slice for tool-capable finders (omitted docs named for
+   * on-demand reads); 'full' restores the old widen-everywhere behavior
+   * (JBOT_GUIDELINE_WIDEN=full). Checkout-blind finders always widen.
+   */
+  guidelineWiden?: 'auto' | 'full';
   /**
    * Model for the auxiliary sessions (addressed-check, guideline compliance,
    * finding verification). Lets the main review run on a stronger tier while
@@ -2054,12 +2062,21 @@ async function runReviewPipeline(params: {
       }
     }
 
-    // Finders get the capped, relevance-ranked slice ONLY while the compliance
-    // session will actually run and audit the full set in parallel — keyed on
-    // the session's own final enable, not the option. Any reason it stays off
-    // (option, aux embedded-diff overflow, trivial-delta trim) widens finders
-    // back to the full set so no doc is seen by zero sessions.
-    const guidelinesForPrompt = incrementalLenses.guidelinePass ? finderGuidelines : guidelines;
+    // Finders get the capped, relevance-ranked slice while the compliance
+    // session runs (keyed on the session's own final enable, not the option).
+    // When it stays off (option, aux embedded-diff overflow, trivial-delta
+    // trim), only checkout-blind finders widen to the full set — they cannot
+    // recover an omitted doc; tool-capable finders keep the slice with the
+    // omitted docs named for on-demand reads (JBOT_GUIDELINE_WIDEN=full
+    // restores the old widen-everywhere behavior).
+    const guidelinesForPrompt = selectFinderGuidelineText({
+      discovered: discoveredGuidelines,
+      forFiles: changedFiles,
+      complianceRuns: incrementalLenses.guidelinePass,
+      mainCanReadWorkspace: !mainRequiresCompleteEmbeddedDiff,
+      widen: options.guidelineWiden,
+      full: guidelines,
+    });
 
     // Embedded-only main backends carry the unbounded block buildShardPlans
     // renders for them, not the 40KB default. Shared with the budget log so
@@ -2767,6 +2784,7 @@ export function normalizeOptions(
     shardCachePath: options?.shardCachePath ?? '',
     contextTrim: options?.contextTrim ?? false,
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
+    guidelineWiden: options?.guidelineWiden ?? 'auto',
     auxModel: options?.auxModel ?? '',
     auxApiKey: options?.auxApiKey ?? '',
     auxBaseURL: options?.auxBaseURL ?? '',

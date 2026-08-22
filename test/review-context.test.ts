@@ -14,6 +14,7 @@ import {
   formatFinderGuidelines,
   formatGuidelines,
   formatLinkedIssues,
+  selectFinderGuidelineText,
   truncatePrBody,
   MAX_CHANGED_FILES_BYTES,
   MAX_COMMITS_BYTES,
@@ -324,6 +325,56 @@ describe('discoverGuidelines', () => {
       assert.doesNotMatch(guidelines, /END_SHOULD_NOT_APPEAR/);
       assert.doesNotMatch(guidelines, /\uFFFD/);
     });
+  });
+});
+
+describe('selectFinderGuidelineText', () => {
+  // Doc B exceeds the 24KiB finder cap behind doc A, so the slice omits it.
+  const discovered = {
+    docs: [
+      { label: 'apps/web/AGENTS.md', text: 'scoped rule', relevance: 3 },
+      { label: 'ARCHITECTURE.md', text: 'x'.repeat(25 * 1024), relevance: 1 },
+    ],
+    referenced: [],
+    budgetExhausted: false,
+  } as never;
+  const params = {
+    discovered,
+    forFiles: ['apps/web/a.ts'],
+    full: 'FULL_GUIDELINE_SET',
+    widen: 'auto' as const,
+    mainCanReadWorkspace: true,
+  };
+
+  it('keeps the finder slice when the compliance pass runs, exactly as today', () => {
+    const text = selectFinderGuidelineText({ ...params, complianceRuns: true });
+    assert.match(text, /scoped rule/);
+    assert.doesNotMatch(text, /x{100}/);
+    assert.match(text, /full set is reviewed by the separate guideline-compliance pass/);
+  });
+
+  it('keeps the slice for tool-capable finders when compliance is skipped, naming omitted docs', () => {
+    // The old widen-to-full behavior inverted the guideline budget on exactly
+    // the small PRs that skip the compliance pass; a tool-capable finder can
+    // read the named docs instead.
+    const text = selectFinderGuidelineText({ ...params, complianceRuns: false });
+    assert.match(text, /scoped rule/);
+    assert.doesNotMatch(text, /x{100}/);
+    assert.match(text, /guideline-compliance pass is not running/);
+    assert.match(text, /ARCHITECTURE\.md/);
+    assert.doesNotMatch(text, /full set is reviewed by the separate guideline-compliance pass/);
+  });
+
+  it('widens to the full set for tool-less finders and under the kill switch', () => {
+    // A backend that cannot read the checkout cannot recover an omitted doc.
+    assert.equal(
+      selectFinderGuidelineText({ ...params, complianceRuns: false, mainCanReadWorkspace: false }),
+      'FULL_GUIDELINE_SET',
+    );
+    assert.equal(
+      selectFinderGuidelineText({ ...params, complianceRuns: false, widen: 'full' }),
+      'FULL_GUIDELINE_SET',
+    );
   });
 });
 

@@ -17,7 +17,7 @@ import {
 import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_ACP_BIN, CODEX_PROVIDER_ID } from '@symma/protocol';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
-import { defaultModelOptions, parseEnvBoolean, resolvePoolCredentials } from '../shared/config.ts';
+import { defaultModelOptions, parseEnvBoolean, parseEnvGuidelineWiden, resolvePoolCredentials } from '../shared/config.ts';
 import {
   CURSOR_CLI_BIN,
   CURSOR_PROVIDER_ID,
@@ -572,6 +572,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
       evidenceQuotes: parseEnvBoolean('JBOT_EVIDENCE_QUOTES', true),
       contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
       embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
+      guidelineWiden: parseEnvGuidelineWiden('JBOT_GUIDELINE_WIDEN'),
       ...(opencodePort ? { opencodePort } : {}),
       onReviewResult: (result) => {
         reviewResult = result;

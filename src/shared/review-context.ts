@@ -843,9 +843,10 @@ export const MAX_FINDER_GUIDELINE_BYTES = 24 * 1024;
  */
 export function formatFinderGuidelines(
   discovered: DiscoveredGuidelines,
-  options: { capBytes?: number; forFiles?: string[] } = {},
+  options: { capBytes?: number; forFiles?: string[]; complianceCovers?: boolean } = {},
 ): string {
   const capBytes = options.capBytes ?? MAX_FINDER_GUIDELINE_BYTES;
+  const complianceCovers = options.complianceCovers ?? true;
 
   // A rule that declared its own path scope and matches none of the changed
   // files ranks below everything else: demoted (first out under the cap),
@@ -893,15 +894,47 @@ export function formatFinderGuidelines(
     );
   }
   if (budgetNotes.length > 0) {
-    sections.push(
-      [
-        '### Review guidance budget',
-        `${budgetNotes.join('; ')}. The full set is reviewed by the separate guideline-compliance pass.`,
-      ].join('\n'),
-    );
+    // When the compliance pass is skipped, "the full set is reviewed" would be
+    // false — name the omitted docs instead so a tool-capable finder can read
+    // any that apply.
+    const coverage = complianceCovers
+      ? 'The full set is reviewed by the separate guideline-compliance pass.'
+      : `The guideline-compliance pass is not running this run; omitted file(s): ${discovered.docs
+          .filter((_, index) => !keptIndices.has(index))
+          .map((doc) => doc.label)
+          .join(', ')}. Read any that apply to your changed files.`;
+    sections.push(['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n'));
   }
 
   return sections.join('\n\n');
+}
+
+/**
+ * The guideline text a finder session receives. When the compliance pass runs
+ * it audits the full set in parallel, so finders keep the relevance-ranked
+ * slice — byte-identical to the slice used before this selector existed. When
+ * it is skipped, only backends that cannot read the checkout still widen to
+ * the full set ("no doc seen by zero sessions" is load-bearing only there);
+ * tool-capable finders keep the slice with the omitted docs named for
+ * on-demand reads. `widen: 'full'` (JBOT_GUIDELINE_WIDEN=full) restores the
+ * old widen-everywhere behavior.
+ */
+export function selectFinderGuidelineText(params: {
+  discovered: DiscoveredGuidelines;
+  forFiles: string[];
+  complianceRuns: boolean;
+  mainCanReadWorkspace: boolean;
+  widen: 'auto' | 'full';
+  full: string;
+}): string {
+  if (params.complianceRuns) {
+    return formatFinderGuidelines(params.discovered, { forFiles: params.forFiles });
+  }
+  if (params.widen === 'full' || !params.mainCanReadWorkspace) return params.full;
+  return formatFinderGuidelines(params.discovered, {
+    forFiles: params.forFiles,
+    complianceCovers: false,
+  });
 }
 
 function extractMarkdownDocumentReferences(markdown: string): string[] {
