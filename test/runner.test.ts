@@ -29,6 +29,7 @@ import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import type { Octokit, PrFile } from '../src/shared/github.ts';
 import { planExploration } from '../src/shared/exploration-policy.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
+import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
 import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
 import type { Finding } from '../src/shared/types.ts';
 
@@ -504,6 +505,77 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     );
     assert.equal(transientCalls.length, 2);
     assert.deepEqual(result, { summary: 'ok', findings: [] });
+  });
+
+  it('keeps the Context7-stripped retry for context-length failures', async () => {
+    // The retry deliberately differs when Context7 was active (baseContext
+    // strips the block), so a context-length failure can succeed there —
+    // blanket non-retryability would kill that designed recovery.
+    const withContext7: string[] = [];
+    await runShardedReview({
+      backend: backendThrowingOnce('maximum context length exceeded', withContext7),
+      model: 'fake/model',
+      guidelinesForPrompt: '',
+      shardPlans: [shardPlan],
+      changedFiles: ['a.ts'],
+      context7Active: true,
+      context7ApiKey: '',
+      log: () => {},
+    });
+    assert.deepEqual(withContext7, ['ctx', 'base']);
+
+    // Identical-prompt retries stay skipped.
+    const withoutContext7: string[] = [];
+    await assert.rejects(
+      run(backendThrowingOnce('maximum context length exceeded', withoutContext7)),
+      /refusing to post partial review coverage/,
+    );
+    assert.equal(withoutContext7.length, 1);
+  });
+
+  it('checks PR freshness before reusing a cached retry result', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'] });
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-shard-cache-'));
+    try {
+      const cache = { dir, headSha: 'head1234', config: 'cfg' };
+      saveShardResult(
+        dir,
+        shardFingerprint({
+          headSha: cache.headSha,
+          model: 'fake/model',
+          context: shardPlan.baseContext,
+          guidelines: '',
+          evidenceQuotes: false,
+          config: cache.config,
+        }),
+        { summary: 'stale cached retry', findings: [] },
+      );
+      const backend = {
+        name: 'fake',
+        runReview: async () => {
+          t.mock.timers.tick(61_000);
+          throw new Error('socket hang up');
+        },
+      } as unknown as ReviewBackend;
+
+      await assert.rejects(
+        runShardedReview({
+          backend,
+          model: 'fake/model',
+          guidelinesForPrompt: '',
+          shardPlans: [shardPlan],
+          changedFiles: ['a.ts'],
+          context7Active: false,
+          context7ApiKey: '',
+          cache,
+          staleCheck: async () => new StaleReviewError('merged'),
+          log: () => {},
+        }),
+        (error: unknown) => error instanceof StaleReviewError,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('checks PR freshness before a retry of a long attempt and aborts stale runs', async (t) => {

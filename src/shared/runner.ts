@@ -3704,6 +3704,12 @@ export async function runShardedReview(params: {
         if (params.cache && retryFingerprint) {
           const cached = loadCachedShardResult(params.cache.dir, retryFingerprint);
           if (cached) {
+            // The cache hit costs nothing, but posting it against a merged,
+            // closed, or moved PR is as pointless as a live retry there.
+            if (Date.now() - startedAt > STALE_CHECK_MIN_ATTEMPT_MS) {
+              const stale = await checkStale();
+              if (stale) throw stale;
+            }
             log(`${plan.label}: reusing cached retry result (${retryFingerprint}).`);
             params.onCoverage?.({
               session: `${plan.label}-retry`,
@@ -3715,8 +3721,11 @@ export async function runShardedReview(params: {
         }
         // TASK-150: a deterministic failure re-buys the identical error for up
         // to another finder window; only plausibly-transient classes retry.
+        // Exception: the retry DIFFERS when Context7 was active (baseContext
+        // strips the block), so a context-length failure may fit there.
         const { failureClass, retryable } = classifyMainShardFailure(error);
-        if (!retryable) {
+        const retryPromptDiffers = params.context7Active;
+        if (!retryable && !(failureClass === 'context-length' && retryPromptDiffers)) {
           log(
             `${plan.label} failed with a non-retryable ${failureClass} error; skipping the retry.`,
           );

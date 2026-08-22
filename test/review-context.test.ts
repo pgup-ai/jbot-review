@@ -405,6 +405,46 @@ describe('selectFinderGuidelineText', () => {
     assert.match(note, /and \d+ more omitted file\(s\)/);
   });
 
+  it('names unloaded referenced docs and survives an oversized first label', () => {
+    // [P1] referenced files the discovery budget could not preload were only
+    // exposed by the full rendering; with compliance skipped they must appear
+    // in the finder disclosure or no session ever sees their paths. And a
+    // first label larger than the label budget must not render a dangling
+    // "omitted file(s): " with an empty list.
+    const withReferenced = {
+      docs: [
+        { label: 'apps/web/AGENTS.md', text: 'scoped rule', relevance: 3 },
+        { label: 'ARCHITECTURE.md', text: 'x'.repeat(25 * 1024), relevance: 1 },
+      ],
+      referenced: ['docs/UNLOADED_RULES.md'],
+      budgetExhausted: true,
+    } as never;
+    const text = selectFinderGuidelineText({
+      ...params,
+      discovered: withReferenced,
+      complianceRuns: false,
+    });
+    assert.match(text, /ARCHITECTURE\.md/);
+    assert.match(text, /docs\/UNLOADED_RULES\.md/);
+
+    const oversized = {
+      docs: [
+        { label: 'apps/web/AGENTS.md', text: 'scoped rule', relevance: 3 },
+        { label: `rules/${'x'.repeat(1200)}.md`, text: 'y'.repeat(25 * 1024), relevance: 1 },
+      ],
+      referenced: [],
+      budgetExhausted: false,
+    } as never;
+    const clipped = selectFinderGuidelineText({
+      ...params,
+      discovered: oversized,
+      complianceRuns: false,
+    });
+    assert.doesNotMatch(clipped, /omitted file\(s\): {2}and/);
+    assert.doesNotMatch(clipped, /omitted file\(s\): \./);
+    assert.match(clipped, /1 omitted file\(s\) not listed/);
+  });
+
   it('widens to the full set for tool-less finders and under the kill switch', () => {
     // A backend that cannot read the checkout cannot recover an omitted doc.
     assert.equal(

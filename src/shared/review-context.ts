@@ -901,9 +901,12 @@ export function formatFinderGuidelines(
     // any that apply. The label list is itself byte-capped: labels are not
     // charged to any other budget, and a hostile repo could regrow the block
     // through hundreds of long paths.
-    const omittedLabels = discovered.docs
-      .filter((_, index) => !keptIndices.has(index))
-      .map((doc) => doc.label);
+    // Referenced-but-unloaded docs count too: the full rendering exposed
+    // their paths, and with compliance skipped no other session names them.
+    const omittedLabels = [
+      ...discovered.docs.filter((_, index) => !keptIndices.has(index)).map((doc) => doc.label),
+      ...discovered.referenced,
+    ];
     const shownLabels: string[] = [];
     let labelBytes = 0;
     for (const label of omittedLabels) {
@@ -916,9 +919,11 @@ export function formatFinderGuidelines(
       ? 'The full set is reviewed by the separate guideline-compliance pass.'
       : omittedLabels.length === 0
         ? 'The guideline-compliance pass is not running this run.'
-        : `The guideline-compliance pass is not running this run; omitted file(s): ${shownLabels.join(
-            ', ',
-          )}${hidden > 0 ? ` and ${hidden} more omitted file(s)` : ''}. Read any that apply to your changed files.`;
+        : shownLabels.length === 0
+          ? `The guideline-compliance pass is not running this run; ${omittedLabels.length} omitted file(s) not listed (label budget).`
+          : `The guideline-compliance pass is not running this run; omitted file(s): ${shownLabels.join(
+              ', ',
+            )}${hidden > 0 ? ` and ${hidden} more omitted file(s)` : ''}. Read any that apply to your changed files.`;
     sections.push(
       ['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n'),
     );
