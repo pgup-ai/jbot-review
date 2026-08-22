@@ -126,6 +126,12 @@ describe('verification effort floor (TASK-157)', () => {
       verificationModelOptions({ reasoningEffort: 'default' }, { reasoningEffort: 'low' }),
       { reasoningEffort: 'low' },
     );
+    // A provider-managed AUX effort is left alone too (poolside's 'default'):
+    // the floor never overwrites a value the provider manages itself.
+    assert.deepEqual(
+      verificationModelOptions({ reasoningEffort: 'medium' }, { reasoningEffort: 'default' }),
+      { reasoningEffort: 'default' },
+    );
     // An aux entry without an effort still gets the main floor, keeping its other keys.
     assert.deepEqual(verificationModelOptions({ reasoningEffort: 'medium' }, { temperature: 0 }), {
       temperature: 0,

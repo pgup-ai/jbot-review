@@ -330,6 +330,31 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
     );
   });
 
+  it('never collides distinct file-level (line 0) findings on the same file', () => {
+    // dedupeFindings deliberately keeps two different file-level findings on
+    // one file, so path:line is NOT unique at line 0 — the title joins the key.
+    const targetZero = finding({ path: 'app.ts', line: 0, severity: 'P1', title: 'wiring gap' });
+    const twinZero = finding({ path: 'app.ts', line: 0, severity: 'P1', title: 'cap unreachable' });
+    const { findings, dropped, lateUnverified } = mergeVerdictsByLocation(
+      [targetZero, twinZero],
+      [targetZero],
+      [{ index: 0, verdict: 'refuted' }],
+    );
+
+    assert.deepEqual(
+      dropped.map(({ finding: f }) => f.title),
+      ['wiring gap'],
+    );
+    assert.deepEqual(
+      findings.map((f) => f.title),
+      ['cap unreachable'],
+    );
+    assert.deepEqual(
+      lateUnverified.map((f) => f.title),
+      ['cap unreachable'],
+    );
+  });
+
   it('fails open per finding: no verdict for a target means confirmed', () => {
     const { findings, lateUnverified } = mergeVerdictsByLocation(finalFindings, targets, [
       { index: 0, verdict: 'refuted' },

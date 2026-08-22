@@ -494,7 +494,12 @@ export function verificationModelOptions(
   const mainEffort = mainOptions?.reasoningEffort;
   if (typeof mainEffort !== 'string' || effortRank(mainEffort) < 0) return auxOptions;
   const auxEffort = auxOptions.reasoningEffort;
-  if (typeof auxEffort === 'string' && effortRank(auxEffort) >= effortRank(mainEffort)) {
+  // A provider-managed aux effort (poolside 'default') is outside the order
+  // and never overwritten; a rankable one at or above the floor stands.
+  if (
+    typeof auxEffort === 'string' &&
+    (effortRank(auxEffort) < 0 || effortRank(auxEffort) >= effortRank(mainEffort))
+  ) {
     return auxOptions;
   }
   return { ...auxOptions, reasoningEffort: mainEffort };

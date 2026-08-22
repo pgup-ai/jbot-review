@@ -229,7 +229,10 @@ export function mergeVerdictsByLocation(
   verdicts: FindingVerdict[],
 ): OverlapVerdictMerge {
   const verdictByPosition = new Map(verdicts.map((verdict) => [verdict.index, verdict]));
-  const locationOf = (finding: Finding) => `${finding.path} ${finding.line}`;
+  // dedupeFindings keeps distinct file-level (line 0) findings on one file,
+  // so path:line alone is not unique there — the title joins the key.
+  const locationOf = (finding: Finding) =>
+    `${finding.path}:${finding.line}${finding.line === 0 ? `:${finding.title}` : ''}`;
   const verdictByLocation = new Map<string, FindingVerdict | undefined>();
   verifiedTargets.forEach((target, position) => {
     verdictByLocation.set(locationOf(target), verdictByPosition.get(position));
