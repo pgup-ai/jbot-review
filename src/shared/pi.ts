@@ -670,6 +670,8 @@ export interface PiRuntime {
   /** Full `provider/model` — a bare model ID collides across providers. */
   mainModel: string;
   thinkingLevel?: string;
+  /** For sessions on a model other than `mainModel` (the aux default). */
+  auxThinkingLevel?: string;
   gitDiffTool?: unknown;
   readTool: unknown;
   toolTelemetry?: ToolTelemetryAccumulator;
@@ -726,6 +728,8 @@ export async function startPi(
   log: (msg: string) => void,
   options: {
     modelOptions?: Record<string, unknown>;
+    /** Thinking level for sessions on a model other than the main one. */
+    auxThinkingLevel?: string;
     additionalProviderKeys?: ProviderKeyConfig[];
     diffScope?: PiDiffScope;
     toolTelemetry?: ToolTelemetryAccumulator;
@@ -819,6 +823,7 @@ export async function startPi(
     activeSessions: new Set(),
     stopped: false,
     ...(thinkingLevel ? { thinkingLevel } : {}),
+    ...(options.auxThinkingLevel ? { auxThinkingLevel: options.auxThinkingLevel } : {}),
     ...(options.diffScope
       ? {
           gitDiffTool: createPiGitDiffTool(
@@ -869,9 +874,8 @@ async function createPiSession(
   const modelRef = requirePiModel(runtime.modelRuntime, providerID, modelID);
   const thinkingLevel =
     thinkingLevelOverride ??
-    // modelOptions are main-model-only, matching the opencode engine. Compare
-    // the full provider/model: bare model IDs repeat across providers.
-    (model === runtime.mainModel ? runtime.thinkingLevel : undefined);
+    // Compare the full provider/model: bare model IDs repeat across providers.
+    (model === runtime.mainModel ? runtime.thinkingLevel : runtime.auxThinkingLevel);
   const { session } = await runtime.sdk.createAgentSession({
     model: modelRef,
     cwd: runtime.workspace,

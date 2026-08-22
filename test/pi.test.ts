@@ -556,9 +556,13 @@ describe('Pi review sessions', () => {
     );
     assert.equal(sessions[0]?.thinkingLevel, 'high');
 
-    // Without the override, a non-main model still gets no thinking level.
+    // Without the override, a non-main model takes the aux default when the
+    // runtime carries one, and none otherwise.
     await runPiFindingVerification(runtime, 'opencode/aux-model', 'ctx', [finding], () => {}, 1000);
     assert.equal('thinkingLevel' in (sessions[1] ?? {}), false);
+    runtime.auxThinkingLevel = 'low';
+    await runPiFindingVerification(runtime, 'opencode/aux-model', 'ctx', [finding], () => {}, 1000);
+    assert.equal(sessions[2]?.thinkingLevel, 'low');
   });
 
   it('gives the embedded-first system prompt to review sessions only', async () => {

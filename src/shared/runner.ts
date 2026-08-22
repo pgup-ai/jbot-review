@@ -64,6 +64,7 @@ import {
   runPiFindingVerification,
   runPiGuidelineComplianceCheck,
   runPiReview,
+  piThinkingLevel,
   startPi,
   PI_TELEMETRY_CAPABILITY,
   type PiRuntime,
@@ -1864,10 +1865,11 @@ async function runReviewPipeline(params: {
         piConfig.apiKey,
         log,
         {
-          // pi's thinking level is runtime-wide, so a runtime shared by both
-          // roles follows the main model. One serving aux alone takes the aux
-          // effort instead of none.
+          // Levels are per session: main-model sessions take the main effort,
+          // a distinct aux model takes the aux default (a runtime serving aux
+          // alone sees the aux model as its main).
           modelOptions: mainOnPi ? options.modelOptions : auxModelOptions,
+          auxThinkingLevel: piThinkingLevel(auxModelOptions),
           // pi's prompt caching is provider-managed (no setCacheKey knob);
           // resolvePromptCachePolicy applies to the opencode server only.
           additionalProviderKeys: auxNeedsOwnKey
