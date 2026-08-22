@@ -2543,11 +2543,12 @@ async function runReviewPipeline(params: {
         if (aborted === 0) continue;
         // Durable record (TASK-076): the abandoned session's own failure row
         // usually settles after telemetry has been emitted, so without this
-        // an abandonment leaves no trace in the artifact.
+        // an abandonment leaves no trace in the artifact. Backends that
+        // cannot abort only abandoned — the label must not claim otherwise.
         recordCoverage({
           session: label,
           state: 'failed',
-          error: new Error('aborted-after-grace'),
+          error: new Error(aborted === undefined ? 'abandoned-after-grace' : 'aborted-after-grace'),
         });
       }
     };
