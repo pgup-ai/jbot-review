@@ -46,7 +46,12 @@ Axis-by-axis state of the 2026-08-21 speed deep dive's backlog after
   (TASK-150/155); reasoning-effort clamp + verification effort floor with
   per-backend delivery (TASK-157); byte caps on the last uncapped context
   blocks (invariant #4); guideline widen-fallback keeps the finder slice for
-  tool-capable finders (`JBOT_GUIDELINE_WIDEN=full` restores widening).
+  tool-capable finders (`JBOT_GUIDELINE_WIDEN=full` restores widening);
+  CommandCode `--effort` delivery on an exact per-model allowlist match
+  (probed 2026-08-22: deepseek-v4-flash accepts high|max, muse-spark none —
+  default options stay undelivered, so current behavior is unchanged; kilo's
+  `--variant` never reaches `kilo acp` sessions and Devin encodes effort in
+  the model id, so those stay pool-configured).
 - **Shipped, default off:** grace-overlap verification with late-unverified
   counting (TASK-079/080, `JBOT_VERIFY_OVERLAP_GRACE`); slim verifier
   context (TASK-065 arm, `JBOT_VERIFIER_SLIM_CONTEXT` — screen: clean-case

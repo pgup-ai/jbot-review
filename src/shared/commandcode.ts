@@ -88,6 +88,7 @@ export function writeCommandCodeReadOnlySettings(home: string): string {
 
 export interface CommandCodeCliArgsInput {
   model: string;
+  effort?: string;
 }
 
 export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[] {
@@ -108,7 +109,32 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
     String(COMMANDCODE_MAX_TURNS),
   ];
   if (modelID !== 'default') args.push('--model', modelID);
+  if (input.effort) args.push('--effort', input.effort);
   return args;
+}
+
+// Probed 2026-08-22: `--effort` validates per model and exits nonzero on
+// values outside the model's set; muse-spark rejects the flag outright.
+const COMMANDCODE_MODEL_EFFORTS: Record<string, readonly string[]> = {
+  'deepseek/deepseek-v4-flash': ['high', 'max'],
+  'meta/muse-spark-1.2-contributor': [],
+};
+
+/**
+ * The `--effort` value for a session, or undefined to omit the flag. Exact
+ * membership only — no nearest-tier clamping: the CLI hard-fails on values
+ * outside a model's set, and silently promoting a requested `low` to a
+ * model's `high` floor would change behavior the caller never asked for.
+ * Unsupported or undeclared combinations keep the CLI's own default.
+ */
+export function commandCodeReasoningEffort(
+  model: string,
+  modelOptions?: Record<string, unknown>,
+): string | undefined {
+  const { modelID } = parseModelName(model);
+  const effort = modelOptions?.reasoningEffort;
+  if (typeof effort !== 'string') return undefined;
+  return COMMANDCODE_MODEL_EFFORTS[modelID]?.includes(effort) ? effort : undefined;
 }
 
 export async function runCommandCodeReview(
@@ -125,6 +151,7 @@ export async function runCommandCodeReview(
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
     home?: string;
+    effort?: string;
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
@@ -147,6 +174,7 @@ export async function runCommandCodeReview(
     options.timeoutMs,
     options.onTokenUsage,
     options.home,
+    options.effort,
   );
   try {
     return parseReview(raw, label, log, { strict: true });
@@ -170,6 +198,7 @@ export async function runCommandCodeReview(
       options.timeoutMs,
       options.onTokenUsage,
       options.home,
+      options.effort,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
@@ -183,6 +212,7 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
+  effort?: string,
 ): Promise<AddressedPriorComment[]> {
   const raw = await runCommandCodePrompt(
     workspace,
@@ -193,6 +223,7 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
     timeoutMs,
     onTokenUsage,
     home,
+    effort,
   );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
 }
@@ -206,6 +237,7 @@ export async function runCommandCodeGuidelineComplianceCheck(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
+  effort?: string,
 ): Promise<Finding[]> {
   const raw = await runCommandCodePrompt(
     workspace,
@@ -216,6 +248,7 @@ export async function runCommandCodeGuidelineComplianceCheck(
     timeoutMs,
     onTokenUsage,
     home,
+    effort,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
 }
@@ -229,6 +262,7 @@ export async function runCommandCodeChangesSinceLastReview(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
+  effort?: string,
 ): Promise<string> {
   const raw = await runCommandCodePrompt(
     workspace,
@@ -239,6 +273,7 @@ export async function runCommandCodeChangesSinceLastReview(
     timeoutMs,
     onTokenUsage,
     home,
+    effort,
   );
   return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
 }
@@ -252,6 +287,7 @@ export async function runCommandCodeFindingVerification(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
+  effort?: string,
 ): Promise<FindingVerdict[] | undefined> {
   const raw = await runCommandCodePrompt(
     workspace,
@@ -262,6 +298,7 @@ export async function runCommandCodeFindingVerification(
     timeoutMs,
     onTokenUsage,
     home,
+    effort,
   );
   return parseFindingVerdicts(raw, findings.length, log);
 }
@@ -474,9 +511,12 @@ async function runCommandCodePrompt(
   timeoutMs = COMMANDCODE_PROMPT_TIMEOUT_MS,
   onTokenUsage?: TokenUsageRecorder,
   home?: string,
+  effort?: string,
 ): Promise<string> {
-  const args = buildCommandCodeCliArgs({ model });
-  log(`Calling ${label} prompt (agent=commandcode-cli, model=${model})`);
+  const args = buildCommandCodeCliArgs({ model, effort });
+  log(
+    `Calling ${label} prompt (agent=commandcode-cli, model=${model}${effort ? `, effort=${effort}` : ''})`,
+  );
   const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, args, {
     cwd: workspace,
     input: withNoToolsReviewDirective(prompt),

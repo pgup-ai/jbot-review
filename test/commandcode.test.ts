@@ -8,6 +8,7 @@ import {
   buildCommandCodeCliArgs,
   classifyCommandCodePromptFailure,
   commandCodeEnvForHome,
+  commandCodeReasoningEffort,
   commandCodeAuthPath,
   commandCodeSessionEstimatedCost,
   formatCommandCodePromptTimeoutMessage,
@@ -71,6 +72,37 @@ describe('CommandCode CLI provider helpers', () => {
       '--model',
       'Qwen/Qwen3.7-Max',
     ]);
+    assert.deepEqual(
+      buildCommandCodeCliArgs({
+        model: 'commandcode/deepseek/deepseek-v4-flash',
+        effort: 'high',
+      }).slice(-4),
+      ['--model', 'deepseek/deepseek-v4-flash', '--effort', 'high'],
+    );
+  });
+
+  it('delivers --effort only on an exact per-model membership match', () => {
+    // The CLI exits nonzero on an effort outside the model's set and
+    // muse-spark rejects the flag outright, so anything but an exact match
+    // (including the default medium/low options) keeps the CLI's own default
+    // rather than gambling on a hard failure or a silent promotion.
+    const deepseek = 'commandcode/deepseek/deepseek-v4-flash';
+    assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'high' }), 'high');
+    assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'max' }), 'max');
+    assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'low' }), undefined);
+    assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'medium' }), undefined);
+    assert.equal(
+      commandCodeReasoningEffort('commandcode/meta/muse-spark-1.2-contributor', {
+        reasoningEffort: 'high',
+      }),
+      undefined,
+    );
+    assert.equal(
+      commandCodeReasoningEffort('commandcode/Qwen/Qwen3.7-Max', { reasoningEffort: 'high' }),
+      undefined,
+    );
+    assert.equal(commandCodeReasoningEffort(deepseek, {}), undefined);
+    assert.equal(commandCodeReasoningEffort(deepseek, undefined), undefined);
   });
 
   it('denies all CommandCode tools', () => {

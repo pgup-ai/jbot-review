@@ -133,6 +133,7 @@ import { createDevinCliBackend } from './devin-cli.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
   COMMANDCODE_TELEMETRY_CAPABILITY,
+  commandCodeReasoningEffort,
   listCommandCodeModels,
   runCommandCodeAddressedPriorCommentsCheck,
   runCommandCodeFindingVerification,
@@ -446,7 +447,11 @@ function createPoolsideBackend(
   };
 }
 
-function createCommandCodeBackend(workspace: string, home: string): ReviewBackend {
+function createCommandCodeBackend(
+  workspace: string,
+  home: string,
+  effortFor: (model: string, override?: Record<string, unknown>) => string | undefined,
+): ReviewBackend {
   return {
     name: COMMANDCODE_PROVIDER_ID,
     observability: COMMANDCODE_TELEMETRY_CAPABILITY,
@@ -454,6 +459,7 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
       runCommandCodeReview(workspace, model, prContext, guidelines, log, {
         ...options,
         home,
+        effort: effortFor(model),
       }),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
       runCommandCodeAddressedPriorCommentsCheck(
@@ -464,6 +470,7 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
         timeoutMs,
         onTokenUsage,
         home,
+        effortFor(model),
       ),
     runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
       runCommandCodeGuidelineComplianceCheck(
@@ -475,8 +482,17 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
         timeoutMs,
         onTokenUsage,
         home,
+        effortFor(model),
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      modelOptions,
+    ) =>
       runCommandCodeFindingVerification(
         workspace,
         model,
@@ -486,6 +502,7 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
         timeoutMs,
         onTokenUsage,
         home,
+        effortFor(model, modelOptions),
       ),
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
       runCommandCodeChangesSinceLastReview(
@@ -497,6 +514,7 @@ function createCommandCodeBackend(workspace: string, home: string): ReviewBacken
         timeoutMs,
         onTokenUsage,
         home,
+        effortFor(model),
       ),
   };
 }
@@ -1254,6 +1272,20 @@ async function runReviewPipeline(params: {
   const auxPoolsideKey = options.auxApiKey || (auxProviderID === providerID ? apiKey : '');
   const auxPoolsideBackend = auxOnPoolside ? createPoolsideBackend(auxPoolsideKey) : undefined;
 
+  const auxModelOptions = auxModelOptionsFor(providerID, modelID, auxProviderID, auxModelID);
+  // TASK-157: the verifier floors at the main-pass effort. An identity return
+  // means the aux entry already delivers it, so no per-session override (and
+  // no opencode alias entry) is needed.
+  const verifyModelOptions = verificationModelOptions(
+    supportedModelOptions(providerID, modelID, options.modelOptions),
+    auxModelOptions,
+  );
+  const verifierNeedsOwnOptions =
+    verifyModelOptions !== undefined && verifyModelOptions !== auxModelOptions;
+  const verifierSessionOptions = verifierNeedsOwnOptions
+    ? supportedModelOptions(auxProviderID, auxModelID, verifyModelOptions)
+    : undefined;
+
   const discoveredGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
   const guidelines = formatGuidelines(discoveredGuidelines);
   const finderGuidelines = formatFinderGuidelines(discoveredGuidelines, {
@@ -1651,7 +1683,12 @@ async function runReviewPipeline(params: {
     log(`CommandCode CLI auth configured at ${authPath}.`);
     log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
     log('CommandCode reviews run with skills and tools disabled.');
-    commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome);
+    commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome, (m, override) =>
+      commandCodeReasoningEffort(
+        m,
+        override ?? (m === auxModel && auxModelOptions ? auxModelOptions : options.modelOptions),
+      ),
+    );
   }
 
   if (!remoteAcp && (mainCliBackend === CODEX_PROVIDER_ID || auxCliBackend === CODEX_PROVIDER_ID)) {
@@ -1790,19 +1827,6 @@ async function runReviewPipeline(params: {
   // different vendor's endpoint (and fail auth there anyway).
   const auxNeedsOwnKey =
     auxProviderID !== providerID && ((mainOnPi && auxOnPi) || (mainOnOpencode && auxOnOpencode));
-  const auxModelOptions = auxModelOptionsFor(providerID, modelID, auxProviderID, auxModelID);
-  // TASK-157: the verifier floors at the main-pass effort. An identity return
-  // means the aux entry already delivers it, so no per-session override (and
-  // no opencode alias entry) is needed.
-  const verifyModelOptions = verificationModelOptions(
-    supportedModelOptions(providerID, modelID, options.modelOptions),
-    auxModelOptions,
-  );
-  const verifierNeedsOwnOptions =
-    verifyModelOptions !== undefined && verifyModelOptions !== auxModelOptions;
-  const verifierSessionOptions = verifierNeedsOwnOptions
-    ? supportedModelOptions(auxProviderID, auxModelID, verifyModelOptions)
-    : undefined;
   const auxNeedsOpencodeConfig =
     mainOnOpencode &&
     auxOnOpencode &&
