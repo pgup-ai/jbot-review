@@ -430,7 +430,7 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
 }
 
 // Provider-managed values (poolside's 'default') stay outside this order.
-const REASONING_EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'max'] as const;
+const REASONING_EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 function effortRank(effort: string): number {
   return REASONING_EFFORT_ORDER.indexOf(effort as (typeof REASONING_EFFORT_ORDER)[number]);

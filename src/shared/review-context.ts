@@ -833,6 +833,8 @@ export function formatGuidelines(discovered: DiscoveredGuidelines): string {
  * spend attention on the diff, not on the full standards corpus.
  */
 export const MAX_FINDER_GUIDELINE_BYTES = 24 * 1024;
+// Rendered omitted-doc labels in the budget note (invariant #4 backstop).
+const MAX_OMITTED_LABEL_BYTES = 1024;
 
 /**
  * Relevance-ranked, byte-capped render for finder sessions (shards + lenses).
@@ -896,13 +898,27 @@ export function formatFinderGuidelines(
   if (budgetNotes.length > 0) {
     // When the compliance pass is skipped, "the full set is reviewed" would be
     // false — name the omitted docs instead so a tool-capable finder can read
-    // any that apply.
+    // any that apply. The label list is itself byte-capped: labels are not
+    // charged to any other budget, and a hostile repo could regrow the block
+    // through hundreds of long paths.
+    const omittedLabels = discovered.docs
+      .filter((_, index) => !keptIndices.has(index))
+      .map((doc) => doc.label);
+    const shownLabels: string[] = [];
+    let labelBytes = 0;
+    for (const label of omittedLabels) {
+      labelBytes += Buffer.byteLength(`${label}, `, 'utf8');
+      if (labelBytes > MAX_OMITTED_LABEL_BYTES) break;
+      shownLabels.push(label);
+    }
+    const hidden = omittedLabels.length - shownLabels.length;
     const coverage = complianceCovers
       ? 'The full set is reviewed by the separate guideline-compliance pass.'
-      : `The guideline-compliance pass is not running this run; omitted file(s): ${discovered.docs
-          .filter((_, index) => !keptIndices.has(index))
-          .map((doc) => doc.label)
-          .join(', ')}. Read any that apply to your changed files.`;
+      : omittedLabels.length === 0
+        ? 'The guideline-compliance pass is not running this run.'
+        : `The guideline-compliance pass is not running this run; omitted file(s): ${shownLabels.join(
+            ', ',
+          )}${hidden > 0 ? ` and ${hidden} more omitted file(s)` : ''}. Read any that apply to your changed files.`;
     sections.push(
       ['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n'),
     );

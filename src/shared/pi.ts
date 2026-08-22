@@ -1036,12 +1036,6 @@ async function abortPiSessionBestEffort(
 }
 
 /**
- * Releases a session nothing is waiting on (teardown, or one born after the
- * teardown sweep). Never awaits the abort: abortPiSessionBestEffort's timeout
- * would hold a referenced timer — and the caller — for up to PI_ABORT_TIMEOUT_MS
- * on a hanging abort, which is the delay aborting exists to release.
- */
-/**
  * Best-effort abort of every in-flight session created under `label`, used
  * when the settle grace abandons an auxiliary result (TASK-077): the fallback
  * has already been settled, so the session's remaining work is pure waste —
@@ -1058,6 +1052,12 @@ export function abortPiSessionsByLabel(
   for (const session of labeled) abandonPiSession(runtime, session, label, log);
 }
 
+/**
+ * Releases a session nothing is waiting on (teardown, or one born after the
+ * teardown sweep). Never awaits the abort: abortPiSessionBestEffort's timeout
+ * would hold a referenced timer — and the caller — for up to PI_ABORT_TIMEOUT_MS
+ * on a hanging abort, which is the delay aborting exists to release.
+ */
 function abandonPiSession(
   runtime: PiRuntime,
   session: PiAgentSessionLike,

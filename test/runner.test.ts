@@ -449,6 +449,12 @@ describe('buildSlimVerifierContext (TASK-065 arm)', () => {
     assert.doesNotMatch(context, /Prior review comments/);
     assert.doesNotMatch(context, /Summary instructions/);
     assert.doesNotMatch(context, /Review focus/);
+    // Invariant #4: the slim contract names what it omitted.
+    assert.match(context, /Omitted for verification: commits, prior review comments/);
+    assert.ok(
+      context.indexOf('Omitted for verification: commits') < context.indexOf('DIFF_SENTINEL'),
+      'disclosure precedes the diff so hunks stay last',
+    );
   });
 });
 

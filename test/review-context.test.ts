@@ -365,6 +365,46 @@ describe('selectFinderGuidelineText', () => {
     assert.doesNotMatch(text, /full set is reviewed by the separate guideline-compliance pass/);
   });
 
+  it('renders a clean coverage note when discovery was capped but nothing was sliced out', () => {
+    // budgetExhausted alone must not produce "omitted file(s): ." — an
+    // instruction naming nothing.
+    const exhausted = {
+      docs: [{ label: 'AGENTS.md', text: 'rule', relevance: 1 }],
+      referenced: [],
+      budgetExhausted: true,
+    } as never;
+    const text = selectFinderGuidelineText({
+      ...params,
+      discovered: exhausted,
+      complianceRuns: false,
+    });
+    assert.match(text, /guideline-compliance pass is not running/);
+    assert.doesNotMatch(text, /omitted file\(s\): \./);
+  });
+
+  it('bounds the omitted-doc label list so hostile repos cannot regrow the block', () => {
+    const many = {
+      docs: [
+        { label: 'apps/web/AGENTS.md', text: 'scoped rule', relevance: 3 },
+        ...Array.from({ length: 300 }, (_, i) => ({
+          label: `rules/${'long-segment-'.repeat(8)}${i}.mdc`,
+          text: 'x'.repeat(2 * 1024),
+          relevance: 1,
+        })),
+      ],
+      referenced: [],
+      budgetExhausted: false,
+    } as never;
+    const text = selectFinderGuidelineText({
+      ...params,
+      discovered: many,
+      complianceRuns: false,
+    });
+    const note = text.split('### Review guidance budget')[1] ?? '';
+    assert.ok(Buffer.byteLength(note, 'utf8') < 3 * 1024, `note is ${note.length} chars`);
+    assert.match(note, /and \d+ more omitted file\(s\)/);
+  });
+
   it('widens to the full set for tool-less finders and under the kill switch', () => {
     // A backend that cannot read the checkout cannot recover an omitted doc.
     assert.equal(

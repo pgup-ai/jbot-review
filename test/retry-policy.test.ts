@@ -13,6 +13,10 @@ describe('classifyMainShardFailure', () => {
       failureClass: 'auth',
       retryable: false,
     });
+    assert.deepEqual(classify('Incorrect API key provided'), {
+      failureClass: 'auth',
+      retryable: false,
+    });
     assert.deepEqual(classify("Unknown model: 'opencode/nope'"), {
       failureClass: 'model-not-found',
       retryable: false,

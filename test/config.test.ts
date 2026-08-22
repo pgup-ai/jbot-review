@@ -98,6 +98,13 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
     assert.equal(clampReasoningEffort('medium', ['low', 'turbo']), 'low');
     assert.equal(clampReasoningEffort('medium', ['default']), undefined);
     assert.equal(clampReasoningEffort('default', ['low', 'high']), undefined);
+    // pi's xhigh is rankable (between high and max), so an xhigh finder floors
+    // the verifier and an xhigh request clamps upward on ladders without it.
+    assert.deepEqual(
+      verificationModelOptions({ reasoningEffort: 'xhigh' }, { reasoningEffort: 'low' }),
+      { reasoningEffort: 'xhigh' },
+    );
+    assert.equal(clampReasoningEffort('xhigh', ['low', 'high', 'max']), 'max');
   });
 });
 

@@ -30,7 +30,7 @@ export function classifyMainShardFailure(error: unknown): {
   const message = error instanceof Error ? error.message : String(error);
   const matches = (pattern: RegExp) => pattern.test(message);
   const failureClass: MainShardFailureClass = matches(
-    /\b401\b|\b403\b|unauthorized|invalid.{0,12}(api.?key|token)|authentication/i,
+    /\b401\b|\b403\b|unauthorized|(invalid|incorrect).{0,12}(api.?key|token)|authentication/i,
   )
     ? 'auth'
     : matches(/unknown model|model.{0,24}not (found|exist|available)|no such model/i)

@@ -2379,8 +2379,11 @@ async function runReviewPipeline(params: {
     // overlap-with-main: this starts only after the main review settles. The
     // pre-pass mirrors the final pure pipeline WITHOUT telemetry rows — the
     // final pass below stays the single recorded pipeline.
+    // 'skipped' = serial verification would ALSO have posted unverified
+    // (exhausted budget, failed verifier) — bypass late counting. An empty
+    // snapshot still returns a mergeable outcome so late arrivals count.
     const startOverlapVerification = async (): Promise<
-      { targets: Finding[]; verdicts: FindingVerdictList } | undefined
+      { targets: Finding[]; verdicts: FindingVerdictList; snapshotBlocking: Finding[] } | 'skipped'
     > => {
       const session = 'finding-verification';
       const lists: Finding[][] = [findings];
@@ -2390,7 +2393,13 @@ async function runReviewPipeline(params: {
       if (guidelineComplianceCheck.isSettled()) {
         lists.push(await guidelineComplianceCheck.promise.catch(() => [] as Finding[]));
       }
-      const gatedLists = lists.map((list) => demoteLowConfidenceBlockingFindings(list).findings);
+      // Deep-ish copies: resolveFindingAnchors mutates `line` in place, and
+      // these are the very objects the final pipeline re-anchors and counts —
+      // a mutated pre-pass would empty the final `reanchored` telemetry.
+      const gatedLists = lists.map(
+        (list) =>
+          demoteLowConfidenceBlockingFindings(list.map((finding) => ({ ...finding }))).findings,
+      );
       for (const list of gatedLists) {
         resolveFindingAnchors(list, addable, patchByPath, options.evidenceQuotes);
       }
@@ -2399,10 +2408,13 @@ async function runReviewPipeline(params: {
         priorJbotThreads,
         headSha ? addable : undefined,
       ).findings;
+      const snapshotBlocking = selectBlockingFindingIndexes(settled, settled.length).map(
+        (index) => settled[index],
+      );
       const indexes = selectBlockingFindingIndexes(settled, MAX_VERIFIED_FINDINGS);
       if (indexes.length === 0) {
         recordCoverage({ session, state: 'skipped' });
-        return undefined;
+        return { targets: [], verdicts: [], snapshotBlocking };
       }
       const timeoutMs = computeVerificationTimeoutMs(
         options.timeBudgetMinutes,
@@ -2413,7 +2425,7 @@ async function runReviewPipeline(params: {
           'Skipping finding verification: time budget exhausted; posting findings unverified (fail-open).',
         );
         recordCoverage({ session, state: 'skipped' });
-        return undefined;
+        return 'skipped';
       }
       const targets = indexes.map((index) => settled[index]);
       log(
@@ -2430,11 +2442,11 @@ async function runReviewPipeline(params: {
         onTokenUsage: recordTokenUsage,
         onCoverage: recordCoverage,
       });
-      return verdicts ? { targets, verdicts } : undefined;
+      return verdicts ? { targets, verdicts, snapshotBlocking } : 'skipped';
     };
     const overlapVerification =
       options.verifyOverlapGrace && options.verifyFindings && auxSessionsEnabled
-        ? startOverlapVerification().catch(() => undefined)
+        ? startOverlapVerification().catch(() => 'skipped' as const)
         : undefined;
     const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
       lensPasses,
@@ -2567,11 +2579,12 @@ async function runReviewPipeline(params: {
     let verifiedFindings: Finding[];
     if (overlapVerification) {
       const outcome = await overlapVerification;
-      if (outcome) {
+      if (outcome !== 'skipped') {
         const merge = mergeVerdictsByLocation(
           suppression.findings,
           outcome.targets,
           outcome.verdicts,
+          outcome.snapshotBlocking,
         );
         logVerdictOutcomes(merge, log);
         if (merge.lateUnverified.length > 0) {
@@ -3536,6 +3549,11 @@ export function buildSlimVerifierContext(params: {
       linkedIssues: params.linkedIssues,
       linkedIssuesOmitted: params.linkedIssuesOmitted,
     }),
+    // Invariant #4: the slim contract names what it omitted.
+    [
+      '## Slim verification context',
+      'Omitted for verification: commits, prior review comments, prior finding threads, review playbooks, and summary instructions. The findings under review were produced with that context.',
+    ].join('\n'),
     params.auxDiffBlockText,
   );
 }
@@ -3577,14 +3595,19 @@ export async function runShardedReview(params: {
     context7Disabled = true;
     await params.disableContext7?.();
   };
-  // At most one freshness fetch per run: the first long-failed shard checks;
-  // a stale result aborts everything through the Promise.all rejection anyway.
-  let staleChecked = false;
-  const checkStaleOnce = async (): Promise<StaleReviewError | undefined> => {
-    if (staleChecked || !params.staleCheck) return undefined;
-    staleChecked = true;
-    // A broken freshness fetch must not block the retry (fail open).
-    return params.staleCheck().catch(() => undefined);
+  // Simultaneous shard failures share one freshness fetch, but a LATER
+  // failure re-checks: a head that moved after an earlier "fresh" answer must
+  // still cancel the retry. A broken fetch fails open (never blocks a retry).
+  let staleCheckInFlight: Promise<StaleReviewError | undefined> | undefined;
+  const checkStale = (): Promise<StaleReviewError | undefined> => {
+    if (!params.staleCheck) return Promise.resolve(undefined);
+    staleCheckInFlight ??= params
+      .staleCheck()
+      .catch(() => undefined)
+      .finally(() => {
+        staleCheckInFlight = undefined;
+      });
+    return staleCheckInFlight;
   };
 
   const outcomes: ShardOutcome[] = await Promise.all(
@@ -3692,7 +3715,7 @@ export async function runShardedReview(params: {
         // TASK-155: a long attempt leaves room for the PR to merge, close, or
         // move; re-check before spending another window on a stale head.
         if (Date.now() - startedAt > STALE_CHECK_MIN_ATTEMPT_MS) {
-          const stale = await checkStaleOnce();
+          const stale = await checkStale();
           if (stale) throw stale;
         }
         const retryTimeoutMs = computeRetryTimeoutMs(params.deadlineAt, Date.now(), timeoutMs);

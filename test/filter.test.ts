@@ -307,6 +307,7 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
         { index: 1, verdict: 'uncertain' },
         { index: 2, verdict: 'confirmed' },
       ],
+      targets,
     );
 
     assert.deepEqual(
@@ -328,15 +329,18 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
     );
   });
 
-  it('never collides distinct file-level (line 0) findings on the same file', () => {
-    // dedupeFindings deliberately keeps two different file-level findings on
-    // one file, so path:line is NOT unique at line 0 — the title joins the key.
+  it('never applies a verdict to a finding the verifier did not judge', () => {
+    // Two shapes of the same hazard: dedupe keeps distinct file-level (line 0)
+    // findings on one file, and a stronger LATE finding can replace the
+    // verified one at the same nonzero line. The title joins the key, so both
+    // stay unjudged and count as late instead of inheriting the verdict.
     const targetZero = finding({ path: 'app.ts', line: 0, severity: 'P1', title: 'wiring gap' });
     const twinZero = finding({ path: 'app.ts', line: 0, severity: 'P1', title: 'cap unreachable' });
     const { findings, dropped, lateUnverified } = mergeVerdictsByLocation(
       [targetZero, twinZero],
       [targetZero],
       [{ index: 0, verdict: 'refuted' }],
+      [targetZero],
     );
 
     assert.deepEqual(
@@ -351,17 +355,53 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
       lateUnverified.map((f) => f.title),
       ['cap unreachable'],
     );
+
+    // Same-line replacement: the late stronger finding at refuted a.ts:1 has a
+    // different title, so the old verdict must not drop it.
+    const replacement = finding({ path: 'a.ts', line: 1, severity: 'P0', title: 'worse bug' });
+    const replaced = mergeVerdictsByLocation(
+      [replacement],
+      targets,
+      [{ index: 0, verdict: 'refuted' }],
+      targets,
+    );
+    assert.deepEqual(
+      replaced.findings.map((f) => f.title),
+      ['worse bug'],
+    );
+    assert.deepEqual(
+      replaced.lateUnverified.map((f) => f.title),
+      ['worse bug'],
+    );
   });
 
   it('fails open per finding: no verdict for a target means confirmed', () => {
-    const { findings, lateUnverified } = mergeVerdictsByLocation(finalFindings, targets, [
-      { index: 0, verdict: 'refuted' },
-    ]);
+    const { findings, lateUnverified } = mergeVerdictsByLocation(
+      finalFindings,
+      targets,
+      [{ index: 0, verdict: 'refuted' }],
+      targets,
+    );
     assert.equal(findings.length, finalFindings.length - 1);
     assert.deepEqual(
       lateUnverified.map((f) => f.title),
       ['late blocking'],
     );
+  });
+
+  it('never counts snapshot findings the verification cap left unselected as late', () => {
+    // MAX_VERIFIED_FINDINGS bounds the targets; an unselected snapshot finding
+    // was not "late" — inflating the TASK-080 signal would reject the arm on
+    // noise.
+    const capped = finding({ path: 'd.ts', line: 4, severity: 'P2', title: 'over the cap' });
+    const { findings, lateUnverified } = mergeVerdictsByLocation(
+      [...targets, capped],
+      targets,
+      [{ index: 2, verdict: 'confirmed' }],
+      [...targets, capped],
+    );
+    assert.equal(findings.length, 4);
+    assert.deepEqual(lateUnverified, []);
   });
 });
 

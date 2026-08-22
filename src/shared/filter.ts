@@ -218,36 +218,43 @@ export interface OverlapVerdictMerge extends VerdictApplication {
 
 /**
  * Applies grace-overlap verification verdicts (TASK-079) to the FINAL finding
- * list, which can differ from the snapshot the verifier judged: verdicts
- * re-attach by path:line — unique after dedupe — and blocking findings with
- * no verified counterpart pass through unverified and are counted (TASK-080's
- * rejection signal). Fail-open per finding, like `applyFindingVerdicts`.
+ * list, which can differ from the snapshot the verifier judged. Identity is
+ * path:line:title — the title keeps a verdict off any finding the verifier
+ * never judged (distinct file-level findings share line 0, and a stronger
+ * LATE finding can replace the judged one at its exact line). `lateUnverified`
+ * (TASK-080's rejection signal) counts blocking findings absent from the
+ * whole SNAPSHOT, not merely unselected by the verification cap — a capped
+ * snapshot finding was not late. Fail-open per finding, like
+ * `applyFindingVerdicts`.
  */
 export function mergeVerdictsByLocation(
   findings: Finding[],
   verifiedTargets: Finding[],
   verdicts: FindingVerdict[],
+  snapshotBlocking: Finding[],
 ): OverlapVerdictMerge {
   const verdictByPosition = new Map(verdicts.map((verdict) => [verdict.index, verdict]));
-  // dedupeFindings keeps distinct file-level (line 0) findings on one file,
-  // so path:line alone is not unique there — the title joins the key.
-  const locationOf = (finding: Finding) =>
-    `${finding.path}:${finding.line}${finding.line === 0 ? `:${finding.title}` : ''}`;
-  const verdictByLocation = new Map<string, FindingVerdict | undefined>();
+  const identityOf = (finding: Finding) => `${finding.path}:${finding.line}:${finding.title}`;
+  const verdictByIdentity = new Map<string, FindingVerdict | undefined>();
   verifiedTargets.forEach((target, position) => {
-    verdictByLocation.set(locationOf(target), verdictByPosition.get(position));
+    verdictByIdentity.set(identityOf(target), verdictByPosition.get(position));
   });
+  const snapshotIdentities = new Set(
+    [...snapshotBlocking, ...verifiedTargets].map((finding) => identityOf(finding)),
+  );
 
   const dropped: VerdictApplication['dropped'] = [];
   const demoted: VerdictApplication['demoted'] = [];
   const lateUnverified: Finding[] = [];
   const result = findings.flatMap((finding) => {
-    const location = locationOf(finding);
-    if (!verdictByLocation.has(location)) {
-      if (BLOCKING_SEVERITIES.has(finding.severity)) lateUnverified.push(finding);
+    const identity = identityOf(finding);
+    if (!verdictByIdentity.has(identity)) {
+      if (BLOCKING_SEVERITIES.has(finding.severity) && !snapshotIdentities.has(identity)) {
+        lateUnverified.push(finding);
+      }
       return [finding];
     }
-    const verdict = verdictByLocation.get(location);
+    const verdict = verdictByIdentity.get(identity);
     if (!verdict || verdict.verdict === 'confirmed') return [finding];
     if (verdict.verdict === 'refuted') {
       dropped.push({ finding, reason: verdict.reason });
