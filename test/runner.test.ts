@@ -312,23 +312,30 @@ describe('buildMainShardFailureMessage', () => {
 
 describe('renderReviewMetadataBlock', () => {
   it('renders collapsed review metadata with model and token counters', () => {
-    const block = renderReviewMetadataBlock('opencode/deepseek-v4-flash-free', {
-      models: ['opencode/deepseek-v4-flash-free'],
-      input: 100,
-      output: 20,
-      reasoning: 30,
-      cacheRead: 40,
-      cacheWrite: 50,
-      costUsd: 1.23456,
-      estimatedCostUsd: 0.75,
-      creditCost: 2.5,
-      acuCost: 3,
-    }).join('\n');
+    const block = renderReviewMetadataBlock(
+      'opencode/deepseek-v4-flash-free',
+      {
+        models: ['opencode/deepseek-v4-flash-free'],
+        input: 100,
+        output: 20,
+        reasoning: 30,
+        cacheRead: 40,
+        cacheWrite: 50,
+        costUsd: 1.23456,
+        estimatedCostUsd: 0.75,
+        creditCost: 2.5,
+        acuCost: 3,
+      },
+      'low',
+    ).join('\n');
 
     assert.match(block, /^<details>/m);
     assert.doesNotMatch(block, /<details open>/);
     assert.match(block, /<summary>Review metadata<\/summary>/);
     assert.match(block, /model=opencode\/deepseek-v4-flash-free/);
+    // The effort A/B arm identity; absent when the engine ignores the option
+    // (the other cases below pass no effort and must not render the line).
+    assert.match(block, /model=.*\nreasoning effort=low\n/);
     assert.match(block, /input=100/);
     assert.match(block, /output=20/);
     assert.match(block, /reasoning=30/);

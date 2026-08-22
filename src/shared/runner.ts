@@ -1291,6 +1291,22 @@ async function runReviewPipeline(params: {
   const verifierSessionOptions = verifierNeedsOwnOptions
     ? supportedModelOptions(auxProviderID, auxModelID, verifyModelOptions)
     : undefined;
+  // Stamped into the posted review's metadata: the arm identity for effort
+  // A/Bs. Undefined wherever the main engine does not consume the option.
+  const mainReasoningEffort = (() => {
+    if (mainCliBackend === COMMANDCODE_PROVIDER_ID)
+      return commandCodeSessionEffort(model, undefined, {
+        auxModel,
+        auxModelOptions,
+        mainModelOptions: options.modelOptions,
+        explicit: options.modelOptionsExplicit ?? false,
+      });
+    if (mainCliBackend) return undefined;
+    const resolved = supportedModelOptions(providerID, modelID, options.modelOptions);
+    if (mainOnPi) return piThinkingLevel(resolved);
+    const effort = resolved?.reasoningEffort;
+    return typeof effort === 'string' && effort !== 'default' ? effort : undefined;
+  })();
 
   const discoveredGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
   const guidelines = formatGuidelines(discoveredGuidelines);
@@ -2737,6 +2753,7 @@ async function runReviewPipeline(params: {
         headSha,
         tokenUsage.snapshot(),
         engineByModel,
+        mainReasoningEffort,
       );
       log(
         `Dry run enabled; would post verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
@@ -2779,6 +2796,7 @@ async function runReviewPipeline(params: {
         headSha,
         tokenUsage.snapshot(),
         engineByModel,
+        mainReasoningEffort,
       );
     const postCurrentReviewIfNeeded = async (): Promise<void> => {
       if (!shouldPostComment) {
@@ -4375,6 +4393,7 @@ export function buildBody(
   headSha?: string,
   tokenUsage?: ReviewTokenUsage,
   engineByModel?: Record<string, string>,
+  reasoningEffort?: string,
 ): string {
   const total = all.length;
   const lines = ['## J-Bot Code Review', ''];
@@ -4411,12 +4430,16 @@ export function buildBody(
   }
   const orphanedSection = renderOrphanedSection(orphaned);
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
-  lines.push(...renderReviewMetadataBlock(model, tokenUsage));
+  lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));
   lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
   return lines.join('\n');
 }
 
-export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewTokenUsage): string[] {
+export function renderReviewMetadataBlock(
+  model: string,
+  tokenUsage?: ReviewTokenUsage,
+  reasoningEffort?: string,
+): string[] {
   if (!tokenUsage) return [];
   const models = uniqueModels(model, tokenUsage.models);
   return [
@@ -4426,6 +4449,8 @@ export function renderReviewMetadataBlock(model: string, tokenUsage?: ReviewToke
     '',
     '```text',
     models.length === 1 ? `model=${models[0]}` : `models=${models.join(', ')}`,
+    // The main pass's resolved effort — the arm identity for effort A/Bs.
+    ...(reasoningEffort ? [`reasoning effort=${reasoningEffort}`] : []),
     `input=${tokenUsage.input}`,
     `output=${tokenUsage.output}`,
     `reasoning=${tokenUsage.reasoning}`,
