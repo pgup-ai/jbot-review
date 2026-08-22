@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   anchorFindings,
   applyFindingVerdicts,
+  mergeVerdictsByLocation,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
@@ -277,6 +278,150 @@ describe('applyFindingVerdicts', () => {
     assert.equal(dropped.length, 1);
     assert.equal(demoted.length, 0);
     assert.equal(result.length, findings.length - 1);
+  });
+});
+
+describe('mergeVerdictsByLocation (TASK-079/080)', () => {
+  // Verdicts re-attach to the (possibly larger) final list by location;
+  // blocking stragglers pass through unverified and are counted.
+  const targets = [
+    finding({ path: 'a.ts', line: 1, severity: 'P1', title: 'refute me' }),
+    finding({ path: 'b.ts', line: 2, severity: 'P2', title: 'uncertain me' }),
+    finding({ path: 'c.ts', line: 3, severity: 'P2', title: 'confirm me' }),
+  ];
+  const straggler = finding({ path: 'late.ts', line: 9, severity: 'P1', title: 'late blocking' });
+  const lateAdvisory = finding({
+    path: 'late.ts',
+    line: 10,
+    severity: 'P3',
+    title: 'late advisory',
+  });
+  const finalFindings = [targets[0], targets[1], targets[2], straggler, lateAdvisory];
+
+  it('re-attaches verdicts by location and counts late blocking findings as unverified', () => {
+    const { findings, dropped, demoted, lateUnverified } = mergeVerdictsByLocation(
+      finalFindings,
+      targets,
+      [
+        { index: 0, verdict: 'refuted', reason: 'guarded' },
+        { index: 1, verdict: 'uncertain' },
+        { index: 2, verdict: 'confirmed' },
+      ],
+      targets,
+    );
+
+    assert.deepEqual(
+      dropped.map(({ finding: f }) => f.title),
+      ['refute me'],
+    );
+    assert.deepEqual(
+      demoted.map(({ finding: f }) => f.title),
+      ['uncertain me'],
+    );
+    assert.deepEqual(
+      findings.map((f) => `${f.title}:${f.severity}`),
+      ['uncertain me:P3', 'confirm me:P2', 'late blocking:P1', 'late advisory:P3'],
+    );
+    // Only BLOCKING stragglers count: advisories were never verification targets.
+    assert.deepEqual(
+      lateUnverified.map((f) => f.title),
+      ['late blocking'],
+    );
+  });
+
+  it('never applies a verdict to a finding the verifier did not judge', () => {
+    // Two shapes of the same hazard: dedupe keeps distinct file-level (line 0)
+    // findings on one file, and a stronger LATE finding can replace the
+    // verified one at the same nonzero line. The title joins the key, so both
+    // stay unjudged and count as late instead of inheriting the verdict.
+    const targetZero = finding({ path: 'app.ts', line: 0, severity: 'P1', title: 'wiring gap' });
+    const twinZero = finding({ path: 'app.ts', line: 0, severity: 'P1', title: 'cap unreachable' });
+    const { findings, dropped, lateUnverified } = mergeVerdictsByLocation(
+      [targetZero, twinZero],
+      [targetZero],
+      [{ index: 0, verdict: 'refuted' }],
+      [targetZero],
+    );
+
+    assert.deepEqual(
+      dropped.map(({ finding: f }) => f.title),
+      ['wiring gap'],
+    );
+    assert.deepEqual(
+      findings.map((f) => f.title),
+      ['cap unreachable'],
+    );
+    assert.deepEqual(
+      lateUnverified.map((f) => f.title),
+      ['cap unreachable'],
+    );
+
+    // Same-line replacement: the late stronger finding at refuted a.ts:1 has a
+    // different title, so the old verdict must not drop it.
+    const replacement = finding({ path: 'a.ts', line: 1, severity: 'P0', title: 'worse bug' });
+    const replaced = mergeVerdictsByLocation(
+      [replacement],
+      targets,
+      [{ index: 0, verdict: 'refuted' }],
+      targets,
+    );
+    assert.deepEqual(
+      replaced.findings.map((f) => f.title),
+      ['worse bug'],
+    );
+    assert.deepEqual(
+      replaced.lateUnverified.map((f) => f.title),
+      ['worse bug'],
+    );
+  });
+
+  it('never lets delimiter-bearing fields forge another finding identity', () => {
+    // "a:1" + line 2 + "x" must not collide with "a" + line 1 + "2:x".
+    const target = finding({ path: 'a:1', line: 2, severity: 'P1', title: 'x' });
+    const lookalike = finding({ path: 'a', line: 1, severity: 'P1', title: '2:x' });
+    const { findings, lateUnverified } = mergeVerdictsByLocation(
+      [lookalike],
+      [target],
+      [{ index: 0, verdict: 'refuted' }],
+      [target],
+    );
+    assert.deepEqual(
+      findings.map((f) => f.title),
+      ['2:x'],
+    );
+    assert.deepEqual(
+      lateUnverified.map((f) => f.title),
+      ['2:x'],
+    );
+  });
+
+  it('fails open per finding: no verdict for a target means confirmed', () => {
+    const { findings, lateUnverified } = mergeVerdictsByLocation(
+      finalFindings,
+      targets,
+      [{ index: 0, verdict: 'refuted' }],
+      targets,
+    );
+    assert.equal(findings.length, finalFindings.length - 1);
+    assert.deepEqual(
+      lateUnverified.map((f) => f.title),
+      ['late blocking'],
+    );
+  });
+
+  it('never counts snapshot findings the verification cap left unselected as late', () => {
+    // MAX_VERIFIED_FINDINGS bounds the targets; an unselected snapshot finding
+    // was not "late" — inflating the TASK-080 signal would reject the arm on
+    // noise.
+    const capped = finding({ path: 'd.ts', line: 4, severity: 'P2', title: 'over the cap' });
+    const { findings, lateUnverified } = mergeVerdictsByLocation(
+      [...targets, capped],
+      targets,
+      [{ index: 2, verdict: 'confirmed' }],
+      [...targets, capped],
+    );
+    assert.equal(findings.length, 4);
+    assert.deepEqual(lateUnverified, []);
   });
 });
 

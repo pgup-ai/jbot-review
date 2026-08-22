@@ -59,6 +59,21 @@ export function backendRequiresCompleteEmbeddedDiff(
   );
 }
 
+/**
+ * Whether the main session can read checkout files on demand. Checkout-blind
+ * routes are the complete-embedded-diff backends plus cline, whose sessions
+ * run tool-less (NO_TOOLS_REVIEW_DIRECTIVE, `--auto-approve false`) even
+ * though its diff handling is not embedded-only.
+ */
+export function backendCanReadWorkspace(
+  providerID: string,
+  cliBackend: CliBackendID | undefined,
+): boolean {
+  return (
+    !backendRequiresCompleteEmbeddedDiff(providerID, cliBackend) && cliBackend !== CLINE_PROVIDER_ID
+  );
+}
+
 export interface ReviewBackendSelection {
   mainCliBackend?: CliBackendID;
   auxCliBackend?: CliBackendID;

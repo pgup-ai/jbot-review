@@ -2,10 +2,24 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  backendCanReadWorkspace,
   backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
   swallowedProviderWarnings,
 } from '../src/shared/backend-selection.ts';
+
+describe('backendCanReadWorkspace', () => {
+  it('marks complete-embedded-diff routes AND cline as checkout-blind', () => {
+    // cline sessions run tool-less (NO_TOOLS_REVIEW_DIRECTIVE, --auto-approve
+    // false), so a "read the omitted docs yourself" instruction is a dead end
+    // there even though its diff handling is not embedded-only.
+    assert.equal(backendCanReadWorkspace('opencode', undefined), true);
+    assert.equal(backendCanReadWorkspace('devin', 'devin'), true);
+    assert.equal(backendCanReadWorkspace('cline', 'cline'), false);
+    assert.equal(backendCanReadWorkspace('commandcode', 'commandcode'), false);
+    assert.equal(backendCanReadWorkspace('poolside', undefined), false);
+  });
+});
 
 describe('selectReviewBackends', () => {
   const base = {

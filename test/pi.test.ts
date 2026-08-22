@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
+  abortPiSessionsByLabel,
   PI_MIN_NODE_VERSION,
   PI_TELEMETRY_CAPABILITY,
   runPiAddressedPriorCommentsCheck,
+  runPiFindingVerification,
   runPiGuidelineComplianceCheck,
   runPiReview,
   type PiRuntime,
@@ -26,6 +28,7 @@ import {
   piTurnUsageSince,
   resolvePiEngine,
 } from '../src/shared/pi.ts';
+import { CONTINUATION_NUDGE_PROMPT } from '../src/shared/prompt.ts';
 import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts';
@@ -462,6 +465,106 @@ describe('Pi review sessions', () => {
     return runtime;
   };
 
+  it('sends a continuation, not a reformat, when the model only announces a plan', async () => {
+    // A same-session nudge resumes the announced work with the prefix cached;
+    // the JSON-repair wording would demand immediate JSON and get an empty
+    // review instead of the announced exploration.
+    const prompts: string[] = [];
+    const runtime = fakeRuntime(
+      false,
+      [],
+      [
+        { role: 'assistant', content: "I'll review this PR thoroughly. Let me start." },
+        { role: 'assistant', content: JSON.stringify({ summary: 'done', findings: [] }) },
+      ],
+    );
+    const inner = runtime.sdk.createAgentSession;
+    runtime.sdk.createAgentSession = async (args: unknown) => {
+      const created = await (inner as (a: unknown) => Promise<{ session: never }>)(args);
+      const session = created.session as { prompt: (p: string) => Promise<void> };
+      const original = session.prompt.bind(session);
+      session.prompt = (prompt: string) => {
+        prompts.push(prompt);
+        return original(prompt);
+      };
+      return created;
+    };
+
+    const result = await runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {});
+    assert.equal(result.summary, 'done');
+    assert.equal(prompts.length, 2);
+    assert.equal(prompts[1], CONTINUATION_NUDGE_PROMPT);
+  });
+
+  it('aborts an in-flight labeled session at grace abandonment (TASK-077)', async () => {
+    // The label registry lets the runner abort an abandoned session the
+    // moment its fallback is settled, instead of at teardown.
+    const events: string[] = [];
+    const runtime = fakeRuntime(false, events);
+    runtime.sdk.createAgentSession = async () => {
+      const session = {
+        messages: [] as unknown[],
+        prompt: () => new Promise<void>(() => {}),
+        abort: async () => void events.push('aborted'),
+        dispose: () => events.push('disposed'),
+      };
+      return { session };
+    };
+
+    const pending = runPiGuidelineComplianceCheck(
+      runtime,
+      'deepseek/deepseek-v4-flash',
+      'ctx',
+      'guidelines',
+      () => {},
+      200,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    abortPiSessionsByLabel(runtime, 'guideline-compliance', () => {});
+    assert.deepEqual(events, ['aborted', 'disposed']);
+    // Unknown labels are a no-op.
+    abortPiSessionsByLabel(runtime, 'no-such-label', () => {});
+    // The abandoned call still times out on its own; fail-open lives in the
+    // runner's aux wrapper, which converts this rejection into the fallback.
+    await assert.rejects(pending, /did not finish/);
+  });
+
+  it('delivers the verifier effort as a per-session thinking level (TASK-157)', async () => {
+    // Without the override a distinct-aux verification session runs at the
+    // provider default, below the finder — the accident TASK-157 closes.
+    const sessions: Array<Record<string, unknown>> = [];
+    const runtime = fakeRuntime(false, []);
+    runtime.thinkingLevel = 'medium';
+    const inner = runtime.sdk.createAgentSession;
+    runtime.sdk.createAgentSession = async (args: Record<string, unknown>) => {
+      sessions.push(args);
+      return (inner as (a: unknown) => Promise<{ session: unknown }>)(args);
+    };
+    const finding = { path: 'a.ts', line: 1, title: 't', body: 'b', severity: 'P1' } as never;
+
+    await runPiFindingVerification(
+      runtime,
+      'opencode/aux-model',
+      'ctx',
+      [finding],
+      () => {},
+      1000,
+      undefined,
+      {
+        reasoningEffort: 'high',
+      },
+    );
+    assert.equal(sessions[0]?.thinkingLevel, 'high');
+
+    // Without the override, a non-main model takes the aux default when the
+    // runtime carries one, and none otherwise.
+    await runPiFindingVerification(runtime, 'opencode/aux-model', 'ctx', [finding], () => {}, 1000);
+    assert.equal('thinkingLevel' in (sessions[1] ?? {}), false);
+    runtime.auxThinkingLevel = 'low';
+    await runPiFindingVerification(runtime, 'opencode/aux-model', 'ctx', [finding], () => {}, 1000);
+    assert.equal(sessions[2]?.thinkingLevel, 'low');
+  });
+
   it('gives the embedded-first system prompt to review sessions only', async () => {
     // The aux prompts still tell the model to run a full git diff, so they must
     // not inherit a system prompt that allows git_diff only for hunk recovery.
@@ -487,6 +590,20 @@ describe('Pi review sessions', () => {
     );
     // Order matters: aborting after disposal would fail against a dead session.
     assert.deepEqual(events, ['aborted', 'disposed']);
+  });
+
+  it('releases the newborn post-stop session under its registration label', async () => {
+    // Registration keys sessionsByLabel by the real label; abandoning under a
+    // synthetic one would leak the entry and feed later label aborts a
+    // disposed session.
+    const runtime = fakeRuntime(true, []);
+    await assert.rejects(
+      runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}),
+      /stopped during session creation/,
+    );
+    for (const [label, sessions] of runtime.sessionsByLabel ?? []) {
+      assert.equal(sessions.size, 0, `leaked session under label "${label}"`);
+    }
   });
 
   it('still disposes when abort throws synchronously', async () => {

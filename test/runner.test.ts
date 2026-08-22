@@ -21,10 +21,16 @@ import {
   settleWithinGrace,
   runPrReview,
   EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
+  runShardedReview,
+  buildSlimVerifierContext,
 } from '../src/shared/runner.ts';
 import { buildDiffHunksBlockWithMetadata } from '../src/shared/diff-context.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import type { Octokit, PrFile } from '../src/shared/github.ts';
+import { planExploration } from '../src/shared/exploration-policy.ts';
+import { StaleReviewError } from '../src/shared/retry-policy.ts';
+import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
+import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 const PRIOR_JBOT_REVIEW = [
@@ -422,6 +428,215 @@ describe('formatReviewedWith', () => {
   });
 });
 
+describe('buildSlimVerifierContext (TASK-065 arm)', () => {
+  it('carries the claim-checking context and none of the finder supplements', () => {
+    // A probe measured the full-context verifier prompt at ~50K uncached input
+    // tokens; the slim contract keeps what verdicts cite and drops the rest.
+    const context = buildSlimVerifierContext({
+      pullTitle: 'Add retry logic',
+      pullBody: 'Fixes the backoff.',
+      changedFiles: ['src/a.ts'],
+      linkedIssues: [{ number: 7, title: 'Retries drop', body: 'details' }],
+      linkedIssuesOmitted: 0,
+      auxDiffBlockText: '## Diff hunks\nDIFF_SENTINEL',
+    });
+
+    assert.match(context, /author-controlled and UNTRUSTED/); // untrusted-note guard
+    assert.match(context, /Add retry logic/);
+    assert.match(context, /#7: Retries drop/);
+    assert.match(context, /- src\/a\.ts/);
+    assert.match(context, /DIFF_SENTINEL/);
+    assert.match(context, /## Commits\n\(none\)/);
+    assert.doesNotMatch(context, /Prior review comments/);
+    assert.doesNotMatch(context, /Summary instructions/);
+    assert.doesNotMatch(context, /Review focus/);
+    // Invariant #4: the slim contract names what it omitted.
+    assert.match(context, /Omitted for verification: commits, prior review comments/);
+    assert.ok(
+      context.indexOf('Omitted for verification: commits') < context.indexOf('DIFF_SENTINEL'),
+      'disclosure precedes the diff so hunks stay last',
+    );
+  });
+});
+
+describe('runShardedReview retry policy (TASK-150/155)', () => {
+  const shardPlan = {
+    label: 'review',
+    context: 'ctx',
+    baseContext: 'base',
+    assignedFiles: ['a.ts'],
+    exploration: planExploration({ tier: 'standard', truncatedFiles: [], omittedFiles: [] }),
+  };
+  const okResult = { summary: 'ok', findings: [] };
+  const backendThrowingOnce = (message: string, calls: string[]) =>
+    ({
+      name: 'fake',
+      runReview: async (_m: string, context: string) => {
+        calls.push(context);
+        if (calls.length === 1) throw new Error(message);
+        return okResult;
+      },
+    }) as unknown as ReviewBackend;
+  const run = (backend: ReviewBackend, staleCheck?: () => Promise<Error | undefined>) =>
+    runShardedReview({
+      backend,
+      model: 'fake/model',
+      guidelinesForPrompt: '',
+      shardPlans: [shardPlan],
+      changedFiles: ['a.ts'],
+      context7Active: false,
+      context7ApiKey: '',
+      log: () => {},
+      ...(staleCheck ? { staleCheck } : {}),
+    });
+
+  it('skips the retry for deterministic failures and keeps it for transient ones', async () => {
+    // A deterministic failure re-buys the same error — the INC-001 waste class.
+    const authCalls: string[] = [];
+    await assert.rejects(
+      run(backendThrowingOnce('401 Unauthorized', authCalls)),
+      /refusing to post partial review coverage/,
+    );
+    assert.equal(authCalls.length, 1);
+
+    const transientCalls: string[] = [];
+    const result = await run(
+      backendThrowingOnce('The API server encountered an error', transientCalls),
+    );
+    assert.equal(transientCalls.length, 2);
+    assert.deepEqual(result, { summary: 'ok', findings: [] });
+  });
+
+  it('keeps the Context7-stripped retry for context-length failures', async () => {
+    // The retry deliberately differs when Context7 was active (baseContext
+    // strips the block), so a context-length failure can succeed there —
+    // blanket non-retryability would kill that designed recovery.
+    const withContext7: string[] = [];
+    await runShardedReview({
+      backend: backendThrowingOnce('maximum context length exceeded', withContext7),
+      model: 'fake/model',
+      guidelinesForPrompt: '',
+      shardPlans: [shardPlan],
+      changedFiles: ['a.ts'],
+      context7Active: true,
+      context7ApiKey: '',
+      log: () => {},
+    });
+    assert.deepEqual(withContext7, ['ctx', 'base']);
+
+    // Identical-prompt retries stay skipped.
+    const withoutContext7: string[] = [];
+    await assert.rejects(
+      run(backendThrowingOnce('maximum context length exceeded', withoutContext7)),
+      /refusing to post partial review coverage/,
+    );
+    assert.equal(withoutContext7.length, 1);
+  });
+
+  it('checks PR freshness before reusing a cached retry result, even after a short attempt', async () => {
+    // The cache entry may come from a PRIOR run (e.g. a workflow re-run on an
+    // already-merged PR), so the live retry's 60s attempt gate is no proxy
+    // for its staleness.
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-shard-cache-'));
+    try {
+      const cache = { dir, headSha: 'head1234', config: 'cfg' };
+      saveShardResult(
+        dir,
+        shardFingerprint({
+          headSha: cache.headSha,
+          model: 'fake/model',
+          context: shardPlan.baseContext,
+          guidelines: '',
+          evidenceQuotes: false,
+          config: cache.config,
+        }),
+        { summary: 'stale cached retry', findings: [] },
+      );
+      const backend = {
+        name: 'fake',
+        runReview: async () => {
+          throw new Error('socket hang up');
+        },
+      } as unknown as ReviewBackend;
+
+      await assert.rejects(
+        runShardedReview({
+          backend,
+          model: 'fake/model',
+          guidelinesForPrompt: '',
+          shardPlans: [shardPlan],
+          changedFiles: ['a.ts'],
+          context7Active: false,
+          context7ApiKey: '',
+          cache,
+          staleCheck: async () => new StaleReviewError('merged'),
+          log: () => {},
+        }),
+        (error: unknown) => error instanceof StaleReviewError,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('checks PR freshness before a retry of a long attempt and aborts stale runs', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'] });
+    const staleCalls: string[] = [];
+    const calls: string[] = [];
+    const backend = {
+      name: 'fake',
+      runReview: async () => {
+        calls.push('attempt');
+        t.mock.timers.tick(61_000);
+        throw new Error('The API server encountered an error');
+      },
+    } as unknown as ReviewBackend;
+
+    await assert.rejects(
+      run(backend, async () => {
+        staleCalls.push('checked');
+        return new StaleReviewError('merged');
+      }),
+      (error: unknown) => error instanceof StaleReviewError && error.reason === 'merged',
+    );
+    assert.deepEqual(staleCalls, ['checked']);
+    assert.equal(calls.length, 1);
+  });
+
+  it('retries when the freshness check reports the PR unchanged, and skips it on short attempts', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'] });
+    const staleCalls: string[] = [];
+    const slowTransient = {
+      name: 'fake',
+      runReview: (() => {
+        let first = true;
+        return async () => {
+          if (first) {
+            first = false;
+            t.mock.timers.tick(61_000);
+            throw new Error('socket hang up');
+          }
+          return okResult;
+        };
+      })(),
+    } as unknown as ReviewBackend;
+    await run(slowTransient, async () => {
+      staleCalls.push('checked');
+      return undefined;
+    });
+    assert.deepEqual(staleCalls, ['checked']);
+
+    // A sub-minute attempt cannot have outlived the PR state; no fetch.
+    const fastCalls: string[] = [];
+    await run(backendThrowingOnce('socket hang up', fastCalls), async () => {
+      staleCalls.push('unexpected');
+      return undefined;
+    });
+    assert.equal(fastCalls.length, 2);
+    assert.deepEqual(staleCalls, ['checked']);
+  });
+});
+
 describe('runPrReview local mode and early exits', () => {
   // Blank workspace skips ensureGitSafeDirectory, so tests never touch the
   // developer's global git config.
@@ -697,6 +912,13 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions({ autoApprove: true }).autoApprove, true);
   });
 
+  it('keeps the experiment arms off and the widen policy conservative by default', () => {
+    const defaults = normalizeOptions(undefined);
+    assert.equal(defaults.guidelineWiden, 'auto');
+    assert.equal(defaults.verifierSlimContext, false);
+    assert.equal(defaults.verifyOverlapGrace, false);
+  });
+
   it('keeps SDK routing automatic unless an entrypoint supplies the override', () => {
     assert.equal(normalizeOptions(undefined).sdkEngine, '');
     assert.equal(normalizeOptions({ sdkEngine: 'opencode' }).sdkEngine, 'opencode');
@@ -749,6 +971,49 @@ describe('settleWithinGrace', () => {
 
     assert.deepEqual(await settleWithinGrace(session(stuck), [], (m) => logs.push(m), 5), []);
     assert.match(logs.join('\n'), /lens still running .* after the main review; abandoning it/);
+  });
+
+  it('aborts the underlying session on abandonment, settle-first (TASK-076/077)', async () => {
+    // The fallback resolves before the abort fires (RISK-007), and sessions
+    // that settled on their own — success or failure — are never aborted.
+    const abandoned: string[] = [];
+    const stuck = new Promise<number[]>(() => {});
+    assert.deepEqual(
+      await settleWithinGrace(
+        session(stuck),
+        [],
+        () => {},
+        5,
+        () => abandoned.push('stuck'),
+      ),
+      [],
+    );
+    assert.deepEqual(abandoned, ['stuck']);
+
+    await settleWithinGrace(
+      session(Promise.resolve([1])),
+      [],
+      () => {},
+      1000,
+      () => abandoned.push('done'),
+    );
+    const failed = Promise.reject(new Error('boom'));
+    failed.catch(() => {});
+    await settleWithinGrace(
+      session(failed),
+      [],
+      () => {},
+      1000,
+      () => abandoned.push('failed'),
+    );
+    await settleWithinGrace(
+      session(Promise.resolve(['kept']), true),
+      [],
+      () => {},
+      0,
+      () => abandoned.push('settled'),
+    );
+    assert.deepEqual(abandoned, ['stuck']);
   });
 
   it('returns the real value when it lands inside the grace', async () => {

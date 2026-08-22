@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  CONTINUATION_NUDGE_PROMPT,
+  isNoAttemptReply,
   ADDRESSED_PRIOR_COMMENTS_PROMPT,
   CHANGES_SINCE_CONTEXT_BUDGET,
   CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
@@ -35,6 +37,31 @@ import {
   selectLensKeys,
   withNoToolsReviewDirective,
 } from '../src/shared/prompt.ts';
+
+describe('no-attempt reply recovery', () => {
+  it('classifies delimiter-free replies as abandoned turns and pins the nudge wording', () => {
+    // An announcement needs a CONTINUATION; a reformat request just elicits
+    // another announcement (observed with devin/glm-5.2: the repair returned
+    // an empty review after 9 minutes).
+    assert.equal(isNoAttemptReply("I'll review this PR thoroughly. Let me start."), true);
+    assert.equal(isNoAttemptReply(''), true);
+    // Bracketed prose is still a plan, not an attempt — mid-line or
+    // line-leading alike; only a JSON-array opener counts.
+    assert.equal(isNoAttemptReply('I will inspect [src/foo.ts] and [test/bar.ts].'), true);
+    assert.equal(isNoAttemptReply('Plan:\n[src/foo.ts] will be inspected'), true);
+    assert.equal(isNoAttemptReply('{"summary": "broken'), false);
+    // Wrong-shaped output is still an attempt: it fails open or gets the
+    // reformat, never a follow-up session. Fenced and preamble-wrapped arrays
+    // count — the parsers extract fenced blocks.
+    assert.equal(isNoAttemptReply('[]'), false);
+    assert.equal(isNoAttemptReply('[{"path": "a.ts"}]'), false);
+    assert.equal(isNoAttemptReply('```json\n[]\n```'), false);
+    assert.equal(isNoAttemptReply('Here are my findings:\n[]'), false);
+    assert.match(CONTINUATION_NUDGE_PROMPT, /finish the task now, in this turn/);
+    assert.match(CONTINUATION_NUDGE_PROMPT, /Do not reply with a plan or preamble/);
+    assert.match(CONTINUATION_NUDGE_PROMPT, /ONLY the JSON/);
+  });
+});
 
 describe('NO_TOOLS_REVIEW_DIRECTIVE', () => {
   it('keeps the tool-less review contract', () => {

@@ -14,10 +14,14 @@ import {
   formatFinderGuidelines,
   formatGuidelines,
   formatLinkedIssues,
+  selectFinderGuidelineText,
   truncatePrBody,
+  MAX_CHANGED_FILES_BYTES,
+  MAX_COMMITS_BYTES,
   MAX_FINDER_GUIDELINE_BYTES,
   MAX_LINKED_ISSUES_BYTES,
   MAX_PR_BODY_BYTES,
+  MAX_PRIOR_COMMENTS_BYTES,
 } from '../src/shared/review-context.ts';
 
 const GIT_DIFF_COMMAND = `git ${GIT_DIFF_ARGS.join(' ')}`;
@@ -324,6 +328,136 @@ describe('discoverGuidelines', () => {
   });
 });
 
+describe('selectFinderGuidelineText', () => {
+  // Doc B exceeds the 24KiB finder cap behind doc A, so the slice omits it.
+  const discovered = {
+    docs: [
+      { label: 'apps/web/AGENTS.md', text: 'scoped rule', relevance: 3 },
+      { label: 'ARCHITECTURE.md', text: 'x'.repeat(25 * 1024), relevance: 1 },
+    ],
+    referenced: [],
+    budgetExhausted: false,
+  } as never;
+  const params = {
+    discovered,
+    forFiles: ['apps/web/a.ts'],
+    full: 'FULL_GUIDELINE_SET',
+    widen: 'auto' as const,
+    mainCanReadWorkspace: true,
+  };
+
+  it('keeps the finder slice when the compliance pass runs, exactly as today', () => {
+    const text = selectFinderGuidelineText({ ...params, complianceRuns: true });
+    assert.match(text, /scoped rule/);
+    assert.doesNotMatch(text, /x{100}/);
+    assert.match(text, /full set is reviewed by the separate guideline-compliance pass/);
+  });
+
+  it('keeps the slice for tool-capable finders when compliance is skipped, naming omitted docs', () => {
+    // The old widen-to-full behavior inverted the guideline budget on exactly
+    // the small PRs that skip the compliance pass; a tool-capable finder can
+    // read the named docs instead.
+    const text = selectFinderGuidelineText({ ...params, complianceRuns: false });
+    assert.match(text, /scoped rule/);
+    assert.doesNotMatch(text, /x{100}/);
+    assert.match(text, /guideline-compliance pass is not running/);
+    assert.match(text, /ARCHITECTURE\.md/);
+    assert.doesNotMatch(text, /full set is reviewed by the separate guideline-compliance pass/);
+  });
+
+  it('renders a clean coverage note when discovery was capped but nothing was sliced out', () => {
+    // budgetExhausted alone must not produce "omitted file(s): ." — an
+    // instruction naming nothing.
+    const exhausted = {
+      docs: [{ label: 'AGENTS.md', text: 'rule', relevance: 1 }],
+      referenced: [],
+      budgetExhausted: true,
+    } as never;
+    const text = selectFinderGuidelineText({
+      ...params,
+      discovered: exhausted,
+      complianceRuns: false,
+    });
+    assert.match(text, /guideline-compliance pass is not running/);
+    assert.doesNotMatch(text, /omitted file\(s\): \./);
+  });
+
+  it('bounds the omitted-doc label list so hostile repos cannot regrow the block', () => {
+    const many = {
+      docs: [
+        { label: 'apps/web/AGENTS.md', text: 'scoped rule', relevance: 3 },
+        ...Array.from({ length: 300 }, (_, i) => ({
+          label: `rules/${'long-segment-'.repeat(8)}${i}.mdc`,
+          text: 'x'.repeat(2 * 1024),
+          relevance: 1,
+        })),
+      ],
+      referenced: [],
+      budgetExhausted: false,
+    } as never;
+    const text = selectFinderGuidelineText({
+      ...params,
+      discovered: many,
+      complianceRuns: false,
+    });
+    const note = text.split('### Review guidance budget')[1] ?? '';
+    assert.ok(Buffer.byteLength(note, 'utf8') < 3 * 1024, `note is ${note.length} chars`);
+    assert.match(note, /and \d+ more omitted file\(s\)/);
+  });
+
+  it('names unloaded referenced docs and survives an oversized first label', () => {
+    // [P1] referenced files the discovery budget could not preload were only
+    // exposed by the full rendering; with compliance skipped they must appear
+    // in the finder disclosure or no session ever sees their paths. And a
+    // first label larger than the label budget must not render a dangling
+    // "omitted file(s): " with an empty list.
+    const withReferenced = {
+      docs: [
+        { label: 'apps/web/AGENTS.md', text: 'scoped rule', relevance: 3 },
+        { label: 'ARCHITECTURE.md', text: 'x'.repeat(25 * 1024), relevance: 1 },
+      ],
+      referenced: ['docs/UNLOADED_RULES.md'],
+      budgetExhausted: true,
+    } as never;
+    const text = selectFinderGuidelineText({
+      ...params,
+      discovered: withReferenced,
+      complianceRuns: false,
+    });
+    assert.match(text, /ARCHITECTURE\.md/);
+    assert.match(text, /docs\/UNLOADED_RULES\.md/);
+
+    const oversized = {
+      docs: [
+        { label: 'apps/web/AGENTS.md', text: 'scoped rule', relevance: 3 },
+        { label: `rules/${'x'.repeat(1200)}.md`, text: 'y'.repeat(25 * 1024), relevance: 1 },
+      ],
+      referenced: [],
+      budgetExhausted: false,
+    } as never;
+    const clipped = selectFinderGuidelineText({
+      ...params,
+      discovered: oversized,
+      complianceRuns: false,
+    });
+    assert.doesNotMatch(clipped, /omitted file\(s\): {2}and/);
+    assert.doesNotMatch(clipped, /omitted file\(s\): \./);
+    assert.match(clipped, /1 omitted file\(s\) not listed/);
+  });
+
+  it('widens to the full set for tool-less finders and under the kill switch', () => {
+    // A backend that cannot read the checkout cannot recover an omitted doc.
+    assert.equal(
+      selectFinderGuidelineText({ ...params, complianceRuns: false, mainCanReadWorkspace: false }),
+      'FULL_GUIDELINE_SET',
+    );
+    assert.equal(
+      selectFinderGuidelineText({ ...params, complianceRuns: false, widen: 'full' }),
+      'FULL_GUIDELINE_SET',
+    );
+  });
+});
+
 describe('formatDiffScope', () => {
   it('prefers SHAs and emits a three-dot diff command', () => {
     const baseSha = 'a'.repeat(40);
@@ -430,6 +564,52 @@ describe('buildReviewContext', () => {
 
     assert.match(context, /PR description truncated/);
     assert.ok(!context.includes('�'), 'truncation split a multi-byte character');
+  });
+
+  it('caps changed files, commits, and prior comments at their byte budgets (invariant #4)', () => {
+    // These blocks grow with PR maturity and previously had no budget — the
+    // likely source of the 232KB assembled-context outliers.
+    const context = buildReviewContext({
+      ...baseParams,
+      changedFiles: Array.from({ length: 2000 }, (_, i) => `src/dir/file-${i}.ts`),
+      commits: Array.from({ length: 500 }, (_, i) => ({
+        sha: 'a'.repeat(40),
+        message: `commit ${i} ${'m'.repeat(80)}`,
+        author: 'dev',
+      })),
+      priorComments: Array.from({ length: 50 }, (_, i) => `comment ${i} ${'x'.repeat(1000)}`),
+    });
+    const section = (title: string): string =>
+      context.split('\n\n').find((candidate) => candidate.startsWith(title)) ?? '';
+
+    const changedFiles = section('## Changed files');
+    assert.ok(Buffer.byteLength(changedFiles, 'utf8') <= MAX_CHANGED_FILES_BYTES);
+    assert.match(changedFiles, /file-0\.ts/);
+    assert.doesNotMatch(changedFiles, /file-1999\.ts/);
+    assert.match(changedFiles, /more changed file\(s\) not listed .*diff itself is unaffected/);
+
+    const commits = section('## Commits');
+    assert.ok(Buffer.byteLength(commits, 'utf8') <= MAX_COMMITS_BYTES);
+    assert.match(commits, /commit 0 /);
+    assert.match(commits, /more commit\(s\) not listed/);
+
+    const priorComments = section('## Prior review comments');
+    assert.ok(Buffer.byteLength(priorComments, 'utf8') <= MAX_PRIOR_COMMENTS_BYTES);
+    assert.match(priorComments, /comment 0 /);
+    assert.match(priorComments, /more prior review comment\(s\) not shown/);
+  });
+
+  it('leaves small changed-file, commit, and prior-comment blocks unchanged', () => {
+    const context = buildReviewContext({
+      ...baseParams,
+      commits: [{ sha: 'a'.repeat(40), message: 'one commit', author: 'dev' }],
+      priorComments: ['a prior comment'],
+    });
+
+    assert.match(context, /- src\/a\.ts/);
+    assert.match(context, /one commit/);
+    assert.match(context, /- a prior comment/);
+    assert.doesNotMatch(context, /not listed|not shown/);
   });
 
   it('caps the WHOLE linked-issues block at the byte budget and discloses every omission', () => {

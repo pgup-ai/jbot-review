@@ -49,6 +49,12 @@ export interface ReviewBackend {
     log: (msg: string) => void,
     timeoutMs?: number,
     onTokenUsage?: TokenUsageRecorder,
+    /**
+     * TASK-157: the verifier's own model options (effort floored at the main
+     * pass). Passed only when the aux entry does not already deliver them;
+     * backends without per-session option support ignore it.
+     */
+    modelOptions?: Record<string, unknown>,
   ): Promise<FindingVerdict[] | undefined>;
   runChangesSinceLastReview(
     model: string,
@@ -58,6 +64,14 @@ export interface ReviewBackend {
     timeoutMs?: number,
     onTokenUsage?: TokenUsageRecorder,
   ): Promise<string>;
+  /**
+   * TASK-076: best-effort abort of this backend's in-flight sessions for a
+   * prompt label, called when the settle grace abandons an auxiliary result.
+   * Absent on backends without abort support; callers feature-test. Returns
+   * the number of sessions signalled: 0 means everything under the label had
+   * already settled.
+   */
+  abortSessionsByLabel?(label: string, log: (msg: string) => void): number;
 }
 
 export interface SessionSlots {
@@ -141,6 +155,13 @@ export function limitReviewBackendSessions(
   return {
     name: backend.name,
     observability: backend.observability,
+    // No slot involved: aborting frees slots, it must never wait on one.
+    ...(backend.abortSessionsByLabel
+      ? {
+          abortSessionsByLabel: (label: string, log: (msg: string) => void) =>
+            backend.abortSessionsByLabel!(label, log),
+        }
+      : {}),
     runReview: (...args) => withSlots(args[4]?.label ?? 'review', () => backend.runReview(...args)),
     runAddressedPriorCommentsCheck: (...args) =>
       withSlots('addressed-prior-comments', () => backend.runAddressedPriorCommentsCheck(...args)),

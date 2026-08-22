@@ -31,6 +31,8 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairPrompt,
+  CONTINUATION_NUDGE_PROMPT,
+  isNoAttemptReply,
 } from './prompt.ts';
 import { isFiniteNumber, isRecord, truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
@@ -668,6 +670,8 @@ export interface PiRuntime {
   /** Full `provider/model` — a bare model ID collides across providers. */
   mainModel: string;
   thinkingLevel?: string;
+  /** For sessions on a model other than `mainModel` (the aux default). */
+  auxThinkingLevel?: string;
   gitDiffTool?: unknown;
   readTool: unknown;
   toolTelemetry?: ToolTelemetryAccumulator;
@@ -678,6 +682,11 @@ export interface PiRuntime {
   activeSessions: Set<PiAgentSessionLike>;
   /** Set by stop(); a session born after the teardown sweep aborts itself. */
   stopped: boolean;
+  /**
+   * In-flight sessions by prompt label, for the grace-expiry abort
+   * (TASK-077). Optional and lazily created so test fakes stay minimal.
+   */
+  sessionsByLabel?: Map<string, Set<PiAgentSessionLike>>;
 }
 
 function requirePiProvider(providerID: string): string {
@@ -719,6 +728,8 @@ export async function startPi(
   log: (msg: string) => void,
   options: {
     modelOptions?: Record<string, unknown>;
+    /** Thinking level for sessions on a model other than the main one. */
+    auxThinkingLevel?: string;
     additionalProviderKeys?: ProviderKeyConfig[];
     diffScope?: PiDiffScope;
     toolTelemetry?: ToolTelemetryAccumulator;
@@ -812,6 +823,7 @@ export async function startPi(
     activeSessions: new Set(),
     stopped: false,
     ...(thinkingLevel ? { thinkingLevel } : {}),
+    ...(options.auxThinkingLevel ? { auxThinkingLevel: options.auxThinkingLevel } : {}),
     ...(options.diffScope
       ? {
           gitDiffTool: createPiGitDiffTool(
@@ -853,9 +865,17 @@ async function createPiSession(
   singleShot: boolean,
   /** Only the review and lens sessions carry the matching embedded-first user prompt. */
   reviewSession = false,
+  /** Per-session override (TASK-157: the verifier's floored effort). */
+  thinkingLevelOverride?: string,
+  /** Registers the session for the grace-expiry abort (TASK-077). */
+  label?: string,
 ): Promise<PiAgentSessionLike> {
   const { providerID, modelID } = parseModelName(model);
   const modelRef = requirePiModel(runtime.modelRuntime, providerID, modelID);
+  const thinkingLevel =
+    thinkingLevelOverride ??
+    // Compare the full provider/model: bare model IDs repeat across providers.
+    (model === runtime.mainModel ? runtime.thinkingLevel : runtime.auxThinkingLevel);
   const { session } = await runtime.sdk.createAgentSession({
     model: modelRef,
     cwd: runtime.workspace,
@@ -868,20 +888,23 @@ async function createPiSession(
     resourceLoader: reviewSession && runtime.reviewLoader ? runtime.reviewLoader : runtime.loader,
     sessionManager: runtime.sdk.SessionManager.inMemory(),
     settingsManager: runtime.sdk.SettingsManager.inMemory({}),
-    // modelOptions are main-model-only, matching the opencode engine. Compare
-    // the full provider/model: bare model IDs repeat across providers.
-    ...(model === runtime.mainModel && runtime.thinkingLevel
-      ? { thinkingLevel: runtime.thinkingLevel }
-      : {}),
+    ...(thinkingLevel ? { thinkingLevel } : {}),
   });
   runtime.activeSessions.add(session);
+  if (label) {
+    const byLabel = (runtime.sessionsByLabel ??= new Map());
+    const labeled = byLabel.get(label) ?? new Set<PiAgentSessionLike>();
+    byLabel.set(label, labeled);
+    labeled.add(session);
+  }
   if (runtime.toolTelemetry) piSessionTelemetry.set(session, runtime.toolTelemetry);
   // stop() may have swept the registry while createAgentSession was pending
   // (an abandoned caller racing teardown): abort the newborn session and fail
   // the call into the aux fail-open path rather than prompting post-teardown.
   if (runtime.stopped) {
-    // The throw skips the caller's dispose finally, so release it here.
-    abandonPiSession(runtime, session, 'post-stop', () => undefined);
+    // The throw skips the caller's dispose finally, so release it here — under
+    // the registration label, or the sessionsByLabel entry leaks.
+    abandonPiSession(runtime, session, label ?? 'post-stop', () => undefined);
     throw new Error('pi engine stopped during session creation');
   }
   return session;
@@ -1020,6 +1043,25 @@ async function abortPiSessionBestEffort(
 }
 
 /**
+ * Best-effort abort of every in-flight session created under `label`, used
+ * when the settle grace abandons an auxiliary result (TASK-077): the fallback
+ * has already been settled, so the session's remaining work is pure waste —
+ * decode, a held concurrency slot, and process linger.
+ */
+export function abortPiSessionsByLabel(
+  runtime: PiRuntime,
+  label: string,
+  log: (msg: string) => void,
+): number {
+  const labeled = runtime.sessionsByLabel?.get(label);
+  if (!labeled || labeled.size === 0) return 0;
+  const count = labeled.size;
+  // Abandoning deletes only the visited element — safe during Set iteration.
+  for (const session of labeled) abandonPiSession(runtime, session, label, log);
+  return count;
+}
+
+/**
  * Releases a session nothing is waiting on (teardown, or one born after the
  * teardown sweep). Never awaits the abort: abortPiSessionBestEffort's timeout
  * would hold a referenced timer — and the caller — for up to PI_ABORT_TIMEOUT_MS
@@ -1049,6 +1091,7 @@ function disposePiSession(
 ): void {
   // Idempotent: teardown disposes abandoned sessions, whose own callers still
   // run this from their finally once the abort settles their prompt.
+  runtime.sessionsByLabel?.get(label)?.delete(session);
   if (!runtime.activeSessions.delete(session)) return;
   const failed = (error: unknown) =>
     log(
@@ -1091,7 +1134,7 @@ export async function runPiReview(
     options.embeddedFirstPrompt ?? false,
   );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
-  const session = await createPiSession(runtime, model, false, true);
+  const session = await createPiSession(runtime, model, false, true, undefined, label);
   try {
     const raw = await promptPiSession(
       session,
@@ -1109,6 +1152,7 @@ export async function runPiReview(
       const repaired = await repromptPiForJson(
         session,
         model,
+        raw,
         error,
         label,
         log,
@@ -1126,6 +1170,7 @@ export async function runPiReview(
 async function repromptPiForJson(
   session: PiAgentSessionLike,
   model: string,
+  raw: string,
   parseError: unknown,
   label: string,
   log: (msg: string) => void,
@@ -1134,6 +1179,19 @@ async function repromptPiForJson(
   budget?: ExplorationBudget,
 ): Promise<string> {
   const message = parseError instanceof Error ? parseError.message : String(parseError);
+  if (isNoAttemptReply(raw)) {
+    log(`${label} ended its turn without attempting the task; sending one continuation prompt`);
+    return promptPiSession(
+      session,
+      model,
+      CONTINUATION_NUDGE_PROMPT,
+      `${label}-continue`,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      budget,
+    );
+  }
   log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
   return promptPiSession(
     session,
@@ -1168,6 +1226,7 @@ async function parsePiAuxWithRepair<T>(
       const repaired = await repromptPiForJson(
         session,
         model,
+        raw,
         error,
         label,
         log,
@@ -1192,7 +1251,7 @@ export async function runPiAddressedPriorCommentsCheck(
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<AddressedPriorComment[]> {
   const label = 'addressed-prior-comments';
-  const session = await createPiSession(runtime, model, false);
+  const session = await createPiSession(runtime, model, false, false, undefined, label);
   try {
     const raw = await promptPiSession(
       session,
@@ -1228,7 +1287,7 @@ export async function runPiGuidelineComplianceCheck(
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<Finding[]> {
   const label = 'guideline-compliance';
-  const session = await createPiSession(runtime, model, false);
+  const session = await createPiSession(runtime, model, false, false, undefined, label);
   try {
     const raw = await promptPiSession(
       session,
@@ -1268,7 +1327,7 @@ export async function runPiChangesSinceLastReview(
   // git_diff only serves the full base...HEAD diff — offering it would let the
   // model describe old PR changes as new. The commit list is embedded in the
   // prompt, so it summarizes from that.
-  const session = await createPiSession(runtime, model, true);
+  const session = await createPiSession(runtime, model, true, false, undefined, label);
   try {
     const raw = await promptPiSession(
       session,
@@ -1298,13 +1357,23 @@ export async function runPiFindingVerification(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  modelOptions?: Record<string, unknown>,
 ): Promise<FindingVerdict[] | undefined> {
   const label = 'finding-verification';
   // Findings pass through unprojected — a field-subset projection here would
   // silently drop `evidence` and defeat verifier grounding (see the opencode
   // engine's identical warning).
   const prompt = assembleFindingVerificationPrompt(prContext, findings, true);
-  const session = await createPiSession(runtime, model, true);
+  // TASK-157: the runner passes the verifier's floored options when the aux
+  // entry does not already deliver them; pi maps them per session.
+  const session = await createPiSession(
+    runtime,
+    model,
+    true,
+    false,
+    piThinkingLevel(modelOptions),
+    label,
+  );
   try {
     const raw = await promptPiSession(session, model, prompt, label, log, timeoutMs, onTokenUsage);
     return parseFindingVerdicts(raw, findings.length, log);

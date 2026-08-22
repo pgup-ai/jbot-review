@@ -18,6 +18,8 @@ import {
   assembleGuidelineCompliancePrompt,
   assembleReviewPrompt,
   buildJsonRepairPrompt,
+  CONTINUATION_NUDGE_PROMPT,
+  isNoAttemptReply,
 } from './prompt.ts';
 import { isFiniteNumber, isRecord } from './text.ts';
 import {
@@ -122,7 +124,17 @@ export interface OpencodeProviderConfig extends ProviderKeyConfig {
   promptCache?: boolean;
   /** Provider options for this entry's model, scoped to it alone. */
   modelOptions?: Record<string, unknown>;
+  /**
+   * TASK-157: options for the verifier alias entry on this model (effort
+   * floored at the main pass). The prompt API has no per-session options, so
+   * the alias `<modelID>--jbot-verify` carries them, with `id` pointing back
+   * at the real model.
+   */
+  verificationModelOptions?: Record<string, unknown>;
 }
+
+/** Config-time model alias that carries the verifier's own options (TASK-157). */
+export const VERIFICATION_MODEL_ALIAS_SUFFIX = '--jbot-verify';
 
 type ProviderEntry = NonNullable<NonNullable<ServerOptions['config']>['provider']>[string];
 
@@ -137,10 +149,12 @@ function buildProviderEntry(params: {
   promptCache: boolean;
   modelID: string;
   modelOptions?: Record<string, unknown>;
+  verificationModelOptions?: Record<string, unknown>;
 }): ProviderEntry {
   const { providerID, apiKey, baseURL, promptCache, modelID } = params;
   const modelOptions = supportedModelOptions(providerID, modelID, params.modelOptions);
   const hasModelOptions = Boolean(modelOptions && Object.keys(modelOptions).length > 0);
+  const aliasModels = verificationAliasEntry(providerID, modelID, params.verificationModelOptions);
   const options = {
     apiKey,
     ...(promptCache ? { setCacheKey: true } : {}),
@@ -158,12 +172,38 @@ function buildProviderEntry(params: {
           name: modelID,
           ...(hasModelOptions ? { options: modelOptions } : {}),
         },
+        ...aliasModels,
       },
     };
   }
   return {
     options,
-    ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
+    ...(hasModelOptions || aliasModels
+      ? {
+          models: {
+            ...(hasModelOptions ? { [modelID]: { options: modelOptions } } : {}),
+            ...aliasModels,
+          },
+        }
+      : {}),
+  };
+}
+
+/** Builds the alias entry OpencodeProviderConfig.verificationModelOptions describes. */
+function verificationAliasEntry(
+  providerID: string,
+  modelID: string,
+  verificationModelOptions?: Record<string, unknown>,
+): Record<string, { id: string; name?: string; options: Record<string, unknown> }> | undefined {
+  if (!modelID) return undefined;
+  const options = supportedModelOptions(providerID, modelID, verificationModelOptions);
+  if (!options || Object.keys(options).length === 0) return undefined;
+  return {
+    [`${modelID}${VERIFICATION_MODEL_ALIAS_SUFFIX}`]: {
+      id: modelID,
+      ...(PROVIDERS[providerID]?.custom ? { name: modelID } : {}),
+      options,
+    },
   };
 }
 
@@ -237,6 +277,7 @@ export function buildConfig(
   promptCache = true,
   additionalProviderKeys: OpencodeProviderConfig[] = [],
   baseURL?: string,
+  verificationModelOptions?: Record<string, unknown>,
 ): ServerOptions['config'] {
   const providerConfig: NonNullable<ServerOptions['config']>['provider'] = {
     [providerID]: buildProviderEntry({
@@ -246,6 +287,7 @@ export function buildConfig(
       promptCache,
       modelID,
       modelOptions,
+      verificationModelOptions,
     }),
   };
   for (const providerKey of additionalProviderKeys) {
@@ -258,18 +300,28 @@ export function buildConfig(
         providerKey.modelOptions,
       );
       const hasAuxOptions = Boolean(auxOptions && Object.keys(auxOptions).length > 0);
+      const aliasModels = verificationAliasEntry(
+        providerID,
+        providerKey.modelID ?? '',
+        providerKey.verificationModelOptions,
+      );
       // A same-provider aux model needs its own entry only to carry a name
-      // (custom providers) or options of its own; otherwise the provider entry
-      // already covers it.
+      // (custom providers), options of its own, or a verifier alias; otherwise
+      // the provider entry already covers it.
       if (!providerKey.modelID || providerKey.modelID === modelID) continue;
-      if (!custom && !hasAuxOptions) continue;
+      if (!custom && !hasAuxOptions && !aliasModels) continue;
       const entry = providerConfig[providerID];
       entry.models = {
         ...entry.models,
-        [providerKey.modelID]: {
-          ...(custom ? { name: providerKey.modelID } : {}),
-          ...(hasAuxOptions ? { options: auxOptions } : {}),
-        },
+        ...(custom || hasAuxOptions
+          ? {
+              [providerKey.modelID]: {
+                ...(custom ? { name: providerKey.modelID } : {}),
+                ...(hasAuxOptions ? { options: auxOptions } : {}),
+              },
+            }
+          : {}),
+        ...aliasModels,
       };
       continue;
     }
@@ -280,6 +332,7 @@ export function buildConfig(
       promptCache: providerKey.promptCache ?? promptCache,
       modelID: providerKey.modelID ?? '',
       modelOptions: providerKey.modelOptions,
+      verificationModelOptions: providerKey.verificationModelOptions,
     });
   }
   return {
@@ -431,6 +484,8 @@ export async function startOpencode(
   log: (msg: string) => void,
   options: {
     modelOptions?: Record<string, unknown>;
+    /** Verifier alias options for the ROOT model (aux-as-root runs; TASK-157). */
+    verificationModelOptions?: Record<string, unknown>;
     port?: number;
     promptCache?: boolean;
     baseURL?: string;
@@ -523,6 +578,7 @@ export async function startOpencode(
       options.promptCache ?? true,
       options.additionalProviderKeys,
       options.baseURL,
+      options.verificationModelOptions,
     );
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',
@@ -729,6 +785,7 @@ export async function runReview(
       client,
       model,
       sessionID,
+      raw,
       error,
       label,
       log,
@@ -739,11 +796,17 @@ export async function runReview(
   }
 }
 
-/** One same-session JSON repair re-prompt, shared by the main and auxiliary sessions. */
+/**
+ * One same-session recovery re-prompt, shared by the main and auxiliary
+ * sessions: a continuation for an abandoned turn (announcement/empty — a
+ * reformat request there just elicits another announcement), the JSON repair
+ * for a malformed attempt.
+ */
 async function repromptForJson(
   client: OpencodeClient,
   model: string,
   sessionID: string,
+  raw: string,
   parseError: unknown,
   label: string,
   log: (msg: string) => void,
@@ -751,6 +814,21 @@ async function repromptForJson(
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<string> {
   const message = parseError instanceof Error ? parseError.message : String(parseError);
+  if (isNoAttemptReply(raw)) {
+    log(`${label} ended its turn without attempting the task; sending one continuation prompt`);
+    return promptPlanAgentInSession(
+      client,
+      model,
+      sessionID,
+      CONTINUATION_NUDGE_PROMPT,
+      `${label}-continue`,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      undefined,
+      label,
+    );
+  }
   log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
   return promptPlanAgentInSession(
     client,
@@ -761,6 +839,8 @@ async function repromptForJson(
     log,
     timeoutMs,
     onTokenUsage,
+    undefined,
+    label,
   );
 }
 
@@ -792,6 +872,7 @@ async function parseAuxSessionWithRepair<T>(
         client,
         model,
         sessionID,
+        raw,
         error,
         label,
         log,
@@ -901,7 +982,12 @@ export async function runFindingVerification(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  modelOptions?: Record<string, unknown>,
 ): Promise<FindingVerdict[] | undefined> {
+  // TASK-157: per-session options don't exist in the prompt API; when the
+  // runner passed verifier options it also registered the matching alias
+  // entry at boot, so the floored effort rides the alias model id.
+  const verificationModel = modelOptions ? `${model}${VERIFICATION_MODEL_ALIAS_SUFFIX}` : model;
   // Pass findings through unprojected: Finding is structurally a VerifiableFinding.
   // An earlier field-subset projection here silently dropped `evidence` and
   // defeated verifier grounding on this (primary) backend — don't reintroduce one.
@@ -910,7 +996,7 @@ export async function runFindingVerification(
   // diff in one model call instead of an agentic git/grep loop.
   const { raw } = await promptPlanAgent(
     client,
-    model,
+    verificationModel,
     prompt,
     'finding-verification',
     log,
@@ -983,6 +1069,8 @@ async function promptPlanAgentInSession(
   timeoutMs = PROMPT_TIMEOUT_MS,
   onTokenUsage?: TokenUsageRecorder,
   tools?: Record<string, boolean>,
+  /** Grace-abort registry key; repair/continue prompts keep the BASE label. */
+  abortLabel = label,
 ): Promise<string> {
   const release = sessionSlots ? await sessionSlots.acquire() : undefined;
   try {
@@ -996,6 +1084,7 @@ async function promptPlanAgentInSession(
       timeoutMs,
       onTokenUsage,
       tools,
+      abortLabel,
     );
   } finally {
     release?.();
@@ -1012,73 +1101,130 @@ async function promptInSessionHoldingSlot(
   timeoutMs: number,
   onTokenUsage?: TokenUsageRecorder,
   tools: Record<string, boolean> = READONLY_TOOLS,
+  abortLabel = label,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
-
-  // A follow-up prompt in an existing session must not return the previous
-  // completed assistant message: remember its id and wait for a NEWER one.
-  const previous = await getLatestAssistantMessage(client, sessionID, label);
-  const previousMessageID = previous?.info.id;
-
-  log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
-  const promptRes = await client.session.promptAsync({
-    path: { id: sessionID },
-    query: queryDirectory(client),
-    body: {
-      model: { providerID, modelID },
-      agent: 'plan',
-      // Defense-in-depth alongside the plan agent and the config-level
-      // permission.edit deny: mutating tools are always off. Default keeps
-      // bash/read on (the review needs git diff/log/grep); single-shot callers
-      // pass SINGLE_SHOT_TOOLS to turn exploration off for a one-call response.
-      tools,
-      parts: [{ type: 'text', text: prompt }],
-    },
-  });
-  const promptError = getResultError(promptRes);
-  if (promptError) throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
-
-  let data;
+  // Abortable only while a prompt is in flight (mirrors the pi registry's
+  // dispose-time cleanup): a settled session left registered would eat a
+  // later same-label abort as a spurious failed-abort log line. Keyed by the
+  // BASE label — a repair/continue prompt must stay reachable by the runner's
+  // grace-expiry abort, which only knows base labels.
+  registerOpencodeSessionForAbort(client, abortLabel, sessionID);
   try {
-    data = await waitForAssistantMessage(
-      client,
-      sessionID,
-      label,
-      log,
-      previousMessageID,
-      timeoutMs,
+    // A follow-up prompt in an existing session must not return the previous
+    // completed assistant message: remember its id and wait for a NEWER one.
+    const previous = await getLatestAssistantMessage(client, sessionID, label);
+    const previousMessageID = previous?.info.id;
+
+    log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
+    const promptRes = await client.session.promptAsync({
+      path: { id: sessionID },
+      query: queryDirectory(client),
+      body: {
+        model: { providerID, modelID },
+        agent: 'plan',
+        // Defense-in-depth alongside the plan agent and the config-level
+        // permission.edit deny: mutating tools are always off. Default keeps
+        // bash/read on (the review needs git diff/log/grep); single-shot callers
+        // pass SINGLE_SHOT_TOOLS to turn exploration off for a one-call response.
+        tools,
+        parts: [{ type: 'text', text: prompt }],
+      },
+    });
+    const promptError = getResultError(promptRes);
+    if (promptError) throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
+
+    let data;
+    try {
+      data = await waitForAssistantMessage(
+        client,
+        sessionID,
+        label,
+        log,
+        previousMessageID,
+        timeoutMs,
+      );
+    } catch (error) {
+      // A timed-out or failed wait leaves the session generating (and
+      // spending tokens) until the server shuts down; stop it now.
+      await abortSessionBestEffort(client, sessionID, label, log);
+      throw error;
+    }
+
+    const parts = data.parts;
+    const telemetry = opencodeToolTelemetry.get(client);
+    if (telemetry) recordOpencodeToolParts(telemetry, label, data.observedParts);
+    log(
+      `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
     );
-  } catch (error) {
-    // A timed-out or failed wait leaves the session generating (and
-    // spending tokens) until the server shuts down; stop it now.
-    await abortSessionBestEffort(client, sessionID, label, log);
-    throw error;
+    log(`${label} ${formatTokenUsage(data.info)}`);
+    const usage = extractPromptTokenUsage(data.info);
+    if (usage) onTokenUsage?.(usage, model, label);
+
+    const textParts = parts.filter(
+      (part): part is Extract<Part, { type: 'text' }> => part.type === 'text' && Boolean(part.text),
+    );
+    // No text part (e.g. the model exhausted its budget on reasoning) must
+    // surface as a parse failure so the repair loop fires — defaulting to
+    // '{}' would silently score the session as "no findings".
+    const raw = textParts
+      .map((p) => p.text)
+      .join('\n\n')
+      .trim();
+    if (!raw)
+      log(
+        `${label} response contained no text part (types: ${parts.map((p) => p.type).join(', ')})`,
+      );
+    log(`Extracted ${label} text: ${raw.length} chars from ${textParts.length} text part(s)`);
+    return raw;
+  } finally {
+    unregisterOpencodeSessionForAbort(client, abortLabel, sessionID);
   }
+}
 
-  const parts = data.parts;
-  const telemetry = opencodeToolTelemetry.get(client);
-  if (telemetry) recordOpencodeToolParts(telemetry, label, data.observedParts);
-  log(
-    `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
-  );
-  log(`${label} ${formatTokenUsage(data.info)}`);
-  const usage = extractPromptTokenUsage(data.info);
-  if (usage) onTokenUsage?.(usage, model, label);
+/**
+ * Grace-abandon abort registry (TASK-076): sessions register at creation and
+ * stay registered — aborting a finished session is a server-side no-op, the
+ * set is cleared on the first abort, and the registry dies with the client.
+ */
+const abortableSessionsByLabel = new WeakMap<OpencodeClient, Map<string, Set<string>>>();
 
-  const textParts = parts.filter(
-    (part): part is Extract<Part, { type: 'text' }> => part.type === 'text' && Boolean(part.text),
-  );
-  // No text part (e.g. the model exhausted its budget on reasoning) must
-  // surface as a parse failure so the repair loop fires — defaulting to
-  // '{}' would silently score the session as "no findings".
-  const raw = textParts
-    .map((p) => p.text)
-    .join('\n\n')
-    .trim();
-  if (!raw)
-    log(`${label} response contained no text part (types: ${parts.map((p) => p.type).join(', ')})`);
-  log(`Extracted ${label} text: ${raw.length} chars from ${textParts.length} text part(s)`);
-  return raw;
+export function registerOpencodeSessionForAbort(
+  client: OpencodeClient,
+  label: string,
+  sessionID: string,
+): void {
+  const byLabel = abortableSessionsByLabel.get(client) ?? new Map<string, Set<string>>();
+  abortableSessionsByLabel.set(client, byLabel);
+  const ids = byLabel.get(label) ?? new Set<string>();
+  byLabel.set(label, ids);
+  ids.add(sessionID);
+}
+
+export function unregisterOpencodeSessionForAbort(
+  client: OpencodeClient,
+  label: string,
+  sessionID: string,
+): void {
+  abortableSessionsByLabel.get(client)?.get(label)?.delete(sessionID);
+}
+
+/**
+ * Best-effort, fire-and-forget: used when the settle grace abandons a result.
+ * Returns how many sessions were signalled — 0 means the label's prompts had
+ * already settled, so the caller must not record it as abandoned.
+ */
+export function abortOpencodeSessionsByLabel(
+  client: OpencodeClient,
+  label: string,
+  log: (msg: string) => void,
+): number {
+  const ids = abortableSessionsByLabel.get(client)?.get(label);
+  if (!ids || ids.size === 0) return 0;
+  const count = ids.size;
+  for (const sessionID of ids) void abortSessionBestEffort(client, sessionID, label, log);
+  ids.clear();
+  return count;
 }
 
 async function abortSessionBestEffort(
