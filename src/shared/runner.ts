@@ -1075,7 +1075,14 @@ async function runReviewPipeline(params: {
     model,
     ...(auxModel !== model ? { auxModel } : {}),
   });
-  const recordCoverage: SessionCoverageRecorder = (coverage) => telemetry.recordCoverage(coverage);
+  // Once a label is abandoned at grace expiry, its eager coverage row owns the
+  // terminal state: the abort settles the underlying promise promptly, whose
+  // own catch handler would otherwise append a second, conflicting row.
+  const abandonedAuxLabels = new Set<string>();
+  const recordCoverage: SessionCoverageRecorder = (coverage) => {
+    if (abandonedAuxLabels.has(coverage.session)) return;
+    telemetry.recordCoverage(coverage);
+  };
   const trackedAux: AuxiliarySession<unknown>[] = [];
   const trackAux = <T>(label: string, promise: Promise<T>): AuxiliarySession<T> => {
     const session = trackAuxiliarySession(label, promise);
@@ -2546,6 +2553,7 @@ async function runReviewPipeline(params: {
           state: 'failed',
           error: new Error(aborted === undefined ? 'abandoned-after-grace' : 'aborted-after-grace'),
         });
+        abandonedAuxLabels.add(label);
       }
     };
     const [
