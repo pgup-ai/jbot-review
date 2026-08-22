@@ -1292,7 +1292,9 @@ export function assembleFindingVerificationPrompt(
  * plan, not an attempt.
  */
 export function isNoAttemptReply(raw: string): boolean {
-  return !raw.includes('{') && !/^\s*\[/m.test(raw);
+  // A line-leading `[` counts only when it opens a JSON array ({, ", ], [,
+  // or a digit follows) — "[src/foo.ts] will be inspected" is plan prose.
+  return !raw.includes('{') && !/^\s*\[\s*[[{"\]0-9]/m.test(raw);
 }
 
 /** In-session continuation for an announced-then-stopped turn (multi-turn engines). */

@@ -9,6 +9,7 @@ import {
   classifyCommandCodePromptFailure,
   commandCodeEnvForHome,
   commandCodeReasoningEffort,
+  commandCodeSessionEffort,
   commandCodeAuthPath,
   commandCodeSessionEstimatedCost,
   formatCommandCodePromptTimeoutMessage,
@@ -111,6 +112,21 @@ describe('CommandCode CLI provider helpers', () => {
     }
     assert.equal(commandCodeReasoningEffort(deepseek, {}), undefined);
     assert.equal(commandCodeReasoningEffort(deepseek, undefined), undefined);
+
+    // Role selection: the aux default never clamps, main options and the
+    // verifier override do; an aux model sharing the main entry follows it.
+    const ctx = {
+      auxModel: deepseek,
+      auxModelOptions: { reasoningEffort: 'low' },
+      mainModelOptions: { reasoningEffort: 'low' },
+      explicit: true,
+    };
+    assert.equal(commandCodeSessionEffort(deepseek, undefined, ctx), undefined);
+    assert.equal(commandCodeSessionEffort(deepseek, { reasoningEffort: 'low' }, ctx), 'high');
+    assert.equal(
+      commandCodeSessionEffort(deepseek, undefined, { ...ctx, auxModelOptions: undefined }),
+      'high',
+    );
   });
 
   it('denies all CommandCode tools', () => {

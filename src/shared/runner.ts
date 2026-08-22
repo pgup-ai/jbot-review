@@ -134,7 +134,7 @@ import { createDevinCliBackend } from './devin-cli.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
   COMMANDCODE_TELEMETRY_CAPABILITY,
-  commandCodeReasoningEffort,
+  commandCodeSessionEffort,
   listCommandCodeModels,
   runCommandCodeAddressedPriorCommentsCheck,
   runCommandCodeFindingVerification,
@@ -1689,16 +1689,14 @@ async function runReviewPipeline(params: {
     log(`CommandCode CLI auth configured at ${authPath}.`);
     log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
     log('CommandCode reviews run with skills and tools disabled.');
-    commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome, (m, override) => {
-      // Aux sessions run the built-in aux defaults; everything else (main
-      // options, or the verifier's floored override) carries user intent.
-      const auxCall = override === undefined && m === auxModel && auxModelOptions !== undefined;
-      return commandCodeReasoningEffort(
-        m,
-        override ?? (auxCall ? auxModelOptions : options.modelOptions),
-        !auxCall && options.modelOptionsExplicit,
-      );
-    });
+    commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome, (m, override) =>
+      commandCodeSessionEffort(m, override, {
+        auxModel,
+        auxModelOptions,
+        mainModelOptions: options.modelOptions,
+        explicit: options.modelOptionsExplicit ?? false,
+      }),
+    );
   }
 
   if (!remoteAcp && (mainCliBackend === CODEX_PROVIDER_ID || auxCliBackend === CODEX_PROVIDER_ID)) {

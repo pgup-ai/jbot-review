@@ -140,6 +140,30 @@ export function commandCodeReasoningEffort(
   return explicit ? clampReasoningEffort(effort, supported) : undefined;
 }
 
+/**
+ * Role-aware effort for one session: aux sessions run the built-in aux
+ * defaults (never clamped); main options and the verifier's floored
+ * override carry user intent, so they clamp when the options are explicit.
+ */
+export function commandCodeSessionEffort(
+  model: string,
+  override: Record<string, unknown> | undefined,
+  ctx: {
+    auxModel: string;
+    auxModelOptions?: Record<string, unknown>;
+    mainModelOptions?: Record<string, unknown>;
+    explicit: boolean;
+  },
+): string | undefined {
+  const auxCall =
+    override === undefined && model === ctx.auxModel && ctx.auxModelOptions !== undefined;
+  return commandCodeReasoningEffort(
+    model,
+    override ?? (auxCall ? ctx.auxModelOptions : ctx.mainModelOptions),
+    !auxCall && ctx.explicit,
+  );
+}
+
 export async function runCommandCodeReview(
   workspace: string,
   model: string,
