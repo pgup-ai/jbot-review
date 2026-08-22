@@ -533,8 +533,10 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     assert.equal(withoutContext7.length, 1);
   });
 
-  it('checks PR freshness before reusing a cached retry result', async (t) => {
-    t.mock.timers.enable({ apis: ['Date'] });
+  it('checks PR freshness before reusing a cached retry result, even after a short attempt', async () => {
+    // The cache entry may come from a PRIOR run (e.g. a workflow re-run on an
+    // already-merged PR), so the live retry's 60s attempt gate is no proxy
+    // for its staleness.
     const dir = mkdtempSync(join(tmpdir(), 'jbot-shard-cache-'));
     try {
       const cache = { dir, headSha: 'head1234', config: 'cfg' };
@@ -553,7 +555,6 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
       const backend = {
         name: 'fake',
         runReview: async () => {
-          t.mock.timers.tick(61_000);
           throw new Error('socket hang up');
         },
       } as unknown as ReviewBackend;

@@ -3704,12 +3704,12 @@ export async function runShardedReview(params: {
         if (params.cache && retryFingerprint) {
           const cached = loadCachedShardResult(params.cache.dir, retryFingerprint);
           if (cached) {
-            // The cache hit costs nothing, but posting it against a merged,
-            // closed, or moved PR is as pointless as a live retry there.
-            if (Date.now() - startedAt > STALE_CHECK_MIN_ATTEMPT_MS) {
-              const stale = await checkStale();
-              if (stale) throw stale;
-            }
+            // Unconditional, unlike the live retry's 60s gate (TASK-155's
+            // spec guards a model-window spend): the entry may come from a
+            // prior run, this costs one fail-open GET, and posting it against
+            // a merged, closed, or moved PR is as pointless as a live retry.
+            const stale = await checkStale();
+            if (stale) throw stale;
             log(`${plan.label}: reusing cached retry result (${retryFingerprint}).`);
             params.onCoverage?.({
               session: `${plan.label}-retry`,
