@@ -234,7 +234,10 @@ export function mergeVerdictsByLocation(
   snapshotBlocking: Finding[],
 ): OverlapVerdictMerge {
   const verdictByPosition = new Map(verdicts.map((verdict) => [verdict.index, verdict]));
-  const identityOf = (finding: Finding) => `${finding.path}:${finding.line}:${finding.title}`;
+  // JSON-encoded tuple: fields can carry ':' themselves, and a joined string
+  // would let "a:1"+2+"x" forge the identity of "a"+1+"2:x".
+  const identityOf = (finding: Finding) =>
+    JSON.stringify([finding.path, finding.line, finding.title]);
   const verdictByIdentity = new Map<string, FindingVerdict | undefined>();
   verifiedTargets.forEach((target, position) => {
     verdictByIdentity.set(identityOf(target), verdictByPosition.get(position));

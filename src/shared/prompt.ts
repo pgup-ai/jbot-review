@@ -1280,14 +1280,18 @@ export function assembleFindingVerificationPrompt(
  * One repair attempt is made before the run fails.
  */
 /**
- * True when a reply contains no JSON delimiter at all — an abandoned turn (a
- * plan announcement or empty text), not a malformed attempt. A continuation
- * is the right recovery there: a reformat request just elicits another
- * announcement or an empty review (observed with devin/glm-5.2, which spent
- * 9 minutes on the repair prompt and returned a finding-free JSON).
+ * True when a reply never attempted the task — an abandoned turn (a plan
+ * announcement or empty text), not a malformed attempt. A continuation is the
+ * right recovery there: a reformat request just elicits another announcement
+ * or an empty review (observed with devin/glm-5.2, which spent 9 minutes on
+ * the repair prompt and returned a finding-free JSON). The signal is an
+ * object brace anywhere, or a reply that IS an array (wrong-shaped output is
+ * still an attempt — it fails open or gets the reformat, never a follow-up
+ * session). Bracketed prose ("I will inspect [src/foo.ts]") is a plan, not
+ * an attempt.
  */
 export function isNoAttemptReply(raw: string): boolean {
-  return !raw.includes('{') && !raw.includes('[');
+  return !raw.includes('{') && !raw.trimStart().startsWith('[');
 }
 
 /** In-session continuation for an announced-then-stopped turn (multi-turn engines). */

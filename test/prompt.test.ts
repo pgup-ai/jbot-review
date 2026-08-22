@@ -45,8 +45,14 @@ describe('no-attempt reply recovery', () => {
     // an empty review after 9 minutes).
     assert.equal(isNoAttemptReply("I'll review this PR thoroughly. Let me start."), true);
     assert.equal(isNoAttemptReply(''), true);
+    // Bracketed prose is still a plan, not an attempt — every output schema
+    // is an object, and even an array-shaped attempt carries object braces.
+    assert.equal(isNoAttemptReply('I will inspect [src/foo.ts] and [test/bar.ts].'), true);
     assert.equal(isNoAttemptReply('{"summary": "broken'), false);
-    assert.equal(isNoAttemptReply('[1]'), false);
+    // Wrong-shaped output is still an attempt: it fails open or gets the
+    // reformat, never a follow-up session.
+    assert.equal(isNoAttemptReply('[]'), false);
+    assert.equal(isNoAttemptReply('[{"path": "a.ts"}]'), false);
     assert.match(CONTINUATION_NUDGE_PROMPT, /finish the task now, in this turn/);
     assert.match(CONTINUATION_NUDGE_PROMPT, /Do not reply with a plan or preamble/);
     assert.match(CONTINUATION_NUDGE_PROMPT, /ONLY the JSON/);

@@ -375,6 +375,26 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
     );
   });
 
+  it('never lets delimiter-bearing fields forge another finding identity', () => {
+    // "a:1" + line 2 + "x" must not collide with "a" + line 1 + "2:x".
+    const target = finding({ path: 'a:1', line: 2, severity: 'P1', title: 'x' });
+    const lookalike = finding({ path: 'a', line: 1, severity: 'P1', title: '2:x' });
+    const { findings, lateUnverified } = mergeVerdictsByLocation(
+      [lookalike],
+      [target],
+      [{ index: 0, verdict: 'refuted' }],
+      [target],
+    );
+    assert.deepEqual(
+      findings.map((f) => f.title),
+      ['2:x'],
+    );
+    assert.deepEqual(
+      lateUnverified.map((f) => f.title),
+      ['2:x'],
+    );
+  });
+
   it('fails open per finding: no verdict for a target means confirmed', () => {
     const { findings, lateUnverified } = mergeVerdictsByLocation(
       finalFindings,

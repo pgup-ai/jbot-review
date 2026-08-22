@@ -11,6 +11,7 @@ import {
   parseReview,
 } from './opencode.ts';
 import {
+  isNoAttemptReply,
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
@@ -210,10 +211,10 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
     };
 
     const raw = await deliver(model, prompt, label, log, timeoutMs);
-    // Any JSON delimiter counts as an attempt: an array-shaped reply is wrong
-    // but reformable (or fails open in its parser) — only delimiter-free text
-    // is an abandoned turn worth a continuation.
-    if (!raw.includes('{') && !raw.includes('[')) {
+    // Shared classifier: only brace-free text is an abandoned turn worth a
+    // continuation (bracketed prose is a plan; array-shaped attempts carry
+    // object braces).
+    if (isNoAttemptReply(raw)) {
       log(`${label} ended its turn without attempting the task; sending one continuation prompt`);
       const continued = await deliver(
         model,
@@ -227,7 +228,7 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
         log,
         timeoutMs,
       );
-      if (!continued.includes('{') && !continued.includes('[')) {
+      if (isNoAttemptReply(continued)) {
         // Observed with devin/glm-5.2 on large reviews: the model announces a
         // plan and stops, even when the continuation explicitly forbids it —
         // while completing small prompts fine. Name the condition and the
