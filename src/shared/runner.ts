@@ -877,6 +877,11 @@ export interface ReviewRunOptions {
    */
   modelOptions?: Record<string, unknown>;
   /**
+   * True when `modelOptions` came from user input rather than the built-in
+   * defaults; only explicit efforts may clamp to a restricted model's tiers.
+   */
+  modelOptionsExplicit?: boolean;
+  /**
    * Enable opencode prompt caching (provider `setCacheKey`). Default true:
    * parallel shards and re-reviews share a byte-identical prompt prefix, so
    * caching cuts input-token cost on models that honor it. Models marked
@@ -1683,12 +1688,16 @@ async function runReviewPipeline(params: {
     log(`CommandCode CLI auth configured at ${authPath}.`);
     log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
     log('CommandCode reviews run with skills and tools disabled.');
-    commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome, (m, override) =>
-      commandCodeReasoningEffort(
+    commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome, (m, override) => {
+      // Aux sessions run the built-in aux defaults; everything else (main
+      // options, or the verifier's floored override) carries user intent.
+      const auxCall = override === undefined && m === auxModel && auxModelOptions !== undefined;
+      return commandCodeReasoningEffort(
         m,
-        override ?? (m === auxModel && auxModelOptions ? auxModelOptions : options.modelOptions),
-      ),
-    );
+        override ?? (auxCall ? auxModelOptions : options.modelOptions),
+        !auxCall && options.modelOptionsExplicit,
+      );
+    });
   }
 
   if (!remoteAcp && (mainCliBackend === CODEX_PROVIDER_ID || auxCliBackend === CODEX_PROVIDER_ID)) {
@@ -3058,6 +3067,7 @@ export function normalizeOptions(
     timeBudgetMinutes: Math.max(options?.timeBudgetMinutes ?? 0, 0),
     reviewShards: Math.max(options?.reviewShards ?? 0, 0),
     modelOptions: options?.modelOptions ?? {},
+    modelOptionsExplicit: options?.modelOptionsExplicit ?? false,
     promptCache: options?.promptCache ?? true,
     skipDocOnly: options?.skipDocOnly ?? true,
     dynamicFanout: options?.dynamicFanout ?? true,

@@ -29,6 +29,16 @@ describe('classifyMainShardFailure', () => {
       failureClass: 'context-length',
       retryable: false,
     });
+    assert.deepEqual(classify('prompt too long for the model'), {
+      failureClass: 'context-length',
+      retryable: false,
+    });
+    // "too long" without context/size wording is a duration complaint, not a
+    // context overflow — it must keep its retry.
+    assert.deepEqual(classify('request took too long'), {
+      failureClass: 'timeout',
+      retryable: true,
+    });
 
     // Transient: worth one fresh session.
     assert.deepEqual(classify('429 rate limit exceeded'), {

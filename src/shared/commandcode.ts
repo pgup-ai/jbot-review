@@ -23,6 +23,7 @@ import {
   type TokenUsageRecorder,
 } from './opencode.ts';
 import { spawnWithTimeout, truncateForLog } from '@symma/protocol';
+import { clampReasoningEffort } from './config.ts';
 import { isFiniteNumber, isRecord } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
@@ -121,20 +122,22 @@ const COMMANDCODE_MODEL_EFFORTS: Record<string, readonly string[]> = {
 };
 
 /**
- * The `--effort` value for a session, or undefined to omit the flag. Exact
- * membership only — no nearest-tier clamping: the CLI hard-fails on values
- * outside a model's set, and silently promoting a requested `low` to a
- * model's `high` floor would change behavior the caller never asked for.
- * Unsupported or undeclared combinations keep the CLI's own default.
+ * The `--effort` value for a session; undefined omits the flag. An explicit
+ * effort clamps to the nearest declared tier (one knob: "low" means "as low
+ * as this model goes"); the built-in defaults deliver only on an exact
+ * match, so a default `medium` is never silently promoted to a `high` floor.
  */
 export function commandCodeReasoningEffort(
   model: string,
-  modelOptions?: Record<string, unknown>,
+  modelOptions: Record<string, unknown> | undefined,
+  explicit = false,
 ): string | undefined {
   const { modelID } = parseModelName(model);
   const effort = modelOptions?.reasoningEffort;
-  if (typeof effort !== 'string') return undefined;
-  return COMMANDCODE_MODEL_EFFORTS[modelID]?.includes(effort) ? effort : undefined;
+  const supported = COMMANDCODE_MODEL_EFFORTS[modelID];
+  if (typeof effort !== 'string' || !supported?.length) return undefined;
+  if (supported.includes(effort)) return effort;
+  return explicit ? clampReasoningEffort(effort, supported) : undefined;
 }
 
 export async function runCommandCodeReview(

@@ -157,6 +157,7 @@ async function main(): Promise<void> {
         auxApiKey: auxCredential?.apiKey ?? '',
         auxBaseURL: auxCredential?.baseURL,
         modelOptions,
+        modelOptionsExplicit: core.getInput('model-options').trim() !== '',
         onReviewResult: (result) => {
           findingCount = result.findings.length;
         },

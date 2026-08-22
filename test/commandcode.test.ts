@@ -81,26 +81,34 @@ describe('CommandCode CLI provider helpers', () => {
     );
   });
 
-  it('delivers --effort only on an exact per-model membership match', () => {
-    // The CLI exits nonzero on an effort outside the model's set and
-    // muse-spark rejects the flag outright, so anything but an exact match
-    // (including the default medium/low options) keeps the CLI's own default
-    // rather than gambling on a hard failure or a silent promotion.
+  it('delivers --effort from the per-model allowlist: exact for defaults, clamped when explicit', () => {
+    // Defaults must never be promoted to a restricted model's floor; explicit
+    // efforts clamp so one global knob still reaches restricted models.
     const deepseek = 'commandcode/deepseek/deepseek-v4-flash';
     assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'high' }), 'high');
     assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'max' }), 'max');
     assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'low' }), undefined);
     assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'medium' }), undefined);
-    assert.equal(
-      commandCodeReasoningEffort('commandcode/meta/muse-spark-1.2-contributor', {
-        reasoningEffort: 'high',
-      }),
-      undefined,
-    );
-    assert.equal(
-      commandCodeReasoningEffort('commandcode/Qwen/Qwen3.7-Max', { reasoningEffort: 'high' }),
-      undefined,
-    );
+    assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'low' }, true), 'high');
+    assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'max' }, true), 'max');
+    for (const explicit of [false, true]) {
+      assert.equal(
+        commandCodeReasoningEffort(
+          'commandcode/meta/muse-spark-1.2-contributor',
+          { reasoningEffort: 'high' },
+          explicit,
+        ),
+        undefined,
+      );
+      assert.equal(
+        commandCodeReasoningEffort(
+          'commandcode/Qwen/Qwen3.7-Max',
+          { reasoningEffort: 'high' },
+          explicit,
+        ),
+        undefined,
+      );
+    }
     assert.equal(commandCodeReasoningEffort(deepseek, {}), undefined);
     assert.equal(commandCodeReasoningEffort(deepseek, undefined), undefined);
   });

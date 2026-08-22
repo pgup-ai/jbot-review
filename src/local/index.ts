@@ -570,6 +570,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
       reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
       dynamicFanout: parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),
       modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', defaultModelOptions(provider)),
+      modelOptionsExplicit: Boolean(process.env.JBOT_MODEL_OPTIONS?.trim()),
       promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),
       skipDocOnly: parseEnvBoolean('JBOT_SKIP_DOC_ONLY', true),
       maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),
