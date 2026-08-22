@@ -190,8 +190,7 @@ function buildProviderEntry(params: {
 /**
  * The verifier alias model entry for a provider config: `id` routes the wire
  * call back to the real model while the entry's options carry the floored
- * verification effort (TASK-157). Options clamp against the real model's
- * declared ladder, same as any entry.
+ * verification effort (TASK-157).
  */
 function verificationAliasEntry(
   providerID: string,

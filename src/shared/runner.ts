@@ -2122,13 +2122,8 @@ async function runReviewPipeline(params: {
       }
     }
 
-    // Finders get the capped, relevance-ranked slice while the compliance
-    // session runs (keyed on the session's own final enable, not the option).
-    // When it stays off (option, aux embedded-diff overflow, trivial-delta
-    // trim), only checkout-blind finders widen to the full set — they cannot
-    // recover an omitted doc; tool-capable finders keep the slice with the
-    // omitted docs named for on-demand reads (JBOT_GUIDELINE_WIDEN=full
-    // restores the old widen-everywhere behavior).
+    // Slice-vs-widen policy lives in selectFinderGuidelineText; keyed on the
+    // compliance session's own final enable, not the option.
     const guidelinesForPrompt = selectFinderGuidelineText({
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
@@ -2463,10 +2458,8 @@ async function runReviewPipeline(params: {
     // rather than one. Each falls back to its own empty result — the same value
     // these sessions produce when they fail open on their own.
     const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
-    // Abandonment aborts the underlying sessions where the backend supports it
-    // (pi + opencode today): the fallback is already settled, so everything
-    // the session still generates is waste — decode, a held slot the verifier
-    // can queue behind, and process linger.
+    // Aborts the underlying sessions where the backend supports it (pi +
+    // opencode today); see abortSessionsByLabel.
     const abandonAuxSessions = (labels: string[]) => () => {
       for (const label of labels) auxBackend.abortSessionsByLabel?.(label, log);
     };
