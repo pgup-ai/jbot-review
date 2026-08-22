@@ -429,10 +429,42 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
   return PROVIDERS[providerID]?.models?.[modelID]?.promptCache !== false;
 }
 
+// Provider-managed values (poolside's 'default') stay outside this order.
+const REASONING_EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'max'] as const;
+
+function effortRank(effort: string): number {
+  return REASONING_EFFORT_ORDER.indexOf(effort as (typeof REASONING_EFFORT_ORDER)[number]);
+}
+
 /**
- * Drops a `reasoningEffort` the model would reject. Model options are resolved
- * per provider before a pool entry is chosen, so this is the first point that
- * knows both the model and the effort.
+ * Nearest supported tier for a requested effort, ties resolved UPWARD so a
+ * ladder without `medium` cannot quietly reinstate a lower tier (TASK-157).
+ * Out-of-range requests clamp to the ladder's end; efforts outside the rank
+ * order (provider-managed values) return undefined — the caller drops them.
+ */
+export function clampReasoningEffort(
+  requested: string,
+  supported: readonly string[],
+): string | undefined {
+  const want = effortRank(requested);
+  if (want < 0) return undefined;
+  return supported
+    .filter((effort) => effortRank(effort) >= 0)
+    .reduce<string | undefined>((best, effort) => {
+      if (best === undefined) return effort;
+      const distance = Math.abs(effortRank(effort) - want);
+      const bestDistance = Math.abs(effortRank(best) - want);
+      if (distance < bestDistance) return effort;
+      return distance === bestDistance && effortRank(effort) > effortRank(best) ? effort : best;
+    }, undefined);
+}
+
+/**
+ * Clamps a `reasoningEffort` the model would reject to its nearest supported
+ * tier (the provider 400s on unsupported efforts, non-retryably), dropping it
+ * only when no tier is rankable. Model options are resolved per provider
+ * before a pool entry is chosen, so this is the first point that knows both
+ * the model and the effort.
  */
 export function supportedModelOptions(
   providerID: string,
@@ -442,8 +474,30 @@ export function supportedModelOptions(
   const supported = PROVIDERS[providerID]?.models?.[modelID]?.reasoningEfforts;
   const effort = modelOptions?.reasoningEffort;
   if (!supported || typeof effort !== 'string' || supported.includes(effort)) return modelOptions;
+  const clamped = clampReasoningEffort(effort, supported);
   const { reasoningEffort: _dropped, ...rest } = modelOptions!;
-  return rest;
+  return clamped ? { ...rest, reasoningEffort: clamped } : rest;
+}
+
+/**
+ * The verifier's model options (TASK-157): a verifier reasoning below the
+ * finder cannot overturn the finder's reasoning errors, so parity with the
+ * main pass is the floor. `undefined` aux options mean the verifier shares
+ * the main model entry, where parity already holds. Efforts outside the rank
+ * order (provider-managed) are left alone.
+ */
+export function verificationModelOptions(
+  mainOptions: Record<string, unknown> | undefined,
+  auxOptions: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!auxOptions) return undefined;
+  const mainEffort = mainOptions?.reasoningEffort;
+  if (typeof mainEffort !== 'string' || effortRank(mainEffort) < 0) return auxOptions;
+  const auxEffort = auxOptions.reasoningEffort;
+  if (typeof auxEffort === 'string' && effortRank(auxEffort) >= effortRank(mainEffort)) {
+    return auxOptions;
+  }
+  return { ...auxOptions, reasoningEffort: mainEffort };
 }
 
 export interface PromptCachePolicyInput {
