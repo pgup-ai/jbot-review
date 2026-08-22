@@ -64,6 +64,12 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
       supportedModelOptions('opencode', 'x-preview-f-free', { reasoningEffort: 'medium' }),
       { reasoningEffort: 'high' },
     );
+    // mimo collapses below medium (probed 2026-08-22): the aux default `low`
+    // must clamp up on every delivery path, the pi aux level included.
+    assert.deepEqual(
+      supportedModelOptions('opencode', 'mimo-v2.5-free', { reasoningEffort: 'low' }),
+      { reasoningEffort: 'medium' },
+    );
     assert.deepEqual(
       supportedModelOptions('opencode', 'x-preview-f-free', {
         reasoningEffort: 'high',

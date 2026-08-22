@@ -1867,7 +1867,11 @@ async function runReviewPipeline(params: {
           // a distinct aux model takes the aux default (a runtime serving aux
           // alone sees the aux model as its main).
           modelOptions: mainOnPi ? options.modelOptions : auxModelOptions,
-          auxThinkingLevel: piThinkingLevel(auxModelOptions),
+          // Clamped like startPi clamps the main options — the raw aux `low`
+          // would resurrect mimo's below-floor collapse on shared runtimes.
+          auxThinkingLevel: piThinkingLevel(
+            supportedModelOptions(auxProviderID, auxModelID, auxModelOptions),
+          ),
           // pi's prompt caching is provider-managed (no setCacheKey knob);
           // resolvePromptCachePolicy applies to the opencode server only.
           additionalProviderKeys: auxNeedsOwnKey
