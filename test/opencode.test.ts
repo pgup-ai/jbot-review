@@ -252,9 +252,8 @@ describe('aux model options', () => {
   });
 
   it('registers a verifier alias entry carrying the floored effort (TASK-157)', () => {
-    // Per-session model options don't exist in the opencode prompt API, so the
-    // verifier's floored effort rides a config-time model alias whose `id`
-    // points back at the real model (probe-verified against the live gateway).
+    // No per-session options in the prompt API: the floored effort rides a
+    // model alias whose `id` routes back to the real model (probe-verified).
     const config = buildConfig('opencode', 'main-model', 'k', { reasoningEffort: 'medium' }, true, [
       {
         providerID: 'opencode',

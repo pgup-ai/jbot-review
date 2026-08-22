@@ -282,10 +282,8 @@ describe('applyFindingVerdicts', () => {
 });
 
 describe('mergeVerdictsByLocation (TASK-079/080)', () => {
-  // Grace-overlap verification judges a snapshot taken at main settle; the
-  // final list can differ (straggler lens/compliance findings). Verdicts
-  // re-attach by path:line — unique post-dedupe — and blocking findings that
-  // arrived after the snapshot pass through unverified and are counted.
+  // Verdicts re-attach to the (possibly larger) final list by location;
+  // blocking stragglers pass through unverified and are counted.
   const targets = [
     finding({ path: 'a.ts', line: 1, severity: 'P1', title: 'refute me' }),
     finding({ path: 'b.ts', line: 2, severity: 'P2', title: 'uncertain me' }),

@@ -58,10 +58,8 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
   });
 
   it('clamps a reasoning effort the model would reject to the nearest tier', () => {
-    // opencode/x-preview-f-free 400s on the main pass's `medium`, and the error
-    // is not retryable, so an unsupported effort must never reach the provider.
-    // TASK-157: clamp instead of dropping — ties resolve UP, so a ladder
-    // without `medium` cannot quietly reinstate the provider default.
+    // The provider 400s non-retryably on unsupported efforts; ties resolve UP
+    // so a ladder without `medium` cannot quietly reinstate a lower tier.
     assert.deepEqual(
       supportedModelOptions('opencode', 'x-preview-f-free', { reasoningEffort: 'medium' }),
       { reasoningEffort: 'high' },

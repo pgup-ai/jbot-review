@@ -869,9 +869,8 @@ describe('review posting', () => {
 
 describe('formatPriorJbotThreadsForPrompt', () => {
   it('bounds the rendered block at the byte budget, dropping resolved threads first', () => {
-    // Count caps alone allow ≈133KB (25 threads × 1000-char bodies × 5×800-char
-    // replies); the byte budget is the invariant-#4 backstop. Unresolved
-    // threads sort first, so the budget evicts resolved ones preferentially.
+    // Count caps alone allow ≈133KB; the byte budget is the invariant-#4
+    // backstop, and unresolved-first ordering makes it evict resolved threads.
     const thread = (index: number, isResolved: boolean): PriorJbotThread => ({
       id: `PRRT_${isResolved ? 'resolved' : 'open'}_${index}`,
       isResolved,

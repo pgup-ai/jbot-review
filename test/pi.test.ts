@@ -465,9 +465,8 @@ describe('Pi review sessions', () => {
   };
 
   it('aborts an in-flight labeled session at grace abandonment (TASK-077)', async () => {
-    // Grace expiry used to bound only the WAIT: the abandoned session kept
-    // generating and held its slot until teardown. The label registry lets the
-    // runner abort it the moment its fallback is settled.
+    // The label registry lets the runner abort an abandoned session the
+    // moment its fallback is settled, instead of at teardown.
     const events: string[] = [];
     const runtime = fakeRuntime(false, events);
     runtime.sdk.createAgentSession = async () => {
@@ -499,9 +498,8 @@ describe('Pi review sessions', () => {
   });
 
   it('delivers the verifier effort as a per-session thinking level (TASK-157)', async () => {
-    // pi's runtime thinking level is main-model-only; without the override a
-    // distinct-aux verification session runs at the provider default, below
-    // the finder — exactly the accident TASK-157 closes.
+    // Without the override a distinct-aux verification session runs at the
+    // provider default, below the finder — the accident TASK-157 closes.
     const sessions: Array<Record<string, unknown>> = [];
     const runtime = fakeRuntime(false, []);
     runtime.thinkingLevel = 'medium';

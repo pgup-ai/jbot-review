@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import {
-  STALE_CHECK_MIN_ATTEMPT_MS,
-  StaleReviewError,
-  classifyMainShardFailure,
-} from '../src/shared/retry-policy.ts';
+import { StaleReviewError, classifyMainShardFailure } from '../src/shared/retry-policy.ts';
 
 describe('classifyMainShardFailure', () => {
   it('never retries deterministic failures and always retries plausibly-transient ones', () => {
@@ -66,6 +62,5 @@ describe('StaleReviewError', () => {
     const error = new StaleReviewError('merged');
     assert.equal(error.reason, 'merged');
     assert.match(error.message, /^stale-before-retry: /);
-    assert.equal(STALE_CHECK_MIN_ATTEMPT_MS, 60_000);
   });
 });

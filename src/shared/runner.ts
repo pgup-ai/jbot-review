@@ -2375,14 +2375,10 @@ async function runReviewPipeline(params: {
         ? Buffer.byteLength(summary) + Buffer.byteLength(JSON.stringify(findings))
         : undefined,
     );
-    // TASK-079 (JBOT_VERIFY_OVERLAP_GRACE, default off): verify the findings
-    // already settled at main completion WHILE the aux graces run, instead of
-    // strictly after them — the tail becomes max(grace, verify) instead of
-    // grace + verify. NOT the 2026-06-29-rejected overlap-with-main: this
-    // starts only after the main review settles. Late aux findings merge in
-    // unverified (the existing fail-open class) and are counted (TASK-080).
-    // The pre-pass mirrors the final pure pipeline without telemetry rows;
-    // the final pass below stays the single recorded pipeline.
+    // TASK-079 overlap arm (see the option's doc). NOT the 2026-06-29-rejected
+    // overlap-with-main: this starts only after the main review settles. The
+    // pre-pass mirrors the final pure pipeline WITHOUT telemetry rows — the
+    // final pass below stays the single recorded pipeline.
     const startOverlapVerification = async (): Promise<
       { targets: Finding[]; verdicts: FindingVerdictList } | undefined
     > => {
@@ -2461,7 +2457,17 @@ async function runReviewPipeline(params: {
     // Aborts the underlying sessions where the backend supports it (pi +
     // opencode today); see abortSessionsByLabel.
     const abandonAuxSessions = (labels: string[]) => () => {
-      for (const label of labels) auxBackend.abortSessionsByLabel?.(label, log);
+      for (const label of labels) {
+        // Durable record (TASK-076): the abandoned session's own failure row
+        // usually settles after telemetry has been emitted, so without this
+        // an abandonment leaves no trace in the artifact.
+        recordCoverage({
+          session: label,
+          state: 'failed',
+          error: new Error('aborted-after-grace'),
+        });
+        auxBackend.abortSessionsByLabel?.(label, log);
+      }
     };
     const [
       lensFindingLists,

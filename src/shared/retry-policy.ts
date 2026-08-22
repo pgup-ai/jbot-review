@@ -1,11 +1,10 @@
 /**
- * Main-shard retry policy (TASK-150/155). The shard retry used to be blanket:
- * any failure re-sent a near-identical prompt for up to another finder window,
- * so a deterministic 4xx (bad key, unknown model, oversized context — the
- * INC-001 failure class) burned the whole remaining budget re-buying the same
- * error. Classification is by message shape because provider errors arrive as
- * strings from a dozen backends; unknown stays retryable — a wrongly skipped
- * retry loses a review, a wasted one only loses time.
+ * Main-shard retry policy (TASK-150/155): a deterministic failure re-buys the
+ * identical error for up to another finder window (the INC-001 waste class),
+ * so only plausibly-transient classes retry. Classification is by message
+ * shape — provider errors arrive as strings from a dozen backends — and
+ * unknown stays retryable: a wrongly skipped retry loses a review, a wasted
+ * one only loses time.
  */
 
 export type MainShardFailureClass =

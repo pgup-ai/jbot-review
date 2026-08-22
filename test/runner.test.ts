@@ -429,11 +429,8 @@ describe('formatReviewedWith', () => {
 
 describe('buildSlimVerifierContext (TASK-065 arm)', () => {
   it('carries the claim-checking context and none of the finder supplements', () => {
-    // The verifier judges a handful of findings against the diff; a probe
-    // measured its full-context prompt at ~50K uncached input tokens. The slim
-    // contract keeps what verdicts cite (title/body/diff scope, linked issues,
-    // changed files, the full diff) and drops commits, prior comments/threads,
-    // playbooks, and summary instructions.
+    // A probe measured the full-context verifier prompt at ~50K uncached input
+    // tokens; the slim contract keeps what verdicts cite and drops the rest.
     const context = buildSlimVerifierContext({
       pullTitle: 'Add retry logic',
       pullBody: 'Fixes the backoff.',
@@ -487,8 +484,7 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     });
 
   it('skips the retry for deterministic failures and keeps it for transient ones', async () => {
-    // A same-prompt retry of an auth/model/context failure re-buys the same
-    // error for up to another finder window — the INC-001 waste class.
+    // A deterministic failure re-buys the same error — the INC-001 waste class.
     const authCalls: string[] = [];
     await assert.rejects(
       run(backendThrowingOnce('401 Unauthorized', authCalls)),
@@ -835,6 +831,13 @@ describe('normalizeOptions defaults', () => {
   it('keeps auto approval opt-in', () => {
     assert.equal(normalizeOptions(undefined).autoApprove, false);
     assert.equal(normalizeOptions({ autoApprove: true }).autoApprove, true);
+  });
+
+  it('keeps the experiment arms off and the widen policy conservative by default', () => {
+    const defaults = normalizeOptions(undefined);
+    assert.equal(defaults.guidelineWiden, 'auto');
+    assert.equal(defaults.verifierSlimContext, false);
+    assert.equal(defaults.verifyOverlapGrace, false);
   });
 
   it('keeps SDK routing automatic unless an entrypoint supplies the override', () => {
