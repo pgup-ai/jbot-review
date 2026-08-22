@@ -50,9 +50,12 @@ describe('no-attempt reply recovery', () => {
     assert.equal(isNoAttemptReply('I will inspect [src/foo.ts] and [test/bar.ts].'), true);
     assert.equal(isNoAttemptReply('{"summary": "broken'), false);
     // Wrong-shaped output is still an attempt: it fails open or gets the
-    // reformat, never a follow-up session.
+    // reformat, never a follow-up session. Fenced and preamble-wrapped arrays
+    // count — the parsers extract fenced blocks.
     assert.equal(isNoAttemptReply('[]'), false);
     assert.equal(isNoAttemptReply('[{"path": "a.ts"}]'), false);
+    assert.equal(isNoAttemptReply('```json\n[]\n```'), false);
+    assert.equal(isNoAttemptReply('Here are my findings:\n[]'), false);
     assert.match(CONTINUATION_NUDGE_PROMPT, /finish the task now, in this turn/);
     assert.match(CONTINUATION_NUDGE_PROMPT, /Do not reply with a plan or preamble/);
     assert.match(CONTINUATION_NUDGE_PROMPT, /ONLY the JSON/);

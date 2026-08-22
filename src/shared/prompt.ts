@@ -1285,13 +1285,14 @@ export function assembleFindingVerificationPrompt(
  * right recovery there: a reformat request just elicits another announcement
  * or an empty review (observed with devin/glm-5.2, which spent 9 minutes on
  * the repair prompt and returned a finding-free JSON). The signal is an
- * object brace anywhere, or a reply that IS an array (wrong-shaped output is
- * still an attempt — it fails open or gets the reformat, never a follow-up
- * session). Bracketed prose ("I will inspect [src/foo.ts]") is a plan, not
- * an attempt.
+ * object brace anywhere, or an array literal at the start of any line —
+ * fenced \`\`\`json blocks and preamble-then-array included (wrong-shaped
+ * output is still an attempt: it fails open or gets the reformat, never a
+ * follow-up session). Bracketed prose ("I will inspect [src/foo.ts]") is a
+ * plan, not an attempt.
  */
 export function isNoAttemptReply(raw: string): boolean {
-  return !raw.includes('{') && !raw.trimStart().startsWith('[');
+  return !raw.includes('{') && !/^\s*\[/m.test(raw);
 }
 
 /** In-session continuation for an announced-then-stopped turn (multi-turn engines). */
