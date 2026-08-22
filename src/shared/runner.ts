@@ -1279,13 +1279,11 @@ async function runReviewPipeline(params: {
   const auxPoolsideBackend = auxOnPoolside ? createPoolsideBackend(auxPoolsideKey) : undefined;
 
   const auxModelOptions = auxModelOptionsFor(providerID, modelID, auxProviderID, auxModelID);
+  const resolvedMainOptions = supportedModelOptions(providerID, modelID, options.modelOptions);
   // TASK-157: the verifier floors at the main-pass effort. An identity return
   // means the aux entry already delivers it, so no per-session override (and
   // no opencode alias entry) is needed.
-  const verifyModelOptions = verificationModelOptions(
-    supportedModelOptions(providerID, modelID, options.modelOptions),
-    auxModelOptions,
-  );
+  const verifyModelOptions = verificationModelOptions(resolvedMainOptions, auxModelOptions);
   const verifierNeedsOwnOptions =
     verifyModelOptions !== undefined && verifyModelOptions !== auxModelOptions;
   const verifierSessionOptions = verifierNeedsOwnOptions
@@ -1302,9 +1300,8 @@ async function runReviewPipeline(params: {
         explicit: options.modelOptionsExplicit ?? false,
       });
     if (mainCliBackend) return undefined;
-    const resolved = supportedModelOptions(providerID, modelID, options.modelOptions);
-    if (mainOnPi) return piThinkingLevel(resolved);
-    const effort = resolved?.reasoningEffort;
+    if (mainOnPi) return piThinkingLevel(resolvedMainOptions);
+    const effort = resolvedMainOptions?.reasoningEffort;
     return typeof effort === 'string' && effort !== 'default' ? effort : undefined;
   })();
 
@@ -2543,8 +2540,7 @@ async function runReviewPipeline(params: {
         if (aborted === 0) continue;
         // Durable record (TASK-076): the abandoned session's own failure row
         // usually settles after telemetry has been emitted, so without this
-        // an abandonment leaves no trace in the artifact. Backends that
-        // cannot abort only abandoned — the label must not claim otherwise.
+        // an abandonment leaves no trace in the artifact.
         recordCoverage({
           session: label,
           state: 'failed',
@@ -4450,7 +4446,6 @@ export function renderReviewMetadataBlock(
     '',
     '```text',
     models.length === 1 ? `model=${models[0]}` : `models=${models.join(', ')}`,
-    // The main pass's resolved effort — the arm identity for effort A/Bs.
     ...(reasoningEffort ? [`reasoning effort=${reasoningEffort}`] : []),
     `input=${tokenUsage.input}`,
     `output=${tokenUsage.output}`,

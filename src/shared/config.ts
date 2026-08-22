@@ -196,9 +196,8 @@ const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
  * Models whose declared efforts are the only ones that work. x-preview
  * hard-400s on anything else ("[1210] This model always engages in thinking
  * and cannot be disabled; please use low, high, or max"), which no retry
- * recovers. mimo accepts `low` but collapses below its floor (probed
- * 2026-08-22: empty completion once, 5 reasoning tokens and a wrong answer
- * once; correct at medium/high) — silent quality loss instead of a 400.
+ * recovers. mimo accepts `low` but silently collapses there (probed
+ * 2026-08-22: empty or wrong output; correct at medium/high).
  */
 const EFFORT_RESTRICTED_MODELS = {
   'x-preview-f-free': { reasoningEfforts: ['low', 'high', 'max'] },

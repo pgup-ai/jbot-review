@@ -1211,8 +1211,7 @@ export function unregisterOpencodeSessionForAbort(
 
 /**
  * Best-effort, fire-and-forget: used when the settle grace abandons a result.
- * Returns how many sessions were signalled — 0 means the label's prompts had
- * already settled, so the caller must not record it as abandoned.
+ * Returns the signalled count (the ReviewBackend.abortSessionsByLabel contract).
  */
 export function abortOpencodeSessionsByLabel(
   client: OpencodeClient,
