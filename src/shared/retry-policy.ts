@@ -48,7 +48,10 @@ export function classifyMainShardFailure(error: unknown): {
             : matches(/parse|json|schema|repair/i)
               ? 'parse'
               : matches(
-                    /\b5\d\d\b|overloaded|upstream|stream|socket|econn|enotfound|fetch failed|network|unavailable|api/i,
+                    // No bare `api` token: it labeled any stray mention as
+                    // provider-transient when `unknown` (equally retryable)
+                    // is the honest class for unrecognized shapes.
+                    /\b5\d\d\b|overloaded|upstream|stream|socket|econn|enotfound|fetch failed|network|unavailable/i,
                   )
                 ? 'provider-transient'
                 : 'unknown';
