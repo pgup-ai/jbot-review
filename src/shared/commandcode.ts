@@ -127,10 +127,10 @@ const COMMANDCODE_MODEL_EFFORTS: Record<string, readonly string[]> = {
  * as this model goes"); the built-in defaults deliver only on an exact
  * match, so a default `medium` is never silently promoted to a `high` floor.
  */
-export function commandCodeReasoningEffort(
+function commandCodeReasoningEffort(
   model: string,
   modelOptions: Record<string, unknown> | undefined,
-  explicit = false,
+  explicit: boolean,
 ): string | undefined {
   const { modelID } = parseModelName(model);
   const effort = modelOptions?.reasoningEffort;

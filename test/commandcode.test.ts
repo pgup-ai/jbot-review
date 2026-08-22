@@ -8,7 +8,6 @@ import {
   buildCommandCodeCliArgs,
   classifyCommandCodePromptFailure,
   commandCodeEnvForHome,
-  commandCodeReasoningEffort,
   commandCodeSessionEffort,
   commandCodeAuthPath,
   commandCodeSessionEstimatedCost,
@@ -84,17 +83,20 @@ describe('CommandCode CLI provider helpers', () => {
 
   it('delivers --effort from the per-model allowlist: exact for defaults, clamped when explicit', () => {
     // Defaults must never be promoted to a restricted model's floor; explicit
-    // efforts clamp so one global knob still reaches restricted models.
+    // efforts clamp so one global knob still reaches restricted models. The
+    // override path exercises the raw allowlist matrix.
     const deepseek = 'commandcode/deepseek/deepseek-v4-flash';
-    assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'high' }), 'high');
-    assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'max' }), 'max');
-    assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'low' }), undefined);
-    assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'medium' }), undefined);
-    assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'low' }, true), 'high');
-    assert.equal(commandCodeReasoningEffort(deepseek, { reasoningEffort: 'max' }, true), 'max');
+    const effortOf = (model: string, opts: Record<string, unknown> | undefined, explicit = false) =>
+      commandCodeSessionEffort(model, opts, { auxModel: 'commandcode/unused', explicit });
+    assert.equal(effortOf(deepseek, { reasoningEffort: 'high' }), 'high');
+    assert.equal(effortOf(deepseek, { reasoningEffort: 'max' }), 'max');
+    assert.equal(effortOf(deepseek, { reasoningEffort: 'low' }), undefined);
+    assert.equal(effortOf(deepseek, { reasoningEffort: 'medium' }), undefined);
+    assert.equal(effortOf(deepseek, { reasoningEffort: 'low' }, true), 'high');
+    assert.equal(effortOf(deepseek, { reasoningEffort: 'max' }, true), 'max');
     for (const explicit of [false, true]) {
       assert.equal(
-        commandCodeReasoningEffort(
+        effortOf(
           'commandcode/meta/muse-spark-1.2-contributor',
           { reasoningEffort: 'high' },
           explicit,
@@ -102,16 +104,12 @@ describe('CommandCode CLI provider helpers', () => {
         undefined,
       );
       assert.equal(
-        commandCodeReasoningEffort(
-          'commandcode/Qwen/Qwen3.7-Max',
-          { reasoningEffort: 'high' },
-          explicit,
-        ),
+        effortOf('commandcode/Qwen/Qwen3.7-Max', { reasoningEffort: 'high' }, explicit),
         undefined,
       );
     }
-    assert.equal(commandCodeReasoningEffort(deepseek, {}), undefined);
-    assert.equal(commandCodeReasoningEffort(deepseek, undefined), undefined);
+    assert.equal(effortOf(deepseek, {}), undefined);
+    assert.equal(effortOf(deepseek, undefined), undefined);
 
     // Role selection: the aux default never clamps, main options and the
     // verifier override do; an aux model sharing the main entry follows it.
