@@ -1228,7 +1228,12 @@ async function runReviewPipeline(params: {
     ? []
     : await listPrComments(octokit, owner, repo, pullNumber);
   const priorJbotReviewCount = allPriorReviewComments.filter(isJbotReviewBody).length;
-  const priorComments = options.includePriorComments ? allPriorReviewComments : [];
+  // jbot's own review bodies stay out of the flat context block: the
+  // structured prior-threads block already carries every prior finding, so
+  // including them here doubled the same text on mature PRs.
+  const priorComments = options.includePriorComments
+    ? allPriorReviewComments.filter((comment) => !isJbotReviewBody(comment))
+    : [];
   if (!options.includePriorComments) {
     log('Prior review comments excluded from review context by configuration.');
   }

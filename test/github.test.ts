@@ -10,6 +10,7 @@ import {
   isBotAddressedReply,
   listClosingIssues,
   listPriorJbotThreads,
+  MAX_PRIOR_JBOT_THREADS_BYTES,
   minimizePullRequestReview,
   postAddressedThreadReply,
   postApprovalReview,
@@ -867,6 +868,42 @@ describe('review posting', () => {
 });
 
 describe('formatPriorJbotThreadsForPrompt', () => {
+  it('bounds the rendered block at the byte budget, dropping resolved threads first', () => {
+    // Count caps alone allow ≈133KB (25 threads × 1000-char bodies × 5×800-char
+    // replies); the byte budget is the invariant-#4 backstop. Unresolved
+    // threads sort first, so the budget evicts resolved ones preferentially.
+    const thread = (index: number, isResolved: boolean): PriorJbotThread => ({
+      id: `PRRT_${isResolved ? 'resolved' : 'open'}_${index}`,
+      isResolved,
+      replyToCommentId: index,
+      path: 'src/example.ts',
+      line: index + 1,
+      body: `**P3** finding ${index} ${'b'.repeat(1000)}`,
+      url: `https://github.com/example/repo/pull/1#discussion_r${index}`,
+      replies: Array.from({ length: 5 }, (_, reply) => ({
+        author: 'dev',
+        body: `reply ${reply} ${'r'.repeat(800)}`,
+        url: `https://github.com/example/repo/pull/1#discussion_r${index}${reply}`,
+      })),
+    });
+    const threads = [
+      ...Array.from({ length: 20 }, (_, i) => thread(i, true)),
+      ...Array.from({ length: 5 }, (_, i) => thread(100 + i, false)),
+    ];
+
+    const prompt = formatPriorJbotThreadsForPrompt(threads);
+
+    assert.ok(
+      Buffer.byteLength(prompt, 'utf8') <= MAX_PRIOR_JBOT_THREADS_BYTES,
+      `rendered block ${Buffer.byteLength(prompt, 'utf8')} bytes exceeds the budget`,
+    );
+    for (let index = 0; index < 5; index += 1) {
+      assert.match(prompt, new RegExp(`PRRT_open_${100 + index}\\b`));
+    }
+    assert.match(prompt, /Showing \d+ of 25 prior jbot-review threads/);
+    assert.doesNotMatch(prompt, /PRRT_resolved_19\b/);
+  });
+
   it('includes human thread replies so declined suggestions are not re-raised', () => {
     const thread: PriorJbotThread = {
       id: 'PRRT_example',

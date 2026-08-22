@@ -15,9 +15,12 @@ import {
   formatGuidelines,
   formatLinkedIssues,
   truncatePrBody,
+  MAX_CHANGED_FILES_BYTES,
+  MAX_COMMITS_BYTES,
   MAX_FINDER_GUIDELINE_BYTES,
   MAX_LINKED_ISSUES_BYTES,
   MAX_PR_BODY_BYTES,
+  MAX_PRIOR_COMMENTS_BYTES,
 } from '../src/shared/review-context.ts';
 
 const GIT_DIFF_COMMAND = `git ${GIT_DIFF_ARGS.join(' ')}`;
@@ -430,6 +433,52 @@ describe('buildReviewContext', () => {
 
     assert.match(context, /PR description truncated/);
     assert.ok(!context.includes('�'), 'truncation split a multi-byte character');
+  });
+
+  it('caps changed files, commits, and prior comments at their byte budgets (invariant #4)', () => {
+    // These blocks grow with PR maturity and previously had no budget — the
+    // likely source of the 232KB assembled-context outliers.
+    const context = buildReviewContext({
+      ...baseParams,
+      changedFiles: Array.from({ length: 2000 }, (_, i) => `src/dir/file-${i}.ts`),
+      commits: Array.from({ length: 500 }, (_, i) => ({
+        sha: 'a'.repeat(40),
+        message: `commit ${i} ${'m'.repeat(80)}`,
+        author: 'dev',
+      })),
+      priorComments: Array.from({ length: 50 }, (_, i) => `comment ${i} ${'x'.repeat(1000)}`),
+    });
+    const section = (title: string): string =>
+      context.split('\n\n').find((candidate) => candidate.startsWith(title)) ?? '';
+
+    const changedFiles = section('## Changed files');
+    assert.ok(Buffer.byteLength(changedFiles, 'utf8') <= MAX_CHANGED_FILES_BYTES);
+    assert.match(changedFiles, /file-0\.ts/);
+    assert.doesNotMatch(changedFiles, /file-1999\.ts/);
+    assert.match(changedFiles, /more changed file\(s\) not listed .*diff itself is unaffected/);
+
+    const commits = section('## Commits');
+    assert.ok(Buffer.byteLength(commits, 'utf8') <= MAX_COMMITS_BYTES);
+    assert.match(commits, /commit 0 /);
+    assert.match(commits, /more commit\(s\) not listed/);
+
+    const priorComments = section('## Prior review comments');
+    assert.ok(Buffer.byteLength(priorComments, 'utf8') <= MAX_PRIOR_COMMENTS_BYTES);
+    assert.match(priorComments, /comment 0 /);
+    assert.match(priorComments, /more prior review comment\(s\) not shown/);
+  });
+
+  it('leaves small changed-file, commit, and prior-comment blocks unchanged', () => {
+    const context = buildReviewContext({
+      ...baseParams,
+      commits: [{ sha: 'a'.repeat(40), message: 'one commit', author: 'dev' }],
+      priorComments: ['a prior comment'],
+    });
+
+    assert.match(context, /- src\/a\.ts/);
+    assert.match(context, /one commit/);
+    assert.match(context, /- a prior comment/);
+    assert.doesNotMatch(context, /not listed|not shown/);
   });
 
   it('caps the WHOLE linked-issues block at the byte budget and discloses every omission', () => {

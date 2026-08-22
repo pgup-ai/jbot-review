@@ -996,38 +996,49 @@ export async function minimizePullRequestReview(
   );
 }
 
+/**
+ * Byte backstop over the count caps above (invariant #4): the count caps
+ * alone allow ≈133KB. Unresolved threads sort first, so the budget evicts
+ * resolved threads preferentially.
+ */
+export const MAX_PRIOR_JBOT_THREADS_BYTES = 32 * 1024;
+
 export function formatPriorJbotThreadsForPrompt(threads: PriorJbotThread[]): string {
   if (threads.length === 0) return '';
   const promptThreads = [...threads]
     .sort((a, b) => Number(a.isResolved) - Number(b.isResolved))
     .slice(0, MAX_PRIOR_JBOT_THREADS_FOR_PROMPT);
-  const lines = [
+  const header = [
     '## Prior jbot-review inline comments',
     'Canonical rules for these threads:',
     '- Do not re-raise an issue an existing thread already covers, unless a newer commit creates a materially different problem.',
     '- If later thread replies say the finding was not applied, intentionally declined, accepted as-is, or not worth fixing, treat the issue as already discussed: do not re-post it and do not mark it addressed.',
     '- When a task asks you to report addressed threads: only mark a thread addressed when the current branch verifiably fixes the specific issue raised, and use the exact thread id; not re-raising an issue does not make it addressed.',
   ];
-  if (threads.length > promptThreads.length) {
-    lines.push(
-      `Showing ${promptThreads.length} of ${threads.length} prior jbot-review threads to keep review context bounded.`,
-    );
-  }
+  const disclosureFor = (shown: number) =>
+    `Showing ${shown} of ${threads.length} prior jbot-review threads to keep review context bounded.`;
+  let used = Buffer.byteLength(header.join('\n\n'), 'utf8');
+  const reserve = Buffer.byteLength(`\n\n${disclosureFor(threads.length)}`, 'utf8');
+  const sections: string[] = [];
   for (const thread of promptThreads) {
     const location = thread.line ? `${thread.path}:${thread.line}` : thread.path;
-    lines.push(
-      [
-        `### ${thread.id}`,
-        `Status: ${thread.isResolved ? 'resolved' : 'unresolved'}`,
-        `Location: ${location}`,
-        `URL: ${thread.url}`,
-        'Comment:',
-        truncateForPrompt(stripJbotMarkers(thread.body), MAX_PRIOR_JBOT_COMMENT_CHARS),
-        formatPriorThreadRepliesForPrompt(thread.replies),
-      ].join('\n'),
-    );
+    const section = [
+      `### ${thread.id}`,
+      `Status: ${thread.isResolved ? 'resolved' : 'unresolved'}`,
+      `Location: ${location}`,
+      `URL: ${thread.url}`,
+      'Comment:',
+      truncateForPrompt(stripJbotMarkers(thread.body), MAX_PRIOR_JBOT_COMMENT_CHARS),
+      formatPriorThreadRepliesForPrompt(thread.replies),
+    ].join('\n');
+    const cost = Buffer.byteLength(`\n\n${section}`, 'utf8');
+    if (used + cost + reserve > MAX_PRIOR_JBOT_THREADS_BYTES) break;
+    sections.push(section);
+    used += cost;
   }
-  return lines.join('\n\n');
+  const lines = [...header];
+  if (sections.length < threads.length) lines.push(disclosureFor(sections.length));
+  return [...lines, ...sections].join('\n\n');
 }
 
 function formatPriorThreadRepliesForPrompt(replies: PriorJbotThreadReply[]): string {

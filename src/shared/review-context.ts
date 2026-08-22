@@ -405,6 +405,41 @@ export function truncatePrBody(body: string): string {
   return buffer.toString('utf8', 0, findUtf8Boundary(buffer, budget)) + PR_BODY_TRUNCATION_NOTICE;
 }
 
+// These blocks grow with PR maturity and were the last uncapped ones
+// (invariant #4). Budgets sit alongside the PR-body/linked-issue caps above.
+export const MAX_CHANGED_FILES_BYTES = 8 * 1024;
+export const MAX_COMMITS_BYTES = 4 * 1024;
+export const MAX_PRIOR_COMMENTS_BYTES = 8 * 1024;
+// One runaway comment must not evict every other one from the capped block.
+const MAX_PRIOR_COMMENT_ENTRY_CHARS = 2_000;
+
+/**
+ * Keeps whole entries in order until the byte budget, then one disclosure
+ * line. The disclosure's widest form is reserved up front so it always fits.
+ */
+function capListSection(
+  header: string,
+  entries: string[],
+  budgetBytes: number,
+  omission: (omitted: number) => string,
+): string {
+  const lines = [header];
+  let used = Buffer.byteLength(header, 'utf8');
+  const reserve = Buffer.byteLength(`\n${omission(entries.length)}`, 'utf8');
+  let omitted = 0;
+  for (const [index, entry] of entries.entries()) {
+    const cost = Buffer.byteLength(`\n${entry}`, 'utf8');
+    if (used + cost + reserve > budgetBytes) {
+      omitted = entries.length - index;
+      break;
+    }
+    lines.push(entry);
+    used += cost;
+  }
+  if (omitted > 0) lines.push(omission(omitted));
+  return lines.join('\n');
+}
+
 export function buildReviewContext(params: BuildReviewContextParams): string {
   const sections: string[] = [];
 
@@ -424,36 +459,44 @@ export function buildReviewContext(params: BuildReviewContextParams): string {
   if (linkedIssuesBlock) sections.push(linkedIssuesBlock);
 
   sections.push(
-    [
-      '## Changed files',
-      params.changedFiles.length > 0
-        ? params.changedFiles.map((file) => `- ${file}`).join('\n')
-        : '(none)',
-    ].join('\n'),
+    params.changedFiles.length > 0
+      ? capListSection(
+          '## Changed files',
+          params.changedFiles.map((file) => `- ${file}`),
+          MAX_CHANGED_FILES_BYTES,
+          (omitted) =>
+            `(and ${omitted} more changed file(s) not listed to keep the prompt bounded; the diff itself is unaffected.)`,
+        )
+      : '## Changed files\n(none)',
   );
 
   sections.push(
-    [
-      '## Commits',
-      params.commits.length > 0
-        ? params.commits
-            .map((commit) => {
-              const author = commit.author ? ` (${commit.author})` : '';
-              return `- ${commit.sha.slice(0, 7)}${author}: ${commit.message}`;
-            })
-            .join('\n')
-        : '(none)',
-    ].join('\n'),
+    params.commits.length > 0
+      ? capListSection(
+          '## Commits',
+          params.commits.map((commit) => {
+            const author = commit.author ? ` (${commit.author})` : '';
+            return `- ${commit.sha.slice(0, 7)}${author}: ${commit.message}`;
+          }),
+          MAX_COMMITS_BYTES,
+          (omitted) => `(and ${omitted} more commit(s) not listed.)`,
+        )
+      : '## Commits\n(none)',
   );
 
   sections.push(['## Check status summary', params.checkSummary || '(unavailable)'].join('\n'));
 
   if (params.priorComments.length > 0) {
     sections.push(
-      [
+      capListSection(
         '## Prior review comments',
-        params.priorComments.map((comment) => `- ${comment}`).join('\n'),
-      ].join('\n'),
+        params.priorComments.map(
+          (comment) =>
+            `- ${comment.length > MAX_PRIOR_COMMENT_ENTRY_CHARS ? `${comment.slice(0, MAX_PRIOR_COMMENT_ENTRY_CHARS)}…` : comment}`,
+        ),
+        MAX_PRIOR_COMMENTS_BYTES,
+        (omitted) => `(and ${omitted} more prior review comment(s) not shown.)`,
+      ),
     );
   }
 
