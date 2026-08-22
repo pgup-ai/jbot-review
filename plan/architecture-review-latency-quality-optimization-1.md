@@ -36,6 +36,37 @@ Program-level targets:
 - Keep full-diff coverage, anchoring validity, read-only enforcement, prior-thread behavior, and auxiliary fail-open behavior unchanged.
 - Report results separately by backend, model, reasoning level, change-risk tier, diff-size bucket, first review versus re-review, and cache state.
 
+## Status — 2026-08-21 (deep-dive backlog, PR #169)
+
+Axis-by-axis state of the 2026-08-21 speed deep dive's backlog after
+`feat/speed-backlog-1`:
+
+- **Shipped, default on:** grace-expiry abort of abandoned aux sessions
+  (TASK-076/077); failure-classified retry + stale-before-retry
+  (TASK-150/155); reasoning-effort clamp + verification effort floor with
+  per-backend delivery (TASK-157); byte caps on the last uncapped context
+  blocks (invariant #4); guideline widen-fallback keeps the finder slice for
+  tool-capable finders (`JBOT_GUIDELINE_WIDEN=full` restores widening).
+- **Shipped, default off:** grace-overlap verification with late-unverified
+  counting (TASK-079/080, `JBOT_VERIFY_OVERLAP_GRACE`); slim verifier
+  context (TASK-065 arm, `JBOT_VERIFIER_SLIM_CONTEXT` — screen: clean-case
+  FPs 5/6→2/6, defect detection intact, latency unresolved at 12 pairs).
+- **Screened, not defaulted:** `reasoningEffort low` on muse-spark — whole-run
+  paired median −29.8% (p=0.0002), reasoning tokens −43%, output flat,
+  12/12 defect runs anchored in both arms; the default flip waits on the
+  core subset + adjudication (TASK-100/105).
+- **Open, ranked by expected value:** changes-since/addressed/compliance
+  session contracts (the remaining ~55–95KB of TASK-065); the ~45–49K-token
+  per-session opencode engine context measured behind every session (needs
+  TASK-058/062 token-source telemetry before acting); TASK-084 fetch
+  parallelization + `listReviews`/viewer dedupe; the log-only model-listing
+  spawns and serial Context7 enable on the critical path; aux lenient-first
+  parsing and the ACP repair/continuation multiplier (fold into TASK-150);
+  prompt dedupe (TASK-060) and the embedded-first diff-intro contradiction
+  (`diff-context.ts`); queue-aware verification timeout; the sub-45s
+  verification skip on budget-exhausted runs (a precision-disclosure
+  decision, coupled to TASK-079's graduation).
+
 ## 1. Requirements & Constraints
 
 - **REQ-001**: Every run must cover the complete merge-base-relative base...head diff, either in one session or as the union of shards; optimization must never introduce delta-only review scope.
@@ -263,17 +294,17 @@ Completion criteria for Phase 5:
 
 - GOAL-007: Reduce prefill and repeated-context cost while keeping the complete review signal.
 
-| Task     | Priority / Impact / Effort    | Description                                                                                                                                                                                                                                                                                                | Dependencies              | Completed | Date |
-| -------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | --------- | ---- |
-| TASK-058 | P0 / Latency 0, Quality + / S | Add token estimates and actual provider input/cache tokens to the existing byte budget report. Keep bytes as the hard safety budget; use tokens only for performance analysis because tokenizer availability varies.                                                                                       | TASK-009                  |           |      |
-| TASK-059 | P1 / Latency M, Quality 0 / M | Run the existing `JBOT_CONTEXT_TRIM` arm against the full corpus. Report which supplementary blocks were dropped, tool work induced by each drop, cache effects, and quality changes. Do not enable it from latency alone.                                                                                 | TASK-005, TASK-019        |           |      |
-| TASK-060 | P1 / Latency M, Quality + / M | Audit `REVIEW_PROMPT` for semantic duplication. Remove only rules stated more than once, preserve prompt-order invariants, and prove structural requirements in `test/prompt.test.ts`. Benchmark prompt bytes, reasoning tokens, and quality after each deletion group.                                    | TASK-035                  |           |      |
-| TASK-061 | P1 / Latency M, Quality 0 / M | Reorder only variable prompt blocks that do not violate invariant #5 so all shard/lens sessions maximize a byte-identical prefix. Extend `test/runner.test.ts` to calculate shared-prefix bytes and fail on regressions above an explicit tolerance.                                                       | TASK-058                  |           |      |
-| TASK-062 | P1 / Latency M, Quality 0 / S | Add cache-effectiveness telemetry: eligible sessions, cache-key enabled, cache read/write tokens, shared-prefix bytes, hit/miss/unknown status, and avoided-input estimate. Separate provider prompt cache from local shard-result cache.                                                                  | TASK-009, TASK-061        |           |      |
-| TASK-063 | P2 / Latency M, Quality + / M | Test risk-aware guideline selection and tighter relevance budgets in `src/shared/review-context.ts`. Never truncate away scoped guidance that applies to a changed file; drop unrelated or lower-relevance guidance first and disclose omissions.                                                          | TASK-025, TASK-058        |           |      |
-| TASK-064 | P2 / Latency M, Quality + / M | Test compact diff rendering that removes transport-only redundancy while retaining every changed line, hunk header, file identity, and anchoring line number. Reject any format that makes evidence quotes or line anchoring less reliable.                                                                | TASK-025                  |           |      |
-| TASK-065 | P2 / Latency L, Quality 0 / S | Separate context contracts by session type: main/lens receives complete review context, verifier receives only required diff/evidence/finding context, addressed check receives prior threads plus relevant diff, and changes-since receives delta metadata. Prove no session gets unrelated large blocks. | TASK-058                  |           |      |
-| TASK-066 | P0 / Latency 0, Quality + / M | Add regression tests for hard fragment budgets, assembled cap warnings, prefix identity, output reminder position, full changed-line preservation, scoped guideline retention, and omission disclosures.                                                                                                   | TASK-058 through TASK-065 |           |      |
+| Task     | Priority / Impact / Effort    | Description                                                                                                                                                                                                                                                                                                | Dependencies              | Completed         | Date       |
+| -------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ----------------- | ---------- |
+| TASK-058 | P0 / Latency 0, Quality + / S | Add token estimates and actual provider input/cache tokens to the existing byte budget report. Keep bytes as the hard safety budget; use tokens only for performance analysis because tokenizer availability varies.                                                                                       | TASK-009                  |                   |            |
+| TASK-059 | P1 / Latency M, Quality 0 / M | Run the existing `JBOT_CONTEXT_TRIM` arm against the full corpus. Report which supplementary blocks were dropped, tool work induced by each drop, cache effects, and quality changes. Do not enable it from latency alone.                                                                                 | TASK-005, TASK-019        |                   |            |
+| TASK-060 | P1 / Latency M, Quality + / M | Audit `REVIEW_PROMPT` for semantic duplication. Remove only rules stated more than once, preserve prompt-order invariants, and prove structural requirements in `test/prompt.test.ts`. Benchmark prompt bytes, reasoning tokens, and quality after each deletion group.                                    | TASK-035                  |                   |            |
+| TASK-061 | P1 / Latency M, Quality 0 / M | Reorder only variable prompt blocks that do not violate invariant #5 so all shard/lens sessions maximize a byte-identical prefix. Extend `test/runner.test.ts` to calculate shared-prefix bytes and fail on regressions above an explicit tolerance.                                                       | TASK-058                  |                   |            |
+| TASK-062 | P1 / Latency M, Quality 0 / S | Add cache-effectiveness telemetry: eligible sessions, cache-key enabled, cache read/write tokens, shared-prefix bytes, hit/miss/unknown status, and avoided-input estimate. Separate provider prompt cache from local shard-result cache.                                                                  | TASK-009, TASK-061        |                   |            |
+| TASK-063 | P2 / Latency M, Quality + / M | Test risk-aware guideline selection and tighter relevance budgets in `src/shared/review-context.ts`. Never truncate away scoped guidance that applies to a changed file; drop unrelated or lower-relevance guidance first and disclose omissions.                                                          | TASK-025, TASK-058        |                   |            |
+| TASK-064 | P2 / Latency M, Quality + / M | Test compact diff rendering that removes transport-only redundancy while retaining every changed line, hunk header, file identity, and anchoring line number. Reject any format that makes evidence quotes or line anchoring less reliable.                                                                | TASK-025                  | Closed (won't do) | 2026-08-21 |
+| TASK-065 | P2 / Latency L, Quality 0 / S | Separate context contracts by session type: main/lens receives complete review context, verifier receives only required diff/evidence/finding context, addressed check receives prior threads plus relevant diff, and changes-since receives delta metadata. Prove no session gets unrelated large blocks. | TASK-058                  |                   |            |
+| TASK-066 | P0 / Latency 0, Quality + / M | Add regression tests for hard fragment budgets, assembled cap warnings, prefix identity, output reminder position, full changed-line preservation, scoped guideline retention, and omission disclosures.                                                                                                   | TASK-058 through TASK-065 |                   |            |
 
 **Phase status (2026-08-21):** three context reductions landed from the
 2026-08-21 deep dive: hard byte caps on the previously uncapped blocks
@@ -283,7 +314,12 @@ enforcement, default on; the guideline widen-fallback now keeps the finder
 slice for tool-capable finders when the compliance pass is skipped
 (`JBOT_GUIDELINE_WIDEN=full` restores widening; checkout-blind finders always
 widen); and a TASK-065 verifier arm behind `JBOT_VERIFIER_SLIM_CONTEXT`
-(default off — precision gate, needs adjudicated evidence).
+(default off — precision gate, needs adjudicated evidence). TASK-064 is
+closed without implementation: the 2026-08-21 audit found the rendering
+already header-free (GitHub patches carry hunks only), and what remains —
+context lines and `@@` headers — is load-bearing for new-side line-number
+computation and evidence re-anchoring (`resolveFindingAnchors`), so under 2%
+is removable at high anchoring risk.
 
 Completion criteria for Phase 6:
 
