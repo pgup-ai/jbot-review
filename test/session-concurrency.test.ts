@@ -68,6 +68,24 @@ describe('limitReviewBackendSessions', () => {
     assert.deepEqual(priorities, ['high', 'high', 'normal', 'normal']);
   });
 
+  it('passes the verifier model options through the limiter (TASK-157)', async () => {
+    const seen: unknown[] = [];
+    const backend = makeBackend();
+    backend.runFindingVerification = async (...args) => {
+      seen.push(args[6]);
+      return [];
+    };
+    const limited = limitReviewBackendSessions(backend, 'aux', {
+      acquire: async () => () => undefined,
+    });
+
+    await limited.runFindingVerification('model', 'context', [], noLog, undefined, undefined, {
+      reasoningEffort: 'medium',
+    });
+
+    assert.deepEqual(seen, [{ reasoningEffort: 'medium' }]);
+  });
+
   it('takes and hands off a provider slot before the global slot', async () => {
     const events: string[] = [];
     const slots = (name: string): SessionSlots => ({

@@ -84,7 +84,13 @@ import {
   shardFilesForReview,
   touchesRiskyPath,
 } from './diff-context.ts';
-import { auxModelOptionsFor, needsAuxOpencodeConfig, resolvePromptCachePolicy } from './config.ts';
+import {
+  auxModelOptionsFor,
+  needsAuxOpencodeConfig,
+  resolvePromptCachePolicy,
+  supportedModelOptions,
+  verificationModelOptions,
+} from './config.ts';
 import { parseModelName } from '@symma/protocol';
 import { parseAddedLines } from './patch.ts';
 import {
@@ -283,7 +289,7 @@ function createOpencodeBackend(
         timeoutMs,
         onTokenUsage,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage, modelOptions) =>
       runOpencodeFindingVerification(
         client,
         model,
@@ -292,6 +298,7 @@ function createOpencodeBackend(
         log,
         timeoutMs,
         onTokenUsage,
+        modelOptions,
       ),
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
       runOpencodeChangesSinceLastReview(
@@ -324,8 +331,17 @@ function createPiBackend(runtime: PiRuntime): ReviewBackend {
         timeoutMs,
         onTokenUsage,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      runPiFindingVerification(runtime, model, prContext, findings, log, timeoutMs, onTokenUsage),
+    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage, modelOptions) =>
+      runPiFindingVerification(
+        runtime,
+        model,
+        prContext,
+        findings,
+        log,
+        timeoutMs,
+        onTokenUsage,
+        modelOptions,
+      ),
     runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
       runPiChangesSinceLastReview(
         runtime,
@@ -1692,11 +1708,24 @@ async function runReviewPipeline(params: {
   const auxNeedsOwnKey =
     auxProviderID !== providerID && ((mainOnPi && auxOnPi) || (mainOnOpencode && auxOnOpencode));
   const auxModelOptions = auxModelOptionsFor(providerID, modelID, auxProviderID, auxModelID);
+  // TASK-157: the verifier floors at the main-pass effort. An identity return
+  // means the aux entry already delivers it, so no per-session override (and
+  // no opencode alias entry) is needed.
+  const verifyModelOptions = verificationModelOptions(
+    supportedModelOptions(providerID, modelID, options.modelOptions),
+    auxModelOptions,
+  );
+  const verifierNeedsOwnOptions =
+    verifyModelOptions !== undefined && verifyModelOptions !== auxModelOptions;
+  const verifierSessionOptions = verifierNeedsOwnOptions
+    ? supportedModelOptions(auxProviderID, auxModelID, verifyModelOptions)
+    : undefined;
   const auxNeedsOpencodeConfig =
     mainOnOpencode &&
     auxOnOpencode &&
     (needsAuxOpencodeConfig(providerID, modelID, auxProviderID, auxModelID) ||
-      Boolean(auxModelOptions && Object.keys(auxModelOptions).length > 0));
+      Boolean(auxModelOptions && Object.keys(auxModelOptions).length > 0) ||
+      verifierNeedsOwnOptions);
   if (auxNeedsOwnKey && !options.auxApiKey) {
     cleanupCliHomes();
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
@@ -1764,8 +1793,12 @@ async function runReviewPipeline(params: {
         log,
         {
           // Symmetric to the pi runtime below: when main is not on opencode the
-          // root model IS the aux model, so it carries the aux options.
+          // root model IS the aux model, so it carries the aux options — and
+          // the verifier alias, since verification runs on the aux model.
           modelOptions: mainOnOpencode ? options.modelOptions : auxModelOptions,
+          ...(!mainOnOpencode && verifierNeedsOwnOptions
+            ? { verificationModelOptions: verifyModelOptions }
+            : {}),
           baseURL: mainOnOpencode ? baseURL : options.auxBaseURL,
           promptCache: mainOnOpencode
             ? promptCachePolicy.providerPromptCache
@@ -1782,6 +1815,9 @@ async function runReviewPipeline(params: {
                   baseURL: auxNeedsOwnKey ? options.auxBaseURL : baseURL,
                   promptCache: promptCachePolicy.auxProviderPromptCache,
                   ...(auxModelOptions ? { modelOptions: auxModelOptions } : {}),
+                  ...(verifierNeedsOwnOptions
+                    ? { verificationModelOptions: verifyModelOptions }
+                    : {}),
                 },
               ]
             : undefined,
@@ -2327,6 +2363,7 @@ async function runReviewPipeline(params: {
       timeoutMs: computeVerificationTimeoutMs(options.timeBudgetMinutes, Date.now() - runStartedAt),
       findings: suppression.findings,
       enabled: options.verifyFindings && auxSessionsEnabled,
+      modelOptions: verifierSessionOptions,
       log,
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
@@ -2983,6 +3020,8 @@ async function verifyBlockingFindings(params: {
   findings: Finding[];
   enabled: boolean;
   timeoutMs?: number;
+  /** TASK-157: the verifier's floored options when the aux entry lacks them. */
+  modelOptions?: Record<string, unknown>;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
@@ -3019,6 +3058,7 @@ async function verifyBlockingFindings(params: {
       params.log,
       params.timeoutMs,
       params.onTokenUsage,
+      params.modelOptions,
     );
   } catch (error) {
     params.log(

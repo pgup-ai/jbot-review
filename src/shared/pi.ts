@@ -853,9 +853,16 @@ async function createPiSession(
   singleShot: boolean,
   /** Only the review and lens sessions carry the matching embedded-first user prompt. */
   reviewSession = false,
+  /** Per-session override (TASK-157: the verifier's floored effort). */
+  thinkingLevelOverride?: string,
 ): Promise<PiAgentSessionLike> {
   const { providerID, modelID } = parseModelName(model);
   const modelRef = requirePiModel(runtime.modelRuntime, providerID, modelID);
+  const thinkingLevel =
+    thinkingLevelOverride ??
+    // modelOptions are main-model-only, matching the opencode engine. Compare
+    // the full provider/model: bare model IDs repeat across providers.
+    (model === runtime.mainModel ? runtime.thinkingLevel : undefined);
   const { session } = await runtime.sdk.createAgentSession({
     model: modelRef,
     cwd: runtime.workspace,
@@ -868,11 +875,7 @@ async function createPiSession(
     resourceLoader: reviewSession && runtime.reviewLoader ? runtime.reviewLoader : runtime.loader,
     sessionManager: runtime.sdk.SessionManager.inMemory(),
     settingsManager: runtime.sdk.SettingsManager.inMemory({}),
-    // modelOptions are main-model-only, matching the opencode engine. Compare
-    // the full provider/model: bare model IDs repeat across providers.
-    ...(model === runtime.mainModel && runtime.thinkingLevel
-      ? { thinkingLevel: runtime.thinkingLevel }
-      : {}),
+    ...(thinkingLevel ? { thinkingLevel } : {}),
   });
   runtime.activeSessions.add(session);
   if (runtime.toolTelemetry) piSessionTelemetry.set(session, runtime.toolTelemetry);
@@ -1298,13 +1301,16 @@ export async function runPiFindingVerification(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  modelOptions?: Record<string, unknown>,
 ): Promise<FindingVerdict[] | undefined> {
   const label = 'finding-verification';
   // Findings pass through unprojected — a field-subset projection here would
   // silently drop `evidence` and defeat verifier grounding (see the opencode
   // engine's identical warning).
   const prompt = assembleFindingVerificationPrompt(prContext, findings, true);
-  const session = await createPiSession(runtime, model, true);
+  // TASK-157: the runner passes the verifier's floored options when the aux
+  // entry does not already deliver them; pi maps them per session.
+  const session = await createPiSession(runtime, model, true, false, piThinkingLevel(modelOptions));
   try {
     const raw = await promptPiSession(session, model, prompt, label, log, timeoutMs, onTokenUsage);
     return parseFindingVerdicts(raw, findings.length, log);

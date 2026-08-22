@@ -182,10 +182,10 @@ describe('aux model options', () => {
     });
   });
 
-  it('drops a rejected reasoning effort on the main and the aux entry alike', () => {
+  it('clamps a rejected reasoning effort on the main and the aux entry alike', () => {
     // x-preview-f-free hard-400s on `medium`. The aux entry is assembled
-    // outside buildProviderEntry, so it needs the same filter; with the effort
-    // dropped it carries nothing and earns no entry at all.
+    // outside buildProviderEntry, so it needs the same clamp (TASK-157): the
+    // nearest supported tier reaches the provider, ties resolving upward.
     const aux = buildConfig('opencode', 'deepseek-v4-flash-free', 'k', undefined, true, [
       {
         providerID: 'opencode',
@@ -194,13 +194,13 @@ describe('aux model options', () => {
         modelOptions: { reasoningEffort: 'medium' },
       },
     ]);
-    assert.equal(
+    assert.deepEqual(
       (aux as { provider: Record<string, { models?: Record<string, unknown> }> }).provider.opencode
         .models,
-      undefined,
+      { 'x-preview-f-free': { options: { reasoningEffort: 'high' } } },
     );
 
-    // The main entry is built by buildProviderEntry, which filters the same way.
+    // The main entry is built by buildProviderEntry, which clamps the same way.
     const main = buildConfig(
       'opencode',
       'x-preview-f-free',
@@ -208,25 +208,13 @@ describe('aux model options', () => {
       { reasoningEffort: 'medium' },
       true,
     );
-    assert.equal(
+    assert.deepEqual(
       (main as { provider: Record<string, { models?: Record<string, unknown> }> }).provider.opencode
         .models,
-      undefined,
-    );
-    const mainKept = buildConfig(
-      'opencode',
-      'x-preview-f-free',
-      'k',
-      { reasoningEffort: 'high' },
-      true,
-    );
-    assert.deepEqual(
-      (mainKept as { provider: Record<string, { models: Record<string, unknown> }> }).provider
-        .opencode.models,
       { 'x-preview-f-free': { options: { reasoningEffort: 'high' } } },
     );
 
-    // A supported effort still reaches the aux entry.
+    // A supported effort passes through untouched.
     const kept = buildConfig('opencode', 'deepseek-v4-flash-free', 'k', undefined, true, [
       {
         providerID: 'opencode',
@@ -239,6 +227,49 @@ describe('aux model options', () => {
       (kept as { provider: Record<string, { models: Record<string, unknown> }> }).provider.opencode
         .models,
       { 'x-preview-f-free': { options: { reasoningEffort: 'low' } } },
+    );
+  });
+
+  it('registers a verifier alias entry carrying the floored effort (TASK-157)', () => {
+    // Per-session model options don't exist in the opencode prompt API, so the
+    // verifier's floored effort rides a config-time model alias whose `id`
+    // points back at the real model (probe-verified against the live gateway).
+    const config = buildConfig('opencode', 'main-model', 'k', { reasoningEffort: 'medium' }, true, [
+      {
+        providerID: 'opencode',
+        apiKey: 'k',
+        modelID: 'aux-model',
+        modelOptions: { reasoningEffort: 'low' },
+        verificationModelOptions: { reasoningEffort: 'medium' },
+      },
+    ]);
+    const models = (config as { provider: Record<string, { models: Record<string, unknown> }> })
+      .provider.opencode.models;
+    assert.deepEqual(models, {
+      'main-model': { options: { reasoningEffort: 'medium' } },
+      'aux-model': { options: { reasoningEffort: 'low' } },
+      'aux-model--jbot-verify': { id: 'aux-model', options: { reasoningEffort: 'medium' } },
+    });
+
+    // Root-entry variant: when the opencode server's root model IS the aux
+    // model (main runs on another engine), the alias hangs off the root entry.
+    const root = buildConfig(
+      'opencode',
+      'aux-model',
+      'k',
+      { reasoningEffort: 'low' },
+      true,
+      [],
+      undefined,
+      { reasoningEffort: 'medium' },
+    );
+    assert.deepEqual(
+      (root as { provider: Record<string, { models: Record<string, unknown> }> }).provider.opencode
+        .models,
+      {
+        'aux-model': { options: { reasoningEffort: 'low' } },
+        'aux-model--jbot-verify': { id: 'aux-model', options: { reasoningEffort: 'medium' } },
+      },
     );
   });
 

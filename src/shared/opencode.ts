@@ -122,7 +122,17 @@ export interface OpencodeProviderConfig extends ProviderKeyConfig {
   promptCache?: boolean;
   /** Provider options for this entry's model, scoped to it alone. */
   modelOptions?: Record<string, unknown>;
+  /**
+   * TASK-157: options for the verifier alias entry on this model (effort
+   * floored at the main pass). The prompt API has no per-session options, so
+   * the alias `<modelID>--jbot-verify` carries them, with `id` pointing back
+   * at the real model.
+   */
+  verificationModelOptions?: Record<string, unknown>;
 }
+
+/** Config-time model alias that carries the verifier's own options (TASK-157). */
+export const VERIFICATION_MODEL_ALIAS_SUFFIX = '--jbot-verify';
 
 type ProviderEntry = NonNullable<NonNullable<ServerOptions['config']>['provider']>[string];
 
@@ -137,10 +147,12 @@ function buildProviderEntry(params: {
   promptCache: boolean;
   modelID: string;
   modelOptions?: Record<string, unknown>;
+  verificationModelOptions?: Record<string, unknown>;
 }): ProviderEntry {
   const { providerID, apiKey, baseURL, promptCache, modelID } = params;
   const modelOptions = supportedModelOptions(providerID, modelID, params.modelOptions);
   const hasModelOptions = Boolean(modelOptions && Object.keys(modelOptions).length > 0);
+  const aliasModels = verificationAliasEntry(providerID, modelID, params.verificationModelOptions);
   const options = {
     apiKey,
     ...(promptCache ? { setCacheKey: true } : {}),
@@ -158,12 +170,43 @@ function buildProviderEntry(params: {
           name: modelID,
           ...(hasModelOptions ? { options: modelOptions } : {}),
         },
+        ...aliasModels,
       },
     };
   }
   return {
     options,
-    ...(hasModelOptions ? { models: { [modelID]: { options: modelOptions } } } : {}),
+    ...(hasModelOptions || aliasModels
+      ? {
+          models: {
+            ...(hasModelOptions ? { [modelID]: { options: modelOptions } } : {}),
+            ...aliasModels,
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * The verifier alias model entry for a provider config: `id` routes the wire
+ * call back to the real model while the entry's options carry the floored
+ * verification effort (TASK-157). Options clamp against the real model's
+ * declared ladder, same as any entry.
+ */
+function verificationAliasEntry(
+  providerID: string,
+  modelID: string,
+  verificationModelOptions?: Record<string, unknown>,
+): Record<string, { id: string; name?: string; options: Record<string, unknown> }> | undefined {
+  if (!modelID) return undefined;
+  const options = supportedModelOptions(providerID, modelID, verificationModelOptions);
+  if (!options || Object.keys(options).length === 0) return undefined;
+  return {
+    [`${modelID}${VERIFICATION_MODEL_ALIAS_SUFFIX}`]: {
+      id: modelID,
+      ...(PROVIDERS[providerID]?.custom ? { name: modelID } : {}),
+      options,
+    },
   };
 }
 
@@ -237,6 +280,7 @@ export function buildConfig(
   promptCache = true,
   additionalProviderKeys: OpencodeProviderConfig[] = [],
   baseURL?: string,
+  verificationModelOptions?: Record<string, unknown>,
 ): ServerOptions['config'] {
   const providerConfig: NonNullable<ServerOptions['config']>['provider'] = {
     [providerID]: buildProviderEntry({
@@ -246,6 +290,7 @@ export function buildConfig(
       promptCache,
       modelID,
       modelOptions,
+      verificationModelOptions,
     }),
   };
   for (const providerKey of additionalProviderKeys) {
@@ -258,18 +303,28 @@ export function buildConfig(
         providerKey.modelOptions,
       );
       const hasAuxOptions = Boolean(auxOptions && Object.keys(auxOptions).length > 0);
+      const aliasModels = verificationAliasEntry(
+        providerID,
+        providerKey.modelID ?? '',
+        providerKey.verificationModelOptions,
+      );
       // A same-provider aux model needs its own entry only to carry a name
-      // (custom providers) or options of its own; otherwise the provider entry
-      // already covers it.
+      // (custom providers), options of its own, or a verifier alias; otherwise
+      // the provider entry already covers it.
       if (!providerKey.modelID || providerKey.modelID === modelID) continue;
-      if (!custom && !hasAuxOptions) continue;
+      if (!custom && !hasAuxOptions && !aliasModels) continue;
       const entry = providerConfig[providerID];
       entry.models = {
         ...entry.models,
-        [providerKey.modelID]: {
-          ...(custom ? { name: providerKey.modelID } : {}),
-          ...(hasAuxOptions ? { options: auxOptions } : {}),
-        },
+        ...(custom || hasAuxOptions
+          ? {
+              [providerKey.modelID]: {
+                ...(custom ? { name: providerKey.modelID } : {}),
+                ...(hasAuxOptions ? { options: auxOptions } : {}),
+              },
+            }
+          : {}),
+        ...aliasModels,
       };
       continue;
     }
@@ -280,6 +335,7 @@ export function buildConfig(
       promptCache: providerKey.promptCache ?? promptCache,
       modelID: providerKey.modelID ?? '',
       modelOptions: providerKey.modelOptions,
+      verificationModelOptions: providerKey.verificationModelOptions,
     });
   }
   return {
@@ -431,6 +487,8 @@ export async function startOpencode(
   log: (msg: string) => void,
   options: {
     modelOptions?: Record<string, unknown>;
+    /** Verifier alias options for the ROOT model (aux-as-root runs; TASK-157). */
+    verificationModelOptions?: Record<string, unknown>;
     port?: number;
     promptCache?: boolean;
     baseURL?: string;
@@ -523,6 +581,7 @@ export async function startOpencode(
       options.promptCache ?? true,
       options.additionalProviderKeys,
       options.baseURL,
+      options.verificationModelOptions,
     );
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',
@@ -901,7 +960,12 @@ export async function runFindingVerification(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
+  modelOptions?: Record<string, unknown>,
 ): Promise<FindingVerdict[] | undefined> {
+  // TASK-157: per-session options don't exist in the prompt API; when the
+  // runner passed verifier options it also registered the matching alias
+  // entry at boot, so the floored effort rides the alias model id.
+  const verificationModel = modelOptions ? `${model}${VERIFICATION_MODEL_ALIAS_SUFFIX}` : model;
   // Pass findings through unprojected: Finding is structurally a VerifiableFinding.
   // An earlier field-subset projection here silently dropped `evidence` and
   // defeated verifier grounding on this (primary) backend — don't reintroduce one.
@@ -910,7 +974,7 @@ export async function runFindingVerification(
   // diff in one model call instead of an agentic git/grep loop.
   const { raw } = await promptPlanAgent(
     client,
-    model,
+    verificationModel,
     prompt,
     'finding-verification',
     log,

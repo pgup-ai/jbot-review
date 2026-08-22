@@ -49,6 +49,12 @@ export interface ReviewBackend {
     log: (msg: string) => void,
     timeoutMs?: number,
     onTokenUsage?: TokenUsageRecorder,
+    /**
+     * TASK-157: the verifier's own model options (effort floored at the main
+     * pass). Passed only when the aux entry does not already deliver them;
+     * backends without per-session option support ignore it.
+     */
+    modelOptions?: Record<string, unknown>,
   ): Promise<FindingVerdict[] | undefined>;
   runChangesSinceLastReview(
     model: string,

@@ -8,6 +8,7 @@ import {
   PI_MIN_NODE_VERSION,
   PI_TELEMETRY_CAPABILITY,
   runPiAddressedPriorCommentsCheck,
+  runPiFindingVerification,
   runPiGuidelineComplianceCheck,
   runPiReview,
   type PiRuntime,
@@ -461,6 +462,30 @@ describe('Pi review sessions', () => {
     };
     return runtime;
   };
+
+  it('delivers the verifier effort as a per-session thinking level (TASK-157)', async () => {
+    // pi's runtime thinking level is main-model-only; without the override a
+    // distinct-aux verification session runs at the provider default, below
+    // the finder — exactly the accident TASK-157 closes.
+    const sessions: Array<Record<string, unknown>> = [];
+    const runtime = fakeRuntime(false, []);
+    runtime.thinkingLevel = 'medium';
+    const inner = runtime.sdk.createAgentSession;
+    runtime.sdk.createAgentSession = async (args: Record<string, unknown>) => {
+      sessions.push(args);
+      return (inner as (a: unknown) => Promise<{ session: unknown }>)(args);
+    };
+    const finding = { path: 'a.ts', line: 1, title: 't', body: 'b', severity: 'P1' } as never;
+
+    await runPiFindingVerification(runtime, 'opencode/aux-model', 'ctx', [finding], () => {}, 1000, undefined, {
+      reasoningEffort: 'high',
+    });
+    assert.equal(sessions[0]?.thinkingLevel, 'high');
+
+    // Without the override, a non-main model still gets no thinking level.
+    await runPiFindingVerification(runtime, 'opencode/aux-model', 'ctx', [finding], () => {}, 1000);
+    assert.equal('thinkingLevel' in (sessions[1] ?? {}), false);
+  });
 
   it('gives the embedded-first system prompt to review sessions only', async () => {
     // The aux prompts still tell the model to run a full git diff, so they must
