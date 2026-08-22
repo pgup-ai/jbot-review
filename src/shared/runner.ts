@@ -774,6 +774,13 @@ export interface ReviewRunOptions {
    */
   guidelineWiden?: 'auto' | 'full';
   /**
+   * TASK-065 arm: verification judges from a slim claim-checking context
+   * (title/body/diff scope, linked issues, changed files, full diff) instead
+   * of the whole finder context. Off by default — the verifier is a precision
+   * gate, so the flip waits on adjudicated benchmark evidence.
+   */
+  verifierSlimContext?: boolean;
+  /**
    * Model for the auxiliary sessions (addressed-check, guideline compliance,
    * finding verification). Lets the main review run on a stronger tier while
    * the mechanical checks stay on a cheap one. Empty = use the main model.
@@ -1319,6 +1326,8 @@ async function runReviewPipeline(params: {
   // Populated on the enhanced path only; the basic branch has no droppable set.
   let baseCoreContext = '';
   let supplementaryBlocks: ContextBlock[] = [];
+  // Captured for the slim verifier contract (TASK-065); enhanced path only.
+  let slimVerifierIssueInputs: { linkedIssues: LinkedIssue[]; linkedIssuesOmitted: number } | undefined;
   if (options.enhancedContext) {
     const commits = localDiff
       ? localDiff.commits
@@ -1359,6 +1368,7 @@ async function runReviewPipeline(params: {
     });
     baseCoreContext = coreContext;
     coreContext = joinContext(coreContext, ...supplementaryBlocks.map((block) => block.text));
+    slimVerifierIssueInputs = { linkedIssues, linkedIssuesOmitted };
   } else {
     const commentsBlock =
       priorComments.length > 0
@@ -1382,7 +1392,6 @@ async function runReviewPipeline(params: {
   // mark it once here so every session derived from coreContext (main + aux)
   // carries the guard. Static text, so it stays in the cache-stable prefix.
   coreContext = joinContext(UNTRUSTED_PR_CONTENT_NOTE, coreContext);
-  const basePrContext = joinContext(coreContext, diffHunksBlock);
   const auxHasCompleteEmbeddedDiff =
     !auxRequiresCompleteEmbeddedDiff || embeddedOnlyBackendIncompleteDiffFiles.length === 0;
   if (!auxHasCompleteEmbeddedDiff) {
@@ -1392,10 +1401,26 @@ async function runReviewPipeline(params: {
       )}). Main review continues without aux findings or verification.`,
     );
   }
-  const auxPrContext =
+  const auxDiffBlockText =
     auxRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks && auxHasCompleteEmbeddedDiff
-      ? joinContext(coreContext, embeddedOnlyBackendDiffHunks.text)
-      : basePrContext;
+      ? embeddedOnlyBackendDiffHunks.text
+      : diffHunksBlock;
+  const auxPrContext = joinContext(coreContext, auxDiffBlockText);
+  // TASK-065 arm (JBOT_VERIFIER_SLIM_CONTEXT): the verifier judges a handful
+  // of findings against the diff; the finder supplements around it are pure
+  // prefill. Same diff block as the aux path, so a slim verifier never judges
+  // from a diff the full context would have carried whole.
+  const verifierPrContext =
+    options.verifierSlimContext && slimVerifierIssueInputs
+      ? buildSlimVerifierContext({
+          pullTitle,
+          pullBody,
+          changedFiles,
+          diffScope,
+          ...slimVerifierIssueInputs,
+          auxDiffBlockText,
+        })
+      : auxPrContext;
 
   // Use a per-run limiter around every backend so mixed Devin/OpenCode runs
   // honor one global cap. Disable opencode's older process-global limiter to
@@ -2453,7 +2478,7 @@ async function runReviewPipeline(params: {
     const verifiedFindings = await verifyBlockingFindings({
       backend: auxBackend,
       model: auxModel,
-      prContext: auxPrContext,
+      prContext: verifierPrContext,
       timeoutMs: computeVerificationTimeoutMs(options.timeBudgetMinutes, Date.now() - runStartedAt),
       findings: suppression.findings,
       enabled: options.verifyFindings && auxSessionsEnabled,
@@ -2857,6 +2882,7 @@ export function normalizeOptions(
     contextTrim: options?.contextTrim ?? false,
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
     guidelineWiden: options?.guidelineWiden ?? 'auto',
+    verifierSlimContext: options?.verifierSlimContext ?? false,
     auxModel: options?.auxModel ?? '',
     auxApiKey: options?.auxApiKey ?? '',
     auxBaseURL: options?.auxBaseURL ?? '',
@@ -3326,6 +3352,40 @@ function incompleteDiffFiles(result: ReturnType<typeof buildDiffHunksBlockWithMe
  * do not. In sharded mode each shard's findings are clamped in code to its
  * assigned files so parallel shards cannot duplicate or poach each other.
  */
+/**
+ * The verifier's slim context (TASK-065, JBOT_VERIFIER_SLIM_CONTEXT): the
+ * claim-checking inputs — untrusted-input guard, PR title/body/diff scope,
+ * linked issues, changed files, and the SAME full diff block the aux path
+ * carries — without the commits, prior comments/threads, playbooks, and
+ * summary instructions the verifier never cites. Exported for tests.
+ */
+export function buildSlimVerifierContext(params: {
+  pullTitle: string;
+  pullBody: string;
+  changedFiles: string[];
+  diffScope?: Parameters<typeof buildReviewContext>[0]['diffScope'];
+  linkedIssues: LinkedIssue[];
+  linkedIssuesOmitted: number;
+  auxDiffBlockText: string;
+}): string {
+  return joinContext(
+    UNTRUSTED_PR_CONTENT_NOTE,
+    buildReviewContext({
+      pullTitle: params.pullTitle,
+      pullBody: params.pullBody,
+      changedFiles: params.changedFiles,
+      priorComments: [],
+      commits: [],
+      checkSummary: 'Omitted for verification.',
+      guidelines: '',
+      ...(params.diffScope ? { diffScope: params.diffScope } : {}),
+      linkedIssues: params.linkedIssues,
+      linkedIssuesOmitted: params.linkedIssuesOmitted,
+    }),
+    params.auxDiffBlockText,
+  );
+}
+
 /** Exported for retry-policy tests; runReviewPipeline is the only production caller. */
 export async function runShardedReview(params: {
   backend: ReviewBackend;

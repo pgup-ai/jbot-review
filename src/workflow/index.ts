@@ -81,6 +81,7 @@ async function main(): Promise<void> {
     contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
     embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
     guidelineWiden: parseEnvGuidelineWiden('JBOT_GUIDELINE_WIDEN'),
+    verifierSlimContext: parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
   };
   const pullTarget = getPullRequestTarget();
   for (const warning of swallowedProviderWarnings([...modelPool, ...auxProbe])) {

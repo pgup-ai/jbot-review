@@ -22,6 +22,7 @@ import {
   runPrReview,
   EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
   runShardedReview,
+  buildSlimVerifierContext,
 } from '../src/shared/runner.ts';
 import { buildDiffHunksBlockWithMetadata } from '../src/shared/diff-context.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
@@ -423,6 +424,34 @@ describe('formatReviewedWith', () => {
       ),
       'Reviewed with `devin/glm-5.2` via devin; auxiliary sessions used `opencode/deepseek-v4-flash-free` via pi.',
     );
+  });
+});
+
+describe('buildSlimVerifierContext (TASK-065 arm)', () => {
+  it('carries the claim-checking context and none of the finder supplements', () => {
+    // The verifier judges a handful of findings against the diff; a probe
+    // measured its full-context prompt at ~50K uncached input tokens. The slim
+    // contract keeps what verdicts cite (title/body/diff scope, linked issues,
+    // changed files, the full diff) and drops commits, prior comments/threads,
+    // playbooks, and summary instructions.
+    const context = buildSlimVerifierContext({
+      pullTitle: 'Add retry logic',
+      pullBody: 'Fixes the backoff.',
+      changedFiles: ['src/a.ts'],
+      linkedIssues: [{ number: 7, title: 'Retries drop', body: 'details' }],
+      linkedIssuesOmitted: 0,
+      auxDiffBlockText: '## Diff hunks\nDIFF_SENTINEL',
+    });
+
+    assert.match(context, /author-controlled and UNTRUSTED/); // untrusted-note guard
+    assert.match(context, /Add retry logic/);
+    assert.match(context, /#7: Retries drop/);
+    assert.match(context, /- src\/a\.ts/);
+    assert.match(context, /DIFF_SENTINEL/);
+    assert.match(context, /## Commits\n\(none\)/);
+    assert.doesNotMatch(context, /Prior review comments/);
+    assert.doesNotMatch(context, /Summary instructions/);
+    assert.doesNotMatch(context, /Review focus/);
   });
 });
 
