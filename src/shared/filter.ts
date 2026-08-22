@@ -211,6 +211,51 @@ export interface VerdictApplication {
  * findings are dropped, uncertain ones demoted to advisory; a selected
  * finding with no verdict passes through unchanged (fail-open per finding).
  */
+export interface OverlapVerdictMerge extends VerdictApplication {
+  /** Blocking findings that arrived after the verification snapshot (posted unverified). */
+  lateUnverified: Finding[];
+}
+
+/**
+ * Applies grace-overlap verification verdicts (TASK-079) to the FINAL finding
+ * list, which can differ from the snapshot the verifier judged: verdicts
+ * re-attach by path:line — unique after dedupe — and blocking findings with
+ * no verified counterpart pass through unverified and are counted (TASK-080's
+ * rejection signal). Fail-open per finding, like `applyFindingVerdicts`.
+ */
+export function mergeVerdictsByLocation(
+  findings: Finding[],
+  verifiedTargets: Finding[],
+  verdicts: FindingVerdict[],
+): OverlapVerdictMerge {
+  const verdictByPosition = new Map(verdicts.map((verdict) => [verdict.index, verdict]));
+  const locationOf = (finding: Finding) => `${finding.path} ${finding.line}`;
+  const verdictByLocation = new Map<string, FindingVerdict | undefined>();
+  verifiedTargets.forEach((target, position) => {
+    verdictByLocation.set(locationOf(target), verdictByPosition.get(position));
+  });
+
+  const dropped: VerdictApplication['dropped'] = [];
+  const demoted: VerdictApplication['demoted'] = [];
+  const lateUnverified: Finding[] = [];
+  const result = findings.flatMap((finding) => {
+    const location = locationOf(finding);
+    if (!verdictByLocation.has(location)) {
+      if (BLOCKING_SEVERITIES.has(finding.severity)) lateUnverified.push(finding);
+      return [finding];
+    }
+    const verdict = verdictByLocation.get(location);
+    if (!verdict || verdict.verdict === 'confirmed') return [finding];
+    if (verdict.verdict === 'refuted') {
+      dropped.push({ finding, reason: verdict.reason });
+      return [];
+    }
+    demoted.push({ finding, reason: verdict.reason });
+    return [{ ...finding, severity: 'P3' as const }];
+  });
+  return { findings: result, dropped, demoted, lateUnverified };
+}
+
 export function applyFindingVerdicts(
   findings: Finding[],
   selectedIndexes: number[],

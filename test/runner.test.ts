@@ -497,7 +497,9 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     assert.equal(authCalls.length, 1);
 
     const transientCalls: string[] = [];
-    const result = await run(backendThrowingOnce('The API server encountered an error', transientCalls));
+    const result = await run(
+      backendThrowingOnce('The API server encountered an error', transientCalls),
+    );
     assert.equal(transientCalls.length, 2);
     assert.deepEqual(result, { summary: 'ok', findings: [] });
   });
@@ -895,19 +897,39 @@ describe('settleWithinGrace', () => {
     const abandoned: string[] = [];
     const stuck = new Promise<number[]>(() => {});
     assert.deepEqual(
-      await settleWithinGrace(session(stuck), [], () => {}, 5, () => abandoned.push('stuck')),
+      await settleWithinGrace(
+        session(stuck),
+        [],
+        () => {},
+        5,
+        () => abandoned.push('stuck'),
+      ),
       [],
     );
     assert.deepEqual(abandoned, ['stuck']);
 
-    await settleWithinGrace(session(Promise.resolve([1])), [], () => {}, 1000, () =>
-      abandoned.push('done'),
+    await settleWithinGrace(
+      session(Promise.resolve([1])),
+      [],
+      () => {},
+      1000,
+      () => abandoned.push('done'),
     );
     const failed = Promise.reject(new Error('boom'));
     failed.catch(() => {});
-    await settleWithinGrace(session(failed), [], () => {}, 1000, () => abandoned.push('failed'));
-    await settleWithinGrace(session(Promise.resolve(['kept']), true), [], () => {}, 0, () =>
-      abandoned.push('settled'),
+    await settleWithinGrace(
+      session(failed),
+      [],
+      () => {},
+      1000,
+      () => abandoned.push('failed'),
+    );
+    await settleWithinGrace(
+      session(Promise.resolve(['kept']), true),
+      [],
+      () => {},
+      0,
+      () => abandoned.push('settled'),
     );
     assert.deepEqual(abandoned, ['stuck']);
   });

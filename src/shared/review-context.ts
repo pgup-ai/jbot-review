@@ -903,7 +903,9 @@ export function formatFinderGuidelines(
           .filter((_, index) => !keptIndices.has(index))
           .map((doc) => doc.label)
           .join(', ')}. Read any that apply to your changed files.`;
-    sections.push(['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n'));
+    sections.push(
+      ['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n'),
+    );
   }
 
   return sections.join('\n\n');

@@ -3,7 +3,12 @@ import { join } from 'node:path';
 import * as core from '@actions/core';
 import * as github from '@actions/github';
 
-import { defaultModelOptions, parseEnvBoolean, parseEnvGuidelineWiden, resolvePoolCredentials } from '../shared/config.ts';
+import {
+  defaultModelOptions,
+  parseEnvBoolean,
+  parseEnvGuidelineWiden,
+  resolvePoolCredentials,
+} from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 
 import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
@@ -82,6 +87,7 @@ async function main(): Promise<void> {
     embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
     guidelineWiden: parseEnvGuidelineWiden('JBOT_GUIDELINE_WIDEN'),
     verifierSlimContext: parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
+    verifyOverlapGrace: parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
   };
   const pullTarget = getPullRequestTarget();
   for (const warning of swallowedProviderWarnings([...modelPool, ...auxProbe])) {

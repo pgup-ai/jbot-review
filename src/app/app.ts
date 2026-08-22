@@ -7,7 +7,12 @@ import type { InstallationAccessTokenAuthentication } from '@octokit/auth-app';
 import { createAppOctokit } from './auth.ts';
 import { clonePr } from './clone.ts';
 import { runPrReview } from '../shared/runner.ts';
-import { defaultModelOptions, parseEnvBoolean, parseEnvGuidelineWiden, type ProviderCredential } from '../shared/config.ts';
+import {
+  defaultModelOptions,
+  parseEnvBoolean,
+  parseEnvGuidelineWiden,
+  type ProviderCredential,
+} from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 import { pickAuxModel, pickPooledModel, resolveAuxModel } from '../shared/model.ts';
 import { enqueue } from './queue.ts';
@@ -139,6 +144,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
           guidelineWiden: parseEnvGuidelineWiden('JBOT_GUIDELINE_WIDEN'),
           verifierSlimContext: parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
+          verifyOverlapGrace: parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });

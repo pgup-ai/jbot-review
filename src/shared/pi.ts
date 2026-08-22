@@ -1341,7 +1341,14 @@ export async function runPiFindingVerification(
   const prompt = assembleFindingVerificationPrompt(prContext, findings, true);
   // TASK-157: the runner passes the verifier's floored options when the aux
   // entry does not already deliver them; pi maps them per session.
-  const session = await createPiSession(runtime, model, true, false, piThinkingLevel(modelOptions), label);
+  const session = await createPiSession(
+    runtime,
+    model,
+    true,
+    false,
+    piThinkingLevel(modelOptions),
+    label,
+  );
   try {
     const raw = await promptPiSession(session, model, prompt, label, log, timeoutMs, onTokenUsage);
     return parseFindingVerdicts(raw, findings.length, log);

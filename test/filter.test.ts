@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   anchorFindings,
   applyFindingVerdicts,
+  mergeVerdictsByLocation,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   isNoiseFile,
@@ -277,6 +278,67 @@ describe('applyFindingVerdicts', () => {
     assert.equal(dropped.length, 1);
     assert.equal(demoted.length, 0);
     assert.equal(result.length, findings.length - 1);
+  });
+});
+
+describe('mergeVerdictsByLocation (TASK-079/080)', () => {
+  // Grace-overlap verification judges a snapshot taken at main settle; the
+  // final list can differ (straggler lens/compliance findings). Verdicts
+  // re-attach by path:line — unique post-dedupe — and blocking findings that
+  // arrived after the snapshot pass through unverified and are counted.
+  const targets = [
+    finding({ path: 'a.ts', line: 1, severity: 'P1', title: 'refute me' }),
+    finding({ path: 'b.ts', line: 2, severity: 'P2', title: 'uncertain me' }),
+    finding({ path: 'c.ts', line: 3, severity: 'P2', title: 'confirm me' }),
+  ];
+  const straggler = finding({ path: 'late.ts', line: 9, severity: 'P1', title: 'late blocking' });
+  const lateAdvisory = finding({
+    path: 'late.ts',
+    line: 10,
+    severity: 'P3',
+    title: 'late advisory',
+  });
+  const finalFindings = [targets[0], targets[1], targets[2], straggler, lateAdvisory];
+
+  it('re-attaches verdicts by location and counts late blocking findings as unverified', () => {
+    const { findings, dropped, demoted, lateUnverified } = mergeVerdictsByLocation(
+      finalFindings,
+      targets,
+      [
+        { index: 0, verdict: 'refuted', reason: 'guarded' },
+        { index: 1, verdict: 'uncertain' },
+        { index: 2, verdict: 'confirmed' },
+      ],
+    );
+
+    assert.deepEqual(
+      dropped.map(({ finding: f }) => f.title),
+      ['refute me'],
+    );
+    assert.deepEqual(
+      demoted.map(({ finding: f }) => f.title),
+      ['uncertain me'],
+    );
+    assert.deepEqual(
+      findings.map((f) => `${f.title}:${f.severity}`),
+      ['uncertain me:P3', 'confirm me:P2', 'late blocking:P1', 'late advisory:P3'],
+    );
+    // Only BLOCKING stragglers count: advisories were never verification targets.
+    assert.deepEqual(
+      lateUnverified.map((f) => f.title),
+      ['late blocking'],
+    );
+  });
+
+  it('fails open per finding: no verdict for a target means confirmed', () => {
+    const { findings, lateUnverified } = mergeVerdictsByLocation(finalFindings, targets, [
+      { index: 0, verdict: 'refuted' },
+    ]);
+    assert.equal(findings.length, finalFindings.length - 1);
+    assert.deepEqual(
+      lateUnverified.map((f) => f.title),
+      ['late blocking'],
+    );
   });
 });
 

@@ -36,7 +36,9 @@ export function classifyMainShardFailure(error: unknown): {
     ? 'auth'
     : matches(/unknown model|model.{0,24}not (found|exist|available)|no such model/i)
       ? 'model-not-found'
-      : matches(/context.{0,12}length|maximum context|\b413\b|too (large|long)|exceeds.{0,24}(context|token)/i)
+      : matches(
+            /context.{0,12}length|maximum context|\b413\b|too (large|long)|exceeds.{0,24}(context|token)/i,
+          )
         ? 'context-length'
         : matches(/\b429\b|rate.?limit|quota/i)
           ? 'rate-limit'

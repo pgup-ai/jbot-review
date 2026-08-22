@@ -512,9 +512,18 @@ describe('Pi review sessions', () => {
     };
     const finding = { path: 'a.ts', line: 1, title: 't', body: 'b', severity: 'P1' } as never;
 
-    await runPiFindingVerification(runtime, 'opencode/aux-model', 'ctx', [finding], () => {}, 1000, undefined, {
-      reasoningEffort: 'high',
-    });
+    await runPiFindingVerification(
+      runtime,
+      'opencode/aux-model',
+      'ctx',
+      [finding],
+      () => {},
+      1000,
+      undefined,
+      {
+        reasoningEffort: 'high',
+      },
+    );
     assert.equal(sessions[0]?.thinkingLevel, 'high');
 
     // Without the override, a non-main model still gets no thinking level.

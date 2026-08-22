@@ -127,10 +127,10 @@ describe('verification effort floor (TASK-157)', () => {
       { reasoningEffort: 'low' },
     );
     // An aux entry without an effort still gets the main floor, keeping its other keys.
-    assert.deepEqual(
-      verificationModelOptions({ reasoningEffort: 'medium' }, { temperature: 0 }),
-      { temperature: 0, reasoningEffort: 'medium' },
-    );
+    assert.deepEqual(verificationModelOptions({ reasoningEffort: 'medium' }, { temperature: 0 }), {
+      temperature: 0,
+      reasoningEffort: 'medium',
+    });
   });
 });
 

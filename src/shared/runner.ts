@@ -11,6 +11,7 @@ import {
   anchorFindings,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
+  mergeVerdictsByLocation,
   resolveFindingAnchors,
   isNoiseFile,
   isPrCleanAfterRun,
@@ -299,7 +300,15 @@ function createOpencodeBackend(
         timeoutMs,
         onTokenUsage,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage, modelOptions) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      modelOptions,
+    ) =>
       runOpencodeFindingVerification(
         client,
         model,
@@ -342,7 +351,15 @@ function createPiBackend(runtime: PiRuntime): ReviewBackend {
         timeoutMs,
         onTokenUsage,
       ),
-    runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage, modelOptions) =>
+    runFindingVerification: (
+      model,
+      prContext,
+      findings,
+      log,
+      timeoutMs,
+      onTokenUsage,
+      modelOptions,
+    ) =>
       runPiFindingVerification(
         runtime,
         model,
@@ -773,6 +790,13 @@ export interface ReviewRunOptions {
    * (JBOT_GUIDELINE_WIDEN=full). Checkout-blind finders always widen.
    */
   guidelineWiden?: 'auto' | 'full';
+  /**
+   * TASK-079 arm: verify the main-settle finding snapshot concurrently with
+   * the aux settle grace (tail becomes max(grace, verify), not grace +
+   * verify). Late aux findings post unverified and are counted (TASK-080).
+   * Off by default. Not the rejected overlap-with-the-main-pass.
+   */
+  verifyOverlapGrace?: boolean;
   /**
    * TASK-065 arm: verification judges from a slim claim-checking context
    * (title/body/diff scope, linked issues, changed files, full diff) instead
@@ -1327,7 +1351,8 @@ async function runReviewPipeline(params: {
   let baseCoreContext = '';
   let supplementaryBlocks: ContextBlock[] = [];
   // Captured for the slim verifier contract (TASK-065); enhanced path only.
-  let slimVerifierIssueInputs: { linkedIssues: LinkedIssue[]; linkedIssuesOmitted: number } | undefined;
+  let slimVerifierIssueInputs:
+    { linkedIssues: LinkedIssue[]; linkedIssuesOmitted: number } | undefined;
   if (options.enhancedContext) {
     const commits = localDiff
       ? localDiff.commits
@@ -2355,6 +2380,71 @@ async function runReviewPipeline(params: {
         ? Buffer.byteLength(summary) + Buffer.byteLength(JSON.stringify(findings))
         : undefined,
     );
+    // TASK-079 (JBOT_VERIFY_OVERLAP_GRACE, default off): verify the findings
+    // already settled at main completion WHILE the aux graces run, instead of
+    // strictly after them — the tail becomes max(grace, verify) instead of
+    // grace + verify. NOT the 2026-06-29-rejected overlap-with-main: this
+    // starts only after the main review settles. Late aux findings merge in
+    // unverified (the existing fail-open class) and are counted (TASK-080).
+    // The pre-pass mirrors the final pure pipeline without telemetry rows;
+    // the final pass below stays the single recorded pipeline.
+    const startOverlapVerification = async (): Promise<
+      { targets: Finding[]; verdicts: FindingVerdictList } | undefined
+    > => {
+      const session = 'finding-verification';
+      const lists: Finding[][] = [findings];
+      if (lensPasses.isSettled()) {
+        lists.push(...(await lensPasses.promise.catch(() => [] as Finding[][])));
+      }
+      if (guidelineComplianceCheck.isSettled()) {
+        lists.push(await guidelineComplianceCheck.promise.catch(() => [] as Finding[]));
+      }
+      const gatedLists = lists.map((list) => demoteLowConfidenceBlockingFindings(list).findings);
+      for (const list of gatedLists) {
+        resolveFindingAnchors(list, addable, patchByPath, options.evidenceQuotes);
+      }
+      const settled = suppressPreviouslyReported(
+        dedupeFindings(...gatedLists),
+        priorJbotThreads,
+        headSha ? addable : undefined,
+      ).findings;
+      const indexes = selectBlockingFindingIndexes(settled, MAX_VERIFIED_FINDINGS);
+      if (indexes.length === 0) {
+        recordCoverage({ session, state: 'skipped' });
+        return undefined;
+      }
+      const timeoutMs = computeVerificationTimeoutMs(
+        options.timeBudgetMinutes,
+        Date.now() - runStartedAt,
+      );
+      if (timeoutMs === 0) {
+        log(
+          'Skipping finding verification: time budget exhausted; posting findings unverified (fail-open).',
+        );
+        recordCoverage({ session, state: 'skipped' });
+        return undefined;
+      }
+      const targets = indexes.map((index) => settled[index]);
+      log(
+        `Verifying ${targets.length} blocking finding(s) concurrently with the aux settle grace.`,
+      );
+      const verdicts = await requestFindingVerdicts({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: verifierPrContext,
+        targets,
+        timeoutMs,
+        modelOptions: verifierSessionOptions,
+        log,
+        onTokenUsage: recordTokenUsage,
+        onCoverage: recordCoverage,
+      });
+      return verdicts ? { targets, verdicts } : undefined;
+    };
+    const overlapVerification =
+      options.verifyOverlapGrace && options.verifyFindings && auxSessionsEnabled
+        ? startOverlapVerification().catch(() => undefined)
+        : undefined;
     const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
       lensPasses,
       addressedPriorCheck,
@@ -2475,18 +2565,48 @@ async function runReviewPipeline(params: {
       telemetry.enabled ? Buffer.byteLength(JSON.stringify(suppression.findings)) : undefined,
     );
     const verificationDone = phases.start({ phase: 'verification', scope: 'run' });
-    const verifiedFindings = await verifyBlockingFindings({
-      backend: auxBackend,
-      model: auxModel,
-      prContext: verifierPrContext,
-      timeoutMs: computeVerificationTimeoutMs(options.timeBudgetMinutes, Date.now() - runStartedAt),
-      findings: suppression.findings,
-      enabled: options.verifyFindings && auxSessionsEnabled,
-      modelOptions: verifierSessionOptions,
-      log,
-      onTokenUsage: recordTokenUsage,
-      onCoverage: recordCoverage,
-    });
+    let verifiedFindings: Finding[];
+    if (overlapVerification) {
+      const outcome = await overlapVerification;
+      if (outcome) {
+        const merge = mergeVerdictsByLocation(
+          suppression.findings,
+          outcome.targets,
+          outcome.verdicts,
+        );
+        logVerdictOutcomes(merge, log);
+        if (merge.lateUnverified.length > 0) {
+          // TASK-080's rejection signal: revisit the overlap arm if this is
+          // ever nonzero for P0/P1 in practice.
+          log(
+            `${merge.lateUnverified.length} blocking finding(s) arrived after the verification snapshot and post unverified (fail-open): ${merge.lateUnverified
+              .map(formatFindingLocation)
+              .join(', ')}`,
+          );
+          recordCoverage({ session: 'late-unverified-findings', state: 'completed' });
+        }
+        verifiedFindings = merge.findings;
+      } else {
+        // Fail-open, same as a broken serial verifier.
+        verifiedFindings = suppression.findings;
+      }
+    } else {
+      verifiedFindings = await verifyBlockingFindings({
+        backend: auxBackend,
+        model: auxModel,
+        prContext: verifierPrContext,
+        timeoutMs: computeVerificationTimeoutMs(
+          options.timeBudgetMinutes,
+          Date.now() - runStartedAt,
+        ),
+        findings: suppression.findings,
+        enabled: options.verifyFindings && auxSessionsEnabled,
+        modelOptions: verifierSessionOptions,
+        log,
+        onTokenUsage: recordTokenUsage,
+        onCoverage: recordCoverage,
+      });
+    }
     verificationDone(
       'completed',
       telemetry.enabled ? Buffer.byteLength(JSON.stringify(verifiedFindings)) : undefined,
@@ -2883,6 +3003,7 @@ export function normalizeOptions(
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
     guidelineWiden: options?.guidelineWiden ?? 'auto',
     verifierSlimContext: options?.verifierSlimContext ?? false,
+    verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     auxModel: options?.auxModel ?? '',
     auxApiKey: options?.auxApiKey ?? '',
     auxBaseURL: options?.auxBaseURL ?? '',
@@ -3174,13 +3295,38 @@ async function verifyBlockingFindings(params: {
   const targets = selectedIndexes.map((index) => params.findings[index]);
   params.log(`Verifying ${targets.length} blocking finding(s) before posting.`);
 
+  const verdicts = await requestFindingVerdicts({ ...params, targets });
+  if (!verdicts) return params.findings;
+
+  const application = applyFindingVerdicts(params.findings, selectedIndexes, verdicts);
+  logVerdictOutcomes(application, params.log);
+  return application.findings;
+}
+
+/**
+ * One verifier session call with the shared fail-open contract: undefined on
+ * any failure or unusable output, with the coverage row recorded. Used by the
+ * serial path above and the grace-overlap path (TASK-079).
+ */
+async function requestFindingVerdicts(params: {
+  backend: ReviewBackend;
+  model: string;
+  prContext: string;
+  targets: Finding[];
+  timeoutMs?: number;
+  modelOptions?: Record<string, unknown>;
+  log: (msg: string) => void;
+  onTokenUsage?: TokenUsageRecorder;
+  onCoverage?: SessionCoverageRecorder;
+}): Promise<FindingVerdictList | undefined> {
+  const session = 'finding-verification';
   const startedAt = Date.now();
   let verdicts;
   try {
     verdicts = await params.backend.runFindingVerification(
       params.model,
       params.prContext,
-      targets,
+      params.targets,
       params.log,
       params.timeoutMs,
       params.onTokenUsage,
@@ -3191,31 +3337,40 @@ async function verifyBlockingFindings(params: {
       `(skipped finding verification: ${error instanceof Error ? error.message : String(error)})`,
     );
     params.onCoverage?.({ session, state: 'failed', error, durationMs: Date.now() - startedAt });
-    return params.findings;
+    return undefined;
   }
   if (!verdicts) {
     params.log('(finding verification output unusable; keeping findings unverified)');
     params.onCoverage?.({ session, state: 'failed', durationMs: Date.now() - startedAt });
-    return params.findings;
+    return undefined;
   }
   params.onCoverage?.({ session, state: 'completed', durationMs: Date.now() - startedAt });
+  return verdicts;
+}
 
-  const application = applyFindingVerdicts(params.findings, selectedIndexes, verdicts);
+type FindingVerdictList = NonNullable<Awaited<ReturnType<ReviewBackend['runFindingVerification']>>>;
+
+function logVerdictOutcomes(
+  application: {
+    dropped: Array<{ finding: Finding; reason?: string }>;
+    demoted: Array<{ finding: Finding; reason?: string }>;
+  },
+  log: (msg: string) => void,
+): void {
   for (const { finding, reason } of application.dropped) {
-    params.log(
+    log(
       `Dropped refuted finding ${formatFindingLocation(finding)} "${finding.title}".${
         reason ? ` Reason: ${reason}` : ''
       }`,
     );
   }
   for (const { finding, reason } of application.demoted) {
-    params.log(
+    log(
       `Demoted uncertain finding ${formatFindingLocation(finding)} "${finding.title}" to P3.${
         reason ? ` Reason: ${reason}` : ''
       }`,
     );
   }
-  return application.findings;
 }
 
 function filterFindings(findings: Finding[], options: NormalizedReviewRunOptions): Finding[] {
