@@ -219,6 +219,7 @@ import {
   getCheckStatusSummary,
   formatFindingLabel,
   formatFindingLocation,
+  getPullFreshness,
   postFileLevelComment,
   addPrReaction,
   removeOwnPrReaction,
@@ -242,6 +243,11 @@ import {
   type PriorJbotThreads,
 } from './github.ts';
 import { isDefinitiveApprovalRejection, type AutoApprovalDecision } from './approval.ts';
+import {
+  classifyMainShardFailure,
+  STALE_CHECK_MIN_ATTEMPT_MS,
+  StaleReviewError,
+} from './retry-policy.ts';
 import { condenseSummary, formatSummaryMarkdown, renderOrphanedSection } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
@@ -2200,6 +2206,21 @@ async function runReviewPipeline(params: {
         : undefined,
       evidenceQuotes: options.evidenceQuotes,
       embeddedFirstPrompt: options.embeddedFirstPrompt,
+      // Local mode has no PR to go stale; GitHub runs re-check before a retry
+      // of a long attempt. Fetch failures fail open inside runShardedReview.
+      ...(!localDiff && headSha
+        ? {
+            staleCheck: async () => {
+              const fresh = await getPullFreshness(octokit, owner, repo, pullNumber);
+              if (fresh.merged) return new StaleReviewError('merged');
+              if (fresh.state === 'closed') return new StaleReviewError('closed');
+              if (fresh.headSha && fresh.headSha !== headSha) {
+                return new StaleReviewError('head-moved');
+              }
+              return undefined;
+            },
+          }
+        : {}),
       log,
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
@@ -2282,7 +2303,23 @@ async function runReviewPipeline(params: {
       }),
     );
 
-    const { summary, findings } = await mainReview;
+    let summary: string;
+    let findings: Finding[];
+    try {
+      ({ summary, findings } = await mainReview);
+    } catch (error) {
+      // TASK-155: the PR merged, closed, or moved mid-review — nothing this
+      // run produces can post against the reviewed state. Not a failure: the
+      // freshest-head run (or none) is the correct outcome.
+      if (error instanceof StaleReviewError) {
+        mainExecutionDone('failed');
+        log(`Review abandoned before retry: ${error.message}. Posting nothing.`);
+        recordCoverage({ session: 'stale-before-retry', state: 'skipped' });
+        finishTelemetry('skipped');
+        return;
+      }
+      throw error;
+    }
     mainExecutionDone(
       'completed',
       telemetry.enabled
@@ -3249,7 +3286,8 @@ function incompleteDiffFiles(result: ReturnType<typeof buildDiffHunksBlockWithMe
  * do not. In sharded mode each shard's findings are clamped in code to its
  * assigned files so parallel shards cannot duplicate or poach each other.
  */
-async function runShardedReview(params: {
+/** Exported for retry-policy tests; runReviewPipeline is the only production caller. */
+export async function runShardedReview(params: {
   backend: ReviewBackend;
   model: string;
   guidelinesForPrompt: string;
@@ -3263,6 +3301,12 @@ async function runShardedReview(params: {
   disableContext7?: () => Promise<void>;
   evidenceQuotes?: boolean;
   embeddedFirstPrompt?: boolean;
+  /**
+   * TASK-155: re-checks PR state before a retry of a long attempt; a returned
+   * error aborts the run (thrown) instead of retrying against a stale head.
+   * Absent in local mode.
+   */
+  staleCheck?: () => Promise<StaleReviewError | undefined>;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
@@ -3278,6 +3322,15 @@ async function runShardedReview(params: {
     if (context7Disabled) return;
     context7Disabled = true;
     await params.disableContext7?.();
+  };
+  // At most one freshness fetch per run: the first long-failed shard checks;
+  // a stale result aborts everything through the Promise.all rejection anyway.
+  let staleChecked = false;
+  const checkStaleOnce = async (): Promise<StaleReviewError | undefined> => {
+    if (staleChecked || !params.staleCheck) return undefined;
+    staleChecked = true;
+    // A broken freshness fetch must not block the retry (fail open).
+    return params.staleCheck().catch(() => undefined);
   };
 
   const outcomes: ShardOutcome[] = await Promise.all(
@@ -3372,6 +3425,21 @@ async function runShardedReview(params: {
             });
             return { plan, result: cached };
           }
+        }
+        // TASK-150: a deterministic failure re-buys the identical error for up
+        // to another finder window; only plausibly-transient classes retry.
+        const { failureClass, retryable } = classifyMainShardFailure(error);
+        if (!retryable) {
+          log(
+            `${plan.label} failed with a non-retryable ${failureClass} error; skipping the retry.`,
+          );
+          return { plan, error };
+        }
+        // TASK-155: a long attempt leaves room for the PR to merge, close, or
+        // move; re-check before spending another window on a stale head.
+        if (Date.now() - startedAt > STALE_CHECK_MIN_ATTEMPT_MS) {
+          const stale = await checkStaleOnce();
+          if (stale) throw stale;
         }
         const retryTimeoutMs = computeRetryTimeoutMs(params.deadlineAt, Date.now(), timeoutMs);
         if (retryTimeoutMs === 0) {

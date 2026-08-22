@@ -1135,6 +1135,31 @@ async function getLatestJbotDecision(
   return findLatestJbotDecision(reviews, viewerLogin);
 }
 
+export interface PullFreshness {
+  state: 'open' | 'closed';
+  merged: boolean;
+  headSha: string;
+}
+
+/**
+ * Current PR liveness for the pre-retry stale check (TASK-155): merged,
+ * closed, or a moved head makes a main-shard retry pointless — its output
+ * could never be posted against the reviewed state.
+ */
+export async function getPullFreshness(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  pullNumber: number,
+): Promise<PullFreshness> {
+  const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: pullNumber });
+  return {
+    state: data.state === 'closed' ? 'closed' : 'open',
+    merged: Boolean(data.merged),
+    headSha: data.head?.sha ?? '',
+  };
+}
+
 export function isJbotReviewBody(body: string): boolean {
   return body.includes(REVIEW_MARKER) || /^## j-?bot code review\b/i.test(body);
 }

@@ -21,10 +21,14 @@ import {
   settleWithinGrace,
   runPrReview,
   EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
+  runShardedReview,
 } from '../src/shared/runner.ts';
 import { buildDiffHunksBlockWithMetadata } from '../src/shared/diff-context.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import type { Octokit, PrFile } from '../src/shared/github.ts';
+import { planExploration } from '../src/shared/exploration-policy.ts';
+import { StaleReviewError } from '../src/shared/retry-policy.ts';
+import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 const PRIOR_JBOT_REVIEW = [
@@ -419,6 +423,111 @@ describe('formatReviewedWith', () => {
       ),
       'Reviewed with `devin/glm-5.2` via devin; auxiliary sessions used `opencode/deepseek-v4-flash-free` via pi.',
     );
+  });
+});
+
+describe('runShardedReview retry policy (TASK-150/155)', () => {
+  const shardPlan = {
+    label: 'review',
+    context: 'ctx',
+    baseContext: 'base',
+    assignedFiles: ['a.ts'],
+    exploration: planExploration({ tier: 'standard', truncatedFiles: [], omittedFiles: [] }),
+  };
+  const okResult = { summary: 'ok', findings: [] };
+  const backendThrowingOnce = (message: string, calls: string[]) =>
+    ({
+      name: 'fake',
+      runReview: async (_m: string, context: string) => {
+        calls.push(context);
+        if (calls.length === 1) throw new Error(message);
+        return okResult;
+      },
+    }) as unknown as ReviewBackend;
+  const run = (backend: ReviewBackend, staleCheck?: () => Promise<Error | undefined>) =>
+    runShardedReview({
+      backend,
+      model: 'fake/model',
+      guidelinesForPrompt: '',
+      shardPlans: [shardPlan],
+      changedFiles: ['a.ts'],
+      context7Active: false,
+      context7ApiKey: '',
+      log: () => {},
+      ...(staleCheck ? { staleCheck } : {}),
+    });
+
+  it('skips the retry for deterministic failures and keeps it for transient ones', async () => {
+    // A same-prompt retry of an auth/model/context failure re-buys the same
+    // error for up to another finder window — the INC-001 waste class.
+    const authCalls: string[] = [];
+    await assert.rejects(
+      run(backendThrowingOnce('401 Unauthorized', authCalls)),
+      /refusing to post partial review coverage/,
+    );
+    assert.equal(authCalls.length, 1);
+
+    const transientCalls: string[] = [];
+    const result = await run(backendThrowingOnce('The API server encountered an error', transientCalls));
+    assert.equal(transientCalls.length, 2);
+    assert.deepEqual(result, { summary: 'ok', findings: [] });
+  });
+
+  it('checks PR freshness before a retry of a long attempt and aborts stale runs', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'] });
+    const staleCalls: string[] = [];
+    const calls: string[] = [];
+    const backend = {
+      name: 'fake',
+      runReview: async () => {
+        calls.push('attempt');
+        t.mock.timers.tick(61_000);
+        throw new Error('The API server encountered an error');
+      },
+    } as unknown as ReviewBackend;
+
+    await assert.rejects(
+      run(backend, async () => {
+        staleCalls.push('checked');
+        return new StaleReviewError('merged');
+      }),
+      (error: unknown) => error instanceof StaleReviewError && error.reason === 'merged',
+    );
+    assert.deepEqual(staleCalls, ['checked']);
+    assert.equal(calls.length, 1);
+  });
+
+  it('retries when the freshness check reports the PR unchanged, and skips it on short attempts', async (t) => {
+    t.mock.timers.enable({ apis: ['Date'] });
+    const staleCalls: string[] = [];
+    const slowTransient = {
+      name: 'fake',
+      runReview: (() => {
+        let first = true;
+        return async () => {
+          if (first) {
+            first = false;
+            t.mock.timers.tick(61_000);
+            throw new Error('socket hang up');
+          }
+          return okResult;
+        };
+      })(),
+    } as unknown as ReviewBackend;
+    await run(slowTransient, async () => {
+      staleCalls.push('checked');
+      return undefined;
+    });
+    assert.deepEqual(staleCalls, ['checked']);
+
+    // A sub-minute attempt cannot have outlived the PR state; no fetch.
+    const fastCalls: string[] = [];
+    await run(backendThrowingOnce('socket hang up', fastCalls), async () => {
+      staleCalls.push('unexpected');
+      return undefined;
+    });
+    assert.equal(fastCalls.length, 2);
+    assert.deepEqual(staleCalls, ['checked']);
   });
 });
 
