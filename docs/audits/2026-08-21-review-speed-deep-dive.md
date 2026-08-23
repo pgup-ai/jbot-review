@@ -275,3 +275,18 @@ belong at `medium`. x-preview is not viable on this corpus at any effort
 not an effort one. Net: the global `low` knob is safe to stage (no
 significant harm anywhere) but the graduated per-model form (TASK-101) is
 the real destination.
+
+**mimo-v2.5-free (floor verification, 2026-08-23, engine pinned to
+opencode):** treatment `low` clamps to `medium` (verified at the engine
+boundary: identical `thinking=medium` startup lines both arms), so the A/B
+is a null-result test of `EFFORT_RESTRICTED_MODELS` — and it held: paired
+median +22.2% n.s. (p=0.44, CI −19…+48, 11/24 faster), defect runs 11/12
+vs 12/12, clean-case FP rate identical (0.833 both arms), and none of the
+unfloored-`low` collapse signatures (empty/wrong output) appeared. Two
+operational side-findings: pi-route and opencode-route free tiers are
+limited separately (mimo hard-429'd via pi in the same minute it served
+full reviews via the opencode server, same key — pin
+`JBOT_SDK_ENGINE=opencode` if a free-tier pool entry starts 429ing under
+auto routing), and `sdk-engine: auto` gave yesterday's per-model rows
+different engines (mimo→pi, muse-spark→opencode); pin the engine when
+comparing across models.
