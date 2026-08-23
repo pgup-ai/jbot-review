@@ -954,6 +954,8 @@ async function runReviewPipeline(params: {
   pullTitle: string;
   pullBody: string;
   workspace: string;
+  /** Optional telemetry output directory; defaults to `<workspace>/.jbot-review`. */
+  telemetryDirectory?: string;
   model: string;
   apiKey: string;
   /** Base URL for a custom main provider. Native Models.dev providers leave this unset. */
@@ -986,6 +988,7 @@ async function runReviewPipeline(params: {
     pullTitle,
     pullBody,
     workspace,
+    telemetryDirectory,
     model,
     apiKey,
     baseURL,
@@ -1096,7 +1099,7 @@ async function runReviewPipeline(params: {
   const emitTelemetry = () => {
     if (telemetryEmitted) return;
     telemetryEmitted = true;
-    emitReviewTelemetry(telemetry, workspace, log);
+    emitReviewTelemetry(telemetry, workspace, log, telemetryDirectory);
   };
   const finishTelemetry = (state: RunTerminalState) => {
     if (telemetryDone) return;
@@ -3130,6 +3133,7 @@ export function emitReviewTelemetry(
   telemetry: TelemetryRecorder,
   workspace: string,
   log: (msg: string) => void,
+  telemetryDirectory?: string,
 ): void {
   if (!telemetry.enabled) return;
   const rows = telemetry.findingRows();
@@ -3140,7 +3144,7 @@ export function emitReviewTelemetry(
     .join(', ');
   log(`Telemetry: ${rows.length} finding(s) produced${breakdown ? ` (${breakdown})` : ''}.`);
   try {
-    const dir = join(workspace, '.jbot-review');
+    const dir = telemetryDirectory ?? join(workspace, '.jbot-review');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'telemetry.jsonl'), `${telemetry.toJsonl()}\n`);
     log('Telemetry written to .jbot-review/telemetry.jsonl');

@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -67,6 +67,13 @@ import {
   renderReport,
   renderReviewPreview,
 } from './util.ts';
+import {
+  parseLocalArgs,
+  resolveConfiguredBase,
+  resolveLocalPaths,
+  type LocalArgs,
+  type LocalPaths,
+} from './args.ts';
 
 /**
  * Local review driver (`npm run review:local`): runs the real review pipeline
@@ -79,24 +86,40 @@ import {
 const execFileAsync = promisify(execFile);
 const REPORT_DIR = '.jbot-review';
 
+interface LocalInvocation {
+  args: LocalArgs;
+  paths: LocalPaths;
+}
+
 const log = (msg: string) => console.log(`[jbot-review] ${msg}`);
 
-async function git(args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, { maxBuffer: 64 * 1024 * 1024 });
+async function git(args: string[], cwd?: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, {
+    ...(cwd ? { cwd } : {}),
+    maxBuffer: 64 * 1024 * 1024,
+  });
   return stdout;
 }
 
-async function gitOrEmpty(args: string[]): Promise<string> {
+async function gitOrEmpty(args: string[], cwd?: string): Promise<string> {
   try {
-    return await git(args);
+    return await git(args, cwd);
   } catch {
     return '';
   }
 }
 
+async function resolveWorkspace(workspace: string): Promise<string> {
+  const root = (await gitOrEmpty(['rev-parse', '--show-toplevel'], workspace)).trim();
+  if (!root) throw new Error(`Workspace "${workspace}" is not an existing Git worktree.`);
+  return root;
+}
+
 /** No `git fetch` anywhere — a stale base ref widens the diff; fetching is the user's call. */
-async function resolveBase(): Promise<{ baseRef: string; mergeBase: string }> {
-  let baseRef = process.env.JBOT_LOCAL_BASE?.trim() || '';
+async function resolveBase(
+  configuredBase?: string,
+): Promise<{ baseRef: string; mergeBase: string }> {
+  let baseRef = configuredBase || '';
   if (!baseRef) {
     // origin/HEAD tracks the remote default branch when the clone set it up.
     const symbolic = (await gitOrEmpty(['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']))
@@ -256,36 +279,26 @@ const INSTALL_HINTS: Record<string, string> = {
   [DEVIN_CLI_BIN]: 'curl -fsSL https://static.devin.ai/cli/3000.4.25/setup.sh | sh',
 };
 
-/** The runner writes telemetry under the workspace, which is the throwaway
- * checkout when gateway-routed — keep it in the repo before that goes away. */
-function keepTelemetry(from: string): void {
-  const source = join(from, REPORT_DIR, 'telemetry.jsonl');
-  if (!existsSync(source)) return;
-  try {
-    mkdirSync(REPORT_DIR, { recursive: true });
-    copyFileSync(source, join(REPORT_DIR, 'telemetry.jsonl'));
-  } catch (error) {
-    log(`Could not keep telemetry: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-async function main(): Promise<void> {
+async function main(invocation: LocalInvocation): Promise<void> {
   // Adopted from review() once it knows whether the run routes to the gateway;
   // checkoutHead covers the signal path itself from the moment it has a
   // directory, so this only has to handle the ordinary return and throw.
   let isolated: IsolatedCheckout | undefined;
   try {
-    await review((checkout) => {
+    await review(invocation, (checkout) => {
       isolated = checkout;
     });
   } finally {
-    if (isolated) keepTelemetry(isolated.path);
     isolated?.remove();
   }
 }
 
-async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void> {
-  const benchmarkOutput = process.env.JBOT_BENCHMARK_OUTPUT?.trim();
+async function review(
+  invocation: LocalInvocation,
+  adopt: (checkout: IsolatedCheckout) => void,
+): Promise<void> {
+  const { args, paths } = invocation;
+  const { benchmarkOutput } = paths;
   if (benchmarkOutput && process.env.JBOT_BENCHMARK_DRY_RUN !== 'true') {
     throw new Error('JBOT_BENCHMARK_OUTPUT requires JBOT_BENCHMARK_DRY_RUN=true.');
   }
@@ -324,7 +337,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
 
   // Preview never spawns checkouts or sessions: it inspects the worktree diff
   // exactly as the non-gateway path would review it.
-  const preview = process.argv.includes('--preview');
+  const preview = args.preview;
 
   // The companion checks out repo@ref, and both are optional. With neither it
   // works in an empty workspace, so the worktree diff stands — there is nothing
@@ -349,7 +362,9 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   }
   if (isolated) adopt(isolated);
 
-  const { baseRef, mergeBase } = await resolveBase();
+  const { baseRef, mergeBase } = await resolveBase(
+    resolveConfiguredBase(args.base, process.env.JBOT_LOCAL_BASE),
+  );
   const shortBase = mergeBase.slice(0, 12);
   // Deepen target for the companion: a shallow clone that stops short of the
   // base cannot run the merge-base diff this prompt describes.
@@ -542,7 +557,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   log(`Reviewing ${reviewable.length} changed file(s) on ${branch} with ${model}.`);
 
   const opencodePort = await pickOpencodePort();
-  let reviewResult: ReviewResult | undefined;
+  let reviewResult: (ReviewResult & { telemetry?: string }) | undefined;
   await runPrReview({
     // No octokit and no headSha: reads come from localDiff, and the runner's
     // built-in "check status unavailable" fallback covers CI checks.
@@ -552,6 +567,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     pullTitle: subject || `Local review of ${branch}`,
     pullBody: body,
     workspace,
+    telemetryDirectory: paths.artifactRoot,
     model,
     apiKey,
     baseURL,
@@ -600,7 +616,7 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
     writeFileSync(
       benchmarkOutput,
       `${JSON.stringify(
-        benchmarkReviewOutput(reviewResult, join(workspace, REPORT_DIR, 'telemetry.jsonl')),
+        benchmarkReviewOutput(reviewResult, join(paths.artifactRoot, 'telemetry.jsonl')),
       )}\n`,
     );
   }
@@ -608,17 +624,27 @@ async function review(adopt: (checkout: IsolatedCheckout) => void): Promise<void
   const report = renderReport(reviewResult, { branch, baseRef, mergeBase, model });
   console.log(`\n${report}`);
   if (parseEnvBoolean('JBOT_LOCAL_REPORT', false)) {
-    mkdirSync(REPORT_DIR, { recursive: true });
-    const reportPath = join(REPORT_DIR, 'last-run.md');
+    mkdirSync(paths.artifactRoot, { recursive: true });
+    const reportPath = join(paths.artifactRoot, 'last-run.md');
     writeFileSync(reportPath, `${report}\n`);
-    log(`Report written to ${reportPath}`);
+    log(`Report written to ${args.workspace ? reportPath : join(REPORT_DIR, 'last-run.md')}`);
   }
 }
 
-if (loadDotEnv()) log('Loaded .env');
+async function bootstrap(): Promise<void> {
+  const launchDirectory = process.cwd();
+  const args = parseLocalArgs(process.argv.slice(2));
+  if (loadDotEnv(join(launchDirectory, '.env'))) log('Loaded .env');
+  const paths = resolveLocalPaths(args, launchDirectory, process.env.JBOT_BENCHMARK_OUTPUT);
+  const workspace = await resolveWorkspace(paths.workspace);
+  process.chdir(workspace);
+  if (args.workspace) log(`Workspace: ${workspace}`);
+  await main({ args, paths: { ...paths, workspace } });
+}
+
 // Run verdict + observer flush live in runPrReview; here we only surface the
 // error, set the exit code, and guarantee the process actually ends.
-main()
+bootstrap()
   .catch((error: unknown) => {
     console.error(
       `[jbot-review] Local review failed: ${error instanceof Error ? error.message : String(error)}`,

@@ -902,6 +902,23 @@ describe('emitReviewTelemetry sink', () => {
     }
   });
 
+  it('writes to an explicit telemetry directory instead of the workspace', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-tel-explicit-'));
+    try {
+      const rec = createTelemetryRecorder(true);
+      rec.produced('review', [finding]);
+      const telemetryDirectory = join(dir, 'launcher-artifacts');
+      emitReviewTelemetry(rec, join(dir, 'target-workspace'), () => {}, telemetryDirectory);
+
+      assert.match(readFileSync(join(telemetryDirectory, 'telemetry.jsonl'), 'utf8'), /"kind"/);
+      assert.throws(() =>
+        readFileSync(join(dir, 'target-workspace', '.jbot-review', 'telemetry.jsonl')),
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('fails open (logs, does not throw) when the file cannot be written', () => {
     const dir = mkdtempSync(join(tmpdir(), 'jbot-tel-bad-'));
     try {
