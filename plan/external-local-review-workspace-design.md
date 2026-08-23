@@ -57,28 +57,37 @@ npm run review:local
 
 ## Startup and path ownership
 
-The local entry point captures the launch directory before changing the process
-working directory, then performs startup in this order:
+The local entry point captures one absolute `launchRoot` before changing the
+process working directory, then performs startup in this order:
 
 1. Parse arguments without side effects.
-2. Load `.env` from the launch directory, with the real process environment
+2. Load `.env` from `launchRoot`, with the real process environment
    retaining precedence.
 3. Resolve and validate the workspace, then change to its Git top level.
 4. Resolve the explicit argument or environment base ref.
 5. Run the existing local-review pipeline from the target worktree.
 
-When `--workspace` is present, the target repository's `.env` is never loaded.
-This prevents an arbitrary checkout from changing the model, provider,
+Bootstrap loads exactly one `.env`, from `launchRoot`, before any `chdir`. It
+never additionally loads an `.env` from a distinct target workspace. If
+`launchRoot` and the target Git root are the same (including
+`--workspace .`), this preserves today's single repo-root `.env` behavior.
+This prevents a distinct arbitrary checkout from changing the model, provider,
 gateway, output, or credential configuration. Repository-scoped guideline
 discovery (`AGENTS.md` and the existing supported files) still runs from the
 target root because those files are intentional review context.
 
-Paths owned by the launcher stay anchored to the launch directory:
+Every launcher-owned configuration and output path derives from the captured
+`launchRoot`, never from the post-`chdir` process cwd. The built-in
+`artifactRoot` is the absolute `<launchRoot>/.jbot-review`; a relative
+`JBOT_BENCHMARK_OUTPUT` resolves against `launchRoot`, while an absolute value
+stays absolute. Consequently:
 
-- `.env`
-- `.jbot-review/telemetry.jsonl`
-- `.jbot-review/last-run.md` when `JBOT_LOCAL_REPORT=true`
-- relative `JBOT_BENCHMARK_OUTPUT` paths
+- configuration loads from `<launchRoot>/.env`;
+- telemetry writes to `<artifactRoot>/telemetry.jsonl`;
+- the optional local report writes to `<artifactRoot>/last-run.md`;
+- gateway-isolation telemetry is preserved to that same `artifactRoot` rather
+  than the target or temporary worktree;
+- relative benchmark output is resolved once from `launchRoot` before `chdir`.
 
 Git operations, source discovery, guideline discovery, blast-radius lookup,
 and model-session workspace access use the target Git root. This separation
@@ -95,13 +104,12 @@ After bootstrap, the current pipeline remains authoritative:
 3. Discover target-repository guidelines and supplementary context under their
    existing budgets.
 4. Run `runPrReview` in enforced dry-run mode against the target workspace.
-5. Print the report and write optional artifacts under the launch directory.
+5. Print the existing report and write optional artifacts through the resolved
+   launcher-owned paths.
 
-The report records the target remote owner/repository when parseable, branch,
-base ref, merge-base SHA, and exact `HEAD` SHA. The SHA is required for research
-reproducibility because a branch name can advance between runs. A dirty-worktree
-indicator makes clear when the reviewed right side is not reproducible from
-`HEAD` alone.
+Report content stays unchanged in this scope. Research callers that need an
+immutable run manifest should record the checked-out base and head SHAs before
+invocation rather than expanding this local-input adapter.
 
 Gateway-routed review keeps its existing committed-HEAD contract and exclusion
 of uncommitted changes. `--workspace` does not infer or populate
@@ -115,10 +123,10 @@ remote.
 - `src/local/index.ts` owns bootstrap, worktree validation, `chdir`, and wiring
   the resolved base and artifact directory into the existing pipeline.
 - The telemetry sink accepts an optional explicit artifact directory; all
-  existing callers retain the workspace-local default. This is the only shared
-  runner surface needed to keep external targets clean.
-- `src/local/util.ts` continues to own dotenv and report formatting. Report
-  metadata gains `headSha` and dirty-worktree state.
+  existing callers retain the workspace-local default. The local driver passes
+  `artifactRoot` through both ordinary and gateway-isolated review paths.
+- `src/local/util.ts` continues to own dotenv and report formatting; report
+  content does not change.
 
 No new dependency is required.
 
@@ -130,14 +138,14 @@ Pure unit tests cover:
 - CLI-over-environment base precedence;
 - relative workspace resolution and Git-root normalization;
 - launch-directory artifact paths;
-- report rendering of the exact head and dirty state.
+- relative and absolute benchmark-output resolution.
 
 A temporary-repository integration test invokes `--preview` against a target
 worktree different from the launch directory and proves:
 
 - the diff and guideline discovery come from the target;
 - the launch directory's `.env` is used and a target `.env` is ignored;
-- no output file is written into the target;
+- preview leaves the target's pre-existing Git status unchanged;
 - an invalid base fails before credentials or sessions are required;
 - the original no-argument local workflow still selects the launch checkout.
 
@@ -148,7 +156,9 @@ external-worktree `--preview` smoke run.
 ## Non-goals
 
 - Accepting a GitHub PR URL or number.
-- Cloning, fetching, switching, creating, or deleting worktrees.
+- Preparing, switching, creating, or deleting the caller's target checkout or
+  worktrees. The existing internal gateway-isolation worktree remains required
+  and unchanged.
 - Reading PR title/body, comments, checks, prior review threads, or live state.
 - Posting findings to GitHub.
 - Making private-repository authentication decisions.
