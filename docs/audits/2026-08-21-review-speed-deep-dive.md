@@ -251,3 +251,27 @@ session scratchpad (`bench/`); phase rows from `.jbot-review/telemetry.jsonl`
 per fixture workspace; manifest `bench/live-manifest.json` (declared
 treatment variables: `JBOT_MODEL_OPTIONS`, `reasoningEffort`). Subagent
 audit transcripts retained in the session task files.
+
+## Post-merge replication — med vs low across three models (2026-08-23)
+
+Same harness and smoke corpus (12 cases × 2 reps × 2 arms per model), run
+on `main` after PR #169 merged; control = default options, treatment =
+`JBOT_MODEL_OPTIONS={"reasoningEffort":"low"}` (the shipped one-knob path).
+
+| Model                                       |            Paired median Δ |     p |         Reasoning tokens |     Defect runs | Clean runs w/ findings |          Failures |
+| ------------------------------------------- | -------------------------: | ----: | -----------------------: | --------------: | ---------------------: | ----------------: |
+| muse-spark-1.2-contributor-free             | **−26.1%** (CI −34.9…−9.0) | 0.023 |     53.2K → 40.6K (−24%) |      12/12 both |        4/12 → **8/12** |                 0 |
+| hy3-free                                    |               +5.3% (n.s.) |  0.10 | 34.3K → **46.8K (+36%)** |   10/12 → 12/12 |           8/12 → 10/12 |                 0 |
+| x-preview-f-free (control clamps to `high`) | −29.4% (10 pairs, MDE 50%) |  0.09 |              1.9K → 0.3K | **2/12 → 1/12** |                    low | 9 + 7 runner-exit |
+
+Read: the reasoning-effort win is **per-model, not universal**. muse-spark
+replicates the −26–30% median with recall intact but shows a clean-case
+false-positive doubling and 4 extra recovery sessions at `low` — a
+precision question for the TASK-100/105 adjudication, and the case for the
+slim-verifier flag as the compensating lever. hy3 gains nothing and
+reasons **more** at `low` (the compensation failure mode); its floor may
+belong at `medium`. x-preview is not viable on this corpus at any effort
+(≈33% runner-exit, 1–2/12 defect detection) — a pool-membership question,
+not an effort one. Net: the global `low` knob is safe to stage (no
+significant harm anywhere) but the graduated per-model form (TASK-101) is
+the real destination.
