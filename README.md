@@ -749,19 +749,17 @@ API call, no `git fetch`:
 npm run review:local
 ```
 
-To review a branch or PR head already checked out in another local repository:
+To review another repository that is already checked out locally:
 
 ```bash
 npm run review:local -- --workspace /path/to/repo --base origin/main
 ```
 
-The caller owns cloning, fetching, and checking out the desired branch or PR
-head. `--workspace` accepts the worktree root or a directory inside it;
-`--base` overrides `JBOT_LOCAL_BASE`. The command never fetches, switches the
-target checkout, reads live PR metadata, or posts to GitHub. Add `--preview` to
-inspect the external review plan without provider credentials.
+`--workspace` accepts the worktree root or a directory inside it. Prepare the
+checkout yourself; the command does not clone, fetch, switch it, or use GitHub.
+Add `--preview` to inspect the review plan without provider credentials.
 
-- **Diff scope:** merge-base of the selected checkout's branch and `origin/HEAD`
+- **Diff scope:** merge-base of the selected checkout's `HEAD` and `origin/HEAD`
   (falls back to `origin/main`; override with `--base <ref>` or
   `JBOT_LOCAL_BASE=<ref>`) → the **working
   tree** — uncommitted changes are reviewed; untracked files are listed but
@@ -775,15 +773,13 @@ inspect the external review plan without provider credentials.
   plus its key env
   var (same keys as [Provider configuration](#provider-configuration-in-repo);
   full list in `src/shared/config.ts`), plus the namespaced base URL for
-  `openai-compatible`. A `.env` in the directory where the command is launched
-  is loaded before entering a distinct external workspace; the target's `.env`
-  is not loaded. No GitHub credential is read, and nothing is posted anywhere —
-  dry-run is enforced in code.
+  `openai-compatible`. The command loads `.env` from its launch directory, not
+  from a distinct target workspace. No GitHub credential is read, and nothing
+  is posted anywhere — dry-run is enforced in code.
 - **Output:** findings print to the terminal; set `JBOT_LOCAL_REPORT=true` to
-  also write `.jbot-review/last-run.md` under the launch directory (gitignored
-  in this repository). Telemetry and relative benchmark output are likewise
-  launcher-owned, so reviewing an external checkout does not add jbot artifacts
-  to it.
+  also write `.jbot-review/last-run.md` under the launch directory. Telemetry
+  and relative benchmark output use that directory too, keeping the target
+  checkout clean.
 - **Model pool:** `MODEL` accepts the same comma-separated pool as the action,
   seeded on HEAD instead of a PR head sha — so re-running against uncommitted
   edits keeps the same reviewer and a before/after comparison stays comparable.

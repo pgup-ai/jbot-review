@@ -67,13 +67,7 @@ import {
   renderReport,
   renderReviewPreview,
 } from './util.ts';
-import {
-  parseLocalArgs,
-  resolveConfiguredBase,
-  resolveLocalPaths,
-  type LocalArgs,
-  type LocalPaths,
-} from './args.ts';
+import { parseLocalArgs, resolveLocalPaths, type LocalArgs, type LocalPaths } from './args.ts';
 
 /**
  * Local review driver (`npm run review:local`): runs the real review pipeline
@@ -363,7 +357,7 @@ async function review(
   if (isolated) adopt(isolated);
 
   const { baseRef, mergeBase } = await resolveBase(
-    resolveConfiguredBase(args.base, process.env.JBOT_LOCAL_BASE),
+    args.base ?? process.env.JBOT_LOCAL_BASE?.trim(),
   );
   const shortBase = mergeBase.slice(0, 12);
   // Deepen target for the companion: a shallow clone that stops short of the

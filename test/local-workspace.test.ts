@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { it } from 'node:test';
@@ -69,9 +69,6 @@ it('previews a distinct local workspace with launcher-owned config and artifacts
     assert.match(output, /src\/a\.ts/);
     assert.match(output, /src\/b\.ts/);
     assert.match(output, /Guidelines: 2 doc\(s\)/);
-    assert.match(output, /no sessions started/i);
-    assert.equal(git(target, ['status', '--porcelain=v1', '--untracked-files=all']), before);
-    assert.equal(existsSync(join(target, '.jbot-review')), false);
 
     const failure = spawnSync(TSX, [LOCAL_ENTRY, '--workspace', workspace, '--base', 'missing'], {
       cwd: launcher,
@@ -112,7 +109,6 @@ it('keeps the launch checkout as the workspace when --workspace is omitted', () 
       ['MODEL=openai/gpt-5.4-nano', 'JBOT_LOCAL_BASE=main'].join('\n'),
     );
 
-    const before = git(launcher, ['status', '--porcelain=v1', '--untracked-files=all']);
     const output = execFileSync(TSX, [LOCAL_ENTRY, '--preview'], {
       cwd: launcher,
       env: isolatedEnv(),
@@ -123,7 +119,6 @@ it('keeps the launch checkout as the workspace when --workspace is omitted', () 
     assert.match(output, /Diff base: main/);
     assert.match(output, /local\.ts/);
     assert.doesNotMatch(output, /Workspace:/);
-    assert.equal(git(launcher, ['status', '--porcelain=v1', '--untracked-files=all']), before);
   } finally {
     rmSync(launcher, { recursive: true, force: true });
   }

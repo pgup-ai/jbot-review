@@ -41,13 +41,6 @@ export function parseLocalArgs(argv: string[]): LocalArgs {
   return parsed;
 }
 
-export function resolveConfiguredBase(
-  explicitBase: string | undefined,
-  environmentBase: string | undefined,
-): string | undefined {
-  return (explicitBase ?? environmentBase?.trim()) || undefined;
-}
-
 export function resolveLocalPaths(
   args: LocalArgs,
   launchDirectory: string,

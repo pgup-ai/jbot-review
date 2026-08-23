@@ -954,7 +954,6 @@ async function runReviewPipeline(params: {
   pullTitle: string;
   pullBody: string;
   workspace: string;
-  /** Optional telemetry output directory; defaults to `<workspace>/.jbot-review`. */
   telemetryDirectory?: string;
   model: string;
   apiKey: string;

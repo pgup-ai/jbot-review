@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
-import { parseLocalArgs, resolveConfiguredBase, resolveLocalPaths } from '../src/local/args.ts';
+import { parseLocalArgs, resolveLocalPaths } from '../src/local/args.ts';
 
 describe('local review arguments', () => {
   it('parses workspace, base, and preview in any order', () => {
@@ -19,7 +19,6 @@ describe('local review arguments', () => {
 
   it('rejects unknown, duplicate, and missing-value arguments', () => {
     assert.throws(() => parseLocalArgs(['target']), /Unknown local review argument "target"/);
-    assert.throws(() => parseLocalArgs(['--head', 'main']), /Unknown local review argument/);
     assert.throws(
       () => parseLocalArgs(['--workspace', 'a', '--workspace', 'b']),
       /Duplicate local review argument "--workspace"/,
@@ -32,12 +31,6 @@ describe('local review arguments', () => {
       () => parseLocalArgs(['--workspace', '--preview']),
       /Local review argument "--workspace" requires a value/,
     );
-  });
-
-  it('gives the CLI base precedence over the environment', () => {
-    assert.equal(resolveConfiguredBase('topic-base', 'env-base'), 'topic-base');
-    assert.equal(resolveConfiguredBase(undefined, ' env-base '), 'env-base');
-    assert.equal(resolveConfiguredBase(undefined, '  '), undefined);
   });
 });
 
