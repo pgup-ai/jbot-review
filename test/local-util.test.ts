@@ -13,17 +13,30 @@ import {
 } from '../src/local/util.ts';
 
 describe('benchmarkReviewOutput', () => {
-  it('includes only telemetry from the supplied workspace when present', () => {
+  it('uses persisted telemetry only when it belongs to the current run', () => {
     const dir = mkdtempSync(join(tmpdir(), 'jbot-benchmark-output-'));
-    const result = { summary: '', findings: [], addressedPriorComments: [] };
+    const current = '{"kind":"run","runId":"current"}\n';
+    const result = {
+      summary: '',
+      findings: [],
+      addressedPriorComments: [],
+      telemetry: current,
+    };
     try {
       const telemetry = join(dir, 'telemetry.jsonl');
       assert.deepEqual(benchmarkReviewOutput(result, telemetry), result);
-      writeFileSync(telemetry, '{"kind":"session"}\n');
+      const persisted = `${current}{"kind":"session"}\n`;
+      writeFileSync(telemetry, persisted);
       assert.deepEqual(benchmarkReviewOutput(result, telemetry), {
         ...result,
-        telemetry: '{"kind":"session"}\n',
+        telemetry: persisted,
       });
+      writeFileSync(telemetry, '{"kind":"run","runId":"stale"}\n');
+      assert.deepEqual(benchmarkReviewOutput(result, telemetry), result);
+      assert.deepEqual(
+        benchmarkReviewOutput({ summary: '', findings: [], addressedPriorComments: [] }, telemetry),
+        { summary: '', findings: [], addressedPriorComments: [] },
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

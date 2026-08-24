@@ -897,6 +897,16 @@ describe('emitReviewTelemetry sink', () => {
       assert.ok(logs.some((l) => /Telemetry: 1 finding\(s\).*posted-inline/.test(l)));
       const written = readFileSync(join(dir, '.jbot-review', 'telemetry.jsonl'), 'utf8');
       assert.match(written, /"disposition":"posted-inline"/);
+      const telemetryDirectory = join(dir, 'launcher-artifacts');
+      emitReviewTelemetry(rec, join(dir, 'target-workspace'), () => {}, telemetryDirectory);
+
+      assert.match(
+        readFileSync(join(telemetryDirectory, 'telemetry.jsonl'), 'utf8'),
+        /"disposition":"posted-inline"/,
+      );
+      assert.throws(() =>
+        readFileSync(join(dir, 'target-workspace', '.jbot-review', 'telemetry.jsonl')),
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

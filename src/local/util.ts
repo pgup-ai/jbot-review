@@ -52,13 +52,34 @@ export function parseOwnerRepo(remoteUrl: string): { owner: string; repo: string
 }
 
 export function benchmarkReviewOutput(
-  result: ReviewResult,
+  result: ReviewResult & { telemetry?: string },
   telemetryPath: string,
 ): ReviewResult & { telemetry?: string } {
+  const expectedRunId = telemetryRunId(result.telemetry);
+  let persisted: string | undefined;
+  if (expectedRunId) {
+    try {
+      const candidate = readFileSync(telemetryPath, 'utf8');
+      if (telemetryRunId(candidate) === expectedRunId) persisted = candidate;
+    } catch {
+      // Keep the current in-memory telemetry when the optional sink is unreadable.
+    }
+  }
   return {
     ...result,
-    ...(existsSync(telemetryPath) ? { telemetry: readFileSync(telemetryPath, 'utf8') } : {}),
+    ...(persisted ? { telemetry: persisted } : {}),
   };
+}
+
+function telemetryRunId(jsonl: string | undefined): string | undefined {
+  const header = jsonl?.split('\n', 1)[0];
+  if (!header) return undefined;
+  try {
+    const row = JSON.parse(header) as { kind?: unknown; runId?: unknown };
+    return row.kind === 'run' && typeof row.runId === 'string' ? row.runId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function renderReport(

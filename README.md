@@ -749,8 +749,19 @@ API call, no `git fetch`:
 npm run review:local
 ```
 
-- **Diff scope:** merge-base of the branch and `origin/HEAD` (falls back to
-  `origin/main`; override with `JBOT_LOCAL_BASE=<ref>`) → the **working
+To review another repository that is already checked out locally:
+
+```bash
+npm run review:local -- --workspace /path/to/repo --base origin/main
+```
+
+`--workspace` accepts the worktree root or a directory inside it. Prepare the
+checkout yourself; the command does not clone, fetch, switch it, or use GitHub.
+Add `--preview` to inspect the review plan without provider credentials.
+
+- **Diff scope:** merge-base of the selected checkout's `HEAD` and `origin/HEAD`
+  (falls back to `origin/main`; override with `--base <ref>` or
+  `JBOT_LOCAL_BASE=<ref>`) → the **working
   tree** — uncommitted changes are reviewed; untracked files are listed but
   not reviewed. On a clean tree this equals `base...HEAD`; with no changes it
   prints "nothing to review" and exits 0. When the run actually routes to the
@@ -762,11 +773,13 @@ npm run review:local
   plus its key env
   var (same keys as [Provider configuration](#provider-configuration-in-repo);
   full list in `src/shared/config.ts`), plus the namespaced base URL for
-  `openai-compatible`. A `.env` in the repo root is loaded by this command only.
-  No GitHub credential is read, and nothing is posted anywhere — dry-run is
-  enforced in code.
+  `openai-compatible`. The command loads `.env` from its launch directory, not
+  from a distinct target workspace. No GitHub credential is read, and nothing
+  is posted anywhere — dry-run is enforced in code.
 - **Output:** findings print to the terminal; set `JBOT_LOCAL_REPORT=true` to
-  also write `.jbot-review/last-run.md` (gitignored).
+  also write `.jbot-review/last-run.md` under the launch directory. Telemetry
+  and relative benchmark output use that directory too, keeping the target
+  checkout clean.
 - **Model pool:** `MODEL` accepts the same comma-separated pool as the action,
   seeded on HEAD instead of a PR head sha — so re-running against uncommitted
   edits keeps the same reviewer and a before/after comparison stays comparable.
