@@ -94,6 +94,42 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
     `scripts/verify-journal.ts` on copied journals with companion-sourced
     keys; durable key identity is M3.
 
+## Review-quality gate
+
+Benchmark policy for changes that alter model inputs or finding disposition
+(corpus contract: `plan/review-quality-corpus.md`):
+
+- **Trigger paths:** `src/shared/prompt.ts`, `src/shared/filter.ts`,
+  `src/shared/diff-context.ts`, `src/shared/review-context.ts`,
+  `src/shared/fanout.ts`, `src/shared/context-trim.ts`,
+  `src/shared/review-playbooks.ts`, `src/shared/exploration-policy.ts`,
+  session driving in `src/shared/opencode.ts` / `src/shared/acp.ts`, and
+  model/provider defaults (`src/shared/config.ts`, `src/shared/model.ts`).
+  When a change's effect on model inputs is unclear, the gate applies.
+- Touching a trigger path → before merge: run the **core** subset, 3
+  repetitions, git `fixtureMode`; blind-adjudicate the retained findings per
+  `plan/review-quality-corpus.md`; rescore without re-running:
+  `npm run benchmark:review -- --manifest <experiment.json> --adjudicated-cases <adjudicated.jsonl> --baseline-cases <run>/cases.jsonl --output <rescored> --subset core`
+  (the rescore inherits `repetitions` from the manifest). A live run scores
+  `adjudication-required`; only the rescored row can pass the gate. Record
+  it:
+  `npm run benchmark:ledger -- --results <rescored> [--audit-doc docs/audits/<doc>.md]`.
+  The experiment manifest must set `treatmentCommit` to the revision under
+  test (the derivation refuses to record a run without it, and the append
+  must run from that revision), and `--audit-doc` must be supplied at append
+  time — rows are append-only and dedupe ignores it.
+- Default-policy flips (changing what ships enabled) → **full** subset, per
+  the corpus contract's quality and merge gates.
+- Everything else → no benchmark run required. CI keeps only the
+  deterministic replay-mode contract check.
+
+Results accumulate in `docs/audits/benchmark-ledger.jsonl` — committed,
+append-only, one JSON row per run, created on first append. Rows are
+sanitized by construction (model identity, outcome metrics, and token counts
+only — no endpoints, credentials, sampling config, or spend); the full
+comparability record stays in the local results directory, tied back via
+`resultsHash`.
+
 ## Conventions
 
 - TypeScript ESM with `.ts` import specifiers (run via tsx); no new
