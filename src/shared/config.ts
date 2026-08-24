@@ -193,15 +193,25 @@ const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
 } satisfies Record<string, ModelConfig>;
 
 /**
- * Models whose declared efforts are the only ones that work. x-preview
- * hard-400s on anything else ("[1210] This model always engages in thinking
- * and cannot be disabled; please use low, high, or max"), which no retry
- * recovers. mimo accepts `low` but silently collapses there (probed
+ * Models whose declared efforts are the only ones that work. x-preview and
+ * ox-alpha hard-400 on anything else ("[1210] This model always engages in
+ * thinking and cannot be disabled; please use low, high, or max"), which no
+ * retry recovers. mimo accepts `low` but silently collapses there (probed
  * 2026-08-22: empty or wrong output; correct at medium/high).
  */
 const EFFORT_RESTRICTED_MODELS = {
   'x-preview-f-free': { reasoningEfforts: ['low', 'high', 'max'] },
+  'ox-alpha-free': { reasoningEfforts: ['low', 'high', 'max'] },
   'mimo-v2.5-free': { reasoningEfforts: ['medium', 'high'] },
+} satisfies Record<string, ModelConfig>;
+
+/**
+ * One catalog behind two routes (`-free` suffixes on `opencode`, bare ids on
+ * `opencode-go`), so a per-model quirk found on either applies to both.
+ */
+const OPENCODE_ZEN_MODELS = {
+  ...GLM_PROMPT_CACHE_UNSUPPORTED_MODELS,
+  ...EFFORT_RESTRICTED_MODELS,
 } satisfies Record<string, ModelConfig>;
 
 // See https://models.dev/ for opencode-backed model catalogs. CLI backends
@@ -211,15 +221,13 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'opencode/deepseek-v4-flash-free',
     keyEnv: 'OPENCODE_API_KEY',
     keyInput: 'opencode-api-key',
-    models: EFFORT_RESTRICTED_MODELS,
+    models: OPENCODE_ZEN_MODELS,
   },
   'opencode-go': {
     defaultModel: 'opencode-go/deepseek-v4-flash',
     keyEnv: 'OPENCODE_API_KEY',
     keyInput: 'opencode-api-key',
-    // Models.dev marks these as family=glm; GLM rejects promptCacheKey.
-    // Omitted models default enabled.
-    models: GLM_PROMPT_CACHE_UNSUPPORTED_MODELS,
+    models: OPENCODE_ZEN_MODELS,
   },
   deepseek: {
     defaultModel: 'deepseek/deepseek-v4-flash',

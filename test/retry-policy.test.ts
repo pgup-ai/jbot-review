@@ -21,6 +21,12 @@ describe('classifyMainShardFailure', () => {
       failureClass: 'model-not-found',
       retryable: false,
     });
+    assert.deepEqual(
+      classify(
+        '[1210] This model always engages in thinking and cannot be disabled; please use low, high, or max.',
+      ),
+      { failureClass: 'unsupported-effort', retryable: false },
+    );
     assert.deepEqual(classify('maximum context length exceeded'), {
       failureClass: 'context-length',
       retryable: false,

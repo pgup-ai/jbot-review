@@ -11,6 +11,7 @@ export type MainShardFailureClass =
   | 'auth'
   | 'model-not-found'
   | 'context-length'
+  | 'unsupported-effort'
   | 'rate-limit'
   | 'timeout'
   | 'parse'
@@ -21,6 +22,7 @@ const NON_RETRYABLE: ReadonlySet<MainShardFailureClass> = new Set([
   'auth',
   'model-not-found',
   'context-length',
+  'unsupported-effort',
 ]);
 
 export function classifyMainShardFailure(error: unknown): {
@@ -41,20 +43,26 @@ export function classifyMainShardFailure(error: unknown): {
             /context.{0,12}length|maximum context|\b413\b|(context|prompt|input|message|tokens?).{0,24}too (large|long)|too (large|long).{0,32}(context|window|tokens?|limit)|exceeds.{0,24}(context|token)/i,
           )
         ? 'context-length'
-        : matches(/\b429\b|rate.?limit|quota/i)
-          ? 'rate-limit'
-          : matches(/timed?\s*out|timeout|deadline|did not finish within|took too long/i)
-            ? 'timeout'
-            : matches(/parse|json|schema|repair/i)
-              ? 'parse'
-              : matches(
-                    // No bare `api` token: it labeled any stray mention as
-                    // provider-transient when `unknown` (equally retryable)
-                    // is the honest class for unrecognized shapes.
-                    /\b5\d\d\b|overloaded|upstream|stream|socket|econn|enotfound|fetch failed|network|unavailable/i,
-                  )
-                ? 'provider-transient'
-                : 'unknown';
+        : matches(
+              // The provider names its own legal values ("[1210] ... please use
+              // low, high, or max") and refuses identically on every retry.
+              /\b(?:reasoning|thinking)[\s\S]{0,80}?\b(?:cannot be disabled|please use|does not support)\b/i,
+            )
+          ? 'unsupported-effort'
+          : matches(/\b429\b|rate.?limit|quota/i)
+            ? 'rate-limit'
+            : matches(/timed?\s*out|timeout|deadline|did not finish within|took too long/i)
+              ? 'timeout'
+              : matches(/parse|json|schema|repair/i)
+                ? 'parse'
+                : matches(
+                      // No bare `api` token: it labeled any stray mention as
+                      // provider-transient when `unknown` (equally retryable)
+                      // is the honest class for unrecognized shapes.
+                      /\b5\d\d\b|overloaded|upstream|stream|socket|econn|enotfound|fetch failed|network|unavailable/i,
+                    )
+                  ? 'provider-transient'
+                  : 'unknown';
   return { failureClass, retryable: !NON_RETRYABLE.has(failureClass) };
 }
 
