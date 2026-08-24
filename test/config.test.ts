@@ -55,8 +55,8 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
   it('disables prompt caching for mimo (unverified endpoint), keeps it for other providers', () => {
     assert.equal(modelSupportsPromptCache('xiaomi-token-plan-sgp', 'mimo-v2.5-pro'), false);
     assert.equal(modelSupportsPromptCache('openai', 'gpt-5.4-nano'), true);
-    // GLM rejects promptCacheKey on either Zen route, not just opencode-go.
-    assert.equal(modelSupportsPromptCache('opencode', 'glm-5.2'), false);
+    // Either Zen route, and `-free` normalizes to the bare key.
+    assert.equal(modelSupportsPromptCache('opencode', 'glm-5-free'), false);
   });
 
   it('clamps a reasoning effort the model would reject to the nearest tier', () => {
@@ -67,7 +67,7 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
       { reasoningEffort: 'high' },
     );
     assert.deepEqual(
-      supportedModelOptions('opencode-go', 'x-preview-f-free', { reasoningEffort: 'medium' }),
+      supportedModelOptions('opencode-go', 'x-preview-f', { reasoningEffort: 'medium' }),
       { reasoningEffort: 'high' },
     );
     assert.deepEqual(

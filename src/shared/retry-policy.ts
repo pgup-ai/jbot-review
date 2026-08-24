@@ -44,9 +44,10 @@ export function classifyMainShardFailure(error: unknown): {
           )
         ? 'context-length'
         : matches(
-              // The provider names its own legal values ("[1210] ... please use
-              // low, high, or max") and refuses identically on every retry.
-              /\b(?:reasoning|thinking)[\s\S]{0,80}?\b(?:cannot be disabled|please use|does not support)\b/i,
+              // Anchored on the refusal and on the tier NAMES the provider
+              // enumerates ("[1210] ... please use low, high, or max"): a generic
+              // verb like "please use" would swallow timeouts, which keep retrying.
+              /\b(?:reasoning|thinking)\b[\s\S]{0,80}?(?:cannot be disabled|\b(?:minimal|low|medium|high|xhigh|max)\b[\s\S]{0,16}?\b(?:minimal|low|medium|high|xhigh|max)\b)/i,
             )
           ? 'unsupported-effort'
           : matches(/\b429\b|rate.?limit|quota/i)
