@@ -287,6 +287,34 @@ describe('review-benchmark', () => {
         /expected 24/,
       );
       assert.equal(existsSync(join(root, 'incomplete-output')), false);
+
+      const orphanCases = join(root, 'orphan-cases.jsonl');
+      writeFileSync(orphanCases, readFileSync(join(output, 'cases.jsonl'), 'utf8'));
+      const rescore = (baselineCases: string, outputName: string) =>
+        execFileSync(
+          TSX,
+          [
+            join(ROOT, 'scripts/review-benchmark.ts'),
+            '--manifest',
+            MANIFEST,
+            '--output',
+            join(root, outputName),
+            '--subset',
+            'smoke',
+            '--repetitions',
+            '1',
+            '--adjudicated-cases',
+            orphanCases,
+            '--baseline-cases',
+            baselineCases,
+          ],
+          { encoding: 'utf8', stdio: 'pipe' },
+        );
+      assert.throws(() => rescore(orphanCases, 'orphan-output'), /No summary.json beside/);
+      // Rows swapped in beside another run's summary must not inherit its provenance.
+      const swapped = join(rescoredOutput, 'swapped-cases.jsonl');
+      writeFileSync(swapped, `${readFileSync(orphanCases, 'utf8').trimEnd()}\n\n`);
+      assert.throws(() => rescore(swapped, 'swapped-output'), /from different runs/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

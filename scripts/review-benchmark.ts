@@ -38,6 +38,7 @@ import {
 } from '../src/shared/benchmark-paired.ts';
 import {
   validateAdjudicatedBenchmarkRows,
+  verifyBenchmarkRescoreProvenance,
   type BenchmarkCaseRow,
 } from '../src/shared/benchmark-rescore.ts';
 import {
@@ -79,6 +80,12 @@ function usage(): never {
     'usage: review-benchmark.ts --manifest <manifest.json> --output <directory> [--repetitions <n>] [--subset <smoke|core|full>] [--adjudicated-cases <cases.jsonl> --baseline-cases <cases.jsonl>]',
   );
   process.exit(2);
+}
+
+/** Binds a run's rows to its summary: a rescore cannot pair one run's rows
+ * with another run's provenance. */
+function hashCasesFile(path: string): string {
+  return `sha256:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
 }
 
 function readManifest(path: string): BenchmarkManifest {
@@ -494,6 +501,19 @@ async function main(): Promise<void> {
   if (Boolean(adjudicatedCasesArg) !== Boolean(baselineCasesArg)) {
     throw new Error('--adjudicated-cases and --baseline-cases must be provided together.');
   }
+  if (baselineCasesArg) {
+    const baselineSummaryPath = join(dirname(resolve(baselineCasesArg)), 'summary.json');
+    if (!existsSync(baselineSummaryPath)) {
+      throw new Error(
+        `No summary.json beside ${baselineCasesArg}; --baseline-cases must point into the original run's output directory.`,
+      );
+    }
+    verifyBenchmarkRescoreProvenance(
+      JSON.parse(readFileSync(baselineSummaryPath, 'utf8')),
+      manifest,
+      hashCasesFile(baselineCasesArg),
+    );
+  }
   const rows: BenchmarkCaseRow[] =
     adjudicatedCasesArg && baselineCasesArg
       ? validateAdjudicatedBenchmarkRows(
@@ -559,6 +579,8 @@ async function main(): Promise<void> {
     subset,
     subsetCases: benchmarkCases.length,
     repetitions,
+    fixtureMode: manifest.runner.fixtureMode,
+    casesHash: hashCasesFile(casesPath),
     declaredTreatmentVariables: manifest.declaredTreatmentVariables,
     control: {
       name: manifest.control.name,

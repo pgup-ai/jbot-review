@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 
-import type { BenchmarkArm, BenchmarkCase } from '../src/shared/benchmark-manifest.ts';
+import type {
+  BenchmarkArm,
+  BenchmarkCase,
+  BenchmarkManifest,
+} from '../src/shared/benchmark-manifest.ts';
 import {
   validateAdjudicatedBenchmarkRows,
+  verifyBenchmarkRescoreProvenance,
   type BenchmarkCaseRow,
 } from '../src/shared/benchmark-rescore.ts';
 
@@ -209,4 +214,40 @@ it('validates every process failure execution state', () => {
       /Contradictory execution data/,
     );
   }
+});
+
+it('binds rescored provenance to the original run summary', () => {
+  const manifest = {
+    corpusHash: 'sha256:corpus',
+    treatmentCommit: 'headsha',
+    runner: { fixtureMode: 'git' },
+    control: { name: 'control', configuration: { model: 'model-a' } },
+    treatment: { name: 'treatment', configuration: { model: 'model-b' } },
+  } as unknown as BenchmarkManifest;
+  const summary = () => ({
+    corpusHash: 'sha256:corpus',
+    fixtureMode: 'git',
+    casesHash: 'sha256:cases',
+    treatmentCommit: 'headsha',
+    control: { name: 'control', configuration: { model: 'model-a' }, successfulRuns: 1 },
+    treatment: { name: 'treatment', configuration: { model: 'model-b' }, successfulRuns: 1 },
+  });
+  const verify = (value: unknown, casesHash = 'sha256:cases') =>
+    verifyBenchmarkRescoreProvenance(value, manifest, casesHash);
+  assert.doesNotThrow(() => verify(summary()));
+  assert.throws(() => verify(summary(), 'sha256:other'), /from different runs/);
+  assert.throws(
+    () => verify({ ...summary(), fixtureMode: 'replay' }),
+    /runner.fixtureMode differs/,
+  );
+  assert.throws(
+    () => verify({ ...summary(), treatmentCommit: 'other' }),
+    /treatmentCommit differs/,
+  );
+  const swapped = summary();
+  swapped.treatment.configuration.model = 'model-c';
+  assert.throws(() => verify(swapped), /treatment differs/);
+  const { casesHash: _ch, ...legacy } = summary();
+  assert.throws(() => verify(legacy), /predates provenance/);
+  assert.throws(() => verify(null), /must be an object/);
 });
