@@ -1,3 +1,4 @@
+import { isBenchmarkRunnerOutput } from './benchmark-runner.ts';
 import type { BenchmarkObservedFinding } from './benchmark-score.ts';
 
 interface CompareArgs {
@@ -39,6 +40,22 @@ export function parseCompareArgs(argv: string[]): CompareArgs {
   const workspace = values.get('--workspace');
   const base = values.get('--base');
   return { models, ...(workspace ? { workspace } : {}), ...(base ? { base } : {}) };
+}
+
+/** `undefined` is a review that skipped: it exits 0 and writes no output. */
+export function classifyReviewOutput(
+  raw: string | undefined,
+): Pick<CompareResult, 'findings' | 'error'> {
+  if (raw === undefined) return { findings: [], error: 'no review output (nothing to review?)' };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { findings: [], error: 'unreadable review output' };
+  }
+  return isBenchmarkRunnerOutput(parsed)
+    ? { findings: parsed.findings }
+    : { findings: [], error: 'unreadable review output' };
 }
 
 export function renderComparison(results: CompareResult[]): string {

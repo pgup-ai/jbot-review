@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 
-import { parseCompareArgs, renderComparison } from '../src/shared/review-compare.ts';
+import {
+  classifyReviewOutput,
+  parseCompareArgs,
+  renderComparison,
+} from '../src/shared/review-compare.ts';
 
 it('parses models, workspace, and base', () => {
   const args = parseCompareArgs([
@@ -19,6 +23,16 @@ it('parses models, workspace, and base', () => {
   assert.throws(() => parseCompareArgs([]), /--models/);
   assert.throws(() => parseCompareArgs(['--models', ' , ']), /--models/);
   assert.throws(() => parseCompareArgs(['--models', 'a', '--nope', 'x']), /--nope/);
+});
+
+it('classifies missing, unparseable, and malformed review output', () => {
+  const finding = { path: 'a.ts', line: 1, severity: 'P2', title: 'Finding' };
+  assert.deepEqual(classifyReviewOutput(JSON.stringify({ findings: [finding] })), {
+    findings: [finding],
+  });
+  assert.match(classifyReviewOutput(undefined).error!, /nothing to review/);
+  assert.match(classifyReviewOutput('{not json').error!, /unreadable/);
+  assert.match(classifyReviewOutput('{"findings":"nope"}').error!, /unreadable/);
 });
 
 it('renders a comparison table with per-model findings and failures', () => {

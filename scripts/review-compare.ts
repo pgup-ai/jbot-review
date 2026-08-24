@@ -4,26 +4,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { isBenchmarkRunnerOutput } from '../src/shared/benchmark-runner.ts';
 import {
+  classifyReviewOutput,
   parseCompareArgs,
   renderComparison,
   type CompareResult,
 } from '../src/shared/review-compare.ts';
-
-/** A review that skips (nothing reviewable) exits 0 without writing output. */
-function readFindings(output: string): Pick<CompareResult, 'findings' | 'error'> {
-  if (!existsSync(output)) return { findings: [], error: 'no review output (nothing to review?)' };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(output, 'utf8'));
-  } catch {
-    return { findings: [], error: 'unreadable review output' };
-  }
-  return isBenchmarkRunnerOutput(parsed)
-    ? { findings: parsed.findings }
-    : { findings: [], error: 'unreadable review output' };
-}
 
 function main(): void {
   const args = parseCompareArgs(process.argv.slice(2));
@@ -65,14 +51,19 @@ function main(): void {
         model,
         seconds,
         ...(run.status === 0
-          ? readFindings(output)
+          ? classifyReviewOutput(existsSync(output) ? readFileSync(output, 'utf8') : undefined)
           : { findings: [], error: run.error?.message ?? `exit ${run.status ?? run.signal}` }),
       });
     }
 
     console.log(`\n${renderComparison(results)}`);
   } finally {
-    rmSync(outputDir, { recursive: true, force: true });
+    try {
+      rmSync(outputDir, { recursive: true, force: true });
+    } catch (error) {
+      // Never let teardown replace the result being reported.
+      console.error(`compare: temp cleanup failed: ${String(error)}`);
+    }
   }
 }
 
