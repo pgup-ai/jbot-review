@@ -34,12 +34,14 @@ Audit the final branch after implementation and before publication.
    - dogfood the real review pipeline when auth and provider availability permit
 8. Review-quality gate: if the branch diff touches a trigger path listed in
    `AGENTS.md` → "Review-quality gate", `docs/audits/benchmark-ledger.jsonl`
-   must contain a row with `gate: "passed"`, `subset` of `"core"` or
-   `"full"`, and `repetitions` of at least 3, whose `jbotSha` is a branch
-   commit at or after the last commit on the branch (`origin/main..HEAD`)
-   that touches a trigger path — a rebase or amend that rewrites the
-   benchmarked commit leaves no qualifying row. No qualifying row means the
-   gate is unmet: report it as a finding and do not call the branch ready.
+   must contain a row with `gate: "passed"`, `fixtureMode: "git"`, `subset`
+   of `"core"` or `"full"`, and `repetitions` of at least 3, whose `jbotSha`
+   is a branch commit at or after the last commit on the branch
+   (`origin/main..HEAD`) that touches a trigger path — a rebase or amend
+   that rewrites the benchmarked commit leaves no qualifying row. A
+   default-policy flip additionally requires `subset: "full"` and
+   `mergeGateSatisfied: true`. No qualifying row means the gate is unmet:
+   report it as a finding and do not call the branch ready.
 9. Reinspect the final committed diff. Do not call the branch ready when validation or a required contract remains unexplained.
 
 ## Report

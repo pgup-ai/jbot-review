@@ -559,6 +559,7 @@ async function main(): Promise<void> {
     subset,
     subsetCases: benchmarkCases.length,
     repetitions,
+    fixtureMode: manifest.runner.fixtureMode,
     declaredTreatmentVariables: manifest.declaredTreatmentVariables,
     control: {
       name: manifest.control.name,

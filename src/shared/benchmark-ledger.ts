@@ -36,6 +36,7 @@ export interface BenchmarkLedgerRow {
   subset: string;
   subsetCases: number;
   repetitions: number;
+  fixtureMode: 'git' | 'replay';
   control: BenchmarkLedgerArm;
   treatment: BenchmarkLedgerArm;
   gate: 'passed' | 'failed' | 'adjudication-required';
@@ -74,7 +75,7 @@ function num(summary: Record<string, unknown>, path: string): number {
 
 function metricValue(summary: Record<string, unknown>, path: string): number | null {
   const value = pick(summary, path);
-  if (!isRecord(value) || (value.value !== null && typeof value.value !== 'number')) {
+  if (!isRecord(value) || (value.value !== null && !isFiniteNumber(value.value))) {
     throw new Error(`benchmark summary ${path} must be a metric`);
   }
   return value.value as number | null;
@@ -157,6 +158,7 @@ export function deriveBenchmarkLedgerRow(
     subset: str(summary, 'subset'),
     subsetCases: num(summary, 'subsetCases'),
     repetitions: num(summary, 'repetitions'),
+    fixtureMode: oneOf(summary, 'fixtureMode', ['git', 'replay'] as const),
     control: deriveArm(summary, 'control'),
     treatment: deriveArm(summary, 'treatment'),
     gate: oneOf(summary, 'qualityGate.status', [

@@ -115,8 +115,8 @@ Benchmark policy for changes that alter model inputs or finding disposition
   `npm run benchmark:ledger -- --results <rescored> [--audit-doc docs/audits/<doc>.md]`.
   The experiment manifest must set `treatmentCommit` to the revision under
   test (the derivation refuses to record a run without it, and the append
-  must run from that revision), and `--audit-doc` must be supplied at append
-  time — rows are append-only and dedupe ignores it.
+  must run from that revision), and any `--audit-doc` link must be supplied
+  at append time — rows are append-only and dedupe ignores it.
 - Default-policy flips (changing what ships enabled) → **full** subset, per
   the corpus contract's quality and merge gates.
 - Everything else → no benchmark run required. CI keeps only the

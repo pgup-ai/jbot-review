@@ -65,6 +65,7 @@ function summaryFixture(overrides: Record<string, unknown> = {}) {
     subset: 'core',
     subsetCases: 60,
     repetitions: 3,
+    fixtureMode: 'git',
     control: armFixture('model-a'),
     treatment: armFixture('model-b'),
     qualityGate: {
@@ -94,6 +95,7 @@ describe('deriveBenchmarkLedgerRow', () => {
     assert.equal(row.subset, 'core');
     assert.equal(row.subsetCases, 60);
     assert.equal(row.repetitions, 3);
+    assert.equal(row.fixtureMode, 'git');
     assert.equal(row.gate, 'passed');
     assert.deepEqual(row.gateReasons, []);
     assert.equal(row.mergeGateSatisfied, false);
@@ -143,6 +145,7 @@ describe('deriveBenchmarkLedgerRow', () => {
       'control',
       'corpusHash',
       'date',
+      'fixtureMode',
       'gate',
       'gateReasons',
       'jbotSha',
@@ -181,6 +184,16 @@ describe('deriveBenchmarkLedgerRow', () => {
     assert.throws(() => deriveBenchmarkLedgerRow(null, CONTEXT), /benchmark summary/);
     const { treatmentCommit: _tc, ...withoutCommit } = summaryFixture();
     assert.throws(() => deriveBenchmarkLedgerRow(withoutCommit, CONTEXT), /treatmentCommit/);
+    const nanArm = armFixture('model-d');
+    nanArm.score.precision = { value: Number.NaN, ci95: null };
+    assert.throws(
+      () => deriveBenchmarkLedgerRow(summaryFixture({ treatment: nanArm }), CONTEXT),
+      /must be a metric/,
+    );
+    assert.throws(
+      () => deriveBenchmarkLedgerRow(summaryFixture({ fixtureMode: 'live' }), CONTEXT),
+      /fixtureMode/,
+    );
   });
 
   it('computes a resultsHash that ignores key order', () => {
