@@ -191,11 +191,17 @@ function validateRows(
 export function verifyBenchmarkRescoreProvenance(
   baselineSummary: unknown,
   manifest: BenchmarkManifest,
+  baselineCasesHash: string,
 ): void {
   if (!isRecord(baselineSummary)) throw new Error('Baseline summary.json must be an object.');
-  if (baselineSummary.fixtureMode === undefined) {
+  if (baselineSummary.fixtureMode === undefined || baselineSummary.casesHash === undefined) {
     throw new Error(
-      'Baseline summary.json records no fixtureMode; it predates provenance recording — re-run the experiment with the current runner.',
+      'Baseline summary.json records no fixtureMode/casesHash; it predates provenance recording — re-run the experiment with the current runner.',
+    );
+  }
+  if (baselineSummary.casesHash !== baselineCasesHash) {
+    throw new Error(
+      'Baseline cases.jsonl does not match the summary.json beside it; the two are from different runs.',
     );
   }
   const canonical = (value: unknown) => benchmarkCanonicalJson({ value });

@@ -82,6 +82,12 @@ function usage(): never {
   process.exit(2);
 }
 
+/** Binds a run's rows to its summary: a rescore cannot pair one run's rows
+ * with another run's provenance. */
+function hashCasesFile(path: string): string {
+  return `sha256:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+}
+
 function readManifest(path: string): BenchmarkManifest {
   return validateBenchmarkManifest(JSON.parse(readFileSync(path, 'utf8')));
 }
@@ -505,6 +511,7 @@ async function main(): Promise<void> {
     verifyBenchmarkRescoreProvenance(
       JSON.parse(readFileSync(baselineSummaryPath, 'utf8')),
       manifest,
+      hashCasesFile(baselineCasesArg),
     );
   }
   const rows: BenchmarkCaseRow[] =
@@ -573,6 +580,7 @@ async function main(): Promise<void> {
     subsetCases: benchmarkCases.length,
     repetitions,
     fixtureMode: manifest.runner.fixtureMode,
+    casesHash: hashCasesFile(casesPath),
     declaredTreatmentVariables: manifest.declaredTreatmentVariables,
     control: {
       name: manifest.control.name,
