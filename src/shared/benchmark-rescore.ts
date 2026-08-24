@@ -1,4 +1,4 @@
-import type { BenchmarkArm, BenchmarkCase } from './benchmark-manifest.ts';
+import type { BenchmarkArm, BenchmarkCase, BenchmarkManifest } from './benchmark-manifest.ts';
 import {
   BENCHMARK_SCHEMA_VERSION,
   benchmarkCanonicalJson,
@@ -180,6 +180,38 @@ function validateRows(
     );
   }
   return rows;
+}
+
+/**
+ * A rescore never re-runs the reviewer, so its summary restates provenance
+ * (fixture mode, commit, arm identity) from whatever manifest it is handed.
+ * Bind those claims to the original run's summary so a replay run cannot be
+ * relabeled into git-mode evidence.
+ */
+export function verifyBenchmarkRescoreProvenance(
+  baselineSummary: unknown,
+  manifest: BenchmarkManifest,
+): void {
+  if (!isRecord(baselineSummary)) throw new Error('Baseline summary.json must be an object.');
+  if (baselineSummary.fixtureMode === undefined) {
+    throw new Error(
+      'Baseline summary.json records no fixtureMode; it predates provenance recording — re-run the experiment with the current runner.',
+    );
+  }
+  const canonical = (value: unknown) => benchmarkCanonicalJson({ value });
+  const armIdentity = (value: unknown) =>
+    isRecord(value) ? { name: value.name, configuration: value.configuration } : value;
+  for (const [field, original, rescore] of [
+    ['corpusHash', baselineSummary.corpusHash, manifest.corpusHash],
+    ['runner.fixtureMode', baselineSummary.fixtureMode, manifest.runner.fixtureMode],
+    ['treatmentCommit', baselineSummary.treatmentCommit, manifest.treatmentCommit],
+    ['control', armIdentity(baselineSummary.control), armIdentity(manifest.control)],
+    ['treatment', armIdentity(baselineSummary.treatment), armIdentity(manifest.treatment)],
+  ] as const) {
+    if (canonical(original) !== canonical(rescore)) {
+      throw new Error(`Rescore manifest does not match the original run: ${field} differs.`);
+    }
+  }
 }
 
 export function validateAdjudicatedBenchmarkRows(

@@ -287,6 +287,32 @@ describe('review-benchmark', () => {
         /expected 24/,
       );
       assert.equal(existsSync(join(root, 'incomplete-output')), false);
+
+      const orphanCases = join(root, 'orphan-cases.jsonl');
+      writeFileSync(orphanCases, readFileSync(join(output, 'cases.jsonl'), 'utf8'));
+      assert.throws(
+        () =>
+          execFileSync(
+            TSX,
+            [
+              join(ROOT, 'scripts/review-benchmark.ts'),
+              '--manifest',
+              MANIFEST,
+              '--output',
+              join(root, 'orphan-output'),
+              '--subset',
+              'smoke',
+              '--repetitions',
+              '1',
+              '--adjudicated-cases',
+              orphanCases,
+              '--baseline-cases',
+              orphanCases,
+            ],
+            { encoding: 'utf8', stdio: 'pipe' },
+          ),
+        /No summary.json beside/,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

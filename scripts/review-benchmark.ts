@@ -38,6 +38,7 @@ import {
 } from '../src/shared/benchmark-paired.ts';
 import {
   validateAdjudicatedBenchmarkRows,
+  verifyBenchmarkRescoreProvenance,
   type BenchmarkCaseRow,
 } from '../src/shared/benchmark-rescore.ts';
 import {
@@ -493,6 +494,18 @@ async function main(): Promise<void> {
   const baselineCasesArg = benchmarkArgument('baseline-cases');
   if (Boolean(adjudicatedCasesArg) !== Boolean(baselineCasesArg)) {
     throw new Error('--adjudicated-cases and --baseline-cases must be provided together.');
+  }
+  if (baselineCasesArg) {
+    const baselineSummaryPath = join(dirname(resolve(baselineCasesArg)), 'summary.json');
+    if (!existsSync(baselineSummaryPath)) {
+      throw new Error(
+        `No summary.json beside ${baselineCasesArg}; --baseline-cases must point into the original run's output directory.`,
+      );
+    }
+    verifyBenchmarkRescoreProvenance(
+      JSON.parse(readFileSync(baselineSummaryPath, 'utf8')),
+      manifest,
+    );
   }
   const rows: BenchmarkCaseRow[] =
     adjudicatedCasesArg && baselineCasesArg

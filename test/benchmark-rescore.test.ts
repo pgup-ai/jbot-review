@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 
-import type { BenchmarkArm, BenchmarkCase } from '../src/shared/benchmark-manifest.ts';
+import type {
+  BenchmarkArm,
+  BenchmarkCase,
+  BenchmarkManifest,
+} from '../src/shared/benchmark-manifest.ts';
 import {
   validateAdjudicatedBenchmarkRows,
+  verifyBenchmarkRescoreProvenance,
   type BenchmarkCaseRow,
 } from '../src/shared/benchmark-rescore.ts';
 
@@ -209,4 +214,36 @@ it('validates every process failure execution state', () => {
       /Contradictory execution data/,
     );
   }
+});
+
+it('binds rescored provenance to the original run summary', () => {
+  const manifest = {
+    corpusHash: 'sha256:corpus',
+    treatmentCommit: 'headsha',
+    runner: { fixtureMode: 'git' },
+    control: { name: 'control', configuration: { model: 'model-a' } },
+    treatment: { name: 'treatment', configuration: { model: 'model-b' } },
+  } as unknown as BenchmarkManifest;
+  const summary = () => ({
+    corpusHash: 'sha256:corpus',
+    fixtureMode: 'git',
+    treatmentCommit: 'headsha',
+    control: { name: 'control', configuration: { model: 'model-a' }, successfulRuns: 1 },
+    treatment: { name: 'treatment', configuration: { model: 'model-b' }, successfulRuns: 1 },
+  });
+  assert.doesNotThrow(() => verifyBenchmarkRescoreProvenance(summary(), manifest));
+  assert.throws(
+    () => verifyBenchmarkRescoreProvenance({ ...summary(), fixtureMode: 'replay' }, manifest),
+    /runner.fixtureMode differs/,
+  );
+  assert.throws(
+    () => verifyBenchmarkRescoreProvenance({ ...summary(), treatmentCommit: 'other' }, manifest),
+    /treatmentCommit differs/,
+  );
+  const swapped = summary();
+  swapped.treatment.configuration.model = 'model-c';
+  assert.throws(() => verifyBenchmarkRescoreProvenance(swapped, manifest), /treatment differs/);
+  const { fixtureMode: _fm, ...legacy } = summary();
+  assert.throws(() => verifyBenchmarkRescoreProvenance(legacy, manifest), /predates provenance/);
+  assert.throws(() => verifyBenchmarkRescoreProvenance(null, manifest), /must be an object/);
 });
