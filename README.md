@@ -759,6 +759,32 @@ npm run review:local -- --workspace /path/to/repo --base origin/main
 checkout yourself; the command does not clone, fetch, switch it, or use GitHub.
 Add `--preview` to inspect the review plan without provider credentials.
 
+### Comparing models
+
+Run the same review with several models and compare speed and findings:
+
+```bash
+npm run review:compare -- --models opencode/grok-code,zai-coding-plan/glm-5.2 --workspace /path/to/repo --base origin/main
+```
+
+Each model reviews the same diff in turn, then a table reports wall-clock,
+finding count, and severities, followed by every model's findings. A model that
+fails is reported in its row instead of ending the comparison. `--workspace` and
+`--base` are optional and mean what they do above.
+
+Name the provider in the model id (`provider/model`); the command blanks
+`PROVIDER` so a pin left in `.env` cannot swallow that prefix. To review a pull
+request, check it out first:
+
+```bash
+git -C /path/to/repo fetch origin pull/123/head:pr-123 && git -C /path/to/repo switch pr-123
+```
+
+This is an eyeball comparison, not a graded one: it reports what each model
+said and how long it took, and nothing scores those findings. Use
+`benchmark:review` (see `plan/review-quality-corpus.md`) when you need recall
+and precision against seeded defects.
+
 - **Diff scope:** merge-base of the selected checkout's `HEAD` and `origin/HEAD`
   (falls back to `origin/main`; override with `--base <ref>` or
   `JBOT_LOCAL_BASE=<ref>`) → the **working
