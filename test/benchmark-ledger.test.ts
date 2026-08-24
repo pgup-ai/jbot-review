@@ -110,8 +110,6 @@ describe('deriveBenchmarkLedgerRow', () => {
     assert.equal(row.treatment.variance, 'reportable');
     assert.equal(row.control.successfulRuns, 35);
     assert.equal(row.control.failedRuns, 1);
-    // Sanitization is structural: the row never carries endpoints, sampling,
-    // env config, or spend, no matter what the summary held.
     const serialized = JSON.stringify(row);
     assert.ok(!serialized.includes('secret-endpoint.example'));
     assert.ok(!serialized.includes('costUsd'));
@@ -139,28 +137,24 @@ describe('deriveBenchmarkLedgerRow', () => {
       'successfulRuns',
       'variance',
     ]);
-    assert.deepEqual(
-      Object.keys(row).sort(),
-      [
-        'auditDoc',
-        'branch',
-        'control',
-        'corpusHash',
-        'date',
-        'gate',
-        'gateReasons',
-        'jbotSha',
-        'mergeGateSatisfied',
-        'repetitions',
-        'resultsHash',
-        'schemaVersion',
-        'subset',
-        'subsetCases',
-        'treatment',
-      ].sort(),
-    );
-    // Null metric values (a zero denominator — e.g. precision with no
-    // retained findings) flow through as null rather than throwing.
+    assert.deepEqual(Object.keys(row).sort(), [
+      'auditDoc',
+      'branch',
+      'control',
+      'corpusHash',
+      'date',
+      'gate',
+      'gateReasons',
+      'jbotSha',
+      'mergeGateSatisfied',
+      'repetitions',
+      'resultsHash',
+      'schemaVersion',
+      'subset',
+      'subsetCases',
+      'treatment',
+    ]);
+    // Upstream emits null for a zero denominator — precision with no retained findings.
     const nullArm = armFixture('model-c');
     nullArm.score.precision = { value: null, ci95: null };
     const nullRow = deriveBenchmarkLedgerRow(summaryFixture({ treatment: nullArm }), CONTEXT);
@@ -238,8 +232,7 @@ describe('benchmark-ledger script', () => {
     assert.equal(second.status, 1);
     assert.match(second.stderr, /already has this run/);
     assert.equal(readFileSync(ledger, 'utf8').trim().split('\n').length, 1);
-    // A hand-edited ledger missing its trailing newline still gets a
-    // well-formed append instead of two rows joined on one line.
+    // A hand-edited ledger can lack the trailing newline the writer always appends.
     writeFileSync(ledger, content.trimEnd());
     const third = run(writeResults('results-2', 5));
     assert.equal(third.status, 0, third.stderr);

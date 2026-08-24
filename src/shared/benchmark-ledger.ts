@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { benchmarkCanonicalJson } from './benchmark-score.ts';
 import { isFiniteNumber, isNonArrayRecord as isRecord, isNonEmptyString } from './text.ts';
 
-export interface BenchmarkLedgerArm {
+interface BenchmarkLedgerArm {
   name: string;
   model: string;
   modelRevision: string;

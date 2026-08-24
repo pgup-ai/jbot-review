@@ -107,10 +107,9 @@ Benchmark policy for changes that alter model inputs or finding disposition
   model/provider defaults (`src/shared/config.ts`, `src/shared/model.ts`).
   When a change's effect on model inputs is unclear, the gate applies.
 - Touching a trigger path → before merge: run the **core** subset, 3
-  repetitions, git `fixtureMode`; blind-adjudicate the retained findings per
-  `plan/review-quality-corpus.md`; rescore without re-running:
-  `npm run benchmark:review -- --manifest <experiment.json> --adjudicated-cases <adjudicated.jsonl> --baseline-cases <run>/cases.jsonl --output <rescored> --subset core`
-  (the rescore inherits `repetitions` from the manifest). A live run scores
+  repetitions, git `fixtureMode`; blind-adjudicate the retained findings and
+  rescore per the corpus contract with `--subset core` (the rescore inherits
+  `repetitions` from the manifest). A live run scores
   `adjudication-required`; only the rescored row can pass the gate. Record
   it:
   `npm run benchmark:ledger -- --results <rescored> [--audit-doc docs/audits/<doc>.md]`.
