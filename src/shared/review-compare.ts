@@ -1,6 +1,6 @@
 import type { BenchmarkObservedFinding } from './benchmark-score.ts';
 
-export interface CompareArgs {
+interface CompareArgs {
   models: string[];
   workspace?: string;
   base?: string;
