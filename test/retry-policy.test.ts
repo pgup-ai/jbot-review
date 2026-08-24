@@ -21,6 +21,17 @@ describe('classifyMainShardFailure', () => {
       failureClass: 'model-not-found',
       retryable: false,
     });
+    assert.deepEqual(
+      classify(
+        '[1210] This model always engages in thinking and cannot be disabled; please use low, high, or max.',
+      ),
+      { failureClass: 'unsupported-effort', retryable: false },
+    );
+    // A timeout that mentions "thinking" must keep its retry.
+    assert.deepEqual(
+      classify('The model did not finish within 900s while thinking; please use a shorter prompt'),
+      { failureClass: 'timeout', retryable: true },
+    );
     assert.deepEqual(classify('maximum context length exceeded'), {
       failureClass: 'context-length',
       retryable: false,

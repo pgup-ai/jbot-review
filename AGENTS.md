@@ -97,7 +97,9 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 ## Review-quality gate
 
 Benchmark policy for changes that alter model inputs or finding disposition
-(corpus contract: `plan/review-quality-corpus.md`):
+(corpus contract: `plan/review-quality-corpus.md`). The benchmark is
+**advisory**: no PR is blocked on a missing run. Run it when a change
+plausibly moves review quality; when you skip it, say so in the PR.
 
 - **Trigger paths:** `src/shared/prompt.ts`, `src/shared/filter.ts`,
   `src/shared/diff-context.ts`, `src/shared/review-context.ts`,
@@ -105,8 +107,8 @@ Benchmark policy for changes that alter model inputs or finding disposition
   `src/shared/review-playbooks.ts`, `src/shared/exploration-policy.ts`,
   session driving in `src/shared/opencode.ts` / `src/shared/acp.ts`, and
   model/provider defaults (`src/shared/config.ts`, `src/shared/model.ts`).
-  When a change's effect on model inputs is unclear, the gate applies.
-- Touching a trigger path → before merge: run the **core** subset, 3
+  When a change's effect on model inputs is unclear, prefer running it.
+- Touching a trigger path → **recommended** before merge: run the **core** subset, 3
   repetitions, git `fixtureMode`; blind-adjudicate the retained findings and
   rescore per the corpus contract with `--subset core` (the rescore inherits
   `repetitions` from the manifest). A live run scores
@@ -117,8 +119,9 @@ Benchmark policy for changes that alter model inputs or finding disposition
   test (the derivation refuses to record a run without it, and the append
   must run from that revision), and any `--audit-doc` link must be supplied
   at append time — rows are append-only and dedupe ignores it.
-- Default-policy flips (changing what ships enabled) → **full** subset, per
-  the corpus contract's quality and merge gates.
+- Default-policy flips (changing what ships enabled) → the one case still
+  **required**: **full** subset, per the corpus contract's quality and merge
+  gates.
 - Everything else → no benchmark run required. CI keeps only the
   deterministic replay-mode contract check.
 
