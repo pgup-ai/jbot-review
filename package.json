@@ -15,6 +15,7 @@
     "review:local": "tsx src/local/index.ts",
     "benchmark:review": "tsx scripts/review-benchmark.ts",
     "benchmark:normalize": "tsx scripts/review-competitor-adapter.ts",
+    "benchmark:ledger": "tsx scripts/benchmark-ledger.ts",
     "corpus:import-history": "tsx scripts/review-history-import.ts",
     "corpus:adjudicate": "tsx scripts/review-adjudication.ts",
     "performance:review": "tsx scripts/review-performance.ts",

@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { deriveBenchmarkLedgerRow } from '../src/shared/benchmark-ledger.ts';
 
@@ -196,5 +201,50 @@ describe('deriveBenchmarkLedgerRow', () => {
       CONTEXT,
     ).resultsHash;
     assert.notEqual(left, changed);
+  });
+});
+
+describe('benchmark-ledger script', () => {
+  it('appends a row once and refuses the duplicate', () => {
+    const script = fileURLToPath(new URL('../scripts/benchmark-ledger.ts', import.meta.url));
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-ledger-'));
+    const writeResults = (name: string, repetitions: number) => {
+      const results = join(dir, name);
+      mkdirSync(results);
+      writeFileSync(
+        join(results, 'summary.json'),
+        JSON.stringify(summaryFixture({ treatmentCommit: head, repetitions })),
+      );
+      return results;
+    };
+    const results = writeResults('results', 3);
+    const ledger = join(dir, 'ledger.jsonl');
+    const run = (resultsDir: string, ...extra: string[]) =>
+      spawnSync(
+        process.execPath,
+        ['--import', 'tsx', script, '--results', resultsDir, '--ledger', ledger, ...extra],
+        { encoding: 'utf8' },
+      );
+    const first = run(results, '--audit-doc', 'docs/audits/x.md');
+    assert.equal(first.status, 0, first.stderr);
+    const content = readFileSync(ledger, 'utf8');
+    assert.ok(content.endsWith('\n'));
+    const row = JSON.parse(content.trim());
+    assert.equal(row.jbotSha, head);
+    assert.equal(row.gate, 'passed');
+    assert.equal(row.auditDoc, 'docs/audits/x.md');
+    const second = run(results);
+    assert.equal(second.status, 1);
+    assert.match(second.stderr, /already has this run/);
+    assert.equal(readFileSync(ledger, 'utf8').trim().split('\n').length, 1);
+    // A hand-edited ledger missing its trailing newline still gets a
+    // well-formed append instead of two rows joined on one line.
+    writeFileSync(ledger, content.trimEnd());
+    const third = run(writeResults('results-2', 5));
+    assert.equal(third.status, 0, third.stderr);
+    const lines = readFileSync(ledger, 'utf8').trim().split('\n');
+    assert.equal(lines.length, 2);
+    for (const line of lines) JSON.parse(line);
   });
 });
