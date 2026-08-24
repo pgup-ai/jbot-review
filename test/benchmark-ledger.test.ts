@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { deriveBenchmarkLedgerRow } from '../src/shared/benchmark-ledger.ts';
 
-export function armFixture(model: string) {
+function armFixture(model: string) {
   return {
     name: `${model}-arm`,
     configuration: {
@@ -57,7 +57,7 @@ export function armFixture(model: string) {
   };
 }
 
-export function summaryFixture(overrides: Record<string, unknown> = {}) {
+function summaryFixture(overrides: Record<string, unknown> = {}) {
   return {
     schemaVersion: 1,
     generatedAt: '2026-08-23T10:00:00.000Z',
