@@ -13,6 +13,7 @@
     "lint": "oxlint --deny-warnings",
     "dev": "tsx src/app/server.ts",
     "review:local": "tsx src/local/index.ts",
+    "review:compare": "tsx scripts/review-compare.ts",
     "benchmark:review": "tsx scripts/review-benchmark.ts",
     "benchmark:normalize": "tsx scripts/review-competitor-adapter.ts",
     "benchmark:ledger": "tsx scripts/benchmark-ledger.ts",
