@@ -112,6 +112,13 @@ function parseQoderModels(output: string): string[] {
     .map((model) => (model === 'Auto' ? 'auto' : model));
 }
 
+function parseDimModels(output: string): string[] {
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function parseCodexModels(output: string): string[] {
   const parsed = JSON.parse(output) as { models?: Array<{ slug?: unknown }> };
   if (!Array.isArray(parsed.models)) throw new Error('Codex model output has no models array.');
@@ -189,7 +196,10 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   const qoderModels = parseQoderModels(
     npmCliOutput('@qoder-ai/qodercli', 'qodercli', ['--list-models']),
   );
-  const codexModels = parseCodexModels(npmCliOutput('@openai/codex', 'codex', ['debug', 'models']));
+  const codexModels = parseCodexModels(
+    npmCliOutput('@agentclientprotocol/codex-acp', 'codex', ['debug', 'models']),
+  );
+  const dimModels = parseDimModels(npmCliOutput('dimcode', 'dim', ['model', 'list']));
   const { models: clineModels, llmsVersion } = await loadClineModels();
   const clinePassModels = await loadClinePassModels();
   const grokModels = parseGrokModels(npmCliOutput('@xai-official/grok', 'grok', ['models']));
@@ -205,6 +215,7 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
     'cline-pass': clinePassModels,
     grok: grokModels,
     kilo: kiloModels,
+    dim: dimModels,
   })) {
     if (models.length === 0) throw new Error(`${providerID} returned no model IDs.`);
   }
@@ -246,8 +257,8 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
     },
     codex: {
       discovery: '`codex debug models`',
-      source: `${npmSource('@openai/codex')} authenticated catalog`,
-      note: 'The command returns model slugs available to the current Codex account.',
+      source: `${npmSource('@agentclientprotocol/codex-acp')} authenticated catalog`,
+      note: 'The image installs the ACP adapter, not `@openai/codex` itself; `codex` resolves from its dependency tree. The command returns model slugs available to the current Codex account.',
       models: withDefault(
         'codex',
         codexModels.map((model) => `codex/${model}`),
@@ -275,6 +286,15 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
       models: withDefault(
         'grok',
         grokModels.map((model) => `grok/${model}`),
+      ),
+    },
+    dim: {
+      discovery: '`dim model list`',
+      source: `${npmSource('dimcode')} live catalog`,
+      note: 'dim\'s own plan is OAuth-only (no API key). Authenticate with `dim auth login --device-login --provider dimcode-api-oauth`, then run `npm run dim:bundle` and carry its output as `DIM_AUTH_BUNDLE`. The bundle holds `auth.json` AND the pruned provider store — `auth.json` alone leaves dim with "No connected provider".',
+      models: withDefault(
+        'dim',
+        dimModels.map((model) => `dim/${model}`),
       ),
     },
     kilo: {
