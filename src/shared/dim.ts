@@ -146,6 +146,15 @@ export function dimProviderMismatch(model: string, bundle: DimBundle): string | 
   );
 }
 
+export function parseDimModelList(output: string): string[] {
+  // `dim model list` prints one `<dim-provider>/<model>` per line; a header or
+  // warning line would otherwise be read as a model ID.
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^[\w.-]+\/[\w.-]+$/.test(line));
+}
+
 export function buildDimCliArgs(model: string): string[] {
   const args = [
     'exec',

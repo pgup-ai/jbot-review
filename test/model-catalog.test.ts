@@ -31,6 +31,7 @@ describe('model catalog', () => {
       'cline',
       'cline-pass',
       'grok',
+      'dim',
       'kilo',
     ]) {
       const section = catalog.split(`### \`${providerID}\``)[1]?.split('\n### ')[0];
@@ -49,12 +50,34 @@ describe('model catalog', () => {
   // #100 swapped `@openai/codex` for the ACP adapter, and the generator threw on
   // every run after that while the stale file kept looking fine.
   it('sources every CLI snapshot from a package the Dockerfile still pins', () => {
-    const claims = [...catalog.matchAll(/Docker-pinned npm package \[`([^`]+)`\]/g)].map(
-      (match) => match[1],
+    // Scoped names carry their own `@`, so the version is whatever follows the last one.
+    const splitPin = (token: string): [string, string] => {
+      const at = token.lastIndexOf('@');
+      return [token.slice(0, at), token.slice(at + 1)];
+    };
+    const pins = new Map(
+      [...dockerfile.matchAll(/npm install -g (.*)/g)]
+        .flatMap((match) => match[1].split(/\s+/))
+        .filter((token) => token.lastIndexOf('@') > 0)
+        .map(splitPin),
     );
-    assert.ok(claims.length >= 6, 'expected the CLI providers to claim Docker-pinned sources');
-    for (const claim of claims) {
-      assert.ok(dockerfile.includes(claim), `${claim} is not the pinned Dockerfile version`);
+    const claims = [...catalog.matchAll(/Docker-pinned npm package \[`([^`]+)`\]/g)].map((match) =>
+      splitPin(match[1]),
+    );
+
+    // Enumerated so a provider cannot quietly drop its source line. Deduped
+    // because cline-pass is served by Cline's package and claims it too.
+    assert.deepEqual([...new Set(claims.map(([pkg]) => pkg))].sort(), [
+      '@agentclientprotocol/codex-acp',
+      '@kilocode/cli',
+      '@qoder-ai/qodercli',
+      '@xai-official/grok',
+      'cline',
+      'command-code',
+      'dimcode',
+    ]);
+    for (const [pkg, version] of claims) {
+      assert.equal(pins.get(pkg), version, `${pkg} claims ${version}`);
     }
   });
 
