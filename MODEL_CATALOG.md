@@ -20,7 +20,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `openai`                | Models.dev           |      47 | `openai/gpt-5.4-nano`                                      |
 | `anthropic`             | Models.dev           |      13 | `anthropic/claude-sonnet-4-6`                              |
 | `google`                | Models.dev           |      39 | `google/gemini-2.5-flash`                                  |
-| `openrouter`            | Models.dev           |     355 | `openrouter/openai/gpt-4o-mini`                            |
+| `openrouter`            | Models.dev           |     356 | `openrouter/openai/gpt-4o-mini`                            |
 | `nvidia`                | Models.dev           |     102 | `nvidia/nemotron-3-ultra-550b-a55b`                        |
 | `zai-coding-plan`       | Models.dev           |       9 | `zai-coding-plan/glm-5.2`                                  |
 | `kimi-for-coding`       | Models.dev           |       4 | `kimi-for-coding/k3`                                       |
@@ -34,9 +34,9 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `qoder`                 | CLI snapshot         |       3 | `qoder/auto`                                               |
 | `codex`                 | CLI snapshot         |      10 | `codex/default`                                            |
 | `grok`                  | CLI snapshot         |       2 | `grok/default`                                             |
-| `cline`                 | CLI snapshot         |     272 | `cline/default`                                            |
+| `cline`                 | CLI snapshot         |     288 | `cline/default`                                            |
 | `cline-pass`            | CLI snapshot         |      14 | `cline-pass/default`                                       |
-| `kilo`                  | CLI snapshot         |     296 | `kilo/kilo-auto/free`                                      |
+| `kilo`                  | CLI snapshot         |     297 | `kilo/kilo-auto/free`                                      |
 | `dim`                   | CLI snapshot         |       4 | `dim/dimcode-api-oauth/deepseek-v4-flash`                  |
 | `openai-compatible`     | Custom endpoint      | dynamic | required                                                   |
 
@@ -305,7 +305,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `openrouter`
 
-355 model IDs. Default: `openrouter/openai/gpt-4o-mini`.
+356 model IDs. Default: `openrouter/openai/gpt-4o-mini`.
 
 - `openrouter/~anthropic/claude-fable-latest`
 - `openrouter/~anthropic/claude-haiku-latest`
@@ -609,6 +609,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/qwen/qwen3.7-plus`
 - `openrouter/qwen/qwen3.8-2.4t-a95b`
 - `openrouter/qwen/qwen3.8-27b`
+- `openrouter/qwen/qwen3.8-flash`
 - `openrouter/qwen/qwen3.8-max`
 - `openrouter/rekaai/reka-edge`
 - `openrouter/rekaai/reka-flash-3`
@@ -1199,23 +1200,24 @@ The CLI does not expose a complete list.
 
 ### `cline`
 
-- Source: Docker-pinned npm package [`cline@3.0.46`](https://www.npmjs.com/package/cline) → [`@cline/llms@0.0.65`](https://www.npmjs.com/package/@cline/llms).
-- Refresh/list: the `@cline/llms` catalog bundled by `cline@3.0.46`.
+- Source: Docker-pinned npm package [`cline@3.0.60`](https://www.npmjs.com/package/cline) → [`@cline/llms@0.0.81`](https://www.npmjs.com/package/@cline/llms).
+- Refresh/list: the `@cline/llms` catalog bundled by `cline@3.0.60`.
 - Note: Pay-as-you-go IDs include the upstream model type, for example `cline/deepseek/deepseek-v4-flash`.
 
-272 J-Bot model values:
+288 J-Bot model values:
 
 - `cline/~anthropic/claude-fable-latest`
 - `cline/~anthropic/claude-haiku-latest`
 - `cline/~anthropic/claude-opus-latest`
 - `cline/~anthropic/claude-sonnet-latest`
+- `cline/~deepseek/deepseek-v4-flash-latest`
 - `cline/~google/gemini-flash-latest`
 - `cline/~google/gemini-pro-latest`
 - `cline/~moonshotai/kimi-latest`
 - `cline/~openai/gpt-latest`
 - `cline/~openai/gpt-mini-latest`
 - `cline/~x-ai/grok-latest`
-- `cline/ai21/jamba-large-1.7`
+- `cline/~z-ai/glm-latest`
 - `cline/aion-labs/aion-2.0`
 - `cline/aion-labs/aion-3.0`
 - `cline/aion-labs/aion-3.0-mini`
@@ -1235,6 +1237,8 @@ The CLI does not expose a complete list.
 - `cline/anthropic/claude-opus-4.7-fast`
 - `cline/anthropic/claude-opus-4.8`
 - `cline/anthropic/claude-opus-4.8-fast`
+- `cline/anthropic/claude-opus-5`
+- `cline/anthropic/claude-opus-5-fast`
 - `cline/anthropic/claude-sonnet-4`
 - `cline/anthropic/claude-sonnet-4.5`
 - `cline/anthropic/claude-sonnet-4.6`
@@ -1243,6 +1247,8 @@ The CLI does not expose a complete list.
 - `cline/arcee-ai/virtuoso-large`
 - `cline/bytedance-seed/seed-1.6`
 - `cline/bytedance-seed/seed-1.6-flash`
+- `cline/bytedance-seed/seed-2-1-turbo`
+- `cline/bytedance-seed/seed-2.0-code`
 - `cline/bytedance-seed/seed-2.0-lite`
 - `cline/bytedance-seed/seed-2.0-mini`
 - `cline/cohere/command-r-08-2024`
@@ -1257,20 +1263,26 @@ The CLI does not expose a complete list.
 - `cline/deepseek/deepseek-v3.2`
 - `cline/deepseek/deepseek-v3.2-exp`
 - `cline/deepseek/deepseek-v4-flash`
+- `cline/deepseek/deepseek-v4-flash-0731`
+- `cline/deepseek/deepseek-v4-flash-vision-exp`
 - `cline/deepseek/deepseek-v4-pro`
+- `cline/deepseek/deepseek-v4-pro-0813`
 - `cline/default` **(default)**
+- `cline/dots-studio/dots-3-note-preview:free`
 - `cline/google/gemini-2.5-flash`
 - `cline/google/gemini-2.5-flash-lite`
 - `cline/google/gemini-2.5-pro`
 - `cline/google/gemini-2.5-pro-preview`
 - `cline/google/gemini-2.5-pro-preview-05-06`
 - `cline/google/gemini-3-flash-preview`
-- `cline/google/gemini-3-pro-image`
 - `cline/google/gemini-3.1-flash-lite`
 - `cline/google/gemini-3.1-flash-lite-preview`
 - `cline/google/gemini-3.1-pro-preview`
 - `cline/google/gemini-3.1-pro-preview-customtools`
 - `cline/google/gemini-3.5-flash`
+- `cline/google/gemini-3.5-flash-lite`
+- `cline/google/gemini-3.6-flash`
+- `cline/google/gemini-3.7-flash`
 - `cline/google/gemma-3-12b-it`
 - `cline/google/gemma-3-27b-it`
 - `cline/google/gemma-4-26b-a4b-it`
@@ -1279,26 +1291,31 @@ The CLI does not expose a complete list.
 - `cline/google/gemma-4-31b-it:free`
 - `cline/ibm-granite/granite-4.1-8b`
 - `cline/inception/mercury-2`
-- `cline/inclusionai/ling-2.6-1t`
-- `cline/inclusionai/ling-2.6-flash`
-- `cline/inclusionai/ring-2.6-1t`
+- `cline/inclusionai/ling-3.0-flash`
 - `cline/kwaipilot/kat-coder-air-v2.5`
 - `cline/kwaipilot/kat-coder-pro-v2`
 - `cline/kwaipilot/kat-coder-pro-v2.5`
+- `cline/liquid/lfm-2.5-2.6b:free`
+- `cline/meituan/longcat-2.0`
 - `cline/meta-llama/llama-3.1-70b-instruct`
 - `cline/meta-llama/llama-3.1-8b-instruct`
 - `cline/meta-llama/llama-3.3-70b-instruct`
-- `cline/meta-llama/llama-3.3-70b-instruct:free`
 - `cline/meta-llama/llama-4-maverick`
 - `cline/meta-llama/llama-4-scout`
+- `cline/meta/muse-glimmer-30b`
 - `cline/meta/muse-spark-1.1`
+- `cline/meta/muse-spark-1.2`
+- `cline/meta/muse-spark-1.2-contributor`
 - `cline/minimax/minimax-m1`
 - `cline/minimax/minimax-m2`
 - `cline/minimax/minimax-m2.1`
 - `cline/minimax/minimax-m2.5`
 - `cline/minimax/minimax-m2.7`
+- `cline/minimax/minimax-m2.7:free`
 - `cline/minimax/minimax-m3`
+- `cline/minimax/minimax-m3:free`
 - `cline/mistralai/codestral-2508`
+- `cline/mistralai/devstral-2512`
 - `cline/mistralai/ministral-14b-2512`
 - `cline/mistralai/ministral-3b-2512`
 - `cline/mistralai/ministral-8b-2512`
@@ -1324,14 +1341,13 @@ The CLI does not expose a complete list.
 - `cline/nex-agi/nex-n2-mini`
 - `cline/nex-agi/nex-n2-pro`
 - `cline/nvidia/nemotron-3-nano-30b-a3b`
-- `cline/nvidia/nemotron-3-nano-30b-a3b:free`
 - `cline/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`
 - `cline/nvidia/nemotron-3-super-120b-a12b`
 - `cline/nvidia/nemotron-3-super-120b-a12b:free`
 - `cline/nvidia/nemotron-3-ultra-550b-a55b`
 - `cline/nvidia/nemotron-3-ultra-550b-a55b:free`
-- `cline/nvidia/nemotron-nano-12b-v2-vl:free`
-- `cline/nvidia/nemotron-nano-9b-v2:free`
+- `cline/nvidia/nemotron-3.5-lightning`
+- `cline/nvidia/nemotron-3.5-lightning:free`
 - `cline/openai/gpt-3.5-turbo`
 - `cline/openai/gpt-3.5-turbo-0613`
 - `cline/openai/gpt-3.5-turbo-16k`
@@ -1348,12 +1364,10 @@ The CLI does not expose a complete list.
 - `cline/openai/gpt-4o-mini`
 - `cline/openai/gpt-4o-mini-2024-07-18`
 - `cline/openai/gpt-5`
-- `cline/openai/gpt-5-codex`
 - `cline/openai/gpt-5-mini`
 - `cline/openai/gpt-5-nano`
 - `cline/openai/gpt-5-pro`
 - `cline/openai/gpt-5.1`
-- `cline/openai/gpt-5.1-chat`
 - `cline/openai/gpt-5.1-codex`
 - `cline/openai/gpt-5.1-codex-max`
 - `cline/openai/gpt-5.1-codex-mini`
@@ -1361,7 +1375,6 @@ The CLI does not expose a complete list.
 - `cline/openai/gpt-5.2-chat`
 - `cline/openai/gpt-5.2-codex`
 - `cline/openai/gpt-5.2-pro`
-- `cline/openai/gpt-5.3-chat`
 - `cline/openai/gpt-5.3-codex`
 - `cline/openai/gpt-5.4`
 - `cline/openai/gpt-5.4-mini`
@@ -1380,28 +1393,23 @@ The CLI does not expose a complete list.
 - `cline/openai/gpt-chat-latest`
 - `cline/openai/gpt-oss-120b`
 - `cline/openai/gpt-oss-20b`
-- `cline/openai/gpt-oss-20b:free`
 - `cline/openai/gpt-oss-safeguard-20b`
 - `cline/openai/o1`
 - `cline/openai/o3`
-- `cline/openai/o3-deep-research`
 - `cline/openai/o3-mini`
 - `cline/openai/o3-mini-high`
 - `cline/openai/o3-pro`
 - `cline/openai/o4-mini`
-- `cline/openai/o4-mini-deep-research`
 - `cline/openai/o4-mini-high`
-- `cline/openrouter/auto`
 - `cline/openrouter/free`
-- `cline/poolside/laguna-m.1`
-- `cline/poolside/laguna-m.1:free`
+- `cline/poolside/laguna-s-2.1`
+- `cline/poolside/laguna-s-2.1:free`
 - `cline/poolside/laguna-xs-2.1`
 - `cline/poolside/laguna-xs-2.1:free`
 - `cline/qwen/qwen-2.5-72b-instruct`
 - `cline/qwen/qwen-2.5-7b-instruct`
 - `cline/qwen/qwen-plus`
 - `cline/qwen/qwen-plus-2025-07-28`
-- `cline/qwen/qwen-plus-2025-07-28:thinking`
 - `cline/qwen/qwen3-14b`
 - `cline/qwen/qwen3-235b-a22b`
 - `cline/qwen/qwen3-235b-a22b-2507`
@@ -1416,11 +1424,9 @@ The CLI does not expose a complete list.
 - `cline/qwen/qwen3-coder-flash`
 - `cline/qwen/qwen3-coder-next`
 - `cline/qwen/qwen3-coder-plus`
-- `cline/qwen/qwen3-coder:free`
 - `cline/qwen/qwen3-max`
 - `cline/qwen/qwen3-max-thinking`
 - `cline/qwen/qwen3-next-80b-a3b-instruct`
-- `cline/qwen/qwen3-next-80b-a3b-instruct:free`
 - `cline/qwen/qwen3-next-80b-a3b-thinking`
 - `cline/qwen/qwen3-vl-235b-a22b-instruct`
 - `cline/qwen/qwen3-vl-235b-a22b-thinking`
@@ -1442,32 +1448,42 @@ The CLI does not expose a complete list.
 - `cline/qwen/qwen3.6-flash`
 - `cline/qwen/qwen3.6-max-preview`
 - `cline/qwen/qwen3.6-plus`
+- `cline/qwen/qwen3.7-flash`
 - `cline/qwen/qwen3.7-max`
 - `cline/qwen/qwen3.7-plus`
+- `cline/qwen/qwen3.8-2.4t-a95b`
+- `cline/qwen/qwen3.8-27b`
+- `cline/qwen/qwen3.8-max`
 - `cline/rekaai/reka-edge`
 - `cline/relace/relace-search`
 - `cline/sakana/fugu-ultra`
+- `cline/sakana/sakana-namazu`
 - `cline/sao10k/l3.1-euryale-70b`
+- `cline/stealth/ox-alpha`
 - `cline/stepfun/step-3.5-flash`
 - `cline/stepfun/step-3.7-flash`
 - `cline/tencent/hy3`
 - `cline/tencent/hy3-preview`
-- `cline/tencent/hy3:free`
 - `cline/thedrummer/unslopnemo-12b`
 - `cline/thinkingmachines/inkling`
+- `cline/thinkingmachines/inkling-small`
+- `cline/thinkingmachines/inkling-small:free`
+- `cline/thinkingmachines/inkling:free`
 - `cline/upstage/solar-pro-3`
+- `cline/upstage/solar-pro4`
 - `cline/x-ai/grok-4.20`
 - `cline/x-ai/grok-4.3`
 - `cline/x-ai/grok-4.5`
+- `cline/x-ai/grok-4.6`
 - `cline/x-ai/grok-build-0.1`
 - `cline/xiaomi/mimo-v2.5`
 - `cline/xiaomi/mimo-v2.5-pro`
+- `cline/z-ai/glm-4.6v`
+- `cline/z-ai/glm-5.2:free`
 - `cline/zai/glm-4.5`
 - `cline/zai/glm-4.5-air`
 - `cline/zai/glm-4.5v`
 - `cline/zai/glm-4.6`
-- `cline/zai/glm-4.6v`
-- `cline/zai/glm-4.6v-flash`
 - `cline/zai/glm-4.7`
 - `cline/zai/glm-4.7-flash`
 - `cline/zai/glm-4.7-flashx`
@@ -1476,11 +1492,12 @@ The CLI does not expose a complete list.
 - `cline/zai/glm-5.1`
 - `cline/zai/glm-5.2`
 - `cline/zai/glm-5.2-fast`
+- `cline/zai/glm-5.3`
 - `cline/zai/glm-5v-turbo`
 
 ### `cline-pass`
 
-- Source: Docker-pinned npm package [`cline@3.0.46`](https://www.npmjs.com/package/cline) live ClinePass catalog.
+- Source: Docker-pinned npm package [`cline@3.0.60`](https://www.npmjs.com/package/cline) live ClinePass catalog.
 - Refresh/list: [Cline's live recommended-models endpoint](https://api.cline.bot/api/v1/ai/cline/recommended-models).
 - Note: The endpoint already returns `cline-pass/…` IDs, which are the exact J-Bot values.
 
@@ -1507,7 +1524,7 @@ The CLI does not expose a complete list.
 - Refresh/list: `kilo models --pure`.
 - Note: Kilo already prints fully qualified J-Bot values such as `kilo/openai/gpt-5.4`; do not add another `kilo/` prefix.
 
-296 J-Bot model values:
+297 J-Bot model values:
 
 - `kilo/~anthropic/claude-fable-latest`
 - `kilo/~anthropic/claude-haiku-latest`
@@ -1760,6 +1777,7 @@ The CLI does not expose a complete list.
 - `kilo/qwen/qwen3.7-plus`
 - `kilo/qwen/qwen3.8-2.4t-a95b`
 - `kilo/qwen/qwen3.8-27b`
+- `kilo/qwen/qwen3.8-flash`
 - `kilo/qwen/qwen3.8-max`
 - `kilo/rekaai/reka-edge`
 - `kilo/relace/relace-search`
