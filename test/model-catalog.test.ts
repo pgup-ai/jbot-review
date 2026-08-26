@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 import { PROVIDERS } from '../src/shared/config.ts';
 
 const catalog = readFileSync(new URL('../MODEL_CATALOG.md', import.meta.url), 'utf8');
+const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
 
 describe('model catalog', () => {
   it('covers every centralized provider exactly once', () => {
@@ -42,6 +43,19 @@ describe('model catalog', () => {
     assert.match(catalog, /`grok models`/);
     assert.match(catalog, /authenticated remote catalog/);
     assert.doesNotMatch(catalog, /`kilo\/kilo\/[^`]+`/);
+  });
+
+  // Nothing but a text match links the catalog's claimed pins to the Dockerfile:
+  // #100 swapped `@openai/codex` for the ACP adapter, and the generator threw on
+  // every run after that while the stale file kept looking fine.
+  it('sources every CLI snapshot from a package the Dockerfile still pins', () => {
+    const claims = [...catalog.matchAll(/Docker-pinned npm package \[`([^`]+)`\]/g)].map(
+      (match) => match[1],
+    );
+    assert.ok(claims.length >= 6, 'expected the CLI providers to claim Docker-pinned sources');
+    for (const claim of claims) {
+      assert.ok(dockerfile.includes(claim), `${claim} is not the pinned Dockerfile version`);
+    }
   });
 
   it('documents the one non-enumerable CLI boundary', () => {
