@@ -22,16 +22,16 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `google`                | Models.dev           |      39 | `google/gemini-2.5-flash`                                  |
 | `openrouter`            | Models.dev           |     355 | `openrouter/openai/gpt-4o-mini`                            |
 | `nvidia`                | Models.dev           |     102 | `nvidia/nemotron-3-ultra-550b-a55b`                        |
-| `zai-coding-plan`       | Models.dev           |       8 | `zai-coding-plan/glm-5.2`                                  |
+| `zai-coding-plan`       | Models.dev           |       9 | `zai-coding-plan/glm-5.2`                                  |
 | `kimi-for-coding`       | Models.dev           |       4 | `kimi-for-coding/k3`                                       |
 | `xai`                   | Models.dev           |      12 | `xai/grok-4.3`                                             |
 | `xiaomi-token-plan-sgp` | Models.dev           |       7 | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                      |
 | `fireworks-ai`          | Models.dev           |      23 | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` |
 | `poolside`              | Models.dev           |       3 | `poolside/laguna-s-2.1`                                    |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                            |
-| `commandcode`           | CLI snapshot         |      61 | `commandcode/default`                                      |
+| `commandcode`           | CLI snapshot         |      62 | `commandcode/default`                                      |
 | `cursor`                | CLI snapshot         |     205 | `cursor/default`                                           |
-| `qoder`                 | CLI snapshot         |       2 | `qoder/auto`                                               |
+| `qoder`                 | CLI snapshot         |       3 | `qoder/auto`                                               |
 | `codex`                 | CLI snapshot         |      10 | `codex/default`                                            |
 | `grok`                  | CLI snapshot         |       2 | `grok/default`                                             |
 | `cline`                 | CLI snapshot         |     272 | `cline/default`                                            |
@@ -772,7 +772,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `zai-coding-plan`
 
-8 model IDs. Default: `zai-coding-plan/glm-5.2`.
+9 model IDs. Default: `zai-coding-plan/glm-5.2`.
 
 - `zai-coding-plan/glm-4.7`
 - `zai-coding-plan/glm-5`
@@ -781,6 +781,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `zai-coding-plan/glm-5.2` **(default)**
 - `zai-coding-plan/glm-5.2-highspeed`
 - `zai-coding-plan/glm-5.3`
+- `zai-coding-plan/glm-5.3-flash`
 - `zai-coding-plan/glm-5.3-highspeed`
 
 ### `kimi-for-coding`
@@ -871,11 +872,11 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.33.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Source: Docker-pinned npm package [`command-code@1.36.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
-61 J-Bot model values:
+62 J-Bot model values:
 
 - `commandcode/claude-fable-5`
 - `commandcode/claude-haiku-4-5`
@@ -921,9 +922,9 @@ The CLI does not expose a complete list.
 - `commandcode/qwen/qwen3.7-max`
 - `commandcode/qwen/qwen3.7-plus`
 - `commandcode/qwen/qwen3.8-27b`
+- `commandcode/qwen/qwen3.8-flash`
 - `commandcode/qwen/qwen3.8-max`
 - `commandcode/sakana/fugu-ultra`
-- `commandcode/stealth/ox-alpha`
 - `commandcode/stepfun/step-3.5-flash`
 - `commandcode/stepfun/step-3.7-flash`
 - `commandcode/tencent/hy3-paid`
@@ -933,6 +934,7 @@ The CLI does not expose a complete list.
 - `commandcode/xai/grok-4.6`
 - `commandcode/xiaomi/mimo-v2.5`
 - `commandcode/xiaomi/mimo-v2.5-pro`
+- `commandcode/z-ai/glm-5.3-flash`
 - `commandcode/zai-org/glm-5`
 - `commandcode/zai-org/glm-5.1`
 - `commandcode/zai-org/glm-5.2`
@@ -1159,9 +1161,10 @@ The CLI does not expose a complete list.
 - Refresh/list: `qodercli --list-models`.
 - Note: Names are passed unchanged to the Qoder Agent SDK; `Auto` is normalized to the SDK value `auto`.
 
-2 J-Bot model values:
+3 J-Bot model values:
 
 - `qoder/auto` **(default)**
+- `qoder/Qwen3.8-Flash`
 - `qoder/Qwen3.8-Max`
 
 ### `codex`
