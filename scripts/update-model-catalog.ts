@@ -11,6 +11,7 @@ import {
   parseCommandCodeModelList,
 } from '../src/shared/commandcode.ts';
 import { PROVIDERS } from '../src/shared/config.ts';
+import { parseDimModelList } from '../src/shared/dim.ts';
 import { parseCursorModelList, parseKiloModelList } from '@symma/protocol';
 
 const MODELS_DEV_URL = 'https://models.dev/api.json';
@@ -119,15 +120,6 @@ function parseQoderModels(output: string): string[] {
     .map((model) => (model === 'Auto' ? 'auto' : model));
 }
 
-function parseDimModels(output: string): string[] {
-  // Keep only the documented `<dim-provider>/<model>` shape: a header or warning
-  // line would otherwise be published as a model ID.
-  return output
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => /^[\w.-]+\/[\w.-]+$/.test(line));
-}
-
 function parseCodexModels(output: string): string[] {
   const parsed = JSON.parse(output) as { models?: Array<{ slug?: unknown }> };
   if (!Array.isArray(parsed.models)) throw new Error('Codex model output has no models array.');
@@ -208,8 +200,8 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   const codexModels = parseCodexModels(
     npmCliOutput('@agentclientprotocol/codex-acp', 'codex', ['debug', 'models']),
   );
-  const dimModels = parseDimModels(
-    // dim self-updates by default, which would snapshot a newer CLI than the pin.
+  const dimModels = parseDimModelList(
+    // The CLI self-updates by default, which would drift from the pinned image.
     npmCliOutput('dimcode', 'dim', ['model', 'list'], { DIMCODE_DISABLE_AUTOUPDATE: '1' }),
   );
   const { models: clineModels, llmsVersion } = await loadClineModels();
@@ -301,7 +293,7 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
       ),
     },
     dim: {
-      discovery: '`dim model list`',
+      discovery: '`DIMCODE_DISABLE_AUTOUPDATE=1 dim model list`',
       source: `${npmSource('dimcode')} live catalog`,
       note: 'dim\'s own plan is OAuth-only (no API key). Authenticate with `dim auth login --device-login --provider dimcode-api-oauth`, then run `npm run dim:bundle` and carry its output as `DIM_AUTH_BUNDLE`. The bundle holds `auth.json` AND the pruned provider store — `auth.json` alone leaves dim with "No connected provider".',
       models: withDefault(

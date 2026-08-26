@@ -1806,7 +1806,7 @@ The CLI does not expose a complete list.
 ### `dim`
 
 - Source: Docker-pinned npm package [`dimcode@0.3.15`](https://www.npmjs.com/package/dimcode) live catalog.
-- Refresh/list: `dim model list`.
+- Refresh/list: `DIMCODE_DISABLE_AUTOUPDATE=1 dim model list`.
 - Note: dim's own plan is OAuth-only (no API key). Authenticate with `dim auth login --device-login --provider dimcode-api-oauth`, then run `npm run dim:bundle` and carry its output as `DIM_AUTH_BUNDLE`. The bundle holds `auth.json` AND the pruned provider store — `auth.json` alone leaves dim with "No connected provider".
 
 4 J-Bot model values:

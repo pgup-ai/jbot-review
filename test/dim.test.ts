@@ -10,6 +10,7 @@ import {
   dimProviderMismatch,
   encodeDimBundle,
   parseDimEventStream,
+  parseDimModelList,
 } from '../src/shared/dim.ts';
 
 const event = (eventType: string, payload: unknown): string =>
@@ -44,6 +45,24 @@ describe('buildDimCliArgs', () => {
     // A bare id stays unqualified rather than inventing a dim provider.
     assert.deepEqual(buildDimCliArgs('dim/glm-5.2').slice(9), ['--model', 'glm-5.2']);
     assert.deepEqual(buildDimCliArgs('dim/default').slice(9), []);
+  });
+});
+
+describe('parseDimModelList', () => {
+  it('keeps only qualified provider/model lines', () => {
+    assert.deepEqual(
+      parseDimModelList(
+        [
+          'MODEL',
+          'dimcode-api-oauth/deepseek-v4-flash',
+          '',
+          '  dimcode-api-oauth/seed-2.0-mini  ',
+          'update available: run dim upgrade',
+          'dimcode-api-oauth/extra/segment',
+        ].join('\n'),
+      ),
+      ['dimcode-api-oauth/deepseek-v4-flash', 'dimcode-api-oauth/seed-2.0-mini'],
+    );
   });
 });
 
