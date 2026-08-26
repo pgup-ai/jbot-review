@@ -66,13 +66,14 @@ function withDefault(providerID: string, models: string[]): string[] {
   return uniqueSorted(defaultModel ? [defaultModel, ...models] : models);
 }
 
-function run(command: string, args: string[], label: string): string {
+function run(command: string, args: string[], label: string, env?: NodeJS.ProcessEnv): string {
   try {
     return execFileSync(command, args, {
       encoding: 'utf8',
       maxBuffer: 20 * 1024 * 1024,
       timeout: COMMAND_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: env && { ...process.env, ...env },
     });
   } catch (cause) {
     throw new Error(
@@ -90,12 +91,18 @@ function dockerPackageVersion(packageName: string): string {
   return match[1];
 }
 
-function npmCliOutput(packageName: string, bin: string, args: string[]): string {
+function npmCliOutput(
+  packageName: string,
+  bin: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+): string {
   const version = dockerPackageVersion(packageName);
   return run(
     'npm',
     ['exec', '--yes', `--package=${packageName}@${version}`, '--', bin, ...args],
     `${packageName}@${version} model catalog`,
+    env,
   );
 }
 
@@ -113,10 +120,12 @@ function parseQoderModels(output: string): string[] {
 }
 
 function parseDimModels(output: string): string[] {
+  // Keep only the documented `<dim-provider>/<model>` shape: a header or warning
+  // line would otherwise be published as a model ID.
   return output
     .split('\n')
     .map((line) => line.trim())
-    .filter(Boolean);
+    .filter((line) => /^[\w.-]+\/[\w.-]+$/.test(line));
 }
 
 function parseCodexModels(output: string): string[] {
@@ -199,7 +208,10 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   const codexModels = parseCodexModels(
     npmCliOutput('@agentclientprotocol/codex-acp', 'codex', ['debug', 'models']),
   );
-  const dimModels = parseDimModels(npmCliOutput('dimcode', 'dim', ['model', 'list']));
+  const dimModels = parseDimModels(
+    // dim self-updates by default, which would snapshot a newer CLI than the pin.
+    npmCliOutput('dimcode', 'dim', ['model', 'list'], { DIMCODE_DISABLE_AUTOUPDATE: '1' }),
+  );
   const { models: clineModels, llmsVersion } = await loadClineModels();
   const clinePassModels = await loadClinePassModels();
   const grokModels = parseGrokModels(npmCliOutput('@xai-official/grok', 'grok', ['models']));
