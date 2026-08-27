@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { startOpencode } from '../src/shared/opencode.ts';
+import { startOpencode, withTimeout } from '../src/shared/opencode.ts';
 import { toolSchemaShimPluginUrl } from '../src/shared/opencode-hardening.ts';
 
 interface ToolDefinitionOutput {
@@ -117,9 +117,9 @@ describe('bash schema on the wire', { skip: !hasOpencode }, () => {
           parts: [{ type: 'text', text: 'hi' }],
         },
       });
-      // Await the captured request rather than a fixed sleep (bounded so a
-      // genuine no-request failure still surfaces instead of hanging).
-      await Promise.race([firstRequest, new Promise((resolve) => setTimeout(resolve, 15_000))]);
+      // Await the captured request rather than a fixed sleep; withTimeout
+      // clears its timer and surfaces a clear message if none arrives.
+      await withTimeout(firstRequest, 15_000, 'opencode sent no provider request within 15s');
     } finally {
       stop();
       mock.close();
