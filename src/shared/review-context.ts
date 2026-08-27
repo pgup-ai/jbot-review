@@ -946,7 +946,7 @@ export async function discoverGuidelineDocs(
     ];
     // Reserve for whichever note is actually appended, so body+note is a hard
     // cap. Both candidates are computed up front (the truncation marker can be
-    // longer than the plain note); the body floors at 1 (buffer opens with `#`).
+    // longer than the plain note).
     const noteTruncated = renderOmissionNote(
       [...droppedIds, `§${included.at(-1)?.section} (truncated)`],
       governanceRelPath,
@@ -956,7 +956,13 @@ export async function discoverGuidelineDocs(
       Buffer.byteLength(noteTruncated, 'utf8'),
       Buffer.byteLength(notePlain, 'utf8'),
     );
-    const bodyBytes = findUtf8Boundary(buffer, Math.max(1, Math.min(buffer.length, cap - reserve)));
+    // Near total exhaustion the note alone can exceed what's left: skip rather
+    // than overshoot (the budget-exhausted disclosure fires downstream).
+    if (cap <= reserve) {
+      markBudgetExhausted();
+      return;
+    }
+    const bodyBytes = findUtf8Boundary(buffer, Math.min(buffer.length, cap - reserve));
     const note = bodyBytes < buffer.length ? noteTruncated : notePlain;
     const text = `${buffer.toString('utf8', 0, bodyBytes)}${note}`.trim();
     remainingGuidelineBytes -= Buffer.byteLength(text, 'utf8');
