@@ -901,15 +901,20 @@ export async function discoverGuidelineDocs(
     );
     if (deduped.length === 0) {
       // Every cited section was unavailable — disclose the request (invariant #4)
-      // instead of contributing nothing. missing is non-empty here (all cited
-      // sections failed to extract) and the note is bounded, like the main path.
-      seen.add(resolved.absolutePath);
-      seenRealPaths.add(resolved.realPath);
+      // instead of contributing nothing (missing is non-empty here). Skip rather
+      // than overshoot when the bounded note won't fit the remaining budget.
       const note = renderOmissionNote(
         missing.map((section) => `§${section} (not found)`),
         governanceRelPath,
       ).trim();
-      remainingGuidelineBytes -= Buffer.byteLength(note, 'utf8');
+      const noteBytes = Buffer.byteLength(note, 'utf8');
+      if (noteBytes > remainingGuidelineBytes) {
+        markBudgetExhausted();
+        return;
+      }
+      seen.add(resolved.absolutePath);
+      seenRealPaths.add(resolved.realPath);
+      remainingGuidelineBytes -= noteBytes;
       docs.push({
         label: `.pr-governance/${governanceRelPath} (unavailable)`,
         text: note,
@@ -987,11 +992,16 @@ export async function discoverGuidelineDocs(
       const globCache = new Map<string, GlobToken[][] | null>();
       matchOps = 0;
       const boundedGlobMatch = (glob: string, file: string): boolean => {
-        if (matchOps > MAX_ROUTE_MATCH_OPS) return false;
         const variants = compileBoundedGlob(glob, globCache);
         if (!variants) return false;
         const target = glob.includes('/') ? file : file.slice(file.lastIndexOf('/') + 1);
-        return variants.some((tokens) => matchTokens(tokens, target));
+        for (const tokens of variants) {
+          // Check per variant, not per glob: each variant is a full token pass, so
+          // a 64-variant glob could otherwise overshoot the ceiling substantially.
+          if (matchOps > MAX_ROUTE_MATCH_OPS) return false;
+          if (matchTokens(tokens, target)) return true;
+        }
+        return false;
       };
       let matched = selectDiffRoutes(routes, changedFiles, boundedGlobMatch);
       // If the work budget was blown mid-scan, the matched set is a partial,

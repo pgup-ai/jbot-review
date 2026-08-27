@@ -283,6 +283,37 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.ok(!(await matches('x/a/c.md')), '? does not match a slash');
   });
 
+  it('discards routing atomically when the work budget is blown, keeping whole-file fallback', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-workcap-'));
+    roots.push(root);
+    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+    mkdirSync(join(root, '.pr-governance/design'), { recursive: true });
+    writeFileSync(join(root, 'AGENTS.md'), '# Agents\nfallback guidance');
+    writeFileSync(
+      join(root, '.pr-governance/README.md'),
+      '## Rule IDs\n- `TS-<n>` maps to `design/TECHNICAL_STANDARDS.md`',
+    );
+    writeFileSync(join(root, '.pr-governance/design/TECHNICAL_STANDARDS.md'), '## 1. R\nROUTED');
+    // A hostile route (400 long-shared-prefix globs) exhausts the op ceiling before
+    // the exact `x/**` route is reached; the whole matched set is then discarded.
+    const prefix = 'apps/core/src/modules/deeply/nested/area';
+    const hostile = Array.from({ length: 400 }, (_, i) => `'${prefix}/pkg${i}/**/*.ts'`).join(', ');
+    writeFileSync(
+      join(root, '.pr-governance/review/rules-for-diff.yaml'),
+      `entries:\n  - name: hostile\n    paths: [${hostile}]\n    rules: [TS-1]\n  - name: real\n    paths: ['x/**']\n    rules: [TS-1]`,
+    );
+    const files = [
+      ...Array.from({ length: 3000 }, (_, i) => `${prefix}/other/component${i}.tsx`),
+      'x/a.ts',
+    ];
+    const { docs } = await discoverGuidelineDocs(root, files);
+    assert.ok(!docs.some((d) => d.label.includes('§')), 'routing discarded once the budget blows');
+    assert.ok(
+      docs.some((d) => d.label === 'AGENTS.md'),
+      'whole-file fallback still supplies guidance',
+    );
+  });
+
   it('falls back to whole-file discovery when no routing file exists', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-noroute-'));
     roots.push(root);
