@@ -980,9 +980,12 @@ export async function runChangesSinceLastReview(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<string> {
-  const prompt = promptForModel(
-    model,
-    assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+  // Its own single-shot variant carries the omitted-subjects disclosure a bare
+  // no-tools directive would lack, so use that rather than promptForModel.
+  const prompt = assembleChangesSinceLastReviewPrompt(
+    prContext,
+    deltaContext,
+    isSingleShotModel(model),
   );
   const { raw } = await promptPlanAgent(
     client,
@@ -1064,27 +1067,29 @@ const SINGLE_SHOT_TOOLS = {
  * zero-tool single-shot for models that cannot drive a tool loop (proxied
  * Gemini — see `modelSupportsAgenticTools`). Exported for unit testing (pure).
  */
+/** A model that cannot drive an opencode tool loop runs a zero-tool single-shot. */
+export function isSingleShotModel(model: string): boolean {
+  const { providerID, modelID } = parseModelName(model);
+  return !modelSupportsAgenticTools(providerID, modelID);
+}
+
 export function resolveSessionTools(
   model: string,
   explicit?: Record<string, boolean>,
 ): Record<string, boolean> {
   if (explicit) return explicit;
-  const { providerID, modelID } = parseModelName(model);
-  return modelSupportsAgenticTools(providerID, modelID) ? READONLY_TOOLS : SINGLE_SHOT_TOOLS;
+  return isSingleShotModel(model) ? SINGLE_SHOT_TOOLS : READONLY_TOOLS;
 }
 
 /**
- * When the model runs tool-free (single-shot; see resolveSessionTools), prepend
- * the no-tools directive so the agentic review prompt's "run git diff / explore
- * the checkout" instructions don't make a tool-trained model emit tool-call
- * markup or "I'll inspect…" prose instead of JSON. Agentic models are unchanged.
- * Exported for unit testing (pure).
+ * Prepend the no-tools directive for a single-shot model so the agentic review
+ * prompt's "run git diff / explore the checkout" instructions don't make a
+ * tool-trained model emit tool-call markup or "I'll inspect…" prose instead of
+ * JSON. Passes with a tailored single-shot prompt variant (changes-since,
+ * verification) use that instead. Agentic models are unchanged.
  */
 export function promptForModel(model: string, prompt: string): string {
-  const { providerID, modelID } = parseModelName(model);
-  return modelSupportsAgenticTools(providerID, modelID)
-    ? prompt
-    : withNoToolsReviewDirective(prompt);
+  return isSingleShotModel(model) ? withNoToolsReviewDirective(prompt) : prompt;
 }
 
 async function promptPlanAgent(
