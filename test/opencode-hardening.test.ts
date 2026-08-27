@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { toolSchemaShimPluginUrl } from '../src/shared/opencode-schema-shim.ts';
+import { toolSchemaShimPluginUrl } from '../src/shared/opencode-hardening.ts';
 
 interface ToolDefinitionOutput {
   description?: string;

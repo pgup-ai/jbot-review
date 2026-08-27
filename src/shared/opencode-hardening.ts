@@ -11,12 +11,11 @@ import { pathToFileURL } from 'node:url';
  * no such field, so every tool-bearing request 400s and the review attempt
  * dies. The `tool.definition` hook rewrites only what the provider sees —
  * argument validation still runs on opencode's own schema, and `minimum: 1`
- * is the same contract. bash is the only affected tool, and the hook fires
- * for registry tools only (MCP schemas bypass it), so replacing bash's schema
- * outright is both sufficient and the only available lever. Measured on
- * opencode 1.18.21.
+ * is the same contract. bash is the only affected builtin, and the hook fires
+ * for registry tools only (MCP schemas bypass it, so they are dropped instead;
+ * see hermeticOpencodeConfigHome). Measured on opencode 1.18.21.
  */
-const TOOL_SCHEMA_SHIM_PLUGIN = `// jbot-review: bash wire-schema shim; why lives in src/shared/opencode-schema-shim.ts.
+const TOOL_SCHEMA_SHIM_PLUGIN = `// jbot-review: bash wire-schema shim; why lives in src/shared/opencode-hardening.ts.
 export const GeminiSafeToolSchemas = async () => ({
   'tool.definition': async (input, output) => {
     if (input.toolID !== 'bash' || output.jsonSchema !== undefined) return;
@@ -47,4 +46,16 @@ export function toolSchemaShimPluginUrl(): string {
     shimUrl = pathToFileURL(file).href;
   }
   return shimUrl;
+}
+
+let configHome: string | undefined;
+
+/**
+ * Empty XDG_CONFIG_HOME dir for the opencode child so it ignores the operator's
+ * global opencode config; rationale lives at the startOpencode call site.
+ * Memoized so repeated spawns in one process share a single dir.
+ */
+export function hermeticOpencodeConfigHome(): string {
+  configHome ??= mkdtempSync(join(tmpdir(), 'jbot-opencode-config-'));
+  return configHome;
 }

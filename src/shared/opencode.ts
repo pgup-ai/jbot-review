@@ -9,7 +9,7 @@ import {
 
 import { isContext7QuotaError } from './context7.ts';
 import { PROVIDERS, supportedModelOptions } from './config.ts';
-import { toolSchemaShimPluginUrl } from './opencode-schema-shim.ts';
+import { hermeticOpencodeConfigHome, toolSchemaShimPluginUrl } from './opencode-hardening.ts';
 import { BASH_PERMISSIONS } from './shell-policy.ts';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -562,17 +562,22 @@ export async function startOpencode(
       scopedEnv.set(key, process.env[key]);
       process.env[key] = value;
     }
-    // Read-only enforcement, fourth layer (invariant 8): opencode auto-loads
-    // and EXECUTES plugins and tools committed under the reviewed repo's
-    // .opencode/ (and root opencode.json) when a session names the workspace
-    // as its directory — code that runs at session start OUTSIDE the tool
-    // sandbox, where the plan agent and permission denies never reach it, so a
-    // malicious PR would run arbitrary Node beside the provider keys and GitHub
-    // token. Disabling project (directory) config discovery keeps jbot's own
-    // config (OPENCODE_CONFIG_CONTENT) and the operator's global config.
-    // Scoped like proxyEnv above.
+    // Hermetic config: the child uses ONLY jbot's config (via
+    // OPENCODE_CONFIG_CONTENT) plus the context7 MCP jbot adds at runtime,
+    // never ambient opencode config. Two sources, two switches:
+    //   - Project (reviewed repo's .opencode/): auto-EXECUTES plugins/tools at
+    //     session start outside the tool sandbox — a malicious-PR RCE beside
+    //     the provider keys and GitHub token (read-only invariant 8, layer 4).
+    //   - Global (~/.config/opencode): its MCP servers add unvetted,
+    //     write-capable tools (github, postgres) and 400 a Gemini backend
+    //     (schemas carry x-mcp-header / exclusiveMinimum). Empty XDG_CONFIG_HOME
+    //     drops them; auth lives under XDG_DATA_HOME, so it stays.
+    // Scoped like proxyEnv above: the child copies these at spawn, the parent
+    // restores immediately after.
     scopedEnv.set('OPENCODE_DISABLE_PROJECT_CONFIG', process.env.OPENCODE_DISABLE_PROJECT_CONFIG);
     process.env.OPENCODE_DISABLE_PROJECT_CONFIG = '1';
+    scopedEnv.set('XDG_CONFIG_HOME', process.env.XDG_CONFIG_HOME);
+    process.env.XDG_CONFIG_HOME = hermeticOpencodeConfigHome();
     if (options.scrubEnv !== false) {
       for (const key of sessionEnvDenyKeys(Object.keys(process.env))) {
         scrubbedEnv.set(key, process.env[key]!);
