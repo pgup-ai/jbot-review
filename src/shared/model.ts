@@ -106,9 +106,10 @@ export function removedAuxInputWarnings(read: (input: string, env: string) => st
 }
 
 /**
- * The aux seed is salted so both roles do not draw the same entry. A one-entry
- * pool has nothing to differ on, which is what makes the aux session share the
- * main options entry and its effort rather than the low aux default.
+ * The aux seed is salted so the two roles draw independently rather than always
+ * together; both still hash into the same pool, so they land on one model about
+ * 1/n of the time, and always on a one-entry pool. That is when the aux session
+ * shares the main options entry and its effort rather than the low aux default.
  */
 export function pickReviewModels(
   pool: string[],

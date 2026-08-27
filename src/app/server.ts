@@ -3,7 +3,7 @@ import { Webhooks, createNodeMiddleware } from '@octokit/webhooks';
 
 import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
 import { resolvePoolCredentials } from '../shared/config.ts';
-import { resolveModelSelection } from '../shared/model.ts';
+import { removedAuxInputWarnings, resolveModelSelection } from '../shared/model.ts';
 import { handlePrEvent } from './app.ts';
 import type { AppConfig } from './app.ts';
 
@@ -28,7 +28,10 @@ const appCfg: AppConfig = {
   modelPool,
 };
 
-for (const warning of swallowedProviderWarnings(modelPool)) {
+for (const warning of [
+  ...swallowedProviderWarnings(modelPool),
+  ...removedAuxInputWarnings((_, env) => process.env[env] ?? ''),
+]) {
   console.warn(`[jbot-review] ${warning}`);
 }
 

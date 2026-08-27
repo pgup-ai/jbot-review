@@ -634,12 +634,13 @@ than only the runs that happen to pick that provider. Listing a model is a
 request to review with it, so an unusable candidate is a configuration error,
 never silently skipped.
 
-**Auxiliary sessions draw from the same pool.** Their pick is salted, so they
-land on a different candidate than the main pass rather than always pairing the
-same two entries. A one-entry pool necessarily runs both roles on that model,
-which is what makes the aux session share the main model's options entry and its
-effort instead of the lower aux default. Order the pool heavy-first if you want
-the deep pass on the stronger tier.
+**Auxiliary sessions draw from the same pool.** Their seed is salted, so the two
+picks are independent rather than locked to the same index — not that they
+differ. Both hash into the same pool, so roughly 1/n of runs land both roles on
+one candidate (half the runs on a two-model pool), and a one-entry pool
+always does. That is when the aux session shares the main model's options entry
+and its effort instead of the lower aux default. Neither draw prefers a
+position, so pool order carries no heavy/fast role assignment.
 
 **Legacy `provider`** still works unchanged. Setting it _pins_ the provider: an
 unprefixed id belongs to it, a matching `provider/` prefix is stripped, and any
