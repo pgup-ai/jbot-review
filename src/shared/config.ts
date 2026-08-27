@@ -457,6 +457,10 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
  * "missing thought_signature in functionCall parts". The native `google`
  * adapter preserves it, so only proxied Gemini is affected — it falls back to a
  * zero-tool single-shot review (judged from the embedded diff).
+ *
+ * Proxied Gemini is recognized by a `gemini` substring in the model id (holds
+ * for every proxy seen: `google/gemini-*`, `gemini-2.5-flash`); a proxy that
+ * renamed the model to a slug without "gemini" would be missed and 400.
  */
 export function modelSupportsAgenticTools(providerID: string, modelID: string): boolean {
   if (providerID === 'google') return true;
