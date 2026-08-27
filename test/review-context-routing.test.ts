@@ -304,18 +304,12 @@ describe('rendered guideline block byte caps', () => {
   }));
   const discovered = { docs, referenced: ['a.md', 'b.md'], budgetExhausted: true };
 
-  it('caps the full render at the total budget and the finder render at its cap', () => {
+  it('hard-caps the rendered block at its budget, down to sub-marker caps', () => {
     assert.ok(Buffer.byteLength(formatGuidelines(discovered), 'utf8') <= 96 * 1024);
-    assert.ok(
-      Buffer.byteLength(formatFinderGuidelines(discovered, { capBytes: 24 * 1024 }), 'utf8') <=
-        24 * 1024,
-    );
-  });
-
-  it('never exceeds even a cap smaller than the truncation marker', () => {
-    for (const cap of [0, 5, 30]) {
+    // 0/5/30 are smaller than the truncation marker itself — still never exceeded.
+    for (const cap of [24 * 1024, 30, 5, 0]) {
       const out = formatFinderGuidelines(discovered, { capBytes: cap });
-      assert.ok(Buffer.byteLength(out, 'utf8') <= cap, `<= ${cap}`);
+      assert.ok(Buffer.byteLength(out, 'utf8') <= cap, `finder <= ${cap}`);
     }
   });
 });

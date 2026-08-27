@@ -220,9 +220,8 @@ function tokenizeGlob(glob: string): GlobToken[] {
 let matchRowA = new Uint8Array(0);
 let matchRowB = new Uint8Array(0);
 
-// Actual token-work done by matchTokens, so route selection can fail open once a
-// pathological route set (many long-shared-prefix globs × many files) blows past
-// a budget instead of blocking the event loop. Reset by the routing caller.
+// Token-work counter for the routing work budget (see MAX_ROUTE_MATCH_OPS);
+// reset by the routing caller before each pass.
 let matchOps = 0;
 
 /**
@@ -1281,9 +1280,8 @@ export function formatFinderGuidelines(
             )}${hidden > 0 ? ` and ${hidden} more omitted file(s)` : ''}. Read any that apply to your changed files.`;
     noteText = `\n\n${['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n')}`;
   }
-  // Selection already reserved FINDER_NOTE_RESERVE for the note, so docs + note
-  // fit without truncating a selected doc; the final cap is a backstop for the
-  // one intentionally-oversized mandatory doc.
+  // Note renders after the docs, so the final cap trims the note (not a selected
+  // doc) when the two together exceed the budget.
   return capRenderedBlock(`${docsText}${noteText}`, capBytes);
 }
 
