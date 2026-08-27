@@ -587,10 +587,8 @@ export async function discoverGuidelineDocs(
 
   const governanceDir = resolve(cwd, '.pr-governance');
 
-  // Read a whole governance file (routing config, README, or rule doc) up to a
-  // large cap, independent of the guideline budget: only extracted sections are
-  // charged. A rule section can live past the per-file guideline cap, so the
-  // source must be read in full to find it.
+  // Whole-file read of a governance file (routing config, README, or rule doc),
+  // independent of the guideline budget — see MAX_RULE_DOC_BYTES.
   async function readGovernanceFile(relativePath: string): Promise<string | undefined> {
     const resolved = await resolveExistingInsideWorkspace(resolve(governanceDir, relativePath));
     if (!resolved) return undefined;
@@ -761,8 +759,6 @@ export async function discoverGuidelineDocs(
       .map((section) => ({ section, text: extractRuleSection(source, section) }))
       .filter((entry): entry is { section: string; text: string } => Boolean(entry.text));
     if (found.length === 0) return;
-    // Reserve the source now so the fallback whole-file load below skips it —
-    // the matched sections stand in for it.
     seen.add(resolved.absolutePath);
     seenRealPaths.add(resolved.realPath);
     const label = `.pr-governance/${governanceRelPath} (§${found.map((f) => f.section).join(', §')})`;
@@ -780,11 +776,9 @@ export async function discoverGuidelineDocs(
     docs.push({ label, text: text.trim(), relevance: GUIDELINE_RELEVANCE.scoped });
   }
 
-  // Diff-scoped routing first (highest priority for the budget): a repo's
-  // rules-for-diff.yaml maps changed paths to the governance docs and rule IDs
-  // that apply, so a large standards file contributes only its matched sections
-  // instead of an arbitrary head-of-file truncation. Absent or malformed → the
-  // whole-file discovery below is the fallback.
+  // Diff-scoped routing first, so its rule sections and docs win the budget over
+  // the generic files below (see review-routing.ts). Absent or malformed → that
+  // whole-file discovery is the fallback.
   {
     const routingText = await readGovernanceFile('review/rules-for-diff.yaml');
     const routes = routingText ? parseDiffRoutes(routingText) : [];

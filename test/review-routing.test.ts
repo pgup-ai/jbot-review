@@ -102,21 +102,14 @@ describe('extractRuleSection', () => {
     'seven body',
   ].join('\n');
 
-  it('extracts a whole-number section up to the next same-level heading', () => {
-    const section = extractRuleSection(doc, '6');
-    assert.match(section!, /^## 6\. Test helpers/);
-    assert.match(section!, /whole-number section body/);
-    // Stops before the next `##`, but includes its own `###` children.
-    assert.match(section!, /### 6\.2 Placement/);
-    assert.ok(!section!.includes('## 7. Repository'));
-  });
-
-  it('extracts a dotted subsection up to the next same-or-higher heading', () => {
-    const section = extractRuleSection(doc, '6.2');
-    assert.equal(section, '### 6.2 Placement\nsubsection body');
-  });
-
-  it('returns undefined for an absent section', () => {
+  it('extracts a section through the next same-or-higher heading', () => {
+    // Whole number: keeps its `###` children, stops at the next `##`.
+    const whole = extractRuleSection(doc, '6')!;
+    assert.match(whole, /^## 6\. Test helpers[\s\S]*### 6\.2 Placement/);
+    assert.ok(!whole.includes('## 7. Repository'));
+    // Dotted subsection: stops at the next same-level heading.
+    assert.equal(extractRuleSection(doc, '6.2'), '### 6.2 Placement\nsubsection body');
+    // Absent number.
     assert.equal(extractRuleSection(doc, '99'), undefined);
   });
 });
