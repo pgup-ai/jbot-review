@@ -151,6 +151,57 @@ describe('discoverGuidelineDocs with diff routing', () => {
     }
   });
 
+  it('loads a doc requested whole via docs: even when its sections are also cited', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-whole-'));
+    roots.push(root);
+    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+    mkdirSync(join(root, '.pr-governance/design'), { recursive: true });
+    writeFileSync(
+      join(root, '.pr-governance/README.md'),
+      '## Rule IDs\n- `INV-<n>` maps to `design/INVARIANTS.md`',
+    );
+    // INVARIANTS is in docs: AND its §1 is cited via rules: — the whole doc wins.
+    writeFileSync(
+      join(root, '.pr-governance/review/rules-for-diff.yaml'),
+      "entries:\n  - name: s\n    paths: ['x/**']\n    docs: ['.pr-governance/design/INVARIANTS.md']\n    rules: [INV-1]",
+    );
+    writeFileSync(
+      join(root, '.pr-governance/design/INVARIANTS.md'),
+      '# Invariants\n## 1. First\nWHOLE-DOC-MARKER',
+    );
+    const { docs } = await discoverGuidelineDocs(root, ['x/a.ts']);
+    const inv = docs.find((d) => d.label.includes('INVARIANTS.md'))!;
+    assert.match(inv.text, /WHOLE-DOC-MARKER/);
+    assert.ok(!inv.label.includes('§'), 'loaded whole, not suppressed into a §-only bundle');
+  });
+
+  it('discloses a route whose every cited section is unavailable, bounded', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-allmiss-'));
+    roots.push(root);
+    // §97/§98 are absent; a bounded "unavailable" record must still name them.
+    writeRoutedRepo(root, { rules: 'TS-97, TS-98', doc: '## 1. Only\nSECTION-ONE' });
+    const { docs } = await discoverGuidelineDocs(root, ['x/a.ts']);
+    const rec = docs.find((d) => d.label.includes('unavailable'))!;
+    assert.match(rec.text, /§97 \(not found\)/);
+    assert.ok(!docs.some((d) => d.label.includes('§')), 'no section bundle — nothing resolved');
+  });
+
+  it('bounds the omission note when a route cites hundreds of unavailable sections', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-note-'));
+    roots.push(root);
+    const many = Array.from({ length: 400 }, (_, i) => `TS-${i + 100}`).join(', ');
+    writeRoutedRepo(root, { rules: `TS-1, ${many}`, doc: '## 1. First\nSECTION-ONE' });
+    const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
+      d.label.includes('§'),
+    )!;
+    assert.match(bundle.text, /SECTION-ONE/);
+    assert.match(bundle.text, /\+\d+ more/, 'the omission list is capped with a +N more summary');
+    assert.ok(
+      Buffer.byteLength(bundle.text, 'utf8') < 2048,
+      'the note cannot balloon to thousands of ids',
+    );
+  });
+
   it('falls back to whole-file discovery when no routing file exists', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-noroute-'));
     roots.push(root);

@@ -209,53 +209,90 @@ function tokenizeGlob(glob: string): GlobToken[] {
   return tokens;
 }
 
+// Reusable reachability rows: route matching runs matchTokens over every
+// (glob, file) pair, so allocating a fresh array per token per call dominated
+// large diffs. Node is single-threaded and matchTokens never awaits, so shared
+// scratch grown to the longest path seen is safe and keeps the loop alloc-free.
+let matchRowA = new Uint8Array(0);
+let matchRowB = new Uint8Array(0);
+
 /**
  * Linear-time glob match: one reachability pass per token over the target,
  * O(tokens × length) with no regex engine, so a hostile pattern cannot make
  * matching backtrack — only take a proportionally longer straight walk.
  */
-function matchGlobVariant(glob: string, target: string): boolean {
-  const tokens = tokenizeGlob(glob);
-  let reachable = Array.from({ length: target.length + 1 }, () => false);
-  reachable[0] = true;
+function matchTokens(tokens: GlobToken[], target: string): boolean {
+  const len = target.length;
+  if (matchRowA.length < len + 1) {
+    matchRowA = new Uint8Array(len + 1);
+    matchRowB = new Uint8Array(len + 1);
+  }
+  let cur = matchRowA;
+  let next = matchRowB;
+  cur.fill(0, 0, len + 1);
+  cur[0] = 1;
   for (const token of tokens) {
-    const next = Array.from({ length: target.length + 1 }, () => false);
-    for (let j = 0; j <= target.length; j += 1) {
-      if (!reachable[j]) continue;
+    next.fill(0, 0, len + 1);
+    for (let j = 0; j <= len; j += 1) {
+      if (!cur[j]) continue;
       switch (token.kind) {
         case 'lit':
-          if (target[j] === token.ch) next[j + 1] = true;
+          if (target[j] === token.ch) next[j + 1] = 1;
           break;
         case 'any1':
-          if (j < target.length && target[j] !== '/') next[j + 1] = true;
+          if (j < len && target[j] !== '/') next[j + 1] = 1;
           break;
         case 'star':
-          for (let k = j; k <= target.length && (k === j || target[k - 1] !== '/'); k += 1) {
-            next[k] = true;
-          }
+          for (let k = j; k <= len && (k === j || target[k - 1] !== '/'); k += 1) next[k] = 1;
           break;
         case 'globstar':
-          for (let k = j; k <= target.length; k += 1) next[k] = true;
+          for (let k = j; k <= len; k += 1) next[k] = 1;
           break;
         case 'globstarSlash':
           // `**/` spans any leading directories or none: `**/a.ts` matches
           // both `a.ts` and `src/a.ts`.
-          next[j] = true;
-          for (let k = j + 1; k <= target.length; k += 1) {
-            if (target[k - 1] === '/') next[k] = true;
-          }
+          next[j] = 1;
+          for (let k = j + 1; k <= len; k += 1) if (target[k - 1] === '/') next[k] = 1;
           break;
       }
     }
-    reachable = next;
+    const tmp = cur;
+    cur = next;
+    next = tmp;
   }
-  return reachable[target.length];
+  return cur[len] === 1;
+}
+
+function matchGlobVariant(glob: string, target: string): boolean {
+  return matchTokens(tokenizeGlob(glob), target);
 }
 
 /** Slash-less globs match the basename (Cursor's `*.ts` means "any .ts file"). */
 function globMatches(glob: string, file: string): boolean {
   const target = glob.includes('/') ? file : file.slice(file.lastIndexOf('/') + 1);
   return expandBraces(glob).some((variant) => matchGlobVariant(variant, target));
+}
+
+/**
+ * Compile a bounded glob into matchable token variants once (expand braces +
+ * tokenize), cached by glob string. Route selection matches every glob against
+ * every changed file, so without this each glob would re-expand and re-tokenize
+ * per file — O(globs × files) redundant work that stalls large diffs. `null`
+ * marks a glob that fails the length/variant bound (treated as non-matching).
+ */
+function compileBoundedGlob(
+  glob: string,
+  cache: Map<string, GlobToken[][] | null>,
+): GlobToken[][] | null {
+  const cached = cache.get(glob);
+  if (cached !== undefined) return cached;
+  let variants: GlobToken[][] | null = null;
+  if (glob.length <= MAX_GLOB_LENGTH) {
+    const expanded = expandBraces(glob);
+    if (expanded.length <= MAX_GLOB_VARIANTS) variants = expanded.map(tokenizeGlob);
+  }
+  cache.set(glob, variants);
+  return variants;
 }
 
 export interface DiscoveredGuidelines {
@@ -555,6 +592,22 @@ const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
 // per-file guideline cap); only the extracted section is charged to the budget.
 const MAX_RULE_DOC_BYTES = 512 * 1024;
 
+// Cap the ids listed in a routed bundle's omission note. Routes are
+// PR-controlled and can cite hundreds of sections; without this the note itself
+// (dropped + not-found ids) could dwarf the section content and blow the budget.
+const MAX_OMISSION_IDS = 24;
+
+/** Bounded omission note for a routed bundle: at most MAX_OMISSION_IDS ids, then a count. */
+function renderOmissionNote(ids: string[], sourceRel: string): string {
+  if (ids.length === 0) return '';
+  const shown = ids.slice(0, MAX_OMISSION_IDS);
+  const list =
+    ids.length > shown.length
+      ? `${shown.join(', ')}, +${ids.length - shown.length} more`
+      : shown.join(', ');
+  return `\n\n[Omitted from this bundle to stay within budget: ${list} — read from .pr-governance/${sourceRel} if relevant.]`;
+}
+
 /**
  * Read up to MAX_RULE_DOC_BYTES from a governance file via a bounded handle
  * read — never allocating the whole of a repo-controlled, possibly oversized
@@ -787,7 +840,25 @@ export async function discoverGuidelineDocs(
           (other) => other.text.length > entry.text.length && other.text.includes(entry.text),
         ),
     );
-    if (deduped.length === 0) return;
+    if (deduped.length === 0) {
+      // Every cited section was unavailable — disclose the request (invariant #4)
+      // instead of contributing nothing, still bounded.
+      const note = renderOmissionNote(
+        missing.map((section) => `§${section} (not found)`),
+        governanceRelPath,
+      ).trim();
+      if (note && remainingGuidelineBytes > 0) {
+        seen.add(resolved.absolutePath);
+        seenRealPaths.add(resolved.realPath);
+        remainingGuidelineBytes -= Buffer.byteLength(note, 'utf8');
+        docs.push({
+          label: `.pr-governance/${governanceRelPath} (unavailable)`,
+          text: note,
+          relevance: GUIDELINE_RELEVANCE.scoped,
+        });
+      }
+      return;
+    }
     seen.add(resolved.absolutePath);
     seenRealPaths.add(resolved.realPath);
     // Fit whole sections under the per-file cap, skipping any single one too
@@ -805,21 +876,26 @@ export async function discoverGuidelineDocs(
     }
     if (included.length === 0) included.push(deduped[0]);
     const buffer = Buffer.from(included.map((entry) => entry.text).join('\n\n'), 'utf8');
-    // buffer opens with a `#` heading and cap ≥ 1, so a boundary ≥ 1 always exists.
-    const includedBytes = findUtf8Boundary(buffer, Math.min(buffer.length, cap));
     const label = `.pr-governance/${governanceRelPath} (§${included.map((e) => e.section).join(', §')})`;
     // Name the omitted sections (and the source) so a reviewer can read them on
     // demand instead of silently missing a matched rule that didn't fit.
-    const dropped = [
+    const droppedIds = [
       ...deduped.filter((entry) => !included.includes(entry)).map((e) => `§${e.section}`),
       ...missing.map((section) => `§${section} (not found)`),
-      ...(includedBytes < buffer.length ? [`§${included.at(-1)?.section} (truncated)`] : []),
     ];
-    const note =
-      dropped.length > 0
-        ? `\n\n[Omitted from this bundle to stay within budget: ${dropped.join(', ')} — read from .pr-governance/${governanceRelPath} if relevant.]`
-        : '';
-    const text = `${buffer.toString('utf8', 0, includedBytes)}${note}`.trim();
+    // Reserve room for the (bounded) note so body+note stays within the per-file
+    // cap; +32 covers the optional truncation marker. buffer opens with a `#`
+    // heading, so flooring the limit at 1 keeps at least one boundary.
+    const reserve =
+      Buffer.byteLength(renderOmissionNote(droppedIds, governanceRelPath), 'utf8') + 32;
+    const bodyBytes = findUtf8Boundary(buffer, Math.max(1, Math.min(buffer.length, cap - reserve)));
+    const note = renderOmissionNote(
+      bodyBytes < buffer.length
+        ? [...droppedIds, `§${included.at(-1)?.section} (truncated)`]
+        : droppedIds,
+      governanceRelPath,
+    );
+    const text = `${buffer.toString('utf8', 0, bodyBytes)}${note}`.trim();
     remainingGuidelineBytes -= Buffer.byteLength(text, 'utf8');
     docs.push({
       label,
@@ -835,22 +911,30 @@ export async function discoverGuidelineDocs(
     const routingText = await readGovernanceFile('review/rules-for-diff.yaml');
     const routes = routingText ? parseDiffRoutes(routingText) : [];
     if (routes.length > 0) {
-      // Route globs are PR-controlled; bound them like `.mdc` globs so a
-      // pathological pattern can't stall the O(tokens × path) matcher.
-      const boundedGlobMatch = (glob: string, file: string): boolean =>
-        glob.length <= MAX_GLOB_LENGTH &&
-        expandBraces(glob).length <= MAX_GLOB_VARIANTS &&
-        globMatches(glob, file);
+      // Route globs are PR-controlled; bound them like `.mdc` globs and compile
+      // each once so matching every glob against every changed file can't stall.
+      const globCache = new Map<string, GlobToken[][] | null>();
+      const boundedGlobMatch = (glob: string, file: string): boolean => {
+        const variants = compileBoundedGlob(glob, globCache);
+        if (!variants) return false;
+        const target = glob.includes('/') ? file : file.slice(file.lastIndexOf('/') + 1);
+        return variants.some((tokens) => matchTokens(tokens, target));
+      };
       const matched = selectDiffRoutes(routes, changedFiles, boundedGlobMatch);
       const readmeText = await readGovernanceFile('README.md');
       const ruleIdDocs = readmeText ? parseRuleIdDocs(readmeText) : new Map<string, string>();
-      // Rule sections before whole docs: they are the most targeted guidance.
+      // A doc requested whole via `docs:` outranks section extraction of the same
+      // file — the whole doc already contains its sections, and extracting them
+      // first would mark the path seen and suppress the explicit whole-doc load.
+      const wholeDocs = new Set(matched.docs.map((doc) => resolve(cwd, doc)));
       const sectionsByDoc = new Map<string, string[]>();
       for (const id of matched.ruleIds) {
         const parsed = splitRuleId(id);
         const doc = parsed && ruleIdDocs.get(parsed.prefix);
-        if (doc) sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed.section]);
+        if (doc && !wholeDocs.has(resolve(governanceDir, doc)))
+          sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed.section]);
       }
+      // Rule sections first (most targeted), then the whole docs.
       for (const [doc, sections] of sectionsByDoc) await addRuleSections(doc, sections);
       for (const doc of matched.docs)
         await addGuidelineWithReferences(doc, GUIDELINE_RELEVANCE.scoped);
