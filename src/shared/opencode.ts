@@ -1061,18 +1061,17 @@ const SINGLE_SHOT_TOOLS = {
   question: false,
 } as const;
 
+export function isSingleShotModel(model: string): boolean {
+  const { providerID, modelID } = parseModelName(model);
+  return !modelSupportsAgenticTools(providerID, modelID);
+}
+
 /**
  * The tool set for a session: a caller's explicit choice (e.g. verification
  * forces SINGLE_SHOT_TOOLS), else exploration for agentic models and a
  * zero-tool single-shot for models that cannot drive a tool loop (proxied
  * Gemini — see `modelSupportsAgenticTools`). Exported for unit testing (pure).
  */
-/** A model that cannot drive an opencode tool loop runs a zero-tool single-shot. */
-export function isSingleShotModel(model: string): boolean {
-  const { providerID, modelID } = parseModelName(model);
-  return !modelSupportsAgenticTools(providerID, modelID);
-}
-
 export function resolveSessionTools(
   model: string,
   explicit?: Record<string, boolean>,
