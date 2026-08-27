@@ -8,7 +8,7 @@ import {
 } from '@opencode-ai/sdk';
 
 import { isContext7QuotaError } from './context7.ts';
-import { PROVIDERS, supportedModelOptions } from './config.ts';
+import { modelSupportsAgenticTools, PROVIDERS, supportedModelOptions } from './config.ts';
 import { hermeticOpencodeConfigHome, toolSchemaShimPluginUrl } from './opencode-hardening.ts';
 import { BASH_PERMISSIONS } from './shell-policy.ts';
 import { parseModelName } from '@symma/protocol';
@@ -1029,9 +1029,13 @@ export async function runFindingVerification(
 }
 
 // Defense-in-depth tool sets for every review prompt. Default: mutating tools
-// off, exploration (bash/read/grep) on. Single-shot also turns exploration off,
-// forcing ONE model call with no agentic round-trips (used by finding-verification,
-// which judges from the embedded diff).
+// off, exploration (bash/read/grep) on. Single-shot turns off EVERY tool —
+// exploration plus the agentic builtins opencode still offers otherwise
+// (task/todowrite/skill/question) — so opencode sends an empty tools array and
+// the model answers in ONE turn with no function calls. Used by
+// finding-verification, and by any model that cannot drive a tool loop
+// (`modelSupportsAgenticTools`); a lingering `question` tool would also hang a
+// headless run.
 const READONLY_TOOLS = { write: false, edit: false, patch: false } as const;
 const SINGLE_SHOT_TOOLS = {
   write: false,
@@ -1043,7 +1047,26 @@ const SINGLE_SHOT_TOOLS = {
   glob: false,
   list: false,
   webfetch: false,
+  task: false,
+  todowrite: false,
+  skill: false,
+  question: false,
 } as const;
+
+/**
+ * The tool set for a session: a caller's explicit choice (e.g. verification
+ * forces SINGLE_SHOT_TOOLS), else exploration for agentic models and a
+ * zero-tool single-shot for models that cannot drive a tool loop (proxied
+ * Gemini — see `modelSupportsAgenticTools`). Exported for unit testing (pure).
+ */
+export function resolveSessionTools(
+  model: string,
+  explicit?: Record<string, boolean>,
+): Record<string, boolean> {
+  if (explicit) return explicit;
+  const { providerID, modelID } = parseModelName(model);
+  return modelSupportsAgenticTools(providerID, modelID) ? READONLY_TOOLS : SINGLE_SHOT_TOOLS;
+}
 
 async function promptPlanAgent(
   client: OpencodeClient,
@@ -1121,10 +1144,11 @@ async function promptInSessionHoldingSlot(
   log: (msg: string) => void,
   timeoutMs: number,
   onTokenUsage?: TokenUsageRecorder,
-  tools: Record<string, boolean> = READONLY_TOOLS,
+  tools?: Record<string, boolean>,
   abortLabel = label,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
+  const resolvedTools = resolveSessionTools(model, tools);
   // Abortable only while a prompt is in flight (mirrors the pi registry's
   // dispose-time cleanup): a settled session left registered would eat a
   // later same-label abort as a spurious failed-abort log line. Keyed by the
@@ -1147,8 +1171,8 @@ async function promptInSessionHoldingSlot(
         // Defense-in-depth alongside the plan agent and the config-level
         // permission.edit deny: mutating tools are always off. Default keeps
         // bash/read on (the review needs git diff/log/grep); single-shot callers
-        // pass SINGLE_SHOT_TOOLS to turn exploration off for a one-call response.
-        tools,
+        // and non-agentic models (resolvedTools) send an empty tool set.
+        tools: resolvedTools,
         parts: [{ type: 'text', text: prompt }],
       },
     });

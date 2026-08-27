@@ -449,6 +449,20 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
   return modelConfigFor(providerID, modelID)?.promptCache !== false;
 }
 
+/**
+ * Whether a model can drive a multi-turn tool loop through opencode. Gemini
+ * requires the `thought_signature` it returns on a tool call to be echoed back
+ * on the next turn; opencode's OpenAI-compatible adapter (GMI, OpenRouter, and
+ * other proxies fronting Gemini) drops it, so any second turn 400s with
+ * "missing thought_signature in functionCall parts". The native `google`
+ * adapter preserves it, so only proxied Gemini is affected — it falls back to a
+ * zero-tool single-shot review (judged from the embedded diff).
+ */
+export function modelSupportsAgenticTools(providerID: string, modelID: string): boolean {
+  if (providerID === 'google') return true;
+  return !/gemini/i.test(modelID);
+}
+
 // Provider-managed values (poolside's 'default') stay outside this order.
 const REASONING_EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 

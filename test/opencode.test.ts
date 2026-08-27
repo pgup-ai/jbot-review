@@ -7,6 +7,7 @@ import {
   observedAssistantParts,
   parseChangesSinceLastReviewSummary,
   recordOpencodeToolParts,
+  resolveSessionTools,
   sessionEnvDenyKeys,
   registerOpencodeSessionForAbort,
   unregisterOpencodeSessionForAbort,
@@ -199,6 +200,29 @@ describe('buildConfig bash permissions', () => {
   it('wires the shared accident filter into the session config', () => {
     const bash = buildConfig('deepseek', 'deepseek-v4-flash', 'key')?.permission?.bash;
     assert.deepEqual(bash, BASH_PERMISSIONS);
+  });
+});
+
+describe('resolveSessionTools', () => {
+  it('gives proxied Gemini a zero-tool single-shot and other models exploration', () => {
+    // Proxied Gemini can't round-trip thought_signature across turns, so every
+    // agentic builtin is off — opencode then sends an empty tools array.
+    const gemini = resolveSessionTools('openai-compatible/google/gemini-3.7-flash');
+    for (const tool of ['bash', 'read', 'task', 'todowrite', 'skill', 'question']) {
+      assert.equal(gemini[tool], false, `${tool} must be disabled for proxied Gemini`);
+    }
+
+    // The native google adapter preserves the signature, and non-Gemini
+    // models are unaffected — both keep exploration (bash left on).
+    assert.equal(resolveSessionTools('google/gemini-2.5-flash').bash, undefined);
+    assert.equal(resolveSessionTools('openai-compatible/deepseek-ai/DeepSeek-V4').bash, undefined);
+
+    // An explicit set (e.g. verification) is honored verbatim.
+    const explicit = { bash: true };
+    assert.equal(
+      resolveSessionTools('openai-compatible/google/gemini-3.7-flash', explicit),
+      explicit,
+    );
   });
 });
 
