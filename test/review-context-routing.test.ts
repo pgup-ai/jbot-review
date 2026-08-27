@@ -58,6 +58,22 @@ function buildGovernanceRepo(): string {
   return root;
 }
 
+// Minimal single-doc routed repo. README uses the `maps to` phrasing (fms-frontend's),
+// so these also exercise rule-ID resolution end-to-end for that convention.
+function writeRoutedRepo(root: string, opts: { paths?: string; rules: string; doc: string }): void {
+  mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+  mkdirSync(join(root, '.pr-governance/design'), { recursive: true });
+  writeFileSync(
+    join(root, '.pr-governance/README.md'),
+    '## Rule IDs\n- `TS-<n>` maps to `design/TECHNICAL_STANDARDS.md`',
+  );
+  writeFileSync(
+    join(root, '.pr-governance/review/rules-for-diff.yaml'),
+    `entries:\n  - name: s\n    paths: ${opts.paths ?? "['x/**']"}\n    rules: [${opts.rules}]`,
+  );
+  writeFileSync(join(root, '.pr-governance/design/TECHNICAL_STANDARDS.md'), opts.doc);
+}
+
 describe('discoverGuidelineDocs with diff routing', () => {
   const roots: string[] = [];
   after(() => roots.forEach((r) => rmSync(r, { recursive: true, force: true })));
@@ -84,37 +100,55 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.ok(docs.some((d) => d.label.endsWith('SEAMS.md')));
   });
 
-  it('skips an oversized section so a smaller later one still lands, and names the omitted', async () => {
+  it('an oversized first section does not block smaller later ones, and is named omitted', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-cap-'));
     roots.push(root);
-    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
-    mkdirSync(join(root, '.pr-governance/design'), { recursive: true });
-    writeFileSync(
-      join(root, '.pr-governance/README.md'),
-      '## Rule IDs\n- `TS-<n>` — sections of `design/TECHNICAL_STANDARDS.md`',
-    );
-    writeFileSync(
-      join(root, '.pr-governance/review/rules-for-diff.yaml'),
-      "entries:\n  - name: s\n    paths: ['x/**']\n    rules: [TS-1, TS-2, TS-3]",
-    );
-    writeFileSync(
-      join(root, '.pr-governance/design/TECHNICAL_STANDARDS.md'),
-      [
-        '## 1. First',
-        'SECTION-ONE',
-        '## 2. Huge',
-        'over-cap '.repeat(4000), // >24 KB — must be skipped, not stop the scan
+    writeRoutedRepo(root, {
+      rules: 'TS-1, TS-2, TS-3',
+      doc: [
+        '## 1. Huge',
+        'over-cap '.repeat(4000), // >24 KB, cited FIRST — must not starve §2/§3
+        '## 2. Second',
+        'SECTION-TWO',
         '## 3. Third',
         'SECTION-THREE',
       ].join('\n'),
-    );
+    });
+    const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
+      d.label.includes('§'),
+    )!;
+    assert.match(bundle.text, /SECTION-TWO/, 'a later small section lands despite the huge §1');
+    assert.match(bundle.text, /SECTION-THREE/);
+    assert.match(bundle.text, /Omitted from this bundle[\s\S]*§1/, 'the skipped section is named');
+    assert.ok(!bundle.label.includes('§1'));
+  });
+
+  it('names a cited section absent from the source instead of dropping it silently', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-missing-'));
+    roots.push(root);
+    writeRoutedRepo(root, { rules: 'TS-1, TS-9', doc: '## 1. First\nSECTION-ONE' });
     const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
       d.label.includes('§'),
     )!;
     assert.match(bundle.text, /SECTION-ONE/);
-    assert.match(bundle.text, /SECTION-THREE/, 'a later small section lands despite the huge §2');
-    assert.match(bundle.text, /Omitted from this bundle[\s\S]*§2/, 'the skipped section is named');
-    assert.ok(!bundle.label.includes('§2'));
+    assert.match(bundle.text, /§9 \(not found\)/, 'the absent cited section is disclosed');
+    assert.ok(!bundle.label.includes('§9'));
+  });
+
+  it('bounds a pathological route glob so it cannot stall the matcher', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-glob-'));
+    roots.push(root);
+    // A 130-char slash-less glob matches any basename if unbounded; over MAX_GLOB_LENGTH it must not.
+    writeRoutedRepo(root, {
+      paths: `['${'*'.repeat(130)}']`,
+      rules: 'TS-1',
+      doc: '## 1. First\nSECTION-ONE',
+    });
+    const { docs } = await discoverGuidelineDocs(root, ['a.ts']);
+    assert.ok(
+      !docs.some((d) => d.label.includes('§')),
+      'the over-long glob is rejected, no section loads',
+    );
   });
 
   it('falls back to whole-file discovery when no routing file exists', async () => {

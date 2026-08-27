@@ -59,15 +59,16 @@ describe('parseDiffRoutes', () => {
 });
 
 describe('parseRuleIdDocs', () => {
-  it('maps a rule-id prefix to the doc that defines its sections', () => {
+  it('maps a rule-id prefix to its doc across both README phrasings', () => {
+    // Both conventions exist in the wild: fms uses `— sections of`, fms-frontend `maps to`.
     const readme = [
       '## Rule IDs',
       '- `INV-<n>` — sections of `design/INVARIANTS.md`, for example `INV-9.1`',
-      '- `TS-<n>` — sections of `design/TECHNICAL_STANDARDS.md`, for example `TS-13.1`',
+      '- `TS-<n>` maps to `design/TECHNICAL_STANDARDS.md`, for example `TS-13.1`',
     ].join('\n');
     const map = parseRuleIdDocs(readme);
     assert.equal(map.get('INV'), 'design/INVARIANTS.md');
-    assert.equal(map.get('TS'), 'design/TECHNICAL_STANDARDS.md');
+    assert.equal(map.get('TS'), 'design/TECHNICAL_STANDARDS.md'); // not the trailing `TS-13.1`
   });
 });
 

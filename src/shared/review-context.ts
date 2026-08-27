@@ -767,9 +767,17 @@ export async function discoverGuidelineDocs(
     } catch {
       return;
     }
-    const found = sections
-      .map((section) => ({ section, text: extractRuleSection(source, section) }))
-      .filter((entry): entry is { section: string; text: string } => Boolean(entry.text));
+    const extracted = sections.map((section) => ({
+      section,
+      text: extractRuleSection(source, section),
+    }));
+    const found = extracted.filter((entry): entry is { section: string; text: string } =>
+      Boolean(entry.text),
+    );
+    // Cited sections not present in the source (removed, mis-numbered, or past
+    // the MAX_RULE_DOC_BYTES read) — named in the omission note, never dropped
+    // silently.
+    const missing = extracted.filter((entry) => !entry.text).map((entry) => entry.section);
     // A nested child (`### 6.1` under `## 6`) is already inside its selected
     // parent's extract — drop the duplicate so it is neither emitted nor budgeted
     // twice. Strictly-larger guard: equal-length distinct sections keep both.
@@ -782,29 +790,29 @@ export async function discoverGuidelineDocs(
     if (deduped.length === 0) return;
     seen.add(resolved.absolutePath);
     seenRealPaths.add(resolved.realPath);
-    // Fit sections under the per-file cap; skip (don't stop at) one too large so
-    // a smaller later rule still lands. The first is kept even if it alone
-    // exceeds the cap, so a bundle is never empty when sections exist.
+    // Fit whole sections under the per-file cap, skipping any single one too
+    // large so a smaller later rule still lands (an oversized section never
+    // blocks the rest). If every section is over-cap, keep the first so the
+    // bundle is non-empty — it is truncated to the cap below.
     const cap = Math.min(MAX_GUIDELINE_FILE_BYTES, remainingGuidelineBytes);
     const included: typeof deduped = [];
     let used = 0;
     for (const entry of deduped) {
       const bytes = Buffer.byteLength(entry.text, 'utf8') + (included.length > 0 ? 2 : 0);
-      if (included.length > 0 && used + bytes > cap) continue;
+      if (used + bytes > cap) continue;
       included.push(entry);
       used += bytes;
     }
+    if (included.length === 0) included.push(deduped[0]);
     const buffer = Buffer.from(included.map((entry) => entry.text).join('\n\n'), 'utf8');
+    // buffer opens with a `#` heading and cap ≥ 1, so a boundary ≥ 1 always exists.
     const includedBytes = findUtf8Boundary(buffer, Math.min(buffer.length, cap));
-    if (includedBytes <= 0) {
-      markBudgetExhausted();
-      return;
-    }
     const label = `.pr-governance/${governanceRelPath} (§${included.map((e) => e.section).join(', §')})`;
     // Name the omitted sections (and the source) so a reviewer can read them on
     // demand instead of silently missing a matched rule that didn't fit.
     const dropped = [
       ...deduped.filter((entry) => !included.includes(entry)).map((e) => `§${e.section}`),
+      ...missing.map((section) => `§${section} (not found)`),
       ...(includedBytes < buffer.length ? [`§${included.at(-1)?.section} (truncated)`] : []),
     ];
     const note =
@@ -827,7 +835,13 @@ export async function discoverGuidelineDocs(
     const routingText = await readGovernanceFile('review/rules-for-diff.yaml');
     const routes = routingText ? parseDiffRoutes(routingText) : [];
     if (routes.length > 0) {
-      const matched = selectDiffRoutes(routes, changedFiles, globMatches);
+      // Route globs are PR-controlled; bound them like `.mdc` globs so a
+      // pathological pattern can't stall the O(tokens × path) matcher.
+      const boundedGlobMatch = (glob: string, file: string): boolean =>
+        glob.length <= MAX_GLOB_LENGTH &&
+        expandBraces(glob).length <= MAX_GLOB_VARIANTS &&
+        globMatches(glob, file);
+      const matched = selectDiffRoutes(routes, changedFiles, boundedGlobMatch);
       const readmeText = await readGovernanceFile('README.md');
       const ruleIdDocs = readmeText ? parseRuleIdDocs(readmeText) : new Map<string, string>();
       // Rule sections before whole docs: they are the most targeted guidance.

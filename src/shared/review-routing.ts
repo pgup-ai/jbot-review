@@ -96,12 +96,13 @@ function splitTopLevel(inner: string): string[] {
 
 /**
  * Parse a governance README's rule-ID declaration into `PREFIX → doc path`
- * (the path is relative to the README's directory). Recognizes the documented
- * form, e.g. `` `TS-<n>` — sections of `design/TECHNICAL_STANDARDS.md` ``.
+ * (the path is relative to the README's directory). Matches a backticked
+ * `` `PREFIX-<n>` `` followed on the same line by the first backticked `.md`
+ * path — covering both phrasings in the wild (`— sections of`, `maps to`).
  */
 export function parseRuleIdDocs(readmeText: string): Map<string, string> {
   const map = new Map<string, string>();
-  const pattern = /`([A-Za-z][A-Za-z0-9]*)-<n>`[^`\n]*?sections of[ \t]*`([^`\n]+\.md)`/gi;
+  const pattern = /`([A-Za-z][A-Za-z0-9]*)-<n>`[^`\n]*?`([^`\n]+\.md)`/gi;
   for (const match of readmeText.replace(/\r\n/g, '\n').matchAll(pattern))
     map.set(match[1].toUpperCase(), match[2].trim());
   return map;
