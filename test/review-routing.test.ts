@@ -155,5 +155,15 @@ describe('extractRuleSection', () => {
       'REAL',
     ].join('\n');
     assert.equal(extractRuleSection(info, '9'), '## 9. Real\nREAL');
+    // A shorter ``` does not close a longer ```` fence.
+    const longer = ['# T', '````', '## 9. A', '```', '## 9. B', '````', '## 9. Real', 'REAL'].join(
+      '\n',
+    );
+    assert.equal(extractRuleSection(longer, '9'), '## 9. Real\nREAL');
+    // A 4-space-indented marker is indented code, not a fence opener.
+    assert.equal(
+      extractRuleSection(['# T', '    ```', '## 9. Real', 'REAL'].join('\n'), '9'),
+      '## 9. Real\nREAL',
+    );
   });
 });

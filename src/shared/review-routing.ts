@@ -152,20 +152,29 @@ export function selectDiffRoutes(
  */
 export function extractRuleSection(docText: string, section: string): string | undefined {
   const lines = docText.replace(/\r\n/g, '\n').split('\n');
-  // Headings inside ``` / ~~~ fences are examples, not policy — skip them. A
-  // fence closes only on a bare marker of the SAME family (no info-string
-  // trailing content), so ` ```example ` opens but does not close.
+  // Headings inside ``` / ~~~ fences are examples, not policy — skip them.
+  // CommonMark fence rules: at most 3 spaces of indent; a fence closes only on a
+  // bare run of the SAME character at least as long as the opener — so
+  // ` ```example `, a `~~~` in a ``` block, and a shorter ``` in a ```` block all
+  // fail to close it.
   const fenced: boolean[] = [];
   let fenceChar: '`' | '~' | undefined;
+  let fenceLen = 0;
   for (const line of lines) {
-    const m = line.match(/^\s*(```+|~~~+)(.*)$/);
-    const marker = m?.[1]?.[0] as '`' | '~' | undefined;
+    const m = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    const run = m?.[1];
+    const char = run?.[0] as '`' | '~' | undefined;
     if (fenceChar === undefined) {
-      fenced.push(marker !== undefined);
-      fenceChar = marker;
+      fenced.push(char !== undefined);
+      if (char) {
+        fenceChar = char;
+        fenceLen = run!.length;
+      }
     } else {
       fenced.push(true);
-      if (marker === fenceChar && m![2].trim() === '') fenceChar = undefined;
+      if (char === fenceChar && run!.length >= fenceLen && m![2].trim() === '') {
+        fenceChar = undefined;
+      }
     }
   }
   const heading = (i: number): { level: number; number?: string } | undefined => {
