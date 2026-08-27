@@ -102,8 +102,11 @@ export function selectDiffRoutes(
 /**
  * Extract the section a numbered heading owns. Sections are numbered headings
  * (`## 6. Title`, `### 6.2 Title`); a rule's section number is the heading's
- * leading numeric token (a trailing dot on whole numbers is ignored). Returns
- * the heading through just before the next heading of the same or higher level.
+ * leading numeric token (a trailing dot on whole numbers is ignored). Bounded
+ * by the `#` level, not the number: a `##` section runs to the next `##`/`#`,
+ * so its deeper (`###`) subsections are included, while flat same-level
+ * headings (`## 16` then `## 16.2`) stay separate — which is what a doc that
+ * cites both `TS-16` and `TS-16.2` wants (no duplicated body).
  */
 export function extractRuleSection(docText: string, section: string): string | undefined {
   const lines = docText.split('\n');
@@ -126,5 +129,5 @@ export function extractRuleSection(docText: string, section: string): string | u
       break;
     }
   }
-  return lines.slice(start, end).join('\n').trim() || undefined;
+  return lines.slice(start, end).join('\n').trim();
 }

@@ -92,23 +92,28 @@ describe('selectDiffRoutes', () => {
 describe('extractRuleSection', () => {
   const doc = [
     '# Technical Standards',
-    '## 6. Test helpers',
+    '## 6. Test helpers', // nested: `###` children
     'whole-number section body',
     '### 6.2 Placement',
     'subsection body',
-    '### 6.3 Next sub',
-    'other',
-    '## 7. Repository',
-    'seven body',
+    '## 16. AI', // flat: `##` "children"
+    'ai body',
+    '## 16.2 Parity',
+    'parity body',
+    '## 17. Repository',
+    'seventeen body',
   ].join('\n');
 
-  it('extracts a section through the next same-or-higher heading', () => {
-    // Whole number: keeps its `###` children, stops at the next `##`.
+  it('extracts a section bounded by heading level, not number', () => {
+    // Nested: a `##` section keeps its deeper `###` children, stops at the next `##`.
     const whole = extractRuleSection(doc, '6')!;
     assert.match(whole, /^## 6\. Test helpers[\s\S]*### 6\.2 Placement/);
-    assert.ok(!whole.includes('## 7. Repository'));
-    // Dotted subsection: stops at the next same-level heading.
+    assert.ok(!whole.includes('## 16. AI'));
     assert.equal(extractRuleSection(doc, '6.2'), '### 6.2 Placement\nsubsection body');
+    // Flat: `## 16` and `## 16.2` are siblings — §16 must NOT swallow §16.2, or a
+    // route citing both TS-16 and TS-16.2 would duplicate the body.
+    assert.equal(extractRuleSection(doc, '16'), '## 16. AI\nai body');
+    assert.equal(extractRuleSection(doc, '16.2'), '## 16.2 Parity\nparity body');
     // Absent number.
     assert.equal(extractRuleSection(doc, '99'), undefined);
   });

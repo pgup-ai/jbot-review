@@ -555,6 +555,16 @@ const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
 // per-file guideline cap); only the extracted section is charged to the budget.
 const MAX_RULE_DOC_BYTES = 512 * 1024;
 
+/** Whole-file read to a UTF-8 boundary within MAX_RULE_DOC_BYTES. */
+async function readWholeBounded(realPath: string): Promise<string> {
+  const buffer = await readFile(realPath);
+  return buffer.toString(
+    'utf8',
+    0,
+    findUtf8Boundary(buffer, Math.min(buffer.length, MAX_RULE_DOC_BYTES)),
+  );
+}
+
 export async function discoverGuidelineDocs(
   cwd: string,
   changedFiles: string[] = [],
@@ -593,12 +603,7 @@ export async function discoverGuidelineDocs(
     const resolved = await resolveExistingInsideWorkspace(resolve(governanceDir, relativePath));
     if (!resolved) return undefined;
     try {
-      const buffer = await readFile(resolved.realPath);
-      return buffer.toString(
-        'utf8',
-        0,
-        findUtf8Boundary(buffer, Math.min(buffer.length, MAX_RULE_DOC_BYTES)),
-      );
+      return await readWholeBounded(resolved.realPath);
     } catch {
       return undefined;
     }
@@ -746,12 +751,7 @@ export async function discoverGuidelineDocs(
     if (!resolved || seenRealPaths.has(resolved.realPath)) return;
     let source: string;
     try {
-      const buffer = await readFile(resolved.realPath);
-      source = buffer.toString(
-        'utf8',
-        0,
-        findUtf8Boundary(buffer, Math.min(buffer.length, MAX_RULE_DOC_BYTES)),
-      );
+      source = await readWholeBounded(resolved.realPath);
     } catch {
       return;
     }
