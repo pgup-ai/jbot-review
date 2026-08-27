@@ -1134,7 +1134,12 @@ function capRenderedBlock(text: string, maxBytes: number): string {
   const buffer = Buffer.from(text, 'utf8');
   if (buffer.length <= maxBytes) return text;
   const marker = '\n\n[Guidance truncated to stay within the review budget.]';
-  const bodyBytes = findUtf8Boundary(buffer, Math.max(0, maxBytes - Buffer.byteLength(marker)));
+  // No room for the marker (tiny cap): truncate the text itself so the result
+  // never exceeds maxBytes.
+  if (maxBytes <= Buffer.byteLength(marker)) {
+    return buffer.toString('utf8', 0, findUtf8Boundary(buffer, maxBytes));
+  }
+  const bodyBytes = findUtf8Boundary(buffer, maxBytes - Buffer.byteLength(marker));
   return `${buffer.toString('utf8', 0, bodyBytes).trimEnd()}${marker}`;
 }
 
@@ -1276,13 +1281,10 @@ export function formatFinderGuidelines(
             )}${hidden > 0 ? ` and ${hidden} more omitted file(s)` : ''}. Read any that apply to your changed files.`;
     noteText = `\n\n${['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n')}`;
   }
-  // Cap the docs to leave room for the budget note, so the omission disclosure
-  // survives within the finder cap instead of being cut off.
-  const cappedDocs = capRenderedBlock(
-    docsText,
-    Math.max(0, capBytes - Buffer.byteLength(noteText, 'utf8')),
-  );
-  return capRenderedBlock(`${cappedDocs}${noteText}`, capBytes);
+  // Selection already reserved FINDER_NOTE_RESERVE for the note, so docs + note
+  // fit without truncating a selected doc; the final cap is a backstop for the
+  // one intentionally-oversized mandatory doc.
+  return capRenderedBlock(`${docsText}${noteText}`, capBytes);
 }
 
 /**

@@ -342,4 +342,11 @@ describe('rendered guideline block byte caps', () => {
         24 * 1024,
     );
   });
+
+  it('never exceeds even a cap smaller than the truncation marker', () => {
+    for (const cap of [0, 5, 30]) {
+      const out = formatFinderGuidelines(discovered, { capBytes: cap });
+      assert.ok(Buffer.byteLength(out, 'utf8') <= cap, `<= ${cap}`);
+    }
+  });
 });

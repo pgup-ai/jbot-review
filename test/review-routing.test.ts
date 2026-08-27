@@ -143,5 +143,17 @@ describe('extractRuleSection', () => {
     // A `~~~` inside a ``` fence is a different family and must not close it.
     const mixed = ['# T', '```', '~~~', '## 9. Ex', '~~~', '```', '## 9. Real', 'REAL'].join('\n');
     assert.equal(extractRuleSection(mixed, '9'), '## 9. Real\nREAL');
+    // An info-string line (```example) opens but does not close a fence.
+    const info = [
+      '# T',
+      '```',
+      '## 9. A',
+      '```example',
+      '## 9. B',
+      '```',
+      '## 9. Real',
+      'REAL',
+    ].join('\n');
+    assert.equal(extractRuleSection(info, '9'), '## 9. Real\nREAL');
   });
 });

@@ -152,19 +152,20 @@ export function selectDiffRoutes(
  */
 export function extractRuleSection(docText: string, section: string): string | undefined {
   const lines = docText.replace(/\r\n/g, '\n').split('\n');
-  // Headings inside ``` / ~~~ fences are examples, not policy — skip them. Only
-  // the same delimiter family closes a fence, so a `~~~` inside a ``` block does
-  // not end it (and vice versa).
+  // Headings inside ``` / ~~~ fences are examples, not policy — skip them. A
+  // fence closes only on a bare marker of the SAME family (no info-string
+  // trailing content), so ` ```example ` opens but does not close.
   const fenced: boolean[] = [];
   let fenceChar: '`' | '~' | undefined;
   for (const line of lines) {
-    const marker = line.match(/^\s*(```+|~~~+)/)?.[1]?.[0] as '`' | '~' | undefined;
+    const m = line.match(/^\s*(```+|~~~+)(.*)$/);
+    const marker = m?.[1]?.[0] as '`' | '~' | undefined;
     if (fenceChar === undefined) {
       fenced.push(marker !== undefined);
       fenceChar = marker;
     } else {
       fenced.push(true);
-      if (marker === fenceChar) fenceChar = undefined;
+      if (marker === fenceChar && m![2].trim() === '') fenceChar = undefined;
     }
   }
   const heading = (i: number): { level: number; number?: string } | undefined => {
