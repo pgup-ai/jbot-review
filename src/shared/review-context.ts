@@ -635,19 +635,21 @@ const MAX_RULE_DOC_BYTES = 512 * 1024;
 const MAX_OMISSION_NOTE_BYTES = 1024;
 const MAX_LABEL_LIST_BYTES = 512;
 
-/** Join items with ", " until maxBytes, summing the rest as "+N more". */
+/** Join items with ", " within maxBytes (a hard cap), summing the rest as "+N more". */
 function boundedJoin(items: string[], maxBytes: number): string {
+  // Reserve room for a trailing ", +N more" so appending it can't breach the cap.
+  const budget = maxBytes - 16;
   const shown: string[] = [];
   let used = 0;
   for (const item of items) {
-    used += (shown.length > 0 ? 2 : 0) + Buffer.byteLength(item, 'utf8');
-    if (used > maxBytes) break;
+    const add = (shown.length > 0 ? 2 : 0) + Buffer.byteLength(item, 'utf8');
+    if (used + add > budget) break;
     shown.push(item);
+    used += add;
   }
   const more = items.length - shown.length;
-  return more > 0
-    ? `${shown.length > 0 ? `${shown.join(', ')}, ` : ''}+${more} more`
-    : shown.join(', ');
+  if (more === 0) return shown.join(', ');
+  return shown.length > 0 ? `${shown.join(', ')}, +${more} more` : `+${more} more`;
 }
 
 function renderOmissionNote(ids: string[], sourceRel: string): string {
