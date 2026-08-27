@@ -401,8 +401,11 @@ describe('selectFinderGuidelineText', () => {
       complianceRuns: false,
     });
     const note = text.split('### Review guidance budget')[1] ?? '';
+    // Docs are kept whole; the trailing note is bounded and discloses omissions
+    // (its tail may be cut by the hard render cap when docs fill the budget).
+    assert.ok(Buffer.byteLength(text, 'utf8') <= 24 * 1024, 'render stays within the finder cap');
     assert.ok(Buffer.byteLength(note, 'utf8') < 3 * 1024, `note is ${note.length} chars`);
-    assert.match(note, /and \d+ more omitted file\(s\)/);
+    assert.match(note, /omitted file\(s\)/, 'omissions are disclosed');
   });
 
   it('names unloaded referenced docs and survives an oversized first label', () => {

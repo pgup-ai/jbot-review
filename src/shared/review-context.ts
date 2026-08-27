@@ -2,6 +2,13 @@ import { access, open, readdir, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 import { GIT_DIFF_ARGS } from './git.ts';
+import {
+  extractRuleSection,
+  parseDiffRoutes,
+  parseRuleIdDocs,
+  selectDiffRoutes,
+  splitRuleId,
+} from './review-routing.ts';
 
 export interface ReviewCommit {
   sha: string;
@@ -59,6 +66,10 @@ export interface GuidelineDoc {
 const MAX_GLOB_LENGTH = 128;
 const MAX_GLOBS_PER_DOC = 64;
 const MAX_GLOB_VARIANTS = 64;
+// Token-work ceiling for one routing pass (~sub-second). Real FMS is ~85M;
+// beyond this, route selection fails open (unmatched routes just don't apply,
+// and whole-file discovery still supplies guidance).
+const MAX_ROUTE_MATCH_OPS = 300_000_000;
 
 /** Cuts an unquoted trailing `# comment` — valid YAML Cursor tolerates. */
 function stripYamlComment(value: string): string {
@@ -202,53 +213,131 @@ function tokenizeGlob(glob: string): GlobToken[] {
   return tokens;
 }
 
+// Reusable reachability rows: route matching runs matchTokens over every
+// (glob, file) pair, so allocating a fresh array per token per call dominated
+// large diffs. Node is single-threaded and matchTokens never awaits, so shared
+// scratch grown to the longest path seen is safe and keeps the loop alloc-free.
+let matchRowA = new Uint8Array(0);
+let matchRowB = new Uint8Array(0);
+
+// Token-work counter for the routing work budget (see MAX_ROUTE_MATCH_OPS);
+// reset by the routing caller before each pass.
+let matchOps = 0;
+
 /**
  * Linear-time glob match: one reachability pass per token over the target,
- * O(tokens × length) with no regex engine, so a hostile pattern cannot make
- * matching backtrack — only take a proportionally longer straight walk.
+ * O(tokens × length) with no regex engine. Wildcard propagation is a single
+ * left-to-right sweep with a carry flag — NOT an inner scan from every reachable
+ * index — so an adversarial pattern (triple-star, or globstar-then-star on a
+ * deep path) stays linear instead of going quadratic per glob/file pair.
  */
-function matchGlobVariant(glob: string, target: string): boolean {
-  const tokens = tokenizeGlob(glob);
-  let reachable = Array.from({ length: target.length + 1 }, () => false);
-  reachable[0] = true;
+function matchTokens(tokens: GlobToken[], target: string): boolean {
+  const len = target.length;
+  if (matchRowA.length < len + 1) {
+    matchRowA = new Uint8Array(len + 1);
+    matchRowB = new Uint8Array(len + 1);
+  }
+  let cur = matchRowA;
+  let next = matchRowB;
+  cur.fill(0, 0, len + 1);
+  cur[0] = 1;
   for (const token of tokens) {
-    const next = Array.from({ length: target.length + 1 }, () => false);
-    for (let j = 0; j <= target.length; j += 1) {
-      if (!reachable[j]) continue;
-      switch (token.kind) {
-        case 'lit':
-          if (target[j] === token.ch) next[j + 1] = true;
-          break;
-        case 'any1':
-          if (j < target.length && target[j] !== '/') next[j + 1] = true;
-          break;
-        case 'star':
-          for (let k = j; k <= target.length && (k === j || target[k - 1] !== '/'); k += 1) {
-            next[k] = true;
+    matchOps += len;
+    next.fill(0, 0, len + 1);
+    switch (token.kind) {
+      // A literal/single-char token can empty the frontier; when it does, no
+      // suffix can rematch, so bail immediately. This keeps a non-matching glob
+      // (the common case across many changed files) O(prefix), not O(tokens).
+      case 'lit': {
+        let hit = false;
+        for (let j = 0; j < len; j += 1)
+          if (cur[j] && target[j] === token.ch) {
+            next[j + 1] = 1;
+            hit = true;
           }
-          break;
-        case 'globstar':
-          for (let k = j; k <= target.length; k += 1) next[k] = true;
-          break;
-        case 'globstarSlash':
-          // `**/` spans any leading directories or none: `**/a.ts` matches
-          // both `a.ts` and `src/a.ts`.
-          next[j] = true;
-          for (let k = j + 1; k <= target.length; k += 1) {
-            if (target[k - 1] === '/') next[k] = true;
+        if (!hit) return false;
+        break;
+      }
+      case 'any1': {
+        let hit = false;
+        for (let j = 0; j < len; j += 1)
+          if (cur[j] && target[j] !== '/') {
+            next[j + 1] = 1;
+            hit = true;
           }
-          break;
+        if (!hit) return false;
+        break;
+      }
+      case 'star': {
+        // Carry within the path segment only — a star never crosses a `/`.
+        let reach = false;
+        for (let k = 0; k <= len; k += 1) {
+          if (cur[k]) reach = true;
+          if (reach) next[k] = 1;
+          if (k < len && target[k] === '/') reach = false;
+        }
+        break;
+      }
+      case 'globstar': {
+        let reach = false;
+        for (let k = 0; k <= len; k += 1) {
+          if (cur[k]) reach = true;
+          if (reach) next[k] = 1;
+        }
+        break;
+      }
+      case 'globstarSlash': {
+        // `**/` spans any leading directories or none: reachable at the start
+        // index (zero dirs) and after each subsequent `/`.
+        let reach = false;
+        for (let k = 0; k <= len; k += 1) {
+          if (cur[k]) {
+            reach = true;
+            next[k] = 1;
+          } else if (reach && k > 0 && target[k - 1] === '/') {
+            next[k] = 1;
+          }
+        }
+        break;
       }
     }
-    reachable = next;
+    const tmp = cur;
+    cur = next;
+    next = tmp;
   }
-  return reachable[target.length];
+  return cur[len] === 1;
+}
+
+function matchGlobVariant(glob: string, target: string): boolean {
+  return matchTokens(tokenizeGlob(glob), target);
 }
 
 /** Slash-less globs match the basename (Cursor's `*.ts` means "any .ts file"). */
 function globMatches(glob: string, file: string): boolean {
   const target = glob.includes('/') ? file : file.slice(file.lastIndexOf('/') + 1);
   return expandBraces(glob).some((variant) => matchGlobVariant(variant, target));
+}
+
+/**
+ * Compile a bounded glob into matchable token variants once (expand braces +
+ * tokenize), cached by glob string. Route selection matches every glob against
+ * every changed file, so without this each glob would re-expand and re-tokenize
+ * per file — O(globs × files) redundant work that stalls large diffs. `null`
+ * marks a glob that fails the length/variant bound (treated as non-matching).
+ */
+function compileBoundedGlob(
+  glob: string,
+  cache: Map<string, GlobToken[][] | null>,
+): GlobToken[][] | null {
+  const cached = cache.get(glob);
+  if (cached !== undefined) return cached;
+  let variants: GlobToken[][] | null = null;
+  if (glob.length <= MAX_GLOB_LENGTH) {
+    const expanded = expandBraces(glob);
+    if (expanded.length <= MAX_GLOB_VARIANTS) variants = expanded.map(tokenizeGlob);
+  }
+  cache.set(glob, variants);
+  return variants;
 }
 
 export interface DiscoveredGuidelines {
@@ -544,6 +633,56 @@ const SCOPED_GUIDELINE_FILES = [
 const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
 const MAX_GUIDELINE_FILE_BYTES = 24 * 1024;
 const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
+// A rule doc is read in full to locate a section (which can sit past the
+// per-file guideline cap); only the extracted section is charged to the budget.
+const MAX_RULE_DOC_BYTES = 512 * 1024;
+
+// Byte-cap the id lists a routed bundle renders (label and omission note).
+// Routes are PR-controlled and can cite hundreds of sections with arbitrarily
+// long dotted ids, so both must fit a fixed byte budget or the fragment could
+// dwarf its section content and blow the prompt budget.
+const MAX_OMISSION_NOTE_BYTES = 1024;
+const MAX_LABEL_LIST_BYTES = 512;
+
+/** Join items with ", " within maxBytes (for caps that fit the summary), summing the rest as "+N more". */
+function boundedJoin(items: string[], maxBytes: number): string {
+  // Reserve room for a trailing ", +N more" so appending it can't breach the cap.
+  const budget = maxBytes - 16;
+  const shown: string[] = [];
+  let used = 0;
+  for (const item of items) {
+    const add = (shown.length > 0 ? 2 : 0) + Buffer.byteLength(item, 'utf8');
+    if (used + add > budget) break;
+    shown.push(item);
+    used += add;
+  }
+  const more = items.length - shown.length;
+  if (more === 0) return shown.join(', ');
+  return shown.length > 0 ? `${shown.join(', ')}, +${more} more` : `+${more} more`;
+}
+
+function renderOmissionNote(ids: string[], sourceRel: string): string {
+  if (ids.length === 0) return '';
+  return `\n\n[Omitted from this bundle to stay within budget: ${boundedJoin(ids, MAX_OMISSION_NOTE_BYTES)} — read from .pr-governance/${sourceRel} if relevant.]`;
+}
+
+/**
+ * Read up to MAX_RULE_DOC_BYTES from a governance file via a bounded handle
+ * read — never allocating the whole of a repo-controlled, possibly oversized
+ * file — and cut to a UTF-8 boundary.
+ */
+async function readWholeBounded(realPath: string): Promise<string> {
+  const handle = await open(realPath, 'r');
+  try {
+    const byteLimit = Math.min((await handle.stat()).size, MAX_RULE_DOC_BYTES);
+    if (byteLimit <= 0) return '';
+    const buffer = Buffer.alloc(byteLimit);
+    const { bytesRead } = await handle.read(buffer, 0, byteLimit, 0);
+    return buffer.toString('utf8', 0, findUtf8Boundary(buffer, bytesRead));
+  } finally {
+    await handle.close();
+  }
+}
 
 export async function discoverGuidelineDocs(
   cwd: string,
@@ -570,6 +709,20 @@ export async function discoverGuidelineDocs(
       const realPath = await realpath(absolutePath);
       if (!isInsideDirectory(workspaceRoot, realPath)) return undefined;
       return { absolutePath, realPath };
+    } catch {
+      return undefined;
+    }
+  }
+
+  const governanceDir = resolve(cwd, '.pr-governance');
+
+  // Whole-file read of a governance file (routing config, README, or rule doc),
+  // independent of the guideline budget — see MAX_RULE_DOC_BYTES.
+  async function readGovernanceFile(relativePath: string): Promise<string | undefined> {
+    const resolved = await resolveExistingInsideWorkspace(resolve(governanceDir, relativePath));
+    if (!resolved) return undefined;
+    try {
+      return await readWholeBounded(resolved.realPath);
     } catch {
       return undefined;
     }
@@ -707,6 +860,182 @@ export async function discoverGuidelineDocs(
     }
   }
 
+  // Load the matched sections of a rule doc as one synthetic guideline, then
+  // mark the source seen so the whole (often large) file is not also loaded.
+  async function addRuleSections(governanceRelPath: string, sections: string[]): Promise<void> {
+    if (sections.length === 0) return;
+    if (remainingGuidelineBytes <= 0) {
+      markBudgetExhausted();
+      return;
+    }
+    const resolved = await resolveExistingInsideWorkspace(
+      resolve(governanceDir, governanceRelPath),
+    );
+    if (!resolved || seenRealPaths.has(resolved.realPath)) return;
+    let source: string;
+    try {
+      source = await readWholeBounded(resolved.realPath);
+    } catch {
+      return;
+    }
+    const extracted = sections.map((section) => ({
+      section,
+      text: extractRuleSection(source, section),
+    }));
+    const found = extracted.filter((entry): entry is { section: string; text: string } =>
+      Boolean(entry.text),
+    );
+    // Cited sections not present in the source (removed, mis-numbered, or past
+    // the MAX_RULE_DOC_BYTES read) — named in the omission note, never dropped
+    // silently.
+    const missing = extracted.filter((entry) => !entry.text).map((entry) => entry.section);
+    // A nested child (`### 6.1` under `## 6`) is already inside its selected
+    // parent's extract — drop the duplicate so it is neither emitted nor budgeted
+    // twice. Strictly-larger guard: equal-length distinct sections keep both.
+    const deduped = found.filter(
+      (entry) =>
+        !found.some(
+          (other) => other.text.length > entry.text.length && other.text.includes(entry.text),
+        ),
+    );
+    if (deduped.length === 0) {
+      // Every cited section was unavailable — disclose the request (invariant #4)
+      // instead of contributing nothing (missing is non-empty here). Skip rather
+      // than overshoot when the bounded note won't fit the remaining budget.
+      const note = renderOmissionNote(
+        missing.map((section) => `§${section} (not found)`),
+        governanceRelPath,
+      ).trim();
+      const noteBytes = Buffer.byteLength(note, 'utf8');
+      if (noteBytes > remainingGuidelineBytes) {
+        markBudgetExhausted();
+        return;
+      }
+      seen.add(resolved.absolutePath);
+      seenRealPaths.add(resolved.realPath);
+      remainingGuidelineBytes -= noteBytes;
+      docs.push({
+        label: `.pr-governance/${governanceRelPath} (unavailable)`,
+        text: note,
+        relevance: GUIDELINE_RELEVANCE.scoped,
+      });
+      return;
+    }
+    seen.add(resolved.absolutePath);
+    seenRealPaths.add(resolved.realPath);
+    // Fit whole sections under the per-file cap, skipping any single one too
+    // large so a smaller later rule still lands (an oversized section never
+    // blocks the rest). If every section is over-cap, keep the first so the
+    // bundle is non-empty — it is truncated to the cap below.
+    const cap = Math.min(MAX_GUIDELINE_FILE_BYTES, remainingGuidelineBytes);
+    const included: typeof deduped = [];
+    let used = 0;
+    for (const entry of deduped) {
+      const bytes = Buffer.byteLength(entry.text, 'utf8') + (included.length > 0 ? 2 : 0);
+      if (used + bytes > cap) continue;
+      included.push(entry);
+      used += bytes;
+    }
+    if (included.length === 0) included.push(deduped[0]);
+    const buffer = Buffer.from(included.map((entry) => entry.text).join('\n\n'), 'utf8');
+    const label = `.pr-governance/${governanceRelPath} (${boundedJoin(
+      included.map((e) => `§${e.section}`),
+      MAX_LABEL_LIST_BYTES,
+    )})`;
+    // Name the omitted sections (and the source) so a reviewer can read them on
+    // demand instead of silently missing a matched rule that didn't fit.
+    const droppedIds = [
+      ...deduped.filter((entry) => !included.includes(entry)).map((e) => `§${e.section}`),
+      ...missing.map((section) => `§${section} (not found)`),
+    ];
+    const notePlain = renderOmissionNote(droppedIds, governanceRelPath);
+    let bodyBytes: number;
+    let note: string;
+    if (buffer.length + Buffer.byteLength(notePlain, 'utf8') <= cap) {
+      // The whole bundle fits — no truncation, no truncation marker.
+      bodyBytes = buffer.length;
+      note = notePlain;
+    } else {
+      // Truncate, reserving the (longer) truncation note. Near total exhaustion
+      // the note alone can exceed what's left: skip rather than overshoot.
+      const noteTruncated = renderOmissionNote(
+        [...droppedIds, `§${included.at(-1)?.section} (truncated)`],
+        governanceRelPath,
+      );
+      const reserve = Buffer.byteLength(noteTruncated, 'utf8');
+      if (cap <= reserve) {
+        markBudgetExhausted();
+        return;
+      }
+      bodyBytes = findUtf8Boundary(buffer, cap - reserve);
+      note = noteTruncated;
+    }
+    const text = `${buffer.toString('utf8', 0, bodyBytes)}${note}`.trim();
+    remainingGuidelineBytes -= Buffer.byteLength(text, 'utf8');
+    docs.push({
+      label,
+      text,
+      relevance: GUIDELINE_RELEVANCE.scoped,
+    });
+  }
+
+  // Diff-scoped routing first, so its rule sections and docs win the budget over
+  // the generic files below (see review-routing.ts). Absent or malformed → that
+  // whole-file discovery is the fallback.
+  {
+    const routingText = await readGovernanceFile('review/rules-for-diff.yaml');
+    const routes = routingText ? parseDiffRoutes(routingText) : [];
+    if (routes.length > 0) {
+      // Route globs are PR-controlled; bound them like `.mdc` globs, compile each
+      // once, and fail open past a total work budget so matching can't stall.
+      const globCache = new Map<string, GlobToken[][] | null>();
+      matchOps = 0;
+      const boundedGlobMatch = (glob: string, file: string): boolean => {
+        const variants = compileBoundedGlob(glob, globCache);
+        if (!variants) return false;
+        const target = glob.includes('/') ? file : file.slice(file.lastIndexOf('/') + 1);
+        for (const tokens of variants) {
+          // Check per variant, not per glob: each variant is a full token pass, so
+          // a 64-variant glob could otherwise overshoot the ceiling substantially.
+          if (matchOps > MAX_ROUTE_MATCH_OPS) return false;
+          if (matchTokens(tokens, target)) return true;
+        }
+        return false;
+      };
+      let matched = selectDiffRoutes(routes, changedFiles, boundedGlobMatch);
+      // If the work budget was blown mid-scan, the matched set is a partial,
+      // order-dependent subset — discard it whole so the outcome is deterministic
+      // (whole-file discovery below still supplies guidance) rather than silently
+      // dropping whichever routes happened to be scanned last.
+      if (matchOps > MAX_ROUTE_MATCH_OPS) matched = { docs: [], ruleIds: [] };
+      const readmeText = await readGovernanceFile('README.md');
+      const ruleIdDocs = readmeText ? parseRuleIdDocs(readmeText) : new Map<string, string>();
+      const wholeDocRealPaths = new Set<string>();
+      for (const doc of matched.docs) {
+        const resolved = await resolveExistingInsideWorkspace(resolve(cwd, doc));
+        if (resolved) wholeDocRealPaths.add(resolved.realPath);
+      }
+      const sectionsByDoc = new Map<string, string[]>();
+      for (const id of matched.ruleIds) {
+        const parsed = splitRuleId(id);
+        const doc = parsed && ruleIdDocs.get(parsed.prefix);
+        if (doc) sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed.section]);
+      }
+      // A doc requested whole via `docs:` outranks section extraction of the same
+      // file (the whole doc already contains its sections). Compare real paths so
+      // a symlinked docs: entry still matches; extracting first would mark the
+      // path seen and suppress the explicit whole-doc load. Sections (most
+      // targeted) load first, then the whole docs.
+      for (const [doc, sections] of sectionsByDoc) {
+        const resolved = await resolveExistingInsideWorkspace(resolve(governanceDir, doc));
+        if (resolved && wholeDocRealPaths.has(resolved.realPath)) continue;
+        await addRuleSections(doc, sections);
+      }
+      for (const doc of matched.docs)
+        await addGuidelineWithReferences(doc, GUIDELINE_RELEVANCE.scoped);
+    }
+  }
+
   for (const relativePath of ROOT_GUIDELINE_FILES) {
     await addGuidelineWithReferences(relativePath, GUIDELINE_RELEVANCE.root);
   }
@@ -719,7 +1048,6 @@ export async function discoverGuidelineDocs(
     await addRuleDirectory(`${dir}/.cursor/rules`, GUIDELINE_RELEVANCE.scoped);
   }
 
-  const governanceDir = resolve(cwd, '.pr-governance');
   const readme = await addGuidelineFile(
     '.pr-governance/README.md',
     resolve(governanceDir, 'README.md'),
@@ -795,25 +1123,43 @@ function formatGuidelineDoc(doc: GuidelineDoc): string {
 }
 
 /**
+ * Hard-cap the fully assembled block. The per-doc discovery budget charges only
+ * `doc.text`; labels, `###` wrappers, separators, and trailing notices are added
+ * here for free, so the rendered block is the only place the true output size is
+ * known. Truncating it once guarantees the declared byte cap regardless of the
+ * metadata added above.
+ */
+function capRenderedBlock(text: string, maxBytes: number): string {
+  const buffer = Buffer.from(text, 'utf8');
+  if (buffer.length <= maxBytes) return text;
+  const marker = '\n\n[Guidance truncated to stay within the review budget.]';
+  // No room for the marker (tiny cap): truncate the text itself so the result
+  // never exceeds maxBytes.
+  if (maxBytes <= Buffer.byteLength(marker)) {
+    return buffer.toString('utf8', 0, findUtf8Boundary(buffer, maxBytes));
+  }
+  const bodyBytes = findUtf8Boundary(buffer, maxBytes - Buffer.byteLength(marker));
+  return `${buffer.toString('utf8', 0, bodyBytes).trimEnd()}${marker}`;
+}
+
+/**
  * Full guideline render: every loaded doc, plus the budget notice (when the
  * total discovery budget was exhausted) and the referenced-but-not-loaded
  * pointer list. This is what the dedicated guideline-compliance session and
  * the back-compat `discoverGuidelines` wrapper receive.
  */
 export function formatGuidelines(discovered: DiscoveredGuidelines): string {
-  const sections = discovered.docs.map(formatGuidelineDoc);
-
+  const meta: string[] = [];
   if (discovered.budgetExhausted) {
-    sections.push(
+    meta.push(
       [
         '### Review guidance budget',
         `Additional guidance was skipped after the ${MAX_GUIDELINE_TOTAL_BYTES} byte review guidance budget was reached.`,
       ].join('\n'),
     );
   }
-
   if (discovered.referenced.length > 0) {
-    sections.push(
+    meta.push(
       [
         '### Referenced Markdown documents',
         'These docs were mentioned by loaded review guidance but were not preloaded. Read them only when relevant to the changed files or review question.',
@@ -821,8 +1167,14 @@ export function formatGuidelines(discovered: DiscoveredGuidelines): string {
       ].join('\n'),
     );
   }
-
-  return sections.join('\n\n');
+  // Cap the docs to leave room for the trailing disclosures, so notices and the
+  // referenced-doc list survive within the total budget instead of being cut.
+  const metaText = meta.length > 0 ? `\n\n${meta.join('\n\n')}` : '';
+  const docsText = capRenderedBlock(
+    discovered.docs.map(formatGuidelineDoc).join('\n\n'),
+    Math.max(0, MAX_GUIDELINE_TOTAL_BYTES - Buffer.byteLength(metaText, 'utf8')),
+  );
+  return capRenderedBlock(`${docsText}${metaText}`, MAX_GUIDELINE_TOTAL_BYTES);
 }
 
 /**
@@ -880,9 +1232,10 @@ export function formatFinderGuidelines(
     }
   }
 
-  const sections = discovered.docs
+  const docsText = discovered.docs
     .filter((_, index) => keptIndices.has(index))
-    .map(formatGuidelineDoc);
+    .map(formatGuidelineDoc)
+    .join('\n\n');
 
   const budgetNotes: string[] = [];
   if (omitted > 0) {
@@ -895,6 +1248,7 @@ export function formatFinderGuidelines(
       `repository guidance also hit the ${MAX_GUIDELINE_TOTAL_BYTES} byte discovery budget upstream`,
     );
   }
+  let noteText = '';
   if (budgetNotes.length > 0) {
     // When the compliance pass is skipped, "the full set is reviewed" would be
     // false — name the omitted docs instead so a tool-capable finder can read
@@ -924,12 +1278,11 @@ export function formatFinderGuidelines(
           : `The guideline-compliance pass is not running this run; omitted file(s): ${shownLabels.join(
               ', ',
             )}${hidden > 0 ? ` and ${hidden} more omitted file(s)` : ''}. Read any that apply to your changed files.`;
-    sections.push(
-      ['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n'),
-    );
+    noteText = `\n\n${['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n')}`;
   }
-
-  return sections.join('\n\n');
+  // Note renders after the docs, so the final cap trims the note (not a selected
+  // doc) when the two together exceed the budget.
+  return capRenderedBlock(`${docsText}${noteText}`, capBytes);
 }
 
 /**
