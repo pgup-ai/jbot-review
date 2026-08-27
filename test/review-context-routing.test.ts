@@ -84,6 +84,39 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.ok(docs.some((d) => d.label.endsWith('SEAMS.md')));
   });
 
+  it('skips an oversized section so a smaller later one still lands, and names the omitted', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-cap-'));
+    roots.push(root);
+    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+    mkdirSync(join(root, '.pr-governance/design'), { recursive: true });
+    writeFileSync(
+      join(root, '.pr-governance/README.md'),
+      '## Rule IDs\n- `TS-<n>` — sections of `design/TECHNICAL_STANDARDS.md`',
+    );
+    writeFileSync(
+      join(root, '.pr-governance/review/rules-for-diff.yaml'),
+      "entries:\n  - name: s\n    paths: ['x/**']\n    rules: [TS-1, TS-2, TS-3]",
+    );
+    writeFileSync(
+      join(root, '.pr-governance/design/TECHNICAL_STANDARDS.md'),
+      [
+        '## 1. First',
+        'SECTION-ONE',
+        '## 2. Huge',
+        'over-cap '.repeat(4000), // >24 KB — must be skipped, not stop the scan
+        '## 3. Third',
+        'SECTION-THREE',
+      ].join('\n'),
+    );
+    const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
+      d.label.includes('§'),
+    )!;
+    assert.match(bundle.text, /SECTION-ONE/);
+    assert.match(bundle.text, /SECTION-THREE/, 'a later small section lands despite the huge §2');
+    assert.match(bundle.text, /Omitted from this bundle[\s\S]*§2/, 'the skipped section is named');
+    assert.ok(!bundle.label.includes('§2'));
+  });
+
   it('falls back to whole-file discovery when no routing file exists', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-noroute-'));
     roots.push(root);

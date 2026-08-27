@@ -778,35 +778,37 @@ export async function discoverGuidelineDocs(
     if (deduped.length === 0) return;
     seen.add(resolved.absolutePath);
     seenRealPaths.add(resolved.realPath);
-    // Add sections up to the per-file cap so the label names only what is
-    // actually present (the first is kept even if it alone exceeds the cap).
+    // Fit sections under the per-file cap; skip (don't stop at) one too large so
+    // a smaller later rule still lands. The first is kept even if it alone
+    // exceeds the cap, so a bundle is never empty when sections exist.
     const cap = Math.min(MAX_GUIDELINE_FILE_BYTES, remainingGuidelineBytes);
     const included: typeof deduped = [];
     let used = 0;
     for (const entry of deduped) {
       const bytes = Buffer.byteLength(entry.text, 'utf8') + (included.length > 0 ? 2 : 0);
-      if (included.length > 0 && used + bytes > cap) break;
+      if (included.length > 0 && used + bytes > cap) continue;
       included.push(entry);
       used += bytes;
     }
     const buffer = Buffer.from(included.map((entry) => entry.text).join('\n\n'), 'utf8');
     const includedBytes = findUtf8Boundary(buffer, Math.min(buffer.length, cap));
     if (includedBytes <= 0) return;
-    remainingGuidelineBytes -= includedBytes;
     const label = `.pr-governance/${governanceRelPath} (§${included.map((e) => e.section).join(', §')})`;
     // Name the omitted sections (and the source) so a reviewer can read them on
     // demand instead of silently missing a matched rule that didn't fit.
     const dropped = [
-      ...deduped.slice(included.length).map((e) => `§${e.section}`),
+      ...deduped.filter((entry) => !included.includes(entry)).map((e) => `§${e.section}`),
       ...(includedBytes < buffer.length ? [`§${included.at(-1)?.section} (truncated)`] : []),
     ];
     const note =
       dropped.length > 0
         ? `\n\n[Omitted from this bundle to stay within budget: ${dropped.join(', ')} — read from .pr-governance/${governanceRelPath} if relevant.]`
         : '';
+    const text = `${buffer.toString('utf8', 0, includedBytes)}${note}`.trim();
+    remainingGuidelineBytes -= Buffer.byteLength(text, 'utf8');
     docs.push({
       label,
-      text: `${buffer.toString('utf8', 0, includedBytes)}${note}`.trim(),
+      text,
       relevance: GUIDELINE_RELEVANCE.scoped,
     });
   }
