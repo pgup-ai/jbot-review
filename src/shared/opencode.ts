@@ -1032,10 +1032,8 @@ export async function runFindingVerification(
 // off, exploration (bash/read/grep) on. Single-shot turns off EVERY tool —
 // exploration plus the agentic builtins opencode still offers otherwise
 // (task/todowrite/skill/question) — so opencode sends an empty tools array and
-// the model answers in ONE turn with no function calls. Used by
-// finding-verification, and by any model that cannot drive a tool loop
-// (`modelSupportsAgenticTools`); a lingering `question` tool would also hang a
-// headless run.
+// the model answers in ONE turn. A lingering `question` tool would also hang a
+// headless run. (resolveSessionTools decides which set a session gets.)
 const READONLY_TOOLS = { write: false, edit: false, patch: false } as const;
 const SINGLE_SHOT_TOOLS = {
   write: false,
