@@ -1,4 +1,4 @@
-import { access, open, readdir, readFile, realpath } from 'node:fs/promises';
+import { access, open, readdir, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 import { GIT_DIFF_ARGS } from './git.ts';
@@ -555,14 +555,22 @@ const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
 // per-file guideline cap); only the extracted section is charged to the budget.
 const MAX_RULE_DOC_BYTES = 512 * 1024;
 
-/** Whole-file read to a UTF-8 boundary within MAX_RULE_DOC_BYTES. */
+/**
+ * Read up to MAX_RULE_DOC_BYTES from a governance file via a bounded handle
+ * read — never allocating the whole of a repo-controlled, possibly oversized
+ * file — and cut to a UTF-8 boundary.
+ */
 async function readWholeBounded(realPath: string): Promise<string> {
-  const buffer = await readFile(realPath);
-  return buffer.toString(
-    'utf8',
-    0,
-    findUtf8Boundary(buffer, Math.min(buffer.length, MAX_RULE_DOC_BYTES)),
-  );
+  const handle = await open(realPath, 'r');
+  try {
+    const byteLimit = Math.min((await handle.stat()).size, MAX_RULE_DOC_BYTES);
+    if (byteLimit <= 0) return '';
+    const buffer = Buffer.alloc(byteLimit);
+    const { bytesRead } = await handle.read(buffer, 0, byteLimit, 0);
+    return buffer.toString('utf8', 0, findUtf8Boundary(buffer, bytesRead));
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function discoverGuidelineDocs(
@@ -758,22 +766,45 @@ export async function discoverGuidelineDocs(
     const found = sections
       .map((section) => ({ section, text: extractRuleSection(source, section) }))
       .filter((entry): entry is { section: string; text: string } => Boolean(entry.text));
-    if (found.length === 0) return;
+    // A nested child (`### 6.1` under `## 6`) is already inside its selected
+    // parent's extract — drop the duplicate so it is neither emitted nor budgeted
+    // twice. Strictly-larger guard: equal-length distinct sections keep both.
+    const deduped = found.filter(
+      (entry) =>
+        !found.some(
+          (other) => other.text.length > entry.text.length && other.text.includes(entry.text),
+        ),
+    );
+    if (deduped.length === 0) return;
     seen.add(resolved.absolutePath);
     seenRealPaths.add(resolved.realPath);
-    const label = `.pr-governance/${governanceRelPath} (§${found.map((f) => f.section).join(', §')})`;
-    const body = found.map((f) => f.text).join('\n\n');
-    const buffer = Buffer.from(body, 'utf8');
-    const byteLimit = Math.min(buffer.length, MAX_GUIDELINE_FILE_BYTES, remainingGuidelineBytes);
-    const includedBytes = findUtf8Boundary(buffer, byteLimit);
+    // Add sections up to the per-file cap so the label names only what is
+    // actually present (the first is kept even if it alone exceeds the cap).
+    const cap = Math.min(MAX_GUIDELINE_FILE_BYTES, remainingGuidelineBytes);
+    const included: typeof deduped = [];
+    let used = 0;
+    for (const entry of deduped) {
+      const bytes = Buffer.byteLength(entry.text, 'utf8') + (included.length > 0 ? 2 : 0);
+      if (included.length > 0 && used + bytes > cap) break;
+      included.push(entry);
+      used += bytes;
+    }
+    const buffer = Buffer.from(included.map((entry) => entry.text).join('\n\n'), 'utf8');
+    const includedBytes = findUtf8Boundary(buffer, Math.min(buffer.length, cap));
     if (includedBytes <= 0) return;
     remainingGuidelineBytes -= includedBytes;
-    const kept = buffer.toString('utf8', 0, includedBytes);
-    const text =
-      includedBytes < buffer.length
-        ? `${kept}\n\n[Rule sections truncated after ${includedBytes} bytes to keep the review prompt bounded.]`
-        : kept;
-    docs.push({ label, text: text.trim(), relevance: GUIDELINE_RELEVANCE.scoped });
+    const label = `.pr-governance/${governanceRelPath} (§${included.map((e) => e.section).join(', §')})`;
+    const dropped = deduped.length - included.length;
+    const truncated = includedBytes < buffer.length;
+    const note =
+      dropped > 0 || truncated
+        ? `\n\n[${dropped + (truncated ? 1 : 0)} more matched rule section(s) omitted to keep the review prompt bounded.]`
+        : '';
+    docs.push({
+      label,
+      text: `${buffer.toString('utf8', 0, includedBytes)}${note}`.trim(),
+      relevance: GUIDELINE_RELEVANCE.scoped,
+    });
   }
 
   // Diff-scoped routing first, so its rule sections and docs win the budget over

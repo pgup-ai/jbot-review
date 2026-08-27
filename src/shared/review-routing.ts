@@ -28,8 +28,9 @@ const MAX_LIST_ITEMS = 400;
  * bracketed lists (inline or multi-line); anything else is ignored, not an
  * error. Not a general YAML parser.
  */
-export function parseDiffRoutes(yamlText: string): DiffRoute[] {
-  if (yamlText.length > MAX_ROUTING_BYTES) return [];
+export function parseDiffRoutes(text: string): DiffRoute[] {
+  if (text.length > MAX_ROUTING_BYTES) return [];
+  const yamlText = text.replace(/\r\n/g, '\n');
   const region = yamlText.match(/^entries:[ \t]*$([\s\S]*)/m)?.[1];
   if (!region) return [];
   const routes: DiffRoute[] = [];
@@ -52,8 +53,7 @@ function parseBracketList(block: string, key: string): string[] {
   // or on the next (multi-line block).
   const inner = block.match(new RegExp(`(?:^|\\n)[ \\t]*${key}:\\s*\\[([\\s\\S]*?)\\]`))?.[1];
   if (inner === undefined) return [];
-  return inner
-    .split(',')
+  return splitTopLevel(inner)
     .map((token) =>
       token
         .trim()
@@ -65,6 +65,36 @@ function parseBracketList(block: string, key: string): string[] {
 }
 
 /**
+ * Split on commas that are outside quotes and brace sets, so a brace-set glob
+ * (`**​/*.{ts,tsx}`) the downstream matcher supports stays one item instead of
+ * splitting into two broken paths.
+ */
+function splitTopLevel(inner: string): string[] {
+  const items: string[] = [];
+  let current = '';
+  let depth = 0;
+  let quote: "'" | '"' | undefined;
+  for (const ch of inner) {
+    if (quote) {
+      if (ch === quote) quote = undefined;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+    } else if (ch === '{') {
+      depth += 1;
+    } else if (ch === '}') {
+      depth = Math.max(0, depth - 1);
+    } else if (ch === ',' && depth === 0) {
+      items.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  items.push(current);
+  return items;
+}
+
+/**
  * Parse a governance README's rule-ID declaration into `PREFIX → doc path`
  * (the path is relative to the README's directory). Recognizes the documented
  * form, e.g. `` `TS-<n>` — sections of `design/TECHNICAL_STANDARDS.md` ``.
@@ -72,7 +102,7 @@ function parseBracketList(block: string, key: string): string[] {
 export function parseRuleIdDocs(readmeText: string): Map<string, string> {
   const map = new Map<string, string>();
   const pattern = /`([A-Za-z][A-Za-z0-9]*)-<n>`[^`\n]*?sections of[ \t]*`([^`\n]+\.md)`/gi;
-  for (const match of readmeText.matchAll(pattern))
+  for (const match of readmeText.replace(/\r\n/g, '\n').matchAll(pattern))
     map.set(match[1].toUpperCase(), match[2].trim());
   return map;
 }
@@ -109,7 +139,7 @@ export function selectDiffRoutes(
  * cites both `TS-16` and `TS-16.2` wants (no duplicated body).
  */
 export function extractRuleSection(docText: string, section: string): string | undefined {
-  const lines = docText.split('\n');
+  const lines = docText.replace(/\r\n/g, '\n').split('\n');
   const heading = (line: string): { level: number; number?: string } | undefined => {
     const match = line.match(/^(#+)[ \t]+(.*)$/);
     if (!match) return undefined;

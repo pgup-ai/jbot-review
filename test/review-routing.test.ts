@@ -44,9 +44,17 @@ describe('parseDiffRoutes', () => {
     assert.deepEqual(routes[2].docs, []); // absent list → empty, not an error
   });
 
-  it('fails safe (empty) on malformed or entry-less input', () => {
+  it('keeps a brace-set glob whole and parses CRLF input', () => {
+    const routes = parseDiffRoutes(
+      "entries:\r\n  - name: x\r\n    paths: ['**/*.{ts,tsx}', 'a/**']\r\n",
+    );
+    assert.deepEqual(routes[0].paths, ['**/*.{ts,tsx}', 'a/**']);
+  });
+
+  it('fails safe (empty) on malformed, entry-less, or oversized input', () => {
     assert.deepEqual(parseDiffRoutes('not: yaml\n'), []);
     assert.deepEqual(parseDiffRoutes(''), []);
+    assert.deepEqual(parseDiffRoutes(`entries:\n${'#'.repeat(70 * 1024)}`), []);
   });
 });
 
@@ -114,7 +122,6 @@ describe('extractRuleSection', () => {
     // route citing both TS-16 and TS-16.2 would duplicate the body.
     assert.equal(extractRuleSection(doc, '16'), '## 16. AI\nai body');
     assert.equal(extractRuleSection(doc, '16.2'), '## 16.2 Parity\nparity body');
-    // Absent number.
     assert.equal(extractRuleSection(doc, '99'), undefined);
   });
 });

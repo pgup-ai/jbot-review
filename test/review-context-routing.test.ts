@@ -30,19 +30,23 @@ function buildGovernanceRepo(): string {
       '  - name: services',
       "    paths: ['apps/**/*.service.ts']",
       "    docs: ['.pr-governance/design/SEAMS.md']",
-      '    rules: [TS-16.2, TS-1]',
+      '    rules: [TS-6, TS-6.1, TS-16.2]',
     ].join('\n'),
   );
   writeFileSync(join(root, '.pr-governance/design/SEAMS.md'), '# Seams\nrouted whole doc body');
-  const filler = `\n${'padding line to push later sections past the 24 KB cap. '.repeat(40)}`;
+  // §2 (uncited) is padded past 24 KB so §16.2 lives past the per-file cap: a
+  // whole-file 24 KB load would stop in §2, but section extraction still reaches it.
+  const filler = `\n${'padding to push §16.2 past the 24 KB whole-file cap. '.repeat(40)}`;
   writeFileSync(
     join(root, '.pr-governance/design/TECHNICAL_STANDARDS.md'),
     [
       '# Technical Standards',
-      '## 1. Money and decimal types',
-      `body of section one${filler.repeat(12)}`,
-      '## 2. Something else',
-      `body two${filler.repeat(12)}`,
+      '## 6. Helpers', // nested parent — cited alongside its `### 6.1` child
+      'parent body',
+      '### 6.1 Nested child',
+      'NESTED-CHILD-MARKER body',
+      '## 2. Filler',
+      `uncited body${filler.repeat(12)}`,
       '## 16. AI',
       'ai body',
       '## 16.2 Service parity',
@@ -70,6 +74,9 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.match(tsSection.text, /THE-SERVICE-PARITY-RULE/, '§16.2 is included despite its offset');
     assert.match(tsSection.label, /§16\.2/);
     assert.equal(tsSection.relevance, 3, 'routed sections rank scoped (highest)');
+    // §6.1 is nested under the also-cited §6, so it appears once (deduped), not twice.
+    assert.equal(tsSection.text.match(/NESTED-CHILD-MARKER/g)?.length, 1);
+    assert.ok(!tsSection.label.includes('§6.1'), 'the deduped child is not named in the label');
 
     // The whole (large) file is not also loaded — the sections stand in for it.
     assert.ok(!docs.some((d) => d.label.endsWith('TECHNICAL_STANDARDS.md')));
