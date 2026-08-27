@@ -2136,16 +2136,17 @@ async function runReviewPipeline(params: {
     });
     let context7Active = false;
     let context7Block = '';
-    // Context7 is added at the client (all sessions share it), so enable it
-    // only when EVERY session model can drive a tool loop. A single-shot model
+    // Context7 is added at the opencode client, so every model that runs a
+    // session there must be able to drive a tool loop. A single-shot model
     // (proxied Gemini) runs tool-free; a visible Context7 tool would let it make
     // the call that 400s on the thought_signature continuation, and it cannot
-    // use the tool anyway.
-    const allModelsAgentic =
+    // use the tool anyway. Aux only counts when it runs on opencode (not pi/CLI,
+    // which never touch this client).
+    const opencodeModelsAgentic =
       modelSupportsAgenticTools(providerID, modelID) &&
-      modelSupportsAgenticTools(auxProviderID, auxModelID);
+      (!auxOnOpencode || modelSupportsAgenticTools(auxProviderID, auxModelID));
     if (context7.enabled && opencodeRuntime && mainBackend.name === 'opencode') {
-      if (allModelsAgentic) {
+      if (opencodeModelsAgentic) {
         log(`Context7 MCP requested: ${context7.reason}`);
         context7Active = await enableContext7Mcp(
           opencodeRuntime.client,

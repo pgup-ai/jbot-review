@@ -68,11 +68,16 @@ describe('bash schema on the wire', { skip: !hasOpencode }, () => {
   it('opencode loads the shim and emits a Gemini-safe bash schema', async () => {
     const requests: Array<{ tools?: Array<{ function: { name: string; parameters: unknown } }> }> =
       [];
+    let onFirstRequest: () => void;
+    const firstRequest = new Promise<void>((resolve) => (onFirstRequest = resolve));
     const mock = createServer((req, res) => {
       let body = '';
       req.on('data', (chunk) => (body += chunk));
       req.on('end', () => {
-        if (body) requests.push(JSON.parse(body));
+        if (body) {
+          requests.push(JSON.parse(body));
+          onFirstRequest();
+        }
         // opencode retry-loops unless the provider speaks SSE.
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         const chunk = (delta: object, finish: string | null) =>
@@ -112,7 +117,9 @@ describe('bash schema on the wire', { skip: !hasOpencode }, () => {
           parts: [{ type: 'text', text: 'hi' }],
         },
       });
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Await the captured request rather than a fixed sleep (bounded so a
+      // genuine no-request failure still surfaces instead of hanging).
+      await Promise.race([firstRequest, new Promise((resolve) => setTimeout(resolve, 15_000))]);
     } finally {
       stop();
       mock.close();
