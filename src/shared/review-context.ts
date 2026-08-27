@@ -842,21 +842,20 @@ export async function discoverGuidelineDocs(
     );
     if (deduped.length === 0) {
       // Every cited section was unavailable — disclose the request (invariant #4)
-      // instead of contributing nothing, still bounded.
+      // instead of contributing nothing. missing is non-empty here (all cited
+      // sections failed to extract) and the note is bounded, like the main path.
+      seen.add(resolved.absolutePath);
+      seenRealPaths.add(resolved.realPath);
       const note = renderOmissionNote(
         missing.map((section) => `§${section} (not found)`),
         governanceRelPath,
       ).trim();
-      if (note && remainingGuidelineBytes > 0) {
-        seen.add(resolved.absolutePath);
-        seenRealPaths.add(resolved.realPath);
-        remainingGuidelineBytes -= Buffer.byteLength(note, 'utf8');
-        docs.push({
-          label: `.pr-governance/${governanceRelPath} (unavailable)`,
-          text: note,
-          relevance: GUIDELINE_RELEVANCE.scoped,
-        });
-      }
+      remainingGuidelineBytes -= Buffer.byteLength(note, 'utf8');
+      docs.push({
+        label: `.pr-governance/${governanceRelPath} (unavailable)`,
+        text: note,
+        relevance: GUIDELINE_RELEVANCE.scoped,
+      });
       return;
     }
     seen.add(resolved.absolutePath);
@@ -923,19 +922,27 @@ export async function discoverGuidelineDocs(
       const matched = selectDiffRoutes(routes, changedFiles, boundedGlobMatch);
       const readmeText = await readGovernanceFile('README.md');
       const ruleIdDocs = readmeText ? parseRuleIdDocs(readmeText) : new Map<string, string>();
-      // A doc requested whole via `docs:` outranks section extraction of the same
-      // file — the whole doc already contains its sections, and extracting them
-      // first would mark the path seen and suppress the explicit whole-doc load.
-      const wholeDocs = new Set(matched.docs.map((doc) => resolve(cwd, doc)));
+      const wholeDocRealPaths = new Set<string>();
+      for (const doc of matched.docs) {
+        const resolved = await resolveExistingInsideWorkspace(resolve(cwd, doc));
+        if (resolved) wholeDocRealPaths.add(resolved.realPath);
+      }
       const sectionsByDoc = new Map<string, string[]>();
       for (const id of matched.ruleIds) {
         const parsed = splitRuleId(id);
         const doc = parsed && ruleIdDocs.get(parsed.prefix);
-        if (doc && !wholeDocs.has(resolve(governanceDir, doc)))
-          sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed.section]);
+        if (doc) sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed.section]);
       }
-      // Rule sections first (most targeted), then the whole docs.
-      for (const [doc, sections] of sectionsByDoc) await addRuleSections(doc, sections);
+      // A doc requested whole via `docs:` outranks section extraction of the same
+      // file (the whole doc already contains its sections). Compare real paths so
+      // a symlinked docs: entry still matches; extracting first would mark the
+      // path seen and suppress the explicit whole-doc load. Sections (most
+      // targeted) load first, then the whole docs.
+      for (const [doc, sections] of sectionsByDoc) {
+        const resolved = await resolveExistingInsideWorkspace(resolve(governanceDir, doc));
+        if (resolved && wholeDocRealPaths.has(resolved.realPath)) continue;
+        await addRuleSections(doc, sections);
+      }
       for (const doc of matched.docs)
         await addGuidelineWithReferences(doc, GUIDELINE_RELEVANCE.scoped);
     }

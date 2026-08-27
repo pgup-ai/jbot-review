@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -151,6 +151,32 @@ describe('discoverGuidelineDocs with diff routing', () => {
     }
   });
 
+  it('matches many globs across varied-length files correctly (compiled cache + shared scratch)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-multi-'));
+    roots.push(root);
+    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+    mkdirSync(join(root, '.pr-governance/design'), { recursive: true });
+    writeFileSync(
+      join(root, '.pr-governance/README.md'),
+      '## Rule IDs\n- `TS-<n>` maps to `design/TECHNICAL_STANDARDS.md`',
+    );
+    writeFileSync(
+      join(root, '.pr-governance/review/rules-for-diff.yaml'),
+      "entries:\n  - name: a\n    paths: ['apps/**']\n    rules: [TS-1]\n  - name: b\n    paths: ['libs/**']\n    rules: [TS-2]",
+    );
+    writeFileSync(
+      join(root, '.pr-governance/design/TECHNICAL_STANDARDS.md'),
+      '## 1. First\nSECTION-ONE\n## 2. Second\nSECTION-TWO',
+    );
+    // The long apps path grows the shared match scratch; libs/** must still match
+    // the short libs path afterward (reused scratch not corrupted across calls).
+    const bundle = (
+      await discoverGuidelineDocs(root, ['apps/really/deep/nested/dir/component.tsx', 'libs/y.ts'])
+    ).docs.find((d) => d.label.includes('§'))!;
+    assert.match(bundle.text, /SECTION-ONE/, 'apps/** matched via TS-1');
+    assert.match(bundle.text, /SECTION-TWO/, 'libs/** matched via TS-2 after the scratch grew');
+  });
+
   it('loads a doc requested whole via docs: even when its sections are also cited', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-whole-'));
     roots.push(root);
@@ -173,6 +199,34 @@ describe('discoverGuidelineDocs with diff routing', () => {
     const inv = docs.find((d) => d.label.includes('INVARIANTS.md'))!;
     assert.match(inv.text, /WHOLE-DOC-MARKER/);
     assert.ok(!inv.label.includes('§'), 'loaded whole, not suppressed into a §-only bundle');
+  });
+
+  it('honors whole-doc precedence through a symlinked docs: entry', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-symlink-'));
+    roots.push(root);
+    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+    mkdirSync(join(root, '.pr-governance/design'), { recursive: true });
+    writeFileSync(
+      join(root, '.pr-governance/README.md'),
+      '## Rule IDs\n- `INV-<n>` maps to `design/INVARIANTS.md`',
+    );
+    writeFileSync(
+      join(root, '.pr-governance/design/INVARIANTS.md'),
+      '# Invariants\n## 1. First\nWHOLE-VIA-SYMLINK',
+    );
+    // docs: points at a symlink to the same file the rule maps to; real-path
+    // comparison must still treat it as the whole-doc request.
+    symlinkSync('INVARIANTS.md', join(root, '.pr-governance/design/inv-link.md'));
+    writeFileSync(
+      join(root, '.pr-governance/review/rules-for-diff.yaml'),
+      "entries:\n  - name: s\n    paths: ['x/**']\n    docs: ['.pr-governance/design/inv-link.md']\n    rules: [INV-1]",
+    );
+    const { docs } = await discoverGuidelineDocs(root, ['x/a.ts']);
+    assert.ok(
+      docs.some((d) => d.text.includes('WHOLE-VIA-SYMLINK')),
+      'the symlinked target loads whole',
+    );
+    assert.ok(!docs.some((d) => d.label.includes('§')), 'section extraction was skipped');
   });
 
   it('discloses a route whose every cited section is unavailable, bounded', async () => {
