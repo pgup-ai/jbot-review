@@ -6,6 +6,7 @@ import {
   buildConfig,
   observedAssistantParts,
   parseChangesSinceLastReviewSummary,
+  promptForModel,
   recordOpencodeToolParts,
   resolveSessionTools,
   sessionEnvDenyKeys,
@@ -223,6 +224,15 @@ describe('resolveSessionTools', () => {
       resolveSessionTools('openai-compatible/google/gemini-3.7-flash', explicit),
       explicit,
     );
+  });
+
+  it('prepends the no-tools directive to single-shot models only', () => {
+    // A tool-free model must be told the agentic exploration steps are already
+    // done, or it emits tool-call markup instead of the required JSON.
+    const gemini = promptForModel('openai-compatible/google/gemini-3.7-flash', 'BODY');
+    assert.match(gemini, /Use no tools for this review[\s\S]*BODY$/);
+    // Agentic models get the prompt untouched.
+    assert.equal(promptForModel('openai-compatible/deepseek-ai/DeepSeek-V4', 'BODY'), 'BODY');
   });
 });
 

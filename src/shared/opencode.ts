@@ -21,6 +21,7 @@ import {
   buildJsonRepairPrompt,
   CONTINUATION_NUDGE_PROMPT,
   isNoAttemptReply,
+  withNoToolsReviewDirective,
 } from './prompt.ts';
 import { isFiniteNumber, isRecord } from './text.ts';
 import {
@@ -781,12 +782,15 @@ export async function runReview(
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
-  const prompt = assembleReviewPrompt(
-    prContext,
-    guidelines,
-    options.lensAddendum ?? '',
-    options.evidenceQuotes ?? false,
-    options.embeddedFirstPrompt ?? false,
+  const prompt = promptForModel(
+    model,
+    assembleReviewPrompt(
+      prContext,
+      guidelines,
+      options.lensAddendum ?? '',
+      options.evidenceQuotes ?? false,
+      options.embeddedFirstPrompt ?? false,
+    ),
   );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
 
@@ -917,7 +921,7 @@ export async function runAddressedPriorCommentsCheck(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<AddressedPriorComment[]> {
-  const prompt = assembleAddressedPriorCommentsPrompt(prContext);
+  const prompt = promptForModel(model, assembleAddressedPriorCommentsPrompt(prContext));
   const { raw, sessionID } = await promptPlanAgent(
     client,
     model,
@@ -951,7 +955,7 @@ export async function runGuidelineComplianceCheck(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<Finding[]> {
-  const prompt = assembleGuidelineCompliancePrompt(prContext, guidelines);
+  const prompt = promptForModel(model, assembleGuidelineCompliancePrompt(prContext, guidelines));
   const { raw, sessionID } = await promptPlanAgent(
     client,
     model,
@@ -976,7 +980,10 @@ export async function runChangesSinceLastReview(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<string> {
-  const prompt = assembleChangesSinceLastReviewPrompt(prContext, deltaContext);
+  const prompt = promptForModel(
+    model,
+    assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+  );
   const { raw } = await promptPlanAgent(
     client,
     model,
@@ -1064,6 +1071,20 @@ export function resolveSessionTools(
   if (explicit) return explicit;
   const { providerID, modelID } = parseModelName(model);
   return modelSupportsAgenticTools(providerID, modelID) ? READONLY_TOOLS : SINGLE_SHOT_TOOLS;
+}
+
+/**
+ * When the model runs tool-free (single-shot; see resolveSessionTools), prepend
+ * the no-tools directive so the agentic review prompt's "run git diff / explore
+ * the checkout" instructions don't make a tool-trained model emit tool-call
+ * markup or "I'll inspect…" prose instead of JSON. Agentic models are unchanged.
+ * Exported for unit testing (pure).
+ */
+export function promptForModel(model: string, prompt: string): string {
+  const { providerID, modelID } = parseModelName(model);
+  return modelSupportsAgenticTools(providerID, modelID)
+    ? prompt
+    : withNoToolsReviewDirective(prompt);
 }
 
 async function promptPlanAgent(
