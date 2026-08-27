@@ -650,8 +650,8 @@ Set it only to keep an existing configuration working; new setups should qualify
 every candidate and drop the input. Dropping `provider` while a model id is still
 unqualified falls back to `opencode`.
 
-`aux-model` and `aux-provider` were removed. Both roles now draw from `model`;
-either input still being set is ignored with a warning.
+`aux-model` and `aux-provider` were removed; either one still being set is
+ignored with a warning.
 
 For manual reruns, `workflow_dispatch` provider and model inputs can take
 precedence over `JBOT_REVIEW_PROVIDER` and `JBOT_REVIEW_MODEL`; automatic

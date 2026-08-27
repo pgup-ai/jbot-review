@@ -8,7 +8,6 @@ import {
 } from '../src/shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 import {
-  pickAuxModel,
   pickReviewModels,
   removedAuxInputWarnings,
   pickPooledModel,
@@ -138,48 +137,39 @@ describe('pickPooledModel', () => {
 });
 
 describe('removedAuxInputWarnings', () => {
-  it('warns per removed input that a config still sets', () => {
-    const set = (inputs: Record<string, string>) => (input: string) => inputs[input] ?? '';
-    assert.deepEqual(removedAuxInputWarnings(set({})), []);
-    assert.deepEqual(removedAuxInputWarnings(set({ 'aux-model': 'openai/gpt-5' })), [
-      '`aux-model` was removed and is ignored: both roles draw from `model`.',
+  it('reads each removed input under the env var it shipped with', () => {
+    const seen: Array<[string, string]> = [];
+    removedAuxInputWarnings((input, env) => {
+      seen.push([input, env]);
+      return '';
+    });
+    assert.deepEqual(seen, [
+      ['aux-model', 'JBOT_REVIEW_AUX_MODEL'],
+      ['aux-provider', 'JBOT_AUX_PROVIDER'],
     ]);
-    assert.equal(
-      removedAuxInputWarnings(set({ 'aux-model': 'a', 'aux-provider': 'openai' })).length,
-      2,
-    );
+    assert.equal(removedAuxInputWarnings((input) => (input === 'aux-model' ? 'x' : '')).length, 1);
   });
 });
 
 describe('pickReviewModels', () => {
   it('draws both roles from one pool, salting the aux pick', () => {
-    const pool = ['openai/gpt-5', 'google/gemini-2.5-flash', 'opencode/glm-5.2'];
-    const seed = 'head-sha';
-    assert.deepEqual(pickReviewModels(pool, seed), {
-      model: pickPooledModel(pool, seed),
-      auxModel: pickAuxModel(pool, seed),
-    });
+    const pool = ['opencode/a', 'opencode/b', 'opencode/c'];
+    // A seed the salt actually moves: on a third of seeds both roles land
+    // together, and those cannot tell a salted pick from an unsalted one.
+    const seed = 'deadbeef';
+    const { model, auxModel } = pickReviewModels(pool, seed);
+
+    assert.equal(model, pickPooledModel(pool, seed));
+    assert.ok(pool.includes(auxModel));
+    assert.notEqual(auxModel, model);
     // Retries advance the main pick past a failing candidate; aux fails open, so it holds.
     assert.equal(pickReviewModels(pool, seed, 2).model, pickPooledModel(pool, seed, 2));
-    assert.equal(pickReviewModels(pool, seed, 2).auxModel, pickAuxModel(pool, seed));
-    // One entry leaves nothing to differ on: aux shares the main model, and its effort.
-    assert.deepEqual(pickReviewModels(['openai/gpt-5'], seed), {
-      model: 'openai/gpt-5',
-      auxModel: 'openai/gpt-5',
+    assert.equal(pickReviewModels(pool, seed, 2).auxModel, auxModel);
+    // One entry: both roles land on it, so aux shares the main options entry and its effort.
+    assert.deepEqual(pickReviewModels(['opencode/a'], seed), {
+      model: 'opencode/a',
+      auxModel: 'opencode/a',
     });
-  });
-});
-
-describe('pickAuxModel', () => {
-  it('salts the seed so an aux pool is not locked to the main pool index', () => {
-    const pool = ['opencode/a', 'opencode/b', 'opencode/c'];
-    // A seed the salt actually moves: on a third of seeds both land together,
-    // and those cannot tell a salted pick from an unsalted one.
-    const seed = 'deadbeef';
-
-    assert.equal(pickAuxModel(pool, seed), pickPooledModel(pool, `aux:${seed}`));
-    assert.notEqual(pickAuxModel(pool, seed), pickPooledModel(pool, seed));
-    assert.equal(pickAuxModel([], seed), '');
   });
 });
 

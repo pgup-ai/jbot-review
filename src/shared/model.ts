@@ -93,14 +93,6 @@ export function pickPooledModel(pool: string[], seed: string, attempt = 1): stri
   return pool[(first + attempt - 1) % pool.length];
 }
 
-/**
- * Salted so the aux pick is not index-locked to the main one: on the raw seed,
- * both roles would always draw the same entry.
- */
-export function pickAuxModel(pool: string[], seed: string): string {
-  return pool.length ? pickPooledModel(pool, `aux:${seed}`) : '';
-}
-
 /** `aux-model`/`aux-provider` are gone; a config still setting them changed behavior. */
 export function removedAuxInputWarnings(read: (input: string, env: string) => string): string[] {
   return [
@@ -114,16 +106,19 @@ export function removedAuxInputWarnings(read: (input: string, env: string) => st
 }
 
 /**
- * Both review roles draw from one pool. A single-entry pool necessarily lands
- * them on the same model, which is what makes the aux session share the main
- * options entry and its effort rather than the low aux default.
+ * The aux seed is salted so both roles do not draw the same entry. A one-entry
+ * pool has nothing to differ on, which is what makes the aux session share the
+ * main options entry and its effort rather than the low aux default.
  */
 export function pickReviewModels(
   pool: string[],
   seed: string,
   attempt = 1,
 ): { model: string; auxModel: string } {
-  return { model: pickPooledModel(pool, seed, attempt), auxModel: pickAuxModel(pool, seed) };
+  return {
+    model: pickPooledModel(pool, seed, attempt),
+    auxModel: pickPooledModel(pool, `aux:${seed}`),
+  };
 }
 
 function formatModelName(model: ParsedModel): string {
