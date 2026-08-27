@@ -8,9 +8,9 @@ import {
 } from '../src/shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 import {
-  pickAuxModel,
+  pickReviewModels,
+  removedAuxInputWarnings,
   pickPooledModel,
-  resolveAuxModel,
   resolveModelSelection,
 } from '../src/shared/model.ts';
 
@@ -82,7 +82,6 @@ describe('resolveModelSelection', () => {
     // A pin must not absorb a leading slash into the model id as `opencode//x`.
     assert.throws(() => resolveModelSelection('/deepseek'), /a non-empty model id/);
     assert.throws(() => resolveModelSelection('/deepseek', 'opencode'), /a non-empty model id/);
-    assert.throws(() => resolveAuxModel('/m', 'openai', 'openai'), /a non-empty model id/);
     assert.throws(() => resolveModelSelection('opencode/', 'opencode'), /a non-empty model id/);
   });
 
@@ -137,59 +136,40 @@ describe('pickPooledModel', () => {
   });
 });
 
-describe('resolveAuxModel', () => {
-  it('keeps an unqualified aux model on the main provider', () => {
-    assert.deepEqual(resolveAuxModel('gpt-5.4-mini', 'openai'), ['openai/gpt-5.4-mini']);
-  });
-
-  it('returns an empty pool when no aux model is set', () => {
-    // An empty pool means the aux sessions reuse the main model and its credential.
-    assert.deepEqual(resolveAuxModel(undefined, 'openai'), []);
-    assert.deepEqual(resolveAuxModel('  ', 'openai'), []);
-  });
-
-  it('routes a qualified aux model to the provider it names', () => {
-    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'openai'), [
-      'google/gemini-2.5-flash',
+describe('removedAuxInputWarnings', () => {
+  it('reads each removed input under the env var it shipped with', () => {
+    const seen: Array<[string, string]> = [];
+    removedAuxInputWarnings((input, env) => {
+      seen.push([input, env]);
+      return '';
+    });
+    assert.deepEqual(seen, [
+      ['aux-model', 'JBOT_REVIEW_AUX_MODEL'],
+      ['aux-provider', 'JBOT_AUX_PROVIDER'],
     ]);
-    assert.throws(() => resolveAuxModel('nope/m', 'openai'), /Unknown provider "nope"/);
-  });
-
-  it('accepts a pool on the same terms as the main model', () => {
-    assert.deepEqual(resolveAuxModel('opencode/a, devin/b', 'openai'), ['opencode/a', 'devin/b']);
-  });
-
-  it('lets a legacy aux provider pin the model as before', () => {
-    // The old resolver always pinned the aux model — to aux-provider, else the
-    // main provider — so a legacy pin must still swallow a qualified ref rather
-    // than let it route itself. Entries pass `aux-provider || provider` here.
-    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'openai', 'openrouter'), [
-      'openrouter/google/gemini-2.5-flash',
-    ]);
-    assert.deepEqual(resolveAuxModel('google/gemini-2.5-flash', 'opencode', 'opencode'), [
-      'opencode/google/gemini-2.5-flash',
-    ]);
-    assert.throws(() => resolveAuxModel('a', 'openai', 'nope'), /Unknown provider "nope"/);
-  });
-
-  it('names the input the error came from, on both throw paths', () => {
-    assert.throws(() => resolveModelSelection('/x'), /Invalid model "\/x"/);
-    assert.throws(() => resolveAuxModel('/x', 'opencode'), /Invalid aux-model "\/x"/);
-    // The pinned branch throws separately and must carry the same label.
-    assert.throws(() => resolveAuxModel('opencode/', 'opencode', 'opencode'), /Invalid aux-model/);
+    assert.equal(removedAuxInputWarnings((input) => (input === 'aux-model' ? 'x' : '')).length, 1);
   });
 });
 
-describe('pickAuxModel', () => {
-  it('salts the seed so an aux pool is not locked to the main pool index', () => {
+describe('pickReviewModels', () => {
+  it('draws both roles from one pool, salting the aux pick', () => {
     const pool = ['opencode/a', 'opencode/b', 'opencode/c'];
-    // A seed the salt actually moves: on a third of seeds both land together,
-    // and those cannot tell a salted pick from an unsalted one.
+    // A seed the salt actually moves: on a third of seeds both roles land
+    // together, and those cannot tell a salted pick from an unsalted one.
     const seed = 'deadbeef';
+    const { model, auxModel } = pickReviewModels(pool, seed);
 
-    assert.equal(pickAuxModel(pool, seed), pickPooledModel(pool, `aux:${seed}`));
-    assert.notEqual(pickAuxModel(pool, seed), pickPooledModel(pool, seed));
-    assert.equal(pickAuxModel([], seed), '');
+    assert.equal(model, pickPooledModel(pool, seed));
+    assert.ok(pool.includes(auxModel));
+    assert.notEqual(auxModel, model);
+    // Retries advance the main pick past a failing candidate; aux fails open, so it holds.
+    assert.equal(pickReviewModels(pool, seed, 2).model, pickPooledModel(pool, seed, 2));
+    assert.equal(pickReviewModels(pool, seed, 2).auxModel, auxModel);
+    // One entry: both roles land on it, so aux shares the main options entry and its effort.
+    assert.deepEqual(pickReviewModels(['opencode/a'], seed), {
+      model: 'opencode/a',
+      auxModel: 'opencode/a',
+    });
   });
 });
 

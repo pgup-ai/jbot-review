@@ -12,7 +12,7 @@ interface ProviderResolution {
   /** Provider for a ref that carries no provider segment. */
   fallback: string;
   /** Input this came from, so an error points at the field to fix. */
-  label: 'model' | 'aux-model';
+  label: 'model';
 }
 
 /**
@@ -93,33 +93,33 @@ export function pickPooledModel(pool: string[], seed: string, attempt = 1): stri
   return pool[(first + attempt - 1) % pool.length];
 }
 
-/**
- * `pinnedProviderID` is the legacy aux-provider input, falling back to the
- * legacy main provider input — either pins the aux model, because the old
- * resolver always pinned it (to aux-provider, else the main provider) and never
- * derived. `mainProviderID` serves a ref that names no provider. An empty pool
- * means "use the main model".
- */
-export function resolveAuxModel(
-  auxModel: string | undefined,
-  mainProviderID: string,
-  pinnedProviderID?: string,
-): string[] {
-  const input = auxModel?.trim();
-  if (!input) return [];
-  return resolveSelection(input, {
-    pinned: pinnedProviderID?.trim(),
-    fallback: mainProviderID,
-    label: 'aux-model',
-  });
+/** `aux-model`/`aux-provider` are gone; a config still setting them changed behavior. */
+export function removedAuxInputWarnings(read: (input: string, env: string) => string): string[] {
+  return [
+    ['aux-model', 'JBOT_REVIEW_AUX_MODEL'],
+    ['aux-provider', 'JBOT_AUX_PROVIDER'],
+  ].flatMap(([input, env]) =>
+    read(input, env)
+      ? [`\`${input}\` was removed and is ignored: both roles draw from \`model\`.`]
+      : [],
+  );
 }
 
 /**
- * Salted so an aux pool is not index-locked to the main one: on the raw seed,
- * equal-length pools would always pair the same two entries.
+ * The aux seed is salted so the two roles draw independently rather than always
+ * together; both still hash into the same pool, so they land on one model about
+ * 1/n of the time, and always on a one-entry pool. That is when the aux session
+ * shares the main options entry and its effort rather than the low aux default.
  */
-export function pickAuxModel(pool: string[], seed: string): string {
-  return pool.length ? pickPooledModel(pool, `aux:${seed}`) : '';
+export function pickReviewModels(
+  pool: string[],
+  seed: string,
+  attempt = 1,
+): { model: string; auxModel: string } {
+  return {
+    model: pickPooledModel(pool, seed, attempt),
+    auxModel: pickPooledModel(pool, `aux:${seed}`),
+  };
 }
 
 function formatModelName(model: ParsedModel): string {

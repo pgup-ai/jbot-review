@@ -16,9 +16,8 @@ import { parseContext7Mode } from '../shared/context7.ts';
 import { exitOnLingeringHandles } from '../shared/exit.ts';
 import { takeOpencodeProxyEnv } from '../shared/opencode.ts';
 import {
-  pickAuxModel,
-  pickPooledModel,
-  resolveAuxModel,
+  pickReviewModels,
+  removedAuxInputWarnings,
   resolveModelSelection,
 } from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
@@ -41,17 +40,8 @@ async function main(): Promise<void> {
     getInputOrEnv('model', 'JBOT_REVIEW_MODEL'),
     providerInput,
   );
-  const auxModelInput = getInputOrEnv('aux-model', 'JBOT_REVIEW_AUX_MODEL');
-  const auxPinned = getInputOrEnv('aux-provider', 'JBOT_AUX_PROVIDER') || providerInput;
-  // Probe only to learn which providers need a key. A qualified or pinned aux
-  // ref names its own provider regardless of the pick; a bare one lands on the
-  // picked model's provider, which the main pool already covers either way.
-  const auxProbe = resolveAuxModel(
-    auxModelInput,
-    parseModelName(modelPool[0]).providerID,
-    auxPinned,
-  );
-  const credentials = resolvePoolCredentials([...modelPool, ...auxProbe], ({ input, env }) =>
+  for (const warning of removedAuxInputWarnings(getInputOrEnv)) core.warning(warning);
+  const credentials = resolvePoolCredentials(modelPool, ({ input, env }) =>
     getInputOrEnv(input, env),
   );
   const options = {
@@ -90,7 +80,7 @@ async function main(): Promise<void> {
     verifyOverlapGrace: parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
   };
   const pullTarget = getPullRequestTarget();
-  for (const warning of swallowedProviderWarnings([...modelPool, ...auxProbe])) {
+  for (const warning of swallowedProviderWarnings(modelPool)) {
     core.warning(warning);
   }
   core.info(`Model: ${modelPool.join(', ')}`);
@@ -114,25 +104,25 @@ async function main(): Promise<void> {
     );
     options.sdkEngine = sdkEngineForProxy(options.sdkEngine, options.opencodeProxyEnv);
     core.info(
-      `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} auxModel=${auxModelInput || '(main model)'} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout} contextTrim=${options.contextTrim} embeddedFirstPrompt=${options.embeddedFirstPrompt}`,
+      `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout} contextTrim=${options.contextTrim} embeddedFirstPrompt=${options.embeddedFirstPrompt}`,
     );
 
-    const model = pickPooledModel(modelPool, pull.head.sha, github.context.runAttempt);
+    const { model, auxModel } = pickReviewModels(
+      modelPool,
+      pull.head.sha,
+      github.context.runAttempt,
+    );
     if (modelPool.length > 1) {
       core.info(
-        `Model pool of ${modelPool.length}: picked ${model} for workflow attempt ${github.context.runAttempt}`,
+        `Model pool of ${modelPool.length}: picked ${model} (aux ${auxModel}) for workflow attempt ${github.context.runAttempt}`,
       );
     }
-    // The pick decides the provider, so both its credential and the provider a
-    // bare aux ref belongs to are only known here.
+    // The picks decide the providers, so their credentials are only known here.
     const { providerID } = parseModelName(model);
     const { apiKey, baseURL } = credentials.get(providerID)!;
-    const auxPool = resolveAuxModel(auxModelInput, providerID, auxPinned);
-    const auxModel = pickAuxModel(auxPool, pull.head.sha);
-    if (auxPool.length > 1) core.info(`Aux model pool of ${auxPool.length}: picked ${auxModel}`);
     const modelOptions = parseJsonObjectInput('model-options', defaultModelOptions(providerID));
     core.info(`Model options: ${JSON.stringify(modelOptions)}`);
-    const auxProviderID = auxModel ? parseModelName(auxModel).providerID : providerID;
+    const auxProviderID = parseModelName(auxModel).providerID;
     const auxCredential = auxProviderID === providerID ? undefined : credentials.get(auxProviderID);
 
     let findingCount: number | undefined;
