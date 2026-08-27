@@ -794,11 +794,15 @@ export async function discoverGuidelineDocs(
     if (includedBytes <= 0) return;
     remainingGuidelineBytes -= includedBytes;
     const label = `.pr-governance/${governanceRelPath} (§${included.map((e) => e.section).join(', §')})`;
-    const dropped = deduped.length - included.length;
-    const truncated = includedBytes < buffer.length;
+    // Name the omitted sections (and the source) so a reviewer can read them on
+    // demand instead of silently missing a matched rule that didn't fit.
+    const dropped = [
+      ...deduped.slice(included.length).map((e) => `§${e.section}`),
+      ...(includedBytes < buffer.length ? [`§${included.at(-1)?.section} (truncated)`] : []),
+    ];
     const note =
-      dropped > 0 || truncated
-        ? `\n\n[${dropped + (truncated ? 1 : 0)} more matched rule section(s) omitted to keep the review prompt bounded.]`
+      dropped.length > 0
+        ? `\n\n[Omitted from this bundle to stay within budget: ${dropped.join(', ')} — read from .pr-governance/${governanceRelPath} if relevant.]`
         : '';
     docs.push({
       label,
