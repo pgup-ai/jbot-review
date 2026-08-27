@@ -213,9 +213,13 @@ describe('resolveSessionTools', () => {
       assert.equal(gemini[tool], false, `${tool} must be disabled for proxied Gemini`);
     }
 
-    // The native google adapter preserves the signature, and non-Gemini
-    // models are unaffected — both keep exploration (bash left on).
+    // Proxied gpt-5 also runs single-shot: opencode injects reasoning_effort,
+    // which chat/completions proxies reject alongside function tools.
+    assert.equal(resolveSessionTools('openai-compatible/openai/gpt-5.6-luna').bash, false);
+
+    // Native google/openai adapters and non-affected models keep exploration.
     assert.equal(resolveSessionTools('google/gemini-2.5-flash').bash, undefined);
+    assert.equal(resolveSessionTools('openai/gpt-5.4-nano').bash, undefined);
     assert.equal(resolveSessionTools('openai-compatible/deepseek-ai/DeepSeek-V4').bash, undefined);
 
     // An explicit set (e.g. verification) is honored verbatim.
