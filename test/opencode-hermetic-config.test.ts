@@ -49,7 +49,8 @@ describe('opencode sessions ignore ambient config', { skip: !hasOpencode }, () =
         'stub/model',
         'stub-key',
         () => {},
-        { baseURL: 'http://127.0.0.1:1/v1', port: 47421, scrubEnv: false },
+        // port 0: OS-assigned, so parallel test processes never collide.
+        { baseURL: 'http://127.0.0.1:1/v1', port: 0, scrubEnv: false },
       );
       try {
         // Discovery fires on session-create, which every review does.
