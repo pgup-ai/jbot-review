@@ -450,21 +450,22 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
 }
 
 /**
- * Whether a model can drive a multi-turn tool loop through opencode. Gemini
- * requires the `thought_signature` it returns on a tool call to be echoed back
- * on the next turn; opencode's OpenAI-compatible adapter (GMI, OpenRouter, and
- * other proxies fronting Gemini) drops it, so any second turn 400s with
- * "missing thought_signature in functionCall parts". The native `google`
- * adapter preserves it, so only proxied Gemini is affected — it falls back to a
- * zero-tool single-shot review (judged from the embedded diff).
- *
- * Proxied Gemini is recognized by a `gemini` substring in the model id (holds
- * for every proxy seen: `google/gemini-*`, `gemini-2.5-flash`); a proxy that
- * renamed the model to a slug without "gemini" would be missed and 400.
+ * Whether a model can drive a multi-turn tool loop through opencode's
+ * OpenAI-compatible chat/completions path. Two families can't, and fall back to
+ * a zero-tool single-shot review (judged from the embedded diff, reasoning
+ * kept):
+ *   - Gemini: the adapter drops the `thought_signature` Gemini requires echoed
+ *     back on the next turn, so any second tool turn 400s.
+ *   - gpt-5: opencode injects `reasoning_effort`, which chat/completions proxies
+ *     (GMI, …) reject alongside function tools — "set reasoning_effort to none".
+ * The native `google`/`openai` providers use their own adapters, not the
+ * OpenAI-compatible proxy path these limits are specific to, so their models
+ * are left agentic. Both families are matched by a model-id substring; a proxy
+ * that renamed the model would be missed and 400.
  */
 export function modelSupportsAgenticTools(providerID: string, modelID: string): boolean {
-  if (providerID === 'google') return true;
-  return !/gemini/i.test(modelID);
+  if (providerID === 'google' || providerID === 'openai') return true;
+  return !/gemini|gpt-5/i.test(modelID);
 }
 
 // Provider-managed values (poolside's 'default') stay outside this order.
