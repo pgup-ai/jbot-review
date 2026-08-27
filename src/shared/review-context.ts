@@ -218,8 +218,10 @@ let matchRowB = new Uint8Array(0);
 
 /**
  * Linear-time glob match: one reachability pass per token over the target,
- * O(tokens × length) with no regex engine, so a hostile pattern cannot make
- * matching backtrack — only take a proportionally longer straight walk.
+ * O(tokens × length) with no regex engine. Wildcard propagation is a single
+ * left-to-right sweep with a carry flag — NOT an inner scan from every reachable
+ * index — so an adversarial pattern (triple-star, or globstar-then-star on a
+ * deep path) stays linear instead of going quadratic per glob/file pair.
  */
 function matchTokens(tokens: GlobToken[], target: string): boolean {
   const len = target.length;
@@ -233,27 +235,45 @@ function matchTokens(tokens: GlobToken[], target: string): boolean {
   cur[0] = 1;
   for (const token of tokens) {
     next.fill(0, 0, len + 1);
-    for (let j = 0; j <= len; j += 1) {
-      if (!cur[j]) continue;
-      switch (token.kind) {
-        case 'lit':
-          if (target[j] === token.ch) next[j + 1] = 1;
-          break;
-        case 'any1':
-          if (j < len && target[j] !== '/') next[j + 1] = 1;
-          break;
-        case 'star':
-          for (let k = j; k <= len && (k === j || target[k - 1] !== '/'); k += 1) next[k] = 1;
-          break;
-        case 'globstar':
-          for (let k = j; k <= len; k += 1) next[k] = 1;
-          break;
-        case 'globstarSlash':
-          // `**/` spans any leading directories or none: `**/a.ts` matches
-          // both `a.ts` and `src/a.ts`.
-          next[j] = 1;
-          for (let k = j + 1; k <= len; k += 1) if (target[k - 1] === '/') next[k] = 1;
-          break;
+    switch (token.kind) {
+      case 'lit':
+        for (let j = 0; j < len; j += 1) if (cur[j] && target[j] === token.ch) next[j + 1] = 1;
+        break;
+      case 'any1':
+        for (let j = 0; j < len; j += 1) if (cur[j] && target[j] !== '/') next[j + 1] = 1;
+        break;
+      case 'star': {
+        // Any reachable index carries forward within the segment, stopping at a `/`.
+        let reach = false;
+        for (let k = 0; k <= len; k += 1) {
+          if (cur[k]) reach = true;
+          if (reach) next[k] = 1;
+          if (k < len && target[k] === '/') reach = false;
+        }
+        break;
+      }
+      case 'globstar': {
+        // Any reachable index carries forward across everything, slashes included.
+        let reach = false;
+        for (let k = 0; k <= len; k += 1) {
+          if (cur[k]) reach = true;
+          if (reach) next[k] = 1;
+        }
+        break;
+      }
+      case 'globstarSlash': {
+        // `**/` spans any leading directories or none: reachable at the start
+        // index (zero dirs) and after each subsequent `/`.
+        let reach = false;
+        for (let k = 0; k <= len; k += 1) {
+          if (cur[k]) {
+            reach = true;
+            next[k] = 1;
+          } else if (reach && k > 0 && target[k - 1] === '/') {
+            next[k] = 1;
+          }
+        }
+        break;
       }
     }
     const tmp = cur;
@@ -592,19 +612,25 @@ const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
 // per-file guideline cap); only the extracted section is charged to the budget.
 const MAX_RULE_DOC_BYTES = 512 * 1024;
 
-// Cap the ids listed in a routed bundle's omission note. Routes are
-// PR-controlled and can cite hundreds of sections; without this the note itself
-// (dropped + not-found ids) could dwarf the section content and blow the budget.
-const MAX_OMISSION_IDS = 24;
+// Byte-cap a routed bundle's omission note. Routes are PR-controlled and can
+// cite hundreds of sections with arbitrarily long dotted ids, so bounding the
+// count alone is not enough — the rendered ids must fit a fixed byte budget or
+// the note could dwarf the section content and blow the prompt budget.
+const MAX_OMISSION_NOTE_BYTES = 1024;
 
-/** Bounded omission note for a routed bundle: at most MAX_OMISSION_IDS ids, then a count. */
+/** Bounded omission note: ids listed until MAX_OMISSION_NOTE_BYTES, rest summed as "+N more". */
 function renderOmissionNote(ids: string[], sourceRel: string): string {
   if (ids.length === 0) return '';
-  const shown = ids.slice(0, MAX_OMISSION_IDS);
+  const shown: string[] = [];
+  let used = 0;
+  for (const id of ids) {
+    used += (shown.length > 0 ? 2 : 0) + Buffer.byteLength(id, 'utf8');
+    if (used > MAX_OMISSION_NOTE_BYTES) break;
+    shown.push(id);
+  }
+  const more = ids.length - shown.length;
   const list =
-    ids.length > shown.length
-      ? `${shown.join(', ')}, +${ids.length - shown.length} more`
-      : shown.join(', ');
+    more > 0 ? `${shown.length > 0 ? `${shown.join(', ')}, ` : ''}+${more} more` : shown.join(', ');
   return `\n\n[Omitted from this bundle to stay within budget: ${list} — read from .pr-governance/${sourceRel} if relevant.]`;
 }
 

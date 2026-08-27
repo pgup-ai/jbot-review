@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { after, describe, it } from 'node:test';
 
 import { discoverGuidelineDocs } from '../src/shared/review-context.ts';
@@ -254,6 +255,38 @@ describe('discoverGuidelineDocs with diff routing', () => {
       Buffer.byteLength(bundle.text, 'utf8') < 2048,
       'the note cannot balloon to thousands of ids',
     );
+  });
+
+  it('byte-bounds the omission note even for a single oversized dotted section id', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-bigid-'));
+    roots.push(root);
+    const hugeId = `TS-${'1.'.repeat(2000)}1`; // a ~4 KB valid dotted section id, absent from the doc
+    writeRoutedRepo(root, { rules: `TS-1, ${hugeId}`, doc: '## 1. First\nSECTION-ONE' });
+    const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
+      d.label.includes('§'),
+    )!;
+    assert.match(bundle.text, /SECTION-ONE/);
+    assert.ok(
+      Buffer.byteLength(bundle.text, 'utf8') < 2048,
+      'the note is byte-bounded, so one huge id cannot blow the cap',
+    );
+  });
+
+  it('matches adversarial globstar+star globs over many deep paths in linear time', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-dos-'));
+    roots.push(root);
+    // globstar + many stars (≤ MAX_GLOB_LENGTH) ending in a literal that fails:
+    // the old per-index propagation was O(len²) per pair — minutes across a fleet.
+    writeRoutedRepo(root, {
+      paths: `['**/${'*'.repeat(110)}zzzz']`,
+      rules: 'TS-1',
+      doc: '## 1\nX',
+    });
+    const deep = `${'a/'.repeat(120)}file.ts`; // 120 slashes; basename is not ...zzzz, so no match
+    const files = Array.from({ length: 500 }, (_, i) => `${deep}${i}`);
+    const t0 = performance.now();
+    await discoverGuidelineDocs(root, files);
+    assert.ok(performance.now() - t0 < 1500, 'wildcard matching stays linear across the fleet');
   });
 
   it('falls back to whole-file discovery when no routing file exists', async () => {
