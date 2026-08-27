@@ -33,8 +33,13 @@ export function parseDiffRoutes(text: string): DiffRoute[] {
   const yamlText = text.replace(/\r\n/g, '\n');
   const region = yamlText.match(/^entries:[ \t]*$([\s\S]*)/m)?.[1];
   if (!region) return [];
+  const blocks = region.split(/^[ \t]*-[ \t]+name:/m).slice(1);
+  // Reject an over-count file rather than silently keeping a truncated subset:
+  // a non-empty partial would suppress the caller's whole-file fallback, so a
+  // path matching only a dropped route would get no guidance at all.
+  if (blocks.length > MAX_ROUTES) return [];
   const routes: DiffRoute[] = [];
-  for (const block of region.split(/^[ \t]*-[ \t]+name:/m).slice(1, MAX_ROUTES + 1)) {
+  for (const block of blocks) {
     const name = block.match(/^[ \t]*(.+)$/m)?.[1]?.trim();
     if (!name) continue;
     routes.push({
@@ -148,20 +153,33 @@ export function selectDiffRoutes(
  */
 export function extractRuleSection(docText: string, section: string): string | undefined {
   const lines = docText.replace(/\r\n/g, '\n').split('\n');
-  const heading = (line: string): { level: number; number?: string } | undefined => {
-    const match = line.match(/^(#+)[ \t]+(.*)$/);
+  // Headings inside ``` / ~~~ fences are examples, not policy — skip them.
+  const fenced: boolean[] = [];
+  let inFence = false;
+  for (const line of lines) {
+    const marker = /^\s*(```|~~~)/.test(line);
+    fenced.push(inFence || marker);
+    if (marker) inFence = !inFence;
+  }
+  const heading = (i: number): { level: number; number?: string } | undefined => {
+    const match = fenced[i] ? null : lines[i].match(/^(#+)[ \t]+(.*)$/);
     if (!match) return undefined;
     return {
       level: match[1].length,
       number: match[2].trim().match(/^(\d+(?:\.\d+)*)\.?(?=\s|$)/)?.[1],
     };
   };
-  const start = lines.findIndex((line) => heading(line)?.number === section);
+  let start = -1;
+  for (let i = 0; i < lines.length; i += 1)
+    if (heading(i)?.number === section) {
+      start = i;
+      break;
+    }
   if (start < 0) return undefined;
-  const startLevel = heading(lines[start])!.level;
+  const startLevel = heading(start)!.level;
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i += 1) {
-    const level = heading(lines[i])?.level;
+    const level = heading(i)?.level;
     if (level !== undefined && level <= startLevel) {
       end = i;
       break;

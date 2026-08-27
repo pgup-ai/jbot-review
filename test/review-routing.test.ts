@@ -55,6 +55,13 @@ describe('parseDiffRoutes', () => {
     assert.deepEqual(parseDiffRoutes('not: yaml\n'), []);
     assert.deepEqual(parseDiffRoutes(''), []);
     assert.deepEqual(parseDiffRoutes(`entries:\n${'#'.repeat(70 * 1024)}`), []);
+    // Over-count rejects the whole file (so whole-file fallback runs) rather than
+    // keeping a truncated subset that would suppress the fallback.
+    const overflow = Array.from(
+      { length: 301 },
+      (_, i) => `  - name: r${i}\n    paths: ['a${i}/**']`,
+    );
+    assert.deepEqual(parseDiffRoutes(`entries:\n${overflow.join('\n')}`), []);
   });
 });
 
@@ -126,5 +133,12 @@ describe('extractRuleSection', () => {
     assert.equal(extractRuleSection(doc, '16'), '## 16. AI\nai body');
     assert.equal(extractRuleSection(doc, '16.2'), '## 16.2 Parity\nparity body');
     assert.equal(extractRuleSection(doc, '99'), undefined);
+  });
+
+  it('ignores a numbered heading inside a fenced code block', () => {
+    const fenced = ['# T', '```md', '## 9. Example', 'FENCED', '```', '## 9. Real', 'REAL'].join(
+      '\n',
+    );
+    assert.equal(extractRuleSection(fenced, '9'), '## 9. Real\nREAL');
   });
 });

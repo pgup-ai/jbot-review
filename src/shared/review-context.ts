@@ -66,6 +66,10 @@ export interface GuidelineDoc {
 const MAX_GLOB_LENGTH = 128;
 const MAX_GLOBS_PER_DOC = 64;
 const MAX_GLOB_VARIANTS = 64;
+// Token-work ceiling for one routing pass (~sub-second). Real FMS is ~85M;
+// beyond this, route selection fails open (unmatched routes just don't apply,
+// and whole-file discovery still supplies guidance).
+const MAX_ROUTE_MATCH_OPS = 300_000_000;
 
 /** Cuts an unquoted trailing `# comment` — valid YAML Cursor tolerates. */
 function stripYamlComment(value: string): string {
@@ -216,6 +220,11 @@ function tokenizeGlob(glob: string): GlobToken[] {
 let matchRowA = new Uint8Array(0);
 let matchRowB = new Uint8Array(0);
 
+// Actual token-work done by matchTokens, so route selection can fail open once a
+// pathological route set (many long-shared-prefix globs × many files) blows past
+// a budget instead of blocking the event loop. Reset by the routing caller.
+let matchOps = 0;
+
 /**
  * Linear-time glob match: one reachability pass per token over the target,
  * O(tokens × length) with no regex engine. Wildcard propagation is a single
@@ -234,6 +243,7 @@ function matchTokens(tokens: GlobToken[], target: string): boolean {
   cur.fill(0, 0, len + 1);
   cur[0] = 1;
   for (const token of tokens) {
+    matchOps += len;
     next.fill(0, 0, len + 1);
     switch (token.kind) {
       // A literal/single-char token can empty the frontier; when it does, no
@@ -636,7 +646,7 @@ const MAX_OMISSION_NOTE_BYTES = 1024;
 const MAX_LABEL_LIST_BYTES = 512;
 
 /** Join items with ", " within maxBytes (a hard cap), summing the rest as "+N more". */
-function boundedJoin(items: string[], maxBytes: number): string {
+export function boundedJoin(items: string[], maxBytes: number): string {
   // Reserve room for a trailing ", +N more" so appending it can't breach the cap.
   const budget = maxBytes - 16;
   const shown: string[] = [];
@@ -934,18 +944,20 @@ export async function discoverGuidelineDocs(
       ...deduped.filter((entry) => !included.includes(entry)).map((e) => `§${e.section}`),
       ...missing.map((section) => `§${section} (not found)`),
     ];
-    // Reserve room for the (bounded) note so body+note stays within the per-file
-    // cap; +32 covers the optional truncation marker. buffer opens with a `#`
-    // heading, so flooring the limit at 1 keeps at least one boundary.
-    const reserve =
-      Buffer.byteLength(renderOmissionNote(droppedIds, governanceRelPath), 'utf8') + 32;
-    const bodyBytes = findUtf8Boundary(buffer, Math.max(1, Math.min(buffer.length, cap - reserve)));
-    const note = renderOmissionNote(
-      bodyBytes < buffer.length
-        ? [...droppedIds, `§${included.at(-1)?.section} (truncated)`]
-        : droppedIds,
+    // Reserve for whichever note is actually appended, so body+note is a hard
+    // cap. Both candidates are computed up front (the truncation marker can be
+    // longer than the plain note); the body floors at 1 (buffer opens with `#`).
+    const noteTruncated = renderOmissionNote(
+      [...droppedIds, `§${included.at(-1)?.section} (truncated)`],
       governanceRelPath,
     );
+    const notePlain = renderOmissionNote(droppedIds, governanceRelPath);
+    const reserve = Math.max(
+      Buffer.byteLength(noteTruncated, 'utf8'),
+      Buffer.byteLength(notePlain, 'utf8'),
+    );
+    const bodyBytes = findUtf8Boundary(buffer, Math.max(1, Math.min(buffer.length, cap - reserve)));
+    const note = bodyBytes < buffer.length ? noteTruncated : notePlain;
     const text = `${buffer.toString('utf8', 0, bodyBytes)}${note}`.trim();
     remainingGuidelineBytes -= Buffer.byteLength(text, 'utf8');
     docs.push({
@@ -962,10 +974,12 @@ export async function discoverGuidelineDocs(
     const routingText = await readGovernanceFile('review/rules-for-diff.yaml');
     const routes = routingText ? parseDiffRoutes(routingText) : [];
     if (routes.length > 0) {
-      // Route globs are PR-controlled; bound them like `.mdc` globs and compile
-      // each once so matching every glob against every changed file can't stall.
+      // Route globs are PR-controlled; bound them like `.mdc` globs, compile each
+      // once, and fail open past a total work budget so matching can't stall.
       const globCache = new Map<string, GlobToken[][] | null>();
+      matchOps = 0;
       const boundedGlobMatch = (glob: string, file: string): boolean => {
+        if (matchOps > MAX_ROUTE_MATCH_OPS) return false;
         const variants = compileBoundedGlob(glob, globCache);
         if (!variants) return false;
         const target = glob.includes('/') ? file : file.slice(file.lastIndexOf('/') + 1);

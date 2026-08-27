@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { discoverGuidelineDocs } from '../src/shared/review-context.ts';
+import { boundedJoin, discoverGuidelineDocs } from '../src/shared/review-context.ts';
 
 // Synthetic .pr-governance fixture (no repo content). TECHNICAL_STANDARDS is
 // padded so §16.2 sits well past the 24 KB per-file cap: a whole-file load would
@@ -216,6 +216,21 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.ok(!docs.some((d) => d.label.includes('§')), 'no section bundle — nothing resolved');
   });
 
+  it('keeps body+note within the per-file cap when the selected section is truncated', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-trunc-'));
+    roots.push(root);
+    // A single ~40 KB section forces truncation; the note + its "(truncated)" marker must still fit.
+    writeRoutedRepo(root, { rules: 'TS-1', doc: `## 1. Big\n${'x'.repeat(40000)}` });
+    const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
+      d.label.includes('§'),
+    )!;
+    assert.match(bundle.text, /truncated/, 'the truncation is disclosed');
+    assert.ok(
+      Buffer.byteLength(bundle.text, 'utf8') <= 24 * 1024,
+      'body plus the truncation note stays within the per-file cap',
+    );
+  });
+
   it('byte-bounds the omission note when a route cites hundreds of unavailable sections', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-note-'));
     roots.push(root);
@@ -260,5 +275,16 @@ describe('discoverGuidelineDocs with diff routing', () => {
     const { docs } = await discoverGuidelineDocs(root, ['src/x.ts']);
     assert.ok(docs.some((d) => d.label === 'AGENTS.md'));
     assert.ok(!docs.some((d) => d.label.includes('§')));
+  });
+});
+
+describe('boundedJoin', () => {
+  it('is a hard byte cap once the "+N more" suffix is appended', () => {
+    const many = Array.from({ length: 50 }, (_, i) => `§${i}.${i}.${i}`);
+    for (const max of [24, 64, 512, 1024]) {
+      assert.ok(Buffer.byteLength(boundedJoin(many, max), 'utf8') <= max, `<= ${max}`);
+    }
+    // A lone item over budget summarizes as "+N more" rather than breaching the cap.
+    assert.ok(Buffer.byteLength(boundedJoin(['x'.repeat(2000)], 512), 'utf8') <= 512);
   });
 });
