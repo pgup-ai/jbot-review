@@ -36,9 +36,8 @@ import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
 import { DIM_CLI_BIN, DIM_PROVIDER_ID } from '../shared/dim.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID, parseModelName } from '@symma/protocol';
 import {
-  pickAuxModel,
-  pickPooledModel,
-  resolveAuxModel,
+  pickReviewModels,
+  removedAuxInputWarnings,
   resolveModelSelection,
 } from '../shared/model.ts';
 import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
@@ -316,18 +315,11 @@ async function review(
   // HEAD, not the worktree: iterating on uncommitted edits keeps the same
   // reviewer, so a before/after comparison is not confounded by the pick.
   const headSha = (await git(['rev-parse', 'HEAD'])).trim();
-  const model = pickPooledModel(pool, headSha);
+  const { model, auxModel } = pickReviewModels(pool, headSha);
   const provider = parseModelName(model).providerID;
-  // After the pick: a pool may span providers, so an aux id naming none
-  // belongs to the model this run actually chose, not to the pool's first.
-  const auxPool = resolveAuxModel(
-    process.env.JBOT_REVIEW_AUX_MODEL,
-    provider,
-    process.env.JBOT_AUX_PROVIDER || process.env.PROVIDER,
-  );
-  const auxModel = pickAuxModel(auxPool, headSha);
-  const auxProviderID = auxModel ? parseModelName(auxModel).providerID : provider;
-  for (const warning of swallowedProviderWarnings([...pool, ...auxPool])) log(warning);
+  const auxProviderID = parseModelName(auxModel).providerID;
+  for (const warning of swallowedProviderWarnings(pool)) log(warning);
+  for (const warning of removedAuxInputWarnings((_, env) => process.env[env] ?? '')) log(warning);
 
   // Preview never spawns checkouts or sessions: it inspects the worktree diff
   // exactly as the non-gateway path would review it.
@@ -489,7 +481,7 @@ async function review(
   // run rather than only the runs that happen to draw that provider. Still
   // below the no-review exits, so a clean tree needs no key at all.
   const credentials = resolvePoolCredentials(
-    [...pool, ...auxPool],
+    pool,
     ({ env }: { env: string }) => process.env[env],
     ' Local review needs only the provider configuration — no GitHub token; set it in the environment or in .env.',
   );

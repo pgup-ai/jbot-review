@@ -14,7 +14,7 @@ import {
   type ProviderCredential,
 } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
-import { pickAuxModel, pickPooledModel, resolveAuxModel } from '../shared/model.ts';
+import { pickReviewModels } from '../shared/model.ts';
 import { enqueue } from './queue.ts';
 
 export interface AppConfig {
@@ -22,11 +22,7 @@ export interface AppConfig {
   privateKey: string;
   /** Candidate models for this deployment; one is picked per PR head. */
   modelPool: string[];
-  /** Raw aux-model input; resolved per PR, since a bare id follows the pick. */
-  auxModelInput: string;
-  /** Legacy aux-provider pin, when one is configured. */
-  auxPinned?: string;
-  /** Credential per provider either pool draws on, keyed by provider id. */
+  /** Credential per provider the pool draws on, keyed by provider id. */
   credentials: Map<string, ProviderCredential>;
 }
 
@@ -88,14 +84,10 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
       });
       cleanup = cloned.cleanup;
       workspaceDir = cloned.dir;
-      const model = pickPooledModel(cfg.modelPool, pr.head.sha);
+      const { model, auxModel } = pickReviewModels(cfg.modelPool, pr.head.sha);
       const { providerID } = parseModelName(model);
       const { apiKey, baseURL } = cfg.credentials.get(providerID)!;
-      const auxModel = pickAuxModel(
-        resolveAuxModel(cfg.auxModelInput, providerID, cfg.auxPinned),
-        pr.head.sha,
-      );
-      const auxProviderID = auxModel ? parseModelName(auxModel).providerID : providerID;
+      const auxProviderID = parseModelName(auxModel).providerID;
       const auxCredential =
         auxProviderID === providerID ? undefined : cfg.credentials.get(auxProviderID);
       // A run that fails before posting has no review metadata block naming the model.

@@ -212,7 +212,7 @@ export function swallowedProviderWarnings(pool: string[]): string[] {
     return [
       `"${model}" sends model id "${modelID}" to provider "${providerID}", but "${prefix}" is ` +
         `itself a provider. To review on "${prefix}", name the model under it instead — and drop ` +
-        `provider/aux-provider if either is set, since a pin absorbs the prefix.`,
+        `provider if it is set, since a pin absorbs the prefix.`,
     ];
   });
 }
