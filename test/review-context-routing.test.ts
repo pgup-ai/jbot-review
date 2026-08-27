@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 
-import { boundedJoin, discoverGuidelineDocs } from '../src/shared/review-context.ts';
+import {
+  discoverGuidelineDocs,
+  formatFinderGuidelines,
+  formatGuidelines,
+} from '../src/shared/review-context.ts';
 
 // Synthetic .pr-governance fixture (no repo content). TECHNICAL_STANDARDS is
 // padded so §16.2 sits well past the 24 KB per-file cap: a whole-file load would
@@ -231,6 +235,17 @@ describe('discoverGuidelineDocs with diff routing', () => {
     );
   });
 
+  it('does not falsely truncate a section that fits under the cap', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-fits-'));
+    roots.push(root);
+    writeRoutedRepo(root, { rules: 'TS-1', doc: `## 1. Fits\n${'x'.repeat(20000)}` }); // ~20 KB < 24 KB
+    const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
+      d.label.includes('§'),
+    )!;
+    assert.ok(!bundle.text.includes('truncated'), 'a fitting section is not marked truncated');
+    assert.equal(bundle.text.match(/x/g)?.length, 20000, 'the full body is present');
+  });
+
   it('byte-bounds the omission note when a route cites hundreds of unavailable sections', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-note-'));
     roots.push(root);
@@ -278,13 +293,22 @@ describe('discoverGuidelineDocs with diff routing', () => {
   });
 });
 
-describe('boundedJoin', () => {
-  it('is a hard byte cap once the "+N more" suffix is appended', () => {
-    const many = Array.from({ length: 50 }, (_, i) => `§${i}.${i}.${i}`);
-    for (const max of [24, 64, 512, 1024]) {
-      assert.ok(Buffer.byteLength(boundedJoin(many, max), 'utf8') <= max, `<= ${max}`);
-    }
-    // A lone item over budget summarizes as "+N more" rather than breaching the cap.
-    assert.ok(Buffer.byteLength(boundedJoin(['x'.repeat(2000)], 512), 'utf8') <= 512);
+describe('rendered guideline block byte caps', () => {
+  // Labels, `###` wrappers, separators, and notices are added at render time and
+  // are not charged to the per-doc discovery budget — so only the final rendered
+  // block can enforce the true output size.
+  const docs = Array.from({ length: 40 }, (_, i) => ({
+    label: `.pr-governance/design/DOC-${i}.md (§${i})`,
+    text: 'x'.repeat(3000),
+    relevance: 3 as const,
+  }));
+  const discovered = { docs, referenced: ['a.md', 'b.md'], budgetExhausted: true };
+
+  it('caps the full render at the total budget and the finder render at its cap', () => {
+    assert.ok(Buffer.byteLength(formatGuidelines(discovered), 'utf8') <= 96 * 1024);
+    assert.ok(
+      Buffer.byteLength(formatFinderGuidelines(discovered, { capBytes: 24 * 1024 }), 'utf8') <=
+        24 * 1024,
+    );
   });
 });

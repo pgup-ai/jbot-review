@@ -55,13 +55,13 @@ describe('parseDiffRoutes', () => {
     assert.deepEqual(parseDiffRoutes('not: yaml\n'), []);
     assert.deepEqual(parseDiffRoutes(''), []);
     assert.deepEqual(parseDiffRoutes(`entries:\n${'#'.repeat(70 * 1024)}`), []);
-    // Over-count rejects the whole file (so whole-file fallback runs) rather than
-    // keeping a truncated subset that would suppress the fallback.
+    // Over-count keeps the first MAX_ROUTES (routed nested docs load only via
+    // routing, so dropping all of it would lose more than the overflow tail).
     const overflow = Array.from(
       { length: 301 },
       (_, i) => `  - name: r${i}\n    paths: ['a${i}/**']`,
     );
-    assert.deepEqual(parseDiffRoutes(`entries:\n${overflow.join('\n')}`), []);
+    assert.equal(parseDiffRoutes(`entries:\n${overflow.join('\n')}`).length, 300);
   });
 });
 
@@ -140,5 +140,8 @@ describe('extractRuleSection', () => {
       '\n',
     );
     assert.equal(extractRuleSection(fenced, '9'), '## 9. Real\nREAL');
+    // A `~~~` inside a ``` fence is a different family and must not close it.
+    const mixed = ['# T', '```', '~~~', '## 9. Ex', '~~~', '```', '## 9. Real', 'REAL'].join('\n');
+    assert.equal(extractRuleSection(mixed, '9'), '## 9. Real\nREAL');
   });
 });

@@ -645,8 +645,8 @@ const MAX_RULE_DOC_BYTES = 512 * 1024;
 const MAX_OMISSION_NOTE_BYTES = 1024;
 const MAX_LABEL_LIST_BYTES = 512;
 
-/** Join items with ", " within maxBytes (a hard cap), summing the rest as "+N more". */
-export function boundedJoin(items: string[], maxBytes: number): string {
+/** Join items with ", " within maxBytes (for caps that fit the summary), summing the rest as "+N more". */
+function boundedJoin(items: string[], maxBytes: number): string {
   // Reserve room for a trailing ", +N more" so appending it can't breach the cap.
   const budget = maxBytes - 16;
   const shown: string[] = [];
@@ -944,26 +944,28 @@ export async function discoverGuidelineDocs(
       ...deduped.filter((entry) => !included.includes(entry)).map((e) => `§${e.section}`),
       ...missing.map((section) => `§${section} (not found)`),
     ];
-    // Reserve for whichever note is actually appended, so body+note is a hard
-    // cap. Both candidates are computed up front (the truncation marker can be
-    // longer than the plain note).
-    const noteTruncated = renderOmissionNote(
-      [...droppedIds, `§${included.at(-1)?.section} (truncated)`],
-      governanceRelPath,
-    );
     const notePlain = renderOmissionNote(droppedIds, governanceRelPath);
-    const reserve = Math.max(
-      Buffer.byteLength(noteTruncated, 'utf8'),
-      Buffer.byteLength(notePlain, 'utf8'),
-    );
-    // Near total exhaustion the note alone can exceed what's left: skip rather
-    // than overshoot (the budget-exhausted disclosure fires downstream).
-    if (cap <= reserve) {
-      markBudgetExhausted();
-      return;
+    let bodyBytes: number;
+    let note: string;
+    if (buffer.length + Buffer.byteLength(notePlain, 'utf8') <= cap) {
+      // The whole bundle fits — no truncation, no truncation marker.
+      bodyBytes = buffer.length;
+      note = notePlain;
+    } else {
+      // Truncate, reserving the (longer) truncation note. Near total exhaustion
+      // the note alone can exceed what's left: skip rather than overshoot.
+      const noteTruncated = renderOmissionNote(
+        [...droppedIds, `§${included.at(-1)?.section} (truncated)`],
+        governanceRelPath,
+      );
+      const reserve = Buffer.byteLength(noteTruncated, 'utf8');
+      if (cap <= reserve) {
+        markBudgetExhausted();
+        return;
+      }
+      bodyBytes = findUtf8Boundary(buffer, cap - reserve);
+      note = noteTruncated;
     }
-    const bodyBytes = findUtf8Boundary(buffer, Math.min(buffer.length, cap - reserve));
-    const note = bodyBytes < buffer.length ? noteTruncated : notePlain;
     const text = `${buffer.toString('utf8', 0, bodyBytes)}${note}`.trim();
     remainingGuidelineBytes -= Buffer.byteLength(text, 'utf8');
     docs.push({
@@ -991,7 +993,12 @@ export async function discoverGuidelineDocs(
         const target = glob.includes('/') ? file : file.slice(file.lastIndexOf('/') + 1);
         return variants.some((tokens) => matchTokens(tokens, target));
       };
-      const matched = selectDiffRoutes(routes, changedFiles, boundedGlobMatch);
+      let matched = selectDiffRoutes(routes, changedFiles, boundedGlobMatch);
+      // If the work budget was blown mid-scan, the matched set is a partial,
+      // order-dependent subset — discard it whole so the outcome is deterministic
+      // (whole-file discovery below still supplies guidance) rather than silently
+      // dropping whichever routes happened to be scanned last.
+      if (matchOps > MAX_ROUTE_MATCH_OPS) matched = { docs: [], ruleIds: [] };
       const readmeText = await readGovernanceFile('README.md');
       const ruleIdDocs = readmeText ? parseRuleIdDocs(readmeText) : new Map<string, string>();
       const wholeDocRealPaths = new Set<string>();
@@ -1107,25 +1114,38 @@ function formatGuidelineDoc(doc: GuidelineDoc): string {
 }
 
 /**
+ * Hard-cap the fully assembled block. The per-doc discovery budget charges only
+ * `doc.text`; labels, `###` wrappers, separators, and trailing notices are added
+ * here for free, so the rendered block is the only place the true output size is
+ * known. Truncating it once guarantees the declared byte cap regardless of the
+ * metadata added above.
+ */
+function capRenderedBlock(text: string, maxBytes: number): string {
+  const buffer = Buffer.from(text, 'utf8');
+  if (buffer.length <= maxBytes) return text;
+  const marker = '\n\n[Guidance truncated to stay within the review budget.]';
+  const bodyBytes = findUtf8Boundary(buffer, Math.max(0, maxBytes - Buffer.byteLength(marker)));
+  return `${buffer.toString('utf8', 0, bodyBytes).trimEnd()}${marker}`;
+}
+
+/**
  * Full guideline render: every loaded doc, plus the budget notice (when the
  * total discovery budget was exhausted) and the referenced-but-not-loaded
  * pointer list. This is what the dedicated guideline-compliance session and
  * the back-compat `discoverGuidelines` wrapper receive.
  */
 export function formatGuidelines(discovered: DiscoveredGuidelines): string {
-  const sections = discovered.docs.map(formatGuidelineDoc);
-
+  const meta: string[] = [];
   if (discovered.budgetExhausted) {
-    sections.push(
+    meta.push(
       [
         '### Review guidance budget',
         `Additional guidance was skipped after the ${MAX_GUIDELINE_TOTAL_BYTES} byte review guidance budget was reached.`,
       ].join('\n'),
     );
   }
-
   if (discovered.referenced.length > 0) {
-    sections.push(
+    meta.push(
       [
         '### Referenced Markdown documents',
         'These docs were mentioned by loaded review guidance but were not preloaded. Read them only when relevant to the changed files or review question.',
@@ -1133,8 +1153,14 @@ export function formatGuidelines(discovered: DiscoveredGuidelines): string {
       ].join('\n'),
     );
   }
-
-  return sections.join('\n\n');
+  // Cap the docs to leave room for the trailing disclosures, so notices and the
+  // referenced-doc list survive within the total budget instead of being cut.
+  const metaText = meta.length > 0 ? `\n\n${meta.join('\n\n')}` : '';
+  const docsText = capRenderedBlock(
+    discovered.docs.map(formatGuidelineDoc).join('\n\n'),
+    Math.max(0, MAX_GUIDELINE_TOTAL_BYTES - Buffer.byteLength(metaText, 'utf8')),
+  );
+  return capRenderedBlock(`${docsText}${metaText}`, MAX_GUIDELINE_TOTAL_BYTES);
 }
 
 /**
@@ -1192,9 +1218,10 @@ export function formatFinderGuidelines(
     }
   }
 
-  const sections = discovered.docs
+  const docsText = discovered.docs
     .filter((_, index) => keptIndices.has(index))
-    .map(formatGuidelineDoc);
+    .map(formatGuidelineDoc)
+    .join('\n\n');
 
   const budgetNotes: string[] = [];
   if (omitted > 0) {
@@ -1207,6 +1234,7 @@ export function formatFinderGuidelines(
       `repository guidance also hit the ${MAX_GUIDELINE_TOTAL_BYTES} byte discovery budget upstream`,
     );
   }
+  let noteText = '';
   if (budgetNotes.length > 0) {
     // When the compliance pass is skipped, "the full set is reviewed" would be
     // false — name the omitted docs instead so a tool-capable finder can read
@@ -1236,12 +1264,15 @@ export function formatFinderGuidelines(
           : `The guideline-compliance pass is not running this run; omitted file(s): ${shownLabels.join(
               ', ',
             )}${hidden > 0 ? ` and ${hidden} more omitted file(s)` : ''}. Read any that apply to your changed files.`;
-    sections.push(
-      ['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n'),
-    );
+    noteText = `\n\n${['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n')}`;
   }
-
-  return sections.join('\n\n');
+  // Cap the docs to leave room for the budget note, so the omission disclosure
+  // survives within the finder cap instead of being cut off.
+  const cappedDocs = capRenderedBlock(
+    docsText,
+    Math.max(0, capBytes - Buffer.byteLength(noteText, 'utf8')),
+  );
+  return capRenderedBlock(`${cappedDocs}${noteText}`, capBytes);
 }
 
 /**

@@ -33,13 +33,12 @@ export function parseDiffRoutes(text: string): DiffRoute[] {
   const yamlText = text.replace(/\r\n/g, '\n');
   const region = yamlText.match(/^entries:[ \t]*$([\s\S]*)/m)?.[1];
   if (!region) return [];
-  const blocks = region.split(/^[ \t]*-[ \t]+name:/m).slice(1);
-  // Reject an over-count file rather than silently keeping a truncated subset:
-  // a non-empty partial would suppress the caller's whole-file fallback, so a
-  // path matching only a dropped route would get no guidance at all.
-  if (blocks.length > MAX_ROUTES) return [];
+  // Keep the first MAX_ROUTES rather than rejecting the whole file: routed docs
+  // (often nested under `.pr-governance/design/`) are reachable ONLY via routing
+  // — generic discovery does not recurse there — so dropping all routing would
+  // lose more guidance than dropping the overflow tail.
   const routes: DiffRoute[] = [];
-  for (const block of blocks) {
+  for (const block of region.split(/^[ \t]*-[ \t]+name:/m).slice(1, MAX_ROUTES + 1)) {
     const name = block.match(/^[ \t]*(.+)$/m)?.[1]?.trim();
     if (!name) continue;
     routes.push({
@@ -153,13 +152,20 @@ export function selectDiffRoutes(
  */
 export function extractRuleSection(docText: string, section: string): string | undefined {
   const lines = docText.replace(/\r\n/g, '\n').split('\n');
-  // Headings inside ``` / ~~~ fences are examples, not policy — skip them.
+  // Headings inside ``` / ~~~ fences are examples, not policy — skip them. Only
+  // the same delimiter family closes a fence, so a `~~~` inside a ``` block does
+  // not end it (and vice versa).
   const fenced: boolean[] = [];
-  let inFence = false;
+  let fenceChar: '`' | '~' | undefined;
   for (const line of lines) {
-    const marker = /^\s*(```|~~~)/.test(line);
-    fenced.push(inFence || marker);
-    if (marker) inFence = !inFence;
+    const marker = line.match(/^\s*(```+|~~~+)/)?.[1]?.[0] as '`' | '~' | undefined;
+    if (fenceChar === undefined) {
+      fenced.push(marker !== undefined);
+      fenceChar = marker;
+    } else {
+      fenced.push(true);
+      if (marker === fenceChar) fenceChar = undefined;
+    }
   }
   const heading = (i: number): { level: number; number?: string } | undefined => {
     const match = fenced[i] ? null : lines[i].match(/^(#+)[ \t]+(.*)$/);

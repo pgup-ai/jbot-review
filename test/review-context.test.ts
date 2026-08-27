@@ -401,6 +401,9 @@ describe('selectFinderGuidelineText', () => {
       complianceRuns: false,
     });
     const note = text.split('### Review guidance budget')[1] ?? '';
+    // The render is hard-capped, and the docs are capped to leave room so the
+    // omitted-label note survives intact within the finder budget.
+    assert.ok(Buffer.byteLength(text, 'utf8') <= 24 * 1024, 'render stays within the finder cap');
     assert.ok(Buffer.byteLength(note, 'utf8') < 3 * 1024, `note is ${note.length} chars`);
     assert.match(note, /and \d+ more omitted file\(s\)/);
   });
