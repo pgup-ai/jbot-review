@@ -1,0 +1,130 @@
+/**
+ * Diff-scoped review routing. A repo can declare, per changed-path glob, which
+ * governance docs and rule IDs apply (a `rules-for-diff.yaml`), and map rule-ID
+ * prefixes to the doc that defines them (the "Rule IDs" section of a governance
+ * README). jbot then loads the matched docs and the specific rule SECTIONS
+ * ahead of generic guidance, so a large standards file contributes its relevant
+ * sections instead of an arbitrary head-of-file truncation.
+ *
+ * Every parser is fail-safe: malformed or oversized input yields an empty
+ * result, and the caller falls back to whole-file discovery. These are pure
+ * (string in, value out); file IO and byte budgeting live in the caller.
+ */
+
+export interface DiffRoute {
+  name: string;
+  paths: string[];
+  docs: string[];
+  rules: string[];
+}
+
+const MAX_ROUTING_BYTES = 64 * 1024;
+const MAX_ROUTES = 300;
+const MAX_LIST_ITEMS = 400;
+
+/**
+ * Parse the bounded `entries:` list of a rules-for-diff.yaml. Only the shape
+ * this schema uses is recognized — `name` scalars and `paths`/`docs`/`rules`
+ * bracketed lists (inline or multi-line); anything else is ignored, not an
+ * error. Not a general YAML parser.
+ */
+export function parseDiffRoutes(yamlText: string): DiffRoute[] {
+  if (yamlText.length > MAX_ROUTING_BYTES) return [];
+  const region = yamlText.match(/^entries:[ \t]*$([\s\S]*)/m)?.[1];
+  if (!region) return [];
+  const routes: DiffRoute[] = [];
+  for (const block of region.split(/^[ \t]*-[ \t]+name:/m).slice(1, MAX_ROUTES + 1)) {
+    const name = block.match(/^[ \t]*(.+)$/m)?.[1]?.trim();
+    if (!name) continue;
+    routes.push({
+      name,
+      paths: parseBracketList(block, 'paths'),
+      docs: parseBracketList(block, 'docs'),
+      rules: parseBracketList(block, 'rules'),
+    });
+  }
+  return routes;
+}
+
+/** A line-anchored `key: [ ... ]` list; items are comma-separated, quotes optional. */
+function parseBracketList(block: string, key: string): string[] {
+  // `\s*` after the colon: the schema puts the `[` on the same line (inline)
+  // or on the next (multi-line block).
+  const inner = block.match(new RegExp(`(?:^|\\n)[ \\t]*${key}:\\s*\\[([\\s\\S]*?)\\]`))?.[1];
+  if (inner === undefined) return [];
+  return inner
+    .split(',')
+    .map((token) =>
+      token
+        .trim()
+        .replace(/^['"]|['"]$/g, '')
+        .trim(),
+    )
+    .filter((token) => token.length > 0)
+    .slice(0, MAX_LIST_ITEMS);
+}
+
+/**
+ * Parse a governance README's rule-ID declaration into `PREFIX → doc path`
+ * (the path is relative to the README's directory). Recognizes the documented
+ * form, e.g. `` `TS-<n>` — sections of `design/TECHNICAL_STANDARDS.md` ``.
+ */
+export function parseRuleIdDocs(readmeText: string): Map<string, string> {
+  const map = new Map<string, string>();
+  const pattern = /`([A-Za-z][A-Za-z0-9]*)-<n>`[^`\n]*?sections of[ \t]*`([^`\n]+\.md)`/gi;
+  for (const match of readmeText.matchAll(pattern))
+    map.set(match[1].toUpperCase(), match[2].trim());
+  return map;
+}
+
+/** Split `TS-16.2` into its prefix and section number; undefined if not an ID. */
+export function splitRuleId(id: string): { prefix: string; section: string } | undefined {
+  const match = id.trim().match(/^([A-Za-z][A-Za-z0-9]*)-(\d+(?:\.\d+)*)$/);
+  return match ? { prefix: match[1].toUpperCase(), section: match[2] } : undefined;
+}
+
+/** Docs + rule IDs of every route whose paths glob-match at least one changed file. */
+export function selectDiffRoutes(
+  routes: DiffRoute[],
+  changedFiles: string[],
+  matches: (glob: string, file: string) => boolean,
+): { docs: string[]; ruleIds: string[] } {
+  const docs = new Set<string>();
+  const ruleIds = new Set<string>();
+  for (const route of routes) {
+    if (!route.paths.some((glob) => changedFiles.some((file) => matches(glob, file)))) continue;
+    for (const doc of route.docs) docs.add(doc);
+    for (const rule of route.rules) ruleIds.add(rule);
+  }
+  return { docs: [...docs], ruleIds: [...ruleIds] };
+}
+
+/**
+ * Extract the section a numbered heading owns. Sections are numbered headings
+ * (`## 6. Title`, `### 6.2 Title`); a rule's section number is the heading's
+ * leading numeric token (a trailing dot on whole numbers is ignored). Returns
+ * the heading through just before the next heading of the same or higher level.
+ */
+export function extractRuleSection(docText: string, section: string): string | undefined {
+  const lines = docText.split('\n');
+  const heading = (line: string): { level: number; number?: string } | undefined => {
+    const match = line.match(/^(#+)[ \t]+(.*)$/);
+    if (!match) return undefined;
+    return {
+      level: match[1].length,
+      number: match[2].trim().match(/^(\d+(?:\.\d+)*)\.?(?=\s|$)/)?.[1],
+    };
+  };
+  const start = lines.findIndex((line) => heading(line)?.number === section);
+  if (start < 0) return undefined;
+  const startLevel = heading(lines[start])!.level;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const level = heading(lines[i])?.level;
+    if (level !== undefined && level <= startLevel) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start, end).join('\n').trim() || undefined;
+}

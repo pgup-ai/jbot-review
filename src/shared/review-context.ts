@@ -1,7 +1,14 @@
-import { access, open, readdir, realpath } from 'node:fs/promises';
+import { access, open, readdir, readFile, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 import { GIT_DIFF_ARGS } from './git.ts';
+import {
+  extractRuleSection,
+  parseDiffRoutes,
+  parseRuleIdDocs,
+  selectDiffRoutes,
+  splitRuleId,
+} from './review-routing.ts';
 
 export interface ReviewCommit {
   sha: string;
@@ -544,6 +551,9 @@ const SCOPED_GUIDELINE_FILES = [
 const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
 const MAX_GUIDELINE_FILE_BYTES = 24 * 1024;
 const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
+// A rule doc is read in full to locate a section (which can sit past the
+// per-file guideline cap); only the extracted section is charged to the budget.
+const MAX_RULE_DOC_BYTES = 512 * 1024;
 
 export async function discoverGuidelineDocs(
   cwd: string,
@@ -570,6 +580,27 @@ export async function discoverGuidelineDocs(
       const realPath = await realpath(absolutePath);
       if (!isInsideDirectory(workspaceRoot, realPath)) return undefined;
       return { absolutePath, realPath };
+    } catch {
+      return undefined;
+    }
+  }
+
+  const governanceDir = resolve(cwd, '.pr-governance');
+
+  // Read a whole governance file (routing config, README, or rule doc) up to a
+  // large cap, independent of the guideline budget: only extracted sections are
+  // charged. A rule section can live past the per-file guideline cap, so the
+  // source must be read in full to find it.
+  async function readGovernanceFile(relativePath: string): Promise<string | undefined> {
+    const resolved = await resolveExistingInsideWorkspace(resolve(governanceDir, relativePath));
+    if (!resolved) return undefined;
+    try {
+      const buffer = await readFile(resolved.realPath);
+      return buffer.toString(
+        'utf8',
+        0,
+        findUtf8Boundary(buffer, Math.min(buffer.length, MAX_RULE_DOC_BYTES)),
+      );
     } catch {
       return undefined;
     }
@@ -707,6 +738,73 @@ export async function discoverGuidelineDocs(
     }
   }
 
+  // Load the matched sections of a rule doc as one synthetic guideline, then
+  // mark the source seen so the whole (often large) file is not also loaded.
+  async function addRuleSections(governanceRelPath: string, sections: string[]): Promise<void> {
+    if (sections.length === 0 || remainingGuidelineBytes <= 0) return;
+    const resolved = await resolveExistingInsideWorkspace(
+      resolve(governanceDir, governanceRelPath),
+    );
+    if (!resolved || seenRealPaths.has(resolved.realPath)) return;
+    let source: string;
+    try {
+      const buffer = await readFile(resolved.realPath);
+      source = buffer.toString(
+        'utf8',
+        0,
+        findUtf8Boundary(buffer, Math.min(buffer.length, MAX_RULE_DOC_BYTES)),
+      );
+    } catch {
+      return;
+    }
+    const found = sections
+      .map((section) => ({ section, text: extractRuleSection(source, section) }))
+      .filter((entry): entry is { section: string; text: string } => Boolean(entry.text));
+    if (found.length === 0) return;
+    // Reserve the source now so the fallback whole-file load below skips it —
+    // the matched sections stand in for it.
+    seen.add(resolved.absolutePath);
+    seenRealPaths.add(resolved.realPath);
+    const label = `.pr-governance/${governanceRelPath} (§${found.map((f) => f.section).join(', §')})`;
+    const body = found.map((f) => f.text).join('\n\n');
+    const buffer = Buffer.from(body, 'utf8');
+    const byteLimit = Math.min(buffer.length, MAX_GUIDELINE_FILE_BYTES, remainingGuidelineBytes);
+    const includedBytes = findUtf8Boundary(buffer, byteLimit);
+    if (includedBytes <= 0) return;
+    remainingGuidelineBytes -= includedBytes;
+    const kept = buffer.toString('utf8', 0, includedBytes);
+    const text =
+      includedBytes < buffer.length
+        ? `${kept}\n\n[Rule sections truncated after ${includedBytes} bytes to keep the review prompt bounded.]`
+        : kept;
+    docs.push({ label, text: text.trim(), relevance: GUIDELINE_RELEVANCE.scoped });
+  }
+
+  // Diff-scoped routing first (highest priority for the budget): a repo's
+  // rules-for-diff.yaml maps changed paths to the governance docs and rule IDs
+  // that apply, so a large standards file contributes only its matched sections
+  // instead of an arbitrary head-of-file truncation. Absent or malformed → the
+  // whole-file discovery below is the fallback.
+  {
+    const routingText = await readGovernanceFile('review/rules-for-diff.yaml');
+    const routes = routingText ? parseDiffRoutes(routingText) : [];
+    if (routes.length > 0) {
+      const matched = selectDiffRoutes(routes, changedFiles, globMatches);
+      const readmeText = await readGovernanceFile('README.md');
+      const ruleIdDocs = readmeText ? parseRuleIdDocs(readmeText) : new Map<string, string>();
+      // Rule sections before whole docs: they are the most targeted guidance.
+      const sectionsByDoc = new Map<string, string[]>();
+      for (const id of matched.ruleIds) {
+        const parsed = splitRuleId(id);
+        const doc = parsed && ruleIdDocs.get(parsed.prefix);
+        if (doc) sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed.section]);
+      }
+      for (const [doc, sections] of sectionsByDoc) await addRuleSections(doc, sections);
+      for (const doc of matched.docs)
+        await addGuidelineWithReferences(doc, GUIDELINE_RELEVANCE.scoped);
+    }
+  }
+
   for (const relativePath of ROOT_GUIDELINE_FILES) {
     await addGuidelineWithReferences(relativePath, GUIDELINE_RELEVANCE.root);
   }
@@ -719,7 +817,6 @@ export async function discoverGuidelineDocs(
     await addRuleDirectory(`${dir}/.cursor/rules`, GUIDELINE_RELEVANCE.scoped);
   }
 
-  const governanceDir = resolve(cwd, '.pr-governance');
   const readme = await addGuidelineFile(
     '.pr-governance/README.md',
     resolve(governanceDir, 'README.md'),

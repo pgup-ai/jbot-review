@@ -1,0 +1,122 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+
+import {
+  extractRuleSection,
+  parseDiffRoutes,
+  parseRuleIdDocs,
+  selectDiffRoutes,
+  splitRuleId,
+} from '../src/shared/review-routing.ts';
+
+// Synthetic fixtures mirroring the schema/heading shape — no repo content.
+const ROUTES_YAML = `version: 1
+entries:
+  - name: inline-entry
+    paths: ['apps/api/src/**']
+    docs: ['design/SEAMS.md']
+    rules: [INV-2]
+  - name: multiline-entry
+    paths:
+      [
+        'libs/mod/**',
+        'apps/core/src/thing.service.ts',
+      ]
+    docs: ['design/INVARIANTS.md', 'design/CONTRACTS.md']
+    rules: [INV-17, TS-16.2]
+  - name: no-docs
+    paths: ['**/*.spec.ts']
+    rules: [TS-6, TS-6.2]
+`;
+
+describe('parseDiffRoutes', () => {
+  it('parses inline and multi-line bracket lists and unquoted rule ids', () => {
+    const routes = parseDiffRoutes(ROUTES_YAML);
+    assert.equal(routes.length, 3);
+    assert.deepEqual(routes[0], {
+      name: 'inline-entry',
+      paths: ['apps/api/src/**'],
+      docs: ['design/SEAMS.md'],
+      rules: ['INV-2'],
+    });
+    assert.deepEqual(routes[1].paths, ['libs/mod/**', 'apps/core/src/thing.service.ts']);
+    assert.deepEqual(routes[1].rules, ['INV-17', 'TS-16.2']);
+    assert.deepEqual(routes[2].docs, []); // absent list → empty, not an error
+  });
+
+  it('fails safe (empty) on malformed or entry-less input', () => {
+    assert.deepEqual(parseDiffRoutes('not: yaml\n'), []);
+    assert.deepEqual(parseDiffRoutes(''), []);
+  });
+});
+
+describe('parseRuleIdDocs', () => {
+  it('maps a rule-id prefix to the doc that defines its sections', () => {
+    const readme = [
+      '## Rule IDs',
+      '- `INV-<n>` — sections of `design/INVARIANTS.md`, for example `INV-9.1`',
+      '- `TS-<n>` — sections of `design/TECHNICAL_STANDARDS.md`, for example `TS-13.1`',
+    ].join('\n');
+    const map = parseRuleIdDocs(readme);
+    assert.equal(map.get('INV'), 'design/INVARIANTS.md');
+    assert.equal(map.get('TS'), 'design/TECHNICAL_STANDARDS.md');
+  });
+});
+
+describe('splitRuleId', () => {
+  it('splits a prefixed section id and rejects non-ids', () => {
+    assert.deepEqual(splitRuleId('TS-16.2'), { prefix: 'TS', section: '16.2' });
+    assert.deepEqual(splitRuleId('INV-9'), { prefix: 'INV', section: '9' });
+    assert.equal(splitRuleId('not-an-id'), undefined);
+    assert.equal(splitRuleId('TS-'), undefined);
+  });
+});
+
+describe('selectDiffRoutes', () => {
+  it('unions docs and rule ids of every route matching a changed file', () => {
+    const matches = (glob: string, file: string) =>
+      new RegExp('^' + glob.replace(/\*\*/g, '.*').replace(/(?<!\.)\*/g, '[^/]*') + '$').test(file);
+    const { docs, ruleIds } = selectDiffRoutes(
+      parseDiffRoutes(ROUTES_YAML),
+      ['libs/mod/x.ts'],
+      matches,
+    );
+    assert.deepEqual(docs, ['design/INVARIANTS.md', 'design/CONTRACTS.md']);
+    assert.deepEqual(ruleIds, ['INV-17', 'TS-16.2']);
+
+    const none = selectDiffRoutes(parseDiffRoutes(ROUTES_YAML), ['README.md'], matches);
+    assert.deepEqual(none, { docs: [], ruleIds: [] });
+  });
+});
+
+describe('extractRuleSection', () => {
+  const doc = [
+    '# Technical Standards',
+    '## 6. Test helpers',
+    'whole-number section body',
+    '### 6.2 Placement',
+    'subsection body',
+    '### 6.3 Next sub',
+    'other',
+    '## 7. Repository',
+    'seven body',
+  ].join('\n');
+
+  it('extracts a whole-number section up to the next same-level heading', () => {
+    const section = extractRuleSection(doc, '6');
+    assert.match(section!, /^## 6\. Test helpers/);
+    assert.match(section!, /whole-number section body/);
+    // Stops before the next `##`, but includes its own `###` children.
+    assert.match(section!, /### 6\.2 Placement/);
+    assert.ok(!section!.includes('## 7. Repository'));
+  });
+
+  it('extracts a dotted subsection up to the next same-or-higher heading', () => {
+    const section = extractRuleSection(doc, '6.2');
+    assert.equal(section, '### 6.2 Placement\nsubsection body');
+  });
+
+  it('returns undefined for an absent section', () => {
+    assert.equal(extractRuleSection(doc, '99'), undefined);
+  });
+});
