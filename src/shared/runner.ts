@@ -90,6 +90,7 @@ import {
 } from './diff-context.ts';
 import {
   auxModelOptionsFor,
+  modelSupportsAgenticTools,
   needsAuxOpencodeConfig,
   resolvePromptCachePolicy,
   supportedModelOptions,
@@ -2135,10 +2136,27 @@ async function runReviewPipeline(params: {
     });
     let context7Active = false;
     let context7Block = '';
+    // Context7 is added at the opencode client, so every model that runs a
+    // session there must be able to drive a tool loop. A single-shot model
+    // (proxied Gemini) runs tool-free; a visible Context7 tool would let it make
+    // the call that 400s on the thought_signature continuation, and it cannot
+    // use the tool anyway. Aux only counts when it runs on opencode (not pi/CLI,
+    // which never touch this client).
+    const opencodeModelsAgentic =
+      modelSupportsAgenticTools(providerID, modelID) &&
+      (!auxOnOpencode || modelSupportsAgenticTools(auxProviderID, auxModelID));
     if (context7.enabled && opencodeRuntime && mainBackend.name === 'opencode') {
-      log(`Context7 MCP requested: ${context7.reason}`);
-      context7Active = await enableContext7Mcp(opencodeRuntime.client, options.context7ApiKey, log);
-      if (context7Active) context7Block = buildContext7PromptBlock(context7.reason);
+      if (opencodeModelsAgentic) {
+        log(`Context7 MCP requested: ${context7.reason}`);
+        context7Active = await enableContext7Mcp(
+          opencodeRuntime.client,
+          options.context7ApiKey,
+          log,
+        );
+        if (context7Active) context7Block = buildContext7PromptBlock(context7.reason);
+      } else {
+        log('Context7 MCP skipped: a single-shot model runs the review without tools.');
+      }
     } else if (context7.enabled) {
       // pi has no MCP support; framework-behavior claims fall back to the
       // abstention discipline. CLI backends likewise run without Context7.

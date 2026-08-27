@@ -8,7 +8,8 @@ import {
 } from '@opencode-ai/sdk';
 
 import { isContext7QuotaError } from './context7.ts';
-import { PROVIDERS, supportedModelOptions } from './config.ts';
+import { modelSupportsAgenticTools, PROVIDERS, supportedModelOptions } from './config.ts';
+import { hermeticOpencodeConfigHome, toolSchemaShimPluginUrl } from './opencode-hardening.ts';
 import { BASH_PERMISSIONS } from './shell-policy.ts';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -20,6 +21,7 @@ import {
   buildJsonRepairPrompt,
   CONTINUATION_NUDGE_PROMPT,
   isNoAttemptReply,
+  withNoToolsReviewDirective,
 } from './prompt.ts';
 import { isFiniteNumber, isRecord } from './text.ts';
 import {
@@ -278,7 +280,7 @@ export function buildConfig(
   additionalProviderKeys: OpencodeProviderConfig[] = [],
   baseURL?: string,
   verificationModelOptions?: Record<string, unknown>,
-): ServerOptions['config'] {
+): NonNullable<ServerOptions['config']> {
   const providerConfig: NonNullable<ServerOptions['config']>['provider'] = {
     [providerID]: buildProviderEntry({
       providerID,
@@ -561,6 +563,22 @@ export async function startOpencode(
       scopedEnv.set(key, process.env[key]);
       process.env[key] = value;
     }
+    // Hermetic config: the child uses ONLY jbot's config (via
+    // OPENCODE_CONFIG_CONTENT) plus the context7 MCP jbot adds at runtime,
+    // never ambient opencode config. Two sources, two switches:
+    //   - Project (reviewed repo's .opencode/): auto-EXECUTES plugins/tools at
+    //     session start outside the tool sandbox — a malicious-PR RCE beside
+    //     the provider keys and GitHub token (read-only invariant 8, layer 4).
+    //   - Global (~/.config/opencode): its MCP servers add unvetted,
+    //     write-capable tools (github, postgres) and 400 a Gemini backend
+    //     (schemas carry x-mcp-header / exclusiveMinimum). Empty XDG_CONFIG_HOME
+    //     drops them; auth lives under XDG_DATA_HOME, so it stays.
+    // Scoped like proxyEnv above: the child copies these at spawn, the parent
+    // restores immediately after.
+    scopedEnv.set('OPENCODE_DISABLE_PROJECT_CONFIG', process.env.OPENCODE_DISABLE_PROJECT_CONFIG);
+    process.env.OPENCODE_DISABLE_PROJECT_CONFIG = '1';
+    scopedEnv.set('XDG_CONFIG_HOME', process.env.XDG_CONFIG_HOME);
+    process.env.XDG_CONFIG_HOME = hermeticOpencodeConfigHome();
     if (options.scrubEnv !== false) {
       for (const key of sessionEnvDenyKeys(Object.keys(process.env))) {
         scrubbedEnv.set(key, process.env[key]!);
@@ -570,16 +588,20 @@ export async function startOpencode(
     if (scrubbedEnv.size > 0) {
       log(`Withheld ${scrubbedEnv.size} credential env var(s) from the opencode child.`);
     }
-    const config = buildConfig(
-      providerID,
-      modelID,
-      apiKey,
-      options.modelOptions,
-      options.promptCache ?? true,
-      options.additionalProviderKeys,
-      options.baseURL,
-      options.verificationModelOptions,
-    );
+    const config = {
+      ...buildConfig(
+        providerID,
+        modelID,
+        apiKey,
+        options.modelOptions,
+        options.promptCache ?? true,
+        options.additionalProviderKeys,
+        options.baseURL,
+        options.verificationModelOptions,
+      ),
+      // Bash wire-schema shim: Gemini-backed proxies 400 on exclusiveMinimum.
+      plugin: [toolSchemaShimPluginUrl()],
+    };
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',
       // Fixed port means two runs on one host collide (e.g. the webhook app
@@ -760,12 +782,15 @@ export async function runReview(
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
-  const prompt = assembleReviewPrompt(
-    prContext,
-    guidelines,
-    options.lensAddendum ?? '',
-    options.evidenceQuotes ?? false,
-    options.embeddedFirstPrompt ?? false,
+  const prompt = promptForModel(
+    model,
+    assembleReviewPrompt(
+      prContext,
+      guidelines,
+      options.lensAddendum ?? '',
+      options.evidenceQuotes ?? false,
+      options.embeddedFirstPrompt ?? false,
+    ),
   );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
 
@@ -896,7 +921,7 @@ export async function runAddressedPriorCommentsCheck(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<AddressedPriorComment[]> {
-  const prompt = assembleAddressedPriorCommentsPrompt(prContext);
+  const prompt = promptForModel(model, assembleAddressedPriorCommentsPrompt(prContext));
   const { raw, sessionID } = await promptPlanAgent(
     client,
     model,
@@ -930,7 +955,7 @@ export async function runGuidelineComplianceCheck(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<Finding[]> {
-  const prompt = assembleGuidelineCompliancePrompt(prContext, guidelines);
+  const prompt = promptForModel(model, assembleGuidelineCompliancePrompt(prContext, guidelines));
   const { raw, sessionID } = await promptPlanAgent(
     client,
     model,
@@ -955,7 +980,13 @@ export async function runChangesSinceLastReview(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<string> {
-  const prompt = assembleChangesSinceLastReviewPrompt(prContext, deltaContext);
+  // Its own single-shot variant carries the omitted-subjects disclosure a bare
+  // no-tools directive would lack, so use that rather than promptForModel.
+  const prompt = assembleChangesSinceLastReviewPrompt(
+    prContext,
+    deltaContext,
+    isSingleShotModel(model),
+  );
   const { raw } = await promptPlanAgent(
     client,
     model,
@@ -1008,9 +1039,11 @@ export async function runFindingVerification(
 }
 
 // Defense-in-depth tool sets for every review prompt. Default: mutating tools
-// off, exploration (bash/read/grep) on. Single-shot also turns exploration off,
-// forcing ONE model call with no agentic round-trips (used by finding-verification,
-// which judges from the embedded diff).
+// off, exploration (bash/read/grep) on. Single-shot turns off EVERY tool —
+// exploration plus the agentic builtins opencode still offers otherwise
+// (task/todowrite/skill/question) — so opencode sends an empty tools array and
+// the model answers in ONE turn. A lingering `question` tool would also hang a
+// headless run. (resolveSessionTools decides which set a session gets.)
 const READONLY_TOOLS = { write: false, edit: false, patch: false } as const;
 const SINGLE_SHOT_TOOLS = {
   write: false,
@@ -1022,7 +1055,41 @@ const SINGLE_SHOT_TOOLS = {
   glob: false,
   list: false,
   webfetch: false,
+  task: false,
+  todowrite: false,
+  skill: false,
+  question: false,
 } as const;
+
+export function isSingleShotModel(model: string): boolean {
+  const { providerID, modelID } = parseModelName(model);
+  return !modelSupportsAgenticTools(providerID, modelID);
+}
+
+/**
+ * The tool set for a session: a caller's explicit choice (e.g. verification
+ * forces SINGLE_SHOT_TOOLS), else exploration for agentic models and a
+ * zero-tool single-shot for models that cannot drive a tool loop (proxied
+ * Gemini — see `modelSupportsAgenticTools`). Exported for unit testing (pure).
+ */
+export function resolveSessionTools(
+  model: string,
+  explicit?: Record<string, boolean>,
+): Record<string, boolean> {
+  if (explicit) return explicit;
+  return isSingleShotModel(model) ? SINGLE_SHOT_TOOLS : READONLY_TOOLS;
+}
+
+/**
+ * Prepend the no-tools directive for a single-shot model so the agentic review
+ * prompt's "run git diff / explore the checkout" instructions don't make a
+ * tool-trained model emit tool-call markup or "I'll inspect…" prose instead of
+ * JSON. Passes with a tailored single-shot prompt variant (changes-since,
+ * verification) use that instead. Agentic models are unchanged.
+ */
+export function promptForModel(model: string, prompt: string): string {
+  return isSingleShotModel(model) ? withNoToolsReviewDirective(prompt) : prompt;
+}
 
 async function promptPlanAgent(
   client: OpencodeClient,
@@ -1100,10 +1167,11 @@ async function promptInSessionHoldingSlot(
   log: (msg: string) => void,
   timeoutMs: number,
   onTokenUsage?: TokenUsageRecorder,
-  tools: Record<string, boolean> = READONLY_TOOLS,
+  tools?: Record<string, boolean>,
   abortLabel = label,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
+  const resolvedTools = resolveSessionTools(model, tools);
   // Abortable only while a prompt is in flight (mirrors the pi registry's
   // dispose-time cleanup): a settled session left registered would eat a
   // later same-label abort as a spurious failed-abort log line. Keyed by the
@@ -1126,8 +1194,8 @@ async function promptInSessionHoldingSlot(
         // Defense-in-depth alongside the plan agent and the config-level
         // permission.edit deny: mutating tools are always off. Default keeps
         // bash/read on (the review needs git diff/log/grep); single-shot callers
-        // pass SINGLE_SHOT_TOOLS to turn exploration off for a one-call response.
-        tools,
+        // and non-agentic models (resolvedTools) send an empty tool set.
+        tools: resolvedTools,
         parts: [{ type: 'text', text: prompt }],
       },
     });
