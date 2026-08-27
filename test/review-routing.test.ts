@@ -78,6 +78,8 @@ describe('splitRuleId', () => {
     assert.deepEqual(splitRuleId('INV-9'), { prefix: 'INV', section: '9' });
     assert.equal(splitRuleId('not-an-id'), undefined);
     assert.equal(splitRuleId('TS-'), undefined);
+    // An absurdly long dotted id is rejected, so it can't bloat a label or note.
+    assert.equal(splitRuleId(`TS-${'1.'.repeat(2000)}1`), undefined);
   });
 });
 

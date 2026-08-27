@@ -236,14 +236,31 @@ function matchTokens(tokens: GlobToken[], target: string): boolean {
   for (const token of tokens) {
     next.fill(0, 0, len + 1);
     switch (token.kind) {
-      case 'lit':
-        for (let j = 0; j < len; j += 1) if (cur[j] && target[j] === token.ch) next[j + 1] = 1;
+      // A literal/single-char token can empty the frontier; when it does, no
+      // suffix can rematch, so bail immediately. This keeps a non-matching glob
+      // (the common case across many changed files) O(prefix), not O(tokens).
+      case 'lit': {
+        let hit = false;
+        for (let j = 0; j < len; j += 1)
+          if (cur[j] && target[j] === token.ch) {
+            next[j + 1] = 1;
+            hit = true;
+          }
+        if (!hit) return false;
         break;
-      case 'any1':
-        for (let j = 0; j < len; j += 1) if (cur[j] && target[j] !== '/') next[j + 1] = 1;
+      }
+      case 'any1': {
+        let hit = false;
+        for (let j = 0; j < len; j += 1)
+          if (cur[j] && target[j] !== '/') {
+            next[j + 1] = 1;
+            hit = true;
+          }
+        if (!hit) return false;
         break;
+      }
       case 'star': {
-        // Any reachable index carries forward within the segment, stopping at a `/`.
+        // Carry within the path segment only — a star never crosses a `/`.
         let reach = false;
         for (let k = 0; k <= len; k += 1) {
           if (cur[k]) reach = true;
@@ -253,7 +270,6 @@ function matchTokens(tokens: GlobToken[], target: string): boolean {
         break;
       }
       case 'globstar': {
-        // Any reachable index carries forward across everything, slashes included.
         let reach = false;
         for (let k = 0; k <= len; k += 1) {
           if (cur[k]) reach = true;
@@ -612,26 +628,31 @@ const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
 // per-file guideline cap); only the extracted section is charged to the budget.
 const MAX_RULE_DOC_BYTES = 512 * 1024;
 
-// Byte-cap a routed bundle's omission note. Routes are PR-controlled and can
-// cite hundreds of sections with arbitrarily long dotted ids, so bounding the
-// count alone is not enough — the rendered ids must fit a fixed byte budget or
-// the note could dwarf the section content and blow the prompt budget.
+// Byte-cap the id lists a routed bundle renders (label and omission note).
+// Routes are PR-controlled and can cite hundreds of sections with arbitrarily
+// long dotted ids, so both must fit a fixed byte budget or the fragment could
+// dwarf its section content and blow the prompt budget.
 const MAX_OMISSION_NOTE_BYTES = 1024;
+const MAX_LABEL_LIST_BYTES = 512;
 
-/** Bounded omission note: ids listed until MAX_OMISSION_NOTE_BYTES, rest summed as "+N more". */
-function renderOmissionNote(ids: string[], sourceRel: string): string {
-  if (ids.length === 0) return '';
+/** Join items with ", " until maxBytes, summing the rest as "+N more". */
+function boundedJoin(items: string[], maxBytes: number): string {
   const shown: string[] = [];
   let used = 0;
-  for (const id of ids) {
-    used += (shown.length > 0 ? 2 : 0) + Buffer.byteLength(id, 'utf8');
-    if (used > MAX_OMISSION_NOTE_BYTES) break;
-    shown.push(id);
+  for (const item of items) {
+    used += (shown.length > 0 ? 2 : 0) + Buffer.byteLength(item, 'utf8');
+    if (used > maxBytes) break;
+    shown.push(item);
   }
-  const more = ids.length - shown.length;
-  const list =
-    more > 0 ? `${shown.length > 0 ? `${shown.join(', ')}, ` : ''}+${more} more` : shown.join(', ');
-  return `\n\n[Omitted from this bundle to stay within budget: ${list} — read from .pr-governance/${sourceRel} if relevant.]`;
+  const more = items.length - shown.length;
+  return more > 0
+    ? `${shown.length > 0 ? `${shown.join(', ')}, ` : ''}+${more} more`
+    : shown.join(', ');
+}
+
+function renderOmissionNote(ids: string[], sourceRel: string): string {
+  if (ids.length === 0) return '';
+  return `\n\n[Omitted from this bundle to stay within budget: ${boundedJoin(ids, MAX_OMISSION_NOTE_BYTES)} — read from .pr-governance/${sourceRel} if relevant.]`;
 }
 
 /**
@@ -901,7 +922,10 @@ export async function discoverGuidelineDocs(
     }
     if (included.length === 0) included.push(deduped[0]);
     const buffer = Buffer.from(included.map((entry) => entry.text).join('\n\n'), 'utf8');
-    const label = `.pr-governance/${governanceRelPath} (§${included.map((e) => e.section).join(', §')})`;
+    const label = `.pr-governance/${governanceRelPath} (${boundedJoin(
+      included.map((e) => `§${e.section}`),
+      MAX_LABEL_LIST_BYTES,
+    )})`;
     // Name the omitted sections (and the source) so a reviewer can read them on
     // demand instead of silently missing a matched rule that didn't fit.
     const droppedIds = [

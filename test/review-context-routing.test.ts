@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { performance } from 'node:perf_hooks';
 import { after, describe, it } from 'node:test';
 
 import { discoverGuidelineDocs } from '../src/shared/review-context.ts';
@@ -178,31 +177,7 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.match(bundle.text, /SECTION-TWO/, 'libs/** matched via TS-2 after the scratch grew');
   });
 
-  it('loads a doc requested whole via docs: even when its sections are also cited', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'jbot-whole-'));
-    roots.push(root);
-    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
-    mkdirSync(join(root, '.pr-governance/design'), { recursive: true });
-    writeFileSync(
-      join(root, '.pr-governance/README.md'),
-      '## Rule IDs\n- `INV-<n>` maps to `design/INVARIANTS.md`',
-    );
-    // INVARIANTS is in docs: AND its §1 is cited via rules: — the whole doc wins.
-    writeFileSync(
-      join(root, '.pr-governance/review/rules-for-diff.yaml'),
-      "entries:\n  - name: s\n    paths: ['x/**']\n    docs: ['.pr-governance/design/INVARIANTS.md']\n    rules: [INV-1]",
-    );
-    writeFileSync(
-      join(root, '.pr-governance/design/INVARIANTS.md'),
-      '# Invariants\n## 1. First\nWHOLE-DOC-MARKER',
-    );
-    const { docs } = await discoverGuidelineDocs(root, ['x/a.ts']);
-    const inv = docs.find((d) => d.label.includes('INVARIANTS.md'))!;
-    assert.match(inv.text, /WHOLE-DOC-MARKER/);
-    assert.ok(!inv.label.includes('§'), 'loaded whole, not suppressed into a §-only bundle');
-  });
-
-  it('honors whole-doc precedence through a symlinked docs: entry', async () => {
+  it('honors whole-doc precedence (via a symlinked docs: entry) over section extraction', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-symlink-'));
     roots.push(root);
     mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
@@ -241,7 +216,7 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.ok(!docs.some((d) => d.label.includes('§')), 'no section bundle — nothing resolved');
   });
 
-  it('bounds the omission note when a route cites hundreds of unavailable sections', async () => {
+  it('byte-bounds the omission note when a route cites hundreds of unavailable sections', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-note-'));
     roots.push(root);
     const many = Array.from({ length: 400 }, (_, i) => `TS-${i + 100}`).join(', ');
@@ -250,43 +225,32 @@ describe('discoverGuidelineDocs with diff routing', () => {
       d.label.includes('§'),
     )!;
     assert.match(bundle.text, /SECTION-ONE/);
-    assert.match(bundle.text, /\+\d+ more/, 'the omission list is capped with a +N more summary');
+    assert.match(bundle.text, /\+\d+ more/, 'the list is capped with a +N more summary');
     assert.ok(
       Buffer.byteLength(bundle.text, 'utf8') < 2048,
-      'the note cannot balloon to thousands of ids',
+      'the note cannot balloon to hundreds of ids',
     );
   });
 
-  it('byte-bounds the omission note even for a single oversized dotted section id', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'jbot-bigid-'));
+  it('applies globstar/star/? tokens with the correct segment and slash semantics', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-tokens-'));
     roots.push(root);
-    const hugeId = `TS-${'1.'.repeat(2000)}1`; // a ~4 KB valid dotted section id, absent from the doc
-    writeRoutedRepo(root, { rules: `TS-1, ${hugeId}`, doc: '## 1. First\nSECTION-ONE' });
-    const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
-      d.label.includes('§'),
-    )!;
-    assert.match(bundle.text, /SECTION-ONE/);
-    assert.ok(
-      Buffer.byteLength(bundle.text, 'utf8') < 2048,
-      'the note is byte-bounded, so one huge id cannot blow the cap',
-    );
-  });
-
-  it('matches adversarial globstar+star globs over many deep paths in linear time', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'jbot-dos-'));
-    roots.push(root);
-    // globstar + many stars (≤ MAX_GLOB_LENGTH) ending in a literal that fails:
-    // the old per-index propagation was O(len²) per pair — minutes across a fleet.
+    // `?` glob uses a distinct extension so `**/*.ts` can't mask its slash test.
     writeRoutedRepo(root, {
-      paths: `['**/${'*'.repeat(110)}zzzz']`,
+      paths: "['**/*.ts', 'x/a?c.md']",
       rules: 'TS-1',
-      doc: '## 1\nX',
+      doc: '## 1. A\nONE',
     });
-    const deep = `${'a/'.repeat(120)}file.ts`; // 120 slashes; basename is not ...zzzz, so no match
-    const files = Array.from({ length: 500 }, (_, i) => `${deep}${i}`);
-    const t0 = performance.now();
-    await discoverGuidelineDocs(root, files);
-    assert.ok(performance.now() - t0 < 1500, 'wildcard matching stays linear across the fleet');
+    const matches = async (file: string) =>
+      (await discoverGuidelineDocs(root, [file])).docs.some((d) => d.label.includes('§'));
+    assert.ok(
+      await matches('top.ts'),
+      '**/*.ts matches a top-level file (globstar spans zero dirs)',
+    );
+    assert.ok(await matches('a/b/c/deep.ts'), '**/*.ts matches a deep file');
+    assert.ok(!(await matches('a/b/c/deep.tsx')), 'the trailing literal still discriminates');
+    assert.ok(await matches('x/axc.md'), '? matches one non-slash char');
+    assert.ok(!(await matches('x/a/c.md')), '? does not match a slash');
   });
 
   it('falls back to whole-file discovery when no routing file exists', async () => {

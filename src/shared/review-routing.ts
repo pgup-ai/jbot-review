@@ -108,9 +108,16 @@ export function parseRuleIdDocs(readmeText: string): Map<string, string> {
   return map;
 }
 
+// A real rule id is short (`TS-16.2`); reject absurdly long ones so a
+// PR-controlled routing file can't inject a huge section number that later
+// bloats a bundle label or omission note past budget.
+const MAX_RULE_ID_LENGTH = 64;
+
 /** Split `TS-16.2` into its prefix and section number; undefined if not an ID. */
 export function splitRuleId(id: string): { prefix: string; section: string } | undefined {
-  const match = id.trim().match(/^([A-Za-z][A-Za-z0-9]*)-(\d+(?:\.\d+)*)$/);
+  const trimmed = id.trim();
+  if (trimmed.length > MAX_RULE_ID_LENGTH) return undefined;
+  const match = trimmed.match(/^([A-Za-z][A-Za-z0-9]*)-(\d+(?:\.\d+)*)$/);
   return match ? { prefix: match[1].toUpperCase(), section: match[2] } : undefined;
 }
 
