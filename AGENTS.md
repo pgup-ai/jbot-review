@@ -75,13 +75,16 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    posts, so anchor validity is unaffected. Routing local mode to the ACP
    gateway pins the right side back to HEAD in a throwaway linked worktree —
    the companion clones a committed ref, and the two must agree.
-8. **Read-only enforced in three layers** for every opencode session: the
+8. **Read-only enforced in four layers** for every opencode session: the
    `plan` agent, config-level `permission.edit/external_directory: deny`,
-   and per-prompt `tools: { write/edit/patch: false }`. The sessions must
-   never mutate the workspace; bash stays allowed for git diff/log/grep.
-   Scope is the model sessions — the local driver's opt-in, gitignored
-   `.jbot-review/last-run.md` report is post-review output, not a session
-   write.
+   per-prompt `tools: { write/edit/patch: false }`, and
+   `OPENCODE_DISABLE_PROJECT_CONFIG` on the server child so the reviewed
+   repo's committed `.opencode/` (plugins, tools, agents, config) never
+   loads — that code runs at session start OUTSIDE the tool sandbox, so the
+   first three layers cannot see it. The sessions must never mutate the
+   workspace; bash stays allowed for git diff/log/grep. Scope is the model
+   sessions — the local driver's opt-in, gitignored `.jbot-review/last-run.md`
+   report is post-review output, not a session write.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal.
 10. **Extract pure logic for tests.** New decision logic goes in a pure

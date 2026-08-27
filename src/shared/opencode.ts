@@ -9,6 +9,7 @@ import {
 
 import { isContext7QuotaError } from './context7.ts';
 import { PROVIDERS, supportedModelOptions } from './config.ts';
+import { toolSchemaShimPluginUrl } from './opencode-schema-shim.ts';
 import { BASH_PERMISSIONS } from './shell-policy.ts';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -278,7 +279,7 @@ export function buildConfig(
   additionalProviderKeys: OpencodeProviderConfig[] = [],
   baseURL?: string,
   verificationModelOptions?: Record<string, unknown>,
-): ServerOptions['config'] {
+): NonNullable<ServerOptions['config']> {
   const providerConfig: NonNullable<ServerOptions['config']>['provider'] = {
     [providerID]: buildProviderEntry({
       providerID,
@@ -561,6 +562,17 @@ export async function startOpencode(
       scopedEnv.set(key, process.env[key]);
       process.env[key] = value;
     }
+    // Read-only enforcement, fourth layer (invariant 8): opencode auto-loads
+    // and EXECUTES plugins and tools committed under the reviewed repo's
+    // .opencode/ (and root opencode.json) when a session names the workspace
+    // as its directory — code that runs at session start OUTSIDE the tool
+    // sandbox, where the plan agent and permission denies never reach it, so a
+    // malicious PR would run arbitrary Node beside the provider keys and GitHub
+    // token. Disabling project (directory) config discovery keeps jbot's own
+    // config (OPENCODE_CONFIG_CONTENT) and the operator's global config.
+    // Scoped like proxyEnv above.
+    scopedEnv.set('OPENCODE_DISABLE_PROJECT_CONFIG', process.env.OPENCODE_DISABLE_PROJECT_CONFIG);
+    process.env.OPENCODE_DISABLE_PROJECT_CONFIG = '1';
     if (options.scrubEnv !== false) {
       for (const key of sessionEnvDenyKeys(Object.keys(process.env))) {
         scrubbedEnv.set(key, process.env[key]!);
@@ -570,16 +582,20 @@ export async function startOpencode(
     if (scrubbedEnv.size > 0) {
       log(`Withheld ${scrubbedEnv.size} credential env var(s) from the opencode child.`);
     }
-    const config = buildConfig(
-      providerID,
-      modelID,
-      apiKey,
-      options.modelOptions,
-      options.promptCache ?? true,
-      options.additionalProviderKeys,
-      options.baseURL,
-      options.verificationModelOptions,
-    );
+    const config = {
+      ...buildConfig(
+        providerID,
+        modelID,
+        apiKey,
+        options.modelOptions,
+        options.promptCache ?? true,
+        options.additionalProviderKeys,
+        options.baseURL,
+        options.verificationModelOptions,
+      ),
+      // Bash wire-schema shim: Gemini-backed proxies 400 on exclusiveMinimum.
+      plugin: [toolSchemaShimPluginUrl()],
+    };
     const { client, server } = await createOpencode({
       hostname: '127.0.0.1',
       // Fixed port means two runs on one host collide (e.g. the webhook app
