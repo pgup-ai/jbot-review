@@ -135,20 +135,20 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.ok(!bundle.label.includes('§9'));
   });
 
-  it('bounds a pathological route glob so it cannot stall the matcher', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'jbot-glob-'));
-    roots.push(root);
-    // A 130-char slash-less glob matches any basename if unbounded; over MAX_GLOB_LENGTH it must not.
-    writeRoutedRepo(root, {
-      paths: `['${'*'.repeat(130)}']`,
-      rules: 'TS-1',
-      doc: '## 1. First\nSECTION-ONE',
-    });
-    const { docs } = await discoverGuidelineDocs(root, ['a.ts']);
-    assert.ok(
-      !docs.some((d) => d.label.includes('§')),
-      'the over-long glob is rejected, no section loads',
-    );
+  it('bounds pathological route globs (over-length and over-expanding) so they cannot stall the matcher', async () => {
+    // Each glob would match its file if unbounded; both must be rejected — one by
+    // MAX_GLOB_LENGTH (short-circuits first), one by MAX_GLOB_VARIANTS (2^7 > 64).
+    const cases = [
+      { tag: 'length', paths: `['${'*'.repeat(130)}']`, file: 'a.ts' },
+      { tag: 'variants', paths: `['x/${'{a,b}'.repeat(7)}.ts']`, file: 'x/aaaaaaa.ts' },
+    ];
+    for (const { tag, paths, file } of cases) {
+      const root = mkdtempSync(join(tmpdir(), `jbot-glob-${tag}-`));
+      roots.push(root);
+      writeRoutedRepo(root, { paths, rules: 'TS-1', doc: '## 1. First\nSECTION-ONE' });
+      const { docs } = await discoverGuidelineDocs(root, [file]);
+      assert.ok(!docs.some((d) => d.label.includes('§')), `${tag}-bounded glob loads no section`);
+    }
   });
 
   it('falls back to whole-file discovery when no routing file exists', async () => {
