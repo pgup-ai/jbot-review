@@ -752,7 +752,11 @@ export async function discoverGuidelineDocs(
   // Load the matched sections of a rule doc as one synthetic guideline, then
   // mark the source seen so the whole (often large) file is not also loaded.
   async function addRuleSections(governanceRelPath: string, sections: string[]): Promise<void> {
-    if (sections.length === 0 || remainingGuidelineBytes <= 0) return;
+    if (sections.length === 0) return;
+    if (remainingGuidelineBytes <= 0) {
+      markBudgetExhausted();
+      return;
+    }
     const resolved = await resolveExistingInsideWorkspace(
       resolve(governanceDir, governanceRelPath),
     );
@@ -792,7 +796,10 @@ export async function discoverGuidelineDocs(
     }
     const buffer = Buffer.from(included.map((entry) => entry.text).join('\n\n'), 'utf8');
     const includedBytes = findUtf8Boundary(buffer, Math.min(buffer.length, cap));
-    if (includedBytes <= 0) return;
+    if (includedBytes <= 0) {
+      markBudgetExhausted();
+      return;
+    }
     const label = `.pr-governance/${governanceRelPath} (§${included.map((e) => e.section).join(', §')})`;
     // Name the omitted sections (and the source) so a reviewer can read them on
     // demand instead of silently missing a matched rule that didn't fit.
