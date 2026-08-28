@@ -109,10 +109,10 @@ describe('discoverGuidelines', () => {
   it('lists governance references that exceed the guidance budget instead of dropping them', async () => {
     await withTempRepo(async (repo) => {
       await mkdir(join(repo, '.pr-governance'), { recursive: true });
-      // 5 x 24KB files exhaust the 96KB total budget before the last reference.
+      // 23 x 24KB files exhaust the bounded candidate pool before the last reference.
       const bigBody = 'x'.repeat(25 * 1024);
       const references: string[] = [];
-      for (let index = 1; index <= 5; index += 1) {
+      for (let index = 1; index <= 23; index += 1) {
         await writeFile(
           join(repo, '.pr-governance', `BIG_${index}.md`),
           `# Big ${index}\n${bigBody}`,
@@ -130,8 +130,8 @@ describe('discoverGuidelines', () => {
 
       assert.match(guidelines, /### Review guidance budget/);
       assert.doesNotMatch(guidelines, /Budget exhausted by now/);
-      assert.match(guidelines, /### Referenced Markdown documents/);
-      assert.match(guidelines, /- \.pr-governance\/LAST\.md/);
+      assert.match(guidelines, /Referenced Markdown documents not preloaded/);
+      assert.match(guidelines, /\.pr-governance\/LAST\.md/);
     });
   });
 
@@ -167,7 +167,7 @@ describe('discoverGuidelines', () => {
       await mkdir(join(repo, 'docs'), { recursive: true });
       const bigBody = 'x'.repeat(25 * 1024);
       const references: string[] = [];
-      for (let index = 1; index <= 4; index += 1) {
+      for (let index = 1; index <= 22; index += 1) {
         await writeFile(join(repo, 'docs', `BIG_${index}.md`), `# Big ${index}\n${bigBody}`);
         references.push(`- \`docs/BIG_${index}.md\``);
       }
@@ -179,8 +179,8 @@ describe('discoverGuidelines', () => {
 
       assert.match(guidelines, /### Review guidance budget/);
       assert.doesNotMatch(guidelines, /Budget exhausted by now/);
-      assert.match(guidelines, /### Referenced Markdown documents/);
-      assert.match(guidelines, /- docs\/LAST\.md/);
+      assert.match(guidelines, /Referenced Markdown documents not preloaded/);
+      assert.match(guidelines, /docs\/LAST\.md/);
     });
   });
 
@@ -320,7 +320,7 @@ describe('discoverGuidelines', () => {
 
       const guidelines = await discoverGuidelines(repo);
 
-      assert.match(guidelines, /### AGENTS\.md\n# Agents/);
+      assert.match(guidelines, /### AGENTS\.md \[part 1\/\d+\]\n# Agents/);
       assert.match(guidelines, /Guidance truncated after \d+ bytes/);
       assert.doesNotMatch(guidelines, /END_SHOULD_NOT_APPEAR/);
       assert.doesNotMatch(guidelines, /\uFFFD/);
@@ -329,7 +329,7 @@ describe('discoverGuidelines', () => {
 });
 
 describe('selectFinderGuidelineText', () => {
-  // Doc B exceeds the 24KiB finder cap behind doc A, so the slice omits it.
+  // Doc B exceeds the 24KiB finder cap behind doc A, so only a prefix fits.
   const discovered = {
     docs: [
       { label: 'apps/web/AGENTS.md', text: 'scoped rule', relevance: 3 },
@@ -346,10 +346,11 @@ describe('selectFinderGuidelineText', () => {
     mainCanReadWorkspace: true,
   };
 
-  it('keeps the finder slice when the compliance pass runs, exactly as today', () => {
+  it('keeps a useful prefix of an oversized lower-relevance doc', () => {
     const text = selectFinderGuidelineText({ ...params, complianceRuns: true });
     assert.match(text, /scoped rule/);
-    assert.doesNotMatch(text, /x{100}/);
+    assert.match(text, /ARCHITECTURE\.md \[part 1\/\d+\]/);
+    assert.match(text, /x{100}/);
     assert.match(text, /full set is reviewed by the separate guideline-compliance pass/);
   });
 
@@ -359,7 +360,7 @@ describe('selectFinderGuidelineText', () => {
     // read the named docs instead.
     const text = selectFinderGuidelineText({ ...params, complianceRuns: false });
     assert.match(text, /scoped rule/);
-    assert.doesNotMatch(text, /x{100}/);
+    assert.match(text, /x{100}/);
     assert.match(text, /guideline-compliance pass is not running/);
     assert.match(text, /ARCHITECTURE\.md/);
     assert.doesNotMatch(text, /full set is reviewed by the separate guideline-compliance pass/);
@@ -764,7 +765,7 @@ describe('formatFinderGuidelines', () => {
 
       const discovered = await discoverGuidelineDocs(repo, ['src/index.ts']);
       const finder = formatFinderGuidelines(discovered, {
-        capBytes: 480,
+        capBytes: 720,
         forFiles: ['src/index.ts'],
       });
       assert.match(finder, /findme-ts/, 'glob-matching rule outranks a non-matching one');

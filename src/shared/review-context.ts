@@ -3,6 +3,12 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 import { GIT_DIFF_ARGS } from './git.ts';
 import {
+  buildFairGuidelineFragments,
+  type GuidelineFragment,
+  type GuidelineFragmentSource,
+  selectGuidelineFragments,
+} from './guideline-fragments.ts';
+import {
   extractRuleSection,
   parseDiffRoutes,
   parseRuleIdDocs,
@@ -345,7 +351,7 @@ export interface DiscoveredGuidelines {
   docs: GuidelineDoc[];
   /** Labels referenced by loaded docs but not themselves loaded (sorted). */
   referenced: string[];
-  /** True when the total discovery budget was exhausted before all files. */
+  /** True when the bounded candidate pool was exhausted before all files. */
   budgetExhausted: boolean;
 }
 
@@ -633,16 +639,15 @@ const SCOPED_GUIDELINE_FILES = [
 const RULE_DIRECTORY_FILES = new Set(['.md', '.mdc']);
 const MAX_GUIDELINE_FILE_BYTES = 24 * 1024;
 const MAX_GUIDELINE_TOTAL_BYTES = 96 * 1024;
+const MAX_GUIDELINE_CANDIDATE_BYTES = 512 * 1024;
+const MAX_GUIDELINE_FRAGMENT_BYTES = 4 * 1024;
 // A rule doc is read in full to locate a section (which can sit past the
 // per-file guideline cap); only the extracted section is charged to the budget.
 const MAX_RULE_DOC_BYTES = 512 * 1024;
 
-// Byte-cap the id lists a routed bundle renders (label and omission note).
 // Routes are PR-controlled and can cite hundreds of sections with arbitrarily
-// long dotted ids, so both must fit a fixed byte budget or the fragment could
-// dwarf its section content and blow the prompt budget.
+// long dotted ids, so their omission metadata needs its own bound.
 const MAX_OMISSION_NOTE_BYTES = 1024;
-const MAX_LABEL_LIST_BYTES = 512;
 
 /** Join items with ", " within maxBytes (for caps that fit the summary), summing the rest as "+N more". */
 function boundedJoin(items: string[], maxBytes: number): string {
@@ -671,14 +676,18 @@ function renderOmissionNote(ids: string[], sourceRel: string): string {
  * read — never allocating the whole of a repo-controlled, possibly oversized
  * file — and cut to a UTF-8 boundary.
  */
-async function readWholeBounded(realPath: string): Promise<string> {
+async function readWholeBounded(realPath: string): Promise<{ text: string; truncated: boolean }> {
   const handle = await open(realPath, 'r');
   try {
-    const byteLimit = Math.min((await handle.stat()).size, MAX_RULE_DOC_BYTES);
-    if (byteLimit <= 0) return '';
+    const { size } = await handle.stat();
+    const byteLimit = Math.min(size, MAX_RULE_DOC_BYTES);
+    if (byteLimit <= 0) return { text: '', truncated: false };
     const buffer = Buffer.alloc(byteLimit);
     const { bytesRead } = await handle.read(buffer, 0, byteLimit, 0);
-    return buffer.toString('utf8', 0, findUtf8Boundary(buffer, bytesRead));
+    return {
+      text: buffer.toString('utf8', 0, findUtf8Boundary(buffer, bytesRead)),
+      truncated: size > bytesRead,
+    };
   } finally {
     await handle.close();
   }
@@ -693,7 +702,7 @@ export async function discoverGuidelineDocs(
   const seenRealPaths = new Set<string>();
   const referencedDocs = new Map<string, string>();
   const workspaceRoot = await realpath(cwd);
-  let remainingGuidelineBytes = MAX_GUIDELINE_TOTAL_BYTES;
+  let remainingCandidateBytes = MAX_GUIDELINE_CANDIDATE_BYTES;
   let budgetExhausted = false;
 
   function markBudgetExhausted(): void {
@@ -722,14 +731,14 @@ export async function discoverGuidelineDocs(
     const resolved = await resolveExistingInsideWorkspace(resolve(governanceDir, relativePath));
     if (!resolved) return undefined;
     try {
-      return await readWholeBounded(resolved.realPath);
+      return (await readWholeBounded(resolved.realPath)).text;
     } catch {
       return undefined;
     }
   }
 
   async function readBoundedGuidelineFile(realPath: string): Promise<string | undefined> {
-    if (remainingGuidelineBytes <= 0) {
+    if (remainingCandidateBytes <= 0) {
       markBudgetExhausted();
       return undefined;
     }
@@ -739,7 +748,7 @@ export async function discoverGuidelineDocs(
       const { size } = await handle.stat();
       if (size <= 0) return undefined;
 
-      const byteLimit = Math.min(size, MAX_GUIDELINE_FILE_BYTES, remainingGuidelineBytes);
+      const byteLimit = Math.min(size, MAX_GUIDELINE_FILE_BYTES, remainingCandidateBytes);
       const buffer = Buffer.alloc(byteLimit);
       const { bytesRead } = await handle.read(buffer, 0, byteLimit, 0);
       if (bytesRead <= 0) return undefined;
@@ -747,7 +756,7 @@ export async function discoverGuidelineDocs(
       const includedBytes = findUtf8Boundary(buffer, bytesRead);
       if (includedBytes <= 0) return undefined;
 
-      remainingGuidelineBytes -= includedBytes;
+      remainingCandidateBytes -= includedBytes;
       const text = buffer.toString('utf8', 0, includedBytes);
       if (size <= includedBytes) return text;
 
@@ -860,11 +869,11 @@ export async function discoverGuidelineDocs(
     }
   }
 
-  // Load the matched sections of a rule doc as one synthetic guideline, then
-  // mark the source seen so the whole (often large) file is not also loaded.
+  // Fragment matched sections round-robin so each gets a prefix before any one
+  // section can consume the per-file budget.
   async function addRuleSections(governanceRelPath: string, sections: string[]): Promise<void> {
     if (sections.length === 0) return;
-    if (remainingGuidelineBytes <= 0) {
+    if (remainingCandidateBytes <= 0) {
       markBudgetExhausted();
       return;
     }
@@ -872,15 +881,18 @@ export async function discoverGuidelineDocs(
       resolve(governanceDir, governanceRelPath),
     );
     if (!resolved || seenRealPaths.has(resolved.realPath)) return;
-    let source: string;
+    let source: { text: string; truncated: boolean };
     try {
       source = await readWholeBounded(resolved.realPath);
     } catch {
       return;
     }
-    const extracted = sections.map((section) => ({
+    const uniqueSections = [...new Set(sections)].sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true }),
+    );
+    const extracted = uniqueSections.map((section) => ({
       section,
-      text: extractRuleSection(source, section),
+      text: extractRuleSection(source.text, section),
     }));
     const found = extracted.filter((entry): entry is { section: string; text: string } =>
       Boolean(entry.text),
@@ -898,22 +910,31 @@ export async function discoverGuidelineDocs(
           (other) => other.text.length > entry.text.length && other.text.includes(entry.text),
         ),
     );
+    const sourceTruncated = source.truncated
+      ? deduped
+          .filter((entry) => source.text.trimEnd().endsWith(entry.text))
+          .map((entry) => entry.section)
+      : [];
     if (deduped.length === 0) {
       // Every cited section was unavailable — disclose the request (invariant #4)
       // instead of contributing nothing (missing is non-empty here). Skip rather
       // than overshoot when the bounded note won't fit the remaining budget.
       const note = renderOmissionNote(
-        missing.map((section) => `§${section} (not found)`),
+        missing.map((section) =>
+          source.truncated
+            ? `§${section} (not found before source read limit)`
+            : `§${section} (not found)`,
+        ),
         governanceRelPath,
       ).trim();
       const noteBytes = Buffer.byteLength(note, 'utf8');
-      if (noteBytes > remainingGuidelineBytes) {
+      if (noteBytes > remainingCandidateBytes) {
         markBudgetExhausted();
         return;
       }
       seen.add(resolved.absolutePath);
       seenRealPaths.add(resolved.realPath);
-      remainingGuidelineBytes -= noteBytes;
+      remainingCandidateBytes -= noteBytes;
       docs.push({
         label: `.pr-governance/${governanceRelPath} (unavailable)`,
         text: note,
@@ -923,60 +944,70 @@ export async function discoverGuidelineDocs(
     }
     seen.add(resolved.absolutePath);
     seenRealPaths.add(resolved.realPath);
-    // Fit whole sections under the per-file cap, skipping any single one too
-    // large so a smaller later rule still lands (an oversized section never
-    // blocks the rest). If every section is over-cap, keep the first so the
-    // bundle is non-empty — it is truncated to the cap below.
-    const cap = Math.min(MAX_GUIDELINE_FILE_BYTES, remainingGuidelineBytes);
-    const included: typeof deduped = [];
-    let used = 0;
-    for (const entry of deduped) {
-      const bytes = Buffer.byteLength(entry.text, 'utf8') + (included.length > 0 ? 2 : 0);
-      if (used + bytes > cap) continue;
-      included.push(entry);
-      used += bytes;
-    }
-    if (included.length === 0) included.push(deduped[0]);
-    const buffer = Buffer.from(included.map((entry) => entry.text).join('\n\n'), 'utf8');
-    const label = `.pr-governance/${governanceRelPath} (${boundedJoin(
-      included.map((e) => `§${e.section}`),
-      MAX_LABEL_LIST_BYTES,
-    )})`;
-    // Name the omitted sections (and the source) so a reviewer can read them on
-    // demand instead of silently missing a matched rule that didn't fit.
-    const droppedIds = [
-      ...deduped.filter((entry) => !included.includes(entry)).map((e) => `§${e.section}`),
-      ...missing.map((section) => `§${section} (not found)`),
-    ];
-    const notePlain = renderOmissionNote(droppedIds, governanceRelPath);
-    let bodyBytes: number;
-    let note: string;
-    if (buffer.length + Buffer.byteLength(notePlain, 'utf8') <= cap) {
-      // The whole bundle fits — no truncation, no truncation marker.
-      bodyBytes = buffer.length;
-      note = notePlain;
-    } else {
-      // Truncate, reserving the (longer) truncation note. Near total exhaustion
-      // the note alone can exceed what's left: skip rather than overshoot.
-      const noteTruncated = renderOmissionNote(
-        [...droppedIds, `§${included.at(-1)?.section} (truncated)`],
-        governanceRelPath,
-      );
-      const reserve = Buffer.byteLength(noteTruncated, 'utf8');
-      if (cap <= reserve) {
-        markBudgetExhausted();
-        return;
-      }
-      bodyBytes = findUtf8Boundary(buffer, cap - reserve);
-      note = noteTruncated;
-    }
-    const text = `${buffer.toString('utf8', 0, bodyBytes)}${note}`.trim();
-    remainingGuidelineBytes -= Buffer.byteLength(text, 'utf8');
-    docs.push({
-      label,
-      text,
+    const cap = Math.min(MAX_GUIDELINE_FILE_BYTES, remainingCandidateBytes);
+    const sources: GuidelineFragmentSource[] = deduped.map((entry) => ({
+      id: entry.section,
+      label: `§${entry.section}`,
+      text: entry.text,
       relevance: GUIDELINE_RELEVANCE.scoped,
+    }));
+    const fragments = buildFairGuidelineFragments(sources, cap, MAX_GUIDELINE_FRAGMENT_BYTES);
+    let bodyCap = cap;
+    let plan = selectGuidelineFragments(fragments, bodyCap, (fragment) => fragment.text, '');
+    let note = '';
+    for (;;) {
+      const droppedIds = [
+        ...plan.omittedSourceLabels.map((label) => `${label} (partially loaded)`),
+        ...sourceTruncated.map((section) => `§${section} (source read truncated)`),
+        ...missing.map((section) =>
+          source.truncated
+            ? `§${section} (not found before source read limit)`
+            : `§${section} (not found)`,
+        ),
+      ];
+      note = renderOmissionNote(droppedIds, governanceRelPath).trim();
+      const separatorBytes = plan.text && note ? 2 : 0;
+      const total =
+        Buffer.byteLength(plan.text, 'utf8') + separatorBytes + Buffer.byteLength(note, 'utf8');
+      if (total <= cap) break;
+      const nextBodyCap = Math.max(0, bodyCap - (total - cap));
+      if (nextBodyCap === bodyCap) break;
+      bodyCap = nextBodyCap;
+      plan = selectGuidelineFragments(fragments, bodyCap, (fragment) => fragment.text, '');
+    }
+
+    const selectedBySection = new Map<string, string[]>();
+    for (const fragment of plan.selected) {
+      const parts = selectedBySection.get(fragment.sourceId) ?? [];
+      parts.push(fragment.text);
+      selectedBySection.set(fragment.sourceId, parts);
+    }
+    const emitted: GuidelineDoc[] = sources.flatMap((source) => {
+      const parts = selectedBySection.get(source.id);
+      return parts
+        ? [
+            {
+              label: `.pr-governance/${governanceRelPath} (${source.label})`,
+              text: parts.join(''),
+              relevance: GUIDELINE_RELEVANCE.scoped,
+            },
+          ]
+        : [];
     });
+    if (note) {
+      emitted.push({
+        label: `.pr-governance/${governanceRelPath} (omissions)`,
+        text: note,
+        relevance: GUIDELINE_RELEVANCE.governance,
+      });
+    }
+    const usedBytes = emitted.reduce((total, doc) => total + Buffer.byteLength(doc.text), 0);
+    if (usedBytes > remainingCandidateBytes || emitted.length === 0) {
+      markBudgetExhausted();
+      return;
+    }
+    remainingCandidateBytes -= usedBytes;
+    docs.push(...emitted);
   }
 
   // Diff-scoped routing first, so its rule sections and docs win the budget over
@@ -1021,18 +1052,15 @@ export async function discoverGuidelineDocs(
         const doc = parsed && ruleIdDocs.get(parsed.prefix);
         if (doc) sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed.section]);
       }
-      // A doc requested whole via `docs:` outranks section extraction of the same
-      // file (the whole doc already contains its sections). Compare real paths so
-      // a symlinked docs: entry still matches; extracting first would mark the
-      // path seen and suppress the explicit whole-doc load. Sections (most
-      // targeted) load first, then the whole docs.
-      for (const [doc, sections] of sectionsByDoc) {
+      // `docs:` outranks section extraction of the same real path (including
+      // symlinks) and loads first so section candidates cannot consume its budget.
+      for (const doc of [...matched.docs].sort())
+        await addGuidelineWithReferences(doc, GUIDELINE_RELEVANCE.scoped);
+      for (const [doc, sections] of [...sectionsByDoc].sort(([a], [b]) => a.localeCompare(b))) {
         const resolved = await resolveExistingInsideWorkspace(resolve(governanceDir, doc));
         if (resolved && wholeDocRealPaths.has(resolved.realPath)) continue;
         await addRuleSections(doc, sections);
       }
-      for (const doc of matched.docs)
-        await addGuidelineWithReferences(doc, GUIDELINE_RELEVANCE.scoped);
     }
   }
 
@@ -1117,29 +1145,64 @@ function buildDiscoveredGuidelines(
   return { docs, referenced, budgetExhausted };
 }
 
-/** A single loaded guideline doc rendered as a prompt section. */
-function formatGuidelineDoc(doc: GuidelineDoc): string {
-  return `### ${doc.label}\n${doc.text}`;
-}
-
-/**
- * Hard-cap the fully assembled block. The per-doc discovery budget charges only
- * `doc.text`; labels, `###` wrappers, separators, and trailing notices are added
- * here for free, so the rendered block is the only place the true output size is
- * known. Truncating it once guarantees the declared byte cap regardless of the
- * metadata added above.
- */
-function capRenderedBlock(text: string, maxBytes: number): string {
+function truncateUtf8(text: string, maxBytes: number): string {
   const buffer = Buffer.from(text, 'utf8');
   if (buffer.length <= maxBytes) return text;
-  const marker = '\n\n[Guidance truncated to stay within the review budget.]';
-  // No room for the marker (tiny cap): truncate the text itself so the result
-  // never exceeds maxBytes.
-  if (maxBytes <= Buffer.byteLength(marker)) {
-    return buffer.toString('utf8', 0, findUtf8Boundary(buffer, maxBytes));
+  return buffer.toString('utf8', 0, findUtf8Boundary(buffer, maxBytes));
+}
+
+function renderGuidelineFragment(fragment: GuidelineFragment): string {
+  return `### ${fragment.label}\n${fragment.text}`;
+}
+
+function renderGuidelineBlock(
+  sources: GuidelineFragmentSource[],
+  capBytes: number,
+  buildNotice: (omittedSourceLabels: string[]) => string,
+): string {
+  if (capBytes <= 0) return '';
+  const fragments = buildFairGuidelineFragments(sources, capBytes, MAX_GUIDELINE_FRAGMENT_BYTES);
+  let bodyCap = capBytes;
+  let plan = selectGuidelineFragments(fragments, bodyCap, renderGuidelineFragment);
+
+  for (;;) {
+    const notice = truncateUtf8(
+      buildNotice(plan.omittedSourceLabels),
+      Math.min(3 * 1024, Math.floor(capBytes / 3)),
+    );
+    const separator = plan.text && notice ? '\n\n' : '';
+    const output = `${plan.text}${separator}${notice}`;
+    const outputBytes = Buffer.byteLength(output, 'utf8');
+    if (outputBytes <= capBytes) return output;
+    const nextBodyCap = Math.max(0, bodyCap - (outputBytes - capBytes));
+    if (nextBodyCap === bodyCap) return truncateUtf8(notice, capBytes);
+    bodyCap = nextBodyCap;
+    plan = selectGuidelineFragments(fragments, bodyCap, renderGuidelineFragment);
   }
-  const bodyBytes = findUtf8Boundary(buffer, maxBytes - Buffer.byteLength(marker));
-  return `${buffer.toString('utf8', 0, bodyBytes).trimEnd()}${marker}`;
+}
+
+function guidelineSources(
+  docs: GuidelineDoc[],
+  relevance: (doc: GuidelineDoc) => number = (doc) => doc.relevance,
+): GuidelineFragmentSource[] {
+  return docs.map((doc, index) => ({
+    id: `${index}:${doc.label}`,
+    label: doc.label,
+    text: doc.text,
+    relevance: relevance(doc),
+  }));
+}
+
+function uniqueLabels(labels: string[]): string[] {
+  return [...new Set(labels)];
+}
+
+function omittedLabelText(labels: string[]): string {
+  if (labels.length === 0) return '';
+  const joined = boundedJoin(labels, MAX_OMITTED_LABEL_BYTES);
+  return joined.startsWith('+')
+    ? `${labels.length} omitted file(s) not listed (label budget)`
+    : `omitted file(s): ${joined}`;
 }
 
 /**
@@ -1149,32 +1212,29 @@ function capRenderedBlock(text: string, maxBytes: number): string {
  * the back-compat `discoverGuidelines` wrapper receive.
  */
 export function formatGuidelines(discovered: DiscoveredGuidelines): string {
-  const meta: string[] = [];
-  if (discovered.budgetExhausted) {
-    meta.push(
-      [
-        '### Review guidance budget',
-        `Additional guidance was skipped after the ${MAX_GUIDELINE_TOTAL_BYTES} byte review guidance budget was reached.`,
-      ].join('\n'),
-    );
-  }
-  if (discovered.referenced.length > 0) {
-    meta.push(
-      [
-        '### Referenced Markdown documents',
-        'These docs were mentioned by loaded review guidance but were not preloaded. Read them only when relevant to the changed files or review question.',
-        discovered.referenced.map((label) => `- ${label}`).join('\n'),
-      ].join('\n'),
-    );
-  }
-  // Cap the docs to leave room for the trailing disclosures, so notices and the
-  // referenced-doc list survive within the total budget instead of being cut.
-  const metaText = meta.length > 0 ? `\n\n${meta.join('\n\n')}` : '';
-  const docsText = capRenderedBlock(
-    discovered.docs.map(formatGuidelineDoc).join('\n\n'),
-    Math.max(0, MAX_GUIDELINE_TOTAL_BYTES - Buffer.byteLength(metaText, 'utf8')),
+  return renderGuidelineBlock(
+    guidelineSources(discovered.docs),
+    MAX_GUIDELINE_TOTAL_BYTES,
+    (omitted) => {
+      const notes: string[] = [];
+      if (omitted.length > 0) {
+        notes.push(
+          `Guidance fragments were omitted to stay within the ${MAX_GUIDELINE_TOTAL_BYTES} byte review budget; ${omittedLabelText(omitted)}.`,
+        );
+      }
+      if (discovered.budgetExhausted) {
+        notes.push(
+          `Additional files were skipped after the ${MAX_GUIDELINE_CANDIDATE_BYTES} byte guideline candidate budget was reached.`,
+        );
+      }
+      if (discovered.referenced.length > 0) {
+        notes.push(
+          `Referenced Markdown documents not preloaded: ${boundedJoin(discovered.referenced, MAX_OMITTED_LABEL_BYTES)}. Read any that apply to the changed files or review question.`,
+        );
+      }
+      return notes.length > 0 ? `### Review guidance budget\n${notes.join(' ')}` : '';
+    },
   );
-  return capRenderedBlock(`${docsText}${metaText}`, MAX_GUIDELINE_TOTAL_BYTES);
 }
 
 /**
@@ -1190,10 +1250,8 @@ const MAX_OMITTED_LABEL_BYTES = 1024;
 
 /**
  * Relevance-ranked, byte-capped render for finder sessions (shards + lenses).
- * Docs are CHOSEN by relevance (scoped > governance > root) but RENDERED in
- * discovery order. The single highest-relevance doc is always kept even if it
- * alone exceeds the cap, so finders are never left with zero guidance; the
- * referenced-doc pointer list is omitted to avoid inviting extra reads.
+ * Equal-relevance docs contribute round-robin fragments, so discovery order
+ * and one oversized file cannot decide all coverage.
  */
 export function formatFinderGuidelines(
   discovered: DiscoveredGuidelines,
@@ -1210,79 +1268,34 @@ export function formatFinderGuidelines(
     forFiles && doc.globs && !doc.globs.some((glob) => forFiles.some((f) => globMatches(glob, f)))
       ? 0
       : doc.relevance;
-  const ranked = discovered.docs
-    .map((doc, index) => ({ doc, index, relevance: effectiveRelevance(doc) }))
-    .sort((a, b) => b.relevance - a.relevance || a.index - b.index);
-
-  const keptIndices = new Set<number>();
-  let usedBytes = 0;
-  let omitted = 0;
-  for (const { doc, index } of ranked) {
-    const separatorBytes = keptIndices.size > 0 ? 2 : 0;
-    const sectionBytes = Buffer.byteLength(formatGuidelineDoc(doc), 'utf8') + separatorBytes;
-    // Always keep the single highest-relevance doc, even if it alone exceeds
-    // the cap (the per-file read bound can equal this budget): finders must
-    // never be left with zero guidance when guidance exists. This makes the
-    // cap intentionally soft for the first doc only.
-    if (keptIndices.size === 0 || usedBytes + sectionBytes <= capBytes) {
-      keptIndices.add(index);
-      usedBytes += sectionBytes;
-    } else {
-      omitted += 1;
-    }
-  }
-
-  const docsText = discovered.docs
-    .filter((_, index) => keptIndices.has(index))
-    .map(formatGuidelineDoc)
-    .join('\n\n');
-
-  const budgetNotes: string[] = [];
-  if (omitted > 0) {
-    budgetNotes.push(
-      `${omitted} lower-relevance guideline file(s) were omitted from this pass to stay within the ${capBytes} byte finder budget`,
-    );
-  }
-  if (discovered.budgetExhausted) {
-    budgetNotes.push(
-      `repository guidance also hit the ${MAX_GUIDELINE_TOTAL_BYTES} byte discovery budget upstream`,
-    );
-  }
-  let noteText = '';
-  if (budgetNotes.length > 0) {
-    // When the compliance pass is skipped, "the full set is reviewed" would be
-    // false — name the omitted docs instead so a tool-capable finder can read
-    // any that apply. The label list is itself byte-capped: labels are not
-    // charged to any other budget, and a hostile repo could regrow the block
-    // through hundreds of long paths.
-    // Referenced-but-unloaded docs count too: the full rendering exposed
-    // their paths, and with compliance skipped no other session names them.
-    const omittedLabels = [
-      ...discovered.docs.filter((_, index) => !keptIndices.has(index)).map((doc) => doc.label),
-      ...discovered.referenced,
-    ];
-    const shownLabels: string[] = [];
-    let labelBytes = 0;
-    for (const label of omittedLabels) {
-      labelBytes += Buffer.byteLength(`${label}, `, 'utf8');
-      if (labelBytes > MAX_OMITTED_LABEL_BYTES) break;
-      shownLabels.push(label);
-    }
-    const hidden = omittedLabels.length - shownLabels.length;
-    const coverage = complianceCovers
-      ? 'The full set is reviewed by the separate guideline-compliance pass.'
-      : omittedLabels.length === 0
-        ? 'The guideline-compliance pass is not running this run.'
-        : shownLabels.length === 0
-          ? `The guideline-compliance pass is not running this run; ${omittedLabels.length} omitted file(s) not listed (label budget).`
-          : `The guideline-compliance pass is not running this run; omitted file(s): ${shownLabels.join(
-              ', ',
-            )}${hidden > 0 ? ` and ${hidden} more omitted file(s)` : ''}. Read any that apply to your changed files.`;
-    noteText = `\n\n${['### Review guidance budget', `${budgetNotes.join('; ')}. ${coverage}`].join('\n')}`;
-  }
-  // Note renders after the docs, so the final cap trims the note (not a selected
-  // doc) when the two together exceed the budget.
-  return capRenderedBlock(`${docsText}${noteText}`, capBytes);
+  return renderGuidelineBlock(
+    guidelineSources(discovered.docs, effectiveRelevance),
+    capBytes,
+    (fragmentOmissions) => {
+      const omitted = uniqueLabels([
+        ...fragmentOmissions,
+        ...(!complianceCovers ? discovered.referenced : []),
+      ]);
+      if (omitted.length === 0 && !discovered.budgetExhausted) return '';
+      const budgetNotes: string[] = [];
+      if (fragmentOmissions.length > 0) {
+        budgetNotes.push(
+          `Guidance was partially or fully omitted from this pass to stay within the ${capBytes} byte finder budget; ${omittedLabelText(omitted)}`,
+        );
+      } else if (omitted.length > 0) {
+        budgetNotes.push(omittedLabelText(omitted));
+      }
+      if (discovered.budgetExhausted) {
+        budgetNotes.push(
+          `repository guidance also hit the ${MAX_GUIDELINE_CANDIDATE_BYTES} byte candidate budget upstream`,
+        );
+      }
+      const coverage = complianceCovers
+        ? 'The full set is reviewed by the separate guideline-compliance pass.'
+        : 'The guideline-compliance pass is not running this run. Read any omitted file that applies to the changed files.';
+      return `### Review guidance budget\n${budgetNotes.join('; ')}. ${coverage}`;
+    },
+  );
 }
 
 /**

@@ -165,8 +165,9 @@ export function extractRuleSection(docText: string, section: string): string | u
     const run = m?.[1];
     const char = run?.[0] as '`' | '~' | undefined;
     if (fenceChar === undefined) {
-      fenced.push(char !== undefined);
-      if (char) {
+      const opens = char !== undefined && (char === '~' || !m![2].includes('`'));
+      fenced.push(opens);
+      if (opens) {
         fenceChar = char;
         fenceLen = run!.length;
       }
@@ -182,7 +183,7 @@ export function extractRuleSection(docText: string, section: string): string | u
     if (!match) return undefined;
     return {
       level: match[1].length,
-      number: match[2].trim().match(/^(\d+(?:\.\d+)*)\.?(?=\s|$)/)?.[1],
+      number: match[2].trim().match(/^(\d+(?:\.\d+)*)(?=\s|$|[.:)\-–—])/)?.[1],
     };
   };
   let start = -1;
