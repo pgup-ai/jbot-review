@@ -71,6 +71,18 @@ export function classifyMainShardFailure(error: unknown): {
  * cannot meaningfully have moved, and the freshness fetch is not free. */
 export const STALE_CHECK_MIN_ATTEMPT_MS = 60_000;
 
+type StaleReviewReason = 'merged' | 'closed' | 'head-moved';
+
+export function classifyReviewStaleness(
+  fresh: { state: 'open' | 'closed'; merged: boolean; headSha: string },
+  reviewedHeadSha: string,
+): StaleReviewReason | undefined {
+  if (fresh.merged) return 'merged';
+  if (fresh.state === 'closed') return 'closed';
+  if (fresh.headSha && fresh.headSha !== reviewedHeadSha) return 'head-moved';
+  return undefined;
+}
+
 /**
  * Thrown instead of retrying when the PR merged, closed, or moved to a new
  * head while the failed attempt ran: the retry's output could never be
@@ -78,7 +90,7 @@ export const STALE_CHECK_MIN_ATTEMPT_MS = 60_000;
  * (`stale-before-retry`), post nothing, and finish telemetry normally.
  */
 export class StaleReviewError extends Error {
-  constructor(public readonly reason: 'merged' | 'closed' | 'head-moved') {
+  constructor(public readonly reason: StaleReviewReason) {
     super(`stale-before-retry: PR ${reason} while the review was running`);
     this.name = 'StaleReviewError';
   }

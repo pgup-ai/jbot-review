@@ -121,6 +121,12 @@ describe('planIncrementalLenses', () => {
   it('runs frontend only when the delta touches frontend files', () => {
     assert.ok(gate([added(3, 'apps/web/src/pages/Config.tsx')]).lensKeys.includes('frontend'));
     assert.ok(!gate([added(3, 'src/util/calc.ts')]).lensKeys.includes('frontend'));
+    assert.ok(!gate([added(3, 'apps/api/client/http.ts')]).lensKeys.includes('frontend'));
+    assert.ok(
+      !gate([
+        added(3, 'libs/core-ledger-shared/src/quickbooks/client/quickbooks-api.client.ts'),
+      ]).lensKeys.includes('frontend'),
+    );
   });
 
   it('skips frontend on a test-only delta even if a .test.tsx matches (mirrors selectLensKeys)', () => {

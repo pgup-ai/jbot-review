@@ -893,37 +893,48 @@ async function getViewerLogin(octokit: Octokit): Promise<string> {
 
 /**
  * Removes the bot's own prior reaction of the given content from the PR.
- * Scoped to OUR reactions (viewer login, with the github-actions[bot] alias)
- * so a human's reaction is never touched. Used to clear the "review done"
- * marker at the start of a new run so it only reappears when the run
- * finishes.
+ * GitHub's mutation is viewer-scoped, so a human's reaction is never touched.
  */
 export async function removeOwnPrReaction(
   octokit: Octokit,
   owner: string,
   repo: string,
   pullNumber: number,
-  content: PrReactionContent,
+  content: 'rocket',
 ): Promise<void> {
-  const viewerLogin = await getViewerLogin(octokit);
-  const reactions = await octokit.paginate(octokit.rest.reactions.listForIssue, {
-    owner,
-    repo,
-    issue_number: pullNumber,
-    content,
-    per_page: 100,
-  });
-  for (const reaction of reactions) {
-    if (reaction.content !== content) continue;
-    const login = reaction.user?.login;
-    if (!isViewerActor(login, viewerLogin)) continue;
-    await octokit.rest.reactions.deleteForIssue({
-      owner,
-      repo,
-      issue_number: pullNumber,
-      reaction_id: reaction.id,
-    });
+  const reactionContent = content.toUpperCase();
+  const response = (await octokit.graphql(
+    `query JbotPrReaction($owner: String!, $repo: String!, $pullNumber: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $pullNumber) {
+          id
+          reactionGroups { content viewerHasReacted }
+        }
+      }
+    }`,
+    { owner, repo, pullNumber },
+  )) as {
+    repository: {
+      pullRequest: {
+        id: string;
+        reactionGroups: Array<{ content: string; viewerHasReacted: boolean }>;
+      } | null;
+    } | null;
+  };
+  const pull = response.repository?.pullRequest;
+  if (
+    !pull?.reactionGroups.some(
+      (group) => group.content === reactionContent && group.viewerHasReacted,
+    )
+  ) {
+    return;
   }
+  await octokit.graphql(
+    `mutation JbotRemovePrReaction($input: RemoveReactionInput!) {
+      removeReaction(input: $input) { clientMutationId }
+    }`,
+    { input: { subjectId: pull.id, content: reactionContent } },
+  );
 }
 
 /** Adds a reaction to the PR (the "review done" marker). Idempotent server-side. */
@@ -1142,9 +1153,8 @@ export interface PullFreshness {
 }
 
 /**
- * Current PR liveness for the pre-retry stale check (TASK-155): merged,
- * closed, or a moved head makes a main-shard retry pointless — its output
- * could never be posted against the reviewed state.
+ * Current PR liveness for startup and pre-retry stale checks (TASK-155):
+ * merged, closed, or a moved head makes model work unpostable.
  */
 export async function getPullFreshness(
   octokit: Octokit,

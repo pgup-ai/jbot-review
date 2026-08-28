@@ -431,6 +431,16 @@ describe('selectLensKeys', () => {
 
   it('does not add the frontend lens for non-frontend PRs', () => {
     assert.deepEqual(selectLensKeys(3, ['src/server/api.ts']), ['interactions', 'integrity']);
+    assert.deepEqual(
+      selectLensKeys(3, [
+        'apps/api/client/http.ts',
+        'libs/core-ledger-shared/src/quickbooks/client/quickbooks-api.client.spec.ts',
+        'libs/core-ledger-shared/src/quickbooks/client/quickbooks-api.client.ts',
+        'packages/sdk/client/http.ts',
+        'packages/sdk/src/client/http.ts',
+      ]),
+      ['interactions', 'integrity'],
+    );
   });
 
   it('respects passes=1 (no lenses at all) even on a frontend PR', () => {
