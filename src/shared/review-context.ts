@@ -953,7 +953,7 @@ export async function discoverGuidelineDocs(
     }));
     const fragments = buildFairGuidelineFragments(sources, cap, MAX_GUIDELINE_FRAGMENT_BYTES);
     let bodyCap = cap;
-    let plan = selectGuidelineFragments(fragments, bodyCap, (fragment) => fragment.text);
+    let plan = selectGuidelineFragments(fragments, bodyCap, (fragment) => fragment.text, '');
     let note = '';
     for (;;) {
       const droppedIds = [
@@ -973,7 +973,7 @@ export async function discoverGuidelineDocs(
       const nextBodyCap = Math.max(0, bodyCap - (total - cap));
       if (nextBodyCap === bodyCap) break;
       bodyCap = nextBodyCap;
-      plan = selectGuidelineFragments(fragments, bodyCap, (fragment) => fragment.text);
+      plan = selectGuidelineFragments(fragments, bodyCap, (fragment) => fragment.text, '');
     }
 
     const selectedBySection = new Map<string, string[]>();

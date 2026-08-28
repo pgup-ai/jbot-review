@@ -21,13 +21,14 @@ interface GuidelineFragmentPlan {
 }
 
 function splitByUtf8Bytes(text: string, maxBytes: number): string[] {
-  if (!text || maxBytes <= 0) return [];
+  if (!text) return [];
+  if (maxBytes < 4) throw new RangeError('maxBytes must be at least 4');
   const chunks: string[] = [];
   let chunk = '';
   let chunkBytes = 0;
 
   const flush = (): void => {
-    if (chunk.trim()) chunks.push(chunk);
+    if (chunk) chunks.push(chunk);
     chunk = '';
     chunkBytes = 0;
   };
@@ -109,7 +110,7 @@ export function buildFairGuidelineFragments(
   const firstRoundBudget = Math.floor((capBytes * 2) / 3);
   const fragmentBytes = Math.min(
     maxFragmentBytes,
-    Math.max(1, Math.floor(firstRoundBudget / Math.max(6, topTierSize))),
+    Math.max(4, Math.floor(firstRoundBudget / Math.max(6, topTierSize))),
   );
   return buildGuidelineFragments(sources, fragmentBytes);
 }
@@ -118,6 +119,7 @@ export function selectGuidelineFragments(
   fragments: GuidelineFragment[],
   capBytes: number,
   render: (fragment: GuidelineFragment) => string,
+  separator = '\n\n',
 ): GuidelineFragmentPlan {
   const selected: GuidelineFragment[] = [];
   const blocked = new Set<string>();
@@ -126,7 +128,9 @@ export function selectGuidelineFragments(
   for (const fragment of fragments) {
     if (blocked.has(fragment.sourceId)) continue;
     const rendered = render(fragment);
-    const bytes = Buffer.byteLength(rendered, 'utf8') + (selected.length > 0 ? 2 : 0);
+    const bytes =
+      Buffer.byteLength(rendered, 'utf8') +
+      (selected.length > 0 ? Buffer.byteLength(separator, 'utf8') : 0);
     if (usedBytes + bytes > capBytes) {
       blocked.add(fragment.sourceId);
       continue;
@@ -149,6 +153,6 @@ export function selectGuidelineFragments(
   return {
     selected,
     omittedSourceLabels,
-    text: selected.map(render).join('\n\n'),
+    text: selected.map(render).join(separator),
   };
 }

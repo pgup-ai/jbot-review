@@ -2,22 +2,32 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  buildFairGuidelineFragments,
   buildGuidelineFragments,
   selectGuidelineFragments,
 } from '../src/shared/guideline-fragments.ts';
 
 describe('guideline fragments', () => {
   it('splits on UTF-8 boundaries within the byte cap', () => {
-    const fragments = buildGuidelineFragments(
-      [{ id: 'a', label: 'A', text: `heading\n${'世界'.repeat(20)}`, relevance: 1 }],
-      17,
-    );
+    const text = `heading\n${' \n'.repeat(20)}${'世界'.repeat(20)}`;
+    const fragments = buildGuidelineFragments([{ id: 'a', label: 'A', text, relevance: 1 }], 17);
 
     assert.ok(fragments.length > 1);
     assert.ok(fragments.every((fragment) => Buffer.byteLength(fragment.text, 'utf8') <= 17));
     const reconstructed = fragments.map((fragment) => fragment.text).join('');
-    assert.doesNotMatch(reconstructed, /\uFFFD/);
-    assert.equal(reconstructed, `heading\n${'世界'.repeat(20)}`);
+    assert.equal(reconstructed, text);
+    assert.throws(
+      () => buildGuidelineFragments([{ id: 'a', label: 'A', text: '世', relevance: 1 }], 3),
+      /at least 4/,
+    );
+    assert.deepEqual(
+      buildFairGuidelineFragments(
+        [{ id: 'a', label: 'A', text: '世界', relevance: 1 }],
+        1,
+        4096,
+      ).map((fragment) => fragment.text),
+      ['世', '界'],
+    );
   });
 
   it('round-robins equal-relevance sources independent of input order', () => {

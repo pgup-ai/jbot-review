@@ -268,11 +268,13 @@ describe('discoverGuidelineDocs with diff routing', () => {
   it('does not falsely truncate a section that fits under the cap', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-fits-'));
     roots.push(root);
-    writeRoutedRepo(root, { rules: 'TS-1', doc: `## 1. Fits\n${'x'.repeat(20000)}` }); // ~20 KB < 24 KB
+    const heading = '## 1. Fits\n';
+    const body = 'x'.repeat(24 * 1024 - Buffer.byteLength(heading));
+    writeRoutedRepo(root, { rules: 'TS-1', doc: `${heading}${body}` });
     const sections = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs);
     const text = sections.map((doc) => doc.text).join('\n');
     assert.ok(!text.includes('partially loaded'), 'a fitting section is not marked partial');
-    assert.equal(text.match(/x/g)?.length, 20000, 'the full body is present');
+    assert.equal(text.match(/x/g)?.length, body.length, 'the full body is present');
   });
 
   it('byte-bounds the omission note when a route cites hundreds of unavailable sections', async () => {
