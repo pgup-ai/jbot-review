@@ -427,19 +427,16 @@ describe('selectLensKeys', () => {
       'integrity',
       'frontend',
     ]);
-    assert.deepEqual(selectLensKeys(3, ['apps/checkout/client/state/session.ts']), [
-      'interactions',
-      'integrity',
-      'frontend',
-    ]);
   });
 
   it('does not add the frontend lens for non-frontend PRs', () => {
     assert.deepEqual(selectLensKeys(3, ['src/server/api.ts']), ['interactions', 'integrity']);
     assert.deepEqual(
       selectLensKeys(3, [
+        'apps/api/client/http.ts',
         'libs/core-ledger-shared/src/quickbooks/client/quickbooks-api.client.spec.ts',
         'libs/core-ledger-shared/src/quickbooks/client/quickbooks-api.client.ts',
+        'packages/sdk/client/http.ts',
         'packages/sdk/src/client/http.ts',
       ]),
       ['interactions', 'integrity'],

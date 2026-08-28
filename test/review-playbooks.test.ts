@@ -75,7 +75,9 @@ describe('selectReviewPlaybookIds', () => {
       'apps/api/src/modules/webhook/webhook.service.ts',
       'apps/api/src/modules/webhook/webhook.controller.ts',
       'apps/api/test/webhook-dedup.test.ts',
+      'apps/api/client/http.ts',
       'libs/core-ledger-shared/src/quickbooks/client/quickbooks-api.client.ts',
+      'packages/sdk/client/http.ts',
       'packages/sdk/src/client/http.ts',
       // `use` + lowercase is not a hook — guards the case-sensitive `use[A-Z]`.
       'apps/api/src/user.ts',
@@ -99,8 +101,6 @@ describe('selectReviewPlaybookIds', () => {
       'src/login-form.ts',
       'client/state/session.ts',
       'apps/client/state/session.ts',
-      'apps/checkout/client/state/session.ts',
-      'packages/design-system/client/theme.ts',
     ]) {
       assert.ok(selectReviewPlaybookIds([file]).includes('frontend-workflow'), `missed: ${file}`);
     }
