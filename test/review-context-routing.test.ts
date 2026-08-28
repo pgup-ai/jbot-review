@@ -114,25 +114,25 @@ describe('discoverGuidelineDocs with diff routing', () => {
     assert.ok(docs.some((d) => d.label.endsWith('SEAMS.md')));
   });
 
-  it('an oversized first section does not block smaller later ones, and is named omitted', async () => {
+  it('gives every oversized matched section a prefix and names partial sections', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-cap-'));
     roots.push(root);
+    const sections = Array.from({ length: 8 }, (_, index) => index + 1);
     writeRoutedRepo(root, {
-      rules: 'TS-1, TS-2, TS-3',
-      doc: [
-        '## 1. Huge',
-        'over-cap '.repeat(4000), // >24 KB, cited FIRST — must not starve §2/§3
-        '## 2. Second',
-        'SECTION-TWO',
-        '## 3. Third',
-        'SECTION-THREE',
-      ].join('\n'),
+      rules: sections.map((section) => `TS-${section}`).join(', '),
+      doc: sections
+        .flatMap((section) => [
+          `## ${section}. Section`,
+          `SECTION-${section}-MARKER`,
+          'x'.repeat(8000),
+        ])
+        .join('\n'),
     });
-    const sections = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs);
-    const text = sections.map((doc) => doc.text).join('\n');
-    assert.match(text, /SECTION-TWO/, 'a later small section lands despite the huge §1');
-    assert.match(text, /SECTION-THREE/);
-    assert.match(text, /Omitted from this bundle[\s\S]*§1/, 'the partial section is named');
+    const text = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs)
+      .map((doc) => doc.text)
+      .join('\n');
+    for (const section of sections) assert.match(text, new RegExp(`SECTION-${section}-MARKER`));
+    assert.match(text, /Omitted from this bundle[\s\S]*partially loaded/);
   });
 
   it('names a cited section absent from the source instead of dropping it silently', async () => {
@@ -290,21 +290,22 @@ describe('discoverGuidelineDocs with diff routing', () => {
   it('gives each routed document and explicit doc a finder fragment', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-fair-'));
     roots.push(root);
+    const ids = Array.from({ length: 26 }, (_, index) => `R${index}`);
     mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
     mkdirSync(join(root, '.pr-governance/design'), { recursive: true });
     mkdirSync(join(root, 'docs'), { recursive: true });
     writeFileSync(
       join(root, '.pr-governance/README.md'),
-      [
-        '## Rule IDs',
-        ...['A', 'B', 'C', 'D'].map((id) => `- \`${id}-<n>\` maps to \`design/${id}.md\``),
-      ].join('\n'),
+      ['## Rule IDs', ...ids.map((id) => `- \`${id}-<n>\` maps to \`design/${id}.md\``)].join('\n'),
     );
-    writeFileSync(
-      join(root, '.pr-governance/review/rules-for-diff.yaml'),
-      "entries:\n  - name: all\n    paths: ['x/**']\n    docs: ['docs/EXPLICIT.md']\n    rules: [D-1, B-1, A-1, C-1]",
-    );
-    for (const id of ['A', 'B', 'C', 'D']) {
+    const routingPath = join(root, '.pr-governance/review/rules-for-diff.yaml');
+    const writeRouting = (ruleIds: string[]) =>
+      writeFileSync(
+        routingPath,
+        `entries:\n  - name: all\n    paths: ['x/**']\n    docs: ['docs/EXPLICIT.md']\n    rules: [${ruleIds.map((id) => `${id}-1`).join(', ')}]`,
+      );
+    writeRouting([...ids].reverse());
+    for (const id of ids) {
       writeFileSync(
         join(root, `.pr-governance/design/${id}.md`),
         `## 1. ${id}\n${id}-ROUTED-MARKER\n${id.toLowerCase().repeat(40 * 1024)}`,
@@ -312,11 +313,19 @@ describe('discoverGuidelineDocs with diff routing', () => {
     }
     writeFileSync(join(root, 'docs/EXPLICIT.md'), '# Explicit\nEXPLICIT-DOC-MARKER');
 
-    const finder = formatFinderGuidelines(await discoverGuidelineDocs(root, ['x/a.ts']));
+    const discovered = await discoverGuidelineDocs(root, ['x/a.ts']);
+    const finder = formatFinderGuidelines(discovered);
 
-    for (const id of ['A', 'B', 'C', 'D']) assert.match(finder, new RegExp(`${id}-ROUTED-MARKER`));
+    assert.ok(discovered.budgetExhausted, 'fixture reaches the candidate cap');
     assert.match(finder, /EXPLICIT-DOC-MARKER/);
+    for (const marker of discovered.docs.flatMap(
+      (doc) => doc.text.match(/R\d+-ROUTED-MARKER/g) ?? [],
+    ))
+      assert.match(finder, new RegExp(marker));
     assert.ok(Buffer.byteLength(finder, 'utf8') <= 24 * 1024);
+
+    writeRouting(ids);
+    assert.equal(formatFinderGuidelines(await discoverGuidelineDocs(root, ['x/a.ts'])), finder);
   });
 
   it('applies globstar/star/? tokens with the correct segment and slash semantics', async () => {

@@ -132,6 +132,8 @@ describe('extractRuleSection', () => {
     // route citing both TS-16 and TS-16.2 would duplicate the body.
     assert.equal(extractRuleSection(doc, '16'), '## 16. AI\nai body');
     assert.equal(extractRuleSection(doc, '16.2'), '## 16.2 Parity\nparity body');
+    assert.equal(extractRuleSection('## 16.2: Parity\ncolon', '16.2'), '## 16.2: Parity\ncolon');
+    assert.equal(extractRuleSection('## 16.2.Parity\ndot', '16.2'), '## 16.2.Parity\ndot');
     assert.equal(extractRuleSection(doc, '99'), undefined);
   });
 
@@ -163,6 +165,10 @@ describe('extractRuleSection', () => {
     // A 4-space-indented marker is indented code, not a fence opener.
     assert.equal(
       extractRuleSection(['# T', '    ```', '## 9. Real', 'REAL'].join('\n'), '9'),
+      '## 9. Real\nREAL',
+    );
+    assert.equal(
+      extractRuleSection(['# T', '```js `invalid', '## 9. Real', 'REAL'].join('\n'), '9'),
       '## 9. Real\nREAL',
     );
   });

@@ -3,7 +3,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 
 import { GIT_DIFF_ARGS } from './git.ts';
 import {
-  buildGuidelineFragments,
+  buildFairGuidelineFragments,
   type GuidelineFragment,
   type GuidelineFragmentSource,
   selectGuidelineFragments,
@@ -869,9 +869,8 @@ export async function discoverGuidelineDocs(
     }
   }
 
-  // Load matched sections as small, independently allocatable fragments. A
-  // round-robin gives every cited section a prefix before any one section gets
-  // the rest of the per-file budget.
+  // Fragment matched sections round-robin so each gets a prefix before any one
+  // section can consume the per-file budget.
   async function addRuleSections(governanceRelPath: string, sections: string[]): Promise<void> {
     if (sections.length === 0) return;
     if (remainingCandidateBytes <= 0) {
@@ -952,7 +951,7 @@ export async function discoverGuidelineDocs(
       text: entry.text,
       relevance: GUIDELINE_RELEVANCE.scoped,
     }));
-    const fragments = buildGuidelineFragments(sources, MAX_GUIDELINE_FRAGMENT_BYTES);
+    const fragments = buildFairGuidelineFragments(sources, cap, MAX_GUIDELINE_FRAGMENT_BYTES);
     let bodyCap = cap;
     let plan = selectGuidelineFragments(fragments, bodyCap, (fragment) => fragment.text);
     let note = '';
@@ -1053,18 +1052,15 @@ export async function discoverGuidelineDocs(
         const doc = parsed && ruleIdDocs.get(parsed.prefix);
         if (doc) sectionsByDoc.set(doc, [...(sectionsByDoc.get(doc) ?? []), parsed.section]);
       }
-      // A doc requested whole via `docs:` outranks section extraction of the same
-      // file (the whole doc already contains its sections). Compare real paths so
-      // a symlinked docs: entry still matches; extracting first would mark the
-      // path seen and suppress the explicit whole-doc load. Sections (most
-      // targeted) load first, then the whole docs.
+      // `docs:` outranks section extraction of the same real path (including
+      // symlinks) and loads first so section candidates cannot consume its budget.
+      for (const doc of [...matched.docs].sort())
+        await addGuidelineWithReferences(doc, GUIDELINE_RELEVANCE.scoped);
       for (const [doc, sections] of [...sectionsByDoc].sort(([a], [b]) => a.localeCompare(b))) {
         const resolved = await resolveExistingInsideWorkspace(resolve(governanceDir, doc));
         if (resolved && wholeDocRealPaths.has(resolved.realPath)) continue;
         await addRuleSections(doc, sections);
       }
-      for (const doc of [...matched.docs].sort())
-        await addGuidelineWithReferences(doc, GUIDELINE_RELEVANCE.scoped);
     }
   }
 
@@ -1165,13 +1161,7 @@ function renderGuidelineBlock(
   buildNotice: (omittedSourceLabels: string[]) => string,
 ): string {
   if (capBytes <= 0) return '';
-  const topRelevance = Math.max(...sources.map((source) => source.relevance));
-  const topTierSize = sources.filter((source) => source.relevance === topRelevance).length;
-  const fragmentBytes = Math.min(
-    MAX_GUIDELINE_FRAGMENT_BYTES,
-    Math.max(1, Math.floor((capBytes * 2) / 3 / Math.max(6, topTierSize))),
-  );
-  const fragments = buildGuidelineFragments(sources, fragmentBytes);
+  const fragments = buildFairGuidelineFragments(sources, capBytes, MAX_GUIDELINE_FRAGMENT_BYTES);
   let bodyCap = capBytes;
   let plan = selectGuidelineFragments(fragments, bodyCap, renderGuidelineFragment);
 

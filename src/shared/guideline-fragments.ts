@@ -99,6 +99,21 @@ export function buildGuidelineFragments(
   return result;
 }
 
+export function buildFairGuidelineFragments(
+  sources: GuidelineFragmentSource[],
+  capBytes: number,
+  maxFragmentBytes: number,
+): GuidelineFragment[] {
+  const topRelevance = Math.max(...sources.map((source) => source.relevance));
+  const topTierSize = sources.filter((source) => source.relevance === topRelevance).length;
+  const firstRoundBudget = Math.floor((capBytes * 2) / 3);
+  const fragmentBytes = Math.min(
+    maxFragmentBytes,
+    Math.max(1, Math.floor(firstRoundBudget / Math.max(6, topTierSize))),
+  );
+  return buildGuidelineFragments(sources, fragmentBytes);
+}
+
 export function selectGuidelineFragments(
   fragments: GuidelineFragment[],
   capBytes: number,
