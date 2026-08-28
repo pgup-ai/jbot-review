@@ -251,6 +251,7 @@ import {
 } from './github.ts';
 import { isDefinitiveApprovalRejection, type AutoApprovalDecision } from './approval.ts';
 import {
+  classifyReviewStaleness,
   classifyMainShardFailure,
   STALE_CHECK_MIN_ATTEMPT_MS,
   StaleReviewError,
@@ -1126,6 +1127,28 @@ async function runReviewPipeline(params: {
       }
       finishTelemetry('failed');
     };
+  }
+
+  if (!localDiff && headSha) {
+    try {
+      const fresh = await getPullFreshness(octokit, owner, repo, pullNumber);
+      const staleReason = classifyReviewStaleness(fresh, headSha);
+      if (staleReason) {
+        const detail =
+          staleReason === 'head-moved'
+            ? `head moved from ${headSha} to ${fresh.headSha}`
+            : `PR ${staleReason}`;
+        log(`Skipping stale review before startup: ${detail}.`);
+        finishTelemetry('skipped');
+        return;
+      }
+    } catch (error) {
+      log(
+        `Could not verify PR freshness before startup; continuing: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   // Local checkouts are owned by the invoking user — dubious-ownership can't
@@ -2348,12 +2371,8 @@ async function runReviewPipeline(params: {
         ? {
             staleCheck: async () => {
               const fresh = await getPullFreshness(octokit, owner, repo, pullNumber);
-              if (fresh.merged) return new StaleReviewError('merged');
-              if (fresh.state === 'closed') return new StaleReviewError('closed');
-              if (fresh.headSha && fresh.headSha !== headSha) {
-                return new StaleReviewError('head-moved');
-              }
-              return undefined;
+              const staleReason = classifyReviewStaleness(fresh, headSha);
+              return staleReason ? new StaleReviewError(staleReason) : undefined;
             },
           }
         : {}),
@@ -3076,10 +3095,8 @@ async function safeRemoveReviewReaction(
 }
 
 /**
- * Reaction failures are most often a missing permission: PR reactions use the
- * issues API, and listing/deleting them needs `issues: write` (creating one
- * happens to work under `pull-requests: write`, which is why an unclearable
- * reaction can appear). Surface the fix in the log.
+ * Reaction failures are most often a missing permission: creating PR reactions
+ * uses the issues API. Surface the fix in the log.
  */
 function describeReactionError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);

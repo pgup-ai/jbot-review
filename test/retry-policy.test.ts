@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { StaleReviewError, classifyMainShardFailure } from '../src/shared/retry-policy.ts';
+import {
+  StaleReviewError,
+  classifyMainShardFailure,
+  classifyReviewStaleness,
+} from '../src/shared/retry-policy.ts';
 
 describe('classifyMainShardFailure', () => {
   it('never retries deterministic failures and always retries plausibly-transient ones', () => {
@@ -83,6 +87,29 @@ describe('classifyMainShardFailure', () => {
 });
 
 describe('StaleReviewError', () => {
+  it('classifies only states that make the reviewed head unpostable', () => {
+    assert.equal(
+      classifyReviewStaleness({ state: 'closed', merged: true, headSha: 'old' }, 'old'),
+      'merged',
+    );
+    assert.equal(
+      classifyReviewStaleness({ state: 'closed', merged: false, headSha: 'old' }, 'old'),
+      'closed',
+    );
+    assert.equal(
+      classifyReviewStaleness({ state: 'open', merged: false, headSha: 'new' }, 'old'),
+      'head-moved',
+    );
+    assert.equal(
+      classifyReviewStaleness({ state: 'open', merged: false, headSha: 'old' }, 'old'),
+      undefined,
+    );
+    assert.equal(
+      classifyReviewStaleness({ state: 'open', merged: false, headSha: '' }, 'old'),
+      undefined,
+    );
+  });
+
   it('carries the staleness reason and a stable message prefix for telemetry', () => {
     const error = new StaleReviewError('merged');
     assert.equal(error.reason, 'merged');

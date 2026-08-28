@@ -698,6 +698,37 @@ describe('runPrReview local mode and early exits', () => {
     );
   });
 
+  it('skips a stale GitHub run before listing files', async () => {
+    let listedFiles = false;
+    const logs: string[] = [];
+    const octokit = {
+      rest: {
+        pulls: {
+          get: async () => ({
+            data: { state: 'open', merged: false, head: { sha: 'new-head' } },
+          }),
+          listFiles: async () => {
+            listedFiles = true;
+            return { data: [] };
+          },
+        },
+      },
+    } as unknown as Octokit;
+
+    await runPrReview({
+      ...base,
+      octokit,
+      headSha: 'old-head',
+      options: { dryRun: true },
+      log: (message) => logs.push(message),
+    });
+
+    assert.equal(listedFiles, false);
+    assert.ok(
+      logs.some((message) => /Skipping stale review before startup: head moved/.test(message)),
+    );
+  });
+
   // No `octokit` at all: the runner's internal landmine Proxy throws on ANY
   // property access, so completing proves local mode performs zero GitHub
   // calls on this path — structurally, not by mock bookkeeping.

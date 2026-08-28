@@ -15,6 +15,7 @@ import {
   postAddressedThreadReply,
   postApprovalReview,
   postReview,
+  removeOwnPrReaction,
   selectResolvedJbotReviewsToFinalize,
   updateReviewBody,
   type JbotReviewGroup,
@@ -45,6 +46,39 @@ const LINKED_REVIEW_BODY = [
   REVIEW_BODY.replace('| 1 | 0 | 0 | 1 | 0 | 0 |', '| 2 | 0 | 0 | 1 | 1 | 0 |'),
   '<!-- jbot-review:linked-comments:200 -->',
 ].join('\n');
+
+describe('removeOwnPrReaction', () => {
+  it('removes the viewer reaction without using the issues REST API', async () => {
+    const calls: Array<{ query: string; variables: unknown }> = [];
+    const octokit = {
+      graphql: async (query: string, variables: unknown) => {
+        calls.push({ query, variables });
+        if (query.includes('JbotPrReaction')) {
+          return {
+            repository: {
+              pullRequest: {
+                id: 'PR_1',
+                reactionGroups: [
+                  { content: 'ROCKET', viewerHasReacted: true },
+                  { content: 'HEART', viewerHasReacted: false },
+                ],
+              },
+            },
+          };
+        }
+        return { removeReaction: { clientMutationId: null } };
+      },
+    } as unknown as Octokit;
+
+    await removeOwnPrReaction(octokit, 'acme', 'widget', 1, 'rocket');
+
+    assert.equal(calls.length, 2);
+    assert.match(calls[1]!.query, /removeReaction/);
+    assert.deepEqual(calls[1]!.variables, {
+      input: { subjectId: 'PR_1', content: 'ROCKET' },
+    });
+  });
+});
 
 describe('formatFindingLabel', () => {
   it('keeps confidence explicit but visually secondary', () => {
