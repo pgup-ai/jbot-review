@@ -42,7 +42,9 @@ const FRONTEND_WORKFLOW_PATTERNS = [
   // server action is backend-shaped. Real UI files under `app/` already match
   // by `.tsx`/`.jsx` extension below, so bare `app` would mostly add backend
   // false positives. `apps?/web` stays for the monorepo `apps/web` case.
-  /(^|\/)(apps?\/web|ui|frontend|client|components?|pages?|views?|hooks?|stores?)\//i,
+  /(^|\/)(apps?\/web|ui|frontend|components?|pages?|views?|hooks?|stores?)\//i,
+  // Explicit client-app roots avoid nested backend SDK/API client directories.
+  /^(?:(?:apps?|packages?)\/)?(?:src\/)?client\//i,
   // Frontend-named .ts/.tsx file. The keyword must sit at a token boundary
   // (start, path slash, `.`, `-`, `_`) so a substring inside a larger word —
   // `re`+`view`, `web`+`hook` — does NOT false-match in a backend repo.
