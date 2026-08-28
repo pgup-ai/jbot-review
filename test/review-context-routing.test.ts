@@ -78,6 +78,14 @@ function writeRoutedRepo(root: string, opts: { paths?: string; rules: string; do
   writeFileSync(join(root, '.pr-governance/design/TECHNICAL_STANDARDS.md'), opts.doc);
 }
 
+function routedDocs(docs: Array<{ label: string; text: string; relevance: number }>): Array<{
+  label: string;
+  text: string;
+  relevance: number;
+}> {
+  return docs.filter((doc) => doc.label.includes('TECHNICAL_STANDARDS.md'));
+}
+
 describe('discoverGuidelineDocs with diff routing', () => {
   const roots: string[] = [];
   after(() => roots.forEach((r) => rmSync(r, { recursive: true, force: true })));
@@ -87,16 +95,18 @@ describe('discoverGuidelineDocs with diff routing', () => {
     roots.push(root);
     const { docs } = await discoverGuidelineDocs(root, ['apps/core/src/thing.service.ts']);
 
-    const tsSection = docs.find(
-      (d) => d.label.includes('TECHNICAL_STANDARDS.md') && d.label.includes('§'),
+    const tsSections = routedDocs(docs);
+    const text = tsSections.map((doc) => doc.text).join('\n');
+    const labels = tsSections.map((doc) => doc.label).join('\n');
+    assert.match(text, /THE-SERVICE-PARITY-RULE/, '§16.2 is included despite its offset');
+    assert.match(labels, /§16\.2/);
+    assert.ok(
+      tsSections.every((doc) => doc.relevance === 3),
+      'routed sections rank scoped',
     );
-    assert.ok(tsSection, 'a TECHNICAL_STANDARDS section bundle is loaded');
-    assert.match(tsSection.text, /THE-SERVICE-PARITY-RULE/, '§16.2 is included despite its offset');
-    assert.match(tsSection.label, /§16\.2/);
-    assert.equal(tsSection.relevance, 3, 'routed sections rank scoped (highest)');
     // §6.1 is nested under the also-cited §6, so it appears once (deduped), not twice.
-    assert.equal(tsSection.text.match(/NESTED-CHILD-MARKER/g)?.length, 1);
-    assert.ok(!tsSection.label.includes('§6.1'), 'the deduped child is not named in the label');
+    assert.equal(text.match(/NESTED-CHILD-MARKER/g)?.length, 1);
+    assert.ok(!labels.includes('§6.1'), 'the deduped child is not named in the label');
 
     // The whole (large) file is not also loaded — the sections stand in for it.
     assert.ok(!docs.some((d) => d.label.endsWith('TECHNICAL_STANDARDS.md')));
@@ -118,25 +128,22 @@ describe('discoverGuidelineDocs with diff routing', () => {
         'SECTION-THREE',
       ].join('\n'),
     });
-    const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
-      d.label.includes('§'),
-    )!;
-    assert.match(bundle.text, /SECTION-TWO/, 'a later small section lands despite the huge §1');
-    assert.match(bundle.text, /SECTION-THREE/);
-    assert.match(bundle.text, /Omitted from this bundle[\s\S]*§1/, 'the skipped section is named');
-    assert.ok(!bundle.label.includes('§1'));
+    const sections = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs);
+    const text = sections.map((doc) => doc.text).join('\n');
+    assert.match(text, /SECTION-TWO/, 'a later small section lands despite the huge §1');
+    assert.match(text, /SECTION-THREE/);
+    assert.match(text, /Omitted from this bundle[\s\S]*§1/, 'the partial section is named');
   });
 
   it('names a cited section absent from the source instead of dropping it silently', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-missing-'));
     roots.push(root);
     writeRoutedRepo(root, { rules: 'TS-1, TS-9', doc: '## 1. First\nSECTION-ONE' });
-    const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
-      d.label.includes('§'),
-    )!;
-    assert.match(bundle.text, /SECTION-ONE/);
-    assert.match(bundle.text, /§9 \(not found\)/, 'the absent cited section is disclosed');
-    assert.ok(!bundle.label.includes('§9'));
+    const sections = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs);
+    const text = sections.map((doc) => doc.text).join('\n');
+    assert.match(text, /SECTION-ONE/);
+    assert.match(text, /§9 \(not found\)/, 'the absent cited section is disclosed');
+    assert.ok(!sections.some((doc) => doc.label.includes('§9')));
   });
 
   it('bounds pathological route globs (over-length and over-expanding) so they cannot stall the matcher', async () => {
@@ -174,11 +181,17 @@ describe('discoverGuidelineDocs with diff routing', () => {
     );
     // The long apps path grows the shared match scratch; libs/** must still match
     // the short libs path afterward (reused scratch not corrupted across calls).
-    const bundle = (
-      await discoverGuidelineDocs(root, ['apps/really/deep/nested/dir/component.tsx', 'libs/y.ts'])
-    ).docs.find((d) => d.label.includes('§'))!;
-    assert.match(bundle.text, /SECTION-ONE/, 'apps/** matched via TS-1');
-    assert.match(bundle.text, /SECTION-TWO/, 'libs/** matched via TS-2 after the scratch grew');
+    const sections = routedDocs(
+      (
+        await discoverGuidelineDocs(root, [
+          'apps/really/deep/nested/dir/component.tsx',
+          'libs/y.ts',
+        ])
+      ).docs,
+    );
+    const text = sections.map((doc) => doc.text).join('\n');
+    assert.match(text, /SECTION-ONE/, 'apps/** matched via TS-1');
+    assert.match(text, /SECTION-TWO/, 'libs/** matched via TS-2 after the scratch grew');
   });
 
   it('honors whole-doc precedence (via a symlinked docs: entry) over section extraction', async () => {
@@ -225,25 +238,41 @@ describe('discoverGuidelineDocs with diff routing', () => {
     roots.push(root);
     // A single ~40 KB section forces truncation; the note + its "(truncated)" marker must still fit.
     writeRoutedRepo(root, { rules: 'TS-1', doc: `## 1. Big\n${'x'.repeat(40000)}` });
-    const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
-      d.label.includes('§'),
-    )!;
-    assert.match(bundle.text, /truncated/, 'the truncation is disclosed');
+    const sections = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs);
+    const text = sections.map((doc) => doc.text).join('\n');
+    assert.match(text, /partially loaded/, 'the truncation is disclosed');
     assert.ok(
-      Buffer.byteLength(bundle.text, 'utf8') <= 24 * 1024,
+      sections.reduce((total, doc) => total + Buffer.byteLength(doc.text, 'utf8'), 0) <= 24 * 1024,
       'body plus the truncation note stays within the per-file cap',
     );
+  });
+
+  it('discloses a section cut by the bounded source read', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-source-cap-'));
+    roots.push(root);
+    const target = '## 2. Target\nTARGET-BODY-CONTINUES';
+    const prefix = '## 1. Filler\n';
+    const targetOffset = 512 * 1024 - 24;
+    writeRoutedRepo(root, {
+      rules: 'TS-2',
+      doc: `${prefix}${'x'.repeat(targetOffset - prefix.length - 1)}\n${target}${'z'.repeat(100)}`,
+    });
+
+    const text = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs)
+      .map((doc) => doc.text)
+      .join('\n');
+    assert.match(text, /## 2\. Target/);
+    assert.match(text, /§2 \(source read truncated\)/);
   });
 
   it('does not falsely truncate a section that fits under the cap', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jbot-fits-'));
     roots.push(root);
     writeRoutedRepo(root, { rules: 'TS-1', doc: `## 1. Fits\n${'x'.repeat(20000)}` }); // ~20 KB < 24 KB
-    const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
-      d.label.includes('§'),
-    )!;
-    assert.ok(!bundle.text.includes('truncated'), 'a fitting section is not marked truncated');
-    assert.equal(bundle.text.match(/x/g)?.length, 20000, 'the full body is present');
+    const sections = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs);
+    const text = sections.map((doc) => doc.text).join('\n');
+    assert.ok(!text.includes('partially loaded'), 'a fitting section is not marked partial');
+    assert.equal(text.match(/x/g)?.length, 20000, 'the full body is present');
   });
 
   it('byte-bounds the omission note when a route cites hundreds of unavailable sections', async () => {
@@ -251,15 +280,43 @@ describe('discoverGuidelineDocs with diff routing', () => {
     roots.push(root);
     const many = Array.from({ length: 400 }, (_, i) => `TS-${i + 100}`).join(', ');
     writeRoutedRepo(root, { rules: `TS-1, ${many}`, doc: '## 1. First\nSECTION-ONE' });
-    const bundle = (await discoverGuidelineDocs(root, ['x/a.ts'])).docs.find((d) =>
-      d.label.includes('§'),
-    )!;
-    assert.match(bundle.text, /SECTION-ONE/);
-    assert.match(bundle.text, /\+\d+ more/, 'the list is capped with a +N more summary');
-    assert.ok(
-      Buffer.byteLength(bundle.text, 'utf8') < 2048,
-      'the note cannot balloon to hundreds of ids',
+    const sections = routedDocs((await discoverGuidelineDocs(root, ['x/a.ts'])).docs);
+    const text = sections.map((doc) => doc.text).join('\n');
+    assert.match(text, /SECTION-ONE/);
+    assert.match(text, /\+\d+ more/, 'the list is capped with a +N more summary');
+    assert.ok(Buffer.byteLength(text, 'utf8') < 2048, 'the note cannot balloon to hundreds of ids');
+  });
+
+  it('gives each routed document and explicit doc a finder fragment', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-fair-'));
+    roots.push(root);
+    mkdirSync(join(root, '.pr-governance/review'), { recursive: true });
+    mkdirSync(join(root, '.pr-governance/design'), { recursive: true });
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(
+      join(root, '.pr-governance/README.md'),
+      [
+        '## Rule IDs',
+        ...['A', 'B', 'C', 'D'].map((id) => `- \`${id}-<n>\` maps to \`design/${id}.md\``),
+      ].join('\n'),
     );
+    writeFileSync(
+      join(root, '.pr-governance/review/rules-for-diff.yaml'),
+      "entries:\n  - name: all\n    paths: ['x/**']\n    docs: ['docs/EXPLICIT.md']\n    rules: [D-1, B-1, A-1, C-1]",
+    );
+    for (const id of ['A', 'B', 'C', 'D']) {
+      writeFileSync(
+        join(root, `.pr-governance/design/${id}.md`),
+        `## 1. ${id}\n${id}-ROUTED-MARKER\n${id.toLowerCase().repeat(40 * 1024)}`,
+      );
+    }
+    writeFileSync(join(root, 'docs/EXPLICIT.md'), '# Explicit\nEXPLICIT-DOC-MARKER');
+
+    const finder = formatFinderGuidelines(await discoverGuidelineDocs(root, ['x/a.ts']));
+
+    for (const id of ['A', 'B', 'C', 'D']) assert.match(finder, new RegExp(`${id}-ROUTED-MARKER`));
+    assert.match(finder, /EXPLICIT-DOC-MARKER/);
+    assert.ok(Buffer.byteLength(finder, 'utf8') <= 24 * 1024);
   });
 
   it('applies globstar/star/? tokens with the correct segment and slash semantics', async () => {
