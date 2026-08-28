@@ -78,6 +78,36 @@ describe('removeOwnPrReaction', () => {
       input: { subjectId: 'PR_1', content: 'ROCKET' },
     });
   });
+
+  it('does nothing when the PR or viewer reaction is absent', async () => {
+    for (const repository of [
+      null,
+      { pullRequest: null },
+      {
+        pullRequest: {
+          id: 'PR_1',
+          reactionGroups: [{ content: 'ROCKET', viewerHasReacted: false }],
+        },
+      },
+      {
+        pullRequest: {
+          id: 'PR_1',
+          reactionGroups: [{ content: 'HEART', viewerHasReacted: true }],
+        },
+      },
+    ]) {
+      let calls = 0;
+      const octokit = {
+        graphql: async () => {
+          calls += 1;
+          return { repository };
+        },
+      } as unknown as Octokit;
+
+      await removeOwnPrReaction(octokit, 'acme', 'widget', 1, 'rocket');
+      assert.equal(calls, 1);
+    }
+  });
 });
 
 describe('formatFindingLabel', () => {

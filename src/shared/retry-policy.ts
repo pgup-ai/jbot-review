@@ -71,7 +71,7 @@ export function classifyMainShardFailure(error: unknown): {
  * cannot meaningfully have moved, and the freshness fetch is not free. */
 export const STALE_CHECK_MIN_ATTEMPT_MS = 60_000;
 
-export type StaleReviewReason = 'merged' | 'closed' | 'head-moved';
+type StaleReviewReason = 'merged' | 'closed' | 'head-moved';
 
 export function classifyReviewStaleness(
   fresh: { state: 'open' | 'closed'; merged: boolean; headSha: string },

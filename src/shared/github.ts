@@ -900,10 +900,9 @@ export async function removeOwnPrReaction(
   owner: string,
   repo: string,
   pullNumber: number,
-  content: PrReactionContent,
+  content: 'rocket',
 ): Promise<void> {
-  const reactionContent =
-    content === '+1' ? 'THUMBS_UP' : content === '-1' ? 'THUMBS_DOWN' : content.toUpperCase();
+  const reactionContent = content.toUpperCase();
   const response = (await octokit.graphql(
     `query JbotPrReaction($owner: String!, $repo: String!, $pullNumber: Int!) {
       repository(owner: $owner, name: $repo) {
@@ -920,9 +919,9 @@ export async function removeOwnPrReaction(
         id: string;
         reactionGroups: Array<{ content: string; viewerHasReacted: boolean }>;
       } | null;
-    };
+    } | null;
   };
-  const pull = response.repository.pullRequest;
+  const pull = response.repository?.pullRequest;
   if (
     !pull?.reactionGroups.some(
       (group) => group.content === reactionContent && group.viewerHasReacted,
