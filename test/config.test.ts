@@ -12,6 +12,7 @@ import {
   needsAuxOpencodeConfig,
   providerConfig,
   providerCredentialSources,
+  providerSessionConcurrency,
   resolvePoolCredentials,
   resolveProviderBaseURL,
   resolveProviderCredential,
@@ -208,6 +209,11 @@ describe('provider configuration resolution', () => {
       () => providerConfig('nope', 'nope/m'),
       /Unknown provider "nope" derived from model "nope\/m"/,
     );
+  });
+
+  it('applies the strictest provider-owned session cap', () => {
+    assert.equal(providerSessionConcurrency(['openai']), undefined);
+    assert.equal(providerSessionConcurrency(['openai', 'nvidia']), 1);
   });
 
   it('rejects malformed base URLs as non-absolute', () => {

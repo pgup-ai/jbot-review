@@ -11,6 +11,7 @@ export interface ProviderConfig {
     baseURL: { env: string; input: string };
   };
   promptCache?: boolean;
+  sessionConcurrency?: number;
   models?: Record<string, ModelConfig>;
 }
 
@@ -272,8 +273,10 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'nvidia/nemotron-3-ultra-550b-a55b',
     keyEnv: 'NVIDIA_API_KEY',
     keyInput: 'nvidia-api-key',
-    // NIM rejects promptCacheKey; Kimi K3 accepts only low/high/max effort.
+    // NIM rejects promptCacheKey and the hosted tier 429s concurrent sessions;
+    // Kimi K3 accepts only low/high/max effort.
     promptCache: false,
+    sessionConcurrency: 1,
     models: { 'moonshotai/kimi-k3': { reasoningEfforts: ['low', 'high', 'max'] } },
   },
   'zai-coding-plan': {
@@ -450,6 +453,14 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
     return false;
   if (PROVIDERS[providerID]?.promptCache === false) return false;
   return modelConfigFor(providerID, modelID)?.promptCache !== false;
+}
+
+export function providerSessionConcurrency(providerIDs: string[]): number | undefined {
+  const limits = providerIDs.flatMap((providerID) => {
+    const limit = PROVIDERS[providerID]?.sessionConcurrency;
+    return limit === undefined ? [] : [limit];
+  });
+  return limits.length > 0 ? Math.min(...limits) : undefined;
 }
 
 /**
