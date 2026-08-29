@@ -31,6 +31,7 @@ interface RuntimeCatalog {
   source: string;
   note: string;
   models: string[];
+  defaultValidationModels?: string[];
   freeModels?: string[];
   enumerable?: boolean;
 }
@@ -287,12 +288,14 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
       source: `${npmSource('opencode-ai')} live provider catalog`,
       note: 'Exact model values exposed by the pinned OpenCode runtime; the CLI refreshes its Models.dev cache before listing.',
       models: opencodeModels,
+      defaultValidationModels: opencodeModels,
     },
     'opencode-go': {
       discovery: '`opencode models opencode-go --pure --refresh`',
       source: `${npmSource('opencode-ai')} live provider catalog`,
       note: 'Exact model values exposed by the pinned OpenCode runtime; the CLI refreshes its Models.dev cache before listing.',
       models: opencodeGoModels,
+      defaultValidationModels: opencodeGoModels,
     },
     devin: {
       discovery: '`devin --help` and the interactive model picker',
@@ -381,7 +384,9 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
 }
 
 async function main(): Promise<void> {
-  const response = await fetch(MODELS_DEV_URL);
+  const response = await fetch(MODELS_DEV_URL, {
+    signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`Models.dev request failed: ${response.status} ${response.statusText}`);
   }
@@ -404,7 +409,13 @@ async function main(): Promise<void> {
     }
     const runtime = runtimeCatalogs[providerID];
     if (runtime) {
-      assertRuntimeDefaultListed(providerID, config.defaultModel, runtime.models);
+      if (runtime.defaultValidationModels) {
+        assertRuntimeDefaultListed(
+          providerID,
+          config.defaultModel,
+          runtime.defaultValidationModels,
+        );
+      }
       runtimeProviders.push({ providerID, catalog: runtime });
       continue;
     }

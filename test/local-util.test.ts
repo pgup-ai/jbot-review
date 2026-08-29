@@ -173,7 +173,10 @@ describe('renderReport', () => {
     assert.match(report, /`src\/b\.ts`/);
     assert.doesNotMatch(report, /src\/b\.ts:0/);
     assert.match(report, /## Findings \(2\)/);
-    assert.match(report, /- Review time: 1m 5s/);
+  });
+
+  it('formats sub-second, second, and minute review durations', () => {
+    assert.match(renderReport({ summary: '', findings: [] }, meta), /Review time: 1m 5s/);
     assert.match(renderReport({ summary: '', findings: [] }, { ...meta, durationMs: 499 }), /<1s/);
     assert.match(
       renderReport({ summary: '', findings: [] }, { ...meta, durationMs: 59_000 }),

@@ -47,6 +47,9 @@ describe('model catalog', () => {
       }),
       { clinePass: [], free: ['z-ai/glm-5.3-flash'] },
     );
+  });
+
+  it('rejects Cline free catalogs without a valid model ID', () => {
     assert.throws(
       () => parseClineRecommendedModels({ clinePass: [], free: [null, {}, { id: 1 }] }),
       /free catalog returned no model IDs/,
@@ -67,7 +70,10 @@ describe('model catalog', () => {
     assert.match(catalog, /`openai-compatible\/<endpoint-model-id>`/);
     assert.match(catalog, /does not invent or probe a default/);
     assert.doesNotMatch(catalog, /`poolside\/poolside\//);
-    assert.doesNotThrow(() => assertRuntimeDefaultListed('cline', 'cline/x', ['cline/x']));
+  });
+
+  it('rejects runtime defaults absent from their discovered snapshot', () => {
+    assertRuntimeDefaultListed('cline', 'cline/x', ['cline/x']);
     assert.throws(
       () => assertRuntimeDefaultListed('cline', 'cline/missing', ['cline/x']),
       /Default model "cline\/missing" is missing from runtime provider "cline"/,
