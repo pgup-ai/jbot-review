@@ -176,6 +176,7 @@ describe('modelSupportsPromptCache', () => {
     assert.equal(modelSupportsPromptCache('opencode-go', 'glm-5.2'), false);
     assert.equal(modelSupportsPromptCache('zai-coding-plan', 'glm-5.2'), false);
     assert.equal(modelSupportsPromptCache('kimi-for-coding', 'k3'), false);
+    assert.equal(modelSupportsPromptCache('nvidia', 'moonshotai/kimi-k3'), false);
     assert.equal(modelSupportsPromptCache('openai-compatible', 'any-model'), false);
     assert.equal(modelSupportsPromptCache('opencode-go', 'deepseek-v4-flash'), true);
     assert.equal(modelSupportsPromptCache('opencode-go', 'kimi-k2.6'), true);

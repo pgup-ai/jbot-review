@@ -272,6 +272,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'nvidia/nemotron-3-ultra-550b-a55b',
     keyEnv: 'NVIDIA_API_KEY',
     keyInput: 'nvidia-api-key',
+    // NIM rejects promptCacheKey; Kimi K3 accepts only low/high/max effort.
+    promptCache: false,
+    models: { 'moonshotai/kimi-k3': { reasoningEfforts: ['low', 'high', 'max'] } },
   },
   'zai-coding-plan': {
     defaultModel: 'zai-coding-plan/glm-5.2',
