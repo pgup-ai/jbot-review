@@ -3,28 +3,88 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { PROVIDERS } from '../src/shared/config.ts';
+import {
+  assertRuntimeDefaultListed,
+  parseClineRecommendedModels,
+  parseQualifiedModelList,
+} from '../scripts/update-model-catalog.ts';
 
 const catalog = readFileSync(new URL('../MODEL_CATALOG.md', import.meta.url), 'utf8');
 const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
 
 describe('model catalog', () => {
+  it('parses live OpenCode provider lists without status output or other providers', () => {
+    assert.deepEqual(
+      parseQualifiedModelList(
+        [
+          'Models cache refreshed',
+          'opencode/zeta',
+          'opencode-go/not-this-provider',
+          'opencode/alpha',
+          '',
+        ].join('\n'),
+        'opencode',
+      ),
+      ['opencode/alpha', 'opencode/zeta'],
+    );
+  });
+
+  it('keeps Cline free-menu IDs separate from ClinePass IDs', () => {
+    assert.deepEqual(
+      parseClineRecommendedModels({
+        clinePass: [{ id: 'cline-pass/glm-5.3' }],
+        free: [{ id: 'cline-free/longcat-2.0' }, { id: 'z-ai/glm-5.3-flash' }],
+      }),
+      {
+        clinePass: ['cline-pass/glm-5.3'],
+        free: ['cline-free/longcat-2.0', 'z-ai/glm-5.3-flash'],
+      },
+    );
+    assert.deepEqual(
+      parseClineRecommendedModels({
+        clinePass: [],
+        free: [null, {}, { id: 1 }, { id: 'z-ai/glm-5.3-flash' }],
+      }),
+      { clinePass: [], free: ['z-ai/glm-5.3-flash'] },
+    );
+  });
+
+  it('rejects Cline free catalogs without a valid model ID', () => {
+    assert.throws(
+      () => parseClineRecommendedModels({ clinePass: [], free: [null, {}, { id: 1 }] }),
+      /free catalog returned no model IDs/,
+    );
+  });
+
   it('covers every centralized provider exactly once', () => {
     const headings = [...catalog.matchAll(/^### `([^`]+)`$/gm)].map((match) => match[1]);
     assert.deepEqual(headings.sort(), Object.keys(PROVIDERS).sort());
   });
 
   it('includes every configured default and keeps the custom provider explicit', () => {
-    for (const provider of Object.values(PROVIDERS)) {
-      if (provider.defaultModel) assert.ok(catalog.includes(`\`${provider.defaultModel}\``));
+    for (const [providerID, provider] of Object.entries(PROVIDERS)) {
+      if (!provider.defaultModel) continue;
+      const section = catalog.split(`### \`${providerID}\``)[1]?.split('\n### ')[0];
+      assert.ok(section?.includes(`\`${provider.defaultModel}\``));
     }
     assert.match(catalog, /`openai-compatible\/<endpoint-model-id>`/);
     assert.match(catalog, /does not invent or probe a default/);
     assert.doesNotMatch(catalog, /`poolside\/poolside\//);
   });
 
+  it('rejects runtime defaults absent from their discovered snapshot', () => {
+    assertRuntimeDefaultListed('cline', 'cline/x', ['cline/x']);
+    assert.throws(
+      () => assertRuntimeDefaultListed('cline', 'cline/missing', ['cline/x']),
+      /Default model "cline\/missing" is missing from runtime provider "cline"/,
+    );
+  });
+
   it('publishes sourced CLI snapshots with copyable J-Bot values', () => {
     for (const providerID of [
       'commandcode',
+      'opencode',
+      'opencode-go',
       'cursor',
       'qoder',
       'codex',
@@ -43,6 +103,13 @@ describe('model catalog', () => {
     assert.match(catalog, /`codex debug models`/);
     assert.match(catalog, /`grok models`/);
     assert.match(catalog, /authenticated remote catalog/);
+    for (const model of [
+      'cline/cline-free/longcat-2.0',
+      'cline/z-ai/glm-5.3-flash',
+      'cline/deepseek/deepseek-v4-flash',
+    ]) {
+      assert.ok(catalog.includes(`- \`${model}\` **(free)**`));
+    }
     assert.doesNotMatch(catalog, /`kilo\/kilo\/[^`]+`/);
   });
 
@@ -75,6 +142,7 @@ describe('model catalog', () => {
       'cline',
       'command-code',
       'dimcode',
+      'opencode-ai',
     ]);
     for (const [pkg, version] of claims) {
       assert.equal(pins.get(pkg), version, `${pkg} claims ${version}`);

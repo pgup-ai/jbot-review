@@ -31,11 +31,14 @@ interface RuntimeCatalog {
   source: string;
   note: string;
   models: string[];
+  defaultValidationModels?: string[];
+  freeModels?: string[];
   enumerable?: boolean;
 }
 
 interface ClineRecommendedModels {
-  clinePass?: Array<{ id?: unknown }>;
+  clinePass?: unknown;
+  free?: unknown;
 }
 
 function isModelsDevProvider(value: unknown): value is ModelsDevProvider {
@@ -133,6 +136,48 @@ function parseGrokModels(output: string): string[] {
   });
 }
 
+export function parseQualifiedModelList(output: string, providerID: string): string[] {
+  const prefix = `${providerID}/`;
+  return uniqueSorted(
+    output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith(prefix) && !line.includes(' ')),
+  );
+}
+
+export function parseClineRecommendedModels(payload: ClineRecommendedModels): {
+  clinePass: string[];
+  free: string[];
+} {
+  if (!Array.isArray(payload.clinePass)) {
+    throw new Error('Cline model response has no clinePass catalog.');
+  }
+  if (!Array.isArray(payload.free)) {
+    throw new Error('Cline model response has no free catalog.');
+  }
+  const ids = (models: unknown[]): string[] =>
+    models.flatMap((model) => {
+      if (typeof model !== 'object' || model === null || !('id' in model)) return [];
+      return typeof model.id === 'string' ? [model.id] : [];
+    });
+  const free = ids(payload.free);
+  if (free.length === 0) throw new Error('Cline free catalog returned no model IDs.');
+  return { clinePass: ids(payload.clinePass), free };
+}
+
+export function assertRuntimeDefaultListed(
+  providerID: string,
+  defaultModel: string | undefined,
+  models: string[],
+): void {
+  if (defaultModel && !models.includes(defaultModel)) {
+    throw new Error(
+      `Default model "${defaultModel}" is missing from runtime provider "${providerID}".`,
+    );
+  }
+}
+
 async function loadClineModels(): Promise<{ models: string[]; llmsVersion: string }> {
   const clineVersion = dockerPackageVersion('cline');
   const llmsVersion = JSON.parse(
@@ -175,16 +220,18 @@ async function loadClineModels(): Promise<{ models: string[]; llmsVersion: strin
   }
 }
 
-async function loadClinePassModels(): Promise<string[]> {
-  const response = await fetch(CLINE_RECOMMENDED_MODELS_URL);
+async function loadClineRecommendedModels(): Promise<{
+  clinePass: string[];
+  free: string[];
+}> {
+  const response = await fetch(CLINE_RECOMMENDED_MODELS_URL, {
+    signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`Cline model request failed: ${response.status} ${response.statusText}`);
   }
   const payload = (await response.json()) as ClineRecommendedModels;
-  if (!Array.isArray(payload.clinePass)) {
-    throw new Error('Cline model response has no clinePass catalog.');
-  }
-  return payload.clinePass.flatMap(({ id }) => (typeof id === 'string' ? [id] : []));
+  return parseClineRecommendedModels(payload);
 }
 
 async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
@@ -204,13 +251,24 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
     // The CLI self-updates by default, which would drift from the pinned image.
     npmCliOutput('dimcode', 'dim', ['model', 'list'], { DIMCODE_DISABLE_AUTOUPDATE: '1' }),
   );
+  const opencodeModels = parseQualifiedModelList(
+    npmCliOutput('opencode-ai', 'opencode', ['models', 'opencode', '--pure', '--refresh']),
+    'opencode',
+  );
+  const opencodeGoModels = parseQualifiedModelList(
+    npmCliOutput('opencode-ai', 'opencode', ['models', 'opencode-go', '--pure', '--refresh']),
+    'opencode-go',
+  );
   const { models: clineModels, llmsVersion } = await loadClineModels();
-  const clinePassModels = await loadClinePassModels();
+  const { clinePass: clinePassModels, free: clineFreeModels } = await loadClineRecommendedModels();
+  const clineFreeValues = clineFreeModels.map((model) => `cline/${model}`);
   const grokModels = parseGrokModels(npmCliOutput('@xai-official/grok', 'grok', ['models']));
   const kiloModels = parseKiloModelList(
     npmCliOutput('@kilocode/cli', 'kilo', ['models', '--pure']),
   );
   for (const [providerID, models] of Object.entries({
+    opencode: opencodeModels,
+    'opencode-go': opencodeGoModels,
     commandcode: commandCodeModels,
     cursor: cursorModels,
     qoder: qoderModels,
@@ -225,6 +283,20 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   }
 
   return {
+    opencode: {
+      discovery: '`opencode models opencode --pure --refresh`',
+      source: `${npmSource('opencode-ai')} live provider catalog`,
+      note: 'Exact model values exposed by the pinned OpenCode runtime; the CLI refreshes its Models.dev cache before listing.',
+      models: opencodeModels,
+      defaultValidationModels: opencodeModels,
+    },
+    'opencode-go': {
+      discovery: '`opencode models opencode-go --pure --refresh`',
+      source: `${npmSource('opencode-ai')} live provider catalog`,
+      note: 'Exact model values exposed by the pinned OpenCode runtime; the CLI refreshes its Models.dev cache before listing.',
+      models: opencodeGoModels,
+      defaultValidationModels: opencodeGoModels,
+    },
     devin: {
       discovery: '`devin --help` and the interactive model picker',
       source: 'Vendor-installed Devin CLI (the Docker image does not install an npm package)',
@@ -271,11 +343,12 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
     cline: {
       discovery: `the \`@cline/llms\` catalog bundled by \`cline@${dockerPackageVersion('cline')}\``,
       source: `${npmSource('cline')} → [\`@cline/llms@${llmsVersion}\`](https://www.npmjs.com/package/@cline/llms)`,
-      note: 'Pay-as-you-go IDs include the upstream model type, for example `cline/deepseek/deepseek-v4-flash`.',
-      models: withDefault(
-        'cline',
-        clineModels.map((model) => `cline/${model}`),
-      ),
+      note: "Pay-as-you-go IDs include the upstream model type; entries marked free come from Cline's live recommended-models endpoint.",
+      models: withDefault('cline', [
+        ...clineModels.map((model) => `cline/${model}`),
+        ...clineFreeValues,
+      ]),
+      freeModels: clineFreeValues,
     },
     'cline-pass': {
       discovery: `[Cline's live recommended-models endpoint](${CLINE_RECOMMENDED_MODELS_URL})`,
@@ -311,7 +384,9 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
 }
 
 async function main(): Promise<void> {
-  const response = await fetch(MODELS_DEV_URL);
+  const response = await fetch(MODELS_DEV_URL, {
+    signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`Models.dev request failed: ${response.status} ${response.statusText}`);
   }
@@ -334,6 +409,13 @@ async function main(): Promise<void> {
     }
     const runtime = runtimeCatalogs[providerID];
     if (runtime) {
+      if (runtime.defaultValidationModels) {
+        assertRuntimeDefaultListed(
+          providerID,
+          config.defaultModel,
+          runtime.defaultValidationModels,
+        );
+      }
       runtimeProviders.push({ providerID, catalog: runtime });
       continue;
     }
@@ -438,9 +520,13 @@ async function main(): Promise<void> {
         ? 'The CLI does not expose a complete list.'
         : `${catalog.models.length} J-Bot model values:`,
       '',
-      ...catalog.models.map((model) =>
-        model === defaultModel ? `- \`${model}\` **(default)**` : `- \`${model}\``,
-      ),
+      ...catalog.models.map((model) => {
+        const labels = [
+          model === defaultModel ? 'default' : undefined,
+          catalog.freeModels?.includes(model) ? 'free' : undefined,
+        ].filter(Boolean);
+        return `- \`${model}\`${labels.length > 0 ? ` **(${labels.join(', ')})**` : ''}`;
+      }),
       '',
     );
   }
@@ -461,4 +547,4 @@ async function main(): Promise<void> {
   );
 }
 
-await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

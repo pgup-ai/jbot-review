@@ -233,7 +233,7 @@ keys:
 
 ```yaml
 with:
-  model: opencode/deepseek-v4-flash-free,openrouter/google/gemini-2.5-flash
+  model: opencode/deepseek-v4-flash,openrouter/google/gemini-2.5-flash
   opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
   openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
   github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -457,32 +457,32 @@ These counters are observability only: they do not identify API keys,
 accounts, organizations, quota buckets, remaining quota, or reset times, so
 jbot-review does not use them for smart key rotation.
 
-| `provider`              | Default model                                              | Action key input                | Secret/env var                       |
-| ----------------------- | ---------------------------------------------------------- | ------------------------------- | ------------------------------------ |
-| `opencode`              | `opencode/deepseek-v4-flash-free`                          | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
-| `opencode-go`           | `opencode-go/deepseek-v4-flash`                            | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
-| `deepseek`              | `deepseek/deepseek-v4-flash`                               | `deepseek-api-key`              | `DEEPSEEK_API_KEY`                   |
-| `openai`                | `openai/gpt-5.4-nano`                                      | `openai-api-key`                | `OPENAI_API_KEY`                     |
-| `openai-compatible`     | required                                                   | `openai-compatible-api-key`     | `JBOT_OPENAI_COMPATIBLE_API_KEY`     |
-| `anthropic`             | `anthropic/claude-sonnet-4-6`                              | `anthropic-api-key`             | `ANTHROPIC_API_KEY`                  |
-| `google`                | `google/gemini-2.5-flash`                                  | `gemini-api-key`                | `GEMINI_API_KEY`                     |
-| `openrouter`            | `openrouter/openai/gpt-4o-mini`                            | `openrouter-api-key`            | `OPENROUTER_API_KEY`                 |
-| `nvidia`                | `nvidia/nemotron-3-ultra-550b-a55b`                        | `nvidia-api-key`                | `NVIDIA_API_KEY`                     |
-| `zai-coding-plan`       | `zai-coding-plan/glm-5.2`                                  | `zai-api-key`                   | `ZAI_API_KEY`                        |
-| `kimi-for-coding`       | `kimi-for-coding/k3`                                       | `kimi-api-key`                  | `KIMI_API_KEY`                       |
-| `xai`                   | `xai/grok-4.3`                                             | `xai-api-key`                   | `XAI_API_KEY`                        |
-| `fireworks-ai`          | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash` | `fireworks-api-key`             | `FIREWORKS_API_KEY`                  |
-| `xiaomi-token-plan-sgp` | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                      | `mimo-api-key`                  | `MIMO_API_KEY`                       |
-| `devin`                 | `devin/default`                                            | `devin-windsurf-api-key`        | `DEVIN_WINDSURF_API_KEY`             |
-| `commandcode`           | `commandcode/default`                                      | `commandcode-access-key`        | `COMMANDCODE_ACCESS_KEY`             |
-| `cursor`                | `cursor/default`                                           | `cursor-api-key`                | `CURSOR_API_KEY`                     |
-| `poolside`              | `poolside/laguna-s-2.1`                                    | `poolside-api-key`              | `POOLSIDE_API_KEY`                   |
-| `qoder`                 | `qoder/auto`                                               | `qoder-token`                   | `QODER_PERSONAL_ACCESS_TOKEN`        |
-| `codex`                 | `codex/default`                                            | `codex-auth`                    | `CODEX_AUTH_JSON`                    |
-| `cline`                 | `cline/default`                                            | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
-| `cline-pass`            | `cline-pass/default`                                       | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
-| `grok`                  | `grok/default`                                             | `grok-auth`, then `xai-api-key` | `GROK_AUTH_JSON`, then `XAI_API_KEY` |
-| `kilo`                  | `kilo/kilo-auto/free`                                      | `kilo-auth`                     | `KILO_AUTH_CONTENT`                  |
+| `provider`              | Default model                                                   | Action key input                | Secret/env var                       |
+| ----------------------- | --------------------------------------------------------------- | ------------------------------- | ------------------------------------ |
+| `opencode`              | `opencode/deepseek-v4-flash`                                    | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
+| `opencode-go`           | `opencode-go/deepseek-v4-flash`                                 | `opencode-api-key`              | `OPENCODE_API_KEY`                   |
+| `deepseek`              | `deepseek/deepseek-v4-flash`                                    | `deepseek-api-key`              | `DEEPSEEK_API_KEY`                   |
+| `openai`                | `openai/gpt-5.4-nano`                                           | `openai-api-key`                | `OPENAI_API_KEY`                     |
+| `openai-compatible`     | required                                                        | `openai-compatible-api-key`     | `JBOT_OPENAI_COMPATIBLE_API_KEY`     |
+| `anthropic`             | `anthropic/claude-sonnet-4-6`                                   | `anthropic-api-key`             | `ANTHROPIC_API_KEY`                  |
+| `google`                | `google/gemini-2.5-flash`                                       | `gemini-api-key`                | `GEMINI_API_KEY`                     |
+| `openrouter`            | `openrouter/openai/gpt-4o-mini`                                 | `openrouter-api-key`            | `OPENROUTER_API_KEY`                 |
+| `nvidia`                | `nvidia/nemotron-3-ultra-550b-a55b`                             | `nvidia-api-key`                | `NVIDIA_API_KEY`                     |
+| `zai-coding-plan`       | `zai-coding-plan/glm-5.2`                                       | `zai-api-key`                   | `ZAI_API_KEY`                        |
+| `kimi-for-coding`       | `kimi-for-coding/k3`                                            | `kimi-api-key`                  | `KIMI_API_KEY`                       |
+| `xai`                   | `xai/grok-4.3`                                                  | `xai-api-key`                   | `XAI_API_KEY`                        |
+| `fireworks-ai`          | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` | `fireworks-api-key`             | `FIREWORKS_API_KEY`                  |
+| `xiaomi-token-plan-sgp` | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                           | `mimo-api-key`                  | `MIMO_API_KEY`                       |
+| `devin`                 | `devin/default`                                                 | `devin-windsurf-api-key`        | `DEVIN_WINDSURF_API_KEY`             |
+| `commandcode`           | `commandcode/default`                                           | `commandcode-access-key`        | `COMMANDCODE_ACCESS_KEY`             |
+| `cursor`                | `cursor/default`                                                | `cursor-api-key`                | `CURSOR_API_KEY`                     |
+| `poolside`              | `poolside/laguna-s-2.1`                                         | `poolside-api-key`              | `POOLSIDE_API_KEY`                   |
+| `qoder`                 | `qoder/auto`                                                    | `qoder-token`                   | `QODER_PERSONAL_ACCESS_TOKEN`        |
+| `codex`                 | `codex/default`                                                 | `codex-auth`                    | `CODEX_AUTH_JSON`                    |
+| `cline`                 | `cline/default`                                                 | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
+| `cline-pass`            | `cline-pass/default`                                            | `cline-auth`                    | `CLINE_AUTH_JSON`                    |
+| `grok`                  | `grok/default`                                                  | `grok-auth`, then `xai-api-key` | `GROK_AUTH_JSON`, then `XAI_API_KEY` |
+| `kilo`                  | `kilo/kilo-auto/free`                                           | `kilo-auth`                     | `KILO_AUTH_CONTENT`                  |
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
@@ -604,7 +604,7 @@ the provider, its credential, and its base URL — so `provider` is no longer
 needed:
 
 ```yaml
-model: opencode/deepseek-v4-flash-free
+model: opencode/deepseek-v4-flash
 ```
 
 Only the **first** slash splits. Everything after it is the provider's own model
@@ -625,7 +625,7 @@ it. The chosen model is logged and appears in the posted review's metadata block
 provider's key is resolved separately, so a pool can mix them:
 
 ```yaml
-model: opencode/deepseek-v4-flash-free,deepseek/deepseek-v4-flash,openai/gpt-5.4-nano
+model: opencode/deepseek-v4-flash,deepseek/deepseek-v4-flash,openai/gpt-5.4-nano
 ```
 
 Every provider a pool draws on needs its own key, and all of them are resolved
@@ -788,9 +788,9 @@ and precision against seeded defects.
   from a distinct target workspace. No GitHub credential is read, and nothing
   is posted anywhere — dry-run is enforced in code.
 - **Output:** findings print to the terminal; set `JBOT_LOCAL_REPORT=true` to
-  also write `.jbot-review/last-run.md` under the launch directory. Telemetry
-  and relative benchmark output use that directory too, keeping the target
-  checkout clean.
+  also write `.jbot-review/last-run.md` under the launch directory, including
+  the review's wall-clock duration. Telemetry and relative benchmark output use
+  that directory too, keeping the target checkout clean.
 - **Model pool:** `MODEL` accepts the same comma-separated pool as the action,
   seeded on HEAD instead of a PR head sha — so re-running against uncommitted
   edits keeps the same reviewer and a before/after comparison stays comparable.

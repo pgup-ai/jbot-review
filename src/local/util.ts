@@ -84,14 +84,28 @@ function telemetryRunId(jsonl: string | undefined): string | undefined {
 
 export function renderReport(
   result: ReviewResult,
-  meta: { branch: string; baseRef: string; mergeBase: string; model: string },
+  meta: {
+    branch: string;
+    baseRef: string;
+    mergeBase: string;
+    model: string;
+    durationMs: number;
+  },
 ): string {
+  const elapsedSeconds = Math.round(meta.durationMs / 1_000);
+  const reviewTime =
+    elapsedSeconds < 1
+      ? '<1s'
+      : elapsedSeconds < 60
+        ? `${elapsedSeconds}s`
+        : `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`;
   const lines = [
     '# jbot local review',
     '',
     `- Branch: \`${meta.branch}\``,
     `- Base: \`${meta.baseRef}\` (merge-base \`${meta.mergeBase.slice(0, 12)}\`)`,
     `- Model: \`${meta.model}\``,
+    `- Review time: ${reviewTime}`,
     `- Generated: ${new Date().toISOString()}`,
     '',
     '## Summary',

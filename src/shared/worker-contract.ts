@@ -6,7 +6,7 @@ export interface ClaimedJob {
   jobId: string;
   repoFullName: string; // "owner/repo"
   prNumber: number;
-  model: string; // qualified ref, e.g. "opencode/deepseek-v4-flash-free"
+  model: string; // qualified ref, e.g. "opencode/deepseek-v4-flash"
   auxModel: string | null;
   apiKey: string; // DECRYPTED provider key for the model's provider
   auxApiKey: string | null; // aux model's provider key when it differs; else null

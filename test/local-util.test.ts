@@ -149,7 +149,13 @@ describe('parseOwnerRepo', () => {
 });
 
 describe('renderReport', () => {
-  const meta = { branch: 'b', baseRef: 'origin/main', mergeBase: 'abcdef1234567890', model: 'm/x' };
+  const meta = {
+    branch: 'b',
+    baseRef: 'origin/main',
+    mergeBase: 'abcdef1234567890',
+    model: 'm/x',
+    durationMs: 65_432,
+  };
 
   it('renders line anchors for inline findings and bare paths for file-level (line 0)', () => {
     const report = renderReport(
@@ -167,6 +173,15 @@ describe('renderReport', () => {
     assert.match(report, /`src\/b\.ts`/);
     assert.doesNotMatch(report, /src\/b\.ts:0/);
     assert.match(report, /## Findings \(2\)/);
+  });
+
+  it('formats sub-second, second, and minute review durations', () => {
+    assert.match(renderReport({ summary: '', findings: [] }, meta), /Review time: 1m 5s/);
+    assert.match(renderReport({ summary: '', findings: [] }, { ...meta, durationMs: 499 }), /<1s/);
+    assert.match(
+      renderReport({ summary: '', findings: [] }, { ...meta, durationMs: 59_000 }),
+      /Review time: 59s/,
+    );
   });
 
   it('says "No findings." on a clean run', () => {
