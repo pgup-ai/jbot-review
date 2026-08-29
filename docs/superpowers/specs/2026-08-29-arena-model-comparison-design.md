@@ -149,6 +149,7 @@ interface ComparisonManifestV1 {
     shardCache: false;
     scrubSessionEnv: true;
     auxModelMode: "same-as-main";
+    sdkEngine: "auto" | "opencode";
     reviewPasses: number;
     verifyFindings: boolean;
     timeBudgetMinutes: number;
@@ -171,7 +172,7 @@ interface ComparisonManifestV1 {
     model: string;
     provider: string;
     credentialAlias: string; // committed map key, never secret material
-    artifactName: string;
+    artifactName: string; // "model-<index>-<sha256(model)>"
   }>;
 }
 ```
@@ -179,7 +180,8 @@ interface ComparisonManifestV1 {
 The prepare job resolves every workflow/repository-variable knob into
 `reviewConfig`; workers never re-read mutable repository variables. V1 fixes
 enhanced context and dry-run on; posting, prior-comment loading, and shard cache
-off; and auxiliary sessions to the main model. The remaining defaults match
+off; auxiliary sessions to the main model; and the SDK engine to `auto` unless
+the arena workflow explicitly freezes `opencode`. The remaining defaults match
 today's local path: one pass, auto shards (`reviewShards: 0`), 30-minute budget,
 concurrency 3, minimum severity `nit`, unlimited findings, and
 verification/guideline-pass/fan-out/cache/doc-only-skip/telemetry/evidence/
