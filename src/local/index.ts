@@ -544,6 +544,7 @@ async function review(
 
   const opencodePort = await pickOpencodePort();
   let reviewResult: (ReviewResult & { telemetry?: string }) | undefined;
+  const reviewStartedAt = Date.now();
   await runPrReview({
     // No octokit and no headSha: reads come from localDiff, and the runner's
     // built-in "check status unavailable" fallback covers CI checks.
@@ -590,6 +591,7 @@ async function review(
     },
     log,
   });
+  const reviewDurationMs = Date.now() - reviewStartedAt;
 
   if (!reviewResult) {
     // The runner returned before producing a result (doc-only skip or no
@@ -607,7 +609,13 @@ async function review(
     );
   }
 
-  const report = renderReport(reviewResult, { branch, baseRef, mergeBase, model });
+  const report = renderReport(reviewResult, {
+    branch,
+    baseRef,
+    mergeBase,
+    model,
+    durationMs: reviewDurationMs,
+  });
   console.log(`\n${report}`);
   if (parseEnvBoolean('JBOT_LOCAL_REPORT', false)) {
     mkdirSync(paths.artifactRoot, { recursive: true });

@@ -218,7 +218,7 @@ const OPENCODE_ZEN_MODELS = {
 // such as Devin, CommandCode, and Cursor expose their own model lists.
 export const PROVIDERS: Record<string, ProviderConfig> = {
   opencode: {
-    defaultModel: 'opencode/deepseek-v4-flash-free',
+    defaultModel: 'opencode/deepseek-v4-flash',
     keyEnv: 'OPENCODE_API_KEY',
     keyInput: 'opencode-api-key',
     models: OPENCODE_ZEN_MODELS,
@@ -303,7 +303,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     models: { 'mimo-v2.5-pro': { promptCache: false } },
   },
   'fireworks-ai': {
-    defaultModel: 'fireworks-ai/accounts/fireworks/models/deepseek-v4-flash',
+    defaultModel: 'fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731',
     keyEnv: 'FIREWORKS_API_KEY',
     keyInput: 'fireworks-api-key',
     // Fireworks rejects opencode's promptCacheKey with a non-retryable 400 for every model.

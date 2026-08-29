@@ -3,19 +3,54 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { PROVIDERS } from '../src/shared/config.ts';
+import {
+  parseClineRecommendedModels,
+  parseQualifiedModelList,
+} from '../scripts/update-model-catalog.ts';
 
 const catalog = readFileSync(new URL('../MODEL_CATALOG.md', import.meta.url), 'utf8');
 const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
 
 describe('model catalog', () => {
+  it('parses live OpenCode provider lists without status output or other providers', () => {
+    assert.deepEqual(
+      parseQualifiedModelList(
+        [
+          'Models cache refreshed',
+          'opencode/zeta',
+          'opencode-go/not-this-provider',
+          'opencode/alpha',
+          '',
+        ].join('\n'),
+        'opencode',
+      ),
+      ['opencode/alpha', 'opencode/zeta'],
+    );
+  });
+
+  it('keeps Cline free-menu IDs separate from ClinePass IDs', () => {
+    assert.deepEqual(
+      parseClineRecommendedModels({
+        clinePass: [{ id: 'cline-pass/glm-5.3' }],
+        free: [{ id: 'cline-free/longcat-2.0' }, { id: 'z-ai/glm-5.3-flash' }],
+      }),
+      {
+        clinePass: ['cline-pass/glm-5.3'],
+        free: ['cline-free/longcat-2.0', 'z-ai/glm-5.3-flash'],
+      },
+    );
+  });
+
   it('covers every centralized provider exactly once', () => {
     const headings = [...catalog.matchAll(/^### `([^`]+)`$/gm)].map((match) => match[1]);
     assert.deepEqual(headings.sort(), Object.keys(PROVIDERS).sort());
   });
 
   it('includes every configured default and keeps the custom provider explicit', () => {
-    for (const provider of Object.values(PROVIDERS)) {
-      if (provider.defaultModel) assert.ok(catalog.includes(`\`${provider.defaultModel}\``));
+    for (const [providerID, provider] of Object.entries(PROVIDERS)) {
+      if (!provider.defaultModel) continue;
+      const section = catalog.split(`### \`${providerID}\``)[1]?.split('\n### ')[0];
+      assert.ok(section?.includes(`\`${provider.defaultModel}\``));
     }
     assert.match(catalog, /`openai-compatible\/<endpoint-model-id>`/);
     assert.match(catalog, /does not invent or probe a default/);
@@ -25,6 +60,8 @@ describe('model catalog', () => {
   it('publishes sourced CLI snapshots with copyable J-Bot values', () => {
     for (const providerID of [
       'commandcode',
+      'opencode',
+      'opencode-go',
       'cursor',
       'qoder',
       'codex',
@@ -75,6 +112,7 @@ describe('model catalog', () => {
       'cline',
       'command-code',
       'dimcode',
+      'opencode-ai',
     ]);
     for (const [pkg, version] of claims) {
       assert.equal(pins.get(pkg), version, `${pkg} claims ${version}`);
