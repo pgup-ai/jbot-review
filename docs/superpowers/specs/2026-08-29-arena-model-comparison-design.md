@@ -1,7 +1,7 @@
 # Arena model comparison — design
 
 Date: 2026-08-29
-Status: approved in discussion; awaiting spec review
+Status: approved in discussion; three spec-review iterations completed; awaiting user review
 Scope: one comparison feature across `jbot-review` and a dedicated arena repository
 
 ## Problem
@@ -253,6 +253,7 @@ type ArenaFailureClass =
   | "invalid-output"
   | "missing-artifact"
   | "unknown";
+type JbotArenaFailureClass = "timeout" | "provider" | "parse" | "unknown";
 
 interface ArenaFindingV1 {
   path: string;
@@ -322,7 +323,7 @@ interface JbotArenaOutputV1 {
   reviewMs: number | null;
   usage: ArenaUsageV1;
   review: ArenaResultV1["review"];
-  failure: ArenaResultV1["failure"];
+  failure: { class: JbotArenaFailureClass; message: string } | null;
 }
 ```
 
@@ -340,10 +341,12 @@ worker wrapper validates that output and constructs `ArenaResultV1` by copying
 manifest identity/config/image fields and adding total worker time. For
 checkout, image, or credential failures before J-Bot starts, the wrapper emits
 zero sessions, null metric values, null resolved backend/options, and its own
-classified failure. J-Bot owns timeout/provider/parse/runner-exit/signal
-classification after launch; the wrapper owns checkout/image/credential,
-invalid output, and unknown pre-launch failures; the publisher alone owns
-missing-artifact.
+classified failure. J-Bot owns only timeout/provider/parse/unknown failures it
+catches and serializes. The wrapper owns checkout/image/credential and invalid
+output before launch, plus external-watchdog timeout, signal, abrupt
+`runner-exit`, and unknown wrapper failures after launch; those states are
+synthesized from the child-process outcome because the J-Bot process cannot
+serialize them. The publisher alone owns `missing-artifact`.
 
 Each token metric is summed independently across sessions that report it;
 `value` is null only when none do. A metric is complete exactly when its
@@ -361,10 +364,19 @@ the publisher wire contract.
 Provider-reported dollar cost is labelled actual, configured inference is
 labelled estimated, and absence remains unavailable. Zero must not imply free.
 
-The target checkout is mounted read-only; the result directory is the only
-writable mount. The reviewed repository's `.env`, project OpenCode config, and
-global operator config never load. Current session credential scrubbing and
-read-only permission layers remain unchanged.
+The worker mounts the target checkout at `/workspace:ro`, the manifest at
+`/run/jbot-comparison/comparison.json:ro`, and an empty host artifact directory
+at `/out:rw`; `/out` is the only writable host mount. It runs the container with
+`--workdir /workspace`, `--pr-context /run/jbot-comparison/comparison.json`, and
+`--output /out/jbot-output.json`. In arena mode, J-Bot requires an absolute
+output path outside the reviewed workspace and writes raw telemetry to the
+fixed sibling `/out/telemetry.jsonl`; the wrapper writes the validated merged
+`/out/result.json` after the container exits. Interactive local mode keeps its
+existing launch-directory `.jbot-review` behavior.
+
+The reviewed repository's `.env`, project OpenCode config, and global operator
+config never load. Current session credential scrubbing and read-only permission
+layers remain unchanged.
 
 ## Workflow and data flow
 
@@ -521,7 +533,8 @@ or workflow syntax. Raw model Markdown remains available only in artifacts.
 - Local argument tests cover `--pr-context` and `--output`, including duplicate,
   missing, malformed, and mismatched-head inputs.
 - Pure result-envelope tests cover completed, skipped, and classified-failure
-  output plus cost provenance.
+  output plus cost provenance. Wrapper tests cover pre-launch failures, caught
+  J-Bot failures, external watchdog timeout, signal, and abrupt child exit.
 - Existing local-workspace and `review:compare` tests remain green, proving the
   default local path is unchanged.
 - Docker smoke test invokes the bundled local entrypoint against a fixture
@@ -549,14 +562,20 @@ the implementation PR records that skip rationale.
 
 ## Rollout
 
-1. Land the J-Bot image contract: bundled local entrypoint, frozen PR context,
-   structured output, tests, and a full-SHA image tag.
-2. Create/configure the dedicated arena repository with provider mapping,
-   spend-capped credentials, the workflow, parser/publisher tests, and one
-   long-lived arena PR.
-3. Run the two-model smoke comparison and verify the published image digest,
-   frozen target SHAs, deterministic comments, artifacts, and zero target-side
-   mutations.
+1. Land J-Bot's versioned `JbotArenaOutputV1`, telemetry aggregation, arena
+   output-directory contract, and focused tests without changing local defaults.
+2. Land frozen PR-context input plus the bundled local image entrypoint, publish
+   its full-SHA tag, and verify the registry digest.
+3. In the arena repository, land the command parser, provider map, target/image
+   resolver, and `ComparisonManifestV1` fixtures.
+4. Land the isolated matrix worker, wrapper-owned failure synthesis, artifact
+   upload, and fixture-image tests.
+5. Land the safe renderer/publisher, pagination/idempotence cleanup, and comment
+   tests.
+6. Wire the jobs in `jbot-compare.yml`, configure spend-capped credentials and
+   the long-lived arena PR, then run the two-model smoke comparison. Verify the
+   published image digest, frozen target SHAs, deterministic comments,
+   artifacts, and zero target-side mutations.
 
 The arena remains explicitly experimental. Any future move from observational
 comparison to model selection requires repetitions plus labelled/adjudicated
