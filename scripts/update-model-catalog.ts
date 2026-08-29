@@ -36,8 +36,8 @@ interface RuntimeCatalog {
 }
 
 interface ClineRecommendedModels {
-  clinePass?: Array<{ id?: unknown }>;
-  free?: Array<{ id?: unknown }>;
+  clinePass?: unknown;
+  free?: unknown;
 }
 
 function isModelsDevProvider(value: unknown): value is ModelsDevProvider {
@@ -155,9 +155,26 @@ export function parseClineRecommendedModels(payload: ClineRecommendedModels): {
   if (!Array.isArray(payload.free)) {
     throw new Error('Cline model response has no free catalog.');
   }
-  const ids = (models: Array<{ id?: unknown }>): string[] =>
-    models.flatMap(({ id }) => (typeof id === 'string' ? [id] : []));
-  return { clinePass: ids(payload.clinePass), free: ids(payload.free) };
+  const ids = (models: unknown[]): string[] =>
+    models.flatMap((model) => {
+      if (typeof model !== 'object' || model === null || !('id' in model)) return [];
+      return typeof model.id === 'string' ? [model.id] : [];
+    });
+  const free = ids(payload.free);
+  if (free.length === 0) throw new Error('Cline free catalog returned no model IDs.');
+  return { clinePass: ids(payload.clinePass), free };
+}
+
+export function assertRuntimeDefaultListed(
+  providerID: string,
+  defaultModel: string | undefined,
+  models: string[],
+): void {
+  if (defaultModel && !models.includes(defaultModel)) {
+    throw new Error(
+      `Default model "${defaultModel}" is missing from runtime provider "${providerID}".`,
+    );
+  }
 }
 
 async function loadClineModels(): Promise<{ models: string[]; llmsVersion: string }> {
@@ -206,7 +223,9 @@ async function loadClineRecommendedModels(): Promise<{
   clinePass: string[];
   free: string[];
 }> {
-  const response = await fetch(CLINE_RECOMMENDED_MODELS_URL);
+  const response = await fetch(CLINE_RECOMMENDED_MODELS_URL, {
+    signal: AbortSignal.timeout(COMMAND_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`Cline model request failed: ${response.status} ${response.statusText}`);
   }
@@ -385,11 +404,7 @@ async function main(): Promise<void> {
     }
     const runtime = runtimeCatalogs[providerID];
     if (runtime) {
-      if (config.defaultModel && !runtime.models.includes(config.defaultModel)) {
-        throw new Error(
-          `Default model "${config.defaultModel}" is missing from runtime provider "${providerID}".`,
-        );
-      }
+      assertRuntimeDefaultListed(providerID, config.defaultModel, runtime.models);
       runtimeProviders.push({ providerID, catalog: runtime });
       continue;
     }

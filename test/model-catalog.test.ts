@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 
 import { PROVIDERS } from '../src/shared/config.ts';
 import {
+  assertRuntimeDefaultListed,
   parseClineRecommendedModels,
   parseQualifiedModelList,
 } from '../scripts/update-model-catalog.ts';
@@ -39,6 +40,17 @@ describe('model catalog', () => {
         free: ['cline-free/longcat-2.0', 'z-ai/glm-5.3-flash'],
       },
     );
+    assert.deepEqual(
+      parseClineRecommendedModels({
+        clinePass: [],
+        free: [null, {}, { id: 1 }, { id: 'z-ai/glm-5.3-flash' }],
+      }),
+      { clinePass: [], free: ['z-ai/glm-5.3-flash'] },
+    );
+    assert.throws(
+      () => parseClineRecommendedModels({ clinePass: [], free: [null, {}, { id: 1 }] }),
+      /free catalog returned no model IDs/,
+    );
   });
 
   it('covers every centralized provider exactly once', () => {
@@ -55,6 +67,11 @@ describe('model catalog', () => {
     assert.match(catalog, /`openai-compatible\/<endpoint-model-id>`/);
     assert.match(catalog, /does not invent or probe a default/);
     assert.doesNotMatch(catalog, /`poolside\/poolside\//);
+    assert.doesNotThrow(() => assertRuntimeDefaultListed('cline', 'cline/x', ['cline/x']));
+    assert.throws(
+      () => assertRuntimeDefaultListed('cline', 'cline/missing', ['cline/x']),
+      /Default model "cline\/missing" is missing from runtime provider "cline"/,
+    );
   });
 
   it('publishes sourced CLI snapshots with copyable J-Bot values', () => {

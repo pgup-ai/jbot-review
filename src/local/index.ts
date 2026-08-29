@@ -4,6 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { promisify } from 'node:util';
 
 import { parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
@@ -544,7 +545,7 @@ async function review(
 
   const opencodePort = await pickOpencodePort();
   let reviewResult: (ReviewResult & { telemetry?: string }) | undefined;
-  const reviewStartedAt = Date.now();
+  const reviewStartedAt = performance.now();
   await runPrReview({
     // No octokit and no headSha: reads come from localDiff, and the runner's
     // built-in "check status unavailable" fallback covers CI checks.
@@ -591,7 +592,7 @@ async function review(
     },
     log,
   });
-  const reviewDurationMs = Date.now() - reviewStartedAt;
+  const reviewDurationMs = performance.now() - reviewStartedAt;
 
   if (!reviewResult) {
     // The runner returned before producing a result (doc-only skip or no

@@ -174,6 +174,11 @@ describe('renderReport', () => {
     assert.doesNotMatch(report, /src\/b\.ts:0/);
     assert.match(report, /## Findings \(2\)/);
     assert.match(report, /- Review time: 1m 5s/);
+    assert.match(renderReport({ summary: '', findings: [] }, { ...meta, durationMs: 499 }), /<1s/);
+    assert.match(
+      renderReport({ summary: '', findings: [] }, { ...meta, durationMs: 59_000 }),
+      /Review time: 59s/,
+    );
   });
 
   it('says "No findings." on a clean run', () => {
