@@ -702,8 +702,7 @@ async function review(
   if (arenaRunState) arenaRunState.reviewStartedAt = reviewStartedAt;
   const config = comparison?.reviewConfig;
   await runPrReview({
-    // No octokit: reads come from localDiff. Arena mode supplies its immutable
-    // head only as provenance; ordinary local mode keeps it absent.
+    // Arena headSha is provenance only; localDiff keeps this path GitHub-free.
     owner,
     repo,
     pullNumber: comparison?.target.prNumber ?? 0,

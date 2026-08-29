@@ -221,7 +221,6 @@ it('writes a credential-free skipped arena result for the frozen clean doc-only 
     git(target, ['config', 'user.email', 'test@jbot.local']);
     git(target, ['config', 'user.name', 'jbot test']);
     writeFileSync(join(target, 'README.md'), '# Base\n');
-    // Arena mode must not load reviewed-repository environment configuration.
     writeFileSync(join(target, '.env'), 'PROVIDER=bogus\nJBOT_SKIP_DOC_ONLY=false\n');
     git(target, ['add', '.']);
     git(target, ['-c', 'commit.gpgsign=false', 'commit', '-qm', 'base']);

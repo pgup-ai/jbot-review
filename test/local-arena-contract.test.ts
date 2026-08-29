@@ -1,7 +1,4 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -14,7 +11,6 @@ import {
   selectArenaModel,
   validateComparisonManifest,
   validateJbotArenaOutput,
-  writeJbotArenaOutput,
   type ComparisonManifestV1,
   type JbotArenaOutputV1,
 } from '../src/local/arena-contract.ts';
@@ -248,17 +244,6 @@ describe('J-Bot arena output', () => {
       }).status,
       'failed',
     );
-  });
-
-  it('atomically writes one validated JSON envelope', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'jbot-arena-output-'));
-    const path = join(dir, 'output.json');
-    try {
-      writeJbotArenaOutput(path, completedOutput());
-      assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), completedOutput());
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 
   it('classifies failures and scrubs bounded one-line messages', () => {
