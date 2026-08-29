@@ -80,6 +80,13 @@ describe('model catalog', () => {
     assert.match(catalog, /`codex debug models`/);
     assert.match(catalog, /`grok models`/);
     assert.match(catalog, /authenticated remote catalog/);
+    for (const model of [
+      'cline/cline-free/longcat-2.0',
+      'cline/z-ai/glm-5.3-flash',
+      'cline/deepseek/deepseek-v4-flash',
+    ]) {
+      assert.ok(catalog.includes(`- \`${model}\` **(free)**`));
+    }
     assert.doesNotMatch(catalog, /`kilo\/kilo\/[^`]+`/);
   });
 

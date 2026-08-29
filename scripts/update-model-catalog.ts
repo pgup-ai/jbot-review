@@ -31,6 +31,7 @@ interface RuntimeCatalog {
   source: string;
   note: string;
   models: string[];
+  freeModels?: string[];
   enumerable?: boolean;
 }
 
@@ -240,6 +241,7 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   );
   const { models: clineModels, llmsVersion } = await loadClineModels();
   const { clinePass: clinePassModels, free: clineFreeModels } = await loadClineRecommendedModels();
+  const clineFreeValues = clineFreeModels.map((model) => `cline/${model}`);
   const grokModels = parseGrokModels(npmCliOutput('@xai-official/grok', 'grok', ['models']));
   const kiloModels = parseKiloModelList(
     npmCliOutput('@kilocode/cli', 'kilo', ['models', '--pure']),
@@ -319,11 +321,12 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
     cline: {
       discovery: `the \`@cline/llms\` catalog bundled by \`cline@${dockerPackageVersion('cline')}\``,
       source: `${npmSource('cline')} → [\`@cline/llms@${llmsVersion}\`](https://www.npmjs.com/package/@cline/llms)`,
-      note: "Pay-as-you-go IDs include the upstream model type; live free-menu IDs are merged from Cline's recommended-models endpoint.",
-      models: withDefault(
-        'cline',
-        [...clineModels, ...clineFreeModels].map((model) => `cline/${model}`),
-      ),
+      note: "Pay-as-you-go IDs include the upstream model type; entries marked free come from Cline's live recommended-models endpoint.",
+      models: withDefault('cline', [
+        ...clineModels.map((model) => `cline/${model}`),
+        ...clineFreeValues,
+      ]),
+      freeModels: clineFreeValues,
     },
     'cline-pass': {
       discovery: `[Cline's live recommended-models endpoint](${CLINE_RECOMMENDED_MODELS_URL})`,
@@ -491,9 +494,13 @@ async function main(): Promise<void> {
         ? 'The CLI does not expose a complete list.'
         : `${catalog.models.length} J-Bot model values:`,
       '',
-      ...catalog.models.map((model) =>
-        model === defaultModel ? `- \`${model}\` **(default)**` : `- \`${model}\``,
-      ),
+      ...catalog.models.map((model) => {
+        const labels = [
+          model === defaultModel ? 'default' : undefined,
+          catalog.freeModels?.includes(model) ? 'free' : undefined,
+        ].filter(Boolean);
+        return `- \`${model}\`${labels.length > 0 ? ` **(${labels.join(', ')})**` : ''}`;
+      }),
       '',
     );
   }

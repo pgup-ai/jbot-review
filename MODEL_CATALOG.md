@@ -1163,7 +1163,7 @@ The CLI does not expose a complete list.
 
 - Source: Docker-pinned npm package [`cline@3.0.60`](https://www.npmjs.com/package/cline) → [`@cline/llms@0.0.81`](https://www.npmjs.com/package/@cline/llms).
 - Refresh/list: the `@cline/llms` catalog bundled by `cline@3.0.60`.
-- Note: Pay-as-you-go IDs include the upstream model type; live free-menu IDs are merged from Cline's recommended-models endpoint.
+- Note: Pay-as-you-go IDs include the upstream model type; entries marked free come from Cline's live recommended-models endpoint.
 
 290 J-Bot model values:
 
@@ -1212,7 +1212,7 @@ The CLI does not expose a complete list.
 - `cline/bytedance-seed/seed-2.0-code`
 - `cline/bytedance-seed/seed-2.0-lite`
 - `cline/bytedance-seed/seed-2.0-mini`
-- `cline/cline-free/longcat-2.0`
+- `cline/cline-free/longcat-2.0` **(free)**
 - `cline/cohere/command-r-08-2024`
 - `cline/cohere/command-r-plus-08-2024`
 - `cline/cohere/north-mini-code:free`
@@ -1224,7 +1224,7 @@ The CLI does not expose a complete list.
 - `cline/deepseek/deepseek-v3.1-terminus`
 - `cline/deepseek/deepseek-v3.2`
 - `cline/deepseek/deepseek-v3.2-exp`
-- `cline/deepseek/deepseek-v4-flash`
+- `cline/deepseek/deepseek-v4-flash` **(free)**
 - `cline/deepseek/deepseek-v4-flash-0731`
 - `cline/deepseek/deepseek-v4-flash-vision-exp`
 - `cline/deepseek/deepseek-v4-pro`
@@ -1365,7 +1365,7 @@ The CLI does not expose a complete list.
 - `cline/openai/o4-mini-high`
 - `cline/openrouter/free`
 - `cline/poolside/laguna-s-2.1`
-- `cline/poolside/laguna-s-2.1:free`
+- `cline/poolside/laguna-s-2.1:free` **(free)**
 - `cline/poolside/laguna-xs-2.1`
 - `cline/poolside/laguna-xs-2.1:free`
 - `cline/qwen/qwen-2.5-72b-instruct`
@@ -1442,7 +1442,7 @@ The CLI does not expose a complete list.
 - `cline/xiaomi/mimo-v2.5-pro`
 - `cline/z-ai/glm-4.6v`
 - `cline/z-ai/glm-5.2:free`
-- `cline/z-ai/glm-5.3-flash`
+- `cline/z-ai/glm-5.3-flash` **(free)**
 - `cline/zai/glm-4.5`
 - `cline/zai/glm-4.5-air`
 - `cline/zai/glm-4.5v`
