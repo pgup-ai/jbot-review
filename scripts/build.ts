@@ -49,6 +49,12 @@ await esbuild.build({
   outfile: 'dist/companion/index.js',
 });
 
+await esbuild.build({
+  ...shared,
+  entryPoints: ['src/local/index.ts'],
+  outfile: 'dist/local/index.js',
+});
+
 // The bundles are ESM; copying only `dist/` drops the repo-root package.json
 // that tells Node so. Emit a minimal one so `node dist/gateway/server.js`
 // (the documented deploy) runs from a bare `dist/`.
