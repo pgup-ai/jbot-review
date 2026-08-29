@@ -4,13 +4,13 @@ version: 1.0
 date_created: 2026-08-29
 last_updated: 2026-08-29
 owner: J-Bot maintainers
-status: 'In progress'
+status: 'Completed'
 tags: [feature, arena, model-comparison, local-review, docker]
 ---
 
 # Introduction
 
-![Status: In progress](https://img.shields.io/badge/status-In_progress-yellow)
+![Status: Completed](https://img.shields.io/badge/status-Completed-brightgreen)
 
 This plan implements the J-Bot-owned foundation for arena model comparisons on a fresh branch from `origin/main`. The separate arena repository is intentionally deferred until this versioned contract is merged and its full-SHA image is published.
 
@@ -40,32 +40,32 @@ This plan implements the J-Bot-owned foundation for arena model comparisons on a
 
 - GOAL-001: Define and test the trust-boundary types, manifest validation, telemetry aggregation, and output serialization.
 
-| Task     | Description                                                                                                                                                                                                                                                                                        | Completed | Date |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---- |
-| TASK-001 | Create `src/local/arena-contract.ts` with `ComparisonManifestV1`, `JbotArenaOutputV1`, failure/status/usage types, complete manifest validation, one-model selection validation, metric aggregation, failure classification, bounded message scrubbing, and atomic JSON output.                    |           |      |
-| TASK-002 | Add `test/local-arena-contract.test.ts` covering valid same-repo/fork manifests, every required-field rejection class, model mismatch/pool rejection, independent token completeness, actual-versus-estimated cost precedence, completed/skipped/failure invariants, and secret/message scrubbing. |           |      |
-| TASK-003 | Amend `docs/superpowers/specs/2026-08-29-arena-model-comparison-design.md` so `reviewConfig.sdkEngine` is frozen as `auto` or `opencode`, matching the implementation boundary.                                                                                                                    |           |      |
+| Task     | Description                                                                                                                                                                                                                                                                                        | Completed | Date       |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------- |
+| TASK-001 | Create `src/local/arena-contract.ts` with `ComparisonManifestV1`, `JbotArenaOutputV1`, failure/status/usage types, complete manifest validation, one-model selection validation, metric aggregation, failure classification, bounded message scrubbing, and atomic JSON output.                    | ✅        | 2026-08-29 |
+| TASK-002 | Add `test/local-arena-contract.test.ts` covering valid same-repo/fork manifests, every required-field rejection class, model mismatch/pool rejection, independent token completeness, actual-versus-estimated cost precedence, completed/skipped/failure invariants, and secret/message scrubbing. | ✅        | 2026-08-29 |
+| TASK-003 | Amend `docs/superpowers/specs/2026-08-29-arena-model-comparison-design.md` so `reviewConfig.sdkEngine` is frozen as `auto` or `opencode`, matching the implementation boundary.                                                                                                                    | ✅        | 2026-08-29 |
 
 ### Implementation Phase 2 — Frozen PR input and structured output
 
 - GOAL-002: Integrate arena mode into the local entrypoint without changing ordinary `review:local` behavior.
 
-| Task     | Description                                                                                                                                                                                                                                                                     | Completed | Date |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---- |
-| TASK-004 | Extend `src/local/args.ts` and `test/local-args.test.ts` with paired `--pr-context`/`--output` flags, absolute arena path resolution, and rejection of output paths inside the reviewed workspace.                                                                              |           |      |
-| TASK-005 | Update `src/local/index.ts` to load the manifest before credential resolution; enforce exact `HEAD`, clean worktree, frozen base merge-base, target metadata, one-model identity, same-model auxiliaries, and manifest-only review options.                                     |           |      |
-| TASK-006 | Update `src/local/index.ts` to write skipped output before provider use, completed output after persisted telemetry is available, and caught serialized failures after backend resolution while retaining nonzero exit status.                                                  |           |      |
-| TASK-007 | Extend `test/local-workspace.test.ts` with credential-free arena integration cases for exact-head/frozen-base success through preview-free skip paths, dirty/mismatched-head rejection, fork metadata parsing, output-location isolation, and unchanged default local behavior. |           |      |
+| Task     | Description                                                                                                                                                                                                                                                                     | Completed | Date       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------- |
+| TASK-004 | Extend `src/local/args.ts` and `test/local-args.test.ts` with paired `--pr-context`/`--output` flags, absolute arena path resolution, and rejection of output paths inside the reviewed workspace.                                                                              | ✅        | 2026-08-29 |
+| TASK-005 | Update `src/local/index.ts` to load the manifest before credential resolution; enforce exact `HEAD`, clean worktree, frozen base merge-base, target metadata, one-model identity, same-model auxiliaries, and manifest-only review options.                                     | ✅        | 2026-08-29 |
+| TASK-006 | Update `src/local/index.ts` to write skipped output before provider use, completed output after persisted telemetry is available, and caught serialized failures after backend resolution while retaining nonzero exit status.                                                  | ✅        | 2026-08-29 |
+| TASK-007 | Extend `test/local-workspace.test.ts` with credential-free arena integration cases for exact-head/frozen-base success through preview-free skip paths, dirty/mismatched-head rejection, fork metadata parsing, output-location isolation, and unchanged default local behavior. | ✅        | 2026-08-29 |
 
 ### Implementation Phase 3 — Image bundle and validation
 
 - GOAL-003: Make the arena-safe local entrypoint available in the existing SHA-tagged image.
 
-| Task     | Description                                                                                                                                                                                                                           | Completed | Date |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---- |
-| TASK-008 | Add `src/local/index.ts -> dist/local/index.js` to `scripts/build.ts`; keep the existing image entrypoint unchanged.                                                                                                                  |           |      |
-| TASK-009 | Add build/image smoke assertions in `.github/workflows/build.yml` and `Dockerfile` that `dist/local/index.js` exists while preserving all existing provider binary checks.                                                            |           |      |
-| TASK-010 | Run focused tests, full tests, typecheck, lint, formatting check, build, bundled-entrypoint smoke, and a final diff audit; record that no quality-corpus benchmark is required because prompts and finding disposition are unchanged. |           |      |
+| Task     | Description                                                                                                                                                                                                                           | Completed | Date       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------- |
+| TASK-008 | Add `src/local/index.ts -> dist/local/index.js` to `scripts/build.ts`; keep the existing image entrypoint unchanged.                                                                                                                  | ✅        | 2026-08-29 |
+| TASK-009 | Add build/image smoke assertions in `.github/workflows/build.yml` and `Dockerfile` that `dist/local/index.js` exists while preserving all existing provider binary checks.                                                            | ✅        | 2026-08-29 |
+| TASK-010 | Run focused tests, full tests, typecheck, lint, formatting check, build, bundled-entrypoint smoke, and a final diff audit; record that no quality-corpus benchmark is required because prompts and finding disposition are unchanged. | ✅        | 2026-08-29 |
 
 ## 3. Alternatives
 
