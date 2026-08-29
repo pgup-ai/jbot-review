@@ -53,7 +53,7 @@ import {
 import { EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS, runPrReview } from '../shared/runner.ts';
 import { onFatalSignal } from '@symma/protocol';
 import type { ReviewResult } from '../shared/types.ts';
-import { GIT_DIFF_ARGS, parseGitDiff } from '../shared/git.ts';
+import { ensureGitSafeDirectory, GIT_DIFF_ARGS, parseGitDiff } from '../shared/git.ts';
 import {
   buildDiffHunksBlockWithMetadata,
   classifyChangeShape,
@@ -738,7 +738,7 @@ async function review(
       timeBudgetMinutes: config?.timeBudgetMinutes ?? parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
       reviewShards: config?.reviewShards ?? parseEnvInt('JBOT_REVIEW_SHARDS', 0),
       dynamicFanout: config?.dynamicFanout ?? parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),
-      modelOptions: configuredModelOptions,
+      modelOptions: comparison ? resolvedModelOptions : configuredModelOptions,
       modelOptionsExplicit: comparison
         ? comparison.reviewConfig.modelOptions !== null
         : Boolean(process.env.JBOT_MODEL_OPTIONS?.trim()),
@@ -818,6 +818,7 @@ async function bootstrap(): Promise<void> {
   const args = parseLocalArgs(process.argv.slice(2));
   if (!args.prContext && loadDotEnv(join(launchDirectory, '.env'))) log('Loaded .env');
   const paths = resolveLocalPaths(args, launchDirectory, process.env.JBOT_BENCHMARK_OUTPUT);
+  if (paths.prContext) await ensureGitSafeDirectory(paths.workspace, log);
   const workspace = await resolveWorkspace(paths.workspace);
   let comparison: ComparisonManifestV1 | undefined;
   if (paths.prContext && paths.arenaOutput) {

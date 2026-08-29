@@ -1556,10 +1556,6 @@ async function runReviewPipeline(params: {
   // A missing main endpoint is fatal; an auxiliary-only endpoint fails open.
   // Cap sessions at the companion's available capacity.
   let sessionCap = options.maxConcurrentSessions;
-  const providerCap = providerSessionConcurrency([providerID, auxProviderID]);
-  if (providerCap !== undefined && (sessionCap === 0 || providerCap < sessionCap)) {
-    sessionCap = providerCap;
-  }
   let auxGatewayPreflightError: unknown;
   if (remoteAcp && routedAgents.length > 0) {
     const mainGatewayAgent =
@@ -1590,6 +1586,14 @@ async function runReviewPipeline(params: {
   }
   const sessionSlots = sessionCap > 0 ? new Semaphore(sessionCap) : undefined;
   if (sessionCap > 0) log(`Model session concurrency capped at ${sessionCap}.`);
+  const providerSlots = new Map<string, Semaphore>();
+  for (const id of new Set([providerID, auxProviderID])) {
+    const cap = providerSessionConcurrency(id);
+    if (cap !== undefined) {
+      providerSlots.set(id, new Semaphore(cap));
+      log(`Provider session concurrency capped at ${cap} for ${id}.`);
+    }
+  }
 
   let opencodeRuntime: Awaited<ReturnType<typeof startOpencode>> | undefined;
   let opencodeBackend: ReviewBackend | undefined;
@@ -2053,14 +2057,14 @@ async function runReviewPipeline(params: {
     mainBaseBackend,
     'main',
     sessionSlots,
-    serializedBackends.get(mainBaseBackend),
+    providerSlots.get(providerID) ?? serializedBackends.get(mainBaseBackend),
     sessionTelemetry,
   );
   const auxBackend = limitReviewBackendSessions(
     auxBaseBackend,
     'aux',
     sessionSlots,
-    serializedBackends.get(auxBaseBackend),
+    providerSlots.get(auxProviderID) ?? serializedBackends.get(auxBaseBackend),
     sessionTelemetry,
   );
   // Single gate for every aux session (lenses, guideline, addressed,

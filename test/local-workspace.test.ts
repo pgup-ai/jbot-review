@@ -214,9 +214,11 @@ it('writes a credential-free skipped arena result for the frozen clean doc-only 
   const target = join(root, 'target');
   const run = join(root, 'run');
   const output = join(root, 'output');
+  const home = join(root, 'home');
   try {
     mkdirSync(run);
     mkdirSync(output);
+    mkdirSync(home);
     git(root, ['init', '-q', '-b', 'main', target]);
     git(target, ['config', 'user.email', 'test@jbot.local']);
     git(target, ['config', 'user.name', 'jbot test']);
@@ -238,13 +240,19 @@ it('writes a credential-free skipped arena result for the frozen clean doc-only 
       [LOCAL_ENTRY, '--pr-context', contextPath, '--output', outputPath],
       {
         cwd: target,
-        env: { ...isolatedEnv(), MODEL: ARENA_MODEL },
+        env: {
+          ...isolatedEnv(),
+          MODEL: ARENA_MODEL,
+          HOME: home,
+          GIT_TEST_ASSUME_DIFFERENT_OWNER: '1',
+        },
         encoding: 'utf8',
         stdio: 'pipe',
       },
     );
 
     assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Configured git safe\.directory/);
     assert.match(result.stdout, /Doc-only PR/);
     assert.deepEqual(JSON.parse(readFileSync(outputPath, 'utf8')), {
       schemaVersion: 1,
@@ -308,6 +316,27 @@ it('writes bounded arena failures for mismatched HEAD and a dirty checkout', () 
     assert.equal(mismatchEnvelope.status, 'failed');
     assert.equal(mismatchEnvelope.failure.class, 'unknown');
     assert.doesNotMatch(mismatchEnvelope.failure.message, /[\r\n]/);
+
+    for (const gatewayEnv of [
+      'JBOT_ACP_GATEWAY_URL',
+      'JBOT_ACP_GATEWAY_REPO',
+      'JBOT_ACP_GATEWAY_REF',
+    ]) {
+      const gatewayOutput = join(output, `${gatewayEnv}.json`);
+      const gateway = spawnSync(
+        TSX,
+        [LOCAL_ENTRY, '--pr-context', mismatchContext, '--output', gatewayOutput],
+        {
+          cwd: target,
+          env: { ...isolatedEnv(), MODEL: ARENA_MODEL, [gatewayEnv]: 'forbidden' },
+          encoding: 'utf8',
+          stdio: 'pipe',
+        },
+      );
+      assert.equal(gateway.status, 1);
+      assert.match(gateway.stderr, /does not accept ACP gateway routing/);
+      assert.equal(JSON.parse(readFileSync(gatewayOutput, 'utf8')).status, 'failed');
+    }
 
     writeFileSync(join(target, 'code.ts'), 'export const value = 2;\n');
     const dirtyContext = join(run, 'dirty.json');

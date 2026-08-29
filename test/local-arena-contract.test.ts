@@ -135,6 +135,14 @@ describe('comparison manifest validation', () => {
       ['schema', (value) => Object.assign(value, { schemaVersion: 2 }), /schemaVersion/],
       ['comparison id', (value) => (value.comparisonId = 'wrong'), /comparisonId/],
       ['target URL', (value) => (value.target.url += '?x=1'), /canonical public GitHub PR URL/],
+      [
+        'base repository',
+        (value) => {
+          value.target.base.repository = 'other/repository';
+          value.target.base.cloneUrl = 'https://github.com/other/repository.git';
+        },
+        /base\.repository must match/,
+      ],
       ['base SHA', (value) => (value.target.base.sha = 'ABC'), /40-character SHA/],
       ['clone URL', (value) => (value.target.head.cloneUrl = 'git@example:x/y'), /canonical/],
       ['write mode', (value) => Object.assign(value.reviewConfig, { dryRun: false }), /dryRun/],
@@ -254,11 +262,14 @@ describe('J-Bot arena output', () => {
     const secret = 'super-secret-value';
     const sanitized = sanitizeArenaFailureMessage(
       new Error(
-        `Bearer bearer-token\nurl=https://user:pass@example.com?q=1&api_key=query-key secret=${secret} ${'😀'.repeat(200)}`,
+        `Bearer bearer-token Basic basic-token\nurl=https://user:pass@example.com?q=1&api_key=query-key token=plain-token password: plain-password secret=${secret} ${'😀'.repeat(200)}`,
       ),
       [secret],
     );
-    assert.doesNotMatch(sanitized, /bearer-token|user:pass|query-key|super-secret-value/);
+    assert.doesNotMatch(
+      sanitized,
+      /bearer-token|basic-token|user:pass|query-key|plain-token|plain-password|super-secret-value/,
+    );
     assert.doesNotMatch(sanitized, /[\r\n]/);
     assert.ok(Buffer.byteLength(sanitized, 'utf8') <= 512);
   });

@@ -455,12 +455,8 @@ export function modelSupportsPromptCache(providerID: string, modelID: string): b
   return modelConfigFor(providerID, modelID)?.promptCache !== false;
 }
 
-export function providerSessionConcurrency(providerIDs: string[]): number | undefined {
-  const limits = providerIDs.flatMap((providerID) => {
-    const limit = PROVIDERS[providerID]?.sessionConcurrency;
-    return limit === undefined ? [] : [limit];
-  });
-  return limits.length > 0 ? Math.min(...limits) : undefined;
+export function providerSessionConcurrency(providerID: string): number | undefined {
+  return PROVIDERS[providerID]?.sessionConcurrency;
 }
 
 /**

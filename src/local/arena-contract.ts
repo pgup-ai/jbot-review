@@ -315,6 +315,9 @@ export function validateComparisonManifest(value: unknown): ComparisonManifestV1
   }
   const base = validateRepositoryRef(target.base, 'comparison.target.base');
   const head = validateRepositoryRef(target.head, 'comparison.target.head');
+  if (base.repository !== targetRepository) {
+    throw new Error('comparison.target.base.repository must match the target repository.');
+  }
 
   const jbot = requireRecord(manifest.jbot, 'comparison.jbot');
   const commitSha = requireSha(jbot.commitSha, 'comparison.jbot.commitSha');
@@ -526,8 +529,11 @@ export function sanitizeArenaFailureMessage(error: unknown, secretValues: string
     message = message.replaceAll(secret, '[REDACTED]');
   }
   message = message
-    .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]')
-    .replace(/([?&](?:api[_-]?key|token|secret|password)=)[^&#\s]+/gi, '$1[REDACTED]')
+    .replace(/\b(Bearer|Basic)\s+[^\s,;]+/gi, '$1 [REDACTED]')
+    .replace(
+      /\b((?:api[_-]?key|token|secret|password|credential)\s*[:=]\s*)[^\s,;]+/gi,
+      '$1[REDACTED]',
+    )
     .replace(/(https?:\/\/)[^/@\s]+@/gi, '$1[REDACTED]@')
     .replace(/\s+/g, ' ')
     .trim();
