@@ -135,6 +135,7 @@ interface ComparisonManifestV1 {
   jbot: {
     commitSha: string;
     imageRef: string; // full-commit tag, never latest
+    imageDigest: string; // sha256:<64 lowercase hex>; resolved once in prepare
   };
   reviewConfig: {
     enhancedContext: true;
@@ -220,9 +221,11 @@ CLIs. V1 does not install tooling dynamically.
 src/local/index.ts -> dist/local/index.js
 ```
 
-The image's default app-server entrypoint remains unchanged. Arena workers pull
-an image tagged with the full J-Bot commit SHA, record the resolved image digest,
-and override the entrypoint to run `node /app/dist/local/index.js`.
+The image's default app-server entrypoint remains unchanged. During prepare, the
+arena resolves the full-commit tag to one registry digest and records both in
+`comparison.json`. Every worker pulls by `repository@sha256:digest`, verifies
+the local image has that digest, and overrides the entrypoint to run
+`node /app/dist/local/index.js`. Workers never resolve the tag independently.
 
 The local driver gains two optional, arena-safe inputs while preserving today's
 interactive local behavior:
@@ -263,6 +266,24 @@ interface ArenaFindingV1 {
   evidence?: string;
 }
 
+interface ArenaUsageMetricV1 {
+  value: number | null;
+  reportingSessions: number;
+}
+
+interface ArenaUsageV1 {
+  sessions: number;
+  inputTokens: ArenaUsageMetricV1;
+  outputTokens: ArenaUsageMetricV1;
+  reasoningTokens: ArenaUsageMetricV1;
+  cacheReadTokens: ArenaUsageMetricV1;
+  cost: {
+    usd: number | null;
+    source: "provider" | "configured-estimate" | "mixed" | "unavailable";
+    reportingSessions: number;
+  };
+}
+
 interface ArenaResultV1 {
   schemaVersion: 1;
   comparisonId: string;
@@ -275,33 +296,33 @@ interface ArenaResultV1 {
     targetHeadSha: string;
     jbotCommitSha: string;
     imageRef: string;
-    imageDigest: string | null;
-    backend: string;
-    sdkEngine: string;
+    imageDigest: string;
+    backend: string | null;
+    sdkEngine: string | null;
     workflowRunId: number;
     runAttempt: number;
     reviewConfig: ComparisonManifestV1["reviewConfig"];
-    resolvedModelOptions: Record<string, unknown>;
+    resolvedModelOptions: Record<string, unknown> | null;
   };
   timing: {
     reviewMs: number | null;
     workerMs: number;
   };
-  usage: {
-    sessions: number;
-    tokenReportingSessions: number;
-    inputTokens: number | null;
-    outputTokens: number | null;
-    reasoningTokens: number | null;
-    cacheReadTokens: number | null;
-    cost: {
-      usd: number | null;
-      source: "provider" | "configured-estimate" | "mixed" | "unavailable";
-      reportingSessions: number;
-    };
-  };
+  usage: ArenaUsageV1;
   review: { summary: string; findings: ArenaFindingV1[] } | null;
   failure: { class: ArenaFailureClass; message: string } | null;
+}
+
+interface JbotArenaOutputV1 {
+  schemaVersion: 1;
+  status: ArenaResultStatus;
+  backend: string | null;
+  sdkEngine: string | null;
+  resolvedModelOptions: Record<string, unknown> | null;
+  reviewMs: number | null;
+  usage: ArenaUsageV1;
+  review: ArenaResultV1["review"];
+  failure: ArenaResultV1["failure"];
 }
 ```
 
@@ -309,15 +330,33 @@ interface ArenaResultV1 {
 `review: null` and `failure: null`; `failed` requires `review: null` and a
 non-null `failure`. A failure message is credential-scrubbed, newline-collapsed,
 and capped at 512 UTF-8 bytes. The publisher synthesizes `missing-artifact`;
-workers use the other classes.
+workers use the other classes. `backend`, `sdkEngine`, and
+`resolvedModelOptions` remain `null` when the run ends before J-Bot resolves
+them; null means unavailable, not an implicit default.
 
-Token totals are `null` when no session reported that metric; the reporting
-session count prevents partial telemetry from looking complete. Cost provenance
-is `provider` when every contributing cost is provider-reported,
-`configured-estimate` when every contribution is inferred from configured
-pricing, `mixed` when both occur, and `unavailable` with `usd: null` when no
-session reports cost. Raw `telemetry.jsonl` is a sibling artifact for deeper
-analysis but is not part of the publisher wire contract.
+The J-Bot process owns `JbotArenaOutputV1`: terminal review status, resolved
+backend/options, review-only time, telemetry aggregates, and review content. The
+worker wrapper validates that output and constructs `ArenaResultV1` by copying
+manifest identity/config/image fields and adding total worker time. For
+checkout, image, or credential failures before J-Bot starts, the wrapper emits
+zero sessions, null metric values, null resolved backend/options, and its own
+classified failure. J-Bot owns timeout/provider/parse/runner-exit/signal
+classification after launch; the wrapper owns checkout/image/credential,
+invalid output, and unknown pre-launch failures; the publisher alone owns
+missing-artifact.
+
+Each token metric is summed independently across sessions that report it;
+`value` is null only when none do. A metric is complete exactly when its
+`reportingSessions` equals `sessions`, so partial input reporting cannot be
+mistaken for complete output/cache reporting. For each session,
+provider-reported cost wins when present; otherwise a configured estimate is
+used when available; otherwise that session reports no cost. Aggregate cost
+sums those selected per-session values. Its source is `provider` or
+`configured-estimate` when all reporting sessions use that source, `mixed` when
+both sources contribute, and `unavailable` with `usd: null` only when none
+report cost. Completeness is again `reportingSessions === sessions`. Raw
+`telemetry.jsonl` is a sibling artifact for deeper analysis but is not part of
+the publisher wire contract.
 
 Provider-reported dollar cost is labelled actual, configured inference is
 labelled estimated, and absence remains unavailable. Zero must not imply free.
@@ -403,8 +442,8 @@ at most 60 KiB of UTF-8 content including its marker/header. It packs whole
 summary/finding blocks first; if one block alone exceeds the budget, it splits
 at newline boundaries and finally at a UTF-8-safe byte boundary. Continuations
 repeat the model/finding identity, so no summary or finding text is lost. Part
-headers preserve model and comparison identity. Complete Markdown, JSON, and
-raw telemetry remain downloadable artifacts.
+headers preserve model and comparison identity. Complete raw Markdown, JSON,
+and telemetry remain downloadable artifacts.
 
 Dedicated markers avoid J-Bot's production review markers:
 
@@ -414,15 +453,30 @@ Dedicated markers avoid J-Bot's production review markers:
 ```
 
 The publisher emits the marker as the exact first line and matches only that
-line, so model text cannot impersonate ownership. Publishing is idempotent for
-the command comment: retrying or rerunning the workflow updates/finishes the
-same comparison comments instead of duplicating them. Workflow run/attempt
-remain displayed provenance, not comment identity. A fresh sample requires a
-new `/compare` command, which appends a new comparison to arena history.
+line, so model text cannot impersonate ownership. It paginates every arena PR
+conversation comment before publishing. For each desired marker, the lowest-ID
+bot-authored match is canonical and is updated in place; any additional
+bot-authored matches are duplicates. After all desired comments are upserted,
+the publisher deletes duplicate matches and model parts whose part number now
+exceeds the rendered part count. A cleanup failure fails the publisher so the
+same operation can be retried. It never edits or deletes another author's
+comment.
 
-Artifacts and model output are untrusted data. The publisher parses the JSON
-schema and calls the GitHub API directly; it never evaluates result text or
-interpolates it into shell or workflow syntax.
+Publishing is therefore idempotent for the command comment: retrying or
+rerunning the workflow updates/finishes the same comparison comments without
+leaving stale report parts. Workflow run/attempt remain displayed provenance,
+not comment identity. A fresh sample requires a new `/compare` command, which
+appends a new comparison to arena history.
+
+Artifacts, target metadata, paths, provider errors, and model output are
+untrusted data. Only publisher-generated labels, validated enums, and numbers
+become Markdown structure. Every untrusted prose field is rendered verbatim
+inside an adaptive fenced-code block whose delimiter is longer than any run of
+backticks in the field; mentions, issue references, links, HTML, and remote
+images are therefore inert. Target file links are publisher-generated from the
+validated repository/head SHA plus a percent-encoded relative path and integer
+line. The publisher never evaluates artifact text or interpolates it into shell
+or workflow syntax. Raw model Markdown remains available only in artifacts.
 
 ## Failure behavior
 
@@ -435,7 +489,7 @@ interpolates it into shell or workflow syntax.
 | Auxiliary session fails | Existing J-Bot fail-open behavior applies and telemetry discloses it. |
 | Review has no reviewable files | Distinct `skipped` status, not success-with-zero-findings or failure. |
 | Worker disappears without an artifact | Publisher synthesizes a missing-artifact failure from the manifest. |
-| Publisher partially posts | Marker-based retry updates/finishes the same comparison. |
+| Publisher partially posts | Paginated marker-based retry updates/finishes the same comparison, then removes duplicate and surplus bot-owned parts. |
 
 ## Security
 
@@ -455,6 +509,9 @@ interpolates it into shell or workflow syntax.
   credential-shaped environment variables remain withheld from model-session
   children.
 - The publisher treats every artifact field as untrusted text.
+- Rendered comments neutralize mentions, issue cross-references, raw links,
+  HTML, and remote images; only validated publisher-built target links remain
+  active.
 
 ## Testing
 
@@ -477,8 +534,8 @@ interpolates it into shell or workflow syntax.
 - Target-resolution fixtures cover same-repo and fork PR metadata.
 - Publisher tests cover deterministic model order, severity/token tables,
   target-SHA links, whole-finding and oversized-single-block splitting, markers,
-  retry/rerun updates, failed and missing artifacts, and untrusted Markdown
-  text.
+  paginated discovery, duplicate/surplus cleanup, retry/rerun updates, failed
+  and missing artifacts, and adversarial Markdown/mentions/links/images.
 - Workflow lint validates permissions, `fail-fast: false`, `if: always()`, and
   unique artifact names.
 - One manual end-to-end smoke comparison uses two configured low-cost/free
