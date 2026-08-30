@@ -403,6 +403,23 @@ export function parseComparisonManifestJson(raw: string): ComparisonManifestV1 {
   return validateComparisonManifest(parsed);
 }
 
+export function parseArenaAuthJson(raw: string | undefined): Record<string, string> {
+  if (!raw?.trim()) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('JBOT_AUTH_JSON must be valid JSON.');
+  }
+  const auth = requireRecord(parsed, 'JBOT_AUTH_JSON');
+  for (const [name, value] of Object.entries(auth)) {
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(name) || typeof value !== 'string' || !value) {
+      throw new Error(`JBOT_AUTH_JSON contains an invalid entry: ${name}.`);
+    }
+  }
+  return auth as Record<string, string>;
+}
+
 export function selectArenaModel(
   manifest: ComparisonManifestV1,
   selectedModels: string[],

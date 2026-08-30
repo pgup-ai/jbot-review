@@ -81,6 +81,7 @@ import {
   aggregateArenaUsage,
   classifyJbotArenaFailure,
   emptyArenaUsage,
+  parseArenaAuthJson,
   sanitizeArenaFailureMessage,
   selectArenaModel,
   parseComparisonManifestJson,
@@ -104,6 +105,7 @@ interface LocalInvocation {
   args: LocalArgs;
   paths: LocalPaths;
   comparison?: ComparisonManifestV1;
+  arenaAuth?: Record<string, string>;
 }
 
 interface ArenaRunState {
@@ -613,8 +615,10 @@ async function review(
   // below the no-review exits, so a clean tree needs no key at all.
   const credentials = resolvePoolCredentials(
     pool,
-    ({ env }: { env: string }) => process.env[env],
-    ' Local review needs only the provider configuration — no GitHub token; set it in the environment or in .env.',
+    ({ env }: { env: string }) => (comparison ? invocation.arenaAuth?.[env] : process.env[env]),
+    comparison
+      ? ' Arena credentials must be provided through the arena auth bundle.'
+      : ' Local review needs only the provider configuration — no GitHub token; set it in the environment or in .env.',
   );
   const { apiKey, baseURL } = credentials.get(provider)!;
   const auxCredential = auxProviderID === provider ? undefined : credentials.get(auxProviderID);
@@ -821,9 +825,13 @@ async function bootstrap(): Promise<void> {
   const args = parseLocalArgs(process.argv.slice(2));
   if (!args.prContext && loadDotEnv(join(launchDirectory, '.env'))) log('Loaded .env');
   const paths = resolveLocalPaths(args, launchDirectory, process.env.JBOT_BENCHMARK_OUTPUT);
+  const arenaAuthJson =
+    paths.prContext && paths.arenaOutput ? process.env.JBOT_AUTH_JSON : undefined;
+  if (arenaAuthJson !== undefined) delete process.env.JBOT_AUTH_JSON;
   if (paths.prContext) await ensureGitSafeDirectory(paths.workspace, log);
   const workspace = await resolveWorkspace(paths.workspace);
   let comparison: ComparisonManifestV1 | undefined;
+  let arenaAuth: Record<string, string> | undefined;
   if (paths.prContext && paths.arenaOutput) {
     assertArenaPathIsolation(workspace, paths.prContext, paths.arenaOutput);
     arenaRunState = {
@@ -836,10 +844,15 @@ async function bootstrap(): Promise<void> {
       written: false,
     };
     comparison = parseComparisonManifestJson(readFileSync(paths.prContext, 'utf8'));
+    arenaAuth = parseArenaAuthJson(arenaAuthJson);
   }
   process.chdir(workspace);
   if (args.workspace) log(`Workspace: ${workspace}`);
-  await main({ args, paths: { ...paths, workspace }, ...(comparison ? { comparison } : {}) });
+  await main({
+    args,
+    paths: { ...paths, workspace },
+    ...(comparison ? { comparison, arenaAuth } : {}),
+  });
 }
 
 // Run verdict + observer flush live in runPrReview; here we only surface the
