@@ -59,8 +59,7 @@ function manifest(): ComparisonManifestV1 {
       },
     },
     jbot: {
-      commitSha: JBOT_SHA,
-      imageRef: `ghcr.io/pgup-ai/jbot-review:${JBOT_SHA}`,
+      imageRef: 'ghcr.io/pgup-ai/jbot-review:latest',
       imageDigest: IMAGE_DIGEST,
     },
     reviewConfig: {
@@ -128,6 +127,17 @@ function completedOutput(): JbotArenaOutputV1 {
 describe('comparison manifest validation', () => {
   it('accepts the complete v1 contract, including a fork head', () => {
     assert.deepEqual(validateComparisonManifest(manifest()), manifest());
+    const legacy = manifest();
+    const parsedLegacy = validateComparisonManifest({
+      ...legacy,
+      jbot: {
+        commitSha: JBOT_SHA,
+        imageRef: `ghcr.io/pgup-ai/jbot-review:${JBOT_SHA}`,
+        imageDigest: legacy.jbot.imageDigest,
+      },
+    });
+    assert.equal(parsedLegacy.jbot.imageRef, `ghcr.io/pgup-ai/jbot-review:${JBOT_SHA}`);
+    assert.ok(!('commitSha' in parsedLegacy.jbot));
   });
 
   it('rejects incompatible identity, immutable refs, fixed config, and model artifacts', () => {
@@ -155,9 +165,13 @@ describe('comparison manifest validation', () => {
       ['provider', (value) => (value.models[0]!.provider = 'kilo'), /provider/],
       ['artifact', (value) => (value.models[0]!.artifactName = '../unsafe'), /artifactName/],
       [
-        'image tag',
-        (value) => (value.jbot.imageRef = 'ghcr.io/pgup-ai/jbot-review:latest'),
-        /full commit SHA/,
+        'image ref',
+        (value) =>
+          Object.assign(value.jbot, {
+            commitSha: JBOT_SHA,
+            imageRef: `ghcr.io/attacker/image:${JBOT_SHA}`,
+          }),
+        /canonical J-Bot image/,
       ],
       [
         'duplicate',

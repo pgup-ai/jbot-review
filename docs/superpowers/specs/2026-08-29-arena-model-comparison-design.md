@@ -132,8 +132,7 @@ interface ComparisonManifestV1 {
     head: { repository: string; cloneUrl: string; ref: string; sha: string };
   };
   jbot: {
-    commitSha: string;
-    imageRef: string; // full-commit tag, never latest
+    imageRef: "ghcr.io/pgup-ai/jbot-review:latest";
     imageDigest: string; // sha256:<64 lowercase hex>; resolved once in prepare
   };
   reviewConfig: {
@@ -222,7 +221,7 @@ src/local/index.ts -> dist/local/index.js
 ```
 
 The image's default app-server entrypoint remains unchanged. During prepare, the
-arena resolves the full-commit tag to one registry digest and records both in
+arena resolves the `latest` tag to one registry digest and records both in
 `comparison.json`. Every worker pulls by `repository@sha256:digest`, verifies
 the local image has that digest, and overrides the entrypoint to run
 `node /app/dist/local/index.js`. Workers never resolve the tag independently.
@@ -295,7 +294,6 @@ interface ArenaResultV1 {
   provenance: {
     targetBaseSha: string;
     targetHeadSha: string;
-    jbotCommitSha: string;
     imageRef: string;
     imageDigest: string;
     backend: string | null;
@@ -564,8 +562,8 @@ the implementation PR records that skip rationale.
 
 1. Land J-Bot's versioned `JbotArenaOutputV1`, telemetry aggregation, arena
    output-directory contract, and focused tests without changing local defaults.
-2. Land frozen PR-context input plus the bundled local image entrypoint, publish
-   its full-SHA tag, and verify the registry digest.
+2. Land frozen PR-context input plus the bundled local image entrypoint and
+   verify the digest resolved from the published `latest` image.
 3. In the arena repository, land the command parser, target/image resolver, and
    provider-agnostic `ComparisonManifestV1` fixtures.
 4. Land the isolated matrix worker, wrapper-owned failure synthesis, artifact

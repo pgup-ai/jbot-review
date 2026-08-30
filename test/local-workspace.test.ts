@@ -63,8 +63,7 @@ function arenaManifest(baseSha: string, headSha: string): ComparisonManifestV1 {
       },
     },
     jbot: {
-      commitSha: '3'.repeat(40),
-      imageRef: `ghcr.io/pgup-ai/jbot-review:${'3'.repeat(40)}`,
+      imageRef: 'ghcr.io/pgup-ai/jbot-review:latest',
       imageDigest: `sha256:${'4'.repeat(64)}`,
     },
     reviewConfig: {
