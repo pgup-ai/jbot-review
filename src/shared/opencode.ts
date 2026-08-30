@@ -224,11 +224,28 @@ export function sessionEnvDenyKeys(keys: string[]): string[] {
   // in KEY (not SECRET), and a bare `API_KEY`/`TOKEN` has no leading segment.
   // `(^|_)` also covers GITHUB_TOKEN/GH_TOKEN without naming them.
   const CREDENTIAL_NAME =
-    /(^|_)(KEY|KEY_ID|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|AUTH_CONTENT|AUTH_JSON|DSN)$/;
+    /(^|_)(KEY|KEY_ID|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|AUTH_BUNDLE|AUTH_CONTENT|AUTH_JSON|DSN)$/;
   return keys.filter((key) => {
     const upper = key.toUpperCase();
     return upper.startsWith('INPUT_') || CREDENTIAL_NAME.test(upper);
   });
+}
+
+export async function withCredentialEnvWithheld<T>(
+  run: () => Promise<T>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<T> {
+  const withheld = new Map<string, string>();
+  for (const key of sessionEnvDenyKeys(Object.keys(env))) {
+    const value = env[key];
+    if (value !== undefined) withheld.set(key, value);
+    delete env[key];
+  }
+  try {
+    return await run();
+  } finally {
+    for (const [key, value] of withheld) env[key] = value;
+  }
 }
 
 export function takeOpencodeProxyEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {

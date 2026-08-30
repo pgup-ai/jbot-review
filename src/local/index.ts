@@ -34,6 +34,7 @@ import {
 import { exitOnLingeringHandles } from '../shared/exit.ts';
 import { isNoiseFile } from '../shared/filter.ts';
 import { observerEnabled, setRunName } from '../shared/observer.ts';
+import { withCredentialEnvWithheld } from '../shared/opencode.ts';
 import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
 import { DIM_CLI_BIN, DIM_PROVIDER_ID } from '../shared/dim.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID, parseModelName } from '@symma/protocol';
@@ -701,7 +702,7 @@ async function review(
   const reviewStartedAt = performance.now();
   if (arenaRunState) arenaRunState.reviewStartedAt = reviewStartedAt;
   const config = comparison?.reviewConfig;
-  await runPrReview({
+  const reviewParams: Parameters<typeof runPrReview>[0] = {
     // Arena headSha is provenance only; localDiff keeps this path GitHub-free.
     owner,
     repo,
@@ -762,7 +763,9 @@ async function review(
       },
     },
     log,
-  });
+  };
+  if (comparison) await withCredentialEnvWithheld(() => runPrReview(reviewParams));
+  else await runPrReview(reviewParams);
   const reviewDurationMs = performance.now() - reviewStartedAt;
 
   if (!reviewResult) {

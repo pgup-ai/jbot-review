@@ -9,7 +9,6 @@ import {
   buildClineCliArgs,
   buildClinePromptArg,
   CLINE_MAX_ARGV_BYTES,
-  CLINE_STRIPPED_ENV_KEYS,
   clineEnvForHome,
   clineProvidersPath,
   formatClinePromptTimeoutMessage,
@@ -142,17 +141,22 @@ describe('Cline CLI provider helpers', () => {
     assert.throws(() => writeClineAuth('not json', '/tmp/x'), /Invalid CLINE_AUTH_JSON/);
   });
 
-  it('sets HOME and strips every provider api-key env so carried auth wins', () => {
-    const previous = new Map(CLINE_STRIPPED_ENV_KEYS.map((k) => [k, process.env[k]] as const));
+  it('sets HOME and strips credential-shaped env so carried auth wins', () => {
+    const credentialKeys = [
+      'CLINE_AUTH_JSON',
+      'NVIDIA_API_KEY',
+      'DIM_AUTH_BUNDLE',
+      'FUTURE_PROVIDER_SECRET',
+    ];
+    const previous = new Map(credentialKeys.map((key) => [key, process.env[key]] as const));
     try {
-      for (const key of CLINE_STRIPPED_ENV_KEYS) process.env[key] = `ambient-${key}`;
+      for (const key of credentialKeys) process.env[key] = `ambient-${key}`;
 
       const env = clineEnvForHome('/tmp/jbot-cline-home-test');
 
       assert.equal(env.HOME, '/tmp/jbot-cline-home-test');
-      for (const key of CLINE_STRIPPED_ENV_KEYS) {
+      for (const key of credentialKeys) {
         assert.equal(env[key], undefined, `${key} must be stripped from the child env`);
-        // The ambient process env must be left untouched.
         assert.equal(process.env[key], `ambient-${key}`, `${key} ambient env must be intact`);
       }
     } finally {

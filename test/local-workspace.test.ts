@@ -102,7 +102,6 @@ function arenaManifest(baseSha: string, headSha: string): ComparisonManifestV1 {
         index: 0,
         model: ARENA_MODEL,
         provider: 'openai',
-        credentialAlias: 'OPENAI_API_KEY',
         artifactName: arenaArtifactName(0, ARENA_MODEL),
       },
     ],

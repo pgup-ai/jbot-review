@@ -74,8 +74,7 @@ The command job accepts the command only when:
 - the URL is an exact public `github.com/<owner>/<repo>/pull/<positive integer>`
   URL with no credentials, query, fragment, or alternate host;
 - `--models` contains 1–8 unique, fully qualified model IDs matching the grammar
-  below; and
-- every provider prefix is configured in the arena's committed provider map.
+  below.
 
 One model reference is 3–512 characters and matches:
 
@@ -94,10 +93,10 @@ slashes, and empty path segments. After this syntax check, J-Bot's existing
 provider/model can run. Artifact names use the stable model index plus a SHA-256
 digest, never the model string.
 
-Unknown flags, prose after the command, malformed targets, unconfigured
-providers, duplicate models, and an empty list are rejected before a provider
-credential is exposed. A missing or expired credential is a per-model setup
-failure, never a fallback to another model.
+Unknown flags, prose after the command, malformed targets, duplicate models, and
+an empty list are rejected by the arena. J-Bot's normal model selection rejects
+unknown providers and missing or expired credentials as per-model failures,
+never as a fallback to another model.
 
 The command supplies models only. All other review knobs come from the pinned
 arena workflow or repository variables and are recorded in the result. V1 uses
@@ -171,7 +170,6 @@ interface ComparisonManifestV1 {
     index: number; // zero-based, contiguous, requested order
     model: string;
     provider: string;
-    credentialAlias: string; // committed map key, never secret material
     artifactName: string; // "model-<index>-<sha256(model)>"
   }>;
 }
@@ -420,8 +418,9 @@ publisher (always)  -- comparison comment + one full comment per model
 
 - `strategy.fail-fast: false` so one unavailable free model does not cancel the
   rest.
-- One model and one provider credential per worker. Workers receive no GitHub
-  write token.
+- One model per worker. The trusted image receives the configured provider auth
+  environment and resolves the selected model through J-Bot's normal path.
+  Workers receive no GitHub write token.
 - Pull the same pinned J-Bot image and review the same frozen target.
 - Measure setup/job time separately from J-Bot review time.
 - Upload a result artifact even for a classified failure. The requested-model
@@ -510,18 +509,16 @@ or workflow syntax. Raw model Markdown remains available only in artifacts.
 - Only trusted default-branch arena workflow code receives secrets.
 - Only public target PRs are accepted in v1.
 - The command is maintainer-gated and the model count is capped.
-- Provider credentials are spend-capped and rotatable. Only the selected
-  provider credential enters each worker.
-- The committed provider map includes only officially supported automation
-  routes whose service terms permit this use; a model being open source,
-  catalogued, or advertised as free is not sufficient authorization.
+- Provider credentials are spend-capped and rotatable. The arena exposes them
+  only to the trusted image; J-Bot withholds the ambient credential catalog and
+  forwards selected auth through its existing backend contract.
 - Workers have no arena write credential; the publisher has no provider key.
 - Target code is never built, tested, installed, sourced, or used as workflow
   code. The ephemeral container and read-only mount are the mutation boundary;
   J-Bot's shell command filter remains an accident guard, not a sandbox.
-- Reviewed-repo OpenCode config and ambient global config remain disabled, and
-  credential-shaped environment variables remain withheld from model-session
-  children.
+- For OpenCode sessions, reviewed-repo config and ambient global config remain
+  disabled, and credential-shaped environment variables remain withheld from
+  session children.
 - The publisher treats every artifact field as untrusted text.
 - Rendered comments neutralize mentions, issue cross-references, raw links,
   HTML, and remote images; only validated publisher-built target links remain
@@ -568,8 +565,8 @@ the implementation PR records that skip rationale.
    output-directory contract, and focused tests without changing local defaults.
 2. Land frozen PR-context input plus the bundled local image entrypoint, publish
    its full-SHA tag, and verify the registry digest.
-3. In the arena repository, land the command parser, provider map, target/image
-   resolver, and `ComparisonManifestV1` fixtures.
+3. In the arena repository, land the command parser, target/image resolver, and
+   provider-agnostic `ComparisonManifestV1` fixtures.
 4. Land the isolated matrix worker, wrapper-owned failure synthesis, artifact
    upload, and fixture-image tests.
 5. Land the safe renderer/publisher, pagination/idempotence cleanup, and comment
