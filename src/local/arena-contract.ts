@@ -531,7 +531,7 @@ export function sanitizeArenaFailureMessage(error: unknown, secretValues: string
   message = message
     .replace(/\b(Bearer|Basic)\s+[^\s,;]+/gi, '$1 [REDACTED]')
     .replace(
-      /\b((?:api[_-]?key|token|secret|password|credential)\s*[:=]\s*)[^\s,;]+/gi,
+      /\b((?:api[_-]?key|token|secret|password|credential)"?\s*[:=]\s*"?)[^\s,;"}]+/gi,
       '$1[REDACTED]',
     )
     .replace(/(https?:\/\/)[^/@\s]+@/gi, '$1[REDACTED]@')

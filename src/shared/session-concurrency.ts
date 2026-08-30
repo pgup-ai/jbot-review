@@ -1,5 +1,5 @@
 import type { ExplorationPlan } from './exploration-policy.ts';
-import type { SemaphorePriority, TokenUsageRecorder } from './opencode.ts';
+import { Semaphore, type SemaphorePriority, type TokenUsageRecorder } from './opencode.ts';
 import {
   classifyTelemetryStopReason,
   type BackendTelemetryCapability,
@@ -76,6 +76,24 @@ export interface ReviewBackend {
 
 export interface SessionSlots {
   acquire(priority?: SemaphorePriority): Promise<() => void>;
+}
+
+export function createProviderSessionLimiters(
+  providerIDs: string[],
+  concurrencyFor: (providerID: string) => number | undefined,
+): {
+  configured: Array<{ providerID: string; limit: number }>;
+  forProvider: (providerID: string) => SessionSlots | undefined;
+} {
+  const limiters = new Map<string, { limit: number; slots: SessionSlots }>();
+  for (const providerID of new Set(providerIDs)) {
+    const limit = concurrencyFor(providerID);
+    if (limit !== undefined) limiters.set(providerID, { limit, slots: new Semaphore(limit) });
+  }
+  return {
+    configured: [...limiters].map(([providerID, { limit }]) => ({ providerID, limit })),
+    forProvider: (providerID) => limiters.get(providerID)?.slots,
+  };
 }
 
 export function limitReviewBackendSessions(

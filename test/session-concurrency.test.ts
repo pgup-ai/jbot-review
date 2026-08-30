@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  createProviderSessionLimiters,
   limitReviewBackendSessions,
   type ReviewBackend,
   type SessionSlots,
@@ -27,6 +28,16 @@ function makeBackend(onReview: () => void | Promise<void> = () => undefined): Re
 }
 
 describe('limitReviewBackendSessions', () => {
+  it('owns provider slots independently for mixed-provider runs', () => {
+    const limiters = createProviderSessionLimiters(['nvidia', 'openai', 'nvidia'], (providerID) =>
+      providerID === 'nvidia' ? 1 : undefined,
+    );
+
+    assert.deepEqual(limiters.configured, [{ providerID: 'nvidia', limit: 1 }]);
+    assert.ok(limiters.forProvider('nvidia'));
+    assert.equal(limiters.forProvider('openai'), undefined);
+  });
+
   it('gives main sessions priority over auxiliary sessions', async () => {
     const priorities: SemaphorePriority[] = [];
     const slots: SessionSlots = {

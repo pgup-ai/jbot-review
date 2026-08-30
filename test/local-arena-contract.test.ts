@@ -262,13 +262,13 @@ describe('J-Bot arena output', () => {
     const secret = 'super-secret-value';
     const sanitized = sanitizeArenaFailureMessage(
       new Error(
-        `Bearer bearer-token Basic basic-token\nurl=https://user:pass@example.com?q=1&api_key=query-key token=plain-token password: plain-password secret=${secret} ${'😀'.repeat(200)}`,
+        `Bearer bearer-token Basic basic-token\nurl=https://user:pass@example.com?q=1&api_key=query-key token=plain-token password: plain-password secret=${secret} {"credential":"json-secret"} ${'😀'.repeat(200)}`,
       ),
       [secret],
     );
     assert.doesNotMatch(
       sanitized,
-      /bearer-token|basic-token|user:pass|query-key|plain-token|plain-password|super-secret-value/,
+      /bearer-token|basic-token|user:pass|query-key|plain-token|plain-password|super-secret-value|json-secret/,
     );
     assert.doesNotMatch(sanitized, /[\r\n]/);
     assert.ok(Buffer.byteLength(sanitized, 'utf8') <= 512);
