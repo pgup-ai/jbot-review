@@ -509,16 +509,16 @@ or workflow syntax. Raw model Markdown remains available only in artifacts.
 - Only trusted default-branch arena workflow code receives secrets.
 - Only public target PRs are accepted in v1.
 - The command is maintainer-gated and the model count is capped.
-- Provider credentials are spend-capped and rotatable. J-Bot selects the
-  credential for the requested model and withholds credential-shaped variables
-  from model-session children.
+- Provider credentials are spend-capped and rotatable. The arena exposes them
+  only to the trusted image; J-Bot withholds the ambient credential catalog and
+  forwards selected auth through its existing backend contract.
 - Workers have no arena write credential; the publisher has no provider key.
 - Target code is never built, tested, installed, sourced, or used as workflow
   code. The ephemeral container and read-only mount are the mutation boundary;
   J-Bot's shell command filter remains an accident guard, not a sandbox.
-- Reviewed-repo OpenCode config and ambient global config remain disabled, and
-  credential-shaped environment variables remain withheld from model-session
-  children.
+- For OpenCode sessions, reviewed-repo config and ambient global config remain
+  disabled, and credential-shaped environment variables remain withheld from
+  session children.
 - The publisher treats every artifact field as untrusted text.
 - Rendered comments neutralize mentions, issue cross-references, raw links,
   HTML, and remote images; only validated publisher-built target links remain
