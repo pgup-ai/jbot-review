@@ -59,7 +59,6 @@ export interface ComparisonModelV1 {
   index: number;
   model: string;
   provider: string;
-  credentialAlias: string;
   artifactName: string;
 }
 
@@ -137,7 +136,6 @@ const SHA_PATTERN = /^[a-f0-9]{40}$/;
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const MODEL_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}\/[A-Za-z0-9._:-]+(?:\/[A-Za-z0-9._:-]+)*$/;
-const CREDENTIAL_ALIAS_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!isRecord(value)) throw new Error(`${label} must be an object.`);
@@ -347,13 +345,6 @@ export function validateComparisonManifest(value: unknown): ComparisonManifestV1
     if (provider !== modelName.slice(0, modelName.indexOf('/'))) {
       throw new Error(`comparison.models[${index}].provider must match the model prefix.`);
     }
-    const credentialAlias = requireString(
-      model.credentialAlias,
-      `comparison.models[${index}].credentialAlias`,
-    );
-    if (!CREDENTIAL_ALIAS_PATTERN.test(credentialAlias)) {
-      throw new Error(`comparison.models[${index}].credentialAlias is invalid.`);
-    }
     const artifactName = requireString(
       model.artifactName,
       `comparison.models[${index}].artifactName`,
@@ -361,7 +352,7 @@ export function validateComparisonManifest(value: unknown): ComparisonManifestV1
     if (artifactName !== arenaArtifactName(index, modelName)) {
       throw new Error(`comparison.models[${index}].artifactName is inconsistent.`);
     }
-    return { index, model: modelName, provider, credentialAlias, artifactName };
+    return { index, model: modelName, provider, artifactName };
   });
   if (new Set(models.map(({ model }) => model)).size !== models.length) {
     throw new Error('comparison.models must be unique.');

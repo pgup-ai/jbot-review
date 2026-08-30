@@ -25,7 +25,6 @@ function manifest(): ComparisonManifestV1 {
     index,
     model,
     provider: model.split('/')[0]!,
-    credentialAlias: index === 0 ? 'OPENROUTER_API_KEY' : 'KILO_API_KEY',
     artifactName: arenaArtifactName(index, model),
   }));
   return {
