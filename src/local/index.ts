@@ -617,7 +617,7 @@ async function review(
     pool,
     ({ env }: { env: string }) => (comparison ? invocation.arenaAuth?.[env] : process.env[env]),
     comparison
-      ? ' Arena credentials must be provided through JBOT_AUTH_JSON.'
+      ? ' Arena credentials must be provided through the arena auth bundle.'
       : ' Local review needs only the provider configuration — no GitHub token; set it in the environment or in .env.',
   );
   const { apiKey, baseURL } = credentials.get(provider)!;
@@ -821,12 +821,13 @@ async function review(
 }
 
 async function bootstrap(): Promise<void> {
-  const arenaAuthJson = process.env.JBOT_AUTH_JSON;
-  delete process.env.JBOT_AUTH_JSON;
   const launchDirectory = process.cwd();
   const args = parseLocalArgs(process.argv.slice(2));
   if (!args.prContext && loadDotEnv(join(launchDirectory, '.env'))) log('Loaded .env');
   const paths = resolveLocalPaths(args, launchDirectory, process.env.JBOT_BENCHMARK_OUTPUT);
+  const arenaAuthJson =
+    paths.prContext && paths.arenaOutput ? process.env.JBOT_AUTH_JSON : undefined;
+  if (arenaAuthJson !== undefined) delete process.env.JBOT_AUTH_JSON;
   if (paths.prContext) await ensureGitSafeDirectory(paths.workspace, log);
   const workspace = await resolveWorkspace(paths.workspace);
   let comparison: ComparisonManifestV1 | undefined;
