@@ -12,6 +12,7 @@ import {
   needsAuxOpencodeConfig,
   providerConfig,
   providerCredentialSources,
+  providerSessionConcurrency,
   resolvePoolCredentials,
   resolveProviderBaseURL,
   resolveProviderCredential,
@@ -72,6 +73,10 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
     );
     assert.deepEqual(
       supportedModelOptions('opencode-go', 'ox-alpha-free', { reasoningEffort: 'medium' }),
+      { reasoningEffort: 'high' },
+    );
+    assert.deepEqual(
+      supportedModelOptions('nvidia', 'moonshotai/kimi-k3', { reasoningEffort: 'medium' }),
       { reasoningEffort: 'high' },
     );
     // mimo collapses below medium (probed 2026-08-22): the aux default `low`
@@ -204,6 +209,11 @@ describe('provider configuration resolution', () => {
       () => providerConfig('nope', 'nope/m'),
       /Unknown provider "nope" derived from model "nope\/m"/,
     );
+  });
+
+  it('resolves provider-owned session caps independently', () => {
+    assert.equal(providerSessionConcurrency('openai'), undefined);
+    assert.equal(providerSessionConcurrency('nvidia'), 1);
   });
 
   it('rejects malformed base URLs as non-absolute', () => {

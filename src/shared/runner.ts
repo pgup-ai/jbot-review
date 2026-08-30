@@ -37,7 +37,11 @@ import {
   selectReviewBackends,
   type CliBackendID,
 } from './backend-selection.ts';
-import { limitReviewBackendSessions, type ReviewBackend } from './session-concurrency.ts';
+import {
+  createProviderSessionLimiters,
+  limitReviewBackendSessions,
+  type ReviewBackend,
+} from './session-concurrency.ts';
 import {
   loadCachedShardResult,
   resolveShardCacheDir,
@@ -92,6 +96,7 @@ import {
   auxModelOptionsFor,
   modelSupportsAgenticTools,
   needsAuxOpencodeConfig,
+  providerSessionConcurrency,
   resolvePromptCachePolicy,
   supportedModelOptions,
   verificationModelOptions,
@@ -1585,6 +1590,13 @@ async function runReviewPipeline(params: {
   }
   const sessionSlots = sessionCap > 0 ? new Semaphore(sessionCap) : undefined;
   if (sessionCap > 0) log(`Model session concurrency capped at ${sessionCap}.`);
+  const providerLimiters = createProviderSessionLimiters(
+    [providerID, auxProviderID],
+    providerSessionConcurrency,
+  );
+  for (const { providerID: id, limit } of providerLimiters.configured) {
+    log(`Provider session concurrency capped at ${limit} for ${id}.`);
+  }
 
   let opencodeRuntime: Awaited<ReturnType<typeof startOpencode>> | undefined;
   let opencodeBackend: ReviewBackend | undefined;
@@ -2048,14 +2060,14 @@ async function runReviewPipeline(params: {
     mainBaseBackend,
     'main',
     sessionSlots,
-    serializedBackends.get(mainBaseBackend),
+    providerLimiters.forProvider(providerID) ?? serializedBackends.get(mainBaseBackend),
     sessionTelemetry,
   );
   const auxBackend = limitReviewBackendSessions(
     auxBaseBackend,
     'aux',
     sessionSlots,
-    serializedBackends.get(auxBaseBackend),
+    providerLimiters.forProvider(auxProviderID) ?? serializedBackends.get(auxBaseBackend),
     sessionTelemetry,
   );
   // Single gate for every aux session (lenses, guideline, addressed,

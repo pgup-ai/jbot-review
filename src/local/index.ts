@@ -1,5 +1,5 @@
 import { execFile, spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -23,6 +23,7 @@ import {
   parseEnvBoolean,
   parseEnvGuidelineWiden,
   resolvePoolCredentials,
+  supportedModelOptions,
 } from '../shared/config.ts';
 import {
   CURSOR_CLI_BIN,
@@ -52,10 +53,11 @@ import {
 import { EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS, runPrReview } from '../shared/runner.ts';
 import { onFatalSignal } from '@symma/protocol';
 import type { ReviewResult } from '../shared/types.ts';
-import { GIT_DIFF_ARGS, parseGitDiff } from '../shared/git.ts';
+import { ensureGitSafeDirectory, GIT_DIFF_ARGS, parseGitDiff } from '../shared/git.ts';
 import {
   buildDiffHunksBlockWithMetadata,
   classifyChangeShape,
+  isDocOnlyChange,
   shardFilesForReview,
 } from '../shared/diff-context.ts';
 import { planReviewFanout } from '../shared/fanout.ts';
@@ -67,7 +69,24 @@ import {
   renderReport,
   renderReviewPreview,
 } from './util.ts';
-import { parseLocalArgs, resolveLocalPaths, type LocalArgs, type LocalPaths } from './args.ts';
+import {
+  assertArenaPathIsolation,
+  parseLocalArgs,
+  resolveLocalPaths,
+  type LocalArgs,
+  type LocalPaths,
+} from './args.ts';
+import {
+  aggregateArenaUsage,
+  classifyJbotArenaFailure,
+  emptyArenaUsage,
+  sanitizeArenaFailureMessage,
+  selectArenaModel,
+  parseComparisonManifestJson,
+  writeJbotArenaOutput,
+  type ComparisonManifestV1,
+  type JbotArenaOutputV1,
+} from './arena-contract.ts';
 
 /**
  * Local review driver (`npm run review:local`): runs the real review pipeline
@@ -83,9 +102,73 @@ const REPORT_DIR = '.jbot-review';
 interface LocalInvocation {
   args: LocalArgs;
   paths: LocalPaths;
+  comparison?: ComparisonManifestV1;
 }
 
+interface ArenaRunState {
+  outputPath: string;
+  artifactRoot: string;
+  backend: string | null;
+  sdkEngine: string | null;
+  resolvedModelOptions: Record<string, unknown> | null;
+  reviewStartedAt?: number;
+  secretValues: string[];
+  written: boolean;
+}
+
+let arenaRunState: ArenaRunState | undefined;
+
 const log = (msg: string) => console.log(`[jbot-review] ${msg}`);
+
+function arenaTelemetry(state: ArenaRunState): string | undefined {
+  try {
+    return readFileSync(join(state.artifactRoot, 'telemetry.jsonl'), 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+function writeArenaTerminal(output: JbotArenaOutputV1): void {
+  if (!arenaRunState) return;
+  writeJbotArenaOutput(arenaRunState.outputPath, output);
+  arenaRunState.written = true;
+}
+
+function writeArenaSkipped(resolved = false): void {
+  const state = arenaRunState;
+  writeArenaTerminal({
+    schemaVersion: 1,
+    status: 'skipped',
+    backend: resolved ? (state?.backend ?? null) : null,
+    sdkEngine: resolved ? (state?.sdkEngine ?? null) : null,
+    resolvedModelOptions: resolved ? (state?.resolvedModelOptions ?? null) : null,
+    reviewMs: null,
+    usage: resolved && state ? aggregateArenaUsage(arenaTelemetry(state)) : emptyArenaUsage(),
+    review: null,
+    failure: null,
+  });
+}
+
+function writeArenaFailure(error: unknown): void {
+  const state = arenaRunState;
+  if (!state || state.written) return;
+  const reviewMs =
+    state.reviewStartedAt === undefined ? null : performance.now() - state.reviewStartedAt;
+  writeArenaTerminal({
+    schemaVersion: 1,
+    status: 'failed',
+    backend: state.backend,
+    sdkEngine: state.sdkEngine,
+    resolvedModelOptions: state.resolvedModelOptions,
+    reviewMs,
+    usage: aggregateArenaUsage(arenaTelemetry(state)),
+    review: null,
+    failure: {
+      class: classifyJbotArenaFailure(error),
+      message: sanitizeArenaFailureMessage(error, state.secretValues),
+    },
+  });
+}
 
 async function git(args: string[], cwd?: string): Promise<string> {
   const { stdout } = await execFileAsync('git', args, {
@@ -212,8 +295,8 @@ async function checkoutHead(): Promise<IsolatedCheckout> {
  * one — a developer's own opencode session often occupies the default 4096,
  * which CI never has to worry about.
  */
-async function pickOpencodePort(): Promise<number | undefined> {
-  if (process.env.JBOT_OPENCODE_PORT?.trim()) return undefined; // opencode.ts reads the env itself
+async function pickOpencodePort(forceEphemeral = false): Promise<number | undefined> {
+  if (!forceEphemeral && process.env.JBOT_OPENCODE_PORT?.trim()) return undefined;
   return await new Promise((resolve) => {
     const probe = createServer();
     probe.once('error', () => resolve(undefined)); // fall back to the default port
@@ -292,6 +375,7 @@ async function review(
   adopt: (checkout: IsolatedCheckout) => void,
 ): Promise<void> {
   const { args, paths } = invocation;
+  const comparison = invocation.comparison;
   const { benchmarkOutput } = paths;
   if (benchmarkOutput && process.env.JBOT_BENCHMARK_DRY_RUN !== 'true') {
     throw new Error('JBOT_BENCHMARK_OUTPUT requires JBOT_BENCHMARK_DRY_RUN=true.');
@@ -312,10 +396,38 @@ async function review(
   // the diff so a clean tree still exits "nothing to review" without a key set;
   // the model names have to come first because they decide whether this run
   // routes to the gateway, which is what the diff's right side depends on.
-  const pool = resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
+  if (comparison && !process.env.MODEL?.trim()) {
+    throw new Error('Arena review requires one explicit fully qualified MODEL.');
+  }
+  if (comparison && process.env.PROVIDER?.trim()) {
+    throw new Error('Arena review does not accept the legacy PROVIDER pin.');
+  }
+  if (
+    comparison &&
+    [
+      process.env.JBOT_ACP_GATEWAY_URL,
+      process.env.JBOT_ACP_GATEWAY_REPO,
+      process.env.JBOT_ACP_GATEWAY_REF,
+    ].some((value) => value?.trim())
+  ) {
+    throw new Error('Arena review does not accept ACP gateway routing.');
+  }
+  const pool = resolveModelSelection(
+    process.env.MODEL,
+    comparison ? undefined : process.env.PROVIDER,
+  );
+  if (comparison) selectArenaModel(comparison, pool);
   // HEAD, not the worktree: iterating on uncommitted edits keeps the same
   // reviewer, so a before/after comparison is not confounded by the pick.
   const headSha = (await git(['rev-parse', 'HEAD'])).trim();
+  if (comparison && headSha !== comparison.target.head.sha) {
+    throw new Error(
+      `Arena checkout HEAD ${headSha} does not match frozen head ${comparison.target.head.sha}.`,
+    );
+  }
+  if (comparison && (await gitOrEmpty(['status', '--porcelain'])).trim()) {
+    throw new Error('Arena checkout must be clean before review.');
+  }
   const { model, auxModel } = pickReviewModels(pool, headSha);
   const provider = parseModelName(model).providerID;
   const auxProviderID = parseModelName(auxModel).providerID;
@@ -330,7 +442,9 @@ async function review(
   // works in an empty workspace, so the worktree diff stands — there is nothing
   // to align with. With both, the diff has to describe that same commit.
   const routed =
-    !preview && gatewayRoutedModels([model, auxModel]) ? remoteAcpConfigFromEnv() : undefined;
+    !comparison && !preview && gatewayRoutedModels([model, auxModel])
+      ? remoteAcpConfigFromEnv()
+      : undefined;
   if (routed?.repo && !routed.ref) {
     throw new Error(
       'JBOT_ACP_GATEWAY_REPO is set without JBOT_ACP_GATEWAY_REF: the companion would review a ' +
@@ -350,13 +464,17 @@ async function review(
   if (isolated) adopt(isolated);
 
   const { baseRef, mergeBase } = await resolveBase(
-    args.base ?? process.env.JBOT_LOCAL_BASE?.trim(),
+    comparison ? comparison.target.base.sha : (args.base ?? process.env.JBOT_LOCAL_BASE?.trim()),
   );
   const shortBase = mergeBase.slice(0, 12);
   // Deepen target for the companion: a shallow clone that stops short of the
   // base cannot run the merge-base diff this prompt describes.
   if (isolated) process.env.JBOT_ACP_GATEWAY_BASE = mergeBase;
-  const rightSide = isolated ? `HEAD ${isolated.head.slice(0, 12)}` : 'the working tree';
+  const rightSide = isolated
+    ? `HEAD ${isolated.head.slice(0, 12)}`
+    : comparison
+      ? `frozen HEAD ${headSha.slice(0, 12)}`
+      : 'the working tree';
   log(`Diff base: ${baseRef} (merge-base ${shortBase}); right side is ${rightSide}.`);
   log('Note: a stale base ref widens the diff — fetch before reviewing if in doubt.');
 
@@ -384,7 +502,11 @@ async function review(
 
   // Left side merge-base; see GIT_DIFF_ARGS for the gitconfig pins that keep
   // the output parseable.
-  const diffText = await git([...GIT_DIFF_ARGS, mergeBase, ...(isolated ? [isolated.head] : [])]);
+  const diffText = await git([
+    ...GIT_DIFF_ARGS,
+    mergeBase,
+    ...(isolated ? [isolated.head] : comparison ? [headSha] : []),
+  ]);
   const files = parseGitDiff(diffText);
   // Exit before requiring credentials when nothing the runner would review is
   // present: parseGitDiff yields patchless entries for binary/mode-only/pure-
@@ -395,6 +517,13 @@ async function review(
   if (reviewable.length === 0) {
     const detail = files.length > 0 ? ' (only binary/mode-only/noise changes)' : '';
     log(`Nothing to review vs ${baseRef} (merge-base ${shortBase})${detail}.`);
+    if (comparison) writeArenaSkipped();
+    return;
+  }
+
+  if (comparison?.reviewConfig.skipDocOnly && isDocOnlyChange(reviewable.map((f) => f.filename))) {
+    log(`Doc-only PR (${reviewable.length} file(s)); skipping the full review.`);
+    writeArenaSkipped();
     return;
   }
 
@@ -490,6 +619,13 @@ async function review(
   const auxCredential = auxProviderID === provider ? undefined : credentials.get(auxProviderID);
   const auxApiKey = auxCredential?.apiKey;
   const auxBaseURL = auxCredential?.baseURL;
+  if (arenaRunState) {
+    arenaRunState.secretValues.push(
+      ...[apiKey, baseURL, auxApiKey, auxBaseURL].filter(
+        (value): value is string => typeof value === 'string' && Boolean(value),
+      ),
+    );
+  }
 
   // Backend-aware preflight: opencode only when the selection needs it; CLI
   // backends bring their own binary.
@@ -497,7 +633,10 @@ async function review(
   const aux = parseModelName(auxModel || model);
   // Preflight-only resolution (the runner re-resolves for its own routing):
   // roles served by the in-process pi engine need no opencode binary.
-  const piEngine = resolvePiEngine(process.env, process.version);
+  const piEngine = resolvePiEngine(
+    comparison ? { JBOT_SDK_ENGINE: comparison.reviewConfig.sdkEngine } : process.env,
+    process.version,
+  );
   const [mainPiModelAvailable, auxPiModelAvailable] = piEngine.enabled
     ? await Promise.all([
         piModelAvailable(providerID, modelID),
@@ -515,6 +654,18 @@ async function review(
     mainPiModelAvailable,
     auxPiModelAvailable,
   });
+  const configuredModelOptions = comparison
+    ? (comparison.reviewConfig.modelOptions ?? defaultModelOptions(provider))
+    : parseEnvJsonObject('JBOT_MODEL_OPTIONS', defaultModelOptions(provider));
+  const resolvedModelOptions =
+    supportedModelOptions(providerID, modelID, configuredModelOptions) ?? {};
+  if (arenaRunState) {
+    arenaRunState.backend = selection.mainCliBackend ?? selection.mainSdkEngine ?? 'opencode';
+    arenaRunState.sdkEngine = selection.mainCliBackend
+      ? null
+      : (selection.mainSdkEngine ?? 'opencode');
+    arenaRunState.resolvedModelOptions = resolvedModelOptions;
+  }
   const requiredBins = new Set<string>();
   if (selection.needsOpencode) requiredBins.add('opencode');
   const addCliBin = (backend: CliBackendID | undefined): void => {
@@ -537,54 +688,74 @@ async function review(
   const subject = (await gitOrEmpty(['log', '-1', '--format=%s'])).trim();
   const body = (await gitOrEmpty(['log', '-1', '--format=%b'])).trim();
   const remoteUrl = await gitOrEmpty(['remote', 'get-url', 'origin']);
-  const { owner, repo } = parseOwnerRepo(remoteUrl) ?? { owner: 'local', repo: 'local' };
+  const { owner, repo } = comparison
+    ? { owner: comparison.target.owner, repo: comparison.target.repository }
+    : (parseOwnerRepo(remoteUrl) ?? { owner: 'local', repo: 'local' });
   const commits = await localCommits(mergeBase);
   const workspace = isolated?.path ?? process.cwd();
 
   log(`Reviewing ${reviewable.length} changed file(s) on ${branch} with ${model}.`);
 
-  const opencodePort = await pickOpencodePort();
+  const opencodePort = await pickOpencodePort(Boolean(comparison));
   let reviewResult: (ReviewResult & { telemetry?: string }) | undefined;
   const reviewStartedAt = performance.now();
+  if (arenaRunState) arenaRunState.reviewStartedAt = reviewStartedAt;
+  const config = comparison?.reviewConfig;
   await runPrReview({
-    // No octokit and no headSha: reads come from localDiff, and the runner's
-    // built-in "check status unavailable" fallback covers CI checks.
+    // Arena headSha is provenance only; localDiff keeps this path GitHub-free.
     owner,
     repo,
-    pullNumber: 0,
-    pullTitle: subject || `Local review of ${branch}`,
-    pullBody: body,
+    pullNumber: comparison?.target.prNumber ?? 0,
+    pullTitle: (comparison?.target.title ?? subject) || `Local review of ${branch}`,
+    pullBody: comparison?.target.body ?? body,
     workspace,
     telemetryDirectory: paths.artifactRoot,
     model,
     apiKey,
     baseURL,
+    ...(comparison ? { headSha } : {}),
     baseRef,
     baseSha: mergeBase,
     localDiff: { files, commits },
     options: {
-      enhancedContext: true,
-      dryRun: true,
-      reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 1),
-      verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
+      enhancedContext: config?.enhancedContext ?? true,
+      scrubSessionEnv: config?.scrubSessionEnv ?? true,
+      sdkEngine: config?.sdkEngine ?? '',
+      dryRun: config?.dryRun ?? true,
+      autoApprove: config?.autoApprove ?? false,
+      maxFindings: config?.maxFindings ?? 0,
+      minSeverity: config?.minSeverity ?? 'nit',
+      includePriorComments: config?.includePriorComments ?? true,
+      context7Mode: config?.context7Mode ?? 'auto',
+      guidelinePass: config?.guidelinePass ?? true,
+      shardCachePath: '',
+      reviewPasses: config?.reviewPasses ?? parseEnvInt('JBOT_REVIEW_PASSES', 1),
+      verifyFindings:
+        config?.verifyFindings ?? process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
       auxModel,
       ...(auxApiKey ? { auxApiKey } : {}),
       ...(auxBaseURL ? { auxBaseURL } : {}),
-      timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
-      reviewShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
-      dynamicFanout: parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),
-      modelOptions: parseEnvJsonObject('JBOT_MODEL_OPTIONS', defaultModelOptions(provider)),
-      modelOptionsExplicit: Boolean(process.env.JBOT_MODEL_OPTIONS?.trim()),
-      promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),
-      skipDocOnly: parseEnvBoolean('JBOT_SKIP_DOC_ONLY', true),
-      maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),
-      reviewTelemetry: parseEnvBoolean('JBOT_REVIEW_TELEMETRY', true),
-      evidenceQuotes: parseEnvBoolean('JBOT_EVIDENCE_QUOTES', true),
-      contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
-      embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
-      guidelineWiden: parseEnvGuidelineWiden('JBOT_GUIDELINE_WIDEN'),
-      verifierSlimContext: parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
-      verifyOverlapGrace: parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
+      timeBudgetMinutes: config?.timeBudgetMinutes ?? parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),
+      reviewShards: config?.reviewShards ?? parseEnvInt('JBOT_REVIEW_SHARDS', 0),
+      dynamicFanout: config?.dynamicFanout ?? parseEnvBoolean('JBOT_DYNAMIC_FANOUT', true),
+      modelOptions: comparison ? resolvedModelOptions : configuredModelOptions,
+      modelOptionsExplicit: comparison
+        ? comparison.reviewConfig.modelOptions !== null
+        : Boolean(process.env.JBOT_MODEL_OPTIONS?.trim()),
+      promptCache: config?.promptCache ?? parseEnvBoolean('JBOT_PROMPT_CACHE', true),
+      skipDocOnly: config?.skipDocOnly ?? parseEnvBoolean('JBOT_SKIP_DOC_ONLY', true),
+      maxConcurrentSessions:
+        config?.maxConcurrentSessions ?? parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),
+      reviewTelemetry: config?.reviewTelemetry ?? parseEnvBoolean('JBOT_REVIEW_TELEMETRY', true),
+      evidenceQuotes: config?.evidenceQuotes ?? parseEnvBoolean('JBOT_EVIDENCE_QUOTES', true),
+      contextTrim: config?.contextTrim ?? parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
+      embeddedFirstPrompt:
+        config?.embeddedFirstPrompt ?? parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
+      guidelineWiden: config?.guidelineWiden ?? parseEnvGuidelineWiden('JBOT_GUIDELINE_WIDEN'),
+      verifierSlimContext:
+        config?.verifierSlimContext ?? parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
+      verifyOverlapGrace:
+        config?.verifyOverlapGrace ?? parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
       ...(opencodePort ? { opencodePort } : {}),
       onReviewResult: (result) => {
         reviewResult = result;
@@ -598,16 +769,32 @@ async function review(
     // The runner returned before producing a result (doc-only skip or no
     // reviewable files) — the log above already says why.
     log('Review ended without findings output (skipped).');
+    if (comparison) writeArenaSkipped(true);
     return;
   }
 
+  const finalizedReview = benchmarkReviewOutput(
+    reviewResult,
+    join(paths.artifactRoot, 'telemetry.jsonl'),
+  );
   if (benchmarkOutput) {
-    writeFileSync(
-      benchmarkOutput,
-      `${JSON.stringify(
-        benchmarkReviewOutput(reviewResult, join(paths.artifactRoot, 'telemetry.jsonl')),
-      )}\n`,
-    );
+    writeFileSync(benchmarkOutput, `${JSON.stringify(finalizedReview)}\n`);
+  }
+  if (comparison) {
+    writeArenaTerminal({
+      schemaVersion: 1,
+      status: 'completed',
+      backend: arenaRunState?.backend ?? null,
+      sdkEngine: arenaRunState?.sdkEngine ?? null,
+      resolvedModelOptions: arenaRunState?.resolvedModelOptions ?? null,
+      reviewMs: reviewDurationMs,
+      usage: aggregateArenaUsage(finalizedReview.telemetry),
+      review: {
+        summary: finalizedReview.summary,
+        findings: finalizedReview.findings.map(({ id: _id, ...finding }) => finding),
+      },
+      failure: null,
+    });
   }
 
   const report = renderReport(reviewResult, {
@@ -629,21 +816,48 @@ async function review(
 async function bootstrap(): Promise<void> {
   const launchDirectory = process.cwd();
   const args = parseLocalArgs(process.argv.slice(2));
-  if (loadDotEnv(join(launchDirectory, '.env'))) log('Loaded .env');
+  if (!args.prContext && loadDotEnv(join(launchDirectory, '.env'))) log('Loaded .env');
   const paths = resolveLocalPaths(args, launchDirectory, process.env.JBOT_BENCHMARK_OUTPUT);
+  if (paths.prContext) await ensureGitSafeDirectory(paths.workspace, log);
   const workspace = await resolveWorkspace(paths.workspace);
+  let comparison: ComparisonManifestV1 | undefined;
+  if (paths.prContext && paths.arenaOutput) {
+    assertArenaPathIsolation(workspace, paths.prContext, paths.arenaOutput);
+    arenaRunState = {
+      outputPath: paths.arenaOutput,
+      artifactRoot: paths.artifactRoot,
+      backend: null,
+      sdkEngine: null,
+      resolvedModelOptions: null,
+      secretValues: [],
+      written: false,
+    };
+    comparison = parseComparisonManifestJson(readFileSync(paths.prContext, 'utf8'));
+  }
   process.chdir(workspace);
   if (args.workspace) log(`Workspace: ${workspace}`);
-  await main({ args, paths: { ...paths, workspace } });
+  await main({ args, paths: { ...paths, workspace }, ...(comparison ? { comparison } : {}) });
 }
 
 // Run verdict + observer flush live in runPrReview; here we only surface the
 // error, set the exit code, and guarantee the process actually ends.
 bootstrap()
   .catch((error: unknown) => {
-    console.error(
-      `[jbot-review] Local review failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    try {
+      writeArenaFailure(error);
+    } catch (outputError) {
+      console.error(
+        `[jbot-review] Could not write arena failure output: ${
+          outputError instanceof Error ? outputError.message : String(outputError)
+        }`,
+      );
+    }
+    const message = arenaRunState
+      ? sanitizeArenaFailureMessage(error, arenaRunState.secretValues)
+      : error instanceof Error
+        ? error.message
+        : String(error);
+    console.error(`[jbot-review] Local review failed: ${message}`);
     process.exitCode = 1;
   })
   .finally(() => exitOnLingeringHandles(log));
