@@ -283,9 +283,11 @@ it('writes bounded arena failures for mismatched HEAD and a dirty checkout', () 
   const target = join(root, 'target');
   const run = join(root, 'run');
   const output = join(root, 'output');
+  const home = join(root, 'home');
   try {
     mkdirSync(run);
     mkdirSync(output);
+    mkdirSync(home);
     git(root, ['init', '-q', '-b', 'main', target]);
     git(target, ['config', 'user.email', 'test@jbot.local']);
     git(target, ['config', 'user.name', 'jbot test']);
@@ -293,6 +295,7 @@ it('writes bounded arena failures for mismatched HEAD and a dirty checkout', () 
     git(target, ['add', '.']);
     git(target, ['-c', 'commit.gpgsign=false', 'commit', '-qm', 'base']);
     const sha = git(target, ['rev-parse', 'HEAD']);
+    const arenaEnv = { ...isolatedEnv(), MODEL: ARENA_MODEL, HOME: home };
 
     const mismatchContext = join(run, 'mismatch.json');
     const mismatchOutput = join(output, 'mismatch.json');
@@ -302,7 +305,7 @@ it('writes bounded arena failures for mismatched HEAD and a dirty checkout', () 
       [LOCAL_ENTRY, '--pr-context', mismatchContext, '--output', mismatchOutput],
       {
         cwd: target,
-        env: { ...isolatedEnv(), MODEL: ARENA_MODEL },
+        env: arenaEnv,
         encoding: 'utf8',
         stdio: 'pipe',
       },
@@ -328,7 +331,7 @@ it('writes bounded arena failures for mismatched HEAD and a dirty checkout', () 
         [LOCAL_ENTRY, '--pr-context', mismatchContext, '--output', gatewayOutput],
         {
           cwd: target,
-          env: { ...isolatedEnv(), MODEL: ARENA_MODEL, [gatewayEnv]: 'forbidden' },
+          env: { ...arenaEnv, [gatewayEnv]: 'forbidden' },
           encoding: 'utf8',
           stdio: 'pipe',
         },
@@ -347,7 +350,7 @@ it('writes bounded arena failures for mismatched HEAD and a dirty checkout', () 
       [LOCAL_ENTRY, '--pr-context', dirtyContext, '--output', dirtyOutput],
       {
         cwd: target,
-        env: { ...isolatedEnv(), MODEL: ARENA_MODEL },
+        env: arenaEnv,
         encoding: 'utf8',
         stdio: 'pipe',
       },
