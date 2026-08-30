@@ -38,7 +38,6 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:arena-v1
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
           # Persist the code-independent layers (apt + CLI installs) so PR
