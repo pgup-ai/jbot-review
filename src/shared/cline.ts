@@ -18,6 +18,7 @@ import {
   parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,
   parseReview,
+  sessionEnvDenyKeys,
   type TokenUsageRecorder,
 } from './opencode.ts';
 import { spawnWithTimeout, truncateForLog } from '@symma/protocol';
@@ -138,29 +139,14 @@ export function assertClinePromptArgWithinBudget(label: string, prompt: string):
   }
 }
 
-// Provider api-key envs Cline could read above the carried providers.json; stripped so an
-// ambient key can't silently redirect billing (Cline is multi-provider, unlike codex).
-export const CLINE_STRIPPED_ENV_KEYS = [
-  'CLINE_API_KEY',
-  'ANTHROPIC_API_KEY',
-  'OPENAI_API_KEY',
-  'OPENROUTER_API_KEY',
-  'GEMINI_API_KEY',
-  'GOOGLE_API_KEY',
-  'DEEPSEEK_API_KEY',
-  'XAI_API_KEY',
-  'GROQ_API_KEY',
-  'CEREBRAS_API_KEY',
-] as const;
-
-/** Child env with the temp `HOME` (Cline reads `~/.cline`); provider api-key envs stripped. */
+/** Child env with the temp `HOME` (Cline reads `~/.cline`); ambient credentials stripped. */
 export function clineEnvForHome(clineHome: string | undefined): NodeJS.ProcessEnv {
   const home = clineHome?.trim();
   if (!home) {
     throw new Error('Missing Cline home. A temp HOME is required for auth.');
   }
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
-  for (const key of CLINE_STRIPPED_ENV_KEYS) delete env[key];
+  for (const key of sessionEnvDenyKeys(Object.keys(env))) delete env[key];
   return env;
 }
 

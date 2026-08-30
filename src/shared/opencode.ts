@@ -224,7 +224,7 @@ export function sessionEnvDenyKeys(keys: string[]): string[] {
   // in KEY (not SECRET), and a bare `API_KEY`/`TOKEN` has no leading segment.
   // `(^|_)` also covers GITHUB_TOKEN/GH_TOKEN without naming them.
   const CREDENTIAL_NAME =
-    /(^|_)(KEY|KEY_ID|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|AUTH_CONTENT|AUTH_JSON|DSN)$/;
+    /(^|_)(KEY|KEY_ID|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS|AUTH_BUNDLE|AUTH_CONTENT|AUTH_JSON|DSN)$/;
   return keys.filter((key) => {
     const upper = key.toUpperCase();
     return upper.startsWith('INPUT_') || CREDENTIAL_NAME.test(upper);
