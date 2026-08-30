@@ -616,7 +616,9 @@ async function review(
   const credentials = resolvePoolCredentials(
     pool,
     ({ env }: { env: string }) => (comparison ? invocation.arenaAuth?.[env] : process.env[env]),
-    ' Local review needs only the provider configuration — no GitHub token; set it in the environment or in .env.',
+    comparison
+      ? ' Arena credentials must be provided through JBOT_AUTH_JSON.'
+      : ' Local review needs only the provider configuration — no GitHub token; set it in the environment or in .env.',
   );
   const { apiKey, baseURL } = credentials.get(provider)!;
   const auxCredential = auxProviderID === provider ? undefined : credentials.get(auxProviderID);
