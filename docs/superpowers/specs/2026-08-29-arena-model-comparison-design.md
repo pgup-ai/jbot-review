@@ -418,9 +418,10 @@ publisher (always)  -- comparison comment + one full comment per model
 
 - `strategy.fail-fast: false` so one unavailable free model does not cancel the
   rest.
-- One model per worker. The trusted image receives the configured provider auth
-  environment and resolves the selected model through J-Bot's normal path.
-  Workers receive no GitHub write token.
+- One model per worker. The trusted image receives the serialized Actions
+  secrets context with GitHub tokens removed; J-Bot reads only the credential
+  names required by the selected model pool. Workers receive no GitHub write
+  token.
 - Pull the same pinned J-Bot image and review the same frozen target.
 - Measure setup/job time separately from J-Bot review time.
 - Upload a result artifact even for a classified failure. The requested-model
@@ -509,9 +510,9 @@ or workflow syntax. Raw model Markdown remains available only in artifacts.
 - Only trusted default-branch arena workflow code receives secrets.
 - Only public target PRs are accepted in v1.
 - The command is maintainer-gated and the model count is capped.
-- Provider credentials are spend-capped and rotatable. The arena exposes them
-  only to the trusted image; J-Bot withholds the ambient credential catalog and
-  forwards selected auth through its existing backend contract.
+- Provider credentials are spend-capped and rotatable. The arena exposes the
+  filtered bundle only to the trusted image; J-Bot forwards selected auth
+  through its existing backend contract and withholds the bundle from sessions.
 - Workers have no arena write credential; the publisher has no provider key.
 - Target code is never built, tested, installed, sourced, or used as workflow
   code. The ephemeral container and read-only mount are the mutation boundary;

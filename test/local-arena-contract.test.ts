@@ -6,6 +6,7 @@ import {
   arenaArtifactName,
   classifyJbotArenaFailure,
   emptyArenaUsage,
+  parseArenaAuthJson,
   parseComparisonManifestJson,
   sanitizeArenaFailureMessage,
   selectArenaModel,
@@ -196,6 +197,17 @@ describe('comparison manifest validation', () => {
       /exactly one/,
     );
     assert.throws(() => selectArenaModel(value, ['openrouter/not-requested']), /not present/);
+  });
+});
+
+describe('arena auth bundle', () => {
+  it('accepts future credential names and rejects malformed entries', () => {
+    assert.deepEqual(
+      parseArenaAuthJson('{"NVIDIA_API_KEY":"key","FUTURE_PROVIDER_TOKEN":"token"}'),
+      { NVIDIA_API_KEY: 'key', FUTURE_PROVIDER_TOKEN: 'token' },
+    );
+    assert.throws(() => parseArenaAuthJson('[]'), /must be an object/);
+    assert.throws(() => parseArenaAuthJson('{"github_token":"token"}'), /invalid entry/);
   });
 });
 
