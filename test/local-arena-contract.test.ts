@@ -203,9 +203,12 @@ describe('comparison manifest validation', () => {
 describe('arena auth bundle', () => {
   it('accepts future credential names and rejects malformed entries', () => {
     assert.deepEqual(
-      parseArenaAuthJson('{"NVIDIA_API_KEY":"key","FUTURE_PROVIDER_TOKEN":"token"}'),
-      { NVIDIA_API_KEY: 'key', FUTURE_PROVIDER_TOKEN: 'token' },
+      parseArenaAuthJson(
+        '{"NVIDIA_API_KEY":"key","FUTURE_PROVIDER_TOKEN":"token","_INTERNAL_TOKEN":"unused"}',
+      ),
+      { NVIDIA_API_KEY: 'key', FUTURE_PROVIDER_TOKEN: 'token', _INTERNAL_TOKEN: 'unused' },
     );
+    assert.throws(() => parseArenaAuthJson('{'), /valid JSON/);
     assert.throws(() => parseArenaAuthJson('[]'), /must be an object/);
     assert.throws(() => parseArenaAuthJson('{"github_token":"token"}'), /invalid entry/);
   });

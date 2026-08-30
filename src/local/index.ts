@@ -105,6 +105,7 @@ interface LocalInvocation {
   args: LocalArgs;
   paths: LocalPaths;
   comparison?: ComparisonManifestV1;
+  arenaAuth?: Record<string, string>;
 }
 
 interface ArenaRunState {
@@ -612,10 +613,9 @@ async function review(
   // The whole pool, not just the picked pair: a missing key must fail the next
   // run rather than only the runs that happen to draw that provider. Still
   // below the no-review exits, so a clean tree needs no key at all.
-  const arenaAuth = comparison ? parseArenaAuthJson(process.env.JBOT_AUTH_JSON) : undefined;
   const credentials = resolvePoolCredentials(
     pool,
-    ({ env }: { env: string }) => (arenaAuth ? arenaAuth[env] : process.env[env]),
+    ({ env }: { env: string }) => (comparison ? invocation.arenaAuth?.[env] : process.env[env]),
     ' Local review needs only the provider configuration — no GitHub token; set it in the environment or in .env.',
   );
   const { apiKey, baseURL } = credentials.get(provider)!;
@@ -819,6 +819,8 @@ async function review(
 }
 
 async function bootstrap(): Promise<void> {
+  const arenaAuthJson = process.env.JBOT_AUTH_JSON;
+  delete process.env.JBOT_AUTH_JSON;
   const launchDirectory = process.cwd();
   const args = parseLocalArgs(process.argv.slice(2));
   if (!args.prContext && loadDotEnv(join(launchDirectory, '.env'))) log('Loaded .env');
@@ -826,6 +828,7 @@ async function bootstrap(): Promise<void> {
   if (paths.prContext) await ensureGitSafeDirectory(paths.workspace, log);
   const workspace = await resolveWorkspace(paths.workspace);
   let comparison: ComparisonManifestV1 | undefined;
+  let arenaAuth: Record<string, string> | undefined;
   if (paths.prContext && paths.arenaOutput) {
     assertArenaPathIsolation(workspace, paths.prContext, paths.arenaOutput);
     arenaRunState = {
@@ -838,10 +841,15 @@ async function bootstrap(): Promise<void> {
       written: false,
     };
     comparison = parseComparisonManifestJson(readFileSync(paths.prContext, 'utf8'));
+    arenaAuth = parseArenaAuthJson(arenaAuthJson);
   }
   process.chdir(workspace);
   if (args.workspace) log(`Workspace: ${workspace}`);
-  await main({ args, paths: { ...paths, workspace }, ...(comparison ? { comparison } : {}) });
+  await main({
+    args,
+    paths: { ...paths, workspace },
+    ...(comparison ? { comparison, arenaAuth } : {}),
+  });
 }
 
 // Run verdict + observer flush live in runPrReview; here we only surface the

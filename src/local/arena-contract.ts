@@ -413,7 +413,7 @@ export function parseArenaAuthJson(raw: string | undefined): Record<string, stri
   }
   const auth = requireRecord(parsed, 'JBOT_AUTH_JSON');
   for (const [name, value] of Object.entries(auth)) {
-    if (!/^[A-Z][A-Z0-9_]*$/.test(name) || typeof value !== 'string' || !value) {
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(name) || typeof value !== 'string' || !value) {
       throw new Error(`JBOT_AUTH_JSON contains an invalid entry: ${name}.`);
     }
   }
