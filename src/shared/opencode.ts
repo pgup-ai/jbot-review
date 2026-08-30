@@ -231,6 +231,23 @@ export function sessionEnvDenyKeys(keys: string[]): string[] {
   });
 }
 
+export async function withCredentialEnvWithheld<T>(
+  run: () => Promise<T>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<T> {
+  const withheld = new Map<string, string>();
+  for (const key of sessionEnvDenyKeys(Object.keys(env))) {
+    const value = env[key];
+    if (value !== undefined) withheld.set(key, value);
+    delete env[key];
+  }
+  try {
+    return await run();
+  } finally {
+    for (const [key, value] of withheld) env[key] = value;
+  }
+}
+
 export function takeOpencodeProxyEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const proxy = env.JBOT_OPENCODE_HTTPS_PROXY?.trim();
   const noProxy = env.JBOT_OPENCODE_NO_PROXY?.trim();

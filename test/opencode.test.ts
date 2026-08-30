@@ -9,10 +9,11 @@ import {
   promptForModel,
   recordOpencodeToolParts,
   resolveSessionTools,
-  sessionEnvDenyKeys,
   registerOpencodeSessionForAbort,
+  sessionEnvDenyKeys,
   unregisterOpencodeSessionForAbort,
   takeOpencodeProxyEnv,
+  withCredentialEnvWithheld,
   type OpencodeClient,
 } from '../src/shared/opencode.ts';
 import { BASH_PERMISSIONS } from '../src/shared/shell-policy.ts';
@@ -137,6 +138,21 @@ describe('sessionEnvDenyKeys', () => {
       'DATABASE_DSN',
       'GCP_CREDENTIALS',
     ]);
+  });
+
+  it('withholds credentials for one scope and restores them on failure', async () => {
+    const env = { NVIDIA_API_KEY: 'selected-key', SAFE_SETTING: 'kept' };
+    const selectedKey = env.NVIDIA_API_KEY;
+    await assert.rejects(
+      withCredentialEnvWithheld(async () => {
+        assert.equal(env.NVIDIA_API_KEY, undefined);
+        assert.equal(env.SAFE_SETTING, 'kept');
+        assert.equal(selectedKey, 'selected-key');
+        throw new Error('stop');
+      }, env),
+      /stop/,
+    );
+    assert.deepEqual(env, { NVIDIA_API_KEY: 'selected-key', SAFE_SETTING: 'kept' });
   });
 });
 
