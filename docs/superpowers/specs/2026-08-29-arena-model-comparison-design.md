@@ -419,9 +419,9 @@ publisher (always)  -- comparison comment + one full comment per model
 - `strategy.fail-fast: false` so one unavailable free model does not cancel the
   rest.
 - One model per worker. The trusted image receives the serialized Actions
-  secrets context with GitHub tokens removed; J-Bot reads only the credential
-  names required by the selected model pool. Workers receive no GitHub write
-  token.
+  secrets context without Actions' built-in GitHub token aliases; J-Bot reads
+  only the credential names required by the selected model pool. Workers
+  receive no GitHub write token.
 - Pull the same pinned J-Bot image and review the same frozen target.
 - Measure setup/job time separately from J-Bot review time.
 - Upload a result artifact even for a classified failure. The requested-model
