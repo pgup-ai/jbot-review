@@ -454,6 +454,8 @@ export function aggregateArenaUsage(telemetry: string | undefined): ArenaUsageV1
   let cost = 0;
   let providerCosts = 0;
   let estimatedCosts = 0;
+  let executionSessions = 0;
+  let usageSessions = 0;
   for (const line of telemetry.split('\n')) {
     if (!line) continue;
     let parsed: unknown;
@@ -462,8 +464,17 @@ export function aggregateArenaUsage(telemetry: string | undefined): ArenaUsageV1
     } catch {
       continue;
     }
-    if (!isRecord(parsed) || parsed.kind !== 'session') continue;
-    usage.sessions += 1;
+    if (!isRecord(parsed)) continue;
+    if (
+      parsed.kind === 'phase' &&
+      parsed.scope === 'session' &&
+      (parsed.phase === 'main-execution' || parsed.phase === 'auxiliary-execution')
+    ) {
+      executionSessions += 1;
+      continue;
+    }
+    if (parsed.kind !== 'session') continue;
+    usageSessions += 1;
     for (const key of Object.keys(sums) as Array<keyof typeof sums>) {
       const value = nonNegativeNumber(parsed[key]);
       if (value === undefined) continue;
@@ -480,6 +491,7 @@ export function aggregateArenaUsage(telemetry: string | undefined): ArenaUsageV1
       estimatedCosts += 1;
     }
   }
+  usage.sessions = Math.max(executionSessions, usageSessions);
   for (const key of Object.keys(sums) as Array<keyof typeof sums>) {
     if (usage[key].reportingSessions > 0) usage[key].value = sums[key];
   }

@@ -201,8 +201,9 @@ describe('comparison manifest validation', () => {
 });
 
 describe('arena telemetry aggregation', () => {
-  it('tracks each metric independently and prefers provider cost per session', () => {
+  it('tracks session and metric completeness, preferring provider cost', () => {
     const telemetry = [
+      JSON.stringify({ kind: 'phase', scope: 'session', phase: 'main-execution' }),
       JSON.stringify({
         kind: 'session',
         inputTokens: 10,
@@ -210,6 +211,7 @@ describe('arena telemetry aggregation', () => {
         costUsd: 0.25,
         estimatedCostUsd: 9,
       }),
+      JSON.stringify({ kind: 'phase', scope: 'session', phase: 'auxiliary-execution' }),
       JSON.stringify({
         kind: 'session',
         inputTokens: 20,
@@ -217,11 +219,12 @@ describe('arena telemetry aggregation', () => {
         cacheReadTokens: 7,
         estimatedCostUsd: 0.1,
       }),
+      JSON.stringify({ kind: 'phase', scope: 'session', phase: 'auxiliary-execution' }),
       JSON.stringify({ kind: 'finding', inputTokens: 999 }),
       '{bad json',
     ].join('\n');
     assert.deepEqual(aggregateArenaUsage(telemetry), {
-      sessions: 2,
+      sessions: 3,
       inputTokens: { value: 30, reportingSessions: 2 },
       outputTokens: { value: 4, reportingSessions: 1 },
       reasoningTokens: { value: 8, reportingSessions: 1 },
