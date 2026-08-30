@@ -24,7 +24,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: test -s dist/local/index.js
+      - run: test -s dist/local/index.js && test -s dist/local/arena-auth.js
       - run: npm run typecheck
       - uses: docker/login-action@v3
         with:

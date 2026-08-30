@@ -85,7 +85,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 COPY dist/ ./dist/
-RUN test -s /app/dist/local/index.js
+RUN test -s /app/dist/local/index.js \
+  && test -s /app/dist/local/arena-auth.js
 
 EXPOSE 3000
 
