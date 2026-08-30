@@ -319,7 +319,10 @@ export function validateComparisonManifest(value: unknown): ComparisonManifestV1
   const jbot = requireRecord(manifest.jbot, 'comparison.jbot');
   const imageRef = requireNonEmptyString(jbot.imageRef, 'comparison.jbot.imageRef');
   if (imageRef !== 'ghcr.io/pgup-ai/jbot-review:latest') {
-    throw new Error('comparison.jbot.imageRef must be the canonical latest J-Bot image.');
+    const commitSha = requireSha(jbot.commitSha, 'comparison.jbot.commitSha');
+    if (imageRef !== `ghcr.io/pgup-ai/jbot-review:${commitSha}`) {
+      throw new Error('comparison.jbot.imageRef must identify the canonical J-Bot image.');
+    }
   }
   const imageDigest = requireString(jbot.imageDigest, 'comparison.jbot.imageDigest');
   if (!DIGEST_PATTERN.test(imageDigest)) {
