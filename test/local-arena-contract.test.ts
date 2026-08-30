@@ -18,7 +18,6 @@ import {
 
 const BASE_SHA = '1'.repeat(40);
 const HEAD_SHA = '2'.repeat(40);
-const JBOT_SHA = '3'.repeat(40);
 const IMAGE_DIGEST = `sha256:${'4'.repeat(64)}`;
 
 function manifest(): ComparisonManifestV1 {
@@ -59,8 +58,7 @@ function manifest(): ComparisonManifestV1 {
       },
     },
     jbot: {
-      commitSha: JBOT_SHA,
-      imageRef: `ghcr.io/pgup-ai/jbot-review:${JBOT_SHA}`,
+      imageRef: 'ghcr.io/pgup-ai/jbot-review:latest',
       imageDigest: IMAGE_DIGEST,
     },
     reviewConfig: {
@@ -155,9 +153,9 @@ describe('comparison manifest validation', () => {
       ['provider', (value) => (value.models[0]!.provider = 'kilo'), /provider/],
       ['artifact', (value) => (value.models[0]!.artifactName = '../unsafe'), /artifactName/],
       [
-        'image tag',
-        (value) => (value.jbot.imageRef = 'ghcr.io/pgup-ai/jbot-review:latest'),
-        /full commit SHA/,
+        'image ref',
+        (value) => (value.jbot.imageRef = 'ghcr.io/attacker/image:latest'),
+        /canonical latest J-Bot image/,
       ],
       [
         'duplicate',

@@ -83,7 +83,6 @@ export interface ComparisonManifestV1 {
     head: ComparisonRepositoryRefV1;
   };
   jbot: {
-    commitSha: string;
     imageRef: string;
     imageDigest: string;
   };
@@ -318,13 +317,9 @@ export function validateComparisonManifest(value: unknown): ComparisonManifestV1
   }
 
   const jbot = requireRecord(manifest.jbot, 'comparison.jbot');
-  const commitSha = requireSha(jbot.commitSha, 'comparison.jbot.commitSha');
   const imageRef = requireNonEmptyString(jbot.imageRef, 'comparison.jbot.imageRef');
-  if (!/^[a-z0-9.-]+(?::[0-9]+)?\/[a-z0-9._/-]+:[a-f0-9]{40}$/.test(imageRef)) {
-    throw new Error('comparison.jbot.imageRef must be a registry image tagged by full commit SHA.');
-  }
-  if (!imageRef.endsWith(`:${commitSha}`)) {
-    throw new Error('comparison.jbot.imageRef tag must equal comparison.jbot.commitSha.');
+  if (imageRef !== 'ghcr.io/pgup-ai/jbot-review:latest') {
+    throw new Error('comparison.jbot.imageRef must be the canonical latest J-Bot image.');
   }
   const imageDigest = requireString(jbot.imageDigest, 'comparison.jbot.imageDigest');
   if (!DIGEST_PATTERN.test(imageDigest)) {
@@ -379,7 +374,6 @@ export function validateComparisonManifest(value: unknown): ComparisonManifestV1
       head,
     },
     jbot: {
-      commitSha,
       imageRef,
       imageDigest,
     },
