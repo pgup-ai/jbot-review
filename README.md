@@ -118,7 +118,6 @@ jobs:
           xai-api-key: ${{ secrets.XAI_API_KEY }}
           fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
           mimo-api-key: ${{ secrets.MIMO_API_KEY }}
-    tokenrouter-api-key: ${{ secrets.TOKENROUTER_API_KEY }}
           tokenrouter-api-key: ${{ secrets.TOKENROUTER_API_KEY }}
           devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
           commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
