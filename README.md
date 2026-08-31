@@ -118,6 +118,7 @@ jobs:
           xai-api-key: ${{ secrets.XAI_API_KEY }}
           fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
           mimo-api-key: ${{ secrets.MIMO_API_KEY }}
+          tokenrouter-api-key: ${{ secrets.TOKENROUTER_API_KEY }}
           devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
           commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
           cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
@@ -149,7 +150,7 @@ fork policy, `workflow_dispatch` parity — are documented in
 and variables → Actions → New repository secret. Add the keys for the providers
 you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`,
 `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `NVIDIA_API_KEY`, `ZAI_API_KEY`, `KIMI_API_KEY`,
-`XAI_API_KEY`, `FIREWORKS_API_KEY`, `MIMO_API_KEY`, `DEVIN_WINDSURF_API_KEY`,
+`XAI_API_KEY`, `FIREWORKS_API_KEY`, `MIMO_API_KEY`, `TOKENROUTER_API_KEY`, `DEVIN_WINDSURF_API_KEY`,
 `COMMANDCODE_ACCESS_KEY`, `CURSOR_API_KEY`, `POOLSIDE_API_KEY`, `QODER_PERSONAL_ACCESS_TOKEN`, `CODEX_AUTH_JSON`,
 `CLINE_AUTH_JSON`, `GROK_AUTH_JSON`, `KILO_AUTH_CONTENT`, `ANTHROPIC_API_KEY`, or
 `JBOT_OPENAI_COMPATIBLE_API_KEY`. Configure `JBOT_OPENAI_COMPATIBLE_BASE_URL`
@@ -310,6 +311,7 @@ input so `JBOT_REVIEW_MODEL` can switch providers without editing the workflow.
     xai-api-key: ${{ secrets.XAI_API_KEY }}
     fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
     mimo-api-key: ${{ secrets.MIMO_API_KEY }}
+    tokenrouter-api-key: ${{ secrets.TOKENROUTER_API_KEY }}
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
@@ -473,6 +475,7 @@ jbot-review does not use them for smart key rotation.
 | `xai`                   | `xai/grok-4.3`                                                  | `xai-api-key`                   | `XAI_API_KEY`                        |
 | `fireworks-ai`          | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` | `fireworks-api-key`             | `FIREWORKS_API_KEY`                  |
 | `xiaomi-token-plan-sgp` | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                           | `mimo-api-key`                  | `MIMO_API_KEY`                       |
+| `tokenrouter`           | `tokenrouter/z-ai/glm-5.3-free`                                 | `tokenrouter-api-key`           | `TOKENROUTER_API_KEY`                |
 | `devin`                 | `devin/default`                                                 | `devin-windsurf-api-key`        | `DEVIN_WINDSURF_API_KEY`             |
 | `commandcode`           | `commandcode/default`                                           | `commandcode-access-key`        | `COMMANDCODE_ACCESS_KEY`             |
 | `cursor`                | `cursor/default`                                                | `cursor-api-key`                | `CURSOR_API_KEY`                     |
@@ -568,6 +571,7 @@ pass it through the workflow. Leave it unset to use `opencode`'s default model
     xai-api-key: ${{ secrets.XAI_API_KEY }}
     fireworks-api-key: ${{ secrets.FIREWORKS_API_KEY }}
     mimo-api-key: ${{ secrets.MIMO_API_KEY }}
+    tokenrouter-api-key: ${{ secrets.TOKENROUTER_API_KEY }}
     devin-windsurf-api-key: ${{ secrets.DEVIN_WINDSURF_API_KEY }}
     commandcode-access-key: ${{ secrets.COMMANDCODE_ACCESS_KEY }}
     cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
@@ -691,6 +695,7 @@ documentation lookup.
 | `xai-api-key`                | No       | —                     | Used by `xai`, or by `grok` when `grok-auth` is empty                                                                                                                                |
 | `fireworks-api-key`          | No       | —                     | Used when the main or aux model names `fireworks-ai`                                                                                                                                 |
 | `mimo-api-key`               | No       | —                     | Used when the main or aux model names `xiaomi-token-plan-sgp`                                                                                                                        |
+| `tokenrouter-api-key`        | No       | —                     | Used when the main or aux model names `tokenrouter`                                                                                                                                  |
 | `devin-windsurf-api-key`     | No       | —                     | Used when the main or aux model names `devin`                                                                                                                                        |
 | `commandcode-access-key`     | No       | —                     | Used when the main or aux model names `commandcode`                                                                                                                                  |
 | `cursor-api-key`             | No       | —                     | Used when the main or aux model names `cursor`                                                                                                                                       |

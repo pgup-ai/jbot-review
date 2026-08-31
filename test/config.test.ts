@@ -27,6 +27,35 @@ function providerEntry(
   return (config as { provider: Record<string, Record<string, unknown>> }).provider[providerID];
 }
 
+describe('tokenrouter (native Models.dev provider)', () => {
+  it('registers the router with no custom def and prompt caching off', () => {
+    const p = PROVIDERS['tokenrouter'];
+    assert.equal(p.defaultModel, 'tokenrouter/z-ai/glm-5.3-free');
+    assert.equal(p.keyEnv, 'TOKENROUTER_API_KEY');
+    assert.equal(p.keyInput, 'tokenrouter-api-key');
+    // Models.dev supplies the base URL + model catalog; we pin only the key.
+    assert.equal('custom' in p, false);
+    // The router is unverified for opencode's promptCacheKey.
+    assert.equal(modelSupportsPromptCache('tokenrouter', 'z-ai/glm-5.3-free'), false);
+  });
+
+  it('emits only the key and clamps efforts to the glm-5.3 ladder', () => {
+    const config = buildConfig('tokenrouter', 'z-ai/glm-5.3-free', 'tr-abc', undefined, false);
+    const entry = providerEntry(config, 'tokenrouter');
+    const options = entry.options as Record<string, unknown>;
+    assert.equal(options.apiKey, 'tr-abc');
+    assert.equal('baseURL' in options, false);
+    assert.equal('npm' in entry, false);
+    assert.equal('setCacheKey' in options, false, 'prompt cache off for this provider');
+    // The default main effort `medium` is off the declared ladder; `-free`
+    // normalizes to the bare model key and the tie resolves upward.
+    assert.deepEqual(
+      supportedModelOptions('tokenrouter', 'z-ai/glm-5.3-free', { reasoningEffort: 'medium' }),
+      { reasoningEffort: 'high' },
+    );
+  });
+});
+
 describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
   it('registers the Singapore Token Plan provider with no custom def', () => {
     const p = PROVIDERS['xiaomi-token-plan-sgp'];
