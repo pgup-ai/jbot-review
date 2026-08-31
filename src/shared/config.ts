@@ -315,6 +315,17 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // Fireworks rejects opencode's promptCacheKey with a non-retryable 400 for every model.
     promptCache: false,
   },
+  // TokenRouter (openai-compatible router). Models.dev defines the provider —
+  // baseURL and catalog — so it needs only the key.
+  // promptCache off: the router is unverified for opencode's promptCacheKey.
+  tokenrouter: {
+    defaultModel: 'tokenrouter/z-ai/glm-5.3-free',
+    keyEnv: 'TOKENROUTER_API_KEY',
+    keyInput: 'tokenrouter-api-key',
+    promptCache: false,
+    // glm-5.3 declares low/high/max only (Models.dev reasoning_options).
+    models: { 'z-ai/glm-5.3': { reasoningEfforts: ['low', 'high', 'max'] } },
+  },
   devin: {
     defaultModel: 'devin/default',
     keyEnv: 'DEVIN_WINDSURF_API_KEY',

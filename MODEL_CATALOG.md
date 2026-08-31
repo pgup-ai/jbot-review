@@ -2,7 +2,7 @@
 
 # J-Bot model ID catalog
 
-Generated on **2026-08-29** from the live [Models.dev catalog](https://models.dev/api.json), Docker-pinned CLI npm packages, and authenticated CLI catalogs by `npm run models:update`.
+Generated on **2026-08-31** from the live [Models.dev catalog](https://models.dev/api.json), Docker-pinned CLI npm packages, and authenticated CLI catalogs by `npm run models:update`.
 
 J-Bot model values use `provider/model-id`. You may pass either the full value shown here or the model-id portion when `provider` is configured separately. Provider access, region, account tier, and model retirement can change independently of this snapshot.
 
@@ -17,16 +17,17 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `deepseek`              | Models.dev           |       3 | `deepseek/deepseek-v4-flash`                                    |
 | `openai`                | Models.dev           |      47 | `openai/gpt-5.4-nano`                                           |
 | `anthropic`             | Models.dev           |      13 | `anthropic/claude-sonnet-4-6`                                   |
-| `google`                | Models.dev           |      39 | `google/gemini-2.5-flash`                                       |
+| `google`                | Models.dev           |      38 | `google/gemini-2.5-flash`                                       |
 | `openrouter`            | Models.dev           |     354 | `openrouter/openai/gpt-4o-mini`                                 |
 | `nvidia`                | Models.dev           |     103 | `nvidia/nemotron-3-ultra-550b-a55b`                             |
 | `zai-coding-plan`       | Models.dev           |       9 | `zai-coding-plan/glm-5.2`                                       |
 | `kimi-for-coding`       | Models.dev           |       4 | `kimi-for-coding/k3`                                            |
 | `xai`                   | Models.dev           |      12 | `xai/grok-4.3`                                                  |
 | `xiaomi-token-plan-sgp` | Models.dev           |       7 | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                           |
-| `fireworks-ai`          | Models.dev           |      17 | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` |
+| `fireworks-ai`          | Models.dev           |      18 | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` |
+| `tokenrouter`           | Models.dev           |       2 | `tokenrouter/z-ai/glm-5.3-free`                                 |
 | `poolside`              | Models.dev           |       3 | `poolside/laguna-s-2.1`                                         |
-| `opencode`              | CLI snapshot         |      62 | `opencode/deepseek-v4-flash`                                    |
+| `opencode`              | CLI snapshot         |      61 | `opencode/deepseek-v4-flash`                                    |
 | `opencode-go`           | CLI snapshot         |      25 | `opencode-go/deepseek-v4-flash`                                 |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                                 |
 | `commandcode`           | CLI snapshot         |      62 | `commandcode/default`                                           |
@@ -36,7 +37,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `grok`                  | CLI snapshot         |       2 | `grok/default`                                                  |
 | `cline`                 | CLI snapshot         |     290 | `cline/default`                                                 |
 | `cline-pass`            | CLI snapshot         |      15 | `cline-pass/default`                                            |
-| `kilo`                  | CLI snapshot         |     298 | `kilo/kilo-auto/free`                                           |
+| `kilo`                  | CLI snapshot         |     297 | `kilo/kilo-auto/free`                                           |
 | `dim`                   | CLI snapshot         |       4 | `dim/dimcode-api-oauth/deepseek-v4-flash`                       |
 | `openai-compatible`     | Custom endpoint      | dynamic | required                                                        |
 
@@ -122,7 +123,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `google`
 
-39 model IDs. Default: `google/gemini-2.5-flash`.
+38 model IDs. Default: `google/gemini-2.5-flash`.
 
 - `google/deep-research-max-preview-04-2026`
 - `google/deep-research-preview-04-2026`
@@ -155,7 +156,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `google/gemini-flash-latest`
 - `google/gemini-flash-lite-latest`
 - `google/gemini-omni-flash-preview`
-- `google/gemini-robotics-er-1.6-preview`
 - `google/gemma-4-26b-a4b-it`
 - `google/gemma-4-31b-it`
 - `google/lyria-3-clip-preview`
@@ -270,10 +270,10 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/gryphe/mythomax-l2-13b`
 - `openrouter/ibm-granite/granite-4.0-h-micro`
 - `openrouter/ibm-granite/granite-4.1-8b`
+- `openrouter/ibm-granite/granite-4.2-8b`
 - `openrouter/inception/mercury-2`
 - `openrouter/inclusionai/ling-3.0-flash`
 - `openrouter/inclusionai/ling-3.0-flash-fin:free`
-- `openrouter/kwaipilot/kat-coder-air-v2.5`
 - `openrouter/kwaipilot/kat-coder-pro-v2`
 - `openrouter/kwaipilot/kat-coder-pro-v2.5`
 - `openrouter/liquid/lfm-2.5-2.6b:free`
@@ -685,12 +685,13 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `fireworks-ai`
 
-17 model IDs. Default: `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731`.
+18 model IDs. Default: `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731`.
 
 - `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` **(default)**
 - `fireworks-ai/accounts/fireworks/models/deepseek-v4-pro-0813`
 - `fireworks-ai/accounts/fireworks/models/glm-5p2`
 - `fireworks-ai/accounts/fireworks/models/glm-5p3`
+- `fireworks-ai/accounts/fireworks/models/glm-5p3-flash`
 - `fireworks-ai/accounts/fireworks/models/gpt-oss-120b`
 - `fireworks-ai/accounts/fireworks/models/inkling`
 - `fireworks-ai/accounts/fireworks/models/kimi-k2p6`
@@ -704,6 +705,13 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `fireworks-ai/accounts/fireworks/models/qwen3p8-max`
 - `fireworks-ai/accounts/fireworks/routers/glm-5p2-fast`
 - `fireworks-ai/accounts/fireworks/routers/kimi-k3-fast`
+
+### `tokenrouter`
+
+2 model IDs. Default: `tokenrouter/z-ai/glm-5.3-free`.
+
+- `tokenrouter/z-ai/glm-5.3`
+- `tokenrouter/z-ai/glm-5.3-free` **(default)**
 
 ### `poolside`
 
@@ -721,7 +729,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - Refresh/list: `opencode models opencode --pure --refresh`.
 - Note: Exact model values exposed by the pinned OpenCode runtime; the CLI refreshes its Models.dev cache before listing.
 
-62 J-Bot model values:
+61 J-Bot model values:
 
 - `opencode/big-pickle`
 - `opencode/claude-fable-5`
@@ -769,7 +777,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/grok-4.5`
 - `opencode/grok-4.6`
 - `opencode/grok-build-0.1`
-- `opencode/hy3-free`
 - `opencode/kimi-k2.5`
 - `opencode/kimi-k2.6`
 - `opencode/kimi-k2.7-code`
@@ -832,7 +839,7 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.36.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Source: Docker-pinned npm package [`command-code@1.39.2`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
@@ -846,6 +853,7 @@ The CLI does not expose a complete list.
 - `commandcode/claude-sonnet-4-6`
 - `commandcode/claude-sonnet-5`
 - `commandcode/deepseek/deepseek-v4-flash`
+- `commandcode/deepseek/deepseek-v4-flash-fast`
 - `commandcode/deepseek/deepseek-v4-flash-vision-exp`
 - `commandcode/deepseek/deepseek-v4-pro`
 - `commandcode/default` **(default)**
@@ -864,8 +872,6 @@ The CLI does not expose a complete list.
 - `commandcode/meta/muse-spark-1.1`
 - `commandcode/meta/muse-spark-1.2`
 - `commandcode/meta/muse-spark-1.2-contributor`
-- `commandcode/minimax/minimax-m2.7-free`
-- `commandcode/minimax/minimax-m3-free`
 - `commandcode/minimaxai/minimax-m2.5`
 - `commandcode/minimaxai/minimax-m2.7`
 - `commandcode/minimaxai/minimax-m3`
@@ -888,6 +894,7 @@ The CLI does not expose a complete list.
 - `commandcode/stepfun/step-3.5-flash`
 - `commandcode/stepfun/step-3.7-flash`
 - `commandcode/tencent/hy3-paid`
+- `commandcode/tencent/hy4-preview`
 - `commandcode/thinkingmachines/inkling`
 - `commandcode/thinkingmachines/inkling-small`
 - `commandcode/xai/grok-4.5`
@@ -1488,7 +1495,7 @@ The CLI does not expose a complete list.
 - Refresh/list: `kilo models --pure`.
 - Note: Kilo already prints fully qualified J-Bot values such as `kilo/openai/gpt-5.4`; do not add another `kilo/` prefix.
 
-298 J-Bot model values:
+297 J-Bot model values:
 
 - `kilo/~anthropic/claude-fable-latest`
 - `kilo/~anthropic/claude-haiku-latest`
@@ -1570,6 +1577,7 @@ The CLI does not expose a complete list.
 - `kilo/google/gemma-4-26b-a4b-it`
 - `kilo/google/gemma-4-31b-it`
 - `kilo/ibm-granite/granite-4.1-8b`
+- `kilo/ibm-granite/granite-4.2-8b`
 - `kilo/inception/mercury-2`
 - `kilo/inclusionai/ling-3.0-flash`
 - `kilo/inclusionai/ling-3.0-flash-fin:free`
@@ -1578,7 +1586,6 @@ The CLI does not expose a complete list.
 - `kilo/kilo-auto/free` **(default)**
 - `kilo/kilo-auto/frontier`
 - `kilo/kilo-auto/small`
-- `kilo/kwaipilot/kat-coder-air-v2.5`
 - `kilo/kwaipilot/kat-coder-pro-v2`
 - `kilo/kwaipilot/kat-coder-pro-v2.5`
 - `kilo/liquid/lfm-2.5-2.6b:free`
@@ -1758,7 +1765,6 @@ The CLI does not expose a complete list.
 - `kilo/stepfun/step-3.7-flash:free`
 - `kilo/tencent/hy3`
 - `kilo/tencent/hy3-preview`
-- `kilo/tencent/hy3:free`
 - `kilo/tencent/hy4-preview`
 - `kilo/thedrummer/unslopnemo-12b`
 - `kilo/thinkingmachines/inkling`

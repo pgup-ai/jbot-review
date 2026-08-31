@@ -53,9 +53,11 @@ describe('piSupportsProvider', () => {
     }
   });
 
-  it('rejects CLI-backend and unknown providers', () => {
-    // CLI backends never route through an SDK engine; unknowns fail closed.
+  it('rejects CLI-backend, pi-catalog-lacking, and unknown providers', () => {
+    // CLI backends never route through an SDK engine; tokenrouter is non-CLI
+    // but absent from pi's static catalog; unknowns fail closed.
     for (const providerID of [
+      'tokenrouter',
       'kilo',
       'cline',
       'cline-pass',
