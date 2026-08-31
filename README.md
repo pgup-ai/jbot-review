@@ -422,7 +422,7 @@ allowlist covers `anthropic`, `openai`,
 `google`, `deepseek`, `xai`, `openrouter`,
 `fireworks-ai`, `zai-coding-plan`, `xiaomi-token-plan-sgp`, `nvidia`, and the
 `opencode`/`opencode-go` Zen gateways (which pi reaches over their HTTP
-endpoint directly, not through the opencode server). `kimi-for-coding` and
+endpoint directly, not through the opencode server). `kimi-for-coding`, `tokenrouter`, and
 `openai-compatible` stay on opencode. Set the Action input `sdk-engine: opencode`
 or, for hosted/local runs, `JBOT_SDK_ENGINE=opencode` to pin every SDK session
 to opencode — the one-line rollback if pi misbehaves, and the path CLI backends'
