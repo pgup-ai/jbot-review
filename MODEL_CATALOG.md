@@ -725,7 +725,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode`
 
-- Source: Docker-pinned npm package [`opencode-ai@1.18.21`](https://www.npmjs.com/package/opencode-ai) live provider catalog.
+- Source: Docker-pinned npm package [`opencode-ai@1.18.25`](https://www.npmjs.com/package/opencode-ai) live provider catalog.
 - Refresh/list: `opencode models opencode --pure --refresh`.
 - Note: Exact model values exposed by the pinned OpenCode runtime; the CLI refreshes its Models.dev cache before listing.
 
@@ -795,7 +795,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `opencode-go`
 
-- Source: Docker-pinned npm package [`opencode-ai@1.18.21`](https://www.npmjs.com/package/opencode-ai) live provider catalog.
+- Source: Docker-pinned npm package [`opencode-ai@1.18.25`](https://www.npmjs.com/package/opencode-ai) live provider catalog.
 - Refresh/list: `opencode models opencode-go --pure --refresh`.
 - Note: Exact model values exposed by the pinned OpenCode runtime; the CLI refreshes its Models.dev cache before listing.
 

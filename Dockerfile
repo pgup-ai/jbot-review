@@ -16,7 +16,7 @@ RUN npm config set fetch-retries 5 \
 # on Node 24. Pinned exactly: with @latest the buildx layer cache froze whatever version
 # the last cache bust happened to grab — bump versions here deliberately instead.
 # CommandCode hard-codes selectable model IDs, so bump its pin when it rejects a new model.
-RUN npm install -g opencode-ai@1.18.21 command-code@1.39.2 cline@3.0.60 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 @agentclientprotocol/codex-acp@1.1.7 \
+RUN npm install -g opencode-ai@1.18.25 command-code@1.39.2 cline@3.0.60 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 @agentclientprotocol/codex-acp@1.1.7 \
   && npm cache clean --force \
   && opencode --version \
   && command-code --no-auto-update --version \
