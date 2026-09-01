@@ -63,6 +63,11 @@ async function main(): Promise<void> {
     dynamicFanout: parseBooleanInput('dynamic-fanout', true),
     promptCache: parseBooleanInput('prompt-cache', true),
     skipDocOnly: parseBooleanInput('skip-doc-only', true),
+    // Only PR-event runs may skip an unchanged diff; an explicit ask
+    // (comment trigger, manual dispatch) always reviews.
+    skipUnchanged:
+      parseBooleanInput('skip-unchanged', true) &&
+      ['pull_request', 'pull_request_target'].includes(github.context.eventName),
     maxConcurrentSessions: parseNumberInput('max-concurrent-sessions', 3),
     reviewTelemetry: parseBooleanInput('review-telemetry', true),
     evidenceQuotes: parseBooleanInput('evidence-quotes', true),
@@ -104,7 +109,7 @@ async function main(): Promise<void> {
     );
     options.sdkEngine = sdkEngineForProxy(options.sdkEngine, options.opencodeProxyEnv);
     core.info(
-      `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} dynamicFanout=${options.dynamicFanout} contextTrim=${options.contextTrim} embeddedFirstPrompt=${options.embeddedFirstPrompt}`,
+      `Options: sdkEngine=${options.sdkEngine} dryRun=${options.dryRun} autoApprove=${options.autoApprove} maxFindings=${options.maxFindings} minSeverity=${options.minSeverity} includePriorComments=${options.includePriorComments} context7=${options.context7Mode} reviewPasses=${options.reviewPasses} verifyFindings=${options.verifyFindings} timeBudget=${options.timeBudgetMinutes}m shards=${options.reviewShards || 'auto'} promptCache=${options.promptCache} skipDocOnly=${options.skipDocOnly} skipUnchanged=${options.skipUnchanged} dynamicFanout=${options.dynamicFanout} contextTrim=${options.contextTrim} embeddedFirstPrompt=${options.embeddedFirstPrompt}`,
     );
 
     const { model, auxModel } = pickReviewModels(

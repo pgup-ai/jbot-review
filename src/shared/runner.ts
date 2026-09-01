@@ -89,6 +89,7 @@ import {
   buildDiffHunksBlockWithMetadata,
   classifyChangeShape,
   isDocOnlyChange,
+  samePatchSet,
   shardFilesForReview,
   touchesRiskyPath,
 } from './diff-context.ts';
@@ -908,6 +909,17 @@ export interface ReviewRunOptions {
    * the whole model cost) and leaves the review reaction unchanged.
    */
   skipDocOnly?: boolean;
+  /**
+   * Skip the run when the merge-base-relative patch set is byte-identical to
+   * the one the last POSTED review covered — the common "Update branch" merge
+   * from main. Deterministic and fail-open: no reviewed head, a same-head
+   * rerun, an auto-approve run (the newest head must get re-approved), a
+   * compare failure or cap, or any patchless file forces the full review.
+   * Entries
+   * disable it for comment-triggered and manual runs so an explicit ask
+   * always reviews.
+   */
+  skipUnchanged?: boolean;
   /** Scale recall-supplement fan-out down for low-risk diffs (see `fanout.ts`); default true. Never gates the main review or verify; false forces full fan-out. */
   dynamicFanout?: boolean;
   /**
@@ -1266,6 +1278,42 @@ async function runReviewPipeline(params: {
     await finalizePriorResolvedReviews([]);
     finishTelemetry('skipped');
     return;
+  }
+
+  // Unchanged-diff gate (contract on `skipUnchanged`): nothing new for the
+  // model at this exact content, so skip before any server boot or LLM session.
+  // Auto-approve runs never skip: approval must re-attest the latest pushed
+  // head, and a skipped run would leave the prior approval stranded on the old
+  // head — blocking PRs behind stale-approval-dismissing branch protection.
+  if (!localDiff && options.skipUnchanged && !options.autoApprove && headSha && baseRef) {
+    const reviewedHead = findLatestReviewedHead(priorJbotReviewGroups.map((group) => group.body));
+    // Same-head reruns are never assumed unchanged: the base may have advanced
+    // since that review, and a same-head compare would only test today's diff
+    // against itself — only a different head has a meaningful comparison.
+    if (reviewedHead && reviewedHead !== headSha) {
+      const priorFiles = await compareCommitFiles(
+        octokit,
+        owner,
+        repo,
+        baseRef,
+        reviewedHead,
+      ).catch((error) => {
+        log(
+          `Unchanged-diff check unavailable; running the full review: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return null;
+      });
+      if (priorFiles !== null && samePatchSet(rawFiles, priorFiles)) {
+        log(
+          `Diff unchanged since the last posted review (head ${reviewedHead.slice(0, 7)}); skipping the full review.`,
+        );
+        await finalizePriorResolvedReviews([]);
+        finishTelemetry('skipped');
+        return;
+      }
+    }
   }
 
   const piEngine = resolvePiEngine(
@@ -3158,6 +3206,7 @@ export function normalizeOptions(
     modelOptionsExplicit: options?.modelOptionsExplicit ?? false,
     promptCache: options?.promptCache ?? true,
     skipDocOnly: options?.skipDocOnly ?? true,
+    skipUnchanged: options?.skipUnchanged ?? true,
     dynamicFanout: options?.dynamicFanout ?? true,
     // Capped by default: throttled tiers serialize upstream anyway, and an
     // uncapped burst turns session deadlines into queue-time measurements

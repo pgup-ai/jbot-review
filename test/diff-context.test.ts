@@ -11,6 +11,7 @@ import {
   diffRiskScore,
   isDocFile,
   isDocOnlyChange,
+  samePatchSet,
   shardFilesForReview,
 } from '../src/shared/diff-context.ts';
 import type { PrFile } from '../src/shared/github.ts';
@@ -523,6 +524,30 @@ describe('isDocOnlyChange', () => {
 
   it('is not doc-only for an empty change set (nothing to skip)', () => {
     assert.equal(isDocOnlyChange([]), false);
+  });
+});
+
+describe('samePatchSet', () => {
+  const a = { filename: 'src/a.ts', patch: '@@ -1 +1 @@\n-x\n+y' };
+  const b = { filename: 'src/b.ts', patch: '@@ -2 +2 @@\n-p\n+q' };
+
+  it('matches identical patch sets regardless of file order', () => {
+    assert.equal(samePatchSet([a, b], [b, a]), true);
+  });
+
+  it('differs on patch text, membership, or filenames', () => {
+    assert.equal(samePatchSet([a, b], [a, { ...b, patch: '@@ -2 +2 @@\n-p\n+z' }]), false);
+    assert.equal(samePatchSet([a, b], [a]), false);
+    assert.equal(samePatchSet([a], [a, b]), false);
+    assert.equal(samePatchSet([a, b], [a, { ...b, filename: 'src/c.ts' }]), false);
+  });
+
+  it('fails open when any file on either side lacks a patch (binary/omitted)', () => {
+    const patchless = { filename: 'img.png' };
+    assert.equal(samePatchSet([a, patchless], [a, patchless]), false);
+    assert.equal(samePatchSet([a], [{ filename: 'src/a.ts' }]), false);
+    // Empty sets have nothing unreviewed to skip over; the no-files gate owns that case.
+    assert.equal(samePatchSet([], []), false);
   });
 });
 

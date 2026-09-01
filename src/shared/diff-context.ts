@@ -53,6 +53,24 @@ export function isDocOnlyChange(filenames: string[]): boolean {
 }
 
 /**
+ * Byte-identical patch-set equality — the unchanged-diff skip gate's
+ * comparator. A file without patch text on either side (binaries,
+ * GitHub-omitted large patches) makes the sets incomparable and returns
+ * false, failing open to a full review; empty sets are false because the
+ * no-reviewable-files gate owns that case.
+ */
+export function samePatchSet(
+  current: ReadonlyArray<{ filename: string; patch?: string }>,
+  prior: ReadonlyArray<{ filename: string; patch?: string }>,
+): boolean {
+  if (current.length === 0 || current.length !== prior.length) return false;
+  const priorByPath = new Map(prior.map((file) => [file.filename, file.patch]));
+  return current.every(
+    (file) => Boolean(file.patch) && priorByPath.get(file.filename) === file.patch,
+  );
+}
+
+/**
  * ~10K tokens. The block is replicated into every session of a run (main,
  * lenses, compliance, verification), so the cap is per-fragment, not per-run.
  */
