@@ -630,7 +630,7 @@ interface CommandCodeUsageWindow {
   exceeded: boolean;
 }
 
-export interface CommandCodeMonthlyWindow {
+interface CommandCodeMonthlyWindow {
   used: number;
   cap: number;
   /** Billing-period end — rendered as a date, unlike the rolling windows. */
@@ -699,18 +699,29 @@ export function parseCommandCodePeriodBounds(
   if (typeof currentPeriodStart !== 'string' || typeof currentPeriodEnd !== 'string') {
     return undefined;
   }
+  // Both bounds must parse and order forward: startIso becomes the summary
+  // request's `since`, and a garbage interval can return the wrong period's
+  // spend rather than fail.
+  const startMs = Date.parse(currentPeriodStart);
   const endMs = Date.parse(currentPeriodEnd);
-  return Number.isFinite(endMs) ? { startIso: currentPeriodStart, endMs } : undefined;
+  return Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs
+    ? { startIso: currentPeriodStart, endMs }
+    : undefined;
 }
 
-/** Plan total = spent so far + remaining; a zero total means nothing to meter. */
+/**
+ * Plan total = spent so far + remaining. A zero total (free account) has
+ * nothing to meter, and a NEGATIVE remaining would shrink the cap below the
+ * plan's real total — both drop the segment. Spend and period end arrive
+ * pre-validated by their parsers.
+ */
 export function composeCommandCodeMonthlyWindow(
   spentCredits: number,
   remainingCredits: number,
   periodEndMs: number,
 ): CommandCodeMonthlyWindow | undefined {
   const cap = spentCredits + remainingCredits;
-  return cap > 0 ? { used: spentCredits, cap, periodEndMs } : undefined;
+  return remainingCredits >= 0 && cap > 0 ? { used: spentCredits, cap, periodEndMs } : undefined;
 }
 
 // Sub-percent spend must stay distinguishable from a meter at zero.

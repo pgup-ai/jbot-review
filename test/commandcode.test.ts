@@ -404,12 +404,20 @@ describe('CommandCode plan usage', () => {
       null,
       {},
       { data: { currentPeriodEnd: '2026-09-13T22:06:17.000Z' } },
-      { data: { currentPeriodStart: 'x', currentPeriodEnd: 'soon' } },
+      { data: { currentPeriodStart: 'x', currentPeriodEnd: '2026-09-13T22:06:17.000Z' } },
+      {
+        data: {
+          currentPeriodStart: '2026-09-13T22:06:17.000Z',
+          currentPeriodEnd: '2026-08-13T22:06:17.000Z',
+        },
+      },
     ]) {
       assert.equal(parseCommandCodePeriodBounds(bad), undefined);
     }
-    // Zero plan total (free account) has nothing to meter.
+    // Zero plan total (free account) has nothing to meter, and a negative
+    // remaining would shrink the cap below the plan's real total.
     assert.equal(composeCommandCodeMonthlyWindow(0, 0, 1), undefined);
+    assert.equal(composeCommandCodeMonthlyWindow(32, -5, 1), undefined);
 
     const usage = parseCommandCodePlanUsage(payload);
     assert.ok(usage);
