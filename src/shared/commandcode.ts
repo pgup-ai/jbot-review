@@ -734,6 +734,10 @@ function percentLabel(used: number, cap: number): string {
 }
 
 export function formatCommandCodePlanUsage(usage: CommandCodePlanUsage, now: number): string {
+  return `CommandCode plan usage: ${formatCommandCodePlanUsageBody(usage, now)}`;
+}
+
+function formatCommandCodePlanUsageBody(usage: CommandCodePlanUsage, now: number): string {
   const meter = (label: string, window?: CommandCodeUsageWindow): string | undefined => {
     if (!window) return undefined;
     return `${label} ${window.used.toFixed(1)}/${window.cap} (${percentLabel(window.used, window.cap)}${
@@ -755,7 +759,7 @@ export function formatCommandCodePlanUsage(usage: CommandCodePlanUsage, now: num
     .join(', ');
   const purchased =
     usage.purchasedCredits > 0 ? ` + ${usage.purchasedCredits.toFixed(1)} purchased` : '';
-  return `CommandCode plan usage: ${windows ? `${windows}; ` : ''}${usage.monthlyCredits.toFixed(1)} plan credits remaining${purchased}.`;
+  return `${windows ? `${windows}; ` : ''}${usage.monthlyCredits.toFixed(1)} plan credits remaining${purchased}.`;
 }
 
 function formatShortDuration(ms: number): string {
@@ -779,21 +783,6 @@ async function commandCodeApiJson(
   return response.json();
 }
 
-async function fetchCommandCodeCreditsUsage(
-  accessKey: string,
-): Promise<CommandCodePlanUsage | undefined> {
-  try {
-    // Full usage timeout, not the enrichment tier: the probe decides the run's
-    // credential, and a cold process (DNS + TLS on first contact — the Action's
-    // normal shape) can exceed 1.5s and silently degrade the pick to fallback.
-    return parseCommandCodePlanUsage(
-      await commandCodeApiJson(accessKey, '/alpha/billing/credits', COMMANDCODE_USAGE_TIMEOUT_MS),
-    );
-  } catch {
-    return undefined;
-  }
-}
-
 export function splitCommandCodeAccessKeys(value: string): string[] {
   return value
     .split(',')
@@ -806,12 +795,20 @@ interface CommandCodeKeyProbe {
   usage?: CommandCodePlanUsage;
 }
 
+/** Share of the monthly plan left, or undefined when the total could not be composed. */
+function planShareRemaining(usage: CommandCodePlanUsage): number | undefined {
+  return usage.monthly ? usage.monthlyCredits / usage.monthly.cap : undefined;
+}
+
 /**
  * Window-aware pick: keys throttled RIGHT NOW (a rolling window exceeded)
- * lose to keys that can run, then the most monthly credits remaining wins —
- * draining the fullest plan first keeps every key inside its included
- * allowance. Unreachable probes are excluded; when none are reachable the
- * first key wins, which is exactly the legacy single-key behavior.
+ * lose to keys that can run. Ranking is by the PERCENTAGE of the monthly plan
+ * remaining, not absolute credits: allowances expire at period end, so
+ * burning all plans down proportionally is what keeps a small plan's credits
+ * from expiring unused next to a large one. Keys whose plan total could not
+ * be composed rank below known ones; absolute credits remaining break ties.
+ * Unreachable probes are excluded; when none are reachable the first key
+ * wins, which is exactly the legacy single-key behavior.
  */
 export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[]): {
   key: string;
@@ -827,46 +824,88 @@ export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[])
     (probe) => !probe.usage.fiveHour?.exceeded && !probe.usage.weekly?.exceeded,
   );
   const pool = windowOpen.length > 0 ? windowOpen : reachable;
-  const best = pool.reduce((a, b) => (b.usage.monthlyCredits > a.usage.monthlyCredits ? b : a));
+  const best = pool.reduce((a, b) => {
+    const shareA = planShareRemaining(a.usage) ?? -1;
+    const shareB = planShareRemaining(b.usage) ?? -1;
+    if (shareB > shareA) return b;
+    if (shareB === shareA && b.usage.monthlyCredits > a.usage.monthlyCredits) return b;
+    return a;
+  });
   // Counted over REACHABLE keys: an unreachable probe's window state is unknown.
   const prefix = windowOpen.length === 0 ? `all ${reachable.length} window-limited; ` : '';
+  const share = planShareRemaining(best.usage);
+  const standing =
+    share === undefined
+      ? `${best.usage.monthlyCredits.toFixed(1)} credits remaining`
+      : `${Math.round(share * 100)}% of plan left`;
   return {
     key: best.key,
     reason:
       `${prefix}picked ${probes.indexOf(best) + 1}/${probes.length} ` +
-      `(…${best.key.slice(-4)}, ${best.usage.monthlyCredits.toFixed(1)} credits remaining)`,
+      `(…${best.key.slice(-4)}, ${standing})`,
   };
+}
+
+/** One per-key meter line logged BEFORE the pick, so the decision's inputs are visible. */
+export function formatCommandCodeKeyProbeLine(
+  probe: CommandCodeKeyProbe,
+  index: number,
+  total: number,
+  now: number,
+): string {
+  const label = `CommandCode key ${index + 1}/${total} (…${probe.key.slice(-4)})`;
+  return probe.usage
+    ? `${label}: ${formatCommandCodePlanUsageBody(probe.usage, now)}`
+    : `${label}: usage unavailable.`;
 }
 
 /**
  * Resolves a possibly comma-separated access-key list to the one key this run
  * uses. A comma-free value returns VERBATIM with no probe or log — the legacy
- * path stays byte-identical. Stray separators around one real key normalize
- * to that key (still probe-free); multiple keys probe their credits in
- * parallel and take the window-aware pick above. Per-run and sticky: no
- * mid-run rotation.
+ * path stays byte-identical (`usageLogged: false` tells the caller to log the
+ * plan-usage line as it always has). Stray separators around one real key
+ * normalize to that key (still probe-free). Multiple keys probe their FULL
+ * usage in parallel, log one meter line per key BEFORE the pick so the
+ * decision's inputs are visible, then take the window-aware pick above.
+ * Per-run and sticky: no mid-run rotation.
  */
 export async function selectCommandCodeAccessKey(
   rawValue: string,
   log: (msg: string) => void,
-): Promise<string> {
-  if (!rawValue.includes(',')) return rawValue;
+): Promise<{ key: string; usageLogged: boolean }> {
+  if (!rawValue.includes(',')) return { key: rawValue, usageLogged: false };
   const keys = splitCommandCodeAccessKeys(rawValue);
   // Nothing parseable keeps the raw value: legacy garbage-in behavior.
-  if (keys.length === 0) return rawValue;
-  if (keys.length === 1) return keys[0];
+  if (keys.length === 0) return { key: rawValue, usageLogged: false };
+  if (keys.length === 1) return { key: keys[0], usageLogged: false };
   const probes = await Promise.all(
-    keys.map(async (key) => ({ key, usage: await fetchCommandCodeCreditsUsage(key) })),
+    keys.map(async (key) => ({ key, usage: await fetchCommandCodeFullUsage(key) })),
+  );
+  const now = Date.now();
+  probes.forEach((probe, index) =>
+    log(formatCommandCodeKeyProbeLine(probe, index, probes.length, now)),
   );
   const picked = pickCommandCodeAccessKey(probes);
   log(`CommandCode key: ${picked.reason}`);
-  return picked.key;
+  return { key: picked.key, usageLogged: true };
 }
 
 /** One log line of live plan usage, or undefined on ANY failure — never throws. */
 export async function fetchCommandCodePlanUsageLine(
   accessKey: string,
 ): Promise<string | undefined> {
+  const usage = await fetchCommandCodeFullUsage(accessKey);
+  return usage && formatCommandCodePlanUsage(usage, Date.now());
+}
+
+/**
+ * Full composed usage (credits at the standard timeout — a cold process's
+ * first contact must not flake the probe — monthly enrichment on its shorter
+ * tier), or undefined on ANY failure. Never throws.
+ */
+async function fetchCommandCodeFullUsage(
+  accessKey: string,
+): Promise<CommandCodePlanUsage | undefined> {
   const getJson = (path: string, timeoutMs: number): Promise<unknown> =>
     commandCodeApiJson(accessKey, path, timeoutMs);
   try {
@@ -892,7 +931,7 @@ export async function fetchCommandCodePlanUsageLine(
         usage.monthly = composeCommandCodeMonthlyWindow(spent, usage.monthlyCredits, bounds.endMs);
       }
     }
-    return formatCommandCodePlanUsage(usage, Date.now());
+    return usage;
   } catch {
     return undefined;
   }
