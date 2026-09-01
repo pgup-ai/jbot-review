@@ -1348,11 +1348,16 @@ async function runReviewPipeline(params: {
     auxPiModelAvailable,
   });
   const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
-  // Live plan meters (what the CLI's /usage view shows), logged at teardown so
-  // the numbers include this run's own spend. Backend selection owns the
-  // main-wins key policy; empty when no role routed to commandcode, so
-  // skipped and non-commandcode runs stay silent.
+  // Live plan meters (what the CLI's /usage view shows), logged up front so
+  // the remaining allowance is visible before the run spends into it. Backend
+  // selection owns the main-wins key policy; empty when no role routed to
+  // commandcode, so skipped and non-commandcode runs stay silent.
   const commandCodePlanUsageKey = backendSelection.commandCodeAccessKey;
+  if (commandCodePlanUsageKey) {
+    const planUsage = await fetchCommandCodePlanUsageLine(commandCodePlanUsageKey);
+    // The absence line keeps alpha-API drift visible instead of silent.
+    log(planUsage ?? 'CommandCode plan usage unavailable.');
+  }
   const mainOnPi = backendSelection.mainSdkEngine === 'pi';
   const auxOnPi = backendSelection.auxSdkEngine === 'pi';
   const mainOnPoolside = backendSelection.mainSdkEngine === 'poolside';
@@ -3073,15 +3078,6 @@ async function runReviewPipeline(params: {
     postingDone();
     finishTelemetry('completed');
   } finally {
-    if (commandCodePlanUsageKey) {
-      try {
-        const planUsage = await fetchCommandCodePlanUsageLine(commandCodePlanUsageKey);
-        // The absence line keeps alpha-API drift visible instead of silent.
-        log(planUsage ?? 'CommandCode plan usage unavailable.');
-      } catch {
-        // Best-effort reporting must never block teardown or mask the run's error.
-      }
-    }
     const teardownDone = phases.start({ phase: 'teardown', scope: 'run' });
     let teardownCompleted = false;
     try {
