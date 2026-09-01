@@ -268,7 +268,7 @@ interface ReviewNodesResponse {
 export interface PriorJbotThreads {
   /** Open jbot finding threads — review context + duplicate-suppression input. */
   threads: PriorJbotThread[];
-  /** Jbot reviews with their finding threads, including resolved threads. */
+  /** Every prior jbot review — clean ones included — with any finding threads attached. */
   reviewGroups: JbotReviewGroup[];
   /**
    * Threads jbot already replied to as addressed (marker present) but that are
@@ -472,9 +472,10 @@ export async function listPriorJbotThreads(
     }
   } while (after);
 
-  const reviewGroups = commentState
-    ? [...commentState.reviewGroupsById.values()].filter((review) => review.threads.length > 0)
-    : [];
+  // Unfiltered: zero-thread (clean) reviews must stay visible so the
+  // unchanged-diff gate can read the latest reviewed head; the compaction
+  // selector already rejects thread-less reviews itself.
+  const reviewGroups = commentState ? [...commentState.reviewGroupsById.values()] : [];
   return { threads, reviewGroups, unresolvedAddressedThreadIds, outcomes };
 }
 

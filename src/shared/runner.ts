@@ -912,8 +912,9 @@ export interface ReviewRunOptions {
   /**
    * Skip the run when the merge-base-relative patch set is byte-identical to
    * the one the last POSTED review covered — the common "Update branch" merge
-   * from main. Deterministic and fail-open: no reviewed head, a compare
-   * failure or cap, or any patchless file forces the full review. Entries
+   * from main. Deterministic and fail-open: no reviewed head, a same-head
+   * rerun, a compare failure or cap, or any patchless file forces the full
+   * review. Entries
    * disable it for comment-triggered and manual runs so an explicit ask
    * always reviews.
    */
@@ -1282,8 +1283,10 @@ async function runReviewPipeline(params: {
   // model at this exact content, so skip before any server boot or LLM session.
   if (!localDiff && options.skipUnchanged && headSha && baseRef) {
     const reviewedHead = findLatestReviewedHead(priorJbotReviewGroups.map((group) => group.body));
-    let unchanged = reviewedHead === headSha;
-    if (!unchanged && reviewedHead) {
+    // Same-head reruns are never assumed unchanged: the base may have advanced
+    // since that review, and a same-head compare would only test today's diff
+    // against itself — only a different head has a meaningful comparison.
+    if (reviewedHead && reviewedHead !== headSha) {
       const priorFiles = await compareCommitFiles(
         octokit,
         owner,
@@ -1298,15 +1301,14 @@ async function runReviewPipeline(params: {
         );
         return null;
       });
-      unchanged = priorFiles !== null && samePatchSet(rawFiles, priorFiles);
-    }
-    if (unchanged) {
-      log(
-        `Diff unchanged since the last posted review (head ${reviewedHead?.slice(0, 7)}); skipping the full review.`,
-      );
-      await finalizePriorResolvedReviews([]);
-      finishTelemetry('skipped');
-      return;
+      if (priorFiles !== null && samePatchSet(rawFiles, priorFiles)) {
+        log(
+          `Diff unchanged since the last posted review (head ${reviewedHead.slice(0, 7)}); skipping the full review.`,
+        );
+        await finalizePriorResolvedReviews([]);
+        finishTelemetry('skipped');
+        return;
+      }
     }
   }
 
