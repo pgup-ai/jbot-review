@@ -613,17 +613,31 @@ export function commandCodeEnvForHome(home: string | undefined): NodeJS.ProcessE
   return env;
 }
 
-// The same alpha endpoint the pinned CLI's /usage view reads (fetchUsageData
+// The same alpha endpoints the pinned CLI's /usage view reads (fetchUsageData
 // in its bundle), Bearer-authed with the access key. Alpha API: every shape
 // drift parses to undefined — usage visibility must never fail a run.
-const COMMANDCODE_USAGE_URL = 'https://api.commandcode.ai/alpha/billing/credits';
+// The credits payload carries the 5h/weekly meters and the remaining balance;
+// the monthly meter is COMPOSED like the TUI does it: spend-this-period from
+// the usage summary + remaining = plan total, reset date from the
+// subscription's period end.
+const COMMANDCODE_API_BASE = 'https://api.commandcode.ai';
 const COMMANDCODE_USAGE_TIMEOUT_MS = 4_000;
+// Enrichment calls get less patience: the core line must never sit hostage to
+// a slow secondary endpoint whose meter it can simply drop.
+const COMMANDCODE_ENRICHMENT_TIMEOUT_MS = 1_500;
 
 interface CommandCodeUsageWindow {
   used: number;
   cap: number;
   resetAt: number;
   exceeded: boolean;
+}
+
+interface CommandCodeMonthlyWindow {
+  used: number;
+  cap: number;
+  /** Billing-period end — rendered as a date, unlike the rolling windows. */
+  periodEndMs: number;
 }
 
 export interface CommandCodePlanUsage {
@@ -633,6 +647,8 @@ export interface CommandCodePlanUsage {
   purchasedCredits: number;
   fiveHour?: CommandCodeUsageWindow;
   weekly?: CommandCodeUsageWindow;
+  /** Enrichment from the summary + subscription endpoints; absent when either is unavailable. */
+  monthly?: CommandCodeMonthlyWindow;
 }
 
 export function parseCommandCodePlanUsage(payload: unknown): CommandCodePlanUsage | undefined {
@@ -667,17 +683,74 @@ export function parseCommandCodePlanUsage(payload: unknown): CommandCodePlanUsag
   };
 }
 
+/**
+ * Billing-period spend (`totalMonthlyCredits`) from the usage summary, or
+ * undefined on drift.
+ */
+export function parseCommandCodeMonthlySpend(payload: unknown): number | undefined {
+  if (!isNonArrayRecord(payload)) return undefined;
+  const spent = payload.totalMonthlyCredits;
+  return isFiniteNumber(spent) && spent >= 0 ? spent : undefined;
+}
+
+/** Billing-period bounds from the subscription payload, or undefined on drift. */
+export function parseCommandCodePeriodBounds(
+  payload: unknown,
+): { startIso: string; endMs: number } | undefined {
+  if (!isNonArrayRecord(payload) || !isNonArrayRecord(payload.data)) return undefined;
+  const { currentPeriodStart, currentPeriodEnd } = payload.data;
+  if (typeof currentPeriodStart !== 'string' || typeof currentPeriodEnd !== 'string') {
+    return undefined;
+  }
+  // Both bounds must parse and order forward: startIso becomes the summary
+  // request's `since`, and a garbage interval can return the wrong period's
+  // spend rather than fail.
+  const startMs = Date.parse(currentPeriodStart);
+  const endMs = Date.parse(currentPeriodEnd);
+  return Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs
+    ? { startIso: currentPeriodStart, endMs }
+    : undefined;
+}
+
+/**
+ * Plan total = spent so far + remaining. A zero total (free account) has
+ * nothing to meter, and a NEGATIVE remaining would shrink the cap below the
+ * plan's real total — both drop the segment. Spend and period end arrive
+ * pre-validated by their parsers.
+ */
+export function composeCommandCodeMonthlyWindow(
+  spentCredits: number,
+  remainingCredits: number,
+  periodEndMs: number,
+): CommandCodeMonthlyWindow | undefined {
+  const cap = spentCredits + remainingCredits;
+  return remainingCredits >= 0 && cap > 0 ? { used: spentCredits, cap, periodEndMs } : undefined;
+}
+
+// Sub-percent spend must stay distinguishable from a meter at zero.
+function percentLabel(used: number, cap: number): string {
+  const percent = (used / cap) * 100;
+  return percent > 0 && percent < 1 ? '<1%' : `${Math.round(percent)}%`;
+}
+
 export function formatCommandCodePlanUsage(usage: CommandCodePlanUsage, now: number): string {
   const meter = (label: string, window?: CommandCodeUsageWindow): string | undefined => {
     if (!window) return undefined;
-    const percent = (window.used / window.cap) * 100;
-    // Sub-percent spend must stay distinguishable from a meter at zero.
-    const percentLabel = percent > 0 && percent < 1 ? '<1%' : `${Math.round(percent)}%`;
-    return `${label} ${window.used.toFixed(1)}/${window.cap} (${percentLabel}${
+    return `${label} ${window.used.toFixed(1)}/${window.cap} (${percentLabel(window.used, window.cap)}${
       window.exceeded ? ', EXCEEDED' : ''
     }, resets in ${formatShortDuration(Math.max(window.resetAt - now, 0))})`;
   };
-  const windows = [meter('5h', usage.fiveHour), meter('weekly', usage.weekly)]
+  const monthly = usage.monthly
+    ? `monthly ${usage.monthly.used.toFixed(1)}/${usage.monthly.cap.toFixed(1)} (${percentLabel(
+        usage.monthly.used,
+        usage.monthly.cap,
+      )}, resets ${new Date(usage.monthly.periodEndMs).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        timeZone: 'UTC',
+      })})`
+    : undefined;
+  const windows = [meter('5h', usage.fiveHour), meter('weekly', usage.weekly), monthly]
     .filter(Boolean)
     .join(', ');
   const purchased =
@@ -697,14 +770,38 @@ function formatShortDuration(ms: number): string {
 export async function fetchCommandCodePlanUsageLine(
   accessKey: string,
 ): Promise<string | undefined> {
-  try {
-    const response = await fetch(COMMANDCODE_USAGE_URL, {
+  const getJson = async (path: string, timeoutMs: number): Promise<unknown> => {
+    const response = await fetch(`${COMMANDCODE_API_BASE}${path}`, {
       headers: { Authorization: `Bearer ${accessKey}` },
-      signal: AbortSignal.timeout(COMMANDCODE_USAGE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!response.ok) return undefined;
-    const usage = parseCommandCodePlanUsage(await response.json());
-    return usage && formatCommandCodePlanUsage(usage, Date.now());
+    if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+    return response.json();
+  };
+  try {
+    const [creditsPayload, subscriptionPayload] = await Promise.all([
+      getJson('/alpha/billing/credits', COMMANDCODE_USAGE_TIMEOUT_MS),
+      // The monthly meter is an enrichment: its two secondary requests failing
+      // (or drifting) drop only the monthly segment, never the whole line.
+      getJson('/alpha/billing/subscriptions', COMMANDCODE_ENRICHMENT_TIMEOUT_MS).catch(
+        () => undefined,
+      ),
+    ]);
+    const usage = parseCommandCodePlanUsage(creditsPayload);
+    if (!usage) return undefined;
+    const bounds = parseCommandCodePeriodBounds(subscriptionPayload);
+    if (bounds) {
+      const spent = parseCommandCodeMonthlySpend(
+        await getJson(
+          `/alpha/usage/summary?since=${encodeURIComponent(bounds.startIso)}`,
+          COMMANDCODE_ENRICHMENT_TIMEOUT_MS,
+        ).catch(() => undefined),
+      );
+      if (spent !== undefined) {
+        usage.monthly = composeCommandCodeMonthlyWindow(spent, usage.monthlyCredits, bounds.endMs);
+      }
+    }
+    return formatCommandCodePlanUsage(usage, Date.now());
   } catch {
     return undefined;
   }
