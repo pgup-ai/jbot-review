@@ -541,13 +541,12 @@ describe('CommandCode multi-key pick', () => {
     assert.equal(weeklyPick.key, 'tiny');
     assert.match(weeklyPick.reason, /picked 2\/2 \(…tiny, 85% of weekly limit left\)/);
     // No weekly cap at all means nothing can throttle: full headroom.
-    assert.equal(
-      pickCommandCodeAccessKey([
-        { key: 'capped', usage: withWeekly(50, 1, 35) },
-        { key: 'unlimited', usage: { monthlyCredits: 1, purchasedCredits: 0 } },
-      ]).key,
-      'unlimited',
-    );
+    const uncapped = pickCommandCodeAccessKey([
+      { key: 'capped', usage: withWeekly(50, 1, 35) },
+      { key: 'unlimited', usage: { monthlyCredits: 1, purchasedCredits: 0 } },
+    ]);
+    assert.equal(uncapped.key, 'unlimited');
+    assert.match(uncapped.reason, /\(…ited, no weekly limit\)$/);
     // Equal weekly headroom: most credits remaining wins; ties keep the first.
     assert.equal(
       pickCommandCodeAccessKey([

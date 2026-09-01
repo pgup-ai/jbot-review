@@ -835,11 +835,15 @@ export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[])
   });
   // Counted over REACHABLE keys: an unreachable probe's window state is unknown.
   const prefix = windowOpen.length === 0 ? `all ${reachable.length} window-limited; ` : '';
+  // The full-headroom sentinel for an uncapped account must not read as a real meter.
+  const standing = best.usage.weekly
+    ? `${Math.round(weeklyHeadroom(best.usage) * 100)}% of weekly limit left`
+    : 'no weekly limit';
   return {
     key: best.key,
     reason:
       `${prefix}picked ${probes.indexOf(best) + 1}/${probes.length} ` +
-      `(…${best.key.slice(-4)}, ${Math.round(weeklyHeadroom(best.usage) * 100)}% of weekly limit left)`,
+      `(…${best.key.slice(-4)}, ${standing})`,
   };
 }
 
