@@ -622,9 +622,11 @@ export function commandCodeEnvForHome(home: string | undefined): NodeJS.ProcessE
 // subscription's period end.
 const COMMANDCODE_API_BASE = 'https://api.commandcode.ai';
 const COMMANDCODE_USAGE_TIMEOUT_MS = 4_000;
-// Enrichment calls get less patience: the core line must never sit hostage to
-// a slow secondary endpoint whose meter it can simply drop.
-const COMMANDCODE_ENRICHMENT_TIMEOUT_MS = 1_500;
+// Enrichment calls get less patience than the core call: the line must never
+// sit hostage to a slow secondary endpoint whose meter it can simply drop.
+// 3s, not less: the subscriptions endpoint measures ~1.1s warm on some
+// accounts, and a cold process (the Action's normal shape) adds DNS + TLS.
+const COMMANDCODE_ENRICHMENT_TIMEOUT_MS = 3_000;
 
 interface CommandCodeUsageWindow {
   used: number;
@@ -795,20 +797,23 @@ interface CommandCodeKeyProbe {
   usage?: CommandCodePlanUsage;
 }
 
-/** Share of the monthly plan left, or undefined when the total could not be composed. */
-function planShareRemaining(usage: CommandCodePlanUsage): number | undefined {
-  return usage.monthly ? usage.monthlyCredits / usage.monthly.cap : undefined;
+/**
+ * Share of the weekly rolling cap still open; no cap at all means nothing can
+ * throttle, so full headroom. An exceeded window floors at zero rather than
+ * ranking by how far over it is.
+ */
+function weeklyHeadroom(usage: CommandCodePlanUsage): number {
+  return usage.weekly ? Math.max(0, 1 - usage.weekly.used / usage.weekly.cap) : 1;
 }
 
 /**
  * Window-aware pick: keys throttled RIGHT NOW (a rolling window exceeded)
- * lose to keys that can run. Ranking is by the PERCENTAGE of the monthly plan
- * remaining, not absolute credits: allowances expire at period end, so
- * burning all plans down proportionally is what keeps a small plan's credits
- * from expiring unused next to a large one. Keys whose plan total could not
- * be composed rank below known ones; absolute credits remaining break ties.
- * Unreachable probes are excluded; when none are reachable the first key
- * wins, which is exactly the legacy single-key behavior.
+ * lose to keys that can run. Ranking is by the share of the WEEKLY cap still
+ * open — the pacing limit that actually throttles a run, read straight from
+ * the credits payload so it never depends on the slower monthly enrichment.
+ * Absolute credits remaining break ties. Unreachable probes are excluded;
+ * when none are reachable the first key wins, which is exactly the legacy
+ * single-key behavior.
  */
 export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[]): {
   key: string;
@@ -825,19 +830,18 @@ export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[])
   );
   const pool = windowOpen.length > 0 ? windowOpen : reachable;
   const best = pool.reduce((a, b) => {
-    const shareA = planShareRemaining(a.usage) ?? -1;
-    const shareB = planShareRemaining(b.usage) ?? -1;
-    if (shareB > shareA) return b;
-    if (shareB === shareA && b.usage.monthlyCredits > a.usage.monthlyCredits) return b;
+    const headroomA = weeklyHeadroom(a.usage);
+    const headroomB = weeklyHeadroom(b.usage);
+    if (headroomB > headroomA) return b;
+    if (headroomB === headroomA && b.usage.monthlyCredits > a.usage.monthlyCredits) return b;
     return a;
   });
   // Counted over REACHABLE keys: an unreachable probe's window state is unknown.
   const prefix = windowOpen.length === 0 ? `all ${reachable.length} window-limited; ` : '';
-  const share = planShareRemaining(best.usage);
-  const standing =
-    share === undefined
-      ? `${best.usage.monthlyCredits.toFixed(1)} credits remaining`
-      : `${Math.round(share * 100)}% of plan left`;
+  // The full-headroom sentinel for an uncapped account must not read as a real meter.
+  const standing = best.usage.weekly
+    ? `${Math.round(weeklyHeadroom(best.usage) * 100)}% of weekly limit left`
+    : 'no weekly limit';
   return {
     key: best.key,
     reason:
