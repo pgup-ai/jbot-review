@@ -528,28 +528,27 @@ describe('CommandCode multi-key pick', () => {
   });
 
   it('picks window-open keys by most remaining credits, failing back sanely', () => {
-    // Percent of plan remaining outranks absolute credits: a small nearly-full
-    // plan beats a large half-drained one (allowances expire at period end).
-    const withPlan = (monthlyCredits, cap) => ({
+    // Share of the WEEKLY limit still open ranks first — read from the credits
+    // payload, so the pick never depends on the slower monthly enrichment.
+    const withWeekly = (monthlyCredits, used, cap) => ({
       ...usage(monthlyCredits),
-      monthly: { used: cap - monthlyCredits, cap, periodEndMs: 1 },
+      weekly: { used, cap, resetAt: 1, exceeded: false },
     });
-    const percentPick = pickCommandCodeAccessKey([
-      { key: 'big', usage: withPlan(36.8, 70.2) },
-      { key: 'tiny', usage: withPlan(7, 7) },
+    const weeklyPick = pickCommandCodeAccessKey([
+      { key: 'big', usage: withWeekly(30.8, 13.2, 35) },
+      { key: 'tiny', usage: withWeekly(9.1, 0.9, 6) },
     ]);
-    assert.equal(percentPick.key, 'tiny');
-    assert.match(percentPick.reason, /picked 2\/2 \(…tiny, 100% of plan left\)/);
-    // A key whose plan total could not be composed ranks below known ones.
+    assert.equal(weeklyPick.key, 'tiny');
+    assert.match(weeklyPick.reason, /picked 2\/2 \(…tiny, 85% of weekly limit left\)/);
+    // No weekly cap at all means nothing can throttle: full headroom.
     assert.equal(
       pickCommandCodeAccessKey([
-        { key: 'known', usage: withPlan(10, 70) },
-        { key: 'unknown', usage: usage(99) },
+        { key: 'capped', usage: withWeekly(50, 1, 35) },
+        { key: 'unlimited', usage: { monthlyCredits: 1, purchasedCredits: 0 } },
       ]).key,
-      'known',
+      'unlimited',
     );
-    // Unknown-total keys (no monthly composed): most credits remaining wins;
-    // ties keep the first.
+    // Equal weekly headroom: most credits remaining wins; ties keep the first.
     assert.equal(
       pickCommandCodeAccessKey([
         { key: 'k1', usage: usage(3) },
@@ -570,7 +569,7 @@ describe('CommandCode multi-key pick', () => {
       { key: 'k2', usage: usage(3) },
     ]);
     assert.equal(windowAware.key, 'k2');
-    assert.match(windowAware.reason, /picked 2\/2 \(…k2, 3\.0 credits remaining\)/);
+    assert.match(windowAware.reason, /picked 2\/2 \(…k2, 97% of weekly limit left\)/);
     // Every window limited: fall back to most remaining, flagged as such.
     const allLimited = pickCommandCodeAccessKey([
       { key: 'k1', usage: usage(9, true) },
