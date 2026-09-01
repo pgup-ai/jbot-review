@@ -622,6 +622,9 @@ export function commandCodeEnvForHome(home: string | undefined): NodeJS.ProcessE
 // subscription's period end.
 const COMMANDCODE_API_BASE = 'https://api.commandcode.ai';
 const COMMANDCODE_USAGE_TIMEOUT_MS = 4_000;
+// Enrichment calls get less patience: the core line must never sit hostage to
+// a slow secondary endpoint whose meter it can simply drop.
+const COMMANDCODE_ENRICHMENT_TIMEOUT_MS = 1_500;
 
 interface CommandCodeUsageWindow {
   used: number;
@@ -767,29 +770,32 @@ function formatShortDuration(ms: number): string {
 export async function fetchCommandCodePlanUsageLine(
   accessKey: string,
 ): Promise<string | undefined> {
-  const getJson = async (path: string): Promise<unknown> => {
+  const getJson = async (path: string, timeoutMs: number): Promise<unknown> => {
     const response = await fetch(`${COMMANDCODE_API_BASE}${path}`, {
       headers: { Authorization: `Bearer ${accessKey}` },
-      signal: AbortSignal.timeout(COMMANDCODE_USAGE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
     return response.json();
   };
   try {
     const [creditsPayload, subscriptionPayload] = await Promise.all([
-      getJson('/alpha/billing/credits'),
+      getJson('/alpha/billing/credits', COMMANDCODE_USAGE_TIMEOUT_MS),
       // The monthly meter is an enrichment: its two secondary requests failing
       // (or drifting) drop only the monthly segment, never the whole line.
-      getJson('/alpha/billing/subscriptions').catch(() => undefined),
+      getJson('/alpha/billing/subscriptions', COMMANDCODE_ENRICHMENT_TIMEOUT_MS).catch(
+        () => undefined,
+      ),
     ]);
     const usage = parseCommandCodePlanUsage(creditsPayload);
     if (!usage) return undefined;
     const bounds = parseCommandCodePeriodBounds(subscriptionPayload);
     if (bounds) {
       const spent = parseCommandCodeMonthlySpend(
-        await getJson(`/alpha/usage/summary?since=${encodeURIComponent(bounds.startIso)}`).catch(
-          () => undefined,
-        ),
+        await getJson(
+          `/alpha/usage/summary?since=${encodeURIComponent(bounds.startIso)}`,
+          COMMANDCODE_ENRICHMENT_TIMEOUT_MS,
+        ).catch(() => undefined),
       );
       if (spent !== undefined) {
         usage.monthly = composeCommandCodeMonthlyWindow(spent, usage.monthlyCredits, bounds.endMs);
