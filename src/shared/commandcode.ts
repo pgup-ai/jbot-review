@@ -612,3 +612,85 @@ export function commandCodeEnvForHome(home: string | undefined): NodeJS.ProcessE
   delete env.COMMAND_CODE_API_KEY;
   return env;
 }
+
+// The same alpha endpoint the pinned CLI's /usage view reads (fetchUsageData
+// in its bundle), Bearer-authed with the access key. Alpha API: every shape
+// drift parses to undefined — usage visibility must never fail a run.
+const COMMANDCODE_USAGE_URL = 'https://api.commandcode.ai/alpha/billing/credits';
+const COMMANDCODE_USAGE_TIMEOUT_MS = 4_000;
+
+interface CommandCodeUsageWindow {
+  used: number;
+  cap: number;
+  resetAt: number;
+  exceeded: boolean;
+}
+
+export interface CommandCodePlanUsage {
+  /** Included plan credits REMAINING this billing period. */
+  monthlyCredits: number;
+  /** Pay-as-you-go balance overage draws from once the plan runs out. */
+  purchasedCredits: number;
+  fiveHour?: CommandCodeUsageWindow;
+  weekly?: CommandCodeUsageWindow;
+}
+
+export function parseCommandCodePlanUsage(payload: unknown): CommandCodePlanUsage | undefined {
+  if (!isRecord(payload) || !isRecord(payload.credits)) return undefined;
+  const { monthlyCredits, purchasedCredits } = payload.credits;
+  if (!isFiniteNumber(monthlyCredits)) return undefined;
+  const windowOf = (value: unknown): CommandCodeUsageWindow | undefined => {
+    if (!isRecord(value)) return undefined;
+    const { used, cap, resetAt } = value;
+    if (!isFiniteNumber(used) || !isFiniteNumber(cap) || cap <= 0 || !isFiniteNumber(resetAt)) {
+      return undefined;
+    }
+    return { used, cap, resetAt, exceeded: value.exceeded === true };
+  };
+  const limits = isRecord(payload.windowLimits) ? payload.windowLimits : undefined;
+  return {
+    monthlyCredits,
+    purchasedCredits: isFiniteNumber(purchasedCredits) ? purchasedCredits : 0,
+    fiveHour: windowOf(limits?.fiveHour),
+    weekly: windowOf(limits?.weekly),
+  };
+}
+
+export function formatCommandCodePlanUsage(usage: CommandCodePlanUsage, now: number): string {
+  const meter = (label: string, window?: CommandCodeUsageWindow): string | undefined =>
+    window &&
+    `${label} ${window.used.toFixed(1)}/${window.cap} (${Math.round((window.used / window.cap) * 100)}%${
+      window.exceeded ? ', EXCEEDED' : ''
+    }, resets in ${formatShortDuration(Math.max(window.resetAt - now, 0))})`;
+  const windows = [meter('5h', usage.fiveHour), meter('weekly', usage.weekly)]
+    .filter(Boolean)
+    .join(', ');
+  const purchased =
+    usage.purchasedCredits > 0 ? ` + ${usage.purchasedCredits.toFixed(1)} purchased` : '';
+  return `CommandCode plan usage: ${windows ? `${windows}; ` : ''}${usage.monthlyCredits.toFixed(1)} plan credits remaining${purchased}.`;
+}
+
+function formatShortDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+/** One log line of live plan usage, or undefined on ANY failure — never throws. */
+export async function fetchCommandCodePlanUsageLine(
+  accessKey: string,
+): Promise<string | undefined> {
+  try {
+    const response = await fetch(COMMANDCODE_USAGE_URL, {
+      headers: { Authorization: `Bearer ${accessKey}` },
+      signal: AbortSignal.timeout(COMMANDCODE_USAGE_TIMEOUT_MS),
+    });
+    if (!response.ok) return undefined;
+    const usage = parseCommandCodePlanUsage(await response.json());
+    return usage && formatCommandCodePlanUsage(usage, Date.now());
+  } catch {
+    return undefined;
+  }
+}

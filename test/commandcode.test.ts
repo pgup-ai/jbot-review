@@ -7,6 +7,8 @@ import { describe, it } from 'node:test';
 import {
   buildCommandCodeCliArgs,
   classifyCommandCodePromptFailure,
+  formatCommandCodePlanUsage,
+  parseCommandCodePlanUsage,
   commandCodeEnvForHome,
   commandCodeSessionEffort,
   commandCodeAuthPath,
@@ -328,5 +330,57 @@ describe('CommandCode CLI provider helpers', () => {
 
     assert.equal(Buffer.byteLength(truncated.split('\n\n')[0]!, 'utf8') <= 6, true);
     assert.match(truncated, /\[Context truncated to \d+ bytes; omitted \d+ bytes\.\]/);
+  });
+});
+
+describe('CommandCode plan usage', () => {
+  const now = 1_788_230_000_000;
+  const payload = {
+    credits: {
+      belowThreshold: false,
+      creditThreshold: 0,
+      monthlyCredits: 38.0527,
+      purchasedCredits: 0,
+      freeCredits: 0,
+    },
+    windowLimits: {
+      limited: true,
+      exceeded: null,
+      fiveHour: {
+        used: 0.6132,
+        cap: 14,
+        exceeded: false,
+        resetAt: now + 2 * 3_600_000 + 41 * 60_000,
+      },
+      weekly: { used: 35, cap: 35, exceeded: true, resetAt: now + 49 * 3_600_000 },
+    },
+  };
+
+  it('parses the credits payload and formats the one-line meter', () => {
+    const usage = parseCommandCodePlanUsage(payload);
+    assert.ok(usage);
+    assert.equal(
+      formatCommandCodePlanUsage(usage, now),
+      'CommandCode plan usage: 5h 0.6/14 (4%, resets in 2h 41m), weekly 35.0/35 (100%, EXCEEDED, resets in 2d 1h); 38.1 plan credits remaining.',
+    );
+    // Purchased credits surface — that is the balance overage draws from.
+    assert.match(
+      formatCommandCodePlanUsage({ ...usage, purchasedCredits: 12 }, now),
+      / \+ 12\.0 purchased\.$/,
+    );
+  });
+
+  it('degrades to a credits-only line without windows and rejects drifted shapes', () => {
+    const usage = parseCommandCodePlanUsage({ credits: { monthlyCredits: 5 } });
+    assert.ok(usage);
+    assert.equal(usage.fiveHour, undefined);
+    assert.equal(
+      formatCommandCodePlanUsage(usage, now),
+      'CommandCode plan usage: 5.0 plan credits remaining.',
+    );
+    // Alpha API: any shape drift parses to undefined, never throws.
+    for (const drifted of [null, 'x', {}, { credits: {} }, { credits: { monthlyCredits: 'a' } }]) {
+      assert.equal(parseCommandCodePlanUsage(drifted), undefined);
+    }
   });
 });

@@ -142,6 +142,7 @@ import {
   COMMANDCODE_PROVIDER_ID,
   COMMANDCODE_TELEMETRY_CAPABILITY,
   commandCodeSessionEffort,
+  fetchCommandCodePlanUsageLine,
   listCommandCodeModels,
   runCommandCodeAddressedPriorCommentsCheck,
   runCommandCodeFindingVerification,
@@ -1347,6 +1348,15 @@ async function runReviewPipeline(params: {
     auxPiModelAvailable,
   });
   const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
+  // Live plan meters (what the CLI's /usage view shows), logged at teardown so
+  // the numbers include this run's own spend. Assigned only past the
+  // deterministic gates, so skipped runs stay silent.
+  const commandCodePlanUsageKey =
+    providerID === COMMANDCODE_PROVIDER_ID
+      ? apiKey
+      : auxProviderID === COMMANDCODE_PROVIDER_ID
+        ? options.auxApiKey
+        : undefined;
   const mainOnPi = backendSelection.mainSdkEngine === 'pi';
   const auxOnPi = backendSelection.auxSdkEngine === 'pi';
   const mainOnPoolside = backendSelection.mainSdkEngine === 'poolside';
@@ -3067,6 +3077,11 @@ async function runReviewPipeline(params: {
     postingDone();
     finishTelemetry('completed');
   } finally {
+    if (commandCodePlanUsageKey) {
+      const planUsage = await fetchCommandCodePlanUsageLine(commandCodePlanUsageKey);
+      // The absence line keeps alpha-API drift visible instead of silent.
+      log(planUsage ?? 'CommandCode plan usage unavailable.');
+    }
     const teardownDone = phases.start({ phase: 'teardown', scope: 'run' });
     let teardownCompleted = false;
     try {
