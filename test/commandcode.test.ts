@@ -8,6 +8,7 @@ import {
   buildCommandCodeCliArgs,
   classifyCommandCodePromptFailure,
   composeCommandCodeMonthlyWindow,
+  formatCommandCodeKeyProbeLine,
   pickCommandCodeAccessKey,
   selectCommandCodeAccessKey,
   splitCommandCodeAccessKeys,
@@ -484,18 +485,71 @@ describe('CommandCode multi-key pick', () => {
   it('resolves the selector without probing when at most one key survives', async () => {
     const logs = [];
     const log = (message) => logs.push(message);
-    // Comma-free values are byte-identical verbatim, whitespace included.
-    assert.equal(await selectCommandCodeAccessKey(' solo ', log), ' solo ');
+    // Comma-free values are byte-identical verbatim, whitespace included; the
+    // caller keeps logging the plan-usage line itself (usageLogged: false).
+    assert.deepEqual(await selectCommandCodeAccessKey(' solo ', log), {
+      key: ' solo ',
+      usageLogged: false,
+    });
     // Stray separators around one real key normalize to it.
-    assert.equal(await selectCommandCodeAccessKey('key,', log), 'key');
-    assert.equal(await selectCommandCodeAccessKey(',key,', log), 'key');
+    assert.deepEqual(await selectCommandCodeAccessKey('key,', log), {
+      key: 'key',
+      usageLogged: false,
+    });
+    assert.deepEqual(await selectCommandCodeAccessKey(',key,', log), {
+      key: 'key',
+      usageLogged: false,
+    });
     // Nothing parseable keeps the raw value (legacy garbage-in behavior).
-    assert.equal(await selectCommandCodeAccessKey(',,', log), ',,');
+    assert.deepEqual(await selectCommandCodeAccessKey(',,', log), {
+      key: ',,',
+      usageLogged: false,
+    });
     assert.equal(logs.length, 0);
   });
 
+  it('formats per-key probe lines with masked tails', () => {
+    const probe = {
+      key: 'user_abcd',
+      usage: {
+        monthlyCredits: 5,
+        purchasedCredits: 0,
+        monthly: { used: 5, cap: 10, periodEndMs: 1 },
+      },
+    };
+    assert.equal(
+      formatCommandCodeKeyProbeLine(probe, 0, 2, 0),
+      'CommandCode key 1/2 (…abcd): monthly 5.0/10.0 (50%, resets Jan 1); 5.0 plan credits remaining.',
+    );
+    assert.equal(
+      formatCommandCodeKeyProbeLine({ key: 'user_wxyz' }, 1, 2, 0),
+      'CommandCode key 2/2 (…wxyz): usage unavailable.',
+    );
+  });
+
   it('picks window-open keys by most remaining credits, failing back sanely', () => {
-    // Healthy keys: most monthly credits remaining wins; ties keep the first.
+    // Percent of plan remaining outranks absolute credits: a small nearly-full
+    // plan beats a large half-drained one (allowances expire at period end).
+    const withPlan = (monthlyCredits, cap) => ({
+      ...usage(monthlyCredits),
+      monthly: { used: cap - monthlyCredits, cap, periodEndMs: 1 },
+    });
+    const percentPick = pickCommandCodeAccessKey([
+      { key: 'big', usage: withPlan(36.8, 70.2) },
+      { key: 'tiny', usage: withPlan(7, 7) },
+    ]);
+    assert.equal(percentPick.key, 'tiny');
+    assert.match(percentPick.reason, /picked 2\/2 \(…tiny, 100% of plan left\)/);
+    // A key whose plan total could not be composed ranks below known ones.
+    assert.equal(
+      pickCommandCodeAccessKey([
+        { key: 'known', usage: withPlan(10, 70) },
+        { key: 'unknown', usage: usage(99) },
+      ]).key,
+      'known',
+    );
+    // Unknown-total keys (no monthly composed): most credits remaining wins;
+    // ties keep the first.
     assert.equal(
       pickCommandCodeAccessKey([
         { key: 'k1', usage: usage(3) },
