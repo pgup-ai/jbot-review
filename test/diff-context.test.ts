@@ -535,7 +535,7 @@ describe('samePatchSet', () => {
     assert.equal(samePatchSet([a, b], [b, a]), true);
   });
 
-  it('differs on patch text, membership, or duplicates', () => {
+  it('differs on patch text, membership, or filenames', () => {
     assert.equal(samePatchSet([a, b], [a, { ...b, patch: '@@ -2 +2 @@\n-p\n+z' }]), false);
     assert.equal(samePatchSet([a, b], [a]), false);
     assert.equal(samePatchSet([a], [a, b]), false);

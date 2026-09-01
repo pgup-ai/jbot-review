@@ -1278,11 +1278,8 @@ async function runReviewPipeline(params: {
     return;
   }
 
-  // Deterministic unchanged-diff gate: a push that leaves the merge-base-
-  // relative patch set byte-identical to the last POSTED review's (the common
-  // "Update branch" merge from main) gives the model nothing it has not
-  // already reviewed at this exact content. Anything uncertain fails open to
-  // a full review.
+  // Unchanged-diff gate (contract on `skipUnchanged`): nothing new for the
+  // model at this exact content, so skip before any server boot or LLM session.
   if (!localDiff && options.skipUnchanged && headSha && baseRef) {
     const reviewedHead = findLatestReviewedHead(priorJbotReviewGroups.map((group) => group.body));
     let unchanged = reviewedHead === headSha;
