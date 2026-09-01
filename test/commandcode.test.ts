@@ -382,6 +382,9 @@ describe('CommandCode plan usage', () => {
     const usage = parseCommandCodePlanUsage({ credits: { monthlyCredits: 5 } });
     assert.ok(usage);
     assert.equal(usage.fiveHour, undefined);
+    // Explicit null degrades too: null is this API's none value (see the live
+    // payload's windowLimits.exceeded: null), not shape drift.
+    assert.ok(parseCommandCodePlanUsage({ credits: { monthlyCredits: 5 }, windowLimits: null }));
     assert.equal(
       formatCommandCodePlanUsage(usage, now),
       'CommandCode plan usage: 5.0 plan credits remaining.',
@@ -398,7 +401,9 @@ describe('CommandCode plan usage', () => {
       { credits: { monthlyCredits: 'a' } },
       { credits: { monthlyCredits: 5, purchasedCredits: 'x' } },
       { credits: { monthlyCredits: 5 }, windowLimits: 'x' },
+      { credits: { monthlyCredits: 5 }, windowLimits: [] },
       { credits: { monthlyCredits: 5 }, windowLimits: { fiveHour: 'x' } },
+      { credits: { monthlyCredits: 5 }, windowLimits: { fiveHour: [window] } },
       { credits: { monthlyCredits: 5 }, windowLimits: { fiveHour: { ...window, used: -1 } } },
       { credits: { monthlyCredits: 5 }, windowLimits: { fiveHour: { ...window, cap: 0 } } },
       { credits: { monthlyCredits: 5 }, windowLimits: { weekly: { ...window, resetAt: 'soon' } } },

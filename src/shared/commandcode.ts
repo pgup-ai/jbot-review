@@ -24,7 +24,7 @@ import {
 } from './opencode.ts';
 import { spawnWithTimeout, truncateForLog } from '@symma/protocol';
 import { clampReasoningEffort } from './config.ts';
-import { isFiniteNumber, isRecord } from './text.ts';
+import { isFiniteNumber, isNonArrayRecord, isRecord } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
@@ -636,20 +636,21 @@ export interface CommandCodePlanUsage {
 }
 
 export function parseCommandCodePlanUsage(payload: unknown): CommandCodePlanUsage | undefined {
-  if (!isRecord(payload) || !isRecord(payload.credits)) return undefined;
+  if (!isNonArrayRecord(payload) || !isNonArrayRecord(payload.credits)) return undefined;
   const { monthlyCredits, purchasedCredits } = payload.credits;
   if (!isFiniteNumber(monthlyCredits)) return undefined;
-  // Only ABSENT fields degrade (older shapes); a present-but-invalid field is
-  // drift and poisons the whole payload — a partial line would render trusted-
-  // looking meters while hiding a real limit.
+  // Only ABSENT fields degrade — explicit null included, because null is this
+  // API's none value (the live payload carries windowLimits.exceeded: null).
+  // A present-but-invalid field is drift and poisons the whole payload: a
+  // partial line would render trusted-looking meters while hiding a real limit.
   if (purchasedCredits != null && !isFiniteNumber(purchasedCredits)) return undefined;
   const { windowLimits } = payload;
-  if (windowLimits != null && !isRecord(windowLimits)) return undefined;
-  const limits = isRecord(windowLimits) ? windowLimits : undefined;
-  // null = present but malformed; undefined = absent.
+  if (windowLimits != null && !isNonArrayRecord(windowLimits)) return undefined;
+  const limits = isNonArrayRecord(windowLimits) ? windowLimits : undefined;
+  // null return = present but malformed; undefined = absent.
   const windowOf = (value: unknown): CommandCodeUsageWindow | null | undefined => {
     if (value == null) return undefined;
-    if (!isRecord(value)) return null;
+    if (!isNonArrayRecord(value)) return null;
     const { used, cap, resetAt, exceeded } = value;
     if (!isFiniteNumber(used) || used < 0 || !isFiniteNumber(cap) || cap <= 0) return null;
     if (!isFiniteNumber(resetAt) || typeof exceeded !== 'boolean') return null;
