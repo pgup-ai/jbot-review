@@ -198,7 +198,7 @@ inputs:
     required: false
     default: 'true'
   skip-unchanged:
-    description: 'Skip the full LLM review when the merge-base-relative patch set is byte-identical to the one the last posted jbot review covered — the common "Update branch" merge from main. Anything uncertain (no prior posted review, compare failure or its 300-file cap, binary/patchless files) fails open to a full review; comment-triggered and manually dispatched runs always review. Deterministic, no model call.'
+    description: 'Skip the full LLM review when the merge-base-relative patch set is byte-identical to the one the last posted jbot review covered — the common "Update branch" merge from main. Anything uncertain (no prior posted review, compare failure or its 300-file cap, binary/patchless files) fails open to a full review; comment-triggered, manually dispatched, and auto-approve runs always review (approval must re-attest the newest head). Deterministic, no model call.'
     required: false
     default: 'true'
   max-concurrent-sessions:
