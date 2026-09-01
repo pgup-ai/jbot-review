@@ -569,6 +569,14 @@ describe('CommandCode multi-key pick', () => {
     ]);
     assert.equal(windowAware.key, 'k2');
     assert.match(windowAware.reason, /picked 2\/2 \(…k2, 97% of weekly limit left\)/);
+    // Over-cap windows floor at zero headroom (never a negative percentage).
+    const overCap = pickCommandCodeAccessKey([
+      {
+        key: 'k1',
+        usage: { ...usage(9, true), weekly: { used: 40, cap: 35, resetAt: 1, exceeded: true } },
+      },
+    ]);
+    assert.match(overCap.reason, /\(…k1, 0% of weekly limit left\)$/);
     // Every window limited: fall back to most remaining, flagged as such.
     const allLimited = pickCommandCodeAccessKey([
       { key: 'k1', usage: usage(9, true) },

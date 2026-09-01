@@ -797,10 +797,13 @@ interface CommandCodeKeyProbe {
   usage?: CommandCodePlanUsage;
 }
 
-/** Share of the monthly plan left, or undefined when the total could not be composed. */
-/** Share of the weekly rolling cap still open; no cap at all means nothing can throttle. */
+/**
+ * Share of the weekly rolling cap still open; no cap at all means nothing can
+ * throttle, so full headroom. An exceeded window floors at zero rather than
+ * ranking by how far over it is.
+ */
 function weeklyHeadroom(usage: CommandCodePlanUsage): number {
-  return usage.weekly ? 1 - usage.weekly.used / usage.weekly.cap : 1;
+  return usage.weekly ? Math.max(0, 1 - usage.weekly.used / usage.weekly.cap) : 1;
 }
 
 /**
