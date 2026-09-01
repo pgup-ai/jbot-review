@@ -766,18 +766,104 @@ function formatShortDuration(ms: number): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
+async function commandCodeApiJson(
+  accessKey: string,
+  path: string,
+  timeoutMs: number,
+): Promise<unknown> {
+  const response = await fetch(`${COMMANDCODE_API_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${accessKey}` },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+  return response.json();
+}
+
+async function fetchCommandCodeCreditsUsage(
+  accessKey: string,
+): Promise<CommandCodePlanUsage | undefined> {
+  try {
+    return parseCommandCodePlanUsage(
+      await commandCodeApiJson(
+        accessKey,
+        '/alpha/billing/credits',
+        COMMANDCODE_ENRICHMENT_TIMEOUT_MS,
+      ),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+export function splitCommandCodeAccessKeys(value: string): string[] {
+  return value
+    .split(',')
+    .map((key) => key.trim())
+    .filter(Boolean);
+}
+
+interface CommandCodeKeyProbe {
+  key: string;
+  usage?: CommandCodePlanUsage;
+}
+
+/**
+ * Window-aware pick: keys throttled RIGHT NOW (a rolling window exceeded)
+ * lose to keys that can run, then the most monthly credits remaining wins —
+ * draining the fullest plan first keeps every key inside its included
+ * allowance. Unreachable probes are excluded; when none are reachable the
+ * first key wins, which is exactly the legacy single-key behavior.
+ */
+export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[]): {
+  key: string;
+  reason: string;
+} {
+  const reachable = probes.filter(
+    (probe): probe is { key: string; usage: CommandCodePlanUsage } => probe.usage !== undefined,
+  );
+  if (reachable.length === 0) {
+    return { key: probes[0].key, reason: `probes unavailable; using first of ${probes.length}` };
+  }
+  const windowOpen = reachable.filter(
+    (probe) => !probe.usage.fiveHour?.exceeded && !probe.usage.weekly?.exceeded,
+  );
+  const pool = windowOpen.length > 0 ? windowOpen : reachable;
+  const best = pool.reduce((a, b) => (b.usage.monthlyCredits > a.usage.monthlyCredits ? b : a));
+  const prefix = windowOpen.length === 0 ? `all ${probes.length} window-limited; ` : '';
+  return {
+    key: best.key,
+    reason:
+      `${prefix}picked ${probes.indexOf(best) + 1}/${probes.length} ` +
+      `(…${best.key.slice(-4)}, ${best.usage.monthlyCredits.toFixed(1)} credits remaining)`,
+  };
+}
+
+/**
+ * Resolves a possibly comma-separated access-key list to the one key this run
+ * uses. A single key returns VERBATIM with no probe or log — the legacy path
+ * stays byte-identical. Multiple keys probe their credits in parallel and take
+ * the window-aware pick above. Per-run and sticky: no mid-run rotation.
+ */
+export async function selectCommandCodeAccessKey(
+  rawValue: string,
+  log: (msg: string) => void,
+): Promise<string> {
+  const keys = splitCommandCodeAccessKeys(rawValue);
+  if (keys.length <= 1) return rawValue;
+  const probes = await Promise.all(
+    keys.map(async (key) => ({ key, usage: await fetchCommandCodeCreditsUsage(key) })),
+  );
+  const picked = pickCommandCodeAccessKey(probes);
+  log(`CommandCode key: ${picked.reason}`);
+  return picked.key;
+}
+
 /** One log line of live plan usage, or undefined on ANY failure — never throws. */
 export async function fetchCommandCodePlanUsageLine(
   accessKey: string,
 ): Promise<string | undefined> {
-  const getJson = async (path: string, timeoutMs: number): Promise<unknown> => {
-    const response = await fetch(`${COMMANDCODE_API_BASE}${path}`, {
-      headers: { Authorization: `Bearer ${accessKey}` },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
-    return response.json();
-  };
+  const getJson = (path: string, timeoutMs: number): Promise<unknown> =>
+    commandCodeApiJson(accessKey, path, timeoutMs);
   try {
     const [creditsPayload, subscriptionPayload] = await Promise.all([
       getJson('/alpha/billing/credits', COMMANDCODE_USAGE_TIMEOUT_MS),

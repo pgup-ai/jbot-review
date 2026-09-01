@@ -87,7 +87,7 @@ inputs:
     required: false
     default: ''
   commandcode-access-key:
-    description: 'CommandCode CLI access key. Used when the main or aux model names commandcode.'
+    description: 'CommandCode CLI access key. Used when the main or aux model names commandcode. Accepts a comma-separated list: each run probes live plan usage and picks the key with the most monthly credits remaining whose rate windows are open; a single key skips the probe entirely.'
     required: false
     default: ''
   cursor-api-key:
