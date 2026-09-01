@@ -7,7 +7,10 @@ import { describe, it } from 'node:test';
 import {
   buildCommandCodeCliArgs,
   classifyCommandCodePromptFailure,
+  composeCommandCodeMonthlyWindow,
   formatCommandCodePlanUsage,
+  parseCommandCodeMonthlySpend,
+  parseCommandCodePeriodBounds,
   parseCommandCodePlanUsage,
   commandCodeEnvForHome,
   commandCodeSessionEffort,
@@ -375,6 +378,45 @@ describe('CommandCode plan usage', () => {
         now,
       ),
       /5h 0\.0\/14 \(<1%,/,
+    );
+  });
+
+  it('composes and formats the monthly billing-period meter', () => {
+    assert.equal(
+      parseCommandCodeMonthlySpend({ totalMonthlyCredits: 32.2563, periodBasis: 'billing-period' }),
+      32.2563,
+    );
+    const bounds = parseCommandCodePeriodBounds({
+      data: {
+        currentPeriodStart: '2026-08-13T22:06:17.000Z',
+        currentPeriodEnd: '2026-09-13T22:06:17.000Z',
+      },
+    });
+    assert.deepEqual(bounds, {
+      startIso: '2026-08-13T22:06:17.000Z',
+      endMs: Date.parse('2026-09-13T22:06:17.000Z'),
+    });
+    // Drift in either secondary payload drops only the monthly enrichment.
+    for (const bad of [null, [], { totalMonthlyCredits: -1 }, { totalMonthlyCredits: 'x' }]) {
+      assert.equal(parseCommandCodeMonthlySpend(bad), undefined);
+    }
+    for (const bad of [
+      null,
+      {},
+      { data: { currentPeriodEnd: '2026-09-13T22:06:17.000Z' } },
+      { data: { currentPeriodStart: 'x', currentPeriodEnd: 'soon' } },
+    ]) {
+      assert.equal(parseCommandCodePeriodBounds(bad), undefined);
+    }
+    // Zero plan total (free account) has nothing to meter.
+    assert.equal(composeCommandCodeMonthlyWindow(0, 0, 1), undefined);
+
+    const usage = parseCommandCodePlanUsage(payload);
+    assert.ok(usage);
+    usage.monthly = composeCommandCodeMonthlyWindow(32.2563, usage.monthlyCredits, bounds!.endMs);
+    assert.match(
+      formatCommandCodePlanUsage(usage, now),
+      /, monthly 32\.3\/70\.3 \(46%, resets Sep 13\); 38\.1 plan credits remaining\.$/,
     );
   });
 
