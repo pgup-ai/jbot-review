@@ -89,6 +89,7 @@ import {
   buildDiffHunksBlockWithMetadata,
   classifyChangeShape,
   isDocOnlyChange,
+  samePatchSet,
   shardFilesForReview,
   touchesRiskyPath,
 } from './diff-context.ts';
@@ -908,6 +909,15 @@ export interface ReviewRunOptions {
    * the whole model cost) and leaves the review reaction unchanged.
    */
   skipDocOnly?: boolean;
+  /**
+   * Skip the run when the merge-base-relative patch set is byte-identical to
+   * the one the last POSTED review covered — the common "Update branch" merge
+   * from main. Deterministic and fail-open: no reviewed head, a compare
+   * failure or cap, or any patchless file forces the full review. Entries
+   * disable it for comment-triggered and manual runs so an explicit ask
+   * always reviews.
+   */
+  skipUnchanged?: boolean;
   /** Scale recall-supplement fan-out down for low-risk diffs (see `fanout.ts`); default true. Never gates the main review or verify; false forces full fan-out. */
   dynamicFanout?: boolean;
   /**
@@ -1266,6 +1276,41 @@ async function runReviewPipeline(params: {
     await finalizePriorResolvedReviews([]);
     finishTelemetry('skipped');
     return;
+  }
+
+  // Deterministic unchanged-diff gate: a push that leaves the merge-base-
+  // relative patch set byte-identical to the last POSTED review's (the common
+  // "Update branch" merge from main) gives the model nothing it has not
+  // already reviewed at this exact content. Anything uncertain fails open to
+  // a full review.
+  if (!localDiff && options.skipUnchanged && headSha && baseRef) {
+    const reviewedHead = findLatestReviewedHead(priorJbotReviewGroups.map((group) => group.body));
+    let unchanged = reviewedHead === headSha;
+    if (!unchanged && reviewedHead) {
+      const priorFiles = await compareCommitFiles(
+        octokit,
+        owner,
+        repo,
+        baseRef,
+        reviewedHead,
+      ).catch((error) => {
+        log(
+          `Unchanged-diff check unavailable; running the full review: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return null;
+      });
+      unchanged = priorFiles !== null && samePatchSet(rawFiles, priorFiles);
+    }
+    if (unchanged) {
+      log(
+        `Diff unchanged since the last posted review (head ${reviewedHead?.slice(0, 7)}); skipping the full review.`,
+      );
+      await finalizePriorResolvedReviews([]);
+      finishTelemetry('skipped');
+      return;
+    }
   }
 
   const piEngine = resolvePiEngine(
@@ -3158,6 +3203,7 @@ export function normalizeOptions(
     modelOptionsExplicit: options?.modelOptionsExplicit ?? false,
     promptCache: options?.promptCache ?? true,
     skipDocOnly: options?.skipDocOnly ?? true,
+    skipUnchanged: options?.skipUnchanged ?? true,
     dynamicFanout: options?.dynamicFanout ?? true,
     // Capped by default: throttled tiers serialize upstream anyway, and an
     // uncapped burst turns session deadlines into queue-time measurements

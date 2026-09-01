@@ -126,6 +126,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           modelOptionsExplicit: Boolean(process.env.JBOT_MODEL_OPTIONS?.trim()),
           promptCache: parseEnvBoolean('JBOT_PROMPT_CACHE', true),
           skipDocOnly: parseEnvBoolean('JBOT_SKIP_DOC_ONLY', true),
+          skipUnchanged: parseEnvBoolean('JBOT_SKIP_UNCHANGED', true),
           maxConcurrentSessions: parseEnvInt('JBOT_MAX_CONCURRENT_SESSIONS', 3),
           reviewTelemetry: parseEnvBoolean('JBOT_REVIEW_TELEMETRY', true),
           evidenceQuotes: parseEnvBoolean('JBOT_EVIDENCE_QUOTES', true),
