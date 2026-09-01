@@ -368,6 +368,14 @@ describe('CommandCode plan usage', () => {
       formatCommandCodePlanUsage({ ...usage, purchasedCredits: 12 }, now),
       / \+ 12\.0 purchased\.$/,
     );
+    // Sub-percent spend stays distinguishable from a zero meter.
+    assert.match(
+      formatCommandCodePlanUsage(
+        { ...usage, fiveHour: { used: 0.0006, cap: 14, exceeded: false, resetAt: now } },
+        now,
+      ),
+      /5h 0\.0\/14 \(<1%,/,
+    );
   });
 
   it('degrades to a credits-only line without windows and rejects drifted shapes', () => {
@@ -378,8 +386,24 @@ describe('CommandCode plan usage', () => {
       formatCommandCodePlanUsage(usage, now),
       'CommandCode plan usage: 5.0 plan credits remaining.',
     );
-    // Alpha API: any shape drift parses to undefined, never throws.
-    for (const drifted of [null, 'x', {}, { credits: {} }, { credits: { monthlyCredits: 'a' } }]) {
+    // Alpha API: any shape drift parses to undefined, never throws. A field
+    // that is PRESENT but invalid poisons the whole payload (a partial line
+    // would hide a real limit); only absent fields degrade.
+    const window = { used: 1, cap: 14, exceeded: false, resetAt: now };
+    for (const drifted of [
+      null,
+      'x',
+      {},
+      { credits: {} },
+      { credits: { monthlyCredits: 'a' } },
+      { credits: { monthlyCredits: 5, purchasedCredits: 'x' } },
+      { credits: { monthlyCredits: 5 }, windowLimits: 'x' },
+      { credits: { monthlyCredits: 5 }, windowLimits: { fiveHour: 'x' } },
+      { credits: { monthlyCredits: 5 }, windowLimits: { fiveHour: { ...window, used: -1 } } },
+      { credits: { monthlyCredits: 5 }, windowLimits: { fiveHour: { ...window, cap: 0 } } },
+      { credits: { monthlyCredits: 5 }, windowLimits: { weekly: { ...window, resetAt: 'soon' } } },
+      { credits: { monthlyCredits: 5 }, windowLimits: { weekly: { ...window, exceeded: 'yes' } } },
+    ]) {
       assert.equal(parseCommandCodePlanUsage(drifted), undefined);
     }
   });

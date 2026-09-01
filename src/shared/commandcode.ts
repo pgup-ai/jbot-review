@@ -639,29 +639,43 @@ export function parseCommandCodePlanUsage(payload: unknown): CommandCodePlanUsag
   if (!isRecord(payload) || !isRecord(payload.credits)) return undefined;
   const { monthlyCredits, purchasedCredits } = payload.credits;
   if (!isFiniteNumber(monthlyCredits)) return undefined;
-  const windowOf = (value: unknown): CommandCodeUsageWindow | undefined => {
-    if (!isRecord(value)) return undefined;
-    const { used, cap, resetAt } = value;
-    if (!isFiniteNumber(used) || !isFiniteNumber(cap) || cap <= 0 || !isFiniteNumber(resetAt)) {
-      return undefined;
-    }
-    return { used, cap, resetAt, exceeded: value.exceeded === true };
+  // Only ABSENT fields degrade (older shapes); a present-but-invalid field is
+  // drift and poisons the whole payload — a partial line would render trusted-
+  // looking meters while hiding a real limit.
+  if (purchasedCredits != null && !isFiniteNumber(purchasedCredits)) return undefined;
+  const { windowLimits } = payload;
+  if (windowLimits != null && !isRecord(windowLimits)) return undefined;
+  const limits = isRecord(windowLimits) ? windowLimits : undefined;
+  // null = present but malformed; undefined = absent.
+  const windowOf = (value: unknown): CommandCodeUsageWindow | null | undefined => {
+    if (value == null) return undefined;
+    if (!isRecord(value)) return null;
+    const { used, cap, resetAt, exceeded } = value;
+    if (!isFiniteNumber(used) || used < 0 || !isFiniteNumber(cap) || cap <= 0) return null;
+    if (!isFiniteNumber(resetAt) || typeof exceeded !== 'boolean') return null;
+    return { used, cap, resetAt, exceeded };
   };
-  const limits = isRecord(payload.windowLimits) ? payload.windowLimits : undefined;
+  const fiveHour = windowOf(limits?.fiveHour);
+  const weekly = windowOf(limits?.weekly);
+  if (fiveHour === null || weekly === null) return undefined;
   return {
     monthlyCredits,
     purchasedCredits: isFiniteNumber(purchasedCredits) ? purchasedCredits : 0,
-    fiveHour: windowOf(limits?.fiveHour),
-    weekly: windowOf(limits?.weekly),
+    fiveHour,
+    weekly,
   };
 }
 
 export function formatCommandCodePlanUsage(usage: CommandCodePlanUsage, now: number): string {
-  const meter = (label: string, window?: CommandCodeUsageWindow): string | undefined =>
-    window &&
-    `${label} ${window.used.toFixed(1)}/${window.cap} (${Math.round((window.used / window.cap) * 100)}%${
+  const meter = (label: string, window?: CommandCodeUsageWindow): string | undefined => {
+    if (!window) return undefined;
+    const percent = (window.used / window.cap) * 100;
+    // Sub-percent spend must stay distinguishable from a meter at zero.
+    const percentLabel = percent > 0 && percent < 1 ? '<1%' : `${Math.round(percent)}%`;
+    return `${label} ${window.used.toFixed(1)}/${window.cap} (${percentLabel}${
       window.exceeded ? ', EXCEEDED' : ''
     }, resets in ${formatShortDuration(Math.max(window.resetAt - now, 0))})`;
+  };
   const windows = [meter('5h', usage.fiveHour), meter('weekly', usage.weekly)]
     .filter(Boolean)
     .join(', ');
