@@ -8,6 +8,9 @@ import {
   buildCommandCodeCliArgs,
   classifyCommandCodePromptFailure,
   composeCommandCodeMonthlyWindow,
+  pickCommandCodeAccessKey,
+  selectCommandCodeAccessKey,
+  splitCommandCodeAccessKeys,
   formatCommandCodePlanUsage,
   parseCommandCodeMonthlySpend,
   parseCommandCodePeriodBounds,
@@ -461,5 +464,77 @@ describe('CommandCode plan usage', () => {
     ]) {
       assert.equal(parseCommandCodePlanUsage(drifted), undefined);
     }
+  });
+});
+
+describe('CommandCode multi-key pick', () => {
+  const usage = (monthlyCredits, fiveExceeded = false, weekExceeded = false) => ({
+    monthlyCredits,
+    purchasedCredits: 0,
+    fiveHour: { used: 1, cap: 14, resetAt: 1, exceeded: fiveExceeded },
+    weekly: { used: 1, cap: 35, resetAt: 1, exceeded: weekExceeded },
+  });
+
+  it('splits key lists; single keys stay on the legacy path', () => {
+    assert.deepEqual(splitCommandCodeAccessKeys('a, b,,c '), ['a', 'b', 'c']);
+    assert.deepEqual(splitCommandCodeAccessKeys(' solo '), ['solo']);
+    assert.deepEqual(splitCommandCodeAccessKeys(',,'), []);
+  });
+
+  it('resolves the selector without probing when at most one key survives', async () => {
+    const logs = [];
+    const log = (message) => logs.push(message);
+    // Comma-free values are byte-identical verbatim, whitespace included.
+    assert.equal(await selectCommandCodeAccessKey(' solo ', log), ' solo ');
+    // Stray separators around one real key normalize to it.
+    assert.equal(await selectCommandCodeAccessKey('key,', log), 'key');
+    assert.equal(await selectCommandCodeAccessKey(',key,', log), 'key');
+    // Nothing parseable keeps the raw value (legacy garbage-in behavior).
+    assert.equal(await selectCommandCodeAccessKey(',,', log), ',,');
+    assert.equal(logs.length, 0);
+  });
+
+  it('picks window-open keys by most remaining credits, failing back sanely', () => {
+    // Healthy keys: most monthly credits remaining wins; ties keep the first.
+    assert.equal(
+      pickCommandCodeAccessKey([
+        { key: 'k1', usage: usage(3) },
+        { key: 'k2', usage: usage(9) },
+      ]).key,
+      'k2',
+    );
+    assert.equal(
+      pickCommandCodeAccessKey([
+        { key: 'k1', usage: usage(5) },
+        { key: 'k2', usage: usage(5) },
+      ]).key,
+      'k1',
+    );
+    // A window-limited key loses to an open one regardless of balance.
+    const windowAware = pickCommandCodeAccessKey([
+      { key: 'k1', usage: usage(9, true) },
+      { key: 'k2', usage: usage(3) },
+    ]);
+    assert.equal(windowAware.key, 'k2');
+    assert.match(windowAware.reason, /picked 2\/2 \(…k2, 3\.0 credits remaining\)/);
+    // Every window limited: fall back to most remaining, flagged as such.
+    const allLimited = pickCommandCodeAccessKey([
+      { key: 'k1', usage: usage(9, true) },
+      { key: 'k2', usage: usage(3, false, true) },
+    ]);
+    assert.equal(allLimited.key, 'k1');
+    assert.match(allLimited.reason, /^all 2 window-limited; picked 1\/2/);
+    // The window-limited count covers only REACHABLE keys, not failed probes.
+    const mixed = pickCommandCodeAccessKey([{ key: 'k1', usage: usage(9, true) }, { key: 'k2' }]);
+    assert.equal(mixed.key, 'k1');
+    assert.match(mixed.reason, /^all 1 window-limited; picked 1\/2/);
+    // Unreachable probes are excluded; all unreachable → first key (legacy behavior).
+    assert.equal(
+      pickCommandCodeAccessKey([{ key: 'k1' }, { key: 'k2', usage: usage(5) }]).key,
+      'k2',
+    );
+    const none = pickCommandCodeAccessKey([{ key: 'k1' }, { key: 'k2' }]);
+    assert.equal(none.key, 'k1');
+    assert.match(none.reason, /probes unavailable; using first of 2/);
   });
 });

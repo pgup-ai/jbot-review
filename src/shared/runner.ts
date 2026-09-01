@@ -144,6 +144,7 @@ import {
   commandCodeSessionEffort,
   fetchCommandCodePlanUsageLine,
   listCommandCodeModels,
+  selectCommandCodeAccessKey,
   runCommandCodeAddressedPriorCommentsCheck,
   runCommandCodeFindingVerification,
   runCommandCodeGuidelineComplianceCheck,
@@ -1348,13 +1349,18 @@ async function runReviewPipeline(params: {
     auxPiModelAvailable,
   });
   const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
+  // Backend selection owns the main-wins key policy; empty when no role
+  // routed to commandcode, so skipped and non-commandcode runs stay silent.
+  // A comma-separated key list resolves here — once per run, window-aware,
+  // stickily — to the single key both the usage line and the CLI auth use;
+  // a single key passes through verbatim with no probe.
+  const commandCodeAccessKey = backendSelection.commandCodeAccessKey
+    ? await selectCommandCodeAccessKey(backendSelection.commandCodeAccessKey, log)
+    : '';
   // Live plan meters (what the CLI's /usage view shows), logged up front so
-  // the remaining allowance is visible before the run spends into it. Backend
-  // selection owns the main-wins key policy; empty when no role routed to
-  // commandcode, so skipped and non-commandcode runs stay silent.
-  const commandCodePlanUsageKey = backendSelection.commandCodeAccessKey;
-  if (commandCodePlanUsageKey) {
-    const planUsage = await fetchCommandCodePlanUsageLine(commandCodePlanUsageKey);
+  // the remaining allowance is visible before the run spends into it.
+  if (commandCodeAccessKey) {
+    const planUsage = await fetchCommandCodePlanUsageLine(commandCodeAccessKey);
     // The absence line keeps alpha-API drift visible instead of silent.
     log(planUsage ?? 'CommandCode plan usage unavailable.');
   }
@@ -1788,7 +1794,6 @@ async function runReviewPipeline(params: {
   }
 
   if (mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID) {
-    const commandCodeAccessKey = backendSelection.commandCodeAccessKey;
     if (!commandCodeAccessKey) {
       cleanupCliHomes();
       throw new Error(`Missing access key for ${COMMANDCODE_PROVIDER_ID} provider.`);
