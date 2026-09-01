@@ -783,12 +783,11 @@ async function fetchCommandCodeCreditsUsage(
   accessKey: string,
 ): Promise<CommandCodePlanUsage | undefined> {
   try {
+    // Full usage timeout, not the enrichment tier: the probe decides the run's
+    // credential, and a cold process (DNS + TLS on first contact — the Action's
+    // normal shape) can exceed 1.5s and silently degrade the pick to fallback.
     return parseCommandCodePlanUsage(
-      await commandCodeApiJson(
-        accessKey,
-        '/alpha/billing/credits',
-        COMMANDCODE_ENRICHMENT_TIMEOUT_MS,
-      ),
+      await commandCodeApiJson(accessKey, '/alpha/billing/credits', COMMANDCODE_USAGE_TIMEOUT_MS),
     );
   } catch {
     return undefined;
@@ -829,7 +828,8 @@ export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[])
   );
   const pool = windowOpen.length > 0 ? windowOpen : reachable;
   const best = pool.reduce((a, b) => (b.usage.monthlyCredits > a.usage.monthlyCredits ? b : a));
-  const prefix = windowOpen.length === 0 ? `all ${probes.length} window-limited; ` : '';
+  // Counted over REACHABLE keys: an unreachable probe's window state is unknown.
+  const prefix = windowOpen.length === 0 ? `all ${reachable.length} window-limited; ` : '';
   return {
     key: best.key,
     reason:
@@ -840,16 +840,21 @@ export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[])
 
 /**
  * Resolves a possibly comma-separated access-key list to the one key this run
- * uses. A single key returns VERBATIM with no probe or log — the legacy path
- * stays byte-identical. Multiple keys probe their credits in parallel and take
- * the window-aware pick above. Per-run and sticky: no mid-run rotation.
+ * uses. A comma-free value returns VERBATIM with no probe or log — the legacy
+ * path stays byte-identical. Stray separators around one real key normalize
+ * to that key (still probe-free); multiple keys probe their credits in
+ * parallel and take the window-aware pick above. Per-run and sticky: no
+ * mid-run rotation.
  */
 export async function selectCommandCodeAccessKey(
   rawValue: string,
   log: (msg: string) => void,
 ): Promise<string> {
+  if (!rawValue.includes(',')) return rawValue;
   const keys = splitCommandCodeAccessKeys(rawValue);
-  if (keys.length <= 1) return rawValue;
+  // Nothing parseable keeps the raw value: legacy garbage-in behavior.
+  if (keys.length === 0) return rawValue;
+  if (keys.length === 1) return keys[0];
   const probes = await Promise.all(
     keys.map(async (key) => ({ key, usage: await fetchCommandCodeCreditsUsage(key) })),
   );

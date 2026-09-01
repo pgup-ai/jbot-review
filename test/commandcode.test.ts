@@ -9,6 +9,7 @@ import {
   classifyCommandCodePromptFailure,
   composeCommandCodeMonthlyWindow,
   pickCommandCodeAccessKey,
+  selectCommandCodeAccessKey,
   splitCommandCodeAccessKeys,
   formatCommandCodePlanUsage,
   parseCommandCodeMonthlySpend,
@@ -480,6 +481,19 @@ describe('CommandCode multi-key pick', () => {
     assert.deepEqual(splitCommandCodeAccessKeys(',,'), []);
   });
 
+  it('resolves the selector without probing when at most one key survives', async () => {
+    const logs = [];
+    const log = (message) => logs.push(message);
+    // Comma-free values are byte-identical verbatim, whitespace included.
+    assert.equal(await selectCommandCodeAccessKey(' solo ', log), ' solo ');
+    // Stray separators around one real key normalize to it.
+    assert.equal(await selectCommandCodeAccessKey('key,', log), 'key');
+    assert.equal(await selectCommandCodeAccessKey(',key,', log), 'key');
+    // Nothing parseable keeps the raw value (legacy garbage-in behavior).
+    assert.equal(await selectCommandCodeAccessKey(',,', log), ',,');
+    assert.equal(logs.length, 0);
+  });
+
   it('picks window-open keys by most remaining credits, failing back sanely', () => {
     // Healthy keys: most monthly credits remaining wins; ties keep the first.
     assert.equal(
@@ -488,6 +502,13 @@ describe('CommandCode multi-key pick', () => {
         { key: 'k2', usage: usage(9) },
       ]).key,
       'k2',
+    );
+    assert.equal(
+      pickCommandCodeAccessKey([
+        { key: 'k1', usage: usage(5) },
+        { key: 'k2', usage: usage(5) },
+      ]).key,
+      'k1',
     );
     // A window-limited key loses to an open one regardless of balance.
     const windowAware = pickCommandCodeAccessKey([
@@ -503,6 +524,10 @@ describe('CommandCode multi-key pick', () => {
     ]);
     assert.equal(allLimited.key, 'k1');
     assert.match(allLimited.reason, /^all 2 window-limited; picked 1\/2/);
+    // The window-limited count covers only REACHABLE keys, not failed probes.
+    const mixed = pickCommandCodeAccessKey([{ key: 'k1', usage: usage(9, true) }, { key: 'k2' }]);
+    assert.equal(mixed.key, 'k1');
+    assert.match(mixed.reason, /^all 1 window-limited; picked 1\/2/);
     // Unreachable probes are excluded; all unreachable → first key (legacy behavior).
     assert.equal(
       pickCommandCodeAccessKey([{ key: 'k1' }, { key: 'k2', usage: usage(5) }]).key,
