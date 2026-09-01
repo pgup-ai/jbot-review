@@ -24,7 +24,7 @@ import {
 } from './opencode.ts';
 import { spawnWithTimeout, truncateForLog } from '@symma/protocol';
 import { clampReasoningEffort } from './config.ts';
-import { isFiniteNumber, isRecord } from './text.ts';
+import { isFiniteNumber, isNonArrayRecord, isRecord } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
@@ -611,4 +611,101 @@ export function commandCodeEnvForHome(home: string | undefined): NodeJS.ProcessE
   // from overriding the selected credential.
   delete env.COMMAND_CODE_API_KEY;
   return env;
+}
+
+// The same alpha endpoint the pinned CLI's /usage view reads (fetchUsageData
+// in its bundle), Bearer-authed with the access key. Alpha API: every shape
+// drift parses to undefined — usage visibility must never fail a run.
+const COMMANDCODE_USAGE_URL = 'https://api.commandcode.ai/alpha/billing/credits';
+const COMMANDCODE_USAGE_TIMEOUT_MS = 4_000;
+
+interface CommandCodeUsageWindow {
+  used: number;
+  cap: number;
+  resetAt: number;
+  exceeded: boolean;
+}
+
+export interface CommandCodePlanUsage {
+  /** Included plan credits REMAINING this billing period. */
+  monthlyCredits: number;
+  /** Pay-as-you-go balance overage draws from once the plan runs out. */
+  purchasedCredits: number;
+  fiveHour?: CommandCodeUsageWindow;
+  weekly?: CommandCodeUsageWindow;
+}
+
+export function parseCommandCodePlanUsage(payload: unknown): CommandCodePlanUsage | undefined {
+  if (!isNonArrayRecord(payload) || !isNonArrayRecord(payload.credits)) return undefined;
+  const { monthlyCredits, purchasedCredits } = payload.credits;
+  if (!isFiniteNumber(monthlyCredits)) return undefined;
+  // Only ABSENT fields degrade — explicit null included, because null is this
+  // API's none value (the live payload carries windowLimits.exceeded: null).
+  // A present-but-invalid field is drift and poisons the whole payload: a
+  // partial line would render trusted-looking meters while hiding a real limit.
+  if (purchasedCredits != null && !isFiniteNumber(purchasedCredits)) return undefined;
+  const { windowLimits } = payload;
+  if (windowLimits != null && !isNonArrayRecord(windowLimits)) return undefined;
+  const limits = isNonArrayRecord(windowLimits) ? windowLimits : undefined;
+  // null return = present but malformed; undefined = absent.
+  const windowOf = (value: unknown): CommandCodeUsageWindow | null | undefined => {
+    if (value == null) return undefined;
+    if (!isNonArrayRecord(value)) return null;
+    const { used, cap, resetAt, exceeded } = value;
+    if (!isFiniteNumber(used) || used < 0 || !isFiniteNumber(cap) || cap <= 0) return null;
+    if (!isFiniteNumber(resetAt) || typeof exceeded !== 'boolean') return null;
+    return { used, cap, resetAt, exceeded };
+  };
+  const fiveHour = windowOf(limits?.fiveHour);
+  const weekly = windowOf(limits?.weekly);
+  if (fiveHour === null || weekly === null) return undefined;
+  return {
+    monthlyCredits,
+    purchasedCredits: isFiniteNumber(purchasedCredits) ? purchasedCredits : 0,
+    fiveHour,
+    weekly,
+  };
+}
+
+export function formatCommandCodePlanUsage(usage: CommandCodePlanUsage, now: number): string {
+  const meter = (label: string, window?: CommandCodeUsageWindow): string | undefined => {
+    if (!window) return undefined;
+    const percent = (window.used / window.cap) * 100;
+    // Sub-percent spend must stay distinguishable from a meter at zero.
+    const percentLabel = percent > 0 && percent < 1 ? '<1%' : `${Math.round(percent)}%`;
+    return `${label} ${window.used.toFixed(1)}/${window.cap} (${percentLabel}${
+      window.exceeded ? ', EXCEEDED' : ''
+    }, resets in ${formatShortDuration(Math.max(window.resetAt - now, 0))})`;
+  };
+  const windows = [meter('5h', usage.fiveHour), meter('weekly', usage.weekly)]
+    .filter(Boolean)
+    .join(', ');
+  const purchased =
+    usage.purchasedCredits > 0 ? ` + ${usage.purchasedCredits.toFixed(1)} purchased` : '';
+  return `CommandCode plan usage: ${windows ? `${windows}; ` : ''}${usage.monthlyCredits.toFixed(1)} plan credits remaining${purchased}.`;
+}
+
+function formatShortDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+/** One log line of live plan usage, or undefined on ANY failure — never throws. */
+export async function fetchCommandCodePlanUsageLine(
+  accessKey: string,
+): Promise<string | undefined> {
+  try {
+    const response = await fetch(COMMANDCODE_USAGE_URL, {
+      headers: { Authorization: `Bearer ${accessKey}` },
+      signal: AbortSignal.timeout(COMMANDCODE_USAGE_TIMEOUT_MS),
+    });
+    if (!response.ok) return undefined;
+    const usage = parseCommandCodePlanUsage(await response.json());
+    return usage && formatCommandCodePlanUsage(usage, Date.now());
+  } catch {
+    return undefined;
+  }
 }

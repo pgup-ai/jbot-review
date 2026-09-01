@@ -7,6 +7,8 @@ import { describe, it } from 'node:test';
 import {
   buildCommandCodeCliArgs,
   classifyCommandCodePromptFailure,
+  formatCommandCodePlanUsage,
+  parseCommandCodePlanUsage,
   commandCodeEnvForHome,
   commandCodeSessionEffort,
   commandCodeAuthPath,
@@ -328,5 +330,86 @@ describe('CommandCode CLI provider helpers', () => {
 
     assert.equal(Buffer.byteLength(truncated.split('\n\n')[0]!, 'utf8') <= 6, true);
     assert.match(truncated, /\[Context truncated to \d+ bytes; omitted \d+ bytes\.\]/);
+  });
+});
+
+describe('CommandCode plan usage', () => {
+  const now = 1_788_230_000_000;
+  const payload = {
+    credits: {
+      belowThreshold: false,
+      creditThreshold: 0,
+      monthlyCredits: 38.0527,
+      purchasedCredits: 0,
+      freeCredits: 0,
+    },
+    windowLimits: {
+      limited: true,
+      exceeded: null,
+      fiveHour: {
+        used: 0.6132,
+        cap: 14,
+        exceeded: false,
+        resetAt: now + 2 * 3_600_000 + 41 * 60_000,
+      },
+      weekly: { used: 35, cap: 35, exceeded: true, resetAt: now + 49 * 3_600_000 },
+    },
+  };
+
+  it('parses the credits payload and formats the one-line meter', () => {
+    const usage = parseCommandCodePlanUsage(payload);
+    assert.ok(usage);
+    assert.equal(
+      formatCommandCodePlanUsage(usage, now),
+      'CommandCode plan usage: 5h 0.6/14 (4%, resets in 2h 41m), weekly 35.0/35 (100%, EXCEEDED, resets in 2d 1h); 38.1 plan credits remaining.',
+    );
+    // Purchased credits surface — that is the balance overage draws from.
+    assert.match(
+      formatCommandCodePlanUsage({ ...usage, purchasedCredits: 12 }, now),
+      / \+ 12\.0 purchased\.$/,
+    );
+    // Sub-percent spend stays distinguishable from a zero meter.
+    assert.match(
+      formatCommandCodePlanUsage(
+        { ...usage, fiveHour: { used: 0.0006, cap: 14, exceeded: false, resetAt: now } },
+        now,
+      ),
+      /5h 0\.0\/14 \(<1%,/,
+    );
+  });
+
+  it('degrades to a credits-only line without windows and rejects drifted shapes', () => {
+    const usage = parseCommandCodePlanUsage({ credits: { monthlyCredits: 5 } });
+    assert.ok(usage);
+    assert.equal(usage.fiveHour, undefined);
+    // Explicit null degrades too: null is this API's none value (see the live
+    // payload's windowLimits.exceeded: null), not shape drift.
+    assert.ok(parseCommandCodePlanUsage({ credits: { monthlyCredits: 5 }, windowLimits: null }));
+    assert.equal(
+      formatCommandCodePlanUsage(usage, now),
+      'CommandCode plan usage: 5.0 plan credits remaining.',
+    );
+    // Alpha API: any shape drift parses to undefined, never throws. A field
+    // that is PRESENT but invalid poisons the whole payload (a partial line
+    // would hide a real limit); only absent fields degrade.
+    const window = { used: 1, cap: 14, exceeded: false, resetAt: now };
+    for (const drifted of [
+      null,
+      'x',
+      {},
+      { credits: {} },
+      { credits: { monthlyCredits: 'a' } },
+      { credits: { monthlyCredits: 5, purchasedCredits: 'x' } },
+      { credits: { monthlyCredits: 5 }, windowLimits: 'x' },
+      { credits: { monthlyCredits: 5 }, windowLimits: [] },
+      { credits: { monthlyCredits: 5 }, windowLimits: { fiveHour: 'x' } },
+      { credits: { monthlyCredits: 5 }, windowLimits: { fiveHour: [window] } },
+      { credits: { monthlyCredits: 5 }, windowLimits: { fiveHour: { ...window, used: -1 } } },
+      { credits: { monthlyCredits: 5 }, windowLimits: { fiveHour: { ...window, cap: 0 } } },
+      { credits: { monthlyCredits: 5 }, windowLimits: { weekly: { ...window, resetAt: 'soon' } } },
+      { credits: { monthlyCredits: 5 }, windowLimits: { weekly: { ...window, exceeded: 'yes' } } },
+    ]) {
+      assert.equal(parseCommandCodePlanUsage(drifted), undefined);
+    }
   });
 });
