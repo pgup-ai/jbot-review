@@ -114,11 +114,14 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
   return args;
 }
 
-// Probed 2026-08-22: `--effort` validates per model and exits nonzero on
-// values outside the model's set; muse-spark rejects the flag outright.
+// Probed 2026-08-22 (1.3 variants 2026-09-02): `--effort` validates per model
+// and exits nonzero on values outside the model's set; muse-spark rejects the
+// flag outright.
 const COMMANDCODE_MODEL_EFFORTS: Record<string, readonly string[]> = {
   'deepseek/deepseek-v4-flash': ['high', 'max'],
   'meta/muse-spark-1.2-contributor': [],
+  'meta/muse-spark-1.3': [],
+  'meta/muse-spark-1.3-contributor': [],
 };
 
 /**

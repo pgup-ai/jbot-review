@@ -104,14 +104,12 @@ describe('CommandCode CLI provider helpers', () => {
     assert.equal(effortOf(deepseek, { reasoningEffort: 'low' }, true), 'high');
     assert.equal(effortOf(deepseek, { reasoningEffort: 'max' }, true), 'max');
     for (const explicit of [false, true]) {
-      assert.equal(
-        effortOf(
-          'commandcode/meta/muse-spark-1.2-contributor',
-          { reasoningEffort: 'high' },
-          explicit,
-        ),
-        undefined,
-      );
+      for (const muse of ['1.2-contributor', '1.3', '1.3-contributor']) {
+        assert.equal(
+          effortOf(`commandcode/meta/muse-spark-${muse}`, { reasoningEffort: 'high' }, explicit),
+          undefined,
+        );
+      }
       assert.equal(
         effortOf('commandcode/Qwen/Qwen3.7-Max', { reasoningEffort: 'high' }, explicit),
         undefined,
