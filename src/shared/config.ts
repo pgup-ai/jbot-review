@@ -194,8 +194,8 @@ const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
 } satisfies Record<string, ModelConfig>;
 
 /**
- * Models whose declared efforts are the only ones that work. x-preview and
- * ox-alpha hard-400 on anything else ("[1210] This model always engages in
+ * Models whose declared efforts are the only ones that work. The Zen stealth
+ * models hard-400 on anything else ("[1210] This model always engages in
  * thinking and cannot be disabled; please use low, high, or max"), which no
  * retry recovers. mimo accepts `low` but silently collapses there (probed
  * 2026-08-22: empty or wrong output; correct at medium/high).
@@ -203,6 +203,7 @@ const GLM_PROMPT_CACHE_UNSUPPORTED_MODELS = {
 const EFFORT_RESTRICTED_MODELS = {
   'x-preview-f': { reasoningEfforts: ['low', 'high', 'max'] },
   'ox-alpha': { reasoningEfforts: ['low', 'high', 'max'] },
+  'omen-alpha': { reasoningEfforts: ['low', 'high', 'max'] },
   'mimo-v2.5': { reasoningEfforts: ['medium', 'high'] },
 } satisfies Record<string, ModelConfig>;
 

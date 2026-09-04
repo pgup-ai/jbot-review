@@ -105,6 +105,10 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
       { reasoningEffort: 'high' },
     );
     assert.deepEqual(
+      supportedModelOptions('opencode-go', 'omen-alpha', { reasoningEffort: 'medium' }),
+      { reasoningEffort: 'high' },
+    );
+    assert.deepEqual(
       supportedModelOptions('nvidia', 'moonshotai/kimi-k3', { reasoningEffort: 'medium' }),
       { reasoningEffort: 'high' },
     );
