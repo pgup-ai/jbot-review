@@ -2331,18 +2331,18 @@ async function runReviewPipeline(params: {
         roles: {
           main: roleTelemetry(mainBackend, model, mainReasoningEffort),
           auxiliary,
-          verification: {
-            ...auxiliary,
-            reasoningEffort: auxSessionsEnabled
-              ? effectiveReasoningEffort(
-                  auxBackend.name,
-                  auxModel,
-                  verifierSessionOptions ?? auxEffortOptions,
-                  commandCodeEffortContext,
-                  verifierSessionOptions,
-                )
-              : undefined,
-          },
+          verification: roleTelemetry(
+            auxSessionsEnabled ? auxBackend : undefined,
+            auxModel,
+            effectiveReasoningEffort(
+              auxBackend.name,
+              auxModel,
+              verifierSessionOptions ?? auxEffortOptions,
+              commandCodeEffortContext,
+              verifierSessionOptions,
+            ),
+            'verification',
+          ),
         },
       });
     }

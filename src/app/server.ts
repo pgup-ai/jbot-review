@@ -22,7 +22,7 @@ function mustEnv(name: string): string {
 
 const modelPool = resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
 const auxModelPool = resolveAuxModelSelection(process.env.JBOT_AUX_MODEL_POOL, modelPool);
-const allModels = [...modelPool, ...auxModelPool];
+const allModels = [...new Set([...modelPool, ...auxModelPool])];
 assertImageSupportsModels(allModels, process.env);
 // Resolved at boot: the deployment picks per PR, so a missing key must fail
 // here rather than on whichever PR happens to draw that provider.

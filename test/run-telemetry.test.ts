@@ -109,4 +109,10 @@ test('effective effort follows the backend contract rather than claiming every r
   );
   assert.equal(roleTelemetry(undefined, 'opencode/a', 'low').reasoningEffort, undefined);
   assert.equal(roleTelemetry(undefined, 'opencode/a').workspaceAccess, 'unavailable');
+  for (const backend of ['opencode', 'pi']) {
+    assert.equal(
+      roleTelemetry({ name: backend }, 'opencode/a', 'high', 'verification').workspaceAccess,
+      'embedded-only',
+    );
+  }
 });

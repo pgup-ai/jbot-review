@@ -425,7 +425,7 @@ async function review(
     comparison ? undefined : process.env.JBOT_AUX_MODEL_POOL,
     pool,
   );
-  const allModels = [...pool, ...auxPool];
+  const allModels = [...new Set([...pool, ...auxPool])];
   assertImageSupportsModels(allModels, process.env);
   if (comparison) selectArenaModel(comparison, pool);
   // HEAD, not the worktree: iterating on uncommitted edits keeps the same

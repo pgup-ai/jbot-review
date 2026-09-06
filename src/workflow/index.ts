@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     getInputOrEnv('aux-model-pool', 'JBOT_AUX_MODEL_POOL'),
     modelPool,
   );
-  const allModels = [...modelPool, ...auxModelPool];
+  const allModels = [...new Set([...modelPool, ...auxModelPool])];
   assertImageSupportsModels(allModels, process.env);
   for (const warning of removedAuxInputWarnings(getInputOrEnv)) core.warning(warning);
   const credentials = resolvePoolCredentials(allModels, ({ input, env }) =>
