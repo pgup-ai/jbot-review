@@ -1,7 +1,17 @@
 import * as esbuild from 'esbuild';
+import { spawnSync } from 'node:child_process';
+
+const revision = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout?.trim();
+const reviewerRevision = revision
+  ? revision +
+    (spawnSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).stdout?.trim()
+      ? '-dirty'
+      : '')
+  : 'unknown';
 
 const shared: esbuild.BuildOptions = {
   bundle: true,
+  define: { __JBOT_REVIEWER_REVISION__: JSON.stringify(reviewerRevision) },
   platform: 'node',
   target: 'node20',
   format: 'esm',

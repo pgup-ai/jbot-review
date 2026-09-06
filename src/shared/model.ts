@@ -12,7 +12,7 @@ interface ProviderResolution {
   /** Provider for a ref that carries no provider segment. */
   fallback: string;
   /** Input this came from, so an error points at the field to fix. */
-  label: 'model';
+  label: 'model' | 'aux-model-pool';
 }
 
 /**
@@ -77,6 +77,12 @@ export function resolveModelSelection(models?: string, pinnedProviderID?: string
   return resolveSelection(input, { pinned, fallback: DEFAULT_PROVIDER_ID, label: 'model' });
 }
 
+export function resolveAuxModelSelection(models: string | undefined, mainPool: string[]): string[] {
+  return models?.trim()
+    ? resolveSelection(models, { fallback: DEFAULT_PROVIDER_ID, label: 'aux-model-pool' })
+    : mainPool;
+}
+
 function defaultModelOf(providerID: string): string {
   const { defaultModel } = providerConfig(providerID);
   if (!defaultModel) {
@@ -100,25 +106,26 @@ export function removedAuxInputWarnings(read: (input: string, env: string) => st
     ['aux-provider', 'JBOT_AUX_PROVIDER'],
   ].flatMap(([input, env]) =>
     read(input, env)
-      ? [`\`${input}\` was removed and is ignored: both roles draw from \`model\`.`]
+      ? [
+          `\`${input}\` was removed and is ignored: use \`aux-model-pool\` for a separate auxiliary pool.`,
+        ]
       : [],
   );
 }
 
 /**
  * The aux seed is salted so the two roles draw independently rather than always
- * together; both still hash into the same pool, so they land on one model about
- * 1/n of the time, and always on a one-entry pool. That is when the aux session
- * shares the main options entry and its effort rather than the low aux default.
+ * together. Selecting the same model shares the main options and effort.
  */
 export function pickReviewModels(
   pool: string[],
   seed: string,
   attempt = 1,
+  auxPool = pool,
 ): { model: string; auxModel: string } {
   return {
     model: pickPooledModel(pool, seed, attempt),
-    auxModel: pickPooledModel(pool, `aux:${seed}`),
+    auxModel: pickPooledModel(auxPool, `aux:${seed}`),
   };
 }
 

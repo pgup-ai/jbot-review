@@ -22,6 +22,7 @@ import {
   pickReviewModels,
   removedAuxInputWarnings,
   resolveModelSelection,
+  resolveAuxModelSelection,
 } from '../shared/model.ts';
 import { runPrReview } from '../shared/runner.ts';
 import type { Octokit } from '../shared/github.ts';
@@ -43,9 +44,14 @@ async function main(): Promise<void> {
     getInputOrEnv('model', 'JBOT_REVIEW_MODEL'),
     providerInput,
   );
-  assertImageSupportsModels(modelPool, process.env);
+  const auxModelPool = resolveAuxModelSelection(
+    getInputOrEnv('aux-model-pool', 'JBOT_AUX_MODEL_POOL'),
+    modelPool,
+  );
+  const allModels = [...modelPool, ...auxModelPool];
+  assertImageSupportsModels(allModels, process.env);
   for (const warning of removedAuxInputWarnings(getInputOrEnv)) core.warning(warning);
-  const credentials = resolvePoolCredentials(modelPool, ({ input, env }) =>
+  const credentials = resolvePoolCredentials(allModels, ({ input, env }) =>
     getInputOrEnv(input, env),
   );
   const options = {
@@ -89,7 +95,7 @@ async function main(): Promise<void> {
     verifyOverlapGrace: parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
   };
   const pullTarget = getPullRequestTarget();
-  for (const warning of swallowedProviderWarnings(modelPool)) {
+  for (const warning of swallowedProviderWarnings(allModels)) {
     core.warning(warning);
   }
   core.info(`Model: ${modelPool.join(', ')}`);
@@ -120,8 +126,9 @@ async function main(): Promise<void> {
       modelPool,
       pull.head.sha,
       github.context.runAttempt,
+      auxModelPool,
     );
-    if (modelPool.length > 1) {
+    if (modelPool.length > 1 || auxModelPool.length > 1) {
       core.info(
         `Model pool of ${modelPool.length}: picked ${model} (aux ${auxModel}) for workflow attempt ${github.context.runAttempt}`,
       );
@@ -152,6 +159,8 @@ async function main(): Promise<void> {
       threadResolutionOctokit,
       options: {
         ...options,
+        modelPool,
+        auxModelPool,
         auxModel,
         auxApiKey: auxCredential?.apiKey ?? '',
         auxBaseURL: auxCredential?.baseURL,

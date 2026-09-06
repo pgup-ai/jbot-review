@@ -274,6 +274,7 @@ jobs:
         with:
           # Precedence: /jbot comment flag > dispatch input > repo variable > default.
           provider: ${{ needs.command.outputs.provider || inputs.provider || vars.JBOT_REVIEW_PROVIDER || '' }}
+          aux-model-pool: ${{ vars.JBOT_AUX_MODEL_POOL || '' }}
           model: ${{ needs.command.outputs.model || inputs.model || vars.JBOT_REVIEW_MODEL || '' }}
           sdk-engine: ${{ vars.JBOT_SDK_ENGINE || '' }}
           opencode-proxy-url: ${{ steps.pr.outputs.same_repo == 'true' && secrets.OPENCODE_PROXY_URL || '' }}
@@ -328,7 +329,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: jbot-review-telemetry
+          name: jbot-review-telemetry-${{ github.run_id }}-${{ github.run_attempt }}
           path: .jbot-review/telemetry.jsonl
           if-no-files-found: ignore
           retention-days: 14

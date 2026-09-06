@@ -12,6 +12,7 @@ import {
   removedAuxInputWarnings,
   pickPooledModel,
   resolveModelSelection,
+  resolveAuxModelSelection,
 } from '../src/shared/model.ts';
 
 describe('parseModelName', () => {
@@ -108,6 +109,27 @@ describe('resolveModelSelection with a legacy provider input', () => {
 
   it('rejects an unknown pinned provider', () => {
     assert.throws(() => resolveModelSelection('a', 'nope'), /Unknown provider "nope"\. Supported:/);
+  });
+});
+
+describe('resolveAuxModelSelection', () => {
+  it('defaults to the main pool but validates an independent weighted auxiliary pool', () => {
+    const main = resolveModelSelection('a,b', 'devin');
+    assert.equal(resolveAuxModelSelection(undefined, main), main);
+    assert.equal(resolveAuxModelSelection(' ', main), main);
+    assert.deepEqual(resolveAuxModelSelection('opencode/a, opencode/a, commandcode/b', main), [
+      'opencode/a',
+      'opencode/a',
+      'commandcode/b',
+    ]);
+    assert.throws(() => resolveAuxModelSelection(',,,', main), /Invalid aux-model-pool/);
+    assert.throws(() => resolveAuxModelSelection('no-such-provider/a', main), /Unknown provider/);
+    const aux = ['opencode/x', 'commandcode/y'];
+    for (const attempt of [1, 2]) {
+      const selected = pickReviewModels(main, 'head', attempt, aux);
+      assert.equal(selected.model, pickPooledModel(main, 'head', attempt));
+      assert.equal(selected.auxModel, pickPooledModel(aux, 'aux:head'));
+    }
   });
 });
 

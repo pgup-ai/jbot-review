@@ -43,6 +43,7 @@ import {
   pickReviewModels,
   removedAuxInputWarnings,
   resolveModelSelection,
+  resolveAuxModelSelection,
 } from '../shared/model.ts';
 import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
@@ -420,7 +421,12 @@ async function review(
     process.env.MODEL,
     comparison ? undefined : process.env.PROVIDER,
   );
-  assertImageSupportsModels(pool, process.env);
+  const auxPool = resolveAuxModelSelection(
+    comparison ? undefined : process.env.JBOT_AUX_MODEL_POOL,
+    pool,
+  );
+  const allModels = [...pool, ...auxPool];
+  assertImageSupportsModels(allModels, process.env);
   if (comparison) selectArenaModel(comparison, pool);
   // HEAD, not the worktree: iterating on uncommitted edits keeps the same
   // reviewer, so a before/after comparison is not confounded by the pick.
@@ -433,10 +439,10 @@ async function review(
   if (comparison && (await gitOrEmpty(['status', '--porcelain'])).trim()) {
     throw new Error('Arena checkout must be clean before review.');
   }
-  const { model, auxModel } = pickReviewModels(pool, headSha);
+  const { model, auxModel } = pickReviewModels(pool, headSha, 1, auxPool);
   const provider = parseModelName(model).providerID;
   const auxProviderID = parseModelName(auxModel).providerID;
-  for (const warning of swallowedProviderWarnings(pool)) log(warning);
+  for (const warning of swallowedProviderWarnings(allModels)) log(warning);
   for (const warning of removedAuxInputWarnings((_, env) => process.env[env] ?? '')) log(warning);
 
   // Preview never spawns checkouts or sessions: it inspects the worktree diff
@@ -616,7 +622,7 @@ async function review(
   // run rather than only the runs that happen to draw that provider. Still
   // below the no-review exits, so a clean tree needs no key at all.
   const credentials = resolvePoolCredentials(
-    pool,
+    allModels,
     ({ env }: { env: string }) => (comparison ? invocation.arenaAuth?.[env] : process.env[env]),
     comparison
       ? ' Arena credentials must be provided through the arena auth bundle.'
@@ -725,6 +731,8 @@ async function review(
     baseSha: mergeBase,
     localDiff: { files, commits },
     options: {
+      modelPool: pool,
+      auxModelPool: auxPool,
       enhancedContext: config?.enhancedContext ?? true,
       scrubSessionEnv: config?.scrubSessionEnv ?? true,
       sdkEngine: config?.sdkEngine ?? '',

@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { MAX_REVIEW_PLAYBOOK_BLOCK_BYTES, buildReviewPlaybookBlock } from '../src/shared/prompt.ts';
-import { selectReviewPlaybookIds } from '../src/shared/review-playbooks.ts';
+import {
+  selectReviewPlaybookIds,
+  changedFilesIncludeFrontend,
+} from '../src/shared/review-playbooks.ts';
 
 describe('selectReviewPlaybookIds', () => {
   it('always includes the compact core review playbook', () => {
@@ -36,6 +39,7 @@ describe('selectReviewPlaybookIds', () => {
         ['code-review-core'],
         `false positive: ${file}`,
       );
+      assert.equal(changedFilesIncludeFrontend([file]), false, file);
     }
   });
 
@@ -84,6 +88,13 @@ describe('selectReviewPlaybookIds', () => {
       'packages/src/client/http.ts',
       'packages/sdk/src/client/http.ts',
       // `use` + lowercase is not a hook — guards the case-sensitive `use[A-Z]`.
+      '.claude/hooks/comment-test-guard.mjs',
+      '.codex/hooks/useGuard.ts',
+      '.agents/hooks/check.ts',
+      '.github/hooks/check.mjs',
+      '.git/hooks/pre-commit',
+      '.husky/hooks/commit.ts',
+      'packages/tool/.githooks/check.ts',
       'apps/api/src/user.ts',
       'apps/api/src/userService.ts',
     ]) {
@@ -91,6 +102,7 @@ describe('selectReviewPlaybookIds', () => {
         !selectReviewPlaybookIds([file]).includes('frontend-workflow'),
         `false positive: ${file}`,
       );
+      assert.equal(changedFilesIncludeFrontend([file]), false, file);
     }
   });
 
@@ -101,6 +113,8 @@ describe('selectReviewPlaybookIds', () => {
       'src/ProfilePage.tsx',
       'src/LoginModal.tsx',
       'src/hooks/useAuth.ts',
+      'apps/web/hooks/useSession.ts',
+      '.claude/components/Settings.tsx',
       'src/useThing.ts',
       'src/login-form.ts',
       'client/state/session.ts',
@@ -109,6 +123,7 @@ describe('selectReviewPlaybookIds', () => {
       'packages/client/state/session.ts',
     ]) {
       assert.ok(selectReviewPlaybookIds([file]).includes('frontend-workflow'), `missed: ${file}`);
+      assert.equal(changedFilesIncludeFrontend(['.claude/hooks/check.mjs', file]), true, file);
     }
   });
 

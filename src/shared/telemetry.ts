@@ -1,3 +1,4 @@
+import type { runConfiguration, runIdentity } from './run-telemetry.ts';
 import type { Finding, FindingConfidence, Severity } from './types.ts';
 
 /**
@@ -174,11 +175,36 @@ export interface FindingRouting {
  * trace, not just a log line.
  */
 export interface RunTelemetryMeta {
+  repository?: string;
+  identity?: ReturnType<typeof runIdentity>;
+  policy?: ReturnType<typeof runConfiguration>;
   runId: string;
   baseSha?: string;
   headSha?: string;
   model: string;
   auxModel?: string;
+}
+
+export interface RunExecutionTelemetry {
+  reviewPasses: number;
+  reviewShards: number;
+  lensKeys: string[];
+  guidelinePass: boolean;
+  context7Active: boolean;
+  auxSessionsEnabled: boolean;
+  maxConcurrentSessions: number;
+  providerConcurrency: { providerID: string; limit: number }[];
+  serializedBackends: string[];
+  roles: Record<
+    'main' | 'auxiliary' | 'verification',
+    {
+      model: string;
+      backend: string;
+      capability: BackendTelemetryCapability;
+      workspaceAccess: 'read-only' | 'embedded-only' | 'unavailable';
+      reasoningEffort?: string;
+    }
+  >;
 }
 
 /** 'skipped' = the run exited before any session (doc-only PR, empty diff). */
@@ -254,6 +280,7 @@ export interface TelemetryRecorder {
   recordOutcome(row: Omit<OutcomeTelemetryRow, 'kind'>): void;
   /** Open the run header row; identity fields only, sealed at start. */
   beginRun(meta: RunTelemetryMeta): void;
+  recordExecution(execution: RunExecutionTelemetry): void;
   /** Close the run header with its terminal state and wall clock. */
   finishRun(state: RunTerminalState, elapsedMs: number): void;
   recordCoverage(coverage: SessionCoverage): void;
@@ -272,6 +299,7 @@ const DISABLED: TelemetryRecorder = {
   recordExploration: () => undefined,
   recordOutcome: () => undefined,
   beginRun: () => undefined,
+  recordExecution: () => undefined,
   finishRun: () => undefined,
   recordCoverage: () => undefined,
   findingRows: () => [],
@@ -389,6 +417,9 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     },
     beginRun(meta) {
       run = { ...meta };
+    },
+    recordExecution(execution) {
+      if (run) Object.assign(run, { execution });
     },
     finishRun(state, elapsedMs) {
       if (run) Object.assign(run, { terminalState: state, elapsedMs });

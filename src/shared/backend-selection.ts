@@ -175,7 +175,7 @@ export function selectReviewBackends(input: ReviewBackendSelectionInput): Review
   };
 }
 
-function cliBackendForProvider(providerID: string): CliBackendID | undefined {
+export function cliBackendForProvider(providerID: string): CliBackendID | undefined {
   if (isDevinProvider(providerID)) return DEVIN_PROVIDER_ID;
   if (isCommandCodeProvider(providerID)) return COMMANDCODE_PROVIDER_ID;
   if (isCursorProvider(providerID)) return CURSOR_PROVIDER_ID;

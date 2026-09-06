@@ -481,6 +481,25 @@ describe('run and coverage telemetry', () => {
       error: new Error('Request to https://secret.example/token?key=abc timed out after 900000ms'),
     });
     t.recordCoverage({ session: 'guideline-compliance', state: 'skipped' });
+    const role = {
+      model: 'prov/model',
+      backend: 'opencode',
+      capability: 'observable' as const,
+      workspaceAccess: 'read-only' as const,
+      reasoningEffort: 'medium',
+    };
+    t.recordExecution({
+      reviewPasses: 2,
+      reviewShards: 1,
+      lensKeys: ['interactions'],
+      guidelinePass: true,
+      context7Active: false,
+      auxSessionsEnabled: true,
+      maxConcurrentSessions: 3,
+      providerConcurrency: [],
+      serializedBackends: [],
+      roles: { main: role, auxiliary: role, verification: role },
+    });
     t.finishRun('completed', 123_456);
 
     const lines = t
@@ -492,6 +511,8 @@ describe('run and coverage telemetry', () => {
     assert.equal(lines[0].headSha, 'head');
     assert.equal(lines[0].terminalState, 'completed');
     assert.equal(lines[0].elapsedMs, 123_456);
+    assert.deepEqual(lines[0].execution.lensKeys, ['interactions']);
+    assert.equal(lines[0].execution.roles.main.reasoningEffort, 'medium');
 
     const coverage = lines.filter((line) => line.kind === 'coverage');
     assert.deepEqual(

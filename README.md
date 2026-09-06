@@ -664,13 +664,28 @@ than only the runs that happen to pick that provider. Listing a model is a
 request to review with it, so an unusable candidate is a configuration error,
 never silently skipped.
 
-**Auxiliary sessions draw from the same pool.** Their seed is salted, so the two
+**Auxiliary sessions draw from the same pool by default.** Their seed is salted, so the two
 picks are independent rather than locked to the same index — not that they
 differ. Both hash into the same pool, so roughly 1/n of runs land both roles on
 one candidate (half the runs on a two-model pool), and a one-entry pool
 always does. That is when the aux session shares the main model's options entry
 and its effort instead of the lower aux default. Neither draw prefers a
 position, so pool order carries no heavy/fast role assignment.
+
+Set `aux-model-pool` to choose a separate pool for recall lenses, addressed-thread
+checks, guideline compliance, summaries, and verification:
+
+```yaml
+model: opencode/your-main-model
+aux-model-pool: opencode/your-aux-model,commandcode/your-other-aux-model
+```
+
+For local and webhook-app runs, set `JBOT_AUX_MODEL_POOL`. Entries use the same
+`provider/model` syntax; repeated entries retain their selection weight. The
+legacy `provider` input only pins the main pool. Omitting or clearing the
+auxiliary pool preserves the existing selection. The auxiliary draw stays
+stable across workflow reruns; the main draw advances as before. Credentials
+and slim-image compatibility are validated for both complete pools.
 
 **Legacy `provider`** still works unchanged. Setting it _pins_ the provider: an
 unprefixed id belongs to it, a matching `provider/` prefix is stripped, and any
@@ -705,6 +720,7 @@ documentation lookup.
 | ---------------------------- | -------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `provider`                   | No       | from `model`          | Deprecated — qualify `model` instead; pins the provider when set (`JBOT_REVIEW_PROVIDER`)                                                                                                                                                                                    |
 | `model`                      | No       | `opencode` default    | `provider/model` reference, or a comma-separated pool that may span providers; required for `openai-compatible`; can come from `JBOT_REVIEW_MODEL`                                                                                                                           |
+| `aux-model-pool`             | No       | main pool             | Separate provider/model pool for auxiliary sessions; defaults to `model`. `JBOT_AUX_MODEL_POOL` outside the Action.                                                                                                                                                          |
 | `sdk-engine`                 | No       | `auto`                | `auto` uses pi for cataloged models; `opencode` pins SDK sessions to opencode                                                                                                                                                                                                |
 | `opencode-proxy-url`         | No       | —                     | Optional HTTP/HTTPS proxy URL for OpenCode; successful verification pins SDK sessions to OpenCode; ignored for fork-head PRs and skipped without failing the review when unavailable                                                                                         |
 | `opencode-api-key`           | No       | —                     | Used when the main or aux model names `opencode`/`opencode-go`                                                                                                                                                                                                               |
@@ -850,6 +866,27 @@ and precision against seeded defects.
   [Provider configuration](#provider-configuration-in-repo)). The
   opencode server uses a free ephemeral port automatically;
   `JBOT_OPENCODE_PORT` pins one instead.
+
+## Comparing review runs
+
+The telemetry `run` header includes the repository, reviewed base/head, selected
+models, and GitHub workflow run ID, attempt, and job key when those environment
+variables are available. Bundles embed the reviewer commit at build time (with
+`-dirty` for an uncommitted build); direct TypeScript runs report `unbundled`.
+The image variant is recorded separately from the reviewed commit.
+
+`policy.configuration` records normalized review controls, weighted pools, and
+requested reasoning effort. Its SHA-256 `configurationHash` covers those fields
+only; arbitrary model-option JSON, endpoints, keys, and cache paths are excluded.
+`execution` records resolved role engines, supported effort, workspace access,
+telemetry capability, effective shards/lenses, Context7 activation, and session
+limits. Missing effort means it was not established for that backend, not `low`.
+Coverage rows remain the authority for which sessions completed or failed.
+Early exits can have a policy header without execution metadata.
+
+The in-repo artifact name includes workflow run and attempt. Join artifacts with
+that identity; do not assume the last artifact or workflow status represents
+every attempt. These fields enable comparisons without changing routing defaults.
 
 ## Observer gateway
 
