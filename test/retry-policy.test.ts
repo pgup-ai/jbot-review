@@ -32,12 +32,16 @@ describe('classifyMainShardFailure', () => {
     ]) {
       assert.deepEqual(classify(message), { failureClass: 'model-not-found', retryable: false });
     }
-    assert.deepEqual(
-      classify('model "provider/a-very-long-model-identifier" temporarily unavailable (503)'),
-      {
-        failureClass: 'provider-transient',
-        retryable: true,
-      },
+    for (const message of [
+      'model "provider/a-very-long-model-identifier" not available (503)',
+      'model "provider/a-very-long-model-identifier" temporarily unavailable (503)',
+    ]) {
+      assert.deepEqual(classify(message), { failureClass: 'provider-transient', retryable: true });
+    }
+    assert.equal(
+      classify('model "provider/a-very-long-model-identifier" is not available right now')
+        .retryable,
+      true,
     );
     assert.deepEqual(classify('model "provider/model" rate limited (429)'), {
       failureClass: 'rate-limit',

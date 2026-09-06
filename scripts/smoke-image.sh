@@ -6,6 +6,11 @@ for entry in workflow/index.js app/server.js worker/index.js local/index.js; do
   test -s "/app/dist/$entry"
   node --check "/app/dist/$entry"
 done
+if output=$(env -u GITHUB_APP_ID MODEL=opencode/smoke PROVIDER=opencode OPENCODE_API_KEY=smoke node /app/dist/app/server.js 2>&1); then
+  echo "App unexpectedly started without GITHUB_APP_ID" >&2
+  exit 1
+fi
+printf '%s\n' "$output" | grep -q 'Error: Missing required env var: GITHUB_APP_ID'
 opencode --version
 command-code --no-auto-update --version
 env PATH=/usr/local/bin:/usr/bin:/bin devin --version

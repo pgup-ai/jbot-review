@@ -504,6 +504,26 @@ describe('resolvePoolCredentials', () => {
     assert.equal(credentials.get('opencode')?.baseURL, undefined);
   });
 
+  it('requires local keys only for providers that do not route to the gateway', () => {
+    const previous = process.env.JBOT_ACP_GATEWAY_URL;
+    process.env.JBOT_ACP_GATEWAY_URL = 'https://gateway.example';
+    try {
+      const credentials = resolvePoolCredentials(
+        ['cursor/a', 'codex/b', 'kilo/c', 'devin/d', 'deepseek/e'],
+        keys(['DEEPSEEK_API_KEY']),
+      );
+      for (const provider of ['cursor', 'codex', 'kilo', 'devin']) {
+        assert.deepEqual(credentials.get(provider), { apiKey: '' });
+      }
+      assert.throws(() => resolvePoolCredentials(['deepseek/e'], keys([])), /Missing key/);
+      delete process.env.JBOT_ACP_GATEWAY_URL;
+      assert.throws(() => resolvePoolCredentials(['cursor/a'], keys([])), /Missing key/);
+    } finally {
+      if (previous === undefined) delete process.env.JBOT_ACP_GATEWAY_URL;
+      else process.env.JBOT_ACP_GATEWAY_URL = previous;
+    }
+  });
+
   it('names the provider, the model that required it, and how to set it', () => {
     assert.throws(
       () => resolvePoolCredentials(['opencode/a', 'deepseek/c'], keys(['OPENCODE_API_KEY'])),

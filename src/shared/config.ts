@@ -1,4 +1,5 @@
 import { parseModelName } from '@symma/protocol';
+import { gatewayRoutedModels } from './acp-remote.ts';
 
 export interface ProviderConfig {
   defaultModel?: string;
@@ -43,15 +44,8 @@ export interface ProviderCredential {
   baseURL?: string;
 }
 
-/**
- * Resolves a credential for every provider the pools draw on. A pool may span
- * providers — only one candidate runs per PR — so each needs its own key, and
- * resolving all of them up front keeps a missing key failing on the next run
- * rather than only the runs that happen to pick that provider.
- *
- * A configured candidate is never silently dropped: listing a model is a
- * request to review with it, so an unusable one is a configuration error.
- */
+/** Resolve the whole pool before selection so a missing local key cannot fail
+ * only on runs that draw that provider. Gateway agents own their credentials. */
 export function resolvePoolCredentials(
   pool: string[],
   read: (source: ProviderCredentialSource) => string | undefined,
@@ -62,6 +56,10 @@ export function resolvePoolCredentials(
     const { providerID } = parseModelName(model);
     if (credentials.has(providerID)) continue;
     const config = providerConfig(providerID, model);
+    if (process.env.JBOT_ACP_GATEWAY_URL?.trim() && gatewayRoutedModels([model])) {
+      credentials.set(providerID, { apiKey: '' });
+      continue;
+    }
     const apiKey = resolveProviderCredential(config, read);
     if (!apiKey) {
       const sources = providerCredentialSources(config)

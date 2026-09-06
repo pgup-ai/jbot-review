@@ -36,7 +36,7 @@ export function classifyMainShardFailure(error: unknown): {
   )
     ? 'auth'
     : matches(
-          /unknown model|model.{0,24}not (found|exist|available)|no such model|\bmodel\s+["'][^"'\r\n]+["']\s+(?:is\s+)?not (?:offered by the agent|found|available|existent)\b/i,
+          /unknown model|model.{0,24}not (found|exist)|no such model|\bmodel\s+["'][^"'\r\n]+["']\s+(?:is\s+)?not (?:offered by the agent|found|existent)\b/i,
         )
       ? 'model-not-found'
       : matches(

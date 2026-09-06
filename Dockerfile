@@ -19,6 +19,7 @@ RUN npm install -g opencode-ai@1.18.27 command-code@1.44.0 \
 # Devin CLI (optional devin provider); strip the installer's interactive setup step.
 ARG DEVIN_CLI_VERSION=3000.4.25
 RUN curl -fsSL "https://static.devin.ai/cli/${DEVIN_CLI_VERSION}/setup.sh" -o /tmp/devin-install.sh \
+  && echo "9687335c83c70b8de7ebceb5f94dfe3d8cb025f8d46bd22ad03e21b994bf93c2  /tmp/devin-install.sh" | sha256sum -c - \
   && grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install.sh \
   && sed '/"\$VERSION_DIR\/bin\/\$COMPILED_BIN_NAME" setup/d' /tmp/devin-install.sh > /tmp/devin-install-no-setup.sh \
   && ! grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install-no-setup.sh \
