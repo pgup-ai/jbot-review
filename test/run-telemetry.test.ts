@@ -15,7 +15,7 @@ test('configuration fingerprints policy changes while excluding credentials and 
     auxBaseURL: 'https://private.example',
     shardCachePath: '/private/cache',
   });
-  const first = runConfiguration(options, 'opencode/a', 'devin/b');
+  const first = runConfiguration(options, 'opencode/a');
   assert.doesNotMatch(JSON.stringify(first), /secret-value|private/);
   assert.equal(
     first.configurationHash,
@@ -26,23 +26,21 @@ test('configuration fingerprints policy changes while excluding credentials and 
         modelOptions: { reasoningEffort: 'medium', secret: 'different' },
       },
       'opencode/a',
-      'devin/b',
     ).configurationHash,
   );
   assert.notEqual(
     first.configurationHash,
-    runConfiguration({ ...options, contextTrim: true }, 'opencode/a', 'devin/b').configurationHash,
+    runConfiguration({ ...options, scrubSessionEnv: false }, 'opencode/a').configurationHash,
   );
   assert.notEqual(
     first.configurationHash,
     runConfiguration(
-      { ...options, auxModelPool: ['devin/b', 'devin/b', 'opencode/a'] },
+      { ...options, modelPool: ['opencode/a', 'opencode/a', 'devin/b'] },
       'opencode/a',
-      'devin/b',
     ).configurationHash,
   );
   assert.equal(
-    runConfiguration({ ...options, sdkEngine: 'https://secret.example' }, 'opencode/a', 'devin/b')
+    runConfiguration({ ...options, sdkEngine: 'https://secret.example' }, 'opencode/a')
       .configuration.sdkEngine,
     'unrecognized',
   );
@@ -100,6 +98,10 @@ test('effective effort follows the backend contract rather than claiming every r
   );
   assert.equal(effectiveReasoningEffort('opencode', 'opencode/a', ctx.auxModelOptions, ctx), 'low');
   assert.equal(
+    effectiveReasoningEffort('poolside', 'poolside/laguna-s-2.1', ctx.auxModelOptions, ctx),
+    'low',
+  );
+  assert.equal(
     roleTelemetry({ name: 'commandcode' }, 'commandcode/a').workspaceAccess,
     'embedded-only',
   );
@@ -107,6 +109,9 @@ test('effective effort follows the backend contract rather than claiming every r
     roleTelemetry({ name: 'opencode', observability: 'enforceable' }, 'opencode/a').workspaceAccess,
     'read-only',
   );
+  for (const model of ['openai-compatible/gemini-2.5-pro', 'openai-compatible/gpt-5']) {
+    assert.equal(roleTelemetry({ name: 'opencode' }, model).workspaceAccess, 'embedded-only');
+  }
   assert.equal(roleTelemetry(undefined, 'opencode/a', 'low').reasoningEffort, undefined);
   assert.equal(roleTelemetry(undefined, 'opencode/a').workspaceAccess, 'unavailable');
   for (const backend of ['opencode', 'pi']) {

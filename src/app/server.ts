@@ -6,11 +6,7 @@ import {
   swallowedProviderWarnings,
 } from '../shared/backend-selection.ts';
 import { resolvePoolCredentials } from '../shared/config.ts';
-import {
-  removedAuxInputWarnings,
-  resolveModelSelection,
-  resolveAuxModelSelection,
-} from '../shared/model.ts';
+import { removedAuxInputWarnings, resolveModelSelection } from '../shared/model.ts';
 import { handlePrEvent } from './app.ts';
 import type { AppConfig } from './app.ts';
 
@@ -21,13 +17,11 @@ function mustEnv(name: string): string {
 }
 
 const modelPool = resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
-const auxModelPool = resolveAuxModelSelection(process.env.JBOT_AUX_MODEL_POOL, modelPool);
-const allModels = [...new Set([...modelPool, ...auxModelPool])];
-assertImageSupportsModels(allModels, process.env);
+assertImageSupportsModels(modelPool, process.env);
 // Resolved at boot: the deployment picks per PR, so a missing key must fail
 // here rather than on whichever PR happens to draw that provider.
 const credentials = resolvePoolCredentials(
-  allModels,
+  modelPool,
   ({ env }: { env: string }) => process.env[env],
 );
 
@@ -36,11 +30,10 @@ const appCfg: AppConfig = {
   privateKey: mustEnv('GITHUB_APP_PRIVATE_KEY').replace(/\\n/g, '\n'),
   credentials,
   modelPool,
-  auxModelPool,
 };
 
 for (const warning of [
-  ...swallowedProviderWarnings(allModels),
+  ...swallowedProviderWarnings(modelPool),
   ...removedAuxInputWarnings((_, env) => process.env[env] ?? ''),
 ]) {
   console.warn(`[jbot-review] ${warning}`);

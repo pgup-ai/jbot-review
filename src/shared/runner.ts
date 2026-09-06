@@ -845,7 +845,6 @@ export interface ReviewRunOptions {
    */
   auxModel?: string;
   modelPool?: string[];
-  auxModelPool?: string[];
   /**
    * Optional API key for the auxiliary model provider when it differs from the
    * main model provider. Empty = reuse the main review API key.
@@ -1100,7 +1099,6 @@ async function runReviewPipeline(params: {
       policy: runConfiguration(
         { ...options, sdkEngine: options.sdkEngine || process.env.JBOT_SDK_ENGINE || 'auto' },
         model,
-        auxModel,
       ),
       ...(baseSha ? { baseSha } : {}),
       ...(headSha ? { headSha } : {}),
@@ -3202,7 +3200,6 @@ export function normalizeOptions(
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     auxModel: options?.auxModel ?? '',
     modelPool: options?.modelPool ?? [],
-    auxModelPool: options?.auxModelPool ?? [],
     auxApiKey: options?.auxApiKey ?? '',
     auxBaseURL: options?.auxBaseURL ?? '',
     reviewPasses: Math.min(Math.max(options?.reviewPasses ?? 1, 1), maxPasses),

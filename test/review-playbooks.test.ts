@@ -87,7 +87,6 @@ describe('selectReviewPlaybookIds', () => {
       'packages/sdk/client/http.ts',
       'packages/src/client/http.ts',
       'packages/sdk/src/client/http.ts',
-      // `use` + lowercase is not a hook — guards the case-sensitive `use[A-Z]`.
       '.claude/hooks/comment-test-guard.mjs',
       '.codex/hooks/useGuard.ts',
       '.agents/hooks/check.ts',
@@ -95,6 +94,7 @@ describe('selectReviewPlaybookIds', () => {
       '.git/hooks/pre-commit',
       '.husky/hooks/commit.ts',
       'packages/tool/.githooks/check.ts',
+      // `use` + lowercase is not a hook — guards the case-sensitive `use[A-Z]`.
       'apps/api/src/user.ts',
       'apps/api/src/userService.ts',
     ]) {

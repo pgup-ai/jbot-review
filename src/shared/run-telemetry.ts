@@ -5,12 +5,14 @@ import { modelSupportsAgenticTools } from './config.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 import { commandCodeSessionEffort } from './commandcode.ts';
 import { piThinkingLevel } from './pi.ts';
+import { poolsideReasoningEffort } from './poolside.ts';
 import type { ReviewRunOptions } from './runner.ts';
 
 declare const __JBOT_REVIEWER_REVISION__: string;
 
 const POLICY_KEYS = [
   'enhancedContext',
+  'scrubSessionEnv',
   'dryRun',
   'autoApprove',
   'maxFindings',
@@ -36,7 +38,7 @@ const POLICY_KEYS = [
   'evidenceQuotes',
 ] as const satisfies readonly (keyof ReviewRunOptions)[];
 
-export function runConfiguration(options: ReviewRunOptions, model: string, auxModel: string) {
+export function runConfiguration(options: ReviewRunOptions, model: string) {
   const configuration = {
     ...Object.fromEntries(POLICY_KEYS.map((key) => [key, options[key]])),
     sdkEngine: ['auto', 'opencode'].includes(options.sdkEngine ?? '')
@@ -44,7 +46,6 @@ export function runConfiguration(options: ReviewRunOptions, model: string, auxMo
       : 'unrecognized',
     shardCacheEnabled: Boolean(options.shardCachePath),
     modelPool: options.modelPool?.length ? options.modelPool : [model],
-    auxModelPool: options.auxModelPool?.length ? options.auxModelPool : [auxModel],
     requestedReasoningEffort: knownEffort(options.modelOptions?.reasoningEffort),
   };
   return {
@@ -87,6 +88,7 @@ export function effectiveReasoningEffort(
   if (backend === 'commandcode')
     return commandCodeSessionEffort(model, override, commandCodeContext);
   if (backend === 'pi') return piThinkingLevel(modelOptions);
+  if (backend === 'poolside') return knownEffort(poolsideReasoningEffort(modelOptions));
   if (backend !== 'opencode') return undefined;
   const effort = knownEffort(modelOptions?.reasoningEffort);
   return effort === 'default' ? undefined : effort;
@@ -99,15 +101,18 @@ export function roleTelemetry(
   role: 'finder' | 'verification' = 'finder',
 ) {
   const { providerID, modelID } = parseModelName(model);
+  const canReadWorkspace =
+    backend &&
+    !(role === 'verification' && ['opencode', 'pi'].includes(backend.name)) &&
+    backendCanReadWorkspace(providerID, cliBackendForProvider(providerID)) &&
+    (backend.name !== 'opencode' || modelSupportsAgenticTools(providerID, modelID));
   return {
     model,
     backend: backend?.name ?? 'unavailable',
     capability: backend?.observability ?? 'opaque',
     workspaceAccess: !backend
       ? ('unavailable' as const)
-      : !(role === 'verification' && ['opencode', 'pi'].includes(backend.name)) &&
-          backendCanReadWorkspace(providerID, cliBackendForProvider(providerID)) &&
-          (backend.name !== 'opencode' || modelSupportsAgenticTools(providerID, modelID))
+      : canReadWorkspace
         ? ('read-only' as const)
         : ('embedded-only' as const),
     reasoningEffort: backend ? reasoningEffort : undefined,

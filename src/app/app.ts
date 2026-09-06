@@ -22,7 +22,6 @@ export interface AppConfig {
   privateKey: string;
   /** Candidate models for this deployment; one is picked per PR head. */
   modelPool: string[];
-  auxModelPool?: string[];
   /** Credential per provider the pool draws on, keyed by provider id. */
   credentials: Map<string, ProviderCredential>;
 }
@@ -85,7 +84,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
       });
       cleanup = cloned.cleanup;
       workspaceDir = cloned.dir;
-      const { model, auxModel } = pickReviewModels(cfg.modelPool, pr.head.sha, 1, cfg.auxModelPool);
+      const { model, auxModel } = pickReviewModels(cfg.modelPool, pr.head.sha);
       const { providerID } = parseModelName(model);
       const { apiKey, baseURL } = cfg.credentials.get(providerID)!;
       const auxProviderID = parseModelName(auxModel).providerID;
@@ -119,7 +118,6 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
           auxModel,
           modelPool: cfg.modelPool,
-          auxModelPool: cfg.auxModelPool ?? cfg.modelPool,
           ...(auxCredential ? { auxApiKey: auxCredential.apiKey } : {}),
           ...(auxCredential?.baseURL ? { auxBaseURL: auxCredential.baseURL } : {}),
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),

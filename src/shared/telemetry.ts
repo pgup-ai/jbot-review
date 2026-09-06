@@ -1,4 +1,4 @@
-import type { runConfiguration, runIdentity } from './run-telemetry.ts';
+import type { runConfiguration, runIdentity, roleTelemetry } from './run-telemetry.ts';
 import type { Finding, FindingConfidence, Severity } from './types.ts';
 
 /**
@@ -195,16 +195,7 @@ export interface RunExecutionTelemetry {
   maxConcurrentSessions: number;
   providerConcurrency: { providerID: string; limit: number }[];
   serializedBackends: string[];
-  roles: Record<
-    'main' | 'auxiliary' | 'verification',
-    {
-      model: string;
-      backend: string;
-      capability: BackendTelemetryCapability;
-      workspaceAccess: 'read-only' | 'embedded-only' | 'unavailable';
-      reasoningEffort?: string;
-    }
-  >;
+  roles: Record<'main' | 'auxiliary' | 'verification', ReturnType<typeof roleTelemetry>>;
 }
 
 /** 'skipped' = the run exited before any session (doc-only PR, empty diff). */
