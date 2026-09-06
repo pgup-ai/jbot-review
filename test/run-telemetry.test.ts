@@ -114,7 +114,7 @@ test('effective effort follows the backend contract rather than claiming every r
   }
   assert.equal(
     effectiveReasoningEffort('poolside', 'poolside/laguna-s-2.1', undefined, ctx),
-    'default',
+    undefined,
   );
   assert.equal(roleTelemetry(undefined, 'opencode/a', 'low').reasoningEffort, undefined);
   assert.equal(roleTelemetry(undefined, 'opencode/a').workspaceAccess, 'unavailable');

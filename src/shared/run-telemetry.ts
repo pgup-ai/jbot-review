@@ -88,9 +88,10 @@ export function effectiveReasoningEffort(
   if (backend === 'commandcode')
     return commandCodeSessionEffort(model, override, commandCodeContext);
   if (backend === 'pi') return piThinkingLevel(modelOptions);
-  if (backend === 'poolside') return knownEffort(poolsideReasoningEffort(modelOptions));
-  if (backend !== 'opencode') return undefined;
-  const effort = knownEffort(modelOptions?.reasoningEffort);
+  if (backend !== 'opencode' && backend !== 'poolside') return undefined;
+  const effort = knownEffort(
+    backend === 'poolside' ? poolsideReasoningEffort(modelOptions) : modelOptions?.reasoningEffort,
+  );
   return effort === 'default' ? undefined : effort;
 }
 
