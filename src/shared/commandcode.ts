@@ -30,7 +30,6 @@ import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } fro
 const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const COMMANDCODE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
-const COMMANDCODE_MODEL_LIST_TIMEOUT_MS = 60_000;
 // Keep the wall-clock timeout as the practical bound for long reviews.
 const COMMANDCODE_MAX_TURNS = 1000;
 
@@ -331,27 +330,6 @@ export async function runCommandCodeFindingVerification(
     effort,
   );
   return parseFindingVerdicts(raw, findings.length, log);
-}
-
-export async function listCommandCodeModels(workspace: string, home?: string): Promise<string[]> {
-  const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, COMMANDCODE_MODEL_LIST_ARGS, {
-    cwd: workspace,
-    input: '',
-    env: commandCodeEnvForHome(home),
-    timeoutMs: COMMANDCODE_MODEL_LIST_TIMEOUT_MS,
-    timeoutMessage: `commandcode model listing timed out after ${Math.round(
-      COMMANDCODE_MODEL_LIST_TIMEOUT_MS / 1000,
-    )}s`,
-  });
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `commandcode model listing exited ${result.exitCode}: ${truncateForLog(
-        result.stderr || result.stdout,
-        1000,
-      )}`,
-    );
-  }
-  return parseCommandCodeModelList(result.stdout);
 }
 
 export function parseCommandCodeModelList(output: string): string[] {

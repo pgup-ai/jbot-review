@@ -35,7 +35,9 @@ export function classifyMainShardFailure(error: unknown): {
     /\b401\b|\b403\b|unauthorized|(invalid|incorrect).{0,12}(api.?key|token)|authentication/i,
   )
     ? 'auth'
-    : matches(/unknown model|model.{0,24}not (found|exist|available)|no such model/i)
+    : matches(
+          /unknown model|model.{0,24}not (found|exist|available)|no such model|\bmodel\s+["'][^"'\r\n]+["']\s+(?:is\s+)?not (?:offered by the agent|found|available|existent)\b/i,
+        )
       ? 'model-not-found'
       : matches(
             // `too large|long` needs context/size wording nearby: bare "took

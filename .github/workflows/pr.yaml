@@ -61,3 +61,36 @@ jobs:
         run: npm run typecheck
       - name: Test
         run: npm test
+
+  images:
+    name: Image (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: full
+            suffix: ''
+          - target: slim
+            suffix: '-slim'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          load: true
+          tags: jbot-review:smoke
+          cache-from: type=registry,ref=ghcr.io/pgup-ai/jbot-review:buildcache${{ matrix.suffix }}
+      - run: docker run --rm --entrypoint sh -v "$PWD/scripts/smoke-image.sh:/smoke-image.sh:ro" jbot-review:smoke /smoke-image.sh ${{ matrix.target }}

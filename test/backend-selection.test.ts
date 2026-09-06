@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  assertImageSupportsModels,
   backendCanReadWorkspace,
   backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
@@ -1124,6 +1125,51 @@ describe('swallowedProviderWarnings', () => {
         'opencode/deepseek-v4-flash-free',
       ]),
       [],
+    );
+  });
+});
+
+describe('assertImageSupportsModels', () => {
+  it('rejects every omitted local runtime in a mixed slim pool before selection', () => {
+    const supported = [
+      'opencode/muse',
+      'opencode-go/muse',
+      'anthropic/claude',
+      'poolside/model',
+      'commandcode/model',
+      'devin/model',
+    ];
+    assert.doesNotThrow(() => assertImageSupportsModels(supported, { JBOT_IMAGE_VARIANT: 'slim' }));
+    for (const provider of [
+      'cline',
+      'cline-pass',
+      'codex',
+      'cursor',
+      'grok',
+      'kilo',
+      'qoder',
+      'dim',
+    ]) {
+      const pool = [...supported, `${provider}/model`];
+      assert.throws(
+        () => assertImageSupportsModels(pool, { JBOT_IMAGE_VARIANT: 'slim' }),
+        /slim image does not include.*Use .*:latest \(full\)/,
+      );
+      assert.doesNotThrow(() => assertImageSupportsModels(pool, {}));
+      assert.doesNotThrow(() => assertImageSupportsModels(pool, { JBOT_IMAGE_VARIANT: 'full' }));
+      assert.deepEqual(pool, [...supported, `${provider}/model`]);
+    }
+  });
+
+  it('allows omitted ACP runtimes only when they route to the gateway', () => {
+    const env = { JBOT_IMAGE_VARIANT: 'slim', JBOT_ACP_GATEWAY_URL: 'https://gateway.example' };
+    assert.doesNotThrow(() =>
+      assertImageSupportsModels(['cursor/model', 'codex/model', 'kilo/model'], env),
+    );
+    assert.throws(() => assertImageSupportsModels(['cline/model'], env), /local runtimes: cline/);
+    assert.throws(
+      () => assertImageSupportsModels(['cursor/model'], { ...env, JBOT_ACP_GATEWAY_URL: ' ' }),
+      /local runtimes: cursor/,
     );
   });
 });

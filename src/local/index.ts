@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 import { parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
 import { gatewayRoutedModels, localRunId, remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
 import {
+  assertImageSupportsModels,
   backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
   swallowedProviderWarnings,
@@ -419,6 +420,7 @@ async function review(
     process.env.MODEL,
     comparison ? undefined : process.env.PROVIDER,
   );
+  assertImageSupportsModels(pool, process.env);
   if (comparison) selectArenaModel(comparison, pool);
   // HEAD, not the worktree: iterating on uncommitted edits keeps the same
   // reviewer, so a before/after comparison is not confounded by the pick.

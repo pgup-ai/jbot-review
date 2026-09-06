@@ -1,5 +1,7 @@
 import { parseModelName } from '@symma/protocol';
 
+import { gatewayRoutedModels } from './acp-remote.ts';
+
 import { CLINE_PROVIDER_ID, isClineProvider } from './cline.ts';
 import { DIM_PROVIDER_ID, isDimProvider } from './dim.ts';
 import { CODEX_PROVIDER_ID, isCodexProvider } from '@symma/protocol';
@@ -215,4 +217,22 @@ export function swallowedProviderWarnings(pool: string[]): string[] {
         `provider if it is set, since a pin absorbs the prefix.`,
     ];
   });
+}
+
+/** Validate the whole pool before the draw so missing local CLIs never fail randomly. */
+export function assertImageSupportsModels(pool: string[], env: NodeJS.ProcessEnv): void {
+  if (env.JBOT_IMAGE_VARIANT !== 'slim') return;
+  const missing = new Set<string>();
+  for (const model of pool) {
+    const backend = cliBackendForProvider(parseModelName(model).providerID);
+    if (!backend || backend === COMMANDCODE_PROVIDER_ID || backend === DEVIN_PROVIDER_ID) continue;
+    if (env.JBOT_ACP_GATEWAY_URL?.trim() && gatewayRoutedModels([model])) continue;
+    missing.add(backend);
+  }
+  if (missing.size) {
+    throw new Error(
+      `The slim image does not include these local runtimes: ${[...missing].join(', ')}. ` +
+        'Use ghcr.io/pgup-ai/jbot-review:latest (full), or configure a pool supported by :latest-slim. No models were removed from the pool.',
+    );
+  }
 }

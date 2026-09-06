@@ -127,7 +127,6 @@ import {
   runFindingVerification as runOpencodeFindingVerification,
   runGuidelineComplianceCheck as runOpencodeGuidelineComplianceCheck,
   runChangesSinceLastReview as runOpencodeChangesSinceLastReview,
-  listProviderModels,
   enableContext7Mcp,
   disableContext7Mcp,
   formatContext7Error,
@@ -143,7 +142,6 @@ import {
   COMMANDCODE_TELEMETRY_CAPABILITY,
   commandCodeSessionEffort,
   fetchCommandCodePlanUsageLine,
-  listCommandCodeModels,
   selectCommandCodeAccessKey,
   runCommandCodeAddressedPriorCommentsCheck,
   runCommandCodeFindingVerification,
@@ -153,12 +151,7 @@ import {
   writeCommandCodeAuth,
   writeCommandCodeReadOnlySettings,
 } from './commandcode.ts';
-import {
-  CODEX_PROVIDER_ID,
-  CURSOR_PROVIDER_ID,
-  listCursorModels,
-  writeCodexAuth,
-} from '@symma/protocol';
+import { CODEX_PROVIDER_ID, CURSOR_PROVIDER_ID, writeCodexAuth } from '@symma/protocol';
 import {
   CLINE_PROVIDER_ID,
   CLINE_TELEMETRY_CAPABILITY,
@@ -192,7 +185,7 @@ import {
   runDimReview,
   type DimRuntime,
 } from './dim.ts';
-import { assertValidKiloAuth, KILO_PROVIDER_ID, listKiloModels } from '@symma/protocol';
+import { assertValidKiloAuth, KILO_PROVIDER_ID } from '@symma/protocol';
 import {
   QODER_PROVIDER_ID,
   QODER_TELEMETRY_CAPABILITY,
@@ -2165,71 +2158,6 @@ async function runReviewPipeline(params: {
   };
   teardownPending = true;
   try {
-    if (commandCodeBackend) {
-      try {
-        const models = await listCommandCodeModels(workspace, commandCodeHome);
-        log(
-          models.length > 0
-            ? `Available models for ${COMMANDCODE_PROVIDER_ID} using supplied CLI auth:\n${models.join('\n')}`
-            : `Available models for ${COMMANDCODE_PROVIDER_ID} using supplied CLI auth: none returned`,
-        );
-      } catch (e) {
-        log(`(skipped CommandCode model listing: ${(e as Error).message})`);
-      }
-    }
-
-    if (cursorBackend) {
-      try {
-        const models = await listCursorModels(workspace, backendSelection.cursorApiKey);
-        log(
-          models.length > 0
-            ? `Available models for ${CURSOR_PROVIDER_ID} using supplied CLI auth:\n${models.join('\n')}`
-            : `Available models for ${CURSOR_PROVIDER_ID} using supplied CLI auth: none returned`,
-        );
-      } catch (e) {
-        log(`(skipped Cursor model listing: ${(e as Error).message})`);
-      }
-    }
-
-    if (kiloBackend) {
-      try {
-        const models = await listKiloModels(workspace, backendSelection.kiloAuth);
-        // Kilo's gateway catalog runs ~250 models; cap the inline log (unlike Cursor's full join).
-        log(
-          models.length > 0
-            ? `Kilo models available (${models.length}): ${models.slice(0, 40).join(', ')}${models.length > 40 ? ', …' : ''}`
-            : 'Kilo model listing returned no models.',
-        );
-      } catch (error) {
-        log(
-          `Kilo model listing failed (continuing): ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-
-    if (opencodeRuntime && mainBackend.name === 'opencode') {
-      try {
-        const modelListCacheKey = `${providerID}:${modelID}`;
-        let models = providerModelListCache.get(modelListCacheKey);
-        const fromCache = !!models;
-        if (!models) {
-          models = await listProviderModels(opencodeRuntime.client, providerID);
-          providerModelListCache.set(modelListCacheKey, models);
-        }
-        log(
-          models.length > 0
-            ? `Available models for ${providerID} using supplied API key/config${fromCache ? ' (cached)' : ''}:\n${models.join('\n')}`
-            : `Available models for ${providerID} using supplied API key/config: none returned`,
-        );
-      } catch (e) {
-        log(`(skipped provider model listing: ${(e as Error).message})`);
-      }
-    } else if (mainBackend.name !== 'opencode') {
-      log(
-        `OpenCode provider model listing skipped: main review uses the ${mainBackend.name} backend.`,
-      );
-    }
-
     const context7 = decideContext7Mode({
       mode: options.context7Mode,
       files,
@@ -3265,8 +3193,6 @@ export function emitReviewTelemetry(
     log(`(telemetry write skipped: ${err instanceof Error ? err.message : String(err)})`);
   }
 }
-
-const providerModelListCache = new Map<string, string[]>();
 
 const MIN_FINDER_TIMEOUT_MS = 60_000;
 // Ceiling for any single session even under a generous budget: callers who
