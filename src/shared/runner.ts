@@ -1412,7 +1412,7 @@ async function runReviewPipeline(params: {
   const mainReasoningEffort = effectiveReasoningEffort(
     mainCliBackend ?? backendSelection.mainSdkEngine ?? 'opencode',
     model,
-    resolvedMainOptions,
+    mainOnPoolside ? options.modelOptions : resolvedMainOptions,
     commandCodeEffortContext,
   );
 
@@ -2301,11 +2301,9 @@ async function runReviewPipeline(params: {
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
     if (telemetry.enabled) {
-      const auxEffortOptions = supportedModelOptions(
-        auxProviderID,
-        auxModelID,
-        auxModelOptions ?? options.modelOptions,
-      );
+      const auxEffortOptions = auxOnPoolside
+        ? undefined
+        : supportedModelOptions(auxProviderID, auxModelID, auxModelOptions ?? options.modelOptions);
       const auxiliary = roleTelemetry(
         auxSessionsEnabled ? auxBackend : undefined,
         auxModel,
@@ -2335,7 +2333,7 @@ async function runReviewPipeline(params: {
             effectiveReasoningEffort(
               auxBackend.name,
               auxModel,
-              verifierSessionOptions ?? auxEffortOptions,
+              auxOnPoolside ? undefined : (verifierSessionOptions ?? auxEffortOptions),
               commandCodeEffortContext,
               verifierSessionOptions,
             ),

@@ -112,6 +112,10 @@ test('effective effort follows the backend contract rather than claiming every r
   for (const model of ['openai-compatible/gemini-2.5-pro', 'openai-compatible/gpt-5']) {
     assert.equal(roleTelemetry({ name: 'opencode' }, model).workspaceAccess, 'embedded-only');
   }
+  assert.equal(
+    effectiveReasoningEffort('poolside', 'poolside/laguna-s-2.1', undefined, ctx),
+    'default',
+  );
   assert.equal(roleTelemetry(undefined, 'opencode/a', 'low').reasoningEffort, undefined);
   assert.equal(roleTelemetry(undefined, 'opencode/a').workspaceAccess, 'unavailable');
   for (const backend of ['opencode', 'pi']) {
