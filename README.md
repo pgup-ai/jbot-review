@@ -11,6 +11,29 @@ workflow file and one secret, and every opened or updated pull request is review
 on your own GitHub Actions runner. The review core is `runner.ts` + `opencode.ts` +
 `github.ts`.
 
+## Image variants
+
+The default `ghcr.io/pgup-ai/jbot-review:latest` includes every supported local
+provider CLI. `:latest-slim` includes only **OpenCode, CommandCode and Devin**,
+plus the same reviewer code and SDK dependencies. Existing workflows continue
+using the full image. Review prompts, model selection and finding policy are
+identical for supported routes.
+
+Use `:<commit-sha>` (full) or `:<commit-sha>-slim` to pin a published revision;
+`latest` and `latest-slim` track successful builds of main. Both variants are
+published for Linux amd64. Build locally with `docker build --target slim .`;
+a build without `--target` remains full.
+
+Choose slim only when every model in the pool uses an included local runtime
+or an SDK provider. Cursor, Codex and Kilo can also run through a configured
+ACP gateway; their CLIs then live on the companion. An incompatible local
+runtime fails pool validation before selection, with a message to use the full
+image. No candidates are silently removed and no CLIs are installed on demand.
+
+Direct Docker/Depot callers can select the image tag. The companion
+`pgup-ai/jbot-review-action` change exposes `slim/action.yml` for GitHub Actions;
+use that entry point only after the slim image and action version are published.
+
 ## In-repo workflow
 
 The review runs as a Docker container action inside the user's GitHub Actions

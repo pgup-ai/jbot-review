@@ -11,7 +11,10 @@ import {
 } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 
-import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
+import {
+  assertImageSupportsModels,
+  swallowedProviderWarnings,
+} from '../shared/backend-selection.ts';
 import { parseContext7Mode } from '../shared/context7.ts';
 import { exitOnLingeringHandles } from '../shared/exit.ts';
 import { takeOpencodeProxyEnv } from '../shared/opencode.ts';
@@ -40,6 +43,7 @@ async function main(): Promise<void> {
     getInputOrEnv('model', 'JBOT_REVIEW_MODEL'),
     providerInput,
   );
+  assertImageSupportsModels(modelPool, process.env);
   for (const warning of removedAuxInputWarnings(getInputOrEnv)) core.warning(warning);
   const credentials = resolvePoolCredentials(modelPool, ({ input, env }) =>
     getInputOrEnv(input, env),

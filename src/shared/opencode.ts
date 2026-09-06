@@ -39,7 +39,6 @@ import {
 } from './types.ts';
 
 const READY_TIMEOUT_MS = 15_000;
-const MODEL_LIST_TIMEOUT_MS = 5_000;
 const PROMPT_TIMEOUT_MS = 15 * 60_000;
 const PROMPT_POLL_INTERVAL_MS = 2_000;
 const PROMPT_POLL_REQUEST_TIMEOUT_MS = 10_000;
@@ -648,27 +647,6 @@ export async function startOpencode(
   }
 }
 
-export async function listProviderModels(
-  client: OpencodeClient,
-  providerID: string,
-  timeoutMs = MODEL_LIST_TIMEOUT_MS,
-): Promise<string[]> {
-  const result = await withTimeout(
-    client.provider.list(),
-    timeoutMs,
-    `provider model listing timed out after ${timeoutMs}ms`,
-  );
-  const data = result.data;
-  if (!isProviderListData(data)) return [];
-
-  const provider = data.all.find((item) => item.id === providerID);
-  if (!provider) return [];
-
-  return Object.keys(provider.models)
-    .map((modelID) => `${providerID}/${modelID}`)
-    .sort();
-}
-
 export async function enableContext7Mcp(
   client: OpencodeClient,
   apiKey: string,
@@ -718,15 +696,6 @@ export async function disableContext7Mcp(
   } catch (error) {
     log(`Context7 MCP disconnect skipped: ${formatContext7Error(error)}`);
   }
-}
-
-function isProviderListData(value: unknown): value is {
-  all: Array<{ id: string; models: Record<string, unknown> }>;
-} {
-  if (!isRecord(value) || !Array.isArray(value.all)) return false;
-  return value.all.every(
-    (item) => isRecord(item) && typeof item.id === 'string' && isRecord(item.models),
-  );
 }
 
 export function formatContext7Error(error: unknown, secret = ''): string {

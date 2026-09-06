@@ -1,7 +1,10 @@
 import { createServer } from 'node:http';
 import { Webhooks, createNodeMiddleware } from '@octokit/webhooks';
 
-import { swallowedProviderWarnings } from '../shared/backend-selection.ts';
+import {
+  assertImageSupportsModels,
+  swallowedProviderWarnings,
+} from '../shared/backend-selection.ts';
 import { resolvePoolCredentials } from '../shared/config.ts';
 import { removedAuxInputWarnings, resolveModelSelection } from '../shared/model.ts';
 import { handlePrEvent } from './app.ts';
@@ -14,6 +17,7 @@ function mustEnv(name: string): string {
 }
 
 const modelPool = resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
+assertImageSupportsModels(modelPool, process.env);
 // Resolved at boot: the deployment picks per PR, so a missing key must fail
 // here rather than on whichever PR happens to draw that provider.
 const credentials = resolvePoolCredentials(

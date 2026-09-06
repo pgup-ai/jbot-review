@@ -1,5 +1,5 @@
 # node 24 matches cursor-agent's bundled Node major, so it shares the system node (see cursor stage).
-FROM node:24-slim
+FROM node:24-slim AS runtime
 
 # git: review shells out to it. curl: used by the provider installers below.
 RUN apt-get update \
@@ -11,15 +11,38 @@ RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000
 
-# Engine + optional commandcode/cline/grok/kilo providers and the codex ACP
-# adapter (which bundles its own @openai/codex); --version verifies they run
-# on Node 24. Pinned exactly: with @latest the buildx layer cache froze whatever version
-# the last cache bust happened to grab — bump versions here deliberately instead.
-# CommandCode hard-codes selectable model IDs, so bump its pin when it rejects a new model.
-RUN npm install -g opencode-ai@1.18.27 command-code@1.44.0 cline@3.0.60 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 @agentclientprotocol/codex-acp@1.1.7 \
+RUN npm install -g opencode-ai@1.18.27 command-code@1.44.0 \
   && npm cache clean --force \
   && opencode --version \
-  && command-code --no-auto-update --version \
+  && command-code --no-auto-update --version
+
+# Devin CLI (optional devin provider); strip the installer's interactive setup step.
+ARG DEVIN_CLI_VERSION=3000.4.25
+RUN curl -fsSL "https://static.devin.ai/cli/${DEVIN_CLI_VERSION}/setup.sh" -o /tmp/devin-install.sh \
+  && echo "9687335c83c70b8de7ebceb5f94dfe3d8cb025f8d46bd22ad03e21b994bf93c2  /tmp/devin-install.sh" | sha256sum -c - \
+  && grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install.sh \
+  && sed '/"\$VERSION_DIR\/bin\/\$COMPILED_BIN_NAME" setup/d' /tmp/devin-install.sh > /tmp/devin-install-no-setup.sh \
+  && ! grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install-no-setup.sh \
+  && bash /tmp/devin-install-no-setup.sh \
+  && test -x /root/.local/bin/devin \
+  && /root/.local/bin/devin --version | grep -Fq "devin ${DEVIN_CLI_VERSION} " \
+  && rm -f /tmp/devin-install.sh /tmp/devin-install-no-setup.sh
+
+ENV PATH="/root/.local/bin:${PATH}"
+ENV JBOT_IMAGE_VARIANT=full
+
+# Depot's env-file may replace PATH; keep Devin on the default executable path.
+RUN ln -s /root/.local/bin/devin /usr/local/bin/devin \
+  && env PATH=/usr/local/bin:/usr/bin:/bin devin --version >/dev/null
+
+WORKDIR /app
+EXPOSE 3000
+ENTRYPOINT ["node", "/app/dist/app/server.js"]
+
+FROM runtime AS full-tools
+
+RUN npm install -g cline@3.0.60 @xai-official/grok@0.2.94 @kilocode/cli@7.3.54 @agentclientprotocol/codex-acp@1.1.7 \
+  && npm cache clean --force \
   && cline --version \
   && grok --version \
   && kilo --version \
@@ -38,17 +61,6 @@ RUN npm install -g @qoder-ai/qodercli@1.0.43 \
 RUN npm install -g dimcode@0.3.15 \
   && npm cache clean --force \
   && DIMCODE_DISABLE_AUTOUPDATE=1 dim version
-
-# Devin CLI (optional devin provider); strip the installer's interactive setup step.
-ARG DEVIN_CLI_VERSION=3000.4.25
-RUN curl -fsSL "https://static.devin.ai/cli/${DEVIN_CLI_VERSION}/setup.sh" -o /tmp/devin-install.sh \
-  && grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install.sh \
-  && sed '/"\$VERSION_DIR\/bin\/\$COMPILED_BIN_NAME" setup/d' /tmp/devin-install.sh > /tmp/devin-install-no-setup.sh \
-  && ! grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install-no-setup.sh \
-  && bash /tmp/devin-install-no-setup.sh \
-  && test -x /root/.local/bin/devin \
-  && /root/.local/bin/devin --version | grep -Fq "devin ${DEVIN_CLI_VERSION} " \
-  && rm -f /tmp/devin-install.sh /tmp/devin-install-no-setup.sh
 
 # Cursor CLI (optional cursor provider); installer saved to disk, not piped to bash
 # (auditable). Dedup: cursor bundles its own Node — when majors match, symlink it to
@@ -69,17 +81,10 @@ RUN set -eux; \
   ln -s /usr/local/bin/node "$cnode"; \
   /root/.local/bin/cursor-agent --help >/dev/null; \
   rm -f /tmp/cursor-install.sh
-ENV PATH="/root/.local/bin:${PATH}"
-
-# Both are spawned by bare name, and an image PATH is advisory: a caller that
-# supplies its own PATH (Depot CI passes --env-file) drops the line above and
-# the spawn fails ENOENT, so publish them on the default PATH too.
-RUN ln -s /root/.local/bin/devin /usr/local/bin/devin \
-  && ln -s /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent \
-  && env PATH=/usr/local/bin:/usr/bin:/bin devin --version >/dev/null \
+RUN ln -s /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent \
   && env PATH=/usr/local/bin:/usr/bin:/bin cursor-agent --help >/dev/null
 
-WORKDIR /app
+FROM runtime AS app
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
@@ -87,6 +92,9 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY dist/ ./dist/
 RUN test -s /app/dist/local/index.js
 
-EXPOSE 3000
+FROM app AS slim
+ENV JBOT_IMAGE_VARIANT=slim
 
-ENTRYPOINT ["node", "/app/dist/app/server.js"]
+# Keep the default target full for existing docker build callers and dogfooding.
+FROM full-tools AS full
+COPY --from=app /app /app

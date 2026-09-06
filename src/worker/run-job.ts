@@ -2,6 +2,7 @@ import { Octokit as CoreOctokit } from '@octokit/core';
 import { paginateRest } from '@octokit/plugin-paginate-rest';
 import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 import type { Octokit } from '../shared/github.ts';
+import { assertImageSupportsModels } from '../shared/backend-selection.ts';
 import { clonePr } from '../app/clone.ts';
 import { defaultModelOptions, parseEnvBoolean } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
@@ -28,6 +29,7 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
   // check-run can gate on real per-severity counts.
   let findingsBySeverity: Partial<Record<Severity, number>> | undefined;
   try {
+    assertImageSupportsModels([job.model, ...(job.auxModel ? [job.auxModel] : [])], process.env);
     // Exactly "owner/repo" — reject empty segments AND extra slashes (e.g. "a/b/c").
     // Parsing lives inside the try so a malformed/absent repoFullName fails the
     // job rather than throwing out of runJob (which is documented never-throws).

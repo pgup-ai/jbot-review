@@ -504,6 +504,42 @@ describe('resolvePoolCredentials', () => {
     assert.equal(credentials.get('opencode')?.baseURL, undefined);
   });
 
+  it('requires local keys only for providers that do not route to the gateway', () => {
+    const names = ['JBOT_ACP_GATEWAY_URL', 'JBOT_ACP_GATEWAY_TOKEN', 'JBOT_ACP_GATEWAY_ENDPOINT'];
+    const previous = names.map((name) => process.env[name]);
+    process.env.JBOT_ACP_GATEWAY_URL = 'https://gateway.example';
+    try {
+      delete process.env.JBOT_ACP_GATEWAY_TOKEN;
+      delete process.env.JBOT_ACP_GATEWAY_ENDPOINT;
+      assert.doesNotThrow(() => resolvePoolCredentials(['deepseek/e'], keys(['DEEPSEEK_API_KEY'])));
+      assert.throws(
+        () => resolvePoolCredentials(['cursor/a'], keys([])),
+        /also set JBOT_ACP_GATEWAY_TOKEN and JBOT_ACP_GATEWAY_ENDPOINT/,
+      );
+      process.env.JBOT_ACP_GATEWAY_TOKEN = 'test-token';
+      assert.throws(
+        () => resolvePoolCredentials(['cursor/a'], keys([])),
+        /also set JBOT_ACP_GATEWAY_ENDPOINT/,
+      );
+      process.env.JBOT_ACP_GATEWAY_ENDPOINT = 'test-endpoint';
+      const credentials = resolvePoolCredentials(
+        ['cursor/a', 'codex/b', 'kilo/c', 'devin/d', 'deepseek/e'],
+        keys(['DEEPSEEK_API_KEY']),
+      );
+      for (const provider of ['cursor', 'codex', 'kilo', 'devin']) {
+        assert.deepEqual(credentials.get(provider), { apiKey: '' });
+      }
+      assert.throws(() => resolvePoolCredentials(['deepseek/e'], keys([])), /Missing key/);
+      delete process.env.JBOT_ACP_GATEWAY_URL;
+      assert.throws(() => resolvePoolCredentials(['cursor/a'], keys([])), /Missing key/);
+    } finally {
+      names.forEach((name, index) => {
+        if (previous[index] === undefined) delete process.env[name];
+        else process.env[name] = previous[index];
+      });
+    }
+  });
+
   it('names the provider, the model that required it, and how to set it', () => {
     assert.throws(
       () => resolvePoolCredentials(['opencode/a', 'deepseek/c'], keys(['OPENCODE_API_KEY'])),

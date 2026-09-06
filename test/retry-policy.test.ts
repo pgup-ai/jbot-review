@@ -25,6 +25,28 @@ describe('classifyMainShardFailure', () => {
       failureClass: 'model-not-found',
       retryable: false,
     });
+    for (const message of [
+      'acp:kilo review: model "kilo/meituan/longcat-2.0-free" is not offered by the agent; first offers: other/model',
+      'acp:kilo review: model "kilo/tencent/hy3-preview:free" is not offered by the agent; first offers: other/model',
+      'model "provider/a-very-long-model-identifier" not found',
+    ]) {
+      assert.deepEqual(classify(message), { failureClass: 'model-not-found', retryable: false });
+    }
+    for (const message of [
+      'model "provider/a-very-long-model-identifier" not available (503)',
+      'model "provider/a-very-long-model-identifier" temporarily unavailable (503)',
+    ]) {
+      assert.deepEqual(classify(message), { failureClass: 'provider-transient', retryable: true });
+    }
+    assert.equal(
+      classify('model "provider/a-very-long-model-identifier" is not available right now')
+        .retryable,
+      true,
+    );
+    assert.deepEqual(classify('model "provider/model" rate limited (429)'), {
+      failureClass: 'rate-limit',
+      retryable: true,
+    });
     assert.deepEqual(
       classify(
         '[1210] This model always engages in thinking and cannot be disabled; please use low, high, or max.',
