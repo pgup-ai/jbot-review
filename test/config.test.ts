@@ -505,9 +505,23 @@ describe('resolvePoolCredentials', () => {
   });
 
   it('requires local keys only for providers that do not route to the gateway', () => {
-    const previous = process.env.JBOT_ACP_GATEWAY_URL;
+    const names = ['JBOT_ACP_GATEWAY_URL', 'JBOT_ACP_GATEWAY_TOKEN', 'JBOT_ACP_GATEWAY_ENDPOINT'];
+    const previous = names.map((name) => process.env[name]);
     process.env.JBOT_ACP_GATEWAY_URL = 'https://gateway.example';
     try {
+      delete process.env.JBOT_ACP_GATEWAY_TOKEN;
+      delete process.env.JBOT_ACP_GATEWAY_ENDPOINT;
+      assert.doesNotThrow(() => resolvePoolCredentials(['deepseek/e'], keys(['DEEPSEEK_API_KEY'])));
+      assert.throws(
+        () => resolvePoolCredentials(['cursor/a'], keys([])),
+        /also set JBOT_ACP_GATEWAY_TOKEN and JBOT_ACP_GATEWAY_ENDPOINT/,
+      );
+      process.env.JBOT_ACP_GATEWAY_TOKEN = 'test-token';
+      assert.throws(
+        () => resolvePoolCredentials(['cursor/a'], keys([])),
+        /also set JBOT_ACP_GATEWAY_ENDPOINT/,
+      );
+      process.env.JBOT_ACP_GATEWAY_ENDPOINT = 'test-endpoint';
       const credentials = resolvePoolCredentials(
         ['cursor/a', 'codex/b', 'kilo/c', 'devin/d', 'deepseek/e'],
         keys(['DEEPSEEK_API_KEY']),
@@ -519,8 +533,10 @@ describe('resolvePoolCredentials', () => {
       delete process.env.JBOT_ACP_GATEWAY_URL;
       assert.throws(() => resolvePoolCredentials(['cursor/a'], keys([])), /Missing key/);
     } finally {
-      if (previous === undefined) delete process.env.JBOT_ACP_GATEWAY_URL;
-      else process.env.JBOT_ACP_GATEWAY_URL = previous;
+      names.forEach((name, index) => {
+        if (previous[index] === undefined) delete process.env[name];
+        else process.env[name] = previous[index];
+      });
     }
   });
 

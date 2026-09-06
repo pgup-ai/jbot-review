@@ -1,5 +1,5 @@
 import { parseModelName } from '@symma/protocol';
-import { gatewayRoutedModels } from './acp-remote.ts';
+import { gatewayRoutedModels, remoteAcpConfigFromEnv } from './acp-remote.ts';
 
 export interface ProviderConfig {
   defaultModel?: string;
@@ -56,7 +56,7 @@ export function resolvePoolCredentials(
     const { providerID } = parseModelName(model);
     if (credentials.has(providerID)) continue;
     const config = providerConfig(providerID, model);
-    if (process.env.JBOT_ACP_GATEWAY_URL?.trim() && gatewayRoutedModels([model])) {
+    if (gatewayRoutedModels([model]) && remoteAcpConfigFromEnv()) {
       credentials.set(providerID, { apiKey: '' });
       continue;
     }
