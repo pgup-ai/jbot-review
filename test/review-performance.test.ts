@@ -56,20 +56,7 @@ describe('review performance aggregation', () => {
       { kind: 'session', session: 'review-repair', cacheReadTokens: 30 },
       { kind: 'session', session: 'review-shard-1-retry' },
       { kind: 'finding', disposition: 'posted-inline' },
-    ]) as {
-      phaseTime: Record<string, { p50: number }>;
-      phaseReconciliation: { gapMs: { p50: number } };
-      tools: {
-        outputBytes: number;
-        droppedRows: number;
-        diffRecoveryCallRate: { status: string };
-      };
-      turns: { p50: number };
-      cacheReadTokens: number;
-      retryRepairRate: { numerator: number; rate: number | null };
-      retainedFindings: number;
-      backendCohorts: Record<string, { toolCalls: number }>;
-    };
+    ]);
 
     assert.equal(report.phaseTime['run:filtering'].p50, 25);
     assert.equal(report.phaseTime['run:posting'].p50, 75);
@@ -92,5 +79,75 @@ describe('review performance aggregation', () => {
       [{ kind: 'run', _source: 3 }],
     );
     assert.deepEqual(warnings, ['Skipped malformed telemetry row 2.']);
+  });
+
+  it('keeps auxiliary failures and findings tied to their run without requiring token rows', () => {
+    const first = [
+      {
+        kind: 'run',
+        runId: 'first',
+        model: 'main/a',
+        auxModel: 'aux/b',
+        identity: { reviewerRevision: 'v1' },
+        policy: { configurationHash: 'config-1' },
+      },
+      {
+        kind: 'phase',
+        scope: 'session',
+        phase: 'auxiliary-queue',
+        session: 'review-frontend',
+        durationMs: 70,
+        stopReason: 'completed',
+      },
+      {
+        kind: 'phase',
+        scope: 'session',
+        phase: 'auxiliary-execution',
+        session: 'review-frontend',
+        durationMs: 120,
+        stopReason: 'aborted',
+      },
+      { kind: 'coverage', session: 'review-frontend', state: 'failed', failureClass: 'aborted' },
+      { kind: 'coverage', session: 'aux-opencode-boot', state: 'failed', failureClass: 'provider' },
+      { kind: 'phase', scope: 'run', phase: 'grace-wait', durationMs: 120 },
+    ];
+    const second = [
+      { kind: 'run', runId: 'second', model: 'main/a', auxModel: 'aux/c' },
+      {
+        kind: 'phase',
+        scope: 'session',
+        phase: 'auxiliary-execution',
+        session: 'review-frontend',
+        durationMs: 30,
+        stopReason: 'completed',
+      },
+      { kind: 'finding', session: 'review-frontend', disposition: 'posted-inline' },
+      { kind: 'finding', session: 'review-frontend', disposition: 'deduped' },
+    ];
+    const { auxiliaryRuns } = aggregatePerformance(
+      [first, second, second.filter((row) => row.kind !== 'run')].flatMap((rows, source) =>
+        parseTelemetryJsonl(rows.map((row) => JSON.stringify(row)).join('\n'), source),
+      ),
+    );
+
+    assert.equal(auxiliaryRuns.length, 2);
+    assert.equal(auxiliaryRuns[0].identity?.reviewerRevision, 'v1');
+    assert.equal(auxiliaryRuns[0].policy?.configurationHash, 'config-1');
+    assert.deepEqual(
+      auxiliaryRuns[0].coverage.map((row) => row.failureClass),
+      ['aborted', 'provider'],
+    );
+    assert.equal(auxiliaryRuns[0].sessions[0].phases[0].durationMs, 70);
+    assert.equal(auxiliaryRuns[0].sessions[0].phases[1].stopReason, 'aborted');
+    assert.equal(auxiliaryRuns[0].sessions[0].retainedFindings, 0);
+    assert.equal(auxiliaryRuns[1].runId, 'second');
+    assert.equal(auxiliaryRuns[1].auxModel, 'aux/c');
+    assert.equal(auxiliaryRuns[1].identity, undefined);
+    assert.deepEqual(auxiliaryRuns[0].runPhases, [
+      { phase: 'grace-wait', durationMs: 120, stopReason: undefined },
+    ]);
+    assert.deepEqual(auxiliaryRuns[1].runPhases, []);
+    assert.equal(auxiliaryRuns[1].sessions[0].producedFindings, 2);
+    assert.equal(auxiliaryRuns[1].sessions[0].retainedFindings, 1);
   });
 });
