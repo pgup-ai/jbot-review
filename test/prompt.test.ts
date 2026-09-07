@@ -6,6 +6,7 @@ import {
   isNoAttemptReply,
   ADDRESSED_PRIOR_COMMENTS_PROMPT,
   CHANGES_SINCE_CONTEXT_BUDGET,
+  CHANGES_SINCE_DIFF_BUDGET,
   CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
   CHANGES_SINCE_LAST_REVIEW_PROMPT,
   CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
@@ -125,6 +126,16 @@ describe('buildChangesSinceContextBlock', () => {
     const block = buildChangesSinceContextBlock('abc1234', 'def5678', subjects);
     assert.ok(block.length <= CHANGES_SINCE_CONTEXT_BUDGET + 200);
     assert.match(block, /and \d+ more commit\(s\); use the git command above\./);
+    const withDiff = buildChangesSinceContextBlock(
+      'abc1234',
+      'def5678',
+      subjects,
+      '+変更\n'.repeat(5000),
+    );
+    assert.ok(
+      Buffer.byteLength(withDiff) <= CHANGES_SINCE_CONTEXT_BUDGET + CHANGES_SINCE_DIFF_BUDGET + 400,
+    );
+    assert.match(withDiff, /Delta diff truncated to \d+ bytes; omitted \d+ bytes/);
   });
 
   it('measures the budget in UTF-8 bytes, not code units', () => {
@@ -153,8 +164,12 @@ describe('CHANGES_SINCE_LAST_REVIEW_PROMPT', () => {
     assert.match(CHANGES_SINCE_LAST_REVIEW_PROMPT, /git is available/);
     assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /NO tools on this call/);
     assert.doesNotMatch(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /git is available/);
-    // A truncated commit list can't be recovered without tools; the output must say so.
     assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /summary is PARTIAL/);
+    assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /bounded delta diff/);
+    assert.match(
+      CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
+      /do not infer implementation details/,
+    );
     assert.match(
       CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
       /do not list bugs or review findings/i,

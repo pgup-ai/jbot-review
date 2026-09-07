@@ -55,3 +55,33 @@ above exercised the changed paths. No production workflow validation is claimed.
 The advisory three-repetition core quality benchmark was not run. These targeted
 summary probes are not a corpus quality gate. No model, concurrency, or finding
 policy defaults changed.
+
+## Review follow-up
+
+Qodo, Greptile, and Cubic identified missing delta evidence for tool-less
+summaries. The earlier probes exercised only agentic summaries, and the local
+review skipped this pass entirely. The initial self-review missed that gap.
+
+Tool-less summaries now receive an 8 KiB delta diff with a byte-omission notice;
+agentic summaries retain the smaller context. Pi, CommandCode, Grok, Poolside,
+Cline, Qoder, and tool-less OpenCode models use the single-shot instructions.
+Git reads are time- and output-limited; a read failure skips this optional summary.
+A regression test checks that generic subjects still carry actual changes while
+excluding earlier PR changes and uncommitted edits. Existing budget tests check
+delta truncation and disclosure.
+
+A live CommandCode Muse 1.3 summary of a fixture with the generic subject `update`
+correctly reported both newly exported constants (`retryLimit = 3`,
+`backoffMs = 250`), using a 2,967-byte prompt in 5.09 seconds. This validates the
+previously untested path, not overall review recall.
+
+The [original CI review](https://github.com/pgup-ai/jbot-review/actions/runs/34082706480)
+used CommandCode Muse 1.2 for main and OpenCode Muse 1.3 for auxiliary sessions.
+All three finder sessions returned zero candidates before filtering. The local
+run used CommandCode Muse 1.3 for all three and also returned zero candidates.
+This was a detection miss, not a verifier rejection. Main finder prompts were
+unchanged by this PR; different models, tools, and reviewer prompts prevent
+attributing the miss to the model alone.
+
+After the fix, all 1,049 tests, format, typecheck, lint, and build passed. A repeat
+local CommandCode Muse review completed in 41 seconds with zero findings.

@@ -295,7 +295,7 @@ export async function runCommandCodeChangesSinceLastReview(
   const raw = await runCommandCodePrompt(
     workspace,
     model,
-    assembleChangesSinceLastReviewPrompt(deltaContext),
+    assembleChangesSinceLastReviewPrompt(deltaContext, true),
     'changes-since-last-review',
     log,
     timeoutMs,

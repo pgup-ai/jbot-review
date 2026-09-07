@@ -186,7 +186,7 @@ export async function runPoolsideChangesSinceLastReview(
     apiKey,
     reasoningEffort,
     model,
-    prompt: assembleChangesSinceLastReviewPrompt(deltaContext),
+    prompt: assembleChangesSinceLastReviewPrompt(deltaContext, true),
     label,
     log,
     timeoutMs,

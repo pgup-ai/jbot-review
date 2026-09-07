@@ -274,7 +274,7 @@ export async function runQoderChangesSinceLastReview(
   const raw = await runQoderPrompt(
     workspace,
     model,
-    assembleChangesSinceLastReviewPrompt(deltaContext),
+    assembleChangesSinceLastReviewPrompt(deltaContext, true),
     'changes-since-last-review',
     log,
     token,

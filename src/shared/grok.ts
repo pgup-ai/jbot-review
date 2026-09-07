@@ -285,7 +285,7 @@ export async function runGrokChangesSinceLastReview(
   void onTokenUsage;
   const raw = await runGrokPrompt(
     model,
-    assembleChangesSinceLastReviewPrompt(deltaContext),
+    assembleChangesSinceLastReviewPrompt(deltaContext, true),
     'changes-since-last-review',
     log,
     runtime,

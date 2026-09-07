@@ -310,7 +310,7 @@ export async function runClineChangesSinceLastReview(
   const raw = await runClinePrompt(
     workspace,
     model,
-    assembleChangesSinceLastReviewPrompt(deltaContext),
+    assembleChangesSinceLastReviewPrompt(deltaContext, true),
     'changes-since-last-review',
     log,
     home,

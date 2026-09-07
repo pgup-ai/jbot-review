@@ -1,9 +1,8 @@
-import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
+import { collectChangesSinceContext } from './changes-since.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
 
 import {
@@ -115,7 +114,6 @@ import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
   UNTRUSTED_PR_CONTENT_NOTE,
-  buildChangesSinceContextBlock,
   buildContext7PromptBlock,
   buildContextTrimNotice,
   buildReviewFocusBlock,
@@ -2449,6 +2447,10 @@ async function runReviewPipeline(params: {
         backend: auxBackend,
         model: auxModel,
         workspace,
+        embedDiff:
+          auxOnPi ||
+          !backendCanReadWorkspace(auxProviderID, auxCliBackend) ||
+          (auxOnOpencode && !modelSupportsAgenticTools(auxProviderID, auxModelID)),
         // Use allPriorReviewComments (always fetched), NOT the
         // includePriorComments-gated priorComments: whether to summarize the
         // delta is a re-review decision, independent of whether prior comments
@@ -4182,23 +4184,6 @@ function startAddressedPriorCommentsCheck(params: {
     });
 }
 
-const execFileAsync = promisify(execFile);
-const GIT_LOG_TIMEOUT_MS = 15_000;
-
-/** Commit subjects (`<short-sha> <subject>`) added between two revisions, in the checkout. */
-async function collectCommitSubjects(
-  workspace: string,
-  fromSha: string,
-  toSha: string,
-): Promise<string[]> {
-  const { stdout } = await execFileAsync(
-    'git',
-    ['log', '--no-merges', '--format=%h %s', `${fromSha}..${toSha}`],
-    { cwd: workspace, timeout: GIT_LOG_TIMEOUT_MS, maxBuffer: 1024 * 1024 },
-  );
-  return stdout.split('\n').filter(Boolean);
-}
-
 /**
  * Summarizes the reviewed..head delta once for the whole PR (non-finder pass).
  * Fail-open: any failure (git, backend, parse) resolves to '' so the block is
@@ -4208,6 +4193,7 @@ function startChangesSinceLastReviewSummary(params: {
   backend: ReviewBackend;
   model: string;
   workspace: string;
+  embedDiff: boolean;
   reviewedHead?: string;
   headSha?: string;
   enabled: boolean;
@@ -4227,12 +4213,16 @@ function startChangesSinceLastReviewSummary(params: {
   let modelRan = false;
   params.log('Starting changes-since-last-review summary in parallel.');
   return (async () => {
-    const subjects = await collectCommitSubjects(params.workspace, reviewedHead, headSha);
-    if (subjects.length === 0) {
+    const deltaContext = await collectChangesSinceContext(
+      params.workspace,
+      reviewedHead,
+      headSha,
+      params.embedDiff,
+    );
+    if (deltaContext === undefined) {
       params.log('changes-since-last-review skipped: no commits since last reviewed head.');
       return '';
     }
-    const deltaContext = buildChangesSinceContextBlock(reviewedHead, headSha, subjects);
     modelRan = true;
     return params.backend.runChangesSinceLastReview(
       params.model,

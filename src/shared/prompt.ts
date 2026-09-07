@@ -853,16 +853,13 @@ export function buildShardAssignmentBlock(
 
 /** Hard byte budget for the embedded commit list in the delta-context block. */
 export const CHANGES_SINCE_CONTEXT_BUDGET = 4000;
+export const CHANGES_SINCE_DIFF_BUDGET = 8 * 1024;
 
-/**
- * Pure builder for the "changes since last review" delta context: the SHA
- * range, the git command to inspect it, and the budgeted commit-subject list.
- * The IO that produces `commitSubjects` (a `git log` call) lives in runner.ts.
- */
 export function buildChangesSinceContextBlock(
   reviewedHead: string,
   headSha: string,
   commitSubjects: string[],
+  diff?: string,
 ): string {
   const header = `## Changes since last review
 
@@ -881,6 +878,12 @@ The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}
   const omitted = commitSubjects.length - kept.length;
   const lines = [header, ...kept];
   if (omitted > 0) lines.push(`- _…and ${omitted} more commit(s); use the git command above._`);
+  if (diff !== undefined) {
+    lines.push(
+      '\n### Delta diff',
+      truncateUtf8WithNotice(diff || '(No file changes.)', CHANGES_SINCE_DIFF_BUDGET, 'Delta diff'),
+    );
+  }
   return lines.join('\n');
 }
 
@@ -917,8 +920,8 @@ ${CHANGES_SINCE_SHARED_RULES}`,
  */
 export const CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT = [
   CHANGES_SINCE_INTRO,
-  `- You have NO tools on this call — do not run, plan, or emit commands. The "Changes since last review" section below gives the last reviewed head, the current head, and the subjects of the commits added between them; summarize from that list alone (the git command it shows is reproduction info for humans).
-- If that section says more commits were omitted, your summary is PARTIAL: end it with a bullet stating how many further commits it does not cover.
+  `- You have NO tools on this call — do not run, plan, or emit commands. The "Changes since last review" section below gives the last reviewed head, the current head, the commit subjects, and a bounded delta diff. Summarize from the embedded evidence only (the git command is reproduction info for humans); do not infer implementation details from generic subjects.
+- If commit subjects or diff bytes were omitted, your summary is PARTIAL: end it with a bullet disclosing the stated omissions. If the evidence cannot support meaningful details, say so instead of guessing.
 ${CHANGES_SINCE_SHARED_RULES}`,
   CHANGES_SINCE_OUTPUT,
 ].join('\n\n');
