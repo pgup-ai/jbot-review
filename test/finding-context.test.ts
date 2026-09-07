@@ -26,14 +26,24 @@ test('source locations preserve cited dependencies and reject path escapes witho
       { ...base, path: '../secret', body: '`../secret:1` and `/tmp/private:2`' },
       { ...base, path: '.git/config', body: 'https://private.example/file.ts:3' },
       { ...base, body: 'See `app/(auth)/[id]/page.tsx:8` and `src/用户 设置.ts:2`.' },
+      { ...base, body: 'Long explanation. '.repeat(600) + '`src/late.ts:9`' },
+      {
+        ...base,
+        body: '`../secret:1` `/tmp/private:2` `src/valid.ts:10` `src/helper.ts:42` `src/extra.ts:11`',
+      },
     ]),
-    [
-      { path: 'src/caller.ts', line: 12 },
-      { path: 'src/helper.ts', line: 42 },
-      { path: 'rules/quality.md', line: 7 },
-      { path: 'app/(auth)/[id]/page.tsx', line: 8 },
-      { path: 'src/用户 设置.ts', line: 2 },
-    ],
+    {
+      locations: [
+        { path: 'src/caller.ts', line: 12 },
+        { path: 'src/helper.ts', line: 42 },
+        { path: 'rules/quality.md', line: 7 },
+        { path: 'app/(auth)/[id]/page.tsx', line: 8 },
+        { path: 'src/用户 设置.ts', line: 2 },
+        { path: 'src/late.ts', line: 9 },
+        { path: 'src/valid.ts', line: 10 },
+      ],
+      omitted: [{ path: 'src/extra.ts', line: 11 }],
+    },
   );
 });
 
@@ -44,8 +54,14 @@ test('source context reads tracked worktree helpers but excludes untracked files
     await mkdir(join(workspace, 'src'));
     await writeFile(join(workspace, 'src/helper.ts'), 'export function validate() {}\n');
     await writeFile(join(workspace, 'private.key'), 'SECRET_MUST_NOT_APPEAR');
+    await writeFile(
+      join(workspace, 'src/large.ts'),
+      'x'.repeat(256 * 1024) + '\nBEYOND_READ_CAP\n',
+    );
     await symlink('../private.key', join(workspace, 'src/alias.ts'));
-    await execFileAsync('git', ['add', 'src/helper.ts', 'src/alias.ts'], { cwd: workspace });
+    await execFileAsync('git', ['add', 'src/helper.ts', 'src/alias.ts', 'src/large.ts'], {
+      cwd: workspace,
+    });
     await writeFile(
       join(workspace, 'src/helper.ts'),
       'export function validate() {\n  markFailed();\n}\n',
@@ -55,7 +71,9 @@ test('source context reads tracked worktree helpers but excludes untracked files
       line: 1,
       severity: 'P2',
       title: 'Missing failure transition',
-      body: 'See `src/helper.ts:2` and `private.key:1`.',
+      body:
+        'Long explanation. '.repeat(600) +
+        'See `src/helper.ts:2`, `private.key:1`, and `src/helper.ts:3`.',
     };
     const block = await buildFindingSourceContext(workspace, [
       finding,
@@ -64,9 +82,12 @@ test('source context reads tracked worktree helpers but excludes untracked files
         path: 'src/alias.ts',
         body: 'See `src/missing.ts:3`.',
       },
+      { ...finding, path: 'src/large.ts', line: 2, body: '' },
     ]);
     assert.match(block, /2:   markFailed\(\);/);
-    assert.doesNotMatch(block, /SECRET_MUST_NOT_APPEAR/);
+    assert.doesNotMatch(block, /SECRET_MUST_NOT_APPEAR|BEYOND_READ_CAP/);
+    assert.match(block, /Unavailable or omitted locations.*src\/large.ts:2/);
+    assert.match(block, /Unavailable or omitted locations.*src\/helper.ts:3/);
     assert.match(
       block,
       /Unavailable or omitted locations.*private.key:1.*src\/alias.ts:1.*src\/missing.ts:3/,

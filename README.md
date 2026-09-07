@@ -761,9 +761,10 @@ merge guidance:
 Cross-file findings should cite inspected repository locations as `path/to/file.ts:42`
 in their bodies. Verification preloads the finding location and up to two such
 citations, including unchanged helpers and written rules. Reads are limited to
-tracked, regular files in the current checkout; symlinks and untracked files are
-excluded. At most 20 locations are sampled, within a 16 KiB context budget, with
-omitted or unavailable evidence labeled explicitly. These are excerpts, not
+the first 256 KiB of tracked, regular files in the current checkout; symlinks
+and untracked files are excluded. Citations beyond that prefix are unavailable.
+At most 20 locations are sampled, within a 16 KiB context budget, with omitted
+or unavailable evidence labeled explicitly. These are excerpts, not
 complete files or proof that omitted behavior is absent.
 
 P3/nit remain advisory and bypass verification. Their prompts require a concrete

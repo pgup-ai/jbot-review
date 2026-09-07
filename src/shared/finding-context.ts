@@ -13,15 +13,15 @@ const MAX_SOURCE_LOCATIONS = 20;
 
 export function findingSourceLocations(findings: Pick<Finding, 'path' | 'line' | 'body'>[]) {
   const locations = new Map<string, { path: string; line: number }>();
+  const omitted = new Map<string, { path: string; line: number }>();
   for (const finding of findings) {
     const refs = [
-      ...finding.body
-        .slice(0, 8192)
-        .matchAll(/`([^`\r\n]+):([1-9]\d*)`|(?:^|[\s(])([\p{L}\p{N}_./@-]+):([1-9]\d*)\b/gu),
-    ]
-      .slice(0, 2)
-      .map((match) => ({ path: match[1] ?? match[3], line: Number(match[2] ?? match[4]) }));
-    for (const ref of [{ path: finding.path, line: finding.line }, ...refs]) {
+      ...finding.body.matchAll(
+        /`([^`\r\n]+):([1-9]\d*)`|(?:^|[\s(])([\p{L}\p{N}_./@-]+):([1-9]\d*)\b/gu,
+      ),
+    ].map((match) => ({ path: match[1] ?? match[3], line: Number(match[2] ?? match[4]) }));
+    let citations = 0;
+    for (const [index, ref] of [{ path: finding.path, line: finding.line }, ...refs].entries()) {
       if (
         !Number.isSafeInteger(ref.line) ||
         ref.line < 1 ||
@@ -32,17 +32,19 @@ export function findingSourceLocations(findings: Pick<Finding, 'path' | 'line' |
         ref.path.split('/').some((part) => part === '..' || part === '.git')
       )
         continue;
-      locations.set(`${ref.path}:${ref.line}`, ref);
+      const selected = index === 0 || citations++ < 2;
+      (selected ? locations : omitted).set(`${ref.path}:${ref.line}`, ref);
     }
   }
-  return [...locations.values()];
+  for (const key of locations.keys()) omitted.delete(key);
+  return { locations: [...locations.values()], omitted: [...omitted.values()] };
 }
 
 export async function buildFindingSourceContext(
   workspace: string,
   findings: Finding[],
 ): Promise<string> {
-  const locations = findingSourceLocations(findings);
+  const { locations, omitted } = findingSourceLocations(findings);
   const root = resolveWithinWorkspace(workspace, '.');
   const files = new Map<string, Promise<string | undefined>>();
   const signal = AbortSignal.timeout(1500);
@@ -97,5 +99,5 @@ export async function buildFindingSourceContext(
       return { ...ref, startLine, lines: lines.slice(startLine - 1, ref.line + 20) };
     }),
   );
-  return formatFindingSources(sources, locations.slice(MAX_SOURCE_LOCATIONS));
+  return formatFindingSources(sources, [...omitted, ...locations.slice(MAX_SOURCE_LOCATIONS)]);
 }
