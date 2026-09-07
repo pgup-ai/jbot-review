@@ -241,3 +241,89 @@ a verifier with tools can still make a reasoning error. It does not establish
 an overall precision improvement. Captured output and telemetry remain at
 `/tmp/jbot-quality-dogfood`. No routing/default-model changes were made on the
 strength of these limited results.
+
+## Verification coverage and uncertainty (`7380761`)
+
+The previous implementation selected at most ten P0/P1/P2 findings. P3 and nits
+bypassed verification. The updated pipeline selects every finding in stable
+severity order, verifies batches of ten within the shared verification budget,
+and follows up on findings arriving after an overlapping verification. A failed
+batch preserves its findings and successful sibling verdicts, with incomplete
+coverage reported. Uncertain findings retain their hypothesis as quoted text,
+receive an explicit unverified title, low confidence, and an investigate kind.
+Nits remain nits; blocking findings become P3. Finder summaries are omitted when
+they could repeat claims left uncertain by verification. Telemetry records
+uncertainty directly rather than inferring it from a severity change.
+
+The same revision fixes contradictory incomplete-review merge guidance, bounds
+Cline changes-since context to its argv transport, streams the delta file overview
+with an omission count, preserves the summary when that optional overview fails,
+and records Git output deadlines as timeouts.
+
+Validation: 1,025 tests passed; subsequent focused checks passed after cleanup.
+Typecheck, lint, formatting, build, and diff checks passed. An isolated Cline
+transport probe submitted 122,706 UTF-8 bytes under the 122,880-byte limit, retained
+the output reminder and omission notice, and parsed the result. A real timed
+child was killed after 30,006 ms and classified as a timeout.
+
+Incremental self-review/de-slop: 15 comment blocks adjudicated (2 kept, 5 rewritten,
+8 cut, including an inline transport-budget explanation); 3 new tests kept for
+separate regressions (batch failure isolation, advisory uncertainty presentation,
+and advisory uncertainty telemetry). One obsolete verification-cap test was
+removed. Existing tests cover late advisory verification, incomplete guidance,
+and bounded file-overview output. Implementation commit: +348/-242 lines.
+
+### Repeated configuration comparison
+
+Twelve runs pinned to `73807612fe95c930f5e731cd45f736786aa1e575`, using the same
+unchanged-helper defect/clean pair described above: three repetitions per case
+and configuration, one main pass, verification enabled, fresh sessions, fixed
+shuffled order, and no expected answers or reviewer comments in prompts. Source
+and HEAD were checked before each run. Artifacts:
+`/tmp/jbot-quality-screen-7380761/{manifest.json,runs.jsonl,00..11.json}`.
+
+| Configuration                                        | Defect                     | Clean counterfactual       | Median elapsed |
+| ---------------------------------------------------- | -------------------------- | -------------------------- | -------------- |
+| Pi / OpenCode Go Muse 1.2 Contributor, tools enabled | Grounded P1 in 3/3         | No findings in 3/3         | 22.325s        |
+| CommandCode / Muse 1.3 Contributor, tools disabled   | Unverified advisory in 3/3 | Unverified advisory in 3/3 | 39.125s        |
+
+All six CommandCode advisories went through verification and were visibly marked
+uncertain. They still did not distinguish the defect from the clean case. These
+are different model/tool configurations, not a causal tools-only comparison or
+an overall quality ranking.
+
+### Whole-branch Pi review
+
+A full-branch local review at `7380761` used Pi / Muse 1.2 Contributor, medium
+requested effort, three review passes, and verification. It completed in 169.592s
+with all enabled sessions finished and no forced exit. Main used 12 repository
+calls; verification used 23. Four deduplicated findings were verified: the false
+undefined-CommandCode-timeout claim was refuted, but two false positives survived
+(the unchanged negative-timeout behavior and the already-tested UTF-8 page
+boundary), alongside the known full-corpus merge requirement, overclassified P1.
+No code changes were made to satisfy those false positives. Artifacts:
+`/tmp/jbot-quality-dogfood-7380761/{result.json,run.log}`.
+
+This demonstrates working investigation and broader verification coverage, not
+sufficient overall precision. The full three-repetition corpus and blind
+adjudication/rescore remain outstanding; the branch is not merge-ready.
+
+### CommandCode minimum-tool feasibility
+
+The [tools](https://commandcode.ai/docs/reference/tools) and
+[CLI](https://commandcode.ai/docs/reference/cli) documentation were checked against
+installed CommandCode 1.44.0. `--tools-enable` re-enables headless-withheld tools;
+it is not a restrictive allowlist. The documented
+[mod API](https://commandcode.ai/docs/mods) provides `setActiveTools`, which hides
+other tools and refuses their execution.
+
+An isolated fixture with a temporary HOME and trusted mod exposed exactly
+`read_file`, `read_directory`, `glob`, and `grep`. Muse 1.3 Contributor followed an
+import with two successful reads and returned the correct helper value. Artifacts:
+`/tmp/jbot-205-commandcode-minimal/`. The initial probe mistakenly supplied the
+whole configured key pool; the corrected probe selected one existing key.
+
+This is feasibility evidence, not a sandbox/security certification or review
+quality comparison. Production CommandCode tooling remains disabled. Its
+project settings/hooks/mod discovery must be isolated before adopting this
+allowlist for arbitrary PR checkouts; plan mode alone is insufficient.
