@@ -149,6 +149,18 @@ describe('phase and tool telemetry', () => {
         outputBytesAfterCap: 50,
       });
     }
+    for (const page of ['next-page-1', 'next-page-2']) {
+      tools.startTool({
+        session: 'review',
+        backend: 'pi',
+        capability: 'enforceable',
+        toolClass: 'file-read',
+        inputBytes: 20,
+        identity: 'secret/path.ts',
+        identityKind: 'path',
+        page,
+      })({ success: true, outputBytesBeforeCap: 100, outputBytesAfterCap: 50 });
+    }
     tools.finishSession({
       session: 'review',
       backend: 'pi',
@@ -159,14 +171,15 @@ describe('phase and tool telemetry', () => {
     });
 
     const jsonl = rec.toJsonl();
-    assert.doesNotMatch(jsonl, /secret\/path|file-42|per-run-salt/);
+    assert.doesNotMatch(jsonl, /secret\/path|file-42|per-run-salt|next-page/);
     const rows = jsonl.split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
     assert.equal(rows.filter((row) => row.kind === 'tool').length, MAX_TOOL_TELEMETRY_ROWS);
     assert.equal(rows.filter((row) => row.kind === 'tool' && row.duplicate === true).length, 2);
     const exploration = rows.find((row) => row.kind === 'exploration');
-    assert.equal(exploration?.toolCalls, MAX_TOOL_TELEMETRY_ROWS + 3);
+    assert.equal(exploration?.toolCalls, MAX_TOOL_TELEMETRY_ROWS + 5);
     assert.equal(exploration?.duplicateReads, 1);
-    assert.equal(exploration?.droppedToolRows, 3);
+    assert.equal(exploration?.uniquePathHashes, MAX_TOOL_TELEMETRY_ROWS);
+    assert.equal(exploration?.droppedToolRows, 5);
     assert.equal(exploration?.turnCount, 3);
   });
 });

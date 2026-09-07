@@ -130,16 +130,25 @@ describe('runReview JSON repair loop', () => {
     assert.equal(result.summary, 'ok after repair');
   });
 
-  it('records prompt bytes without inventing token usage when responses omit it', async () => {
-    const { client, prompts } = makeFakeClient(['broken', VALID_REVIEW]);
-    const usages: unknown[] = [];
-    await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog, {
-      onTokenUsage: (usage) => usages.push(usage),
-    });
-    assert.deepEqual(
-      usages,
-      prompts.map((prompt) => ({ promptBytes: Buffer.byteLength(prompt) })),
-    );
+  it('records each attempted prompt once without inventing missing token usage', async () => {
+    for (const responses of [
+      ['broken', VALID_REVIEW],
+      [new Error('rejected')],
+      ['broken', new Error('rejected')],
+    ]) {
+      const { client, prompts } = makeFakeClient(responses);
+      const usages: unknown[] = [];
+      const run = runReview(client, 'prov/model', 'PR CONTEXT', '', noLog, {
+        onTokenUsage: (usage) => usages.push(usage),
+      });
+      if (responses.some((response) => response instanceof Error))
+        await assert.rejects(run, /rejected/);
+      else await run;
+      assert.deepEqual(
+        usages,
+        prompts.map((prompt) => ({ promptBytes: Buffer.byteLength(prompt) })),
+      );
+    }
   });
 
   it('records token usage for each completed prompt, including repair prompts', async () => {

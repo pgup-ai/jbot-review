@@ -525,43 +525,47 @@ async function runCommandCodePrompt(
   log(
     `Calling ${label} prompt (agent=commandcode-cli, model=${model}${effort ? `, effort=${effort}` : ''})`,
   );
-  const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, args, {
-    cwd: workspace,
-    input,
-    env: commandCodeEnvForHome(home),
-    timeoutMs,
-    timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
-  });
-  if (result.exitCode !== 0) {
-    throw new Error(
-      formatCommandCodePromptFailure(label, result.exitCode, result.stderr || result.stdout),
-    );
-  }
-  const parsed = parseCommandCodeJsonOutput(result.stdout);
-  const estimatedCostUsd =
-    home && parsed.sessionId
-      ? await commandCodeSessionEstimatedCost(home, parsed.sessionId)
+  let usage: PromptTokenUsage | undefined;
+  try {
+    const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, args, {
+      cwd: workspace,
+      input,
+      env: commandCodeEnvForHome(home),
+      timeoutMs,
+      timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
+    });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        formatCommandCodePromptFailure(label, result.exitCode, result.stderr || result.stdout),
+      );
+    }
+    const parsed = parseCommandCodeJsonOutput(result.stdout);
+    const estimatedCostUsd =
+      home && parsed.sessionId
+        ? await commandCodeSessionEstimatedCost(home, parsed.sessionId)
+        : undefined;
+    usage = parsed.usage
+      ? {
+          ...parsed.usage,
+          ...(isFiniteNumber(estimatedCostUsd) ? { estimatedCostUsd } : {}),
+        }
       : undefined;
-  const usage = parsed.usage
-    ? {
-        ...parsed.usage,
-        ...(isFiniteNumber(estimatedCostUsd) ? { estimatedCostUsd } : {}),
-      }
-    : undefined;
-  if (usage) {
+    if (usage) {
+      log(
+        `${label} tokens: input=${usage.input} output=${usage.output} reasoning=${usage.reasoning} cache(read=${usage.cacheRead} write=${usage.cacheWrite})${
+          isFiniteNumber(usage.estimatedCostUsd)
+            ? ` estimated-cost=$${usage.estimatedCostUsd.toFixed(4)}`
+            : ''
+        }`,
+      );
+    }
     log(
-      `${label} tokens: input=${usage.input} output=${usage.output} reasoning=${usage.reasoning} cache(read=${usage.cacheRead} write=${usage.cacheWrite})${
-        isFiniteNumber(usage.estimatedCostUsd)
-          ? ` estimated-cost=$${usage.estimatedCostUsd.toFixed(4)}`
-          : ''
-      }`,
+      `${label} prompt complete via commandcode: result=${parsed.finalText.length} chars stderr=${result.stderr.length} chars`,
     );
+    return parsed.finalText;
+  } finally {
+    onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(input, 'utf8') }, model, label);
   }
-  onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(input, 'utf8') }, model, label);
-  log(
-    `${label} prompt complete via commandcode: result=${parsed.finalText.length} chars stderr=${result.stderr.length} chars`,
-  );
-  return parsed.finalText;
 }
 
 function formatCommandCodePromptFailure(

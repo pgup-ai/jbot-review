@@ -1,5 +1,9 @@
 # Addressed-comment context and prompt measurement
 
+This records the initial addressed-context experiment. PR #205 later expanded
+to restore repository investigation; see [the follow-up audit](2026-09-07-review-investigation.md)
+for discovery changes and the outstanding full-corpus merge gate.
+
 The addressed-comment check now receives revision scope, the same bounded commit
 list and prior threads/replies, and the same diff block it previously received.
 It no longer receives finder-only PR prose, linked issues, check summaries, flat

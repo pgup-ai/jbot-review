@@ -27,7 +27,6 @@ import {
 import { buildDiffHunksBlockWithMetadata } from '../src/shared/diff-context.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import type { Octokit, PrFile } from '../src/shared/github.ts';
-import { planExploration } from '../src/shared/exploration-policy.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
 import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
 import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
@@ -94,7 +93,7 @@ describe('buildShardPlans cache-stable prefix', () => {
 
     assert.match(control[0].context, /follow symbols wherever they lead/);
     assert.doesNotMatch(control[0].context, /repository exploration policy/);
-    assert.match(treatment[0].context, /one-hop default and expansion trigger/);
+    assert.match(treatment[0].context, /Follow dependencies as far as needed/);
     assert.match(treatment[0].context, /repository exploration policy/);
   });
 });
@@ -479,7 +478,6 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     context: 'ctx',
     baseContext: 'base',
     assignedFiles: ['a.ts'],
-    exploration: planExploration({ tier: 'standard', truncatedFiles: [], omittedFiles: [] }),
   };
   const okResult = { summary: 'ok', findings: [] };
   const backendThrowingOnce = (message: string, calls: string[]) =>
@@ -897,7 +895,7 @@ describe('runPrReview local mode and early exits', () => {
   });
 
   it('loads addressed commits without enhanced context and tolerates lookup failure', async () => {
-    const stop = new Error('auxiliary lookup failed open');
+    const logs: string[] = [];
     let commitFetches = 0;
     const octokit = {
       rest: { pulls: { listFiles: 'files', listReviews: 'reviews', listCommits: 'commits' } },
@@ -947,14 +945,16 @@ describe('runPrReview local mode and early exits', () => {
           workspace,
           octokit,
           headSha: 'head',
+          apiKey: '',
           options: { dryRun: true, sdkEngine: 'opencode', enhancedContext: false },
-          log: (message) => {
-            if (message.startsWith('Commits unavailable for addressed checks')) throw stop;
-          },
+          log: (message) => logs.push(message),
         }),
-        (error: unknown) => error === stop,
+        /Missing API key for provider/,
       );
       assert.equal(commitFetches, 1);
+      assert.ok(
+        logs.some((message) => message.startsWith('Commits unavailable for addressed checks')),
+      );
     } finally {
       if (gitConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
       else process.env.GIT_CONFIG_GLOBAL = gitConfig;

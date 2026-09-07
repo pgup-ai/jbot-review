@@ -97,7 +97,6 @@ import {
   isDocOnlyChange,
   samePatchSet,
   shardFilesForReview,
-  touchesRiskyPath,
 } from './diff-context.ts';
 import {
   auxModelOptionsFor,
@@ -215,14 +214,6 @@ import {
   type LinkedIssue,
   type ReviewCommit,
 } from './review-context.ts';
-import {
-  assertRecoverableCoverage,
-  enforcesExplorationBudget,
-  planExploration,
-  selectExplorationTier,
-  type ExplorationPlan,
-  type ExplorationTier,
-} from './exploration-policy.ts';
 import { planReviewFanout, planIncrementalLenses } from './fanout.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
@@ -1441,11 +1432,6 @@ async function runReviewPipeline(params: {
   const priorJbotThreadBlock = formatPriorJbotThreadsForPrompt(priorJbotThreads);
   const summaryScopeBlock = buildSummaryScopeBlock();
   const changeShape = classifyChangeShape(files);
-  const explorationTier = selectExplorationTier({
-    changedFiles: files.length,
-    touchesRiskyPath: touchesRiskyPath(files),
-    testOnly: changeShape.testOnly,
-  });
   const reviewFocusBlock = buildReviewFocusBlock(changedFiles, changeShape);
   const fanout = options.dynamicFanout
     ? planReviewFanout({
@@ -1480,6 +1466,8 @@ async function runReviewPipeline(params: {
   const embeddedOnlyBackendIncompleteDiffFiles = embeddedOnlyBackendDiffHunks
     ? incompleteDiffFiles(embeddedOnlyBackendDiffHunks)
     : [];
+  const auxHasCompleteEmbeddedDiff =
+    !auxRequiresCompleteEmbeddedDiff || embeddedOnlyBackendIncompleteDiffFiles.length === 0;
   if (embeddedOnlyBackendDiffHunks?.text) {
     log(
       `Embedded-only backend diff hunks block: ${embeddedOnlyBackendDiffHunks.text.length} chars.`,
@@ -1545,7 +1533,7 @@ async function runReviewPipeline(params: {
     coreContext = joinContext(coreContext, ...supplementaryBlocks.map((block) => block.text));
     slimVerifierIssueInputs = { linkedIssues, linkedIssuesOmitted };
   } else {
-    if (priorJbotThreads.length > 0) {
+    if (priorJbotThreads.length > 0 && auxHasCompleteEmbeddedDiff) {
       try {
         addressedCommits = formatReviewCommits(
           await listPrCommits(octokit, owner, repo, pullNumber),
@@ -1576,8 +1564,6 @@ async function runReviewPipeline(params: {
   // mark it once here so every session derived from coreContext (main + aux)
   // carries the guard. Static text, so it stays in the cache-stable prefix.
   coreContext = joinContext(UNTRUSTED_PR_CONTENT_NOTE, coreContext);
-  const auxHasCompleteEmbeddedDiff =
-    !auxRequiresCompleteEmbeddedDiff || embeddedOnlyBackendIncompleteDiffFiles.length === 0;
   if (!auxHasCompleteEmbeddedDiff) {
     log(
       `Skipping auxiliary sessions: embedded diff exceeds the backend hard budget (${formatFileList(
@@ -2332,8 +2318,6 @@ async function runReviewPipeline(params: {
     const shardPlans = buildShardPlans({
       coreContext: mainCoreContext,
       fullDiffBlock: diffHunksBlock,
-      fullDiffCoverage: diffHunks,
-      explorationTier,
       context7Block,
       shards,
       requireCompleteEmbeddedDiff: mainRequiresCompleteEmbeddedDiff,
@@ -3607,8 +3591,6 @@ interface ShardPlan {
   baseContext: string;
   /** Changed files this shard may anchor findings in. */
   assignedFiles: string[];
-  /** Budget and the coverage gaps this shard is allowed to recover. */
-  exploration: ExplorationPlan;
 }
 
 /**
@@ -3621,8 +3603,6 @@ interface ShardPlan {
 export function buildShardPlans(params: {
   coreContext: string;
   fullDiffBlock: string;
-  fullDiffCoverage: { truncatedFiles: string[]; omittedFiles: string[] };
-  explorationTier: ExplorationTier;
   context7Block: string;
   shards: ReturnType<typeof shardFilesForReview>;
   requireCompleteEmbeddedDiff?: boolean;
@@ -3632,33 +3612,25 @@ export function buildShardPlans(params: {
   const {
     coreContext,
     fullDiffBlock,
-    fullDiffCoverage,
-    explorationTier,
     context7Block,
     shards,
     requireCompleteEmbeddedDiff = false,
     diffHunksOptions,
   } = params;
-  const explorationFor = (result: { truncatedFiles: string[]; omittedFiles: string[] }) => {
-    const plan = planExploration({ tier: explorationTier, ...result });
-    assertRecoverableCoverage(plan);
-    return plan;
-  };
   if (shards.length <= 1) {
     const diffResult = requireCompleteEmbeddedDiff
       ? buildDiffHunksBlockWithMetadata(shards[0] ?? [], diffHunksOptions)
-      : { text: fullDiffBlock, ...fullDiffCoverage };
-    if (requireCompleteEmbeddedDiff) {
+      : undefined;
+    if (diffResult) {
       assertCompleteEmbeddedDiff(diffResult, 'review');
     }
-    const baseContext = joinContext(coreContext, diffResult.text);
+    const baseContext = joinContext(coreContext, diffResult?.text ?? fullDiffBlock);
     return [
       {
         label: 'review',
         context: joinContext(baseContext, context7Block),
         baseContext,
         assignedFiles: (shards[0] ?? []).map((file) => file.filename),
-        exploration: explorationFor(diffResult),
       },
     ];
   }
@@ -3679,7 +3651,6 @@ export function buildShardPlans(params: {
       context: joinContext(coreContext, context7Block, assignment, diffResult.text),
       baseContext: joinContext(coreContext, assignment, diffResult.text),
       assignedFiles,
-      exploration: explorationFor(diffResult),
     };
   });
 }
@@ -3856,9 +3827,6 @@ export async function runShardedReview(params: {
           onTokenUsage: params.onTokenUsage,
           evidenceQuotes: params.evidenceQuotes,
           embeddedFirstPrompt: params.embeddedFirstPrompt,
-          ...(enforcesExplorationBudget(backend.observability)
-            ? { exploration: plan.exploration }
-            : {}),
         });
         persist(result, primaryFingerprint);
         cover('completed');
@@ -3955,9 +3923,6 @@ export async function runShardedReview(params: {
               onTokenUsage: params.onTokenUsage,
               evidenceQuotes: params.evidenceQuotes,
               embeddedFirstPrompt: params.embeddedFirstPrompt,
-              ...(enforcesExplorationBudget(backend.observability)
-                ? { exploration: plan.exploration }
-                : {}),
             },
           );
           persist(result, retryFingerprint);

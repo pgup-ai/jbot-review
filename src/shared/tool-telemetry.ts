@@ -21,6 +21,7 @@ export interface ToolTelemetryStart {
   inputBytes: number;
   identity?: string;
   identityKind?: 'path' | 'query' | 'scope';
+  page?: string;
   diffScope?: 'whole' | 'path';
 }
 
@@ -105,8 +106,12 @@ export function createToolTelemetryAccumulator(
       const hash = normalized
         ? createHmac('sha256', salt).update(`${input.toolClass}\0${normalized}`).digest('hex')
         : undefined;
-      const duplicate = hash ? seen.has(hash) : false;
-      if (hash && seen.size < MAX_TOOL_IDENTITIES) seen.add(hash);
+      const requestHash =
+        hash && input.page
+          ? createHmac('sha256', salt).update(`${hash}\0${input.page}`).digest('hex')
+          : hash;
+      const duplicate = requestHash ? seen.has(requestHash) : false;
+      if (requestHash && seen.size < MAX_TOOL_IDENTITIES) seen.add(requestHash);
       if (
         hash &&
         input.identityKind === 'path' &&

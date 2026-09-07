@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +14,9 @@ import {
   runPiGuidelineComplianceCheck,
   runPiReview,
   type PiRuntime,
-  capPiDiffOutput,
+  createPiReadTool,
+  createPiGitDiffTool,
+  createPiSearchTool,
   piGitDiffArgs,
   resolveWithinWorkspace,
   extractPiFinalText,
@@ -28,7 +31,11 @@ import {
   piTurnUsageSince,
   resolvePiEngine,
 } from '../src/shared/pi.ts';
-import { CONTINUATION_NUDGE_PROMPT } from '../src/shared/prompt.ts';
+import {
+  CONTINUATION_NUDGE_PROMPT,
+  formatRepositoryPage,
+  REPOSITORY_PAGE_BYTES,
+} from '../src/shared/prompt.ts';
 import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts';
@@ -383,29 +390,72 @@ describe('piGitDiffArgs', () => {
   });
 });
 
-describe('capPiDiffOutput', () => {
-  it('passes short output through untouched', () => {
-    assert.equal(capPiDiffOutput('diff --git a b', 100), 'diff --git a b');
+describe('repository tool pages', () => {
+  it('recovers every UTF-8 byte across pages, including a long single line', () => {
+    const original = 'a' + 'é🙂'.repeat(REPOSITORY_PAGE_BYTES);
+    const chunks: string[] = [];
+    let offset: number | undefined = 0;
+    do {
+      const page = formatRepositoryPage(original, { offset });
+      assert.ok(Buffer.byteLength(page.text) <= REPOSITORY_PAGE_BYTES);
+      chunks.push(page.text.slice(page.text.indexOf('\n\n') + 2));
+      offset = page.nextOffset;
+    } while (offset !== undefined);
+    assert.equal(chunks.join(''), original);
+    assert.throws(() => formatRepositoryPage(original, { offset: 2 }), /UTF-8/);
+    assert.throws(() => formatRepositoryPage(original, { offset: -1 }), /offset/);
+    assert.throws(() => formatRepositoryPage(original, { line: 0 }), /line/);
   });
 
-  it('truncates long output with a size note', () => {
-    const capped = capPiDiffOutput('x'.repeat(200), 100);
-    assert.ok(capped.startsWith('x'.repeat(100)));
-    assert.match(capped, /truncated/);
-  });
-
-  it('caps by bytes, not characters, for multi-byte content', () => {
-    // 100 two-byte chars = 200 bytes; a 100-byte cap keeps exactly 50 chars.
-    const capped = capPiDiffOutput('\u00e9'.repeat(100), 100);
-    assert.ok(capped.startsWith('\u00e9'.repeat(50)));
-    assert.ok(!capped.startsWith('\u00e9'.repeat(51)));
-  });
-
-  it('drops a multi-byte char split at the byte boundary instead of emitting garbage', () => {
-    // 'a' + 49 x 2-byte chars = 99 bytes; byte 100 splits the 50th char.
-    const capped = capPiDiffOutput('a' + '\u00e9'.repeat(100), 100);
-    assert.ok(capped.startsWith('a' + '\u00e9'.repeat(49) + '\n'));
-    assert.ok(!capped.includes('\uFFFD'));
+  it('finds and reads unchanged evidence beyond the first page without escaping the repo', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'jbot-pi-pages-'));
+    const outside = mkdtempSync(join(tmpdir(), 'jbot-pi-outside-'));
+    const sdk = { defineTool: (tool: unknown) => tool } as Parameters<typeof createPiReadTool>[0];
+    type Tool = {
+      execute: (id: string, params: unknown) => Promise<{ content: Array<{ text: string }> }>;
+    };
+    try {
+      execFileSync('git', ['init', '-q', workspace]);
+      writeFileSync(
+        join(workspace, 'large.ts'),
+        '// filler\n'.repeat(20000) + 'const importantDefault = false;\n',
+      );
+      writeFileSync(join(outside, 'secret'), 'hostOnlySecret');
+      symlinkSync(join(outside, 'secret'), join(workspace, 'escape'));
+      execFileSync('git', ['-C', workspace, 'add', 'large.ts', 'escape']);
+      const read = createPiReadTool(sdk, workspace) as Tool;
+      const search = createPiSearchTool(sdk, workspace) as Tool;
+      const result = await search.execute('search', { query: 'importantDefault' });
+      assert.match(result.content[0].text, /large.ts:20001:const importantDefault = false/);
+      const page = await read.execute('read', { path: 'large.ts', line: 20001 });
+      assert.match(page.content[0].text, /Starting at line 20001/);
+      assert.match(page.content[0].text, /importantDefault = false/);
+      assert.match((await read.execute('escape', { path: 'escape' })).content[0].text, /Refused/);
+      assert.match(
+        (await search.execute('secret', { query: 'hostOnlySecret' })).content[0].text,
+        /no matches/,
+      );
+      assert.match(
+        (await search.execute('literal', { query: '$(touch should-not-exist)' })).content[0].text,
+        /no matches/,
+      );
+      writeFileSync(join(workspace, 'large.ts'), '// updated\n'.repeat(20000));
+      const tree = execFileSync('git', ['-C', workspace, 'write-tree'], {
+        encoding: 'utf8',
+      }).trim();
+      const scopedDiff = createPiGitDiffTool(sdk, workspace, {
+        base: tree,
+        worktree: true,
+      }) as Tool;
+      const first = (await scopedDiff.execute('diff', {})).content[0].text;
+      const next = Number(first.match(/offset=(\d+)/)?.[1]);
+      assert.ok(Number.isFinite(next));
+      const second = (await scopedDiff.execute('diff-next', { offset: next })).content[0].text;
+      assert.notEqual(first, second);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });
 
@@ -439,6 +489,7 @@ describe('Pi review sessions', () => {
       workspace: '/tmp/ws',
       mainModel: 'deepseek/deepseek-v4-flash',
       readTool: {},
+      searchTool: {},
       activeSessions: new Set(),
       stopped,
     }) as unknown as PiRuntime;
@@ -502,6 +553,7 @@ describe('Pi review sessions', () => {
     // The label registry lets the runner abort an abandoned session the
     // moment its fallback is settled, instead of at teardown.
     const events: string[] = [];
+    const usage: Array<{ promptBytes?: number }> = [];
     const runtime = fakeRuntime(false, events);
     runtime.sdk.createAgentSession = async () => {
       const session = {
@@ -520,6 +572,7 @@ describe('Pi review sessions', () => {
       'guidelines',
       () => {},
       200,
+      (row) => usage.push(row),
     );
     await new Promise((resolve) => setTimeout(resolve, 10));
     abortPiSessionsByLabel(runtime, 'guideline-compliance', () => {});
@@ -529,6 +582,9 @@ describe('Pi review sessions', () => {
     // The abandoned call still times out on its own; fail-open lives in the
     // runner's aux wrapper, which converts this rejection into the fallback.
     await assert.rejects(pending, /did not finish/);
+    assert.equal(usage.length, 1);
+    assert.ok(usage[0].promptBytes! > 0);
+    assert.equal('input' in usage[0], false);
   });
 
   it('delivers the verifier effort as a per-session thinking level (TASK-157)', async () => {

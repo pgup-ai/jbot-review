@@ -374,7 +374,7 @@ export interface TokenUsageInfo {
 }
 
 export interface PromptTokenUsage {
-  /** Submitted text only; excludes backend system prompts, tools, and history. */
+  /** Attempted prompt text; excludes backend system prompts, tools, and history. */
   promptBytes?: number;
   input: number;
   output: number;
@@ -1165,6 +1165,8 @@ async function promptInSessionHoldingSlot(
   // BASE label — a repair/continue prompt must stay reachable by the runner's
   // grace-expiry abort, which only knows base labels.
   registerOpencodeSessionForAbort(client, abortLabel, sessionID);
+  let attempted = false;
+  let usage: PromptTokenUsage | undefined;
   try {
     // A follow-up prompt in an existing session must not return the previous
     // completed assistant message: remember its id and wait for a NEWER one.
@@ -1172,6 +1174,7 @@ async function promptInSessionHoldingSlot(
     const previousMessageID = previous?.info.id;
 
     log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
+    attempted = true;
     const promptRes = await client.session.promptAsync({
       path: { id: sessionID },
       query: queryDirectory(client),
@@ -1213,8 +1216,7 @@ async function promptInSessionHoldingSlot(
       `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
     );
     log(`${label} ${formatTokenUsage(data.info)}`);
-    const usage = extractPromptTokenUsage(data.info);
-    onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(prompt, 'utf8') }, model, label);
+    usage = extractPromptTokenUsage(data.info);
 
     const textParts = parts.filter(
       (part): part is Extract<Part, { type: 'text' }> => part.type === 'text' && Boolean(part.text),
@@ -1234,6 +1236,8 @@ async function promptInSessionHoldingSlot(
     return raw;
   } finally {
     unregisterOpencodeSessionForAbort(client, abortLabel, sessionID);
+    if (attempted)
+      onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(prompt, 'utf8') }, model, label);
   }
 }
 

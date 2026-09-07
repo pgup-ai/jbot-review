@@ -457,10 +457,15 @@ The pi engine requires Node >= 22.19 (the published Docker image runs Node 24); 
 disables itself and logs why. pi sessions run hermetically (no user-level pi
 config, skills, or prompt templates are loaded), get no shell (pi ships no
 sandbox, so read-only is enforced by withholding `bash` rather than by
-filtering it — the diff is embedded in the prompt, and a read-only `git_diff`
-tool serves any hunks past the embed budget), and manage provider prompt
-caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions
-only.
+filtering it). `read_file` supports a starting line, `search_repo` finds literal
+text in tracked files, and `git_diff` serves the reviewed change. All three return
+up to 128 KiB per response with byte offsets for continuation; large files and
+diffs remain fully accessible. Reads and searches stay inside the repository.
+The provider catalog supplies each model's context window; tool-page size is a
+response budget, not a model context-window override. Repository investigation has
+no tool-call, total-output, distinct-file, repeat-read, or dependency-depth quota;
+existing session deadlines and per-command process limits still apply. Pi manages
+provider prompt caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions only.
 
 **CLI and ACP routing.** Without `JBOT_ACP_GATEWAY_URL`, `devin` runs through
 its headless CLI from an isolated temporary workspace, with repository-controlled
@@ -854,14 +859,12 @@ and precision against seeded defects.
   diff or guideline set that already exceeds the cap on its own stays over it.
   An unmeasured recall trade kept as an A/B arm: run it against an untrimmed
   side before believing either result),
-  `JBOT_EMBEDDED_FIRST_PROMPT` (**on** by default; treats diff hunks already
-  embedded in the prompt as read and authoritative instead of re-running
-  `git diff` to reproduce them. Cuts tool work roughly a third and improves tail
-  latency, at better measured recall and precision than the control. The win
-  only lands where the model does not spend the saved time generating more
-  instead: `deepseek-v4-flash-free` measured 16.3% slower whole-run (p=0.040),
-  so set `false` there. Per-model numbers in
-  `plan/review-prompt-embedded-first-phase3-ab.md`),
+  `JBOT_EMBEDDED_FIRST_PROMPT` (**on** by default; starts from the embedded
+  diff while allowing repository search, repeated reads, and investigation beyond
+  the first dependency hop. Follow-up evidence gathering takes priority over
+  minimizing tool calls. Earlier latency measurements in
+  `plan/review-prompt-embedded-first-phase3-ab.md` used the previous, restrictive
+  prompt and do not validate this version),
   `JBOT_SDK_ENGINE` (see
   [Provider configuration](#provider-configuration-in-repo)). The
   opencode server uses a free ephemeral port automatically;
@@ -901,8 +904,9 @@ session durations do not sum to wall time.
 with input and cache read/write tokens. OpenCode, Pi, and CommandCode record the
 UTF-8 size of the text submitted by J-Bot, including its backend directives;
 other backends leave that size absent. Missing provider usage leaves token counters
-absent without losing the prompt size. Repair calls retain their own labels and
-payload sizes. These bytes exclude backend-added system prompts, tools, and
+absent without losing the prompt size. Failed attempts also retain their payload
+size when the driver returns or throws; this is not proof that the provider
+accepted the request. Repair calls retain their own labels and payload sizes. These bytes exclude backend-added system prompts, tools, and
 conversation history. Reported tokens can include multiple model turns and have
 provider-specific cache accounting, so neither bytes-to-token estimates nor
 input-minus-cache arithmetic establish engine overhead or a cache-hit rate.
