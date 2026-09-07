@@ -131,7 +131,7 @@ describe('runReview JSON repair loop', () => {
   });
 
   it('records token usage for each completed prompt, including repair prompts', async () => {
-    const { client } = makeFakeClient(
+    const { client, prompts } = makeFakeClient(
       ['broken', VALID_REVIEW],
       [
         { input: 10, output: 2, reasoning: 3, cache: { read: 4, write: 5 } },
@@ -152,8 +152,24 @@ describe('runReview JSON repair loop', () => {
     });
 
     assert.deepEqual(usages, [
-      { model: 'prov/model', input: 10, output: 2, reasoning: 3, cacheRead: 4, cacheWrite: 5 },
-      { model: 'prov/model', input: 6, output: 7, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+      {
+        model: 'prov/model',
+        input: 10,
+        output: 2,
+        reasoning: 3,
+        cacheRead: 4,
+        cacheWrite: 5,
+        promptBytes: Buffer.byteLength(prompts[0]),
+      },
+      {
+        model: 'prov/model',
+        input: 6,
+        output: 7,
+        reasoning: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        promptBytes: Buffer.byteLength(prompts[1]),
+      },
     ]);
   });
 

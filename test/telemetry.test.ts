@@ -452,6 +452,8 @@ describe('createTelemetryRecorder finding dispositions', () => {
       model: 'deepseek/deepseek-v4-flash',
       inputTokens: 100,
       outputTokens: 20,
+      promptBytes: 240,
+      cacheWriteTokens: 10,
     });
 
     const lines = rec
@@ -461,6 +463,8 @@ describe('createTelemetryRecorder finding dispositions', () => {
       .map((l) => JSON.parse(l));
     assert.ok(lines.some((l) => l.kind === 'finding' && l.disposition === 'posted-inline'));
     assert.ok(lines.some((l) => l.kind === 'session' && l.model === 'deepseek/deepseek-v4-flash'));
+    assert.equal(lines.find((l) => l.kind === 'session').promptBytes, 240);
+    assert.equal(lines.find((l) => l.kind === 'session').cacheWriteTokens, 10);
   });
 });
 

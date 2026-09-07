@@ -25,6 +25,7 @@ import {
   UNTRUSTED_PR_CONTENT_NOTE,
   VERIFICATION_OUTPUT_REMINDER,
   assembleAddressedPriorCommentsPrompt,
+  buildAddressedPriorCommentsContext,
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
@@ -653,6 +654,23 @@ describe('assembleAddressedPriorCommentsPrompt', () => {
     assert.match(prompt, /## Final output reminder/);
     assert.ok(prompt.indexOf('PR_CONTEXT_SENTINEL') < prompt.indexOf('## Final output reminder'));
   });
+
+  it('retains the complete supplied diff and thread disclosures in the focused context', () => {
+    const diff =
+      '## Diff\ncaller.ts: calls validate\nvalidator.ts: rejects invalid input\n[omitted 2 files]';
+    const context = buildAddressedPriorCommentsContext({
+      diffScope: 'Base: base\nHead: head\ngit diff base...head',
+      commits: '## Commits\n- abc1234 fix validation\n(and 3 more commits not listed.)',
+      threads: '## Prior threads\nthread-1: caller.ts:2\nNot applied\nShowing 1 of 2 threads.',
+      diff,
+    });
+    assert.ok(context.startsWith(UNTRUSTED_PR_CONTENT_NOTE));
+    assert.match(context, /git diff base\.\.\.head/);
+    assert.match(context, /abc1234 fix validation/);
+    assert.match(context, /3 more commits not listed/);
+    assert.match(context, /thread-1: caller.ts:2\nNot applied\nShowing 1 of 2 threads/);
+    assert.ok(context.endsWith(diff));
+  });
 });
 
 describe('ADDRESSED_PRIOR_COMMENTS_PROMPT', () => {
@@ -660,6 +678,10 @@ describe('ADDRESSED_PRIOR_COMMENTS_PROMPT', () => {
     assert.match(ADDRESSED_PRIOR_COMMENTS_PROMPT, /"addressedByCommit"/);
     assert.doesNotMatch(ADDRESSED_PRIOR_COMMENTS_PROMPT, /addressed_by_commit/);
     assert.doesNotMatch(ADDRESSED_PRIOR_COMMENTS_PROMPT, /"note"/);
+    assert.match(
+      ADDRESSED_PRIOR_COMMENTS_PROMPT,
+      /Missing or truncated evidence is not proof of a fix/,
+    );
   });
 });
 

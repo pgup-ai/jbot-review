@@ -521,12 +521,13 @@ async function runCommandCodePrompt(
   effort?: string,
 ): Promise<string> {
   const args = buildCommandCodeCliArgs({ model, effort });
+  const input = withNoToolsReviewDirective(prompt);
   log(
     `Calling ${label} prompt (agent=commandcode-cli, model=${model}${effort ? `, effort=${effort}` : ''})`,
   );
   const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, args, {
     cwd: workspace,
-    input: withNoToolsReviewDirective(prompt),
+    input,
     env: commandCodeEnvForHome(home),
     timeoutMs,
     timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
@@ -555,7 +556,7 @@ async function runCommandCodePrompt(
           : ''
       }`,
     );
-    onTokenUsage?.(usage, model, label);
+    onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(input, 'utf8') }, model, label);
   }
   log(
     `${label} prompt complete via commandcode: result=${parsed.finalText.length} chars stderr=${result.stderr.length} chars`,

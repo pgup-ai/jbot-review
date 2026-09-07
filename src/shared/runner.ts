@@ -114,6 +114,7 @@ import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
   UNTRUSTED_PR_CONTENT_NOTE,
+  buildAddressedPriorCommentsContext,
   buildContext7PromptBlock,
   buildContextTrimNotice,
   buildReviewFocusBlock,
@@ -207,6 +208,7 @@ import {
   formatGuidelines,
   formatFinderGuidelines,
   formatDiffScope,
+  formatReviewCommits,
   formatContextBudget,
   selectFinderGuidelineText,
   truncatePrBody,
@@ -1055,6 +1057,8 @@ async function runReviewPipeline(params: {
       outputTokens: usage.output,
       reasoningTokens: usage.reasoning,
       cacheReadTokens: usage.cacheRead,
+      cacheWriteTokens: usage.cacheWrite,
+      ...(usage.promptBytes !== undefined ? { promptBytes: usage.promptBytes } : {}),
       ...(isFiniteNumber(usage.costUsd) ? { costUsd: usage.costUsd } : {}),
       ...(isFiniteNumber(usage.estimatedCostUsd)
         ? { estimatedCostUsd: usage.estimatedCostUsd }
@@ -1489,6 +1493,7 @@ async function runReviewPipeline(params: {
   // full block. Hunks always go last — closest to the output reminder, where
   // small models attend most.
   let coreContext: string;
+  let addressedCommits = '';
   // Populated on the enhanced path only; the basic branch has no droppable set.
   let baseCoreContext = '';
   let supplementaryBlocks: ContextBlock[] = [];
@@ -1506,6 +1511,7 @@ async function runReviewPipeline(params: {
           ? getCheckStatusSummary(octokit, owner, repo, headSha)
           : 'Check status unavailable: PR head SHA was not provided.',
       ]);
+    if (priorJbotThreads.length > 0) addressedCommits = formatReviewCommits(commits);
     coreContext = buildReviewContext({
       pullTitle,
       pullBody,
@@ -2416,7 +2422,15 @@ async function runReviewPipeline(params: {
       startAddressedPriorCommentsCheck({
         backend: auxBackend,
         model: auxModel,
-        prContext: auxPrContext,
+        prContext:
+          auxSessionsEnabled && priorJbotThreads.length > 0
+            ? buildAddressedPriorCommentsContext({
+                diffScope: formatDiffScope(diffScope),
+                commits: addressedCommits,
+                threads: priorJbotThreadBlock,
+                diff: auxDiffBlockText,
+              })
+            : '',
         priorJbotThreads: auxSessionsEnabled ? priorJbotThreads : [],
         timeoutMs: finderTimeoutMs,
         log,

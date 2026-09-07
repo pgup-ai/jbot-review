@@ -374,6 +374,8 @@ export interface TokenUsageInfo {
 }
 
 export interface PromptTokenUsage {
+  /** Submitted text only; excludes backend system prompts, tools, and history. */
+  promptBytes?: number;
   input: number;
   output: number;
   reasoning: number;
@@ -1208,7 +1210,8 @@ async function promptInSessionHoldingSlot(
     );
     log(`${label} ${formatTokenUsage(data.info)}`);
     const usage = extractPromptTokenUsage(data.info);
-    if (usage) onTokenUsage?.(usage, model, label);
+    if (usage)
+      onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(prompt, 'utf8') }, model, label);
 
     const textParts = parts.filter(
       (part): part is Extract<Part, { type: 'text' }> => part.type === 'text' && Boolean(part.text),

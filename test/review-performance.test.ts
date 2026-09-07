@@ -53,7 +53,14 @@ describe('review performance aggregation', () => {
       },
       { kind: 'exploration', backend: 'opaque', session: 'review-repair' },
       { kind: 'exploration', backend: 'opaque', session: 'review-shard-1-retry' },
-      { kind: 'session', session: 'review-repair', cacheReadTokens: 30 },
+      {
+        kind: 'session',
+        session: 'review-repair',
+        cacheReadTokens: 30,
+        cacheWriteTokens: 10,
+        promptBytes: 240,
+        inputTokens: 100,
+      },
       { kind: 'session', session: 'review-shard-1-retry' },
       { kind: 'finding', disposition: 'posted-inline' },
     ]);
@@ -66,6 +73,15 @@ describe('review performance aggregation', () => {
     assert.equal(report.tools.diffRecoveryCallRate.status, 'truncated');
     assert.equal(report.turns.p50, 2);
     assert.equal(report.cacheReadTokens, 30);
+    assert.deepEqual(report.modelCohorts.unknown.promptBytes, {
+      count: 1,
+      p50: 240,
+      p90: 240,
+      p95: 240,
+    });
+    assert.equal(report.modelCohorts.unknown.cacheWriteTokens, 10);
+    assert.equal(report.auxiliaryRuns[0].promptUsage[0].inputTokens, 100);
+    assert.equal(report.auxiliaryRuns[0].promptUsage[1].promptBytes, undefined);
     assert.equal(report.retryRepairRate.numerator, 2);
     assert.equal(report.retryRepairRate.rate, null);
     assert.equal(report.retainedFindings, 1);

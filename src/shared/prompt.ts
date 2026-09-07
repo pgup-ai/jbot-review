@@ -1009,10 +1009,11 @@ export function buildContext7PromptBlock(reason: string): string {
 
 export const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
 
-Use the checked-out repo, git diff, git log, and the PR context below to verify each prior jbot-review thread.
+Verify each prior thread against the embedded evidence. When tools are available, use the checked-out repo, git diff, and git log to resolve gaps.
 
 Rules:
 - Only mark a prior thread addressed when the current branch clearly fixes the specific issue raised.
+- Missing or truncated evidence is not proof of a fix. Leave a thread unaddressed when you cannot verify the fix.
 - Do not mark a thread addressed just because the latest review has no new findings.
 - Do not mark a thread addressed because a human reply declined the suggestion, such as "Not applied", "accepted as-is", or "not worth fixing".
 - Use the exact prior jbot-review thread id from the prompt.
@@ -1037,6 +1038,23 @@ before or after the JSON. Do not wrap it in markdown fences.`;
 
 export function assembleAddressedPriorCommentsPrompt(prContext: string): string {
   return [ADDRESSED_PRIOR_COMMENTS_PROMPT, prContext, ADDRESSED_OUTPUT_REMINDER].join('\n\n');
+}
+
+export function buildAddressedPriorCommentsContext(blocks: {
+  diffScope: string;
+  commits: string;
+  threads: string;
+  diff: string;
+}): string {
+  return [
+    UNTRUSTED_PR_CONTENT_NOTE,
+    `## Pull request\n${blocks.diffScope}`,
+    blocks.commits,
+    blocks.threads,
+    blocks.diff,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export const GUIDELINE_COMPLIANCE_PROMPT = `You are auditing a pull request for compliance with this repository's

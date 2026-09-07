@@ -897,6 +897,15 @@ absent. Supply each artifact once. Coverage events are preserved, not counted as
 separate sessions. Aborted durations are not completed latency samples, and parallel
 session durations do not sum to wall time.
 
+`auxiliaryRuns[].promptUsage` pairs each reported call's submitted `promptBytes`
+with input and cache read/write tokens. OpenCode, Pi, and CommandCode record the
+UTF-8 size of the text submitted by J-Bot, including its backend directives;
+other backends leave that size absent. Repair calls retain their own labels and
+payload sizes. These bytes exclude backend-added system prompts, tools, and
+conversation history. Reported tokens can include multiple model turns and have
+provider-specific cache accounting, so neither bytes-to-token estimates nor
+input-minus-cache arithmetic establish engine overhead or a cache-hit rate.
+
 Compare the same base/head, reviewer revision, main route, and effective settings,
 accounting for the intended treatment, cache reuse, retries, and actual lenses.
 Retained findings are pipeline survivors, not adjudicated true positives. See the

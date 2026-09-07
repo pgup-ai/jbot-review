@@ -38,6 +38,15 @@ Program-level targets:
 
 ## Status — 2026-08-21 (deep-dive backlog, PR #169)
 
+Update, 2026-09-07: PR #204 completed TASK-084's independent startup fetches and
+the changes-since slice of TASK-065. The addressed-comment slice now retains
+revision scope, commits, prior threads/replies, and the existing diff, while
+excluding finder-only context. TASK-058/062 have partial measurement support:
+submitted prompt bytes and reported input/cache tokens for OpenCode, Pi, and
+CommandCode. Engine-added context attribution remains unresolved; these fields
+must not be treated as an exact overhead or cache-hit calculation. Guideline
+context trimming and graduation of the opt-in slim verifier remain open.
+
 Axis-by-axis state of the 2026-08-21 speed deep dive's backlog after
 `feat/speed-backlog-1`:
 
