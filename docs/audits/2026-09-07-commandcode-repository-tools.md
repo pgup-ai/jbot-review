@@ -84,8 +84,10 @@ An earlier LongCat pilot repeatedly advanced search offsets by one byte despite
 receiving the end-of-output marker. The final schema explicitly identifies byte
 offsets and permits continuation only from a next-page notice. All enabled-tool
 trials were rerun with that schema. Twelve completed no-tools baseline trials
-were retained because their prompt and execution path were unchanged; their
-original source manifest is saved alongside the final one.
+were reused because their prompt and execution path were unchanged; six no-tools
+trials ran anew, giving 18 no-tools trials plus 18 enabled-tool trials. No final
+trial was excluded. The reused trials' original source manifest is saved
+alongside the final one, and `runs.jsonl` marks them with `reusedBaseline`.
 
 An unverified P3 hypothesis is counted separately from a grounded defect. An
 advisory on clean code is unnecessary review noise, even when its conditional
