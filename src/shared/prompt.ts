@@ -886,7 +886,7 @@ The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}
         : truncateUtf8WithNotice(
             diff.text,
             CHANGES_SINCE_DIFF_BUDGET,
-            'Delta diff',
+            'Delta diff (UTF-8 text)',
             diff.totalBytes,
           ),
     );

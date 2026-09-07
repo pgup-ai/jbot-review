@@ -135,7 +135,7 @@ describe('buildChangesSinceContextBlock', () => {
     assert.ok(
       Buffer.byteLength(withDiff) <= CHANGES_SINCE_CONTEXT_BUDGET + CHANGES_SINCE_DIFF_BUDGET + 400,
     );
-    assert.match(withDiff, /Delta diff truncated to \d+ bytes; omitted \d+ bytes/);
+    assert.match(withDiff, /Delta diff \(UTF-8 text\) truncated to \d+ bytes; omitted \d+ bytes/);
   });
 
   it('measures the budget in UTF-8 bytes, not code units', () => {

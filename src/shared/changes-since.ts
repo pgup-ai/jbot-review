@@ -35,9 +35,11 @@ export async function collectChangesSinceContext(
         const prefix = Buffer.alloc(CHANGES_SINCE_DIFF_BUDGET);
         let keptBytes = 0;
         let totalBytes = 0;
-        child.stdout.on('data', (chunk: Buffer) => {
-          keptBytes += chunk.copy(prefix, keptBytes);
-          totalBytes += chunk.length;
+        child.stdout.setEncoding('utf8');
+        child.stdout.on('data', (chunk: string) => {
+          const bytes = Buffer.from(chunk);
+          keptBytes += bytes.copy(prefix, keptBytes);
+          totalBytes += bytes.length;
         });
         child.once('error', reject);
         child.once('close', (code, signal) => {

@@ -65,8 +65,10 @@ review skipped this pass entirely. The initial self-review missed that gap.
 Tool-less summaries now receive an 8 KiB delta diff with a byte-omission notice;
 agentic summaries retain the smaller context. Pi, CommandCode, Grok, Poolside,
 Cline, Qoder, and tool-less OpenCode models use the single-shot instructions.
-Git reads are time-limited; the diff is streamed with only its first 8 KiB retained
-and total bytes counted for the omission notice. A read failure skips this optional summary.
+Git reads are time-limited; the diff is decoded as UTF-8 and streamed with only
+its first 8 KiB retained. The omission notice counts decoded UTF-8 text bytes,
+including replacement characters for malformed input, in the same units as the
+prompt budget. A read failure skips this optional summary.
 A regression test checks that generic subjects still carry actual changes while
 excluding earlier PR changes and uncommitted edits. Existing budget tests check
 delta truncation and disclosure.
