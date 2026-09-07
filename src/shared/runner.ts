@@ -1825,7 +1825,7 @@ async function runReviewPipeline(params: {
     );
     commandCodeBackend = createCommandCodeBackend(
       workspace,
-      { home: commandCodeHome, tools: options.commandCodeTools ?? false },
+      { home: commandCodeHome, tools: options.commandCodeTools },
       (m, override) =>
         commandCodeSessionEffort(m, override, {
           auxModel,
@@ -3218,7 +3218,7 @@ export function normalizeOptions(
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
     guidelineWiden: options?.guidelineWiden ?? 'auto',
     verifierSlimContext: options?.verifierSlimContext ?? false,
-    commandCodeTools: options?.commandCodeTools ?? false,
+    commandCodeTools: options?.commandCodeTools ?? true,
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     auxModel: options?.auxModel ?? '',
     modelPool: options?.modelPool ?? [],

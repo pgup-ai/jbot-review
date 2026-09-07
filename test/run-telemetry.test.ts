@@ -41,7 +41,7 @@ test('configuration fingerprints policy changes while excluding credentials and 
   );
   assert.notEqual(
     first.configurationHash,
-    runConfiguration({ ...options, commandCodeTools: true }, 'opencode/a').configurationHash,
+    runConfiguration({ ...options, commandCodeTools: false }, 'opencode/a').configurationHash,
   );
   assert.equal(
     runConfiguration({ ...options, sdkEngine: 'https://secret.example' }, 'opencode/a')

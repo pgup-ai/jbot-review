@@ -134,10 +134,10 @@ describe('CommandCode CLI provider helpers', () => {
     );
   });
 
-  it('denies all CommandCode tools', () => {
+  it('denies all CommandCode tools when disabled', () => {
     const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
     try {
-      const path = writeCommandCodeReadOnlySettings(home);
+      const path = writeCommandCodeReadOnlySettings(home, false);
 
       assert.equal(path, join(home, '.commandcode', 'settings.json'));
       assert.equal(statSync(path).mode & 0o777, 0o600);

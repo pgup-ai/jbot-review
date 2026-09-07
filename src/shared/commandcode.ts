@@ -80,7 +80,7 @@ export function writeCommandCodeAuth(
   return path;
 }
 
-export function writeCommandCodeReadOnlySettings(home: string, tools = false): string {
+export function writeCommandCodeReadOnlySettings(home: string, tools: boolean): string {
   const path = join(home, '.commandcode', 'settings.json');
   mkdirSync(join(home, '.commandcode'), { recursive: true, mode: 0o700 });
   writeFileSync(

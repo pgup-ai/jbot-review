@@ -1,8 +1,8 @@
 # CommandCode repository tools
 
-PR #205 is the baseline (`8987ddf`). This change adds opt-in investigation to
-CommandCode main and auxiliary sessions with `JBOT_COMMANDCODE_TOOLS=true`.
-The default remains off; full-diff embedding and model selection are unchanged.
+PR #205 is the baseline (`8987ddf`). This change enables repository investigation in
+CommandCode main and auxiliary sessions by default. `JBOT_COMMANDCODE_TOOLS=false`
+disables tools; full-diff embedding and model selection are unchanged.
 
 ## Runtime and boundaries
 
@@ -144,9 +144,14 @@ defect verifier used repository tools. Results are at
 
 The full/core corpus and blind adjudication were not run. This pair tests one
 specific cross-file evidence gap; it does not establish general review precision
-or a model ranking. Keep the rollout opt-in pending broader corpus evaluation.
-The dogfood workflow forwards the repository variable `JBOT_COMMANDCODE_TOOLS`;
-this PR does not set that variable or enable tools globally.
+or a model ranking. The sole consumer explicitly approved enabling tools by
+default and waived the full-corpus gate for this switch. This is an accepted
+rollout limitation, not a passed benchmark gate. The dogfood workflow forwards
+`JBOT_COMMANDCODE_TOOLS`: unset or blank enables tools; explicit `false` disables
+them. No repository variable needs to be created.
+A Linux Muse 1.3 review with the flag unset used repository tools in both main
+review and verification and retained the P1 defect (`/tmp/jbot-206-default-on`).
+Default and opt-out assertions pass with all 1,028 tests.
 
 References: [CommandCode CLI](https://commandcode.ai/docs/reference/cli),
 [mods](https://commandcode.ai/docs/mods), and

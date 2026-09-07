@@ -402,7 +402,7 @@ an automatic approval or review-done reaction. CommandCode cancellation stops it
 process tree and waits for output pipes to close before removing its temporary home.
 Queued passes cancelled before execution never start a provider session.
 Pi and tool-capable OpenCode verifiers can read and search repository evidence;
-CommandCode can also investigate when `JBOT_COMMANDCODE_TOOLS=true`.
+CommandCode verifiers can investigate by default unless `JBOT_COMMANDCODE_TOOLS=false`.
 Changes-since summaries receive up to 256 KiB
 of delta diff plus a bounded file overview; larger deltas disclose summary-only
 omissions. Main reviews continue to cover the full base-to-head diff.
@@ -574,12 +574,12 @@ Use `provider: commandcode` with `commandcode-access-key` /
 includes the CommandCode CLI, but `.commandcode/auth.json` is written under an
 isolated temporary HOME only when the main or active auxiliary provider is
 `commandcode`, then removed after the run. Sessions start in an empty directory;
-repository and operator settings, hooks, mods, and skills are excluded. Tools remain
-disabled by default.
+repository and operator settings, hooks, mods, and skills are excluded. Repository tools are
+enabled by default.
 
-Set `JBOT_COMMANDCODE_TOOLS=true` in the Action step's `env`, local environment,
-or app environment to enable repository investigation for **all CommandCode
-sessions**, including verification. This exposes `jbot_read_file`,
+Set `JBOT_COMMANDCODE_TOOLS=false` in the Action step's `env`, local environment,
+or app environment to disable repository investigation for **all CommandCode
+sessions**, including verification. The default exposes `jbot_read_file`,
 `jbot_list_files`, and `jbot_search`. Reads reject paths and symlinks resolving
 outside the repository. Search covers non-ignored files without following symlinks;
 listing includes tracked and non-ignored untracked files. Direct reads reject Git
@@ -587,7 +587,7 @@ metadata and ignored untracked files. Shell, writes, and web access stay disable
 J-Bot continues embedding the complete review diff. Tool
 results are paginated, with no additional aggregate read/tool-call quota.
 
-The opt-in uses a trusted mod with the image's pinned CommandCode 1.44.0; local
+The tools use a trusted mod with the image's pinned CommandCode 1.44.0; local
 runs need that version. Mod initialization failure stops the CLI. Logs record
 sanitized tool outcome counts and effective workspace access; per-tool timing
 remains unavailable. See the [tooling evaluation](docs/audits/2026-09-07-commandcode-repository-tools.md)
