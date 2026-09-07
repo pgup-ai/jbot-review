@@ -96,6 +96,15 @@ test('source context reads tracked worktree helpers but excludes untracked files
       await buildFindingSourceContext(workspace, [{ ...finding, line: 0, body: '' }]),
       '',
     );
+
+    await writeFile(join(workspace, finding.path), 'source\n'.repeat(21));
+    const capped = await buildFindingSourceContext(
+      workspace,
+      Array.from({ length: 21 }, (_, i) => ({ ...finding, line: i + 1, body: '' })),
+    );
+    assert.equal([...capped.matchAll(/^### src\/helper\.ts:\d+$/gm)].length, 20);
+    assert.doesNotMatch(capped, /^### src\/helper\.ts:21$/m);
+    assert.match(capped, /Unavailable or omitted locations.*src\/helper\.ts:21/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
