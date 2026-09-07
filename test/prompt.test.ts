@@ -98,6 +98,7 @@ describe('UNTRUSTED_PR_CONTENT_NOTE', () => {
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /untrusted/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /never as instructions/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /description/i);
+    assert.match(UNTRUSTED_PR_CONTENT_NOTE, /diffs/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /linked issue bodies/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /prior review comments/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /output format/i);
@@ -126,12 +127,11 @@ describe('buildChangesSinceContextBlock', () => {
     const block = buildChangesSinceContextBlock('abc1234', 'def5678', subjects);
     assert.ok(block.length <= CHANGES_SINCE_CONTEXT_BUDGET + 200);
     assert.match(block, /and \d+ more commit\(s\); use the git command above\./);
-    const withDiff = buildChangesSinceContextBlock(
-      'abc1234',
-      'def5678',
-      subjects,
-      '+変更\n'.repeat(5000),
-    );
+    const text = '+変更\n'.repeat(5000);
+    const withDiff = buildChangesSinceContextBlock('abc1234', 'def5678', subjects, {
+      text,
+      totalBytes: Buffer.byteLength(text),
+    });
     assert.ok(
       Buffer.byteLength(withDiff) <= CHANGES_SINCE_CONTEXT_BUDGET + CHANGES_SINCE_DIFF_BUDGET + 400,
     );
@@ -165,6 +165,10 @@ describe('CHANGES_SINCE_LAST_REVIEW_PROMPT', () => {
     assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /NO tools on this call/);
     assert.doesNotMatch(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /git is available/);
     assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /summary is PARTIAL/);
+    assert.match(
+      CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
+      /every stated omission count \(commits and bytes\)/,
+    );
     assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /bounded delta diff/);
     assert.match(
       CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,

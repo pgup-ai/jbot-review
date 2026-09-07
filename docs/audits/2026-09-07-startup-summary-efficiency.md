@@ -3,7 +3,7 @@
 This change overlaps the enhanced-context commits, linked issues, and check-status
 fetches after the existing skip gates (TASK-084). It also removes full PR context
 from the changes-since summary contract across every backend (a narrow TASK-065
-slice). Main review and finding-related auxiliary inputs remain unchanged.
+slice). Main review scope and finding policy remain unchanged.
 
 ## Startup probe
 
@@ -65,10 +65,17 @@ review skipped this pass entirely. The initial self-review missed that gap.
 Tool-less summaries now receive an 8 KiB delta diff with a byte-omission notice;
 agentic summaries retain the smaller context. Pi, CommandCode, Grok, Poolside,
 Cline, Qoder, and tool-less OpenCode models use the single-shot instructions.
-Git reads are time- and output-limited; a read failure skips this optional summary.
+Git reads are time-limited; the diff is streamed with only its first 8 KiB retained
+and total bytes counted for the omission notice. A read failure skips this optional summary.
 A regression test checks that generic subjects still carry actual changes while
 excluding earlier PR changes and uncommitted edits. Existing budget tests check
 delta truncation and disclosure.
+
+Follow-up review caught an 8 MiB buffering limit that discarded large deltas
+before prompt truncation. The Git fixture now covers a larger diff, UTF-8 prefix
+boundaries, exact omitted-byte counts, empty commits, and failed diff commands.
+The shared untrusted-input warning explicitly includes diffs, and partial
+summaries must retain every stated omission count.
 
 A live CommandCode Muse 1.3 summary of a fixture with the generic subject `update`
 correctly reported both newly exported constants (`retryLimit = 3`,

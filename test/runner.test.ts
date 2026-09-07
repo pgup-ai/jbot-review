@@ -939,7 +939,7 @@ describe('runPrReview local mode and early exits', () => {
         }),
         (error: unknown) => error === sentinel,
       );
-      assert.deepEqual(started, ['commits', 'issues', 'checks']);
+      assert.deepEqual(new Set(started), new Set(['commits', 'issues', 'checks']));
     } finally {
       if (gitConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
       else process.env.GIT_CONFIG_GLOBAL = gitConfig;
