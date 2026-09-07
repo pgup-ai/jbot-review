@@ -884,6 +884,27 @@ have a policy header without execution metadata.
 
 The in-repo telemetry artifact name includes the workflow run ID and attempt.
 
+Download one telemetry JSONL per attempt, then compare them locally:
+
+```sh
+npm run performance:review -- control/telemetry.jsonl candidate/telemetry.jsonl
+```
+
+The report's `auxiliaryRuns` keeps each attempt's identity, configuration, execution
+roles, run phases, coverage events, and auxiliary session phases together. Queue and
+execution time remain separate; failed sessions need no token row to appear.
+Coverage includes startup failures and skipped sessions without phase rows. Missing
+legacy metadata stays absent. Supply each artifact once; this command does not
+deduplicate copied artifacts or interpret repeated coverage events as separate sessions.
+
+Compare the same reviewed base/head, reviewer revision, main route, and effective
+configuration, accounting for the intended treatment. Inspect actual roles and
+coverage as well as the configuration hash: cache reuse, retries, available lenses,
+and provider load can change the work performed. Retained findings are pipeline
+survivors, not adjudicated true positives. See the
+[auxiliary tuning measurements](docs/audits/2026-09-07-auxiliary-tuning.md) for the
+current evidence and limits.
+
 ## Observer gateway
 
 An optional, self-contained service that makes review sessions observable: the

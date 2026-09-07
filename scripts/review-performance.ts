@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
+import type { RunExecutionTelemetry, RunTelemetryMeta } from '../src/shared/telemetry.ts';
+
 export const MIN_RATE_SAMPLE = 20;
 
 type Row = Record<string, unknown> & { kind?: string; _source?: number };
@@ -50,7 +52,7 @@ export function guardedRate(
   };
 }
 
-export function aggregatePerformance(rows: Row[]): Record<string, unknown> {
+export function aggregatePerformance(rows: Row[]) {
   const byKind = (kind: string): Row[] => rows.filter((row) => row.kind === kind);
   const phases = byKind('phase');
   const tools = byKind('tool');
@@ -165,6 +167,63 @@ export function aggregatePerformance(rows: Row[]): Record<string, unknown> {
     const gap = Math.abs(elapsed - measured);
     return [{ gap, withinTolerance: gap <= Math.max(elapsed * 0.05, 2_000) }];
   });
+  const auxiliaryRuns = [...sourceRows.values()].flatMap((source) => {
+    const run = source.find((row) => row.kind === 'run') as
+      (Row & RunTelemetryMeta & { execution?: RunExecutionTelemetry }) | undefined;
+    if (!run) return [];
+    const auxiliaryPhases = source.filter(
+      (row) =>
+        row.kind === 'phase' &&
+        row.scope === 'session' &&
+        (row.phase === 'auxiliary-queue' || row.phase === 'auxiliary-execution'),
+    );
+    return [
+      {
+        runId: run.runId,
+        repository: run.repository,
+        baseSha: run.baseSha,
+        headSha: run.headSha,
+        identity: run.identity,
+        policy: run.policy,
+        execution: run.execution,
+        model: run.model,
+        auxModel: run.auxModel,
+        terminalState: run.terminalState,
+        elapsedMs: number(run, 'elapsedMs'),
+        runPhases: source
+          .filter((row) => row.kind === 'phase' && row.scope === 'run')
+          .map((row) => ({
+            phase: row.phase,
+            durationMs: number(row, 'durationMs'),
+            stopReason: row.stopReason,
+          })),
+        coverage: source
+          .filter((row) => row.kind === 'coverage')
+          .map((row) => ({
+            session: row.session,
+            state: row.state,
+            failureClass: row.failureClass,
+          })),
+        sessions: [...group(auxiliaryPhases, 'session')].map(([session, values]) => {
+          const produced = source.filter(
+            (row) => row.kind === 'finding' && row.session === session,
+          );
+          return {
+            session,
+            phases: values.map((row) => ({
+              phase: row.phase,
+              backend: row.backend,
+              durationMs: number(row, 'durationMs'),
+              stopReason: row.stopReason,
+            })),
+            producedFindings: produced.length,
+            retainedFindings: produced.filter((row) => retained.has(String(row.disposition)))
+              .length,
+          };
+        }),
+      },
+    ];
+  });
   return {
     minimumRateSample: MIN_RATE_SAMPLE,
     runs: {
@@ -216,6 +275,7 @@ export function aggregatePerformance(rows: Row[]): Record<string, unknown> {
     backendCohorts: cohorts,
     modelCohorts,
     findingCohorts,
+    auxiliaryRuns,
   };
 }
 
