@@ -149,6 +149,18 @@ describe('phase and tool telemetry', () => {
         outputBytesAfterCap: 50,
       });
     }
+    for (const page of ['next-page-1', 'next-page-2']) {
+      tools.startTool({
+        session: 'review',
+        backend: 'pi',
+        capability: 'enforceable',
+        toolClass: 'file-read',
+        inputBytes: 20,
+        identity: 'secret/path.ts',
+        identityKind: 'path',
+        page,
+      })({ success: true, outputBytesBeforeCap: 100, outputBytesAfterCap: 50 });
+    }
     tools.finishSession({
       session: 'review',
       backend: 'pi',
@@ -159,14 +171,15 @@ describe('phase and tool telemetry', () => {
     });
 
     const jsonl = rec.toJsonl();
-    assert.doesNotMatch(jsonl, /secret\/path|file-42|per-run-salt/);
+    assert.doesNotMatch(jsonl, /secret\/path|file-42|per-run-salt|next-page/);
     const rows = jsonl.split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
     assert.equal(rows.filter((row) => row.kind === 'tool').length, MAX_TOOL_TELEMETRY_ROWS);
     assert.equal(rows.filter((row) => row.kind === 'tool' && row.duplicate === true).length, 2);
     const exploration = rows.find((row) => row.kind === 'exploration');
-    assert.equal(exploration?.toolCalls, MAX_TOOL_TELEMETRY_ROWS + 3);
+    assert.equal(exploration?.toolCalls, MAX_TOOL_TELEMETRY_ROWS + 5);
     assert.equal(exploration?.duplicateReads, 1);
-    assert.equal(exploration?.droppedToolRows, 3);
+    assert.equal(exploration?.uniquePathHashes, MAX_TOOL_TELEMETRY_ROWS);
+    assert.equal(exploration?.droppedToolRows, 5);
     assert.equal(exploration?.turnCount, 3);
   });
 });
@@ -452,6 +465,8 @@ describe('createTelemetryRecorder finding dispositions', () => {
       model: 'deepseek/deepseek-v4-flash',
       inputTokens: 100,
       outputTokens: 20,
+      promptBytes: 240,
+      cacheWriteTokens: 10,
     });
 
     const lines = rec
@@ -461,6 +476,8 @@ describe('createTelemetryRecorder finding dispositions', () => {
       .map((l) => JSON.parse(l));
     assert.ok(lines.some((l) => l.kind === 'finding' && l.disposition === 'posted-inline'));
     assert.ok(lines.some((l) => l.kind === 'session' && l.model === 'deepseek/deepseek-v4-flash'));
+    assert.equal(lines.find((l) => l.kind === 'session').promptBytes, 240);
+    assert.equal(lines.find((l) => l.kind === 'session').cacheWriteTokens, 10);
   });
 });
 
@@ -559,4 +576,22 @@ describe('run and coverage telemetry', () => {
     const warning = assembledContextWarning('review-shard-1', ASSEMBLED_CONTEXT_WARN_BYTES + 1);
     assert.match(warning ?? '', /review-shard-1/);
   });
+});
+
+it('records uncertain P3 and nit verdicts without relying on a severity change', () => {
+  const recorder = createTelemetryRecorder(true);
+  const proposed = recorder.produced('review', [
+    finding('a.ts', 1, 'P3'),
+    finding('b.ts', 2, 'nit'),
+    finding('c.ts', 3, 'P3'),
+  ]);
+  recorder.snapshot('suppressed', proposed);
+  recorder.snapshot(
+    'verified',
+    proposed.map((f, i) => ({ ...f, verificationUncertain: i < 2 })),
+  );
+  assert.deepEqual(
+    recorder.findingRows().map((row) => row.verifyUncertain),
+    [true, true, false],
+  );
 });

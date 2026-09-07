@@ -1,4 +1,3 @@
-import type { ExplorationPlan } from './exploration-policy.ts';
 import { Semaphore, type SemaphorePriority, type TokenUsageRecorder } from './opencode.ts';
 import {
   classifyTelemetryStopReason,
@@ -23,8 +22,6 @@ export interface ReviewBackend {
       onTokenUsage?: TokenUsageRecorder;
       evidenceQuotes?: boolean;
       embeddedFirstPrompt?: boolean;
-      /** Enforced only by backends whose capability is `enforceable`. */
-      exploration?: ExplorationPlan;
     },
   ): Promise<ReviewResult>;
   runAddressedPriorCommentsCheck(
@@ -74,7 +71,7 @@ export interface ReviewBackend {
 }
 
 export interface SessionSlots {
-  acquire(priority?: SemaphorePriority): Promise<() => void>;
+  acquire(priority?: SemaphorePriority, signal?: AbortSignal): Promise<() => void>;
 }
 
 export function createProviderSessionLimiters(
@@ -103,13 +100,15 @@ export function limitReviewBackendSessions(
   telemetry?: { phases: PhaseTelemetryTracker; tools: ToolTelemetryAccumulator },
 ): ReviewBackend {
   if (!globalSlots && !providerSlots && !telemetry) return backend;
+  const pending = new Map<AbortController, string>();
   const rolePriority = role === 'main' ? 'high' : 'normal';
   const withSlots = async <T>(
     session: string,
     run: () => Promise<T>,
     priority: SemaphorePriority = rolePriority,
-    budgetTier: 'single-shot' | 'observe-only' = 'observe-only',
   ): Promise<T> => {
+    const controller = new AbortController();
+    pending.set(controller, session);
     let providerRelease: (() => void) | undefined;
     let globalRelease: (() => void) | undefined;
     const queueDone = telemetry?.phases.start({
@@ -119,8 +118,15 @@ export function limitReviewBackendSessions(
       backend: backend.name,
     });
     try {
-      providerRelease = providerSlots ? await providerSlots.acquire(priority) : undefined;
-      globalRelease = globalSlots ? await globalSlots.acquire(priority) : undefined;
+      providerRelease = providerSlots
+        ? await providerSlots.acquire(priority, controller.signal)
+        : undefined;
+      controller.signal.throwIfAborted();
+      globalRelease = globalSlots
+        ? await globalSlots.acquire(priority, controller.signal)
+        : undefined;
+      controller.signal.throwIfAborted();
+      pending.delete(controller);
       queueDone?.();
       const executionDone = telemetry?.phases.start({
         phase: role === 'main' ? 'main-execution' : 'auxiliary-execution',
@@ -135,7 +141,7 @@ export function limitReviewBackendSessions(
           session,
           backend: backend.name,
           capability: backend.observability ?? 'opaque',
-          budgetTier,
+          budgetTier: 'observe-only',
           stopReason: 'completed',
           ...((backend.observability ?? 'opaque') === 'opaque'
             ? { explorationMode: 'unavailable' as const }
@@ -149,7 +155,7 @@ export function limitReviewBackendSessions(
           session,
           backend: backend.name,
           capability: backend.observability ?? 'opaque',
-          budgetTier,
+          budgetTier: 'observe-only',
           stopReason,
           ...((backend.observability ?? 'opaque') === 'opaque'
             ? { explorationMode: 'unavailable' as const }
@@ -161,6 +167,7 @@ export function limitReviewBackendSessions(
       queueDone?.(classifyTelemetryStopReason(error));
       throw error;
     } finally {
+      pending.delete(controller);
       providerRelease?.();
       // Let the next provider waiter enter the global priority queue before releasing the global slot.
       if (providerRelease && globalRelease) {
@@ -172,13 +179,15 @@ export function limitReviewBackendSessions(
   return {
     name: backend.name,
     observability: backend.observability,
-    // No slot involved: aborting frees slots, it must never wait on one.
-    ...(backend.abortSessionsByLabel
-      ? {
-          abortSessionsByLabel: (label: string, log: (msg: string) => void) =>
-            backend.abortSessionsByLabel!(label, log),
-        }
-      : {}),
+    abortSessionsByLabel: (label, log) => {
+      let queued = 0;
+      for (const [controller, session] of pending) {
+        if (session !== label || controller.signal.aborted) continue;
+        controller.abort(new Error(`${label} aborted while queued`));
+        queued++;
+      }
+      return queued + (backend.abortSessionsByLabel?.(label, log) ?? 0);
+    },
     runReview: (...args) => withSlots(args[4]?.label ?? 'review', () => backend.runReview(...args)),
     runAddressedPriorCommentsCheck: (...args) =>
       withSlots('addressed-prior-comments', () => backend.runAddressedPriorCommentsCheck(...args)),
@@ -187,12 +196,7 @@ export function limitReviewBackendSessions(
     // The one auxiliary call the posting path awaits: never queue it behind
     // recall sessions still holding slots past the settle grace.
     runFindingVerification: (...args) =>
-      withSlots(
-        'finding-verification',
-        () => backend.runFindingVerification(...args),
-        'high',
-        'single-shot',
-      ),
+      withSlots('finding-verification', () => backend.runFindingVerification(...args), 'high'),
     runChangesSinceLastReview: (...args) =>
       withSlots('changes-since-last-review', () => backend.runChangesSinceLastReview(...args)),
   };

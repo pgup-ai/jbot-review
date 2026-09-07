@@ -11,7 +11,7 @@ import {
   isPrCleanAfterRun,
   openFindingThreadIds,
   resolveFindingAnchors,
-  selectBlockingFindingIndexes,
+  selectFindingIndexes,
   shouldPostReviewComment,
   suppressPreviouslyReported,
 } from '../src/shared/filter.ts';
@@ -201,7 +201,7 @@ describe('dedupeFindings with file-level (line 0) anchors', () => {
   });
 });
 
-describe('selectBlockingFindingIndexes', () => {
+describe('selectFindingIndexes', () => {
   it('selects blocking findings most-severe-first with original indexes', () => {
     const findings = [
       finding({ severity: 'P3' }),
@@ -211,18 +211,18 @@ describe('selectBlockingFindingIndexes', () => {
       finding({ severity: 'P1' }),
     ];
 
-    assert.deepEqual(selectBlockingFindingIndexes(findings, 10), [3, 4, 1]);
+    assert.deepEqual(selectFindingIndexes(findings), [3, 4, 1, 0, 2]);
   });
 
-  it('caps the selection and never selects advisory findings', () => {
+  it('includes advisory findings after equally severe blockers', () => {
     const findings = [
       finding({ severity: 'P2' }),
       finding({ severity: 'P2' }),
       finding({ severity: 'P3' }),
     ];
 
-    assert.deepEqual(selectBlockingFindingIndexes(findings, 1), [0]);
-    assert.deepEqual(selectBlockingFindingIndexes([finding({ severity: 'P3' })], 10), []);
+    assert.deepEqual(selectFindingIndexes(findings), [0, 1, 2]);
+    assert.deepEqual(selectFindingIndexes([finding({ severity: 'P3' })]), [0]);
   });
 });
 
@@ -236,7 +236,7 @@ describe('applyFindingVerdicts', () => {
     finding({ severity: 'P2', title: 'uncertain me' }),
     finding({ severity: 'P2', title: 'confirm me' }),
   ];
-  const selected = selectBlockingFindingIndexes(findings, 10); // [1, 3, 4]
+  const selected = selectFindingIndexes(findings);
 
   it('maps verdict positions back to the right findings', () => {
     const {
@@ -247,6 +247,8 @@ describe('applyFindingVerdicts', () => {
       { index: 0, verdict: 'refuted', reason: 'guarded' },
       { index: 1, verdict: 'uncertain' },
       { index: 2, verdict: 'confirmed' },
+      { index: 3, verdict: 'confirmed' },
+      { index: 4, verdict: 'confirmed' },
     ]);
 
     assert.deepEqual(
@@ -262,13 +264,38 @@ describe('applyFindingVerdicts', () => {
       [
         'advisory survives untouched:P3',
         'nit survives untouched:nit',
-        'uncertain me:P3',
+        'Unverified concern: uncertain me:P3',
         'confirm me:P2',
       ],
     );
   });
 
-  it('treats a selected finding with no verdict as confirmed (fail-open)', () => {
+  it('labels uncertain advisories without upgrading nits or retaining high confidence', () => {
+    const proposed = [
+      finding({ severity: 'P3', confidence: 'high', body: 'Definitely broken.' }),
+      finding({ severity: 'nit', confidence: 'high' }),
+    ];
+    const { findings: result } = applyFindingVerdicts(
+      proposed,
+      [0, 1],
+      [
+        { index: 0, verdict: 'uncertain', reason: 'Caller unavailable.' },
+        { index: 1, verdict: 'uncertain' },
+      ],
+    );
+    assert.deepEqual(
+      result.map((f) => [f.severity, f.kind, f.confidence]),
+      [
+        ['P3', 'investigate', 'low'],
+        ['nit', 'investigate', 'low'],
+      ],
+    );
+    assert.match(result[0].title, /^Unverified concern:/);
+    assert.match(result[0].body, /Caller unavailable/);
+    assert.match(result[0].body, /> Definitely broken/);
+  });
+
+  it('retains missing verdicts as unverified advisories', () => {
     const {
       findings: result,
       dropped,
@@ -276,8 +303,15 @@ describe('applyFindingVerdicts', () => {
     } = applyFindingVerdicts(findings, selected, [{ index: 0, verdict: 'refuted' }]);
 
     assert.equal(dropped.length, 1);
-    assert.equal(demoted.length, 0);
+    assert.equal(demoted.length, 4);
     assert.equal(result.length, findings.length - 1);
+    for (const f of result) {
+      assert.equal(f.verificationUncertain, true);
+      assert.equal(f.confidence, 'low');
+      assert.match(f.body, /Finding verification did not return a verdict/);
+    }
+    assert.equal(result.find((f) => f.title.includes('nit survives'))?.severity, 'nit');
+    assert.equal(applyFindingVerdicts(findings, selected, []).demoted.length, findings.length);
   });
 });
 
@@ -298,7 +332,7 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
   });
   const finalFindings = [targets[0], targets[1], targets[2], straggler, lateAdvisory];
 
-  it('re-attaches verdicts by location and counts late blocking findings as unverified', () => {
+  it('re-attaches verdicts by location and counts all late findings as unverified', () => {
     const { findings, dropped, demoted, lateUnverified } = mergeVerdictsByLocation(
       finalFindings,
       targets,
@@ -307,7 +341,6 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
         { index: 1, verdict: 'uncertain' },
         { index: 2, verdict: 'confirmed' },
       ],
-      targets,
     );
 
     assert.deepEqual(
@@ -320,12 +353,16 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
     );
     assert.deepEqual(
       findings.map((f) => `${f.title}:${f.severity}`),
-      ['uncertain me:P3', 'confirm me:P2', 'late blocking:P1', 'late advisory:P3'],
+      [
+        'Unverified concern: uncertain me:P3',
+        'confirm me:P2',
+        'late blocking:P1',
+        'late advisory:P3',
+      ],
     );
-    // Only BLOCKING stragglers count: advisories were never verification targets.
     assert.deepEqual(
       lateUnverified.map((f) => f.title),
-      ['late blocking'],
+      ['late blocking', 'late advisory'],
     );
   });
 
@@ -340,7 +377,6 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
       [targetZero, twinZero],
       [targetZero],
       [{ index: 0, verdict: 'refuted' }],
-      [targetZero],
     );
 
     assert.deepEqual(
@@ -359,12 +395,9 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
     // Same-line replacement: the late stronger finding at refuted a.ts:1 has a
     // different title, so the old verdict must not drop it.
     const replacement = finding({ path: 'a.ts', line: 1, severity: 'P0', title: 'worse bug' });
-    const replaced = mergeVerdictsByLocation(
-      [replacement],
-      targets,
-      [{ index: 0, verdict: 'refuted' }],
-      targets,
-    );
+    const replaced = mergeVerdictsByLocation([replacement], targets, [
+      { index: 0, verdict: 'refuted' },
+    ]);
     assert.deepEqual(
       replaced.findings.map((f) => f.title),
       ['worse bug'],
@@ -383,7 +416,6 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
       [lookalike],
       [target],
       [{ index: 0, verdict: 'refuted' }],
-      [target],
     );
     assert.deepEqual(
       findings.map((f) => f.title),
@@ -395,33 +427,17 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
     );
   });
 
-  it('fails open per finding: no verdict for a target means confirmed', () => {
-    const { findings, lateUnverified } = mergeVerdictsByLocation(
-      finalFindings,
-      targets,
-      [{ index: 0, verdict: 'refuted' }],
-      targets,
-    );
+  it('marks missing snapshot verdicts unverified while leaving late findings for follow-up', () => {
+    const { findings, lateUnverified } = mergeVerdictsByLocation(finalFindings, targets, [
+      { index: 0, verdict: 'refuted' },
+    ]);
     assert.equal(findings.length, finalFindings.length - 1);
+    assert.ok(findings.slice(0, 2).every((f) => f.verificationUncertain && f.confidence === 'low'));
+    assert.ok(lateUnverified.every((f) => !f.verificationUncertain));
     assert.deepEqual(
       lateUnverified.map((f) => f.title),
-      ['late blocking'],
+      ['late blocking', 'late advisory'],
     );
-  });
-
-  it('never counts snapshot findings the verification cap left unselected as late', () => {
-    // MAX_VERIFIED_FINDINGS bounds the targets; an unselected snapshot finding
-    // was not "late" — inflating the TASK-080 signal would reject the arm on
-    // noise.
-    const capped = finding({ path: 'd.ts', line: 4, severity: 'P2', title: 'over the cap' });
-    const { findings, lateUnverified } = mergeVerdictsByLocation(
-      [...targets, capped],
-      targets,
-      [{ index: 2, verdict: 'confirmed' }],
-      [...targets, capped],
-    );
-    assert.equal(findings.length, 4);
-    assert.deepEqual(lateUnverified, []);
   });
 });
 
@@ -563,15 +579,17 @@ describe('shouldPostReviewComment', () => {
     assert.equal(shouldPostReviewComment(0, 3), true);
   });
 
-  it('posts a re-run only when it has findings', () => {
+  it('posts a re-run when it has findings or incomplete coverage', () => {
     assert.equal(shouldPostReviewComment(2, 0), false);
     assert.equal(shouldPostReviewComment(2, 1), true);
+    assert.equal(shouldPostReviewComment(2, 0, false), true);
   });
 });
 
 describe('isPrCleanAfterRun', () => {
   it('is clean only with known thread state, no new findings, and no open threads', () => {
     assert.equal(isPrCleanAfterRun(0, 0, true), true);
+    assert.equal(isPrCleanAfterRun(0, 0, true, false), false);
     assert.equal(isPrCleanAfterRun(2, 0, true), false); // this run posted findings
     assert.equal(isPrCleanAfterRun(0, 1, true), false); // a finding thread is still open
     assert.equal(isPrCleanAfterRun(0, 0, false), false); // thread state could not be verified

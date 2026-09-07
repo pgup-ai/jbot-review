@@ -1,3 +1,10 @@
+import {
+  computeFinderTimeoutMs,
+  computeRunDeadline,
+  computeRetryTimeoutMs,
+  computeVerificationTimeoutMs,
+  computeAuxiliaryGraceMs,
+} from '../src/shared/time-budget.ts';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,14 +13,11 @@ import { describe, it } from 'node:test';
 
 import {
   buildBody,
+  requestFindingVerdicts,
   buildShardPlans,
   buildSummaryScopeBlock,
   shouldSummarizeChangesSinceLastReview,
   buildMainShardFailureMessage,
-  computeFinderTimeoutMs,
-  computeRetryTimeoutMs,
-  computeRunDeadline,
-  computeVerificationTimeoutMs,
   emitReviewTelemetry,
   formatReviewedWith,
   normalizeOptions,
@@ -27,10 +31,10 @@ import {
 import { buildDiffHunksBlockWithMetadata } from '../src/shared/diff-context.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import type { Octokit, PrFile } from '../src/shared/github.ts';
-import { planExploration } from '../src/shared/exploration-policy.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
 import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
 import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
+import { applyFindingVerdicts, selectFindingIndexes } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 const PRIOR_JBOT_REVIEW = [
@@ -94,7 +98,7 @@ describe('buildShardPlans cache-stable prefix', () => {
 
     assert.match(control[0].context, /follow symbols wherever they lead/);
     assert.doesNotMatch(control[0].context, /repository exploration policy/);
-    assert.match(treatment[0].context, /one-hop default and expansion trigger/);
+    assert.match(treatment[0].context, /Follow dependencies as far as needed/);
     assert.match(treatment[0].context, /repository exploration policy/);
   });
 });
@@ -479,7 +483,6 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     context: 'ctx',
     baseContext: 'base',
     assignedFiles: ['a.ts'],
-    exploration: planExploration({ tier: 'standard', truncatedFiles: [], omittedFiles: [] }),
   };
   const okResult = { summary: 'ok', findings: [] };
   const backendThrowingOnce = (message: string, calls: string[]) =>
@@ -896,6 +899,74 @@ describe('runPrReview local mode and early exits', () => {
     );
   });
 
+  it('loads addressed commits without enhanced context and tolerates lookup failure', async () => {
+    const logs: string[] = [];
+    let commitFetches = 0;
+    const octokit = {
+      rest: { pulls: { listFiles: 'files', listReviews: 'reviews', listCommits: 'commits' } },
+      paginate: async (endpoint: string) => {
+        if (endpoint === 'files') return [{ filename: 'a.ts', patch: '@@ -1 +1 @@\n-a\n+b' }];
+        if (endpoint === 'commits') {
+          commitFetches++;
+          throw new Error('unavailable');
+        }
+        return [];
+      },
+      graphql: async () => ({
+        viewer: { login: 'jbot' },
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              pageInfo: { hasNextPage: false },
+              nodes: [
+                {
+                  id: 'thread',
+                  isResolved: false,
+                  path: 'a.ts',
+                  line: 1,
+                  comments: {
+                    nodes: [
+                      {
+                        databaseId: 1,
+                        body: 'bug<!-- jbot-review:finding -->',
+                        author: { login: 'jbot' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    } as unknown as Octokit;
+    const workspace = mkdtempSync(join(tmpdir(), 'jbot-addressed-'));
+    const gitConfig = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = join(workspace, 'gitconfig');
+    try {
+      await assert.rejects(
+        runPrReview({
+          ...base,
+          workspace,
+          octokit,
+          headSha: 'head',
+          apiKey: '',
+          options: { dryRun: true, sdkEngine: 'opencode', enhancedContext: false },
+          log: (message) => logs.push(message),
+        }),
+        /Missing API key for provider/,
+      );
+      assert.equal(commitFetches, 1);
+      assert.ok(
+        logs.some((message) => message.startsWith('Commits unavailable for addressed checks')),
+      );
+    } finally {
+      if (gitConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = gitConfig;
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('starts independent context fetches before commits settle and preserves fatal failures', async () => {
     const sentinel = new Error('commits unavailable');
     const started: string[] = [];
@@ -1145,4 +1216,123 @@ describe('settleWithinGrace', () => {
 
     assert.deepEqual(await settleWithinGrace(session(failed, true), [], () => {}), []);
   });
+});
+
+it('caps auxiliary grace at ten minutes while reserving verification and posting time', () => {
+  assert.equal(computeAuxiliaryGraceMs(30, 90_000), 600_000);
+  assert.equal(computeAuxiliaryGraceMs(10, 120_000), 150_000);
+  assert.equal(computeAuxiliaryGraceMs(5, 0), 0);
+  assert.equal(computeAuxiliaryGraceMs(5, 0, false), 270_000);
+  assert.equal(computeAuxiliaryGraceMs(0, 9_000_000), 600_000);
+});
+
+it('marks incomplete review bodies without claiming an all-clear result', () => {
+  const body = buildBody(
+    '',
+    '',
+    [],
+    [],
+    'model',
+    'owner',
+    'repo',
+    'head',
+    undefined,
+    undefined,
+    undefined,
+    ['review-interactions'],
+  );
+  assert.match(body, /Review incomplete/);
+  assert.match(body, /review-interactions/);
+  assert.match(body, /completed passes only/);
+  assert.doesNotMatch(body, /✅|Good to go|No new findings were found/);
+  const blocked = buildBody(
+    '',
+    '',
+    [{ path: 'a.ts', line: 1, title: 'Bug', body: 'Claim', severity: 'P1' }],
+    [],
+    'model',
+    'owner',
+    'repo',
+    'head',
+    undefined,
+    undefined,
+    undefined,
+    ['finding-verification'],
+  );
+  assert.match(blocked, /Needs changes before approval/);
+  assert.match(blocked, /Review incomplete/);
+  assert.match(blocked, /Address the P0\/P1\/P2 findings/);
+  const uncertain = buildBody(
+    '',
+    'Definitely broken',
+    [
+      {
+        path: 'a.ts',
+        line: 1,
+        title: 'Unverified concern',
+        body: 'Claim',
+        severity: 'P3',
+        verificationUncertain: true,
+      },
+    ],
+    [],
+    'model',
+    'owner',
+    'repo',
+  );
+  assert.doesNotMatch(uncertain, /Definitely broken/);
+});
+
+it('verifies every batch and preserves successful verdicts when another batch fails', async () => {
+  const findings: Finding[] = Array.from({ length: 23 }, (_, i) => ({
+    path: 'missing.ts',
+    line: i + 1,
+    severity: i < 11 ? 'P3' : 'nit',
+    title: `finding ${i}`,
+    body: 'claim',
+  }));
+  for (const firstBatch of ['complete', 'failed', 'partial']) {
+    const sizes: number[] = [];
+    const coverage: string[] = [];
+    const backend = {
+      async runFindingVerification(_model: string, _context: string, targets: Finding[]) {
+        sizes.push(targets.length);
+        if (sizes.length === 1) {
+          if (firstBatch === 'failed') throw new Error('provider unavailable');
+          if (firstBatch === 'partial') return [{ index: 9, verdict: 'refuted' as const }];
+        }
+        return targets.map((_, index) => ({ index, verdict: 'refuted' as const }));
+      },
+    } as ReviewBackend;
+    const verdicts = await requestFindingVerdicts({
+      workspace: process.cwd(),
+      backend,
+      model: 'model',
+      prContext: '',
+      targets: findings,
+      timeoutMs: 30_000,
+      log: () => {},
+      onCoverage: (row) => coverage.push(row.state),
+    });
+    assert.deepEqual(sizes, [10, 10, 3]);
+    assert.deepEqual(
+      verdicts.map((v) => v.index),
+      findings
+        .map((_, i) => i)
+        .slice(firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0),
+    );
+    assert.deepEqual(coverage, [firstBatch === 'complete' ? 'completed' : 'failed']);
+    const retained = applyFindingVerdicts(
+      findings,
+      selectFindingIndexes(findings),
+      verdicts,
+    ).findings;
+    assert.deepEqual(
+      retained.map((f) => f.line),
+      findings
+        .slice(0, firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0)
+        .map((f) => f.line),
+    );
+    assert.ok(retained.every((f) => f.verificationUncertain && f.confidence === 'low'));
+  }
 });

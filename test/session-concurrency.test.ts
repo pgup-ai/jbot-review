@@ -83,7 +83,10 @@ describe('limitReviewBackendSessions', () => {
     const aborted: string[] = [];
     const backend = {
       ...makeBackend(),
-      abortSessionsByLabel: (label: string) => void aborted.push(label),
+      abortSessionsByLabel: (label: string) => {
+        aborted.push(label);
+        return 1;
+      },
     };
     const limited = limitReviewBackendSessions(backend, 'aux', {
       acquire: async () => () => undefined,
@@ -91,12 +94,34 @@ describe('limitReviewBackendSessions', () => {
 
     limited.abortSessionsByLabel?.('review-frontend', () => {});
     assert.deepEqual(aborted, ['review-frontend']);
-    // Backends without the handle stay without it — callers can feature-test.
-    assert.equal(
-      limitReviewBackendSessions(makeBackend(), 'aux', { acquire: async () => () => undefined })
-        .abortSessionsByLabel,
-      undefined,
-    );
+  });
+
+  it('cancels waiters at either queue without launching or leaking a slot', async () => {
+    for (const blockedQueue of ['provider', 'global']) {
+      const provider = new Semaphore(1);
+      const global = new Semaphore(1);
+      const release = await (blockedQueue === 'provider' ? provider : global).acquire();
+      let started = 0;
+      const backend = limitReviewBackendSessions(
+        makeBackend(() => {
+          started++;
+        }),
+        'aux',
+        global,
+        provider,
+      );
+      const pending = backend.runReview('model', 'ctx', '', noLog, { label: 'abandoned' });
+      const rejected = assert.rejects(pending, /aborted while queued/);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(backend.abortSessionsByLabel?.('abandoned', noLog), 1);
+      await rejected;
+      assert.equal(started, 0);
+      release();
+      await backend.runReview('model', 'ctx', '', noLog, { label: 'abandoned' });
+      assert.equal(started, 1);
+      assert.equal(provider.isBusy(), false);
+      assert.equal(global.isBusy(), false);
+    }
   });
 
   it('passes the verifier model options through the limiter (TASK-157)', async () => {

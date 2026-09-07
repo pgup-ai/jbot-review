@@ -1,16 +1,10 @@
-import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { createReadStream, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { promisify } from 'node:util';
 
+import { gitRepositoryPage, readRepositoryPage } from './repository-output.ts';
 import { supportedModelOptions } from './config.ts';
-import {
-  ExplorationBudget,
-  type ExplorationPlan,
-  type ExplorationRequest,
-} from './exploration-policy.ts';
 import { GIT_DIFF_ARGS } from './git.ts';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -23,7 +17,6 @@ import {
 import type { PromptTokenUsage, ProviderKeyConfig, TokenUsageRecorder } from './opencode.ts';
 import {
   EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
-  EXPLORATION_SOFT_STOP_MESSAGE,
   PI_REVIEW_SYSTEM_PROMPT,
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
@@ -40,19 +33,7 @@ import { serializedBytes, type ToolTelemetryAccumulator } from './tool-telemetry
 import { classifyTelemetryStopReason } from './telemetry.ts';
 
 export const PI_TELEMETRY_CAPABILITY = 'enforceable' as const;
-const piTelemetryContext = new AsyncLocalStorage<{ session: string; budget?: ExplorationBudget }>();
-
-/**
- * Enters the same context `promptPiSession` does. Exported because the store is
- * module-private and the tool budget cannot otherwise be exercised from a test.
- */
-export function withPiExplorationBudget<T>(
-  session: string,
-  budget: ExplorationBudget,
-  body: () => T,
-): T {
-  return piTelemetryContext.run({ session, budget }, body);
-}
+const piTelemetryContext = new AsyncLocalStorage<{ session: string }>();
 const piSessionTelemetry = new WeakMap<object, ToolTelemetryAccumulator>();
 
 /**
@@ -190,15 +171,8 @@ export function piThinkingLevel(modelOptions?: Record<string, unknown>): string 
   return typeof effort === 'string' && PI_THINKING_LEVELS.has(effort) ? effort : undefined;
 }
 
-/**
- * Read-only, workspace-confined access (invariant 8). pi ships no sandbox, and
- * its built-in read/grep/find/ls accept absolute or `..` paths, so a
- * prompt-injected diff could make the model read host files (runner secrets)
- * and echo them in the review. So the built-ins are NEVER enabled — the session
- * gets only our custom tools: `read_file` (confined by resolveWithinWorkspace)
- * and `git_diff` (repo-scoped via git). blast-radius runs git grep in the
- * runner, outside the session. Single-shot sessions get no tools at all.
- */
+// Pi's built-in file tools can escape the checkout; only confined replacements
+// are exposed to model sessions.
 export function resolveWithinWorkspace(
   workspace: string,
   requestedPath: string,
@@ -246,10 +220,6 @@ export function mapPiUsage(usage: unknown): PromptTokenUsage | undefined {
   };
 }
 
-const execFileAsync = promisify(execFile);
-const PI_DIFF_TOOL_MAX_BYTES = 48 * 1024;
-const PI_DIFF_TOOL_TIMEOUT_MS = 30_000;
-
 interface PiDiffScope {
   /** Merge-base (local mode) or PR base sha (GitHub paths). */
   base: string;
@@ -277,14 +247,6 @@ export function piGitDiffArgs(scope: PiDiffScope, path?: string): string[] {
   const trimmed = path?.trim();
   if (trimmed) args.push('--', trimmed);
   return args;
-}
-
-export function capPiDiffOutput(text: string, maxBytes = PI_DIFF_TOOL_MAX_BYTES): string {
-  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
-  // Truncate on the byte budget (chars would overshoot up to 4x on multi-byte
-  // content); decoding a split sequence yields trailing U+FFFD — drop it.
-  const capped = Buffer.from(text, 'utf8').toString('utf8', 0, maxBytes).replace(/�+$/, '');
-  return `${capped}\n\n_[output truncated at ${Math.floor(maxBytes / 1024)}KB]_`;
 }
 
 type PiMessageLike = {
@@ -421,46 +383,6 @@ interface PiSdkLike {
  * could never see removals or unembedded hunks (invariant 1). The base ref and
  * diff form are runner-supplied — the model only chooses an optional pathspec.
  */
-/**
- * Returns the result to send instead of running the call, or undefined to
- * proceed. A refusal reports `budget`, never `denied`: the path was permitted
- * and the allowance simply ran out.
- */
-function explorationVerdict(
-  request: ExplorationRequest,
-  finish:
-    | ((result: {
-        success: boolean;
-        failureClass?: 'budget';
-        outputBytesBeforeCap: number;
-        outputBytesAfterCap: number;
-      }) => void)
-    | undefined,
-): { refused?: { content: { type: string; text: string }[]; details: object }; exempt: boolean } {
-  const budget = piTelemetryContext.getStore()?.budget;
-  if (!budget) return { exempt: false };
-  const verdict = budget.request(request);
-  if (verdict.allow) return { exempt: verdict.exempt };
-  const text = verdict.message ?? EXPLORATION_SOFT_STOP_MESSAGE;
-  finish?.({
-    success: false,
-    failureClass: 'budget',
-    outputBytesBeforeCap: 0,
-    outputBytesAfterCap: Buffer.byteLength(text),
-  });
-  return { refused: { content: [{ type: 'text', text }], details: {} }, exempt: false };
-}
-
-/** Charges a permitted call once its real output size is known. */
-function chargeBudget(
-  request: ExplorationRequest,
-  outputBytes: number,
-  options: { exempt: boolean; complete?: boolean },
-): void {
-  piTelemetryContext.getStore()?.budget?.record(request, outputBytes, options);
-}
-
-/** Exported for the budget-enforcement contract test. */
 export function createPiGitDiffTool(
   sdk: PiSdkLike,
   workspace: string,
@@ -474,6 +396,11 @@ export function createPiGitDiffTool(
     parameters: {
       type: 'object',
       properties: {
+        offset: {
+          type: 'integer',
+          minimum: 0,
+          description: 'Byte offset returned by the previous page.',
+        },
         path: {
           type: 'string',
           description: 'Repo-relative file path to diff; omit for the whole change.',
@@ -488,40 +415,31 @@ export function createPiGitDiffTool(
         capability: PI_TELEMETRY_CAPABILITY,
         toolClass: 'diff-recovery',
         inputBytes: serializedBytes(params),
+        ...(isRecord(params) && (params.offset || params.line)
+          ? { page: JSON.stringify({ offset: params.offset, line: params.line }) }
+          : {}),
         ...(path
           ? { identity: path, identityKind: 'path' as const }
           : { identity: 'whole-diff', identityKind: 'scope' as const }),
         diffScope: path ? 'path' : 'whole',
       });
-      const diffRequest = { kind: 'diff', ...(path ? { path } : {}) } as const;
-      const verdict = explorationVerdict(diffRequest, finish);
-      if (verdict.refused) return verdict.refused;
       let text: string;
       try {
-        const { stdout } = await execFileAsync('git', piGitDiffArgs(scope, path), {
-          cwd: workspace,
-          maxBuffer: 64 * 1024 * 1024,
-          timeout: PI_DIFF_TOOL_TIMEOUT_MS,
-        });
-        text = stdout.trim() ? capPiDiffOutput(stdout) : '(no changes for this path)';
-        // A capped diff delivered only part of the file, so the gap it was
-        // recovering stays open rather than counting as read.
-        chargeBudget(diffRequest, Buffer.byteLength(text), {
-          exempt: verdict.exempt,
-          complete: Buffer.byteLength(stdout) <= PI_DIFF_TOOL_MAX_BYTES,
-        });
+        const page = await gitRepositoryPage(
+          workspace,
+          piGitDiffArgs(scope, path),
+          isRecord(params) ? params : {},
+        );
+        text = page.totalBytes ? page.text : '(no changes for this path)';
         finish?.({
           success: true,
-          outputBytesBeforeCap: Buffer.byteLength(stdout),
+          outputBytesBeforeCap: page.totalBytes,
           outputBytesAfterCap: Buffer.byteLength(text),
         });
       } catch (error) {
         // Surface the failure as tool output the model can react to; a throw
         // here would fail the whole session over a bad pathspec.
-        text = `git diff failed: ${error instanceof Error ? error.message : String(error)}`;
-        // A permitted attempt that failed still spent one: without this the
-        // same failing call moves no counter and can repeat forever.
-        chargeBudget(diffRequest, 0, { exempt: verdict.exempt, complete: false });
+        text = `git diff failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 2000)}`;
         finish?.({
           success: false,
           failureClass:
@@ -543,7 +461,6 @@ export function createPiGitDiffTool(
  * and `..` paths with no sandbox). Refuses anything resolving outside the
  * workspace, so a prompt-injected diff cannot read host files.
  */
-/** Exported for the budget-enforcement contract test. */
 export function createPiReadTool(
   sdk: PiSdkLike,
   workspace: string,
@@ -555,7 +472,19 @@ export function createPiReadTool(
       'Read a UTF-8 file from the repository under review. `path` is repo-relative; paths outside the repo are refused.',
     parameters: {
       type: 'object',
-      properties: { path: { type: 'string', description: 'Repo-relative file path.' } },
+      properties: {
+        path: { type: 'string', description: 'Repo-relative file path.' },
+        line: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Start at this 1-based line; omit when continuing with offset.',
+        },
+        offset: {
+          type: 'integer',
+          minimum: 0,
+          description: 'Byte offset returned by the previous page.',
+        },
+      },
       required: ['path'],
     },
     execute: async (_id: unknown, params: unknown) => {
@@ -566,6 +495,9 @@ export function createPiReadTool(
         capability: PI_TELEMETRY_CAPABILITY,
         toolClass: 'file-read',
         inputBytes: serializedBytes(params),
+        ...(isRecord(params) && (params.offset || params.line)
+          ? { page: JSON.stringify({ offset: params.offset, line: params.line }) }
+          : {}),
         ...(requested ? { identity: requested, identityKind: 'path' as const } : {}),
       });
       const target = requested ? resolveWithinWorkspace(workspace, requested) : undefined;
@@ -583,22 +515,92 @@ export function createPiReadTool(
           details: {},
         };
       }
-      const readRequest = { kind: 'read', path: requested } as const;
-      const verdict = explorationVerdict(readRequest, finish);
-      if (verdict.refused) return verdict.refused;
       let text: string;
       try {
-        const raw = readFileSync(target, 'utf8');
-        text = capPiDiffOutput(raw);
-        chargeBudget(readRequest, Buffer.byteLength(text), { exempt: verdict.exempt });
+        const page = await readRepositoryPage(
+          createReadStream(target, { encoding: 'utf8' }),
+          isRecord(params) ? params : {},
+        );
+        text = page.text;
         finish?.({
           success: true,
-          outputBytesBeforeCap: Buffer.byteLength(raw),
+          outputBytesBeforeCap: page.totalBytes,
           outputBytesAfterCap: Buffer.byteLength(text),
         });
       } catch (error) {
-        text = `read failed: ${error instanceof Error ? error.message : String(error)}`;
-        chargeBudget(readRequest, 0, { exempt: verdict.exempt, complete: false });
+        text = `read failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 2000)}`;
+        finish?.({
+          success: false,
+          failureClass: 'execution',
+          outputBytesBeforeCap: 0,
+          outputBytesAfterCap: Buffer.byteLength(text),
+        });
+      }
+      return { content: [{ type: 'text', text }], details: {} };
+    },
+  });
+}
+
+export function createPiSearchTool(
+  sdk: PiSdkLike,
+  workspace: string,
+  telemetry?: ToolTelemetryAccumulator,
+): unknown {
+  return sdk.defineTool({
+    name: 'search_repo',
+    description:
+      'Search tracked repository files for literal text. Results include path and line number; continue large results with offset.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', minLength: 1 },
+        offset: { type: 'integer', minimum: 0 },
+      },
+      required: ['query'],
+    },
+    execute: async (_id: unknown, params: unknown) => {
+      const query = isRecord(params) && typeof params.query === 'string' ? params.query : '';
+      if (!query)
+        return { content: [{ type: 'text', text: 'query must be nonempty' }], details: {} };
+      const finish = telemetry?.startTool({
+        session: piTelemetryContext.getStore()?.session ?? 'unknown',
+        backend: 'pi',
+        capability: PI_TELEMETRY_CAPABILITY,
+        toolClass: 'search',
+        inputBytes: serializedBytes(params),
+        ...(isRecord(params) && (params.offset || params.line)
+          ? { page: JSON.stringify({ offset: params.offset, line: params.line }) }
+          : {}),
+        identity: query,
+        identityKind: 'query',
+      });
+      let text: string;
+      try {
+        const page = await gitRepositoryPage(
+          workspace,
+          [
+            '--no-pager',
+            'grep',
+            '--no-color',
+            '-n',
+            '-I',
+            '-F',
+            '--no-textconv',
+            '--no-recurse-submodules',
+            '-e',
+            query,
+            '--',
+          ],
+          isRecord(params) ? params : {},
+        );
+        text = page.totalBytes ? page.text : '(no matches in tracked files)';
+        finish?.({
+          success: true,
+          outputBytesBeforeCap: page.totalBytes,
+          outputBytesAfterCap: Buffer.byteLength(text),
+        });
+      } catch (error) {
+        text = `search failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 2000)}`;
         finish?.({
           success: false,
           failureClass: 'execution',
@@ -674,6 +676,7 @@ export interface PiRuntime {
   auxThinkingLevel?: string;
   gitDiffTool?: unknown;
   readTool: unknown;
+  searchTool: unknown;
   toolTelemetry?: ToolTelemetryAccumulator;
   /**
    * Created-but-not-disposed sessions; teardown aborts them so a prompt
@@ -753,9 +756,7 @@ export async function startPi(
   // server would accumulate leaked /tmp/jbot-pi-loader-* dirs).
   const isolationDir = mkdtempSync(join(tmpdir(), 'jbot-pi-loader-'));
   const removeIsolationDir = () => rmSync(isolationDir, { recursive: true, force: true });
-  // A loader's system prompt is fixed, so the embedded-first variant needs its
-  // own: it confines git_diff to coverage recovery, while the addressed and
-  // guideline aux prompts still ask for a full git diff.
+  // System prompts are fixed per loader; review and auxiliary guidance differ.
   const buildLoader = (systemPrompt: string): PiResourceLoaderLike =>
     new sdk.DefaultResourceLoader({
       cwd: isolationDir,
@@ -819,6 +820,7 @@ export async function startPi(
     workspace,
     mainModel: `${providerID}/${modelID}`,
     readTool: createPiReadTool(sdk, workspace, options.toolTelemetry),
+    searchTool: createPiSearchTool(sdk, workspace, options.toolTelemetry),
     ...(options.toolTelemetry ? { toolTelemetry: options.toolTelemetry } : {}),
     activeSessions: new Set(),
     stopped: false,
@@ -854,6 +856,7 @@ function piCustomToolConfig(runtime: PiRuntime): {
 } {
   const entries: Array<{ name: string; tool: unknown }> = [
     { name: 'read_file', tool: runtime.readTool },
+    { name: 'search_repo', tool: runtime.searchTool },
     ...(runtime.gitDiffTool ? [{ name: 'git_diff', tool: runtime.gitDiffTool }] : []),
   ];
   return { tools: entries.map((e) => e.name), customTools: entries.map((e) => e.tool) };
@@ -879,10 +882,8 @@ async function createPiSession(
   const { session } = await runtime.sdk.createAgentSession({
     model: modelRef,
     cwd: runtime.workspace,
-    // Read-only (invariant 8): NO pi built-in tools (they're unsandboxed and
-    // escape the workspace). The session sees only our confined custom tools —
-    // `read_file` and `git_diff` — and `tools` must name each one or it never
-    // registers (verified live). Single-shot sessions get no tools at all.
+    // Naming custom tools in `tools` is required for registration; built-ins
+    // remain unavailable because Pi does not sandbox them.
     ...(singleShot ? { noTools: 'all' } : piCustomToolConfig(runtime)),
     modelRuntime: runtime.modelRuntime,
     resourceLoader: reviewSession && runtime.reviewLoader ? runtime.reviewLoader : runtime.loader,
@@ -923,16 +924,8 @@ async function promptPiSession(
   log: (msg: string) => void,
   timeoutMs = PI_PROMPT_TIMEOUT_MS,
   onTokenUsage?: TokenUsageRecorder,
-  budget?: ExplorationBudget,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
-  // An unbudgeted session is observed, not enforced; say so rather than
-  // implying a tier that was never applied.
-  const enforcedTier = !budget
-    ? 'observe-only'
-    : budget.mode === 'single-shot'
-      ? 'single-shot'
-      : budget.tier;
   log(`Calling ${label} prompt (engine=pi, provider=${providerID} model=${modelID})`);
   // Sessions outlive a single prompt (the JSON repair re-prompts in place), so
   // only the turns appended by THIS prompt may be read or billed.
@@ -941,7 +934,7 @@ async function promptPiSession(
     // prompt() resolves when the full agent turn completes — no polling.
     // Template expansion stays off: prompts embed arbitrary diff text that
     // must never trigger pi's /template expansion.
-    await piTelemetryContext.run({ session: label, ...(budget ? { budget } : {}) }, () =>
+    await piTelemetryContext.run({ session: label }, () =>
       withTimeout(
         session.prompt(prompt, { expandPromptTemplates: false }),
         timeoutMs,
@@ -953,11 +946,12 @@ async function promptPiSession(
       session: label,
       backend: 'pi',
       capability: PI_TELEMETRY_CAPABILITY,
-      budgetTier: enforcedTier,
+      budgetTier: 'observe-only',
       stopReason: classifyTelemetryStopReason(error),
       turnCount: countPiAssistantTurns(piSessionMessages(session).slice(priorTurns)),
     });
     await abortPiSessionBestEffort(session, label, log);
+    onTokenUsage?.({ promptBytes: Buffer.byteLength(prompt, 'utf8') }, model, label);
     throw error;
   }
   const allMessages = piSessionMessages(session);
@@ -980,8 +974,8 @@ async function promptPiSession(
         },
       })}`,
     );
-    onTokenUsage?.(usage, model, label);
   }
+  onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(prompt, 'utf8') }, model, label);
   if (finalMessage?.stopReason === 'error' || finalMessage?.stopReason === 'aborted') {
     const detail =
       typeof finalMessage.errorMessage === 'string' && finalMessage.errorMessage.trim()
@@ -994,7 +988,7 @@ async function promptPiSession(
       session: label,
       backend: 'pi',
       capability: PI_TELEMETRY_CAPABILITY,
-      budgetTier: enforcedTier,
+      budgetTier: 'observe-only',
       stopReason: classifyTelemetryStopReason(error),
       turnCount,
     });
@@ -1009,7 +1003,7 @@ async function promptPiSession(
     session: label,
     backend: 'pi',
     capability: PI_TELEMETRY_CAPABILITY,
-    budgetTier: enforcedTier,
+    budgetTier: 'observe-only',
     stopReason: 'completed',
     turnCount,
   });
@@ -1120,12 +1114,9 @@ export async function runPiReview(
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
-    /** Absent leaves the session unbudgeted, matching pre-Phase-4 behavior. */
-    exploration?: ExplorationPlan;
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
-  const budget = options.exploration ? new ExplorationBudget(options.exploration) : undefined;
   const prompt = assembleReviewPrompt(
     prContext,
     guidelines,
@@ -1144,7 +1135,6 @@ export async function runPiReview(
       log,
       options.timeoutMs,
       options.onTokenUsage,
-      budget,
     );
     try {
       return parseReview(raw, label, log, { strict: true });
@@ -1158,7 +1148,6 @@ export async function runPiReview(
         log,
         options.timeoutMs,
         options.onTokenUsage,
-        budget,
       );
       return parseReview(repaired, `${label}-repair`, log, { strict: true });
     }
@@ -1176,7 +1165,6 @@ async function repromptPiForJson(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  budget?: ExplorationBudget,
 ): Promise<string> {
   const message = parseError instanceof Error ? parseError.message : String(parseError);
   if (isNoAttemptReply(raw)) {
@@ -1189,7 +1177,6 @@ async function repromptPiForJson(
       log,
       timeoutMs,
       onTokenUsage,
-      budget,
     );
   }
   log(`${label} response unparseable; sending one JSON repair prompt: ${message}`);
@@ -1201,7 +1188,6 @@ async function repromptPiForJson(
     log,
     timeoutMs,
     onTokenUsage,
-    budget,
   );
 }
 
@@ -1340,11 +1326,6 @@ export async function runPiChangesSinceLastReview(
   }
 }
 
-/**
- * Single-shot adversarial verification (all tools off — one model call, no
- * agentic loop). Returns undefined when the output is unusable so callers
- * fail open and keep the findings.
- */
 export async function runPiFindingVerification(
   runtime: PiRuntime,
   model: string,
@@ -1359,13 +1340,13 @@ export async function runPiFindingVerification(
   // Findings pass through unprojected — a field-subset projection here would
   // silently drop `evidence` and defeat verifier grounding (see the opencode
   // engine's identical warning).
-  const prompt = assembleFindingVerificationPrompt(prContext, findings, true);
+  const prompt = assembleFindingVerificationPrompt(prContext, findings, false);
   // TASK-157: the runner passes the verifier's floored options when the aux
   // entry does not already deliver them; pi maps them per session.
   const session = await createPiSession(
     runtime,
     model,
-    true,
+    false,
     false,
     piThinkingLevel(modelOptions),
     label,

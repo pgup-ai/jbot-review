@@ -87,6 +87,8 @@ export interface Finding {
   evidence?: string;
   /** Stable per-run id for disposition tracing (reviewTelemetry); absent when telemetry is off, never posted. */
   id?: string;
+  /** Set by verification, never accepted from model output. */
+  verificationUncertain?: boolean;
 }
 
 export interface AddressedPriorComment {

@@ -43,6 +43,8 @@ export interface SessionTelemetryRow {
   outputTokens?: number;
   reasoningTokens?: number;
   cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  promptBytes?: number;
   costUsd?: number;
   estimatedCostUsd?: number;
 }
@@ -247,13 +249,12 @@ export const ASSEMBLED_CONTEXT_WARN_BYTES = 80 * 1024;
 
 export function assembledContextWarning(label: string, bytes: number): string | undefined {
   if (bytes <= ASSEMBLED_CONTEXT_WARN_BYTES) return undefined;
-  return `${label}: assembled context is ${bytes} bytes (soft cap ${ASSEMBLED_CONTEXT_WARN_BYTES}); large contexts dilute finder attention`;
+  return `${label}: assembled context is ${bytes} bytes (attention threshold ${ASSEMBLED_CONTEXT_WARN_BYTES}, not a model context limit)`;
 }
 
 /** Snapshot points, in pipeline order. */
 export type TelemetryStage = 'gated' | 'deduped' | 'suppressed' | 'verified' | 'filtered';
 const STAGE_ORDER: TelemetryStage[] = ['gated', 'deduped', 'suppressed', 'verified', 'filtered'];
-const BLOCKING: ReadonlySet<Severity> = new Set<Severity>(['P0', 'P1', 'P2']);
 
 export interface TelemetryRecorder {
   readonly enabled: boolean;
@@ -312,6 +313,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   let counter = 0;
   const meta = new Map<string, ProducedMeta>();
   const order: string[] = [];
+  const uncertain = new Set<string>();
   const stageSeverity = new Map<TelemetryStage, Map<string, Severity>>();
   const routing = {
     inline: new Set<string>(),
@@ -354,7 +356,11 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     },
     snapshot(stage, findings) {
       const byId = new Map<string, Severity>();
-      for (const f of findings) if (f.id) byId.set(f.id, f.severity);
+      for (const f of findings) {
+        if (!f.id) continue;
+        byId.set(f.id, f.severity);
+        if (stage === 'verified' && f.verificationUncertain) uncertain.add(f.id);
+      }
       stageSeverity.set(stage, byId);
     },
     route(routes) {
@@ -429,7 +435,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     },
     findingRows() {
       return order.map((id) => {
-        const row = deriveRow(id, meta.get(id)!, stageSeverity, routing);
+        const row = deriveRow(id, meta.get(id)!, stageSeverity, routing, uncertain.has(id));
         const posted = routedLine.get(id);
         return posted === undefined ? row : { ...row, line: posted };
       });
@@ -494,18 +500,13 @@ function deriveRow(
     rescued: Set<string>;
     anchorMissed: Set<string>;
   },
+  verifyUncertain: boolean,
 ): FindingTelemetryRow {
   const severityAt = (stage: TelemetryStage): Severity | undefined =>
     stageSeverity.get(stage)?.get(id);
 
   const gated = severityAt('gated');
   const demoted = gated !== undefined && gated !== m.severity;
-  // A finding present at 'verified' was necessarily present at 'suppressed'
-  // (stages only drop, never re-add), so that is the pre-verify severity.
-  const preVerify = severityAt('suppressed');
-  const verifyUncertain =
-    severityAt('verified') === 'P3' && preVerify !== undefined && BLOCKING.has(preVerify);
-
   // Stages only drop findings, so presence is a prefix of STAGE_ORDER: the
   // finding was dropped entering the stage after the last one it appears in.
   // This assumes every stage is snapshotted (the runner always does); with a

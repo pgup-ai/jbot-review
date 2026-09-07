@@ -48,17 +48,22 @@ function makeFakeClient(
   client: OpencodeClient;
   prompts: string[];
   aborted: string[];
+  tools: Array<Record<string, boolean>>;
 } {
   const messages: FakeMessage[] = [];
   const prompts: string[] = [];
   const aborted: string[] = [];
+  const tools: Array<Record<string, boolean>> = [];
 
   const client = {
     session: {
       create: async () => ({ data: { id: 'session-1' } }),
       abort: async ({ path }: { path: { id: string } }) => void aborted.push(path.id),
-      promptAsync: async (request: { body: { parts: Array<{ text: string }> } }) => {
+      promptAsync: async (request: {
+        body: { parts: Array<{ text: string }>; tools: Record<string, boolean> };
+      }) => {
         prompts.push(request.body.parts[0].text);
+        tools.push(request.body.tools);
         // index access, not `??`: a scripted null means "no text part" and
         // must not fall back to '{}'.
         const index = prompts.length - 1;
@@ -88,7 +93,7 @@ function makeFakeClient(
     },
   } as unknown as OpencodeClient;
 
-  return { client, prompts, aborted };
+  return { client, prompts, aborted, tools };
 }
 
 const VALID_REVIEW = JSON.stringify({
@@ -130,30 +135,60 @@ describe('runReview JSON repair loop', () => {
     assert.equal(result.summary, 'ok after repair');
   });
 
+  it('records each attempted prompt once without inventing missing token usage', async () => {
+    for (const responses of [
+      ['broken', VALID_REVIEW],
+      [new Error('rejected')],
+      ['broken', new Error('rejected')],
+    ]) {
+      const { client, prompts } = makeFakeClient(responses);
+      const usages: unknown[] = [];
+      const run = runReview(client, 'prov/model', 'PR CONTEXT', '', noLog, {
+        onTokenUsage: (usage) => usages.push(usage),
+      });
+      if (responses.some((response) => response instanceof Error))
+        await assert.rejects(run, /rejected/);
+      else await run;
+      assert.deepEqual(
+        usages,
+        prompts.map((prompt) => ({ promptBytes: Buffer.byteLength(prompt) })),
+      );
+    }
+  });
+
   it('records token usage for each completed prompt, including repair prompts', async () => {
-    const { client } = makeFakeClient(
+    const { client, prompts } = makeFakeClient(
       ['broken', VALID_REVIEW],
       [
         { input: 10, output: 2, reasoning: 3, cache: { read: 4, write: 5 } },
         { input: 6, output: 7 },
       ],
     );
-    const usages: Array<{
-      model: string;
-      input: number;
-      output: number;
-      reasoning: number;
-      cacheRead: number;
-      cacheWrite: number;
-    }> = [];
+    const usages: unknown[] = [];
 
     await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog, {
       onTokenUsage: (usage, model) => usages.push({ model, ...usage }),
     });
 
     assert.deepEqual(usages, [
-      { model: 'prov/model', input: 10, output: 2, reasoning: 3, cacheRead: 4, cacheWrite: 5 },
-      { model: 'prov/model', input: 6, output: 7, reasoning: 0, cacheRead: 0, cacheWrite: 0 },
+      {
+        model: 'prov/model',
+        input: 10,
+        output: 2,
+        reasoning: 3,
+        cacheRead: 4,
+        cacheWrite: 5,
+        promptBytes: Buffer.byteLength(prompts[0]),
+      },
+      {
+        model: 'prov/model',
+        input: 6,
+        output: 7,
+        reasoning: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        promptBytes: Buffer.byteLength(prompts[1]),
+      },
     ]);
   });
 
@@ -306,7 +341,7 @@ describe('runFindingVerification evidence grounding', () => {
   // Regression guard: a field-subset projection here once dropped `evidence`,
   // silently defeating verifier grounding on this backend. Keep it passing through.
   it('cites each finding’s evidence quote in the verifier prompt', async () => {
-    const { client, prompts } = makeFakeClient([
+    const { client, prompts, tools } = makeFakeClient([
       '{"verdicts":[{"index":0,"verdict":"confirmed"}]}',
     ]);
 
@@ -328,6 +363,8 @@ describe('runFindingVerification evidence grounding', () => {
     );
 
     assert.match(prompts[0], /Cited line: return x - tax;/);
+    assert.deepEqual(tools[0], { write: false, edit: false, patch: false });
+    assert.match(prompts[0], /read\n  the actual code/);
   });
 });
 

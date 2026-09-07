@@ -374,6 +374,8 @@ export interface TokenUsageInfo {
 }
 
 export interface PromptTokenUsage {
+  /** Attempted prompt text; excludes backend system prompts, tools, and history. */
+  promptBytes?: number;
   input: number;
   output: number;
   reasoning: number;
@@ -385,7 +387,11 @@ export interface PromptTokenUsage {
   acuCost?: number;
 }
 
-export type TokenUsageRecorder = (usage: PromptTokenUsage, model: string, label?: string) => void;
+export type TokenUsageRecorder = (
+  usage: PromptTokenUsage | { promptBytes: number },
+  model: string,
+  label?: string,
+) => void;
 
 export function extractPromptTokenUsage(info: TokenUsageInfo): PromptTokenUsage | undefined {
   const tokens = info.tokens;
@@ -438,13 +444,25 @@ export class Semaphore {
 
   constructor(private readonly limit: number) {}
 
-  async acquire(priority: SemaphorePriority = 'normal'): Promise<() => void> {
+  async acquire(priority: SemaphorePriority = 'normal', signal?: AbortSignal): Promise<() => void> {
+    signal?.throwIfAborted();
     if (this.limit === 0) return () => undefined;
     if (this.active < this.limit) {
       this.active += 1;
     } else {
       const queue = priority === 'high' ? this.highPriorityQueue : this.normalPriorityQueue;
-      await new Promise<void>((resolve) => queue.push(resolve));
+      await new Promise<void>((resolve, reject) => {
+        const grant = () => {
+          signal?.removeEventListener('abort', abort);
+          resolve();
+        };
+        const abort = () => {
+          queue.splice(queue.indexOf(grant), 1);
+          reject(signal?.reason);
+        };
+        queue.push(grant);
+        signal?.addEventListener('abort', abort, { once: true });
+      });
     }
     let released = false;
     return () => {
@@ -1003,9 +1021,11 @@ export async function runFindingVerification(
   // Pass findings through unprojected: Finding is structurally a VerifiableFinding.
   // An earlier field-subset projection here silently dropped `evidence` and
   // defeated verifier grounding on this (primary) backend — don't reintroduce one.
-  const prompt = assembleFindingVerificationPrompt(prContext, findings, true);
-  // Single-shot: exploration tools off, so the verifier judges from the embedded
-  // diff in one model call instead of an agentic git/grep loop.
+  const prompt = assembleFindingVerificationPrompt(
+    prContext,
+    findings,
+    isSingleShotModel(verificationModel),
+  );
   const { raw } = await promptPlanAgent(
     client,
     verificationModel,
@@ -1014,7 +1034,6 @@ export async function runFindingVerification(
     log,
     timeoutMs,
     onTokenUsage,
-    SINGLE_SHOT_TOOLS,
   );
   return parseFindingVerdicts(raw, findings.length, log);
 }
@@ -1047,12 +1066,7 @@ export function isSingleShotModel(model: string): boolean {
   return !modelSupportsAgenticTools(providerID, modelID);
 }
 
-/**
- * The tool set for a session: a caller's explicit choice (e.g. verification
- * forces SINGLE_SHOT_TOOLS), else exploration for agentic models and a
- * zero-tool single-shot for models that cannot drive a tool loop (proxied
- * Gemini — see `modelSupportsAgenticTools`). Exported for unit testing (pure).
- */
+// Models with incompatible tool APIs must retain their no-tools fallback.
 export function resolveSessionTools(
   model: string,
   explicit?: Record<string, boolean>,
@@ -1159,6 +1173,8 @@ async function promptInSessionHoldingSlot(
   // BASE label — a repair/continue prompt must stay reachable by the runner's
   // grace-expiry abort, which only knows base labels.
   registerOpencodeSessionForAbort(client, abortLabel, sessionID);
+  let attempted = false;
+  let usage: PromptTokenUsage | undefined;
   try {
     // A follow-up prompt in an existing session must not return the previous
     // completed assistant message: remember its id and wait for a NEWER one.
@@ -1166,6 +1182,7 @@ async function promptInSessionHoldingSlot(
     const previousMessageID = previous?.info.id;
 
     log(`Calling ${label} prompt (agent=plan, provider=${providerID} model=${modelID})`);
+    attempted = true;
     const promptRes = await client.session.promptAsync({
       path: { id: sessionID },
       query: queryDirectory(client),
@@ -1207,8 +1224,7 @@ async function promptInSessionHoldingSlot(
       `${label} prompt complete: parts=${parts.length} (types: ${parts.map((p) => p.type).join(', ')})`,
     );
     log(`${label} ${formatTokenUsage(data.info)}`);
-    const usage = extractPromptTokenUsage(data.info);
-    if (usage) onTokenUsage?.(usage, model, label);
+    usage = extractPromptTokenUsage(data.info);
 
     const textParts = parts.filter(
       (part): part is Extract<Part, { type: 'text' }> => part.type === 'text' && Boolean(part.text),
@@ -1228,6 +1244,8 @@ async function promptInSessionHoldingSlot(
     return raw;
   } finally {
     unregisterOpencodeSessionForAbort(client, abortLabel, sessionID);
+    if (attempted)
+      onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(prompt, 'utf8') }, model, label);
   }
 }
 
@@ -1509,10 +1527,8 @@ export function parseReview(
 const VALID_VERDICTS = new Set<FindingVerdict['verdict']>(['confirmed', 'refuted', 'uncertain']);
 
 /**
- * Parses the verifier's {"verdicts": [...]} response. Returns undefined when
- * the response is unusable so callers fail open. Individual malformed
- * entries are skipped; a finding without a verdict is treated as confirmed
- * by the caller. Exported for direct test coverage.
+ * Returns undefined for unusable responses and skips malformed entries.
+ * Callers retain findings with missing verdicts as unverified advisories.
  */
 export function parseFindingVerdicts(
   raw: string,

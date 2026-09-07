@@ -99,12 +99,10 @@ export function roleTelemetry(
   backend: Pick<ReviewBackend, 'name' | 'observability'> | undefined,
   model: string,
   reasoningEffort?: string,
-  role: 'finder' | 'verification' = 'finder',
 ) {
   const { providerID, modelID } = parseModelName(model);
   const canReadWorkspace =
     backend &&
-    !(role === 'verification' && ['opencode', 'pi'].includes(backend.name)) &&
     backendCanReadWorkspace(providerID, cliBackendForProvider(providerID)) &&
     (backend.name !== 'opencode' || modelSupportsAgenticTools(providerID, modelID));
   return {

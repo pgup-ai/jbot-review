@@ -25,6 +25,7 @@ import {
   UNTRUSTED_PR_CONTENT_NOTE,
   VERIFICATION_OUTPUT_REMINDER,
   assembleAddressedPriorCommentsPrompt,
+  buildAddressedPriorCommentsContext,
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
@@ -127,7 +128,7 @@ describe('buildChangesSinceContextBlock', () => {
     const block = buildChangesSinceContextBlock('abc1234', 'def5678', subjects);
     assert.ok(block.length <= CHANGES_SINCE_CONTEXT_BUDGET + 200);
     assert.match(block, /and \d+ more commit\(s\); use the git command above\./);
-    const text = '+変更\n'.repeat(5000);
+    const text = '+変更\n'.repeat(CHANGES_SINCE_DIFF_BUDGET);
     const withDiff = buildChangesSinceContextBlock('abc1234', 'def5678', subjects, {
       text,
       totalBytes: Buffer.byteLength(text),
@@ -135,7 +136,10 @@ describe('buildChangesSinceContextBlock', () => {
     assert.ok(
       Buffer.byteLength(withDiff) <= CHANGES_SINCE_CONTEXT_BUDGET + CHANGES_SINCE_DIFF_BUDGET + 400,
     );
-    assert.match(withDiff, /Delta diff \(UTF-8 text\) truncated to \d+ bytes; omitted \d+ bytes/);
+    assert.match(
+      withDiff,
+      /Changes-since summary diff \(UTF-8 text\) truncated to \d+ bytes; omitted \d+ bytes/,
+    );
   });
 
   it('measures the budget in UTF-8 bytes, not code units', () => {
@@ -221,12 +225,12 @@ describe('REVIEW_PROMPT', () => {
     assert.match(REVIEW_PROMPT, /"severity": "P1"/);
   });
 
-  it('treats third-party framework-behavior claims as not repo-verifiable', () => {
+  it('keeps unverified framework behavior advisory', () => {
     assert.match(REVIEW_PROMPT, /## Claims about external framework behavior/);
     assert.match(REVIEW_PROMPT, /how the library is USED, not its internal semantics/);
-    assert.match(REVIEW_PROMPT, /never state\s+the library's behavior as fact/);
-    assert.match(REVIEW_PROMPT, /concrete trigger and a material unresolved/);
-    assert.match(REVIEW_PROMPT, /Otherwise omit the finding/);
+    assert.match(REVIEW_PROMPT, /Never state an\s+unverified library behavior as fact/);
+    assert.match(REVIEW_PROMPT, /concrete potential failure to verify/);
+    assert.match(REVIEW_PROMPT, /keep severity advisory/);
     assert.match(REVIEW_PROMPT, /repository's declared\s+versions/);
     assert.match(REVIEW_PROMPT, /Do not infer authorship or generation/);
   });
@@ -322,68 +326,18 @@ describe('REVIEW_PROMPT', () => {
     assert.match(REVIEW_PROMPT, /or 0 for a\s+file-level finding on a changed file/);
   });
 
-  it('treats embedded hunks as authoritative without redundant diff reads', () => {
-    assert.match(
+  it('permits investigation beyond embedded hunks and dependency hops', () => {
+    assert.equal(
+      (EMBEDDED_FIRST_REVIEW_PROMPT.match(/^## Repository exploration policy$/gm) ?? []).length,
+      1,
+    );
+    assert.match(EMBEDDED_FIRST_REVIEW_PROMPT, /Follow dependencies beyond the\s+first hop/);
+    assert.match(EMBEDDED_FIRST_REVIEW_PROMPT, /continue\s+paginated or truncated results/);
+    assert.doesNotMatch(
       EMBEDDED_FIRST_REVIEW_PROMPT,
-      /fully embedded hunk.*authoritative and already\s+read/is,
+      /Use repository tools only|one dependency hop by default|Do not keep exploring solely/,
     );
-    assert.match(
-      EMBEDDED_FIRST_REVIEW_PROMPT,
-      /Do not run `git diff` or reread changed code solely to reproduce content\s+that is already embedded/,
-    );
-    assert.doesNotMatch(EMBEDDED_FIRST_REVIEW_PROMPT, /starting point, not the boundary/i);
-  });
-
-  it('defines one bounded repository-exploration policy', () => {
-    const headings =
-      EMBEDDED_FIRST_REVIEW_PROMPT.match(/^## Repository exploration policy$/gm) ?? [];
-    assert.equal(headings.length, 1);
-    const policy = EMBEDDED_FIRST_REVIEW_PROMPT.split('## Repository exploration policy')[1]?.split(
-      '\n## ',
-    )[0];
-    assert.ok(policy);
-    assert.match(policy, /omitted or truncated/);
-    assert.match(
-      policy,
-      /direct caller, callee, contract, or test relation tied to a changed\s+symbol/,
-    );
-    assert.match(policy, /evidence for a concrete candidate finding/);
-    assert.match(policy, /one dependency hop by default/);
-    assert.match(policy, /first hop reveals\s+a concrete trigger/);
-  });
-
-  it('states each exploration rule once', () => {
-    for (const rule of [
-      'solely to reproduce content',
-      'Before any broad repository search',
-      'one dependency hop by default',
-      'Do not keep exploring solely for completeness',
-    ]) {
-      assert.equal(EMBEDDED_FIRST_REVIEW_PROMPT.split(rule).length - 1, 1, rule);
-    }
-  });
-
-  it('consults changed-symbol usage before a justified broad search', () => {
-    const policy = EMBEDDED_FIRST_REVIEW_PROMPT.split('## Repository exploration policy')[1]?.split(
-      '\n## ',
-    )[0];
-    assert.ok(policy);
-    assert.match(
-      policy,
-      /Before any broad repository search, consult the "Changed symbol usage"\s+manifest/,
-    );
-    assert.match(
-      policy,
-      /manifest is absent, explicitly\s+incomplete, or current evidence identifies a relation it missed/,
-    );
-  });
-
-  it('stops after coverage and material uncertainty resolution', () => {
-    assert.match(
-      EMBEDDED_FIRST_REVIEW_PROMPT,
-      /Once every changed hunk is covered and material uncertainties are resolved,\s+return the final JSON/,
-    );
-    assert.match(EMBEDDED_FIRST_REVIEW_PROMPT, /Do not keep exploring solely for completeness/);
+    assert.match(REVIEW_PROMPT, /Missing evidence is a reason to investigate further/);
   });
 });
 
@@ -653,6 +607,23 @@ describe('assembleAddressedPriorCommentsPrompt', () => {
     assert.match(prompt, /## Final output reminder/);
     assert.ok(prompt.indexOf('PR_CONTEXT_SENTINEL') < prompt.indexOf('## Final output reminder'));
   });
+
+  it('retains the complete supplied diff and thread disclosures in the focused context', () => {
+    const diff =
+      '## Diff\ncaller.ts: calls validate\nvalidator.ts: rejects invalid input\n[omitted 2 files]';
+    const context = buildAddressedPriorCommentsContext({
+      diffScope: 'Base: base\nHead: head\ngit diff base...head',
+      commits: '## Commits\n- abc1234 fix validation\n(and 3 more commits not listed.)',
+      threads: '## Prior threads\nthread-1: caller.ts:2\nNot applied\nShowing 1 of 2 threads.',
+      diff,
+    });
+    assert.ok(context.startsWith(UNTRUSTED_PR_CONTENT_NOTE));
+    assert.match(context, /git diff base\.\.\.head/);
+    assert.match(context, /abc1234 fix validation/);
+    assert.match(context, /3 more commits not listed/);
+    assert.match(context, /thread-1: caller.ts:2\nNot applied\nShowing 1 of 2 threads/);
+    assert.ok(context.endsWith(diff));
+  });
 });
 
 describe('ADDRESSED_PRIOR_COMMENTS_PROMPT', () => {
@@ -660,6 +631,10 @@ describe('ADDRESSED_PRIOR_COMMENTS_PROMPT', () => {
     assert.match(ADDRESSED_PRIOR_COMMENTS_PROMPT, /"addressedByCommit"/);
     assert.doesNotMatch(ADDRESSED_PRIOR_COMMENTS_PROMPT, /addressed_by_commit/);
     assert.doesNotMatch(ADDRESSED_PRIOR_COMMENTS_PROMPT, /"note"/);
+    assert.match(
+      ADDRESSED_PRIOR_COMMENTS_PROMPT,
+      /Missing or truncated evidence is not proof of a fix/,
+    );
   });
 });
 
@@ -727,10 +702,10 @@ describe('buildShardAssignmentBlock', () => {
     assert.match(block, /full checkout and the complete changed-file list are available/);
   });
 
-  it('uses bounded exploration wording only for the treatment', () => {
+  it('uses the exploration policy for embedded-first shards', () => {
     const treatment = buildShardAssignmentBlock(['src/a.ts'], 0, 2, true);
 
-    assert.match(treatment, /one-hop default and expansion trigger/);
+    assert.match(treatment, /Follow dependencies as far as needed/);
     assert.match(treatment, /Apply the repository exploration policy/);
     assert.doesNotMatch(treatment, /wherever they lead/);
   });
@@ -841,16 +816,13 @@ describe('PI_REVIEW_SYSTEM_PROMPT', () => {
     assert.match(PI_REVIEW_SYSTEM_PROMPT, /where instructions mention running/);
   });
 
-  it('limits treatment diff recovery to path-scoped coverage gaps', () => {
-    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /Use git_diff only to recover a hunk/);
+  it('permits targeted investigation and continuation while retaining confinement', () => {
     assert.match(
       EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
-      /explicitly identifies as omitted or truncated/,
+      /investigate related code wherever needed/,
     );
-    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /prefer a path-scoped request/);
-    assert.doesNotMatch(
-      EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
-      /where instructions mention running/,
-    );
+    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /Continue paginated results/);
+    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /outside it are refused/);
+    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /search_repo/);
   });
 });

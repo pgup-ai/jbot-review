@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import childProcess, { execFileSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,7 +8,7 @@ import { it } from 'node:test';
 import { collectChangesSinceContext } from '../src/shared/changes-since.ts';
 import { CHANGES_SINCE_DIFF_BUDGET } from '../src/shared/prompt.ts';
 
-it('embeds only the committed re-review delta when subjects contain no details', async () => {
+it('embeds only the committed re-review delta when subjects contain no details', async (t) => {
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-summary-'));
   const git = (...args: string[]) =>
     execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], {
@@ -34,6 +35,24 @@ it('embeds only the committed re-review delta when subjects contain no details',
     assert.ok(embedded);
     assert.match(embedded, /\+export const retryLimit = 3;/);
     assert.doesNotMatch(embedded, /unrelated|retryLimit = 99/);
+    const spawn = childProcess.spawn;
+    const statFailure = t.mock.method(childProcess, 'spawn', ((
+      ...args: Parameters<typeof spawn>
+    ) =>
+      args[1]?.includes('--stat=120')
+        ? spawn(process.execPath, ['-e', 'process.exit(1)'], args[2])
+        : spawn(...args)) as typeof spawn);
+    syncBuiltinESMExports();
+    try {
+      const withoutStat = await collectChangesSinceContext(workspace, from, to, true);
+      assert.ok(withoutStat);
+      assert.match(withoutStat, /unavailable/);
+      assert.match(withoutStat, /update/);
+      assert.match(withoutStat, /\+export const retryLimit = 3;/);
+    } finally {
+      statFailure.mock.restore();
+      syncBuiltinESMExports();
+    }
     const agentic = await collectChangesSinceContext(workspace, from, to, false);
     assert.ok(agentic);
     assert.match(agentic, /update/);
@@ -47,6 +66,32 @@ it('embeds only the committed re-review delta when subjects contain no details',
     assert.ok(noChanges);
     assert.match(noChanges, /trigger CI/);
     assert.match(noChanges, /\(No file changes\.\)/);
+
+    writeFileSync(join(workspace, 'a-first.ts'), 'const padding = true;\n'.repeat(8000));
+    writeFileSync(join(workspace, 'z-last.ts'), 'export const lastFileChange = true;\n');
+    git('add', '.');
+    git('commit', '-m', 'update');
+    const broad = await collectChangesSinceContext(
+      workspace,
+      empty,
+      git('rev-parse', 'HEAD'),
+      true,
+    );
+    assert.ok(broad);
+    assert.match(broad, /\+export const lastFileChange = true/);
+    assert.match(broad, /Delta file overview/);
+    assert.doesNotMatch(broad, /truncated|omitted/);
+    git('rm', 'a-first.ts', 'z-last.ts');
+    git('commit', '-m', 'update');
+
+    for (let i = 0; i < 512; i++)
+      writeFileSync(join(workspace, `${i}-${'long-name'.repeat(8)}.txt`), 'hello');
+    git('add', '.');
+    git('commit', '-m', 'wide delta');
+    const wide = await collectChangesSinceContext(workspace, empty, git('rev-parse', 'HEAD'), true);
+    const overview = wide!.split('### Delta file overview\n')[1].split('### Delta diff')[0];
+    assert.match(overview, /Delta file overview truncated.*omitted/);
+    assert.ok(Buffer.byteLength(overview) < 33 * 1024);
 
     let large = empty;
     for (const [index, content] of [
@@ -73,7 +118,7 @@ it('embeds only the committed re-review delta when subjects contain no details',
         continue;
       }
       const match = evidence.match(
-        /^([\s\S]*)\n\n\[Delta diff \(UTF-8 text\) truncated to (\d+) bytes; omitted (\d+) bytes\.\]$/,
+        /^([\s\S]*)\n\n\[Changes-since summary diff \(UTF-8 text\) truncated to (\d+) bytes; omitted (\d+) bytes\.\]$/,
       );
       assert.ok(match);
       const [, prefix, kept, omitted] = match;
@@ -88,7 +133,7 @@ it('embeds only the committed re-review delta when subjects contain no details',
     rmSync(join(workspace, '.git', 'objects', blob.slice(0, 2), blob.slice(2)));
     await assert.rejects(
       collectChangesSinceContext(workspace, empty, large, true),
-      /git diff failed/,
+      /git output failed/,
     );
   } finally {
     rmSync(workspace, { recursive: true, force: true });

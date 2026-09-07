@@ -38,6 +38,15 @@ Program-level targets:
 
 ## Status — 2026-08-21 (deep-dive backlog, PR #169)
 
+Update, 2026-09-07: PR #204 completed TASK-084's independent startup fetches and
+the changes-since slice of TASK-065. The addressed-comment slice now retains
+revision scope, commits, prior threads/replies, and the existing diff, while
+excluding finder-only context. TASK-058/062 have partial measurement support:
+submitted prompt bytes and reported input/cache tokens for OpenCode, Pi, and
+CommandCode. Engine-added context attribution remains unresolved; these fields
+must not be treated as an exact overhead or cache-hit calculation. Guideline
+context trimming and graduation of the opt-in slim verifier remain open.
+
 Axis-by-axis state of the 2026-08-21 speed deep dive's backlog after
 `feat/speed-backlog-1`:
 
@@ -64,11 +73,11 @@ Axis-by-axis state of the 2026-08-21 speed deep dive's backlog after
   paired median −29.8% (p=0.0002), reasoning tokens −43%, output flat,
   12/12 defect runs anchored in both arms; the default flip waits on the
   core subset + adjudication (TASK-100/105).
-- **Open, ranked by expected value:** changes-since/addressed/compliance
-  session contracts (the remaining ~55–95KB of TASK-065); the ~45–49K-token
+- **Open, ranked by expected value:** compliance context and slim-verifier
+  graduation (remaining TASK-065 work); the ~45–49K-token
   per-session opencode engine context measured behind every session (needs
-  TASK-058/062 token-source telemetry before acting); TASK-084 fetch
-  parallelization + `listReviews`/viewer dedupe; the log-only model-listing
+  TASK-058/062 token-source telemetry before acting); TASK-084
+  `listReviews`/viewer dedupe; the log-only model-listing
   spawns and serial Context7 enable on the critical path; aux lenient-first
   parsing and the ACP repair/continuation multiplier (fold into TASK-150);
   prompt dedupe (TASK-060) and the embedded-first diff-intro contradiction
@@ -385,7 +394,8 @@ verified concurrently with the graces and verdicts re-attach by path:line
 (`mergeVerdictsByLocation`); late blocking findings post unverified, logged
 and marked with a `late-unverified-findings` coverage row — the typed
 telemetry stage and the automatic rejection rule land with graduation.
-TASK-081 was already shipped (#139); TASK-084 remains open.
+TASK-081 was already shipped (#139). PR #204 shipped TASK-084 startup-fetch
+parallelization; `listReviews`/viewer deduplication remains open.
 
 Completion criteria for Phase 8:
 

@@ -535,6 +535,20 @@ function capListSection(
   return lines.join('\n');
 }
 
+export function formatReviewCommits(commits: ReviewCommit[]): string {
+  return commits.length > 0
+    ? capListSection(
+        '## Commits',
+        commits.map((commit) => {
+          const author = commit.author ? ` (${commit.author})` : '';
+          return `- ${commit.sha.slice(0, 7)}${author}: ${commit.message}`;
+        }),
+        MAX_COMMITS_BYTES,
+        (omitted) => `(and ${omitted} more commit(s) not listed.)`,
+      )
+    : '## Commits\n(none)';
+}
+
 export function buildReviewContext(params: BuildReviewContextParams): string {
   const sections: string[] = [];
 
@@ -565,19 +579,7 @@ export function buildReviewContext(params: BuildReviewContextParams): string {
       : '## Changed files\n(none)',
   );
 
-  sections.push(
-    params.commits.length > 0
-      ? capListSection(
-          '## Commits',
-          params.commits.map((commit) => {
-            const author = commit.author ? ` (${commit.author})` : '';
-            return `- ${commit.sha.slice(0, 7)}${author}: ${commit.message}`;
-          }),
-          MAX_COMMITS_BYTES,
-          (omitted) => `(and ${omitted} more commit(s) not listed.)`,
-        )
-      : '## Commits\n(none)',
-  );
+  sections.push(formatReviewCommits(params.commits));
 
   sections.push(['## Check status summary', params.checkSummary || '(unavailable)'].join('\n'));
 

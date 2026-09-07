@@ -387,7 +387,7 @@ the review itself is unaffected._
 | `dynamic-fanout`          | `true`             | Scale the recall-supplement fan-out (extra lens passes + the guideline-compliance pass) to the diff's risk and size: a small, low-risk change (≤3 files, ≤60 added lines, no security/data/API/infra path or build/CI tooling like `package.json`/`action.yml`/workflows, no dependency-manifest change, no large deletion) runs the general pass only and skips the guideline pass; everything else runs the full requested fan-out. The requested config is the ceiling — this only ever reduces it, and never gates the main full-diff review or `verify-findings`. Set `false` to force the full requested fan-out on every PR.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `verify-findings`         | `true`             | Blocking (P0–P2) findings are adversarially re-checked in a dedicated session before posting: refuted findings are dropped, uncertain ones demoted to advisory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `review-shards`           | `1`                | Parallel shards for the main review. `1` = no sharding, one full-diff session (default). `0` = auto from diff size, capped at 4. `N` = pin N shards. Sharding only speeds review up on providers that serve concurrent sessions; on free/throttled tiers the shards serialize on one key (see `max-concurrent-sessions`), so single-session is the better default. Either way the review covers the complete diff; raise it on paid concurrent tiers, or for very large PRs where smaller per-shard context helps depth.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `time-budget-minutes`     | `30`               | Wall-clock target (`0` = no budget). Finder sessions get the full budget (minus a 30s posting reserve) as their deadline; shard retries and verification use whatever remains, or are skipped (fail-open). An auxiliary session (lens, addressed-thread, guideline, verification) over its deadline is aborted and fails open — degrading only its own coverage, never the run. A main review shard that still fails after its retry aborts the run rather than posting partial coverage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `time-budget-minutes`     | `30`               | Wall-clock target (`0` = no budget). Finder sessions get the full budget (minus a 30s posting reserve) as their deadline; shard retries and verification use whatever remains, or are skipped (fail-open). After main review, parallel auxiliary passes get up to 10 more minutes, limited by the remaining budget with 30s reserved for posting and up to 5min for enabled verification. An auxiliary session (lens, addressed-thread, guideline, verification) over its deadline is aborted and fails open — degrading only its own coverage, never the run. A main review shard that still fails after its retry aborts the run rather than posting partial coverage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `max-concurrent-sessions` | `3`                | Max model sessions in flight (`0` = unlimited). Free/throttled tiers serialize one key's requests upstream — observed as a flash session queued 7+ minutes behind parallel shards. The capped default keeps each session's deadline measuring model time, not queue time; drop to `2` on tight free tiers, or set `0` on paid tiers with real concurrency.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `model-options`           | provider-dependent | JSON object of provider options for the main model. Native providers default to `{"reasoningEffort":"medium"}`; Poolside uses `{"reasoningEffort":"default"}` to leave reasoning provider-managed; custom providers default to `{}` because arbitrary endpoints may reject unknown options. Explicit values are preserved. Governs the main model only. An auxiliary session running a model of its own gets the same treatment one tier lower, since it sits on the tail of the run: `{"reasoningEffort":"low"}` on native providers, `{"reasoningEffort":"default"}` on Poolside, `{}` on custom ones. An auxiliary session drawing the main model shares its entry and its effort — on every engine: pi levels are per session, so a distinct aux model on a shared pi runtime takes the aux effort. CommandCode sessions map `reasoningEffort` onto the CLI `--effort` flag from a per-model allowlist in code: an explicitly-set effort clamps to the nearest declared tier, default options deliver only on an exact match, and undeclared models always keep the CLI default. Other CLI backends do not consume model options — on Devin, effort is part of the model id itself. |
 | `prompt-cache`            | `true`             | Enable opencode prompt caching (provider `setCacheKey`). Parallel shards and re-reviews of the same PR share a byte-identical prompt prefix, so caching cuts input-token cost on models that honor it; models marked unsupported by capability metadata omit the cache key entirely. Each session logs a `tokens: …` line with `cache(read=… write=…)` — `read > 0` on a later shard or re-review confirms a hit. Mostly matters on paid tiers.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -395,6 +395,16 @@ the review itself is unaffected._
 | `skip-unchanged`          | `true`             | Skip the full review (no model call) when the merge-base-relative patch set is byte-identical to the one the last posted jbot review covered — the common "Update branch" merge from main. Anything uncertain (no prior posted review, compare failure or its 300-file cap, binary/patchless files) fails open to a full review, and comment-triggered, manually dispatched, or `auto-approve` runs always review (approval must re-attest the newest head). Set `false` to review every push.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `review-telemetry`        | `true`             | Write per-finding disposition + per-session token telemetry to the gitignored `.jbot-review/telemetry.jsonl` (uploaded as a CI artifact by the dogfood workflow). Near-zero overhead; `false` disables.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `evidence-quotes`         | `true`             | Ask each finding for a verbatim quote of the changed line it flags. Grounds finding verification and lets a finding whose line anchor missed the diff be re-anchored to its quoted line instead of dropped. `false` restores the pre-evidence prompt byte-for-byte.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+
+Incomplete auxiliary passes are named in the review report, including reruns with
+no findings. These runs retain findings from completed passes but do not receive
+an automatic approval or review-done reaction. CommandCode cancellation stops its
+process tree and waits for output pipes to close before removing its temporary home.
+Queued passes cancelled before execution never start a provider session.
+Pi and tool-capable OpenCode verifiers can read and search repository evidence;
+CommandCode remains tool-less. Changes-since summaries receive up to 256 KiB
+of delta diff plus a bounded file overview; larger deltas disclose summary-only
+omissions. Main reviews continue to cover the full base-to-head diff.
 
 **Prompt/context arms (env, not inputs).** `JBOT_EMBEDDED_FIRST_PROMPT` (on)
 and `JBOT_CONTEXT_TRIM` (off) are set by environment rather than action input;
@@ -457,10 +467,15 @@ The pi engine requires Node >= 22.19 (the published Docker image runs Node 24); 
 disables itself and logs why. pi sessions run hermetically (no user-level pi
 config, skills, or prompt templates are loaded), get no shell (pi ships no
 sandbox, so read-only is enforced by withholding `bash` rather than by
-filtering it — the diff is embedded in the prompt, and a read-only `git_diff`
-tool serves any hunks past the embed budget), and manage provider prompt
-caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions
-only.
+filtering it). `read_file` supports a starting line, `search_repo` finds literal
+text in tracked files, and `git_diff` serves the reviewed change. All three return
+up to 128 KiB per response with byte offsets for continuation; large files and
+diffs remain fully accessible. Reads and searches stay inside the repository.
+The provider catalog supplies each model's context window; tool-page size is a
+response budget, not a model context-window override. Repository investigation has
+no tool-call, total-output, distinct-file, repeat-read, or dependency-depth quota;
+existing session deadlines and per-command process limits still apply. Pi manages
+provider prompt caching natively, so `JBOT_PROMPT_CACHE` applies to opencode-served sessions only.
 
 **CLI and ACP routing.** Without `JBOT_ACP_GATEWAY_URL`, `devin` runs through
 its headless CLI from an isolated temporary workspace, with repository-controlled
@@ -767,10 +782,12 @@ At most 20 locations are sampled, within a 16 KiB context budget, with omitted
 or unavailable evidence labeled explicitly. These are excerpts, not
 complete files or proof that omitted behavior is absent.
 
-P3/nit remain advisory and bypass verification. Their prompts require a concrete
-benefit supported by observed code or a written rule; unavailable documentation
-alone is not grounds for an advisory. Verification failures still preserve
-findings, and uncertain verdicts still demote blocking findings to P3.
+All findings, including P3 and nits, receive verification in severity-ordered
+batches of ten. Findings arriving after an overlapping verification receive a
+follow-up check. Verification shares the remaining verification time budget;
+failed or missing verdicts retain findings as unverified advisories and report incomplete coverage.
+Uncertain findings are explicitly labeled unverified, with low confidence and
+an investigate kind; blocking severities become P3, while nits remain nits.
 
 ## Local review
 
@@ -848,20 +865,16 @@ and precision against seeded defects.
   `JBOT_DYNAMIC_FANOUT`, `JBOT_MODEL_OPTIONS`, `JBOT_PROMPT_CACHE`,
   `JBOT_SKIP_DOC_ONLY`, `JBOT_MAX_CONCURRENT_SESSIONS`, `JBOT_REVIEW_TELEMETRY`,
   `JBOT_EVIDENCE_QUOTES`,
-  `JBOT_CONTEXT_TRIM` (off by default; drops supplementary context blocks —
-  blast radius, prior jbot threads, summary scope, review focus, in that order —
-  toward the assembled-context soft cap. Only those blocks are droppable, so a
-  diff or guideline set that already exceeds the cap on its own stays over it.
-  An unmeasured recall trade kept as an A/B arm: run it against an untrimmed
-  side before believing either result),
-  `JBOT_EMBEDDED_FIRST_PROMPT` (**on** by default; treats diff hunks already
-  embedded in the prompt as read and authoritative instead of re-running
-  `git diff` to reproduce them. Cuts tool work roughly a third and improves tail
-  latency, at better measured recall and precision than the control. The win
-  only lands where the model does not spend the saved time generating more
-  instead: `deepseek-v4-flash-free` measured 16.3% slower whole-run (p=0.040),
-  so set `false` there. Per-model numbers in
-  `plan/review-prompt-embedded-first-phase3-ab.md`),
+  `JBOT_CONTEXT_TRIM` (off by default; can drop prior-thread hints above the
+  80 KiB attention threshold. Scope, review focus, caller evidence, diff and
+  guidelines retain their individual budgets and are never dropped to satisfy
+  this threshold; it is not the model's context-window limit),
+  `JBOT_EMBEDDED_FIRST_PROMPT` (**on** by default; starts from the embedded
+  diff while allowing repository search, repeated reads, and investigation beyond
+  the first dependency hop. Follow-up evidence gathering takes priority over
+  minimizing tool calls. Earlier latency measurements in
+  `plan/review-prompt-embedded-first-phase3-ab.md` used the previous, restrictive
+  prompt and do not validate this version),
   `JBOT_SDK_ENGINE` (see
   [Provider configuration](#provider-configuration-in-repo)). The
   opencode server uses a free ephemeral port automatically;
@@ -896,6 +909,17 @@ separate from execution; failures need no token row, and missing metadata stays
 absent. Supply each artifact once. Coverage events are preserved, not counted as
 separate sessions. Aborted durations are not completed latency samples, and parallel
 session durations do not sum to wall time.
+
+`auxiliaryRuns[].promptUsage` pairs each reported call's submitted `promptBytes`
+with input and cache read/write tokens. OpenCode, Pi, and CommandCode record the
+UTF-8 size of the text submitted by J-Bot, including its backend directives;
+other backends leave that size absent. Missing provider usage leaves token counters
+absent without losing the prompt size. Failed attempts also retain their payload
+size when the driver returns or throws; this is not proof that the provider
+accepted the request. Repair calls retain their own labels and payload sizes. These bytes exclude backend-added system prompts, tools, and
+conversation history. Reported tokens can include multiple model turns and have
+provider-specific cache accounting, so neither bytes-to-token estimates nor
+input-minus-cache arithmetic establish engine overhead or a cache-hit rate.
 
 Compare the same base/head, reviewer revision, main route, and effective settings,
 accounting for the intended treatment, cache reuse, retries, and actual lenses.

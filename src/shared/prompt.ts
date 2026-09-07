@@ -1,22 +1,5 @@
-/**
- * The review prompt. The agent is given the checked-out repo and uses its own
- * tools (read, grep, glob, git diff, git log) to explore changes in context.
- * PR metadata (including the exact base...head diff command), embedded diff
- * hunks for the highest-risk files, existing review comments, changed files,
- * and repo-level guidelines are injected into the prompt after these base
- * instructions.
- *
- * The agent returns a single JSON object with "summary" and "findings"; the
- * wrapper validates line anchors against the diff, demotes low-confidence
- * blocking findings, suppresses duplicates of prior jbot-review threads,
- * verifies blocking findings in a dedicated session, computes the verdict,
- * and posts one review. A separate dedicated session owns verification of
- * previously posted jbot-review threads. This file also houses the
- * addressed-prior-comments prompt, the guideline-compliance prompt, the
- * finding-verification prompt, the recall-lens addenda for extra review
- * passes, and the pure assembly functions that place a final output reminder
- * last (recency bias for small models).
- */
+import type { Finding } from './types.ts';
+
 import { PATH_PATTERNS, type ChangeShape } from './diff-context.ts';
 import { changedFilesIncludeFrontend, selectReviewPlaybookIds } from './review-playbooks.ts';
 
@@ -139,12 +122,13 @@ severity when uncertain about IMPACT — but do not lower severity merely
 because the bug requires cross-file reasoning to see. If you verified the
 trigger path, tag the real impact.
 
-Advisory findings need observed evidence too. State the concrete improvement
-and the code or written rule that justifies it; do not park an unverified bug
-claim in P3/nit. Check runtime/version claims against the repository's declared
-versions and supported configurations. Do not infer authorship or generation
-history from file size, naming, or style. A missing helper or guard is a claim
-about its implementation, not something its name or a partial diff proves.
+Investigate plausible regressions before deciding whether to report them. Follow
+callers, defaults, configuration, and tests until you can establish the trigger
+and impact. Missing evidence is a reason to investigate further. Keep published
+claims grounded in inspected code; label a material unresolved contract as an
+"investigate" advisory and state precisely what remains unknown. Check runtime
+claims against the repository's declared versions and supported configurations.
+Do not infer authorship or generation history from file size, naming, or style.
 
 ## What to flag
 
@@ -263,11 +247,10 @@ methods are often wrong for a specific version.
 
 Before reporting a finding that rests on framework-internal behavior, confirm
 that behavior against an authoritative source: the library's documentation, or
-its vendored types/source in the repo. If you cannot confirm it, never state
-the library's behavior as fact. An "investigate" advisory is warranted only
-when inspected code supplies a concrete trigger and a material unresolved
-contract; cite that code and state precisely which fact remains unknown.
-Otherwise omit the finding. A failed docs lookup alone is not a finding.
+its vendored types/source in the repo. If you cannot confirm it, set "kind" to
+"investigate", keep severity advisory, and phrase the unresolved behavior as a
+question with the concrete potential failure to verify. Never state an
+unverified library behavior as fact; a failed lookup alone is not a finding.
 
 ## Tone
 
@@ -335,26 +318,16 @@ Field constraints:
 
 const EMBEDDED_FIRST_EXPLORATION_POLICY = `## Repository exploration policy
 
-Treat every fully embedded hunk in "Diff hunks" as authoritative and already
-read. Do not run \`git diff\` or reread changed code solely to reproduce content
-that is already embedded.
+Use the embedded diff as a starting point. Investigate unchanged code, callers,
+callees, configuration, defaults, tests, and related contracts wherever needed
+to establish the consequences of the change. Follow dependencies beyond the
+first hop when needed; the changed-symbol manifest is a hint, not an exhaustive
+map. Use repository search and targeted reads to close gaps, and continue
+paginated or truncated results until the relevant evidence is available.
 
-Use repository tools only for one of these purposes:
-
-1. Recover a hunk explicitly identified as omitted or truncated, preferring a
-   path-scoped diff for the named file.
-2. Check a direct caller, callee, contract, or test relation tied to a changed
-   symbol.
-3. Confirm evidence for a concrete candidate finding.
-
-Before any broad repository search, consult the "Changed symbol usage"
-manifest. Search more broadly only when that manifest is absent, explicitly
-incomplete, or current evidence identifies a relation it missed. Stay within
-one dependency hop by default; expand farther only when the first hop reveals
-a concrete trigger such as a broken contract or unresolved candidate finding.
-
-Once every changed hunk is covered and material uncertainties are resolved,
-return the final JSON. Do not keep exploring solely for completeness.`;
+Prioritize thoroughness and correctness over tool-call count or speed. Before
+returning, check plausible failure paths and conflicting evidence. Publish
+supported findings and clearly identify material uncertainties.`;
 
 function replacePromptSection(prompt: string, current: string, replacement: string): string {
   const start = prompt.indexOf(current);
@@ -398,44 +371,10 @@ export const EMBEDDED_FIRST_REVIEW_PROMPT = [
    return, narrowed type, or changed default frequently breaks an unchanged
    code path far from the diff.`,
   ],
-  [
-    `- Before accepting a new helper, type, or abstraction, search the repo for an
-  existing one that already does the job; flag duplication and point to the
-  existing code.`,
-    `- Before accepting a new helper, type, or abstraction, search the repo for an
-  existing one that already does the job when a concrete duplication question
-  remains after applying the repository exploration policy; flag duplication
-  and point to the existing code.`,
-  ],
-  [
-    `P1, or P2 findings — verify the trigger path first (read the caller, check
-the type, grep the symbol) and upgrade confidence, or downgrade severity.`,
-    `P1, or P2 findings — verify the trigger path first (read the caller, check
-the type, confirm the relevant relation) and upgrade confidence, or downgrade
-severity.`,
-  ],
 ].reduce(
   (prompt, [current, replacement]) => replacePromptSection(prompt, current, replacement),
   REVIEW_PROMPT,
 );
-
-/** Returned in place of a tool result once a session's exploration budget is spent. */
-export const EXPLORATION_SOFT_STOP_MESSAGE =
-  'Exploration budget reached. Answer now from the evidence you already have; further tool calls will be refused.';
-
-/** Returned to a session that has no tools at all. */
-export const EXPLORATION_NO_TOOLS_MESSAGE = 'Tools are disabled.';
-
-/** Paths named in a refusal before it starts listing a whole large PR back. */
-const EXPLORATION_REFUSAL_PATH_CAP = 10;
-
-/** Returned when a path-scoped diff names a file the prompt never flagged as omitted. */
-export function explorationUnrelatedRecoveryMessage(pendingGaps: readonly string[]): string {
-  const shown = pendingGaps.slice(0, EXPLORATION_REFUSAL_PATH_CAP);
-  const rest = pendingGaps.length - shown.length;
-  const list = rest > 0 ? `${shown.join(', ')} (and ${rest} more)` : shown.join(', ');
-  return `Recovery is limited to the omitted or truncated files: ${list}.`;
-}
 
 export const REVIEW_OUTPUT_REMINDER = `## Final output reminder
 
@@ -469,9 +408,11 @@ Use no tools for this review: do not read files, search the repository, or run
 git or shell commands. Use only the evidence embedded below. Where later
 instructions mention exploring the repo, running the git diff command, or
 grepping for callers, those checks have NOT been performed unless their results
-are included. Missing context does not prove missing behavior. Omit findings
-whose factual premise needs unavailable code or documentation; when verifying
-an existing finding, return "uncertain" instead of guessing. Respond with the
+are included. Missing context does not prove missing behavior. If the embedded evidence
+identifies a concrete potential failure whose premise needs unavailable code,
+report it as an "investigate" advisory and specify what must be checked. Do not
+assert the unverified premise as fact. When verifying an existing finding,
+return "uncertain" instead of guessing. Respond with the
 required JSON computed directly from the embedded context.`;
 
 export function withNoToolsReviewDirective(prompt: string): string {
@@ -484,16 +425,37 @@ export function withNoToolsReviewDirective(prompt: string): string {
  * per-session user prompts (assemble*); this only pins workspace safety.
  */
 export const PI_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer operating inside a checked-out git repository.
-You have no shell. Your tools are read-only and confined to this repository — paths outside it are refused: read_file reads a repo file by repo-relative path, and a git_diff tool (when available) shows the change under review, optionally scoped to a path. The diff under review is also embedded in the user message; if a git_diff tool is available, use it where instructions mention running the git diff command.
+You have no shell. Your tools are read-only and confined to this repository — paths outside it are refused: read_file reads a repo file by repo-relative path (use line to start at a known line, or offset to continue a page), search_repo searches tracked repository text for a literal query, and a git_diff tool (when available) shows the change under review, optionally scoped to a path. The diff under review is also embedded in the user message; if a git_diff tool is available, use it where instructions mention running the git diff command.
 You cannot modify the workspace, and must not attempt to.
 Follow the task instructions in the user message exactly; reply with only the requested output.`;
 
 export const EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer operating inside a checked-out git repository.
-You have no shell. Your tools are read-only and confined to this repository — paths outside it are refused: read_file reads a repo file by repo-relative path, and a git_diff tool (when available) shows the change under review, optionally scoped to a path. The diff under review is also embedded in the user message. Use git_diff only to recover a hunk the user message explicitly identifies as omitted or truncated, and prefer a path-scoped request for that named file.
+You have no shell. Your tools are read-only and confined to this repository — paths outside it are refused: read_file reads a repo file by repo-relative path (use line to start at a known line, or offset to continue a page), search_repo searches tracked repository text for a literal query, and a git_diff tool (when available) shows the change under review, optionally scoped to a path. The diff under review is also embedded in the user message. Use the embedded diff as a starting point and investigate related code wherever needed. Continue paginated results to reach the evidence.
 You cannot modify the workspace, and must not attempt to.
 Follow the task instructions in the user message exactly; reply with only the requested output.`;
 
 export const QODER_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer. Never modify files, execute shell commands, use the network, invoke subagents, or load repository-provided agent customizations.`;
+
+export const REPOSITORY_PAGE_BYTES = 128 * 1024;
+
+export function formatRepositoryPage(page: {
+  text: string;
+  offset: number;
+  line: number;
+  totalBytes: number;
+}) {
+  const { text, offset, line, totalBytes } = page;
+  const end = offset + Buffer.byteLength(text);
+  const nextOffset = end < totalBytes ? end : undefined;
+  const notice =
+    nextOffset === undefined
+      ? 'End of output.'
+      : `More output available. Repeat this tool with the same query/path and offset=${nextOffset}.`;
+  return {
+    text: `Starting at line ${line}, bytes ${offset}..${end} of ${totalBytes}. ${notice}\n\n${text}`,
+    nextOffset,
+  };
+}
 
 /**
  * Marks PR-author-controlled prose (title, description, commit messages,
@@ -830,7 +792,7 @@ export function buildShardAssignmentBlock(
 ): string {
   const explorationRules = embeddedFirstPrompt
     ? [
-        '- Review every assigned file in full depth, including direct interactions with unchanged code and with OTHER changed files. Apply the one-hop default and expansion trigger from the repository exploration policy.',
+        '- Review every assigned file in full depth, including direct interactions with unchanged code and with OTHER changed files. Follow dependencies as far as needed to establish the consequences.',
         '- Apply the repository exploration policy to the embedded hunks and any explicit coverage gaps.',
       ]
     : [
@@ -853,13 +815,15 @@ export function buildShardAssignmentBlock(
 
 /** Hard byte budget for the embedded commit list in the delta-context block. */
 export const CHANGES_SINCE_CONTEXT_BUDGET = 4000;
-export const CHANGES_SINCE_DIFF_BUDGET = 8 * 1024;
+export const CHANGES_SINCE_DIFF_BUDGET = 256 * 1024;
+export const CHANGES_SINCE_STAT_BUDGET = 32 * 1024;
 
 export function buildChangesSinceContextBlock(
   reviewedHead: string,
   headSha: string,
   commitSubjects: string[],
   diff?: { text: string; totalBytes: number },
+  stat?: { text: string; totalBytes: number } | null,
 ): string {
   const header = `## Changes since last review
 
@@ -878,6 +842,18 @@ The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}
   const omitted = commitSubjects.length - kept.length;
   const lines = [header, ...kept];
   if (omitted > 0) lines.push(`- _…and ${omitted} more commit(s); use the git command above._`);
+  if (stat === null)
+    lines.push('\nDelta file overview unavailable; use the delta diff and commits below.');
+  else if (stat)
+    lines.push(
+      '\n### Delta file overview',
+      truncateUtf8WithNotice(
+        stat.text,
+        CHANGES_SINCE_STAT_BUDGET,
+        'Delta file overview',
+        stat.totalBytes,
+      ),
+    );
   if (diff !== undefined) {
     lines.push(
       '\n### Delta diff',
@@ -886,7 +862,7 @@ The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}
         : truncateUtf8WithNotice(
             diff.text,
             CHANGES_SINCE_DIFF_BUDGET,
-            'Delta diff (UTF-8 text)',
+            'Changes-since summary diff (UTF-8 text)',
             diff.totalBytes,
           ),
     );
@@ -1009,10 +985,11 @@ export function buildContext7PromptBlock(reason: string): string {
 
 export const ADDRESSED_PRIOR_COMMENTS_PROMPT = `You are checking whether prior jbot-review inline comments have been addressed by the current PR branch.
 
-Use the checked-out repo, git diff, git log, and the PR context below to verify each prior jbot-review thread.
+Verify each prior thread against the embedded evidence. When tools are available, use the checked-out repo, git diff, and git log to resolve gaps.
 
 Rules:
 - Only mark a prior thread addressed when the current branch clearly fixes the specific issue raised.
+- Missing or truncated evidence is not proof of a fix. Leave a thread unaddressed when you cannot verify the fix.
 - Do not mark a thread addressed just because the latest review has no new findings.
 - Do not mark a thread addressed because a human reply declined the suggestion, such as "Not applied", "accepted as-is", or "not worth fixing".
 - Use the exact prior jbot-review thread id from the prompt.
@@ -1037,6 +1014,23 @@ before or after the JSON. Do not wrap it in markdown fences.`;
 
 export function assembleAddressedPriorCommentsPrompt(prContext: string): string {
   return [ADDRESSED_PRIOR_COMMENTS_PROMPT, prContext, ADDRESSED_OUTPUT_REMINDER].join('\n\n');
+}
+
+export function buildAddressedPriorCommentsContext(blocks: {
+  diffScope: string;
+  commits: string;
+  threads: string;
+  diff: string;
+}): string {
+  return [
+    UNTRUSTED_PR_CONTENT_NOTE,
+    `## Pull request\n${blocks.diffScope}`,
+    blocks.commits,
+    blocks.threads,
+    blocks.diff,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export const GUIDELINE_COMPLIANCE_PROMPT = `You are auditing a pull request for compliance with this repository's
@@ -1140,6 +1134,7 @@ that each finding is WRONG. Your job is to try to refute it.
   it from priors; see the "uncertain" verdict.
 - Check whether the PR itself already handles the concern elsewhere (a later
   hunk, a test, a validation layer).
+- For advisory suggestions, verify the alleged conflict and whether the proposed change offers a concrete benefit. Refute requests to check something the repository already answers.
 - Judge each finding independently. Do NOT widen scope: you are judging the
   listed findings, not re-reviewing the PR. Do not propose new findings.
 - Do NOT modify any files. This is a read-only check.
@@ -1205,6 +1200,7 @@ that each finding is WRONG. Your job is to try to refute it.
   guard elsewhere, or a library's internal behavior — return "uncertain".
   Excerpts are bounded windows, not complete files or exhaustive search results:
   omitted or unavailable code is not evidence that a guard or registration is absent.
+- For advisory suggestions, verify the alleged conflict and whether the proposed change offers a concrete benefit. Refute requests to check something the repository already answers.
 - Judge each finding independently. Do NOT widen scope: you are judging the
   listed findings, not re-reviewing the PR. Do not propose new findings.
 
@@ -1458,4 +1454,14 @@ export function truncateUtf8WithNotice(
     '',
     `[${label} truncated to ${keptBytes} bytes; omitted ${totalBytes - keptBytes} bytes.]`,
   ].join('\n');
+}
+
+export function formatUnverifiedFinding(finding: Pick<Finding, 'title' | 'body'>, reason?: string) {
+  return {
+    title: `Unverified concern: ${finding.title}`,
+    body: `**Not confirmed by verification.** ${reason || 'The available evidence did not establish or refute this concern.'}\n\nOriginal reviewer hypothesis (unverified):\n\n${finding.body
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n')}`,
+  };
 }

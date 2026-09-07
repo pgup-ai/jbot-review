@@ -136,6 +136,11 @@ export function aggregatePerformance(rows: Row[]) {
           (sum, row) => sum + (number(row, 'cacheReadTokens') ?? 0),
           0,
         ),
+        cacheWriteTokens: values.reduce(
+          (sum, row) => sum + (number(row, 'cacheWriteTokens') ?? 0),
+          0,
+        ),
+        promptBytes: distribution(values.flatMap((row) => number(row, 'promptBytes') ?? [])),
         repairRate: guardedRate(
           values.filter((row) => typeof row.session === 'string' && row.session.endsWith('-repair'))
             .length,
@@ -190,6 +195,16 @@ export function aggregatePerformance(rows: Row[]) {
         auxModel: run.auxModel,
         terminalState: run.terminalState,
         elapsedMs: number(run, 'elapsedMs'),
+        promptUsage: source
+          .filter((row) => row.kind === 'session')
+          .map((row) => ({
+            session: row.session,
+            model: row.model,
+            promptBytes: number(row, 'promptBytes'),
+            inputTokens: number(row, 'inputTokens'),
+            cacheReadTokens: number(row, 'cacheReadTokens'),
+            cacheWriteTokens: number(row, 'cacheWriteTokens'),
+          })),
         runPhases: source
           .filter((row) => row.kind === 'phase' && row.scope === 'run')
           .map((row) => ({
