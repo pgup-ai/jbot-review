@@ -15,8 +15,8 @@ The exposed tools are `jbot_read_file`, `read_directory`, `jbot_list_files`, and
 `jbot_search`. Reads resolve paths and symlinks before checking repository
 confinement. The reader and Git tools reuse J-Bot's paginated output helpers;
 there is no new aggregate tool-call or read quota. Listing includes tracked and
-non-ignored untracked paths; search covers tracked files. Git search disables
-text conversion, submodule recursion, and fsmonitor, and pins the worktree.
+non-ignored untracked paths; search covers non-ignored files. Git search disables
+text conversion and fsmonitor, and pins the worktree.
 
 Native plan-mode tools alone were insufficient in the isolation probe: all
 three models could read an outside canary through a direct path or a symlink.
@@ -29,6 +29,15 @@ explicit errors for direct and symlink escapes, found no outside canary through
 search, and listed repository files successfully. A hostile project mod and
 SessionStart hook did not execute; the repository was not mutated. Unit tests
 also cover a malicious Git fsmonitor setting and redirected `core.worktree`.
+
+A follow-up self-review reproduced an escape when an uncommitted directory
+symlink replaced an indexed directory: index-based Git grep followed the parent
+symlink. Search now walks the filesystem with `--no-index --exclude-standard`,
+which skips symlinks and includes non-ignored untracked files. Ignored files,
+including tracked files matching ignore rules, remain available through direct
+reads. The existing isolation test covers the escape and search scope. The
+bundled Linux tool also passes the same escape probe. The 36-run matrix below
+preceded this change.
 
 ## Paired quality screen
 
@@ -102,7 +111,7 @@ repair, telemetry, and packaging. Cleanup removed duplicate credential removal
 and file-stat checks and shortened the default-capability comment.
 Comments: seven blocks reviewed; two kept, one rewritten, four removed.
 New tests: three kept, none folded or removed; existing tests cover added wiring
-and parsing assertions. Net line delta: +562 (637 added, 75 removed).
+and parsing assertions.
 
 - Three focused regression tests; 1,028 existing and new tests pass in total.
 - Formatting, typecheck, lint, bundle build, and slim Docker build pass.

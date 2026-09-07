@@ -93,7 +93,7 @@ export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
       schema: {
         name: search ? 'jbot_search' : 'jbot_list_files',
         description: search
-          ? 'Search tracked repository files for literal text. Results include path and line number. Continue with the returned offset.'
+          ? 'Search non-ignored repository files for literal text without following symlinks. Results include path and line number. Use jbot_read_file for ignored files. Continue with the returned offset.'
           : 'List tracked and non-ignored untracked repository file paths. Continue with the returned offset.',
         input_schema: {
           type: 'object',
@@ -113,12 +113,13 @@ export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
             ? [
                 '--no-pager',
                 'grep',
+                '--no-index',
+                '--exclude-standard',
                 '--no-color',
                 '-n',
                 '-I',
                 '-F',
                 '--no-textconv',
-                '--no-recurse-submodules',
                 '-e',
                 input.query!,
                 '--',

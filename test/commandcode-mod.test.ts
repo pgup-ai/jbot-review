@@ -73,8 +73,15 @@ it('searches and lists the actual worktree without following symlinks or running
     writeFileSync(join(root, 'inside.ts'), 'needle\n');
     writeFileSync(join(outside, 'secret.ts'), 'OUTSIDE_SECRET_CANARY\n');
     symlinkSync(join(outside, 'secret.ts'), join(root, 'escape.ts'));
+    mkdirSync(join(root, 'replaced'));
+    writeFileSync(join(root, 'replaced', 'secret.ts'), 'safe');
+    writeFileSync(join(root, 'ignored.ts'), 'needle\n');
     git('init', '-q');
     git('add', '.');
+    rmSync(join(root, 'replaced'), { recursive: true });
+    symlinkSync(outside, join(root, 'replaced'));
+    writeFileSync(join(root, 'untracked.ts'), 'needle\n');
+    writeFileSync(join(root, '.gitignore'), 'ignored.ts\n');
     git('config', 'core.worktree', outside);
     git('config', 'core.fsmonitor', `touch ${join(parent, 'executed')}`);
     process.env.JBOT_COMMANDCODE_WORKSPACE = root;
@@ -90,6 +97,8 @@ it('searches and lists the actual worktree without following symlinks or running
     const found = await search.run({ input: { query: 'needle' } });
     assert.equal(found.ok, true);
     assert.match(found.content[0].text, /inside.ts:1:needle/);
+    assert.match(found.content[0].text, /untracked.ts:1:needle/);
+    assert.doesNotMatch(found.content[0].text, /ignored.ts/);
     const escaped = await search.run({ input: { query: 'OUTSIDE_SECRET_CANARY' } });
     assert.equal(escaped.ok, true);
     assert.equal(escaped.content[0].text, '(no matches)');
