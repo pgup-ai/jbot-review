@@ -142,6 +142,7 @@ describe('CommandCode CLI provider helpers', () => {
       assert.equal(path, join(home, '.commandcode', 'settings.json'));
       assert.equal(statSync(path).mode & 0o777, 0o600);
       assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
+        tasteLearning: false,
         permissions: { deny: ['*'] },
       });
     } finally {
@@ -149,23 +150,33 @@ describe('CommandCode CLI provider helpers', () => {
     }
   });
 
-  it('keeps ambient API-key auth from overriding the temp auth file', () => {
-    const previousApiKey = process.env.COMMAND_CODE_API_KEY;
-    const previousHome = process.env.HOME;
+  it('isolates CLI auth, configuration and preload hooks from the ambient environment', () => {
+    const overrides = {
+      COMMAND_CODE_API_KEY: 'stale-api-key',
+      HOME: '/ambient-home',
+      GITHUB_TOKEN: 'ambient-token',
+      GIT_DIR: '/other/repo/.git',
+      NODE_OPTIONS: '--require=/other/hook.js',
+      BUN_OPTIONS: '--preload=/other/hook.js',
+      PWD: '/other/repo',
+    };
+    const previous = Object.fromEntries(
+      Object.keys(overrides).map((key) => [key, process.env[key]]),
+    );
     try {
-      process.env.COMMAND_CODE_API_KEY = 'stale-api-key';
-      process.env.HOME = '/ambient-home';
-
-      const env = commandCodeEnvForHome('/tmp/jbot-commandcode-home-test');
-
-      assert.equal(env?.HOME, '/tmp/jbot-commandcode-home-test');
-      assert.equal(env?.COMMAND_CODE_API_KEY, undefined);
+      Object.assign(process.env, overrides);
+      const env = commandCodeEnvForHome('/tmp/jbot-commandcode-home-test')!;
+      assert.equal(env.HOME, '/tmp/jbot-commandcode-home-test');
+      assert.equal(env.XDG_CONFIG_HOME, '/tmp/jbot-commandcode-home-test/.config');
+      for (const key of Object.keys(overrides).filter((key) => key !== 'HOME'))
+        assert.equal(env[key], undefined, key);
+      assert.equal(env.GIT_CONFIG_NOSYSTEM, '1');
       assert.equal(process.env.COMMAND_CODE_API_KEY, 'stale-api-key');
     } finally {
-      if (previousApiKey === undefined) delete process.env.COMMAND_CODE_API_KEY;
-      else process.env.COMMAND_CODE_API_KEY = previousApiKey;
-      if (previousHome === undefined) delete process.env.HOME;
-      else process.env.HOME = previousHome;
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
   });
 
@@ -209,6 +220,14 @@ describe('CommandCode CLI provider helpers', () => {
         '{"type":"event","event":',
         JSON.stringify({ type: 'event', event: { type: 'tool_running' } }),
         JSON.stringify({
+          type: 'event',
+          event: { type: 'tool_completed', toolName: 'jbot_read_file', result: 'private content' },
+        }),
+        JSON.stringify({
+          type: 'event',
+          event: { type: 'tool_hook_blocked', toolName: 'untrusted-name' },
+        }),
+        JSON.stringify({
           type: 'result',
           subtype: 'success',
           sessionId: 'session-1',
@@ -227,6 +246,7 @@ describe('CommandCode CLI provider helpers', () => {
     assert.deepEqual(result, {
       finalText: '{"summary":"ok","findings":[]}',
       sessionId: 'session-1',
+      toolOutcomes: { 'jbot_read_file:tool_completed': 1, 'other:tool_hook_blocked': 1 },
       usage: { input: 100, output: 20, reasoning: 0, cacheRead: 30, cacheWrite: 40 },
     });
 

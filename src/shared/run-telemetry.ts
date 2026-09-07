@@ -24,6 +24,7 @@ const POLICY_KEYS = [
   'embeddedFirstPrompt',
   'guidelineWiden',
   'verifierSlimContext',
+  'commandCodeTools',
   'verifyOverlapGrace',
   'reviewPasses',
   'verifyFindings',
@@ -96,14 +97,15 @@ export function effectiveReasoningEffort(
 }
 
 export function roleTelemetry(
-  backend: Pick<ReviewBackend, 'name' | 'observability'> | undefined,
+  backend: Pick<ReviewBackend, 'name' | 'observability' | 'canReadWorkspace'> | undefined,
   model: string,
   reasoningEffort?: string,
 ) {
   const { providerID, modelID } = parseModelName(model);
   const canReadWorkspace =
     backend &&
-    backendCanReadWorkspace(providerID, cliBackendForProvider(providerID)) &&
+    (backend.canReadWorkspace ??
+      backendCanReadWorkspace(providerID, cliBackendForProvider(providerID))) &&
     (backend.name !== 'opencode' || modelSupportsAgenticTools(providerID, modelID));
   return {
     model,

@@ -108,12 +108,24 @@ describe('parseReview', () => {
     assert.equal(logs.at(-1), 'review response preview:\n<empty>');
   });
 
-  it('rejects a non-object JSON root in strict mode instead of returning an empty review', () => {
-    // A bare array parses, so it used to read as summary:'' + findings:[] —
-    // a silent "no findings" review the repair prompt never got to fix.
+  it('rejects JSON without a review result in strict mode instead of returning an empty review', () => {
     assert.throws(() => parseReview('[]', 'review', noLog, { strict: true }), /non-object/);
     assert.throws(() => parseReview('"done"', 'review', noLog, { strict: true }), /non-object/);
-    // Non-strict auxiliaries keep failing open to an empty result.
+    for (const raw of ['{}', '{"findings":null}', 'Example options: {}. Result: {"findings":[]}'])
+      assert.throws(
+        () => parseReview(raw, 'review', noLog, { strict: true }),
+        /without a findings or addressedPriorComments array/,
+      );
+    assert.deepEqual(
+      parseReview('{"findings":[]}', 'review', noLog, { strict: true }).findings,
+      [],
+    );
+    assert.deepEqual(
+      parseReview('{"addressedPriorComments":[]}', 'addressed', noLog, { strict: true })
+        .addressedPriorComments,
+      [],
+    );
+    assert.deepEqual(parseReview('{}', 'aux', noLog).findings, []);
     assert.deepEqual(parseReview('[]', 'aux', noLog).findings, []);
   });
 

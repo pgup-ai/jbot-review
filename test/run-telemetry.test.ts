@@ -39,6 +39,10 @@ test('configuration fingerprints policy changes while excluding credentials and 
       'opencode/a',
     ).configurationHash,
   );
+  assert.notEqual(
+    first.configurationHash,
+    runConfiguration({ ...options, commandCodeTools: true }, 'opencode/a').configurationHash,
+  );
   assert.equal(
     runConfiguration({ ...options, sdkEngine: 'https://secret.example' }, 'opencode/a')
       .configuration.sdkEngine,
@@ -104,6 +108,10 @@ test('effective effort follows the backend contract rather than claiming every r
   assert.equal(
     roleTelemetry({ name: 'commandcode' }, 'commandcode/a').workspaceAccess,
     'embedded-only',
+  );
+  assert.equal(
+    roleTelemetry({ name: 'commandcode', canReadWorkspace: true }, 'commandcode/a').workspaceAccess,
+    'read-only',
   );
   assert.equal(
     roleTelemetry({ name: 'opencode', observability: 'enforceable' }, 'opencode/a').workspaceAccess,

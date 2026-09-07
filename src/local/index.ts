@@ -760,6 +760,7 @@ async function review(
       embeddedFirstPrompt:
         config?.embeddedFirstPrompt ?? parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
       guidelineWiden: config?.guidelineWiden ?? parseEnvGuidelineWiden('JBOT_GUIDELINE_WIDEN'),
+      commandCodeTools: parseEnvBoolean('JBOT_COMMANDCODE_TOOLS', false),
       verifierSlimContext:
         config?.verifierSlimContext ?? parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
       verifyOverlapGrace:

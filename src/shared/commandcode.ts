@@ -1,8 +1,9 @@
-import { chmodSync, createReadStream, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, createReadStream, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { opendir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 
 import { parseModelName } from '@symma/protocol';
 import {
@@ -13,12 +14,14 @@ import {
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
   withNoToolsReviewDirective,
+  withCommandCodeToolsDirective,
   type VerifiableFinding,
 } from './prompt.ts';
 import {
   parseChangesSinceLastReviewSummary,
   parseFindingVerdicts,
   parseReview,
+  sessionEnvDenyKeys,
   type PromptTokenUsage,
   type TokenUsageRecorder,
 } from './opencode.ts';
@@ -77,14 +80,40 @@ export function writeCommandCodeAuth(
   return path;
 }
 
-export function writeCommandCodeReadOnlySettings(home: string): string {
+export function writeCommandCodeReadOnlySettings(home: string, tools = false): string {
   const path = join(home, '.commandcode', 'settings.json');
   mkdirSync(join(home, '.commandcode'), { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${JSON.stringify({ permissions: { deny: ['*'] } }, null, 2)}\n`, {
-    mode: 0o600,
-  });
+  writeFileSync(
+    path,
+    `${JSON.stringify({ tasteLearning: false, permissions: tools ? { defaultMode: 'plan' } : { deny: ['*'] } }, null, 2)}\n`,
+    {
+      mode: 0o600,
+    },
+  );
   chmodCommandCodeFile(path);
+  mkdirSync(join(home, 'launch'), { mode: 0o700, recursive: true });
+  if (tools) {
+    const bundled = new URL('../commandcode-mod.js', import.meta.url);
+    const mod = existsSync(fileURLToPath(bundled))
+      ? bundled
+      : new URL('./commandcode-mod.ts', import.meta.url);
+    // CommandCode normally swallows mod-load failures. Stop before any unguarded tool can run.
+    writeFileSync(
+      join(home, 'review.mjs'),
+      `export default async function(cmd) {
+  try { const mod = await import(${JSON.stringify(mod.href)}); await mod.default(cmd); }
+  catch { console.error('CommandCode repository tools failed to initialize.'); process.exit(1); }
+}
+`,
+      { mode: 0o600 },
+    );
+  }
   return path;
+}
+
+export interface CommandCodeRuntime {
+  home: string;
+  tools: boolean;
 }
 
 export interface CommandCodeCliArgsInput {
@@ -96,8 +125,6 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
   const { modelID } = parseModelName(input.model);
   const args = [
     '-p',
-    // Trust only skips the project-trust prompt for headless runs; plan mode
-    // keeps the session read-only.
     '--trust',
     '--skip-onboarding',
     '--no-skills',
@@ -180,7 +207,7 @@ export async function runCommandCodeReview(
     label?: string;
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
-    home?: string;
+    runtime?: CommandCodeRuntime;
     effort?: string;
   } = {},
 ): Promise<ReviewResult> {
@@ -203,7 +230,7 @@ export async function runCommandCodeReview(
     log,
     options.timeoutMs,
     options.onTokenUsage,
-    options.home,
+    options.runtime,
     options.effort,
   );
   try {
@@ -227,7 +254,7 @@ export async function runCommandCodeReview(
       log,
       options.timeoutMs,
       options.onTokenUsage,
-      options.home,
+      options.runtime,
       options.effort,
     );
     return parseReview(repaired, `${label}-repair`, log, { strict: true });
@@ -241,7 +268,7 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<AddressedPriorComment[]> {
   const raw = await runCommandCodePrompt(
@@ -252,7 +279,7 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
     log,
     timeoutMs,
     onTokenUsage,
-    home,
+    runtime,
     effort,
   );
   return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
@@ -266,7 +293,7 @@ export async function runCommandCodeGuidelineComplianceCheck(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<Finding[]> {
   const raw = await runCommandCodePrompt(
@@ -277,7 +304,7 @@ export async function runCommandCodeGuidelineComplianceCheck(
     log,
     timeoutMs,
     onTokenUsage,
-    home,
+    runtime,
     effort,
   );
   return parseReview(raw, 'guideline-compliance', log).findings;
@@ -290,7 +317,7 @@ export async function runCommandCodeChangesSinceLastReview(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<string> {
   const raw = await runCommandCodePrompt(
@@ -301,7 +328,7 @@ export async function runCommandCodeChangesSinceLastReview(
     log,
     timeoutMs,
     onTokenUsage,
-    home,
+    runtime,
     effort,
   );
   return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
@@ -315,7 +342,7 @@ export async function runCommandCodeFindingVerification(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<FindingVerdict[] | undefined> {
   const raw = await runCommandCodePrompt(
@@ -326,7 +353,7 @@ export async function runCommandCodeFindingVerification(
     log,
     timeoutMs,
     onTokenUsage,
-    home,
+    runtime,
     effort,
   );
   return parseFindingVerdicts(raw, findings.length, log);
@@ -420,7 +447,9 @@ export function parseCommandCodeJsonOutput(output: string): {
   finalText: string;
   sessionId?: string;
   usage?: PromptTokenUsage;
+  toolOutcomes?: Record<string, number>;
 } {
+  const toolOutcomes: Record<string, number> = {};
   let result: Record<string, unknown> | undefined;
   let recoveredRunEnd: Record<string, unknown> | undefined;
   let invalidLine: string | undefined;
@@ -437,6 +466,22 @@ export function parseCommandCodeJsonOutput(output: string): {
     }
     if (!isRecord(frame)) continue;
     if (frame.type === 'result') result = frame;
+    const event = frame.event;
+    if (
+      isRecord(event) &&
+      typeof event.type === 'string' &&
+      ['tool_completed', 'tool_errored', 'tool_denied', 'tool_hook_blocked'].includes(event.type)
+    ) {
+      const name =
+        typeof event.toolName === 'string' &&
+        ['jbot_read_file', 'read_directory', 'jbot_search', 'jbot_list_files'].includes(
+          event.toolName,
+        )
+          ? event.toolName
+          : 'other';
+      const key = `${name}:${event.type}`;
+      toolOutcomes[key] = (toolOutcomes[key] ?? 0) + 1;
+    }
   }
   const finalResult = result ?? recoveredRunEnd;
   if (!finalResult) {
@@ -456,6 +501,7 @@ export function parseCommandCodeJsonOutput(output: string): {
   const usage = parseCommandCodeUsage(finalResult.usage);
   return {
     finalText: finalResult.finalText,
+    ...(Object.keys(toolOutcomes).length ? { toolOutcomes } : {}),
     ...(typeof finalResult.sessionId === 'string' ? { sessionId: finalResult.sessionId } : {}),
     ...(usage ? { usage } : {}),
   };
@@ -518,20 +564,26 @@ async function runCommandCodePrompt(
   log: (msg: string) => void,
   timeoutMs = COMMANDCODE_PROMPT_TIMEOUT_MS,
   onTokenUsage?: TokenUsageRecorder,
-  home?: string,
+  runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<string> {
   const args = buildCommandCodeCliArgs({ model, effort });
-  const input = withNoToolsReviewDirective(prompt);
+  if (runtime?.tools) args.push('--add-dir', workspace, '--mod', join(runtime.home, 'review.mjs'));
+  const input = runtime?.tools
+    ? withCommandCodeToolsDirective(prompt, workspace)
+    : withNoToolsReviewDirective(prompt);
   log(
     `Calling ${label} prompt (agent=commandcode-cli, model=${model}${effort ? `, effort=${effort}` : ''})`,
   );
   let usage: PromptTokenUsage | undefined;
   try {
     const result = await runCommandCodeProcess(COMMANDCODE_CLI_BIN, args, {
-      cwd: workspace,
+      cwd: runtime ? join(runtime.home, 'launch') : workspace,
       input,
-      env: commandCodeEnvForHome(home),
+      env: {
+        ...(commandCodeEnvForHome(runtime?.home) ?? process.env),
+        ...(runtime?.tools ? { JBOT_COMMANDCODE_WORKSPACE: workspace } : {}),
+      },
       timeoutMs,
       timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
     });
@@ -541,9 +593,11 @@ async function runCommandCodePrompt(
       );
     }
     const parsed = parseCommandCodeJsonOutput(result.stdout);
+    if (runtime?.tools)
+      log(`CommandCode tool outcomes (${label}): ${JSON.stringify(parsed.toolOutcomes ?? {})}`);
     const estimatedCostUsd =
-      home && parsed.sessionId
-        ? await commandCodeSessionEstimatedCost(home, parsed.sessionId)
+      runtime && parsed.sessionId
+        ? await commandCodeSessionEstimatedCost(runtime.home, parsed.sessionId)
         : undefined;
     usage = parsed.usage
       ? {
@@ -591,11 +645,18 @@ export function formatCommandCodePromptTimeoutMessage(
 
 export function commandCodeEnvForHome(home: string | undefined): NodeJS.ProcessEnv | undefined {
   if (!home) return undefined;
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
-  // CommandCode gives this env var precedence over ~/.commandcode/auth.json.
-  // The action input writes temp auth.json, so prevent ambient CI/local state
-  // from overriding the selected credential.
-  delete env.COMMAND_CODE_API_KEY;
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    XDG_CONFIG_HOME: join(home, '.config'),
+  };
+  for (const key of sessionEnvDenyKeys(Object.keys(env))) delete env[key];
+  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
+  delete env.NODE_OPTIONS;
+  delete env.BUN_OPTIONS;
+  delete env.PWD;
+  env.GIT_CONFIG_NOSYSTEM = '1';
   return env;
 }
 

@@ -164,6 +164,7 @@ import {
   runCommandCodeReview,
   writeCommandCodeAuth,
   writeCommandCodeReadOnlySettings,
+  type CommandCodeRuntime,
 } from './commandcode.ts';
 import { CODEX_PROVIDER_ID, CURSOR_PROVIDER_ID, writeCodexAuth } from '@symma/protocol';
 import {
@@ -443,7 +444,7 @@ function createPoolsideBackend(
 
 function createCommandCodeBackend(
   workspace: string,
-  home: string,
+  runtime: CommandCodeRuntime,
   effortFor: (model: string, override?: Record<string, unknown>) => string | undefined,
 ): ReviewBackend & { stop(): Promise<void> } {
   const processes = createCommandCodeProcessScope();
@@ -452,11 +453,12 @@ function createCommandCodeBackend(
     stop: processes.stop,
     abortSessionsByLabel: (label) => processes.abort(label),
     observability: COMMANDCODE_TELEMETRY_CAPABILITY,
+    canReadWorkspace: runtime.tools,
     runReview: (model, prContext, guidelines, log, options) =>
       processes.run(options?.label ?? 'review', () =>
         runCommandCodeReview(workspace, model, prContext, guidelines, log, {
           ...options,
-          home,
+          runtime,
           effort: effortFor(model),
         }),
       ),
@@ -469,7 +471,7 @@ function createCommandCodeBackend(
           log,
           timeoutMs,
           onTokenUsage,
-          home,
+          runtime,
           effortFor(model),
         ),
       ),
@@ -483,7 +485,7 @@ function createCommandCodeBackend(
           log,
           timeoutMs,
           onTokenUsage,
-          home,
+          runtime,
           effortFor(model),
         ),
       ),
@@ -505,7 +507,7 @@ function createCommandCodeBackend(
           log,
           timeoutMs,
           onTokenUsage,
-          home,
+          runtime,
           effortFor(model, modelOptions),
         ),
       ),
@@ -518,7 +520,7 @@ function createCommandCodeBackend(
           log,
           timeoutMs,
           onTokenUsage,
-          home,
+          runtime,
           effortFor(model),
         ),
       ),
@@ -819,6 +821,7 @@ export interface ReviewRunOptions {
    * gate, so the flip waits on adjudicated benchmark evidence.
    */
   verifierSlimContext?: boolean;
+  commandCodeTools?: boolean;
   /**
    * Model for the auxiliary sessions (addressed-check, guideline compliance,
    * finding verification). Lets the main review run on a stronger tier while
@@ -1808,21 +1811,28 @@ async function runReviewPipeline(params: {
       commandCodeHome = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
       guardCliHomes();
       authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
-      writeCommandCodeReadOnlySettings(commandCodeHome);
+      writeCommandCodeReadOnlySettings(commandCodeHome, options.commandCodeTools);
     } catch (error) {
       cleanupCliHomes();
       throw error;
     }
     log(`CommandCode CLI auth configured at ${authPath}.`);
     log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
-    log('CommandCode reviews run with skills and tools disabled.');
-    commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome, (m, override) =>
-      commandCodeSessionEffort(m, override, {
-        auxModel,
-        auxModelOptions,
-        mainModelOptions: options.modelOptions,
-        explicit: options.modelOptionsExplicit ?? false,
-      }),
+    log(
+      options.commandCodeTools
+        ? 'CommandCode repository read/search tools enabled; launch configuration isolated.'
+        : 'CommandCode reviews run with skills and tools disabled.',
+    );
+    commandCodeBackend = createCommandCodeBackend(
+      workspace,
+      { home: commandCodeHome, tools: options.commandCodeTools ?? false },
+      (m, override) =>
+        commandCodeSessionEffort(m, override, {
+          auxModel,
+          auxModelOptions,
+          mainModelOptions: options.modelOptions,
+          explicit: options.modelOptionsExplicit ?? false,
+        }),
     );
   }
 
@@ -2254,7 +2264,8 @@ async function runReviewPipeline(params: {
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
       complianceRuns: incrementalLenses.guidelinePass,
-      mainCanReadWorkspace: backendCanReadWorkspace(providerID, mainCliBackend),
+      mainCanReadWorkspace:
+        mainBackend.canReadWorkspace ?? backendCanReadWorkspace(providerID, mainCliBackend),
       widen: options.guidelineWiden,
       full: guidelines,
     });
@@ -3207,6 +3218,7 @@ export function normalizeOptions(
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
     guidelineWiden: options?.guidelineWiden ?? 'auto',
     verifierSlimContext: options?.verifierSlimContext ?? false,
+    commandCodeTools: options?.commandCodeTools ?? false,
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     auxModel: options?.auxModel ?? '',
     modelPool: options?.modelPool ?? [],

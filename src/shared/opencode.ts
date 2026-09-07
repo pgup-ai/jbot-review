@@ -1493,6 +1493,8 @@ export function parseReview(
   }
 
   const obj = parsed as Record<string, unknown>;
+  if (options.strict && !Array.isArray(obj.findings) && !Array.isArray(obj.addressedPriorComments))
+    throw new Error(`${label} returned JSON without a findings or addressedPriorComments array`);
   const summary = typeof obj.summary === 'string' ? obj.summary : '';
   const rawFindings = Array.isArray(obj.findings) ? obj.findings : [];
   const rawAddressed = Array.isArray(obj.addressedPriorComments) ? obj.addressedPriorComments : [];

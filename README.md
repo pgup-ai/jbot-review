@@ -402,7 +402,8 @@ an automatic approval or review-done reaction. CommandCode cancellation stops it
 process tree and waits for output pipes to close before removing its temporary home.
 Queued passes cancelled before execution never start a provider session.
 Pi and tool-capable OpenCode verifiers can read and search repository evidence;
-CommandCode remains tool-less. Changes-since summaries receive up to 256 KiB
+CommandCode can also investigate when `JBOT_COMMANDCODE_TOOLS=true`.
+Changes-since summaries receive up to 256 KiB
 of delta diff plus a bounded file overview; larger deltas disclose summary-only
 omissions. Main reviews continue to cover the full base-to-head diff.
 
@@ -572,8 +573,25 @@ Use `provider: commandcode` with `commandcode-access-key` /
 `COMMANDCODE_ACCESS_KEY` for the CommandCode CLI backend. The Docker image
 includes the CommandCode CLI, but `.commandcode/auth.json` is written under an
 isolated temporary HOME only when the main or active auxiliary provider is
-`commandcode`, then removed after the run. Skill discovery and tools are disabled;
-reviews use the context and diff embedded by J-Bot.
+`commandcode`, then removed after the run. Sessions start in an empty directory;
+repository and operator settings, hooks, mods, and skills are excluded. Tools remain
+disabled by default.
+
+Set `JBOT_COMMANDCODE_TOOLS=true` in the Action step's `env`, local environment,
+or app environment to enable repository investigation for **all CommandCode
+sessions**, including verification. This exposes `jbot_read_file`, `read_directory`,
+`jbot_list_files`, and `jbot_search`. Reads reject paths and symlinks resolving
+outside the repository. Search covers tracked files; listing also includes
+non-ignored untracked files, which can be read directly. Shell, writes, and web
+access stay disabled. J-Bot continues embedding the complete review diff. Tool
+results are paginated, with no additional aggregate read/tool-call quota.
+
+The opt-in uses a trusted mod with the image's pinned CommandCode 1.44.0; local
+runs need that version. Mod initialization failure stops the CLI. Logs record
+sanitized tool outcome counts and effective workspace access; per-tool timing
+remains unavailable. See the [tooling evaluation](docs/audits/2026-09-07-commandcode-repository-tools.md)
+for the model comparison and rollout limits.
+
 Use `provider: cursor` with `cursor-api-key` / `CURSOR_API_KEY` for the Cursor
 CLI backend. The Docker image includes the Cursor CLI (`cursor-agent`), which
 reads the key from the environment — no credential file — and runs read-only via

@@ -79,10 +79,11 @@ describe('limitReviewBackendSessions', () => {
     assert.deepEqual(priorities, ['high', 'high', 'normal', 'normal']);
   });
 
-  it('passes the abort handle through the limiter (TASK-076)', () => {
+  it('preserves backend capabilities and the abort handle through the limiter (TASK-076)', () => {
     const aborted: string[] = [];
     const backend = {
       ...makeBackend(),
+      canReadWorkspace: true,
       abortSessionsByLabel: (label: string) => {
         aborted.push(label);
         return 1;
@@ -92,6 +93,7 @@ describe('limitReviewBackendSessions', () => {
       acquire: async () => () => undefined,
     });
 
+    assert.equal(limited.canReadWorkspace, true);
     limited.abortSessionsByLabel?.('review-frontend', () => {});
     assert.deepEqual(aborted, ['review-frontend']);
   });

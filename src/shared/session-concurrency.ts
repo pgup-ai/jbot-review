@@ -10,6 +10,7 @@ import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } fro
 export interface ReviewBackend {
   name: string;
   observability?: BackendTelemetryCapability;
+  canReadWorkspace?: boolean;
   runReview(
     model: string,
     prContext: string,
@@ -179,6 +180,7 @@ export function limitReviewBackendSessions(
   return {
     name: backend.name,
     observability: backend.observability,
+    canReadWorkspace: backend.canReadWorkspace,
     abortSessionsByLabel: (label, log) => {
       let queued = 0;
       for (const [controller, session] of pending) {
