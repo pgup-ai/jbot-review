@@ -1527,18 +1527,16 @@ async function runReviewPipeline(params: {
   let slimVerifierIssueInputs:
     { linkedIssues: LinkedIssue[]; linkedIssuesOmitted: number } | undefined;
   if (options.enhancedContext) {
-    const commits = localDiff
-      ? localDiff.commits
-      : await listPrCommits(octokit, owner, repo, pullNumber);
-    const { issues: linkedIssues, omitted: linkedIssuesOmitted } = localDiff
-      ? { issues: [], omitted: 0 }
-      : await safeListClosingIssues(octokit, owner, repo, pullNumber, log);
-    // Belt-and-braces: local mode never reaches GitHub for checks (the local
-    // driver also passes no headSha, so the fallback text stays literally true).
-    const checkSummary =
-      headSha && !localDiff
-        ? await getCheckStatusSummary(octokit, owner, repo, headSha)
-        : 'Check status unavailable: PR head SHA was not provided.';
+    const [commits, { issues: linkedIssues, omitted: linkedIssuesOmitted }, checkSummary] =
+      await Promise.all([
+        localDiff ? localDiff.commits : listPrCommits(octokit, owner, repo, pullNumber),
+        localDiff
+          ? { issues: [], omitted: 0 }
+          : safeListClosingIssues(octokit, owner, repo, pullNumber, log),
+        headSha && !localDiff
+          ? getCheckStatusSummary(octokit, owner, repo, headSha)
+          : 'Check status unavailable: PR head SHA was not provided.',
+      ]);
     coreContext = buildReviewContext({
       pullTitle,
       pullBody,

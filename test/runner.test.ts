@@ -895,6 +895,57 @@ describe('runPrReview local mode and early exits', () => {
       (error: unknown) => error === sentinel,
     );
   });
+
+  it('starts independent context fetches before commits settle and preserves fatal failures', async () => {
+    const sentinel = new Error('commits unavailable');
+    const started: string[] = [];
+    const octokit = {
+      rest: {
+        pulls: {
+          get: async () => ({ data: { state: 'open', merged: false, head: { sha: 'head' } } }),
+          listFiles: 'files',
+          listReviews: 'reviews',
+          listCommits: 'commits',
+        },
+        checks: { listForRef: 'checks' },
+      },
+      paginate: async (endpoint: string) => {
+        if (endpoint === 'files') return [{ filename: 'a.ts', patch: '@@ -1 +1 @@\n-a\n+b' }];
+        if (endpoint === 'reviews') return [];
+        started.push(endpoint);
+        if (endpoint === 'commits') {
+          return new Promise((_, reject) => setImmediate(() => reject(sentinel)));
+        }
+        return [];
+      },
+      graphql: async (query: string) => {
+        if (query.includes('ClosingIssues')) started.push('issues');
+        return { viewer: { login: 'jbot' } };
+      },
+    } as unknown as Octokit;
+
+    const workspace = mkdtempSync(join(tmpdir(), 'jbot-startup-'));
+    const gitConfig = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = join(workspace, 'gitconfig');
+    try {
+      await assert.rejects(
+        runPrReview({
+          ...base,
+          workspace,
+          octokit,
+          headSha: 'head',
+          options: { dryRun: true, sdkEngine: 'opencode', enhancedContext: true },
+          log: () => {},
+        }),
+        (error: unknown) => error === sentinel,
+      );
+      assert.deepEqual(started, ['commits', 'issues', 'checks']);
+    } finally {
+      if (gitConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = gitConfig;
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('emitReviewTelemetry sink', () => {
