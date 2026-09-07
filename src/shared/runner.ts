@@ -3414,7 +3414,7 @@ async function verifyFindings(params: {
       state: 'failed',
       error: new Error('verification budget exhausted'),
     });
-    return params.findings;
+    return applyFindingVerdicts(params.findings, selectedIndexes, []).findings;
   }
 
   const targets = selectedIndexes.map((index) => params.findings[index]);

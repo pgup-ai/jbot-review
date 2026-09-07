@@ -785,7 +785,7 @@ complete files or proof that omitted behavior is absent.
 All findings, including P3 and nits, receive verification in severity-ordered
 batches of ten. Findings arriving after an overlapping verification receive a
 follow-up check. Verification shares the remaining verification time budget;
-failed or missing verdicts preserve findings and report incomplete coverage.
+failed or missing verdicts retain findings as unverified advisories and report incomplete coverage.
 Uncertain findings are explicitly labeled unverified, with low confidence and
 an investigate kind; blocking severities become P3, while nits remain nits.
 

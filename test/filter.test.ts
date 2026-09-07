@@ -247,6 +247,8 @@ describe('applyFindingVerdicts', () => {
       { index: 0, verdict: 'refuted', reason: 'guarded' },
       { index: 1, verdict: 'uncertain' },
       { index: 2, verdict: 'confirmed' },
+      { index: 3, verdict: 'confirmed' },
+      { index: 4, verdict: 'confirmed' },
     ]);
 
     assert.deepEqual(
@@ -293,7 +295,7 @@ describe('applyFindingVerdicts', () => {
     assert.match(result[0].body, /> Definitely broken/);
   });
 
-  it('treats a selected finding with no verdict as confirmed (fail-open)', () => {
+  it('retains missing verdicts as unverified advisories', () => {
     const {
       findings: result,
       dropped,
@@ -301,8 +303,15 @@ describe('applyFindingVerdicts', () => {
     } = applyFindingVerdicts(findings, selected, [{ index: 0, verdict: 'refuted' }]);
 
     assert.equal(dropped.length, 1);
-    assert.equal(demoted.length, 0);
+    assert.equal(demoted.length, 4);
     assert.equal(result.length, findings.length - 1);
+    for (const f of result) {
+      assert.equal(f.verificationUncertain, true);
+      assert.equal(f.confidence, 'low');
+      assert.match(f.body, /Finding verification did not return a verdict/);
+    }
+    assert.equal(result.find((f) => f.title.includes('nit survives'))?.severity, 'nit');
+    assert.equal(applyFindingVerdicts(findings, selected, []).demoted.length, findings.length);
   });
 });
 
@@ -418,11 +427,13 @@ describe('mergeVerdictsByLocation (TASK-079/080)', () => {
     );
   });
 
-  it('fails open per finding: no verdict for a target means confirmed', () => {
+  it('marks missing snapshot verdicts unverified while leaving late findings for follow-up', () => {
     const { findings, lateUnverified } = mergeVerdictsByLocation(finalFindings, targets, [
       { index: 0, verdict: 'refuted' },
     ]);
     assert.equal(findings.length, finalFindings.length - 1);
+    assert.ok(findings.slice(0, 2).every((f) => f.verificationUncertain && f.confidence === 'low'));
+    assert.ok(lateUnverified.every((f) => !f.verificationUncertain));
     assert.deepEqual(
       lateUnverified.map((f) => f.title),
       ['late blocking', 'late advisory'],

@@ -198,14 +198,6 @@ export interface VerdictApplication {
   demoted: Array<{ finding: Finding; reason?: string }>;
 }
 
-/**
- * Applies verifier verdicts to the full findings list. `verdicts[].index`
- * refers to a position in `selectedIndexes` (the order the findings were
- * shown to the verifier), which in turn holds positions in `findings` — this
- * function owns that double translation so it stays testable. Refuted
- * findings are dropped, uncertain ones demoted to advisory; a selected
- * finding with no verdict passes through unchanged (fail-open per finding).
- */
 export interface OverlapVerdictMerge extends VerdictApplication {
   /** Findings absent from the snapshot, requiring a follow-up verification. */
   lateUnverified: Finding[];
@@ -236,8 +228,11 @@ export function mergeVerdictsByLocation(
       lateUnverified.push(finding);
       return [finding];
     }
-    const verdict = verdictByIdentity.get(identity);
-    if (!verdict || verdict.verdict === 'confirmed') return [finding];
+    const verdict = verdictByIdentity.get(identity) ?? {
+      verdict: 'uncertain',
+      reason: 'Finding verification did not return a verdict.',
+    };
+    if (verdict.verdict === 'confirmed') return [finding];
     if (verdict.verdict === 'refuted') {
       dropped.push({ finding, reason: verdict.reason });
       return [];
@@ -259,6 +254,7 @@ function unverifiedFinding(finding: Finding, reason?: string): Finding {
   };
 }
 
+/** Verdict positions index selectedIndexes, which maps back to the full finding list. */
 export function applyFindingVerdicts(
   findings: Finding[],
   selectedIndexes: number[],
@@ -270,8 +266,11 @@ export function applyFindingVerdicts(
   const droppedIndexes = new Set<number>();
 
   selectedIndexes.forEach((findingIndex, position) => {
-    const verdict = verdictByPosition.get(position);
-    if (!verdict || verdict.verdict === 'confirmed') return;
+    const verdict = verdictByPosition.get(position) ?? {
+      verdict: 'uncertain',
+      reason: 'Finding verification did not return a verdict.',
+    };
+    if (verdict.verdict === 'confirmed') return;
     if (verdict.verdict === 'refuted') {
       droppedIndexes.add(findingIndex);
       dropped.push({ finding: findings[findingIndex], reason: verdict.reason });

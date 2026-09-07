@@ -1322,9 +1322,17 @@ it('verifies every batch and preserves successful verdicts when another batch fa
         .slice(firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0),
     );
     assert.deepEqual(coverage, [firstBatch === 'complete' ? 'completed' : 'failed']);
+    const retained = applyFindingVerdicts(
+      findings,
+      selectFindingIndexes(findings),
+      verdicts,
+    ).findings;
     assert.deepEqual(
-      applyFindingVerdicts(findings, selectFindingIndexes(findings), verdicts).findings,
-      findings.slice(0, firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0),
+      retained.map((f) => f.line),
+      findings
+        .slice(0, firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0)
+        .map((f) => f.line),
     );
+    assert.ok(retained.every((f) => f.verificationUncertain && f.confidence === 'low'));
   }
 });
