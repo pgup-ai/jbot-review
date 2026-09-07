@@ -310,7 +310,16 @@ export async function runClineChangesSinceLastReview(
   const raw = await runClinePrompt(
     workspace,
     model,
-    assembleChangesSinceLastReviewPrompt(deltaContext, true),
+    assembleChangesSinceLastReviewPrompt(
+      truncateUtf8WithNotice(
+        deltaContext,
+        CLINE_MAX_ARGV_BYTES -
+          256 - // Reserve the omission notice in the argv limit.
+          Buffer.byteLength(buildClinePromptArg(assembleChangesSinceLastReviewPrompt('', true))),
+        'Changes-since summary context',
+      ),
+      true,
+    ),
     'changes-since-last-review',
     log,
     home,

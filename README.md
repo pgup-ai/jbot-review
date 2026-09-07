@@ -782,10 +782,12 @@ At most 20 locations are sampled, within a 16 KiB context budget, with omitted
 or unavailable evidence labeled explicitly. These are excerpts, not
 complete files or proof that omitted behavior is absent.
 
-P3/nit remain advisory and bypass verification. Their prompts require a concrete
-benefit supported by observed code or a written rule; unavailable documentation
-alone is not grounds for an advisory. Verification failures still preserve
-findings, and uncertain verdicts still demote blocking findings to P3.
+All findings, including P3 and nits, receive verification in severity-ordered
+batches of ten. Findings arriving after an overlapping verification receive a
+follow-up check. Verification shares the remaining verification time budget;
+failed or missing verdicts preserve findings and report incomplete coverage.
+Uncertain findings are explicitly labeled unverified, with low confidence and
+an investigate kind; blocking severities become P3, while nits remain nits.
 
 ## Local review
 

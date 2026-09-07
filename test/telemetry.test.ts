@@ -577,3 +577,21 @@ describe('run and coverage telemetry', () => {
     assert.match(warning ?? '', /review-shard-1/);
   });
 });
+
+it('records uncertain P3 and nit verdicts without relying on a severity change', () => {
+  const recorder = createTelemetryRecorder(true);
+  const proposed = recorder.produced('review', [
+    finding('a.ts', 1, 'P3'),
+    finding('b.ts', 2, 'nit'),
+    finding('c.ts', 3, 'P3'),
+  ]);
+  recorder.snapshot('suppressed', proposed);
+  recorder.snapshot(
+    'verified',
+    proposed.map((f, i) => ({ ...f, verificationUncertain: i < 2 })),
+  );
+  assert.deepEqual(
+    recorder.findingRows().map((row) => row.verifyUncertain),
+    [true, true, false],
+  );
+});

@@ -1,22 +1,5 @@
-/**
- * The review prompt. The agent is given the checked-out repo and uses its own
- * tools (read, grep, glob, git diff, git log) to explore changes in context.
- * PR metadata (including the exact base...head diff command), embedded diff
- * hunks for the highest-risk files, existing review comments, changed files,
- * and repo-level guidelines are injected into the prompt after these base
- * instructions.
- *
- * The agent returns a single JSON object with "summary" and "findings"; the
- * wrapper validates line anchors against the diff, demotes low-confidence
- * blocking findings, suppresses duplicates of prior jbot-review threads,
- * verifies blocking findings in a dedicated session, computes the verdict,
- * and posts one review. A separate dedicated session owns verification of
- * previously posted jbot-review threads. This file also houses the
- * addressed-prior-comments prompt, the guideline-compliance prompt, the
- * finding-verification prompt, the recall-lens addenda for extra review
- * passes, and the pure assembly functions that place a final output reminder
- * last (recency bias for small models).
- */
+import type { Finding } from './types.ts';
+
 import { PATH_PATTERNS, type ChangeShape } from './diff-context.ts';
 import { changedFilesIncludeFrontend, selectReviewPlaybookIds } from './review-playbooks.ts';
 
@@ -833,13 +816,14 @@ export function buildShardAssignmentBlock(
 /** Hard byte budget for the embedded commit list in the delta-context block. */
 export const CHANGES_SINCE_CONTEXT_BUDGET = 4000;
 export const CHANGES_SINCE_DIFF_BUDGET = 256 * 1024;
+export const CHANGES_SINCE_STAT_BUDGET = 32 * 1024;
 
 export function buildChangesSinceContextBlock(
   reviewedHead: string,
   headSha: string,
   commitSubjects: string[],
   diff?: { text: string; totalBytes: number },
-  stat?: string,
+  stat?: { text: string; totalBytes: number } | null,
 ): string {
   const header = `## Changes since last review
 
@@ -858,10 +842,17 @@ The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}
   const omitted = commitSubjects.length - kept.length;
   const lines = [header, ...kept];
   if (omitted > 0) lines.push(`- _…and ${omitted} more commit(s); use the git command above._`);
-  if (stat)
+  if (stat === null)
+    lines.push('\nDelta file overview unavailable; use the delta diff and commits below.');
+  else if (stat)
     lines.push(
       '\n### Delta file overview',
-      truncateUtf8WithNotice(stat, 32 * 1024, 'Delta file overview'),
+      truncateUtf8WithNotice(
+        stat.text,
+        CHANGES_SINCE_STAT_BUDGET,
+        'Delta file overview',
+        stat.totalBytes,
+      ),
     );
   if (diff !== undefined) {
     lines.push(
@@ -1143,6 +1134,7 @@ that each finding is WRONG. Your job is to try to refute it.
   it from priors; see the "uncertain" verdict.
 - Check whether the PR itself already handles the concern elsewhere (a later
   hunk, a test, a validation layer).
+- For advisory suggestions, verify the alleged conflict and whether the proposed change offers a concrete benefit. Refute requests to check something the repository already answers.
 - Judge each finding independently. Do NOT widen scope: you are judging the
   listed findings, not re-reviewing the PR. Do not propose new findings.
 - Do NOT modify any files. This is a read-only check.
@@ -1208,6 +1200,7 @@ that each finding is WRONG. Your job is to try to refute it.
   guard elsewhere, or a library's internal behavior — return "uncertain".
   Excerpts are bounded windows, not complete files or exhaustive search results:
   omitted or unavailable code is not evidence that a guard or registration is absent.
+- For advisory suggestions, verify the alleged conflict and whether the proposed change offers a concrete benefit. Refute requests to check something the repository already answers.
 - Judge each finding independently. Do NOT widen scope: you are judging the
   listed findings, not re-reviewing the PR. Do not propose new findings.
 
@@ -1461,4 +1454,14 @@ export function truncateUtf8WithNotice(
     '',
     `[${label} truncated to ${keptBytes} bytes; omitted ${totalBytes - keptBytes} bytes.]`,
   ].join('\n');
+}
+
+export function formatUnverifiedFinding(finding: Pick<Finding, 'title' | 'body'>, reason?: string) {
+  return {
+    title: `Unverified concern: ${finding.title}`,
+    body: `**Not confirmed by verification.** ${reason || 'The available evidence did not establish or refute this concern.'}\n\nOriginal reviewer hypothesis (unverified):\n\n${finding.body
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n')}`,
+  };
 }

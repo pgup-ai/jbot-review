@@ -13,6 +13,7 @@ import { describe, it } from 'node:test';
 
 import {
   buildBody,
+  requestFindingVerdicts,
   buildShardPlans,
   buildSummaryScopeBlock,
   shouldSummarizeChangesSinceLastReview,
@@ -1242,5 +1243,61 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   assert.match(body, /Review incomplete/);
   assert.match(body, /review-interactions/);
   assert.match(body, /completed passes only/);
-  assert.doesNotMatch(body, /✅/);
+  assert.doesNotMatch(body, /✅|Good to go|No new findings were found/);
+  const uncertain = buildBody(
+    '',
+    'Definitely broken',
+    [
+      {
+        path: 'a.ts',
+        line: 1,
+        title: 'Unverified concern',
+        body: 'Claim',
+        severity: 'P3',
+        verificationUncertain: true,
+      },
+    ],
+    [],
+    'model',
+    'owner',
+    'repo',
+  );
+  assert.doesNotMatch(uncertain, /Definitely broken/);
+});
+
+it('verifies every batch and preserves successful verdicts when another batch fails', async () => {
+  const findings: Finding[] = Array.from({ length: 23 }, (_, i) => ({
+    path: 'missing.ts',
+    line: i + 1,
+    severity: i < 11 ? 'P3' : 'nit',
+    title: `finding ${i}`,
+    body: 'claim',
+  }));
+  for (const failFirst of [false, true]) {
+    const sizes: number[] = [];
+    const coverage: string[] = [];
+    const backend = {
+      async runFindingVerification(_model: string, _context: string, targets: Finding[]) {
+        sizes.push(targets.length);
+        if (failFirst && sizes.length === 1) throw new Error('provider unavailable');
+        return targets.map((_, index) => ({ index, verdict: 'refuted' as const }));
+      },
+    } as ReviewBackend;
+    const verdicts = await requestFindingVerdicts({
+      workspace: process.cwd(),
+      backend,
+      model: 'model',
+      prContext: '',
+      targets: findings,
+      timeoutMs: 30_000,
+      log: () => {},
+      onCoverage: (row) => coverage.push(row.state),
+    });
+    assert.deepEqual(sizes, [10, 10, 3]);
+    assert.deepEqual(
+      verdicts?.map((v) => v.index),
+      findings.map((_, i) => i).slice(failFirst ? 10 : 0),
+    );
+    assert.deepEqual(coverage, [failFirst ? 'failed' : 'completed']);
+  }
 });

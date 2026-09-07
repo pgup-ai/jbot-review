@@ -59,14 +59,18 @@ export async function gitRepositoryPage(
 ) {
   const child = spawn('git', args, {
     cwd: workspace,
-    timeout: 30_000,
-    killSignal: 'SIGKILL',
     stdio: ['ignore', 'pipe', 'ignore'],
   });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGKILL');
+  }, 30_000);
   const closed = new Promise<void>((resolve, reject) => {
     child.once('error', reject);
     child.once('close', (code, signal) => {
-      if (code === 0 || (code === 1 && args.includes('grep'))) resolve();
+      if (timedOut) reject(new Error('git output timed out after 30s'));
+      else if (code === 0 || (code === 1 && args.includes('grep'))) resolve();
       else reject(new Error(`git output failed (${signal ?? code})`));
     });
   });
@@ -75,6 +79,7 @@ export async function gitRepositoryPage(
     const [page] = await Promise.all([readRepositoryPage(child.stdout, options), closed]);
     return page;
   } finally {
+    clearTimeout(timer);
     if (child.exitCode === null) child.kill('SIGKILL');
     await closed.catch(() => undefined);
   }

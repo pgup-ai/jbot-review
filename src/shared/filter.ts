@@ -1,3 +1,4 @@
+import { formatUnverifiedFinding } from './prompt.ts';
 import { anchorByEvidenceSnippet, evidenceWindow, rescueAnchorByEvidence } from './patch.ts';
 import type { Finding, FindingConfidence, FindingVerdict, Severity } from './types.ts';
 
@@ -183,17 +184,11 @@ function significantTokens(text: string): string[] {
   return [...new Set(text.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])];
 }
 
-/**
- * Picks which findings get adversarial verification: the most severe
- * blocking findings first, capped at `max`. Returns indexes into the input
- * array; the sort is stable, so equal severities keep input order.
- */
-export function selectBlockingFindingIndexes(findings: Finding[], max: number): number[] {
+/** Stable severity order keeps blocking findings first without excluding advisories. */
+export function selectFindingIndexes(findings: Finding[]): number[] {
   return findings
     .map((finding, index) => ({ finding, index }))
-    .filter(({ finding }) => BLOCKING_SEVERITIES.has(finding.severity))
     .sort((a, b) => SEVERITY_RANK[a.finding.severity] - SEVERITY_RANK[b.finding.severity])
-    .slice(0, max)
     .map(({ index }) => index);
 }
 
@@ -212,26 +207,15 @@ export interface VerdictApplication {
  * finding with no verdict passes through unchanged (fail-open per finding).
  */
 export interface OverlapVerdictMerge extends VerdictApplication {
-  /** Blocking findings that arrived after the verification snapshot (posted unverified). */
+  /** Findings absent from the snapshot, requiring a follow-up verification. */
   lateUnverified: Finding[];
 }
 
-/**
- * Applies grace-overlap verification verdicts (TASK-079) to the FINAL finding
- * list, which can differ from the snapshot the verifier judged. Identity is
- * path:line:title — the title keeps a verdict off any finding the verifier
- * never judged (distinct file-level findings share line 0, and a stronger
- * LATE finding can replace the judged one at its exact line). `lateUnverified`
- * (TASK-080's rejection signal) counts blocking findings absent from the
- * whole SNAPSHOT, not merely unselected by the verification cap — a capped
- * snapshot finding was not late. Fail-open per finding, like
- * `applyFindingVerdicts`.
- */
+/** Location and title prevent a late replacement from inheriting another finding's verdict. */
 export function mergeVerdictsByLocation(
   findings: Finding[],
   verifiedTargets: Finding[],
   verdicts: FindingVerdict[],
-  snapshotBlocking: Finding[],
 ): OverlapVerdictMerge {
   const verdictByPosition = new Map(verdicts.map((verdict) => [verdict.index, verdict]));
   // JSON-encoded tuple: fields can carry ':' themselves, and a joined string
@@ -242,9 +226,6 @@ export function mergeVerdictsByLocation(
   verifiedTargets.forEach((target, position) => {
     verdictByIdentity.set(identityOf(target), verdictByPosition.get(position));
   });
-  const snapshotIdentities = new Set(
-    [...snapshotBlocking, ...verifiedTargets].map((finding) => identityOf(finding)),
-  );
 
   const dropped: VerdictApplication['dropped'] = [];
   const demoted: VerdictApplication['demoted'] = [];
@@ -252,9 +233,7 @@ export function mergeVerdictsByLocation(
   const result = findings.flatMap((finding) => {
     const identity = identityOf(finding);
     if (!verdictByIdentity.has(identity)) {
-      if (BLOCKING_SEVERITIES.has(finding.severity) && !snapshotIdentities.has(identity)) {
-        lateUnverified.push(finding);
-      }
+      lateUnverified.push(finding);
       return [finding];
     }
     const verdict = verdictByIdentity.get(identity);
@@ -264,9 +243,20 @@ export function mergeVerdictsByLocation(
       return [];
     }
     demoted.push({ finding, reason: verdict.reason });
-    return [{ ...finding, severity: 'P3' as const }];
+    return [unverifiedFinding(finding, verdict.reason)];
   });
   return { findings: result, dropped, demoted, lateUnverified };
+}
+
+function unverifiedFinding(finding: Finding, reason?: string): Finding {
+  return {
+    ...finding,
+    ...formatUnverifiedFinding(finding, reason),
+    severity: finding.severity === 'nit' ? 'nit' : 'P3',
+    kind: 'investigate',
+    confidence: 'low',
+    verificationUncertain: true,
+  };
 }
 
 export function applyFindingVerdicts(
@@ -295,7 +285,7 @@ export function applyFindingVerdicts(
     if (droppedIndexes.has(index)) return [];
     if (demotedByIndex.has(index)) {
       demoted.push({ finding, reason: demotedByIndex.get(index) });
-      return [{ ...finding, severity: 'P3' as const }];
+      return [unverifiedFinding(finding, demotedByIndex.get(index))];
     }
     return [finding];
   });

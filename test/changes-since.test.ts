@@ -65,6 +65,15 @@ it('embeds only the committed re-review delta when subjects contain no details',
     git('rm', 'a-first.ts', 'z-last.ts');
     git('commit', '-m', 'update');
 
+    for (let i = 0; i < 512; i++)
+      writeFileSync(join(workspace, `${i}-${'long-name'.repeat(8)}.txt`), 'hello');
+    git('add', '.');
+    git('commit', '-m', 'wide delta');
+    const wide = await collectChangesSinceContext(workspace, empty, git('rev-parse', 'HEAD'), true);
+    const overview = wide!.split('### Delta file overview\n')[1].split('### Delta diff')[0];
+    assert.match(overview, /Delta file overview truncated.*omitted/);
+    assert.ok(Buffer.byteLength(overview) < 33 * 1024);
+
     let large = empty;
     for (const [index, content] of [
       Buffer.from('変更\n'.repeat(1_500_000)),
@@ -105,7 +114,7 @@ it('embeds only the committed re-review delta when subjects contain no details',
     rmSync(join(workspace, '.git', 'objects', blob.slice(0, 2), blob.slice(2)));
     await assert.rejects(
       collectChangesSinceContext(workspace, empty, large, true),
-      /git diff failed/,
+      /git output failed/,
     );
   } finally {
     rmSync(workspace, { recursive: true, force: true });

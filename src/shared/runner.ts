@@ -25,7 +25,7 @@ import {
   isNoiseFile,
   isPrCleanAfterRun,
   openFindingThreadIds,
-  selectBlockingFindingIndexes,
+  selectFindingIndexes,
   shouldPostReviewComment,
   suppressPreviouslyReported,
 } from './filter.ts';
@@ -274,8 +274,7 @@ import {
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
-/** Blocking findings verified per run; the rest pass through unverified. */
-const MAX_VERIFIED_FINDINGS = 10;
+const VERIFICATION_BATCH_SIZE = 10;
 /**
  * Unbounded on purpose. For a backend that can read the checkout a diff budget
  * caps prompt size, and anything it drops the model fetches with git. For a
@@ -2545,15 +2544,9 @@ async function runReviewPipeline(params: {
         ? Buffer.byteLength(summary) + Buffer.byteLength(JSON.stringify(findings))
         : undefined,
     );
-    // TASK-079 overlap arm (see the option's doc). NOT the 2026-06-29-rejected
-    // overlap-with-main: this starts only after the main review settles. The
-    // pre-pass mirrors the final pure pipeline WITHOUT telemetry rows — the
-    // final pass below stays the single recorded pipeline.
-    // 'skipped' = serial verification would ALSO have posted unverified
-    // (exhausted budget, failed verifier) — bypass late counting. An empty
-    // snapshot still returns a mergeable outcome so late arrivals count.
+    // Overlap only with auxiliary settling; the final pipeline owns telemetry and late arrivals.
     const startOverlapVerification = async (): Promise<
-      { targets: Finding[]; verdicts: FindingVerdictList; snapshotBlocking: Finding[] } | 'skipped'
+      { targets: Finding[]; verdicts: FindingVerdictList } | 'skipped'
     > => {
       const session = 'finding-verification';
       const lists: Finding[][] = [findings];
@@ -2578,13 +2571,10 @@ async function runReviewPipeline(params: {
         priorJbotThreads,
         headSha ? addable : undefined,
       ).findings;
-      const snapshotBlocking = selectBlockingFindingIndexes(settled, settled.length).map(
-        (index) => settled[index],
-      );
-      const indexes = selectBlockingFindingIndexes(settled, MAX_VERIFIED_FINDINGS);
+      const indexes = selectFindingIndexes(settled);
       if (indexes.length === 0) {
         recordCoverage({ session, state: 'skipped' });
-        return { targets: [], verdicts: [], snapshotBlocking };
+        return { targets: [], verdicts: [] };
       }
       const timeoutMs = computeVerificationTimeoutMs(
         options.timeBudgetMinutes,
@@ -2602,9 +2592,7 @@ async function runReviewPipeline(params: {
         return 'skipped';
       }
       const targets = indexes.map((index) => settled[index]);
-      log(
-        `Verifying ${targets.length} blocking finding(s) concurrently with the aux settle grace.`,
-      );
+      log(`Verifying ${targets.length} finding(s) concurrently with the aux settle grace.`);
       const verdicts = await requestFindingVerdicts({
         workspace,
         backend: auxBackend,
@@ -2617,7 +2605,7 @@ async function runReviewPipeline(params: {
         onTokenUsage: recordTokenUsage,
         onCoverage: recordCoverage,
       });
-      return verdicts ? { targets, verdicts, snapshotBlocking } : 'skipped';
+      return { targets, verdicts };
     };
     const overlapVerification =
       options.verifyOverlapGrace && options.verifyFindings && auxSessionsEnabled
@@ -2759,26 +2747,32 @@ async function runReviewPipeline(params: {
           suppression.findings,
           outcome.targets,
           outcome.verdicts,
-          outcome.snapshotBlocking,
         );
         logVerdictOutcomes(merge, log);
-        if (merge.lateUnverified.length > 0) {
-          // TASK-080's rejection signal: revisit the overlap arm if this is
-          // ever nonzero for P0/P1 in practice.
-          log(
-            `${merge.lateUnverified.length} blocking finding(s) arrived after the verification snapshot and post unverified (fail-open): ${merge.lateUnverified
-              .map(formatFindingLocation)
-              .join(', ')}`,
-          );
-          recordCoverage({ session: 'late-unverified-findings', state: 'completed' });
-        }
-        verifiedFindings = merge.findings;
+        const late = await verifyFindings({
+          workspace,
+          backend: auxBackend,
+          model: auxModel,
+          prContext: verifierPrContext,
+          findings: merge.lateUnverified,
+          enabled: options.verifyFindings && auxSessionsEnabled,
+          timeoutMs: computeVerificationTimeoutMs(
+            options.timeBudgetMinutes,
+            Date.now() - runStartedAt,
+          ),
+          modelOptions: verifierSessionOptions,
+          log,
+          onTokenUsage: recordTokenUsage,
+          onCoverage: (row) => recordCoverage({ ...row, session: 'late-finding-verification' }),
+        });
+        const lateSet = new Set(merge.lateUnverified);
+        verifiedFindings = [...merge.findings.filter((finding) => !lateSet.has(finding)), ...late];
       } else {
         // Fail-open, same as a broken serial verifier.
         verifiedFindings = suppression.findings;
       }
     } else {
-      verifiedFindings = await verifyBlockingFindings({
+      verifiedFindings = await verifyFindings({
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3387,13 +3381,7 @@ export function settleWithinGrace<T>(
   });
 }
 
-/**
- * Adversarial precision gate: blocking findings are re-checked by a verifier
- * session prompted to refute them. Refuted findings are dropped, uncertain
- * ones demoted to advisory. Fail-open everywhere — when verification cannot
- * run or returns garbage, findings pass through unchanged.
- */
-async function verifyBlockingFindings(params: {
+async function verifyFindings(params: {
   workspace: string;
   backend: ReviewBackend;
   model: string;
@@ -3412,7 +3400,7 @@ async function verifyBlockingFindings(params: {
     params.onCoverage?.({ session, state: 'skipped' });
     return params.findings;
   }
-  const selectedIndexes = selectBlockingFindingIndexes(params.findings, MAX_VERIFIED_FINDINGS);
+  const selectedIndexes = selectFindingIndexes(params.findings);
   if (selectedIndexes.length === 0) {
     params.onCoverage?.({ session, state: 'skipped' });
     return params.findings;
@@ -3430,22 +3418,17 @@ async function verifyBlockingFindings(params: {
   }
 
   const targets = selectedIndexes.map((index) => params.findings[index]);
-  params.log(`Verifying ${targets.length} blocking finding(s) before posting.`);
+  params.log(`Verifying ${targets.length} finding(s) before posting.`);
 
   const verdicts = await requestFindingVerdicts({ ...params, targets });
-  if (!verdicts) return params.findings;
 
   const application = applyFindingVerdicts(params.findings, selectedIndexes, verdicts);
   logVerdictOutcomes(application, params.log);
   return application.findings;
 }
 
-/**
- * One verifier session call with the shared fail-open contract: undefined on
- * any failure or unusable output, with the coverage row recorded. Used by the
- * serial path above and the grace-overlap path (TASK-079).
- */
-async function requestFindingVerdicts(params: {
+/** A failed batch must not discard verdicts from successful batches. */
+export async function requestFindingVerdicts(params: {
   workspace: string;
   backend: ReviewBackend;
   model: string;
@@ -3456,40 +3439,47 @@ async function requestFindingVerdicts(params: {
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
-}): Promise<FindingVerdictList | undefined> {
+}): Promise<FindingVerdictList> {
   const session = 'finding-verification';
   const startedAt = Date.now();
-  let verdicts;
-  try {
-    const sourceContext = await buildFindingSourceContext(params.workspace, params.targets);
-    const timeoutMs =
-      params.timeoutMs === undefined
-        ? undefined
-        : Math.max(0, params.timeoutMs - (Date.now() - startedAt));
-    if (timeoutMs === 0)
-      throw new Error('Finding verification budget exhausted while collecting source context.');
-    verdicts = await params.backend.runFindingVerification(
-      params.model,
-      [params.prContext, sourceContext].filter(Boolean).join('\n\n'),
-      params.targets,
-      params.log,
-      timeoutMs,
-      params.onTokenUsage,
-      params.modelOptions,
-    );
-  } catch (error) {
-    params.log(
-      `(skipped finding verification: ${error instanceof Error ? error.message : String(error)})`,
-    );
-    params.onCoverage?.({ session, state: 'failed', error, durationMs: Date.now() - startedAt });
-    return undefined;
+  const verdicts: FindingVerdictList = [];
+  let failure: Error | undefined;
+  for (let offset = 0; offset < params.targets.length; offset += VERIFICATION_BATCH_SIZE) {
+    const targets = params.targets.slice(offset, offset + VERIFICATION_BATCH_SIZE);
+    try {
+      const sourceContext = await buildFindingSourceContext(params.workspace, targets);
+      const timeoutMs =
+        params.timeoutMs === undefined
+          ? undefined
+          : Math.max(0, params.timeoutMs - (Date.now() - startedAt));
+      if (timeoutMs === 0) throw new Error('Finding verification budget exhausted.');
+      const batch = await params.backend.runFindingVerification(
+        params.model,
+        [params.prContext, sourceContext].filter(Boolean).join('\n\n'),
+        targets,
+        params.log,
+        timeoutMs,
+        params.onTokenUsage,
+        params.modelOptions,
+      );
+      if (!batch) throw new Error('Finding verification output unusable.');
+      verdicts.push(...batch.map((verdict) => ({ ...verdict, index: verdict.index + offset })));
+      if (batch.length < targets.length)
+        failure ??= new Error('Finding verification returned incomplete verdicts.');
+    } catch (error) {
+      failure ??= error instanceof Error ? error : new Error(String(error));
+      params.log(
+        `(finding verification batch failed; keeping its findings unverified: ${error instanceof Error ? error.message : String(error)})`,
+      );
+      if (params.timeoutMs !== undefined && Date.now() - startedAt >= params.timeoutMs) break;
+    }
   }
-  if (!verdicts) {
-    params.log('(finding verification output unusable; keeping findings unverified)');
-    params.onCoverage?.({ session, state: 'failed', durationMs: Date.now() - startedAt });
-    return undefined;
-  }
-  params.onCoverage?.({ session, state: 'completed', durationMs: Date.now() - startedAt });
+  params.onCoverage?.({
+    session,
+    state: failure ? 'failed' : 'completed',
+    ...(failure ? { error: failure } : {}),
+    durationMs: Date.now() - startedAt,
+  });
   return verdicts;
 }
 
@@ -3511,7 +3501,7 @@ function logVerdictOutcomes(
   }
   for (const { finding, reason } of application.demoted) {
     log(
-      `Demoted uncertain finding ${formatFindingLocation(finding)} "${finding.title}" to P3.${
+      `Marked uncertain finding ${formatFindingLocation(finding)} "${finding.title}" as unverified.${
         reason ? ` Reason: ${reason}` : ''
       }`,
     );
@@ -4438,13 +4428,19 @@ export function buildBody(
   // unlock a wall of "looks correct" prose, and an empty/fully-suppressed summary
   // renders nothing rather than a filler placeholder. The "Changes since last
   // review" block above is independent and still renders on re-reviews.
-  const renderedSummary = summary.trim()
-    ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: true })
-    : '';
+  const renderedSummary =
+    !all.some((finding) => finding.verificationUncertain) && summary.trim()
+      ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: true })
+      : '';
   if (total > 0 && renderedSummary.trim()) {
     lines.push(renderedSummary, '');
   }
-  const guidance = getMergeGuidance(all);
+  const guidance = coverageNotice
+    ? {
+        state: 'Review incomplete',
+        mergeGuidance: 'Do not treat incomplete coverage as an all-clear result.',
+      }
+    : getMergeGuidance(all);
   lines.push(`**Review state:** ${guidance.state}`, '');
   lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`, '');
   if (headSha) {
