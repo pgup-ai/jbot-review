@@ -300,7 +300,6 @@ export async function runClineGuidelineComplianceCheck(
 export async function runClineChangesSinceLastReview(
   workspace: string,
   model: string,
-  prContext: string,
   deltaContext: string,
   log: (msg: string) => void,
   timeoutMs?: number,
@@ -311,7 +310,7 @@ export async function runClineChangesSinceLastReview(
   const raw = await runClinePrompt(
     workspace,
     model,
-    assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+    assembleChangesSinceLastReviewPrompt(deltaContext),
     'changes-since-last-review',
     log,
     home,

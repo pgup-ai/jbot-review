@@ -161,14 +161,14 @@ describe('CHANGES_SINCE_LAST_REVIEW_PROMPT', () => {
     );
     assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /"summary":/);
     assert.ok(
-      assembleChangesSinceLastReviewPrompt('PR-CONTEXT', 'DELTA-CONTEXT', true).includes(
-        'NO tools on this call',
-      ),
+      assembleChangesSinceLastReviewPrompt('DELTA-CONTEXT', true).includes('NO tools on this call'),
     );
   });
 
   it('puts the output reminder last and asks for a single summary key', () => {
-    const out = assembleChangesSinceLastReviewPrompt('PR-CONTEXT', 'DELTA-CONTEXT');
+    const out = assembleChangesSinceLastReviewPrompt('DELTA-CONTEXT');
+    assert.ok(out.includes(UNTRUSTED_PR_CONTENT_NOTE));
+    assert.ok(out.indexOf(UNTRUSTED_PR_CONTENT_NOTE) < out.indexOf('DELTA-CONTEXT'));
     assert.ok(
       out.indexOf('DELTA-CONTEXT') < out.indexOf(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER),
     );

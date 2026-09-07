@@ -1316,7 +1316,6 @@ export async function runPiGuidelineComplianceCheck(
 export async function runPiChangesSinceLastReview(
   runtime: PiRuntime,
   model: string,
-  prContext: string,
   deltaContext: string,
   log: (msg: string) => void,
   timeoutMs?: number,
@@ -1332,7 +1331,7 @@ export async function runPiChangesSinceLastReview(
     const raw = await promptPiSession(
       session,
       model,
-      assembleChangesSinceLastReviewPrompt(prContext, deltaContext, true),
+      assembleChangesSinceLastReviewPrompt(deltaContext, true),
       label,
       log,
       timeoutMs,

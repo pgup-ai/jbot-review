@@ -337,16 +337,8 @@ function createOpencodeBackend(
         onTokenUsage,
         modelOptions,
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runOpencodeChangesSinceLastReview(
-        client,
-        model,
-        prContext,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-      ),
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runOpencodeChangesSinceLastReview(client, model, deltaContext, log, timeoutMs, onTokenUsage),
   };
 }
 
@@ -388,16 +380,8 @@ function createPiBackend(runtime: PiRuntime): ReviewBackend {
         onTokenUsage,
         modelOptions,
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runPiChangesSinceLastReview(
-        runtime,
-        model,
-        prContext,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-      ),
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runPiChangesSinceLastReview(runtime, model, deltaContext, log, timeoutMs, onTokenUsage),
   };
 }
 
@@ -444,12 +428,11 @@ function createPoolsideBackend(
         timeoutMs,
         onTokenUsage,
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runPoolsideChangesSinceLastReview(
         key,
         reasoningEffort,
         model,
-        prContext,
         deltaContext,
         log,
         timeoutMs,
@@ -515,11 +498,10 @@ function createCommandCodeBackend(
         home,
         effortFor(model, modelOptions),
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runCommandCodeChangesSinceLastReview(
         workspace,
         model,
-        prContext,
         deltaContext,
         log,
         timeoutMs,
@@ -571,11 +553,10 @@ function createClineBackend(workspace: string, clineHome: string): ReviewBackend
         onTokenUsage,
         clineHome,
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runClineChangesSinceLastReview(
         workspace,
         model,
-        prContext,
         deltaContext,
         log,
         timeoutMs,
@@ -608,16 +589,8 @@ function createGrokBackend(runtime: GrokRuntime): ReviewBackend {
       ),
     runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
       runGrokFindingVerification(model, prContext, findings, log, timeoutMs, onTokenUsage, runtime),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runGrokChangesSinceLastReview(
-        model,
-        prContext,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        runtime,
-      ),
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runGrokChangesSinceLastReview(model, deltaContext, log, timeoutMs, onTokenUsage, runtime),
   };
 }
 
@@ -664,11 +637,10 @@ function createDimBackend(
         onTokenUsage,
         runtime,
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runDimChangesSinceLastReview(
         workspace,
         model,
-        prContext,
         deltaContext,
         log,
         timeoutMs,
@@ -727,11 +699,10 @@ function createQoderBackend(
         token,
         toolTelemetry,
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runQoderChangesSinceLastReview(
         workspace,
         model,
-        prContext,
         deltaContext,
         log,
         timeoutMs,
@@ -2477,7 +2448,6 @@ async function runReviewPipeline(params: {
       startChangesSinceLastReviewSummary({
         backend: auxBackend,
         model: auxModel,
-        prContext: auxPrContext,
         workspace,
         // Use allPriorReviewComments (always fetched), NOT the
         // includePriorComments-gated priorComments: whether to summarize the
@@ -4237,7 +4207,6 @@ async function collectCommitSubjects(
 function startChangesSinceLastReviewSummary(params: {
   backend: ReviewBackend;
   model: string;
-  prContext: string;
   workspace: string;
   reviewedHead?: string;
   headSha?: string;
@@ -4267,7 +4236,6 @@ function startChangesSinceLastReviewSummary(params: {
     modelRan = true;
     return params.backend.runChangesSinceLastReview(
       params.model,
-      params.prContext,
       deltaContext,
       params.log,
       params.timeoutMs,

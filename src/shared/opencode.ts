@@ -960,7 +960,6 @@ export async function runGuidelineComplianceCheck(
 export async function runChangesSinceLastReview(
   client: OpencodeClient,
   model: string,
-  prContext: string,
   deltaContext: string,
   log: (msg: string) => void,
   timeoutMs?: number,
@@ -968,11 +967,7 @@ export async function runChangesSinceLastReview(
 ): Promise<string> {
   // Its own single-shot variant carries the omitted-subjects disclosure a bare
   // no-tools directive would lack, so use that rather than promptForModel.
-  const prompt = assembleChangesSinceLastReviewPrompt(
-    prContext,
-    deltaContext,
-    isSingleShotModel(model),
-  );
+  const prompt = assembleChangesSinceLastReviewPrompt(deltaContext, isSingleShotModel(model));
   const { raw } = await promptPlanAgent(
     client,
     model,

@@ -285,7 +285,6 @@ export async function runCommandCodeGuidelineComplianceCheck(
 export async function runCommandCodeChangesSinceLastReview(
   workspace: string,
   model: string,
-  prContext: string,
   deltaContext: string,
   log: (msg: string) => void,
   timeoutMs?: number,
@@ -296,7 +295,7 @@ export async function runCommandCodeChangesSinceLastReview(
   const raw = await runCommandCodePrompt(
     workspace,
     model,
-    assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+    assembleChangesSinceLastReviewPrompt(deltaContext),
     'changes-since-last-review',
     log,
     timeoutMs,
