@@ -19,6 +19,7 @@ export async function readRepositoryPage(
     let totalBytes = 0;
     let line = 1;
     let offset: number | undefined;
+    // Exact totals require draining the stream; continuation requests scan it again.
     for await (const chunk of source) {
       const bytes = Buffer.from(chunk);
       if (offset === undefined) {
