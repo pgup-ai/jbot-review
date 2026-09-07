@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import childProcess, { execFileSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,7 +8,7 @@ import { it } from 'node:test';
 import { collectChangesSinceContext } from '../src/shared/changes-since.ts';
 import { CHANGES_SINCE_DIFF_BUDGET } from '../src/shared/prompt.ts';
 
-it('embeds only the committed re-review delta when subjects contain no details', async () => {
+it('embeds only the committed re-review delta when subjects contain no details', async (t) => {
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-summary-'));
   const git = (...args: string[]) =>
     execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], {
@@ -34,6 +35,24 @@ it('embeds only the committed re-review delta when subjects contain no details',
     assert.ok(embedded);
     assert.match(embedded, /\+export const retryLimit = 3;/);
     assert.doesNotMatch(embedded, /unrelated|retryLimit = 99/);
+    const spawn = childProcess.spawn;
+    const statFailure = t.mock.method(childProcess, 'spawn', ((
+      ...args: Parameters<typeof spawn>
+    ) =>
+      args[1]?.includes('--stat=120')
+        ? spawn(process.execPath, ['-e', 'process.exit(1)'], args[2])
+        : spawn(...args)) as typeof spawn);
+    syncBuiltinESMExports();
+    try {
+      const withoutStat = await collectChangesSinceContext(workspace, from, to, true);
+      assert.ok(withoutStat);
+      assert.match(withoutStat, /unavailable/);
+      assert.match(withoutStat, /update/);
+      assert.match(withoutStat, /\+export const retryLimit = 3;/);
+    } finally {
+      statFailure.mock.restore();
+      syncBuiltinESMExports();
+    }
     const agentic = await collectChangesSinceContext(workspace, from, to, false);
     assert.ok(agentic);
     assert.match(agentic, /update/);
