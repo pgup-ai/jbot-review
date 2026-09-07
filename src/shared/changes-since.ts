@@ -55,5 +55,14 @@ export async function collectChangesSinceContext(
         });
       })
     : undefined;
-  return buildChangesSinceContextBlock(fromSha, toSha, subjects, diff);
+  const stat = embedDiff
+    ? (
+        await execFileAsync(
+          'git',
+          ['diff', '--stat=120', '--no-ext-diff', '--no-textconv', range, '--'],
+          options,
+        )
+      ).stdout
+    : undefined;
+  return buildChangesSinceContextBlock(fromSha, toSha, subjects, diff, stat);
 }

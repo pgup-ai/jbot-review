@@ -399,7 +399,12 @@ the review itself is unaffected._
 Incomplete auxiliary passes are named in the review report, including reruns with
 no findings. These runs retain findings from completed passes but do not receive
 an automatic approval or review-done reaction. CommandCode cancellation stops its
-process group and waits for output pipes to close before removing its temporary home.
+process tree and waits for output pipes to close before removing its temporary home.
+Queued passes cancelled before execution never start a provider session.
+Pi and tool-capable OpenCode verifiers can read and search repository evidence;
+CommandCode remains tool-less. Changes-since summaries receive up to 256 KiB
+of delta diff plus a bounded file overview; larger deltas disclose summary-only
+omissions. Main reviews continue to cover the full base-to-head diff.
 
 **Prompt/context arms (env, not inputs).** `JBOT_EMBEDDED_FIRST_PROMPT` (on)
 and `JBOT_CONTEXT_TRIM` (off) are set by environment rather than action input;
@@ -858,12 +863,10 @@ and precision against seeded defects.
   `JBOT_DYNAMIC_FANOUT`, `JBOT_MODEL_OPTIONS`, `JBOT_PROMPT_CACHE`,
   `JBOT_SKIP_DOC_ONLY`, `JBOT_MAX_CONCURRENT_SESSIONS`, `JBOT_REVIEW_TELEMETRY`,
   `JBOT_EVIDENCE_QUOTES`,
-  `JBOT_CONTEXT_TRIM` (off by default; drops supplementary context blocks —
-  blast radius, prior jbot threads, summary scope, review focus, in that order —
-  toward the assembled-context soft cap. Only those blocks are droppable, so a
-  diff or guideline set that already exceeds the cap on its own stays over it.
-  An unmeasured recall trade kept as an A/B arm: run it against an untrimmed
-  side before believing either result),
+  `JBOT_CONTEXT_TRIM` (off by default; can drop prior-thread hints above the
+  80 KiB attention threshold. Scope, review focus, caller evidence, diff and
+  guidelines retain their individual budgets and are never dropped to satisfy
+  this threshold; it is not the model's context-window limit),
   `JBOT_EMBEDDED_FIRST_PROMPT` (**on** by default; starts from the embedded
   diff while allowing repository search, repeated reads, and investigation beyond
   the first dependency hop. Follow-up evidence gathering takes priority over

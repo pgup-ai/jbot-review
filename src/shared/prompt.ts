@@ -455,41 +455,21 @@ export const QODER_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer. Ne
 
 export const REPOSITORY_PAGE_BYTES = 128 * 1024;
 
-export function formatRepositoryPage(
-  text: string,
-  options: { offset?: unknown; line?: unknown } = {},
-) {
-  const bytes = Buffer.from(text);
-  let offset = options.offset ?? 0;
-  if (options.offset === undefined && options.line !== undefined) {
-    if (!Number.isSafeInteger(options.line) || (options.line as number) < 1)
-      throw new Error('line must be a positive integer');
-    let index = 0;
-    for (let line = 1; line < (options.line as number) && index < text.length; line++) {
-      const next = text.indexOf('\n', index);
-      index = next < 0 ? text.length : next + 1;
-    }
-    offset = Buffer.byteLength(text.slice(0, index));
-  }
-  if (
-    typeof offset !== 'number' ||
-    !Number.isSafeInteger(offset) ||
-    offset < 0 ||
-    offset > bytes.length
-  )
-    throw new Error('offset must be an integer within the output');
-  if (offset < bytes.length && (bytes[offset] & 0xc0) === 0x80)
-    throw new Error('offset must be on a UTF-8 character boundary');
-  let end = Math.min(bytes.length, offset + REPOSITORY_PAGE_BYTES - 256);
-  while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--;
-  const nextOffset = end < bytes.length ? end : undefined;
-  const line = bytes.subarray(0, offset).toString().split('\n').length;
+export function formatRepositoryPage(page: {
+  text: string;
+  offset: number;
+  line: number;
+  totalBytes: number;
+}) {
+  const { text, offset, line, totalBytes } = page;
+  const end = offset + Buffer.byteLength(text);
+  const nextOffset = end < totalBytes ? end : undefined;
   const notice =
     nextOffset === undefined
       ? 'End of output.'
       : `More output available. Repeat this tool with the same query/path and offset=${nextOffset}.`;
   return {
-    text: `Starting at line ${line}, bytes ${offset}..${end} of ${bytes.length}. ${notice}\n\n${bytes.subarray(offset, end).toString()}`,
+    text: `Starting at line ${line}, bytes ${offset}..${end} of ${totalBytes}. ${notice}\n\n${text}`,
     nextOffset,
   };
 }
@@ -852,13 +832,14 @@ export function buildShardAssignmentBlock(
 
 /** Hard byte budget for the embedded commit list in the delta-context block. */
 export const CHANGES_SINCE_CONTEXT_BUDGET = 4000;
-export const CHANGES_SINCE_DIFF_BUDGET = 8 * 1024;
+export const CHANGES_SINCE_DIFF_BUDGET = 256 * 1024;
 
 export function buildChangesSinceContextBlock(
   reviewedHead: string,
   headSha: string,
   commitSubjects: string[],
   diff?: { text: string; totalBytes: number },
+  stat?: string,
 ): string {
   const header = `## Changes since last review
 
@@ -877,6 +858,11 @@ The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}
   const omitted = commitSubjects.length - kept.length;
   const lines = [header, ...kept];
   if (omitted > 0) lines.push(`- _…and ${omitted} more commit(s); use the git command above._`);
+  if (stat)
+    lines.push(
+      '\n### Delta file overview',
+      truncateUtf8WithNotice(stat, 32 * 1024, 'Delta file overview'),
+    );
   if (diff !== undefined) {
     lines.push(
       '\n### Delta diff',
@@ -885,7 +871,7 @@ The last reviewed head was \`${reviewedHead}\`; the current head is \`${headSha}
         : truncateUtf8WithNotice(
             diff.text,
             CHANGES_SINCE_DIFF_BUDGET,
-            'Delta diff (UTF-8 text)',
+            'Changes-since summary diff (UTF-8 text)',
             diff.totalBytes,
           ),
     );

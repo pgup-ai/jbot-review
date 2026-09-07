@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { spawnWithTimeout, type CliProcessOptions, type CliProcessResult } from '@symma/protocol';
 
 const sessionSignal = new AsyncLocalStorage<AbortSignal>();
@@ -60,11 +60,27 @@ export function runCommandCodeProcess(
     let stdout = '';
     let stderr = '';
     let failure: Error | undefined;
+    let treeKill: Promise<void> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     const kill = (value: NodeJS.Signals) => {
       if (child.pid === undefined) return;
+      if (process.platform === 'win32') {
+        // Kill the tree together: killing its parent first can orphan pipe holders.
+        treeKill ??= new Promise<void>((done) => {
+          execFile(
+            'taskkill',
+            ['/PID', String(child.pid), '/T', '/F'],
+            { windowsHide: true, timeout: 5000, killSignal: 'SIGKILL' },
+            (error) => {
+              if (error) stderr += `\n[taskkill failed: ${error.message}]`;
+              done();
+            },
+          );
+        });
+        return;
+      }
       try {
-        process.kill(process.platform === 'win32' ? child.pid : -child.pid, value);
+        process.kill(-child.pid, value);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ESRCH') failure ??= error as Error;
       }
@@ -95,10 +111,11 @@ export function runCommandCodeProcess(
     child.on('error', (error) => {
       failure ??= error;
     });
-    child.on('close', (exitCode) => {
+    child.on('close', async (exitCode) => {
       clearTimeout(timer);
       clearTimeout(killTimer);
       signal.removeEventListener('abort', abort);
+      await treeKill;
       if (failure) reject(failure);
       else resolve({ stdout, stderr, exitCode });
     });

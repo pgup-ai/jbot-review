@@ -1,3 +1,10 @@
+import {
+  computeFinderTimeoutMs,
+  computeRunDeadline,
+  computeRetryTimeoutMs,
+  computeVerificationTimeoutMs,
+  computeAuxiliaryGraceMs,
+} from '../src/shared/time-budget.ts';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,11 +17,6 @@ import {
   buildSummaryScopeBlock,
   shouldSummarizeChangesSinceLastReview,
   buildMainShardFailureMessage,
-  computeFinderTimeoutMs,
-  computeAuxiliaryGraceMs,
-  computeRetryTimeoutMs,
-  computeRunDeadline,
-  computeVerificationTimeoutMs,
   emitReviewTelemetry,
   formatReviewedWith,
   normalizeOptions,

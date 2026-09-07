@@ -1,10 +1,9 @@
-import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { createReadStream, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { promisify } from 'node:util';
 
+import { gitRepositoryPage, readRepositoryPage } from './repository-output.ts';
 import { supportedModelOptions } from './config.ts';
 import { GIT_DIFF_ARGS } from './git.ts';
 import { parseModelName } from '@symma/protocol';
@@ -19,7 +18,6 @@ import type { PromptTokenUsage, ProviderKeyConfig, TokenUsageRecorder } from './
 import {
   EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
   PI_REVIEW_SYSTEM_PROMPT,
-  formatRepositoryPage,
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
@@ -221,9 +219,6 @@ export function mapPiUsage(usage: unknown): PromptTokenUsage | undefined {
     ...(isFiniteNumber(cost) ? { costUsd: cost } : {}),
   };
 }
-
-const execFileAsync = promisify(execFile);
-const PI_DIFF_TOOL_TIMEOUT_MS = 30_000;
 
 interface PiDiffScope {
   /** Merge-base (local mode) or PR base sha (GitHub paths). */
@@ -430,16 +425,15 @@ export function createPiGitDiffTool(
       });
       let text: string;
       try {
-        const { stdout } = await execFileAsync('git', piGitDiffArgs(scope, path), {
-          cwd: workspace,
-          maxBuffer: 64 * 1024 * 1024,
-          timeout: PI_DIFF_TOOL_TIMEOUT_MS,
-        });
-        const page = formatRepositoryPage(stdout, isRecord(params) ? params : {});
-        text = stdout.trim() ? page.text : '(no changes for this path)';
+        const page = await gitRepositoryPage(
+          workspace,
+          piGitDiffArgs(scope, path),
+          isRecord(params) ? params : {},
+        );
+        text = page.totalBytes ? page.text : '(no changes for this path)';
         finish?.({
           success: true,
-          outputBytesBeforeCap: Buffer.byteLength(stdout),
+          outputBytesBeforeCap: page.totalBytes,
           outputBytesAfterCap: Buffer.byteLength(text),
         });
       } catch (error) {
@@ -523,11 +517,14 @@ export function createPiReadTool(
       }
       let text: string;
       try {
-        const raw = readFileSync(target, 'utf8');
-        text = formatRepositoryPage(raw, isRecord(params) ? params : {}).text;
+        const page = await readRepositoryPage(
+          createReadStream(target, { encoding: 'utf8' }),
+          isRecord(params) ? params : {},
+        );
+        text = page.text;
         finish?.({
           success: true,
-          outputBytesBeforeCap: Buffer.byteLength(raw),
+          outputBytesBeforeCap: page.totalBytes,
           outputBytesAfterCap: Buffer.byteLength(text),
         });
       } catch (error) {
@@ -579,8 +576,8 @@ export function createPiSearchTool(
       });
       let text: string;
       try {
-        const { stdout } = await execFileAsync(
-          'git',
+        const page = await gitRepositoryPage(
+          workspace,
           [
             '--no-pager',
             'grep',
@@ -590,29 +587,23 @@ export function createPiSearchTool(
             '-F',
             '--no-textconv',
             '--no-recurse-submodules',
-            '--',
+            '-e',
             query,
+            '--',
           ],
-          {
-            cwd: workspace,
-            timeout: PI_DIFF_TOOL_TIMEOUT_MS,
-            maxBuffer: 64 * 1024 * 1024,
-          },
+          isRecord(params) ? params : {},
         );
-        text = formatRepositoryPage(stdout, isRecord(params) ? params : {}).text;
+        text = page.totalBytes ? page.text : '(no matches in tracked files)';
         finish?.({
           success: true,
-          outputBytesBeforeCap: Buffer.byteLength(stdout),
+          outputBytesBeforeCap: page.totalBytes,
           outputBytesAfterCap: Buffer.byteLength(text),
         });
       } catch (error) {
-        const noMatches = isRecord(error) && error.code === 1;
-        text = noMatches
-          ? '(no matches in tracked files)'
-          : `search failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 2000)}`;
+        text = `search failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 2000)}`;
         finish?.({
-          success: noMatches,
-          ...(noMatches ? {} : { failureClass: 'execution' as const }),
+          success: false,
+          failureClass: 'execution',
           outputBytesBeforeCap: 0,
           outputBytesAfterCap: Buffer.byteLength(text),
         });
@@ -1335,11 +1326,6 @@ export async function runPiChangesSinceLastReview(
   }
 }
 
-/**
- * Single-shot adversarial verification (all tools off — one model call, no
- * agentic loop). Returns undefined when the output is unusable so callers
- * fail open and keep the findings.
- */
 export async function runPiFindingVerification(
   runtime: PiRuntime,
   model: string,
@@ -1354,13 +1340,13 @@ export async function runPiFindingVerification(
   // Findings pass through unprojected — a field-subset projection here would
   // silently drop `evidence` and defeat verifier grounding (see the opencode
   // engine's identical warning).
-  const prompt = assembleFindingVerificationPrompt(prContext, findings, true);
+  const prompt = assembleFindingVerificationPrompt(prContext, findings, false);
   // TASK-157: the runner passes the verifier's floored options when the aux
   // entry does not already deliver them; pi maps them per session.
   const session = await createPiSession(
     runtime,
     model,
-    true,
+    false,
     false,
     piThinkingLevel(modelOptions),
     label,

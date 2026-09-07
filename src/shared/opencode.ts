@@ -444,13 +444,25 @@ export class Semaphore {
 
   constructor(private readonly limit: number) {}
 
-  async acquire(priority: SemaphorePriority = 'normal'): Promise<() => void> {
+  async acquire(priority: SemaphorePriority = 'normal', signal?: AbortSignal): Promise<() => void> {
+    signal?.throwIfAborted();
     if (this.limit === 0) return () => undefined;
     if (this.active < this.limit) {
       this.active += 1;
     } else {
       const queue = priority === 'high' ? this.highPriorityQueue : this.normalPriorityQueue;
-      await new Promise<void>((resolve) => queue.push(resolve));
+      await new Promise<void>((resolve, reject) => {
+        const grant = () => {
+          signal?.removeEventListener('abort', abort);
+          resolve();
+        };
+        const abort = () => {
+          queue.splice(queue.indexOf(grant), 1);
+          reject(signal?.reason);
+        };
+        queue.push(grant);
+        signal?.addEventListener('abort', abort, { once: true });
+      });
     }
     let released = false;
     return () => {
@@ -1009,9 +1021,11 @@ export async function runFindingVerification(
   // Pass findings through unprojected: Finding is structurally a VerifiableFinding.
   // An earlier field-subset projection here silently dropped `evidence` and
   // defeated verifier grounding on this (primary) backend — don't reintroduce one.
-  const prompt = assembleFindingVerificationPrompt(prContext, findings, true);
-  // Single-shot: exploration tools off, so the verifier judges from the embedded
-  // diff in one model call instead of an agentic git/grep loop.
+  const prompt = assembleFindingVerificationPrompt(
+    prContext,
+    findings,
+    isSingleShotModel(verificationModel),
+  );
   const { raw } = await promptPlanAgent(
     client,
     verificationModel,
@@ -1020,7 +1034,6 @@ export async function runFindingVerification(
     log,
     timeoutMs,
     onTokenUsage,
-    SINGLE_SHOT_TOOLS,
   );
   return parseFindingVerdicts(raw, findings.length, log);
 }
@@ -1053,12 +1066,7 @@ export function isSingleShotModel(model: string): boolean {
   return !modelSupportsAgenticTools(providerID, modelID);
 }
 
-/**
- * The tool set for a session: a caller's explicit choice (e.g. verification
- * forces SINGLE_SHOT_TOOLS), else exploration for agentic models and a
- * zero-tool single-shot for models that cannot drive a tool loop (proxied
- * Gemini — see `modelSupportsAgenticTools`). Exported for unit testing (pure).
- */
+// Models with incompatible tool APIs must retain their no-tools fallback.
 export function resolveSessionTools(
   model: string,
   explicit?: Record<string, boolean>,

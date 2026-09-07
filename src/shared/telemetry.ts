@@ -249,7 +249,7 @@ export const ASSEMBLED_CONTEXT_WARN_BYTES = 80 * 1024;
 
 export function assembledContextWarning(label: string, bytes: number): string | undefined {
   if (bytes <= ASSEMBLED_CONTEXT_WARN_BYTES) return undefined;
-  return `${label}: assembled context is ${bytes} bytes (soft cap ${ASSEMBLED_CONTEXT_WARN_BYTES}); large contexts dilute finder attention`;
+  return `${label}: assembled context is ${bytes} bytes (attention threshold ${ASSEMBLED_CONTEXT_WARN_BYTES}, not a model context limit)`;
 }
 
 /** Snapshot points, in pipeline order. */

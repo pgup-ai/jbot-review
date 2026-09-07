@@ -1,3 +1,5 @@
+import { Readable } from 'node:stream';
+import { readRepositoryPage } from '../src/shared/repository-output.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -31,11 +33,7 @@ import {
   piTurnUsageSince,
   resolvePiEngine,
 } from '../src/shared/pi.ts';
-import {
-  CONTINUATION_NUDGE_PROMPT,
-  formatRepositoryPage,
-  REPOSITORY_PAGE_BYTES,
-} from '../src/shared/prompt.ts';
+import { CONTINUATION_NUDGE_PROMPT, REPOSITORY_PAGE_BYTES } from '../src/shared/prompt.ts';
 import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts';
@@ -391,20 +389,28 @@ describe('piGitDiffArgs', () => {
 });
 
 describe('repository tool pages', () => {
-  it('recovers every UTF-8 byte across pages, including a long single line', () => {
+  it('recovers every UTF-8 byte across pages, including a long single line', async () => {
     const original = 'a' + 'é🙂'.repeat(REPOSITORY_PAGE_BYTES);
     const chunks: string[] = [];
     let offset: number | undefined = 0;
     do {
-      const page = formatRepositoryPage(original, { offset });
+      const page = await readRepositoryPage(Readable.from(original.match(/.{1,127}/gu)!), {
+        offset,
+      });
       assert.ok(Buffer.byteLength(page.text) <= REPOSITORY_PAGE_BYTES);
       chunks.push(page.text.slice(page.text.indexOf('\n\n') + 2));
       offset = page.nextOffset;
     } while (offset !== undefined);
     assert.equal(chunks.join(''), original);
-    assert.throws(() => formatRepositoryPage(original, { offset: 2 }), /UTF-8/);
-    assert.throws(() => formatRepositoryPage(original, { offset: -1 }), /offset/);
-    assert.throws(() => formatRepositoryPage(original, { line: 0 }), /line/);
+    await assert.rejects(
+      () => readRepositoryPage(Readable.from([original]), { offset: 2 }),
+      /UTF-8/,
+    );
+    await assert.rejects(
+      () => readRepositoryPage(Readable.from([original]), { offset: -1 }),
+      /offset/,
+    );
+    await assert.rejects(() => readRepositoryPage(Readable.from([original]), { line: 0 }), /line/);
   });
 
   it('finds and reads unchanged evidence beyond the first page without escaping the repo', async () => {
@@ -425,6 +431,16 @@ describe('repository tool pages', () => {
       execFileSync('git', ['-C', workspace, 'add', 'large.ts', 'escape']);
       const read = createPiReadTool(sdk, workspace) as Tool;
       const search = createPiSearchTool(sdk, workspace) as Tool;
+      writeFileSync(join(workspace, 'many.txt'), 'needle\n'.repeat(10_000_000));
+      execFileSync('git', ['-C', workspace, 'add', 'many.txt']);
+      const wide = await search.execute('wide', { query: 'needle' });
+      assert.match(wide.content[0].text, /More output available/);
+      assert.ok(Buffer.byteLength(wide.content[0].text) <= REPOSITORY_PAGE_BYTES);
+      const tail = await search.execute('tail', { query: 'needle', offset: 80 * 1024 * 1024 });
+      assert.match(tail.content[0].text, /many.txt:\d+:needle/);
+      assert.doesNotMatch(tail.content[0].text, /failed|maxBuffer/);
+      rmSync(join(workspace, 'many.txt'));
+      execFileSync('git', ['-C', workspace, 'rm', '--cached', 'many.txt']);
       const result = await search.execute('search', { query: 'importantDefault' });
       assert.match(result.content[0].text, /large.ts:20001:const importantDefault = false/);
       const page = await read.execute('read', { path: 'large.ts', line: 20001 });
@@ -613,6 +629,8 @@ describe('Pi review sessions', () => {
       },
     );
     assert.equal(sessions[0]?.thinkingLevel, 'high');
+    assert.equal(sessions[0]?.noTools, undefined);
+    assert.deepEqual(sessions[0]?.tools, ['read_file', 'search_repo']);
 
     // Without the override, a non-main model takes the aux default when the
     // runtime carries one, and none otherwise.

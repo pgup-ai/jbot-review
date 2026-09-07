@@ -128,7 +128,7 @@ describe('buildChangesSinceContextBlock', () => {
     const block = buildChangesSinceContextBlock('abc1234', 'def5678', subjects);
     assert.ok(block.length <= CHANGES_SINCE_CONTEXT_BUDGET + 200);
     assert.match(block, /and \d+ more commit\(s\); use the git command above\./);
-    const text = '+変更\n'.repeat(5000);
+    const text = '+変更\n'.repeat(CHANGES_SINCE_DIFF_BUDGET);
     const withDiff = buildChangesSinceContextBlock('abc1234', 'def5678', subjects, {
       text,
       totalBytes: Buffer.byteLength(text),
@@ -136,7 +136,10 @@ describe('buildChangesSinceContextBlock', () => {
     assert.ok(
       Buffer.byteLength(withDiff) <= CHANGES_SINCE_CONTEXT_BUDGET + CHANGES_SINCE_DIFF_BUDGET + 400,
     );
-    assert.match(withDiff, /Delta diff \(UTF-8 text\) truncated to \d+ bytes; omitted \d+ bytes/);
+    assert.match(
+      withDiff,
+      /Changes-since summary diff \(UTF-8 text\) truncated to \d+ bytes; omitted \d+ bytes/,
+    );
   });
 
   it('measures the budget in UTF-8 bytes, not code units', () => {

@@ -48,6 +48,23 @@ it('embeds only the committed re-review delta when subjects contain no details',
     assert.match(noChanges, /trigger CI/);
     assert.match(noChanges, /\(No file changes\.\)/);
 
+    writeFileSync(join(workspace, 'a-first.ts'), 'const padding = true;\n'.repeat(8000));
+    writeFileSync(join(workspace, 'z-last.ts'), 'export const lastFileChange = true;\n');
+    git('add', '.');
+    git('commit', '-m', 'update');
+    const broad = await collectChangesSinceContext(
+      workspace,
+      empty,
+      git('rev-parse', 'HEAD'),
+      true,
+    );
+    assert.ok(broad);
+    assert.match(broad, /\+export const lastFileChange = true/);
+    assert.match(broad, /Delta file overview/);
+    assert.doesNotMatch(broad, /truncated|omitted/);
+    git('rm', 'a-first.ts', 'z-last.ts');
+    git('commit', '-m', 'update');
+
     let large = empty;
     for (const [index, content] of [
       Buffer.from('変更\n'.repeat(1_500_000)),
@@ -73,7 +90,7 @@ it('embeds only the committed re-review delta when subjects contain no details',
         continue;
       }
       const match = evidence.match(
-        /^([\s\S]*)\n\n\[Delta diff \(UTF-8 text\) truncated to (\d+) bytes; omitted (\d+) bytes\.\]$/,
+        /^([\s\S]*)\n\n\[Changes-since summary diff \(UTF-8 text\) truncated to (\d+) bytes; omitted (\d+) bytes\.\]$/,
       );
       assert.ok(match);
       const [, prefix, kept, omitted] = match;

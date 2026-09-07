@@ -2,6 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  computeFinderTimeoutMs,
+  computeRunDeadline,
+  computeRetryTimeoutMs,
+  computeVerificationTimeoutMs,
+  computeAuxiliaryGraceMs,
+  AUXILIARY_SETTLE_GRACE_MS,
+} from './time-budget.ts';
 import { createCommandCodeProcessScope } from './commandcode-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
@@ -787,11 +795,7 @@ export interface ReviewRunOptions {
    * is therefore off ('') unless an operator configures a path.
    */
   shardCachePath?: string;
-  /**
-   * Drop supplementary context blocks to hold the assembled-context soft cap.
-   * Off by default: an unmeasured recall trade, kept as an A/B arm until
-   * finding-level telemetry says which side wins.
-   */
+  /** Drop prior-thread hints above the soft cap; retain scope, focus and caller evidence. */
   contextTrim?: boolean;
   /** Treat embedded diff hunks as already read. On; JBOT_EMBEDDED_FIRST_PROMPT=false opts out. */
   embeddedFirstPrompt?: boolean;
@@ -2331,7 +2335,6 @@ async function runReviewPipeline(params: {
               commandCodeEffortContext,
               verifierSessionOptions,
             ),
-            'verification',
           ),
         },
       });
@@ -3265,73 +3268,6 @@ export function emitReviewTelemetry(
   }
 }
 
-const MIN_FINDER_TIMEOUT_MS = 60_000;
-// Ceiling for any single session even under a generous budget: callers who
-// set time-budget-minutes 30+ for powerful models get the full 30-minute window.
-const MAX_SESSION_TIMEOUT_MS = 30 * 60_000;
-const POSTING_RESERVE_MS = 30_000;
-const MIN_VERIFICATION_MS = 45_000;
-const MAX_VERIFICATION_MS = 5 * 60_000;
-
-/**
- * Finder sessions (main shards, lenses, aux checks) get the FULL budget
- * (minus the posting reserve) as their deadline: heavy reasoning models need
- * the whole window for a first attempt, and a starved first attempt just
- * converts into a retry that costs more wall clock overall. Retries and
- * verification adaptively use whatever remains — or are skipped, fail-open.
- * Returns undefined (default 15-minute cap) when no budget is set.
- */
-export function computeFinderTimeoutMs(timeBudgetMinutes: number): number | undefined {
-  if (timeBudgetMinutes <= 0) return undefined;
-  const window = timeBudgetMinutes * 60_000 - POSTING_RESERVE_MS;
-  const floor = Math.min(MIN_FINDER_TIMEOUT_MS, window);
-  return Math.min(Math.max(window, floor), MAX_SESSION_TIMEOUT_MS);
-}
-
-/** Absolute run deadline for retries; undefined when no budget is set. */
-export function computeRunDeadline(
-  timeBudgetMinutes: number,
-  runStartedAt: number,
-): number | undefined {
-  if (timeBudgetMinutes <= 0) return undefined;
-  return runStartedAt + timeBudgetMinutes * 60_000 - POSTING_RESERVE_MS;
-}
-
-const MIN_RETRY_TIMEOUT_MS = 60_000;
-
-/**
- * Timeout for a shard's single retry: whatever remains until the run
- * deadline, capped at the original finder timeout. Returns 0 (skip the
- * retry) when less than a usable minute remains; undefined deadline means
- * no budget — retry with the original timeout.
- */
-export function computeRetryTimeoutMs(
-  deadlineAt: number | undefined,
-  now: number,
-  finderTimeoutMs: number | undefined,
-): number | undefined {
-  if (deadlineAt === undefined) return finderTimeoutMs;
-  const remaining = deadlineAt - now;
-  if (remaining < MIN_RETRY_TIMEOUT_MS) return 0;
-  return finderTimeoutMs === undefined ? remaining : Math.min(remaining, finderTimeoutMs);
-}
-
-/**
- * Verification runs last, so it gets whatever actually remains of the
- * budget. Returns undefined for no budget (default cap), 0 when too little
- * remains — the caller skips verification (fail-open: unverified findings
- * post rather than blow the budget or vanish).
- */
-export function computeVerificationTimeoutMs(
-  timeBudgetMinutes: number,
-  elapsedMs: number,
-): number | undefined {
-  if (timeBudgetMinutes <= 0) return undefined;
-  const remaining = timeBudgetMinutes * 60_000 - elapsedMs - POSTING_RESERVE_MS;
-  if (remaining < MIN_VERIFICATION_MS) return 0;
-  return Math.min(remaining, MAX_VERIFICATION_MS);
-}
-
 /**
  * Starts the extra recall passes in parallel with the main review. Each pass
  * is the full review prompt plus one focus lens; a failed lens pass costs
@@ -3410,26 +3346,6 @@ function pendingAuxiliarySessionLabels(
   sessions: { label: string; isSettled: () => boolean }[],
 ): string[] {
   return sessions.filter((session) => !session.isSettled()).map((session) => session.label);
-}
-
-const AUXILIARY_SETTLE_GRACE_MS = 10 * 60_000;
-
-export function computeAuxiliaryGraceMs(
-  timeBudgetMinutes: number,
-  elapsedMs: number,
-  verificationEnabled = true,
-): number {
-  if (timeBudgetMinutes <= 0) return AUXILIARY_SETTLE_GRACE_MS;
-  return Math.max(
-    0,
-    Math.min(
-      AUXILIARY_SETTLE_GRACE_MS,
-      timeBudgetMinutes * 60_000 -
-        elapsedMs -
-        POSTING_RESERVE_MS -
-        (verificationEnabled ? MAX_VERIFICATION_MS : 0),
-    ),
-  );
 }
 
 /** Distinguishes the grace expiring from the session failing on its own. */

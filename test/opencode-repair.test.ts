@@ -48,17 +48,22 @@ function makeFakeClient(
   client: OpencodeClient;
   prompts: string[];
   aborted: string[];
+  tools: Array<Record<string, boolean>>;
 } {
   const messages: FakeMessage[] = [];
   const prompts: string[] = [];
   const aborted: string[] = [];
+  const tools: Array<Record<string, boolean>> = [];
 
   const client = {
     session: {
       create: async () => ({ data: { id: 'session-1' } }),
       abort: async ({ path }: { path: { id: string } }) => void aborted.push(path.id),
-      promptAsync: async (request: { body: { parts: Array<{ text: string }> } }) => {
+      promptAsync: async (request: {
+        body: { parts: Array<{ text: string }>; tools: Record<string, boolean> };
+      }) => {
         prompts.push(request.body.parts[0].text);
+        tools.push(request.body.tools);
         // index access, not `??`: a scripted null means "no text part" and
         // must not fall back to '{}'.
         const index = prompts.length - 1;
@@ -88,7 +93,7 @@ function makeFakeClient(
     },
   } as unknown as OpencodeClient;
 
-  return { client, prompts, aborted };
+  return { client, prompts, aborted, tools };
 }
 
 const VALID_REVIEW = JSON.stringify({
@@ -336,7 +341,7 @@ describe('runFindingVerification evidence grounding', () => {
   // Regression guard: a field-subset projection here once dropped `evidence`,
   // silently defeating verifier grounding on this backend. Keep it passing through.
   it('cites each finding’s evidence quote in the verifier prompt', async () => {
-    const { client, prompts } = makeFakeClient([
+    const { client, prompts, tools } = makeFakeClient([
       '{"verdicts":[{"index":0,"verdict":"confirmed"}]}',
     ]);
 
@@ -358,6 +363,8 @@ describe('runFindingVerification evidence grounding', () => {
     );
 
     assert.match(prompts[0], /Cited line: return x - tax;/);
+    assert.deepEqual(tools[0], { write: false, edit: false, patch: false });
+    assert.match(prompts[0], /read\n  the actual code/);
   });
 });
 
