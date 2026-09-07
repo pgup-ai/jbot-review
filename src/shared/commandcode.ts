@@ -474,9 +474,7 @@ export function parseCommandCodeJsonOutput(output: string): {
     ) {
       const name =
         typeof event.toolName === 'string' &&
-        ['jbot_read_file', 'read_directory', 'jbot_search', 'jbot_list_files'].includes(
-          event.toolName,
-        )
+        ['jbot_read_file', 'jbot_search', 'jbot_list_files'].includes(event.toolName)
           ? event.toolName
           : 'other';
       const key = `${name}:${event.type}`;

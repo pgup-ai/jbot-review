@@ -11,7 +11,7 @@ The CLI starts in an empty directory with an isolated HOME. Project/operator
 settings, hooks, mods, and skills cannot be discovered there. The only loaded
 mod belongs to J-Bot; its bootstrap exits if initialization fails.
 
-The exposed tools are `jbot_read_file`, `read_directory`, `jbot_list_files`, and
+The exposed tools are `jbot_read_file`, `jbot_list_files`, and
 `jbot_search`. Reads resolve paths and symlinks before checking repository
 confinement. The reader and Git tools reuse J-Bot's paginated output helpers;
 there is no new aggregate tool-call or read quota. Listing includes tracked and
@@ -33,11 +33,16 @@ also cover a malicious Git fsmonitor setting and redirected `core.worktree`.
 A follow-up self-review reproduced an escape when an uncommitted directory
 symlink replaced an indexed directory: index-based Git grep followed the parent
 symlink. Search now walks the filesystem with `--no-index --exclude-standard`,
-which skips symlinks and includes non-ignored untracked files. Ignored files,
-including tracked files matching ignore rules, remain available through direct
-reads. The existing isolation test covers the escape and search scope. The
+which skips symlinks and includes non-ignored untracked files. Tracked files
+matching ignore rules remain available through direct reads. The existing
+isolation test covers the escape and search scope. The
 bundled Linux tool also passes the same escape probe. The 36-run matrix below
 preceded this change.
+
+The follow-up also blocks Git metadata and ignored untracked files from direct
+reads, including symlink aliases. Native directory listing was removed because
+the filtered file-list tool already covers discovery. Tool descriptions now live
+in `prompt.ts`; malformed searches are checked in the existing isolation test.
 
 ## Paired quality screen
 
@@ -89,12 +94,13 @@ are both included in the retained result.
 
 ## Response parsing
 
-The matrix preceded a final strict-parsing guard. Investigation reproduced a
+The matrix preceded the final parsing changes. Investigation reproduced a
 separate failure: `Calling review(command, {}) ...` before a valid JSON review
 could make the parser select `{}` and silently return no findings. Strict mode
-now requires a findings or addressed-comments array, so unrelated objects enter
-the existing JSON-repair path. Valid empty reviews, addressed-only responses,
-and lenient auxiliary parsing retain their behavior.
+now requires the array expected by each pass: `findings` for main/guideline
+reviews and `addressedPriorComments` for addressed checks. An addressed-only
+object cannot satisfy a main review. Empty arrays remain valid, and auxiliary
+repairs still fail open.
 
 A controlled probe injected that malformed first response into the actual local
 pipeline. Muse 1.3 repaired it, read the helper, and verified the resulting P1.
@@ -127,7 +133,12 @@ Raw manifests, per-trial results and logs are local at
 reviewer source hashes and fixture commits. Isolation results are at
 `/tmp/jbot-commandcode-isolation-validated`; Linux-image output is at
 `/tmp/jbot-commandcode-docker-smoke`. These are diagnostic results, not a committed
-corpus ledger entry.
+corpus ledger entry. The final self-review changes were checked with regression
+tests and the rebuilt Linux bundle; the model matrix was not repeated.
+Two final Linux-image Muse 1.3 smoke reviews stayed quiet on the clean fixture
+and retained the verified P1 on the defect fixture. Both main sessions and the
+defect verifier used repository tools. Results are at
+`/tmp/jbot-206-final-clean` and `/tmp/jbot-206-final-defect`.
 
 The full/core corpus and blind adjudication were not run. This pair tests one
 specific cross-file evidence gap; it does not establish general review precision

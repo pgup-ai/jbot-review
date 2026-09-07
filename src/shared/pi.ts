@@ -1195,7 +1195,7 @@ async function repromptPiForJson(
  * Aux-session parse with one same-session repair, failing open to the empty
  * selection (invariant 3) — mirrors the opencode engine's behavior.
  */
-async function parsePiAuxWithRepair<T>(
+async function parsePiAuxWithRepair<K extends 'findings' | 'addressedPriorComments'>(
   session: PiAgentSessionLike,
   model: string,
   raw: string,
@@ -1203,10 +1203,10 @@ async function parsePiAuxWithRepair<T>(
   log: (msg: string) => void,
   timeoutMs: number | undefined,
   onTokenUsage: TokenUsageRecorder | undefined,
-  select: (result: ReviewResult) => T,
-): Promise<T> {
+  field: K,
+): Promise<ReviewResult[K]> {
   try {
-    return select(parseReview(raw, label, log, { strict: true }));
+    return parseReview(raw, label, log, { strict: true, field })[field];
   } catch (error) {
     try {
       const repaired = await repromptPiForJson(
@@ -1219,11 +1219,11 @@ async function parsePiAuxWithRepair<T>(
         timeoutMs,
         onTokenUsage,
       );
-      return select(parseReview(repaired, `${label}-repair`, log));
+      return parseReview(repaired, `${label}-repair`, log)[field];
     } catch (repairError) {
       const message = repairError instanceof Error ? repairError.message : String(repairError);
       log(`(${label} repair failed; keeping empty results: ${message})`);
-      return select({ summary: '', findings: [], addressedPriorComments: [] });
+      return [];
     }
   }
 }
@@ -1256,7 +1256,7 @@ export async function runPiAddressedPriorCommentsCheck(
       log,
       timeoutMs,
       onTokenUsage,
-      (result) => result.addressedPriorComments,
+      'addressedPriorComments',
     );
   } finally {
     disposePiSession(runtime, session, label, log);
@@ -1292,7 +1292,7 @@ export async function runPiGuidelineComplianceCheck(
       log,
       timeoutMs,
       onTokenUsage,
-      (result) => result.findings,
+      'findings',
     );
   } finally {
     disposePiSession(runtime, session, label, log);

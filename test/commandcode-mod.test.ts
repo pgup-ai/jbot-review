@@ -16,7 +16,11 @@ it('reads literal bracketed filenames while refusing escapes and non-file reads'
   const parent = mkdtempSync(join(tmpdir(), 'jbot-cc-mod-'));
   const root = join(parent, 'repo');
   mkdirSync(root);
+  execFileSync('git', ['-C', root, 'init', '-q']);
   writeFileSync(join(root, '[id].ts'), 'safe');
+  writeFileSync(join(root, '.gitignore'), '.env\n');
+  writeFileSync(join(root, '.env'), 'private');
+  symlinkSync(join(root, '.env'), join(root, 'private-link'));
   writeFileSync(join(parent, 'outside.ts'), 'outside');
   symlinkSync(join(parent, 'outside.ts'), join(root, 'escape.ts'));
   const previous = process.env.JBOT_COMMANDCODE_WORKSPACE;
@@ -26,12 +30,7 @@ it('reads literal bracketed filenames while refusing escapes and non-file reads'
     process.env.JBOT_COMMANDCODE_WORKSPACE = root;
     commandCodeReviewMod({
       setActiveTools(names) {
-        assert.deepEqual(names, [
-          'jbot_read_file',
-          'read_directory',
-          'jbot_search',
-          'jbot_list_files',
-        ]);
+        assert.deepEqual(names, ['jbot_read_file', 'jbot_search', 'jbot_list_files']);
       },
       hooks(hooks) {
         hook = hooks.beforeToolCall;
@@ -45,6 +44,11 @@ it('reads literal bracketed filenames while refusing escapes and non-file reads'
       const result = await read.run({ input: { path } });
       assert.equal(result.ok, false, path);
       assert.match(result.error, /outside the reviewed repository|not a regular file/);
+    }
+    for (const path of ['.env', 'private-link', '.git/config']) {
+      const denied = await read.run({ input: { path } });
+      assert.equal(denied.ok, false);
+      assert.match(denied.error, /unavailable/);
     }
     const result = await read.run({ input: { path: '[id].ts' } });
     assert.equal(result.ok, true);
@@ -94,11 +98,21 @@ it('searches and lists the actual worktree without following symlinks or running
     });
     for (const tool of tools) assert.ok(Array.isArray(tool.schema.input_schema.required));
     const search = tools.find((t) => t.schema.name === 'jbot_search')!;
+    for (const input of [{}, { query: '' }]) {
+      const invalid = await search.run({ input });
+      assert.equal(invalid.ok, false);
+      assert.match(invalid.error, /query must be nonempty/);
+    }
     const found = await search.run({ input: { query: 'needle' } });
     assert.equal(found.ok, true);
     assert.match(found.content[0].text, /inside.ts:1:needle/);
     assert.match(found.content[0].text, /untracked.ts:1:needle/);
     assert.doesNotMatch(found.content[0].text, /ignored.ts/);
+    const tracked = await tools
+      .find((t) => t.schema.name === 'jbot_read_file')!
+      .run({ input: { path: 'ignored.ts' } });
+    assert.equal(tracked.ok, true);
+    assert.match(tracked.content[0].text, /needle/);
     const escaped = await search.run({ input: { query: 'OUTSIDE_SECRET_CANARY' } });
     assert.equal(escaped.ok, true);
     assert.equal(escaped.content[0].text, '(no matches)');

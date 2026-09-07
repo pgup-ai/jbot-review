@@ -1,5 +1,7 @@
+import { spawnSync } from 'node:child_process';
 import { createReadStream, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { COMMANDCODE_TOOL_DESCRIPTIONS } from './prompt.ts';
 import { gitRepositoryPage, readRepositoryPage } from './repository-output.ts';
 
 interface CommandCodeModApi {
@@ -23,43 +25,24 @@ interface CommandCodeModApi {
 
 export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
   const root = realpathSync(process.env.JBOT_COMMANDCODE_WORKSPACE!);
-  const names = ['jbot_read_file', 'read_directory', 'jbot_search', 'jbot_list_files'];
+  const names = ['jbot_read_file', 'jbot_search', 'jbot_list_files'];
   const offset = {
     type: 'integer',
     minimum: 0,
-    description:
-      'Byte offset copied from an explicit next-page notice, not a line or match count. Omit for the first page. End of output means there is no next page.',
-  };
-  const literal = (path: unknown): string => {
-    if (typeof path !== 'string') throw new Error('Provide a repository file path.');
-    const target = realpathSync(resolve(root, path));
-    const rel = relative(root, target);
-    if (isAbsolute(rel) || rel === '..' || rel.startsWith('..' + sep))
-      throw new Error('Path is outside the reviewed repository.');
-    return target;
+    description: COMMANDCODE_TOOL_DESCRIPTIONS.offset,
   };
   cmd.setActiveTools(names);
   cmd.hooks({
     beforeToolCall({ toolName, input }) {
-      try {
-        if (!names.includes(toolName))
-          throw new Error('Only repository read/search tools are enabled.');
-        if (toolName === 'read_directory') return { input: { path: literal(input.path ?? root) } };
-        return { input };
-      } catch (error) {
-        return {
-          block: true,
-          additionalContext:
-            error instanceof Error ? error.message : 'Invalid repository tool input.',
-        };
-      }
+      return names.includes(toolName)
+        ? { input }
+        : { block: true, additionalContext: 'Only repository read/search tools are enabled.' };
     },
   });
   cmd.addTool({
     schema: {
       name: 'jbot_read_file',
-      description:
-        'Read a UTF-8 repository file, following only symlinks that stay inside the repository. Paths are literal, including brackets. Continue with the returned offset or start at a 1-based line.',
+      description: COMMANDCODE_TOOL_DESCRIPTIONS.read,
       input_schema: {
         type: 'object',
         properties: {
@@ -73,8 +56,21 @@ export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
     readOnly: true,
     async run({ input }) {
       try {
-        const target = literal(input.path);
+        if (typeof input.path !== 'string') throw new Error('Provide a repository file path.');
+        const target = realpathSync(resolve(root, input.path));
+        const rel = relative(root, target);
+        if (isAbsolute(rel) || rel === '..' || rel.startsWith('..' + sep))
+          throw new Error('Path is outside the reviewed repository.');
+        if (rel.split(sep).some((part) => part.toLowerCase() === '.git'))
+          throw new Error('Git metadata is unavailable.');
         if (!statSync(target).isFile()) throw new Error('Path is not a regular file.');
+        const ignored = spawnSync(
+          'git',
+          ['-c', 'core.fsmonitor=false', `--work-tree=${root}`, 'check-ignore', '-q', '--', rel],
+          { cwd: root, stdio: 'ignore', timeout: 30_000 },
+        );
+        if (ignored.status === 0) throw new Error('Ignored local files are unavailable.');
+        if (ignored.status !== 1) throw new Error('Cannot validate repository file visibility.');
         const page = await readRepositoryPage(
           createReadStream(target, { encoding: 'utf8' }),
           input,
@@ -93,8 +89,8 @@ export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
       schema: {
         name: search ? 'jbot_search' : 'jbot_list_files',
         description: search
-          ? 'Search non-ignored repository files for literal text without following symlinks. Results include path and line number. Use jbot_read_file for ignored files. Continue with the returned offset.'
-          : 'List tracked and non-ignored untracked repository file paths. Continue with the returned offset.',
+          ? COMMANDCODE_TOOL_DESCRIPTIONS.search
+          : COMMANDCODE_TOOL_DESCRIPTIONS.list,
         input_schema: {
           type: 'object',
           properties: {

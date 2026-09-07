@@ -111,18 +111,34 @@ describe('parseReview', () => {
   it('rejects JSON without a review result in strict mode instead of returning an empty review', () => {
     assert.throws(() => parseReview('[]', 'review', noLog, { strict: true }), /non-object/);
     assert.throws(() => parseReview('"done"', 'review', noLog, { strict: true }), /non-object/);
-    for (const raw of ['{}', '{"findings":null}', 'Example options: {}. Result: {"findings":[]}'])
+    for (const raw of [
+      '{}',
+      '{"findings":null}',
+      'Example options: {}. Result: {"findings":[]}',
+      '{"addressedPriorComments":[]}',
+      'Example options: {"addressedPriorComments":[]}. Result: {"findings":[]}',
+    ])
       assert.throws(
         () => parseReview(raw, 'review', noLog, { strict: true }),
-        /without a findings or addressedPriorComments array/,
+        /without a findings array/,
       );
     assert.deepEqual(
       parseReview('{"findings":[]}', 'review', noLog, { strict: true }).findings,
       [],
     );
+    assert.throws(
+      () =>
+        parseReview('{"findings":[]}', 'addressed', noLog, {
+          strict: true,
+          field: 'addressedPriorComments',
+        }),
+      /without a addressedPriorComments array/,
+    );
     assert.deepEqual(
-      parseReview('{"addressedPriorComments":[]}', 'addressed', noLog, { strict: true })
-        .addressedPriorComments,
+      parseReview('{"addressedPriorComments":[]}', 'addressed', noLog, {
+        strict: true,
+        field: 'addressedPriorComments',
+      }).addressedPriorComments,
       [],
     );
     assert.deepEqual(parseReview('{}', 'aux', noLog).findings, []);

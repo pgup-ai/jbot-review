@@ -879,7 +879,7 @@ async function repromptForJson(
  * if the repair is unparseable or its round-trip dies. Aux checks never fail the
  * run (invariant #3).
  */
-async function parseAuxSessionWithRepair<T>(
+async function parseAuxSessionWithRepair<K extends 'findings' | 'addressedPriorComments'>(
   session: {
     client: OpencodeClient;
     model: string;
@@ -890,11 +890,11 @@ async function parseAuxSessionWithRepair<T>(
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
   },
-  select: (result: ReviewResult) => T,
-): Promise<T> {
+  field: K,
+): Promise<ReviewResult[K]> {
   const { client, model, sessionID, raw, label, log, timeoutMs, onTokenUsage } = session;
   try {
-    return select(parseReview(raw, label, log, { strict: true }));
+    return parseReview(raw, label, log, { strict: true, field })[field];
   } catch (error) {
     try {
       const repaired = await repromptForJson(
@@ -908,11 +908,11 @@ async function parseAuxSessionWithRepair<T>(
         timeoutMs,
         onTokenUsage,
       );
-      return select(parseReview(repaired, `${label}-repair`, log));
+      return parseReview(repaired, `${label}-repair`, log)[field];
     } catch (repairError) {
       const message = repairError instanceof Error ? repairError.message : String(repairError);
       log(`(${label} repair failed; keeping empty results: ${message})`);
-      return select({ summary: '', findings: [], addressedPriorComments: [] });
+      return [];
     }
   }
 }
@@ -946,7 +946,7 @@ export async function runAddressedPriorCommentsCheck(
       timeoutMs,
       onTokenUsage,
     },
-    (result) => result.addressedPriorComments,
+    'addressedPriorComments',
   );
 }
 
@@ -971,7 +971,7 @@ export async function runGuidelineComplianceCheck(
   );
   return parseAuxSessionWithRepair(
     { client, model, sessionID, raw, label: 'guideline-compliance', log, timeoutMs, onTokenUsage },
-    (result) => result.findings,
+    'findings',
   );
 }
 
@@ -1460,7 +1460,7 @@ export function parseReview(
   raw: string,
   label: string,
   log: (msg: string) => void,
-  options: { strict?: boolean } = {},
+  options: { strict?: boolean; field?: 'findings' | 'addressedPriorComments' } = {},
 ): ReviewResult {
   let parsed: unknown;
   try {
@@ -1493,8 +1493,9 @@ export function parseReview(
   }
 
   const obj = parsed as Record<string, unknown>;
-  if (options.strict && !Array.isArray(obj.findings) && !Array.isArray(obj.addressedPriorComments))
-    throw new Error(`${label} returned JSON without a findings or addressedPriorComments array`);
+  const field = options.field ?? 'findings';
+  if (options.strict && !Array.isArray(obj[field]))
+    throw new Error(`${label} returned JSON without a ${field} array`);
   const summary = typeof obj.summary === 'string' ? obj.summary : '';
   const rawFindings = Array.isArray(obj.findings) ? obj.findings : [];
   const rawAddressed = Array.isArray(obj.addressedPriorComments) ? obj.addressedPriorComments : [];
