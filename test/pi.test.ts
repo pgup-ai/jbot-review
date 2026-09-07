@@ -410,6 +410,11 @@ describe('repository tool pages', () => {
       () => readRepositoryPage(Readable.from([original]), { offset: -1 }),
       /offset/,
     );
+    await assert.rejects(
+      () =>
+        readRepositoryPage(Readable.from([original]), { offset: Buffer.byteLength(original) + 1 }),
+      /within the output/,
+    );
     await assert.rejects(() => readRepositoryPage(Readable.from([original]), { line: 0 }), /line/);
   });
 

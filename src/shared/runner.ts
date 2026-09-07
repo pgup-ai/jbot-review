@@ -4435,12 +4435,7 @@ export function buildBody(
   if (total > 0 && renderedSummary.trim()) {
     lines.push(renderedSummary, '');
   }
-  const guidance = coverageNotice
-    ? {
-        state: 'Review incomplete',
-        mergeGuidance: 'Do not treat incomplete coverage as an all-clear result.',
-      }
-    : getMergeGuidance(all);
+  const guidance = getMergeGuidance(all, Boolean(coverageNotice));
   lines.push(`**Review state:** ${guidance.state}`, '');
   lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`, '');
   if (headSha) {
@@ -4525,17 +4520,13 @@ function uniqueModels(primary: string, others: string[]): string[] {
   return [...new Set([primary, ...others])];
 }
 
-function getMergeGuidance(findings: Pick<Finding, 'severity'>[]): {
+function getMergeGuidance(
+  findings: Pick<Finding, 'severity'>[],
+  incomplete: boolean,
+): {
   state: string;
   mergeGuidance: string;
 } {
-  if (findings.length === 0) {
-    return {
-      state: 'Good to go from jbot-review',
-      mergeGuidance: 'No new findings were found in this review run.',
-    };
-  }
-
   const hasBlockingFinding = findings.some(
     (finding) => SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2,
   );
@@ -4543,6 +4534,20 @@ function getMergeGuidance(findings: Pick<Finding, 'severity'>[]): {
     return {
       state: 'Needs changes before approval',
       mergeGuidance: 'Address the P0/P1/P2 findings before treating this PR as ready to approve.',
+    };
+  }
+
+  if (incomplete) {
+    return {
+      state: 'Review incomplete',
+      mergeGuidance: 'Do not treat incomplete coverage as an all-clear result.',
+    };
+  }
+
+  if (findings.length === 0) {
+    return {
+      state: 'Good to go from jbot-review',
+      mergeGuidance: 'No new findings were found in this review run.',
     };
   }
 

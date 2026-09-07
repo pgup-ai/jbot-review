@@ -34,6 +34,7 @@ import type { Octokit, PrFile } from '../src/shared/github.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
 import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
 import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
+import { applyFindingVerdicts, selectFindingIndexes } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 const PRIOR_JBOT_REVIEW = [
@@ -1244,6 +1245,23 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   assert.match(body, /review-interactions/);
   assert.match(body, /completed passes only/);
   assert.doesNotMatch(body, /✅|Good to go|No new findings were found/);
+  const blocked = buildBody(
+    '',
+    '',
+    [{ path: 'a.ts', line: 1, title: 'Bug', body: 'Claim', severity: 'P1' }],
+    [],
+    'model',
+    'owner',
+    'repo',
+    'head',
+    undefined,
+    undefined,
+    undefined,
+    ['finding-verification'],
+  );
+  assert.match(blocked, /Needs changes before approval/);
+  assert.match(blocked, /Review incomplete/);
+  assert.match(blocked, /Address the P0\/P1\/P2 findings/);
   const uncertain = buildBody(
     '',
     'Definitely broken',
@@ -1273,13 +1291,16 @@ it('verifies every batch and preserves successful verdicts when another batch fa
     title: `finding ${i}`,
     body: 'claim',
   }));
-  for (const failFirst of [false, true]) {
+  for (const firstBatch of ['complete', 'failed', 'partial']) {
     const sizes: number[] = [];
     const coverage: string[] = [];
     const backend = {
       async runFindingVerification(_model: string, _context: string, targets: Finding[]) {
         sizes.push(targets.length);
-        if (failFirst && sizes.length === 1) throw new Error('provider unavailable');
+        if (sizes.length === 1) {
+          if (firstBatch === 'failed') throw new Error('provider unavailable');
+          if (firstBatch === 'partial') return [{ index: 9, verdict: 'refuted' as const }];
+        }
         return targets.map((_, index) => ({ index, verdict: 'refuted' as const }));
       },
     } as ReviewBackend;
@@ -1295,9 +1316,15 @@ it('verifies every batch and preserves successful verdicts when another batch fa
     });
     assert.deepEqual(sizes, [10, 10, 3]);
     assert.deepEqual(
-      verdicts?.map((v) => v.index),
-      findings.map((_, i) => i).slice(failFirst ? 10 : 0),
+      verdicts.map((v) => v.index),
+      findings
+        .map((_, i) => i)
+        .slice(firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0),
     );
-    assert.deepEqual(coverage, [failFirst ? 'failed' : 'completed']);
+    assert.deepEqual(coverage, [firstBatch === 'complete' ? 'completed' : 'failed']);
+    assert.deepEqual(
+      applyFindingVerdicts(findings, selectFindingIndexes(findings), verdicts).findings,
+      findings.slice(0, firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0),
+    );
   }
 });
