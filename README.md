@@ -890,20 +890,18 @@ Download one telemetry JSONL per attempt, then compare them locally:
 npm run performance:review -- control/telemetry.jsonl candidate/telemetry.jsonl
 ```
 
-The report's `auxiliaryRuns` keeps each attempt's identity, configuration, execution
-roles, run phases, coverage events, and auxiliary session phases together. Queue and
-execution time remain separate; failed sessions need no token row to appear.
-Coverage includes startup failures and skipped sessions without phase rows. Missing
-legacy metadata stays absent. Supply each artifact once; this command does not
-deduplicate copied artifacts or interpret repeated coverage events as separate sessions.
+The report's `auxiliaryRuns` keeps each attempt's identity, configuration, effective
+roles, run phases, coverage, and auxiliary session phases together. Queue time is
+separate from execution; failures need no token row, and missing metadata stays
+absent. Supply each artifact once. Coverage events are preserved, not counted as
+separate sessions. Aborted durations are not completed latency samples, and parallel
+session durations do not sum to wall time.
 
-Compare the same reviewed base/head, reviewer revision, main route, and effective
-configuration, accounting for the intended treatment. Inspect actual roles and
-coverage as well as the configuration hash: cache reuse, retries, available lenses,
-and provider load can change the work performed. Retained findings are pipeline
-survivors, not adjudicated true positives. See the
-[auxiliary tuning measurements](docs/audits/2026-09-07-auxiliary-tuning.md) for the
-current evidence and limits.
+Compare the same base/head, reviewer revision, main route, and effective settings,
+accounting for the intended treatment, cache reuse, retries, and actual lenses.
+Retained findings are pipeline survivors, not adjudicated true positives. See the
+[auxiliary measurements](docs/audits/2026-09-07-auxiliary-tuning.md) for evidence
+and limits.
 
 ## Observer gateway
 

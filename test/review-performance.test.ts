@@ -56,20 +56,7 @@ describe('review performance aggregation', () => {
       { kind: 'session', session: 'review-repair', cacheReadTokens: 30 },
       { kind: 'session', session: 'review-shard-1-retry' },
       { kind: 'finding', disposition: 'posted-inline' },
-    ]) as {
-      phaseTime: Record<string, { p50: number }>;
-      phaseReconciliation: { gapMs: { p50: number } };
-      tools: {
-        outputBytes: number;
-        droppedRows: number;
-        diffRecoveryCallRate: { status: string };
-      };
-      turns: { p50: number };
-      cacheReadTokens: number;
-      retryRepairRate: { numerator: number; rate: number | null };
-      retainedFindings: number;
-      backendCohorts: Record<string, { toolCalls: number }>;
-    };
+    ]);
 
     assert.equal(report.phaseTime['run:filtering'].p50, 25);
     assert.equal(report.phaseTime['run:posting'].p50, 75);
@@ -138,7 +125,7 @@ describe('review performance aggregation', () => {
       { kind: 'finding', session: 'review-frontend', disposition: 'deduped' },
     ];
     const { auxiliaryRuns } = aggregatePerformance(
-      [first, second].flatMap((rows, source) =>
+      [first, second, second.filter((row) => row.kind !== 'run')].flatMap((rows, source) =>
         parseTelemetryJsonl(rows.map((row) => JSON.stringify(row)).join('\n'), source),
       ),
     );

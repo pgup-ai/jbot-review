@@ -1,9 +1,8 @@
 # Measured auxiliary tuning
 
-The current evidence supports comparing auxiliary routes before changing global
-concurrency. This PR adds attempt-level diagnostics to the existing performance
-report. It does not change model selection, the shared pool, prompts, verification,
-fan-out, concurrency, or defaults.
+Six fixed-head route attempts show no consistent end-to-end speedup. Keep the
+current review defaults; the report now exposes each attempt's auxiliary timings,
+coverage, and finding counts.
 
 ## Observed workflow evidence
 
@@ -94,21 +93,8 @@ Telemetry run IDs, in table order: `fb297b69-e41c-4298-b4b3-eab0b056f2e1`,
 `b6e4ce2a-5fe3-43c6-a5a4-82d26ece9d06`, `9df1b4fe-949f-4885-8ee0-22928ad5f3ad`,
 `23d28fa0-aeb7-44cf-9f2e-0586c1c0c613`, `23b70003-249e-4976-967b-dcf28cf89cef`,
 `bcaaf20a-c39b-481f-99ca-9845e9bffaad`. Raw local artifacts are retained outside the
-repository; the table can be regenerated with the performance command below.
-
-## Reading the report
-
-Run `npm run performance:review -- <telemetry.jsonl> [...]` with one artifact per
-attempt. `auxiliaryRuns` joins phases and finding dispositions to their own run;
-it does not pool unlike workloads into a model ranking. All coverage events are
-preserved, including startup failures that have no execution or token row. An
-aborted execution and a failed coverage event can describe the same session.
-
-Use run phases to distinguish main execution, grace wait, and verification;
-session phases distinguish queueing from execution. An aborted duration is time
-spent before cancellation, not a completed latency sample. Do not sum parallel
-session durations and call the sum wall time. Retained counts measure findings
-that survived the pipeline, not correctness or recall.
+repository. See [Comparing review runs](../../README.md#comparing-review-runs)
+for the report command and interpretation.
 
 ## Decision
 
