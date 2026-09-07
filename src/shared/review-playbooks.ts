@@ -73,7 +73,13 @@ const INFRA_OPS_PATTERNS = [PATH_PATTERNS.infra];
  * a `.ts` store/hook under apps/web counts for both, or neither.
  */
 export function changedFilesIncludeFrontend(changedFiles: string[]): boolean {
-  return matchesAny(changedFiles, FRONTEND_WORKFLOW_PATTERNS);
+  return matchesAny(
+    changedFiles.filter(
+      (file) =>
+        !/(^|\/)(\.(claude|codex|agents|git|github)\/hooks|\.husky|\.githooks)(\/|$)/i.test(file),
+    ),
+    FRONTEND_WORKFLOW_PATTERNS,
+  );
 }
 
 export function selectReviewPlaybookIds(
@@ -90,7 +96,7 @@ export function selectReviewPlaybookIds(
 
   if (matchesAny(changedFiles, CONTRACT_API_PATTERNS)) selected.add(CONTRACT_API);
   if (matchesAny(changedFiles, BACKEND_DATA_PATTERNS)) selected.add(BACKEND_DATA);
-  if (matchesAny(changedFiles, FRONTEND_WORKFLOW_PATTERNS)) selected.add(FRONTEND_WORKFLOW);
+  if (changedFilesIncludeFrontend(changedFiles)) selected.add(FRONTEND_WORKFLOW);
   if (matchesAny(changedFiles, EXTERNAL_INTEGRATION_PATTERNS)) selected.add(EXTERNAL_INTEGRATION);
   if (matchesAny(changedFiles, INFRA_OPS_PATTERNS)) selected.add(INFRA_OPS);
 

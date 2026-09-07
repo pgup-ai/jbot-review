@@ -725,6 +725,7 @@ async function review(
     baseSha: mergeBase,
     localDiff: { files, commits },
     options: {
+      modelPool: pool,
       enhancedContext: config?.enhancedContext ?? true,
       scrubSessionEnv: config?.scrubSessionEnv ?? true,
       sdkEngine: config?.sdkEngine ?? '',

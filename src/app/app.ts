@@ -117,6 +117,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           reviewPasses: parseEnvInt('JBOT_REVIEW_PASSES', 1),
           verifyFindings: process.env.JBOT_VERIFY_FINDINGS?.trim() !== 'false',
           auxModel,
+          modelPool: cfg.modelPool,
           ...(auxCredential ? { auxApiKey: auxCredential.apiKey } : {}),
           ...(auxCredential?.baseURL ? { auxBaseURL: auxCredential.baseURL } : {}),
           timeBudgetMinutes: parseEnvInt('JBOT_TIME_BUDGET_MINUTES', 30),

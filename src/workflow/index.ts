@@ -152,6 +152,7 @@ async function main(): Promise<void> {
       threadResolutionOctokit,
       options: {
         ...options,
+        modelPool,
         auxModel,
         auxApiKey: auxCredential?.apiKey ?? '',
         auxBaseURL: auxCredential?.baseURL,

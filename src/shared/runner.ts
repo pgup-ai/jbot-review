@@ -29,6 +29,12 @@ import {
   type SessionCoverageRecorder,
   type TelemetryRecorder,
 } from './telemetry.ts';
+import {
+  runConfiguration,
+  runIdentity,
+  effectiveReasoningEffort,
+  roleTelemetry,
+} from './run-telemetry.ts';
 import { buildSupplementaryBlocks, trimContextBlocks } from './context-trim.ts';
 import type { ContextBlock } from './context-trim.ts';
 import {
@@ -838,6 +844,7 @@ export interface ReviewRunOptions {
    * the mechanical checks stay on a cheap one. Empty = use the main model.
    */
   auxModel?: string;
+  modelPool?: string[];
   /**
    * Optional API key for the auxiliary model provider when it differs from the
    * main model provider. Empty = reuse the main review API key.
@@ -1084,13 +1091,20 @@ async function runReviewPipeline(params: {
         : {}),
     });
   };
-  telemetry.beginRun({
-    runId: randomUUID(),
-    ...(baseSha ? { baseSha } : {}),
-    ...(headSha ? { headSha } : {}),
-    model,
-    ...(auxModel !== model ? { auxModel } : {}),
-  });
+  if (telemetry.enabled)
+    telemetry.beginRun({
+      runId: randomUUID(),
+      repository: `${owner}/${repo}`,
+      identity: runIdentity(process.env),
+      policy: runConfiguration(
+        { ...options, sdkEngine: options.sdkEngine || process.env.JBOT_SDK_ENGINE || 'auto' },
+        model,
+      ),
+      ...(baseSha ? { baseSha } : {}),
+      ...(headSha ? { headSha } : {}),
+      model,
+      ...(auxModel !== model ? { auxModel } : {}),
+    });
   // Once a label is abandoned at grace expiry, its eager coverage row owns the
   // terminal state: the abort settles the underlying promise promptly, whose
   // own catch handler would otherwise append a second, conflicting row.
@@ -1389,19 +1403,18 @@ async function runReviewPipeline(params: {
     : undefined;
   // Stamped into the posted review's metadata: the arm identity for effort
   // A/Bs. Undefined wherever the main engine does not consume the option.
-  const mainReasoningEffort = (() => {
-    if (mainCliBackend === COMMANDCODE_PROVIDER_ID)
-      return commandCodeSessionEffort(model, undefined, {
-        auxModel,
-        auxModelOptions,
-        mainModelOptions: options.modelOptions,
-        explicit: options.modelOptionsExplicit ?? false,
-      });
-    if (mainCliBackend) return undefined;
-    if (mainOnPi) return piThinkingLevel(resolvedMainOptions);
-    const effort = resolvedMainOptions?.reasoningEffort;
-    return typeof effort === 'string' && effort !== 'default' ? effort : undefined;
-  })();
+  const commandCodeEffortContext = {
+    auxModel,
+    auxModelOptions,
+    mainModelOptions: options.modelOptions,
+    explicit: options.modelOptionsExplicit,
+  };
+  const mainReasoningEffort = effectiveReasoningEffort(
+    mainCliBackend ?? backendSelection.mainSdkEngine ?? 'opencode',
+    model,
+    mainOnPoolside ? options.modelOptions : resolvedMainOptions,
+    commandCodeEffortContext,
+  );
 
   const discoveredGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
   const guidelines = formatGuidelines(discoveredGuidelines);
@@ -2287,6 +2300,48 @@ async function runReviewPipeline(params: {
           );
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
+    if (telemetry.enabled) {
+      const auxEffortOptions = auxOnPoolside
+        ? undefined
+        : supportedModelOptions(auxProviderID, auxModelID, auxModelOptions ?? options.modelOptions);
+      const auxiliary = roleTelemetry(
+        auxSessionsEnabled ? auxBackend : undefined,
+        auxModel,
+        effectiveReasoningEffort(
+          auxBackend.name,
+          auxModel,
+          auxEffortOptions,
+          commandCodeEffortContext,
+        ),
+      );
+      telemetry.recordExecution({
+        reviewPasses: effectiveReviewPasses,
+        reviewShards: shards.length,
+        lensKeys: incrementalLenses.lensKeys,
+        guidelinePass: incrementalLenses.guidelinePass,
+        context7Active,
+        auxSessionsEnabled,
+        maxConcurrentSessions: sessionCap,
+        providerConcurrency: providerLimiters.configured,
+        serializedBackends: [...serializedBackends.keys()].map((backend) => backend.name),
+        roles: {
+          main: roleTelemetry(mainBackend, model, mainReasoningEffort),
+          auxiliary,
+          verification: roleTelemetry(
+            auxSessionsEnabled ? auxBackend : undefined,
+            auxModel,
+            effectiveReasoningEffort(
+              auxBackend.name,
+              auxModel,
+              auxOnPoolside ? undefined : (verifierSessionOptions ?? auxEffortOptions),
+              commandCodeEffortContext,
+              verifierSessionOptions,
+            ),
+            'verification',
+          ),
+        },
+      });
+    }
     const shardPlans = buildShardPlans({
       coreContext: mainCoreContext,
       fullDiffBlock: diffHunksBlock,
@@ -3142,6 +3197,7 @@ export function normalizeOptions(
     verifierSlimContext: options?.verifierSlimContext ?? false,
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     auxModel: options?.auxModel ?? '',
+    modelPool: options?.modelPool ?? [],
     auxApiKey: options?.auxApiKey ?? '',
     auxBaseURL: options?.auxBaseURL ?? '',
     reviewPasses: Math.min(Math.max(options?.reviewPasses ?? 1, 1), maxPasses),

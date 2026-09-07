@@ -851,6 +851,23 @@ and precision against seeded defects.
   opencode server uses a free ephemeral port automatically;
   `JBOT_OPENCODE_PORT` pins one instead.
 
+## Comparing review runs
+
+The telemetry `run` header records the repository, reviewed base/head, selected
+models, and GitHub workflow run ID, attempt, and job key when available. Bundles
+embed the reviewer commit at build time (`-dirty` for uncommitted builds);
+direct TypeScript runs report `unbundled`. The image variant is recorded separately.
+
+`policy.configuration` contains normalized review controls, the shared model
+pool, and requested reasoning effort. Its SHA-256 `configurationHash` covers
+only those fields: arbitrary model options, endpoints, keys, and cache paths
+are excluded. `execution` records resolved role engines, supported effort,
+workspace access, effective shards/lenses, Context7 activation, and session limits.
+Coverage rows show which sessions actually completed or failed. Early exits can
+have a policy header without execution metadata.
+
+The in-repo telemetry artifact name includes the workflow run ID and attempt.
+
 ## Observer gateway
 
 An optional, self-contained service that makes review sessions observable: the

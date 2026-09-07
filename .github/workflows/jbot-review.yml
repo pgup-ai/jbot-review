@@ -328,7 +328,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: jbot-review-telemetry
+          name: jbot-review-telemetry-${{ github.run_id }}-${{ github.run_attempt }}
           path: .jbot-review/telemetry.jsonl
           if-no-files-found: ignore
           retention-days: 14
