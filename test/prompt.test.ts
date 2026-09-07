@@ -68,7 +68,7 @@ describe('NO_TOOLS_REVIEW_DIRECTIVE', () => {
     for (const rule of [
       /Use no tools for this review/,
       /do not read files, search the repository, or run\s+git or shell commands/,
-      /treat it as already done and review only the diff hunks/,
+      /those checks have NOT been performed unless their results/,
     ]) {
       assert.match(NO_TOOLS_REVIEW_DIRECTIVE, rule);
     }
@@ -205,9 +205,11 @@ describe('REVIEW_PROMPT', () => {
   it('treats third-party framework-behavior claims as not repo-verifiable', () => {
     assert.match(REVIEW_PROMPT, /## Claims about external framework behavior/);
     assert.match(REVIEW_PROMPT, /how the library is USED, not its internal semantics/);
-    assert.match(REVIEW_PROMPT, /never state the library's behavior as fact/);
-    // unconfirmable framework claims route to investigate/advisory, not a confident bug
-    assert.match(REVIEW_PROMPT, /"investigate", keep severity advisory/);
+    assert.match(REVIEW_PROMPT, /never state\s+the library's behavior as fact/);
+    assert.match(REVIEW_PROMPT, /concrete trigger and a material unresolved/);
+    assert.match(REVIEW_PROMPT, /Otherwise omit the finding/);
+    assert.match(REVIEW_PROMPT, /repository's declared\s+versions/);
+    assert.match(REVIEW_PROMPT, /Do not infer authorship or generation/);
   });
 
   it('instructs titles to wrap code identifiers in backticks', () => {
@@ -500,7 +502,7 @@ describe('buildContext7PromptBlock', () => {
     assert.match(block, /## Context7 documentation lookup/);
     assert.match(block, /external contract change detected in src\/db\.ts/);
     assert.match(block, /before asserting framework-internal behavior/);
-    assert.match(block, /downgrade the finding to "investigate"\/advisory/);
+    assert.match(block, /Missing documentation alone does not justify an advisory/);
     // credit-exhaustion / error fallback: no retry loop, no asserting from memory
     assert.match(block, /out of credit/);
     assert.match(block, /do not retry it repeatedly/);

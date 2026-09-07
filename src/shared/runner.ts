@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { buildFindingSourceContext } from './finding-context.ts';
 
 import {
   SEVERITY_RANK,
@@ -2599,6 +2600,7 @@ async function runReviewPipeline(params: {
         `Verifying ${targets.length} blocking finding(s) concurrently with the aux settle grace.`,
       );
       const verdicts = await requestFindingVerdicts({
+        workspace,
         backend: auxBackend,
         model: auxModel,
         prContext: verifierPrContext,
@@ -2784,6 +2786,7 @@ async function runReviewPipeline(params: {
       }
     } else {
       verifiedFindings = await verifyBlockingFindings({
+        workspace,
         backend: auxBackend,
         model: auxModel,
         prContext: verifierPrContext,
@@ -3455,6 +3458,7 @@ export function settleWithinGrace<T>(
  * run or returns garbage, findings pass through unchanged.
  */
 async function verifyBlockingFindings(params: {
+  workspace: string;
   backend: ReviewBackend;
   model: string;
   prContext: string;
@@ -3503,6 +3507,7 @@ async function verifyBlockingFindings(params: {
  * serial path above and the grace-overlap path (TASK-079).
  */
 async function requestFindingVerdicts(params: {
+  workspace: string;
   backend: ReviewBackend;
   model: string;
   prContext: string;
@@ -3517,12 +3522,19 @@ async function requestFindingVerdicts(params: {
   const startedAt = Date.now();
   let verdicts;
   try {
+    const sourceContext = await buildFindingSourceContext(params.workspace, params.targets);
+    const timeoutMs =
+      params.timeoutMs === undefined
+        ? undefined
+        : Math.max(0, params.timeoutMs - (Date.now() - startedAt));
+    if (timeoutMs === 0)
+      throw new Error('Finding verification budget exhausted while collecting source context.');
     verdicts = await params.backend.runFindingVerification(
       params.model,
-      params.prContext,
+      [params.prContext, sourceContext].filter(Boolean).join('\n\n'),
       params.targets,
       params.log,
-      params.timeoutMs,
+      timeoutMs,
       params.onTokenUsage,
       params.modelOptions,
     );
