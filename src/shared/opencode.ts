@@ -387,7 +387,11 @@ export interface PromptTokenUsage {
   acuCost?: number;
 }
 
-export type TokenUsageRecorder = (usage: PromptTokenUsage, model: string, label?: string) => void;
+export type TokenUsageRecorder = (
+  usage: PromptTokenUsage | { promptBytes: number },
+  model: string,
+  label?: string,
+) => void;
 
 export function extractPromptTokenUsage(info: TokenUsageInfo): PromptTokenUsage | undefined {
   const tokens = info.tokens;
@@ -1210,8 +1214,7 @@ async function promptInSessionHoldingSlot(
     );
     log(`${label} ${formatTokenUsage(data.info)}`);
     const usage = extractPromptTokenUsage(data.info);
-    if (usage)
-      onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(prompt, 'utf8') }, model, label);
+    onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(prompt, 'utf8') }, model, label);
 
     const textParts = parts.filter(
       (part): part is Extract<Part, { type: 'text' }> => part.type === 'text' && Boolean(part.text),

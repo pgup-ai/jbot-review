@@ -980,8 +980,8 @@ async function promptPiSession(
         },
       })}`,
     );
-    onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(prompt, 'utf8') }, model, label);
   }
+  onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(prompt, 'utf8') }, model, label);
   if (finalMessage?.stopReason === 'error' || finalMessage?.stopReason === 'aborted') {
     const detail =
       typeof finalMessage.errorMessage === 'string' && finalMessage.errorMessage.trim()

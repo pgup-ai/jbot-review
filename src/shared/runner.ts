@@ -1049,10 +1049,14 @@ async function runReviewPipeline(params: {
     : undefined;
   const contextAssemblyDone = phases.start({ phase: 'context-assembly', scope: 'run' });
   const recordTokenUsage: TokenUsageRecorder = (usage, usageModel, label) => {
+    const identity = { session: label ?? usageModel, model: usageModel };
+    if (!('input' in usage)) {
+      telemetry.recordSession({ ...identity, promptBytes: usage.promptBytes });
+      return;
+    }
     tokenUsage.add(usage, usageModel);
     telemetry.recordSession({
-      session: label ?? usageModel,
-      model: usageModel,
+      ...identity,
       inputTokens: usage.input,
       outputTokens: usage.output,
       reasoningTokens: usage.reasoning,
@@ -1541,6 +1545,15 @@ async function runReviewPipeline(params: {
     coreContext = joinContext(coreContext, ...supplementaryBlocks.map((block) => block.text));
     slimVerifierIssueInputs = { linkedIssues, linkedIssuesOmitted };
   } else {
+    if (priorJbotThreads.length > 0) {
+      try {
+        addressedCommits = formatReviewCommits(
+          await listPrCommits(octokit, owner, repo, pullNumber),
+        );
+      } catch {
+        log('Commits unavailable for addressed checks; continuing with existing evidence.');
+      }
+    }
     const commentsBlock =
       priorComments.length > 0
         ? '## Prior review comments\n' + priorComments.map((c) => `- ${c}`).join('\n')
@@ -4030,7 +4043,7 @@ export interface ReviewTokenUsage {
 }
 
 function createReviewTokenUsageAccumulator(): {
-  add: TokenUsageRecorder;
+  add: (usage: PromptTokenUsage, model: string) => void;
   snapshot: () => ReviewTokenUsage | undefined;
 } {
   let total: ReviewTokenUsage | undefined;

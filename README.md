@@ -900,7 +900,8 @@ session durations do not sum to wall time.
 `auxiliaryRuns[].promptUsage` pairs each reported call's submitted `promptBytes`
 with input and cache read/write tokens. OpenCode, Pi, and CommandCode record the
 UTF-8 size of the text submitted by J-Bot, including its backend directives;
-other backends leave that size absent. Repair calls retain their own labels and
+other backends leave that size absent. Missing provider usage leaves token counters
+absent without losing the prompt size. Repair calls retain their own labels and
 payload sizes. These bytes exclude backend-added system prompts, tools, and
 conversation history. Reported tokens can include multiple model turns and have
 provider-specific cache accounting, so neither bytes-to-token estimates nor

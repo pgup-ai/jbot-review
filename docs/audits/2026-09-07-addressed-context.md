@@ -46,7 +46,8 @@ increased from 15.046 to 16.063 seconds. Reported input/cache-read tokens were
 OpenCode, Pi, and CommandCode now attach submitted text bytes to reported usage;
 repair calls carry their own payload sizes. The existing session row also retains
 cache-write tokens. The performance report keeps these measurements tied to each
-run and call, while absent prompt sizes stay absent for other backends.
+run and call, while absent prompt sizes stay absent for other backends. Calls without provider
+usage retain prompt bytes without inventing token counts.
 
 Byte counts exclude engine-added prompts, tool definitions, and history. Reported
 input tokens can cover different turn ranges and cache accounting across backends.
@@ -66,3 +67,7 @@ The advisory core three-repetition finding benchmark was skipped: it does not
 exercise prior-thread resolution. No model, concurrency, or verifier default was
 changed. Broader resolution cases and a production re-review remain useful follow-up
 validation. Raw probe artifacts are retained outside the repository.
+
+Follow-up self-review also decoupled addressed commit loading from enhanced finder
+context. Basic-context runs fetch commits only when prior threads exist; lookup
+failure leaves the review running with its existing evidence.

@@ -896,6 +896,72 @@ describe('runPrReview local mode and early exits', () => {
     );
   });
 
+  it('loads addressed commits without enhanced context and tolerates lookup failure', async () => {
+    const stop = new Error('auxiliary lookup failed open');
+    let commitFetches = 0;
+    const octokit = {
+      rest: { pulls: { listFiles: 'files', listReviews: 'reviews', listCommits: 'commits' } },
+      paginate: async (endpoint: string) => {
+        if (endpoint === 'files') return [{ filename: 'a.ts', patch: '@@ -1 +1 @@\n-a\n+b' }];
+        if (endpoint === 'commits') {
+          commitFetches++;
+          throw new Error('unavailable');
+        }
+        return [];
+      },
+      graphql: async () => ({
+        viewer: { login: 'jbot' },
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              pageInfo: { hasNextPage: false },
+              nodes: [
+                {
+                  id: 'thread',
+                  isResolved: false,
+                  path: 'a.ts',
+                  line: 1,
+                  comments: {
+                    nodes: [
+                      {
+                        databaseId: 1,
+                        body: 'bug<!-- jbot-review:finding -->',
+                        author: { login: 'jbot' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    } as unknown as Octokit;
+    const workspace = mkdtempSync(join(tmpdir(), 'jbot-addressed-'));
+    const gitConfig = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = join(workspace, 'gitconfig');
+    try {
+      await assert.rejects(
+        runPrReview({
+          ...base,
+          workspace,
+          octokit,
+          headSha: 'head',
+          options: { dryRun: true, sdkEngine: 'opencode', enhancedContext: false },
+          log: (message) => {
+            if (message.startsWith('Commits unavailable for addressed checks')) throw stop;
+          },
+        }),
+        (error: unknown) => error === stop,
+      );
+      assert.equal(commitFetches, 1);
+    } finally {
+      if (gitConfig === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = gitConfig;
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('starts independent context fetches before commits settle and preserves fatal failures', async () => {
     const sentinel = new Error('commits unavailable');
     const started: string[] = [];

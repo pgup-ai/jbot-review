@@ -130,6 +130,18 @@ describe('runReview JSON repair loop', () => {
     assert.equal(result.summary, 'ok after repair');
   });
 
+  it('records prompt bytes without inventing token usage when responses omit it', async () => {
+    const { client, prompts } = makeFakeClient(['broken', VALID_REVIEW]);
+    const usages: unknown[] = [];
+    await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog, {
+      onTokenUsage: (usage) => usages.push(usage),
+    });
+    assert.deepEqual(
+      usages,
+      prompts.map((prompt) => ({ promptBytes: Buffer.byteLength(prompt) })),
+    );
+  });
+
   it('records token usage for each completed prompt, including repair prompts', async () => {
     const { client, prompts } = makeFakeClient(
       ['broken', VALID_REVIEW],
@@ -138,14 +150,7 @@ describe('runReview JSON repair loop', () => {
         { input: 6, output: 7 },
       ],
     );
-    const usages: Array<{
-      model: string;
-      input: number;
-      output: number;
-      reasoning: number;
-      cacheRead: number;
-      cacheWrite: number;
-    }> = [];
+    const usages: unknown[] = [];
 
     await runReview(client, 'prov/model', 'PR CONTEXT', '', noLog, {
       onTokenUsage: (usage, model) => usages.push({ model, ...usage }),
