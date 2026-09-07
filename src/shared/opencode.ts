@@ -1527,10 +1527,8 @@ export function parseReview(
 const VALID_VERDICTS = new Set<FindingVerdict['verdict']>(['confirmed', 'refuted', 'uncertain']);
 
 /**
- * Parses the verifier's {"verdicts": [...]} response. Returns undefined when
- * the response is unusable so callers fail open. Individual malformed
- * entries are skipped; a finding without a verdict is treated as confirmed
- * by the caller. Exported for direct test coverage.
+ * Returns undefined for unusable responses and skips malformed entries.
+ * Callers retain findings with missing verdicts as unverified advisories.
  */
 export function parseFindingVerdicts(
   raw: string,
