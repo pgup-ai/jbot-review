@@ -296,13 +296,13 @@ export function createDevinCliBackend(workspace: string, home: string): ReviewBa
       );
       return parseFindingVerdicts(raw, findings.length, log);
     },
-    async runChangesSinceLastReview(model, prContext, deltaContext, log, timeoutMs) {
+    async runChangesSinceLastReview(model, deltaContext, log, timeoutMs) {
       const raw = await runDevinPrompt(
         workspace,
         home,
         configFile,
         model,
-        assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+        assembleChangesSinceLastReviewPrompt(deltaContext),
         'changes-since-last-review',
         log,
         timeoutMs,

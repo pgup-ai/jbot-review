@@ -406,7 +406,6 @@ export async function runDimGuidelineComplianceCheck(
 export async function runDimChangesSinceLastReview(
   workspace: string,
   model: string,
-  prContext: string,
   deltaContext: string,
   log: (msg: string) => void,
   timeoutMs?: number,
@@ -416,7 +415,7 @@ export async function runDimChangesSinceLastReview(
   const raw = await runDimPrompt(
     workspace,
     model,
-    assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+    assembleChangesSinceLastReviewPrompt(deltaContext),
     'changes-since-last-review',
     log,
     { timeoutMs, onTokenUsage, runtime },

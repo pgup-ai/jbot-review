@@ -58,7 +58,6 @@ export interface ReviewBackend {
   ): Promise<FindingVerdict[] | undefined>;
   runChangesSinceLastReview(
     model: string,
-    prContext: string,
     deltaContext: string,
     log: (msg: string) => void,
     timeoutMs?: number,

@@ -6,6 +6,7 @@ import {
   isNoAttemptReply,
   ADDRESSED_PRIOR_COMMENTS_PROMPT,
   CHANGES_SINCE_CONTEXT_BUDGET,
+  CHANGES_SINCE_DIFF_BUDGET,
   CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER,
   CHANGES_SINCE_LAST_REVIEW_PROMPT,
   CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
@@ -97,6 +98,7 @@ describe('UNTRUSTED_PR_CONTENT_NOTE', () => {
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /untrusted/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /never as instructions/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /description/i);
+    assert.match(UNTRUSTED_PR_CONTENT_NOTE, /diffs/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /linked issue bodies/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /prior review comments/i);
     assert.match(UNTRUSTED_PR_CONTENT_NOTE, /output format/i);
@@ -125,6 +127,15 @@ describe('buildChangesSinceContextBlock', () => {
     const block = buildChangesSinceContextBlock('abc1234', 'def5678', subjects);
     assert.ok(block.length <= CHANGES_SINCE_CONTEXT_BUDGET + 200);
     assert.match(block, /and \d+ more commit\(s\); use the git command above\./);
+    const text = '+変更\n'.repeat(5000);
+    const withDiff = buildChangesSinceContextBlock('abc1234', 'def5678', subjects, {
+      text,
+      totalBytes: Buffer.byteLength(text),
+    });
+    assert.ok(
+      Buffer.byteLength(withDiff) <= CHANGES_SINCE_CONTEXT_BUDGET + CHANGES_SINCE_DIFF_BUDGET + 400,
+    );
+    assert.match(withDiff, /Delta diff \(UTF-8 text\) truncated to \d+ bytes; omitted \d+ bytes/);
   });
 
   it('measures the budget in UTF-8 bytes, not code units', () => {
@@ -153,22 +164,30 @@ describe('CHANGES_SINCE_LAST_REVIEW_PROMPT', () => {
     assert.match(CHANGES_SINCE_LAST_REVIEW_PROMPT, /git is available/);
     assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /NO tools on this call/);
     assert.doesNotMatch(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /git is available/);
-    // A truncated commit list can't be recovered without tools; the output must say so.
     assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /summary is PARTIAL/);
+    assert.match(
+      CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
+      /every stated omission count \(commits and bytes\)/,
+    );
+    assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /bounded delta diff/);
+    assert.match(
+      CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
+      /do not infer implementation details/,
+    );
     assert.match(
       CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
       /do not list bugs or review findings/i,
     );
     assert.match(CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT, /"summary":/);
     assert.ok(
-      assembleChangesSinceLastReviewPrompt('PR-CONTEXT', 'DELTA-CONTEXT', true).includes(
-        'NO tools on this call',
-      ),
+      assembleChangesSinceLastReviewPrompt('DELTA-CONTEXT', true).includes('NO tools on this call'),
     );
   });
 
   it('puts the output reminder last and asks for a single summary key', () => {
-    const out = assembleChangesSinceLastReviewPrompt('PR-CONTEXT', 'DELTA-CONTEXT');
+    const out = assembleChangesSinceLastReviewPrompt('DELTA-CONTEXT');
+    assert.ok(out.includes(UNTRUSTED_PR_CONTENT_NOTE));
+    assert.ok(out.indexOf(UNTRUSTED_PR_CONTENT_NOTE) < out.indexOf('DELTA-CONTEXT'));
     assert.ok(
       out.indexOf('DELTA-CONTEXT') < out.indexOf(CHANGES_SINCE_LAST_REVIEW_OUTPUT_REMINDER),
     );

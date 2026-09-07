@@ -1316,23 +1316,19 @@ export async function runPiGuidelineComplianceCheck(
 export async function runPiChangesSinceLastReview(
   runtime: PiRuntime,
   model: string,
-  prContext: string,
   deltaContext: string,
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
 ): Promise<string> {
   const label = 'changes-since-last-review';
-  // Single-shot (no tools): this pass wants the reviewedHead..head DELTA, but
-  // git_diff only serves the full base...HEAD diff — offering it would let the
-  // model describe old PR changes as new. The commit list is embedded in the
-  // prompt, so it summarizes from that.
+  // git_diff serves base...HEAD, not the re-review delta embedded here.
   const session = await createPiSession(runtime, model, true, false, undefined, label);
   try {
     const raw = await promptPiSession(
       session,
       model,
-      assembleChangesSinceLastReviewPrompt(prContext, deltaContext, true),
+      assembleChangesSinceLastReviewPrompt(deltaContext, true),
       label,
       log,
       timeoutMs,

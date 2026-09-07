@@ -1,9 +1,8 @@
-import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
+import { collectChangesSinceContext } from './changes-since.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
 
 import {
@@ -115,7 +114,6 @@ import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
   UNTRUSTED_PR_CONTENT_NOTE,
-  buildChangesSinceContextBlock,
   buildContext7PromptBlock,
   buildContextTrimNotice,
   buildReviewFocusBlock,
@@ -337,16 +335,8 @@ function createOpencodeBackend(
         onTokenUsage,
         modelOptions,
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runOpencodeChangesSinceLastReview(
-        client,
-        model,
-        prContext,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-      ),
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runOpencodeChangesSinceLastReview(client, model, deltaContext, log, timeoutMs, onTokenUsage),
   };
 }
 
@@ -388,16 +378,8 @@ function createPiBackend(runtime: PiRuntime): ReviewBackend {
         onTokenUsage,
         modelOptions,
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runPiChangesSinceLastReview(
-        runtime,
-        model,
-        prContext,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-      ),
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runPiChangesSinceLastReview(runtime, model, deltaContext, log, timeoutMs, onTokenUsage),
   };
 }
 
@@ -444,12 +426,11 @@ function createPoolsideBackend(
         timeoutMs,
         onTokenUsage,
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runPoolsideChangesSinceLastReview(
         key,
         reasoningEffort,
         model,
-        prContext,
         deltaContext,
         log,
         timeoutMs,
@@ -515,11 +496,10 @@ function createCommandCodeBackend(
         home,
         effortFor(model, modelOptions),
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runCommandCodeChangesSinceLastReview(
         workspace,
         model,
-        prContext,
         deltaContext,
         log,
         timeoutMs,
@@ -571,11 +551,10 @@ function createClineBackend(workspace: string, clineHome: string): ReviewBackend
         onTokenUsage,
         clineHome,
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runClineChangesSinceLastReview(
         workspace,
         model,
-        prContext,
         deltaContext,
         log,
         timeoutMs,
@@ -608,16 +587,8 @@ function createGrokBackend(runtime: GrokRuntime): ReviewBackend {
       ),
     runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
       runGrokFindingVerification(model, prContext, findings, log, timeoutMs, onTokenUsage, runtime),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runGrokChangesSinceLastReview(
-        model,
-        prContext,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        runtime,
-      ),
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
+      runGrokChangesSinceLastReview(model, deltaContext, log, timeoutMs, onTokenUsage, runtime),
   };
 }
 
@@ -664,11 +635,10 @@ function createDimBackend(
         onTokenUsage,
         runtime,
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runDimChangesSinceLastReview(
         workspace,
         model,
-        prContext,
         deltaContext,
         log,
         timeoutMs,
@@ -727,11 +697,10 @@ function createQoderBackend(
         token,
         toolTelemetry,
       ),
-    runChangesSinceLastReview: (model, prContext, deltaContext, log, timeoutMs, onTokenUsage) =>
+    runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
       runQoderChangesSinceLastReview(
         workspace,
         model,
-        prContext,
         deltaContext,
         log,
         timeoutMs,
@@ -1527,18 +1496,16 @@ async function runReviewPipeline(params: {
   let slimVerifierIssueInputs:
     { linkedIssues: LinkedIssue[]; linkedIssuesOmitted: number } | undefined;
   if (options.enhancedContext) {
-    const commits = localDiff
-      ? localDiff.commits
-      : await listPrCommits(octokit, owner, repo, pullNumber);
-    const { issues: linkedIssues, omitted: linkedIssuesOmitted } = localDiff
-      ? { issues: [], omitted: 0 }
-      : await safeListClosingIssues(octokit, owner, repo, pullNumber, log);
-    // Belt-and-braces: local mode never reaches GitHub for checks (the local
-    // driver also passes no headSha, so the fallback text stays literally true).
-    const checkSummary =
-      headSha && !localDiff
-        ? await getCheckStatusSummary(octokit, owner, repo, headSha)
-        : 'Check status unavailable: PR head SHA was not provided.';
+    const [commits, { issues: linkedIssues, omitted: linkedIssuesOmitted }, checkSummary] =
+      await Promise.all([
+        localDiff ? localDiff.commits : listPrCommits(octokit, owner, repo, pullNumber),
+        localDiff
+          ? { issues: [], omitted: 0 }
+          : safeListClosingIssues(octokit, owner, repo, pullNumber, log),
+        headSha && !localDiff
+          ? getCheckStatusSummary(octokit, owner, repo, headSha)
+          : 'Check status unavailable: PR head SHA was not provided.',
+      ]);
     coreContext = buildReviewContext({
       pullTitle,
       pullBody,
@@ -2479,8 +2446,11 @@ async function runReviewPipeline(params: {
       startChangesSinceLastReviewSummary({
         backend: auxBackend,
         model: auxModel,
-        prContext: auxPrContext,
         workspace,
+        embedDiff:
+          auxOnPi ||
+          !backendCanReadWorkspace(auxProviderID, auxCliBackend) ||
+          (auxOnOpencode && !modelSupportsAgenticTools(auxProviderID, auxModelID)),
         // Use allPriorReviewComments (always fetched), NOT the
         // includePriorComments-gated priorComments: whether to summarize the
         // delta is a re-review decision, independent of whether prior comments
@@ -4214,23 +4184,6 @@ function startAddressedPriorCommentsCheck(params: {
     });
 }
 
-const execFileAsync = promisify(execFile);
-const GIT_LOG_TIMEOUT_MS = 15_000;
-
-/** Commit subjects (`<short-sha> <subject>`) added between two revisions, in the checkout. */
-async function collectCommitSubjects(
-  workspace: string,
-  fromSha: string,
-  toSha: string,
-): Promise<string[]> {
-  const { stdout } = await execFileAsync(
-    'git',
-    ['log', '--no-merges', '--format=%h %s', `${fromSha}..${toSha}`],
-    { cwd: workspace, timeout: GIT_LOG_TIMEOUT_MS, maxBuffer: 1024 * 1024 },
-  );
-  return stdout.split('\n').filter(Boolean);
-}
-
 /**
  * Summarizes the reviewed..head delta once for the whole PR (non-finder pass).
  * Fail-open: any failure (git, backend, parse) resolves to '' so the block is
@@ -4239,8 +4192,8 @@ async function collectCommitSubjects(
 function startChangesSinceLastReviewSummary(params: {
   backend: ReviewBackend;
   model: string;
-  prContext: string;
   workspace: string;
+  embedDiff: boolean;
   reviewedHead?: string;
   headSha?: string;
   enabled: boolean;
@@ -4260,16 +4213,19 @@ function startChangesSinceLastReviewSummary(params: {
   let modelRan = false;
   params.log('Starting changes-since-last-review summary in parallel.');
   return (async () => {
-    const subjects = await collectCommitSubjects(params.workspace, reviewedHead, headSha);
-    if (subjects.length === 0) {
+    const deltaContext = await collectChangesSinceContext(
+      params.workspace,
+      reviewedHead,
+      headSha,
+      params.embedDiff,
+    );
+    if (deltaContext === undefined) {
       params.log('changes-since-last-review skipped: no commits since last reviewed head.');
       return '';
     }
-    const deltaContext = buildChangesSinceContextBlock(reviewedHead, headSha, subjects);
     modelRan = true;
     return params.backend.runChangesSinceLastReview(
       params.model,
-      params.prContext,
       deltaContext,
       params.log,
       params.timeoutMs,

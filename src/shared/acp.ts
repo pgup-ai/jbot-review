@@ -318,7 +318,6 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
     },
     async runChangesSinceLastReview(
       model,
-      prContext,
       deltaContext,
       log,
       timeoutMs,
@@ -327,7 +326,7 @@ export function createAcpReviewBackend(name: string, run: AcpPromptRunner): Revi
       void onTokenUsage;
       return promptWithRecovery(
         model,
-        assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+        assembleChangesSinceLastReviewPrompt(deltaContext),
         'changes-since-last-review',
         log,
         timeoutMs,

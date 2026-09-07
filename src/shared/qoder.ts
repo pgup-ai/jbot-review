@@ -264,7 +264,6 @@ export async function runQoderGuidelineComplianceCheck(
 export async function runQoderChangesSinceLastReview(
   workspace: string,
   model: string,
-  prContext: string,
   deltaContext: string,
   log: (msg: string) => void,
   timeoutMs?: number,
@@ -275,7 +274,7 @@ export async function runQoderChangesSinceLastReview(
   const raw = await runQoderPrompt(
     workspace,
     model,
-    assembleChangesSinceLastReviewPrompt(prContext, deltaContext),
+    assembleChangesSinceLastReviewPrompt(deltaContext, true),
     'changes-since-last-review',
     log,
     token,
