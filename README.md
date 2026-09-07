@@ -756,6 +756,22 @@ merge guidance:
 - `Mergeable with non-blocking comments` when only `P3` or `nit` findings are present.
 - `Good to go from jbot-review` when no new findings are found.
 
+### Finding evidence
+
+Cross-file findings should cite inspected repository locations as `path/to/file.ts:42`
+in their bodies. Verification preloads the finding location and up to two such
+citations, including unchanged helpers and written rules. Reads are limited to
+the first 256 KiB of tracked, regular files in the current checkout; symlinks
+and untracked files are excluded. Citations beyond that prefix are unavailable.
+At most 20 locations are sampled, within a 16 KiB context budget, with omitted
+or unavailable evidence labeled explicitly. These are excerpts, not
+complete files or proof that omitted behavior is absent.
+
+P3/nit remain advisory and bypass verification. Their prompts require a concrete
+benefit supported by observed code or a written rule; unavailable documentation
+alone is not grounds for an advisory. Verification failures still preserve
+findings, and uncertain verdicts still demote blocking findings to P3.
+
 ## Local review
 
 Review the current branch before pushing — no PR, no GitHub token, no GitHub
