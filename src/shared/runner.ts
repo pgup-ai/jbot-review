@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createCommandCodeProcessScope } from './commandcode-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
 
@@ -257,6 +258,7 @@ import {
 } from './retry-policy.ts';
 import {
   condenseSummary,
+  formatIncompleteCoverage,
   formatSummaryMarkdown,
   ORPHANED_FINDINGS_HEADING,
   renderOrphanedSection,
@@ -436,38 +438,47 @@ function createCommandCodeBackend(
   workspace: string,
   home: string,
   effortFor: (model: string, override?: Record<string, unknown>) => string | undefined,
-): ReviewBackend {
+): ReviewBackend & { stop(): Promise<void> } {
+  const processes = createCommandCodeProcessScope();
   return {
     name: COMMANDCODE_PROVIDER_ID,
+    stop: processes.stop,
+    abortSessionsByLabel: (label) => processes.abort(label),
     observability: COMMANDCODE_TELEMETRY_CAPABILITY,
     runReview: (model, prContext, guidelines, log, options) =>
-      runCommandCodeReview(workspace, model, prContext, guidelines, log, {
-        ...options,
-        home,
-        effort: effortFor(model),
-      }),
+      processes.run(options?.label ?? 'review', () =>
+        runCommandCodeReview(workspace, model, prContext, guidelines, log, {
+          ...options,
+          home,
+          effort: effortFor(model),
+        }),
+      ),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
-      runCommandCodeAddressedPriorCommentsCheck(
-        workspace,
-        model,
-        prContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        home,
-        effortFor(model),
+      processes.run('addressed-prior-comments', () =>
+        runCommandCodeAddressedPriorCommentsCheck(
+          workspace,
+          model,
+          prContext,
+          log,
+          timeoutMs,
+          onTokenUsage,
+          home,
+          effortFor(model),
+        ),
       ),
     runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
-      runCommandCodeGuidelineComplianceCheck(
-        workspace,
-        model,
-        prContext,
-        guidelines,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        home,
-        effortFor(model),
+      processes.run('guideline-compliance', () =>
+        runCommandCodeGuidelineComplianceCheck(
+          workspace,
+          model,
+          prContext,
+          guidelines,
+          log,
+          timeoutMs,
+          onTokenUsage,
+          home,
+          effortFor(model),
+        ),
       ),
     runFindingVerification: (
       model,
@@ -478,27 +489,31 @@ function createCommandCodeBackend(
       onTokenUsage,
       modelOptions,
     ) =>
-      runCommandCodeFindingVerification(
-        workspace,
-        model,
-        prContext,
-        findings,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        home,
-        effortFor(model, modelOptions),
+      processes.run('finding-verification', () =>
+        runCommandCodeFindingVerification(
+          workspace,
+          model,
+          prContext,
+          findings,
+          log,
+          timeoutMs,
+          onTokenUsage,
+          home,
+          effortFor(model, modelOptions),
+        ),
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runCommandCodeChangesSinceLastReview(
-        workspace,
-        model,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        home,
-        effortFor(model),
+      processes.run('changes-since-last-review', () =>
+        runCommandCodeChangesSinceLastReview(
+          workspace,
+          model,
+          deltaContext,
+          log,
+          timeoutMs,
+          onTokenUsage,
+          home,
+          effortFor(model),
+        ),
       ),
   };
 }
@@ -1078,8 +1093,13 @@ async function runReviewPipeline(params: {
   // terminal state: the abort settles the underlying promise promptly, whose
   // own catch handler would otherwise append a second, conflicting row.
   const abandonedAuxLabels = new Set<string>();
+  const auxCoverage = new Map<string, boolean>();
   const recordCoverage: SessionCoverageRecorder = (coverage) => {
     if (abandonedAuxLabels.has(coverage.session)) return;
+    if (coverage.session !== 'review' && !coverage.session.startsWith('review-shard-')) {
+      if (coverage.state === 'failed' || coverage.state === 'completed')
+        auxCoverage.set(coverage.session, coverage.state === 'completed');
+    }
     telemetry.recordCoverage(coverage);
   };
   const trackedAux: AuxiliarySession<unknown>[] = [];
@@ -1565,6 +1585,7 @@ async function runReviewPipeline(params: {
   // carries the guard. Static text, so it stays in the cache-stable prefix.
   coreContext = joinContext(UNTRUSTED_PR_CONTENT_NOTE, coreContext);
   if (!auxHasCompleteEmbeddedDiff) {
+    recordCoverage({ session: 'aux-embedded-diff', state: 'failed' });
     log(
       `Skipping auxiliary sessions: embedded diff exceeds the backend hard budget (${formatFileList(
         embeddedOnlyBackendIncompleteDiffFiles,
@@ -1650,7 +1671,7 @@ async function runReviewPipeline(params: {
   // agent instead of a local CLI — so their local setup (credentials, temp
   // homes) is skipped entirely.
   let devinBackend: ReviewBackend | undefined;
-  let commandCodeBackend: ReviewBackend | undefined;
+  let commandCodeBackend: ReturnType<typeof createCommandCodeBackend> | undefined;
   let cursorBackend: ReviewBackend | undefined;
   let codexBackend: ReviewBackend | undefined;
   let clineBackend: ReviewBackend | undefined;
@@ -2484,22 +2505,19 @@ async function runReviewPipeline(params: {
     // pass) and use the aux context (no Context7 block): they have no
     // Context7 retry path, so a Context7 hiccup must not be able to zero a
     // pass's findings.
-    const lensPasses = trackAux(
-      `${incrementalLenses.lensKeys.length} lens pass(es)`,
-      startLensPasses({
-        backend: auxBackend,
-        model: auxModel,
-        prContext: auxPrContext,
-        guidelinesForPrompt,
-        lensKeys: incrementalLenses.lensKeys,
-        timeoutMs: finderTimeoutMs,
-        evidenceQuotes: options.evidenceQuotes,
-        embeddedFirstPrompt: options.embeddedFirstPrompt,
-        log,
-        onTokenUsage: recordTokenUsage,
-        onCoverage: recordCoverage,
-      }),
-    );
+    const lensPasses = startLensPasses({
+      backend: auxBackend,
+      model: auxModel,
+      prContext: auxPrContext,
+      guidelinesForPrompt,
+      lensKeys: incrementalLenses.lensKeys,
+      timeoutMs: finderTimeoutMs,
+      evidenceQuotes: options.evidenceQuotes,
+      embeddedFirstPrompt: options.embeddedFirstPrompt,
+      log,
+      onTokenUsage: recordTokenUsage,
+      onCoverage: recordCoverage,
+    }).map((promise, index) => trackAux(`review-${incrementalLenses.lensKeys[index]}`, promise));
 
     let summary: string;
     let findings: Finding[];
@@ -2536,8 +2554,8 @@ async function runReviewPipeline(params: {
     > => {
       const session = 'finding-verification';
       const lists: Finding[][] = [findings];
-      if (lensPasses.isSettled()) {
-        lists.push(...(await lensPasses.promise.catch(() => [] as Finding[][])));
+      for (const lens of lensPasses) {
+        if (lens.isSettled()) lists.push(await lens.promise.catch(() => [] as Finding[]));
       }
       if (guidelineComplianceCheck.isSettled()) {
         lists.push(await guidelineComplianceCheck.promise.catch(() => [] as Finding[]));
@@ -2573,7 +2591,11 @@ async function runReviewPipeline(params: {
         log(
           'Skipping finding verification: time budget exhausted; posting findings unverified (fail-open).',
         );
-        recordCoverage({ session, state: 'skipped' });
+        recordCoverage({
+          session,
+          state: 'failed',
+          error: new Error('verification budget exhausted'),
+        });
         return 'skipped';
       }
       const targets = indexes.map((index) => settled[index]);
@@ -2599,7 +2621,7 @@ async function runReviewPipeline(params: {
         ? startOverlapVerification().catch(() => 'skipped' as const)
         : undefined;
     const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
-      lensPasses,
+      ...lensPasses,
       addressedPriorCheck,
       guidelineComplianceCheck,
       changesSinceLastReview,
@@ -2615,34 +2637,23 @@ async function runReviewPipeline(params: {
     // made, so awaiting them one by one would give the group N graces of tail
     // rather than one. Each falls back to its own empty result — the same value
     // these sessions produce when they fail open on their own.
+    const auxiliaryGraceMs = computeAuxiliaryGraceMs(
+      options.timeBudgetMinutes,
+      Date.now() - runStartedAt,
+      options.verifyFindings && auxSessionsEnabled,
+    );
     const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
-    // Aborts the underlying sessions where the backend supports it (pi +
-    // opencode today); see abortSessionsByLabel.
-    const abandonAuxSessions = (labels: string[]) => () => {
-      for (const label of labels) {
-        // An aggregated group (the lens passes) abandons as one: a member that
-        // already settled must not be re-marked failed, and the registry count
-        // is the truth. Backends without abort support can't tell, so they
-        // keep the unconditional row.
-        const aborted = auxBackend.abortSessionsByLabel
-          ? auxBackend.abortSessionsByLabel(label, log)
-          : undefined;
-        if (aborted === 0) {
-          // Settled member of the group, or a prompt between registrations —
-          // either way its own terminal row lands when it settles.
-          log(`${label} had no in-flight session at grace expiry; no abandon row recorded.`);
-          continue;
-        }
-        // Durable record (TASK-076): the abandoned session's own failure row
-        // usually settles after telemetry has been emitted, so without this
-        // an abandonment leaves no trace in the artifact.
-        recordCoverage({
-          session: label,
-          state: 'failed',
-          error: new Error(aborted === undefined ? 'abandoned-after-grace' : 'aborted-after-grace'),
-        });
-        abandonedAuxLabels.add(label);
-      }
+    const abandonAuxSession = (label: string) => () => {
+      const aborted = auxBackend.abortSessionsByLabel?.(label, log);
+      // Zero registered processes can also mean queued work; only a terminal
+      // coverage row proves the pass has already settled.
+      if (auxCoverage.has(label)) return;
+      recordCoverage({
+        session: label,
+        state: 'failed',
+        error: new Error(aborted ? 'aborted-after-grace' : 'abandoned-after-grace'),
+      });
+      abandonedAuxLabels.add(label);
     };
     const [
       lensFindingLists,
@@ -2652,33 +2663,31 @@ async function runReviewPipeline(params: {
       complianceFindings,
       changesSinceText,
     ] = await Promise.all([
-      settleWithinGrace(
-        lensPasses,
-        [],
-        log,
-        AUXILIARY_SETTLE_GRACE_MS,
-        abandonAuxSessions(incrementalLenses.lensKeys.map((key) => `review-${key}`)),
+      Promise.all(
+        lensPasses.map((lens) =>
+          settleWithinGrace(lens, [], log, auxiliaryGraceMs, abandonAuxSession(lens.label)),
+        ),
       ),
       settleWithinGrace(
         addressedPriorCheck,
         [],
         log,
-        AUXILIARY_SETTLE_GRACE_MS,
-        abandonAuxSessions(['addressed-prior-comments']),
+        auxiliaryGraceMs,
+        abandonAuxSession('addressed-prior-comments'),
       ),
       settleWithinGrace(
         guidelineComplianceCheck,
         [],
         log,
-        AUXILIARY_SETTLE_GRACE_MS,
-        abandonAuxSessions(['guideline-compliance']),
+        auxiliaryGraceMs,
+        abandonAuxSession('guideline-compliance'),
       ),
       settleWithinGrace(
         changesSinceLastReview,
         '',
         log,
-        AUXILIARY_SETTLE_GRACE_MS,
-        abandonAuxSessions(['changes-since-last-review']),
+        auxiliaryGraceMs,
+        abandonAuxSession('changes-since-last-review'),
       ),
     ]);
     graceDone();
@@ -2790,9 +2799,14 @@ async function runReviewPipeline(params: {
     telemetry.snapshot('verified', verifiedFindings);
     const finalFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
     const filteredFindings = filterFindings(verifiedFindings, options);
+    const incompleteSessions = [...auxCoverage]
+      .filter(([, complete]) => !complete)
+      .map(([label]) => label);
+    const coverageNotice = formatIncompleteCoverage(incompleteSessions);
+    if (coverageNotice) log(coverageNotice);
     telemetry.snapshot('filtered', filteredFindings);
     log(
-      `Review complete: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
+      `Review ${coverageNotice ? 'incomplete' : 'complete'}: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
     const { inline, fileLevel, orphaned, anchorMissed } = anchorFindings(
@@ -2826,7 +2840,7 @@ async function runReviewPipeline(params: {
     // the posting/approval phase below succeeds.
     try {
       options.onReviewResult?.({
-        summary,
+        summary: joinContext(coverageNotice, summary),
         findings: filteredFindings,
         addressedPriorComments: verifiedAddressedPriorComments,
         ...(telemetry.enabled ? { telemetry: telemetry.toJsonl() } : {}),
@@ -2848,6 +2862,7 @@ async function runReviewPipeline(params: {
         tokenUsage.snapshot(),
         engineByModel,
         mainReasoningEffort,
+        incompleteSessions,
       );
       log(
         `Dry run enabled; would post verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
@@ -2876,7 +2891,11 @@ async function runReviewPipeline(params: {
     // up front (independent of includePriorComments). Addressed-thread replies
     // (below) still run regardless.
     const findingCount = inline.length + fileLevel.length + orphaned.length;
-    const shouldPostComment = shouldPostReviewComment(priorJbotReviewCount, findingCount);
+    const shouldPostComment = shouldPostReviewComment(
+      priorJbotReviewCount,
+      findingCount,
+      incompleteSessions.length === 0,
+    );
     const deferCleanComment = options.autoApprove && verifiedFindings.length === 0;
     const buildCurrentBody = () =>
       buildBody(
@@ -2891,6 +2910,7 @@ async function runReviewPipeline(params: {
         tokenUsage.snapshot(),
         engineByModel,
         mainReasoningEffort,
+        incompleteSessions,
       );
     const postCurrentReviewIfNeeded = async (): Promise<void> => {
       if (!shouldPostComment) {
@@ -2988,6 +3008,7 @@ async function runReviewPipeline(params: {
       verifiedFindings.length,
       openThreadCount,
       priorThreadStateKnown,
+      incompleteSessions.length === 0,
     );
     let approved = false;
     if (options.autoApprove && approvalClean) {
@@ -3041,8 +3062,17 @@ async function runReviewPipeline(params: {
 
     if (deferCleanComment && !approved) await postCurrentReviewIfNeeded();
 
-    if (isPrCleanAfterRun(findingCount, openThreadCount, priorThreadStateKnown)) {
+    if (
+      isPrCleanAfterRun(
+        findingCount,
+        openThreadCount,
+        priorThreadStateKnown,
+        incompleteSessions.length === 0,
+      )
+    ) {
       await safeAddReviewReaction(octokit, owner, repo, pullNumber, log);
+    } else if (incompleteSessions.length > 0) {
+      log('Review coverage incomplete; not adding the review-done reaction.');
     } else if (!priorThreadStateKnown) {
       log('Prior jbot-review thread state is unavailable; not adding the review-done reaction.');
     } else {
@@ -3056,6 +3086,7 @@ async function runReviewPipeline(params: {
     let teardownCompleted = false;
     try {
       stop();
+      await commandCodeBackend?.stop();
       cleanupCliHomes();
       teardownCompleted = true;
     } finally {
@@ -3318,46 +3349,44 @@ function startLensPasses(params: {
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
-}): Promise<Finding[][]> {
+}): Promise<Finding[]>[] {
   const { lensKeys } = params;
-  if (lensKeys.length === 0) return Promise.resolve([]);
+  if (lensKeys.length === 0) return [];
 
   params.log(`Starting ${lensKeys.length} lens pass(es) in parallel: ${lensKeys.join(', ')}.`);
-  return Promise.all(
-    lensKeys.map((key) => {
-      const startedAt = Date.now();
-      return params.backend
-        .runReview(params.model, params.prContext, params.guidelinesForPrompt, params.log, {
-          lensAddendum: REVIEW_LENSES[key],
-          label: `review-${key}`,
-          timeoutMs: params.timeoutMs,
-          onTokenUsage: params.onTokenUsage,
-          evidenceQuotes: params.evidenceQuotes,
-          embeddedFirstPrompt: params.embeddedFirstPrompt,
-        })
-        .then((result) => {
-          params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
-          params.onCoverage?.({
-            session: `review-${key}`,
-            state: 'completed',
-            durationMs: Date.now() - startedAt,
-          });
-          return result.findings;
-        })
-        .catch((error) => {
-          params.log(
-            `(skipped ${key} lens pass: ${error instanceof Error ? error.message : String(error)})`,
-          );
-          params.onCoverage?.({
-            session: `review-${key}`,
-            state: 'failed',
-            error,
-            durationMs: Date.now() - startedAt,
-          });
-          return [];
+  return lensKeys.map((key) => {
+    const startedAt = Date.now();
+    return params.backend
+      .runReview(params.model, params.prContext, params.guidelinesForPrompt, params.log, {
+        lensAddendum: REVIEW_LENSES[key],
+        label: `review-${key}`,
+        timeoutMs: params.timeoutMs,
+        onTokenUsage: params.onTokenUsage,
+        evidenceQuotes: params.evidenceQuotes,
+        embeddedFirstPrompt: params.embeddedFirstPrompt,
+      })
+      .then((result) => {
+        params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
+        params.onCoverage?.({
+          session: `review-${key}`,
+          state: 'completed',
+          durationMs: Date.now() - startedAt,
         });
-    }),
-  );
+        return result.findings;
+      })
+      .catch((error) => {
+        params.log(
+          `(skipped ${key} lens pass: ${error instanceof Error ? error.message : String(error)})`,
+        );
+        params.onCoverage?.({
+          session: `review-${key}`,
+          state: 'failed',
+          error,
+          durationMs: Date.now() - startedAt,
+        });
+        return [];
+      });
+  });
 }
 
 interface AuxiliarySession<T> {
@@ -3383,15 +3412,25 @@ function pendingAuxiliarySessionLabels(
   return sessions.filter((session) => !session.isSettled()).map((session) => session.label);
 }
 
-/**
- * Grace an auxiliary session gets once the main review is done. Aux work is a
- * recall supplement that already fails open (invariant #3), so past this point
- * it is pure tail: the deep pass has landed and the run is only waiting. The
- * finder budget is the wrong bound here — it is sized for a session that gates
- * the review, and lets one lens (or its JSON repair) add many minutes to a run
- * whose useful work has finished.
- */
-const AUXILIARY_SETTLE_GRACE_MS = 120_000;
+const AUXILIARY_SETTLE_GRACE_MS = 10 * 60_000;
+
+export function computeAuxiliaryGraceMs(
+  timeBudgetMinutes: number,
+  elapsedMs: number,
+  verificationEnabled = true,
+): number {
+  if (timeBudgetMinutes <= 0) return AUXILIARY_SETTLE_GRACE_MS;
+  return Math.max(
+    0,
+    Math.min(
+      AUXILIARY_SETTLE_GRACE_MS,
+      timeBudgetMinutes * 60_000 -
+        elapsedMs -
+        POSTING_RESERVE_MS -
+        (verificationEnabled ? MAX_VERIFICATION_MS : 0),
+    ),
+  );
+}
 
 /** Distinguishes the grace expiring from the session failing on its own. */
 const GRACE_EXPIRED = 'jbot: auxiliary settle grace expired';
@@ -3457,17 +3496,20 @@ async function verifyBlockingFindings(params: {
     params.onCoverage?.({ session, state: 'skipped' });
     return params.findings;
   }
+  const selectedIndexes = selectBlockingFindingIndexes(params.findings, MAX_VERIFIED_FINDINGS);
+  if (selectedIndexes.length === 0) {
+    params.onCoverage?.({ session, state: 'skipped' });
+    return params.findings;
+  }
   if (params.timeoutMs === 0) {
     params.log(
       'Skipping finding verification: time budget exhausted; posting findings unverified (fail-open).',
     );
-    params.onCoverage?.({ session, state: 'skipped' });
-    return params.findings;
-  }
-
-  const selectedIndexes = selectBlockingFindingIndexes(params.findings, MAX_VERIFIED_FINDINGS);
-  if (selectedIndexes.length === 0) {
-    params.onCoverage?.({ session, state: 'skipped' });
+    params.onCoverage?.({
+      session,
+      state: 'failed',
+      error: new Error('verification budget exhausted'),
+    });
     return params.findings;
   }
 
@@ -4463,9 +4505,12 @@ export function buildBody(
   tokenUsage?: ReviewTokenUsage,
   engineByModel?: Record<string, string>,
   reasoningEffort?: string,
+  incompleteSessions: readonly string[] = [],
 ): string {
   const total = all.length;
   const lines = ['## J-Bot Code Review', ''];
+  const coverageNotice = formatIncompleteCoverage(incompleteSessions);
+  if (coverageNotice) lines.push(coverageNotice, '');
   if (changesSinceLastReview.trim()) {
     lines.push('**Changes since last review**', '', changesSinceLastReview.trim(), '');
   }
@@ -4493,7 +4538,7 @@ export function buildBody(
     );
   }
   if (total === 0) {
-    lines.push('✅ _No new findings._');
+    lines.push(coverageNotice ? '_No findings from completed passes._' : '✅ _No new findings._');
   } else {
     lines.push('### Findings Summary', '', ...buildSeverityTable(all), '');
   }

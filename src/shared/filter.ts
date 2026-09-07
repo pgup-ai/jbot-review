@@ -420,16 +420,12 @@ export function anchorFindings(
   return result;
 }
 
-/**
- * Whether to post a review comment this run. The first visible run always
- * posts (sets a baseline) and any run with findings posts; a clean re-run
- * posts nothing — the "review done" reaction signals it instead.
- */
 export function shouldPostReviewComment(
   priorJbotReviewCount: number,
   findingCount: number,
+  coverageComplete = true,
 ): boolean {
-  return priorJbotReviewCount === 0 || findingCount > 0;
+  return !coverageComplete || priorJbotReviewCount === 0 || findingCount > 0;
 }
 
 /** Minimal review-thread shape for the reaction gate (no GitHub-layer import). */
@@ -467,6 +463,7 @@ export function isPrCleanAfterRun(
   findingCount: number,
   openThreadCount: number,
   threadStateKnown: boolean,
+  coverageComplete = true,
 ): boolean {
-  return threadStateKnown && findingCount === 0 && openThreadCount === 0;
+  return coverageComplete && threadStateKnown && findingCount === 0 && openThreadCount === 0;
 }

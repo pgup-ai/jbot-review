@@ -11,6 +11,7 @@ import {
   shouldSummarizeChangesSinceLastReview,
   buildMainShardFailureMessage,
   computeFinderTimeoutMs,
+  computeAuxiliaryGraceMs,
   computeRetryTimeoutMs,
   computeRunDeadline,
   computeVerificationTimeoutMs,
@@ -1211,4 +1212,33 @@ describe('settleWithinGrace', () => {
 
     assert.deepEqual(await settleWithinGrace(session(failed, true), [], () => {}), []);
   });
+});
+
+it('caps auxiliary grace at ten minutes while reserving verification and posting time', () => {
+  assert.equal(computeAuxiliaryGraceMs(30, 90_000), 600_000);
+  assert.equal(computeAuxiliaryGraceMs(10, 120_000), 150_000);
+  assert.equal(computeAuxiliaryGraceMs(5, 0), 0);
+  assert.equal(computeAuxiliaryGraceMs(5, 0, false), 270_000);
+  assert.equal(computeAuxiliaryGraceMs(0, 9_000_000), 600_000);
+});
+
+it('marks incomplete review bodies without claiming an all-clear result', () => {
+  const body = buildBody(
+    '',
+    '',
+    [],
+    [],
+    'model',
+    'owner',
+    'repo',
+    'head',
+    undefined,
+    undefined,
+    undefined,
+    ['review-interactions'],
+  );
+  assert.match(body, /Review incomplete/);
+  assert.match(body, /review-interactions/);
+  assert.match(body, /completed passes only/);
+  assert.doesNotMatch(body, /✅/);
 });

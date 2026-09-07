@@ -563,15 +563,17 @@ describe('shouldPostReviewComment', () => {
     assert.equal(shouldPostReviewComment(0, 3), true);
   });
 
-  it('posts a re-run only when it has findings', () => {
+  it('posts a re-run when it has findings or incomplete coverage', () => {
     assert.equal(shouldPostReviewComment(2, 0), false);
     assert.equal(shouldPostReviewComment(2, 1), true);
+    assert.equal(shouldPostReviewComment(2, 0, false), true);
   });
 });
 
 describe('isPrCleanAfterRun', () => {
   it('is clean only with known thread state, no new findings, and no open threads', () => {
     assert.equal(isPrCleanAfterRun(0, 0, true), true);
+    assert.equal(isPrCleanAfterRun(0, 0, true, false), false);
     assert.equal(isPrCleanAfterRun(2, 0, true), false); // this run posted findings
     assert.equal(isPrCleanAfterRun(0, 1, true), false); // a finding thread is still open
     assert.equal(isPrCleanAfterRun(0, 0, false), false); // thread state could not be verified

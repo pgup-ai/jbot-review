@@ -61,7 +61,9 @@ verification or final publication. Raw results remain in the ignored local
 The first local full-pipeline review found inconsistent quota handling between
 search and reads and incomplete quota recovery across diff pages. Removing the
 quota machinery addressed both. A subsequent Muse 1.2 Pi review completed with
-zero findings; this does not establish recall. All 1,018 tests, format, typecheck, lint, build, and diff checks passed.
+zero findings; this does not establish recall. The implementation committed as `e939df2` passed `npm test` (1,018 tests),
+`npm run format`, `npm run typecheck`, `npm run lint`, `npm run build`, and
+`git diff --check`.
 Functional tests cover paging, late-file evidence, literal search, and refusing
 outside-repository symlinks.
 

@@ -22,7 +22,8 @@ import {
   type PromptTokenUsage,
   type TokenUsageRecorder,
 } from './opencode.ts';
-import { spawnWithTimeout, truncateForLog } from '@symma/protocol';
+import { truncateForLog } from '@symma/protocol';
+import { runCommandCodeProcess } from './commandcode-process.ts';
 import { clampReasoningEffort } from './config.ts';
 import { isFiniteNumber, isNonArrayRecord, isRecord } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
@@ -527,7 +528,7 @@ async function runCommandCodePrompt(
   );
   let usage: PromptTokenUsage | undefined;
   try {
-    const result = await spawnWithTimeout(COMMANDCODE_CLI_BIN, args, {
+    const result = await runCommandCodeProcess(COMMANDCODE_CLI_BIN, args, {
       cwd: workspace,
       input,
       env: commandCodeEnvForHome(home),

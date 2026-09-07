@@ -326,3 +326,8 @@ export function formatSummaryMarkdown(
   while (out.length > 0 && out[out.length - 1] === '') out.pop();
   return out.join('\n');
 }
+
+export function formatIncompleteCoverage(sessions: readonly string[]): string {
+  if (sessions.length === 0) return '';
+  return `⚠️ **Review incomplete:** ${sessions.map((session) => `\`${session}\``).join(', ')} did not complete successfully. Findings reflect completed passes only.`;
+}

@@ -60,7 +60,8 @@ partial TASK-058/062 measurement step, not full engine-context attribution.
 
 ## Validation and limits
 
-All 1,050 tests, formatting, typecheck, lint, and build passed. The new context
+The initial implementation committed as `7c3346c` passed `npm test` (1,050 tests),
+`npm run format`, `npm run typecheck`, `npm run lint`, and `npm run build`. The new context
 case checks retained scope, cross-file diff evidence, replies, and omission
 notices. Existing tests check independent repair payload sizes and missing metrics.
 A local CommandCode Muse 1.3 review completed in 32 seconds with zero findings;
