@@ -347,8 +347,9 @@ Investigate the failure classes in the review lens below across the COMPLETE
 base...head diff, including earlier commits and changes already reviewed.
 Read every changed hunk to identify affected contracts; do not limit the pass
 to particular file extensions. Trace plausible failures into unchanged callers,
-definitions, configuration, and tests. Still report other clear bugs encountered,
-but do not repeat a general style, architecture, or guideline-compliance sweep.
+definitions, configuration, and tests only to establish a lens-specific failure.
+Return findings within this lens's responsibility. Do not start a general bug,
+style, architecture, guideline-compliance, or other lens's investigation.
 
 Use PR intent, linked issues, relevant repository guidelines, and changed-symbol
 usage to establish expected behavior. Repository reads are available only when
@@ -564,12 +565,7 @@ diff evidence with its omission notices, PR intent, linked issues when available
 and investigation guidance are retained. Prior
 findings are suppressed downstream; do not infer that no prior review exists.`;
 
-/**
- * Focus addenda for extra recall passes. Each lens narrows ATTENTION, not
- * scope: a lens pass still reviews the whole diff but spends its effort on
- * one class of bug the single general pass historically misses. Keys are
- * ordered by expected marginal recall.
- */
+/** Each specialist scans the full diff for its assigned failure class. */
 export const REVIEW_LENSES: Record<string, string> = {
   interactions: `## Review lens for this pass
 
@@ -584,8 +580,10 @@ misses:
 - Cross-hunk contradictions inside this PR: one hunk capping, gating, or
   renaming something another hunk (or unchanged code) still relies on.
 
-Still report any other clear bug you encounter, but spend your exploration
-budget tracing symbols from the diff into unchanged code.`,
+Own producer/consumer contracts: arguments, return values, schemas, configuration,
+registration, and compatibility across boundaries. Follow both ends of a changed
+contract until its actual behavior is established. Do not run a UI lifecycle or
+render-state sweep, a security/data-integrity audit, or a written-rule audit.`,
   integrity: `## Review lens for this pass
 
 This pass concentrates on SECURITY, CONCURRENCY, and DATA-INTEGRITY bugs:
@@ -603,8 +601,10 @@ This pass concentrates on SECURITY, CONCURRENCY, and DATA-INTEGRITY bugs:
   mask): the file is still reachable at its own URL, so a type/shape check is
   not sanitization.
 
-Still report any other clear bug you encounter, but spend your exploration
-budget on these classes.`,
+Own trust boundaries and durable-state integrity: authorization, injection,
+transaction consistency, data preservation, and server/resource concurrency.
+Do not run a UI loading/render-state sweep, general API compatibility sweep,
+or written-rule audit.`,
   frontend: `## Review lens for this pass
 
 This pass concentrates on FRONTEND STATE & RENDER bugs — the class a
@@ -620,8 +620,10 @@ hunk-by-hunk read misses in React/Vue/Svelte UIs:
   changed workflow; lost user input, double-submit paths, and stale data
   after mutations.
 
-Still report any other clear bug you encounter, but spend your exploration
-budget on these classes.`,
+Own observable UI behavior: component lifecycle, client state/cache transitions,
+rendering, and user actions. Read API or backend code only to resolve a concrete
+UI failure; do not run a separate API compatibility, security/data-integrity,
+or written-rule audit.`,
 };
 
 export type ReviewPlaybookId =
@@ -1028,8 +1030,7 @@ export function assembleReviewPrompt(
   evidenceQuotes = false,
   embeddedFirstPrompt = false,
 ): string {
-  const focusedLens =
-    lensAddendum === REVIEW_LENSES.interactions || lensAddendum === REVIEW_LENSES.frontend;
+  const focusedLens = Object.values(REVIEW_LENSES).includes(lensAddendum);
   const parts = [
     focusedLens
       ? LENS_REVIEW_PROMPT

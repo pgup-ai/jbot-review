@@ -2521,7 +2521,6 @@ async function runReviewPipeline(params: {
     const lensPasses = startLensPasses({
       backend: auxBackend,
       model: auxModel,
-      prContext: auxPrContext,
       lensPrContext,
       guidelinesForPrompt,
       lensKeys: candidateLensKeys,
@@ -3275,7 +3274,6 @@ export function emitReviewTelemetry(
 function startLensPasses(params: {
   backend: ReviewBackend;
   model: string;
-  prContext: string;
   lensPrContext: string;
   guidelinesForPrompt: string;
   lensKeys: string[];
@@ -3293,10 +3291,8 @@ function startLensPasses(params: {
   params.log(`Starting ${lensKeys.length} lens pass(es) in parallel: ${lensKeys.join(', ')}.`);
   return lensKeys.map((key) => {
     const startedAt = Date.now();
-    const context =
-      key === 'interactions' || key === 'frontend' ? params.lensPrContext : params.prContext;
     return params.backend
-      .runReview(params.model, context, params.guidelinesForPrompt, params.log, {
+      .runReview(params.model, params.lensPrContext, params.guidelinesForPrompt, params.log, {
         lensAddendum: REVIEW_LENSES[key],
         label: `review-${key}`,
         timeoutMs: params.timeoutMs,

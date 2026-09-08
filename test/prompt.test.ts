@@ -343,12 +343,13 @@ describe('REVIEW_PROMPT', () => {
 });
 
 describe('REVIEW_LENSES', () => {
-  it('provides interaction and integrity lenses that narrow attention, not scope', () => {
+  it('assigns each lens a specialist investigation', () => {
     assert.ok(Object.keys(REVIEW_LENSES).includes('interactions'));
     assert.ok(Object.keys(REVIEW_LENSES).includes('integrity'));
     for (const lens of Object.values(REVIEW_LENSES)) {
       assert.match(lens, /## Review lens for this pass/);
-      assert.match(lens, /Still report any other clear bug/);
+      assert.match(lens, /Own /);
+      assert.match(lens, /do not run/i);
     }
   });
 
@@ -365,11 +366,13 @@ describe('REVIEW_LENSES', () => {
     assert.match(REVIEW_LENSES.integrity, /served|bundled|mask/i);
   });
 
-  it('focuses interactions and frontend without losing evidence rules or tail ordering', () => {
-    for (const lens of [REVIEW_LENSES.interactions, REVIEW_LENSES.frontend]) {
+  it('keeps each specialist in its role without losing evidence rules or tail ordering', () => {
+    for (const lens of Object.values(REVIEW_LENSES)) {
       const prompt = assembleReviewPrompt('PR_CONTEXT_SENTINEL', 'GUIDELINES_SENTINEL', lens);
       assert.match(prompt, /COMPLETE\s+base\.\.\.head diff/);
       assert.match(prompt, /unchanged callers/);
+      assert.match(prompt, /Return findings within this lens/);
+      assert.doesNotMatch(prompt, /Still report any other clear bug/);
       assert.match(prompt, /Do not modify files/);
       assert.match(prompt, /Do not run repository code/);
       assert.match(prompt, /Never state an\s+unverified library behavior as fact/);
@@ -385,7 +388,10 @@ describe('REVIEW_LENSES', () => {
       assert.ok(lensIndex < prompt.indexOf('## Final output reminder'));
       assert.ok(prompt.endsWith(REVIEW_OUTPUT_REMINDER));
     }
-    assert.ok(assembleReviewPrompt('PR', '', REVIEW_LENSES.integrity).startsWith(REVIEW_PROMPT));
+    assert.match(REVIEW_LENSES.interactions, /Own producer\/consumer contracts/);
+    assert.match(REVIEW_LENSES.frontend, /Own observable UI behavior/);
+    assert.match(REVIEW_LENSES.integrity, /Own trust boundaries and durable-state integrity/);
+    assert.ok(assembleReviewPrompt('PR', '', 'Custom focus').startsWith(REVIEW_PROMPT));
   });
 });
 
