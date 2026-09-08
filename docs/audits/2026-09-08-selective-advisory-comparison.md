@@ -48,3 +48,19 @@ Validation: 1,024 tests, typecheck, lint, formatting, and build passed. Self-rev
 added guards keeping cited cross-file and external-API claims in verification.
 De-slop kept one new regression case, updated existing verdict/grace cases, kept
 one field-contract comment, and removed one stale selector comment.
+
+## Review follow-up
+
+The selective-verification treatment above was withdrawn after review. A matching
+quote and model-supplied classification cannot establish that an entire advisory
+contains no external or runtime claim. All findings remain eligible for
+verification, and uncertain advisories retain their unverified status rather than
+being dropped. The five-minute auxiliary settling limit remains.
+
+The timings above describe the recorded treatment commit, not the revised branch.
+No new live comparison or full-corpus benchmark was run for this follow-up.
+
+Follow-up validation: 1,023 tests, typecheck, lint, formatting, and build passed.
+The exemption test was removed with the exemption; the existing uncertain-advisory
+test now checks both verdict application paths. Self-review found no remaining
+P1/P2 issues in the revised diff.

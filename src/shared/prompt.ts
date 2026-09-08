@@ -305,11 +305,6 @@ Field constraints:
 - "kind": exactly one of "bug", "security", "performance", "maintainability",
   "architecture", "test", "docs", "investigate".
 - "confidence": exactly one of "high", "medium", "low".
-- Optional "localSuggestion": true only for a P3/nit documentation or
-  maintainability suggestion whose entire rationale is visible in its changed
-  hunk. Include a verbatim "evidence" quote from that hunk. Never set this for
-  a bug, runtime impact, cross-file contract, external API behavior, or a rule
-  defined elsewhere. Omit suggestions without concrete supporting evidence.
 - "title": imperative headline; wrap code identifiers (function, variable,
   type, and file names) in backticks, like the body.
 - "body": the concrete trigger (input/state), the wrong result, why it is

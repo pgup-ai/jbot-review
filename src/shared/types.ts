@@ -56,7 +56,6 @@ export function sanitizeFinding(value: unknown): Finding | undefined {
       typeof f.confidence === 'string' && VALID_CONFIDENCES.has(f.confidence as FindingConfidence)
         ? (f.confidence as FindingConfidence)
         : undefined,
-    ...(f.localSuggestion === true ? { localSuggestion: true } : {}),
     title: f.title,
     body: f.body,
     ...(typeof f.evidence === 'string' && f.evidence.trim()
@@ -86,8 +85,6 @@ export interface Finding {
   body: string;
   /** Verbatim quote of the changed line the finding hangs on (evidenceQuotes); grounds the verifier and enables orphan re-anchoring. Models may omit it. */
   evidence?: string;
-  /** Purely local suggestion, without a runtime, cross-file, or external-API claim. */
-  localSuggestion?: boolean;
   /** Stable per-run id for disposition tracing (reviewTelemetry); absent when telemetry is off, never posted. */
   id?: string;
   /** Set by verification, never accepted from model output. */
