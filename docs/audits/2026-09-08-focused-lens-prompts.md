@@ -6,7 +6,7 @@ sweep, calibration examples, and a summary they never publish. Their PR context
 also included commit messages, CI status, prior threads, and changes-since
 summary instructions owned by other passes.
 
-The treatment gives these two passes focused instructions and removes that
+The initial treatment gives these two passes focused instructions and removes that
 history context. Shared severity, evidence, framework-claim, noise, command, and
 JSON rules remain shared constants. It preserves the exact existing diff block,
 PR intent, linked issues, guidelines, review focus, and changed-symbol guidance.
@@ -71,8 +71,7 @@ not establish that prompt reduction caused the slowdown.
 This was a manual spot-check, not blind adjudication. Different candidates from
 the unchanged main prompt demonstrate model variability. No precision or recall
 improvement is established. The production CommandCode GLM timeout has not been
-reproduced or fixed by this Muse-only experiment. Keep this change in draft;
-smaller prompts alone do not justify a rollout on performance grounds.
+reproduced or fixed by this Muse-only experiment. Smaller prompts alone do not justify a rollout on performance grounds.
 
 ## Validation and cleanup
 
@@ -89,3 +88,55 @@ rather than adding duplicate cases. Net branch size before this audit: +117 line
 mostly shared-rule extraction, focused instructions, and context/test wiring.
 Post-test edits only restore the adjacent lens comment's placement and update
 prose; they do not change the tested prompt values.
+
+## Specialist ownership follow-up
+
+Revision `a4ff84ab08193eab5a2c0168d2f5d6fa9145a4b1` removes each lens's invitation
+to report unrelated bugs and gives all three built-in lenses focused context:
+interactions owns producer/consumer contracts, frontend owns observable UI state
+and behavior, and integrity owns trust boundaries and durable-state correctness.
+Integrity therefore no longer uses the unchanged general-review prompt described
+in the initial experiment above. The main prompt remains byte-identical in both
+assembly modes. Verification, guideline checks, addressed checks, and summary
+passes already have narrow tasks; their behavior is unchanged.
+
+Main must retain baseline coverage when a specialist is unavailable. Verification
+must independently recheck candidate evidence. These are intentional overlaps;
+prompt ownership discourages duplicate broad investigations, but cannot guarantee
+that sessions never read the same code or identify the same defect.
+
+Self-review found no P1/P2 implementation issues. Formatting, typecheck, lint,
+all 1,025 tests, build, and main-prompt equality checks passed. All ten backend
+adapters use the shared assembler. De-slop removed the per-lens context branch
+and its extra parameter. Across the branch, five comment blocks were adjudicated:
+two shortened, three cut, none kept unchanged. The single new context-boundary
+test was kept; existing lens assertions were updated to the new contract.
+
+A follow-up Muse smoke test used the same frozen PR and environment, with three
+review passes to exercise interactions, integrity, and frontend together. Total
+runtime was 264.6 seconds; every scheduled session completed, with no timeout or
+rate-limit error logged. The fixture checkout remained clean.
+
+| Session      | Runtime | Prompt bytes |
+| ------------ | ------: | -----------: |
+| Main         |  80.2 s |       87,997 |
+| Guidelines   |  70.1 s |      148,001 |
+| Interactions | 154.8 s |       80,106 |
+| Integrity    | 112.5 s |       80,243 |
+| Frontend     | 211.2 s |       80,133 |
+| Verification |  52.3 s |       61,735 |
+
+Interactions produced two candidates: the accepted concurrent-refetch tradeoff
+and a cache-updater hypothesis that verification refuted. Frontend produced the
+visible silent-undo P3. Main and integrity returned no candidates. No candidate
+was removed by cross-session deduplication. The retained P2 still describes the
+explicit exception in the fixture's decision log, so this is a precision concern,
+not evidence of a newly discovered blocking defect. The contract finding also
+illustrates that interactions and UI behavior can meet at the same boundary;
+role instructions cannot enforce perfectly disjoint semantic areas.
+
+This is an operational smoke test, not a matched performance comparison: it adds
+an integrity session and uses a later prompt revision. It establishes successful
+completion, not improved speed, recall, or precision. The earlier control and
+treatment results remain the relevant recorded comparison; no new corpus gate
+or production CommandCode validation was performed.
