@@ -1293,12 +1293,12 @@ describe('settleWithinGrace', () => {
   });
 });
 
-it('caps auxiliary grace at ten minutes while reserving verification and posting time', () => {
-  assert.equal(computeAuxiliaryGraceMs(30, 90_000), 600_000);
+it('caps auxiliary grace at five minutes while reserving verification and posting time', () => {
+  assert.equal(computeAuxiliaryGraceMs(30, 90_000), 300_000);
   assert.equal(computeAuxiliaryGraceMs(10, 120_000), 150_000);
   assert.equal(computeAuxiliaryGraceMs(5, 0), 0);
   assert.equal(computeAuxiliaryGraceMs(5, 0, false), 270_000);
-  assert.equal(computeAuxiliaryGraceMs(0, 9_000_000), 600_000);
+  assert.equal(computeAuxiliaryGraceMs(0, 9_000_000), 300_000);
 });
 
 it('marks incomplete review bodies without claiming an all-clear result', () => {

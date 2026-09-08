@@ -272,27 +272,29 @@ describe('applyFindingVerdicts', () => {
 
   it('labels uncertain advisories without upgrading nits or retaining high confidence', () => {
     const proposed = [
-      finding({ severity: 'P3', confidence: 'high', body: 'Definitely broken.' }),
-      finding({ severity: 'nit', confidence: 'high' }),
+      finding({ severity: 'P3', confidence: 'high', title: 'p3', body: 'Definitely broken.' }),
+      finding({ severity: 'nit', confidence: 'high', title: 'nit' }),
     ];
-    const { findings: result } = applyFindingVerdicts(
-      proposed,
-      [0, 1],
-      [
-        { index: 0, verdict: 'uncertain', reason: 'Caller unavailable.' },
-        { index: 1, verdict: 'uncertain' },
-      ],
-    );
-    assert.deepEqual(
-      result.map((f) => [f.severity, f.kind, f.confidence]),
-      [
-        ['P3', 'investigate', 'low'],
-        ['nit', 'investigate', 'low'],
-      ],
-    );
-    assert.match(result[0].title, /^Unverified concern:/);
-    assert.match(result[0].body, /Caller unavailable/);
-    assert.match(result[0].body, /> Definitely broken/);
+    const verdicts = [
+      { index: 0, verdict: 'uncertain' as const, reason: 'Caller unavailable.' },
+      { index: 1, verdict: 'uncertain' as const },
+    ];
+    for (const { findings: result, dropped } of [
+      applyFindingVerdicts(proposed, [0, 1], verdicts),
+      mergeVerdictsByLocation(proposed, proposed, verdicts),
+    ]) {
+      assert.deepEqual(dropped, []);
+      assert.deepEqual(
+        result.map((f) => [f.severity, f.kind, f.confidence]),
+        [
+          ['P3', 'investigate', 'low'],
+          ['nit', 'investigate', 'low'],
+        ],
+      );
+      assert.match(result[0].title, /^Unverified concern:/);
+      assert.match(result[0].body, /Caller unavailable/);
+      assert.match(result[0].body, /> Definitely broken/);
+    }
   });
 
   it('retains missing verdicts as unverified advisories', () => {
