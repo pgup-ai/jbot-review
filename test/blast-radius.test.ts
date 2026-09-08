@@ -58,6 +58,29 @@ describe('extractChangedExportedSymbols', () => {
     const symbols = extractChangedExportedSymbols([{ filename: 'src/a.ts', patch }]);
 
     assert.deepEqual(symbols, ['rawName', 'exportedName', 'Shape', 'PublicShape', 'gone']);
+    const multiline = [
+      '@@ -1,4 +1,4 @@',
+      ' export type {',
+      '-  OldName,',
+      '+  NewName,',
+      '   Internal as PublicName,',
+      ' };',
+      '-export {',
+      '-  Local as',
+      '-  RemovedAlias,',
+      '-};',
+      ' export { Untouched };',
+      '-export {',
+      '-  Incomplete,',
+      '@@ -20 +20 @@',
+      ' };',
+    ].join('\n');
+    assert.deepEqual(extractChangedExportedSymbols([{ filename: 'src/a.ts', patch: multiline }]), [
+      'NewName',
+      'PublicName',
+      'OldName',
+      'RemovedAlias',
+    ]);
   });
 
   it('ignores files without patches', () => {
@@ -145,7 +168,10 @@ describe('buildBlastRadiusBlock', () => {
       await execFileAsync('git', ['init', '-q'], { cwd: repo });
       await mkdir(join(repo, 'src'), { recursive: true });
       await writeFile(join(repo, 'src', 'a.ts'), 'export function renamedFn() {}\n');
-      await writeFile(join(repo, 'src', 'caller.ts'), 'import { changedFn } from "./a.ts";\n');
+      await writeFile(
+        join(repo, 'src', 'caller.ts'),
+        'import { changedFn, removedAlias } from "./a.ts";\n',
+      );
       await writeFile(join(repo, 'src', 'dollar.ts'), 'import { foo$ } from "./a.ts";\n');
       await execFileAsync('git', ['add', '-A'], { cwd: repo });
 
@@ -155,12 +181,13 @@ describe('buildBlastRadiusBlock', () => {
           // ghostFn exists only in the patch, not the worktree: its grep
           // exits 1 (no matches) and must not poison changedFn's result.
           patch:
-            '@@ -1,1 +1,3 @@\n-export function changedFn() {\n+export function renamedFn() {\n+export function ghostFn() {\n+export const foo$ = 1;',
+            '@@ -1,1 +1,3 @@\n-export function changedFn() {\n+export function renamedFn() {\n+export function ghostFn() {\n+export const foo$ = 1;\n-export {\n-  local as removedAlias,\n-};',
         },
       ]);
 
       assert.match(block, /`changedFn` — referenced by unchanged: src\/caller\.ts/);
       assert.match(block, /`foo\$` — referenced by unchanged: src\/dollar\.ts/);
+      assert.match(block, /`removedAlias` — referenced by unchanged: src\/caller\.ts/);
       assert.doesNotMatch(block, /ghostFn/);
     } finally {
       await rm(repo, { recursive: true, force: true });

@@ -499,3 +499,37 @@ duplicate maintained rerun policy. Three comment blocks: one rewritten, one cut,
 one kept for cancellation failure semantics. No remaining P1/P2 finding was
 identified. No new live model probe or core/full corpus was run for these fixes;
 the inspected GitHub run predates them.
+
+### Run 34185796590 and verifier tooling
+
+At `87de66e`, main ran through Pi/Muse 1.2 in 199.6s and returned two findings.
+CommandCode/Muse 1.3 verification started immediately and finished in 173.5s,
+with five successful reads and two searches. Guidelines took 559.7s and returned
+no findings. Interactions made 36 successful tool calls (18 reads, 17 searches,
+one listing) before cancellation at 600.0s; its last tool completion was 13.3s
+before abort. This was ongoing exploration, not evidence of a frozen process.
+The addressed check finished in 54.7s, with one search error whose cause the
+sanitized telemetry does not expose. Review processing finished in 609.3s.
+
+The job succeeded under the auxiliary fail-open policy, while the posted report
+correctly marked interactions coverage incomplete. Verification rejected the
+queue-time finding because the documented ten-minute cap is execution-only, but
+accepted the incorrect claim that `isAbsolute(relative(...))` is dead code.
+Windows cross-drive paths disprove that claim, so the portability guard remains.
+Tool access worked; this run does not establish acceptable review precision.
+CommandCode's actual tool counts are in its progress rows, not its opaque generic
+exploration rows. The maintained role descriptions are in the README.
+
+Feedback fixes moved blast-radius text into the shared prompt module and added
+multiline named-export tracking independently for each diff side, resetting at
+hunk boundaries. Existing real-Git tests now cover callers of removed multiline
+aliases. Timeout cancellation failure is annotated on the original timeout error
+so existing runner logs expose it without another logging callback or an uncaught
+exception. Main/aux routing, tools, context budgets, and deadlines are unchanged.
+
+Validation: all 1,022 tests, typecheck, lint, formatting, and bundle build passed.
+Self-review/de-slop found no further P1/P2 issue. No new test cases; existing cases
+cover multiline context/alias/hunk handling and cancellation diagnostics. One
+comment block was rewritten to explain error propagation. Prompt formatting was
+moved without changing its output. No new live model probe or core/full corpus
+was run for these fixes; the inspected dogfood run predates them.

@@ -1094,6 +1094,8 @@ CommandCode logs progress every minute: elapsed time, observed tool outcomes,
 last completed tool, and time since the last event. A final `commandcode-progress`
 telemetry row survives normal timeout or abort handling. Incomplete snapshots are
 labelled; absent usage remains unavailable. Progress contains metadata only.
+CommandCode's generic exploration row has unavailable tool counts; use the
+`commandcode-progress.toolOutcomes` counts to assess its tool activity.
 
 Re-runs select candidate lenses from the complete PR diff. A prior reviewed-head
 marker never suppresses an auxiliary pass: it does not prove that pass completed.
@@ -1105,6 +1107,13 @@ independent sessions alongside main review. It sets `JBOT_GUIDELINE_SWEEP=false`
 and `JBOT_VERIFY_OVERLAP_GRACE=true`: main findings enter fresh verification as
 soon as main review returns; new auxiliary findings receive a later verification
 batch. Other consumers can select the same environment settings.
+
+`review-interactions` investigates cross-file regressions and inconsistent
+contracts across the full PR diff. `addressed-prior-comments` separately checks
+whether old findings have been fixed; deterministic checks control thread
+resolution and review compaction. `finding-verification` evaluates candidate
+findings in a fresh session, using repository tools where the backend supports
+them. Incorrect verification or thread closure can hide real issues.
 
 Interactions has a ten-minute execution limit starting after session-slot
 acquisition, bounded by the remaining run deadline. The run deadline also applies

@@ -232,7 +232,7 @@ describe('limitReviewBackendSessions', () => {
       label: 'review-interactions',
       timeoutMs: 20,
     });
-    const rejected = assert.rejects(call, /timed out/);
+    const rejected = assert.rejects(call, /timed out; timeout cancellation failed/);
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal(started, false);
     release();
