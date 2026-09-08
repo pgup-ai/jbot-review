@@ -89,6 +89,7 @@ function manifest(): ComparisonManifestV1 {
       contextTrim: false,
       embeddedFirstPrompt: true,
       guidelineWiden: 'auto',
+      commandCodeTools: true,
       verifierSlimContext: false,
       verifyOverlapGrace: false,
     },
@@ -127,6 +128,14 @@ function completedOutput(): JbotArenaOutputV1 {
 describe('comparison manifest validation', () => {
   it('accepts the complete v1 contract, including a fork head', () => {
     assert.deepEqual(validateComparisonManifest(manifest()), manifest());
+    for (const enabled of [false, true]) {
+      const configured = manifest();
+      configured.reviewConfig.commandCodeTools = enabled;
+      assert.equal(validateComparisonManifest(configured).reviewConfig.commandCodeTools, enabled);
+    }
+    const missing = manifest();
+    Reflect.deleteProperty(missing.reviewConfig, 'commandCodeTools');
+    assert.equal(validateComparisonManifest(missing).reviewConfig.commandCodeTools, true);
     const legacy = manifest();
     const parsedLegacy = validateComparisonManifest({
       ...legacy,
@@ -160,6 +169,11 @@ describe('comparison manifest validation', () => {
         'SDK engine',
         (value) => Object.assign(value.reviewConfig, { sdkEngine: 'pi' }),
         /sdkEngine/,
+      ],
+      [
+        'tools flag',
+        (value) => Object.assign(value.reviewConfig, { commandCodeTools: 'false' }),
+        /commandCodeTools/,
       ],
       ['index', (value) => (value.models[1]!.index = 3), /models\[1\]\.index/],
       ['provider', (value) => (value.models[0]!.provider = 'kilo'), /provider/],

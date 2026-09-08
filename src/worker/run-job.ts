@@ -79,6 +79,7 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         reviewShards: 1,
         timeBudgetMinutes: 30,
         modelOptions: defaultModelOptions(parseModelName(job.model).providerID),
+        commandCodeTools: parseEnvBoolean('JBOT_COMMANDCODE_TOOLS', true),
         embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
         onReviewResult: (r) => {
           const counts: Partial<Record<Severity, number>> = {};

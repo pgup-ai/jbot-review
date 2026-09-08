@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { it } from 'node:test';
@@ -53,6 +61,17 @@ it('reads literal bracketed filenames while refusing escapes and non-file reads'
     const result = await read.run({ input: { path: '[id].ts' } });
     assert.equal(result.ok, true);
     assert.match(result.content[0].text, /safe/);
+    const reading = read.run({ input: { path: '[id].ts' } });
+    renameSync(join(root, '[id].ts'), join(root, 'original.ts'));
+    symlinkSync(join(parent, 'outside.ts'), join(root, '[id].ts'));
+    const replaced = await reading;
+    assert.equal(replaced.ok, true);
+    assert.match(replaced.content[0].text, /safe/);
+    assert.doesNotMatch(replaced.content[0].text, /outside/);
+    rmSync(join(root, '.git'), { recursive: true });
+    const gitFailed = await read.run({ input: { path: 'original.ts' } });
+    assert.equal(gitFailed.ok, false);
+    assert.equal(gitFailed.error, 'Cannot validate repository file visibility.');
     assert.equal('block' in hook({ toolName: 'read_directory', input: { path: parent } }), true);
     for (const toolName of ['shell_command', 'write_file', 'read_file', 'grep', 'glob'])
       assert.equal('block' in hook({ toolName, input: {} }), true);
@@ -94,6 +113,13 @@ it('reads a foreign-owned worktree without following escapes or running fsmonito
     symlinkSync(outside, join(root, 'replaced'));
     writeFileSync(join(root, 'untracked.ts'), 'needle\n');
     writeFileSync(join(root, '.gitignore'), 'ignored.ts\n');
+    const nested = join(root, 'nested');
+    mkdirSync(nested);
+    execFileSync('git', ['-C', nested, 'init', '-q']);
+    writeFileSync(join(nested, 'source.ts'), 'needle\n');
+    writeFileSync(join(nested, '.gitignore'), '.env\n');
+    writeFileSync(join(nested, '.env'), 'OUTSIDE_SECRET_CANARY');
+    writeFileSync(join(nested, '.git', 'private'), 'OUTSIDE_SECRET_CANARY');
     git('config', 'core.worktree', outside);
     git('config', 'core.fsmonitor', `touch ${join(parent, 'executed')}`);
     Object.assign(process.env, gitEnv);
@@ -116,6 +142,7 @@ it('reads a foreign-owned worktree without following escapes or running fsmonito
     assert.equal(found.ok, true);
     assert.match(found.content[0].text, /inside.ts:1:needle/);
     assert.match(found.content[0].text, /untracked.ts:1:needle/);
+    assert.match(found.content[0].text, /nested\/source.ts:1:needle/);
     assert.doesNotMatch(found.content[0].text, /ignored.ts/);
     const tracked = await tools
       .find((t) => t.schema.name === 'jbot_read_file')!

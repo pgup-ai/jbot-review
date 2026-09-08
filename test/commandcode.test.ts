@@ -171,6 +171,7 @@ describe('CommandCode CLI provider helpers', () => {
       for (const key of Object.keys(overrides).filter((key) => key !== 'HOME'))
         assert.equal(env[key], undefined, key);
       assert.equal(env.GIT_CONFIG_NOSYSTEM, '1');
+      assert.equal(env.GIT_OPTIONAL_LOCKS, '0');
       assert.equal(process.env.COMMAND_CODE_API_KEY, 'stale-api-key');
     } finally {
       for (const [key, value] of Object.entries(previous)) {

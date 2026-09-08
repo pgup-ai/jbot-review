@@ -578,8 +578,9 @@ repository and operator settings, hooks, mods, and skills are excluded. Reposito
 enabled by default.
 
 Set `JBOT_COMMANDCODE_TOOLS=false` in the Action step's `env`, local environment,
-or app environment to disable repository investigation for **all CommandCode
-sessions**, including verification. The default exposes `jbot_read_file`,
+or app/worker environment to disable repository investigation for **all CommandCode
+sessions**, including verification. Arena comparisons use the frozen
+`reviewConfig.commandCodeTools` manifest value instead of ambient environment. The default exposes `jbot_read_file`,
 `jbot_list_files`, and `jbot_search`. Reads reject paths and symlinks resolving
 outside the repository. Search covers non-ignored files without following symlinks;
 listing includes tracked and non-ignored untracked files. Direct reads reject Git

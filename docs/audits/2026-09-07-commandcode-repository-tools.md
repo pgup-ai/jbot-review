@@ -179,6 +179,38 @@ A Linux Muse 1.3 review with the flag unset used repository tools in both main
 review and verification and retained the P1 defect (`/tmp/jbot-206-default-on`).
 Default and opt-out assertions pass with all 1,028 tests.
 
+## Latest dogfood and review follow-up
+
+[Run 34172342765](https://github.com/pgup-ai/jbot-review/actions/runs/34172342765/job/101894916823)
+completed successfully at `0a9a840`. CommandCode Muse 1.2 made 22 successful tool
+calls (17 reads, four searches, one listing) and finished main review in 228s.
+Pi/Muse 1.2 auxiliary discovery took about 32s in parallel, followed by 32s of
+verification. Two findings were posted: the valid worker opt-out omission and
+optional Git locks. The latter is useful consistency hardening; the run does not
+demonstrate index mutation by these specific Git commands. The main review missed
+the independently reproduced file-replacement race. This run confirms functioning
+tool access, not complete recall or a controlled model comparison.
+
+The follow-up forwards the worker opt-out, disables optional Git locks, and reads
+through the validated file descriptor. The replacement regression fails on the
+previous implementation by returning outside-file content and passes on the fix,
+including in the rebuilt Linux image with a foreign-owned checkout. Existing
+tests also cover failed Git visibility checks and nested search scope. Nested
+source remains searchable; ignored files and Git metadata remain excluded.
+
+Arena now consumes `reviewConfig.commandCodeTools`, defaulting missing legacy
+fields to true independently of ambient environment. The companion Arena change
+freezes the repository variable at preparation and retains it in result
+provenance. Producer/consumer checks pass for both Boolean values. Deploy the
+core image before enabling the companion workflow's opt-out.
+
+Self-review and de-slop found no further issues in these fixes. No new comment
+blocks or test cases were added; existing cases cover the regressions. All 1,028
+core tests and 18 Arena tests pass, along with formatting, typecheck, lint, and
+both builds. The Linux image passes read/list/search, ignored-file, and replacement
+checks. No new live corpus run was made for these fixes; the rollout limitation
+above still applies.
+
 References: [CommandCode CLI](https://commandcode.ai/docs/reference/cli),
 [mods](https://commandcode.ai/docs/mods), and
 [tools](https://commandcode.ai/docs/reference/tools). Installed-version probes,

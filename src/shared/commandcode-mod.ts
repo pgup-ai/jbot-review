@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { createReadStream, realpathSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  createReadStream,
+  fstatSync,
+  openSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { COMMANDCODE_TOOL_DESCRIPTIONS } from './prompt.ts';
 import { gitRepositoryPage, readRepositoryPage } from './repository-output.ts';
@@ -66,6 +74,7 @@ export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
     },
     readOnly: true,
     async run({ input }) {
+      let fd: number | undefined;
       try {
         if (typeof input.path !== 'string') throw new Error('Provide a repository file path.');
         const target = realpathSync(resolve(root, input.path));
@@ -74,20 +83,30 @@ export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
           throw new Error('Path is outside the reviewed repository.');
         if (rel.split(sep).some((part) => part.toLowerCase() === '.git'))
           throw new Error('Git metadata is unavailable.');
-        if (!statSync(target).isFile()) throw new Error('Path is not a regular file.');
+        fd = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+        const opened = fstatSync(fd);
+        if (!opened.isFile()) throw new Error('Path is not a regular file.');
+        const current = statSync(target);
+        if (
+          realpathSync(target) !== target ||
+          current.dev !== opened.dev ||
+          current.ino !== opened.ino
+        )
+          throw new Error('Repository file changed while opening it.');
         const ignored = spawnSync('git', [...gitArgs, 'check-ignore', '-q', '--', rel], gitOptions);
         if (ignored.status === 0) throw new Error('Ignored local files are unavailable.');
         if (ignored.status !== 1) throw new Error('Cannot validate repository file visibility.');
-        const page = await readRepositoryPage(
-          createReadStream(target, { encoding: 'utf8' }),
-          input,
-        );
+        const source = createReadStream(target, { fd, encoding: 'utf8' });
+        fd = undefined;
+        const page = await readRepositoryPage(source, input);
         return { ok: true, content: [{ type: 'text', text: page.text }] };
       } catch (error) {
         return {
           ok: false,
           error: error instanceof Error ? error.message : 'Repository read failed.',
         };
+      } finally {
+        if (fd !== undefined) closeSync(fd);
       }
     },
   });

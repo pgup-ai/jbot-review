@@ -655,6 +655,7 @@ export function commandCodeEnvForHome(home: string | undefined): NodeJS.ProcessE
   delete env.BUN_OPTIONS;
   delete env.PWD;
   env.GIT_CONFIG_NOSYSTEM = '1';
+  env.GIT_OPTIONAL_LOCKS = '0';
   return env;
 }
 
