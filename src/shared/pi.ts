@@ -1,3 +1,5 @@
+import { repositorySearchArgs, REPOSITORY_SEARCH_PROPERTIES } from './repository-search.ts';
+import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createReadStream, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,10 +24,12 @@ import {
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
+  assembleGuidelineSweepPrompt,
   assembleReviewPrompt,
   buildJsonRepairPrompt,
   CONTINUATION_NUDGE_PROMPT,
   isNoAttemptReply,
+  REPOSITORY_SEARCH_DESCRIPTION,
 } from './prompt.ts';
 import { isFiniteNumber, isRecord, truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
@@ -548,20 +552,16 @@ export function createPiSearchTool(
 ): unknown {
   return sdk.defineTool({
     name: 'search_repo',
-    description:
-      'Search tracked repository files for literal text. Results include path and line number; continue large results with offset.',
+    description: REPOSITORY_SEARCH_DESCRIPTION,
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', minLength: 1 },
+        ...REPOSITORY_SEARCH_PROPERTIES,
         offset: { type: 'integer', minimum: 0 },
       },
       required: ['query'],
     },
     execute: async (_id: unknown, params: unknown) => {
-      const query = isRecord(params) && typeof params.query === 'string' ? params.query : '';
-      if (!query)
-        return { content: [{ type: 'text', text: 'query must be nonempty' }], details: {} };
       const finish = telemetry?.startTool({
         session: piTelemetryContext.getStore()?.session ?? 'unknown',
         backend: 'pi',
@@ -571,7 +571,9 @@ export function createPiSearchTool(
         ...(isRecord(params) && (params.offset || params.line)
           ? { page: JSON.stringify({ offset: params.offset, line: params.line }) }
           : {}),
-        identity: query,
+        identity: JSON.stringify(
+          isRecord(params) ? { query: params.query, paths: params.paths } : params,
+        ),
         identityKind: 'query',
       });
       let text: string;
@@ -581,19 +583,17 @@ export function createPiSearchTool(
           [
             '--no-pager',
             'grep',
+            '--no-index',
+            '--exclude-standard',
             '--no-color',
             '-n',
             '-I',
-            '-F',
             '--no-textconv',
-            '--no-recurse-submodules',
-            '-e',
-            query,
-            '--',
+            ...repositorySearchArgs(params),
           ],
           isRecord(params) ? params : {},
         );
-        text = page.totalBytes ? page.text : '(no matches in tracked files)';
+        text = page.totalBytes ? page.text : '(no matches in non-ignored files)';
         finish?.({
           success: true,
           outputBytesBeforeCap: page.totalBytes,
@@ -1108,6 +1108,7 @@ export async function runPiReview(
   guidelines: string,
   log: (msg: string) => void,
   options: {
+    guidelineSweep?: GuidelineSweep;
     lensAddendum?: string;
     evidenceQuotes?: boolean;
     embeddedFirstPrompt?: boolean;
@@ -1117,6 +1118,7 @@ export async function runPiReview(
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
+  const deadlineAt = options.timeoutMs ? Date.now() + options.timeoutMs : undefined;
   const prompt = assembleReviewPrompt(
     prContext,
     guidelines,
@@ -1136,8 +1138,9 @@ export async function runPiReview(
       options.timeoutMs,
       options.onTokenUsage,
     );
+    let result: ReviewResult;
     try {
-      return parseReview(raw, label, log, { strict: true });
+      result = parseReview(raw, label, log, { strict: true });
     } catch (error) {
       const repaired = await repromptPiForJson(
         session,
@@ -1149,8 +1152,30 @@ export async function runPiReview(
         options.timeoutMs,
         options.onTokenUsage,
       );
-      return parseReview(repaired, `${label}-repair`, log, { strict: true });
+      result = parseReview(repaired, `${label}-repair`, log, { strict: true });
     }
+    if (!options.guidelineSweep) return result;
+    const sweep = options.guidelineSweep;
+    const sweepLabel = `guideline-sweep-${label}`;
+    return await appendGuidelineSweep(
+      result,
+      sweep,
+      sweepLabel,
+      deadlineAt,
+      async (timeoutMs) => {
+        const raw = await promptPiSession(
+          session,
+          model,
+          assembleGuidelineSweepPrompt(sweep.guidelines),
+          sweepLabel,
+          log,
+          timeoutMs,
+          options.onTokenUsage,
+        );
+        return parseReview(raw, sweepLabel, log, { strict: true }).findings;
+      },
+      log,
+    );
   } finally {
     disposePiSession(runtime, session, label, log);
   }
@@ -1191,11 +1216,8 @@ async function repromptPiForJson(
   );
 }
 
-/**
- * Aux-session parse with one same-session repair, failing open to the empty
- * selection (invariant 3) — mirrors the opencode engine's behavior.
- */
-async function parsePiAuxWithRepair<T>(
+// Let the runner record failed coverage before applying its auxiliary fallback.
+async function parsePiAuxWithRepair<K extends 'findings' | 'addressedPriorComments'>(
   session: PiAgentSessionLike,
   model: string,
   raw: string,
@@ -1203,28 +1225,22 @@ async function parsePiAuxWithRepair<T>(
   log: (msg: string) => void,
   timeoutMs: number | undefined,
   onTokenUsage: TokenUsageRecorder | undefined,
-  select: (result: ReviewResult) => T,
-): Promise<T> {
+  field: K,
+): Promise<ReviewResult[K]> {
   try {
-    return select(parseReview(raw, label, log, { strict: true }));
+    return parseReview(raw, label, log, { strict: true, field })[field];
   } catch (error) {
-    try {
-      const repaired = await repromptPiForJson(
-        session,
-        model,
-        raw,
-        error,
-        label,
-        log,
-        timeoutMs,
-        onTokenUsage,
-      );
-      return select(parseReview(repaired, `${label}-repair`, log));
-    } catch (repairError) {
-      const message = repairError instanceof Error ? repairError.message : String(repairError);
-      log(`(${label} repair failed; keeping empty results: ${message})`);
-      return select({ summary: '', findings: [], addressedPriorComments: [] });
-    }
+    const repaired = await repromptPiForJson(
+      session,
+      model,
+      raw,
+      error,
+      label,
+      log,
+      timeoutMs,
+      onTokenUsage,
+    );
+    return parseReview(repaired, `${label}-repair`, log, { strict: true, field })[field];
   }
 }
 
@@ -1256,7 +1272,7 @@ export async function runPiAddressedPriorCommentsCheck(
       log,
       timeoutMs,
       onTokenUsage,
-      (result) => result.addressedPriorComments,
+      'addressedPriorComments',
     );
   } finally {
     disposePiSession(runtime, session, label, log);
@@ -1292,7 +1308,7 @@ export async function runPiGuidelineComplianceCheck(
       log,
       timeoutMs,
       onTokenUsage,
-      (result) => result.findings,
+      'findings',
     );
   } finally {
     disposePiSession(runtime, session, label, log);

@@ -164,6 +164,7 @@ import {
   runCommandCodeReview,
   writeCommandCodeAuth,
   writeCommandCodeReadOnlySettings,
+  type CommandCodeRuntime,
 } from './commandcode.ts';
 import { CODEX_PROVIDER_ID, CURSOR_PROVIDER_ID, writeCodexAuth } from '@symma/protocol';
 import {
@@ -223,9 +224,11 @@ import {
   type LinkedIssue,
   type ReviewCommit,
 } from './review-context.ts';
-import { planReviewFanout, planIncrementalLenses } from './fanout.ts';
+import { planReviewFanout } from './fanout.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
+  completedReviewHead,
+  withReviewCoverage,
   listPrFiles,
   compareCommitFiles,
   listPrComments,
@@ -295,6 +298,7 @@ function createOpencodeBackend(
   if (toolTelemetry) configureOpencodeTelemetry(client, toolTelemetry);
   return {
     name: 'opencode',
+    supportsGuidelineSweep: true,
     observability: OPENCODE_TELEMETRY_CAPABILITY,
     abortSessionsByLabel: (label, log) => abortOpencodeSessionsByLabel(client, label, log),
     runReview: (model, prContext, guidelines, log, options) =>
@@ -345,6 +349,7 @@ function createOpencodeBackend(
 function createPiBackend(runtime: PiRuntime): ReviewBackend {
   return {
     name: 'pi',
+    supportsGuidelineSweep: true,
     observability: PI_TELEMETRY_CAPABILITY,
     abortSessionsByLabel: (label, log) => abortPiSessionsByLabel(runtime, label, log),
     runReview: (model, prContext, guidelines, log, options) =>
@@ -443,20 +448,22 @@ function createPoolsideBackend(
 
 function createCommandCodeBackend(
   workspace: string,
-  home: string,
+  runtime: CommandCodeRuntime,
   effortFor: (model: string, override?: Record<string, unknown>) => string | undefined,
 ): ReviewBackend & { stop(): Promise<void> } {
   const processes = createCommandCodeProcessScope();
   return {
     name: COMMANDCODE_PROVIDER_ID,
+    supportsGuidelineSweep: true,
     stop: processes.stop,
     abortSessionsByLabel: (label) => processes.abort(label),
     observability: COMMANDCODE_TELEMETRY_CAPABILITY,
+    canReadWorkspace: runtime.tools,
     runReview: (model, prContext, guidelines, log, options) =>
       processes.run(options?.label ?? 'review', () =>
         runCommandCodeReview(workspace, model, prContext, guidelines, log, {
           ...options,
-          home,
+          runtime,
           effort: effortFor(model),
         }),
       ),
@@ -469,7 +476,7 @@ function createCommandCodeBackend(
           log,
           timeoutMs,
           onTokenUsage,
-          home,
+          runtime,
           effortFor(model),
         ),
       ),
@@ -483,7 +490,7 @@ function createCommandCodeBackend(
           log,
           timeoutMs,
           onTokenUsage,
-          home,
+          runtime,
           effortFor(model),
         ),
       ),
@@ -505,7 +512,7 @@ function createCommandCodeBackend(
           log,
           timeoutMs,
           onTokenUsage,
-          home,
+          runtime,
           effortFor(model, modelOptions),
         ),
       ),
@@ -518,7 +525,7 @@ function createCommandCodeBackend(
           log,
           timeoutMs,
           onTokenUsage,
-          home,
+          runtime,
           effortFor(model),
         ),
       ),
@@ -787,6 +794,7 @@ export interface ReviewRunOptions {
   context7Mode?: Context7Mode;
   context7ApiKey?: string;
   guidelinePass?: boolean;
+  guidelineSweep?: boolean;
   /**
    * Directory for content-addressed reuse of completed shard results across
    * same-content re-runs. Must live OUTSIDE the reviewed checkout (the
@@ -819,6 +827,7 @@ export interface ReviewRunOptions {
    * gate, so the flip waits on adjudicated benchmark evidence.
    */
   verifierSlimContext?: boolean;
+  commandCodeTools?: boolean;
   /**
    * Model for the auxiliary sessions (addressed-check, guideline compliance,
    * finding verification). Lets the main review run on a stronger tier while
@@ -1287,7 +1296,7 @@ async function runReviewPipeline(params: {
   // head, and a skipped run would leave the prior approval stranded on the old
   // head — blocking PRs behind stale-approval-dismissing branch protection.
   if (!localDiff && options.skipUnchanged && !options.autoApprove && headSha && baseRef) {
-    const reviewedHead = findLatestReviewedHead(priorJbotReviewGroups.map((group) => group.body));
+    const reviewedHead = completedReviewHead(priorJbotReviewGroups.at(-1)?.body ?? '');
     // Same-head reruns are never assumed unchanged: the base may have advanced
     // since that review, and a same-head compare would only test today's diff
     // against itself — only a different head has a meaningful comparison.
@@ -1808,21 +1817,38 @@ async function runReviewPipeline(params: {
       commandCodeHome = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
       guardCliHomes();
       authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
-      writeCommandCodeReadOnlySettings(commandCodeHome);
+      writeCommandCodeReadOnlySettings(commandCodeHome, options.commandCodeTools);
     } catch (error) {
       cleanupCliHomes();
       throw error;
     }
     log(`CommandCode CLI auth configured at ${authPath}.`);
     log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
-    log('CommandCode reviews run with skills and tools disabled.');
-    commandCodeBackend = createCommandCodeBackend(workspace, commandCodeHome, (m, override) =>
-      commandCodeSessionEffort(m, override, {
-        auxModel,
-        auxModelOptions,
-        mainModelOptions: options.modelOptions,
-        explicit: options.modelOptionsExplicit ?? false,
-      }),
+    log(
+      options.commandCodeTools
+        ? 'CommandCode repository read/search tools enabled; launch configuration isolated.'
+        : 'CommandCode reviews run with skills and tools disabled.',
+    );
+    commandCodeBackend = createCommandCodeBackend(
+      workspace,
+      {
+        home: commandCodeHome,
+        tools: options.commandCodeTools,
+        onProgress: (session, model, commandCodeProgress) =>
+          telemetry.recordProgress({
+            kind: 'commandcode-progress',
+            session,
+            model,
+            ...commandCodeProgress,
+          }),
+      },
+      (m, override) =>
+        commandCodeSessionEffort(m, override, {
+          auxModel,
+          auxModelOptions,
+          mainModelOptions: options.modelOptions,
+          explicit: options.modelOptionsExplicit ?? false,
+        }),
     );
   }
 
@@ -2206,55 +2232,22 @@ async function runReviewPipeline(params: {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }
 
-    // On a re-review, drop the recall supplements whose trigger class the
-    // incremental delta (since the last reviewed head) doesn't touch. Best-effort
-    // and dynamic-fanout-gated; a null delta (first review, fetch failure, or
-    // escape hatch off) leaves the full set. Main review + verify are never gated.
-    // Local mode never gets here: empty prior comments mean no reviewedHead.
     const reviewedHead = findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody));
-    const incrementalDeltaFiles =
-      options.dynamicFanout && reviewedHead && headSha
-        ? await compareCommitFiles(octokit, owner, repo, reviewedHead, headSha).catch((error) => {
-            log(
-              `Incremental delta unavailable; running full lenses: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            );
-            return null;
-          })
-        : null;
+    // A reviewed-head marker does not prove that any prior auxiliary pass completed.
     const guidelineCandidate = effectiveGuidelinePass && auxSessionsEnabled;
     const candidateLensKeys = selectLensKeys(
       auxSessionsEnabled ? effectiveReviewPasses : 1,
       changedFiles,
       changeShape,
     );
-    const incrementalLenses = planIncrementalLenses({
-      candidateLensKeys,
-      guidelinePass: guidelineCandidate,
-      deltaFiles: incrementalDeltaFiles,
-    });
-    if (incrementalDeltaFiles && reviewedHead) {
-      const skipped = [
-        ...candidateLensKeys.filter((key) => !incrementalLenses.lensKeys.includes(key)),
-        ...(guidelineCandidate && !incrementalLenses.guidelinePass ? ['guideline-compliance'] : []),
-      ];
-      if (skipped.length > 0) {
-        log(
-          `Incremental lenses since ${reviewedHead.slice(0, 7)}: running ${
-            incrementalLenses.lensKeys.join(', ') || 'none'
-          }; skipping ${skipped.join(', ')} (main review + verify unchanged).`,
-        );
-      }
-    }
-
     // Slice-vs-widen policy lives in selectFinderGuidelineText; keyed on the
     // compliance session's own final enable, not the option.
     const guidelinesForPrompt = selectFinderGuidelineText({
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
-      complianceRuns: incrementalLenses.guidelinePass,
-      mainCanReadWorkspace: backendCanReadWorkspace(providerID, mainCliBackend),
+      complianceRuns: guidelineCandidate,
+      mainCanReadWorkspace:
+        mainBackend.canReadWorkspace ?? backendCanReadWorkspace(providerID, mainCliBackend),
       widen: options.guidelineWiden,
       full: guidelines,
     });
@@ -2314,8 +2307,8 @@ async function runReviewPipeline(params: {
       telemetry.recordExecution({
         reviewPasses: effectiveReviewPasses,
         reviewShards: shards.length,
-        lensKeys: incrementalLenses.lensKeys,
-        guidelinePass: incrementalLenses.guidelinePass,
+        lensKeys: candidateLensKeys,
+        guidelinePass: guidelineCandidate,
         context7Active,
         auxSessionsEnabled,
         maxConcurrentSessions: sessionCap,
@@ -2368,6 +2361,12 @@ async function runReviewPipeline(params: {
         'Shard cache disabled: the configured directory resolves inside the reviewed checkout (forgeable).',
       );
     }
+    const sweepGuidelines =
+      options.guidelineSweep && mainBackend.supportsGuidelineSweep ? guidelines : undefined;
+    if (sweepGuidelines)
+      log(
+        'Guideline checking will continue in each main review session; verification remains separate.',
+      );
     const shardCache =
       shardCacheDir && headSha
         ? {
@@ -2435,6 +2434,7 @@ async function runReviewPipeline(params: {
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
       cache: shardCache,
+      sweepGuidelines,
     });
 
     const addressedPriorCheck = trackAux(
@@ -2467,7 +2467,7 @@ async function runReviewPipeline(params: {
         prContext: auxPrContext,
         guidelinesForPrompt: guidelines,
         hasGuidelines: Boolean(guidelines),
-        enabled: incrementalLenses.guidelinePass,
+        enabled: guidelineCandidate && !sweepGuidelines,
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -2512,14 +2512,15 @@ async function runReviewPipeline(params: {
       model: auxModel,
       prContext: auxPrContext,
       guidelinesForPrompt,
-      lensKeys: incrementalLenses.lensKeys,
+      lensKeys: candidateLensKeys,
       timeoutMs: finderTimeoutMs,
+      deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt),
       evidenceQuotes: options.evidenceQuotes,
       embeddedFirstPrompt: options.embeddedFirstPrompt,
       log,
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
-    }).map((promise, index) => trackAux(`review-${incrementalLenses.lensKeys[index]}`, promise));
+    }).map((promise, index) => trackAux(`review-${candidateLensKeys[index]}`, promise));
 
     let summary: string;
     let findings: Finding[];
@@ -2692,7 +2693,7 @@ async function runReviewPipeline(params: {
     const producedLists = [
       telemetry.produced('main-review', findings),
       ...lensFindingLists.map((list, i) =>
-        telemetry.produced(`review-${incrementalLenses.lensKeys[i]}`, list),
+        telemetry.produced(`review-${candidateLensKeys[i]}`, list),
       ),
       telemetry.produced('guideline-compliance', complianceFindings),
     ];
@@ -2740,37 +2741,32 @@ async function runReviewPipeline(params: {
     );
     const verificationDone = phases.start({ phase: 'verification', scope: 'run' });
     let verifiedFindings: Finding[];
-    if (overlapVerification) {
-      const outcome = await overlapVerification;
-      if (outcome !== 'skipped') {
-        const merge = mergeVerdictsByLocation(
-          suppression.findings,
-          outcome.targets,
-          outcome.verdicts,
-        );
-        logVerdictOutcomes(merge, log);
-        const late = await verifyFindings({
-          workspace,
-          backend: auxBackend,
-          model: auxModel,
-          prContext: verifierPrContext,
-          findings: merge.lateUnverified,
-          enabled: options.verifyFindings && auxSessionsEnabled,
-          timeoutMs: computeVerificationTimeoutMs(
-            options.timeBudgetMinutes,
-            Date.now() - runStartedAt,
-          ),
-          modelOptions: verifierSessionOptions,
-          log,
-          onTokenUsage: recordTokenUsage,
-          onCoverage: (row) => recordCoverage({ ...row, session: 'late-finding-verification' }),
-        });
-        const lateSet = new Set(merge.lateUnverified);
-        verifiedFindings = [...merge.findings.filter((finding) => !lateSet.has(finding)), ...late];
-      } else {
-        // Fail-open, same as a broken serial verifier.
-        verifiedFindings = suppression.findings;
-      }
+    const outcome = await overlapVerification;
+    if (outcome && outcome !== 'skipped') {
+      const merge = mergeVerdictsByLocation(
+        suppression.findings,
+        outcome.targets,
+        outcome.verdicts,
+      );
+      logVerdictOutcomes(merge, log);
+      const late = await verifyFindings({
+        workspace,
+        backend: auxBackend,
+        model: auxModel,
+        prContext: verifierPrContext,
+        findings: merge.lateUnverified,
+        enabled: options.verifyFindings && auxSessionsEnabled,
+        timeoutMs: computeVerificationTimeoutMs(
+          options.timeBudgetMinutes,
+          Date.now() - runStartedAt,
+        ),
+        modelOptions: verifierSessionOptions,
+        log,
+        onTokenUsage: recordTokenUsage,
+        onCoverage: (row) => recordCoverage({ ...row, session: 'late-finding-verification' }),
+      });
+      const lateSet = new Set(merge.lateUnverified);
+      verifiedFindings = [...merge.findings.filter((finding) => !lateSet.has(finding)), ...late];
     } else {
       verifiedFindings = await verifyFindings({
         workspace,
@@ -3202,11 +3198,13 @@ export function normalizeOptions(
     context7Mode: options?.context7Mode ?? 'auto',
     context7ApiKey: options?.context7ApiKey ?? '',
     guidelinePass: options?.guidelinePass ?? true,
+    guidelineSweep: (options?.guidelineSweep ?? false) && (options?.guidelinePass ?? true),
     shardCachePath: options?.shardCachePath ?? '',
     contextTrim: options?.contextTrim ?? false,
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
     guidelineWiden: options?.guidelineWiden ?? 'auto',
     verifierSlimContext: options?.verifierSlimContext ?? false,
+    commandCodeTools: options?.commandCodeTools ?? true,
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     auxModel: options?.auxModel ?? '',
     modelPool: options?.modelPool ?? [],
@@ -3274,6 +3272,7 @@ function startLensPasses(params: {
   guidelinesForPrompt: string;
   lensKeys: string[];
   timeoutMs?: number;
+  deadlineAt?: number;
   evidenceQuotes?: boolean;
   embeddedFirstPrompt?: boolean;
   log: (msg: string) => void;
@@ -3291,6 +3290,7 @@ function startLensPasses(params: {
         lensAddendum: REVIEW_LENSES[key],
         label: `review-${key}`,
         timeoutMs: params.timeoutMs,
+        deadlineAt: params.deadlineAt,
         onTokenUsage: params.onTokenUsage,
         evidenceQuotes: params.evidenceQuotes,
         embeddedFirstPrompt: params.embeddedFirstPrompt,
@@ -3673,6 +3673,7 @@ export async function runShardedReview(params: {
   backend: ReviewBackend;
   model: string;
   guidelinesForPrompt: string;
+  sweepGuidelines?: string;
   shardPlans: ShardPlan[];
   changedFiles: string[];
   timeoutMs?: number;
@@ -3746,7 +3747,12 @@ export async function runShardedReview(params: {
               context,
               guidelines: guidelinesForPrompt,
               evidenceQuotes: !!params.evidenceQuotes,
-              config: params.cache.config,
+              config: params.sweepGuidelines
+                ? JSON.stringify({
+                    config: params.cache.config,
+                    sweepGuidelines: params.sweepGuidelines,
+                  })
+                : params.cache.config,
             })
           : undefined;
       const primaryFingerprint = fingerprintFor(plan.context);
@@ -3757,11 +3763,23 @@ export async function runShardedReview(params: {
             `${plan.label}: reusing cached result for identical content (${primaryFingerprint}).`,
           );
           params.onCoverage?.({ session: plan.label, state: 'reused', promptBytes });
+          if (params.sweepGuidelines)
+            params.onCoverage?.({ session: `guideline-sweep-${plan.label}`, state: 'reused' });
           return { plan, result: cached };
         }
       }
+      let sweepComplete = !params.sweepGuidelines;
+      const guidelineSweep = params.sweepGuidelines
+        ? {
+            guidelines: params.sweepGuidelines,
+            onCoverage: (coverage: Parameters<SessionCoverageRecorder>[0]) => {
+              sweepComplete = coverage.state === 'completed';
+              params.onCoverage?.(coverage);
+            },
+          }
+        : undefined;
       const persist = (result: ReviewResultLike, fingerprint: string | undefined) => {
-        if (params.cache && fingerprint) {
+        if (params.cache && fingerprint && sweepComplete) {
           saveShardResult(params.cache.dir, fingerprint, {
             summary: result.summary,
             findings: result.findings,
@@ -3771,6 +3789,7 @@ export async function runShardedReview(params: {
       try {
         const result = await backend.runReview(model, plan.context, guidelinesForPrompt, log, {
           label: plan.label,
+          guidelineSweep,
           timeoutMs,
           onTokenUsage: params.onTokenUsage,
           evidenceQuotes: params.evidenceQuotes,
@@ -3867,6 +3886,7 @@ export async function runShardedReview(params: {
             log,
             {
               label: `${plan.label}-retry`,
+              guidelineSweep,
               timeoutMs: retryTimeoutMs,
               onTokenUsage: params.onTokenUsage,
               evidenceQuotes: params.evidenceQuotes,
@@ -4453,7 +4473,7 @@ export function buildBody(
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
   lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));
   lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
-  return lines.join('\n');
+  return withReviewCoverage(lines.join('\n'), headSha, incompleteSessions.length === 0);
 }
 
 export function renderReviewMetadataBlock(

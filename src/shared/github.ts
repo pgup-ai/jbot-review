@@ -28,6 +28,23 @@ const MAX_PRIOR_JBOT_COMMENT_CHARS = 1000;
 const MAX_PRIOR_JBOT_REPLIES_FOR_PROMPT = 5;
 const MAX_PRIOR_JBOT_REPLY_CHARS = 800;
 
+export function withReviewCoverage(
+  body: string,
+  headSha: string | undefined,
+  complete: boolean,
+): string {
+  if (!headSha) return body;
+  const marker =
+    complete && /^[0-9a-f]{40}$/i.test(headSha) ? `completed-head:${headSha}` : 'incomplete';
+  return `${body}\n\n<!-- jbot-review:${marker} -->`;
+}
+
+export function completedReviewHead(body: string): string | undefined {
+  return body.match(
+    /\n<!-- jbot-review:completed-head:([0-9a-f]{40}) -->(?:\s*<!-- jbot-review:(?:review|threads:\d+|linked-comments:[\d,]*) -->)*\s*$/i,
+  )?.[1];
+}
+
 export interface PrFile {
   filename: string;
   patch?: string;
@@ -1206,20 +1223,24 @@ export function compactJbotReviewBody(body: string, threadCount: number): string
   const noun = threadCount === 1 ? 'thread' : 'threads';
   return appendLinkedCommentsFooter(
     appendReviewMarker(
-      [
-        '## J-Bot Code Review',
-        '',
-        `✅ **All ${threadCount} review ${noun} resolved.**`,
-        '',
-        '<details>',
-        '<summary>Show original review</summary>',
-        '',
-        original,
-        '',
-        '</details>',
-        '',
-        COMPACTED_REVIEW_MARKER,
-      ].join('\n'),
+      withReviewCoverage(
+        [
+          '## J-Bot Code Review',
+          '',
+          `✅ **All ${threadCount} review ${noun} resolved.**`,
+          '',
+          '<details>',
+          '<summary>Show original review</summary>',
+          '',
+          original,
+          '',
+          '</details>',
+          '',
+          COMPACTED_REVIEW_MARKER,
+        ].join('\n'),
+        completedReviewHead(body),
+        true,
+      ),
     ),
     linkedCommentIds,
   );

@@ -736,6 +736,7 @@ async function review(
       includePriorComments: config?.includePriorComments ?? true,
       context7Mode: config?.context7Mode ?? 'auto',
       guidelinePass: config?.guidelinePass ?? true,
+      guidelineSweep: !comparison && parseEnvBoolean('JBOT_GUIDELINE_SWEEP', false),
       shardCachePath: '',
       reviewPasses: config?.reviewPasses ?? parseEnvInt('JBOT_REVIEW_PASSES', 1),
       verifyFindings:
@@ -760,6 +761,7 @@ async function review(
       embeddedFirstPrompt:
         config?.embeddedFirstPrompt ?? parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
       guidelineWiden: config?.guidelineWiden ?? parseEnvGuidelineWiden('JBOT_GUIDELINE_WIDEN'),
+      commandCodeTools: config?.commandCodeTools ?? parseEnvBoolean('JBOT_COMMANDCODE_TOOLS', true),
       verifierSlimContext:
         config?.verifierSlimContext ?? parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
       verifyOverlapGrace:

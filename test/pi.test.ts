@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import { readRepositoryPage } from '../src/shared/repository-output.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -434,6 +434,13 @@ describe('repository tool pages', () => {
       writeFileSync(join(outside, 'secret'), 'hostOnlySecret');
       symlinkSync(join(outside, 'secret'), join(workspace, 'escape'));
       execFileSync('git', ['-C', workspace, 'add', 'large.ts', 'escape']);
+      mkdirSync(join(workspace, 'replaced'));
+      writeFileSync(join(workspace, 'replaced', 'secret'), 'safe');
+      execFileSync('git', ['-C', workspace, 'add', 'replaced']);
+      rmSync(join(workspace, 'replaced'), { recursive: true });
+      symlinkSync(outside, join(workspace, 'replaced'));
+      writeFileSync(join(workspace, '.gitignore'), 'ignored.ts\n');
+      writeFileSync(join(workspace, 'ignored.ts'), 'hostOnlySecret');
       const read = createPiReadTool(sdk, workspace) as Tool;
       const search = createPiSearchTool(sdk, workspace) as Tool;
       writeFileSync(join(workspace, 'many.txt'), 'needle\n'.repeat(10_000_000));
@@ -446,6 +453,36 @@ describe('repository tool pages', () => {
       assert.doesNotMatch(tail.content[0].text, /failed|maxBuffer/);
       rmSync(join(workspace, 'many.txt'));
       execFileSync('git', ['-C', workspace, 'rm', '--cached', 'many.txt']);
+      const scoped = await search.execute('scoped', {
+        query: ['missing', 'importantDefault'],
+        paths: ['large.ts'],
+      });
+      assert.match(scoped.content[0].text, /large.ts:20001/);
+      for (const paths of [
+        ['../'],
+        ['/tmp'],
+        [':(top)*'],
+        ['.git'],
+        null,
+        'src',
+        [1],
+        [''],
+        ['src\\file'],
+        ['src\0file'],
+        ['src/../file'],
+        ['src/.GiT/config'],
+      ])
+        assert.match(
+          (await search.execute('invalid', { query: 'secret', paths })).content[0].text,
+          /paths must/,
+        );
+      for (const query of [null, 1, [], [''], ['a', 1], 'a\0b'])
+        assert.match((await search.execute('invalid', { query })).content[0].text, /query must/);
+      assert.match(
+        (await search.execute('scoped-escape', { query: 'hostOnlySecret', paths: ['replaced'] }))
+          .content[0].text,
+        /no matches/,
+      );
       const result = await search.execute('search', { query: 'importantDefault' });
       assert.match(result.content[0].text, /large.ts:20001:const importantDefault = false/);
       const page = await read.execute('read', { path: 'large.ts', line: 20001 });
@@ -725,6 +762,62 @@ describe('Pi review sessions', () => {
       /stopped during session creation/,
     );
     assert.ok(Date.now() - startedAt < 1_000, 'awaited the hanging abort');
+  });
+
+  it('keeps the main Pi session for the guideline sweep and disposes it afterward', async () => {
+    for (const sweepResponse of ['{"findings":[]}', '{}']) {
+      const events: string[] = [];
+      const runtime = fakeRuntime(false, events, [
+        { role: 'assistant', content: reviewResultJson },
+        { role: 'assistant', content: sweepResponse },
+      ]);
+      let creates = 0;
+      const create = runtime.sdk.createAgentSession;
+      runtime.sdk.createAgentSession = async (args: unknown) => {
+        creates++;
+        return (create as (args: unknown) => Promise<{ session: unknown }>)(args);
+      };
+      const coverage: Array<{ state: string }> = [];
+      const result = await runPiReview(
+        runtime,
+        'deepseek/deepseek-v4-flash',
+        'ctx',
+        'guides',
+        () => {},
+        {
+          guidelineSweep: { guidelines: 'guides', onCoverage: (row) => coverage.push(row) },
+        },
+      );
+      assert.equal(result.summary, 'ok');
+      assert.equal(creates, 1);
+      assert.deepEqual(events, ['prompted', 'prompted', 'disposed']);
+      assert.equal(coverage[0]?.state, sweepResponse === '{}' ? 'failed' : 'completed');
+    }
+  });
+
+  it('rejects wrong-field auxiliary repairs and disposes their sessions', async () => {
+    for (const addressed of [false, true]) {
+      const events: string[] = [];
+      const runtime = fakeRuntime(false, events, [
+        { role: 'assistant', content: '{}' },
+        {
+          role: 'assistant',
+          content: addressed ? '{"findings":[]}' : '{"addressedPriorComments":[]}',
+        },
+      ]);
+      const log = () => {};
+      const result = addressed
+        ? runPiAddressedPriorCommentsCheck(runtime, 'deepseek/deepseek-v4-flash', 'ctx', log)
+        : runPiGuidelineComplianceCheck(
+            runtime,
+            'deepseek/deepseek-v4-flash',
+            'ctx',
+            'guides',
+            log,
+          );
+      await assert.rejects(result, /array/);
+      assert.deepEqual(events, ['prompted', 'prompted', 'disposed']);
+    }
   });
 
   it('leaves a live runtime prompting normally', async () => {

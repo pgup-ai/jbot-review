@@ -392,7 +392,7 @@ the review itself is unaffected._
 | `model-options`           | provider-dependent | JSON object of provider options for the main model. Native providers default to `{"reasoningEffort":"medium"}`; Poolside uses `{"reasoningEffort":"default"}` to leave reasoning provider-managed; custom providers default to `{}` because arbitrary endpoints may reject unknown options. Explicit values are preserved. Governs the main model only. An auxiliary session running a model of its own gets the same treatment one tier lower, since it sits on the tail of the run: `{"reasoningEffort":"low"}` on native providers, `{"reasoningEffort":"default"}` on Poolside, `{}` on custom ones. An auxiliary session drawing the main model shares its entry and its effort — on every engine: pi levels are per session, so a distinct aux model on a shared pi runtime takes the aux effort. CommandCode sessions map `reasoningEffort` onto the CLI `--effort` flag from a per-model allowlist in code: an explicitly-set effort clamps to the nearest declared tier, default options deliver only on an exact match, and undeclared models always keep the CLI default. Other CLI backends do not consume model options — on Devin, effort is part of the model id itself. |
 | `prompt-cache`            | `true`             | Enable opencode prompt caching (provider `setCacheKey`). Parallel shards and re-reviews of the same PR share a byte-identical prompt prefix, so caching cuts input-token cost on models that honor it; models marked unsupported by capability metadata omit the cache key entirely. Each session logs a `tokens: …` line with `cache(read=… write=…)` — `read > 0` on a later shard or re-review confirms a hit. Mostly matters on paid tiers.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `skip-doc-only`           | `true`             | Skip the full review (no model call) when the entire PR diff is documentation, prose, or diagram assets (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`, `.txt`, `.pdf`, `.svg`, `.drawio`, `.dio`, `.excalidraw`, `.mmd`, `.puml`, `.plantuml`); the reaction is left unchanged (a docs push doesn't change the verdict). Evaluated on the **reviewable** file set (noise like lockfiles and patchless/binary files are excluded — the bot never reviews those anyway, so the skip never drops review coverage); any reviewable code/config file forces a full review. Set `false` to always review, e.g. for docs with embedded code samples you care about.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `skip-unchanged`          | `true`             | Skip the full review (no model call) when the merge-base-relative patch set is byte-identical to the one the last posted jbot review covered — the common "Update branch" merge from main. Anything uncertain (no prior posted review, compare failure or its 300-file cap, binary/patchless files) fails open to a full review, and comment-triggered, manually dispatched, or `auto-approve` runs always review (approval must re-attest the newest head). Set `false` to review every push.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `skip-unchanged`          | `true`             | Skip the full review (no model call) when the merge-base-relative patch set is byte-identical to the one the last posted jbot review covered — the common "Update branch" merge from main. Anything uncertain (no completion footer on the latest review, incomplete coverage, compare failure or its 300-file cap, binary/patchless files) fails open to a full review, and comment-triggered, manually dispatched, or `auto-approve` runs always review (approval must re-attest the newest head). Set `false` to review every push.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `review-telemetry`        | `true`             | Write per-finding disposition + per-session token telemetry to the gitignored `.jbot-review/telemetry.jsonl` (uploaded as a CI artifact by the dogfood workflow). Near-zero overhead; `false` disables.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `evidence-quotes`         | `true`             | Ask each finding for a verbatim quote of the changed line it flags. Grounds finding verification and lets a finding whose line anchor missed the diff be re-anchored to its quoted line instead of dropped. `false` restores the pre-evidence prompt byte-for-byte.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
@@ -402,7 +402,8 @@ an automatic approval or review-done reaction. CommandCode cancellation stops it
 process tree and waits for output pipes to close before removing its temporary home.
 Queued passes cancelled before execution never start a provider session.
 Pi and tool-capable OpenCode verifiers can read and search repository evidence;
-CommandCode remains tool-less. Changes-since summaries receive up to 256 KiB
+CommandCode verifiers can investigate by default unless `JBOT_COMMANDCODE_TOOLS=false`.
+Changes-since summaries receive up to 256 KiB
 of delta diff plus a bounded file overview; larger deltas disclose summary-only
 omissions. Main reviews continue to cover the full base-to-head diff.
 
@@ -468,7 +469,7 @@ disables itself and logs why. pi sessions run hermetically (no user-level pi
 config, skills, or prompt templates are loaded), get no shell (pi ships no
 sandbox, so read-only is enforced by withholding `bash` rather than by
 filtering it). `read_file` supports a starting line, `search_repo` finds literal
-text in tracked files, and `git_diff` serves the reviewed change. All three return
+text in non-ignored files without following directory symlinks, and `git_diff` serves the reviewed change. All three return
 up to 128 KiB per response with byte offsets for continuation; large files and
 diffs remain fully accessible. Reads and searches stay inside the repository.
 The provider catalog supplies each model's context window; tool-page size is a
@@ -572,8 +573,34 @@ Use `provider: commandcode` with `commandcode-access-key` /
 `COMMANDCODE_ACCESS_KEY` for the CommandCode CLI backend. The Docker image
 includes the CommandCode CLI, but `.commandcode/auth.json` is written under an
 isolated temporary HOME only when the main or active auxiliary provider is
-`commandcode`, then removed after the run. Skill discovery and tools are disabled;
-reviews use the context and diff embedded by J-Bot.
+`commandcode`, then removed after the run. Sessions start in an empty directory;
+repository and operator settings, hooks, mods, and skills are excluded. Repository tools are
+enabled by default.
+
+Set `JBOT_COMMANDCODE_TOOLS=false` in the Action step's `env`, local environment,
+or app/worker environment to disable repository investigation for **all CommandCode
+sessions**, including verification. Arena comparisons use the frozen
+`reviewConfig.commandCodeTools` manifest value instead of ambient environment. The default exposes `jbot_read_file`,
+`jbot_list_files`, and `jbot_search`. Reads reject paths and symlinks resolving
+outside the repository. Search covers non-ignored files without following symlinks;
+listing includes tracked and non-ignored untracked files. Direct reads reject Git
+metadata and ignored untracked files. Shell, writes, and web access stay disabled.
+J-Bot continues embedding the complete review diff. Tool
+results are paginated, with no additional aggregate read/tool-call quota.
+
+CommandCode `jbot_search` and Pi `search_repo` accept `query` as a literal string
+or an array of literals (match any), plus optional `paths` containing literal
+repository-relative files or directories. For example,
+`{"query":["execute","timeoutMs"],"paths":["src/shared"]}` searches both terms
+in one call. Searches use current worktree contents, preserve each backend's
+file-access rules, and support the existing pagination; no index is introduced.
+
+The tools use a trusted mod with the image's pinned CommandCode 1.44.0; local
+runs need that version. Mod initialization failure stops the CLI. Logs record
+sanitized tool outcome counts and effective workspace access; per-tool timing
+remains unavailable. See the [tooling evaluation](docs/audits/2026-09-07-commandcode-repository-tools.md)
+for the model comparison and rollout limits.
+
 Use `provider: cursor` with `cursor-api-key` / `CURSOR_API_KEY` for the Cursor
 CLI backend. The Docker image includes the Cursor CLI (`cursor-agent`), which
 reads the key from the environment — no credential file — and runs read-only via
@@ -756,7 +783,7 @@ documentation lookup.
 | `max-findings`               | No       | `0`                   | Cap findings; `0` means no limit                                                                                                                                                                                                                                             |
 | `min-severity`               | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                                                                                                                                                                                                                                     |
 | `include-prior-comments`     | No       | `true`                | Include existing PR review comments in context                                                                                                                                                                                                                               |
-| `enable-guideline-pass`      | No       | `true`                | Run a dedicated guideline-compliance session when repo guidelines exist                                                                                                                                                                                                      |
+| `enable-guideline-pass`      | No       | `true`                | Check repository guidelines in a separate session or an opted-in main-session sweep                                                                                                                                                                                          |
 | `fail-on-error`              | No       | `true`                | Fail the workflow if the review cannot complete                                                                                                                                                                                                                              |
 
 ### Review output
@@ -1062,6 +1089,46 @@ definition; docs referenced from other guidance files are deduplicated and
 listed as available paths, read on demand. When any guidelines are discovered,
 a dedicated guideline-compliance session audits the diff rule-by-rule in
 parallel with the main review (disable with `enable-guideline-pass: false`).
+
+CommandCode logs progress every minute: elapsed time, observed tool outcomes,
+last completed tool, and time since the last event. A final `commandcode-progress`
+telemetry row survives normal timeout or abort handling. Incomplete snapshots are
+labelled; absent usage remains unavailable. Progress contains metadata only.
+CommandCode's generic exploration row has unavailable tool counts; use the
+`commandcode-progress.toolOutcomes` counts to assess its tool activity.
+
+Re-runs select candidate lenses from the complete PR diff. A prior reviewed-head
+marker never suppresses an auxiliary pass: it does not prove that pass completed.
+The unchanged-diff shortcut requires an explicit completion footer on the latest
+posted review; older and incomplete reports rerun conservatively.
+
+This repository's dogfood workflow runs guideline checking and interactions in
+independent sessions alongside main review. It sets `JBOT_GUIDELINE_SWEEP=false`
+and `JBOT_VERIFY_OVERLAP_GRACE=true`: main findings enter fresh verification as
+soon as main review returns; new auxiliary findings receive a later verification
+batch. Other consumers can select the same environment settings.
+
+`review-interactions` investigates cross-file regressions and inconsistent
+contracts across the full PR diff. `addressed-prior-comments` separately checks
+whether old findings have been fixed; deterministic checks control thread
+resolution and review compaction. `finding-verification` evaluates candidate
+findings in a fresh session, using repository tools where the backend supports
+them. Incorrect verification or thread closure can hide real issues.
+
+Interactions has a ten-minute execution limit starting after session-slot
+acquisition, bounded by the remaining run deadline. The run deadline also applies
+while queued. Expiry requests backend cancellation and marks coverage incomplete;
+completed main findings survive. The cap includes any repairs inside the session.
+
+Set `JBOT_GUIDELINE_SWEEP=true` to run guideline checking as a follow-up in each
+OpenCode, Pi, or CommandCode main review session, reusing its investigation.
+Verification still uses a fresh session. An enabled sweep is independent of
+auxiliary availability and fan-out; `enable-guideline-pass: false` disables it. This experiment defaults off; other backends retain the
+separate guideline pass, and Arena comparisons keep their existing policy.
+The sweep receives the full guidelines and has at most ten minutes within the
+main attempt's remaining deadline. Failures preserve main findings and mark
+coverage incomplete. Incomplete sweeps are not cached.
+
 For changed files, J-Bot also checks ancestor directories for scoped review files
 such as `REVIEW.md`, `AGENTS.md`, `.cursor/BUGBOT.md`, and `.cursor/rules/`.
 

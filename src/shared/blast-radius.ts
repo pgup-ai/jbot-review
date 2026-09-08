@@ -2,83 +2,77 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 import type { PrFile } from './github.ts';
+import { formatBlastRadiusContext } from './prompt.ts';
 
-/**
- * Deterministic blast-radius manifest: for each exported symbol this PR adds
- * or modifies, list the unchanged files that reference it. The flagship miss
- * pattern this targets is "changed code breaks an UNCHANGED caller" — a
- * flash-tier model rarely volunteers the grep, so the wrapper greps for it
- * and puts the call sites in front of the model.
- *
- * Everything here is best-effort: any failure yields an empty block, never a
- * failed review run.
- */
+// Preload unchanged callers because smaller models may not investigate them unaided.
 export const MAX_BLAST_SYMBOLS = 20;
 export const MAX_CALLSITE_FILES_PER_SYMBOL = 8;
 
 const execFileAsync = promisify(execFile);
 const GIT_GREP_TIMEOUT_MS = 10_000;
 
-// Touching an export's declaration line is the cheap, language-light signal
-// that its contract may have changed. Same body for added (`+`) and removed
-// (`-`) lines; only the diff sign differs.
-const EXPORT_BODY =
-  String.raw`\s*export\s+(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?` +
-  String.raw`(?:function\s*\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)`;
-const ADDED_EXPORT_DECLARATION = new RegExp(String.raw`^\+` + EXPORT_BODY);
-const REMOVED_EXPORT_DECLARATION = new RegExp(String.raw`^-` + EXPORT_BODY);
-const ADDED_NAMED_EXPORTS = /^\+\s*export\s+(?:type\s+)?\{([^}]+)\}/;
-const REMOVED_NAMED_EXPORTS = /^-\s*export\s+(?:type\s+)?\{([^}]+)\}/;
+const EXPORT_DECLARATION =
+  /^[+-]\s*export\s+(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\s*\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/;
+const NAMED_EXPORT_START = /^\s*export\s+(type\s+)?\{/;
 
-function collectExportsFromLine(
-  line: string,
-  declaration: RegExp,
-  named: RegExp,
-  out: Set<string>,
-): void {
-  const declarationMatch = line.match(declaration);
-  if (declarationMatch) out.add(declarationMatch[1]);
-  const namedMatch = line.match(named);
-  if (namedMatch) {
-    for (const symbol of exportedNamesFromList(namedMatch[1])) out.add(symbol);
-  }
-}
-
-/**
- * Pulls exported top-level symbol names from a patch's ADDED lines. With
- * `includeRemoved`, also scans REMOVED lines — a deleted or renamed export is
- * the canonical "breaks an unchanged caller" case, which the incremental-lens
- * gate keys on (see `planIncrementalLenses`).
- */
-export function extractChangedExportedSymbols(
-  files: PrFile[],
-  options: { includeRemoved?: boolean } = {},
-): string[] {
+export function extractChangedExportedSymbols(files: PrFile[]): string[] {
   const symbols = new Set<string>();
   for (const file of files) {
     if (!file.patch) continue;
+    const blocks: Partial<Record<'+' | '-', { text: string; typeOnly: boolean }>> = {};
+    const lists = { '+': new Map<string, string>(), '-': new Map<string, string>() };
+    const flush = (side: '+' | '-', atBoundary = false) => {
+      const block = blocks[side];
+      if (block === undefined) return;
+      const text = block.text.replace(
+        /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\/\*[\s\S]*?(?:\*\/|$)|\/\/[^\n]*/g,
+        (token) => (token.startsWith('/') ? ' ' : token),
+      );
+      const closing = text.indexOf('}');
+      if (closing < 0 && !atBoundary) return;
+      const end = closing < 0 ? text.lastIndexOf(',') : closing;
+      const source =
+        closing < 0 ? '' : (text.slice(end + 1).match(/^\s*from\s+(['"])(.*?)\1/)?.[2] ?? '');
+      for (const part of text.slice(0, Math.max(0, end)).split(',')) {
+        const specifier = part.trim().replace(/\s+/g, ' ');
+        const binding = specifier.replace(/^type\s+(?!as\b)/, '');
+        const name = binding.split(/\s+as\s+/i).at(-1) ?? '';
+        const typeOnly = block.typeOnly || binding !== specifier;
+        if (/^[A-Za-z_$][\w$]*$/.test(name))
+          lists[side].set([typeOnly, binding, source].join('\0'), name);
+      }
+      delete blocks[side];
+    };
+    const finishHunk = () => {
+      flush('+', true);
+      flush('-', true);
+      for (const side of ['+', '-'] as const) {
+        const other = side === '+' ? '-' : '+';
+        for (const [specifier, name] of lists[side])
+          if (!lists[other].has(specifier)) symbols.add(name);
+      }
+      lists['+'].clear();
+      lists['-'].clear();
+    };
     for (const line of file.patch.split('\n')) {
-      collectExportsFromLine(line, ADDED_EXPORT_DECLARATION, ADDED_NAMED_EXPORTS, symbols);
-      if (options.includeRemoved) {
-        collectExportsFromLine(line, REMOVED_EXPORT_DECLARATION, REMOVED_NAMED_EXPORTS, symbols);
+      if (line.startsWith('@@')) {
+        finishHunk();
+        continue;
+      }
+      const declaration = line.match(EXPORT_DECLARATION);
+      if (declaration) symbols.add(declaration[1]);
+      for (const side of ['+', '-'] as const) {
+        if (line[0] !== side && line[0] !== ' ') continue;
+        const text = line.slice(1);
+        const start = text.match(NAMED_EXPORT_START);
+        if (start) blocks[side] = { text: text.slice(start[0].length), typeOnly: !!start[1] };
+        else if (blocks[side] !== undefined) blocks[side].text += '\n' + text;
+        flush(side);
       }
     }
+    finishHunk();
   }
   return [...symbols];
-}
-
-function exportedNamesFromList(exportList: string): string[] {
-  return exportList
-    .split(',')
-    .map((part) => part.trim())
-    .map(
-      (part) =>
-        part
-          .split(/\s+as\s+/i)
-          .at(-1)
-          ?.trim() ?? '',
-    )
-    .filter((part) => /^[A-Za-z_$][\w$]*$/.test(part));
 }
 
 export type SymbolGrep = (workspace: string, symbol: string) => Promise<string[]>;
@@ -132,25 +126,12 @@ export async function buildBlastRadiusBlock(
         callSites: (await grep(workspace, symbol)).filter((file) => !changed.has(file)),
       })),
     );
-    const entries: string[] = [];
-    for (const { symbol, callSites } of callSiteLists) {
-      if (callSites.length === 0) continue;
-      const shown = callSites.slice(0, MAX_CALLSITE_FILES_PER_SYMBOL);
-      const more =
-        callSites.length > shown.length ? `, +${callSites.length - shown.length} more` : '';
-      entries.push(`- \`${symbol}\` — referenced by unchanged: ${shown.join(', ')}${more}`);
-    }
-    if (entries.length === 0) return '';
-
-    return [
-      '## Changed symbol usage',
-      'Exported symbols this PR adds or modifies, with UNCHANGED files that reference them.',
-      'Check each listed call site: does it still hold after this change? (Coverage protocol step 2.)',
-      ...(allSymbols.length > symbols.length
-        ? [`Showing ${symbols.length} of ${allSymbols.length} exported symbols.`]
-        : []),
-      ...entries,
-    ].join('\n');
+    return formatBlastRadiusContext(
+      callSiteLists.filter(({ callSites }) => callSites.length > 0),
+      allSymbols.length,
+      symbols.length,
+      MAX_CALLSITE_FILES_PER_SYMBOL,
+    );
   } catch {
     return '';
   }

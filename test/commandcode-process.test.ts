@@ -16,8 +16,12 @@ it('cancels one session and waits for descendant pipes to close without cancelli
   const otherReady = join(workspace, 'other-ready');
   const release = join(workspace, 'release');
   const grandchild = `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(ready)}, 'ready'); setInterval(() => {}, 1000);`;
-  const parent = `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(grandchild)}], {stdio:'inherit'}); setInterval(() => {}, 1000);`;
+  const parent = `console.log('progress before abort'); require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(grandchild)}], {stdio:'inherit'}); setInterval(() => {}, 1000);`;
+  let observed = '';
   const options = {
+    onStdout: (chunk: string) => {
+      observed += chunk;
+    },
     cwd: workspace,
     timeoutMs: 5000,
     timeoutMessage: 'deadline',
@@ -50,9 +54,11 @@ it('cancels one session and waits for descendant pipes to close without cancelli
     const limit = Date.now() + 3000;
     while ((!existsSync(ready) || !existsSync(otherReady)) && Date.now() < limit) await delay(10);
     assert.ok(existsSync(ready) && existsSync(otherReady));
+    assert.match(observed, /progress before abort/);
     assert.equal(scope.abort('missing'), 0);
     assert.equal(scope.abort('lens'), 1);
     await rejected;
+    assert.match(observed, /progress before abort/);
     writeFileSync(release, 'go');
     const result = await other;
     assert.equal(result.stdout.trim(), 'alive');

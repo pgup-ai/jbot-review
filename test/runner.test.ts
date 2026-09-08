@@ -34,6 +34,7 @@ import type { Octokit, PrFile } from '../src/shared/github.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
 import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
 import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
+import { completedReviewHead } from '../src/shared/github.ts';
 import { applyFindingVerdicts, selectFindingIndexes } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
 
@@ -506,6 +507,58 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
       log: () => {},
       ...(staleCheck ? { staleCheck } : {}),
     });
+
+  it('separates sweep cache identity and never caches an incomplete sweep', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-sweep-cache-'));
+    let calls = 0;
+    let complete = false;
+    const backend = {
+      name: 'fake',
+      runReview: async (
+        _model: string,
+        _context: string,
+        _guides: string,
+        _log: unknown,
+        options?: Parameters<ReviewBackend['runReview']>[4],
+      ) => {
+        calls++;
+        options?.guidelineSweep?.onCoverage?.({
+          session: 'guideline-sweep-review',
+          state: complete ? 'completed' : 'failed',
+        });
+        return okResult;
+      },
+    } as unknown as ReviewBackend;
+    const invoke = (sweepGuidelines?: string) =>
+      runShardedReview({
+        backend,
+        model: 'fake/model',
+        guidelinesForPrompt: 'guides',
+        sweepGuidelines,
+        shardPlans: [shardPlan],
+        changedFiles: ['a.ts'],
+        context7Active: false,
+        context7ApiKey: '',
+        log: () => {},
+        cache: { dir, headSha: 'abc', config: 'same' },
+      });
+    try {
+      await invoke();
+      await invoke();
+      assert.equal(calls, 1);
+      await invoke('full guides');
+      await invoke('full guides');
+      assert.equal(calls, 3);
+      complete = true;
+      await invoke('full guides');
+      await invoke('full guides');
+      assert.equal(calls, 4);
+      await invoke('different full guidelines');
+      assert.equal(calls, 5);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   it('skips the retry for deterministic failures and keeps it for transient ones', async () => {
     // A deterministic failure re-buys the same error — the INC-001 waste class.
@@ -1094,6 +1147,15 @@ describe('normalizeOptions defaults', () => {
     assert.equal(defaults.guidelineWiden, 'auto');
     assert.equal(defaults.verifierSlimContext, false);
     assert.equal(defaults.verifyOverlapGrace, false);
+    assert.equal(defaults.guidelineSweep, false);
+    assert.equal(
+      normalizeOptions({ guidelineSweep: true, dynamicFanout: true }).guidelineSweep,
+      true,
+    );
+    assert.equal(
+      normalizeOptions({ guidelineSweep: true, guidelinePass: false }).guidelineSweep,
+      false,
+    );
   });
 
   it('keeps SDK routing automatic unless an entrypoint supplies the override', () => {
@@ -1121,7 +1183,9 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions(undefined).shardCachePath, '');
   });
 
-  it('runs the embedded-first prompt by default, with a working opt-out', () => {
+  it('enables embedded-first prompts and CommandCode tools by default, with working opt-outs', () => {
+    assert.equal(normalizeOptions(undefined).commandCodeTools, true);
+    assert.equal(normalizeOptions({ commandCodeTools: false }).commandCodeTools, false);
     assert.equal(normalizeOptions(undefined).embeddedFirstPrompt, true);
     assert.equal(normalizeOptions({ embeddedFirstPrompt: false }).embeddedFirstPrompt, false);
   });
@@ -1241,6 +1305,18 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
     undefined,
     ['review-interactions'],
   );
+  assert.equal(completedReviewHead(body), undefined);
+  const head = 'a'.repeat(40);
+  const complete = buildBody('', '', [], [], 'model', 'owner', 'repo', head);
+  assert.equal(completedReviewHead(complete), head);
+  assert.equal(
+    completedReviewHead(
+      complete + '\n\n<!-- jbot-review:review -->\n<!-- jbot-review:threads:0 -->',
+    ),
+    head,
+  );
+  assert.equal(completedReviewHead(complete + '\n\n<!-- jbot-review:incomplete -->'), undefined);
+  assert.equal(completedReviewHead(PRIOR_JBOT_REVIEW), undefined);
   assert.match(body, /Review incomplete/);
   assert.match(body, /review-interactions/);
   assert.match(body, /completed passes only/);

@@ -16,7 +16,7 @@ import type { PrFile } from '../src/shared/github.ts';
 const execFileAsync = promisify(execFile);
 
 describe('extractChangedExportedSymbols', () => {
-  it('extracts exported declarations from added lines only', () => {
+  it('extracts exported declarations from changed lines only', () => {
     const patch = [
       '@@ -1,4 +1,8 @@',
       '+export function addedFn(a: number) {',
@@ -30,7 +30,7 @@ describe('extractChangedExportedSymbols', () => {
 
     const symbols = extractChangedExportedSymbols([{ filename: 'src/a.ts', patch }]);
 
-    assert.deepEqual(symbols, ['addedFn', 'addedConst', 'addedAsync', 'AddedShape']);
+    assert.deepEqual(symbols, ['addedFn', 'addedConst', 'addedAsync', 'AddedShape', 'removedFn']);
   });
 
   it('handles default exports, generators, and abstract classes', () => {
@@ -46,44 +46,89 @@ describe('extractChangedExportedSymbols', () => {
     assert.deepEqual(symbols, ['main', 'makeThings', 'BaseStore']);
   });
 
-  it('extracts named export lists and aliases from added lines', () => {
+  it('extracts named export lists and aliases from changed lines', () => {
     const patch = [
       '@@ -1,1 +1,4 @@',
       '+export { rawName, localName as exportedName };',
       '+export type { Shape, Internal as PublicShape };',
+      '-export { gone };',
       '+export * from "./elsewhere.ts";',
     ].join('\n');
 
     const symbols = extractChangedExportedSymbols([{ filename: 'src/a.ts', patch }]);
 
-    assert.deepEqual(symbols, ['rawName', 'exportedName', 'Shape', 'PublicShape']);
+    assert.deepEqual(symbols, ['rawName', 'exportedName', 'Shape', 'PublicShape', 'gone']);
+    const multiline = [
+      '@@ -1,4 +1,4 @@',
+      ' export type {',
+      '-  OldName,',
+      '+  NewName,',
+      '   Internal as PublicName,',
+      ' };',
+      '-export {',
+      '-  Local as',
+      '-  RemovedAlias,',
+      '-};',
+      ' export { Untouched };',
+      '-export {',
+      '-  Incomplete,',
+      '@@ -20 +20 @@',
+      ' };',
+    ].join('\n');
+    assert.deepEqual(extractChangedExportedSymbols([{ filename: 'src/a.ts', patch: multiline }]), [
+      'NewName',
+      'OldName',
+      'RemovedAlias',
+      'Incomplete',
+    ]);
+  });
+
+  it('ignores unchanged export bindings while retaining changed re-export sources', () => {
+    const patch = [
+      '@@ -1,3 +1,3 @@',
+      ' export {',
+      '- A, B, // old comment',
+      '+ A, B, // new comment',
+      ' };',
+      '-export { Local as Public };',
+      '+export { Other as Public };',
+      '-export { Forwarded /* } */ } /* from "./placeholder" */ from "./old";',
+      '+export { Forwarded /* } */ } /* from "./placeholder" */ from "./new";',
+      ' export {',
+      '   Multiline /* }',
+      '     from "./placeholder" */',
+      '-} from "./before";',
+      '+} from "./after";',
+      '-export type { ToValue };',
+      '+export { ToValue };',
+      '-export { ToType };',
+      '+export type { ToType };',
+      '-export { type Inline };',
+      '+export { Inline };',
+      '-export type { Stable };',
+      '+export { type Stable };',
+      '-export { Url } from "https://old/module";',
+      '+export { Url } from "https://new/module";',
+    ].join('\n');
+    assert.deepEqual(extractChangedExportedSymbols([{ filename: 'a.ts', patch }]), [
+      'Public',
+      'Forwarded',
+      'Multiline',
+      'ToValue',
+      'ToType',
+      'Inline',
+      'Url',
+    ]);
   });
 
   it('ignores files without patches', () => {
     assert.deepEqual(extractChangedExportedSymbols([{ filename: 'src/a.ts' }]), []);
   });
-
-  it('includes removed/renamed exports when includeRemoved is set', () => {
-    const patch = [
-      '@@ -1,2 +1,1 @@',
-      '+export const kept = 1;',
-      '-export function removedFn() {',
-      '-export { gone };',
-    ].join('\n');
-    const file: PrFile = { filename: 'src/a.ts', patch };
-
-    assert.deepEqual(extractChangedExportedSymbols([file]), ['kept']);
-    assert.deepEqual(extractChangedExportedSymbols([file], { includeRemoved: true }), [
-      'kept',
-      'removedFn',
-      'gone',
-    ]);
-  });
 });
 
 describe('buildBlastRadiusBlock', () => {
   const files: PrFile[] = [
-    { filename: 'src/a.ts', patch: '@@ -1,1 +1,1 @@\n+export function changedFn() {' },
+    { filename: 'src/a.ts', patch: '@@ -1,1 +1,1 @@\n-export function changedFn() {' },
   ];
 
   it('lists only call sites outside the changed files', async () => {
@@ -160,8 +205,11 @@ describe('buildBlastRadiusBlock', () => {
     try {
       await execFileAsync('git', ['init', '-q'], { cwd: repo });
       await mkdir(join(repo, 'src'), { recursive: true });
-      await writeFile(join(repo, 'src', 'a.ts'), 'export function changedFn() {}\n');
-      await writeFile(join(repo, 'src', 'caller.ts'), 'import { changedFn } from "./a.ts";\n');
+      await writeFile(join(repo, 'src', 'a.ts'), 'export function renamedFn() {}\n');
+      await writeFile(
+        join(repo, 'src', 'caller.ts'),
+        'import { changedFn, removedAlias } from "./a.ts";\n',
+      );
       await writeFile(join(repo, 'src', 'dollar.ts'), 'import { foo$ } from "./a.ts";\n');
       await execFileAsync('git', ['add', '-A'], { cwd: repo });
 
@@ -171,12 +219,13 @@ describe('buildBlastRadiusBlock', () => {
           // ghostFn exists only in the patch, not the worktree: its grep
           // exits 1 (no matches) and must not poison changedFn's result.
           patch:
-            '@@ -1,1 +1,3 @@\n+export function changedFn() {\n+export function ghostFn() {\n+export const foo$ = 1;',
+            '@@ -1,1 +1,3 @@\n-export function changedFn() {\n+export function renamedFn() {\n+export function ghostFn() {\n+export const foo$ = 1;\n-export {\n-  local as removedAlias,\n-};',
         },
       ]);
 
       assert.match(block, /`changedFn` — referenced by unchanged: src\/caller\.ts/);
       assert.match(block, /`foo\$` — referenced by unchanged: src\/dollar\.ts/);
+      assert.match(block, /`removedAlias` — referenced by unchanged: src\/caller\.ts/);
       assert.doesNotMatch(block, /ghostFn/);
     } finally {
       await rm(repo, { recursive: true, force: true });

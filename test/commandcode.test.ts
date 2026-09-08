@@ -1,11 +1,24 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
   buildCommandCodeCliArgs,
+  runCommandCodeReview,
+  runCommandCodeAddressedPriorCommentsCheck,
+  runCommandCodeGuidelineComplianceCheck,
+  runCommandCodeFindingVerification,
   classifyCommandCodePromptFailure,
   composeCommandCodeMonthlyWindow,
   formatCommandCodeKeyProbeLine,
@@ -134,14 +147,15 @@ describe('CommandCode CLI provider helpers', () => {
     );
   });
 
-  it('denies all CommandCode tools', () => {
+  it('denies all CommandCode tools when disabled', () => {
     const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
     try {
-      const path = writeCommandCodeReadOnlySettings(home);
+      const path = writeCommandCodeReadOnlySettings(home, false);
 
       assert.equal(path, join(home, '.commandcode', 'settings.json'));
       assert.equal(statSync(path).mode & 0o777, 0o600);
       assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), {
+        tasteLearning: false,
         permissions: { deny: ['*'] },
       });
     } finally {
@@ -149,23 +163,34 @@ describe('CommandCode CLI provider helpers', () => {
     }
   });
 
-  it('keeps ambient API-key auth from overriding the temp auth file', () => {
-    const previousApiKey = process.env.COMMAND_CODE_API_KEY;
-    const previousHome = process.env.HOME;
+  it('isolates CLI auth, configuration and preload hooks from the ambient environment', () => {
+    const overrides = {
+      COMMAND_CODE_API_KEY: 'stale-api-key',
+      HOME: '/ambient-home',
+      GITHUB_TOKEN: 'ambient-token',
+      GIT_DIR: '/other/repo/.git',
+      NODE_OPTIONS: '--require=/other/hook.js',
+      BUN_OPTIONS: '--preload=/other/hook.js',
+      PWD: '/other/repo',
+    };
+    const previous = Object.fromEntries(
+      Object.keys(overrides).map((key) => [key, process.env[key]]),
+    );
     try {
-      process.env.COMMAND_CODE_API_KEY = 'stale-api-key';
-      process.env.HOME = '/ambient-home';
-
-      const env = commandCodeEnvForHome('/tmp/jbot-commandcode-home-test');
-
-      assert.equal(env?.HOME, '/tmp/jbot-commandcode-home-test');
-      assert.equal(env?.COMMAND_CODE_API_KEY, undefined);
+      Object.assign(process.env, overrides);
+      const env = commandCodeEnvForHome('/tmp/jbot-commandcode-home-test')!;
+      assert.equal(env.HOME, '/tmp/jbot-commandcode-home-test');
+      assert.equal(env.XDG_CONFIG_HOME, '/tmp/jbot-commandcode-home-test/.config');
+      for (const key of Object.keys(overrides).filter((key) => key !== 'HOME'))
+        assert.equal(env[key], undefined, key);
+      assert.equal(env.GIT_CONFIG_NOSYSTEM, '1');
+      assert.equal(env.GIT_OPTIONAL_LOCKS, '0');
       assert.equal(process.env.COMMAND_CODE_API_KEY, 'stale-api-key');
     } finally {
-      if (previousApiKey === undefined) delete process.env.COMMAND_CODE_API_KEY;
-      else process.env.COMMAND_CODE_API_KEY = previousApiKey;
-      if (previousHome === undefined) delete process.env.HOME;
-      else process.env.HOME = previousHome;
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
   });
 
@@ -209,6 +234,14 @@ describe('CommandCode CLI provider helpers', () => {
         '{"type":"event","event":',
         JSON.stringify({ type: 'event', event: { type: 'tool_running' } }),
         JSON.stringify({
+          type: 'event',
+          event: { type: 'tool_completed', toolName: 'jbot_read_file', result: 'private content' },
+        }),
+        JSON.stringify({
+          type: 'event',
+          event: { type: 'tool_hook_blocked', toolName: 'untrusted-name' },
+        }),
+        JSON.stringify({
           type: 'result',
           subtype: 'success',
           sessionId: 'session-1',
@@ -227,6 +260,7 @@ describe('CommandCode CLI provider helpers', () => {
     assert.deepEqual(result, {
       finalText: '{"summary":"ok","findings":[]}',
       sessionId: 'session-1',
+      toolOutcomes: { 'jbot_read_file:tool_completed': 1, 'other:tool_hook_blocked': 1 },
       usage: { input: 100, output: 20, reasoning: 0, cacheRead: 30, cacheWrite: 40 },
     });
 
@@ -595,4 +629,172 @@ describe('CommandCode multi-key pick', () => {
     assert.equal(none.key, 'k1');
     assert.match(none.reason, /probes unavailable; using first of 2/);
   });
+});
+
+it('resumes each CommandCode review explicitly while verification stays fresh', async (t) => {
+  const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-resume-'));
+  writeCommandCodeReadOnlySettings(home, true);
+  const cli = join(home, 'command-code');
+  writeFileSync(
+    cli,
+    String.raw`#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+const args = process.argv.slice(2);
+const model = args[args.indexOf('--model') + 1];
+const resume = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : undefined;
+let input = '';
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+  if (model === 'abort') {
+    console.log(JSON.stringify({type:'event',event:{type:'tool_completed',toolName:'jbot_read_file',result:'PRIVATE_CONTENT'}}));
+    console.log(JSON.stringify({type:'event',event:{type:'run_end',result:{usage:{inputTokens:12,outputTokens:3,cacheReadTokens:0,cacheWriteTokens:0}}}}));
+    setInterval(() => {}, 1000);
+    return;
+  }
+  fs.appendFileSync(path.join(process.env.HOME, 'calls.jsonl'), JSON.stringify({model, resume, args, input, cwd: process.cwd()}) + '\n');
+  const sessionId = resume || model + '-session';
+  const dir = path.join(process.env.HOME, '.commandcode', 'projects');
+  fs.mkdirSync(dir, {recursive: true});
+  fs.appendFileSync(path.join(dir, sessionId + '.jsonl'), JSON.stringify({type:'message', message:{role:'assistant'}, usage:{costUsd: resume ? 0.125 : 0.25}}) + '\n');
+  const repaired = model === 'repair' && resume && fs.readFileSync(path.join(dir, sessionId + '.jsonl'), 'utf8').trim().split('\n').length === 2;
+  let finalText = model === 'repair' && !resume ? '{}' : resume && !repaired
+    ? model === 'invalid' ? '{}' : JSON.stringify({findings: [{path:'b.ts',line:1,severity:'P2',title:'extra',body:'rule'}]})
+    : JSON.stringify({summary:'main',findings:[{path:'a.ts',line:1,severity:'P1',title:'main',body:'defect'}]});
+  if (model.startsWith('aux-')) {
+    const field = model === 'aux-addressed' ? 'addressedPriorComments' : 'findings';
+    const wrong = field === 'findings' ? 'addressedPriorComments' : 'findings';
+    finalText = model === 'aux-broken' ? '{}' : JSON.stringify({[resume ? field : wrong]: []});
+  }
+  console.log(JSON.stringify({type:'result',subtype:'success',finalText,
+    sessionId: model === 'missing' ? undefined : resume && model === 'mismatch' ? 'wrong-session' : sessionId,
+    usage:{inputTokens:1,outputTokens:1,cacheReadTokens:0,cacheWriteTokens:0}}));
+});
+`,
+  );
+  chmodSync(cli, 0o700);
+  const pathBefore = process.env.PATH;
+  process.env.PATH = `${home}:${pathBefore}`;
+  try {
+    await Promise.all(
+      ['first', 'second', 'repair', 'missing', 'mismatch', 'invalid'].map(async (model) => {
+        const coverage: Array<{ state: string }> = [];
+        const usage: Array<{ estimatedCostUsd?: number }> = [];
+        const result = await runCommandCodeReview(
+          home,
+          `commandcode/${model}`,
+          'FULL_DIFF',
+          '',
+          () => {},
+          {
+            runtime: { home, tools: true },
+            guidelineSweep: {
+              guidelines: 'FULL_GUIDELINES',
+              onCoverage: (row) => coverage.push(row),
+            },
+            onTokenUsage: (row) => usage.push(row),
+            timeoutMs: 5000,
+          },
+        );
+        const completed = ['first', 'second', 'repair'].includes(model);
+        assert.equal(result.summary, 'main');
+        assert.equal(result.findings.length, completed ? 2 : 1);
+        assert.equal(coverage[0].state, completed ? 'completed' : 'failed');
+        if (completed)
+          assert.deepEqual(
+            usage.map((row) => row.estimatedCostUsd),
+            model === 'repair' ? [0.25, undefined, undefined] : [0.25, undefined],
+          );
+      }),
+    );
+    await runCommandCodeFindingVerification(
+      home,
+      'commandcode/verifier',
+      'verification context',
+      [],
+      () => {},
+      5000,
+      undefined,
+      { home, tools: true },
+    );
+    const calls = readFileSync(join(home, 'calls.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(calls.length, 13);
+    for (const call of calls) {
+      assert.equal(call.cwd, realpathSync(join(home, 'launch')));
+      assert.equal(call.args[call.args.indexOf('--permission-mode') + 1], 'plan');
+      assert.equal(call.args[call.args.indexOf('--mod') + 1], join(home, 'review.mjs'));
+      if (call.resume) {
+        assert.equal(call.resume, call.model + '-session');
+        if (!call.input.includes('FULL_DIFF')) assert.match(call.input, /FULL_GUIDELINES/);
+        else assert.equal(call.model, 'repair');
+      }
+    }
+    assert.equal(calls.find((call) => call.model === 'verifier').resume, undefined);
+    for (const [model, addressed] of [
+      ['aux-addressed', true],
+      ['aux-guidelines', false],
+      ['aux-broken', true],
+    ] as const) {
+      const args = [home, `commandcode/${model}`, 'context'] as const;
+      const call = addressed
+        ? runCommandCodeAddressedPriorCommentsCheck(...args, () => {}, 5000, undefined, {
+            home,
+            tools: true,
+          })
+        : runCommandCodeGuidelineComplianceCheck(...args, 'rules', () => {}, 5000, undefined, {
+            home,
+            tools: true,
+          });
+      if (model === 'aux-broken') await assert.rejects(call, /parse|array|JSON/i);
+      else assert.deepEqual(await call, []);
+      const auxCalls = readFileSync(join(home, 'calls.jsonl'), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .filter((call) => call.model === model);
+      assert.equal(auxCalls.length, 2);
+      assert.equal(auxCalls[1].resume, model + '-session');
+    }
+    const interval = globalThis.setInterval;
+    const timer = t.mock.method(globalThis, 'setInterval', ((callback: () => void, ms: number) => {
+      assert.equal(ms, 60_000);
+      return interval(callback, 10);
+    }) as typeof setInterval);
+    const partial: unknown[] = [];
+    const partialUsage: unknown[] = [];
+    const logs: string[] = [];
+    await assert.rejects(
+      runCommandCodeReview(home, 'commandcode/abort', '', '', (line) => logs.push(line), {
+        runtime: {
+          home,
+          tools: true,
+          onProgress: (_label, _model, progress) => partial.push(progress),
+        },
+        timeoutMs: 200,
+        onTokenUsage: (usage) => partialUsage.push(usage),
+      }),
+      /timed out/,
+    );
+    assert.equal(partial.length, 1);
+    assert.equal((partial[0] as { complete: boolean }).complete, false);
+    assert.deepEqual((partial[0] as { toolOutcomes: unknown }).toolOutcomes, {
+      'jbot_read_file:tool_completed': 1,
+    });
+    assert.equal((partialUsage[0] as { input: number }).input, 12);
+    assert.match(logs.join('\n'), /final progress/);
+    assert.match(logs.join('\n'), /CommandCode progress/);
+    timer.mock.restore();
+    const count = logs.length;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(logs.length, count);
+
+    assert.doesNotMatch(logs.join('\n'), /PRIVATE_CONTENT/);
+  } finally {
+    if (pathBefore === undefined) delete process.env.PATH;
+    else process.env.PATH = pathBefore;
+    rmSync(home, { recursive: true, force: true });
+  }
 });

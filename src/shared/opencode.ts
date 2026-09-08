@@ -1,3 +1,4 @@
+import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import {
   createOpencode,
   type AssistantMessage,
@@ -17,6 +18,7 @@ import {
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
+  assembleGuidelineSweepPrompt,
   assembleReviewPrompt,
   buildJsonRepairPrompt,
   CONTINUATION_NUDGE_PROMPT,
@@ -740,6 +742,7 @@ export async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
   message: string,
+  onTimeout?: () => void,
 ): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   // If the timeout wins, keep any later rejection from the original operation
@@ -749,7 +752,16 @@ export async function withTimeout<T>(
     return await Promise.race([
       promise,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+        timer = setTimeout(() => {
+          const error = new Error(message);
+          reject(error);
+          try {
+            onTimeout?.();
+          } catch {
+            // The caller logs this rejection; cancellation failure must not escape the timer.
+            error.message += '; timeout cancellation failed';
+          }
+        }, timeoutMs);
       }),
     ]);
   } finally {
@@ -777,6 +789,7 @@ export async function runReview(
   guidelines: string,
   log: (msg: string) => void,
   options: {
+    guidelineSweep?: GuidelineSweep;
     lensAddendum?: string;
     evidenceQuotes?: boolean;
     embeddedFirstPrompt?: boolean;
@@ -786,6 +799,7 @@ export async function runReview(
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
+  const deadlineAt = options.timeoutMs ? Date.now() + options.timeoutMs : undefined;
   const prompt = promptForModel(
     model,
     assembleReviewPrompt(
@@ -807,8 +821,9 @@ export async function runReview(
     options.timeoutMs,
     options.onTokenUsage,
   );
+  let result: ReviewResult;
   try {
-    return parseReview(raw, label, log, { strict: true });
+    result = parseReview(raw, label, log, { strict: true });
   } catch (error) {
     const repaired = await repromptForJson(
       client,
@@ -821,8 +836,33 @@ export async function runReview(
       options.timeoutMs,
       options.onTokenUsage,
     );
-    return parseReview(repaired, `${label}-repair`, log, { strict: true });
+    result = parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
+  if (!options.guidelineSweep) return result;
+  const sweep = options.guidelineSweep;
+  const sweepLabel = `guideline-sweep-${label}`;
+  return appendGuidelineSweep(
+    result,
+    sweep,
+    sweepLabel,
+    deadlineAt,
+    async (timeoutMs) => {
+      const raw = await promptPlanAgentInSession(
+        client,
+        model,
+        sessionID,
+        promptForModel(model, assembleGuidelineSweepPrompt(sweep.guidelines)),
+        sweepLabel,
+        log,
+        timeoutMs,
+        options.onTokenUsage,
+        undefined,
+        label,
+      );
+      return parseReview(raw, sweepLabel, log, { strict: true }).findings;
+    },
+    log,
+  );
 }
 
 /**
@@ -873,13 +913,8 @@ async function repromptForJson(
   );
 }
 
-/**
- * Runs an aux session's output through a strict parse, one same-session JSON
- * repair on failure, then a lenient parse — failing open to the empty selection
- * if the repair is unparseable or its round-trip dies. Aux checks never fail the
- * run (invariant #3).
- */
-async function parseAuxSessionWithRepair<T>(
+// Let the runner record failed coverage before applying its auxiliary fallback.
+async function parseAuxSessionWithRepair<K extends 'findings' | 'addressedPriorComments'>(
   session: {
     client: OpencodeClient;
     model: string;
@@ -890,30 +925,24 @@ async function parseAuxSessionWithRepair<T>(
     timeoutMs?: number;
     onTokenUsage?: TokenUsageRecorder;
   },
-  select: (result: ReviewResult) => T,
-): Promise<T> {
+  field: K,
+): Promise<ReviewResult[K]> {
   const { client, model, sessionID, raw, label, log, timeoutMs, onTokenUsage } = session;
   try {
-    return select(parseReview(raw, label, log, { strict: true }));
+    return parseReview(raw, label, log, { strict: true, field })[field];
   } catch (error) {
-    try {
-      const repaired = await repromptForJson(
-        client,
-        model,
-        sessionID,
-        raw,
-        error,
-        label,
-        log,
-        timeoutMs,
-        onTokenUsage,
-      );
-      return select(parseReview(repaired, `${label}-repair`, log));
-    } catch (repairError) {
-      const message = repairError instanceof Error ? repairError.message : String(repairError);
-      log(`(${label} repair failed; keeping empty results: ${message})`);
-      return select({ summary: '', findings: [], addressedPriorComments: [] });
-    }
+    const repaired = await repromptForJson(
+      client,
+      model,
+      sessionID,
+      raw,
+      error,
+      label,
+      log,
+      timeoutMs,
+      onTokenUsage,
+    );
+    return parseReview(repaired, `${label}-repair`, log, { strict: true, field })[field];
   }
 }
 
@@ -946,7 +975,7 @@ export async function runAddressedPriorCommentsCheck(
       timeoutMs,
       onTokenUsage,
     },
-    (result) => result.addressedPriorComments,
+    'addressedPriorComments',
   );
 }
 
@@ -971,7 +1000,7 @@ export async function runGuidelineComplianceCheck(
   );
   return parseAuxSessionWithRepair(
     { client, model, sessionID, raw, label: 'guideline-compliance', log, timeoutMs, onTokenUsage },
-    (result) => result.findings,
+    'findings',
   );
 }
 
@@ -1460,7 +1489,7 @@ export function parseReview(
   raw: string,
   label: string,
   log: (msg: string) => void,
-  options: { strict?: boolean } = {},
+  options: { strict?: boolean; field?: 'findings' | 'addressedPriorComments' } = {},
 ): ReviewResult {
   let parsed: unknown;
   try {
@@ -1493,6 +1522,9 @@ export function parseReview(
   }
 
   const obj = parsed as Record<string, unknown>;
+  const field = options.field ?? 'findings';
+  if (options.strict && !Array.isArray(obj[field]))
+    throw new Error(`${label} returned JSON without a ${field} array`);
   const summary = typeof obj.summary === 'string' ? obj.summary : '';
   const rawFindings = Array.isArray(obj.findings) ? obj.findings : [];
   const rawAddressed = Array.isArray(obj.addressedPriorComments) ? obj.addressedPriorComments : [];

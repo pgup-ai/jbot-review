@@ -1,4 +1,10 @@
-import { Semaphore, type SemaphorePriority, type TokenUsageRecorder } from './opencode.ts';
+import type { GuidelineSweep } from './guideline-sweep.ts';
+import {
+  Semaphore,
+  withTimeout,
+  type SemaphorePriority,
+  type TokenUsageRecorder,
+} from './opencode.ts';
 import {
   classifyTelemetryStopReason,
   type BackendTelemetryCapability,
@@ -10,12 +16,16 @@ import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } fro
 export interface ReviewBackend {
   name: string;
   observability?: BackendTelemetryCapability;
+  canReadWorkspace?: boolean;
+  supportsGuidelineSweep?: boolean;
   runReview(
     model: string,
     prContext: string,
     guidelines: string,
     log: (msg: string) => void,
     options?: {
+      guidelineSweep?: GuidelineSweep;
+      deadlineAt?: number;
       lensAddendum?: string;
       label?: string;
       timeoutMs?: number;
@@ -99,16 +109,24 @@ export function limitReviewBackendSessions(
   providerSlots?: SessionSlots,
   telemetry?: { phases: PhaseTelemetryTracker; tools: ToolTelemetryAccumulator },
 ): ReviewBackend {
-  if (!globalSlots && !providerSlots && !telemetry) return backend;
   const pending = new Map<AbortController, string>();
   const rolePriority = role === 'main' ? 'high' : 'normal';
   const withSlots = async <T>(
     session: string,
     run: () => Promise<T>,
     priority: SemaphorePriority = rolePriority,
+    budget?: { timeoutMs: number; deadlineAt?: number; log: (message: string) => void },
   ): Promise<T> => {
     const controller = new AbortController();
     pending.set(controller, session);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let running: Promise<T> | undefined;
+    let timedOut = false;
+    if (budget?.deadlineAt !== undefined)
+      timer = setTimeout(
+        () => controller.abort(new Error(`${session} deadline expired while queued`)),
+        Math.max(0, budget.deadlineAt - Date.now()),
+      );
     let providerRelease: (() => void) | undefined;
     let globalRelease: (() => void) | undefined;
     const queueDone = telemetry?.phases.start({
@@ -127,6 +145,9 @@ export function limitReviewBackendSessions(
         : undefined;
       controller.signal.throwIfAborted();
       pending.delete(controller);
+      clearTimeout(timer);
+      if (budget?.deadlineAt !== undefined && budget.deadlineAt <= Date.now())
+        throw new Error(`${session} deadline expired while queued`);
       queueDone?.();
       const executionDone = telemetry?.phases.start({
         phase: role === 'main' ? 'main-execution' : 'auxiliary-execution',
@@ -135,7 +156,18 @@ export function limitReviewBackendSessions(
         backend: backend.name,
       });
       try {
-        const result = await run();
+        running = run();
+        const result = budget
+          ? await withTimeout(
+              running,
+              Math.max(0, Math.min(budget.timeoutMs, (budget.deadlineAt ?? Infinity) - Date.now())),
+              `${session} timed out`,
+              () => {
+                timedOut = true;
+                backend.abortSessionsByLabel?.(session, budget.log);
+              },
+            )
+          : await running;
         executionDone?.();
         telemetry?.tools.finishSession({
           session,
@@ -167,18 +199,25 @@ export function limitReviewBackendSessions(
       queueDone?.(classifyTelemetryStopReason(error));
       throw error;
     } finally {
+      clearTimeout(timer);
       pending.delete(controller);
-      providerRelease?.();
-      // Let the next provider waiter enter the global priority queue before releasing the global slot.
-      if (providerRelease && globalRelease) {
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
-      }
-      globalRelease?.();
+      const release = async () => {
+        providerRelease?.();
+        // Let the next provider waiter enter the global queue before releasing its slot.
+        if (providerRelease && globalRelease)
+          await new Promise<void>((resolve) => queueMicrotask(resolve));
+        globalRelease?.();
+      };
+      // Timeout ends the caller's wait, not ownership of the still-running provider work.
+      if (timedOut && running) void running.then(release, release);
+      else await release();
     }
   };
   return {
     name: backend.name,
     observability: backend.observability,
+    canReadWorkspace: backend.canReadWorkspace,
+    supportsGuidelineSweep: backend.supportsGuidelineSweep,
     abortSessionsByLabel: (label, log) => {
       let queued = 0;
       for (const [controller, session] of pending) {
@@ -188,7 +227,40 @@ export function limitReviewBackendSessions(
       }
       return queued + (backend.abortSessionsByLabel?.(label, log) ?? 0);
     },
-    runReview: (...args) => withSlots(args[4]?.label ?? 'review', () => backend.runReview(...args)),
+    runReview: (model, context, guidelines, log, options) => {
+      const budget =
+        options?.label === 'review-interactions' || options?.deadlineAt !== undefined
+          ? {
+              timeoutMs: Math.min(
+                options.label === 'review-interactions' ? 600_000 : Infinity,
+                options.timeoutMs ?? Infinity,
+              ),
+              deadlineAt: options.deadlineAt,
+              log,
+            }
+          : undefined;
+      return withSlots(
+        options?.label ?? 'review',
+        () =>
+          backend.runReview(
+            model,
+            context,
+            guidelines,
+            log,
+            budget
+              ? {
+                  ...options,
+                  timeoutMs: Math.max(
+                    0,
+                    Math.min(budget.timeoutMs, (budget.deadlineAt ?? Infinity) - Date.now()),
+                  ),
+                }
+              : options,
+          ),
+        rolePriority,
+        budget,
+      );
+    },
     runAddressedPriorCommentsCheck: (...args) =>
       withSlots('addressed-prior-comments', () => backend.runAddressedPriorCommentsCheck(...args)),
     runGuidelineComplianceCheck: (...args) =>
