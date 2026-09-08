@@ -664,8 +664,7 @@ process.stdin.on('end', async () => {
   const dir = path.join(process.env.HOME, '.commandcode', 'projects');
   fs.mkdirSync(dir, {recursive: true});
   fs.appendFileSync(path.join(dir, sessionId + '.jsonl'), JSON.stringify({type:'message', message:{role:'assistant'}, usage:{costUsd: resume ? 0.125 : 0.25}}) + '\n');
-  const repaired = model === 'repair' && repair;
-  let finalText = model === 'repair' && !resume && !repair ? '{}' : resume && !repaired
+  let finalText = model === 'repair' && !resume && !repair ? '{}' : resume
     ? model === 'invalid' ? '{}' : JSON.stringify({findings: [{path:'b.ts',line:1,severity:'P2',title:'extra',body:'rule'}]})
     : JSON.stringify({summary:'main',findings:[{path:'a.ts',line:1,severity:'P1',title:'main',body:'defect'}]});
   if (model === 'expired') finalText = '{}';

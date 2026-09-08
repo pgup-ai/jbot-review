@@ -35,10 +35,14 @@ no reviewed repository and is not a recall/precision measurement.
 
 Self-review found no additional material issue. De-slop: one comment block
 rewritten, no new test cases, obsolete resume assertions removed. Code, test,
-and README delta before this audit: +81 lines.
+and README delta before this audit: +80 lines.
 
 The required full git-fixture corpus with three repetitions and adjudication
 has not run. This branch is not merge-ready under the default-policy gate in
 AGENTS.md. The next comparison must pin the same PR, model, and revision per arm,
 and report completion, verified findings, false positives, wall time, and
 cumulative token usage before recommending a new default-on tooling policy.
+
+Follow-up skill review: removed an impossible resumed-repair condition from the
+CLI fixture. All 196 focused tests passed after cleanup. No new production issue,
+comment block, or test case was added; the full-corpus gate remains outstanding.
