@@ -121,6 +121,7 @@ import { parseAddedLines } from './patch.ts';
 import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
+  LENS_CONTEXT_NOTE,
   UNTRUSTED_PR_CONTENT_NOTE,
   buildAddressedPriorCommentsContext,
   buildContext7PromptBlock,
@@ -213,6 +214,7 @@ import {
 import { createToolTelemetryAccumulator, type ToolTelemetryAccumulator } from './tool-telemetry.ts';
 import {
   buildReviewContext,
+  buildReviewScopeContext,
   discoverGuidelineDocs,
   formatGuidelines,
   formatFinderGuidelines,
@@ -1511,9 +1513,7 @@ async function runReviewPipeline(params: {
   // Populated on the enhanced path only; the basic branch has no droppable set.
   let baseCoreContext = '';
   let supplementaryBlocks: ContextBlock[] = [];
-  // Captured for the slim verifier contract (TASK-065); enhanced path only.
-  let slimVerifierIssueInputs:
-    { linkedIssues: LinkedIssue[]; linkedIssuesOmitted: number } | undefined;
+  let linkedIssueContext: { linkedIssues: LinkedIssue[]; linkedIssuesOmitted: number } | undefined;
   if (options.enhancedContext) {
     const [commits, { issues: linkedIssues, omitted: linkedIssuesOmitted }, checkSummary] =
       await Promise.all([
@@ -1553,7 +1553,7 @@ async function runReviewPipeline(params: {
     });
     baseCoreContext = coreContext;
     coreContext = joinContext(coreContext, ...supplementaryBlocks.map((block) => block.text));
-    slimVerifierIssueInputs = { linkedIssues, linkedIssuesOmitted };
+    linkedIssueContext = { linkedIssues, linkedIssuesOmitted };
   } else {
     if (priorJbotThreads.length > 0 && auxHasCompleteEmbeddedDiff) {
       try {
@@ -1599,18 +1599,32 @@ async function runReviewPipeline(params: {
       ? embeddedOnlyBackendDiffHunks.text
       : diffHunksBlock;
   const auxPrContext = joinContext(coreContext, auxDiffBlockText);
+  const lensPrContext = joinContext(
+    UNTRUSTED_PR_CONTENT_NOTE,
+    buildReviewScopeContext({
+      pullTitle,
+      pullBody,
+      changedFiles,
+      diffScope,
+      ...linkedIssueContext,
+    }),
+    reviewFocusBlock,
+    blastRadiusBlock,
+    LENS_CONTEXT_NOTE,
+    auxDiffBlockText,
+  );
   // TASK-065 arm (JBOT_VERIFIER_SLIM_CONTEXT): the verifier judges a handful
   // of findings against the diff; the finder supplements around it are pure
   // prefill. Same diff block as the aux path, so a slim verifier never judges
   // from a diff the full context would have carried whole.
   const verifierPrContext =
-    options.verifierSlimContext && slimVerifierIssueInputs
+    options.verifierSlimContext && linkedIssueContext
       ? buildSlimVerifierContext({
           pullTitle,
           pullBody,
           changedFiles,
           diffScope,
-          ...slimVerifierIssueInputs,
+          ...linkedIssueContext,
           auxDiffBlockText,
         })
       : auxPrContext;
@@ -2507,7 +2521,7 @@ async function runReviewPipeline(params: {
     const lensPasses = startLensPasses({
       backend: auxBackend,
       model: auxModel,
-      prContext: auxPrContext,
+      lensPrContext,
       guidelinesForPrompt,
       lensKeys: candidateLensKeys,
       timeoutMs: finderTimeoutMs,
@@ -3257,15 +3271,10 @@ export function emitReviewTelemetry(
   }
 }
 
-/**
- * Starts the extra recall passes in parallel with the main review. Each pass
- * is the full review prompt plus one focus lens; a failed lens pass costs
- * its own findings only, never the run.
- */
 function startLensPasses(params: {
   backend: ReviewBackend;
   model: string;
-  prContext: string;
+  lensPrContext: string;
   guidelinesForPrompt: string;
   lensKeys: string[];
   timeoutMs?: number;
@@ -3283,7 +3292,7 @@ function startLensPasses(params: {
   return lensKeys.map((key) => {
     const startedAt = Date.now();
     return params.backend
-      .runReview(params.model, params.prContext, params.guidelinesForPrompt, params.log, {
+      .runReview(params.model, params.lensPrContext, params.guidelinesForPrompt, params.log, {
         lensAddendum: REVIEW_LENSES[key],
         label: `review-${key}`,
         timeoutMs: params.timeoutMs,

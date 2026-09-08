@@ -1115,9 +1115,32 @@ batch. Other consumers can select the same environment settings.
 `review-interactions` investigates cross-file regressions and inconsistent
 contracts across the full PR diff. `addressed-prior-comments` separately checks
 whether old findings have been fixed; deterministic checks control thread
-resolution and review compaction. `finding-verification` evaluates candidate
-findings in a fresh session, using repository tools where the backend supports
-them. Incorrect verification or thread closure can hide real issues.
+resolution and review compaction. All recall lenses use focused
+prompts with the shared evidence, severity, and output rules. They retain the
+same diff evidence, relevant guidelines, PR intent, review focus, and caller
+context, but omit commit history, CI status, prior review threads, and summary
+instructions. Main review, guideline checks, and verification keep their existing
+context.
+
+`finding-verification` evaluates candidate findings in a fresh session, using
+repository tools where the backend supports them. Incorrect verification or thread closure can hide real issues.
+
+Passes own distinct questions, even when they need to read the same code:
+
+| Pass                         | Responsibility                                                                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Main                         | One complete baseline review of changed behavior; coverage remains when a specialist is disabled or fails.                      |
+| Interactions                 | Producer/consumer contracts across code boundaries: arguments, schemas, configuration, registration, and compatibility.         |
+| Frontend                     | Observable UI behavior: lifecycle, rendering, client state/cache transitions, and user actions.                                 |
+| Integrity                    | Trust boundaries, durable data, transactions, and server/resource concurrency.                                                  |
+| Guidelines / guideline sweep | Violations of specific written repository rules. The sweep reuses main-session evidence and returns only additional violations. |
+| Finding verification         | Confirm or refute supplied candidates; do not discover new findings.                                                            |
+| Addressed prior comments     | Determine whether supplied existing findings were fixed; do not review for new issues.                                          |
+| Changes-since summary        | Describe the supplied change since the previous review; do not produce findings.                                                |
+
+Specialists do not start general reviews or another specialist's audit. Independent
+verification intentionally rechecks evidence; deterministic deduplication still
+handles findings that describe the same defect from different perspectives.
 
 After main review completes, auxiliary sessions have at most five minutes to
 settle, bounded by the run budget with verification and posting time reserved.

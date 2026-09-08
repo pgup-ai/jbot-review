@@ -7,6 +7,7 @@ import { describe, it } from 'node:test';
 import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
 import {
   buildReviewContext,
+  buildReviewScopeContext,
   discoverGuidelineDocs,
   discoverGuidelines,
   formatContextBudget,
@@ -515,6 +516,27 @@ describe('buildReviewContext', () => {
     checkSummary: 'All checks passed',
     guidelines: '',
   };
+
+  it('builds lens scope without history while preserving intent and bounded evidence', () => {
+    const params = {
+      ...baseParams,
+      pullBody: '## Commits\nThis heading belongs to PR intent.',
+      diffScope: { baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40) },
+      linkedIssues: [{ number: 7, title: 'Preserve ordering', body: 'Keep rows stable.' }],
+      priorComments: ['PRIOR_SENTINEL'],
+      commits: [{ sha: 'c'.repeat(40), message: 'COMMIT_SENTINEL' }],
+      checkSummary: 'CHECK_SENTINEL',
+    };
+    const context = buildReviewScopeContext(params);
+    assert.match(context, /## Commits\nThis heading belongs to PR intent/);
+    assert.match(context, /#7: Preserve ordering/);
+    assert.match(context, /Keep rows stable/);
+    assert.match(context, /src\/a\.ts/);
+    assert.ok(context.includes(`${'a'.repeat(40)}...${'b'.repeat(40)}`));
+    assert.doesNotMatch(context, /PRIOR_SENTINEL|COMMIT_SENTINEL|CHECK_SENTINEL/);
+    const oversized = buildReviewScopeContext({ ...params, pullBody: '界'.repeat(8000) });
+    assert.match(oversized, /PR description truncated/);
+  });
 
   it('embeds the diff scope inside the Pull request section', () => {
     const context = buildReviewContext({

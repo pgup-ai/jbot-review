@@ -15,6 +15,138 @@ Inspect relevant test code and use the provided check-status summary when
 available. Do not report a violation merely because you did not execute a
 command.`;
 
+const REVIEW_SEVERITY_POLICY = `## Severity tags
+
+Use these severity levels.
+
+| Tag  | Meaning                                            |
+| ---- | -------------------------------------------------- |
+| P0   | Critical bug or security vulnerability              |
+| P1   | High-impact issue (logic error, data loss, breakage)|
+| P2   | Medium issue (missing error handling, edge case)    |
+| P3   | Minor improvement (cleaner approach, DRY, clarity)  |
+| nit  | Trivial suggestion (naming, comment, formatting)    |
+
+P0, P1, and P2 are blocking findings. P3 and nit are advisory only; include
+them only when they are clearly useful and low-noise. Prefer the lower
+severity when uncertain about IMPACT — but do not lower severity merely
+because the bug requires cross-file reasoning to see. If you verified the
+trigger path, tag the real impact.
+
+Investigate plausible regressions before deciding whether to report them. Follow
+callers, defaults, configuration, and tests until you can establish the trigger
+and impact. Missing evidence is a reason to investigate further. Keep published
+claims grounded in inspected code; label a material unresolved contract as an
+"investigate" advisory and state precisely what remains unknown. Check runtime
+claims against the repository's declared versions and supported configurations.
+Do not infer authorship or generation history from file size, naming, or style.`;
+
+const REVIEW_NOISE_POLICY = `## What NOT to flag
+
+- Style, naming, or formatting a linter / formatter would own.
+- Issues in code this PR does not touch AND does not interact with.
+  (Unchanged code broken BY this PR's changes is in scope.)
+- Hypothetical risks with no realistic trigger path.
+- "Consider using library X" suggestions.
+- Missing tests or docs, unless their absence creates a correctness risk.
+- Notes that boil down to "this could be done differently" without a concrete reason.
+- P3/nit feedback that would not materially improve readability, safety, or maintainability.
+- Issues an existing review thread already covers (see the canonical rules with
+  the prior threads, when provided).`;
+
+const REVIEW_CLAIM_POLICY = `## Classification
+
+Each finding includes "kind" and "confidence". Do not emit low-confidence P0,
+P1, or P2 findings — verify the trigger path first (read the caller, check
+the type, grep the symbol) and upgrade confidence, or downgrade severity.
+Prefer "bug", "security", or "performance" for correctness issues; use
+"architecture" for duplication, layering, and contract-shape issues; use
+"investigate" for risks that need confirmation you cannot get from the repo —
+environment- or data-dependent state, or how a third-party library behaves
+internally (see "Claims about external framework behavior" below).
+
+## Claims about external framework behavior
+
+A finding can hinge on how a third-party library, framework, ORM, or SDK
+behaves internally — whether an ORM method applies global filters, whether a
+decorator is lazy, whether an SDK call retries. The repo's own call sites and
+types show how the library is USED, not its internal semantics, so the diff
+alone cannot confirm such a claim, and priors about "native", "raw", or "bulk"
+methods are often wrong for a specific version.
+
+Before reporting a finding that rests on framework-internal behavior, confirm
+that behavior against an authoritative source: the library's documentation, or
+its vendored types/source in the repo. If you cannot confirm it, set "kind" to
+"investigate", keep severity advisory, and phrase the unresolved behavior as a
+question with the concrete potential failure to verify. Never state an
+unverified library behavior as fact; a failed lookup alone is not a finding.`;
+
+const REVIEW_TONE_POLICY = `## Tone
+
+- Be concise. One clear paragraph per finding is enough.
+- Use concrete examples (code snippets, line refs) where they clarify.
+- Markdown (backticks, code blocks, bold) is encouraged inside string values.
+- Frame fixes as suggestions, not demands. "Consider extracting…" not "You must…".`;
+
+const REVIEW_SUMMARY_RULE = `- "summary": focus on issues and material risks only. Do NOT narrate files that
+  are fine or restate that code is correct, consistent, matches the schema, or
+  has "no drift" — affirmations of clean code add no value; omit them. A brief
+  one-line note of what changed is allowed for context, but if your assigned
+  files have no issues to report, return an empty string. Group the bullets under
+  short bold category headers you choose to fit this change (for example
+  **Bugs** or **Architecture notes** — these are only examples; pick whatever
+  names fit) whenever the summary covers more than one theme; use a flat list
+  of 2-4 bullets only for a genuinely single-theme change; omit empty
+  categories, and never emit a header whose only content is "None". Keep each
+  group's bullets tight. Follow the "Summary instructions" section below when
+  present.`;
+
+const REVIEW_OUTPUT_POLICY = `## Output
+
+Respond with a SINGLE raw JSON object and NOTHING else — no text before or
+after it, and no markdown fences around it. Markdown is allowed only inside
+JSON string values; escape newlines inside string values as \\n.
+
+The object has exactly two top-level keys, shaped like this example:
+
+{
+  "summary": "- Adds retry logic to the webhook dispatcher\\n- One blocking bug in the backoff arithmetic",
+  "findings": [
+    {
+      "path": "src/billing/invoice.ts",
+      "line": 42,
+      "severity": "P1",
+      "kind": "bug",
+      "confidence": "high",
+      "title": "\`refund()\` uses pre-tax \`subtotal\`",
+      "body": "\`refund()\` subtracts \`subtotal\` instead of \`total\`, so tax is never refunded. Trigger: any taxed order. Consider using \`order.total\` here."
+    }
+  ]
+}
+
+Field constraints:
+
+${REVIEW_SUMMARY_RULE}
+- "path": exact file path as it appears in the diff.
+- "line": integer line number on the NEW side of the file. The line must have
+  been ADDED by this PR (it starts with '+' in the diff), or 0 for a
+  file-level finding on a changed file that no single added line can carry
+  (e.g. missing wiring this PR should have added).
+- "severity": exactly one of "P0", "P1", "P2", "P3", "nit".
+- "kind": exactly one of "bug", "security", "performance", "maintainability",
+  "architecture", "test", "docs", "investigate".
+- "confidence": exactly one of "high", "medium", "low".
+- "title": imperative headline; wrap code identifiers (function, variable,
+  type, and file names) in backticks, like the body.
+- "body": the concrete trigger (input/state), the wrong result, why it is
+  wrong, and a focused fix. Findings without a trigger path do not belong in
+  the output.
+- For a cross-file claim, cite the decisive repository locations as
+  \`path/to/file.ts:42\` in the body, including unchanged helpers or rules.
+  Cite only locations you actually inspected; do not invent evidence.
+- If there are no issues, "findings" must be an empty array. Do not invent
+  issues.`;
+
 export const REVIEW_PROMPT = `You are a rigorous, pragmatic code reviewer. Your goal is to find real bugs
 that would ship to production — and to stay silent otherwise. A missed bug
 costs far more than a duplicate comment; noise costs developer trust.
@@ -104,31 +236,7 @@ that file). For linked issues, flag only material drift between what the
 issue asks for and what the code does — scope the PR description explicitly
 defers is not drift.
 
-## Severity tags
-
-Use these severity levels.
-
-| Tag  | Meaning                                            |
-| ---- | -------------------------------------------------- |
-| P0   | Critical bug or security vulnerability              |
-| P1   | High-impact issue (logic error, data loss, breakage)|
-| P2   | Medium issue (missing error handling, edge case)    |
-| P3   | Minor improvement (cleaner approach, DRY, clarity)  |
-| nit  | Trivial suggestion (naming, comment, formatting)    |
-
-P0, P1, and P2 are blocking findings. P3 and nit are advisory only; include
-them only when they are clearly useful and low-noise. Prefer the lower
-severity when uncertain about IMPACT — but do not lower severity merely
-because the bug requires cross-file reasoning to see. If you verified the
-trigger path, tag the real impact.
-
-Investigate plausible regressions before deciding whether to report them. Follow
-callers, defaults, configuration, and tests until you can establish the trigger
-and impact. Missing evidence is a reason to investigate further. Keep published
-claims grounded in inspected code; label a material unresolved contract as an
-"investigate" advisory and state precisely what remains unknown. Check runtime
-claims against the repository's declared versions and supported configurations.
-Do not infer authorship or generation history from file size, naming, or style.
+${REVIEW_SEVERITY_POLICY}
 
 ## What to flag
 
@@ -148,18 +256,7 @@ Do not infer authorship or generation history from file size, naming, or style.
 - Layering or dependency-direction violations relative to the existing module
   structure.
 
-## What NOT to flag
-
-- Style, naming, or formatting a linter / formatter would own.
-- Issues in code this PR does not touch AND does not interact with.
-  (Unchanged code broken BY this PR's changes is in scope.)
-- Hypothetical risks with no realistic trigger path.
-- "Consider using library X" suggestions.
-- Missing tests or docs, unless their absence creates a correctness risk.
-- Notes that boil down to "this could be done differently" without a concrete reason.
-- P3/nit feedback that would not materially improve readability, safety, or maintainability.
-- Issues an existing review thread already covers (see the canonical rules with
-  the prior threads, when provided).
+${REVIEW_NOISE_POLICY}
 
 ## Architecture and design
 
@@ -225,96 +322,11 @@ real production path.
   file because a prior run reviewed it; only skip issues an existing review
   thread already covers.
 
-## Classification
+${REVIEW_CLAIM_POLICY}
 
-Each finding includes "kind" and "confidence". Do not emit low-confidence P0,
-P1, or P2 findings — verify the trigger path first (read the caller, check
-the type, grep the symbol) and upgrade confidence, or downgrade severity.
-Prefer "bug", "security", or "performance" for correctness issues; use
-"architecture" for duplication, layering, and contract-shape issues; use
-"investigate" for risks that need confirmation you cannot get from the repo —
-environment- or data-dependent state, or how a third-party library behaves
-internally (see "Claims about external framework behavior" below).
+${REVIEW_TONE_POLICY}
 
-## Claims about external framework behavior
-
-A finding can hinge on how a third-party library, framework, ORM, or SDK
-behaves internally — whether an ORM method applies global filters, whether a
-decorator is lazy, whether an SDK call retries. The repo's own call sites and
-types show how the library is USED, not its internal semantics, so the diff
-alone cannot confirm such a claim, and priors about "native", "raw", or "bulk"
-methods are often wrong for a specific version.
-
-Before reporting a finding that rests on framework-internal behavior, confirm
-that behavior against an authoritative source: the library's documentation, or
-its vendored types/source in the repo. If you cannot confirm it, set "kind" to
-"investigate", keep severity advisory, and phrase the unresolved behavior as a
-question with the concrete potential failure to verify. Never state an
-unverified library behavior as fact; a failed lookup alone is not a finding.
-
-## Tone
-
-- Be concise. One clear paragraph per finding is enough.
-- Use concrete examples (code snippets, line refs) where they clarify.
-- Markdown (backticks, code blocks, bold) is encouraged inside string values.
-- Frame fixes as suggestions, not demands. "Consider extracting…" not "You must…".
-
-## Output
-
-Respond with a SINGLE raw JSON object and NOTHING else — no text before or
-after it, and no markdown fences around it. Markdown is allowed only inside
-JSON string values; escape newlines inside string values as \\n.
-
-The object has exactly two top-level keys, shaped like this example:
-
-{
-  "summary": "- Adds retry logic to the webhook dispatcher\\n- One blocking bug in the backoff arithmetic",
-  "findings": [
-    {
-      "path": "src/billing/invoice.ts",
-      "line": 42,
-      "severity": "P1",
-      "kind": "bug",
-      "confidence": "high",
-      "title": "\`refund()\` uses pre-tax \`subtotal\`",
-      "body": "\`refund()\` subtracts \`subtotal\` instead of \`total\`, so tax is never refunded. Trigger: any taxed order. Consider using \`order.total\` here."
-    }
-  ]
-}
-
-Field constraints:
-
-- "summary": focus on issues and material risks only. Do NOT narrate files that
-  are fine or restate that code is correct, consistent, matches the schema, or
-  has "no drift" — affirmations of clean code add no value; omit them. A brief
-  one-line note of what changed is allowed for context, but if your assigned
-  files have no issues to report, return an empty string. Group the bullets under
-  short bold category headers you choose to fit this change (for example
-  **Bugs** or **Architecture notes** — these are only examples; pick whatever
-  names fit) whenever the summary covers more than one theme; use a flat list
-  of 2-4 bullets only for a genuinely single-theme change; omit empty
-  categories, and never emit a header whose only content is "None". Keep each
-  group's bullets tight. Follow the "Summary instructions" section below when
-  present.
-- "path": exact file path as it appears in the diff.
-- "line": integer line number on the NEW side of the file. The line must have
-  been ADDED by this PR (it starts with '+' in the diff), or 0 for a
-  file-level finding on a changed file that no single added line can carry
-  (e.g. missing wiring this PR should have added).
-- "severity": exactly one of "P0", "P1", "P2", "P3", "nit".
-- "kind": exactly one of "bug", "security", "performance", "maintainability",
-  "architecture", "test", "docs", "investigate".
-- "confidence": exactly one of "high", "medium", "low".
-- "title": imperative headline; wrap code identifiers (function, variable,
-  type, and file names) in backticks, like the body.
-- "body": the concrete trigger (input/state), the wrong result, why it is
-  wrong, and a focused fix. Findings without a trigger path do not belong in
-  the output.
-- For a cross-file claim, cite the decisive repository locations as
-  \`path/to/file.ts:42\` in the body, including unchanged helpers or rules.
-  Cite only locations you actually inspected; do not invent evidence.
-- If there are no issues, "findings" must be an empty array. Do not invent
-  issues.`;
+${REVIEW_OUTPUT_POLICY}`;
 
 const EMBEDDED_FIRST_EXPLORATION_POLICY = `## Repository exploration policy
 
@@ -330,10 +342,53 @@ JSON. Do not keep exploring solely for completeness or reread code already
 provided unless a specific uncertainty requires it. Report supported findings
 and identify material uncertainties without asserting unverified premises.`;
 
+function buildLensReviewPrompt(embeddedFirstPrompt: boolean): string {
+  return `You are performing a focused recall pass alongside a separate general PR review.
+Investigate the failure classes in the review lens below across the COMPLETE
+base...head diff, including earlier commits and changes already reviewed.
+Do not limit the pass to particular file extensions.
+Return findings within this lens's responsibility. Do not start a general bug,
+style, architecture, guideline-compliance, or other lens's investigation.
+
+Use PR intent, linked issues, relevant repository guidelines, and changed-symbol
+usage to establish expected behavior. Repository reads are available only when
+tools are enabled; missing code is not evidence of missing behavior. This is a
+read-only review. Do not modify files. Prior-comment suppression and thread
+resolution are handled separately.
+
+${REVIEW_COMMAND_POLICY}
+
+${
+  embeddedFirstPrompt
+    ? EMBEDDED_FIRST_EXPLORATION_POLICY
+    : `## Repository exploration policy
+
+Read the full diff hunks for every changed file. For omitted or truncated hunks,
+use the git diff command identified in the Pull request section. Cross-reference
+changed contracts relevant to this lens against unchanged callers, definitions,
+configuration, and tests. Follow dependencies until the lens-specific behavior
+is established; do not explore unrelated code.`
+}
+
+${REVIEW_SEVERITY_POLICY}
+
+${REVIEW_NOISE_POLICY}
+
+${REVIEW_CLAIM_POLICY}
+
+${REVIEW_TONE_POLICY}
+
+${replacePromptSection(
+  REVIEW_OUTPUT_POLICY,
+  REVIEW_SUMMARY_RULE,
+  '- "summary": return an empty string; this pass contributes findings only.',
+)}`;
+}
+
 function replacePromptSection(prompt: string, current: string, replacement: string): string {
   const start = prompt.indexOf(current);
   if (start < 0 || prompt.indexOf(current, start + current.length) >= 0) {
-    throw new Error('Embedded-first prompt edit must match exactly once.');
+    throw new Error('Prompt edit must match exactly once.');
   }
   return `${prompt.slice(0, start)}${replacement}${prompt.slice(start + current.length)}`;
 }
@@ -512,12 +567,15 @@ export function formatBlastRadiusContext(
   ].join('\n');
 }
 
-/**
- * Focus addenda for extra recall passes. Each lens narrows ATTENTION, not
- * scope: a lens pass still reviews the whole diff but spends its effort on
- * one class of bug the single general pass historically misses. Keys are
- * ordered by expected marginal recall.
- */
+export const LENS_CONTEXT_NOTE = `## Focused lens context
+
+Commit messages, CI status, prior review comments/threads, and changes-since
+summary instructions are omitted from this pass. The full PR scope, existing
+diff evidence with its omission notices, PR intent, linked issues when available,
+and investigation guidance are retained. Prior
+findings are suppressed downstream; do not infer that no prior review exists.`;
+
+/** Each specialist scans the full diff for its assigned failure class. */
 export const REVIEW_LENSES: Record<string, string> = {
   interactions: `## Review lens for this pass
 
@@ -532,8 +590,10 @@ misses:
 - Cross-hunk contradictions inside this PR: one hunk capping, gating, or
   renaming something another hunk (or unchanged code) still relies on.
 
-Still report any other clear bug you encounter, but spend your exploration
-budget tracing symbols from the diff into unchanged code.`,
+Own producer/consumer contracts: arguments, return values, schemas, configuration,
+registration, and compatibility across boundaries. Follow both ends of a changed
+contract until its actual behavior is established. Do not run a UI lifecycle or
+render-state sweep, a security/data-integrity audit, or a written-rule audit.`,
   integrity: `## Review lens for this pass
 
 This pass concentrates on SECURITY, CONCURRENCY, and DATA-INTEGRITY bugs:
@@ -551,8 +611,10 @@ This pass concentrates on SECURITY, CONCURRENCY, and DATA-INTEGRITY bugs:
   mask): the file is still reachable at its own URL, so a type/shape check is
   not sanitization.
 
-Still report any other clear bug you encounter, but spend your exploration
-budget on these classes.`,
+Own trust boundaries and durable-state integrity: authorization, injection,
+transaction consistency, data preservation, and server/resource concurrency.
+Do not run a UI loading/render-state sweep, general API compatibility sweep,
+or written-rule audit.`,
   frontend: `## Review lens for this pass
 
 This pass concentrates on FRONTEND STATE & RENDER bugs — the class a
@@ -568,8 +630,10 @@ hunk-by-hunk read misses in React/Vue/Svelte UIs:
   changed workflow; lost user input, double-submit paths, and stale data
   after mutations.
 
-Still report any other clear bug you encounter, but spend your exploration
-budget on these classes.`,
+Own observable UI behavior: component lifecycle, client state/cache transitions,
+rendering, and user actions. Read API or backend code only to resolve a concrete
+UI failure; do not run a separate API compatibility, security/data-integrity,
+or written-rule audit.`,
 };
 
 export type ReviewPlaybookId =
@@ -968,14 +1032,7 @@ export function assembleChangesSinceLastReviewPrompt(
   ].join('\n\n');
 }
 
-/**
- * Assembles the full review prompt. The output reminder is deliberately LAST:
- * small models weight recent instructions most heavily, and tens of KB of PR
- * context would otherwise bury the output contract. An optional lens addendum
- * (see REVIEW_LENSES) goes directly before the reminder — recency keeps the
- * lens salient, and parallel passes share an identical prompt prefix, so
- * provider prompt-prefix caching can reuse the expensive common part.
- */
+/** Keep the lens near the output contract; dynamic context must not bury either. */
 export function assembleReviewPrompt(
   prContext: string,
   guidelines: string,
@@ -983,7 +1040,14 @@ export function assembleReviewPrompt(
   evidenceQuotes = false,
   embeddedFirstPrompt = false,
 ): string {
-  const parts = [embeddedFirstPrompt ? EMBEDDED_FIRST_REVIEW_PROMPT : REVIEW_PROMPT];
+  const focusedLens = Object.values(REVIEW_LENSES).includes(lensAddendum);
+  const parts = [
+    focusedLens
+      ? buildLensReviewPrompt(embeddedFirstPrompt)
+      : embeddedFirstPrompt
+        ? EMBEDDED_FIRST_REVIEW_PROMPT
+        : REVIEW_PROMPT,
+  ];
   if (guidelines) {
     parts.push('## Repository review guidelines\n', guidelines);
   }

@@ -549,7 +549,12 @@ export function formatReviewCommits(commits: ReviewCommit[]): string {
     : '## Commits\n(none)';
 }
 
-export function buildReviewContext(params: BuildReviewContextParams): string {
+export function buildReviewScopeContext(
+  params: Pick<
+    BuildReviewContextParams,
+    'pullTitle' | 'pullBody' | 'changedFiles' | 'diffScope' | 'linkedIssues' | 'linkedIssuesOmitted'
+  >,
+): string {
   const sections: string[] = [];
 
   const pullRequestLines = [
@@ -578,6 +583,12 @@ export function buildReviewContext(params: BuildReviewContextParams): string {
         )
       : '## Changed files\n(none)',
   );
+
+  return sections.join('\n\n');
+}
+
+export function buildReviewContext(params: BuildReviewContextParams): string {
+  const sections = [buildReviewScopeContext(params)];
 
   sections.push(formatReviewCommits(params.commits));
 
