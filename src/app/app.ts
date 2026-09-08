@@ -138,7 +138,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           contextTrim: parseEnvBoolean('JBOT_CONTEXT_TRIM', false),
           embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
           guidelineWiden: parseEnvGuidelineWiden('JBOT_GUIDELINE_WIDEN'),
-          commandCodeTools: parseEnvBoolean('JBOT_COMMANDCODE_TOOLS', true),
+          commandCodeTools: parseEnvBoolean('JBOT_COMMANDCODE_TOOLS', false),
           guidelineSweep: parseEnvBoolean('JBOT_GUIDELINE_SWEEP', false),
           verifierSlimContext: parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
           verifyOverlapGrace: parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),

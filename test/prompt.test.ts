@@ -331,12 +331,13 @@ describe('REVIEW_PROMPT', () => {
       (EMBEDDED_FIRST_REVIEW_PROMPT.match(/^## Repository exploration policy$/gm) ?? []).length,
       1,
     );
-    assert.match(EMBEDDED_FIRST_REVIEW_PROMPT, /Follow dependencies beyond the\s+first hop/);
-    assert.match(EMBEDDED_FIRST_REVIEW_PROMPT, /continue\s+paginated or truncated results/);
+    assert.match(EMBEDDED_FIRST_REVIEW_PROMPT, /Follow dependencies beyond the first hop/);
+    assert.match(EMBEDDED_FIRST_REVIEW_PROMPT, /Continue paginated or truncated\s+results/);
     assert.doesNotMatch(
       EMBEDDED_FIRST_REVIEW_PROMPT,
-      /Use repository tools only|one dependency hop by default|Do not keep exploring solely/,
+      /Use repository tools only|one dependency hop by default/,
     );
+    assert.match(EMBEDDED_FIRST_REVIEW_PROMPT, /Do not keep exploring solely for completeness/);
     assert.match(REVIEW_PROMPT, /Missing evidence is a reason to investigate further/);
   });
 });

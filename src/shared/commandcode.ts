@@ -109,7 +109,14 @@ export function writeCommandCodeReadOnlySettings(home: string, tools: boolean): 
     writeFileSync(
       join(home, 'review.mjs'),
       `export default async function(cmd) {
-  try { const mod = await import(${JSON.stringify(mod.href)}); await mod.default(cmd); }
+  try {
+    if (process.env.JBOT_COMMANDCODE_REPAIR === 'true') {
+      cmd.setActiveTools([]);
+      cmd.hooks({ beforeToolCall() { return { block: true }; } });
+      return;
+    }
+    const mod = await import(${JSON.stringify(mod.href)}); await mod.default(cmd);
+  }
   catch { console.error('CommandCode repository tools failed to initialize.'); process.exit(1); }
 }
 `,
@@ -249,6 +256,8 @@ export async function runCommandCodeReview(
     result = parseReview(raw, label, log, { strict: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= 0) throw error;
     log(
       `${label} response unparseable; sending one JSON repair prompt via commandcode: ${message}`,
     );
@@ -264,11 +273,10 @@ export async function runCommandCodeReview(
       }),
       `${label}-repair`,
       log,
-      options.timeoutMs,
+      remaining,
       options.onTokenUsage,
       options.runtime,
       options.effort,
-      options.guidelineSweep ? sessionId : undefined,
     );
     result = parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
@@ -306,7 +314,7 @@ async function runCommandCodeAuxReview(
 ): Promise<ReviewResult> {
   const [workspace, model, prompt, label, log, timeoutMs, onTokenUsage, runtime, effort] = args;
   const deadline = Date.now() + (timeoutMs ?? COMMANDCODE_PROMPT_TIMEOUT_MS);
-  const { finalText, sessionId } = await runCommandCodePrompt(...args);
+  const { finalText } = await runCommandCodePrompt(...args);
   try {
     return parseReview(finalText, label, log, { strict: true, field });
   } catch (error) {
@@ -332,7 +340,6 @@ async function runCommandCodeAuxReview(
       onTokenUsage,
       runtime,
       effort,
-      sessionId,
     );
     return parseReview(repaired.finalText, `${label}-repair`, log, { strict: true, field });
   }
@@ -622,10 +629,15 @@ async function runCommandCodePrompt(
 ): Promise<{ finalText: string; sessionId?: string }> {
   const args = buildCommandCodeCliArgs({ model, effort });
   if (resumeSessionId) args.push('--resume', resumeSessionId);
-  if (runtime?.tools) args.push('--add-dir', workspace, '--mod', join(runtime.home, 'review.mjs'));
-  const input = runtime?.tools
-    ? withCommandCodeToolsDirective(prompt, workspace)
-    : withNoToolsReviewDirective(prompt);
+  const repair = label.endsWith('-repair');
+  if (runtime?.tools) {
+    if (!repair) args.push('--add-dir', workspace);
+    args.push('--mod', join(runtime.home, 'review.mjs'));
+  }
+  const input =
+    runtime?.tools && !repair
+      ? withCommandCodeToolsDirective(prompt, workspace)
+      : withNoToolsReviewDirective(prompt);
   log(
     `Calling ${label} prompt (agent=commandcode-cli, model=${model}${effort ? `, effort=${effort}` : ''})`,
   );
@@ -642,7 +654,12 @@ async function runCommandCodePrompt(
       input,
       env: {
         ...(commandCodeEnvForHome(runtime?.home) ?? process.env),
-        ...(runtime?.tools ? { JBOT_COMMANDCODE_WORKSPACE: workspace } : {}),
+        ...(runtime?.tools
+          ? {
+              JBOT_COMMANDCODE_WORKSPACE: repair ? '' : workspace,
+              JBOT_COMMANDCODE_REPAIR: String(repair),
+            }
+          : {}),
       },
       timeoutMs,
       timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),

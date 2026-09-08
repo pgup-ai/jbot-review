@@ -645,26 +645,33 @@ const model = args[args.indexOf('--model') + 1];
 const resume = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : undefined;
 let input = '';
 process.stdin.on('data', chunk => input += chunk);
-process.stdin.on('end', () => {
+process.stdin.on('end', async () => {
   if (model === 'abort') {
     console.log(JSON.stringify({type:'event',event:{type:'tool_completed',toolName:'jbot_read_file',result:'PRIVATE_CONTENT'}}));
     console.log(JSON.stringify({type:'event',event:{type:'run_end',result:{usage:{inputTokens:12,outputTokens:3,cacheReadTokens:0,cacheWriteTokens:0}}}}));
     setInterval(() => {}, 1000);
     return;
   }
-  fs.appendFileSync(path.join(process.env.HOME, 'calls.jsonl'), JSON.stringify({model, resume, args, input, cwd: process.cwd()}) + '\n');
-  const sessionId = resume || model + '-session';
+  const repair = process.env.JBOT_COMMANDCODE_REPAIR === 'true';
+  if (repair) {
+    const mod = await import(args[args.indexOf('--mod') + 1]);
+    let names, hook;
+    await mod.default({setActiveTools(value) { names = value; }, hooks(value) { hook = value.beforeToolCall; }});
+    if (names.length || !hook({toolName:'read_file'}).block || args.includes('--add-dir')) throw new Error('Repair tools are not disabled');
+  }
+  fs.appendFileSync(path.join(process.env.HOME, 'calls.jsonl'), JSON.stringify({model, resume, repair, args, input, cwd: process.cwd()}) + '\n');
+  const sessionId = resume || model + (repair ? '-repair-session' : '-session');
   const dir = path.join(process.env.HOME, '.commandcode', 'projects');
   fs.mkdirSync(dir, {recursive: true});
   fs.appendFileSync(path.join(dir, sessionId + '.jsonl'), JSON.stringify({type:'message', message:{role:'assistant'}, usage:{costUsd: resume ? 0.125 : 0.25}}) + '\n');
-  const repaired = model === 'repair' && resume && fs.readFileSync(path.join(dir, sessionId + '.jsonl'), 'utf8').trim().split('\n').length === 2;
-  let finalText = model === 'repair' && !resume ? '{}' : resume && !repaired
+  let finalText = model === 'repair' && !resume && !repair ? '{}' : resume
     ? model === 'invalid' ? '{}' : JSON.stringify({findings: [{path:'b.ts',line:1,severity:'P2',title:'extra',body:'rule'}]})
     : JSON.stringify({summary:'main',findings:[{path:'a.ts',line:1,severity:'P1',title:'main',body:'defect'}]});
+  if (model === 'expired') finalText = '{}';
   if (model.startsWith('aux-')) {
     const field = model === 'aux-addressed' ? 'addressedPriorComments' : 'findings';
     const wrong = field === 'findings' ? 'addressedPriorComments' : 'findings';
-    finalText = model === 'aux-broken' ? '{}' : JSON.stringify({[resume ? field : wrong]: []});
+    finalText = model === 'aux-broken' ? '{}' : JSON.stringify({[repair ? field : wrong]: []});
   }
   console.log(JSON.stringify({type:'result',subtype:'success',finalText,
     sessionId: model === 'missing' ? undefined : resume && model === 'mismatch' ? 'wrong-session' : sessionId,
@@ -703,7 +710,7 @@ process.stdin.on('end', () => {
         if (completed)
           assert.deepEqual(
             usage.map((row) => row.estimatedCostUsd),
-            model === 'repair' ? [0.25, undefined, undefined] : [0.25, undefined],
+            model === 'repair' ? [0.25, 0.25, undefined] : [0.25, undefined],
           );
       }),
     );
@@ -726,10 +733,13 @@ process.stdin.on('end', () => {
       assert.equal(call.cwd, realpathSync(join(home, 'launch')));
       assert.equal(call.args[call.args.indexOf('--permission-mode') + 1], 'plan');
       assert.equal(call.args[call.args.indexOf('--mod') + 1], join(home, 'review.mjs'));
+      if (call.repair) {
+        assert.equal(call.resume, undefined);
+        assert.match(call.input, /Tool use disabled/);
+      }
       if (call.resume) {
         assert.equal(call.resume, call.model + '-session');
-        if (!call.input.includes('FULL_DIFF')) assert.match(call.input, /FULL_GUIDELINES/);
-        else assert.equal(call.model, 'repair');
+        assert.match(call.input, /FULL_GUIDELINES/);
       }
     }
     assert.equal(calls.find((call) => call.model === 'verifier').resume, undefined);
@@ -756,7 +766,30 @@ process.stdin.on('end', () => {
         .map((line) => JSON.parse(line))
         .filter((call) => call.model === model);
       assert.equal(auxCalls.length, 2);
-      assert.equal(auxCalls[1].resume, model + '-session');
+      assert.equal(auxCalls[1].resume, undefined);
+      assert.equal(auxCalls[1].repair, true);
+    }
+    let now = Date.now();
+    const clock = t.mock.method(Date, 'now', () => now);
+    try {
+      await assert.rejects(
+        runCommandCodeReview(home, 'commandcode/expired', 'FULL_DIFF', '', () => {}, {
+          runtime: { home, tools: true },
+          timeoutMs: 5000,
+          onTokenUsage: () => {
+            now += 6000;
+          },
+        }),
+        /findings array/,
+      );
+      const expired = readFileSync(join(home, 'calls.jsonl'), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .filter((call) => call.model === 'expired');
+      assert.equal(expired.length, 1);
+    } finally {
+      clock.mock.restore();
     }
     const interval = globalThis.setInterval;
     const timer = t.mock.method(globalThis, 'setInterval', ((callback: () => void, ms: number) => {
