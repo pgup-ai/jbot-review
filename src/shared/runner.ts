@@ -1351,9 +1351,7 @@ async function runReviewPipeline(params: {
   const { mainCliBackend, auxCliBackend, needsOpencode } = backendSelection;
   // Backend selection owns the main-wins key policy; empty when no role
   // routed to commandcode, so skipped and non-commandcode runs stay silent.
-  // A comma-separated key list resolves here — once per run, window-aware,
-  // stickily — to the single key both the usage line and the CLI auth use;
-  // a single key passes through verbatim with no probe.
+  // Resolve once so main and auxiliary sessions use the same account.
   const commandCodeSelection = backendSelection.commandCodeAccessKey
     ? await selectCommandCodeAccessKey(backendSelection.commandCodeAccessKey, log)
     : { key: '', usageLogged: false };

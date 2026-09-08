@@ -529,6 +529,8 @@ jbot-review does not use them for smart key rotation.
 | `grok`                  | `grok/default`                                                  | `grok-auth`, then `xai-api-key` | `GROK_AUTH_JSON`, then `XAI_API_KEY` |
 | `kilo`                  | `kilo/kilo-auto/free`                                           | `kilo-auth`                     | `KILO_AUTH_CONTENT`                  |
 
+CommandCode checks remaining monthly plan credits for single keys and key lists. Exhausted plans are excluded from selection, even when purchased credits remain; if every reachable key is exhausted, the run stops before starting a review.
+
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
 Use `provider: kimi-for-coding` with `kimi-api-key` / `KIMI_API_KEY` for the

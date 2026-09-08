@@ -508,36 +508,70 @@ describe('CommandCode multi-key pick', () => {
     weekly: { used: 1, cap: 35, resetAt: 1, exceeded: weekExceeded },
   });
 
-  it('splits key lists; single keys stay on the legacy path', () => {
+  it('splits key lists', () => {
     assert.deepEqual(splitCommandCodeAccessKeys('a, b,,c '), ['a', 'b', 'c']);
     assert.deepEqual(splitCommandCodeAccessKeys(' solo '), ['solo']);
     assert.deepEqual(splitCommandCodeAccessKeys(',,'), []);
   });
 
-  it('resolves the selector without probing when at most one key survives', async () => {
-    const logs = [];
-    const log = (message) => logs.push(message);
-    // Comma-free values are byte-identical verbatim, whitespace included; the
-    // caller keeps logging the plan-usage line itself (usageLogged: false).
-    assert.deepEqual(await selectCommandCodeAccessKey(' solo ', log), {
-      key: ' solo ',
-      usageLogged: false,
+  it('checks monthly credits for single keys and normalized lists', async (t) => {
+    let remaining = 1;
+    const requests: string[] = [];
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      requests.push(options.headers.Authorization);
+      return new Response(JSON.stringify({ credits: { monthlyCredits: remaining } }));
     });
-    // Stray separators around one real key normalize to it.
-    assert.deepEqual(await selectCommandCodeAccessKey('key,', log), {
-      key: 'key',
-      usageLogged: false,
-    });
-    assert.deepEqual(await selectCommandCodeAccessKey(',key,', log), {
-      key: 'key',
-      usageLogged: false,
-    });
-    // Nothing parseable keeps the raw value (legacy garbage-in behavior).
-    assert.deepEqual(await selectCommandCodeAccessKey(',,', log), {
+    for (const [raw, key] of [
+      [' solo ', ' solo '],
+      ['key,', 'key'],
+      [',key,', 'key'],
+    ]) {
+      const logs: string[] = [];
+      assert.deepEqual(await selectCommandCodeAccessKey(raw, (line) => logs.push(line)), {
+        key,
+        usageLogged: true,
+      });
+      assert.ok(logs.some((line) => line.includes('1.0 plan credits remaining')));
+      assert.equal(requests.at(-1), `Bearer ${key}`);
+      remaining = 0;
+      await assert.rejects(
+        selectCommandCodeAccessKey(raw, () => {}),
+        /monthly plan credits exhausted/,
+      );
+      remaining = 1;
+    }
+    assert.deepEqual(await selectCommandCodeAccessKey(',,', () => {}), {
       key: ',,',
       usageLogged: false,
     });
-    assert.equal(logs.length, 0);
+  });
+
+  it('excludes exhausted monthly plans even with weekly headroom or purchased credits', () => {
+    for (const monthlyCredits of [0, -1]) {
+      const exhausted = {
+        key: 'exhausted',
+        usage: { ...usage(monthlyCredits), purchasedCredits: 100 },
+      };
+      assert.equal(
+        pickCommandCodeAccessKey([
+          exhausted,
+          {
+            key: 'funded',
+            usage: { ...usage(1), weekly: { used: 30, cap: 35, resetAt: 1, exceeded: false } },
+          },
+        ]).key,
+        'funded',
+      );
+      assert.equal(
+        pickCommandCodeAccessKey([exhausted, { key: 'limited', usage: usage(1, true) }]).key,
+        'limited',
+      );
+      assert.throws(() => pickCommandCodeAccessKey([exhausted]), /monthly plan credits exhausted/);
+      assert.throws(
+        () => pickCommandCodeAccessKey([exhausted, { key: 'unknown' }]),
+        /monthly plan credits exhausted/,
+      );
+    }
   });
 
   it('formats per-key probe lines with masked tails', () => {

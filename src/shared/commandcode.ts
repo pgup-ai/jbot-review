@@ -943,15 +943,8 @@ function weeklyHeadroom(usage: CommandCodePlanUsage): number {
   return usage.weekly ? Math.max(0, 1 - usage.weekly.used / usage.weekly.cap) : 1;
 }
 
-/**
- * Window-aware pick: keys throttled RIGHT NOW (a rolling window exceeded)
- * lose to keys that can run. Ranking is by the share of the WEEKLY cap still
- * open — the pacing limit that actually throttles a run, read straight from
- * the credits payload so it never depends on the slower monthly enrichment.
- * Absolute credits remaining break ties. Unreachable probes are excluded;
- * when none are reachable the first key wins, which is exactly the legacy
- * single-key behavior.
- */
+// Rank weekly headroom using the credits payload so selection does not depend
+// on the slower monthly display enrichment. Remaining credits break ties.
 export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[]): {
   key: string;
   reason: string;
@@ -962,10 +955,14 @@ export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[])
   if (reachable.length === 0) {
     return { key: probes[0].key, reason: `probes unavailable; using first of ${probes.length}` };
   }
-  const windowOpen = reachable.filter(
+  const funded = reachable.filter((probe) => probe.usage.monthlyCredits > 0);
+  if (funded.length === 0) {
+    throw new Error('CommandCode monthly plan credits exhausted for all reachable keys.');
+  }
+  const windowOpen = funded.filter(
     (probe) => !probe.usage.fiveHour?.exceeded && !probe.usage.weekly?.exceeded,
   );
-  const pool = windowOpen.length > 0 ? windowOpen : reachable;
+  const pool = windowOpen.length > 0 ? windowOpen : funded;
   const best = pool.reduce((a, b) => {
     const headroomA = weeklyHeadroom(a.usage);
     const headroomB = weeklyHeadroom(b.usage);
@@ -973,8 +970,7 @@ export function pickCommandCodeAccessKey(probes: readonly CommandCodeKeyProbe[])
     if (headroomB === headroomA && b.usage.monthlyCredits > a.usage.monthlyCredits) return b;
     return a;
   });
-  // Counted over REACHABLE keys: an unreachable probe's window state is unknown.
-  const prefix = windowOpen.length === 0 ? `all ${reachable.length} window-limited; ` : '';
+  const prefix = windowOpen.length === 0 ? `all ${funded.length} window-limited; ` : '';
   // The full-headroom sentinel for an uncapped account must not read as a real meter.
   const standing = best.usage.weekly
     ? `${Math.round(weeklyHeadroom(best.usage) * 100)}% of weekly limit left`
@@ -1000,25 +996,14 @@ export function formatCommandCodeKeyProbeLine(
     : `${label}: usage unavailable.`;
 }
 
-/**
- * Resolves a possibly comma-separated access-key list to the one key this run
- * uses. A comma-free value returns VERBATIM with no probe or log — the legacy
- * path stays byte-identical (`usageLogged: false` tells the caller to log the
- * plan-usage line as it always has). Stray separators around one real key
- * normalize to that key (still probe-free). Multiple keys probe their FULL
- * usage in parallel, log one meter line per key BEFORE the pick so the
- * decision's inputs are visible, then take the window-aware pick above.
- * Per-run and sticky: no mid-run rotation.
- */
+/** Probes once per run; the selected key stays fixed for the whole review. */
 export async function selectCommandCodeAccessKey(
   rawValue: string,
   log: (msg: string) => void,
 ): Promise<{ key: string; usageLogged: boolean }> {
-  if (!rawValue.includes(',')) return { key: rawValue, usageLogged: false };
-  const keys = splitCommandCodeAccessKeys(rawValue);
+  const keys = rawValue.includes(',') ? splitCommandCodeAccessKeys(rawValue) : [rawValue];
   // Nothing parseable keeps the raw value: legacy garbage-in behavior.
   if (keys.length === 0) return { key: rawValue, usageLogged: false };
-  if (keys.length === 1) return { key: keys[0], usageLogged: false };
   const probes = await Promise.all(
     keys.map(async (key) => ({ key, usage: await fetchCommandCodeFullUsage(key) })),
   );
