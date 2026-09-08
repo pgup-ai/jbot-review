@@ -44,6 +44,15 @@ export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
   const gitOptions = { cwd: root, stdio: 'ignore' as const, timeout: 30_000 };
   if (spawnSync('git', [...gitArgs, 'rev-parse', '--show-toplevel'], gitOptions).status !== 0)
     throw new Error('Cannot access the reviewed Git repository.');
+  const assertVisible = (rel: string) => {
+    const ignored = spawnSync(
+      'git',
+      [...gitArgs, 'check-ignore', '-q', '--', rel || '.'],
+      gitOptions,
+    );
+    if (ignored.status === 0) throw new Error('Ignored local files are unavailable.');
+    if (ignored.status !== 1) throw new Error('Cannot validate repository file visibility.');
+  };
   const names = ['jbot_read_file', 'jbot_search', 'jbot_list_files'];
   const offset = {
     type: 'integer',
@@ -83,9 +92,11 @@ export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
           throw new Error('Path is outside the reviewed repository.');
         if (rel.split(sep).some((part) => part.toLowerCase() === '.git'))
           throw new Error('Git metadata is unavailable.');
+        assertVisible(rel);
         fd = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
         const opened = fstatSync(fd);
         if (!opened.isFile()) throw new Error('Path is not a regular file.');
+        assertVisible(rel);
         const current = statSync(target);
         if (
           realpathSync(target) !== target ||
@@ -93,9 +104,6 @@ export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
           current.ino !== opened.ino
         )
           throw new Error('Repository file changed while opening it.');
-        const ignored = spawnSync('git', [...gitArgs, 'check-ignore', '-q', '--', rel], gitOptions);
-        if (ignored.status === 0) throw new Error('Ignored local files are unavailable.');
-        if (ignored.status !== 1) throw new Error('Cannot validate repository file visibility.');
         const source = createReadStream(target, { fd, encoding: 'utf8' });
         fd = undefined;
         const page = await readRepositoryPage(source, input);

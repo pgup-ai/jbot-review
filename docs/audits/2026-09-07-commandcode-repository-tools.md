@@ -211,6 +211,27 @@ both builds. The Linux image passes read/list/search, ignored-file, and replacem
 checks. No new live corpus run was made for these fixes; the rollout limitation
 above still applies.
 
+[Run 34173141823](https://github.com/pgup-ai/jbot-review/actions/runs/34173141823/job/101897219507)
+used Pi/Muse 1.2 for main review (109s) and CommandCode/LongCat for auxiliary
+work. Three auxiliary sessions started concurrently: summary finished in 21s,
+addressed checks in 35s, and guideline checking was abandoned after 709s. The
+verifier then timed out after 300s. The job succeeded with incomplete coverage;
+its sole unverified P3 was false: ordinary `git check-ignore` exempts tracked
+files, including those matched by ignore rules. The existing test and Linux
+probe confirm this. More auxiliary slots would not have addressed this run's
+bottleneck. The existing opt-in `verifyOverlapGrace` can overlap verification
+with the auxiliary tail; it does not make LongCat complete successfully.
+
+The next fixes strictly validate the requested array after OpenCode/Pi repairs
+and check file visibility before and after opening, then compare path/descriptor
+identity after Git validation. The regressions fail on the previous code and
+pass on the fixes; the ignored-file replacement probe also passes in Linux.
+Self-review/de-slop rewrote one stale comment and retained one new Pi regression
+case for its independent repair/session-disposal path. Existing cases cover the
+other changes. All 1,029 tests, formatting, typecheck, lint, bundle build, and
+slim-image build pass. No concurrency/default policy changed, and no new live
+corpus run was made.
+
 References: [CommandCode CLI](https://commandcode.ai/docs/reference/cli),
 [mods](https://commandcode.ai/docs/mods), and
 [tools](https://commandcode.ai/docs/reference/tools). Installed-version probes,

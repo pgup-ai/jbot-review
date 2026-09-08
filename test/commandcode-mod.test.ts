@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import childProcess, { execFileSync, spawnSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import {
   existsSync,
   mkdirSync,
@@ -20,7 +21,7 @@ import {
 
 type ModApi = Parameters<typeof commandCodeReviewMod>[0];
 
-it('reads literal bracketed filenames while refusing escapes and non-file reads', async () => {
+it('reads literal bracketed filenames while refusing escapes and non-file reads', async (t) => {
   const parent = mkdtempSync(join(tmpdir(), 'jbot-cc-mod-'));
   const root = join(parent, 'repo');
   mkdirSync(root);
@@ -68,6 +69,31 @@ it('reads literal bracketed filenames while refusing escapes and non-file reads'
     assert.equal(replaced.ok, true);
     assert.match(replaced.content[0].text, /safe/);
     assert.doesNotMatch(replaced.content[0].text, /outside/);
+    writeFileSync(join(root, '.gitignore'), '.env\nracy.ts\n');
+    writeFileSync(join(root, 'racy.ts'), 'IGNORED_SECRET');
+    const spawn = childProcess.spawnSync;
+    let swapped = false;
+    const replacement = t.mock.method(childProcess, 'spawnSync', ((
+      ...args: Parameters<typeof spawn>
+    ) => {
+      if (!swapped && args[1]?.includes('check-ignore') && args[1]?.includes('racy.ts')) {
+        swapped = true;
+        renameSync(join(root, 'racy.ts'), join(root, '.env'));
+        writeFileSync(join(root, 'racy.ts'), 'safe replacement');
+        execFileSync('git', ['-C', root, 'add', '-f', 'racy.ts']);
+      }
+      return spawn(...args);
+    }) as typeof spawn);
+    syncBuiltinESMExports();
+    try {
+      const raced = await read.run({ input: { path: 'racy.ts' } });
+      assert.equal(raced.ok, true);
+      assert.match(raced.content[0].text, /safe replacement/);
+      assert.doesNotMatch(raced.content[0].text, /IGNORED_SECRET/);
+    } finally {
+      replacement.mock.restore();
+      syncBuiltinESMExports();
+    }
     rmSync(join(root, '.git'), { recursive: true });
     const gitFailed = await read.run({ input: { path: 'original.ts' } });
     assert.equal(gitFailed.ok, false);

@@ -727,6 +727,33 @@ describe('Pi review sessions', () => {
     assert.ok(Date.now() - startedAt < 1_000, 'awaited the hanging abort');
   });
 
+  it('reports wrong-field auxiliary repairs and disposes their sessions', async () => {
+    for (const addressed of [false, true]) {
+      const events: string[] = [];
+      const logs: string[] = [];
+      const runtime = fakeRuntime(false, events, [
+        { role: 'assistant', content: '{}' },
+        {
+          role: 'assistant',
+          content: addressed ? '{"findings":[]}' : '{"addressedPriorComments":[]}',
+        },
+      ]);
+      const log = (message: string) => logs.push(message);
+      const result = addressed
+        ? await runPiAddressedPriorCommentsCheck(runtime, 'deepseek/deepseek-v4-flash', 'ctx', log)
+        : await runPiGuidelineComplianceCheck(
+            runtime,
+            'deepseek/deepseek-v4-flash',
+            'ctx',
+            'guides',
+            log,
+          );
+      assert.deepEqual(result, []);
+      assert.ok(logs.some((message) => message.includes('repair failed')));
+      assert.deepEqual(events, ['prompted', 'prompted', 'disposed']);
+    }
+  });
+
   it('leaves a live runtime prompting normally', async () => {
     const events: string[] = [];
     const result = await runPiReview(

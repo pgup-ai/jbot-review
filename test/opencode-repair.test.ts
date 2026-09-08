@@ -282,19 +282,21 @@ describe('runGuidelineComplianceCheck JSON repair loop', () => {
     assert.deepEqual(findings, [], 'a repair transport failure must not escape the aux check');
   });
 
-  it('fails open to zero findings when the repair response is also unparseable', async () => {
-    const { client, prompts } = makeFakeClient(['prose one', 'prose two']);
-
-    const findings = await runGuidelineComplianceCheck(
-      client,
-      'prov/model',
-      'CTX',
-      'guides',
-      noLog,
-    );
-
-    assert.equal(prompts.length, 2, 'exactly one repair attempt before failing open');
-    assert.deepEqual(findings, []);
+  it('fails open and reports malformed or wrong-field repair responses', async () => {
+    for (const repaired of ['prose two', '{"addressedPriorComments":[]}']) {
+      const { client, prompts } = makeFakeClient(['{}', repaired]);
+      const logs: string[] = [];
+      const findings = await runGuidelineComplianceCheck(
+        client,
+        'prov/model',
+        'CTX',
+        'guides',
+        (message) => logs.push(message),
+      );
+      assert.equal(prompts.length, 2);
+      assert.deepEqual(findings, []);
+      assert.ok(logs.some((message) => message.includes('repair failed')));
+    }
   });
 });
 
@@ -318,13 +320,20 @@ describe('runAddressedPriorCommentsCheck JSON repair loop', () => {
     assert.equal(addressed.length, 1);
   });
 
-  it('fails open to no addressed comments when the repair response is also unparseable', async () => {
-    const { client, prompts } = makeFakeClient(['prose one', 'prose two']);
-
-    const addressed = await runAddressedPriorCommentsCheck(client, 'prov/model', 'CTX', noLog);
-
-    assert.equal(prompts.length, 2, 'exactly one repair attempt before failing open');
-    assert.deepEqual(addressed, []);
+  it('fails open and reports wrong-field addressed-check repairs', async () => {
+    for (const repaired of ['prose two', '{"findings":[]}']) {
+      const { client, prompts } = makeFakeClient(['{}', repaired]);
+      const logs: string[] = [];
+      const addressed = await runAddressedPriorCommentsCheck(
+        client,
+        'prov/model',
+        'CTX',
+        (message) => logs.push(message),
+      );
+      assert.equal(prompts.length, 2);
+      assert.deepEqual(addressed, []);
+      assert.ok(logs.some((message) => message.includes('repair failed')));
+    }
   });
 
   it('fails open to no addressed comments when the repair re-prompt itself fails', async () => {

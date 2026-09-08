@@ -1219,7 +1219,7 @@ async function parsePiAuxWithRepair<K extends 'findings' | 'addressedPriorCommen
         timeoutMs,
         onTokenUsage,
       );
-      return parseReview(repaired, `${label}-repair`, log)[field];
+      return parseReview(repaired, `${label}-repair`, log, { strict: true, field })[field];
     } catch (repairError) {
       const message = repairError instanceof Error ? repairError.message : String(repairError);
       log(`(${label} repair failed; keeping empty results: ${message})`);

@@ -873,12 +873,7 @@ async function repromptForJson(
   );
 }
 
-/**
- * Runs an aux session's output through a strict parse, one same-session JSON
- * repair on failure, then a lenient parse — failing open to the empty selection
- * if the repair is unparseable or its round-trip dies. Aux checks never fail the
- * run (invariant #3).
- */
+// One strict repair; auxiliary failure keeps the empty selection.
 async function parseAuxSessionWithRepair<K extends 'findings' | 'addressedPriorComments'>(
   session: {
     client: OpencodeClient;
@@ -908,7 +903,7 @@ async function parseAuxSessionWithRepair<K extends 'findings' | 'addressedPriorC
         timeoutMs,
         onTokenUsage,
       );
-      return parseReview(repaired, `${label}-repair`, log)[field];
+      return parseReview(repaired, `${label}-repair`, log, { strict: true, field })[field];
     } catch (repairError) {
       const message = repairError instanceof Error ? repairError.message : String(repairError);
       log(`(${label} repair failed; keeping empty results: ${message})`);
