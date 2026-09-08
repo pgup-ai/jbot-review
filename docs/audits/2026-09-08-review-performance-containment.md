@@ -35,7 +35,7 @@ no reviewed repository and is not a recall/precision measurement.
 
 Self-review found no additional material issue. De-slop: one comment block
 rewritten, no new test cases, obsolete resume assertions removed. Code, test,
-and README delta before this audit: +75 lines.
+and README delta before this audit: +81 lines.
 
 The required full git-fixture corpus with three repetitions and adjudication
 has not run. This branch is not merge-ready under the default-policy gate in
