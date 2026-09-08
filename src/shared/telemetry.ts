@@ -1,3 +1,4 @@
+import type { CommandCodeProgress } from './commandcode-progress.ts';
 import type { runConfiguration, runIdentity, roleTelemetry } from './run-telemetry.ts';
 import type { Finding, FindingConfidence, Severity } from './types.ts';
 
@@ -33,6 +34,12 @@ export interface FindingTelemetryRow {
   /** Verification downgraded this finding to advisory (uncertain verdict). */
   verifyUncertain: boolean;
   disposition: FindingDisposition;
+}
+
+export interface CommandCodeProgressTelemetryRow extends CommandCodeProgress {
+  kind: 'commandcode-progress';
+  session: string;
+  model: string;
 }
 
 export interface SessionTelemetryRow {
@@ -265,6 +272,7 @@ export interface TelemetryRecorder {
   /** Record the terminal routing of the surviving findings. */
   route(routing: FindingRouting): void;
   recordSession(row: SessionTelemetryRow): void;
+  recordProgress(row: CommandCodeProgressTelemetryRow): void;
   recordPhase(row: PhaseTelemetryRow): void;
   recordTool(row: ToolTelemetryRow): void;
   recordExploration(row: ExplorationTelemetryRow): void;
@@ -286,6 +294,7 @@ const DISABLED: TelemetryRecorder = {
   snapshot: () => undefined,
   route: () => undefined,
   recordSession: () => undefined,
+  recordProgress: () => undefined,
   recordPhase: () => undefined,
   recordTool: () => undefined,
   recordExploration: () => undefined,
@@ -326,6 +335,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   // honest as the model's original output rather than mutating it.
   const routedLine = new Map<string, number>();
   const sessions: SessionTelemetryRow[] = [];
+  const progress: CommandCodeProgressTelemetryRow[] = [];
   const phases: PhaseTelemetryRow[] = [];
   const tools: ToolTelemetryRow[] = [];
   const exploration = new Map<string, ExplorationTelemetryRow>();
@@ -382,6 +392,9 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     },
     recordSession(row) {
       sessions.push({ kind: 'session', ...row });
+    },
+    recordProgress(row) {
+      progress.push(row);
     },
     recordPhase(row) {
       phases.push(row);
@@ -449,6 +462,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
         ...outcomes,
         ...this.findingRows(),
         ...sessions,
+        ...progress,
         ...tools,
         ...exploration.values(),
       ];

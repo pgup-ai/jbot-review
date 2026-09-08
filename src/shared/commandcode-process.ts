@@ -45,11 +45,11 @@ export function createCommandCodeProcessScope() {
 export function runCommandCodeProcess(
   command: string,
   args: string[],
-  options: CliProcessOptions,
+  options: CliProcessOptions & { onStdout?: (chunk: string) => void },
 ): Promise<CliProcessResult> {
   const signal = sessionSignal.getStore();
-  if (!signal) return spawnWithTimeout(command, args, options);
-  signal.throwIfAborted();
+  if (!signal && !options.onStdout) return spawnWithTimeout(command, args, options);
+  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
@@ -93,13 +93,14 @@ export function runCommandCodeProcess(
       // until close, rather than treating the parent's exit as tree cleanup.
       killTimer = setTimeout(() => kill('SIGKILL'), options.killGraceMs ?? 2000);
     };
-    const abort = () => cancel(new Error(String(signal.reason ?? 'CommandCode aborted')));
-    signal.addEventListener('abort', abort, { once: true });
+    const abort = () => cancel(new Error(String(signal?.reason ?? 'CommandCode aborted')));
+    signal?.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(() => cancel(new Error(options.timeoutMessage)), options.timeoutMs);
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => {
       stdout += chunk;
+      options.onStdout?.(chunk);
     });
     child.stderr?.on('data', (chunk: string) => {
       stderr += chunk;
@@ -114,7 +115,7 @@ export function runCommandCodeProcess(
     child.on('close', async (exitCode) => {
       clearTimeout(timer);
       clearTimeout(killTimer);
-      signal.removeEventListener('abort', abort);
+      signal?.removeEventListener('abort', abort);
       await treeKill;
       if (failure) reject(failure);
       else resolve({ stdout, stderr, exitCode });

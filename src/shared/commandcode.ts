@@ -1,3 +1,9 @@
+import {
+  commandCodeToolOutcome,
+  parseCommandCodeUsage,
+  createCommandCodeProgress,
+  type CommandCodeProgress,
+} from './commandcode-progress.ts';
 import { chmodSync, createReadStream, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { opendir } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -116,6 +122,7 @@ export function writeCommandCodeReadOnlySettings(home: string, tools: boolean): 
 export interface CommandCodeRuntime {
   home: string;
   tools: boolean;
+  onProgress?: (label: string, model: string, progress: CommandCodeProgress) => void;
 }
 
 export interface CommandCodeCliArgsInput {
@@ -427,19 +434,6 @@ export function classifyCommandCodePromptFailure(
   return undefined;
 }
 
-function parseCommandCodeUsage(value: unknown): PromptTokenUsage | undefined {
-  if (!isRecord(value)) return undefined;
-  const fields = [
-    value.inputTokens,
-    value.outputTokens,
-    value.cacheReadTokens,
-    value.cacheWriteTokens,
-  ];
-  if (!fields.every((field) => isFiniteNumber(field) && field >= 0)) return undefined;
-  const [input, output, cacheRead, cacheWrite] = fields as number[];
-  return { input, output, reasoning: 0, cacheRead, cacheWrite };
-}
-
 function parseCommandCodeJsonString(value: string): string | undefined {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -498,20 +492,8 @@ export function parseCommandCodeJsonOutput(output: string): {
     }
     if (!isRecord(frame)) continue;
     if (frame.type === 'result') result = frame;
-    const event = frame.event;
-    if (
-      isRecord(event) &&
-      typeof event.type === 'string' &&
-      ['tool_completed', 'tool_errored', 'tool_denied', 'tool_hook_blocked'].includes(event.type)
-    ) {
-      const name =
-        typeof event.toolName === 'string' &&
-        ['jbot_read_file', 'jbot_search', 'jbot_list_files'].includes(event.toolName)
-          ? event.toolName
-          : 'other';
-      const key = `${name}:${event.type}`;
-      toolOutcomes[key] = (toolOutcomes[key] ?? 0) + 1;
-    }
+    const outcome = commandCodeToolOutcome(frame);
+    if (outcome) toolOutcomes[outcome] = (toolOutcomes[outcome] ?? 0) + 1;
   }
   const finalResult = result ?? recoveredRunEnd;
   if (!finalResult) {
@@ -608,6 +590,12 @@ async function runCommandCodePrompt(
     `Calling ${label} prompt (agent=commandcode-cli, model=${model}${effort ? `, effort=${effort}` : ''})`,
   );
   let usage: PromptTokenUsage | undefined;
+  const progress = createCommandCodeProgress();
+  let complete = false;
+  const heartbeat = setInterval(() => {
+    log(`CommandCode progress (${label}): ${JSON.stringify(progress.snapshot())}`);
+  }, 60_000);
+  heartbeat.unref();
   try {
     const result = await runCommandCodeProcess(COMMANDCODE_CLI_BIN, args, {
       cwd: runtime ? join(runtime.home, 'launch') : workspace,
@@ -618,6 +606,7 @@ async function runCommandCodePrompt(
       },
       timeoutMs,
       timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
+      onStdout: progress.feed,
     });
     if (result.exitCode !== 0) {
       throw new Error(
@@ -651,8 +640,17 @@ async function runCommandCodePrompt(
     log(
       `${label} prompt complete via commandcode: result=${parsed.finalText.length} chars stderr=${result.stderr.length} chars`,
     );
+    complete = true;
     return { finalText: parsed.finalText, sessionId: parsed.sessionId };
   } finally {
+    clearInterval(heartbeat);
+    progress.finish();
+    usage ??= progress.usage();
+    const snapshot = progress.snapshot(complete);
+    log(
+      `CommandCode final progress (${label}): ${JSON.stringify(snapshot)}; usage=${usage ? 'available' : 'unavailable'}`,
+    );
+    runtime?.onProgress?.(label, model, snapshot);
     onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(input, 'utf8') }, model, label);
   }
 }

@@ -308,6 +308,34 @@ comment blocks were added. All 1,033 tests, formatting, typecheck, lint, and the
 bundle build pass. Packaging is unchanged. No additional corpus benchmark ran;
 the experiment remains opt-in globally.
 
+### CommandCode live progress
+
+Run 34176488426 completed main review in 199s and the resumed guideline sweep in
+130s, both with no findings. The concurrent Muse 1.3 interactions pass ran for
+929s before the auxiliary grace cutoff aborted it; its queue wait was 1ms.
+Buffered output left no tool or usage metrics for that pass, so the evidence
+cannot distinguish active investigation from a stalled model or tool.
+
+The update consumes NDJSON metadata as it arrives and logs one-minute snapshots.
+Final snapshots are emitted on success, error, timeout, or abort and retained as
+`commandcode-progress` rows, separate from token-bearing session rows. Only
+allowlisted tool names and outcome categories are retained; unknown names become
+`other`. No arguments, results, paths, or generated text enter progress output.
+Malformed and oversized metadata frames mark counts incomplete. Token totals are
+retained only when emitted in a result or run-end frame; no per-turn usage is
+inferred. Hard termination of the entire runner can still prevent the final
+artifact, but earlier heartbeat logs survive.
+
+Self-review and de-slop retained one new parser case for chunk boundaries,
+metadata privacy, dropped frames, and absent usage; existing process/provider
+cases cover live delivery, timeout preservation, and unchanged failure behavior.
+No new TypeScript comment blocks. All 1,034 tests, formatting, typecheck, lint,
+and bundle build pass. A live CLI 1.44.0 Muse 1.2 probe retained the seeded defect
+and emitted tool-progress snapshots (`/tmp/jbot-commandcode-progress-1.2`). Each
+prompt completed within a minute; deterministic subprocess tests cover streaming
+before exit, periodic reporting, timer cleanup, and retained metadata on timeout. No prompt, finding policy, deadline,
+concurrency, or packaging changes; no additional quality benchmark was run.
+
 References: [CommandCode CLI](https://commandcode.ai/docs/reference/cli),
 [mods](https://commandcode.ai/docs/mods), and
 [tools](https://commandcode.ai/docs/reference/tools). Installed-version probes,

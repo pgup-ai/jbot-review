@@ -1829,7 +1829,17 @@ async function runReviewPipeline(params: {
     );
     commandCodeBackend = createCommandCodeBackend(
       workspace,
-      { home: commandCodeHome, tools: options.commandCodeTools },
+      {
+        home: commandCodeHome,
+        tools: options.commandCodeTools,
+        onProgress: (session, model, commandCodeProgress) =>
+          telemetry.recordProgress({
+            kind: 'commandcode-progress',
+            session,
+            model,
+            ...commandCodeProgress,
+          }),
+      },
       (m, override) =>
         commandCodeSessionEffort(m, override, {
           auxModel,

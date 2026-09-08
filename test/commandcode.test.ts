@@ -629,7 +629,7 @@ describe('CommandCode multi-key pick', () => {
   });
 });
 
-it('resumes each CommandCode review explicitly while verification stays fresh', async () => {
+it('resumes each CommandCode review explicitly while verification stays fresh', async (t) => {
   const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-resume-'));
   writeCommandCodeReadOnlySettings(home, true);
   const cli = join(home, 'command-code');
@@ -644,6 +644,12 @@ const resume = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : 
 let input = '';
 process.stdin.on('data', chunk => input += chunk);
 process.stdin.on('end', () => {
+  if (model === 'abort') {
+    console.log(JSON.stringify({type:'event',event:{type:'tool_completed',toolName:'jbot_read_file',result:'PRIVATE_CONTENT'}}));
+    console.log(JSON.stringify({type:'event',event:{type:'run_end',result:{usage:{inputTokens:12,outputTokens:3,cacheReadTokens:0,cacheWriteTokens:0}}}}));
+    setInterval(() => {}, 1000);
+    return;
+  }
   fs.appendFileSync(path.join(process.env.HOME, 'calls.jsonl'), JSON.stringify({model, resume, args, input, cwd: process.cwd()}) + '\n');
   const sessionId = resume || model + '-session';
   const dir = path.join(process.env.HOME, '.commandcode', 'projects');
@@ -720,6 +726,40 @@ process.stdin.on('end', () => {
       }
     }
     assert.equal(calls.find((call) => call.model === 'verifier').resume, undefined);
+    const interval = globalThis.setInterval;
+    const timer = t.mock.method(globalThis, 'setInterval', ((callback: () => void, ms: number) => {
+      assert.equal(ms, 60_000);
+      return interval(callback, 10);
+    }) as typeof setInterval);
+    const partial: unknown[] = [];
+    const partialUsage: unknown[] = [];
+    const logs: string[] = [];
+    await assert.rejects(
+      runCommandCodeReview(home, 'commandcode/abort', '', '', (line) => logs.push(line), {
+        runtime: {
+          home,
+          tools: true,
+          onProgress: (_label, _model, progress) => partial.push(progress),
+        },
+        timeoutMs: 200,
+        onTokenUsage: (usage) => partialUsage.push(usage),
+      }),
+      /timed out/,
+    );
+    assert.equal(partial.length, 1);
+    assert.equal((partial[0] as { complete: boolean }).complete, false);
+    assert.deepEqual((partial[0] as { toolOutcomes: unknown }).toolOutcomes, {
+      'jbot_read_file:tool_completed': 1,
+    });
+    assert.equal((partialUsage[0] as { input: number }).input, 12);
+    assert.match(logs.join('\n'), /final progress/);
+    assert.match(logs.join('\n'), /CommandCode progress/);
+    timer.mock.restore();
+    const count = logs.length;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(logs.length, count);
+
+    assert.doesNotMatch(logs.join('\n'), /PRIVATE_CONTENT/);
   } finally {
     if (pathBefore === undefined) delete process.env.PATH;
     else process.env.PATH = pathBefore;

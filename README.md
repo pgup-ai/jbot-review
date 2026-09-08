@@ -1083,6 +1083,11 @@ listed as available paths, read on demand. When any guidelines are discovered,
 a dedicated guideline-compliance session audits the diff rule-by-rule in
 parallel with the main review (disable with `enable-guideline-pass: false`).
 
+CommandCode logs progress every minute: elapsed time, observed tool outcomes,
+last completed tool, and time since the last event. A final `commandcode-progress`
+telemetry row survives normal timeout or abort handling. Incomplete snapshots are
+labelled; absent usage remains unavailable. Progress contains metadata only.
+
 Set `JBOT_GUIDELINE_SWEEP=true` to run guideline checking as a follow-up in each
 OpenCode, Pi, or CommandCode main review session, reusing its investigation.
 Verification still uses a fresh session. An enabled sweep is independent of

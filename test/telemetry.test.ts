@@ -478,6 +478,23 @@ describe('createTelemetryRecorder finding dispositions', () => {
     assert.ok(lines.some((l) => l.kind === 'session' && l.model === 'deepseek/deepseek-v4-flash'));
     assert.equal(lines.find((l) => l.kind === 'session').promptBytes, 240);
     assert.equal(lines.find((l) => l.kind === 'session').cacheWriteTokens, 10);
+    rec.recordProgress({
+      kind: 'commandcode-progress',
+      session: 'review',
+      model: 'commandcode/model',
+      elapsedMs: 100,
+      complete: false,
+      observedEvents: 1,
+      droppedFrames: 0,
+      toolOutcomes: { 'jbot_read_file:tool_completed': 1 },
+    });
+    const updated = rec
+      .toJsonl()
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(updated.filter((row) => row.kind === 'session').length, 1);
+    assert.equal(updated.find((row) => row.kind === 'commandcode-progress').complete, false);
   });
 });
 
