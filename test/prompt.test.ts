@@ -365,15 +365,27 @@ describe('REVIEW_LENSES', () => {
     assert.match(REVIEW_LENSES.integrity, /served|bundled|mask/i);
   });
 
-  it('is placed after the PR context and before the output reminder', () => {
-    // Tail placement keeps the prompt prefix identical across parallel
-    // passes (prefix-cache reuse) and puts the lens in the recency window.
-    const prompt = assembleReviewPrompt('PR_CONTEXT_SENTINEL', '', REVIEW_LENSES.interactions);
-
-    assert.ok(prompt.startsWith(REVIEW_PROMPT));
-    const lensIndex = prompt.indexOf('## Review lens for this pass');
-    assert.ok(lensIndex > prompt.indexOf('PR_CONTEXT_SENTINEL'));
-    assert.ok(lensIndex < prompt.indexOf('## Final output reminder'));
+  it('focuses interactions and frontend without losing evidence rules or tail ordering', () => {
+    for (const lens of [REVIEW_LENSES.interactions, REVIEW_LENSES.frontend]) {
+      const prompt = assembleReviewPrompt('PR_CONTEXT_SENTINEL', 'GUIDELINES_SENTINEL', lens);
+      assert.match(prompt, /COMPLETE\s+base\.\.\.head diff/);
+      assert.match(prompt, /unchanged callers/);
+      assert.match(prompt, /Do not modify files/);
+      assert.match(prompt, /Do not run repository code/);
+      assert.match(prompt, /Never state an\s+unverified library behavior as fact/);
+      assert.match(prompt, /Cite only locations you actually inspected/);
+      assert.match(prompt, /"summary": return an empty string/);
+      assert.doesNotMatch(
+        prompt,
+        /## Mandatory coverage protocol|## Calibration examples|## Architecture and design/,
+      );
+      assert.ok(prompt.indexOf('GUIDELINES_SENTINEL') < prompt.indexOf('PR_CONTEXT_SENTINEL'));
+      const lensIndex = prompt.indexOf('## Review lens for this pass');
+      assert.ok(lensIndex > prompt.indexOf('PR_CONTEXT_SENTINEL'));
+      assert.ok(lensIndex < prompt.indexOf('## Final output reminder'));
+      assert.ok(prompt.endsWith(REVIEW_OUTPUT_REMINDER));
+    }
+    assert.ok(assembleReviewPrompt('PR', '', REVIEW_LENSES.integrity).startsWith(REVIEW_PROMPT));
   });
 });
 

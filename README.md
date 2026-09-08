@@ -1115,7 +1115,12 @@ batch. Other consumers can select the same environment settings.
 `review-interactions` investigates cross-file regressions and inconsistent
 contracts across the full PR diff. `addressed-prior-comments` separately checks
 whether old findings have been fixed; deterministic checks control thread
-resolution and review compaction. `finding-verification` evaluates candidate
+resolution and review compaction. Interactions and frontend lenses use focused
+prompts with the shared evidence, severity, and output rules. They retain the
+same diff evidence, relevant guidelines, PR intent, review focus, and caller
+context, but omit commit history, CI status, prior review threads, and summary
+instructions. Main review, guideline checks, and verification keep their existing
+context. `finding-verification` evaluates candidate
 findings in a fresh session, using repository tools where the backend supports
 them. Incorrect verification or thread closure can hide real issues.
 
