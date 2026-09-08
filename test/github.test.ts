@@ -5,6 +5,8 @@ import {
   checkAutoApprovalEligibility,
   classifyPriorJbotThread,
   compactJbotReviewBody,
+  completedReviewHead,
+  withReviewCoverage,
   formatFindingLabel,
   formatPriorJbotThreadsForPrompt,
   isBotAddressedReply,
@@ -501,6 +503,13 @@ describe('resolved review finalization', () => {
     assert.equal(body.match(/jbot-review:compacted/g)?.length, 1);
     assert.match(linkedBody, /jbot-review:linked-comments:200 -->$/);
     assert.equal(compactJbotReviewBody(body, 1), body);
+    const head = 'a'.repeat(40);
+    const complete = withReviewCoverage(LINKED_REVIEW_BODY, head, true);
+    const compacted = compactJbotReviewBody(complete, 2);
+    assert.equal(completedReviewHead(compacted), head);
+    assert.equal(compactJbotReviewBody(compacted, 2), compacted);
+    for (const original of [LINKED_REVIEW_BODY, withReviewCoverage(complete, head, false)])
+      assert.equal(completedReviewHead(compactJbotReviewBody(original, 2)), undefined);
   });
 
   it('updates the submitted review summary body', async () => {

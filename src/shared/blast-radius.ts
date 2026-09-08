@@ -3,49 +3,26 @@ import { promisify } from 'node:util';
 
 import type { PrFile } from './github.ts';
 
-/**
- * Deterministic blast-radius manifest: for each exported symbol this PR adds
- * or modifies, list the unchanged files that reference it. The flagship miss
- * pattern this targets is "changed code breaks an UNCHANGED caller" — a
- * flash-tier model rarely volunteers the grep, so the wrapper greps for it
- * and puts the call sites in front of the model.
- *
- * Everything here is best-effort: any failure yields an empty block, never a
- * failed review run.
- */
+// Preload unchanged callers because smaller models may not investigate them unaided.
 export const MAX_BLAST_SYMBOLS = 20;
 export const MAX_CALLSITE_FILES_PER_SYMBOL = 8;
 
 const execFileAsync = promisify(execFile);
 const GIT_GREP_TIMEOUT_MS = 10_000;
 
-// Changed export declarations identify callers worth including in review context.
-const EXPORT_BODY =
-  String.raw`\s*export\s+(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?` +
-  String.raw`(?:function\s*\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)`;
-const ADDED_EXPORT_DECLARATION = new RegExp(String.raw`^\+` + EXPORT_BODY);
-const ADDED_NAMED_EXPORTS = /^\+\s*export\s+(?:type\s+)?\{([^}]+)\}/;
-
-function collectExportsFromLine(
-  line: string,
-  declaration: RegExp,
-  named: RegExp,
-  out: Set<string>,
-): void {
-  const declarationMatch = line.match(declaration);
-  if (declarationMatch) out.add(declarationMatch[1]);
-  const namedMatch = line.match(named);
-  if (namedMatch) {
-    for (const symbol of exportedNamesFromList(namedMatch[1])) out.add(symbol);
-  }
-}
+const EXPORT_DECLARATION =
+  /^[+-]\s*export\s+(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\s*\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/;
+const NAMED_EXPORTS = /^[+-]\s*export\s+(?:type\s+)?\{([^}]+)\}/;
 
 export function extractChangedExportedSymbols(files: PrFile[]): string[] {
   const symbols = new Set<string>();
   for (const file of files) {
     if (!file.patch) continue;
     for (const line of file.patch.split('\n')) {
-      collectExportsFromLine(line, ADDED_EXPORT_DECLARATION, ADDED_NAMED_EXPORTS, symbols);
+      const declaration = line.match(EXPORT_DECLARATION);
+      if (declaration) symbols.add(declaration[1]);
+      const named = line.match(NAMED_EXPORTS);
+      if (named) for (const symbol of exportedNamesFromList(named[1])) symbols.add(symbol);
     }
   }
   return [...symbols];
@@ -128,7 +105,7 @@ export async function buildBlastRadiusBlock(
 
     return [
       '## Changed symbol usage',
-      'Exported symbols this PR adds or modifies, with UNCHANGED files that reference them.',
+      'Exported symbols this PR adds, modifies, or removes, with UNCHANGED files that reference them.',
       'Check each listed call site: does it still hold after this change? (Coverage protocol step 2.)',
       ...(allSymbols.length > symbols.length
         ? [`Showing ${symbols.length} of ${allSymbols.length} exported symbols.`]

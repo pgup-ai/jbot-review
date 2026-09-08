@@ -1223,20 +1223,24 @@ export function compactJbotReviewBody(body: string, threadCount: number): string
   const noun = threadCount === 1 ? 'thread' : 'threads';
   return appendLinkedCommentsFooter(
     appendReviewMarker(
-      [
-        '## J-Bot Code Review',
-        '',
-        `✅ **All ${threadCount} review ${noun} resolved.**`,
-        '',
-        '<details>',
-        '<summary>Show original review</summary>',
-        '',
-        original,
-        '',
-        '</details>',
-        '',
-        COMPACTED_REVIEW_MARKER,
-      ].join('\n'),
+      withReviewCoverage(
+        [
+          '## J-Bot Code Review',
+          '',
+          `✅ **All ${threadCount} review ${noun} resolved.**`,
+          '',
+          '<details>',
+          '<summary>Show original review</summary>',
+          '',
+          original,
+          '',
+          '</details>',
+          '',
+          COMPACTED_REVIEW_MARKER,
+        ].join('\n'),
+        completedReviewHead(body),
+        true,
+      ),
     ),
     linkedCommentIds,
   );

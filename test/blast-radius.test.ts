@@ -16,7 +16,7 @@ import type { PrFile } from '../src/shared/github.ts';
 const execFileAsync = promisify(execFile);
 
 describe('extractChangedExportedSymbols', () => {
-  it('extracts exported declarations from added lines only', () => {
+  it('extracts exported declarations from changed lines only', () => {
     const patch = [
       '@@ -1,4 +1,8 @@',
       '+export function addedFn(a: number) {',
@@ -30,7 +30,7 @@ describe('extractChangedExportedSymbols', () => {
 
     const symbols = extractChangedExportedSymbols([{ filename: 'src/a.ts', patch }]);
 
-    assert.deepEqual(symbols, ['addedFn', 'addedConst', 'addedAsync', 'AddedShape']);
+    assert.deepEqual(symbols, ['addedFn', 'addedConst', 'addedAsync', 'AddedShape', 'removedFn']);
   });
 
   it('handles default exports, generators, and abstract classes', () => {
@@ -46,7 +46,7 @@ describe('extractChangedExportedSymbols', () => {
     assert.deepEqual(symbols, ['main', 'makeThings', 'BaseStore']);
   });
 
-  it('extracts named export lists and aliases from added lines', () => {
+  it('extracts named export lists and aliases from changed lines', () => {
     const patch = [
       '@@ -1,1 +1,4 @@',
       '+export { rawName, localName as exportedName };',
@@ -57,7 +57,7 @@ describe('extractChangedExportedSymbols', () => {
 
     const symbols = extractChangedExportedSymbols([{ filename: 'src/a.ts', patch }]);
 
-    assert.deepEqual(symbols, ['rawName', 'exportedName', 'Shape', 'PublicShape']);
+    assert.deepEqual(symbols, ['rawName', 'exportedName', 'Shape', 'PublicShape', 'gone']);
   });
 
   it('ignores files without patches', () => {
@@ -67,7 +67,7 @@ describe('extractChangedExportedSymbols', () => {
 
 describe('buildBlastRadiusBlock', () => {
   const files: PrFile[] = [
-    { filename: 'src/a.ts', patch: '@@ -1,1 +1,1 @@\n+export function changedFn() {' },
+    { filename: 'src/a.ts', patch: '@@ -1,1 +1,1 @@\n-export function changedFn() {' },
   ];
 
   it('lists only call sites outside the changed files', async () => {
@@ -144,7 +144,7 @@ describe('buildBlastRadiusBlock', () => {
     try {
       await execFileAsync('git', ['init', '-q'], { cwd: repo });
       await mkdir(join(repo, 'src'), { recursive: true });
-      await writeFile(join(repo, 'src', 'a.ts'), 'export function changedFn() {}\n');
+      await writeFile(join(repo, 'src', 'a.ts'), 'export function renamedFn() {}\n');
       await writeFile(join(repo, 'src', 'caller.ts'), 'import { changedFn } from "./a.ts";\n');
       await writeFile(join(repo, 'src', 'dollar.ts'), 'import { foo$ } from "./a.ts";\n');
       await execFileAsync('git', ['add', '-A'], { cwd: repo });
@@ -155,7 +155,7 @@ describe('buildBlastRadiusBlock', () => {
           // ghostFn exists only in the patch, not the worktree: its grep
           // exits 1 (no matches) and must not poison changedFn's result.
           patch:
-            '@@ -1,1 +1,3 @@\n+export function changedFn() {\n+export function ghostFn() {\n+export const foo$ = 1;',
+            '@@ -1,1 +1,3 @@\n-export function changedFn() {\n+export function renamedFn() {\n+export function ghostFn() {\n+export const foo$ = 1;',
         },
       ]);
 

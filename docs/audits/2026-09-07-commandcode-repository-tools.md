@@ -434,15 +434,11 @@ P1 retained and full finder coverage. Local logs and results are retained under
 Run `34183061911` completed its selected passes, but never launched interactions:
 the incremental reducer trusted the reviewed-head marker from an earlier run
 whose interactions pass had aborted. Removed that reducer and its now-unused
-removed-export scanner. Candidate lenses and guidelines use the full PR diff;
-full-diff dynamic fan-out and main-shard caching remain unchanged.
-
-The unchanged-diff shortcut now requires a completion footer on the latest
-posted review. Older, incomplete, or unrecognized reports cannot authorize a
-skip. The footer is appended after model text; an earlier embedded marker cannot
-override an incomplete footer. OpenCode and Pi auxiliary repair failures now
-reach the runner's existing fail-open handler, which retains main findings and
-records incomplete coverage instead of treating repair failure as zero findings.
+removed-export scanner. The maintained [rerun policy](../../README.md#project-guidelines)
+requires explicit completion evidence; the full-diff dynamic fan-out and
+main-shard cache were preserved. OpenCode and Pi auxiliary repair failures were
+moved to the runner's existing fail-open handler so failed repair no longer
+appeared as zero findings.
 
 The scheduler reuses the shared timeout helper and retains acquired concurrency
 slots until cancelled work settles. Other lens sessions also enforce their
@@ -470,3 +466,36 @@ four rewritten (export context, provider fallbacks, queue ordering), twelve cut
 (with the deleted reducer). No new test cases; thirteen obsolete policy cases
 were removed, and retained cases gained regression assertions. The historical
 sweep description is explicitly marked as an earlier experiment.
+
+### Run 34184612659 and follow-up feedback
+
+The run at `e4c1d27` completed review processing in 267.5s with no timed-out
+passes. Main used OpenCode/Muse 1.3; auxiliary roles used Pi/Muse 1.2. Main
+completed in 242.1s, guidelines in 20.5s, interactions in 68.6s, and fresh
+verification in 16.4s immediately after main. Interactions proposed a shared
+`sweepComplete` race; verification correctly rejected it because the variable
+is declared inside each shard callback. No new review was posted on the empty
+rerun. The addressed check recognized the Pi search fix.
+
+Main made 39 successful tool calls across 29 turns, so disabled tooling does not
+explain its misses. The run demonstrates restored interactions scheduling and a
+useful verifier rejection, but main missed the cancellation-exception and
+completion-compaction issues confirmed during this feedback audit. No general
+recall or model comparison conclusion follows from this single run.
+
+Follow-up fixes contain synchronous timeout-cancellation errors and carry a
+validated completion footer outside newly compacted review bodies. Incomplete
+and legacy bodies still cannot gain completion status. Caller hints now include
+removed declarations and named exports, covering unchanged callers of a renamed
+export; this improves the previous added-lines-only hint generator. The claimed
+broken named-export regex was disproved by executing the committed extractor.
+The Pi wrong-field repair test also passes and checks the intended rejection.
+
+Validation: all 1,022 tests, typecheck, lint, formatting, and bundle build passed.
+Existing tests cover throwing cancellation, compaction/idempotency, incomplete
+footer precedence, and removed-export callers through real Git. No new test
+cases. Self-review/de-slop removed a one-use generic export helper and the audit's
+duplicate maintained rerun policy. Three comment blocks: one rewritten, one cut,
+one kept for cancellation failure semantics. No remaining P1/P2 finding was
+identified. No new live model probe or core/full corpus was run for these fixes;
+the inspected GitHub run predates them.

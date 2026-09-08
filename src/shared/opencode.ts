@@ -754,7 +754,11 @@ export async function withTimeout<T>(
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           reject(new Error(message));
-          onTimeout?.();
+          try {
+            onTimeout?.();
+          } catch {
+            // Cancellation is best-effort; preserve the timeout rejection.
+          }
         }, timeoutMs);
       }),
     ]);

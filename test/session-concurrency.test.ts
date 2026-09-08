@@ -225,7 +225,7 @@ describe('limitReviewBackendSessions', () => {
     });
     backend.abortSessionsByLabel = (label) => {
       aborted.push(label);
-      return 1;
+      throw new Error('Cancellation failed');
     };
     const limited = limitReviewBackendSessions(backend, 'aux', slots);
     const call = limited.runReview('model', '', '', noLog, {
