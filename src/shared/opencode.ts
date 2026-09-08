@@ -1,3 +1,4 @@
+import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import {
   createOpencode,
   type AssistantMessage,
@@ -17,6 +18,7 @@ import {
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
+  assembleGuidelineSweepPrompt,
   assembleReviewPrompt,
   buildJsonRepairPrompt,
   CONTINUATION_NUDGE_PROMPT,
@@ -777,6 +779,7 @@ export async function runReview(
   guidelines: string,
   log: (msg: string) => void,
   options: {
+    guidelineSweep?: GuidelineSweep;
     lensAddendum?: string;
     evidenceQuotes?: boolean;
     embeddedFirstPrompt?: boolean;
@@ -786,6 +789,7 @@ export async function runReview(
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
+  const deadlineAt = options.timeoutMs ? Date.now() + options.timeoutMs : undefined;
   const prompt = promptForModel(
     model,
     assembleReviewPrompt(
@@ -807,8 +811,9 @@ export async function runReview(
     options.timeoutMs,
     options.onTokenUsage,
   );
+  let result: ReviewResult;
   try {
-    return parseReview(raw, label, log, { strict: true });
+    result = parseReview(raw, label, log, { strict: true });
   } catch (error) {
     const repaired = await repromptForJson(
       client,
@@ -821,8 +826,33 @@ export async function runReview(
       options.timeoutMs,
       options.onTokenUsage,
     );
-    return parseReview(repaired, `${label}-repair`, log, { strict: true });
+    result = parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
+  if (!options.guidelineSweep) return result;
+  const sweep = options.guidelineSweep;
+  const sweepLabel = `guideline-sweep-${label}`;
+  return appendGuidelineSweep(
+    result,
+    sweep,
+    sweepLabel,
+    deadlineAt,
+    async (timeoutMs) => {
+      const raw = await promptPlanAgentInSession(
+        client,
+        model,
+        sessionID,
+        promptForModel(model, assembleGuidelineSweepPrompt(sweep.guidelines)),
+        sweepLabel,
+        log,
+        timeoutMs,
+        options.onTokenUsage,
+        undefined,
+        label,
+      );
+      return parseReview(raw, sweepLabel, log, { strict: true }).findings;
+    },
+    log,
+  );
 }
 
 /**

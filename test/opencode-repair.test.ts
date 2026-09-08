@@ -102,6 +102,39 @@ const VALID_REVIEW = JSON.stringify({
 });
 
 describe('runReview JSON repair loop', () => {
+  it('reuses the main session for a guideline sweep without losing findings on failure', async () => {
+    for (const response of [
+      JSON.stringify({
+        findings: [{ path: 'src/b.ts', line: 2, severity: 'P2', title: 'rule', body: 'violation' }],
+      }),
+      '{}',
+      new Error('sweep unavailable'),
+      'HANG',
+    ]) {
+      const { client, prompts, tools } = makeFakeClient([VALID_REVIEW, response]);
+      let creates = 0;
+      const create = client.session.create;
+      client.session.create = (async (...args: Parameters<typeof create>) => {
+        creates++;
+        return create(...args);
+      }) as typeof create;
+      const coverage: Array<{ state: string }> = [];
+      const result = await runReview(client, 'prov/model', 'CTX', 'GUIDES', noLog, {
+        timeoutMs: response === 'HANG' ? 50 : 1000,
+        guidelineSweep: { guidelines: 'FULL GUIDES', onCoverage: (row) => coverage.push(row) },
+      });
+      assert.equal(creates, 1);
+      assert.equal(prompts.length, 2);
+      assert.match(prompts[1], /FULL GUIDES/);
+      assert.doesNotMatch(prompts[1], /CTX/);
+      assert.equal(result.summary, 'ok after repair');
+      assert.deepEqual(tools[1], tools[0]);
+      const succeeded = typeof response === 'string' && response.startsWith('{"findings"');
+      assert.equal(result.findings.length, succeeded ? 2 : 1);
+      assert.equal(coverage[0]?.state, succeeded ? 'completed' : 'failed');
+    }
+  });
+
   it('continues an abandoned turn with one same-session nudge, not a reformat', async () => {
     // Delimiter-free text is an announcement/empty turn; asking it to
     // reformat "as JSON" elicits an empty review instead of the work.

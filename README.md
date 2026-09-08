@@ -776,7 +776,7 @@ documentation lookup.
 | `max-findings`               | No       | `0`                   | Cap findings; `0` means no limit                                                                                                                                                                                                                                             |
 | `min-severity`               | No       | `nit`                 | Include `P0`, `P1`, `P2`, `P3`, or `nit`                                                                                                                                                                                                                                     |
 | `include-prior-comments`     | No       | `true`                | Include existing PR review comments in context                                                                                                                                                                                                                               |
-| `enable-guideline-pass`      | No       | `true`                | Run a dedicated guideline-compliance session when repo guidelines exist                                                                                                                                                                                                      |
+| `enable-guideline-pass`      | No       | `true`                | Check repository guidelines in a separate session or an opted-in main-session sweep                                                                                                                                                                                          |
 | `fail-on-error`              | No       | `true`                | Fail the workflow if the review cannot complete                                                                                                                                                                                                                              |
 
 ### Review output
@@ -1082,6 +1082,15 @@ definition; docs referenced from other guidance files are deduplicated and
 listed as available paths, read on demand. When any guidelines are discovered,
 a dedicated guideline-compliance session audits the diff rule-by-rule in
 parallel with the main review (disable with `enable-guideline-pass: false`).
+
+Set `JBOT_GUIDELINE_SWEEP=true` to run guideline checking as a follow-up in each
+OpenCode/Pi main review session, reusing its investigation. Verification still
+uses a fresh session. This experiment defaults off; other backends retain the
+separate guideline pass, and Arena comparisons keep their existing policy.
+The sweep receives the full guidelines and has at most ten minutes within the
+main attempt's remaining deadline. Failures preserve main findings and mark
+coverage incomplete. Incomplete sweeps are not cached.
+
 For changed files, J-Bot also checks ancestor directories for scoped review files
 such as `REVIEW.md`, `AGENTS.md`, `.cursor/BUGBOT.md`, and `.cursor/rules/`.
 

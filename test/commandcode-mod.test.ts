@@ -70,29 +70,40 @@ it('reads literal bracketed filenames while refusing escapes and non-file reads'
     assert.match(replaced.content[0].text, /safe/);
     assert.doesNotMatch(replaced.content[0].text, /outside/);
     writeFileSync(join(root, '.gitignore'), '.env\nracy.ts\n');
-    writeFileSync(join(root, 'racy.ts'), 'IGNORED_SECRET');
-    const spawn = childProcess.spawnSync;
-    let swapped = false;
-    const replacement = t.mock.method(childProcess, 'spawnSync', ((
-      ...args: Parameters<typeof spawn>
-    ) => {
-      if (!swapped && args[1]?.includes('check-ignore') && args[1]?.includes('racy.ts')) {
-        swapped = true;
-        renameSync(join(root, 'racy.ts'), join(root, '.env'));
-        writeFileSync(join(root, 'racy.ts'), 'safe replacement');
-        execFileSync('git', ['-C', root, 'add', '-f', 'racy.ts']);
-      }
-      return spawn(...args);
-    }) as typeof spawn);
-    syncBuiltinESMExports();
-    try {
-      const raced = await read.run({ input: { path: 'racy.ts' } });
-      assert.equal(raced.ok, true);
-      assert.match(raced.content[0].text, /safe replacement/);
-      assert.doesNotMatch(raced.content[0].text, /IGNORED_SECRET/);
-    } finally {
-      replacement.mock.restore();
+    for (const swapAt of [1, 2]) {
+      writeFileSync(join(root, 'racy.ts'), swapAt === 1 ? 'IGNORED_SECRET' : 'safe original');
+      if (swapAt === 2) execFileSync('git', ['-C', root, 'add', '-f', 'racy.ts']);
+      const spawn = childProcess.spawnSync;
+      let checks = 0;
+      const replacement = t.mock.method(childProcess, 'spawnSync', ((
+        ...args: Parameters<typeof spawn>
+      ) => {
+        if (
+          args[1]?.includes('check-ignore') &&
+          args[1]?.includes('racy.ts') &&
+          ++checks === swapAt
+        ) {
+          renameSync(join(root, 'racy.ts'), join(root, '.env'));
+          writeFileSync(join(root, 'racy.ts'), 'safe replacement');
+          execFileSync('git', ['-C', root, 'add', '-f', 'racy.ts']);
+        }
+        return spawn(...args);
+      }) as typeof spawn);
       syncBuiltinESMExports();
+      try {
+        const raced = await read.run({ input: { path: 'racy.ts' } });
+        if (swapAt === 1) {
+          assert.equal(raced.ok, true);
+          assert.match(raced.content[0].text, /safe replacement/);
+          assert.doesNotMatch(raced.content[0].text, /IGNORED_SECRET/);
+        } else {
+          assert.equal(raced.ok, false);
+          assert.match(raced.error, /changed while opening/);
+        }
+      } finally {
+        replacement.mock.restore();
+        syncBuiltinESMExports();
+      }
     }
     rmSync(join(root, '.git'), { recursive: true });
     const gitFailed = await read.run({ input: { path: 'original.ts' } });

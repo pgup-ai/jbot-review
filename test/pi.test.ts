@@ -727,6 +727,37 @@ describe('Pi review sessions', () => {
     assert.ok(Date.now() - startedAt < 1_000, 'awaited the hanging abort');
   });
 
+  it('keeps the main Pi session for the guideline sweep and disposes it afterward', async () => {
+    for (const sweepResponse of ['{"findings":[]}', '{}']) {
+      const events: string[] = [];
+      const runtime = fakeRuntime(false, events, [
+        { role: 'assistant', content: reviewResultJson },
+        { role: 'assistant', content: sweepResponse },
+      ]);
+      let creates = 0;
+      const create = runtime.sdk.createAgentSession;
+      runtime.sdk.createAgentSession = async (args: unknown) => {
+        creates++;
+        return (create as (args: unknown) => Promise<{ session: unknown }>)(args);
+      };
+      const coverage: Array<{ state: string }> = [];
+      const result = await runPiReview(
+        runtime,
+        'deepseek/deepseek-v4-flash',
+        'ctx',
+        'guides',
+        () => {},
+        {
+          guidelineSweep: { guidelines: 'guides', onCoverage: (row) => coverage.push(row) },
+        },
+      );
+      assert.equal(result.summary, 'ok');
+      assert.equal(creates, 1);
+      assert.deepEqual(events, ['prompted', 'prompted', 'disposed']);
+      assert.equal(coverage[0]?.state, sweepResponse === '{}' ? 'failed' : 'completed');
+    }
+  });
+
   it('reports wrong-field auxiliary repairs and disposes their sessions', async () => {
     for (const addressed of [false, true]) {
       const events: string[] = [];

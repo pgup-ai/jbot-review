@@ -1,3 +1,4 @@
+import type { GuidelineSweep } from './guideline-sweep.ts';
 import { Semaphore, type SemaphorePriority, type TokenUsageRecorder } from './opencode.ts';
 import {
   classifyTelemetryStopReason,
@@ -11,12 +12,14 @@ export interface ReviewBackend {
   name: string;
   observability?: BackendTelemetryCapability;
   canReadWorkspace?: boolean;
+  supportsGuidelineSweep?: boolean;
   runReview(
     model: string,
     prContext: string,
     guidelines: string,
     log: (msg: string) => void,
     options?: {
+      guidelineSweep?: GuidelineSweep;
       lensAddendum?: string;
       label?: string;
       timeoutMs?: number;
@@ -181,6 +184,7 @@ export function limitReviewBackendSessions(
     name: backend.name,
     observability: backend.observability,
     canReadWorkspace: backend.canReadWorkspace,
+    supportsGuidelineSweep: backend.supportsGuidelineSweep,
     abortSessionsByLabel: (label, log) => {
       let queued = 0;
       for (const [controller, session] of pending) {

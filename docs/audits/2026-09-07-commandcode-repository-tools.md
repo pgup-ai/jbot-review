@@ -232,6 +232,52 @@ other changes. All 1,029 tests, formatting, typecheck, lint, bundle build, and
 slim-image build pass. No concurrency/default policy changed, and no new live
 corpus run was made.
 
+## Main-session guideline experiment
+
+[Run 34174490400](https://github.com/pgup-ai/jbot-review/actions/runs/34174490400/job/101901090780)
+used OpenCode/Muse 1.3 for main review and CommandCode/LongCat for auxiliary
+work. Main finished in 230.5s with no findings. Summary and addressed checks
+finished in 16s and 35.5s, but guideline checking was abandoned after 835.7s,
+including ten minutes after main finished. No findings meant no verification.
+The job succeeded with incomplete coverage. The log does not establish whether
+context size caused the guideline timeout; adding concurrency would not fix a
+session that already ran concurrently.
+
+`JBOT_GUIDELINE_SWEEP` is an opt-in experiment, enabled in this repository's
+dogfood workflow. OpenCode and Pi continue each main session for a guideline
+sweep using its existing diff and investigation, plus the full bounded guidelines.
+Other backends retain the separate pass. Verification still creates a fresh
+session. The sweep stays within the main attempt's remaining deadline, capped
+at ten minutes; failures retain main findings and record incomplete coverage.
+Cache identity includes the sweep guidelines, and incomplete sweeps are not
+cached. Arena comparisons retain their existing policy.
+
+Live probes used a committed fixture with a removed subprocess-timeout fallback:
+
+| Actual backend/model               | Result                                                                                 |
+| ---------------------------------- | -------------------------------------------------------------------------------------- |
+| OpenCode/Muse 1.3 contributor free | Same-session sweep completed; fresh verifier retained the seeded defect; 76s total.    |
+| Pi/Muse 1.2 contributor free       | Same-session sweep completed; separate verifier retained the seeded defect; 47s total. |
+
+An additional Muse 1.3 probe requested Pi but routed through OpenCode; it is not
+Pi evidence. Local artifacts are under `/tmp/jbot-guideline-sweep-opencode`,
+`/tmp/jbot-guideline-sweep-pi`, and `/tmp/jbot-guideline-sweep-pi-native`.
+Both sweeps returned zero additional findings. These probes demonstrate session
+reuse and retained findings, not improved recall or latency versus a control.
+The Pi finding also included an unnecessary speculative alternative about zero
+being interpreted as disabled; retaining the real defect does not establish
+perfect precision. No core/full corpus or blind adjudication was run for this
+experiment, and the global default remains off.
+
+The unresolved race-test feedback was valid. The existing regression now also
+replaces the path during the second visibility check, after opening. Removing
+descriptor revalidation makes the test fail. Self-review and de-slop retained
+three new cases for session reuse/fail-open behavior and cache separation, with
+no new TypeScript comment blocks. All 1,032 tests, typecheck, lint, formatting,
+bundle build, and slim-image build pass. Later test-only extensions for policy
+fingerprinting, capability forwarding, and changed-guideline cache identity
+passed the focused 81-test suite and typecheck.
+
 References: [CommandCode CLI](https://commandcode.ai/docs/reference/cli),
 [mods](https://commandcode.ai/docs/mods), and
 [tools](https://commandcode.ai/docs/reference/tools). Installed-version probes,

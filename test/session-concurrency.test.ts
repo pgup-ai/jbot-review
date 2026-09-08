@@ -47,12 +47,11 @@ describe('limitReviewBackendSessions', () => {
       },
     };
 
-    await limitReviewBackendSessions(makeBackend(), 'main', slots).runReview(
-      'model',
-      'context',
-      '',
-      noLog,
-    );
+    const main = makeBackend();
+    main.supportsGuidelineSweep = true;
+    const limited = limitReviewBackendSessions(main, 'main', slots);
+    assert.equal(limited.supportsGuidelineSweep, true);
+    await limited.runReview('model', 'context', '', noLog);
     await limitReviewBackendSessions(makeBackend(), 'aux', slots).runReview(
       'model',
       'context',

@@ -20,6 +20,7 @@ const POLICY_KEYS = [
   'includePriorComments',
   'context7Mode',
   'guidelinePass',
+  'guidelineSweep',
   'contextTrim',
   'embeddedFirstPrompt',
   'guidelineWiden',

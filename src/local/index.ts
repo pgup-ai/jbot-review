@@ -736,6 +736,7 @@ async function review(
       includePriorComments: config?.includePriorComments ?? true,
       context7Mode: config?.context7Mode ?? 'auto',
       guidelinePass: config?.guidelinePass ?? true,
+      guidelineSweep: !comparison && parseEnvBoolean('JBOT_GUIDELINE_SWEEP', false),
       shardCachePath: '',
       reviewPasses: config?.reviewPasses ?? parseEnvInt('JBOT_REVIEW_PASSES', 1),
       verifyFindings:

@@ -86,6 +86,7 @@ async function main(): Promise<void> {
     embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
     guidelineWiden: parseEnvGuidelineWiden('JBOT_GUIDELINE_WIDEN'),
     commandCodeTools: parseEnvBoolean('JBOT_COMMANDCODE_TOOLS', true),
+    guidelineSweep: parseEnvBoolean('JBOT_GUIDELINE_SWEEP', false),
     verifierSlimContext: parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
     verifyOverlapGrace: parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
   };

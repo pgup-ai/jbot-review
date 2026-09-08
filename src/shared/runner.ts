@@ -296,6 +296,7 @@ function createOpencodeBackend(
   if (toolTelemetry) configureOpencodeTelemetry(client, toolTelemetry);
   return {
     name: 'opencode',
+    supportsGuidelineSweep: true,
     observability: OPENCODE_TELEMETRY_CAPABILITY,
     abortSessionsByLabel: (label, log) => abortOpencodeSessionsByLabel(client, label, log),
     runReview: (model, prContext, guidelines, log, options) =>
@@ -346,6 +347,7 @@ function createOpencodeBackend(
 function createPiBackend(runtime: PiRuntime): ReviewBackend {
   return {
     name: 'pi',
+    supportsGuidelineSweep: true,
     observability: PI_TELEMETRY_CAPABILITY,
     abortSessionsByLabel: (label, log) => abortPiSessionsByLabel(runtime, label, log),
     runReview: (model, prContext, guidelines, log, options) =>
@@ -789,6 +791,7 @@ export interface ReviewRunOptions {
   context7Mode?: Context7Mode;
   context7ApiKey?: string;
   guidelinePass?: boolean;
+  guidelineSweep?: boolean;
   /**
    * Directory for content-addressed reuse of completed shard results across
    * same-content re-runs. Must live OUTSIDE the reviewed checkout (the
@@ -2379,6 +2382,16 @@ async function runReviewPipeline(params: {
         'Shard cache disabled: the configured directory resolves inside the reviewed checkout (forgeable).',
       );
     }
+    const sweepGuidelines =
+      options.guidelineSweep &&
+      mainBackend.supportsGuidelineSweep &&
+      incrementalLenses.guidelinePass
+        ? guidelines
+        : undefined;
+    if (sweepGuidelines)
+      log(
+        'Guideline checking will continue in each main review session; verification remains separate.',
+      );
     const shardCache =
       shardCacheDir && headSha
         ? {
@@ -2446,6 +2459,7 @@ async function runReviewPipeline(params: {
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
       cache: shardCache,
+      sweepGuidelines,
     });
 
     const addressedPriorCheck = trackAux(
@@ -2478,7 +2492,7 @@ async function runReviewPipeline(params: {
         prContext: auxPrContext,
         guidelinesForPrompt: guidelines,
         hasGuidelines: Boolean(guidelines),
-        enabled: incrementalLenses.guidelinePass,
+        enabled: incrementalLenses.guidelinePass && !sweepGuidelines,
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -3213,6 +3227,7 @@ export function normalizeOptions(
     context7Mode: options?.context7Mode ?? 'auto',
     context7ApiKey: options?.context7ApiKey ?? '',
     guidelinePass: options?.guidelinePass ?? true,
+    guidelineSweep: options?.guidelineSweep ?? false,
     shardCachePath: options?.shardCachePath ?? '',
     contextTrim: options?.contextTrim ?? false,
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
@@ -3685,6 +3700,7 @@ export async function runShardedReview(params: {
   backend: ReviewBackend;
   model: string;
   guidelinesForPrompt: string;
+  sweepGuidelines?: string;
   shardPlans: ShardPlan[];
   changedFiles: string[];
   timeoutMs?: number;
@@ -3758,7 +3774,12 @@ export async function runShardedReview(params: {
               context,
               guidelines: guidelinesForPrompt,
               evidenceQuotes: !!params.evidenceQuotes,
-              config: params.cache.config,
+              config: params.sweepGuidelines
+                ? JSON.stringify({
+                    config: params.cache.config,
+                    sweepGuidelines: params.sweepGuidelines,
+                  })
+                : params.cache.config,
             })
           : undefined;
       const primaryFingerprint = fingerprintFor(plan.context);
@@ -3769,11 +3790,23 @@ export async function runShardedReview(params: {
             `${plan.label}: reusing cached result for identical content (${primaryFingerprint}).`,
           );
           params.onCoverage?.({ session: plan.label, state: 'reused', promptBytes });
+          if (params.sweepGuidelines)
+            params.onCoverage?.({ session: `guideline-sweep-${plan.label}`, state: 'reused' });
           return { plan, result: cached };
         }
       }
+      let sweepComplete = !params.sweepGuidelines;
+      const guidelineSweep = params.sweepGuidelines
+        ? {
+            guidelines: params.sweepGuidelines,
+            onCoverage: (coverage: Parameters<SessionCoverageRecorder>[0]) => {
+              sweepComplete = coverage.state === 'completed';
+              params.onCoverage?.(coverage);
+            },
+          }
+        : undefined;
       const persist = (result: ReviewResultLike, fingerprint: string | undefined) => {
-        if (params.cache && fingerprint) {
+        if (params.cache && fingerprint && sweepComplete) {
           saveShardResult(params.cache.dir, fingerprint, {
             summary: result.summary,
             findings: result.findings,
@@ -3783,6 +3816,7 @@ export async function runShardedReview(params: {
       try {
         const result = await backend.runReview(model, plan.context, guidelinesForPrompt, log, {
           label: plan.label,
+          guidelineSweep,
           timeoutMs,
           onTokenUsage: params.onTokenUsage,
           evidenceQuotes: params.evidenceQuotes,
@@ -3879,6 +3913,7 @@ export async function runShardedReview(params: {
             log,
             {
               label: `${plan.label}-retry`,
+              guidelineSweep,
               timeoutMs: retryTimeoutMs,
               onTokenUsage: params.onTokenUsage,
               evidenceQuotes: params.evidenceQuotes,

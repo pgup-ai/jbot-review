@@ -507,6 +507,58 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
       ...(staleCheck ? { staleCheck } : {}),
     });
 
+  it('separates sweep cache identity and never caches an incomplete sweep', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-sweep-cache-'));
+    let calls = 0;
+    let complete = false;
+    const backend = {
+      name: 'fake',
+      runReview: async (
+        _model: string,
+        _context: string,
+        _guides: string,
+        _log: unknown,
+        options?: Parameters<ReviewBackend['runReview']>[4],
+      ) => {
+        calls++;
+        options?.guidelineSweep?.onCoverage?.({
+          session: 'guideline-sweep-review',
+          state: complete ? 'completed' : 'failed',
+        });
+        return okResult;
+      },
+    } as unknown as ReviewBackend;
+    const invoke = (sweepGuidelines?: string) =>
+      runShardedReview({
+        backend,
+        model: 'fake/model',
+        guidelinesForPrompt: 'guides',
+        sweepGuidelines,
+        shardPlans: [shardPlan],
+        changedFiles: ['a.ts'],
+        context7Active: false,
+        context7ApiKey: '',
+        log: () => {},
+        cache: { dir, headSha: 'abc', config: 'same' },
+      });
+    try {
+      await invoke();
+      await invoke();
+      assert.equal(calls, 1);
+      await invoke('full guides');
+      await invoke('full guides');
+      assert.equal(calls, 3);
+      complete = true;
+      await invoke('full guides');
+      await invoke('full guides');
+      assert.equal(calls, 4);
+      await invoke('different full guidelines');
+      assert.equal(calls, 5);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('skips the retry for deterministic failures and keeps it for transient ones', async () => {
     // A deterministic failure re-buys the same error — the INC-001 waste class.
     const authCalls: string[] = [];
@@ -1094,6 +1146,7 @@ describe('normalizeOptions defaults', () => {
     assert.equal(defaults.guidelineWiden, 'auto');
     assert.equal(defaults.verifierSlimContext, false);
     assert.equal(defaults.verifyOverlapGrace, false);
+    assert.equal(defaults.guidelineSweep, false);
   });
 
   it('keeps SDK routing automatic unless an entrypoint supplies the override', () => {

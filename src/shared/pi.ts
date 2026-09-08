@@ -1,3 +1,4 @@
+import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createReadStream, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +23,7 @@ import {
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
+  assembleGuidelineSweepPrompt,
   assembleReviewPrompt,
   buildJsonRepairPrompt,
   CONTINUATION_NUDGE_PROMPT,
@@ -1108,6 +1110,7 @@ export async function runPiReview(
   guidelines: string,
   log: (msg: string) => void,
   options: {
+    guidelineSweep?: GuidelineSweep;
     lensAddendum?: string;
     evidenceQuotes?: boolean;
     embeddedFirstPrompt?: boolean;
@@ -1117,6 +1120,7 @@ export async function runPiReview(
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
+  const deadlineAt = options.timeoutMs ? Date.now() + options.timeoutMs : undefined;
   const prompt = assembleReviewPrompt(
     prContext,
     guidelines,
@@ -1136,8 +1140,9 @@ export async function runPiReview(
       options.timeoutMs,
       options.onTokenUsage,
     );
+    let result: ReviewResult;
     try {
-      return parseReview(raw, label, log, { strict: true });
+      result = parseReview(raw, label, log, { strict: true });
     } catch (error) {
       const repaired = await repromptPiForJson(
         session,
@@ -1149,8 +1154,30 @@ export async function runPiReview(
         options.timeoutMs,
         options.onTokenUsage,
       );
-      return parseReview(repaired, `${label}-repair`, log, { strict: true });
+      result = parseReview(repaired, `${label}-repair`, log, { strict: true });
     }
+    if (!options.guidelineSweep) return result;
+    const sweep = options.guidelineSweep;
+    const sweepLabel = `guideline-sweep-${label}`;
+    return await appendGuidelineSweep(
+      result,
+      sweep,
+      sweepLabel,
+      deadlineAt,
+      async (timeoutMs) => {
+        const raw = await promptPiSession(
+          session,
+          model,
+          assembleGuidelineSweepPrompt(sweep.guidelines),
+          sweepLabel,
+          log,
+          timeoutMs,
+          options.onTokenUsage,
+        );
+        return parseReview(raw, sweepLabel, log, { strict: true }).findings;
+      },
+      log,
+    );
   } finally {
     disposePiSession(runtime, session, label, log);
   }

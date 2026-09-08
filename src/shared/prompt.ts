@@ -1124,6 +1124,13 @@ JSON string values; escape newlines inside string values as \\n. Do not write
 an audit recap, completion note, question, or "what would you like next"
 message.`;
 
+export function assembleGuidelineSweepPrompt(guidelines: string): string {
+  return assembleGuidelineCompliancePrompt(
+    'Continue the review in this session, using the PR diff and inspected evidence already in its history. Check the written guidelines below against the same assigned diff scope. Return only additional guideline violations not already reported in your main review; do not repeat the review summary.',
+    guidelines,
+  );
+}
+
 export function assembleGuidelineCompliancePrompt(prContext: string, guidelines: string): string {
   const parts = [GUIDELINE_COMPLIANCE_PROMPT];
   if (guidelines) {
