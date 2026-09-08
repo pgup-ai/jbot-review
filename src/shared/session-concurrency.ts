@@ -20,6 +20,7 @@ export interface ReviewBackend {
     log: (msg: string) => void,
     options?: {
       guidelineSweep?: GuidelineSweep;
+      deadlineAt?: number;
       lensAddendum?: string;
       label?: string;
       timeoutMs?: number;
@@ -103,16 +104,22 @@ export function limitReviewBackendSessions(
   providerSlots?: SessionSlots,
   telemetry?: { phases: PhaseTelemetryTracker; tools: ToolTelemetryAccumulator },
 ): ReviewBackend {
-  if (!globalSlots && !providerSlots && !telemetry) return backend;
   const pending = new Map<AbortController, string>();
   const rolePriority = role === 'main' ? 'high' : 'normal';
   const withSlots = async <T>(
     session: string,
     run: () => Promise<T>,
     priority: SemaphorePriority = rolePriority,
+    budget?: { timeoutMs: number; deadlineAt?: number; log: (message: string) => void },
   ): Promise<T> => {
     const controller = new AbortController();
     pending.set(controller, session);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (budget?.deadlineAt !== undefined)
+      timer = setTimeout(
+        () => controller.abort(new Error(`${session} deadline expired while queued`)),
+        Math.max(0, budget.deadlineAt - Date.now()),
+      );
     let providerRelease: (() => void) | undefined;
     let globalRelease: (() => void) | undefined;
     const queueDone = telemetry?.phases.start({
@@ -131,6 +138,9 @@ export function limitReviewBackendSessions(
         : undefined;
       controller.signal.throwIfAborted();
       pending.delete(controller);
+      clearTimeout(timer);
+      if (budget?.deadlineAt !== undefined && budget.deadlineAt <= Date.now())
+        throw new Error(`${session} deadline expired while queued`);
       queueDone?.();
       const executionDone = telemetry?.phases.start({
         phase: role === 'main' ? 'main-execution' : 'auxiliary-execution',
@@ -139,7 +149,23 @@ export function limitReviewBackendSessions(
         backend: backend.name,
       });
       try {
-        const result = await run();
+        const result = budget
+          ? await Promise.race([
+              run(),
+              new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(
+                  () => {
+                    reject(new Error(`${session} timed out`));
+                    backend.abortSessionsByLabel?.(session, budget.log);
+                  },
+                  Math.max(
+                    0,
+                    Math.min(budget.timeoutMs, (budget.deadlineAt ?? Infinity) - Date.now()),
+                  ),
+                );
+              }),
+            ])
+          : await run();
         executionDone?.();
         telemetry?.tools.finishSession({
           session,
@@ -171,6 +197,7 @@ export function limitReviewBackendSessions(
       queueDone?.(classifyTelemetryStopReason(error));
       throw error;
     } finally {
+      clearTimeout(timer);
       pending.delete(controller);
       providerRelease?.();
       // Let the next provider waiter enter the global priority queue before releasing the global slot.
@@ -194,7 +221,37 @@ export function limitReviewBackendSessions(
       }
       return queued + (backend.abortSessionsByLabel?.(label, log) ?? 0);
     },
-    runReview: (...args) => withSlots(args[4]?.label ?? 'review', () => backend.runReview(...args)),
+    runReview: (model, context, guidelines, log, options) => {
+      const budget =
+        options?.label === 'review-interactions'
+          ? {
+              timeoutMs: Math.min(600_000, options.timeoutMs ?? Infinity),
+              deadlineAt: options.deadlineAt,
+              log,
+            }
+          : undefined;
+      return withSlots(
+        options?.label ?? 'review',
+        () =>
+          backend.runReview(
+            model,
+            context,
+            guidelines,
+            log,
+            budget
+              ? {
+                  ...options,
+                  timeoutMs: Math.max(
+                    0,
+                    Math.min(budget.timeoutMs, (budget.deadlineAt ?? Infinity) - Date.now()),
+                  ),
+                }
+              : options,
+          ),
+        rolePriority,
+        budget,
+      );
+    },
     runAddressedPriorCommentsCheck: (...args) =>
       withSlots('addressed-prior-comments', () => backend.runAddressedPriorCommentsCheck(...args)),
     runGuidelineComplianceCheck: (...args) =>

@@ -2546,6 +2546,7 @@ async function runReviewPipeline(params: {
       guidelinesForPrompt,
       lensKeys: incrementalLenses.lensKeys,
       timeoutMs: finderTimeoutMs,
+      deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt),
       evidenceQuotes: options.evidenceQuotes,
       embeddedFirstPrompt: options.embeddedFirstPrompt,
       log,
@@ -2772,37 +2773,32 @@ async function runReviewPipeline(params: {
     );
     const verificationDone = phases.start({ phase: 'verification', scope: 'run' });
     let verifiedFindings: Finding[];
-    if (overlapVerification) {
-      const outcome = await overlapVerification;
-      if (outcome !== 'skipped') {
-        const merge = mergeVerdictsByLocation(
-          suppression.findings,
-          outcome.targets,
-          outcome.verdicts,
-        );
-        logVerdictOutcomes(merge, log);
-        const late = await verifyFindings({
-          workspace,
-          backend: auxBackend,
-          model: auxModel,
-          prContext: verifierPrContext,
-          findings: merge.lateUnverified,
-          enabled: options.verifyFindings && auxSessionsEnabled,
-          timeoutMs: computeVerificationTimeoutMs(
-            options.timeBudgetMinutes,
-            Date.now() - runStartedAt,
-          ),
-          modelOptions: verifierSessionOptions,
-          log,
-          onTokenUsage: recordTokenUsage,
-          onCoverage: (row) => recordCoverage({ ...row, session: 'late-finding-verification' }),
-        });
-        const lateSet = new Set(merge.lateUnverified);
-        verifiedFindings = [...merge.findings.filter((finding) => !lateSet.has(finding)), ...late];
-      } else {
-        // Fail-open, same as a broken serial verifier.
-        verifiedFindings = suppression.findings;
-      }
+    const outcome = await overlapVerification;
+    if (outcome && outcome !== 'skipped') {
+      const merge = mergeVerdictsByLocation(
+        suppression.findings,
+        outcome.targets,
+        outcome.verdicts,
+      );
+      logVerdictOutcomes(merge, log);
+      const late = await verifyFindings({
+        workspace,
+        backend: auxBackend,
+        model: auxModel,
+        prContext: verifierPrContext,
+        findings: merge.lateUnverified,
+        enabled: options.verifyFindings && auxSessionsEnabled,
+        timeoutMs: computeVerificationTimeoutMs(
+          options.timeBudgetMinutes,
+          Date.now() - runStartedAt,
+        ),
+        modelOptions: verifierSessionOptions,
+        log,
+        onTokenUsage: recordTokenUsage,
+        onCoverage: (row) => recordCoverage({ ...row, session: 'late-finding-verification' }),
+      });
+      const lateSet = new Set(merge.lateUnverified);
+      verifiedFindings = [...merge.findings.filter((finding) => !lateSet.has(finding)), ...late];
     } else {
       verifiedFindings = await verifyFindings({
         workspace,
@@ -3308,6 +3304,7 @@ function startLensPasses(params: {
   guidelinesForPrompt: string;
   lensKeys: string[];
   timeoutMs?: number;
+  deadlineAt?: number;
   evidenceQuotes?: boolean;
   embeddedFirstPrompt?: boolean;
   log: (msg: string) => void;
@@ -3325,6 +3322,7 @@ function startLensPasses(params: {
         lensAddendum: REVIEW_LENSES[key],
         label: `review-${key}`,
         timeoutMs: params.timeoutMs,
+        deadlineAt: params.deadlineAt,
         onTokenUsage: params.onTokenUsage,
         evidenceQuotes: params.evidenceQuotes,
         embeddedFirstPrompt: params.embeddedFirstPrompt,

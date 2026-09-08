@@ -1095,6 +1095,17 @@ last completed tool, and time since the last event. A final `commandcode-progres
 telemetry row survives normal timeout or abort handling. Incomplete snapshots are
 labelled; absent usage remains unavailable. Progress contains metadata only.
 
+This repository's dogfood workflow runs guideline checking and interactions in
+independent sessions alongside main review. It sets `JBOT_GUIDELINE_SWEEP=false`
+and `JBOT_VERIFY_OVERLAP_GRACE=true`: main findings enter fresh verification as
+soon as main review returns; new auxiliary findings receive a later verification
+batch. Other consumers can select the same environment settings.
+
+Interactions has a ten-minute execution limit starting after session-slot
+acquisition, bounded by the remaining run deadline. The run deadline also applies
+while queued. Expiry requests backend cancellation and marks coverage incomplete;
+completed main findings survive. The cap includes any repairs inside the session.
+
 Set `JBOT_GUIDELINE_SWEEP=true` to run guideline checking as a follow-up in each
 OpenCode, Pi, or CommandCode main review session, reusing its investigation.
 Verification still uses a fresh session. An enabled sweep is independent of

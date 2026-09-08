@@ -211,6 +211,68 @@ describe('limitReviewBackendSessions', () => {
     assert.deepEqual(order, ['main-1', 'main-2', 'aux']);
   });
 
+  it('bounds interactions after queueing and cancels at the run deadline', async () => {
+    const slots = new Semaphore(1);
+    const release = await slots.acquire();
+    let started = false;
+    let finish!: () => void;
+    const aborted: string[] = [];
+    const backend = makeBackend(async () => {
+      started = true;
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    backend.abortSessionsByLabel = (label) => {
+      aborted.push(label);
+      finish();
+      return 1;
+    };
+    const limited = limitReviewBackendSessions(backend, 'aux', slots);
+    const call = limited.runReview('model', '', '', noLog, {
+      label: 'review-interactions',
+      timeoutMs: 20,
+    });
+    const rejected = assert.rejects(call, /timed out/);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(started, false);
+    release();
+    await rejected;
+    assert.equal(started, true);
+    assert.deepEqual(aborted, ['review-interactions']);
+    const releaseAgain = await slots.acquire();
+    started = false;
+    await assert.rejects(
+      limited.runReview('model', '', '', noLog, {
+        label: 'review-interactions',
+        deadlineAt: Date.now() + 10,
+      }),
+      /deadline expired/,
+    );
+    assert.equal(started, false);
+    releaseAgain();
+    const fast = makeBackend();
+    const observedTimeouts: number[] = [];
+    const run = fast.runReview;
+    fast.runReview = async (...args) => {
+      observedTimeouts.push(args[4]!.timeoutMs!);
+      return run(...args);
+    };
+    fast.abortSessionsByLabel = () => {
+      throw new Error('Completed session was aborted');
+    };
+    await limitReviewBackendSessions(fast, 'aux', undefined).runReview('model', '', '', noLog, {
+      label: 'review-interactions',
+      timeoutMs: 10,
+    });
+    await limitReviewBackendSessions(fast, 'aux', undefined).runReview('model', '', '', noLog, {
+      label: 'review-interactions',
+      timeoutMs: 1_200_000,
+    });
+    assert.deepEqual(observedTimeouts, [10, 600_000]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+
   it('emits complete queue/execution terminal rows on success and timeout', async () => {
     const recorder = createTelemetryRecorder(true);
     const telemetry = {

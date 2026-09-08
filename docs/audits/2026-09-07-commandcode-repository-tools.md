@@ -390,3 +390,40 @@ formatting, and bundle build. New assertions were folded into existing tests;
 no additional cases or source comments were needed. Self-review/de-slop found no
 remaining P1/P2 issue. Core/full corpus and blind adjudication were not run for
 this incremental change; no default-policy flip is included.
+
+### Independent auxiliary scheduling
+
+Dogfood now sets `JBOT_GUIDELINE_SWEEP=false` and
+`JBOT_VERIFY_OVERLAP_GRACE=true`. Main, guideline compliance, and interactions
+start independently. Main findings enter a fresh verifier without waiting for
+auxiliary settlement; the existing merge sends newly arriving findings to a
+later verification batch. An early verification failure now falls back to the
+normal final verification path instead of publishing survivors without another
+attempt. Global concurrency and consumer defaults for these experiments remain
+unchanged; consumers can opt into the same environment settings.
+
+The shared session scheduler limits interactions to ten minutes after slot
+acquisition, including retries and repair calls. The absolute run deadline also
+bounds execution and queued work. Expiry invokes backend cancellation, rejects
+the pass, and records incomplete coverage through the existing lens handler.
+Completed main findings survive. Other pass deadlines remain unchanged.
+
+Validation: all 1,035 tests, typecheck, lint, formatting, and bundle build. The
+new scheduler case uniquely covers execution allowance after queueing, queued
+run-deadline expiry, cancellation, the 600s cap, and timer cleanup. Existing
+verdict-merge tests cover late findings. Self-review/de-slop removed the obsolete
+fail-open comment (one block cut; no new comments) and retained one new test case.
+No packaging or external API contract changed. Core/full corpus was not run for
+this scheduling change; the live fixture probes below are not a general quality
+or latency benchmark.
+
+Live CommandCode/Muse 1.2 probes used the same committed timeout-defect fixture.
+A five-minute run exercised actual auxiliary cancellation when the existing
+five-minute verification reserve left no settle grace; it retained the verified
+P1 and correctly reported incomplete interactions coverage. A ten-minute run
+started all three finder roles independently: guidelines finished at 15.4s,
+main at 20.4s, and interactions at 22.1s. Verification started after main while
+interactions was still running. The run completed in 37s with the verified seeded
+P1 retained and full finder coverage. Local logs and results are retained under
+`/tmp/jbot-independent-scheduling-1.2` and
+`/tmp/jbot-independent-scheduling-full-1.2`.
