@@ -47,7 +47,7 @@ export function computeVerificationTimeoutMs(
   return Math.min(remaining, MAX_VERIFICATION_MS);
 }
 
-export const AUXILIARY_SETTLE_GRACE_MS = 10 * 60_000;
+export const AUXILIARY_SETTLE_GRACE_MS = 5 * 60_000;
 
 export function computeAuxiliaryGraceMs(
   timeBudgetMinutes: number,

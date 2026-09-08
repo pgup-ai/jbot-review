@@ -1115,7 +1115,16 @@ contracts across the full PR diff. `addressed-prior-comments` separately checks
 whether old findings have been fixed; deterministic checks control thread
 resolution and review compaction. `finding-verification` evaluates candidate
 findings in a fresh session, using repository tools where the backend supports
-them. Incorrect verification or thread closure can hide real issues.
+them. P0–P2 and substantive P3/nit claims are verified. A high-confidence,
+explicitly local documentation or maintainability suggestion can skip verification
+only when its evidence quote matches its added line; it is not marked verified.
+Completed verification drops unsupported P3/nit advisories, while missing verdicts
+and failed sessions retain the existing unverified fail-open behavior.
+Incorrect verification or thread closure can hide real issues.
+
+After main review completes, auxiliary sessions have at most five minutes to
+settle, bounded by the run budget with verification and posting time reserved.
+Unfinished sessions are cancelled and reported as incomplete coverage.
 
 Interactions has a ten-minute execution limit starting after session-slot
 acquisition, bounded by the remaining run deadline. The run deadline also applies

@@ -184,10 +184,24 @@ function significantTokens(text: string): string[] {
   return [...new Set(text.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])];
 }
 
-/** Stable severity order keeps blocking findings first without excluding advisories. */
-export function selectFindingIndexes(findings: Finding[]): number[] {
+export function selectFindingIndexes(
+  findings: Finding[],
+  patches?: ReadonlyMap<string, string>,
+): number[] {
   return findings
     .map((finding, index) => ({ finding, index }))
+    .filter(({ finding }) => {
+      if (
+        BLOCKING_SEVERITIES.has(finding.severity) ||
+        !finding.localSuggestion ||
+        finding.confidence !== 'high' ||
+        !['docs', 'maintainability'].includes(finding.kind ?? '') ||
+        !finding.evidence
+      )
+        return true;
+      const window = evidenceWindow(patches?.get(finding.path), finding.evidence);
+      return !window || window === 'ambiguous' || window.anchor !== finding.line;
+    })
     .sort((a, b) => SEVERITY_RANK[a.finding.severity] - SEVERITY_RANK[b.finding.severity])
     .map(({ index }) => index);
 }
@@ -233,7 +247,12 @@ export function mergeVerdictsByLocation(
       reason: 'Finding verification did not return a verdict.',
     };
     if (verdict.verdict === 'confirmed') return [finding];
-    if (verdict.verdict === 'refuted') {
+    if (
+      verdict.verdict === 'refuted' ||
+      (verdict.verdict === 'uncertain' &&
+        !BLOCKING_SEVERITIES.has(finding.severity) &&
+        verdictByIdentity.get(identity) !== undefined)
+    ) {
       dropped.push({ finding, reason: verdict.reason });
       return [];
     }
@@ -271,7 +290,12 @@ export function applyFindingVerdicts(
       reason: 'Finding verification did not return a verdict.',
     };
     if (verdict.verdict === 'confirmed') return;
-    if (verdict.verdict === 'refuted') {
+    if (
+      verdict.verdict === 'refuted' ||
+      (verdict.verdict === 'uncertain' &&
+        !BLOCKING_SEVERITIES.has(findings[findingIndex].severity) &&
+        verdictByPosition.has(position))
+    ) {
       droppedIndexes.add(findingIndex);
       dropped.push({ finding: findings[findingIndex], reason: verdict.reason });
     } else {

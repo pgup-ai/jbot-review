@@ -15,7 +15,7 @@ import {
   shouldPostReviewComment,
   suppressPreviouslyReported,
 } from '../src/shared/filter.ts';
-import type { Finding } from '../src/shared/types.ts';
+import { sanitizeFinding, type Finding } from '../src/shared/types.ts';
 
 function finding(overrides: Partial<Finding>): Finding {
   return {
@@ -224,6 +224,49 @@ describe('selectFindingIndexes', () => {
     assert.deepEqual(selectFindingIndexes(findings), [0, 1, 2]);
     assert.deepEqual(selectFindingIndexes([finding({ severity: 'P3' })]), [0]);
   });
+
+  it('skips only explicitly local suggestions grounded on their changed line', () => {
+    const local = finding({
+      severity: 'nit',
+      kind: 'maintainability',
+      confidence: 'high',
+      localSuggestion: true,
+      path: 'a.ts',
+      line: 1,
+      evidence: 'const count = 1;',
+    });
+    const patches = new Map([['a.ts', '@@ -1 +1 @@\n-const n = 1;\n+const count = 1;']]);
+    const findings = [
+      local,
+      { ...local, severity: 'P3' as const, kind: 'docs' as const },
+      ...(['bug', 'security', 'performance', 'architecture', 'test', 'investigate'] as const).map(
+        (kind) => ({ ...local, kind }),
+      ),
+      ...(['P0', 'P1', 'P2'] as const).map((severity) => ({ ...local, severity })),
+      { ...local, localSuggestion: undefined },
+      { ...local, confidence: 'medium' as const },
+      { ...local, evidence: 'not in the diff' },
+      { ...local, line: 0 },
+      { ...local, path: 'other.ts' },
+    ];
+    assert.deepEqual(
+      selectFindingIndexes(findings, patches).sort((a, b) => a - b),
+      findings.map((_, index) => index).slice(2),
+    );
+    assert.deepEqual(selectFindingIndexes([local]), [0]);
+    assert.equal(sanitizeFinding(local)?.localSuggestion, true);
+    assert.equal(
+      sanitizeFinding({ ...local, localSuggestion: 'true' })?.localSuggestion,
+      undefined,
+    );
+    assert.deepEqual(
+      selectFindingIndexes(
+        [local],
+        new Map([['a.ts', '@@ -1 +1,2 @@\n-old\n+const count = 1;\n+const count = 1;']]),
+      ),
+      [0],
+    );
+  });
 });
 
 describe('applyFindingVerdicts', () => {
@@ -270,29 +313,26 @@ describe('applyFindingVerdicts', () => {
     );
   });
 
-  it('labels uncertain advisories without upgrading nits or retaining high confidence', () => {
+  it('omits explicitly unsupported advisories in both verification paths', () => {
     const proposed = [
-      finding({ severity: 'P3', confidence: 'high', body: 'Definitely broken.' }),
-      finding({ severity: 'nit', confidence: 'high' }),
+      finding({ severity: 'P3', confidence: 'high', title: 'p3', body: 'Definitely broken.' }),
+      finding({ severity: 'nit', confidence: 'high', title: 'nit' }),
     ];
-    const { findings: result } = applyFindingVerdicts(
-      proposed,
-      [0, 1],
-      [
-        { index: 0, verdict: 'uncertain', reason: 'Caller unavailable.' },
-        { index: 1, verdict: 'uncertain' },
-      ],
-    );
-    assert.deepEqual(
-      result.map((f) => [f.severity, f.kind, f.confidence]),
-      [
-        ['P3', 'investigate', 'low'],
-        ['nit', 'investigate', 'low'],
-      ],
-    );
-    assert.match(result[0].title, /^Unverified concern:/);
-    assert.match(result[0].body, /Caller unavailable/);
-    assert.match(result[0].body, /> Definitely broken/);
+    const verdicts = [
+      { index: 0, verdict: 'uncertain' as const, reason: 'Caller unavailable.' },
+      { index: 1, verdict: 'uncertain' as const },
+    ];
+    for (const result of [
+      applyFindingVerdicts(proposed, [0, 1], verdicts),
+      mergeVerdictsByLocation(proposed, proposed, verdicts),
+    ]) {
+      assert.deepEqual(result.findings, []);
+      assert.deepEqual(
+        result.dropped.map(({ finding }) => finding),
+        proposed,
+      );
+      assert.equal(result.demoted.length, 0);
+    }
   });
 
   it('retains missing verdicts as unverified advisories', () => {

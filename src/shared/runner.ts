@@ -2571,7 +2571,7 @@ async function runReviewPipeline(params: {
         priorJbotThreads,
         headSha ? addable : undefined,
       ).findings;
-      const indexes = selectFindingIndexes(settled);
+      const indexes = selectFindingIndexes(settled, patchByPath);
       if (indexes.length === 0) {
         recordCoverage({ session, state: 'skipped' });
         return { targets: [], verdicts: [] };
@@ -2750,6 +2750,7 @@ async function runReviewPipeline(params: {
       logVerdictOutcomes(merge, log);
       const late = await verifyFindings({
         workspace,
+        patchByPath,
         backend: auxBackend,
         model: auxModel,
         prContext: verifierPrContext,
@@ -2769,6 +2770,7 @@ async function runReviewPipeline(params: {
     } else {
       verifiedFindings = await verifyFindings({
         workspace,
+        patchByPath,
         backend: auxBackend,
         model: auxModel,
         prContext: verifierPrContext,
@@ -3386,6 +3388,7 @@ async function verifyFindings(params: {
   model: string;
   prContext: string;
   findings: Finding[];
+  patchByPath: ReadonlyMap<string, string>;
   enabled: boolean;
   timeoutMs?: number;
   /** TASK-157: the verifier's floored options when the aux entry lacks them. */
@@ -3399,7 +3402,7 @@ async function verifyFindings(params: {
     params.onCoverage?.({ session, state: 'skipped' });
     return params.findings;
   }
-  const selectedIndexes = selectFindingIndexes(params.findings);
+  const selectedIndexes = selectFindingIndexes(params.findings, params.patchByPath);
   if (selectedIndexes.length === 0) {
     params.onCoverage?.({ session, state: 'skipped' });
     return params.findings;
@@ -3493,7 +3496,7 @@ function logVerdictOutcomes(
 ): void {
   for (const { finding, reason } of application.dropped) {
     log(
-      `Dropped refuted finding ${formatFindingLocation(finding)} "${finding.title}".${
+      `Dropped unsupported finding ${formatFindingLocation(finding)} "${finding.title}".${
         reason ? ` Reason: ${reason}` : ''
       }`,
     );
