@@ -446,6 +446,16 @@ describe('repository tool pages', () => {
       assert.doesNotMatch(tail.content[0].text, /failed|maxBuffer/);
       rmSync(join(workspace, 'many.txt'));
       execFileSync('git', ['-C', workspace, 'rm', '--cached', 'many.txt']);
+      const scoped = await search.execute('scoped', {
+        query: ['missing', 'importantDefault'],
+        paths: ['large.ts'],
+      });
+      assert.match(scoped.content[0].text, /large.ts:20001/);
+      for (const paths of [['../'], ['/tmp'], [':(top)*'], ['.git']])
+        assert.match(
+          (await search.execute('invalid', { query: 'secret', paths })).content[0].text,
+          /paths must/,
+        );
       const result = await search.execute('search', { query: 'importantDefault' });
       assert.match(result.content[0].text, /large.ts:20001:const importantDefault = false/);
       const page = await read.execute('read', { path: 'large.ts', line: 20001 });

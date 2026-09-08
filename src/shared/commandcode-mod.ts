@@ -1,3 +1,4 @@
+import { repositorySearchArgs, REPOSITORY_SEARCH_PROPERTIES } from './repository-search.ts';
 import { spawnSync } from 'node:child_process';
 import {
   closeSync,
@@ -24,7 +25,13 @@ interface CommandCodeModApi {
     schema: { name: string; description: string; input_schema: Record<string, unknown> };
     readOnly: true;
     run(call: {
-      input: { path?: string; query?: string; offset?: unknown; line?: unknown };
+      input: {
+        path?: string;
+        query?: string | string[];
+        paths?: string[];
+        offset?: unknown;
+        line?: unknown;
+      };
     }): Promise<
       { ok: true; content: { type: 'text'; text: string }[] } | { ok: false; error: string }
     >;
@@ -128,7 +135,7 @@ export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
         input_schema: {
           type: 'object',
           properties: {
-            ...(search ? { query: { type: 'string', minLength: 1 } } : {}),
+            ...(search ? REPOSITORY_SEARCH_PROPERTIES : {}),
             offset,
           },
           required: search ? ['query'] : [],
@@ -137,8 +144,6 @@ export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
       readOnly: true,
       async run({ input }) {
         try {
-          if (search && (typeof input.query !== 'string' || !input.query))
-            throw new Error('query must be nonempty');
           const args = search
             ? [
                 '--no-pager',
@@ -148,11 +153,8 @@ export default function commandCodeReviewMod(cmd: CommandCodeModApi) {
                 '--no-color',
                 '-n',
                 '-I',
-                '-F',
                 '--no-textconv',
-                '-e',
-                input.query!,
-                '--',
+                ...repositorySearchArgs(input),
               ]
             : ['ls-files', '--cached', '--others', '--exclude-standard'];
           const page = await gitRepositoryPage(root, [...gitArgs, ...args], input);

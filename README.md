@@ -588,6 +588,13 @@ metadata and ignored untracked files. Shell, writes, and web access stay disable
 J-Bot continues embedding the complete review diff. Tool
 results are paginated, with no additional aggregate read/tool-call quota.
 
+CommandCode `jbot_search` and Pi `search_repo` accept `query` as a literal string
+or an array of literals (match any), plus optional `paths` containing literal
+repository-relative files or directories. For example,
+`{"query":["execute","timeoutMs"],"paths":["src/shared"]}` searches both terms
+in one call. Searches use current worktree contents, preserve each backend's
+file-access rules, and support the existing pagination; no index is introduced.
+
 The tools use a trusted mod with the image's pinned CommandCode 1.44.0; local
 runs need that version. Mod initialization failure stops the CLI. Logs record
 sanitized tool outcome counts and effective workspace access; per-tool timing

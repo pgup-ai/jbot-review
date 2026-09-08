@@ -300,6 +300,44 @@ export async function runCommandCodeReview(
   );
 }
 
+async function runCommandCodeAuxReview(
+  field: 'findings' | 'addressedPriorComments',
+  ...args: Parameters<typeof runCommandCodePrompt>
+): Promise<ReviewResult> {
+  const [workspace, model, prompt, label, log, timeoutMs, onTokenUsage, runtime, effort] = args;
+  const deadline = Date.now() + (timeoutMs ?? COMMANDCODE_PROMPT_TIMEOUT_MS);
+  const { finalText, sessionId } = await runCommandCodePrompt(...args);
+  try {
+    return parseReview(finalText, label, log, { strict: true, field });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw error;
+    log(
+      `${label} response unparseable; sending one JSON repair prompt via commandcode: ${message}`,
+    );
+    const repaired = await runCommandCodePrompt(
+      workspace,
+      model,
+      buildJsonRepairFollowupPrompt({
+        originalPrompt: prompt,
+        invalidResponse: finalText,
+        parseError: message,
+        promptBudgetBytes: COMMANDCODE_REPAIR_PROMPT_BUDGET_BYTES,
+        responseBudgetBytes: COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES,
+      }),
+      `${label}-repair`,
+      log,
+      remaining,
+      onTokenUsage,
+      runtime,
+      effort,
+      sessionId,
+    );
+    return parseReview(repaired.finalText, `${label}-repair`, log, { strict: true, field });
+  }
+}
+
 export async function runCommandCodeAddressedPriorCommentsCheck(
   workspace: string,
   model: string,
@@ -310,7 +348,8 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
   runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<AddressedPriorComment[]> {
-  const { finalText: raw } = await runCommandCodePrompt(
+  const result = await runCommandCodeAuxReview(
+    'addressedPriorComments',
     workspace,
     model,
     assembleAddressedPriorCommentsPrompt(prContext),
@@ -321,7 +360,7 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
     runtime,
     effort,
   );
-  return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
+  return result.addressedPriorComments;
 }
 
 export async function runCommandCodeGuidelineComplianceCheck(
@@ -335,7 +374,8 @@ export async function runCommandCodeGuidelineComplianceCheck(
   runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<Finding[]> {
-  const { finalText: raw } = await runCommandCodePrompt(
+  const result = await runCommandCodeAuxReview(
+    'findings',
     workspace,
     model,
     assembleGuidelineCompliancePrompt(prContext, guidelines),
@@ -346,7 +386,7 @@ export async function runCommandCodeGuidelineComplianceCheck(
     runtime,
     effort,
   );
-  return parseReview(raw, 'guideline-compliance', log).findings;
+  return result.findings;
 }
 
 export async function runCommandCodeChangesSinceLastReview(

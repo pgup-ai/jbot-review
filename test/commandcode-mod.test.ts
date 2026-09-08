@@ -175,6 +175,32 @@ it('reads a foreign-owned worktree without following escapes or running fsmonito
       assert.equal(invalid.ok, false);
       assert.match(invalid.error, /query must be nonempty/);
     }
+    writeFileSync(join(root, '[id].ts'), 'other literal\n');
+    const scoped = await search.run({
+      input: { query: ['needle', 'other literal'], paths: ['inside.ts', '[id].ts'] },
+    });
+    assert.equal(scoped.ok, true);
+    assert.match(scoped.content[0].text, /inside.ts:1:needle/);
+    assert.match(scoped.content[0].text, /\[id\].ts:1:other literal/);
+    assert.doesNotMatch(scoped.content[0].text, /untracked.ts|ignored.ts/);
+    writeFileSync(join(root, 'inside.ts'), 'fresh needle\n');
+    const fresh = await search.run({ input: { query: ['fresh needle'], paths: ['inside.ts'] } });
+    assert.equal(fresh.ok, true);
+    assert.match(fresh.content[0].text, /fresh needle/);
+    writeFileSync(join(root, 'inside.ts'), 'needle\n');
+    for (const paths of [
+      ['../outside'],
+      ['/tmp'],
+      [':(top)*'],
+      ['.git'],
+      ['replaced'],
+      ['escape.ts'],
+    ]) {
+      const denied = await search.run({ input: { query: 'OUTSIDE_SECRET_CANARY', paths } });
+      assert.doesNotMatch(JSON.stringify(denied), /OUTSIDE_SECRET_CANARY/);
+    }
+    for (const query of [[], [''], ['needle', '']])
+      assert.equal((await search.run({ input: { query } })).ok, false);
     const found = await search.run({ input: { query: 'needle' } });
     assert.equal(found.ok, true);
     assert.match(found.content[0].text, /inside.ts:1:needle/);

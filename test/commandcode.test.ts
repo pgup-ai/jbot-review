@@ -16,6 +16,8 @@ import { describe, it } from 'node:test';
 import {
   buildCommandCodeCliArgs,
   runCommandCodeReview,
+  runCommandCodeAddressedPriorCommentsCheck,
+  runCommandCodeGuidelineComplianceCheck,
   runCommandCodeFindingVerification,
   classifyCommandCodePromptFailure,
   composeCommandCodeMonthlyWindow,
@@ -656,9 +658,14 @@ process.stdin.on('end', () => {
   fs.mkdirSync(dir, {recursive: true});
   fs.appendFileSync(path.join(dir, sessionId + '.jsonl'), JSON.stringify({type:'message', message:{role:'assistant'}, usage:{costUsd: resume ? 0.125 : 0.25}}) + '\n');
   const repaired = model === 'repair' && resume && fs.readFileSync(path.join(dir, sessionId + '.jsonl'), 'utf8').trim().split('\n').length === 2;
-  const finalText = model === 'repair' && !resume ? '{}' : resume && !repaired
+  let finalText = model === 'repair' && !resume ? '{}' : resume && !repaired
     ? model === 'invalid' ? '{}' : JSON.stringify({findings: [{path:'b.ts',line:1,severity:'P2',title:'extra',body:'rule'}]})
     : JSON.stringify({summary:'main',findings:[{path:'a.ts',line:1,severity:'P1',title:'main',body:'defect'}]});
+  if (model.startsWith('aux-')) {
+    const field = model === 'aux-addressed' ? 'addressedPriorComments' : 'findings';
+    const wrong = field === 'findings' ? 'addressedPriorComments' : 'findings';
+    finalText = model === 'aux-broken' ? '{}' : JSON.stringify({[resume ? field : wrong]: []});
+  }
   console.log(JSON.stringify({type:'result',subtype:'success',finalText,
     sessionId: model === 'missing' ? undefined : resume && model === 'mismatch' ? 'wrong-session' : sessionId,
     usage:{inputTokens:1,outputTokens:1,cacheReadTokens:0,cacheWriteTokens:0}}));
@@ -726,6 +733,31 @@ process.stdin.on('end', () => {
       }
     }
     assert.equal(calls.find((call) => call.model === 'verifier').resume, undefined);
+    for (const [model, addressed] of [
+      ['aux-addressed', true],
+      ['aux-guidelines', false],
+      ['aux-broken', true],
+    ] as const) {
+      const args = [home, `commandcode/${model}`, 'context'] as const;
+      const call = addressed
+        ? runCommandCodeAddressedPriorCommentsCheck(...args, () => {}, 5000, undefined, {
+            home,
+            tools: true,
+          })
+        : runCommandCodeGuidelineComplianceCheck(...args, 'rules', () => {}, 5000, undefined, {
+            home,
+            tools: true,
+          });
+      if (model === 'aux-broken') await assert.rejects(call, /parse|array|JSON/i);
+      else assert.deepEqual(await call, []);
+      const auxCalls = readFileSync(join(home, 'calls.jsonl'), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .filter((call) => call.model === model);
+      assert.equal(auxCalls.length, 2);
+      assert.equal(auxCalls[1].resume, model + '-session');
+    }
     const interval = globalThis.setInterval;
     const timer = t.mock.method(globalThis, 'setInterval', ((callback: () => void, ms: number) => {
       assert.equal(ms, 60_000);

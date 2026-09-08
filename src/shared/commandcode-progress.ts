@@ -98,7 +98,7 @@ export function createCommandCodeProgress(now = Date.now) {
     snapshot(complete = false): CommandCodeProgress {
       return {
         elapsedMs: now() - started,
-        complete: complete && observedEvents > 0 && droppedFrames === 0,
+        complete: complete && droppedFrames === 0,
         observedEvents,
         droppedFrames,
         toolOutcomes: { ...toolOutcomes },

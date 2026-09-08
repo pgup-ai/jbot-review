@@ -1,3 +1,4 @@
+import { repositorySearchArgs, REPOSITORY_SEARCH_PROPERTIES } from './repository-search.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createReadStream, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
@@ -28,6 +29,7 @@ import {
   buildJsonRepairPrompt,
   CONTINUATION_NUDGE_PROMPT,
   isNoAttemptReply,
+  REPOSITORY_SEARCH_DESCRIPTION,
 } from './prompt.ts';
 import { isFiniteNumber, isRecord, truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
@@ -550,20 +552,16 @@ export function createPiSearchTool(
 ): unknown {
   return sdk.defineTool({
     name: 'search_repo',
-    description:
-      'Search tracked repository files for literal text. Results include path and line number; continue large results with offset.',
+    description: REPOSITORY_SEARCH_DESCRIPTION,
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', minLength: 1 },
+        ...REPOSITORY_SEARCH_PROPERTIES,
         offset: { type: 'integer', minimum: 0 },
       },
       required: ['query'],
     },
     execute: async (_id: unknown, params: unknown) => {
-      const query = isRecord(params) && typeof params.query === 'string' ? params.query : '';
-      if (!query)
-        return { content: [{ type: 'text', text: 'query must be nonempty' }], details: {} };
       const finish = telemetry?.startTool({
         session: piTelemetryContext.getStore()?.session ?? 'unknown',
         backend: 'pi',
@@ -573,7 +571,9 @@ export function createPiSearchTool(
         ...(isRecord(params) && (params.offset || params.line)
           ? { page: JSON.stringify({ offset: params.offset, line: params.line }) }
           : {}),
-        identity: query,
+        identity: JSON.stringify(
+          isRecord(params) ? { query: params.query, paths: params.paths } : params,
+        ),
         identityKind: 'query',
       });
       let text: string;
@@ -586,12 +586,9 @@ export function createPiSearchTool(
             '--no-color',
             '-n',
             '-I',
-            '-F',
             '--no-textconv',
             '--no-recurse-submodules',
-            '-e',
-            query,
-            '--',
+            ...repositorySearchArgs(params),
           ],
           isRecord(params) ? params : {},
         );

@@ -340,3 +340,53 @@ References: [CommandCode CLI](https://commandcode.ai/docs/reference/cli),
 [mods](https://commandcode.ai/docs/mods), and
 [tools](https://commandcode.ai/docs/reference/tools). Installed-version probes,
 rather than plan-mode claims alone, establish the boundaries above.
+
+### Scoped search and review-feedback fixes
+
+CommandCode and Pi share literal search argument validation and schema. `query`
+accepts one string or an array matching any literal; optional `paths` restricts
+search to literal repository-relative files or directories. Paths cannot escape
+through traversal, Git metadata, or pathspec magic. Existing backend visibility,
+symlink handling, worktree reads, and pagination remain intact. No index, regex,
+new configuration knob, or tool-policy change is introduced. OpenCode keeps its
+existing native search tools.
+
+CommandCode addressed-comment and standalone guideline checks now require the
+expected array and attempt one repair within the original deadline. Repairs reuse
+the returned session ID when available; unrepaired output reaches the existing
+auxiliary fail-open handling. Result-only successful CLI responses now produce
+complete progress snapshots even without optional event frames. Malformed or
+dropped frames still mark progress incomplete. Existing telemetry uses role
+labels for `session`, so the progress field retains that convention.
+
+A local interactions-lens ablation used CommandCode 1.44.0 and
+`meta/muse-spark-1.3-contributor`, three fresh sessions per arm, interleaved with
+at most two concurrent sessions and a 180s deadline. The fixed fixture diff was
+`c21389c0ccc32fbb2d8bd90950f992c08873c625...0b31c5e1184b95571e330903567984138f28877c`:
+`review()` stopped supplying its 1200000ms default while unchanged `execute()`
+still converted an undefined timeout to zero. Only the changed wrapper was
+embedded; tools could inspect the unchanged callee. The same interactions prompt
+was used in all arms, with the existing tool/no-tool directive appropriate to
+each arm. The read/search-only arm changed the local mod's active tool allowlist;
+no production setting was added.
+
+| Available tools    | Durations (seconds) | Findings adjudicated against fixture                                           |
+| ------------------ | ------------------- | ------------------------------------------------------------------------------ |
+| Read, search, list | 13.8, 24.1, 22.7    | 3/3 identified immediate child termination as P1                               |
+| Read, search       | 14.9, 21.0, 25.1    | 3/3 identified immediate child termination as P1                               |
+| None               | 18.7, 17.6, 21.2    | 3/3 returned uncertain P3 investigations; none established the callee behavior |
+
+Adjudication was manual and not blind; this is a one-fixture finder smoke test,
+not an end-to-end quality benchmark or evidence of general latency improvement.
+There was no separate verifier in this ablation. Retain all three tools: these
+trials show loss of concrete evidence without tools and no consistent benefit
+from removing listing. Raw local results are retained under
+`/tmp/jbot-search-ablation-measured`; credential homes were deleted. Preliminary
+CLI effort/authentication setup failures were excluded before the nine successful
+trials; the measured runs use the existing key-pool selector and native effort.
+
+Validation: all 1,034 tests, focused backend regressions, typecheck, lint,
+formatting, and bundle build. New assertions were folded into existing tests;
+no additional cases or source comments were needed. Self-review/de-slop found no
+remaining P1/P2 issue. Core/full corpus and blind adjudication were not run for
+this incremental change; no default-policy flip is included.

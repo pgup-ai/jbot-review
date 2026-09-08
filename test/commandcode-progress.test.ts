@@ -23,6 +23,7 @@ it('retains only safe observed metadata across chunk boundaries and incomplete o
     JSON.stringify({ type: 'event', event: { type: 'tool_errored', toolName: 'SECRET_TOOL' } }) +
       '\n',
   );
+  assert.equal(progress.snapshot(true).complete, true);
   progress.feed('x'.repeat(1_048_577));
   progress.feed('ignored\nnot json\n');
   progress.feed(
@@ -66,4 +67,6 @@ it('retains only safe observed metadata across chunk boundaries and incomplete o
   assert.equal(empty.usage(), undefined);
   empty.feed('{"type":"result","usage":{"inputTokens":-1}}\n');
   assert.equal(empty.usage(), undefined);
+  assert.equal(empty.snapshot(true).complete, true);
+  assert.equal(empty.snapshot().complete, false);
 });

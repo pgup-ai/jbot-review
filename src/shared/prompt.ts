@@ -419,10 +419,12 @@ export function withNoToolsReviewDirective(prompt: string): string {
   return `${NO_TOOLS_REVIEW_DIRECTIVE}\n\n${prompt}`;
 }
 
+export const REPOSITORY_SEARCH_DESCRIPTION =
+  'Search repository text for query (a literal string or an array matching any literal). Optionally restrict paths to repository-relative literal files or directories. Results include path and line number; continue with offset. No regex or glob expansion.';
+
 export const COMMANDCODE_TOOL_DESCRIPTIONS = {
   read: 'Read a UTF-8 repository file, following only symlinks that stay inside the repository. Git metadata and ignored untracked files are unavailable. Paths are literal, including brackets. Continue with the returned offset or start at a 1-based line.',
-  search:
-    'Search non-ignored repository files for literal text without following symlinks. Results include path and line number. Continue with the returned offset.',
+  search: REPOSITORY_SEARCH_DESCRIPTION + ' Searches non-ignored files without following symlinks.',
   list: 'List tracked and non-ignored untracked repository file paths. Continue with the returned offset.',
   offset:
     'Byte offset copied from an explicit next-page notice, not a line or match count. Omit for the first page. End of output means there is no next page.',
@@ -442,12 +444,12 @@ ${prompt}`;
  * per-session user prompts (assemble*); this only pins workspace safety.
  */
 export const PI_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer operating inside a checked-out git repository.
-You have no shell. Your tools are read-only and confined to this repository — paths outside it are refused: read_file reads a repo file by repo-relative path (use line to start at a known line, or offset to continue a page), search_repo searches tracked repository text for a literal query, and a git_diff tool (when available) shows the change under review, optionally scoped to a path. The diff under review is also embedded in the user message; if a git_diff tool is available, use it where instructions mention running the git diff command.
+You have no shell. Your tools are read-only and confined to this repository — paths outside it are refused: read_file reads a repo file by repo-relative path (use line to start at a known line, or offset to continue a page), search_repo searches tracked repository text for one or multiple literal queries, optionally scoped with paths, and a git_diff tool (when available) shows the change under review, optionally scoped to a path. The diff under review is also embedded in the user message; if a git_diff tool is available, use it where instructions mention running the git diff command.
 You cannot modify the workspace, and must not attempt to.
 Follow the task instructions in the user message exactly; reply with only the requested output.`;
 
 export const EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT = `You are a read-only code reviewer operating inside a checked-out git repository.
-You have no shell. Your tools are read-only and confined to this repository — paths outside it are refused: read_file reads a repo file by repo-relative path (use line to start at a known line, or offset to continue a page), search_repo searches tracked repository text for a literal query, and a git_diff tool (when available) shows the change under review, optionally scoped to a path. The diff under review is also embedded in the user message. Use the embedded diff as a starting point and investigate related code wherever needed. Continue paginated results to reach the evidence.
+You have no shell. Your tools are read-only and confined to this repository — paths outside it are refused: read_file reads a repo file by repo-relative path (use line to start at a known line, or offset to continue a page), search_repo searches tracked repository text for one or multiple literal queries, optionally scoped with paths, and a git_diff tool (when available) shows the change under review, optionally scoped to a path. The diff under review is also embedded in the user message. Use the embedded diff as a starting point and investigate related code wherever needed. Continue paginated results to reach the evidence.
 You cannot modify the workspace, and must not attempt to.
 Follow the task instructions in the user message exactly; reply with only the requested output.`;
 
