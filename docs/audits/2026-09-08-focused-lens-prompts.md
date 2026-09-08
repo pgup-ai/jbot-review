@@ -140,3 +140,13 @@ an integrity session and uses a later prompt revision. It establishes successful
 completion, not improved speed, recall, or precision. The earlier control and
 treatment results remain the relevant recorded comparison; no new corpus gate
 or production CommandCode validation was performed.
+
+## Review feedback
+
+Removed duplicate coverage/caller instructions from the lens introduction. All
+three lenses now honor `JBOT_EMBEDDED_FIRST_PROMPT`: enabled uses the shared
+embedded-first policy; disabled uses full-diff and contract cross-referencing
+instructions without that treatment. Existing prompt tests cover both modes.
+All 1,025 tests, formatting, typecheck, lint, build, and main-prompt equality checks
+passed. Live model runs and the advisory corpus were not repeated for this
+follow-up; the measurements above apply to their recorded revisions.

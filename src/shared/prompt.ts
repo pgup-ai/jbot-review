@@ -342,12 +342,11 @@ JSON. Do not keep exploring solely for completeness or reread code already
 provided unless a specific uncertainty requires it. Report supported findings
 and identify material uncertainties without asserting unverified premises.`;
 
-const LENS_REVIEW_PROMPT = `You are performing a focused recall pass alongside a separate general PR review.
+function buildLensReviewPrompt(embeddedFirstPrompt: boolean): string {
+  return `You are performing a focused recall pass alongside a separate general PR review.
 Investigate the failure classes in the review lens below across the COMPLETE
 base...head diff, including earlier commits and changes already reviewed.
-Read every changed hunk to identify affected contracts; do not limit the pass
-to particular file extensions. Trace plausible failures into unchanged callers,
-definitions, configuration, and tests only to establish a lens-specific failure.
+Do not limit the pass to particular file extensions.
 Return findings within this lens's responsibility. Do not start a general bug,
 style, architecture, guideline-compliance, or other lens's investigation.
 
@@ -359,7 +358,17 @@ resolution are handled separately.
 
 ${REVIEW_COMMAND_POLICY}
 
-${EMBEDDED_FIRST_EXPLORATION_POLICY}
+${
+  embeddedFirstPrompt
+    ? EMBEDDED_FIRST_EXPLORATION_POLICY
+    : `## Repository exploration policy
+
+Read the full diff hunks for every changed file. For omitted or truncated hunks,
+use the git diff command identified in the Pull request section. Cross-reference
+changed contracts relevant to this lens against unchanged callers, definitions,
+configuration, and tests. Follow dependencies until the lens-specific behavior
+is established; do not explore unrelated code.`
+}
 
 ${REVIEW_SEVERITY_POLICY}
 
@@ -374,6 +383,7 @@ ${replacePromptSection(
   REVIEW_SUMMARY_RULE,
   '- "summary": return an empty string; this pass contributes findings only.',
 )}`;
+}
 
 function replacePromptSection(prompt: string, current: string, replacement: string): string {
   const start = prompt.indexOf(current);
@@ -1033,7 +1043,7 @@ export function assembleReviewPrompt(
   const focusedLens = Object.values(REVIEW_LENSES).includes(lensAddendum);
   const parts = [
     focusedLens
-      ? LENS_REVIEW_PROMPT
+      ? buildLensReviewPrompt(embeddedFirstPrompt)
       : embeddedFirstPrompt
         ? EMBEDDED_FIRST_REVIEW_PROMPT
         : REVIEW_PROMPT,

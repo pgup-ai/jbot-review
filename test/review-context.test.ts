@@ -528,7 +528,7 @@ describe('buildReviewContext', () => {
       checkSummary: 'CHECK_SENTINEL',
     };
     const context = buildReviewScopeContext(params);
-    assert.match(context, /This heading belongs to PR intent/);
+    assert.match(context, /## Commits\nThis heading belongs to PR intent/);
     assert.match(context, /#7: Preserve ordering/);
     assert.match(context, /Keep rows stable/);
     assert.match(context, /src\/a\.ts/);

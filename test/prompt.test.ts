@@ -368,25 +368,37 @@ describe('REVIEW_LENSES', () => {
 
   it('keeps each specialist in its role without losing evidence rules or tail ordering', () => {
     for (const lens of Object.values(REVIEW_LENSES)) {
-      const prompt = assembleReviewPrompt('PR_CONTEXT_SENTINEL', 'GUIDELINES_SENTINEL', lens);
-      assert.match(prompt, /COMPLETE\s+base\.\.\.head diff/);
-      assert.match(prompt, /unchanged callers/);
-      assert.match(prompt, /Return findings within this lens/);
-      assert.doesNotMatch(prompt, /Still report any other clear bug/);
-      assert.match(prompt, /Do not modify files/);
-      assert.match(prompt, /Do not run repository code/);
-      assert.match(prompt, /Never state an\s+unverified library behavior as fact/);
-      assert.match(prompt, /Cite only locations you actually inspected/);
-      assert.match(prompt, /"summary": return an empty string/);
-      assert.doesNotMatch(
-        prompt,
-        /## Mandatory coverage protocol|## Calibration examples|## Architecture and design/,
-      );
-      assert.ok(prompt.indexOf('GUIDELINES_SENTINEL') < prompt.indexOf('PR_CONTEXT_SENTINEL'));
-      const lensIndex = prompt.indexOf('## Review lens for this pass');
-      assert.ok(lensIndex > prompt.indexOf('PR_CONTEXT_SENTINEL'));
-      assert.ok(lensIndex < prompt.indexOf('## Final output reminder'));
-      assert.ok(prompt.endsWith(REVIEW_OUTPUT_REMINDER));
+      for (const embeddedFirst of [false, true]) {
+        const prompt = assembleReviewPrompt(
+          'PR_CONTEXT_SENTINEL',
+          'GUIDELINES_SENTINEL',
+          lens,
+          false,
+          embeddedFirst,
+        );
+        assert.match(prompt, /COMPLETE\s+base\.\.\.head diff/);
+        assert.match(prompt, /callers, definitions/);
+        assert.equal((prompt.match(/^## Repository exploration policy$/gm) ?? []).length, 1);
+        assert.equal(prompt.includes('Start with targeted reads'), embeddedFirst);
+        assert.equal(prompt.includes('use the git diff command identified'), !embeddedFirst);
+        assert.doesNotMatch(prompt, /Read every changed hunk to identify affected contracts/);
+        assert.match(prompt, /Return findings within this lens/);
+        assert.doesNotMatch(prompt, /Still report any other clear bug/);
+        assert.match(prompt, /Do not modify files/);
+        assert.match(prompt, /Do not run repository code/);
+        assert.match(prompt, /Never state an\s+unverified library behavior as fact/);
+        assert.match(prompt, /Cite only locations you actually inspected/);
+        assert.match(prompt, /"summary": return an empty string/);
+        assert.doesNotMatch(
+          prompt,
+          /## Mandatory coverage protocol|## Calibration examples|## Architecture and design/,
+        );
+        assert.ok(prompt.indexOf('GUIDELINES_SENTINEL') < prompt.indexOf('PR_CONTEXT_SENTINEL'));
+        const lensIndex = prompt.indexOf('## Review lens for this pass');
+        assert.ok(lensIndex > prompt.indexOf('PR_CONTEXT_SENTINEL'));
+        assert.ok(lensIndex < prompt.indexOf('## Final output reminder'));
+        assert.ok(prompt.endsWith(REVIEW_OUTPUT_REMINDER));
+      }
     }
     assert.match(REVIEW_LENSES.interactions, /Own producer\/consumer contracts/);
     assert.match(REVIEW_LENSES.frontend, /Own observable UI behavior/);
