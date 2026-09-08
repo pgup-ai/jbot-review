@@ -21,20 +21,19 @@ export function extractChangedExportedSymbols(files: PrFile[]): string[] {
     if (!file.patch) continue;
     const blocks: Partial<Record<'+' | '-', { text: string; typeOnly: boolean }>> = {};
     const lists = { '+': new Map<string, string>(), '-': new Map<string, string>() };
-    const flush = (side: '+' | '-', complete: boolean) => {
+    const flush = (side: '+' | '-', atBoundary = false) => {
       const block = blocks[side];
       if (block === undefined) return;
-      const end = complete ? block.text.indexOf('}') : block.text.lastIndexOf(',');
-      const source = complete
-        ? (block.text
-            .slice(end + 1)
-            .replace(/^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*/, '')
-            .match(/^from\s+(['"])(.*?)\1/)?.[2] ?? '')
-        : '';
-      for (const part of block.text
-        .slice(0, Math.max(0, end))
-        .replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')
-        .split(',')) {
+      const text = block.text.replace(
+        /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\/\*[\s\S]*?(?:\*\/|$)|\/\/[^\n]*/g,
+        (token) => (token.startsWith('/') ? ' ' : token),
+      );
+      const closing = text.indexOf('}');
+      if (closing < 0 && !atBoundary) return;
+      const end = closing < 0 ? text.lastIndexOf(',') : closing;
+      const source =
+        closing < 0 ? '' : (text.slice(end + 1).match(/^\s*from\s+(['"])(.*?)\1/)?.[2] ?? '');
+      for (const part of text.slice(0, Math.max(0, end)).split(',')) {
         const specifier = part.trim().replace(/\s+/g, ' ');
         const binding = specifier.replace(/^type\s+(?!as\b)/, '');
         const name = binding.split(/\s+as\s+/i).at(-1) ?? '';
@@ -45,8 +44,8 @@ export function extractChangedExportedSymbols(files: PrFile[]): string[] {
       delete blocks[side];
     };
     const finishHunk = () => {
-      flush('+', false);
-      flush('-', false);
+      flush('+', true);
+      flush('-', true);
       for (const side of ['+', '-'] as const) {
         const other = side === '+' ? '-' : '+';
         for (const [specifier, name] of lists[side])
@@ -68,7 +67,7 @@ export function extractChangedExportedSymbols(files: PrFile[]): string[] {
         const start = text.match(NAMED_EXPORT_START);
         if (start) blocks[side] = { text: text.slice(start[0].length), typeOnly: !!start[1] };
         else if (blocks[side] !== undefined) blocks[side].text += '\n' + text;
-        if (blocks[side]?.text.includes('}')) flush(side, true);
+        flush(side);
       }
     }
     finishHunk();

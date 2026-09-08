@@ -568,3 +568,15 @@ comment blocks, or test cases; existing assertions cover both conversion directi
 equivalent type-only syntax, misleading comments, and URL sources. Code/test delta:
 +20 lines. All 1,023 tests, typecheck, lint, formatting, and build passed. No live
 model or corpus rerun; the impact on model recall remains unmeasured.
+
+### Comment-aware export boundaries
+
+Export blocks now remove comments before detecting closing braces, preserving
+quoted strings and retaining raw text while multiline comments remain open.
+This prevents comment braces from hiding changed re-export sources. The existing
+regression case covers both single-line and multiline block comments.
+
+Self-review/de-slop: no further issue found; consolidated two comment-removal
+paths into one. No new comment blocks or test cases. Code/test delta: +5 lines.
+All 1,023 tests, typecheck, lint, formatting, and build passed. No live model or
+corpus rerun; model recall impact remains unmeasured.
