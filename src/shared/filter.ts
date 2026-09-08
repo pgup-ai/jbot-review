@@ -1,3 +1,4 @@
+import { findingSourceLocations } from './finding-context.ts';
 import { formatUnverifiedFinding } from './prompt.ts';
 import { anchorByEvidenceSnippet, evidenceWindow, rescueAnchorByEvidence } from './patch.ts';
 import type { Finding, FindingConfidence, FindingVerdict, Severity } from './types.ts';
@@ -196,11 +197,16 @@ export function selectFindingIndexes(
         !finding.localSuggestion ||
         finding.confidence !== 'high' ||
         !['docs', 'maintainability'].includes(finding.kind ?? '') ||
-        !finding.evidence
+        !finding.evidence ||
+        /https?:\/\//i.test(finding.body)
       )
         return true;
       const window = evidenceWindow(patches?.get(finding.path), finding.evidence);
-      return !window || window === 'ambiguous' || window.anchor !== finding.line;
+      if (!window || window === 'ambiguous' || window.anchor !== finding.line) return true;
+      const { locations, omitted } = findingSourceLocations([finding]);
+      return [...locations, ...omitted].some(
+        (ref) => ref.path !== finding.path || ref.line < window.start || ref.line > window.end,
+      );
     })
     .sort((a, b) => SEVERITY_RANK[a.finding.severity] - SEVERITY_RANK[b.finding.severity])
     .map(({ index }) => index);

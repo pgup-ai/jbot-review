@@ -248,6 +248,9 @@ describe('selectFindingIndexes', () => {
       { ...local, evidence: 'not in the diff' },
       { ...local, line: 0 },
       { ...local, path: 'other.ts' },
+      { ...local, body: 'Breaks `caller.ts:42`.' },
+      { ...local, body: 'Conflicts with `a.ts:99`.' },
+      { ...local, body: 'See https://example.com/api.' },
     ];
     assert.deepEqual(
       selectFindingIndexes(findings, patches).sort((a, b) => a - b),
