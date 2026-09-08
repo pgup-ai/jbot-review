@@ -128,7 +128,7 @@ describe('runReview JSON repair loop', () => {
       assert.match(prompts[1], /FULL GUIDES/);
       assert.doesNotMatch(prompts[1], /CTX/);
       assert.equal(result.summary, 'ok after repair');
-      assert.deepEqual(tools[1], tools[0]);
+      assert.deepEqual(tools[1], { write: false, edit: false, patch: false });
       const succeeded = typeof response === 'string' && response.startsWith('{"findings"');
       assert.equal(result.findings.length, succeeded ? 2 : 1);
       assert.equal(coverage[0]?.state, succeeded ? 'completed' : 'failed');

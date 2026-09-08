@@ -1,11 +1,22 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
   buildCommandCodeCliArgs,
+  runCommandCodeReview,
+  runCommandCodeFindingVerification,
   classifyCommandCodePromptFailure,
   composeCommandCodeMonthlyWindow,
   formatCommandCodeKeyProbeLine,
@@ -616,4 +627,102 @@ describe('CommandCode multi-key pick', () => {
     assert.equal(none.key, 'k1');
     assert.match(none.reason, /probes unavailable; using first of 2/);
   });
+});
+
+it('resumes each CommandCode review explicitly while verification stays fresh', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'jbot-commandcode-resume-'));
+  writeCommandCodeReadOnlySettings(home, true);
+  const cli = join(home, 'command-code');
+  writeFileSync(
+    cli,
+    String.raw`#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+const args = process.argv.slice(2);
+const model = args[args.indexOf('--model') + 1];
+const resume = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : undefined;
+let input = '';
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+  fs.appendFileSync(path.join(process.env.HOME, 'calls.jsonl'), JSON.stringify({model, resume, args, input, cwd: process.cwd()}) + '\n');
+  const sessionId = resume || model + '-session';
+  const dir = path.join(process.env.HOME, '.commandcode', 'projects');
+  fs.mkdirSync(dir, {recursive: true});
+  fs.appendFileSync(path.join(dir, sessionId + '.jsonl'), JSON.stringify({type:'message', message:{role:'assistant'}, usage:{costUsd: resume ? 0.125 : 0.25}}) + '\n');
+  const repaired = model === 'repair' && resume && fs.readFileSync(path.join(dir, sessionId + '.jsonl'), 'utf8').trim().split('\n').length === 2;
+  const finalText = model === 'repair' && !resume ? '{}' : resume && !repaired
+    ? model === 'invalid' ? '{}' : JSON.stringify({findings: [{path:'b.ts',line:1,severity:'P2',title:'extra',body:'rule'}]})
+    : JSON.stringify({summary:'main',findings:[{path:'a.ts',line:1,severity:'P1',title:'main',body:'defect'}]});
+  console.log(JSON.stringify({type:'result',subtype:'success',finalText,
+    sessionId: model === 'missing' ? undefined : resume && model === 'mismatch' ? 'wrong-session' : sessionId,
+    usage:{inputTokens:1,outputTokens:1,cacheReadTokens:0,cacheWriteTokens:0}}));
+});
+`,
+  );
+  chmodSync(cli, 0o700);
+  const pathBefore = process.env.PATH;
+  process.env.PATH = `${home}:${pathBefore}`;
+  try {
+    await Promise.all(
+      ['first', 'second', 'repair', 'missing', 'mismatch', 'invalid'].map(async (model) => {
+        const coverage: Array<{ state: string }> = [];
+        const usage: Array<{ estimatedCostUsd?: number }> = [];
+        const result = await runCommandCodeReview(
+          home,
+          `commandcode/${model}`,
+          'FULL_DIFF',
+          '',
+          () => {},
+          {
+            runtime: { home, tools: true },
+            guidelineSweep: {
+              guidelines: 'FULL_GUIDELINES',
+              onCoverage: (row) => coverage.push(row),
+            },
+            onTokenUsage: (row) => usage.push(row),
+            timeoutMs: 5000,
+          },
+        );
+        const completed = ['first', 'second', 'repair'].includes(model);
+        assert.equal(result.summary, 'main');
+        assert.equal(result.findings.length, completed ? 2 : 1);
+        assert.equal(coverage[0].state, completed ? 'completed' : 'failed');
+        if (completed)
+          assert.deepEqual(
+            usage.map((row) => row.estimatedCostUsd),
+            model === 'repair' ? [0.25, undefined, undefined] : [0.25, undefined],
+          );
+      }),
+    );
+    await runCommandCodeFindingVerification(
+      home,
+      'commandcode/verifier',
+      'verification context',
+      [],
+      () => {},
+      5000,
+      undefined,
+      { home, tools: true },
+    );
+    const calls = readFileSync(join(home, 'calls.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(calls.length, 13);
+    for (const call of calls) {
+      assert.equal(call.cwd, realpathSync(join(home, 'launch')));
+      assert.equal(call.args[call.args.indexOf('--permission-mode') + 1], 'plan');
+      assert.equal(call.args[call.args.indexOf('--mod') + 1], join(home, 'review.mjs'));
+      if (call.resume) {
+        assert.equal(call.resume, call.model + '-session');
+        if (!call.input.includes('FULL_DIFF')) assert.match(call.input, /FULL_GUIDELINES/);
+        else assert.equal(call.model, 'repair');
+      }
+    }
+    assert.equal(calls.find((call) => call.model === 'verifier').resume, undefined);
+  } finally {
+    if (pathBefore === undefined) delete process.env.PATH;
+    else process.env.PATH = pathBefore;
+    rmSync(home, { recursive: true, force: true });
+  }
 });

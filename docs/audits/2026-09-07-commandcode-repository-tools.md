@@ -244,7 +244,7 @@ context size caused the guideline timeout; adding concurrency would not fix a
 session that already ran concurrently.
 
 `JBOT_GUIDELINE_SWEEP` is an opt-in experiment, enabled in this repository's
-dogfood workflow. OpenCode and Pi continue each main session for a guideline
+dogfood workflow. OpenCode, Pi, and CommandCode continue each main session for a guideline
 sweep using its existing diff and investigation, plus the full bounded guidelines.
 Other backends retain the separate pass. Verification still creates a fresh
 session. The sweep stays within the main attempt's remaining deadline, capped
@@ -277,6 +277,36 @@ no new TypeScript comment blocks. All 1,032 tests, typecheck, lint, formatting,
 bundle build, and slim-image build pass. Later test-only extensions for policy
 fingerprinting, capability forwarding, and changed-guideline cache identity
 passed the focused 81-test suite and typecheck.
+
+### CommandCode continuation
+
+The same experiment now covers CommandCode main models. CLI 1.44.0 resumes the
+explicit main session ID with `--resume`, retaining the isolated launch directory,
+model, permissions, and repository mod. JSON repair also resumes that session when
+the experiment is enabled. Verification starts without a resume argument. Missing
+or mismatched session IDs and invalid sweep output fail open with incomplete
+coverage. Resumed calls report token usage but omit the transcript-based dollar
+estimate: subtracting transcript totals produced misleading zero estimates in the
+live probes, so no per-turn dollar accuracy is claimed.
+
+Live CommandCode Muse 1.2 and 1.3 Contributor runs on the same fixture completed
+in 52s and 83s. Both resumed sweeps returned a duplicate of the seeded defect;
+dedupe removed the extra finding and fresh verification retained the defect.
+Repository tools succeeded in main review and verification. Artifacts are in
+`/tmp/jbot-commandcode-sweep-native-1.2` and `-1.3`. These runs validate continuation,
+not better recall. An initial probe accidentally inherited another model from the
+launch directory's environment and was stopped; it is excluded from the results.
+
+Latest feedback also removed the sweep's dependency on auxiliary availability
+and fan-out, retained the explicit guideline opt-out, removed a duplicate prompt
+rule, and pinned the sweep's read-only tool map directly.
+
+Self-review found no remaining P1/P2 issues. De-slop retained one new subprocess
+regression case: it tests concurrent session identity, JSON repair, fail-open
+continuation, permissions, fresh verification, and cost omission. No TypeScript
+comment blocks were added. All 1,033 tests, formatting, typecheck, lint, and the
+bundle build pass. Packaging is unchanged. No additional corpus benchmark ran;
+the experiment remains opt-in globally.
 
 References: [CommandCode CLI](https://commandcode.ai/docs/reference/cli),
 [mods](https://commandcode.ai/docs/mods), and

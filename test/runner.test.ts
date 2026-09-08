@@ -1147,6 +1147,14 @@ describe('normalizeOptions defaults', () => {
     assert.equal(defaults.verifierSlimContext, false);
     assert.equal(defaults.verifyOverlapGrace, false);
     assert.equal(defaults.guidelineSweep, false);
+    assert.equal(
+      normalizeOptions({ guidelineSweep: true, dynamicFanout: true }).guidelineSweep,
+      true,
+    );
+    assert.equal(
+      normalizeOptions({ guidelineSweep: true, guidelinePass: false }).guidelineSweep,
+      false,
+    );
   });
 
   it('keeps SDK routing automatic unless an entrypoint supplies the override', () => {

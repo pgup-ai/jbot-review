@@ -452,6 +452,7 @@ function createCommandCodeBackend(
   const processes = createCommandCodeProcessScope();
   return {
     name: COMMANDCODE_PROVIDER_ID,
+    supportsGuidelineSweep: true,
     stop: processes.stop,
     abortSessionsByLabel: (label) => processes.abort(label),
     observability: COMMANDCODE_TELEMETRY_CAPABILITY,
@@ -2383,11 +2384,7 @@ async function runReviewPipeline(params: {
       );
     }
     const sweepGuidelines =
-      options.guidelineSweep &&
-      mainBackend.supportsGuidelineSweep &&
-      incrementalLenses.guidelinePass
-        ? guidelines
-        : undefined;
+      options.guidelineSweep && mainBackend.supportsGuidelineSweep ? guidelines : undefined;
     if (sweepGuidelines)
       log(
         'Guideline checking will continue in each main review session; verification remains separate.',
@@ -3227,7 +3224,7 @@ export function normalizeOptions(
     context7Mode: options?.context7Mode ?? 'auto',
     context7ApiKey: options?.context7ApiKey ?? '',
     guidelinePass: options?.guidelinePass ?? true,
-    guidelineSweep: options?.guidelineSweep ?? false,
+    guidelineSweep: (options?.guidelineSweep ?? false) && (options?.guidelinePass ?? true),
     shardCachePath: options?.shardCachePath ?? '',
     contextTrim: options?.contextTrim ?? false,
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,

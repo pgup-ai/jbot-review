@@ -1084,8 +1084,9 @@ a dedicated guideline-compliance session audits the diff rule-by-rule in
 parallel with the main review (disable with `enable-guideline-pass: false`).
 
 Set `JBOT_GUIDELINE_SWEEP=true` to run guideline checking as a follow-up in each
-OpenCode/Pi main review session, reusing its investigation. Verification still
-uses a fresh session. This experiment defaults off; other backends retain the
+OpenCode, Pi, or CommandCode main review session, reusing its investigation.
+Verification still uses a fresh session. An enabled sweep is independent of
+auxiliary availability and fan-out; `enable-guideline-pass: false` disables it. This experiment defaults off; other backends retain the
 separate guideline pass, and Arena comparisons keep their existing policy.
 The sweep receives the full guidelines and has at most ten minutes within the
 main attempt's remaining deadline. Failures preserve main findings and mark

@@ -5,12 +5,14 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
+import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { parseModelName } from '@symma/protocol';
 import {
   assembleAddressedPriorCommentsPrompt,
   assembleChangesSinceLastReviewPrompt,
   assembleFindingVerificationPrompt,
   assembleGuidelineCompliancePrompt,
+  assembleGuidelineSweepPrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
   withNoToolsReviewDirective,
@@ -201,6 +203,7 @@ export async function runCommandCodeReview(
   guidelines: string,
   log: (msg: string) => void,
   options: {
+    guidelineSweep?: GuidelineSweep;
     lensAddendum?: string;
     evidenceQuotes?: boolean;
     embeddedFirstPrompt?: boolean;
@@ -212,6 +215,7 @@ export async function runCommandCodeReview(
   } = {},
 ): Promise<ReviewResult> {
   const label = options.label ?? 'review';
+  const deadlineAt = Date.now() + (options.timeoutMs ?? COMMANDCODE_PROMPT_TIMEOUT_MS);
   const prompt = assembleReviewPrompt(
     prContext,
     guidelines,
@@ -222,7 +226,7 @@ export async function runCommandCodeReview(
   log(
     `Prompt assembled (${label}, commandcode): ${prompt.length} chars, guidelines=${!!guidelines}`,
   );
-  const raw = await runCommandCodePrompt(
+  const { finalText: raw, sessionId } = await runCommandCodePrompt(
     workspace,
     model,
     prompt,
@@ -233,14 +237,15 @@ export async function runCommandCodeReview(
     options.runtime,
     options.effort,
   );
+  let result: ReviewResult;
   try {
-    return parseReview(raw, label, log, { strict: true });
+    result = parseReview(raw, label, log, { strict: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log(
       `${label} response unparseable; sending one JSON repair prompt via commandcode: ${message}`,
     );
-    const repaired = await runCommandCodePrompt(
+    const { finalText: repaired } = await runCommandCodePrompt(
       workspace,
       model,
       buildJsonRepairFollowupPrompt({
@@ -256,9 +261,36 @@ export async function runCommandCodeReview(
       options.onTokenUsage,
       options.runtime,
       options.effort,
+      options.guidelineSweep ? sessionId : undefined,
     );
-    return parseReview(repaired, `${label}-repair`, log, { strict: true });
+    result = parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
+  if (!options.guidelineSweep) return result;
+  const sweep = options.guidelineSweep;
+  const sweepLabel = `guideline-sweep-${label}`;
+  return appendGuidelineSweep(
+    result,
+    sweep,
+    sweepLabel,
+    deadlineAt,
+    async (timeoutMs) => {
+      if (!sessionId) throw new Error('CommandCode main review returned no session ID.');
+      const { finalText } = await runCommandCodePrompt(
+        workspace,
+        model,
+        assembleGuidelineSweepPrompt(sweep.guidelines),
+        sweepLabel,
+        log,
+        timeoutMs,
+        options.onTokenUsage,
+        options.runtime,
+        options.effort,
+        sessionId,
+      );
+      return parseReview(finalText, sweepLabel, log, { strict: true }).findings;
+    },
+    log,
+  );
 }
 
 export async function runCommandCodeAddressedPriorCommentsCheck(
@@ -271,7 +303,7 @@ export async function runCommandCodeAddressedPriorCommentsCheck(
   runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<AddressedPriorComment[]> {
-  const raw = await runCommandCodePrompt(
+  const { finalText: raw } = await runCommandCodePrompt(
     workspace,
     model,
     assembleAddressedPriorCommentsPrompt(prContext),
@@ -296,7 +328,7 @@ export async function runCommandCodeGuidelineComplianceCheck(
   runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<Finding[]> {
-  const raw = await runCommandCodePrompt(
+  const { finalText: raw } = await runCommandCodePrompt(
     workspace,
     model,
     assembleGuidelineCompliancePrompt(prContext, guidelines),
@@ -320,7 +352,7 @@ export async function runCommandCodeChangesSinceLastReview(
   runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<string> {
-  const raw = await runCommandCodePrompt(
+  const { finalText: raw } = await runCommandCodePrompt(
     workspace,
     model,
     assembleChangesSinceLastReviewPrompt(deltaContext, true),
@@ -345,7 +377,7 @@ export async function runCommandCodeFindingVerification(
   runtime?: CommandCodeRuntime,
   effort?: string,
 ): Promise<FindingVerdict[] | undefined> {
-  const raw = await runCommandCodePrompt(
+  const { finalText: raw } = await runCommandCodePrompt(
     workspace,
     model,
     assembleFindingVerificationPrompt(prContext, findings),
@@ -564,8 +596,10 @@ async function runCommandCodePrompt(
   onTokenUsage?: TokenUsageRecorder,
   runtime?: CommandCodeRuntime,
   effort?: string,
-): Promise<string> {
+  resumeSessionId?: string,
+): Promise<{ finalText: string; sessionId?: string }> {
   const args = buildCommandCodeCliArgs({ model, effort });
+  if (resumeSessionId) args.push('--resume', resumeSessionId);
   if (runtime?.tools) args.push('--add-dir', workspace, '--mod', join(runtime.home, 'review.mjs'));
   const input = runtime?.tools
     ? withCommandCodeToolsDirective(prompt, workspace)
@@ -591,10 +625,12 @@ async function runCommandCodePrompt(
       );
     }
     const parsed = parseCommandCodeJsonOutput(result.stdout);
+    if (resumeSessionId && parsed.sessionId !== resumeSessionId)
+      throw new Error('CommandCode resumed a different session.');
     if (runtime?.tools)
       log(`CommandCode tool outcomes (${label}): ${JSON.stringify(parsed.toolOutcomes ?? {})}`);
     const estimatedCostUsd =
-      runtime && parsed.sessionId
+      runtime && parsed.sessionId && !resumeSessionId
         ? await commandCodeSessionEstimatedCost(runtime.home, parsed.sessionId)
         : undefined;
     usage = parsed.usage
@@ -615,7 +651,7 @@ async function runCommandCodePrompt(
     log(
       `${label} prompt complete via commandcode: result=${parsed.finalText.length} chars stderr=${result.stderr.length} chars`,
     );
-    return parsed.finalText;
+    return { finalText: parsed.finalText, sessionId: parsed.sessionId };
   } finally {
     onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(input, 'utf8') }, model, label);
   }
