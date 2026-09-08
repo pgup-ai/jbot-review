@@ -18,6 +18,32 @@ there is no new aggregate tool-call or read quota. Listing includes tracked and
 non-ignored untracked paths; search covers non-ignored files. Git search disables
 text conversion and fsmonitor, and pins the worktree.
 
+The first default-on dogfood run exposed a Docker ownership gap: the Action's
+global `safe.directory` entry was invisible inside CommandCode's isolated HOME.
+A checkout owned by UID 1001 reproduced list failures (Git exit 128) and failed
+file-visibility checks. Every tool Git call now trusts only the canonical checkout
+path through `-c safe.directory`; global configuration remains isolated. A startup
+Git check stops the mod if repository access fails. The regression test simulates
+foreign ownership, and the rebuilt Linux image passes with an actual UID 1001
+checkout while still rejecting ignored secrets.
+
+In [run 34170413510](https://github.com/pgup-ai/jbot-review/actions/runs/34170413510/job/101889494845),
+the image build took 1m 59s and both Muse auxiliary sessions finished within two
+minutes with failed file/list calls. LongCat's main session hit its 1,770-second
+deadline; the run failed without posting incomplete review coverage. Tool counts
+are emitted only after successful session completion, so the log cannot establish
+whether LongCat was retrying tools, generating, or waiting on the provider.
+
+After the ownership fix, default-on Linux reviews of the defect fixture on a
+UID 1001 checkout retained the verified P1 with Muse 1.3 in 32s and LongCat in
+220s. Logs are at `/tmp/jbot-206-foreign-muse` and
+`/tmp/jbot-206-foreign-longcat`. LongCat repeated completed searches, used regex
+syntax with literal search, requested an offset beyond the output, and needed
+one JSON repair. These probes validate access and expose model inefficiency;
+they do not establish the cause of the full-PR timeout or its resolution.
+The ownership-fix self-review kept one concise rationale comment and extended
+existing tests without adding cases. All 1,028 tests and the standard checks pass.
+
 Native plan-mode tools alone were insufficient in the isolation probe: all
 three models could read an outside canary through a direct path or a symlink.
 Inspection showed the CLI's native grep fallback can also follow symlinks, and native file reads

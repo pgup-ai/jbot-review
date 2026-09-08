@@ -63,13 +63,21 @@ it('reads literal bracketed filenames while refusing escapes and non-file reads'
   }
 });
 
-it('searches and lists the actual worktree without following symlinks or running fsmonitor', async () => {
+it('reads a foreign-owned worktree without following escapes or running fsmonitor', async () => {
   const parent = mkdtempSync(join(tmpdir(), 'jbot-cc-search-'));
   const root = join(parent, 'repo');
   const outside = join(parent, 'outside');
   mkdirSync(root);
   mkdirSync(outside);
   const previous = process.env.JBOT_COMMANDCODE_WORKSPACE;
+  const gitEnv = {
+    GIT_TEST_ASSUME_DIFFERENT_OWNER: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+  };
+  const previousGitEnv = Object.fromEntries(
+    Object.keys(gitEnv).map((key) => [key, process.env[key]]),
+  );
   const tools: Parameters<ModApi['addTool']>[0][] = [];
   const git = (...args: string[]) =>
     execFileSync('git', ['-C', root, ...args], { stdio: 'ignore' });
@@ -88,6 +96,7 @@ it('searches and lists the actual worktree without following symlinks or running
     writeFileSync(join(root, '.gitignore'), 'ignored.ts\n');
     git('config', 'core.worktree', outside);
     git('config', 'core.fsmonitor', `touch ${join(parent, 'executed')}`);
+    Object.assign(process.env, gitEnv);
     process.env.JBOT_COMMANDCODE_WORKSPACE = root;
     commandCodeReviewMod({
       setActiveTools() {},
@@ -123,6 +132,10 @@ it('searches and lists the actual worktree without following symlinks or running
   } finally {
     if (previous === undefined) delete process.env.JBOT_COMMANDCODE_WORKSPACE;
     else process.env.JBOT_COMMANDCODE_WORKSPACE = previous;
+    for (const [key, value] of Object.entries(previousGitEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     rmSync(parent, { recursive: true, force: true });
   }
 });
@@ -138,10 +151,10 @@ it('stops the process if the trusted mod cannot initialize', () => {
         'tsx',
         '--input-type=module',
         '-e',
-        `const m = await import(${JSON.stringify(join(home, 'review.mjs'))}); await m.default({}); console.log('unguarded');`,
+        `const m = await import(${JSON.stringify(join(home, 'review.mjs'))}); await m.default({setActiveTools(){}, hooks(){}, addTool(){}}); console.log('unguarded');`,
       ],
       {
-        env: { ...commandCodeEnvForHome(home), JBOT_COMMANDCODE_WORKSPACE: join(home, 'missing') },
+        env: { ...commandCodeEnvForHome(home), JBOT_COMMANDCODE_WORKSPACE: home },
         encoding: 'utf8',
       },
     );
