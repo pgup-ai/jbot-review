@@ -855,10 +855,8 @@ export interface ReviewRunOptions {
   verifyFindings?: boolean;
   /**
    * Wall-clock target in minutes (0 = no budget). Finder sessions get the
-   * full budget (minus a posting reserve) as their deadline; retries and
-   * verification use whatever remains at their start or are skipped
-   * (fail-open). Lets heavy-reasoning models run without ever timing out
-   * the whole job.
+   * shared deadline with posting and enabled verification time reserved.
+   * Retries share that deadline; auxiliary failures preserve main findings.
    */
   timeBudgetMinutes?: number;
   /**
@@ -1027,7 +1025,7 @@ async function runReviewPipeline(params: {
     throw new Error('runPrReview requires headSha for GitHub-backed reviews.');
   }
   const runStartedAt = Date.now();
-  const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes);
+  const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes, options.verifyFindings);
   if (finderTimeoutMs) {
     log(
       `Time budget ${options.timeBudgetMinutes}m: finder sessions capped at ${Math.round(finderTimeoutMs / 1000)}s.`,
@@ -2411,7 +2409,11 @@ async function runReviewPipeline(params: {
       shardPlans,
       changedFiles,
       timeoutMs: finderTimeoutMs,
-      deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt),
+      deadlineAt: computeRunDeadline(
+        options.timeBudgetMinutes,
+        runStartedAt,
+        options.verifyFindings,
+      ),
       context7Active,
       context7ApiKey: options.context7ApiKey,
       disableContext7: opencodeRuntime
@@ -2514,7 +2516,11 @@ async function runReviewPipeline(params: {
       guidelinesForPrompt,
       lensKeys: candidateLensKeys,
       timeoutMs: finderTimeoutMs,
-      deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt),
+      deadlineAt: computeRunDeadline(
+        options.timeBudgetMinutes,
+        runStartedAt,
+        options.verifyFindings,
+      ),
       evidenceQuotes: options.evidenceQuotes,
       embeddedFirstPrompt: options.embeddedFirstPrompt,
       log,
@@ -3204,7 +3210,7 @@ export function normalizeOptions(
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
     guidelineWiden: options?.guidelineWiden ?? 'auto',
     verifierSlimContext: options?.verifierSlimContext ?? false,
-    commandCodeTools: options?.commandCodeTools ?? true,
+    commandCodeTools: options?.commandCodeTools ?? false,
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     auxModel: options?.auxModel ?? '',
     modelPool: options?.modelPool ?? [],
@@ -3790,6 +3796,7 @@ export async function runShardedReview(params: {
         const result = await backend.runReview(model, plan.context, guidelinesForPrompt, log, {
           label: plan.label,
           guidelineSweep,
+          deadlineAt: params.deadlineAt,
           timeoutMs,
           onTokenUsage: params.onTokenUsage,
           evidenceQuotes: params.evidenceQuotes,
@@ -3887,6 +3894,7 @@ export async function runShardedReview(params: {
             {
               label: `${plan.label}-retry`,
               guidelineSweep,
+              deadlineAt: params.deadlineAt,
               timeoutMs: retryTimeoutMs,
               onTokenUsage: params.onTokenUsage,
               evidenceQuotes: params.evidenceQuotes,

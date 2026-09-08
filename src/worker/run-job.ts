@@ -79,7 +79,7 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         reviewShards: 1,
         timeBudgetMinutes: 30,
         modelOptions: defaultModelOptions(parseModelName(job.model).providerID),
-        commandCodeTools: parseEnvBoolean('JBOT_COMMANDCODE_TOOLS', true),
+        commandCodeTools: parseEnvBoolean('JBOT_COMMANDCODE_TOOLS', false),
         guidelineSweep: parseEnvBoolean('JBOT_GUIDELINE_SWEEP', false),
         embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
         onReviewResult: (r) => {

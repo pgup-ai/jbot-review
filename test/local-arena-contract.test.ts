@@ -135,7 +135,7 @@ describe('comparison manifest validation', () => {
     }
     const missing = manifest();
     Reflect.deleteProperty(missing.reviewConfig, 'commandCodeTools');
-    assert.equal(validateComparisonManifest(missing).reviewConfig.commandCodeTools, true);
+    assert.equal(validateComparisonManifest(missing).reviewConfig.commandCodeTools, false);
     const legacy = manifest();
     const parsedLegacy = validateComparisonManifest({
       ...legacy,

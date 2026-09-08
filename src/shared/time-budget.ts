@@ -3,18 +3,25 @@ const POSTING_RESERVE_MS = 30_000;
 const MIN_VERIFICATION_MS = 45_000;
 const MAX_VERIFICATION_MS = 5 * 60_000;
 
-export function computeFinderTimeoutMs(timeBudgetMinutes: number): number | undefined {
-  if (timeBudgetMinutes <= 0) return undefined;
-  const window = timeBudgetMinutes * 60_000 - POSTING_RESERVE_MS;
-  return Math.min(window, MAX_SESSION_TIMEOUT_MS);
+export function computeFinderTimeoutMs(
+  timeBudgetMinutes: number,
+  verificationEnabled = true,
+): number | undefined {
+  const deadline = computeRunDeadline(timeBudgetMinutes, 0, verificationEnabled);
+  return deadline === undefined ? undefined : Math.min(deadline, MAX_SESSION_TIMEOUT_MS);
 }
 
 export function computeRunDeadline(
   timeBudgetMinutes: number,
   runStartedAt: number,
+  verificationEnabled = true,
 ): number | undefined {
   if (timeBudgetMinutes <= 0) return undefined;
-  return runStartedAt + timeBudgetMinutes * 60_000 - POSTING_RESERVE_MS;
+  const available = Math.max(0, timeBudgetMinutes * 60_000 - POSTING_RESERVE_MS);
+  const verificationReserve = verificationEnabled
+    ? Math.min(MAX_VERIFICATION_MS, available / 2)
+    : 0;
+  return runStartedAt + available - verificationReserve;
 }
 
 const MIN_RETRY_TIMEOUT_MS = 60_000;

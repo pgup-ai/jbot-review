@@ -246,11 +246,12 @@ describe('buildBody', () => {
 });
 
 describe('session timeout budgeting', () => {
-  it('gives finders the full budget minus the posting reserve, within clamps', () => {
+  it('reserves verification time without starving short finder budgets', () => {
     assert.equal(computeFinderTimeoutMs(0), undefined);
-    assert.equal(computeFinderTimeoutMs(10), 10 * 60_000 - 30_000); // ~9.5m for a 10m budget
-    assert.equal(computeFinderTimeoutMs(1), 30_000); // never exceeds the run deadline
-    assert.equal(computeFinderTimeoutMs(30), 30 * 60_000 - 30_000); // default budget
+    assert.equal(computeFinderTimeoutMs(10), 285_000);
+    assert.equal(computeFinderTimeoutMs(1), 15_000);
+    assert.equal(computeFinderTimeoutMs(30), 24.5 * 60_000);
+    assert.equal(computeFinderTimeoutMs(30, false), 29.5 * 60_000);
     assert.equal(computeFinderTimeoutMs(120), 30 * 60_000); // ceiling
   });
 
@@ -286,8 +287,8 @@ describe('shard retry budgeting', () => {
 });
 
 describe('computeRunDeadline', () => {
-  it('derives the absolute deadline from the budget minus the posting reserve', () => {
-    assert.equal(computeRunDeadline(10, 1_000_000), 1_000_000 + 10 * 60_000 - 30_000);
+  it('derives a shared finder deadline with verification reserved', () => {
+    assert.equal(computeRunDeadline(10, 1_000_000), 1_000_000 + 285_000);
     assert.equal(computeRunDeadline(0, 1_000_000), undefined);
   });
 });
@@ -489,7 +490,14 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
   const backendThrowingOnce = (message: string, calls: string[]) =>
     ({
       name: 'fake',
-      runReview: async (_m: string, context: string) => {
+      runReview: async (
+        _m: string,
+        context: string,
+        _g: string,
+        _log: unknown,
+        options: { deadlineAt?: number },
+      ) => {
+        assert.equal(options.deadlineAt, 9_000_000_000_000);
         calls.push(context);
         if (calls.length === 1) throw new Error(message);
         return okResult;
@@ -499,6 +507,7 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     runShardedReview({
       backend,
       model: 'fake/model',
+      deadlineAt: 9_000_000_000_000,
       guidelinesForPrompt: '',
       shardPlans: [shardPlan],
       changedFiles: ['a.ts'],
@@ -584,6 +593,7 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     const withContext7: string[] = [];
     await runShardedReview({
       backend: backendThrowingOnce('maximum context length exceeded', withContext7),
+      deadlineAt: 9_000_000_000_000,
       model: 'fake/model',
       guidelinesForPrompt: '',
       shardPlans: [shardPlan],
@@ -1183,9 +1193,9 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions(undefined).shardCachePath, '');
   });
 
-  it('enables embedded-first prompts and CommandCode tools by default, with working opt-outs', () => {
-    assert.equal(normalizeOptions(undefined).commandCodeTools, true);
-    assert.equal(normalizeOptions({ commandCodeTools: false }).commandCodeTools, false);
+  it('keeps embedded-first prompts on and CommandCode investigation opt-in', () => {
+    assert.equal(normalizeOptions(undefined).commandCodeTools, false);
+    assert.equal(normalizeOptions({ commandCodeTools: true }).commandCodeTools, true);
     assert.equal(normalizeOptions(undefined).embeddedFirstPrompt, true);
     assert.equal(normalizeOptions({ embeddedFirstPrompt: false }).embeddedFirstPrompt, false);
   });

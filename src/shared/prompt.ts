@@ -318,16 +318,17 @@ Field constraints:
 
 const EMBEDDED_FIRST_EXPLORATION_POLICY = `## Repository exploration policy
 
-Use the embedded diff as a starting point. Investigate unchanged code, callers,
-callees, configuration, defaults, tests, and related contracts wherever needed
-to establish the consequences of the change. Follow dependencies beyond the
-first hop when needed; the changed-symbol manifest is a hint, not an exhaustive
-map. Use repository search and targeted reads to close gaps, and continue
-paginated or truncated results until the relevant evidence is available.
+Review every changed hunk in the embedded diff. Start with targeted reads of
+callers, definitions, configuration, and tests that resolve a concrete question
+about the change. Follow dependencies beyond the first hop when the evidence
+reveals a plausible broken contract or unresolved finding; the changed-symbol
+manifest is a hint, not an exhaustive map. Continue paginated or truncated
+results when the needed evidence is missing.
 
-Prioritize thoroughness and correctness over tool-call count or speed. Before
-returning, check plausible failure paths and conflicting evidence. Publish
-supported findings and clearly identify material uncertainties.`;
+Once the changed hunks and plausible failure paths are covered, return the final
+JSON. Do not keep exploring solely for completeness or reread code already
+provided unless a specific uncertainty requires it. Report supported findings
+and identify material uncertainties without asserting unverified premises.`;
 
 function replacePromptSection(prompt: string, current: string, replacement: string): string {
   const start = prompt.indexOf(current);
