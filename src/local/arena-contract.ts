@@ -266,7 +266,7 @@ function validateReviewConfig(value: unknown): ComparisonReviewConfigV1 {
     ),
     commandCodeTools:
       config.commandCodeTools === undefined
-        ? false
+        ? true
         : requireBoolean(config.commandCodeTools, 'reviewConfig.commandCodeTools'),
     verifierSlimContext: requireBoolean(
       config.verifierSlimContext,

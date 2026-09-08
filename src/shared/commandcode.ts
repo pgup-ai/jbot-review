@@ -40,7 +40,6 @@ import { isFiniteNumber, isNonArrayRecord, isRecord } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
-const COMMANDCODE_REPAIR_TIMEOUT_MS = 60_000;
 const COMMANDCODE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const COMMANDCODE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 // Keep the wall-clock timeout as the practical bound for long reviews.
@@ -274,7 +273,7 @@ export async function runCommandCodeReview(
       }),
       `${label}-repair`,
       log,
-      Math.min(remaining, COMMANDCODE_REPAIR_TIMEOUT_MS),
+      remaining,
       options.onTokenUsage,
       options.runtime,
       options.effort,
@@ -337,7 +336,7 @@ async function runCommandCodeAuxReview(
       }),
       `${label}-repair`,
       log,
-      Math.min(remaining, COMMANDCODE_REPAIR_TIMEOUT_MS),
+      remaining,
       onTokenUsage,
       runtime,
       effort,

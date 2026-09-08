@@ -1025,12 +1025,6 @@ async function runReviewPipeline(params: {
     throw new Error('runPrReview requires headSha for GitHub-backed reviews.');
   }
   const runStartedAt = Date.now();
-  const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes, options.verifyFindings);
-  if (finderTimeoutMs) {
-    log(
-      `Time budget ${options.timeBudgetMinutes}m: finder sessions capped at ${Math.round(finderTimeoutMs / 1000)}s.`,
-    );
-  }
 
   const { providerID, modelID } = parseModelName(model);
   const auxModel = options.auxModel || model;
@@ -2168,6 +2162,13 @@ async function runReviewPipeline(params: {
   // aux-only opencode boot disable them the same way (invariant #3).
   const auxSessionsEnabled =
     auxHasCompleteEmbeddedDiff && !auxOpencodeBootError && !auxGatewayPreflightError;
+  const verificationEnabled = options.verifyFindings && auxSessionsEnabled;
+  const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes, verificationEnabled);
+  if (finderTimeoutMs) {
+    log(
+      `Time budget ${options.timeBudgetMinutes}m: finder sessions capped at ${Math.round(finderTimeoutMs / 1000)}s.`,
+    );
+  }
   // Which engine each model ran on, for the review footer (main wins on
   // collision — same model ⇒ same engine anyway).
   const engineByModel: Record<string, string> = {
@@ -2409,11 +2410,7 @@ async function runReviewPipeline(params: {
       shardPlans,
       changedFiles,
       timeoutMs: finderTimeoutMs,
-      deadlineAt: computeRunDeadline(
-        options.timeBudgetMinutes,
-        runStartedAt,
-        options.verifyFindings,
-      ),
+      deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt, verificationEnabled),
       context7Active,
       context7ApiKey: options.context7ApiKey,
       disableContext7: opencodeRuntime
@@ -2516,11 +2513,7 @@ async function runReviewPipeline(params: {
       guidelinesForPrompt,
       lensKeys: candidateLensKeys,
       timeoutMs: finderTimeoutMs,
-      deadlineAt: computeRunDeadline(
-        options.timeBudgetMinutes,
-        runStartedAt,
-        options.verifyFindings,
-      ),
+      deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt, verificationEnabled),
       evidenceQuotes: options.evidenceQuotes,
       embeddedFirstPrompt: options.embeddedFirstPrompt,
       log,
@@ -2615,7 +2608,7 @@ async function runReviewPipeline(params: {
       return { targets, verdicts };
     };
     const overlapVerification =
-      options.verifyOverlapGrace && options.verifyFindings && auxSessionsEnabled
+      options.verifyOverlapGrace && verificationEnabled
         ? startOverlapVerification().catch(() => 'skipped' as const)
         : undefined;
     const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
@@ -2638,7 +2631,7 @@ async function runReviewPipeline(params: {
     const auxiliaryGraceMs = computeAuxiliaryGraceMs(
       options.timeBudgetMinutes,
       Date.now() - runStartedAt,
-      options.verifyFindings && auxSessionsEnabled,
+      verificationEnabled,
     );
     const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
     const abandonAuxSession = (label: string) => () => {
@@ -2761,7 +2754,7 @@ async function runReviewPipeline(params: {
         model: auxModel,
         prContext: verifierPrContext,
         findings: merge.lateUnverified,
-        enabled: options.verifyFindings && auxSessionsEnabled,
+        enabled: verificationEnabled,
         timeoutMs: computeVerificationTimeoutMs(
           options.timeBudgetMinutes,
           Date.now() - runStartedAt,
@@ -2784,7 +2777,7 @@ async function runReviewPipeline(params: {
           Date.now() - runStartedAt,
         ),
         findings: suppression.findings,
-        enabled: options.verifyFindings && auxSessionsEnabled,
+        enabled: verificationEnabled,
         modelOptions: verifierSessionOptions,
         log,
         onTokenUsage: recordTokenUsage,

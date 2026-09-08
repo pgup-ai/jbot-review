@@ -580,8 +580,9 @@ disabled by default pending controlled quality and latency comparisons.
 Set `JBOT_COMMANDCODE_TOOLS=true` in the Action step's `env`, local environment,
 or app/worker environment to enable repository investigation for CommandCode
 review and verification sessions. JSON repair is always fresh and tool-less,
-limited to 60 seconds and the remaining session deadline. Arena comparisons use the frozen
-`reviewConfig.commandCodeTools` manifest value instead of ambient environment. The opt-in exposes `jbot_read_file`,
+bounded by the remaining session deadline. Arena comparisons use the frozen
+`reviewConfig.commandCodeTools` manifest value instead of ambient environment; legacy v1
+manifests that omit it retain tools enabled. The opt-in exposes `jbot_read_file`,
 `jbot_list_files`, and `jbot_search`. Reads reject paths and symlinks resolving
 outside the repository. Search covers non-ignored files without following symlinks;
 listing includes tracked and non-ignored untracked files. Direct reads reject Git

@@ -10,15 +10,15 @@ alone does not explain the regression.
 ## Changes
 
 - CommandCode repository investigation is opt-in across Action, local, app,
-  worker, normalized options, and legacy comparison manifests. Explicit manifest
-  values still win. OpenCode/Pi tools and complete-diff coverage remain intact.
+  worker, and normalized options. Legacy comparison manifests retain tools enabled
+  when the field is omitted; explicit manifest values still win. OpenCode/Pi tools and complete-diff coverage remain intact.
 - Embedded-first guidance asks for targeted investigation and a stopping condition,
   without restoring the old aggregate tool/read quotas.
 - Main and auxiliary CommandCode JSON repairs start fresh, block tools in the
-  generated mod, and share the original deadline with a 60-second repair ceiling.
+  generated mod, and share the original deadline without a separate repair ceiling.
   The original main session remains available for an enabled guideline sweep.
 - Main attempts and retries receive the absolute deadline already calculated by
-  the runner. Finders reserve up to five minutes for enabled verification and
+  the runner. Finders reserve up to five minutes for available, enabled verification and
   30 seconds for posting; verification gets at most half the usable budget on
   short runs. The default 30-minute budget gives finders 24.5 minutes.
 

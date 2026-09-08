@@ -289,6 +289,7 @@ describe('shard retry budgeting', () => {
 describe('computeRunDeadline', () => {
   it('derives a shared finder deadline with verification reserved', () => {
     assert.equal(computeRunDeadline(10, 1_000_000), 1_000_000 + 285_000);
+    assert.equal(computeRunDeadline(10, 1_000_000, false), 1_000_000 + 570_000);
     assert.equal(computeRunDeadline(0, 1_000_000), undefined);
   });
 });
