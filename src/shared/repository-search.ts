@@ -25,7 +25,8 @@ export function repositorySearchArgs(input: unknown): string[] {
         path.startsWith('/') ||
         path.includes('\\') ||
         path.includes('\0') ||
-        path.includes(':') ||
+        path.startsWith(':') ||
+        /^[A-Za-z]:/.test(path) ||
         path.split('/').some((part) => part === '..' || part.toLowerCase() === '.git'),
     )
   )

@@ -176,6 +176,10 @@ it('reads a foreign-owned worktree without following escapes or running fsmonito
       assert.match(invalid.error, /query must be nonempty/);
     }
     writeFileSync(join(root, '[id].ts'), 'other literal\n');
+    writeFileSync(join(root, 'name:part.ts'), 'colon needle\n');
+    const colon = await search.run({ input: { query: 'colon needle', paths: ['name:part.ts'] } });
+    assert.equal(colon.ok, true);
+    assert.match(colon.content[0].text, /name:part\.ts:1:colon needle/);
     const scoped = await search.run({
       input: { query: ['needle', 'other literal'], paths: ['inside.ts', '[id].ts'] },
     });
@@ -192,6 +196,8 @@ it('reads a foreign-owned worktree without following escapes or running fsmonito
       ['../outside'],
       ['/tmp'],
       [':(top)*'],
+      ['C:/outside'],
+      ['C:outside'],
       ['.git'],
       ['replaced'],
       ['escape.ts'],

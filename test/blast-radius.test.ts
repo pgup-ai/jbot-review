@@ -77,9 +77,27 @@ describe('extractChangedExportedSymbols', () => {
     ].join('\n');
     assert.deepEqual(extractChangedExportedSymbols([{ filename: 'src/a.ts', patch: multiline }]), [
       'NewName',
-      'PublicName',
       'OldName',
       'RemovedAlias',
+      'Incomplete',
+    ]);
+  });
+
+  it('ignores unchanged export bindings while retaining changed re-export sources', () => {
+    const patch = [
+      '@@ -1,3 +1,3 @@',
+      ' export {',
+      '- A, B, // old comment',
+      '+ A, B, // new comment',
+      ' };',
+      '-export { Local as Public };',
+      '+export { Other as Public };',
+      '-export { Forwarded } from "./old";',
+      '+export { Forwarded } from "./new";',
+    ].join('\n');
+    assert.deepEqual(extractChangedExportedSymbols([{ filename: 'a.ts', patch }]), [
+      'Public',
+      'Forwarded',
     ]);
   });
 

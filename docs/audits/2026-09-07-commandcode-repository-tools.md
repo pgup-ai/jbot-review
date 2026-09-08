@@ -533,3 +533,25 @@ cover multiline context/alias/hunk handling and cancellation diagnostics. One
 comment block was rewritten to explain error propagation. Prompt formatting was
 moved without changing its output. No new live model probe or core/full corpus
 was run for these fixes; the inspected dogfood run predates them.
+
+### Export hints and literal search follow-up
+
+Named-export hints now compare normalized bindings on both sides of each hunk,
+including re-export sources. Unchanged siblings and comment-only edits no longer
+consume the symbol budget. Complete comma-delimited specifiers survive a hunk
+boundary even when the closing brace is absent. Search accepts interior colons
+in literal paths while still rejecting drive-qualified paths and traversal.
+
+The missing-opening-declaration report is valid but deferred: patch-only context
+cannot reliably distinguish an export member from an import or object member.
+Source-backed reconstruction needs a separate change covering base/head, renames,
+deletions, and local uncommitted edits. This remains a best-effort caller-hint
+limitation; full-diff review scope is unaffected.
+
+Self-review: no new P1/P2 issue found in the fixes. De-slop removed the old list
+helper; no comment blocks added or modified. One new test is retained because it
+catches unchanged-binding noise while protecting changed re-export sources;
+existing cases cover hunk boundaries and real-Git scoped search. Code/test delta:
++27 lines. All 1,023 tests, typecheck, lint, formatting, and build passed. No live
+model probe or quality corpus rerun; changed caller hints have deterministic
+coverage but their effect on model recall remains unmeasured.

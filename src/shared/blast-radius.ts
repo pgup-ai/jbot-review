@@ -19,11 +19,39 @@ export function extractChangedExportedSymbols(files: PrFile[]): string[] {
   const symbols = new Set<string>();
   for (const file of files) {
     if (!file.patch) continue;
-    const blocks: Partial<Record<'+' | '-', { text: string; changed: boolean }>> = {};
+    const blocks: Partial<Record<'+' | '-', string>> = {};
+    const lists = { '+': new Map<string, string>(), '-': new Map<string, string>() };
+    const flush = (side: '+' | '-', complete: boolean) => {
+      const block = blocks[side];
+      if (block === undefined) return;
+      const end = complete ? block.indexOf('}') : block.lastIndexOf(',');
+      const source = complete
+        ? (block.slice(end + 1).match(/from\s+(['"])(.*?)\1/)?.[2] ?? '')
+        : '';
+      for (const part of block
+        .slice(0, Math.max(0, end))
+        .replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')
+        .split(',')) {
+        const specifier = part.trim().replace(/\s+/g, ' ');
+        const name = specifier.split(/\s+as\s+/i).at(-1) ?? '';
+        if (/^[A-Za-z_$][\w$]*$/.test(name)) lists[side].set(specifier + '\0' + source, name);
+      }
+      delete blocks[side];
+    };
+    const finishHunk = () => {
+      flush('+', false);
+      flush('-', false);
+      for (const side of ['+', '-'] as const) {
+        const other = side === '+' ? '-' : '+';
+        for (const [specifier, name] of lists[side])
+          if (!lists[other].has(specifier)) symbols.add(name);
+      }
+      lists['+'].clear();
+      lists['-'].clear();
+    };
     for (const line of file.patch.split('\n')) {
       if (line.startsWith('@@')) {
-        delete blocks['+'];
-        delete blocks['-'];
+        finishHunk();
         continue;
       }
       const declaration = line.match(EXPORT_DECLARATION);
@@ -32,40 +60,14 @@ export function extractChangedExportedSymbols(files: PrFile[]): string[] {
         if (line[0] !== side && line[0] !== ' ') continue;
         const text = line.slice(1);
         const start = text.match(NAMED_EXPORT_START);
-        const block = start
-          ? { text: text.slice(start[0].length), changed: line[0] === side }
-          : blocks[side];
-        if (!block) continue;
-        if (!start) {
-          block.text += '\n' + text;
-          block.changed ||= line[0] === side;
-        }
-        const end = block.text.indexOf('}');
-        if (end < 0) blocks[side] = block;
-        else {
-          if (block.changed)
-            for (const symbol of exportedNamesFromList(block.text.slice(0, end)))
-              symbols.add(symbol);
-          delete blocks[side];
-        }
+        if (start) blocks[side] = text.slice(start[0].length);
+        else if (blocks[side] !== undefined) blocks[side] += '\n' + text;
+        if (blocks[side]?.includes('}')) flush(side, true);
       }
     }
+    finishHunk();
   }
   return [...symbols];
-}
-
-function exportedNamesFromList(exportList: string): string[] {
-  return exportList
-    .split(',')
-    .map((part) => part.trim())
-    .map(
-      (part) =>
-        part
-          .split(/\s+as\s+/i)
-          .at(-1)
-          ?.trim() ?? '',
-    )
-    .filter((part) => /^[A-Za-z_$][\w$]*$/.test(part));
 }
 
 export type SymbolGrep = (workspace: string, symbol: string) => Promise<string[]>;
