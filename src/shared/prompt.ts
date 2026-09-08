@@ -556,12 +556,6 @@ export function formatBlastRadiusContext(
   ].join('\n');
 }
 
-/**
- * Focus addenda for extra recall passes. Each lens narrows ATTENTION, not
- * scope: a lens pass still reviews the whole diff but spends its effort on
- * one class of bug the single general pass historically misses. Keys are
- * ordered by expected marginal recall.
- */
 export const LENS_CONTEXT_NOTE = `## Focused lens context
 
 Commit messages, CI status, prior review comments/threads, and changes-since
@@ -570,6 +564,12 @@ diff evidence with its omission notices, PR intent, linked issues when available
 and investigation guidance are retained. Prior
 findings are suppressed downstream; do not infer that no prior review exists.`;
 
+/**
+ * Focus addenda for extra recall passes. Each lens narrows ATTENTION, not
+ * scope: a lens pass still reviews the whole diff but spends its effort on
+ * one class of bug the single general pass historically misses. Keys are
+ * ordered by expected marginal recall.
+ */
 export const REVIEW_LENSES: Record<string, string> = {
   interactions: `## Review lens for this pass
 

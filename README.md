@@ -1120,9 +1120,10 @@ prompts with the shared evidence, severity, and output rules. They retain the
 same diff evidence, relevant guidelines, PR intent, review focus, and caller
 context, but omit commit history, CI status, prior review threads, and summary
 instructions. Main review, guideline checks, and verification keep their existing
-context. `finding-verification` evaluates candidate
-findings in a fresh session, using repository tools where the backend supports
-them. Incorrect verification or thread closure can hide real issues.
+context.
+
+`finding-verification` evaluates candidate findings in a fresh session, using
+repository tools where the backend supports them. Incorrect verification or thread closure can hide real issues.
 
 After main review completes, auxiliary sessions have at most five minutes to
 settle, bounded by the run budget with verification and posting time reserved.
