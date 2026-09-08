@@ -300,35 +300,23 @@ describe('runGuidelineComplianceCheck JSON repair loop', () => {
     assert.equal(findings.length, 1);
   });
 
-  it('fails open to zero findings when the repair re-prompt itself fails', async () => {
+  it('propagates repair transport failures for runner coverage tracking', async () => {
     const { client, prompts } = makeFakeClient(['prose', new Error('socket hang up')]);
-
-    const findings = await runGuidelineComplianceCheck(
-      client,
-      'prov/model',
-      'CTX',
-      'guides',
-      noLog,
+    await assert.rejects(
+      runGuidelineComplianceCheck(client, 'prov/model', 'CTX', 'guides', noLog),
+      /socket hang up/,
     );
-
     assert.equal(prompts.length, 2);
-    assert.deepEqual(findings, [], 'a repair transport failure must not escape the aux check');
   });
 
-  it('fails open and reports malformed or wrong-field repair responses', async () => {
+  it('rejects malformed or wrong-field repair responses', async () => {
     for (const repaired of ['prose two', '{"addressedPriorComments":[]}']) {
       const { client, prompts } = makeFakeClient(['{}', repaired]);
-      const logs: string[] = [];
-      const findings = await runGuidelineComplianceCheck(
-        client,
-        'prov/model',
-        'CTX',
-        'guides',
-        (message) => logs.push(message),
+      await assert.rejects(
+        runGuidelineComplianceCheck(client, 'prov/model', 'CTX', 'guides', noLog),
+        /JSON|findings array/,
       );
       assert.equal(prompts.length, 2);
-      assert.deepEqual(findings, []);
-      assert.ok(logs.some((message) => message.includes('repair failed')));
     }
   });
 });
@@ -353,29 +341,24 @@ describe('runAddressedPriorCommentsCheck JSON repair loop', () => {
     assert.equal(addressed.length, 1);
   });
 
-  it('fails open and reports wrong-field addressed-check repairs', async () => {
+  it('rejects wrong-field addressed-check repairs', async () => {
     for (const repaired of ['prose two', '{"findings":[]}']) {
       const { client, prompts } = makeFakeClient(['{}', repaired]);
-      const logs: string[] = [];
-      const addressed = await runAddressedPriorCommentsCheck(
-        client,
-        'prov/model',
-        'CTX',
-        (message) => logs.push(message),
+      await assert.rejects(
+        runAddressedPriorCommentsCheck(client, 'prov/model', 'CTX', noLog),
+        /JSON|addressedPriorComments array/,
       );
       assert.equal(prompts.length, 2);
-      assert.deepEqual(addressed, []);
-      assert.ok(logs.some((message) => message.includes('repair failed')));
     }
   });
 
-  it('fails open to no addressed comments when the repair re-prompt itself fails', async () => {
+  it('propagates addressed-check repair failures for runner coverage tracking', async () => {
     const { client, prompts } = makeFakeClient(['prose', new Error('socket hang up')]);
-
-    const addressed = await runAddressedPriorCommentsCheck(client, 'prov/model', 'CTX', noLog);
-
+    await assert.rejects(
+      runAddressedPriorCommentsCheck(client, 'prov/model', 'CTX', noLog),
+      /socket hang up/,
+    );
     assert.equal(prompts.length, 2);
-    assert.deepEqual(addressed, [], 'a repair transport failure must not escape the aux check');
   });
 });
 

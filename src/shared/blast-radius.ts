@@ -19,16 +19,12 @@ export const MAX_CALLSITE_FILES_PER_SYMBOL = 8;
 const execFileAsync = promisify(execFile);
 const GIT_GREP_TIMEOUT_MS = 10_000;
 
-// Touching an export's declaration line is the cheap, language-light signal
-// that its contract may have changed. Same body for added (`+`) and removed
-// (`-`) lines; only the diff sign differs.
+// Changed export declarations identify callers worth including in review context.
 const EXPORT_BODY =
   String.raw`\s*export\s+(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?` +
   String.raw`(?:function\s*\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)`;
 const ADDED_EXPORT_DECLARATION = new RegExp(String.raw`^\+` + EXPORT_BODY);
-const REMOVED_EXPORT_DECLARATION = new RegExp(String.raw`^-` + EXPORT_BODY);
 const ADDED_NAMED_EXPORTS = /^\+\s*export\s+(?:type\s+)?\{([^}]+)\}/;
-const REMOVED_NAMED_EXPORTS = /^-\s*export\s+(?:type\s+)?\{([^}]+)\}/;
 
 function collectExportsFromLine(
   line: string,
@@ -44,24 +40,12 @@ function collectExportsFromLine(
   }
 }
 
-/**
- * Pulls exported top-level symbol names from a patch's ADDED lines. With
- * `includeRemoved`, also scans REMOVED lines — a deleted or renamed export is
- * the canonical "breaks an unchanged caller" case, which the incremental-lens
- * gate keys on (see `planIncrementalLenses`).
- */
-export function extractChangedExportedSymbols(
-  files: PrFile[],
-  options: { includeRemoved?: boolean } = {},
-): string[] {
+export function extractChangedExportedSymbols(files: PrFile[]): string[] {
   const symbols = new Set<string>();
   for (const file of files) {
     if (!file.patch) continue;
     for (const line of file.patch.split('\n')) {
       collectExportsFromLine(line, ADDED_EXPORT_DECLARATION, ADDED_NAMED_EXPORTS, symbols);
-      if (options.includeRemoved) {
-        collectExportsFromLine(line, REMOVED_EXPORT_DECLARATION, REMOVED_NAMED_EXPORTS, symbols);
-      }
     }
   }
   return [...symbols];

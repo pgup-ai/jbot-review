@@ -1,5 +1,10 @@
 import type { GuidelineSweep } from './guideline-sweep.ts';
-import { Semaphore, type SemaphorePriority, type TokenUsageRecorder } from './opencode.ts';
+import {
+  Semaphore,
+  withTimeout,
+  type SemaphorePriority,
+  type TokenUsageRecorder,
+} from './opencode.ts';
 import {
   classifyTelemetryStopReason,
   type BackendTelemetryCapability,
@@ -115,6 +120,8 @@ export function limitReviewBackendSessions(
     const controller = new AbortController();
     pending.set(controller, session);
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let running: Promise<T> | undefined;
+    let timedOut = false;
     if (budget?.deadlineAt !== undefined)
       timer = setTimeout(
         () => controller.abort(new Error(`${session} deadline expired while queued`)),
@@ -149,23 +156,18 @@ export function limitReviewBackendSessions(
         backend: backend.name,
       });
       try {
+        running = run();
         const result = budget
-          ? await Promise.race([
-              run(),
-              new Promise<never>((_resolve, reject) => {
-                timer = setTimeout(
-                  () => {
-                    reject(new Error(`${session} timed out`));
-                    backend.abortSessionsByLabel?.(session, budget.log);
-                  },
-                  Math.max(
-                    0,
-                    Math.min(budget.timeoutMs, (budget.deadlineAt ?? Infinity) - Date.now()),
-                  ),
-                );
-              }),
-            ])
-          : await run();
+          ? await withTimeout(
+              running,
+              Math.max(0, Math.min(budget.timeoutMs, (budget.deadlineAt ?? Infinity) - Date.now())),
+              `${session} timed out`,
+              () => {
+                timedOut = true;
+                backend.abortSessionsByLabel?.(session, budget.log);
+              },
+            )
+          : await running;
         executionDone?.();
         telemetry?.tools.finishSession({
           session,
@@ -199,12 +201,16 @@ export function limitReviewBackendSessions(
     } finally {
       clearTimeout(timer);
       pending.delete(controller);
-      providerRelease?.();
-      // Let the next provider waiter enter the global priority queue before releasing the global slot.
-      if (providerRelease && globalRelease) {
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
-      }
-      globalRelease?.();
+      const release = async () => {
+        providerRelease?.();
+        // Let the next provider waiter enter the global queue before releasing its slot.
+        if (providerRelease && globalRelease)
+          await new Promise<void>((resolve) => queueMicrotask(resolve));
+        globalRelease?.();
+      };
+      // Timeout ends the caller's wait, not ownership of the still-running provider work.
+      if (timedOut && running) void running.then(release, release);
+      else await release();
     }
   };
   return {
@@ -223,9 +229,12 @@ export function limitReviewBackendSessions(
     },
     runReview: (model, context, guidelines, log, options) => {
       const budget =
-        options?.label === 'review-interactions'
+        options?.label === 'review-interactions' || options?.deadlineAt !== undefined
           ? {
-              timeoutMs: Math.min(600_000, options.timeoutMs ?? Infinity),
+              timeoutMs: Math.min(
+                options.label === 'review-interactions' ? 600_000 : Infinity,
+                options.timeoutMs ?? Infinity,
+              ),
               deadlineAt: options.deadlineAt,
               log,
             }

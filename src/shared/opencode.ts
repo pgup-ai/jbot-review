@@ -742,6 +742,7 @@ export async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
   message: string,
+  onTimeout?: () => void,
 ): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   // If the timeout wins, keep any later rejection from the original operation
@@ -751,7 +752,10 @@ export async function withTimeout<T>(
     return await Promise.race([
       promise,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+        timer = setTimeout(() => {
+          reject(new Error(message));
+          onTimeout?.();
+        }, timeoutMs);
       }),
     ]);
   } finally {
@@ -903,7 +907,7 @@ async function repromptForJson(
   );
 }
 
-// One strict repair; auxiliary failure keeps the empty selection.
+// Let the runner record failed coverage before applying its auxiliary fallback.
 async function parseAuxSessionWithRepair<K extends 'findings' | 'addressedPriorComments'>(
   session: {
     client: OpencodeClient;
@@ -921,24 +925,18 @@ async function parseAuxSessionWithRepair<K extends 'findings' | 'addressedPriorC
   try {
     return parseReview(raw, label, log, { strict: true, field })[field];
   } catch (error) {
-    try {
-      const repaired = await repromptForJson(
-        client,
-        model,
-        sessionID,
-        raw,
-        error,
-        label,
-        log,
-        timeoutMs,
-        onTokenUsage,
-      );
-      return parseReview(repaired, `${label}-repair`, log, { strict: true, field })[field];
-    } catch (repairError) {
-      const message = repairError instanceof Error ? repairError.message : String(repairError);
-      log(`(${label} repair failed; keeping empty results: ${message})`);
-      return [];
-    }
+    const repaired = await repromptForJson(
+      client,
+      model,
+      sessionID,
+      raw,
+      error,
+      label,
+      log,
+      timeoutMs,
+      onTokenUsage,
+    );
+    return parseReview(repaired, `${label}-repair`, log, { strict: true, field })[field];
   }
 }
 

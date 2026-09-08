@@ -243,8 +243,9 @@ The job succeeded with incomplete coverage. The log does not establish whether
 context size caused the guideline timeout; adding concurrency would not fix a
 session that already ran concurrently.
 
-`JBOT_GUIDELINE_SWEEP` is an opt-in experiment, enabled in this repository's
-dogfood workflow. OpenCode, Pi, and CommandCode continue each main session for a guideline
+In this earlier experiment, the dogfood workflow enabled the opt-in
+`JBOT_GUIDELINE_SWEEP`. It is now disabled there; see independent auxiliary
+scheduling below. OpenCode, Pi, and CommandCode continue each main session for a guideline
 sweep using its existing diff and investigation, plus the full bounded guidelines.
 Other backends retain the separate pass. Verification still creates a fresh
 session. The sweep stays within the main attempt's remaining deadline, capped
@@ -427,3 +428,45 @@ interactions was still running. The run completed in 37s with the verified seede
 P1 retained and full finder coverage. Local logs and results are retained under
 `/tmp/jbot-independent-scheduling-1.2` and
 `/tmp/jbot-independent-scheduling-full-1.2`.
+
+### Completion-aware reruns and review feedback
+
+Run `34183061911` completed its selected passes, but never launched interactions:
+the incremental reducer trusted the reviewed-head marker from an earlier run
+whose interactions pass had aborted. Removed that reducer and its now-unused
+removed-export scanner. Candidate lenses and guidelines use the full PR diff;
+full-diff dynamic fan-out and main-shard caching remain unchanged.
+
+The unchanged-diff shortcut now requires a completion footer on the latest
+posted review. Older, incomplete, or unrecognized reports cannot authorize a
+skip. The footer is appended after model text; an earlier embedded marker cannot
+override an incomplete footer. OpenCode and Pi auxiliary repair failures now
+reach the runner's existing fail-open handler, which retains main findings and
+records incomplete coverage instead of treating repair failure as zero findings.
+
+The scheduler reuses the shared timeout helper and retains acquired concurrency
+slots until cancelled work settles. Other lens sessions also enforce their
+absolute run deadline during queueing and execution. Interactions still receives
+a finite 600s cap when the overall budget is disabled; the reported Infinity-to-
+1ms failure does not occur. Tests exercise delayed cancellation, active and queued
+deadlines, and the absent-budget case.
+
+Pi search now uses the same non-ignored worktree traversal as CommandCode. A
+tracked directory replaced by an outside symlink no longer leaks through indexed
+Git grep. Search includes non-ignored untracked files and excludes ignored files;
+explicit inside-worktree reads remain available. Existing tool tests cover the
+symlink reproduction and shared query/path rejection branches.
+
+Validation: all 1,022 tests, typecheck, lint, formatting, and bundle build passed.
+A live CommandCode/Muse 1.2 fixture run completed in 56s: guidelines at 14.4s,
+interactions at 27.1s, main at 33.4s, then fresh verification retained the seeded
+P1. Results are under `/tmp/jbot-completion-coverage-1.2`. This fixture smoke test
+is not a GitHub rerun or a general quality benchmark. Core/full corpus and blind
+adjudication were not run for these incremental fixes.
+
+Self-review/de-slop: no remaining P1/P2 finding identified. Eighteen changed
+comment blocks were adjudicated: two kept (coverage trust and slot ownership),
+four rewritten (export context, provider fallbacks, queue ordering), twelve cut
+(with the deleted reducer). No new test cases; thirteen obsolete policy cases
+were removed, and retained cases gained regression assertions. The historical
+sweep description is explicitly marked as an earlier experiment.

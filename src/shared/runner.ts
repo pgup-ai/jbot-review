@@ -224,9 +224,11 @@ import {
   type LinkedIssue,
   type ReviewCommit,
 } from './review-context.ts';
-import { planReviewFanout, planIncrementalLenses } from './fanout.ts';
+import { planReviewFanout } from './fanout.ts';
 import { decideContext7Mode, type Context7Mode } from './context7.ts';
 import {
+  completedReviewHead,
+  withReviewCoverage,
   listPrFiles,
   compareCommitFiles,
   listPrComments,
@@ -1294,7 +1296,7 @@ async function runReviewPipeline(params: {
   // head, and a skipped run would leave the prior approval stranded on the old
   // head — blocking PRs behind stale-approval-dismissing branch protection.
   if (!localDiff && options.skipUnchanged && !options.autoApprove && headSha && baseRef) {
-    const reviewedHead = findLatestReviewedHead(priorJbotReviewGroups.map((group) => group.body));
+    const reviewedHead = completedReviewHead(priorJbotReviewGroups.at(-1)?.body ?? '');
     // Same-head reruns are never assumed unchanged: the base may have advanced
     // since that review, and a same-head compare would only test today's diff
     // against itself — only a different head has a meaningful comparison.
@@ -2230,54 +2232,20 @@ async function runReviewPipeline(params: {
       log(`Context7 MCP skipped: ${context7.reason}.`);
     }
 
-    // On a re-review, drop the recall supplements whose trigger class the
-    // incremental delta (since the last reviewed head) doesn't touch. Best-effort
-    // and dynamic-fanout-gated; a null delta (first review, fetch failure, or
-    // escape hatch off) leaves the full set. Main review + verify are never gated.
-    // Local mode never gets here: empty prior comments mean no reviewedHead.
     const reviewedHead = findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody));
-    const incrementalDeltaFiles =
-      options.dynamicFanout && reviewedHead && headSha
-        ? await compareCommitFiles(octokit, owner, repo, reviewedHead, headSha).catch((error) => {
-            log(
-              `Incremental delta unavailable; running full lenses: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-            );
-            return null;
-          })
-        : null;
+    // A reviewed-head marker does not prove that any prior auxiliary pass completed.
     const guidelineCandidate = effectiveGuidelinePass && auxSessionsEnabled;
     const candidateLensKeys = selectLensKeys(
       auxSessionsEnabled ? effectiveReviewPasses : 1,
       changedFiles,
       changeShape,
     );
-    const incrementalLenses = planIncrementalLenses({
-      candidateLensKeys,
-      guidelinePass: guidelineCandidate,
-      deltaFiles: incrementalDeltaFiles,
-    });
-    if (incrementalDeltaFiles && reviewedHead) {
-      const skipped = [
-        ...candidateLensKeys.filter((key) => !incrementalLenses.lensKeys.includes(key)),
-        ...(guidelineCandidate && !incrementalLenses.guidelinePass ? ['guideline-compliance'] : []),
-      ];
-      if (skipped.length > 0) {
-        log(
-          `Incremental lenses since ${reviewedHead.slice(0, 7)}: running ${
-            incrementalLenses.lensKeys.join(', ') || 'none'
-          }; skipping ${skipped.join(', ')} (main review + verify unchanged).`,
-        );
-      }
-    }
-
     // Slice-vs-widen policy lives in selectFinderGuidelineText; keyed on the
     // compliance session's own final enable, not the option.
     const guidelinesForPrompt = selectFinderGuidelineText({
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
-      complianceRuns: incrementalLenses.guidelinePass,
+      complianceRuns: guidelineCandidate,
       mainCanReadWorkspace:
         mainBackend.canReadWorkspace ?? backendCanReadWorkspace(providerID, mainCliBackend),
       widen: options.guidelineWiden,
@@ -2339,8 +2307,8 @@ async function runReviewPipeline(params: {
       telemetry.recordExecution({
         reviewPasses: effectiveReviewPasses,
         reviewShards: shards.length,
-        lensKeys: incrementalLenses.lensKeys,
-        guidelinePass: incrementalLenses.guidelinePass,
+        lensKeys: candidateLensKeys,
+        guidelinePass: guidelineCandidate,
         context7Active,
         auxSessionsEnabled,
         maxConcurrentSessions: sessionCap,
@@ -2499,7 +2467,7 @@ async function runReviewPipeline(params: {
         prContext: auxPrContext,
         guidelinesForPrompt: guidelines,
         hasGuidelines: Boolean(guidelines),
-        enabled: incrementalLenses.guidelinePass && !sweepGuidelines,
+        enabled: guidelineCandidate && !sweepGuidelines,
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -2544,7 +2512,7 @@ async function runReviewPipeline(params: {
       model: auxModel,
       prContext: auxPrContext,
       guidelinesForPrompt,
-      lensKeys: incrementalLenses.lensKeys,
+      lensKeys: candidateLensKeys,
       timeoutMs: finderTimeoutMs,
       deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt),
       evidenceQuotes: options.evidenceQuotes,
@@ -2552,7 +2520,7 @@ async function runReviewPipeline(params: {
       log,
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
-    }).map((promise, index) => trackAux(`review-${incrementalLenses.lensKeys[index]}`, promise));
+    }).map((promise, index) => trackAux(`review-${candidateLensKeys[index]}`, promise));
 
     let summary: string;
     let findings: Finding[];
@@ -2725,7 +2693,7 @@ async function runReviewPipeline(params: {
     const producedLists = [
       telemetry.produced('main-review', findings),
       ...lensFindingLists.map((list, i) =>
-        telemetry.produced(`review-${incrementalLenses.lensKeys[i]}`, list),
+        telemetry.produced(`review-${candidateLensKeys[i]}`, list),
       ),
       telemetry.produced('guideline-compliance', complianceFindings),
     ];
@@ -4505,7 +4473,7 @@ export function buildBody(
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
   lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));
   lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
-  return lines.join('\n');
+  return withReviewCoverage(lines.join('\n'), headSha, incompleteSessions.length === 0);
 }
 
 export function renderReviewMetadataBlock(

@@ -225,7 +225,6 @@ describe('limitReviewBackendSessions', () => {
     });
     backend.abortSessionsByLabel = (label) => {
       aborted.push(label);
-      finish();
       return 1;
     };
     const limited = limitReviewBackendSessions(backend, 'aux', slots);
@@ -240,17 +239,39 @@ describe('limitReviewBackendSessions', () => {
     await rejected;
     assert.equal(started, true);
     assert.deepEqual(aborted, ['review-interactions']);
-    const releaseAgain = await slots.acquire();
-    started = false;
-    await assert.rejects(
-      limited.runReview('model', '', '', noLog, {
-        label: 'review-interactions',
-        deadlineAt: Date.now() + 10,
-      }),
-      /deadline expired/,
-    );
-    assert.equal(started, false);
-    releaseAgain();
+    let replacementStarted = false;
+    const replacement = limited.runGuidelineComplianceCheck('model', '', '', noLog).then(() => {
+      replacementStarted = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(replacementStarted, false);
+    finish();
+    await replacement;
+
+    for (const label of ['review-interactions', 'review-frontend']) {
+      const releaseAgain = await slots.acquire();
+      started = false;
+      await assert.rejects(
+        limited.runReview('model', '', '', noLog, {
+          label,
+          deadlineAt: Date.now() + 10,
+        }),
+        /deadline expired/,
+      );
+      assert.equal(started, false);
+      releaseAgain();
+      await assert.rejects(
+        limited.runReview('model', '', '', noLog, {
+          label,
+          timeoutMs: 1000,
+          deadlineAt: Date.now() + 10,
+        }),
+        /timed out/,
+      );
+      assert.equal(started, true);
+      assert.equal(aborted.at(-1), label);
+      finish();
+    }
     const fast = makeBackend();
     const observedTimeouts: number[] = [];
     const run = fast.runReview;
@@ -269,7 +290,10 @@ describe('limitReviewBackendSessions', () => {
       label: 'review-interactions',
       timeoutMs: 1_200_000,
     });
-    assert.deepEqual(observedTimeouts, [10, 600_000]);
+    await limitReviewBackendSessions(fast, 'aux', undefined).runReview('model', '', '', noLog, {
+      label: 'review-interactions',
+    });
+    assert.deepEqual(observedTimeouts, [10, 600_000, 600_000]);
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
 

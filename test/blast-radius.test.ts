@@ -51,6 +51,7 @@ describe('extractChangedExportedSymbols', () => {
       '@@ -1,1 +1,4 @@',
       '+export { rawName, localName as exportedName };',
       '+export type { Shape, Internal as PublicShape };',
+      '-export { gone };',
       '+export * from "./elsewhere.ts";',
     ].join('\n');
 
@@ -61,23 +62,6 @@ describe('extractChangedExportedSymbols', () => {
 
   it('ignores files without patches', () => {
     assert.deepEqual(extractChangedExportedSymbols([{ filename: 'src/a.ts' }]), []);
-  });
-
-  it('includes removed/renamed exports when includeRemoved is set', () => {
-    const patch = [
-      '@@ -1,2 +1,1 @@',
-      '+export const kept = 1;',
-      '-export function removedFn() {',
-      '-export { gone };',
-    ].join('\n');
-    const file: PrFile = { filename: 'src/a.ts', patch };
-
-    assert.deepEqual(extractChangedExportedSymbols([file]), ['kept']);
-    assert.deepEqual(extractChangedExportedSymbols([file], { includeRemoved: true }), [
-      'kept',
-      'removedFn',
-      'gone',
-    ]);
   });
 });
 

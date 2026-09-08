@@ -583,16 +583,17 @@ export function createPiSearchTool(
           [
             '--no-pager',
             'grep',
+            '--no-index',
+            '--exclude-standard',
             '--no-color',
             '-n',
             '-I',
             '--no-textconv',
-            '--no-recurse-submodules',
             ...repositorySearchArgs(params),
           ],
           isRecord(params) ? params : {},
         );
-        text = page.totalBytes ? page.text : '(no matches in tracked files)';
+        text = page.totalBytes ? page.text : '(no matches in non-ignored files)';
         finish?.({
           success: true,
           outputBytesBeforeCap: page.totalBytes,
@@ -1215,10 +1216,7 @@ async function repromptPiForJson(
   );
 }
 
-/**
- * Aux-session parse with one same-session repair, failing open to the empty
- * selection (invariant 3) — mirrors the opencode engine's behavior.
- */
+// Let the runner record failed coverage before applying its auxiliary fallback.
 async function parsePiAuxWithRepair<K extends 'findings' | 'addressedPriorComments'>(
   session: PiAgentSessionLike,
   model: string,
@@ -1232,23 +1230,17 @@ async function parsePiAuxWithRepair<K extends 'findings' | 'addressedPriorCommen
   try {
     return parseReview(raw, label, log, { strict: true, field })[field];
   } catch (error) {
-    try {
-      const repaired = await repromptPiForJson(
-        session,
-        model,
-        raw,
-        error,
-        label,
-        log,
-        timeoutMs,
-        onTokenUsage,
-      );
-      return parseReview(repaired, `${label}-repair`, log, { strict: true, field })[field];
-    } catch (repairError) {
-      const message = repairError instanceof Error ? repairError.message : String(repairError);
-      log(`(${label} repair failed; keeping empty results: ${message})`);
-      return [];
-    }
+    const repaired = await repromptPiForJson(
+      session,
+      model,
+      raw,
+      error,
+      label,
+      log,
+      timeoutMs,
+      onTokenUsage,
+    );
+    return parseReview(repaired, `${label}-repair`, log, { strict: true, field })[field];
   }
 }
 

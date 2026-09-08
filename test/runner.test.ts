@@ -34,6 +34,7 @@ import type { Octokit, PrFile } from '../src/shared/github.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
 import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
 import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
+import { completedReviewHead } from '../src/shared/github.ts';
 import { applyFindingVerdicts, selectFindingIndexes } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
 
@@ -1304,6 +1305,18 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
     undefined,
     ['review-interactions'],
   );
+  assert.equal(completedReviewHead(body), undefined);
+  const head = 'a'.repeat(40);
+  const complete = buildBody('', '', [], [], 'model', 'owner', 'repo', head);
+  assert.equal(completedReviewHead(complete), head);
+  assert.equal(
+    completedReviewHead(
+      complete + '\n\n<!-- jbot-review:review -->\n<!-- jbot-review:threads:0 -->',
+    ),
+    head,
+  );
+  assert.equal(completedReviewHead(complete + '\n\n<!-- jbot-review:incomplete -->'), undefined);
+  assert.equal(completedReviewHead(PRIOR_JBOT_REVIEW), undefined);
   assert.match(body, /Review incomplete/);
   assert.match(body, /review-interactions/);
   assert.match(body, /completed passes only/);

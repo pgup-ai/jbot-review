@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import { readRepositoryPage } from '../src/shared/repository-output.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -434,6 +434,13 @@ describe('repository tool pages', () => {
       writeFileSync(join(outside, 'secret'), 'hostOnlySecret');
       symlinkSync(join(outside, 'secret'), join(workspace, 'escape'));
       execFileSync('git', ['-C', workspace, 'add', 'large.ts', 'escape']);
+      mkdirSync(join(workspace, 'replaced'));
+      writeFileSync(join(workspace, 'replaced', 'secret'), 'safe');
+      execFileSync('git', ['-C', workspace, 'add', 'replaced']);
+      rmSync(join(workspace, 'replaced'), { recursive: true });
+      symlinkSync(outside, join(workspace, 'replaced'));
+      writeFileSync(join(workspace, '.gitignore'), 'ignored.ts\n');
+      writeFileSync(join(workspace, 'ignored.ts'), 'hostOnlySecret');
       const read = createPiReadTool(sdk, workspace) as Tool;
       const search = createPiSearchTool(sdk, workspace) as Tool;
       writeFileSync(join(workspace, 'many.txt'), 'needle\n'.repeat(10_000_000));
@@ -451,11 +458,31 @@ describe('repository tool pages', () => {
         paths: ['large.ts'],
       });
       assert.match(scoped.content[0].text, /large.ts:20001/);
-      for (const paths of [['../'], ['/tmp'], [':(top)*'], ['.git']])
+      for (const paths of [
+        ['../'],
+        ['/tmp'],
+        [':(top)*'],
+        ['.git'],
+        null,
+        'src',
+        [1],
+        [''],
+        ['src\\file'],
+        ['src\0file'],
+        ['src/../file'],
+        ['src/.GiT/config'],
+      ])
         assert.match(
           (await search.execute('invalid', { query: 'secret', paths })).content[0].text,
           /paths must/,
         );
+      for (const query of [null, 1, [], [''], ['a', 1], 'a\0b'])
+        assert.match((await search.execute('invalid', { query })).content[0].text, /query must/);
+      assert.match(
+        (await search.execute('scoped-escape', { query: 'hostOnlySecret', paths: ['replaced'] }))
+          .content[0].text,
+        /no matches/,
+      );
       const result = await search.execute('search', { query: 'importantDefault' });
       assert.match(result.content[0].text, /large.ts:20001:const importantDefault = false/);
       const page = await read.execute('read', { path: 'large.ts', line: 20001 });
@@ -768,10 +795,9 @@ describe('Pi review sessions', () => {
     }
   });
 
-  it('reports wrong-field auxiliary repairs and disposes their sessions', async () => {
+  it('rejects wrong-field auxiliary repairs and disposes their sessions', async () => {
     for (const addressed of [false, true]) {
       const events: string[] = [];
-      const logs: string[] = [];
       const runtime = fakeRuntime(false, events, [
         { role: 'assistant', content: '{}' },
         {
@@ -779,18 +805,17 @@ describe('Pi review sessions', () => {
           content: addressed ? '{"findings":[]}' : '{"addressedPriorComments":[]}',
         },
       ]);
-      const log = (message: string) => logs.push(message);
+      const log = () => {};
       const result = addressed
-        ? await runPiAddressedPriorCommentsCheck(runtime, 'deepseek/deepseek-v4-flash', 'ctx', log)
-        : await runPiGuidelineComplianceCheck(
+        ? runPiAddressedPriorCommentsCheck(runtime, 'deepseek/deepseek-v4-flash', 'ctx', log)
+        : runPiGuidelineComplianceCheck(
             runtime,
             'deepseek/deepseek-v4-flash',
             'ctx',
             'guides',
             log,
           );
-      assert.deepEqual(result, []);
-      assert.ok(logs.some((message) => message.includes('repair failed')));
+      await assert.rejects(result, /array/);
       assert.deepEqual(events, ['prompted', 'prompted', 'disposed']);
     }
   });
