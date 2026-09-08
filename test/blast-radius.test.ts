@@ -92,12 +92,26 @@ describe('extractChangedExportedSymbols', () => {
       ' };',
       '-export { Local as Public };',
       '+export { Other as Public };',
-      '-export { Forwarded } from "./old";',
-      '+export { Forwarded } from "./new";',
+      '-export { Forwarded } /* from "./placeholder" */ from "./old";',
+      '+export { Forwarded } /* from "./placeholder" */ from "./new";',
+      '-export type { ToValue };',
+      '+export { ToValue };',
+      '-export { ToType };',
+      '+export type { ToType };',
+      '-export { type Inline };',
+      '+export { Inline };',
+      '-export type { Stable };',
+      '+export { type Stable };',
+      '-export { Url } from "https://old/module";',
+      '+export { Url } from "https://new/module";',
     ].join('\n');
     assert.deepEqual(extractChangedExportedSymbols([{ filename: 'a.ts', patch }]), [
       'Public',
       'Forwarded',
+      'ToValue',
+      'ToType',
+      'Inline',
+      'Url',
     ]);
   });
 

@@ -13,28 +13,34 @@ const GIT_GREP_TIMEOUT_MS = 10_000;
 
 const EXPORT_DECLARATION =
   /^[+-]\s*export\s+(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\s*\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/;
-const NAMED_EXPORT_START = /^\s*export\s+(?:type\s+)?\{/;
+const NAMED_EXPORT_START = /^\s*export\s+(type\s+)?\{/;
 
 export function extractChangedExportedSymbols(files: PrFile[]): string[] {
   const symbols = new Set<string>();
   for (const file of files) {
     if (!file.patch) continue;
-    const blocks: Partial<Record<'+' | '-', string>> = {};
+    const blocks: Partial<Record<'+' | '-', { text: string; typeOnly: boolean }>> = {};
     const lists = { '+': new Map<string, string>(), '-': new Map<string, string>() };
     const flush = (side: '+' | '-', complete: boolean) => {
       const block = blocks[side];
       if (block === undefined) return;
-      const end = complete ? block.indexOf('}') : block.lastIndexOf(',');
+      const end = complete ? block.text.indexOf('}') : block.text.lastIndexOf(',');
       const source = complete
-        ? (block.slice(end + 1).match(/from\s+(['"])(.*?)\1/)?.[2] ?? '')
+        ? (block.text
+            .slice(end + 1)
+            .replace(/^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*/, '')
+            .match(/^from\s+(['"])(.*?)\1/)?.[2] ?? '')
         : '';
-      for (const part of block
+      for (const part of block.text
         .slice(0, Math.max(0, end))
         .replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')
         .split(',')) {
         const specifier = part.trim().replace(/\s+/g, ' ');
-        const name = specifier.split(/\s+as\s+/i).at(-1) ?? '';
-        if (/^[A-Za-z_$][\w$]*$/.test(name)) lists[side].set(specifier + '\0' + source, name);
+        const binding = specifier.replace(/^type\s+(?!as\b)/, '');
+        const name = binding.split(/\s+as\s+/i).at(-1) ?? '';
+        const typeOnly = block.typeOnly || binding !== specifier;
+        if (/^[A-Za-z_$][\w$]*$/.test(name))
+          lists[side].set([typeOnly, binding, source].join('\0'), name);
       }
       delete blocks[side];
     };
@@ -60,9 +66,9 @@ export function extractChangedExportedSymbols(files: PrFile[]): string[] {
         if (line[0] !== side && line[0] !== ' ') continue;
         const text = line.slice(1);
         const start = text.match(NAMED_EXPORT_START);
-        if (start) blocks[side] = text.slice(start[0].length);
-        else if (blocks[side] !== undefined) blocks[side] += '\n' + text;
-        if (blocks[side]?.includes('}')) flush(side, true);
+        if (start) blocks[side] = { text: text.slice(start[0].length), typeOnly: !!start[1] };
+        else if (blocks[side] !== undefined) blocks[side].text += '\n' + text;
+        if (blocks[side]?.text.includes('}')) flush(side, true);
       }
     }
     finishHunk();

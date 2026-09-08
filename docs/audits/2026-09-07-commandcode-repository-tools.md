@@ -555,3 +555,16 @@ existing cases cover hunk boundaries and real-Git scoped search. Code/test delta
 +27 lines. All 1,023 tests, typecheck, lint, formatting, and build passed. No live
 model probe or quality corpus rerun; changed caller hints have deterministic
 coverage but their effect on model recall remains unmeasured.
+
+### Type-only exports and commented source clauses
+
+Preserved type-only/runtime identity in named-export comparisons, normalizing
+block and inline type modifiers while keeping the public name as the grep target.
+Source extraction now skips leading comments and matches the actual `from` clause;
+comment-like text inside a quoted module URL remains intact.
+
+Self-review/de-slop: no further issue found in the updated diff. No new helpers,
+comment blocks, or test cases; existing assertions cover both conversion directions,
+equivalent type-only syntax, misleading comments, and URL sources. Code/test delta:
++20 lines. All 1,023 tests, typecheck, lint, formatting, and build passed. No live
+model or corpus rerun; the impact on model recall remains unmeasured.
