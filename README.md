@@ -569,8 +569,9 @@ Use `provider: commandcode` with `commandcode-access-key` /
 includes the CommandCode CLI, but `.commandcode/auth.json` is written under an
 isolated temporary HOME only when the main or active auxiliary provider is
 `commandcode`, then removed after the run. Sessions start in the reviewed checkout
-with CommandCode's native tools in `plan` mode. Skills and taste learning remain
-disabled. J-Bot adds no custom repository tools or tool-output caps; the CLI owns
+with CommandCode's native tools. The pinned 1.44 CLI needs `--yolo` to lift its
+blanket headless shell gate; explicit `--permission-mode plan` retains native
+plan-mode permissions. Skills and taste learning remain disabled. J-Bot adds no custom repository tools or tool-output caps; the CLI owns
 search, batching, pagination, and permissions. Existing session deadlines still apply.
 JSON repair starts a fresh session with the same native plan-mode configuration.
 

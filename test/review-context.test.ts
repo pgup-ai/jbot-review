@@ -25,7 +25,7 @@ import {
   MAX_PRIOR_COMMENTS_BYTES,
 } from '../src/shared/review-context.ts';
 
-const GIT_DIFF_COMMAND = `git ${GIT_DIFF_ARGS.join(' ')}`;
+const GIT_DIFF_COMMAND = `git ${GIT_DIFF_ARGS.slice(GIT_DIFF_ARGS.indexOf('diff')).join(' ')}`;
 
 describe('formatContextBudget', () => {
   it('reports per-fragment bytes largest-first with a total, dropping empties', () => {
@@ -473,6 +473,8 @@ describe('formatDiffScope', () => {
     assert.match(text, /Head: b{40}/);
     assert.ok(text.includes(`${GIT_DIFF_COMMAND} ${baseSha}...${headSha}`));
     assert.match(text, /Only review changes within this diff\./);
+    assert.match(text, /git diff --no-color --no-ext-diff --no-textconv/);
+    assert.doesNotMatch(text, /git -c/);
   });
 
   it('falls back to origin/<baseRef>...HEAD when SHAs are missing', () => {

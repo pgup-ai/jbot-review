@@ -66,7 +66,7 @@ describe('CommandCode CLI provider helpers', () => {
   it('omits --model for the default CommandCode model', () => {
     assert.deepEqual(buildCommandCodeCliArgs({ model: 'commandcode/default' }), [
       '-p',
-      '--trust',
+      '--yolo',
       '--skip-onboarding',
       '--no-skills',
       '--no-auto-update',
@@ -82,7 +82,7 @@ describe('CommandCode CLI provider helpers', () => {
   it('passes explicit CommandCode model ids without the provider prefix', () => {
     assert.deepEqual(buildCommandCodeCliArgs({ model: 'commandcode/Qwen/Qwen3.7-Max' }), [
       '-p',
-      '--trust',
+      '--yolo',
       '--skip-onboarding',
       '--no-skills',
       '--no-auto-update',
@@ -773,6 +773,7 @@ process.stdin.on('end', async () => {
       assert.equal(call.cwd, realpathSync(home));
       assert.equal(call.gitSafeDirectory, home);
       assert.equal(call.args[call.args.indexOf('--permission-mode') + 1], 'plan');
+      assert.ok(call.args.includes('--yolo'));
       assert.ok(!call.args.includes('--mod'));
       assert.doesNotMatch(call.input, /Tool use disabled|jbot_read_file/);
       if (call.repair) {

@@ -355,7 +355,8 @@ export interface DiscoveredGuidelines {
   budgetExhausted: boolean;
 }
 
-const GIT_DIFF_COMMAND = `git ${GIT_DIFF_ARGS.join(' ')}`;
+// Native plan-mode classifiers accept git diff but can reject git -c as mutating.
+const GIT_DIFF_COMMAND = `git ${GIT_DIFF_ARGS.slice(GIT_DIFF_ARGS.indexOf('diff')).join(' ')}`;
 
 /**
  * Renders the PR base/head and the exact three-dot diff command the agent
@@ -379,10 +380,7 @@ export function formatDiffScope(scope: DiffScope): string {
 
   const base = scope.baseSha ?? (scope.baseRef ? `origin/${scope.baseRef}` : undefined);
   if (base && scope.worktree) {
-    // Two-dot against the working tree: matches the merge-base→worktree diff the
-    // local run was built from, uncommitted changes included. Reuse the canonical
-    // safe argv so model-run diffs match the embedded hunks without invoking
-    // external diff or textconv drivers.
+    // Local reviews include uncommitted changes relative to the merge-base.
     lines.push(
       'To see exactly what this review covers (merge-base → working tree, includes uncommitted changes), run:',
       `    ${GIT_DIFF_COMMAND} ${base}`,

@@ -109,7 +109,8 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
   const { modelID } = parseModelName(input.model);
   const args = [
     '-p',
-    '--trust',
+    // 1.44's print gate blocks all shell calls without this; explicit plan mode still applies.
+    '--yolo',
     '--skip-onboarding',
     '--no-skills',
     '--no-auto-update',
