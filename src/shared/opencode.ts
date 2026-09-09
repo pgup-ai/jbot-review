@@ -359,7 +359,7 @@ export function buildConfig(
     provider: providerConfig,
     permission: {
       edit: 'deny',
-      external_directory: 'deny',
+      external_directory: 'allow',
       bash: { ...BASH_PERMISSIONS },
     },
   };

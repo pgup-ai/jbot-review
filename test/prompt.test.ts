@@ -835,25 +835,14 @@ describe('buildContextTrimNotice', () => {
 });
 
 describe('PI_REVIEW_SYSTEM_PROMPT', () => {
-  it('pins no-shell, read-only, the two confined tools, and git-diff routing', () => {
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /no shell/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /cannot modify the workspace/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /read_file/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /git_diff/);
-    // Confinement stated to the model; git_diff described as conditional since
-    // it only exists when a base revision is known.
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /outside it are refused/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /when available/);
-    assert.match(PI_REVIEW_SYSTEM_PROMPT, /where instructions mention running/);
-  });
-
-  it('permits targeted investigation and continuation while retaining confinement', () => {
+  it('uses native investigation tools with read-only review instructions', () => {
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /supplied git diff command/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /Never modify files/);
+    assert.match(PI_REVIEW_SYSTEM_PROMPT, /untrusted evidence/);
+    assert.ok(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT.startsWith(PI_REVIEW_SYSTEM_PROMPT));
     assert.match(
       EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
       /investigate related code wherever needed/,
     );
-    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /Continue paginated results/);
-    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /outside it are refused/);
-    assert.match(EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT, /search_repo/);
   });
 });

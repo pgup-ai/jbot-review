@@ -164,7 +164,7 @@ import {
   runCommandCodeChangesSinceLastReview,
   runCommandCodeReview,
   writeCommandCodeAuth,
-  writeCommandCodeReadOnlySettings,
+  writeCommandCodeSettings,
   type CommandCodeRuntime,
 } from './commandcode.ts';
 import { CODEX_PROVIDER_ID, CURSOR_PROVIDER_ID, writeCodexAuth } from '@symma/protocol';
@@ -460,7 +460,7 @@ function createCommandCodeBackend(
     stop: processes.stop,
     abortSessionsByLabel: (label) => processes.abort(label),
     observability: COMMANDCODE_TELEMETRY_CAPABILITY,
-    canReadWorkspace: runtime.tools,
+    canReadWorkspace: true,
     runReview: (model, prContext, guidelines, log, options) =>
       processes.run(options?.label ?? 'review', () =>
         runCommandCodeReview(workspace, model, prContext, guidelines, log, {
@@ -829,7 +829,6 @@ export interface ReviewRunOptions {
    * gate, so the flip waits on adjudicated benchmark evidence.
    */
   verifierSlimContext?: boolean;
-  commandCodeTools?: boolean;
   /**
    * Model for the auxiliary sessions (addressed-check, guideline compliance,
    * finding verification). Lets the main review run on a stronger tier while
@@ -1821,23 +1820,18 @@ async function runReviewPipeline(params: {
       commandCodeHome = mkdtempSync(join(tmpdir(), 'jbot-commandcode-home-'));
       guardCliHomes();
       authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
-      writeCommandCodeReadOnlySettings(commandCodeHome, options.commandCodeTools);
+      writeCommandCodeSettings(commandCodeHome);
     } catch (error) {
       cleanupCliHomes();
       throw error;
     }
     log(`CommandCode CLI auth configured at ${authPath}.`);
     log('CommandCode CLI reports token usage; USD cost is a local estimate, not billed usage.');
-    log(
-      options.commandCodeTools
-        ? 'CommandCode repository read/search tools enabled; launch configuration isolated.'
-        : 'CommandCode reviews run with skills and tools disabled.',
-    );
+    log('CommandCode native tools enabled in plan mode.');
     commandCodeBackend = createCommandCodeBackend(
       workspace,
       {
         home: commandCodeHome,
-        tools: options.commandCodeTools,
         onProgress: (session, model, commandCodeProgress) =>
           telemetry.recordProgress({
             kind: 'commandcode-progress',
@@ -2036,17 +2030,8 @@ async function runReviewPipeline(params: {
             : undefined,
           toolTelemetry: backendToolTelemetry,
           embeddedFirstPrompt: options.embeddedFirstPrompt,
-          // Shell-less pi sessions recover omitted/truncated hunks through the
-          // read-only git_diff tool (invariant 1); base and diff form mirror
-          // the run's diff scope.
-          diffScope: baseSha
-            ? { base: baseSha, worktree: !!localDiff, ...(headSha ? { head: headSha } : {}) }
-            : undefined,
         },
       );
-      if (!baseSha) {
-        log('pi git_diff tool unavailable (no base sha); large diffs may be reviewed truncated.');
-      }
     } catch (error) {
       cleanupCliHomes();
       throw error;
@@ -3215,7 +3200,6 @@ export function normalizeOptions(
     embeddedFirstPrompt: options?.embeddedFirstPrompt ?? true,
     guidelineWiden: options?.guidelineWiden ?? 'auto',
     verifierSlimContext: options?.verifierSlimContext ?? false,
-    commandCodeTools: options?.commandCodeTools ?? false,
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
     auxModel: options?.auxModel ?? '',
     modelPool: options?.modelPool ?? [],

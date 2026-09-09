@@ -55,7 +55,6 @@ export function backendRequiresCompleteEmbeddedDiff(
 ): boolean {
   return (
     isPoolsideProvider(providerID) ||
-    cliBackend === COMMANDCODE_PROVIDER_ID ||
     cliBackend === GROK_PROVIDER_ID ||
     cliBackend === QODER_PROVIDER_ID
   );

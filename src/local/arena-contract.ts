@@ -51,7 +51,7 @@ export interface ComparisonReviewConfigV1 {
   contextTrim: boolean;
   embeddedFirstPrompt: boolean;
   guidelineWiden: 'auto' | 'full';
-  commandCodeTools: boolean;
+  commandCodeTools: true;
   verifierSlimContext: boolean;
   verifyOverlapGrace: boolean;
 }
@@ -267,7 +267,7 @@ function validateReviewConfig(value: unknown): ComparisonReviewConfigV1 {
     commandCodeTools:
       config.commandCodeTools === undefined
         ? true
-        : requireBoolean(config.commandCodeTools, 'reviewConfig.commandCodeTools'),
+        : requireLiteral(config.commandCodeTools, true, 'reviewConfig.commandCodeTools'),
     verifierSlimContext: requireBoolean(
       config.verifierSlimContext,
       'reviewConfig.verifierSlimContext',

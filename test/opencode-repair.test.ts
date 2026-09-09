@@ -535,7 +535,7 @@ describe('buildConfig prompt caching', () => {
     const config = buildConfig('openai', 'gpt-5', 'key', { reasoningEffort: 'high' }, true);
     const permission = (config as { permission: Record<string, string> }).permission;
     assert.equal(permission.edit, 'deny');
-    assert.equal(permission.external_directory, 'deny');
+    assert.equal(permission.external_directory, 'allow');
   });
 
   it('embeds secondary provider keys for cross-provider aux models', () => {

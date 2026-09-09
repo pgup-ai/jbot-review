@@ -26,22 +26,24 @@ remote-ACP topology — the network between gateway and companion.
 
 Read-only is enforced in three independent layers for every opencode session
 (AGENTS.md invariant 8): the `plan` agent, config-level
-`permission.edit/external_directory: deny` (`src/shared/opencode.ts`), and
-per-prompt `tools: { write/edit/patch: false }`. The pi SDK engine exposes a
-no-shell toolset with a read-only `git_diff` tool (`src/shared/pi.ts`), and
+`permission.edit: deny` (`src/shared/opencode.ts`), and
+per-prompt `tools: { write/edit/patch: false }`. Pi uses native read/search/bash
+tools with read-only instructions; CommandCode uses its native plan mode. Neither
+adds a J-Bot repository sandbox.
 ACP CLI sessions run behind `@symma/protocol`'s client-side permission floor,
 which rejects mutating tool kinds regardless of what the agent requests.
 
 ### T2 — A model session abuses bash
 
-Bash stays available to opencode sessions for `git diff`/`log`/`grep`. The
+Bash stays available to Pi and OpenCode sessions for `git diff`/`log`/`grep`. OpenCode’s
 bash pattern denylist (git commit/push/checkout/reset/clean, `rm`, …) is an
 ACCIDENT filter that mitigates common model-driven git mutations and is
 documented in-code as "NOT a security boundary" (`src/shared/opencode.ts`) —
 it is not a shell-write guarantee. The boundary is the blast radius: sessions
-run in a throwaway CI checkout or, in local mode, an isolated worktree —
-never the operator's live tree — and workspace writes through the session's
-own tools are denied by T1's permission layers.
+should run in a throwaway CI checkout or disposable local worktree. Local mode
+uses the workspace supplied by the operator; it does not automatically isolate
+that workspace. Pi bash has no J-Bot command filter. The execution environment
+owns isolation, and review instructions prohibit changes.
 
 ### T3 — Prompt injection via PR content steers the posted review
 

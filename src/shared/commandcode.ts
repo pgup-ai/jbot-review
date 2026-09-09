@@ -4,12 +4,11 @@ import {
   createCommandCodeProgress,
   type CommandCodeProgress,
 } from './commandcode-progress.ts';
-import { chmodSync, createReadStream, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, createReadStream, mkdirSync, writeFileSync } from 'node:fs';
 import { opendir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-import { fileURLToPath } from 'node:url';
 
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
 import { parseModelName } from '@symma/protocol';
@@ -21,8 +20,6 @@ import {
   assembleGuidelineSweepPrompt,
   assembleReviewPrompt,
   buildJsonRepairFollowupPrompt,
-  withNoToolsReviewDirective,
-  withCommandCodeToolsDirective,
   type VerifiableFinding,
 } from './prompt.ts';
 import {
@@ -88,47 +85,18 @@ export function writeCommandCodeAuth(
   return path;
 }
 
-export function writeCommandCodeReadOnlySettings(home: string, tools: boolean): string {
+export function writeCommandCodeSettings(home: string): string {
   const path = join(home, '.commandcode', 'settings.json');
   mkdirSync(join(home, '.commandcode'), { recursive: true, mode: 0o700 });
-  writeFileSync(
-    path,
-    `${JSON.stringify({ tasteLearning: false, permissions: tools ? { defaultMode: 'plan' } : { deny: ['*'] } }, null, 2)}\n`,
-    {
-      mode: 0o600,
-    },
-  );
+  writeFileSync(path, `${JSON.stringify({ tasteLearning: false }, null, 2)}\n`, {
+    mode: 0o600,
+  });
   chmodCommandCodeFile(path);
-  mkdirSync(join(home, 'launch'), { mode: 0o700, recursive: true });
-  if (tools) {
-    const bundled = new URL('../commandcode-mod.js', import.meta.url);
-    const mod = existsSync(fileURLToPath(bundled))
-      ? bundled
-      : new URL('./commandcode-mod.ts', import.meta.url);
-    // CommandCode normally swallows mod-load failures. Stop before any unguarded tool can run.
-    writeFileSync(
-      join(home, 'review.mjs'),
-      `export default async function(cmd) {
-  try {
-    if (process.env.JBOT_COMMANDCODE_REPAIR === 'true') {
-      cmd.setActiveTools([]);
-      cmd.hooks({ beforeToolCall() { return { block: true }; } });
-      return;
-    }
-    const mod = await import(${JSON.stringify(mod.href)}); await mod.default(cmd);
-  }
-  catch { console.error('CommandCode repository tools failed to initialize.'); process.exit(1); }
-}
-`,
-      { mode: 0o600 },
-    );
-  }
   return path;
 }
 
 export interface CommandCodeRuntime {
   home: string;
-  tools: boolean;
   onProgress?: (label: string, model: string, progress: CommandCodeProgress) => void;
 }
 
@@ -409,7 +377,7 @@ export async function runCommandCodeChangesSinceLastReview(
   const { finalText: raw } = await runCommandCodePrompt(
     workspace,
     model,
-    assembleChangesSinceLastReviewPrompt(deltaContext, true),
+    assembleChangesSinceLastReviewPrompt(deltaContext),
     'changes-since-last-review',
     log,
     timeoutMs,
@@ -629,15 +597,6 @@ async function runCommandCodePrompt(
 ): Promise<{ finalText: string; sessionId?: string }> {
   const args = buildCommandCodeCliArgs({ model, effort });
   if (resumeSessionId) args.push('--resume', resumeSessionId);
-  const repair = label.endsWith('-repair');
-  if (runtime?.tools) {
-    if (!repair) args.push('--add-dir', workspace);
-    args.push('--mod', join(runtime.home, 'review.mjs'));
-  }
-  const input =
-    runtime?.tools && !repair
-      ? withCommandCodeToolsDirective(prompt, workspace)
-      : withNoToolsReviewDirective(prompt);
   log(
     `Calling ${label} prompt (agent=commandcode-cli, model=${model}${effort ? `, effort=${effort}` : ''})`,
   );
@@ -650,16 +609,13 @@ async function runCommandCodePrompt(
   heartbeat.unref();
   try {
     const result = await runCommandCodeProcess(COMMANDCODE_CLI_BIN, args, {
-      cwd: runtime ? join(runtime.home, 'launch') : workspace,
-      input,
+      cwd: workspace,
+      input: prompt,
       env: {
         ...(commandCodeEnvForHome(runtime?.home) ?? process.env),
-        ...(runtime?.tools
-          ? {
-              JBOT_COMMANDCODE_WORKSPACE: repair ? '' : workspace,
-              JBOT_COMMANDCODE_REPAIR: String(repair),
-            }
-          : {}),
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'safe.directory',
+        GIT_CONFIG_VALUE_0: workspace,
       },
       timeoutMs,
       timeoutMessage: formatCommandCodePromptTimeoutMessage(label, model, timeoutMs),
@@ -673,8 +629,7 @@ async function runCommandCodePrompt(
     const parsed = parseCommandCodeJsonOutput(result.stdout);
     if (resumeSessionId && parsed.sessionId !== resumeSessionId)
       throw new Error('CommandCode resumed a different session.');
-    if (runtime?.tools)
-      log(`CommandCode tool outcomes (${label}): ${JSON.stringify(parsed.toolOutcomes ?? {})}`);
+    log(`CommandCode tool outcomes (${label}): ${JSON.stringify(parsed.toolOutcomes ?? {})}`);
     const estimatedCostUsd =
       runtime && parsed.sessionId && !resumeSessionId
         ? await commandCodeSessionEstimatedCost(runtime.home, parsed.sessionId)
@@ -708,7 +663,7 @@ async function runCommandCodePrompt(
       `CommandCode final progress (${label}): ${JSON.stringify(snapshot)}; usage=${usage ? 'available' : 'unavailable'}`,
     );
     runtime?.onProgress?.(label, model, snapshot);
-    onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(input, 'utf8') }, model, label);
+    onTokenUsage?.({ ...usage, promptBytes: Buffer.byteLength(prompt, 'utf8') }, model, label);
   }
 }
 

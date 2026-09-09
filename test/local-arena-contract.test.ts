@@ -128,11 +128,9 @@ function completedOutput(): JbotArenaOutputV1 {
 describe('comparison manifest validation', () => {
   it('accepts the complete v1 contract, including a fork head', () => {
     assert.deepEqual(validateComparisonManifest(manifest()), manifest());
-    for (const enabled of [false, true]) {
-      const configured = manifest();
-      configured.reviewConfig.commandCodeTools = enabled;
-      assert.equal(validateComparisonManifest(configured).reviewConfig.commandCodeTools, enabled);
-    }
+    const disabled = manifest();
+    Object.assign(disabled.reviewConfig, { commandCodeTools: false });
+    assert.throws(() => validateComparisonManifest(disabled), /commandCodeTools/);
     const missing = manifest();
     Reflect.deleteProperty(missing.reviewConfig, 'commandCodeTools');
     assert.equal(validateComparisonManifest(missing).reviewConfig.commandCodeTools, true);

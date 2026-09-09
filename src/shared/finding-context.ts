@@ -1,15 +1,24 @@
 import { execFile } from 'node:child_process';
-import { constants } from 'node:fs';
+import { constants, realpathSync } from 'node:fs';
 import { open } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
-import { resolveWithinWorkspace } from './pi.ts';
 import { formatFindingSources, type FindingSource } from './prompt.ts';
 import type { Finding } from './types.ts';
 
 const execFileAsync = promisify(execFile);
 const MAX_SOURCE_BYTES = 256 * 1024;
 const MAX_SOURCE_LOCATIONS = 20;
+
+function resolveWithinWorkspace(workspace: string, path: string): string | undefined {
+  try {
+    const root = realpathSync(workspace);
+    const target = realpathSync(resolve(root, path));
+    return target === root || target.startsWith(root + sep) ? target : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export function findingSourceLocations(findings: Pick<Finding, 'path' | 'line' | 'body'>[]) {
   const locations = new Map<string, { path: string; line: number }>();

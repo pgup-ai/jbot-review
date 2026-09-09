@@ -1,10 +1,4 @@
-import { Readable } from 'node:stream';
-import { readRepositoryPage } from '../src/shared/repository-output.ts';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import {
@@ -16,11 +10,6 @@ import {
   runPiGuidelineComplianceCheck,
   runPiReview,
   type PiRuntime,
-  createPiReadTool,
-  createPiGitDiffTool,
-  createPiSearchTool,
-  piGitDiffArgs,
-  resolveWithinWorkspace,
   extractPiFinalText,
   mapPiUsage,
   piCatalogHasModel,
@@ -33,8 +22,7 @@ import {
   piTurnUsageSince,
   resolvePiEngine,
 } from '../src/shared/pi.ts';
-import { CONTINUATION_NUDGE_PROMPT, REPOSITORY_PAGE_BYTES } from '../src/shared/prompt.ts';
-import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
+import { CONTINUATION_NUDGE_PROMPT } from '../src/shared/prompt.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts';
 
@@ -190,29 +178,6 @@ describe('piThinkingLevel', () => {
   });
 });
 
-describe('resolveWithinWorkspace', () => {
-  // Security boundary: pi's built-in read tools are unsandboxed, so file access
-  // is confined to the repo here. Must follow symlinks (a link inside the
-  // checkout can point out), so this is exercised against a real filesystem.
-  it('confines to the real workspace and refuses symlink + lexical escapes', () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), 'ws-')));
-    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'out-')));
-    writeFileSync(join(root, 'inside.txt'), 'x');
-    writeFileSync(join(outside, 'secret.txt'), 'SECRET');
-    symlinkSync(join(outside, 'secret.txt'), join(root, 'evil')); // escapes the repo
-    try {
-      assert.equal(resolveWithinWorkspace(root, 'inside.txt'), join(root, 'inside.txt'));
-      assert.equal(resolveWithinWorkspace(root, 'evil'), undefined); // P0: symlink escape
-      assert.equal(resolveWithinWorkspace(root, '/etc/hosts'), undefined); // absolute
-      assert.equal(resolveWithinWorkspace(root, '../../etc/hosts'), undefined); // ..
-      assert.equal(resolveWithinWorkspace(root, 'missing.txt'), undefined); // non-existent
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-      rmSync(outside, { recursive: true, force: true });
-    }
-  });
-});
-
 describe('mapPiUsage', () => {
   it('maps usage fields (both spellings) onto PromptTokenUsage', () => {
     assert.deepEqual(
@@ -340,183 +305,6 @@ describe('extractPiFinalText', () => {
   });
 });
 
-describe('piGitDiffArgs', () => {
-  it('uses the three-dot merge-base form on GitHub-backed reviews', () => {
-    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: false }), [
-      ...GIT_DIFF_ARGS,
-      'abc123...HEAD',
-    ]);
-  });
-
-  it('diffs against the PR head sha (not HEAD) when supplied — checkout HEAD may be a merge ref', () => {
-    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: false, head: 'deadbeef' }), [
-      ...GIT_DIFF_ARGS,
-      'abc123...deadbeef',
-    ]);
-  });
-
-  it('diffs merge-base to the working tree in local mode (invariant 7 exception)', () => {
-    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: true }), [
-      ...GIT_DIFF_ARGS,
-      'abc123',
-    ]);
-  });
-
-  it('scopes to a path behind -- so a flag-shaped path cannot become an option', () => {
-    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: false }, '--exec=x'), [
-      ...GIT_DIFF_ARGS,
-      'abc123...HEAD',
-      '--',
-      '--exec=x',
-    ]);
-  });
-
-  it('ignores an empty path', () => {
-    assert.deepEqual(piGitDiffArgs({ base: 'abc123', worktree: true }, '  '), [
-      ...GIT_DIFF_ARGS,
-      'abc123',
-    ]);
-  });
-
-  it('carries the canonical pins so hunks match the embedded diff and no diff driver runs', () => {
-    const args = piGitDiffArgs({ base: 'abc123', worktree: false });
-    for (const flag of ['--no-color', '--no-ext-diff', '--no-textconv', '--find-renames']) {
-      assert.ok(args.includes(flag), `missing ${flag}`);
-    }
-    // `-c` config pins must precede the `diff` subcommand.
-    assert.ok(args.indexOf('-c') < args.indexOf('diff'));
-  });
-});
-
-describe('repository tool pages', () => {
-  it('recovers every UTF-8 byte across pages, including a long single line', async () => {
-    const original = 'a' + 'é🙂'.repeat(REPOSITORY_PAGE_BYTES);
-    const chunks: string[] = [];
-    let offset: number | undefined = 0;
-    do {
-      const page = await readRepositoryPage(Readable.from(original.match(/.{1,127}/gu)!), {
-        offset,
-      });
-      assert.ok(Buffer.byteLength(page.text) <= REPOSITORY_PAGE_BYTES);
-      chunks.push(page.text.slice(page.text.indexOf('\n\n') + 2));
-      offset = page.nextOffset;
-    } while (offset !== undefined);
-    assert.equal(chunks.join(''), original);
-    await assert.rejects(
-      () => readRepositoryPage(Readable.from([original]), { offset: 2 }),
-      /UTF-8/,
-    );
-    await assert.rejects(
-      () => readRepositoryPage(Readable.from([original]), { offset: -1 }),
-      /offset/,
-    );
-    await assert.rejects(
-      () =>
-        readRepositoryPage(Readable.from([original]), { offset: Buffer.byteLength(original) + 1 }),
-      /within the output/,
-    );
-    await assert.rejects(() => readRepositoryPage(Readable.from([original]), { line: 0 }), /line/);
-  });
-
-  it('finds and reads unchanged evidence beyond the first page without escaping the repo', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'jbot-pi-pages-'));
-    const outside = mkdtempSync(join(tmpdir(), 'jbot-pi-outside-'));
-    const sdk = { defineTool: (tool: unknown) => tool } as Parameters<typeof createPiReadTool>[0];
-    type Tool = {
-      execute: (id: string, params: unknown) => Promise<{ content: Array<{ text: string }> }>;
-    };
-    try {
-      execFileSync('git', ['init', '-q', workspace]);
-      writeFileSync(
-        join(workspace, 'large.ts'),
-        '// filler\n'.repeat(20000) + 'const importantDefault = false;\n',
-      );
-      writeFileSync(join(outside, 'secret'), 'hostOnlySecret');
-      symlinkSync(join(outside, 'secret'), join(workspace, 'escape'));
-      execFileSync('git', ['-C', workspace, 'add', 'large.ts', 'escape']);
-      mkdirSync(join(workspace, 'replaced'));
-      writeFileSync(join(workspace, 'replaced', 'secret'), 'safe');
-      execFileSync('git', ['-C', workspace, 'add', 'replaced']);
-      rmSync(join(workspace, 'replaced'), { recursive: true });
-      symlinkSync(outside, join(workspace, 'replaced'));
-      writeFileSync(join(workspace, '.gitignore'), 'ignored.ts\n');
-      writeFileSync(join(workspace, 'ignored.ts'), 'hostOnlySecret');
-      const read = createPiReadTool(sdk, workspace) as Tool;
-      const search = createPiSearchTool(sdk, workspace) as Tool;
-      writeFileSync(join(workspace, 'many.txt'), 'needle\n'.repeat(10_000_000));
-      execFileSync('git', ['-C', workspace, 'add', 'many.txt']);
-      const wide = await search.execute('wide', { query: 'needle' });
-      assert.match(wide.content[0].text, /More output available/);
-      assert.ok(Buffer.byteLength(wide.content[0].text) <= REPOSITORY_PAGE_BYTES);
-      const tail = await search.execute('tail', { query: 'needle', offset: 80 * 1024 * 1024 });
-      assert.match(tail.content[0].text, /many.txt:\d+:needle/);
-      assert.doesNotMatch(tail.content[0].text, /failed|maxBuffer/);
-      rmSync(join(workspace, 'many.txt'));
-      execFileSync('git', ['-C', workspace, 'rm', '--cached', 'many.txt']);
-      const scoped = await search.execute('scoped', {
-        query: ['missing', 'importantDefault'],
-        paths: ['large.ts'],
-      });
-      assert.match(scoped.content[0].text, /large.ts:20001/);
-      for (const paths of [
-        ['../'],
-        ['/tmp'],
-        [':(top)*'],
-        ['.git'],
-        null,
-        'src',
-        [1],
-        [''],
-        ['src\\file'],
-        ['src\0file'],
-        ['src/../file'],
-        ['src/.GiT/config'],
-      ])
-        assert.match(
-          (await search.execute('invalid', { query: 'secret', paths })).content[0].text,
-          /paths must/,
-        );
-      for (const query of [null, 1, [], [''], ['a', 1], 'a\0b'])
-        assert.match((await search.execute('invalid', { query })).content[0].text, /query must/);
-      assert.match(
-        (await search.execute('scoped-escape', { query: 'hostOnlySecret', paths: ['replaced'] }))
-          .content[0].text,
-        /no matches/,
-      );
-      const result = await search.execute('search', { query: 'importantDefault' });
-      assert.match(result.content[0].text, /large.ts:20001:const importantDefault = false/);
-      const page = await read.execute('read', { path: 'large.ts', line: 20001 });
-      assert.match(page.content[0].text, /Starting at line 20001/);
-      assert.match(page.content[0].text, /importantDefault = false/);
-      assert.match((await read.execute('escape', { path: 'escape' })).content[0].text, /Refused/);
-      assert.match(
-        (await search.execute('secret', { query: 'hostOnlySecret' })).content[0].text,
-        /no matches/,
-      );
-      assert.match(
-        (await search.execute('literal', { query: '$(touch should-not-exist)' })).content[0].text,
-        /no matches/,
-      );
-      writeFileSync(join(workspace, 'large.ts'), '// updated\n'.repeat(20000));
-      const tree = execFileSync('git', ['-C', workspace, 'write-tree'], {
-        encoding: 'utf8',
-      }).trim();
-      const scopedDiff = createPiGitDiffTool(sdk, workspace, {
-        base: tree,
-        worktree: true,
-      }) as Tool;
-      const first = (await scopedDiff.execute('diff', {})).content[0].text;
-      const next = Number(first.match(/offset=(\d+)/)?.[1]);
-      assert.ok(Number.isFinite(next));
-      const second = (await scopedDiff.execute('diff-next', { offset: next })).content[0].text;
-      assert.notEqual(first, second);
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-      rmSync(outside, { recursive: true, force: true });
-    }
-  });
-});
-
 describe('Pi review sessions', () => {
   // A session whose creation resolves after stop() swept the registry must not
   // go on to prompt a torn-down runtime.
@@ -546,8 +334,6 @@ describe('Pi review sessions', () => {
       modelRuntime: { getModel: () => ({}) },
       workspace: '/tmp/ws',
       mainModel: 'deepseek/deepseek-v4-flash',
-      readTool: {},
-      searchTool: {},
       activeSessions: new Set(),
       stopped,
     }) as unknown as PiRuntime;
@@ -672,7 +458,7 @@ describe('Pi review sessions', () => {
     );
     assert.equal(sessions[0]?.thinkingLevel, 'high');
     assert.equal(sessions[0]?.noTools, undefined);
-    assert.deepEqual(sessions[0]?.tools, ['read_file', 'search_repo']);
+    assert.deepEqual(sessions[0]?.tools, ['read', 'bash', 'grep', 'find', 'ls']);
 
     // Without the override, a non-main model takes the aux default when the
     // runtime carries one, and none otherwise.
@@ -833,7 +619,7 @@ describe('Pi review sessions', () => {
     assert.deepEqual(events, ['prompted', 'disposed']);
   });
 
-  it('reports the SDK-exposed turn count with enforceable tool capability', async () => {
+  it('reports the SDK-exposed turn count without claiming tool enforcement', async () => {
     const recorder = createTelemetryRecorder(true);
     const runtime = fakeRuntime(
       false,
@@ -848,9 +634,9 @@ describe('Pi review sessions', () => {
       .split('\n')
       .map((line) => JSON.parse(line))
       .find((row) => row.kind === 'exploration');
-    assert.equal(PI_TELEMETRY_CAPABILITY, 'enforceable');
+    assert.equal(PI_TELEMETRY_CAPABILITY, 'opaque');
     assert.equal(exploration.turnCount, 1);
-    assert.equal(exploration.capability, 'enforceable');
+    assert.equal(exploration.capability, 'opaque');
   });
 
   it('surfaces terminal provider errors without exposing hidden reasoning or attempting JSON repair', async () => {

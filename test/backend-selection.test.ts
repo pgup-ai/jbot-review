@@ -17,7 +17,7 @@ describe('backendCanReadWorkspace', () => {
     assert.equal(backendCanReadWorkspace('opencode', undefined), true);
     assert.equal(backendCanReadWorkspace('devin', 'devin'), true);
     assert.equal(backendCanReadWorkspace('cline', 'cline'), false);
-    assert.equal(backendCanReadWorkspace('commandcode', 'commandcode'), false);
+    assert.equal(backendCanReadWorkspace('commandcode', 'commandcode'), true);
     assert.equal(backendCanReadWorkspace('poolside', undefined), false);
   });
 });
@@ -789,10 +789,11 @@ describe('selectReviewBackends', () => {
 
   it('requires complete embedded diffs for Poolside and shell-free CLI backends', () => {
     assert.equal(backendRequiresCompleteEmbeddedDiff('poolside', undefined), true);
-    for (const backend of ['commandcode', 'grok', 'qoder'] as const) {
+    for (const backend of ['grok', 'qoder'] as const) {
       assert.equal(backendRequiresCompleteEmbeddedDiff('other', backend), true);
     }
     assert.equal(backendRequiresCompleteEmbeddedDiff('other', 'cursor'), false);
+    assert.equal(backendRequiresCompleteEmbeddedDiff('commandcode', 'commandcode'), false);
   });
 
   it('routes Qoder main and aux sessions through one PAT-backed CLI backend', () => {

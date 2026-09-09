@@ -75,20 +75,16 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    posts, so anchor validity is unaffected. Routing local mode to the ACP
    gateway pins the right side back to HEAD in a throwaway linked worktree —
    the companion clones a committed ref, and the two must agree.
-8. **Read-only enforced in four layers** for every opencode session: the
-   `plan` agent, config-level `permission.edit/external_directory: deny`,
-   per-prompt `tools: { write/edit/patch: false }`, and
-   `OPENCODE_DISABLE_PROJECT_CONFIG` on the server child so the reviewed
-   repo's committed `.opencode/` (plugins, tools, agents, config) never
-   loads — that code runs at session start OUTSIDE the tool sandbox, so the
-   first three layers cannot see it. Sessions are hermetic on both sides: the
-   operator's global config is excluded too (empty `XDG_CONFIG_HOME`), so
-   ambient MCP servers — unvetted, sometimes write-capable — never enter a
-   review; the child uses only jbot's `OPENCODE_CONFIG_CONTENT` plus the
-   runtime-added context7 MCP. The sessions must never mutate the workspace;
-   bash stays allowed for git diff/log/grep. Scope is the model sessions — the
-   local driver's opt-in, gitignored `.jbot-review/last-run.md` report is
-   post-review output, not a session write.
+8. **Use native review tools.** Pi, OpenCode, and CommandCode use their own
+   investigation tools; do not replace them with repository-confined wrappers
+   or add tool-output pagination. Isolation belongs to the execution environment.
+   OpenCode uses its `plan` agent, `permission.edit: deny`, and per-prompt
+   `tools: { write/edit/patch: false }`; CommandCode uses native `plan` mode.
+   Pi exposes native read/search/bash tools with read-only review instructions.
+   Shell access is not a guarantee against writes. Keep edits out of the review
+   task and run reviews in a disposable environment. Provider authentication,
+   temporary-home cleanup, and OpenCode's explicit runtime config remain owned
+   by J-Bot. The local driver's optional report is post-review output.
 9. **Resolved threads never suppress** re-detections — a re-detection at a
    resolved location is a regression signal.
 10. **Extract pure logic for tests.** New decision logic goes in a pure

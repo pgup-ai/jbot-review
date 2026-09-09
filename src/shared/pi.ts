@@ -1,13 +1,9 @@
-import { repositorySearchArgs, REPOSITORY_SEARCH_PROPERTIES } from './repository-search.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
-import { AsyncLocalStorage } from 'node:async_hooks';
-import { createReadStream, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve, sep } from 'node:path';
+import { join } from 'node:path';
 
-import { gitRepositoryPage, readRepositoryPage } from './repository-output.ts';
 import { supportedModelOptions } from './config.ts';
-import { GIT_DIFF_ARGS } from './git.ts';
 import { parseModelName } from '@symma/protocol';
 import {
   formatTokenUsage,
@@ -29,15 +25,13 @@ import {
   buildJsonRepairPrompt,
   CONTINUATION_NUDGE_PROMPT,
   isNoAttemptReply,
-  REPOSITORY_SEARCH_DESCRIPTION,
 } from './prompt.ts';
 import { isFiniteNumber, isRecord, truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
-import { serializedBytes, type ToolTelemetryAccumulator } from './tool-telemetry.ts';
+import { type ToolTelemetryAccumulator } from './tool-telemetry.ts';
 import { classifyTelemetryStopReason } from './telemetry.ts';
 
-export const PI_TELEMETRY_CAPABILITY = 'enforceable' as const;
-const piTelemetryContext = new AsyncLocalStorage<{ session: string }>();
+export const PI_TELEMETRY_CAPABILITY = 'opaque' as const;
 const piSessionTelemetry = new WeakMap<object, ToolTelemetryAccumulator>();
 
 /**
@@ -175,32 +169,6 @@ export function piThinkingLevel(modelOptions?: Record<string, unknown>): string 
   return typeof effort === 'string' && PI_THINKING_LEVELS.has(effort) ? effort : undefined;
 }
 
-// Pi's built-in file tools can escape the checkout; only confined replacements
-// are exposed to model sessions.
-export function resolveWithinWorkspace(
-  workspace: string,
-  requestedPath: string,
-): string | undefined {
-  // Canonicalize both sides through realpath: a lexical check alone is bypassed
-  // by a symlink inside the checkout that points out (readFileSync follows it).
-  // realpath resolves symlinks, `..`, and absolute paths; a missing/unreadable
-  // path throws → undefined (nothing to read, no leak).
-  const root = tryRealpath(resolve(workspace));
-  if (!root) return undefined;
-  const target = tryRealpath(resolve(root, requestedPath));
-  if (!target) return undefined;
-  // The trailing sep stops a sibling like `/repo-x` matching the `/repo` root.
-  return target === root || target.startsWith(root + sep) ? target : undefined;
-}
-
-function tryRealpath(candidate: string): string | undefined {
-  try {
-    return realpathSync(candidate);
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * Maps a pi assistant-message usage object onto PromptTokenUsage. Defensive
  * about field spellings (`input` vs `inputTokens`) and missing counters —
@@ -222,35 +190,6 @@ export function mapPiUsage(usage: unknown): PromptTokenUsage | undefined {
     cacheWrite: count(u.cacheWrite, u.cacheWriteTokens),
     ...(isFiniteNumber(cost) ? { costUsd: cost } : {}),
   };
-}
-
-interface PiDiffScope {
-  /** Merge-base (local mode) or PR base sha (GitHub paths). */
-  base: string;
-  /** Local mode diffs merge-base → working tree; GitHub paths are three-dot. */
-  worktree: boolean;
-  /**
-   * PR head sha for GitHub paths. The checkout HEAD may be a synthetic merge
-   * ref (actions/checkout pull_request default), so diff to the head sha the
-   * embedded diff and anchors use — not the checkout's HEAD. Absent in local
-   * mode (working tree) and as a defensive fallback.
-   */
-  head?: string;
-}
-
-/**
- * Reuses the pipeline's canonical GIT_DIFF_ARGS so this tool's hunks match the
- * embedded diff the model anchors findings against, and so no `.gitattributes`
- * textconv or external diff driver can run.
- */
-export function piGitDiffArgs(scope: PiDiffScope, path?: string): string[] {
-  const rev = scope.worktree ? scope.base : `${scope.base}...${scope.head ?? 'HEAD'}`;
-  const args = [...GIT_DIFF_ARGS, rev];
-  // `--` pins the model-supplied path as a pathspec; a flag-shaped value can
-  // never become a git option.
-  const trimmed = path?.trim();
-  if (trimmed) args.push('--', trimmed);
-  return args;
 }
 
 type PiMessageLike = {
@@ -377,240 +316,6 @@ interface PiSdkLike {
   DefaultResourceLoader: new (options: Record<string, unknown>) => PiResourceLoaderLike;
   SessionManager: { inMemory(): unknown };
   SettingsManager: { inMemory(settings: Record<string, unknown>): unknown };
-  defineTool(definition: Record<string, unknown>): unknown;
-}
-
-/**
- * Read-only replacement for the shell the pi engine deliberately lacks: the
- * omitted-hunks notes tell the model to "run the git diff command" when the
- * embedded diff overflows its byte budget, and without this tool a pi session
- * could never see removals or unembedded hunks (invariant 1). The base ref and
- * diff form are runner-supplied — the model only chooses an optional pathspec.
- */
-export function createPiGitDiffTool(
-  sdk: PiSdkLike,
-  workspace: string,
-  scope: PiDiffScope,
-  telemetry?: ToolTelemetryAccumulator,
-): unknown {
-  return sdk.defineTool({
-    name: 'git_diff',
-    description:
-      'Show the change under review (git diff against the PR base). Pass `path` to scope the diff to one file — do that whenever the full output is truncated.',
-    parameters: {
-      type: 'object',
-      properties: {
-        offset: {
-          type: 'integer',
-          minimum: 0,
-          description: 'Byte offset returned by the previous page.',
-        },
-        path: {
-          type: 'string',
-          description: 'Repo-relative file path to diff; omit for the whole change.',
-        },
-      },
-    },
-    execute: async (_id: unknown, params: unknown) => {
-      const path = isRecord(params) && typeof params.path === 'string' ? params.path : undefined;
-      const finish = telemetry?.startTool({
-        session: piTelemetryContext.getStore()?.session ?? 'unknown',
-        backend: 'pi',
-        capability: PI_TELEMETRY_CAPABILITY,
-        toolClass: 'diff-recovery',
-        inputBytes: serializedBytes(params),
-        ...(isRecord(params) && (params.offset || params.line)
-          ? { page: JSON.stringify({ offset: params.offset, line: params.line }) }
-          : {}),
-        ...(path
-          ? { identity: path, identityKind: 'path' as const }
-          : { identity: 'whole-diff', identityKind: 'scope' as const }),
-        diffScope: path ? 'path' : 'whole',
-      });
-      let text: string;
-      try {
-        const page = await gitRepositoryPage(
-          workspace,
-          piGitDiffArgs(scope, path),
-          isRecord(params) ? params : {},
-        );
-        text = page.totalBytes ? page.text : '(no changes for this path)';
-        finish?.({
-          success: true,
-          outputBytesBeforeCap: page.totalBytes,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-      } catch (error) {
-        // Surface the failure as tool output the model can react to; a throw
-        // here would fail the whole session over a bad pathspec.
-        text = `git diff failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 2000)}`;
-        finish?.({
-          success: false,
-          failureClass:
-            (isRecord(error) && error.killed === true) ||
-            classifyTelemetryStopReason(error) === 'timeout'
-              ? 'timeout'
-              : 'execution',
-          outputBytesBeforeCap: 0,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-      }
-      return { content: [{ type: 'text', text }], details: {} };
-    },
-  });
-}
-
-/**
- * Repo-confined replacement for pi's built-in `read` (which accepts absolute
- * and `..` paths with no sandbox). Refuses anything resolving outside the
- * workspace, so a prompt-injected diff cannot read host files.
- */
-export function createPiReadTool(
-  sdk: PiSdkLike,
-  workspace: string,
-  telemetry?: ToolTelemetryAccumulator,
-): unknown {
-  return sdk.defineTool({
-    name: 'read_file',
-    description:
-      'Read a UTF-8 file from the repository under review. `path` is repo-relative; paths outside the repo are refused.',
-    parameters: {
-      type: 'object',
-      properties: {
-        path: { type: 'string', description: 'Repo-relative file path.' },
-        line: {
-          type: 'integer',
-          minimum: 1,
-          description: 'Start at this 1-based line; omit when continuing with offset.',
-        },
-        offset: {
-          type: 'integer',
-          minimum: 0,
-          description: 'Byte offset returned by the previous page.',
-        },
-      },
-      required: ['path'],
-    },
-    execute: async (_id: unknown, params: unknown) => {
-      const requested = isRecord(params) && typeof params.path === 'string' ? params.path : '';
-      const finish = telemetry?.startTool({
-        session: piTelemetryContext.getStore()?.session ?? 'unknown',
-        backend: 'pi',
-        capability: PI_TELEMETRY_CAPABILITY,
-        toolClass: 'file-read',
-        inputBytes: serializedBytes(params),
-        ...(isRecord(params) && (params.offset || params.line)
-          ? { page: JSON.stringify({ offset: params.offset, line: params.line }) }
-          : {}),
-        ...(requested ? { identity: requested, identityKind: 'path' as const } : {}),
-      });
-      const target = requested ? resolveWithinWorkspace(workspace, requested) : undefined;
-      if (!target) {
-        const text = `Refused: "${requested}" is outside the repository.`;
-        finish?.({
-          success: false,
-          failureClass:
-            requested && existsSync(resolve(workspace, requested)) ? 'denied' : 'invalid-input',
-          outputBytesBeforeCap: 0,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-        return {
-          content: [{ type: 'text', text }],
-          details: {},
-        };
-      }
-      let text: string;
-      try {
-        const page = await readRepositoryPage(
-          createReadStream(target, { encoding: 'utf8' }),
-          isRecord(params) ? params : {},
-        );
-        text = page.text;
-        finish?.({
-          success: true,
-          outputBytesBeforeCap: page.totalBytes,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-      } catch (error) {
-        text = `read failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 2000)}`;
-        finish?.({
-          success: false,
-          failureClass: 'execution',
-          outputBytesBeforeCap: 0,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-      }
-      return { content: [{ type: 'text', text }], details: {} };
-    },
-  });
-}
-
-export function createPiSearchTool(
-  sdk: PiSdkLike,
-  workspace: string,
-  telemetry?: ToolTelemetryAccumulator,
-): unknown {
-  return sdk.defineTool({
-    name: 'search_repo',
-    description: REPOSITORY_SEARCH_DESCRIPTION,
-    parameters: {
-      type: 'object',
-      properties: {
-        ...REPOSITORY_SEARCH_PROPERTIES,
-        offset: { type: 'integer', minimum: 0 },
-      },
-      required: ['query'],
-    },
-    execute: async (_id: unknown, params: unknown) => {
-      const finish = telemetry?.startTool({
-        session: piTelemetryContext.getStore()?.session ?? 'unknown',
-        backend: 'pi',
-        capability: PI_TELEMETRY_CAPABILITY,
-        toolClass: 'search',
-        inputBytes: serializedBytes(params),
-        ...(isRecord(params) && (params.offset || params.line)
-          ? { page: JSON.stringify({ offset: params.offset, line: params.line }) }
-          : {}),
-        identity: JSON.stringify(
-          isRecord(params) ? { query: params.query, paths: params.paths } : params,
-        ),
-        identityKind: 'query',
-      });
-      let text: string;
-      try {
-        const page = await gitRepositoryPage(
-          workspace,
-          [
-            '--no-pager',
-            'grep',
-            '--no-index',
-            '--exclude-standard',
-            '--no-color',
-            '-n',
-            '-I',
-            '--no-textconv',
-            ...repositorySearchArgs(params),
-          ],
-          isRecord(params) ? params : {},
-        );
-        text = page.totalBytes ? page.text : '(no matches in non-ignored files)';
-        finish?.({
-          success: true,
-          outputBytesBeforeCap: page.totalBytes,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-      } catch (error) {
-        text = `search failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 2000)}`;
-        finish?.({
-          success: false,
-          failureClass: 'execution',
-          outputBytesBeforeCap: 0,
-          outputBytesAfterCap: Buffer.byteLength(text),
-        });
-      }
-      return { content: [{ type: 'text', text }], details: {} };
-    },
-  });
 }
 
 /**
@@ -674,9 +379,6 @@ export interface PiRuntime {
   thinkingLevel?: string;
   /** For sessions on a model other than `mainModel` (the aux default). */
   auxThinkingLevel?: string;
-  gitDiffTool?: unknown;
-  readTool: unknown;
-  searchTool: unknown;
   toolTelemetry?: ToolTelemetryAccumulator;
   /**
    * Created-but-not-disposed sessions; teardown aborts them so a prompt
@@ -734,7 +436,6 @@ export async function startPi(
     /** Thinking level for sessions on a model other than the main one. */
     auxThinkingLevel?: string;
     additionalProviderKeys?: ProviderKeyConfig[];
-    diffScope?: PiDiffScope;
     toolTelemetry?: ToolTelemetryAccumulator;
     embeddedFirstPrompt?: boolean;
   } = {},
@@ -761,7 +462,7 @@ export async function startPi(
     new sdk.DefaultResourceLoader({
       cwd: isolationDir,
       agentDir: join(isolationDir, 'agent'),
-      systemPromptOverride: () => systemPrompt,
+      appendSystemPrompt: [systemPrompt],
     });
   let loader: PiResourceLoaderLike;
   let reviewLoader: PiResourceLoaderLike | undefined;
@@ -819,23 +520,11 @@ export async function startPi(
     ...(reviewLoader ? { reviewLoader } : {}),
     workspace,
     mainModel: `${providerID}/${modelID}`,
-    readTool: createPiReadTool(sdk, workspace, options.toolTelemetry),
-    searchTool: createPiSearchTool(sdk, workspace, options.toolTelemetry),
     ...(options.toolTelemetry ? { toolTelemetry: options.toolTelemetry } : {}),
     activeSessions: new Set(),
     stopped: false,
     ...(thinkingLevel ? { thinkingLevel } : {}),
     ...(options.auxThinkingLevel ? { auxThinkingLevel: options.auxThinkingLevel } : {}),
-    ...(options.diffScope
-      ? {
-          gitDiffTool: createPiGitDiffTool(
-            sdk,
-            workspace,
-            options.diffScope,
-            options.toolTelemetry,
-          ),
-        }
-      : {}),
   };
   return {
     runtime,
@@ -847,19 +536,6 @@ export async function startPi(
       removeIsolationDir();
     },
   };
-}
-
-/** The session's tool allowlist + custom tools — only our confined tools. */
-function piCustomToolConfig(runtime: PiRuntime): {
-  tools: string[];
-  customTools: unknown[];
-} {
-  const entries: Array<{ name: string; tool: unknown }> = [
-    { name: 'read_file', tool: runtime.readTool },
-    { name: 'search_repo', tool: runtime.searchTool },
-    ...(runtime.gitDiffTool ? [{ name: 'git_diff', tool: runtime.gitDiffTool }] : []),
-  ];
-  return { tools: entries.map((e) => e.name), customTools: entries.map((e) => e.tool) };
 }
 
 async function createPiSession(
@@ -882,9 +558,7 @@ async function createPiSession(
   const { session } = await runtime.sdk.createAgentSession({
     model: modelRef,
     cwd: runtime.workspace,
-    // Naming custom tools in `tools` is required for registration; built-ins
-    // remain unavailable because Pi does not sandbox them.
-    ...(singleShot ? { noTools: 'all' } : piCustomToolConfig(runtime)),
+    ...(singleShot ? { noTools: 'all' } : { tools: ['read', 'bash', 'grep', 'find', 'ls'] }),
     modelRuntime: runtime.modelRuntime,
     resourceLoader: reviewSession && runtime.reviewLoader ? runtime.reviewLoader : runtime.loader,
     sessionManager: runtime.sdk.SessionManager.inMemory(),
@@ -934,12 +608,10 @@ async function promptPiSession(
     // prompt() resolves when the full agent turn completes — no polling.
     // Template expansion stays off: prompts embed arbitrary diff text that
     // must never trigger pi's /template expansion.
-    await piTelemetryContext.run({ session: label }, () =>
-      withTimeout(
-        session.prompt(prompt, { expandPromptTemplates: false }),
-        timeoutMs,
-        `pi ${label} prompt did not finish within ${Math.round(timeoutMs / 1000)}s`,
-      ),
+    await withTimeout(
+      session.prompt(prompt, { expandPromptTemplates: false }),
+      timeoutMs,
+      `pi ${label} prompt did not finish within ${Math.round(timeoutMs / 1000)}s`,
     );
   } catch (error) {
     piSessionTelemetry.get(session)?.finishSession({

@@ -25,7 +25,6 @@ const POLICY_KEYS = [
   'embeddedFirstPrompt',
   'guidelineWiden',
   'verifierSlimContext',
-  'commandCodeTools',
   'verifyOverlapGrace',
   'reviewPasses',
   'verifyFindings',
