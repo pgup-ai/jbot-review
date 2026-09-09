@@ -380,7 +380,6 @@ export function formatDiffScope(scope: DiffScope): string {
 
   const base = scope.baseSha ?? (scope.baseRef ? `origin/${scope.baseRef}` : undefined);
   if (base && scope.worktree) {
-    // Local reviews include uncommitted changes relative to the merge-base.
     lines.push(
       'To see exactly what this review covers (merge-base → working tree, includes uncommitted changes), run:',
       `    ${GIT_DIFF_COMMAND} ${base}`,
