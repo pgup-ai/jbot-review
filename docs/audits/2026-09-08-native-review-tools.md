@@ -124,3 +124,17 @@ requires default-policy flips to have `subset: "full"` with
 This single-fixture diagnostic does not satisfy that merge gate. No
 benchmark-ledger pass is claimed, and the branch is not validated as a performance
 improvement or ready for release.
+
+## Follow-up: native event timing
+
+CommandCode now logs each native tool's running-to-terminal interval and each
+model request's start-to-end interval, with unfinished intervals retained on abort.
+These are monotonic event-receipt timings, not CPU measurements. Model requests
+also report input/output tokens when supplied by the CLI. No tool hooks or mods
+are introduced.
+
+A short Muse 1.3 Contributor smoke ran native `git diff --stat` on the same
+fixture: shell execution took approximately **26 ms**, and the two model requests
+took **4.4 s** and **17.1 s**. This validates the logger, not the cause of the full
+21-minute review. The earlier review was not rerun. Follow-up validation: 1,013
+tests, typecheck, lint, formatting, and build passed.

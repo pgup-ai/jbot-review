@@ -602,7 +602,9 @@ async function runCommandCodePrompt(
     `Calling ${label} prompt (agent=commandcode-cli, model=${model}${effort ? `, effort=${effort}` : ''})`,
   );
   let usage: PromptTokenUsage | undefined;
-  const progress = createCommandCodeProgress();
+  const progress = createCommandCodeProgress(undefined, (timing) =>
+    log(`CommandCode timing (${label}): ${JSON.stringify(timing)}`),
+  );
   let complete = false;
   const heartbeat = setInterval(() => {
     log(`CommandCode progress (${label}): ${JSON.stringify(progress.snapshot())}`);

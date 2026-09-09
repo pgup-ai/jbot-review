@@ -584,6 +584,12 @@ Pi, OpenCode, and CommandCode rely on the execution environment for isolation.
 Review instructions prohibit edits; native tools are not a security sandbox.
 Use a disposable checkout for local experiments too. Logs retain sanitized
 CommandCode tool outcomes without recording file contents or tool arguments.
+Each `CommandCode timing` log records a native tool call or model request,
+its sequence number, outcome, and elapsed milliseconds. Timing uses receipt of
+the CLI's live start/end events; model-request time includes provider/network
+waiting, not just generation. Missing starts omit the duration. Heartbeats and
+final progress retain unfinished calls and completed-duration totals; parallel
+tool durations can overlap and must not be added to model time as wall time.
 
 Use `provider: cursor` with `cursor-api-key` / `CURSOR_API_KEY` for the Cursor
 CLI backend. The Docker image includes the Cursor CLI (`cursor-agent`), which

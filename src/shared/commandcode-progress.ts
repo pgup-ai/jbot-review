@@ -44,9 +44,26 @@ export interface CommandCodeProgress {
   toolOutcomes: Record<string, number>;
   lastCompletedTool?: string;
   lastEventAgeMs?: number;
+  modelRequests?: number;
+  modelDurationMs?: number;
+  toolDurationMs?: number;
+  activeTimings?: CommandCodeTiming[];
 }
 
-export function createCommandCodeProgress(now = Date.now) {
+export interface CommandCodeTiming {
+  phase: 'tool' | 'model';
+  sequence: number;
+  tool?: string;
+  outcome: string;
+  durationMs?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
+export function createCommandCodeProgress(
+  now = () => Math.round(performance.now()),
+  onTiming?: (timing: CommandCodeTiming) => void,
+) {
   const started = now();
   let buffer = '';
   let usage: PromptTokenUsage | undefined;
@@ -56,6 +73,31 @@ export function createCommandCodeProgress(now = Date.now) {
   let lastEventAt: number | undefined;
   let lastCompletedTool: string | undefined;
   const toolOutcomes: Record<string, number> = {};
+  const tools = new Map<string, { sequence: number; tool: string; startedAt: number }>();
+  let toolSequence = 0;
+  let modelRequests = 0;
+  let modelStartedAt: number | undefined;
+  let modelDurationMs = 0;
+  let toolDurationMs = 0;
+  const activeTimings = (): CommandCodeTiming[] => [
+    ...[...tools.values()].map(({ sequence, tool, startedAt }) => ({
+      phase: 'tool' as const,
+      sequence,
+      tool,
+      outcome: 'incomplete',
+      durationMs: now() - startedAt,
+    })),
+    ...(modelStartedAt === undefined
+      ? []
+      : [
+          {
+            phase: 'model' as const,
+            sequence: modelRequests,
+            outcome: 'incomplete',
+            durationMs: now() - modelStartedAt,
+          },
+        ]),
+  ];
   const frame = (line: string) => {
     if (!line.trim()) return;
     let parsed: unknown;
@@ -72,8 +114,56 @@ export function createCommandCodeProgress(now = Date.now) {
       usage = parseCommandCodeUsage(parsed.event.result.usage) ?? usage;
     observedEvents++;
     lastEventAt = now();
+    const event = parsed.event;
+    if (event.type === 'model_request_start') {
+      if (modelStartedAt !== undefined)
+        onTiming?.({
+          phase: 'model',
+          sequence: modelRequests,
+          outcome: 'incomplete',
+          durationMs: now() - modelStartedAt,
+        });
+      modelRequests++;
+      modelStartedAt = now();
+    }
+    if (event.type === 'model_request_end') {
+      const durationMs = modelStartedAt === undefined ? undefined : now() - modelStartedAt;
+      const requestUsage = parseCommandCodeUsage(event.usage);
+      modelDurationMs += durationMs ?? 0;
+      onTiming?.({
+        phase: 'model',
+        sequence: modelRequests,
+        outcome: 'completed',
+        ...(durationMs === undefined ? {} : { durationMs }),
+        ...(requestUsage
+          ? { inputTokens: requestUsage.input, outputTokens: requestUsage.output }
+          : {}),
+      });
+      modelStartedAt = undefined;
+    }
+    if (event.type === 'tool_running' && typeof event.toolCallId === 'string') {
+      tools.set(event.toolCallId, {
+        sequence: ++toolSequence,
+        tool:
+          typeof event.toolName === 'string' && TOOL_NAMES.includes(event.toolName)
+            ? event.toolName
+            : 'other',
+        startedAt: now(),
+      });
+    }
     const outcome = commandCodeToolOutcome(parsed);
     if (outcome) {
+      const active = typeof event.toolCallId === 'string' ? tools.get(event.toolCallId) : undefined;
+      const durationMs = active === undefined ? undefined : now() - active.startedAt;
+      toolDurationMs += durationMs ?? 0;
+      onTiming?.({
+        phase: 'tool',
+        sequence: active?.sequence ?? ++toolSequence,
+        tool: outcome.split(':')[0],
+        outcome: String(event.type),
+        ...(durationMs === undefined ? {} : { durationMs }),
+      });
+      if (typeof event.toolCallId === 'string') tools.delete(event.toolCallId);
       toolOutcomes[outcome] = (toolOutcomes[outcome] ?? 0) + 1;
       if (parsed.event.type === 'tool_completed') lastCompletedTool = outcome.split(':')[0];
     }
@@ -101,6 +191,7 @@ export function createCommandCodeProgress(now = Date.now) {
     finish() {
       if (!dropping) frame(buffer);
       buffer = '';
+      for (const timing of activeTimings()) onTiming?.(timing);
     },
     usage: () => usage,
     snapshot(complete = false): CommandCodeProgress {
@@ -110,6 +201,10 @@ export function createCommandCodeProgress(now = Date.now) {
         observedEvents,
         droppedFrames,
         toolOutcomes: { ...toolOutcomes },
+        modelRequests,
+        modelDurationMs,
+        toolDurationMs,
+        activeTimings: activeTimings(),
         ...(lastCompletedTool ? { lastCompletedTool } : {}),
         ...(lastEventAt !== undefined ? { lastEventAgeMs: now() - lastEventAt } : {}),
       };

@@ -1,6 +1,61 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import { createCommandCodeProgress } from '../src/shared/commandcode-progress.ts';
+import {
+  createCommandCodeProgress,
+  type CommandCodeTiming,
+} from '../src/shared/commandcode-progress.ts';
+
+it('times concurrent native tools separately from model requests and retains unfinished calls', () => {
+  let now = 0;
+  const timings: CommandCodeTiming[] = [];
+  const progress = createCommandCodeProgress(
+    () => now,
+    (timing) => timings.push(timing),
+  );
+  const event = (type: string, data = {}) =>
+    progress.feed(JSON.stringify({ type: 'event', event: { type, ...data } }) + '\n');
+  event('model_request_start');
+  now = 1000;
+  event('model_request_end', {
+    usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+  });
+  event('tool_running', { toolCallId: 'secret-id-1', toolName: 'read_file', input: 'SECRET' });
+  now = 1010;
+  event('tool_running', { toolCallId: 'secret-id-2', toolName: 'web_fetch' });
+  now = 1020;
+  event('tool_completed', { toolCallId: 'secret-id-1', toolName: 'read_file', result: 'SECRET' });
+  now = 1210;
+  event('tool_errored', { toolCallId: 'secret-id-2', toolName: 'web_fetch' });
+  event('tool_denied', { toolCallId: 'missing-start', toolName: 'SECRET_TOOL' });
+  assert.deepEqual(timings, [
+    {
+      phase: 'model',
+      sequence: 1,
+      outcome: 'completed',
+      durationMs: 1000,
+      inputTokens: 100,
+      outputTokens: 20,
+    },
+    { phase: 'tool', sequence: 1, tool: 'read_file', outcome: 'tool_completed', durationMs: 20 },
+    { phase: 'tool', sequence: 2, tool: 'web_fetch', outcome: 'tool_errored', durationMs: 200 },
+    { phase: 'tool', sequence: 3, tool: 'other', outcome: 'tool_denied' },
+  ]);
+  now = 2000;
+  event('model_request_start');
+  event('tool_running', { toolCallId: 'secret-id-3', toolName: 'SECRET_TOOL' });
+  now = 2500;
+  const pending = progress.snapshot();
+  assert.equal(pending.modelRequests, 2);
+  assert.equal(pending.modelDurationMs, 1000);
+  assert.equal(pending.toolDurationMs, 220);
+  assert.equal(pending.activeTimings?.length, 2);
+  progress.finish();
+  assert.deepEqual(timings.slice(-2), [
+    { phase: 'tool', sequence: 4, tool: 'other', outcome: 'incomplete', durationMs: 500 },
+    { phase: 'model', sequence: 2, outcome: 'incomplete', durationMs: 500 },
+  ]);
+  assert.doesNotMatch(JSON.stringify({ timings, pending }), /SECRET|secret-id|missing-start/);
+});
 
 it('retains only safe observed metadata across chunk boundaries and incomplete output', () => {
   let now = 0;
