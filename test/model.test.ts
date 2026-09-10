@@ -31,6 +31,23 @@ describe('resolveModelSelection', () => {
     assert.deepEqual(resolveModelSelection('devin/glm-5.2'), ['devin/glm-5.2']);
   });
 
+  it('defaults Devin SWE-2 aliases to Medium and preserves explicit variants', () => {
+    assert.deepEqual(
+      resolveModelSelection(
+        'devin/swe-2,devin/swe,devin/swe-2-high,devin/swe-2-max,devin/default,opencode/swe-2',
+      ),
+      [
+        'devin/swe-2-medium',
+        'devin/swe-2-medium',
+        'devin/swe-2-high',
+        'devin/swe-2-max',
+        'devin/default',
+        'opencode/swe-2',
+      ],
+    );
+    assert.deepEqual(resolveModelSelection('swe-2', 'devin'), ['devin/swe-2-medium']);
+  });
+
   it('resolves a comma-separated pool of same-provider refs', () => {
     assert.deepEqual(resolveModelSelection(' opencode/a , opencode/b/c ,, opencode/d '), [
       'opencode/a',

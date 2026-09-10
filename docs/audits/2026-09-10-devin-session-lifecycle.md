@@ -247,3 +247,26 @@ correctly read distinct random file contents in 6.8, 7.1, and 6.1 seconds.
 These smoke tests did not reproduce the transient error and do not establish
 full-review reliability or explain the original empty response. No fresh full
 review or adjudicated corpus was run for this classification fix.
+
+## Medium default and local-review follow-up
+
+J-Bot resolves the unqualified `devin/swe-2` and `devin/swe` aliases to
+`devin/swe-2-medium` before pool selection, so all entry points and telemetry
+report the effective variant. Explicit High/Max IDs and `devin/default` are
+preserved. Three concurrent Medium file-read probes succeeded in 5.2, 5.4,
+and 5.6 seconds; the earlier High probes took 6.8, 7.1, and 6.1 seconds.
+These small, sequentially conducted probe sets do not establish full-review
+speed or quality, and the default-policy full-corpus requirement remains unmet.
+
+The attached local run finished main and guideline passes, retained four
+findings, and timed out only interactions at ten minutes. Its valid feedback
+led to separate once-only onboarding/catalog retries within the same deadline,
+a capability-aware omission note for tool-less lenses, and removal of dead
+imports in the signal test's generated script. The complete diff and existing
+context budgets remain intact.
+
+The PR's repeated-signal regression now exits with a distinct failure code
+after one second if the second signal is ignored; a later five-second forced
+exit cannot make the test pass. Self-review kept two new cases for model
+resolution and mixed startup recovery, and extended existing context/signal
+cases. No new comments or abstractions were needed.

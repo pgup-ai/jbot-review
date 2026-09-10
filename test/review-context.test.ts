@@ -807,6 +807,17 @@ describe('formatFinderGuidelines', () => {
       lens: true,
     });
     assert.match(embeddedOnly, /FINAL_CONTRACT/);
+    const missing = selectFinderGuidelineText({
+      discovered: { ...large, referenced: ['docs/missing.md'] },
+      forFiles: ['index.ts'],
+      complianceRuns: false,
+      mainCanReadWorkspace: false,
+      widen: 'auto',
+      full: formatGuidelines(large),
+      lens: true,
+    });
+    assert.match(missing, /Omitted guidance is unavailable/);
+    assert.doesNotMatch(missing, /Read any omitted file/);
   });
 
   it('keeps scoped guidance and drops lower-relevance root docs past the cap', async () => {

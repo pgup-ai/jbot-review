@@ -93,8 +93,6 @@ it('bounds fatal cleanup, forces repeated signals, and preserves a surviving hos
   for (const mode of ['timeout', 'repeat', 'host']) {
     const script = `
       import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
       import { onCliFatalSignal } from ${JSON.stringify(moduleUrl)};
       const mode = ${JSON.stringify(mode)};
       let cleanups = 0;
@@ -108,7 +106,10 @@ import { promisify } from 'node:util';
       process.emit('SIGTERM', 'SIGTERM');
       setImmediate(() => {
         assert.equal(cleanups, 1);
-        if (mode === 'repeat') process.emit('SIGTERM', 'SIGTERM');
+        if (mode === 'repeat') {
+          setTimeout(() => process.exit(91), 1000);
+          process.emit('SIGTERM', 'SIGTERM');
+        }
         if (mode === 'host') {
           assert.equal(signals, 1);
           assert.deepEqual(process.listeners('SIGTERM'), [host]);

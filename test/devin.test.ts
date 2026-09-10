@@ -272,6 +272,33 @@ else {
     }
   });
 
+  it('allows onboarding and catalog recovery once each within one invocation', async () => {
+    for (const sequence of [
+      ['setup', 'catalog'],
+      ['catalog', 'setup'],
+    ]) {
+      const fake = fakeDevin(`
+const attempt = fs.existsSync(stamp) ? Number(fs.readFileSync(stamp, 'utf8')) : 0;
+fs.writeFileSync(stamp, String(attempt + 1));
+const result = ${JSON.stringify(sequence)}[attempt];
+if (result === 'setup') process.stdout.write(banner);
+else if (result === 'catalog') {
+  process.stderr.write("Error: Unknown model: 'swe-2'\\nAvailable: ");
+  process.exitCode = 1;
+} else process.stdout.write('{"summary":"recovered","findings":[]}');
+`);
+      try {
+        const result = await fake.backend.runReview('devin/swe-2', 'context', '', fake.log, {
+          timeoutMs: 10000,
+        });
+        assert.equal(result.summary, 'recovered');
+        assert.equal(readFileSync(join(fake.root, 'onboarded'), 'utf8'), '3');
+      } finally {
+        await fake.restore();
+      }
+    }
+  });
+
   it('cancels only the selected Devin session and reaps remaining sessions before cleanup', async () => {
     const fake = fakeDevin(`
 const prompt = fs.readFileSync(process.argv[process.argv.indexOf('--prompt-file') + 1], 'utf8');

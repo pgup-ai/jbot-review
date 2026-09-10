@@ -1279,6 +1279,7 @@ export function formatFinderGuidelines(
     capBytes?: number;
     forFiles?: string[];
     complianceCovers?: boolean;
+    canReadWorkspace?: boolean;
     lens?: boolean;
   } = {},
 ): string {
@@ -1346,7 +1347,9 @@ export function formatFinderGuidelines(
       }
       const coverage = complianceCovers
         ? 'The full set is reviewed by the separate guideline-compliance pass.'
-        : 'The guideline-compliance pass is not running this run. Read any omitted file that applies to the changed files.';
+        : options.canReadWorkspace === false
+          ? 'The guideline-compliance pass is not running this run. Omitted guidance is unavailable to this session.'
+          : 'The guideline-compliance pass is not running this run. Read any omitted file that applies to the changed files.';
       return `### Review guidance budget\n${budgetNotes.join('; ')}. ${coverage}`;
     },
   );
@@ -1376,6 +1379,7 @@ export function selectFinderGuidelineText(params: {
   return formatFinderGuidelines(params.discovered, {
     forFiles: params.forFiles,
     complianceCovers: params.complianceRuns,
+    canReadWorkspace: params.mainCanReadWorkspace,
     capBytes: full ? MAX_GUIDELINE_TOTAL_BYTES : undefined,
     lens: params.lens,
   });

@@ -120,7 +120,9 @@ async function runDevinPrompt(
     writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home)), { mode: 0o600 });
     writeFileSync(promptFile, prompt, { mode: 0o600 });
     log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
-    for (let attempt = 0; ; attempt += 1) {
+    let retriedSetup = false;
+    let retriedCatalog = false;
+    for (;;) {
       const remainingMs = deadlineAt - Date.now();
       if (remainingMs <= 0) throw new Error(`devin ${label} prompt deadline expired`);
       const result = await runCliProcess(
@@ -135,7 +137,8 @@ async function runDevinPrompt(
       );
       const output = parseDevinCliOutput(result.stdout);
       if (output.setupOnly) {
-        if (attempt === 0) {
+        if (!retriedSetup) {
+          retriedSetup = true;
           log(`${label} devin first-run setup completed; retrying prompt once.`);
           continue;
         }
@@ -148,7 +151,8 @@ async function runDevinPrompt(
           /session\/set_config_option \(model\) failed: Resource not found:\s*\{\s*"uri":\s*"Model not found: [^"\r\n]+\. Available models:\s*"\s*\}\s*$/.test(
             errorOutput,
           );
-        if (attempt === 0 && emptyCatalog) {
+        if (!retriedCatalog && emptyCatalog) {
+          retriedCatalog = true;
           log(`${label} devin returned an empty model catalog; retrying startup once.`);
           continue;
         }

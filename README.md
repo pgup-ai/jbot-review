@@ -572,6 +572,8 @@ Use `provider: devin` with `devin-windsurf-api-key` /
 `DEVIN_WINDSURF_API_KEY` for the Devin CLI backend. The Docker image includes
 the Devin CLI, but credentials are written only when the main or active
 auxiliary provider is `devin`.
+J-Bot resolves `devin/swe-2` and `devin/swe` to `devin/swe-2-medium`.
+Use `devin/swe-2-high` or `devin/swe-2-max` to select those reasoning levels explicitly.
 Devin shares the global `max-concurrent-sessions` limit
 (`JBOT_MAX_CONCURRENT_SESSIONS`, default 3), with no separate provider cap.
 Each invocation has its own CLI state; abandoned
