@@ -23,8 +23,8 @@ its process running until the local driver's forced exit.
 - Reuse the existing CommandCode process lifecycle as `cli-process.ts`.
   Cancel by review label, including recovery launches, and await process cleanup
   before removing credentials during backend teardown.
-- Replace Devin's forced serialization with the shared provider limiter at three
-  concurrent sessions. Leave global concurrency and auxiliary grace unchanged.
+- Replace Devin's forced serialization with the global session limiter.
+  Leave its default of three and auxiliary grace unchanged.
 - Retry an unknown-model error once only when the CLI returns an empty model
   catalog, within the original invocation deadline. A populated catalog that
   lacks the requested model remains an error.
@@ -125,8 +125,10 @@ attempt supplied only an exhausted key; the rerun used the configured key pool.
 
 ## Focused lens follow-up
 
-Devin's cap is now three, so main, guidelines, and interactions can start
-concurrently when the global limit permits. Three native file-read sessions
+Devin uses `JBOT_MAX_CONCURRENT_SESSIONS` without a separate provider cap.
+At the global default of three, main, guidelines, and interactions can start
+concurrently. Higher configured limits are honored but heavy-review throughput
+above three has not been tested. Three native file-read sessions
 through one backend returned separate hidden markers in 5.8, 6.2, and 6.7 seconds.
 That establishes concurrency support, not heavy-review throughput.
 

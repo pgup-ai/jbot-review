@@ -572,8 +572,9 @@ Use `provider: devin` with `devin-windsurf-api-key` /
 `DEVIN_WINDSURF_API_KEY` for the Devin CLI backend. The Docker image includes
 the Devin CLI, but credentials are written only when the main or active
 auxiliary provider is `devin`.
-J-Bot runs up to three concurrent Devin review sessions, also bounded by
-`max-concurrent-sessions`. Each invocation has its own CLI state; abandoned
+Devin shares the global `max-concurrent-sessions` limit
+(`JBOT_MAX_CONCURRENT_SESSIONS`, default 3), with no separate provider cap.
+Each invocation has its own CLI state; abandoned
 sessions are cancelled before their temporary files are removed.
 Use `provider: commandcode` with `commandcode-access-key` /
 `COMMANDCODE_ACCESS_KEY` for the CommandCode CLI backend. The Docker image
