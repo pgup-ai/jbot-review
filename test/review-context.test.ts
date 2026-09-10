@@ -781,7 +781,10 @@ describe('formatFinderGuidelines', () => {
       'BUSINESS_COMMAND_CONTRACT',
     ])
       assert.ok(lens.includes(evidence));
-    assert.match(lens, /sections omitted.*AGENTS\.md: Commands/);
+    assert.match(
+      lens,
+      /introductory text omitted; nested subsections retained:.*AGENTS\.md: Commands/,
+    );
     assert.equal(formatFinderGuidelines(discovered), original);
     assert.ok(
       Buffer.byteLength(formatFinderGuidelines(discovered, { lens: true, capBytes: 256 })) <= 256,

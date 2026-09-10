@@ -90,19 +90,26 @@ it('stops queued work before spawn and reaps a timed-out child before rejecting'
 it('bounds fatal cleanup, forces repeated signals, and preserves a surviving host listener', async () => {
   const execute = promisify(execFile);
   const moduleUrl = new URL('../src/shared/cli-process.ts', import.meta.url).href;
-  for (const mode of ['timeout', 'repeat', 'host']) {
+  for (const mode of ['timeout', 'repeat', 'host', 'protocol-first', 'protocol-last']) {
     const script = `
       import assert from 'node:assert/strict';
+      import { onFatalSignal } from ${JSON.stringify(import.meta.resolve('@symma/protocol'))};
       import { onCliFatalSignal } from ${JSON.stringify(moduleUrl)};
       const mode = ${JSON.stringify(mode)};
       let cleanups = 0;
       let signals = 0;
       const host = () => { signals++; };
       if (mode === 'host') process.on('SIGTERM', host);
+      const registerProtocol = () => onFatalSignal(() => console.log('protocol cleaned'));
+      if (mode === 'protocol-first') registerProtocol();
       onCliFatalSignal(async () => {
         cleanups++;
-        if (mode !== 'host') await new Promise(() => {});
+        if (mode.startsWith('protocol')) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+          console.log('cli cleaned');
+        } else if (mode !== 'host') await new Promise(() => {});
       });
+      if (mode === 'protocol-last') registerProtocol();
       process.emit('SIGTERM', 'SIGTERM');
       setImmediate(() => {
         assert.equal(cleanups, 1);
@@ -113,7 +120,6 @@ it('bounds fatal cleanup, forces repeated signals, and preserves a surviving hos
         if (mode === 'host') {
           assert.equal(signals, 1);
           assert.deepEqual(process.listeners('SIGTERM'), [host]);
-          process.removeListener('SIGTERM', host);
           console.log('host retained');
         }
       });
@@ -128,9 +134,15 @@ it('bounds fatal cleanup, forces repeated signals, and preserves a surviving hos
     );
     if (mode === 'host') assert.equal((await result).stdout.trim(), 'host retained');
     else
-      await assert.rejects(result, (error: NodeJS.ErrnoException & { signal?: string }) => {
-        assert.equal(error.signal, 'SIGTERM');
-        return true;
-      });
+      await assert.rejects(
+        result,
+        (error: NodeJS.ErrnoException & { signal?: string; stdout?: string }) => {
+          assert.equal(error.signal, 'SIGTERM');
+          if (mode.startsWith('protocol')) {
+            assert.equal(error.stdout, 'protocol cleaned\ncli cleaned\n');
+          }
+          return true;
+        },
+      );
   }
 });

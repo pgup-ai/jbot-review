@@ -1330,7 +1330,7 @@ export function formatFinderGuidelines(
       const budgetNotes: string[] = [];
       if (procedureOmissions.length > 0) {
         budgetNotes.push(
-          `Development-procedure sections omitted from this lens: ${boundedJoin(procedureOmissions, MAX_OMITTED_LABEL_BYTES)}`,
+          `Development-procedure headings and introductory text omitted; nested subsections retained: ${boundedJoin(procedureOmissions, MAX_OMITTED_LABEL_BYTES)}`,
         );
       }
       if (fragmentOmissions.length > 0) {

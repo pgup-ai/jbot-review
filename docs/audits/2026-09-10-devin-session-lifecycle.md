@@ -270,3 +270,26 @@ after one second if the second signal is ignored; a later five-second forced
 exit cannot make the test pass. Self-review kept two new cases for model
 resolution and mixed startup recovery, and extended existing context/signal
 cases. No new comments or abstractions were needed.
+
+## Completed Medium run
+
+Local telemetry run `a33b5244-b8b8-44b3-a017-ee29f8fc12f3` completed in
+978,182 ms: main took 978,136 ms, interactions 382,665 ms, and guidelines
+42,695 ms. Queueing was 0–1 ms, grace wait was zero, and verification was
+disabled. This run's critical path was main execution; increasing concurrency
+would not remove that elapsed time. Devin request/tool timing remains
+unavailable, so the telemetry cannot distinguish inference, repeated reads,
+provider waits, or CLI overhead. Zero tool counters mean unavailable here.
+
+The run overlapped the arena-fix commit in the reviewed working tree. It is not
+a controlled High/Medium comparison. Main and guidelines both reported the same
+unmet corpus gate; the other finding was a wording nit, now clarified to say
+nested guideline subsections remain. No claim of improved precision or latency
+is supported by this run.
+
+The signal review recommendation was not applied: the protocol hook removes
+its own listener during dispatch. Regression coverage confirms that both
+registration orders finish both cleanups and exit with SIGTERM. Normal
+host-owned listeners remain intact. Self-review folded this coverage into the
+existing signal case; no production shutdown changes or new test cases were
+needed.
