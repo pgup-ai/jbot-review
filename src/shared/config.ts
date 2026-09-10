@@ -327,7 +327,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
   },
   devin: {
     defaultModel: 'devin/default',
-    sessionConcurrency: 2,
+    sessionConcurrency: 3,
     keyEnv: 'DEVIN_WINDSURF_API_KEY',
     keyInput: 'devin-windsurf-api-key',
     models: {

@@ -356,6 +356,11 @@ tools are enabled; missing code is not evidence of missing behavior. This is a
 read-only review. Do not modify files. Prior-comment suppression and thread
 resolution are handled separately.
 
+Batch independent searches or file reads in one tool turn when supported.
+Use search locations to read related caller/callee sections together. Reuse
+already inspected evidence; investigate further when it leaves a concrete
+contract question unresolved. Never batch a dependent lookup by guessing its input.
+
 ${REVIEW_COMMAND_POLICY}
 
 ${

@@ -23,7 +23,7 @@ its process running until the local driver's forced exit.
 - Reuse the existing CommandCode process lifecycle as `cli-process.ts`.
   Cancel by review label, including recovery launches, and await process cleanup
   before removing credentials during backend teardown.
-- Replace Devin's forced serialization with the shared provider limiter at two
+- Replace Devin's forced serialization with the shared provider limiter at three
   concurrent sessions. Leave global concurrency and auxiliary grace unchanged.
 - Retry an unknown-model error once only when the CLI returns an empty model
   catalog, within the original invocation deadline. A populated catalog that
@@ -123,19 +123,51 @@ A tools-enabled local pipeline inside that image completed in seven seconds,
 found the seeded bug, and recorded successful list/search calls. The first
 attempt supplied only an exhausted key; the rerun used the configured key pool.
 
+## Focused lens follow-up
+
+Devin's cap is now three, so main, guidelines, and interactions can start
+concurrently when the global limit permits. Three native file-read sessions
+through one backend returned separate hidden markers in 5.8, 6.2, and 6.7 seconds.
+That establishes concurrency support, not heavy-review throughput.
+
+Lenses retain the complete diff and changed-symbol guidance, but no longer receive
+the general review checklists. They omit explicitly titled development-procedure
+sections from guidelines, with a bounded disclosure. Unknown headings, nested
+sections, code examples, domain rules, and existing larger tool-less budgets are
+retained. Main/compliance retain the procedure guidance. Generated
+`.jbot-review/last-run.md` reports are excluded from discovery, including aliases.
+The lens prompt encourages batching independent reads without guessing dependent
+lookup inputs or limiting investigation depth.
+
+For this checkout, lens guidelines shrink from 22,144 to 18,825 bytes. Removing
+1,819 bytes of general checklists and adding 309 bytes of batching guidance gives
+a net reduction of 4,829 bytes with the diff unchanged.
+
+A paired `devin/swe-2` probe compared commit `d621bf4` with this treatment on the
+same seeded producer/consumer field rename. Both found the P1 break in the
+unchanged caller and cited its location. Prompts were 16,200 versus 10,703 bytes;
+elapsed times were 7.5 versus 12.5 seconds. The smaller prompt was slower in this
+single pair; it does not establish a latency improvement or satisfy the corpus.
+
+The two added regression cases cover generated-report rediscovery (including a
+symlink alias) and conservative section selection with fenced/nested domain
+rules and the tool-less budget fallback. Existing routing and prompt checks
+remain intact. Self-review keeps the one-line explanation for retaining unknown
+and nested sections; no other new code comments were needed for this follow-up.
+
 ## Validation limits
 
-The full unit suite passes: 1,027 tests. Typecheck, lint, formatting, and build
+The full unit suite passes: 1,029 tests. Typecheck, lint, formatting, and build
 pass. Regression coverage checks independent homes, credential permissions,
 label cancellation, remaining-session teardown, descendant pipe cleanup, and
 the distinction between empty catalogs and unsupported models.
 
 The full, adjudicated quality corpus has not run. Enabling concurrent Devin
 sessions changes the default, so the repository's full-corpus merge gate remains
-outstanding; these live checks do not satisfy it. No prompt, severity policy,
-verification selection, or review-scope change is included.
+outstanding; these live checks do not satisfy it. The lens follow-up changes prompts, but severity policy, verification
+selection, and full-diff scope remain unchanged.
 
-Self-review traced provider limiting, all Devin prompt methods and recovery
+The initial lifecycle self-review traced provider limiting, all Devin prompt methods and recovery
 launches, credential cleanup, and the unchanged CommandCode callers. Cleanup
 rewrote one five-line comment to two lines (0 kept, 1 rewritten, 0 cut) and kept
 two new regression cases (2 kept, 0 folded, 0 cut). They distinguish session

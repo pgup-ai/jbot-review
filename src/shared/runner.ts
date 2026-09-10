@@ -1608,7 +1608,6 @@ async function runReviewPipeline(params: {
       diffScope,
       ...linkedIssueContext,
     }),
-    reviewFocusBlock,
     blastRadiusBlock,
     LENS_CONTEXT_NOTE,
     auxDiffBlockText,
@@ -2252,7 +2251,7 @@ async function runReviewPipeline(params: {
     );
     // Slice-vs-widen policy lives in selectFinderGuidelineText; keyed on the
     // compliance session's own final enable, not the option.
-    const guidelinesForPrompt = selectFinderGuidelineText({
+    const guidelineSelection = {
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
       complianceRuns: guidelineCandidate,
@@ -2260,7 +2259,8 @@ async function runReviewPipeline(params: {
         mainBackend.canReadWorkspace ?? backendCanReadWorkspace(providerID, mainCliBackend),
       widen: options.guidelineWiden,
       full: guidelines,
-    });
+    };
+    const guidelinesForPrompt = selectFinderGuidelineText(guidelineSelection);
 
     // Embedded-only main backends carry the unbounded block buildShardPlans
     // renders for them, not the 40KB default. Shared with the budget log so
@@ -2521,7 +2521,12 @@ async function runReviewPipeline(params: {
       backend: auxBackend,
       model: auxModel,
       lensPrContext,
-      guidelinesForPrompt,
+      guidelinesForPrompt: selectFinderGuidelineText({
+        ...guidelineSelection,
+        mainCanReadWorkspace:
+          auxBackend.canReadWorkspace ?? backendCanReadWorkspace(auxProviderID, auxCliBackend),
+        lens: true,
+      }),
       lensKeys: candidateLensKeys,
       timeoutMs: finderTimeoutMs,
       deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt, verificationEnabled),
