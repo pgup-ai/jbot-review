@@ -4,6 +4,32 @@ import { spawnWithTimeout, type CliProcessOptions, type CliProcessResult } from 
 
 const sessionSignal = new AsyncLocalStorage<AbortSignal>();
 
+const fatalSignals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
+const fatalCleanups = new Set<() => void | Promise<void>>();
+let handlingSignal = false;
+
+async function handleFatalSignal(signal: NodeJS.Signals): Promise<void> {
+  if (handlingSignal) return;
+  handlingSignal = true;
+  await Promise.allSettled([...fatalCleanups].map((cleanup) => Promise.resolve().then(cleanup)));
+  fatalCleanups.clear();
+  for (const name of fatalSignals) process.removeListener(name, handleFatalSignal);
+  handlingSignal = false;
+  if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
+}
+
+// The protocol's synchronous signal hook cannot await child reaping before HOME cleanup.
+export function onCliFatalSignal(cleanup: () => void | Promise<void>): () => void {
+  if (fatalCleanups.size === 0 && !handlingSignal)
+    for (const signal of fatalSignals) process.on(signal, handleFatalSignal);
+  fatalCleanups.add(cleanup);
+  return () => {
+    fatalCleanups.delete(cleanup);
+    if (fatalCleanups.size === 0 && !handlingSignal)
+      for (const signal of fatalSignals) process.removeListener(signal, handleFatalSignal);
+  };
+}
+
 export function createCliProcessScope() {
   const sessions = new Set<{
     label: string;

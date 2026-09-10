@@ -159,7 +159,7 @@ and nested sections; no other new code comments were needed for this follow-up.
 
 ## Validation limits
 
-The full unit suite passes: 1,029 tests. Typecheck, lint, formatting, and build
+The full unit suite passes: 1,031 tests. Typecheck, lint, formatting, and build
 pass. Regression coverage checks independent homes, credential permissions,
 label cancellation, remaining-session teardown, descendant pipe cleanup, and
 the distinction between empty catalogs and unsupported models.
@@ -175,3 +175,25 @@ rewrote one five-line comment to two lines (0 kept, 1 rewritten, 0 cut) and kept
 two new regression cases (2 kept, 0 folded, 0 cut). They distinguish session
 state/cancellation failures from catalog-retry failures. Existing process tests
 were renamed with their implementation, with no assertions removed.
+
+## Review feedback validation
+
+Fatal-signal shutdown now awaits CLI process teardown before removing session
+and parent credential homes. A subprocess regression sends SIGTERM to the driver,
+checks that the CLI can still see its HOME during termination, then confirms the
+CLI is gone and the credentials have been removed. Continuation and JSON repair
+share the original review deadline; a deterministic clock advance verifies
+neither recovery launches after that deadline expires.
+
+The concurrent-session test uses a 60-second prompt deadline while retaining its
+five-second readiness bound. The shared Markdown parser recognizes indented ATX
+headings and closing hashes; the existing lens test covers these forms while
+retaining nested and fenced contract evidence. CommandCode's refreshed catalog
+section has its own date because the other provider snapshots were not refreshed.
+
+Self-review kept the async-cleanup rationale comment and both new regression
+cases: they detect distinct fatal-teardown and deadline-reset failures. Markdown
+coverage was folded into the existing lens case. No extra provider cap, repair
+time cap, or finding-disposition change was introduced. The full adjudicated
+corpus remains outstanding. The hosted app's static model catalog requires a
+separate repository update and deployment.

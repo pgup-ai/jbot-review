@@ -849,6 +849,8 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
+Snapshot refreshed on **2026-09-10**; other provider sections retain the generation date above.
+
 - Source: Docker-pinned npm package [`command-code@1.53.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.

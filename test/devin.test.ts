@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import {
   existsSync,
   mkdirSync,
@@ -172,13 +174,15 @@ ${script}
     );
     process.env.PATH = `${root}:${previousPath}`;
     const logs: string[] = [];
+    const backend = createDevinCliBackend(workspace, home);
     return {
       root,
       home,
-      backend: createDevinCliBackend(workspace, home),
+      backend,
       logs,
       log: (message: string) => logs.push(message),
-      restore() {
+      async restore() {
+        await backend.stop();
         process.env.PATH = previousPath;
         rmSync(root, { recursive: true, force: true });
       },
@@ -199,7 +203,7 @@ else process.stdout.write(banner);
         false,
       );
     } finally {
-      fake.restore();
+      await fake.restore();
     }
   });
 
@@ -217,7 +221,7 @@ else {
       assert.equal(review.summary, 'ok');
       assert.equal(fake.logs.filter((message) => message.includes('first-run setup')).length, 1);
     } finally {
-      fake.restore();
+      await fake.restore();
     }
   });
 
@@ -248,8 +252,7 @@ else {
           !available,
         );
       } finally {
-        await fake.backend.stop();
-        fake.restore();
+        await fake.restore();
       }
     }
   });
@@ -263,10 +266,10 @@ setInterval(() => {}, 1000);
 `);
     const lens = fake.backend.runReview('devin/default', 'LENS_MARKER', '', fake.log, {
       label: 'review-interactions',
-      timeoutMs: 10000,
+      timeoutMs: 60000,
     });
     const main = fake.backend.runReview('devin/default', 'MAIN_MARKER', '', fake.log, {
-      timeoutMs: 10000,
+      timeoutMs: 60000,
     });
     const lensRejected = assert.rejects(lens, /aborted/);
     const mainRejected = assert.rejects(main, /runtime stopped/);
@@ -301,7 +304,101 @@ setInterval(() => {}, 1000);
     } finally {
       await fake.backend.stop();
       await Promise.allSettled([lensRejected, mainRejected]);
-      fake.restore();
+      await fake.restore();
+    }
+  });
+
+  it('shares the review deadline with continuation and JSON repair', async () => {
+    for (const response of ['I will inspect the code.', '{"summary":']) {
+      const fake = fakeDevin(
+        "fs.appendFileSync(stamp, 'launch\\n'); process.stdout.write(" +
+          JSON.stringify(response) +
+          ');',
+      );
+      const now = Date.now;
+      let elapsed = 0;
+      Date.now = () => now() + elapsed;
+      try {
+        await assert.rejects(
+          fake.backend.runReview(
+            'devin/default',
+            'context',
+            '',
+            (message) => {
+              fake.log(message);
+              if (message.includes('prompt complete via devin')) elapsed = 120000;
+            },
+            { timeoutMs: 60000 },
+          ),
+          /deadline expired/,
+        );
+        assert.equal(readFileSync(join(fake.root, 'onboarded'), 'utf8'), 'launch\n');
+      } finally {
+        Date.now = now;
+        await fake.restore();
+      }
+    }
+  });
+
+  it('reaps the CLI before fatal-signal credential cleanup', async () => {
+    const fake = fakeDevin(`
+process.on('SIGTERM', () => {
+  setTimeout(() => {
+    fs.writeFileSync(stamp + '-terminated', String(fs.existsSync(process.env.HOME)));
+    process.exit(0);
+  }, 50);
+});
+fs.writeFileSync(stamp, JSON.stringify({ pid: process.pid, home: process.env.HOME }));
+setInterval(() => {}, 1000);
+`);
+    const driver = join(fake.root, 'driver.mjs');
+    writeFileSync(
+      driver,
+      `
+import { rmSync } from 'node:fs';
+import { createDevinCliBackend } from ${JSON.stringify(new URL('../src/shared/devin-cli.ts', import.meta.url).href)};
+import { onCliFatalSignal } from ${JSON.stringify(new URL('../src/shared/cli-process.ts', import.meta.url).href)};
+const backend = createDevinCliBackend(${JSON.stringify(join(fake.root, 'workspace'))}, ${JSON.stringify(fake.home)});
+onCliFatalSignal(async () => {
+  await backend.stop();
+  rmSync(${JSON.stringify(fake.home)}, { recursive: true, force: true });
+});
+backend.runReview('devin/default', 'context', '', () => {}, { timeoutMs: 60000 }).catch(() => {});
+setInterval(() => {}, 1000);
+`,
+    );
+    const child = spawn(process.execPath, ['--import', 'tsx', driver], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 15000,
+      killSignal: 'SIGKILL',
+    });
+    const closed = once(child, 'close');
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    let record: { pid: number; home: string } | undefined;
+    try {
+      const limit = Date.now() + 10000;
+      while (!existsSync(join(fake.root, 'onboarded')) && Date.now() < limit) await delay(10);
+      assert.ok(existsSync(join(fake.root, 'onboarded')), stderr);
+      record = JSON.parse(readFileSync(join(fake.root, 'onboarded'), 'utf8'));
+      child.kill('SIGTERM');
+      const [code, signal] = await closed;
+      assert.equal(code, null, stderr);
+      assert.equal(signal, 'SIGTERM', stderr);
+      assert.equal(readFileSync(join(fake.root, 'onboarded-terminated'), 'utf8'), 'true');
+      assert.equal(existsSync(fake.home), false);
+      assert.throws(() => process.kill(record!.pid, 0));
+    } finally {
+      child.kill('SIGKILL');
+      if (record) {
+        try {
+          process.kill(-record.pid, 'SIGKILL');
+        } catch {}
+      }
+      await closed;
+      await fake.restore();
     }
   });
 

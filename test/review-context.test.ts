@@ -743,8 +743,10 @@ describe('formatFinderGuidelines', () => {
           text: [
             '# Guide',
             'DOMAIN_INVARIANT',
-            '## Commands',
+            '## Commands ##',
             'npm run build PROCEDURE_ONLY',
+            '  ## Development workflow',
+            'INDENTED_PROCEDURE_ONLY',
             '### Command contract',
             'NESTED_CONTRACT',
             '## Domain semantics',

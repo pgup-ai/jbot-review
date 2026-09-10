@@ -190,7 +190,15 @@ export function markdownHeadings(lines: readonly string[]) {
     }
   }
   return lines.flatMap((line, index) => {
-    const match = fenced[index] ? null : line.match(/^(#+)[ \t]+(.*)$/);
-    return match ? [{ line: index, level: match[1].length, title: match[2].trim() }] : [];
+    const match = fenced[index] ? null : line.match(/^ {0,3}(#{1,6})(?:[ \t]+(.*)|$)/);
+    return match
+      ? [
+          {
+            line: index,
+            level: match[1].length,
+            title: (match[2] ?? '').replace(/[ \t]+#+[ \t]*$/, '').trim(),
+          },
+        ]
+      : [];
   });
 }

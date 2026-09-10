@@ -8,7 +8,6 @@ import {
   DEVIN_CLI_BIN,
   DEVIN_PROVIDER_ID,
   devinCredentialsPath,
-  onFatalSignal,
   parseModelName,
   truncateForLog,
 } from '@symma/protocol';
@@ -29,7 +28,7 @@ import {
   parseReview,
   sessionEnvDenyKeys,
 } from './opencode.ts';
-import { createCliProcessScope, runCliProcess } from './cli-process.ts';
+import { createCliProcessScope, onCliFatalSignal, runCliProcess } from './cli-process.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 
 const DEVIN_CLI_TELEMETRY_CAPABILITY = 'opaque' as const;
@@ -112,7 +111,6 @@ async function runDevinPrompt(
 ): Promise<string> {
   const deadlineAt = Date.now() + timeoutMs;
   const root = mkdtempSync(join(home, 'session-'));
-  const unregister = onFatalSignal(() => removeDevinSession(root, log));
   const promptFile = join(root, 'prompt.txt');
   const configFile = join(root, 'config.json');
   try {
@@ -165,7 +163,6 @@ async function runDevinPrompt(
       return output.response;
     }
   } finally {
-    unregister();
     removeDevinSession(root, log);
   }
 }
@@ -185,14 +182,25 @@ export function createDevinCliBackend(
   home: string,
 ): ReviewBackend & { stop(): Promise<void> } {
   const processes = createCliProcessScope();
+  const unregister = onCliFatalSignal(() => processes.stop());
   return {
     name: DEVIN_PROVIDER_ID,
-    stop: processes.stop,
+    async stop() {
+      try {
+        await processes.stop();
+      } finally {
+        unregister();
+      }
+    },
     abortSessionsByLabel: (label) => processes.abort(label),
     observability: DEVIN_CLI_TELEMETRY_CAPABILITY,
     async runReview(model, prContext, guidelines, log, options = {}) {
       const label = options.label ?? 'review';
       return processes.run(label, async () => {
+        const deadlineAt = Math.min(
+          options.deadlineAt ?? Infinity,
+          Date.now() + (options.timeoutMs ?? DEVIN_PROMPT_TIMEOUT_MS),
+        );
         const prompt = assembleReviewPrompt(
           prContext,
           guidelines,
@@ -210,7 +218,7 @@ export function createDevinCliBackend(
           prompt,
           label,
           log,
-          options.timeoutMs,
+          Math.max(0, deadlineAt - Date.now()),
         );
         // A delimiter-free reply can be an abandoned turn, not JSON to repair.
         // Both recovery launches are fresh sessions, so re-carry the prompt.
@@ -231,7 +239,7 @@ export function createDevinCliBackend(
             }),
             `${label}-repair`,
             log,
-            options.timeoutMs,
+            Math.max(0, deadlineAt - Date.now()),
           );
           return parseReview(repaired, `${label}-repair`, log, { strict: true });
         };
@@ -251,7 +259,7 @@ export function createDevinCliBackend(
             }),
             `${label}-continue`,
             log,
-            options.timeoutMs,
+            Math.max(0, deadlineAt - Date.now()),
           );
           if (isNoAttemptReply(continued)) {
             throw new Error(

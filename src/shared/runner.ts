@@ -10,7 +10,7 @@ import {
   computeAuxiliaryGraceMs,
   AUXILIARY_SETTLE_GRACE_MS,
 } from './time-budget.ts';
-import { createCliProcessScope } from './cli-process.ts';
+import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
 
@@ -131,7 +131,6 @@ import {
   selectLensKeys,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
-import { onFatalSignal } from '@symma/protocol';
 import {
   abortOpencodeSessionsByLabel,
   startOpencode,
@@ -1769,7 +1768,10 @@ async function runReviewPipeline(params: {
   // materialized provider credentials and must not outlive an interrupted run.
   let unregisterCliHomes: (() => void) | undefined;
   const guardCliHomes = (): void => {
-    unregisterCliHomes ??= onFatalSignal(cleanupCliHomes);
+    unregisterCliHomes ??= onCliFatalSignal(async () => {
+      await Promise.all([commandCodeBackend?.stop(), devinBackend?.stop()]);
+      cleanupCliHomes();
+    });
   };
 
   if (!remoteAcp && (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID)) {
