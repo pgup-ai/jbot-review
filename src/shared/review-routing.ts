@@ -152,6 +152,17 @@ export function selectDiffRoutes(
  */
 export function extractRuleSection(docText: string, section: string): string | undefined {
   const lines = docText.replace(/\r\n/g, '\n').split('\n');
+  const headings = markdownHeadings(lines);
+  const start = headings.findIndex(
+    ({ title }) => title.match(/^(\d+(?:\.\d+)*)(?=\s|$|[.:)\-–—])/)?.[1] === section,
+  );
+  if (start < 0) return undefined;
+  const first = headings[start];
+  const end = headings.slice(start + 1).find(({ level }) => level <= first.level)?.line;
+  return lines.slice(first.line, end).join('\n').trim();
+}
+
+export function markdownHeadings(lines: readonly string[]) {
   // Headings inside ``` / ~~~ fences are examples, not policy — skip them.
   // CommonMark fence rules: at most 3 spaces of indent; a fence closes only on a
   // bare run of the SAME character at least as long as the opener — so
@@ -178,29 +189,16 @@ export function extractRuleSection(docText: string, section: string): string | u
       }
     }
   }
-  const heading = (i: number): { level: number; number?: string } | undefined => {
-    const match = fenced[i] ? null : lines[i].match(/^(#+)[ \t]+(.*)$/);
-    if (!match) return undefined;
-    return {
-      level: match[1].length,
-      number: match[2].trim().match(/^(\d+(?:\.\d+)*)(?=\s|$|[.:)\-–—])/)?.[1],
-    };
-  };
-  let start = -1;
-  for (let i = 0; i < lines.length; i += 1)
-    if (heading(i)?.number === section) {
-      start = i;
-      break;
-    }
-  if (start < 0) return undefined;
-  const startLevel = heading(start)!.level;
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    const level = heading(i)?.level;
-    if (level !== undefined && level <= startLevel) {
-      end = i;
-      break;
-    }
-  }
-  return lines.slice(start, end).join('\n').trim();
+  return lines.flatMap((line, index) => {
+    const match = fenced[index] ? null : line.match(/^ {0,3}(#{1,6})(?:[ \t]+(.*)|$)/);
+    return match
+      ? [
+          {
+            line: index,
+            level: match[1].length,
+            title: (match[2] ?? '').replace(/[ \t]+#+[ \t]*$/, '').trim(),
+          },
+        ]
+      : [];
+  });
 }

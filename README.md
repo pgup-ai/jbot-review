@@ -203,7 +203,8 @@ it. Cline and Command Code write their credential into an
 isolated temporary `HOME`, Codex into a temporary `CODEX_HOME`, and Qoder carries
 its PAT through a one-time SDK auth payload while using a temporary `HOME`; each is
 removed after the run. Cursor reads its key straight from the env (no file); Devin writes
-`~/.local/share/devin/credentials.toml` under the process `HOME`. Cline uses only
+`~/.local/share/devin/credentials.toml` under a separate temporary `HOME` per CLI
+invocation, removed after its process exits. Cline uses only
 the auth token — the file's `model`/`reasoning` are stripped — and has two billing
 modes sharing one secret: `cline` (pay-as-you-go) and `cline-pass` (Cline
 subscription). Kilo reads its credential from the `KILO_AUTH_CONTENT` env var (no
@@ -571,6 +572,12 @@ Use `provider: devin` with `devin-windsurf-api-key` /
 `DEVIN_WINDSURF_API_KEY` for the Devin CLI backend. The Docker image includes
 the Devin CLI, but credentials are written only when the main or active
 auxiliary provider is `devin`.
+J-Bot resolves `devin/swe-2` and `devin/swe` to `devin/swe-2-medium`.
+Use `devin/swe-2-high` or `devin/swe-2-max` to select those reasoning levels explicitly.
+Devin shares the global `max-concurrent-sessions` limit
+(`JBOT_MAX_CONCURRENT_SESSIONS`, default 3), with no separate provider cap.
+Each invocation has its own CLI state; abandoned
+sessions are cancelled before their temporary files are removed.
 Use `provider: commandcode` with `commandcode-access-key` /
 `COMMANDCODE_ACCESS_KEY` for the CommandCode CLI backend. The Docker image
 includes the CommandCode CLI, but `.commandcode/auth.json` is written under an
@@ -599,7 +606,7 @@ repository-relative files or directories. For example,
 in one call. Searches use current worktree contents, preserve each backend's
 file-access rules, and support the existing pagination; no index is introduced.
 
-The tools use a trusted mod with the image's pinned CommandCode 1.44.0; local
+The tools use a trusted mod with the image's pinned CommandCode 1.53.0; local
 runs need that version. Mod initialization failure stops the CLI. Logs record
 sanitized tool outcome counts and effective workspace access; per-tool timing
 remains unavailable. See the [tooling evaluation](docs/audits/2026-09-07-commandcode-repository-tools.md)

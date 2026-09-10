@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { it } from 'node:test';
-import {
-  createCommandCodeProcessScope,
-  runCommandCodeProcess,
-} from '../src/shared/commandcode-process.ts';
+import { createCliProcessScope, runCliProcess } from '../src/shared/cli-process.ts';
 
 it('cancels one session and waits for descendant pipes to close without cancelling another', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-cli-cancel-'));
-  const scope = createCommandCodeProcessScope();
+  const scope = createCliProcessScope();
   const ready = join(workspace, 'ready');
   const otherReady = join(workspace, 'other-ready');
   const release = join(workspace, 'release');
@@ -29,11 +28,11 @@ it('cancels one session and waits for descendant pipes to close without cancelli
   };
   try {
     const pending = scope.run('lens', () =>
-      runCommandCodeProcess(process.execPath, ['-e', parent], options),
+      runCliProcess(process.execPath, ['-e', parent], options),
     );
     const rejected = assert.rejects(pending, /aborted/);
     const other = scope.run('other', () =>
-      runCommandCodeProcess(
+      runCliProcess(
         process.execPath,
         [
           '-e',
@@ -70,15 +69,15 @@ it('cancels one session and waits for descendant pipes to close without cancelli
 });
 
 it('stops queued work before spawn and reaps a timed-out child before rejecting', async () => {
-  const scope = createCommandCodeProcessScope();
+  const scope = createCliProcessScope();
   const options = { cwd: tmpdir(), timeoutMs: 30, timeoutMessage: 'deadline', killGraceMs: 20 };
   await assert.rejects(
     scope.run('timeout', () =>
-      runCommandCodeProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], options),
+      runCliProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], options),
     ),
     /deadline/,
   );
-  const pending = scope.run('queued', () => runCommandCodeProcess('must-not-spawn', [], options));
+  const pending = scope.run('queued', () => runCliProcess('must-not-spawn', [], options));
   const rejected = assert.rejects(pending, /runtime stopped/);
   await scope.stop();
   await rejected;
@@ -86,4 +85,64 @@ it('stops queued work before spawn and reaps a timed-out child before rejecting'
     scope.run('later', async () => {}),
     /runtime stopped/,
   );
+});
+
+it('bounds fatal cleanup, forces repeated signals, and preserves a surviving host listener', async () => {
+  const execute = promisify(execFile);
+  const moduleUrl = new URL('../src/shared/cli-process.ts', import.meta.url).href;
+  for (const mode of ['timeout', 'repeat', 'host', 'protocol-first', 'protocol-last']) {
+    const script = `
+      import assert from 'node:assert/strict';
+      import { onFatalSignal } from ${JSON.stringify(import.meta.resolve('@symma/protocol'))};
+      import { onCliFatalSignal } from ${JSON.stringify(moduleUrl)};
+      const mode = ${JSON.stringify(mode)};
+      let cleanups = 0;
+      let signals = 0;
+      const host = () => { signals++; };
+      if (mode === 'host') process.on('SIGTERM', host);
+      const registerProtocol = () => onFatalSignal(() => console.log('protocol cleaned'));
+      if (mode === 'protocol-first') registerProtocol();
+      onCliFatalSignal(async () => {
+        cleanups++;
+        if (mode.startsWith('protocol')) {
+          await new Promise(resolve => setTimeout(resolve, 20));
+          console.log('cli cleaned');
+        } else if (mode !== 'host') await new Promise(() => {});
+      });
+      if (mode === 'protocol-last') registerProtocol();
+      process.emit('SIGTERM', 'SIGTERM');
+      setImmediate(() => {
+        assert.equal(cleanups, 1);
+        if (mode === 'repeat') {
+          setTimeout(() => process.exit(91), 1000);
+          process.emit('SIGTERM', 'SIGTERM');
+        }
+        if (mode === 'host') {
+          assert.equal(signals, 1);
+          assert.deepEqual(process.listeners('SIGTERM'), [host]);
+          console.log('host retained');
+        }
+      });
+    `;
+    const result = execute(
+      process.execPath,
+      ['--import', 'tsx', '--input-type=module', '-e', script],
+      {
+        timeout: 10000,
+        killSignal: 'SIGKILL',
+      },
+    );
+    if (mode === 'host') assert.equal((await result).stdout.trim(), 'host retained');
+    else
+      await assert.rejects(
+        result,
+        (error: NodeJS.ErrnoException & { signal?: string; stdout?: string }) => {
+          assert.equal(error.signal, 'SIGTERM');
+          if (mode.startsWith('protocol')) {
+            assert.equal(error.stdout, 'protocol cleaned\ncli cleaned\n');
+          }
+          return true;
+        },
+      );
+  }
 });

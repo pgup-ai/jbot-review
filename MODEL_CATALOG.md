@@ -30,7 +30,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `opencode`              | CLI snapshot         |      64 | `opencode/deepseek-v4-flash`                                    |
 | `opencode-go`           | CLI snapshot         |      26 | `opencode-go/deepseek-v4-flash`                                 |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                                 |
-| `commandcode`           | CLI snapshot         |      67 | `commandcode/default`                                           |
+| `commandcode`           | CLI snapshot         |      69 | `commandcode/default`                                           |
 | `cursor`                | CLI snapshot         |     218 | `cursor/default`                                                |
 | `qoder`                 | CLI snapshot         |       5 | `qoder/auto`                                                    |
 | `codex`                 | CLI snapshot         |      10 | `codex/default`                                                 |
@@ -849,11 +849,13 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.44.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
+Snapshot refreshed on **2026-09-10**; other provider sections retain the generation date above.
+
+- Source: Docker-pinned npm package [`command-code@1.53.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
-67 J-Bot model values:
+69 J-Bot model values:
 
 - `commandcode/claude-fable-5`
 - `commandcode/claude-fable-5-1`
@@ -867,6 +869,7 @@ The CLI does not expose a complete list.
 - `commandcode/deepseek/deepseek-v4-flash-fast`
 - `commandcode/deepseek/deepseek-v4-flash-vision-exp`
 - `commandcode/deepseek/deepseek-v4-pro`
+- `commandcode/deepseek/deepseek-v4.1-flash`
 - `commandcode/default` **(default)**
 - `commandcode/google/gemini-3.1-flash-lite`
 - `commandcode/google/gemini-3.5-flash`
@@ -881,6 +884,7 @@ The CLI does not expose a complete list.
 - `commandcode/gpt-5.6-luna`
 - `commandcode/gpt-5.6-sol`
 - `commandcode/gpt-5.6-terra`
+- `commandcode/gpt-6-astra`
 - `commandcode/meta/muse-spark-1.1`
 - `commandcode/meta/muse-spark-1.2`
 - `commandcode/meta/muse-spark-1.2-contributor`

@@ -60,6 +60,8 @@ function resolveSelection(input: string, resolution: ProviderResolution): string
   if (!pool.length) throw new Error(`Invalid ${label} "${input}"; expected at least one model.`);
 
   for (const entry of pool) {
+    if (entry.providerID === 'devin' && ['swe', 'swe-2'].includes(entry.modelID))
+      entry.modelID = 'swe-2-medium';
     // A pinned provider was named outright, so only a derived one cites its model.
     providerConfig(entry.providerID, pinned ? undefined : formatModelName(entry));
   }

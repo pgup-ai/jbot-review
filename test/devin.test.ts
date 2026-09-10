@@ -1,8 +1,19 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, statSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import {
   buildDevinReadOnlyConfig,
@@ -145,6 +156,7 @@ describe('Devin CLI provider helpers', () => {
     const workspace = join(root, 'workspace');
     const previousPath = process.env.PATH!;
     mkdirSync(home);
+    writeDevinCredentials('test-key', home);
     mkdirSync(workspace);
     writeFileSync(
       join(root, 'devin'),
@@ -162,11 +174,15 @@ ${script}
     );
     process.env.PATH = `${root}:${previousPath}`;
     const logs: string[] = [];
+    const backend = createDevinCliBackend(workspace, home);
     return {
-      backend: createDevinCliBackend(workspace, home),
+      root,
+      home,
+      backend,
       logs,
       log: (message: string) => logs.push(message),
-      restore() {
+      async restore() {
+        await backend.stop();
         process.env.PATH = previousPath;
         rmSync(root, { recursive: true, force: true });
       },
@@ -187,7 +203,7 @@ else process.stdout.write(banner);
         false,
       );
     } finally {
-      fake.restore();
+      await fake.restore();
     }
   });
 
@@ -205,7 +221,264 @@ else {
       assert.equal(review.summary, 'ok');
       assert.equal(fake.logs.filter((message) => message.includes('first-run setup')).length, 1);
     } finally {
-      fake.restore();
+      await fake.restore();
+    }
+  });
+
+  it('retries an empty model catalog once but preserves an unsupported-model error', async () => {
+    for (const [available, recovers, acp] of [
+      ['', true, false],
+      ['', false, false],
+      ['swe-1', false, false],
+      ['', true, true],
+      ['', false, true],
+      ['swe-1', false, true],
+    ] as const) {
+      const error = acp
+        ? 'Error: session/set_config_option (model) failed: Resource not found: ' +
+          JSON.stringify(
+            { uri: 'Model not found: swe-2-high. Available models: ' + available },
+            null,
+            2,
+          )
+        : "Error: Unknown model: 'swe-2'\nAvailable: " + available + '\n';
+      const fake = fakeDevin(`
+const attempt = fs.existsSync(stamp) ? Number(fs.readFileSync(stamp, 'utf8')) + 1 : 1;
+fs.writeFileSync(stamp, String(attempt));
+if (${acp && recovers} && attempt === 1) process.stdout.write('');
+else if (${recovers} && attempt > ${acp ? 2 : 1}) process.stdout.write('{"summary":"recovered","findings":[]}');
+else {
+  process.stderr.write(${JSON.stringify(error)});
+  process.exitCode = 1;
+}
+`);
+      try {
+        const review = fake.backend.runReview('devin/swe-2', 'context', '', fake.log, {
+          timeoutMs: 3000,
+        });
+        if (recovers) assert.equal((await review).summary, 'recovered');
+        else await assert.rejects(review, /Unknown model|Model not found/);
+        assert.equal(
+          readFileSync(join(fake.root, 'onboarded'), 'utf8'),
+          acp && recovers ? '3' : available ? '1' : '2',
+        );
+        assert.equal(
+          fake.logs.some((line) => line.includes('empty model catalog')),
+          !available,
+        );
+      } finally {
+        await fake.restore();
+      }
+    }
+  });
+
+  it('allows onboarding and catalog recovery once each within one invocation', async () => {
+    for (const sequence of [
+      ['setup', 'catalog'],
+      ['catalog', 'setup'],
+    ]) {
+      const fake = fakeDevin(`
+const attempt = fs.existsSync(stamp) ? Number(fs.readFileSync(stamp, 'utf8')) : 0;
+fs.writeFileSync(stamp, String(attempt + 1));
+const result = ${JSON.stringify(sequence)}[attempt];
+if (result === 'setup') process.stdout.write(banner);
+else if (result === 'catalog') {
+  process.stderr.write("Error: Unknown model: 'swe-2'\\nAvailable: ");
+  process.exitCode = 1;
+} else process.stdout.write('{"summary":"recovered","findings":[]}');
+`);
+      try {
+        const result = await fake.backend.runReview('devin/swe-2', 'context', '', fake.log, {
+          timeoutMs: 10000,
+        });
+        assert.equal(result.summary, 'recovered');
+        assert.equal(readFileSync(join(fake.root, 'onboarded'), 'utf8'), '3');
+      } finally {
+        await fake.restore();
+      }
+    }
+  });
+
+  it('cancels only the selected Devin session and reaps remaining sessions before cleanup', async () => {
+    const fake = fakeDevin(`
+const prompt = fs.readFileSync(process.argv[process.argv.indexOf('--prompt-file') + 1], 'utf8');
+const label = prompt.includes('LENS_MARKER') ? 'lens' : 'main';
+fs.writeFileSync(stamp + '-' + label, JSON.stringify({ home: process.env.HOME, pid: process.pid }));
+setInterval(() => {}, 1000);
+`);
+    const lens = fake.backend.runReview('devin/default', 'LENS_MARKER', '', fake.log, {
+      label: 'review-interactions',
+      timeoutMs: 60000,
+    });
+    const main = fake.backend.runReview('devin/default', 'MAIN_MARKER', '', fake.log, {
+      timeoutMs: 60000,
+    });
+    const lensRejected = assert.rejects(lens, /aborted/);
+    const mainRejected = assert.rejects(main, /runtime stopped/);
+    try {
+      const records = ['lens', 'main'].map((label) => join(fake.root, 'onboarded-' + label));
+      const deadline = Date.now() + 5000;
+      while (!records.every(existsSync) && Date.now() < deadline) await delay(10);
+      assert.ok(records.every(existsSync));
+      const [a, b] = records.map((path) => JSON.parse(readFileSync(path, 'utf8')));
+      assert.notEqual(a.home, b.home);
+      for (const session of [a, b]) {
+        assert.equal(dirname(session.home), fake.home);
+        const config = JSON.parse(readFileSync(join(session.home, 'config.json'), 'utf8'));
+        assert.ok(config.permissions.deny.includes(`Read(${fake.home}/**)`));
+        assert.equal(statSync(devinCredentialsPath(session.home)).mode & 0o777, 0o600);
+        assert.equal(
+          readFileSync(devinCredentialsPath(session.home), 'utf8'),
+          readFileSync(devinCredentialsPath(fake.home), 'utf8'),
+        );
+      }
+      assert.equal(fake.backend.abortSessionsByLabel!('review-interactions', fake.log), 1);
+      await lensRejected;
+      assert.equal(existsSync(a.home), false);
+      assert.throws(() => process.kill(a.pid, 0));
+      process.kill(b.pid, 0);
+      assert.equal(existsSync(b.home), true);
+      await fake.backend.stop();
+      await mainRejected;
+      assert.equal(existsSync(b.home), false);
+      assert.throws(() => process.kill(b.pid, 0));
+      assert.equal(existsSync(devinCredentialsPath(fake.home)), true);
+    } finally {
+      await fake.backend.stop();
+      await Promise.allSettled([lensRejected, mainRejected]);
+      await fake.restore();
+    }
+  });
+
+  it('rejects incomplete auxiliary replies while accepting explicit empty results', async () => {
+    for (const response of [
+      "I'll audit this PR. Let me regenerate the complete current diff.",
+      '{}',
+      '[]',
+      '{"findings":[]}',
+      '{"addressedPriorComments":[]}',
+    ]) {
+      const fake = fakeDevin('process.stdout.write(' + JSON.stringify(response) + ');');
+      try {
+        const guideline = fake.backend.runGuidelineComplianceCheck(
+          'devin/default',
+          'context',
+          'guidelines',
+          fake.log,
+          60000,
+        );
+        if (response === '{"findings":[]}') assert.deepEqual(await guideline, []);
+        else await assert.rejects(guideline, /unparseable JSON|non-object|findings array/);
+
+        const addressed = fake.backend.runAddressedPriorCommentsCheck(
+          'devin/default',
+          'context',
+          fake.log,
+          60000,
+        );
+        if (response === '{"addressedPriorComments":[]}') assert.deepEqual(await addressed, []);
+        else
+          await assert.rejects(
+            addressed,
+            /unparseable JSON|non-object|addressedPriorComments array/,
+          );
+      } finally {
+        await fake.restore();
+      }
+    }
+  });
+
+  it('shares the review deadline with continuation and JSON repair', async () => {
+    for (const response of ['I will inspect the code.', '{"summary":']) {
+      const fake = fakeDevin(
+        "fs.appendFileSync(stamp, 'launch\\n'); process.stdout.write(" +
+          JSON.stringify(response) +
+          ');',
+      );
+      const now = Date.now;
+      let elapsed = 0;
+      Date.now = () => now() + elapsed;
+      try {
+        await assert.rejects(
+          fake.backend.runReview(
+            'devin/default',
+            'context',
+            '',
+            (message) => {
+              fake.log(message);
+              if (message.includes('prompt complete via devin')) elapsed = 120000;
+            },
+            { timeoutMs: 60000 },
+          ),
+          /deadline expired/,
+        );
+        assert.equal(readFileSync(join(fake.root, 'onboarded'), 'utf8'), 'launch\n');
+      } finally {
+        Date.now = now;
+        await fake.restore();
+      }
+    }
+  });
+
+  it('reaps the CLI before fatal-signal credential cleanup', async () => {
+    const fake = fakeDevin(`
+process.on('SIGTERM', () => {
+  setTimeout(() => {
+    fs.writeFileSync(stamp + '-terminated', String(fs.existsSync(process.env.HOME)));
+    process.exit(0);
+  }, 50);
+});
+fs.writeFileSync(stamp, JSON.stringify({ pid: process.pid, home: process.env.HOME }));
+setInterval(() => {}, 1000);
+`);
+    const driver = join(fake.root, 'driver.mjs');
+    writeFileSync(
+      driver,
+      `
+import { rmSync } from 'node:fs';
+import { createDevinCliBackend } from ${JSON.stringify(new URL('../src/shared/devin-cli.ts', import.meta.url).href)};
+import { onCliFatalSignal } from ${JSON.stringify(new URL('../src/shared/cli-process.ts', import.meta.url).href)};
+const backend = createDevinCliBackend(${JSON.stringify(join(fake.root, 'workspace'))}, ${JSON.stringify(fake.home)});
+onCliFatalSignal(async () => {
+  await backend.stop();
+  rmSync(${JSON.stringify(fake.home)}, { recursive: true, force: true });
+});
+backend.runReview('devin/default', 'context', '', () => {}, { timeoutMs: 60000 }).catch(() => {});
+setInterval(() => {}, 1000);
+`,
+    );
+    const child = spawn(process.execPath, ['--import', 'tsx', driver], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 15000,
+      killSignal: 'SIGKILL',
+    });
+    const closed = once(child, 'close');
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    let record: { pid: number; home: string } | undefined;
+    try {
+      const limit = Date.now() + 10000;
+      while (!existsSync(join(fake.root, 'onboarded')) && Date.now() < limit) await delay(10);
+      assert.ok(existsSync(join(fake.root, 'onboarded')), stderr);
+      record = JSON.parse(readFileSync(join(fake.root, 'onboarded'), 'utf8'));
+      child.kill('SIGTERM');
+      const [code, signal] = await closed;
+      assert.equal(code, null, stderr);
+      assert.equal(signal, 'SIGTERM', stderr);
+      assert.equal(readFileSync(join(fake.root, 'onboarded-terminated'), 'utf8'), 'true');
+      assert.equal(existsSync(fake.home), false);
+      assert.throws(() => process.kill(record!.pid, 0));
+    } finally {
+      child.kill('SIGKILL');
+      if (record) {
+        try {
+          process.kill(-record.pid, 'SIGKILL');
+        } catch {}
+      }
+      await closed;
+      await fake.restore();
     }
   });
 

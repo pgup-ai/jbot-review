@@ -329,5 +329,8 @@ export function formatSummaryMarkdown(
 
 export function formatIncompleteCoverage(sessions: readonly string[]): string {
   if (sessions.length === 0) return '';
-  return `⚠️ **Review incomplete:** ${sessions.map((session) => `\`${session}\``).join(', ')} did not complete successfully. Findings reflect completed passes only.`;
+  const verificationFailed = sessions.some(
+    (session) => session === 'finding-verification' || session === 'late-finding-verification',
+  );
+  return `⚠️ **Review incomplete:** Main review completed; ${sessions.map((session) => `\`${session}\``).join(', ')} did not complete successfully. Findings from completed passes are included.${verificationFailed ? ' Findings affected by incomplete verification are marked as unverified concerns.' : ''}`;
 }

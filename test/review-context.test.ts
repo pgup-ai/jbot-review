@@ -52,6 +52,33 @@ async function withTempRepo(run: (repo: string) => Promise<void>): Promise<void>
 }
 
 describe('discoverGuidelines', () => {
+  it('does not rediscover generated review output as guidelines through references or aliases', async () => {
+    await withTempRepo(async (repo) => {
+      await mkdir(join(repo, '.jbot-review'));
+      await mkdir(join(repo, 'docs'));
+      await writeFile(join(repo, '.jbot-review/last-run.md'), 'STALE_REVIEW_FINDING');
+      await symlink(join(repo, '.jbot-review/last-run.md'), join(repo, 'previous-review.md'));
+      await writeFile(join(repo, 'docs/last-run.md'), 'LEGITIMATE_DOMAIN_RULE');
+      await writeFile(
+        join(repo, 'AGENTS.md'),
+        [
+          '# Guidance',
+          '`./.jbot-review/last-run.md`',
+          '[Alias](previous-review.md)',
+          '[Domain guide](docs/last-run.md)',
+        ].join('\n'),
+      );
+      const discovered = await discoverGuidelineDocs(repo);
+      assert.deepEqual(discovered.docs.map(({ label }) => label).sort(), [
+        'AGENTS.md',
+        'docs/last-run.md',
+      ]);
+      assert.deepEqual(discovered.referenced, []);
+      assert.doesNotMatch(formatGuidelines(discovered), /STALE_REVIEW_FINDING/);
+      assert.match(formatGuidelines(discovered), /LEGITIMATE_DOMAIN_RULE/);
+    });
+  });
+
   it('preloads governance README references while keeping root-guideline references listed', async () => {
     await withTempRepo(async (repo) => {
       await mkdir(join(repo, '.pr-governance', 'design'), { recursive: true });
@@ -707,6 +734,95 @@ describe('discoverGuidelineDocs', () => {
 });
 
 describe('formatFinderGuidelines', () => {
+  it('omits lens procedures while retaining nested, ambiguous, and fenced contract evidence', () => {
+    const discovered = {
+      docs: [
+        {
+          label: 'AGENTS.md',
+          relevance: 1 as const,
+          text: [
+            '# Guide',
+            'DOMAIN_INVARIANT',
+            '## Commands ##',
+            'npm run build PROCEDURE_ONLY',
+            '  ## Development workflow',
+            'INDENTED_PROCEDURE_ONLY',
+            '### Command contract',
+            'NESTED_CONTRACT',
+            '## Domain semantics',
+            '```md',
+            '## Development workflow',
+            'FENCED_CONTRACT',
+            '```',
+            '## Commit messages',
+            'COMMIT_PROCEDURE_ONLY',
+            '## Accounting',
+            'DOMAIN_TAIL',
+          ].join('\r\n'),
+        },
+        {
+          label: 'docs/commands.md',
+          relevance: 2 as const,
+          text: '## Commands\nBUSINESS_COMMAND_CONTRACT',
+        },
+      ],
+      referenced: [],
+      budgetExhausted: false,
+    };
+    const original = formatFinderGuidelines(discovered);
+    assert.match(original, /PROCEDURE_ONLY/);
+    const lens = formatFinderGuidelines(discovered, { lens: true });
+    assert.doesNotMatch(lens, /PROCEDURE_ONLY/);
+    for (const evidence of [
+      'DOMAIN_INVARIANT',
+      'NESTED_CONTRACT',
+      'FENCED_CONTRACT',
+      'DOMAIN_TAIL',
+      'BUSINESS_COMMAND_CONTRACT',
+    ])
+      assert.ok(lens.includes(evidence));
+    assert.match(
+      lens,
+      /introductory text omitted; nested subsections retained:.*AGENTS\.md: Commands/,
+    );
+    assert.equal(formatFinderGuidelines(discovered), original);
+    assert.ok(
+      Buffer.byteLength(formatFinderGuidelines(discovered, { lens: true, capBytes: 256 })) <= 256,
+    );
+
+    const large = {
+      ...discovered,
+      docs: [
+        {
+          label: 'REVIEW.md',
+          relevance: 1 as const,
+          text: 'DOMAIN_RULE '.repeat(2500) + 'FINAL_CONTRACT',
+        },
+      ],
+    };
+    const embeddedOnly = selectFinderGuidelineText({
+      discovered: large,
+      forFiles: ['index.ts'],
+      complianceRuns: false,
+      mainCanReadWorkspace: false,
+      widen: 'auto',
+      full: formatGuidelines(large),
+      lens: true,
+    });
+    assert.match(embeddedOnly, /FINAL_CONTRACT/);
+    const missing = selectFinderGuidelineText({
+      discovered: { ...large, referenced: ['docs/missing.md'] },
+      forFiles: ['index.ts'],
+      complianceRuns: false,
+      mainCanReadWorkspace: false,
+      widen: 'auto',
+      full: formatGuidelines(large),
+      lens: true,
+    });
+    assert.match(missing, /Omitted guidance is unavailable/);
+    assert.doesNotMatch(missing, /Read any omitted file/);
+  });
+
   it('keeps scoped guidance and drops lower-relevance root docs past the cap', async () => {
     await withTempRepo(async (repo) => {
       await writeFile(join(repo, 'AGENTS.md'), '# Root\n' + 'x'.repeat(4000));

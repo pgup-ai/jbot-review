@@ -247,6 +247,7 @@ describe('provider configuration resolution', () => {
   it('resolves provider-owned session caps independently', () => {
     assert.equal(providerSessionConcurrency('openai'), undefined);
     assert.equal(providerSessionConcurrency('nvidia'), 1);
+    assert.equal(providerSessionConcurrency('devin'), undefined);
   });
 
   it('rejects malformed base URLs as non-absolute', () => {

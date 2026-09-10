@@ -10,6 +10,7 @@ import {
   parseComparisonManifestJson,
   sanitizeArenaFailureMessage,
   selectArenaModel,
+  resolveArenaModelSelection,
   validateComparisonManifest,
   validateJbotArenaOutput,
   type ComparisonManifestV1,
@@ -210,6 +211,21 @@ describe('comparison manifest validation', () => {
     const value = manifest();
     value.target.body = '😀'.repeat(20_000);
     assert.throws(() => validateComparisonManifest(value), /target.body exceeds/);
+  });
+
+  it('validates requested arena aliases before resolving their execution model', () => {
+    for (const alias of ['devin/swe-2', 'devin/swe']) {
+      const value = manifest();
+      value.models = [
+        { index: 0, model: alias, provider: 'devin', artifactName: arenaArtifactName(0, alias) },
+      ];
+      const original = structuredClone(value);
+      assert.deepEqual(resolveArenaModelSelection(value, alias), ['devin/swe-2-medium']);
+      assert.deepEqual(value, original);
+      assert.throws(() => resolveArenaModelSelection(value, 'devin/swe-2-medium'), /not present/);
+      assert.throws(() => resolveArenaModelSelection(value, alias + ',' + alias), /exactly one/);
+      assert.throws(() => resolveArenaModelSelection(value, undefined), /exactly one/);
+    }
   });
 
   it('requires one selected model that exists in the manifest', () => {

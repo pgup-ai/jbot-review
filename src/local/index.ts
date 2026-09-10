@@ -84,7 +84,7 @@ import {
   emptyArenaUsage,
   parseArenaAuthJson,
   sanitizeArenaFailureMessage,
-  selectArenaModel,
+  resolveArenaModelSelection,
   parseComparisonManifestJson,
   writeJbotArenaOutput,
   type ComparisonManifestV1,
@@ -357,7 +357,7 @@ const INSTALL_HINTS: Record<string, string> = {
   [KILO_CLI_BIN]: 'npm i -g @kilocode/cli',
   [DIM_CLI_BIN]: 'npm i -g dimcode',
   [CURSOR_CLI_BIN]: 'curl -fsSL https://cursor.com/install | sh',
-  [DEVIN_CLI_BIN]: 'curl -fsSL https://static.devin.ai/cli/3000.4.25/setup.sh | sh',
+  [DEVIN_CLI_BIN]: 'curl -fsSL https://static.devin.ai/cli/3000.10.21/setup.sh | bash',
 };
 
 async function main(invocation: LocalInvocation): Promise<void> {
@@ -416,12 +416,10 @@ async function review(
   ) {
     throw new Error('Arena review does not accept ACP gateway routing.');
   }
-  const pool = resolveModelSelection(
-    process.env.MODEL,
-    comparison ? undefined : process.env.PROVIDER,
-  );
+  const pool = comparison
+    ? resolveArenaModelSelection(comparison, process.env.MODEL)
+    : resolveModelSelection(process.env.MODEL, process.env.PROVIDER);
   assertImageSupportsModels(pool, process.env);
-  if (comparison) selectArenaModel(comparison, pool);
   // HEAD, not the worktree: iterating on uncommitted edits keeps the same
   // reviewer, so a before/after comparison is not confounded by the pick.
   const headSha = (await git(['rev-parse', 'HEAD'])).trim();

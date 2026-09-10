@@ -10,6 +10,7 @@ import {
 } from './guideline-fragments.ts';
 import {
   extractRuleSection,
+  markdownHeadings,
   parseDiffRoutes,
   parseRuleIdDocs,
   selectDiffRoutes,
@@ -706,6 +707,10 @@ async function readWholeBounded(realPath: string): Promise<{ text: string; trunc
   }
 }
 
+function isGeneratedReviewReport(path: string): boolean {
+  return /(^|\/)\.jbot-review\/last-run\.md$/.test(path.replaceAll('\\', '/'));
+}
+
 export async function discoverGuidelineDocs(
   cwd: string,
   changedFiles: string[] = [],
@@ -727,9 +732,11 @@ export async function discoverGuidelineDocs(
   ): Promise<{ absolutePath: string; realPath: string } | undefined> {
     const absolutePath = resolve(path);
     if (!isInsideDirectory(cwd, absolutePath)) return undefined;
+    if (isGeneratedReviewReport(relative(cwd, absolutePath))) return undefined;
     try {
       const realPath = await realpath(absolutePath);
       if (!isInsideDirectory(workspaceRoot, realPath)) return undefined;
+      if (isGeneratedReviewReport(relative(workspaceRoot, realPath))) return undefined;
       return { absolutePath, realPath };
     } catch {
       return undefined;
@@ -1268,7 +1275,13 @@ const MAX_OMITTED_LABEL_BYTES = 1024;
  */
 export function formatFinderGuidelines(
   discovered: DiscoveredGuidelines,
-  options: { capBytes?: number; forFiles?: string[]; complianceCovers?: boolean } = {},
+  options: {
+    capBytes?: number;
+    forFiles?: string[];
+    complianceCovers?: boolean;
+    canReadWorkspace?: boolean;
+    lens?: boolean;
+  } = {},
 ): string {
   const capBytes = options.capBytes ?? MAX_FINDER_GUIDELINE_BYTES;
   const complianceCovers = options.complianceCovers ?? true;
@@ -1281,16 +1294,45 @@ export function formatFinderGuidelines(
     forFiles && doc.globs && !doc.globs.some((glob) => forFiles.some((f) => globMatches(glob, f)))
       ? 0
       : doc.relevance;
+  const procedureOmissions: string[] = [];
+  const docs = options.lens
+    ? discovered.docs.map((doc) => {
+        const lines = doc.text.replace(/\r\n/g, '\n').split('\n');
+        const headings = markdownHeadings(lines);
+        const omitted = new Set<number>();
+        for (const [index, heading] of headings.entries()) {
+          // Unknown headings and nested sections may contain domain contracts; retain them.
+          if (
+            !/^(?:commands|development commands|development workflow|pull request workflow|pr workflow|commit messages|context7 steps|review-quality gate)$/i.test(
+              heading.title,
+            )
+          )
+            continue;
+          if (/^commands$/i.test(heading.title) && !/(^|\/)(AGENTS|CLAUDE)\.md$/i.test(doc.label))
+            continue;
+          procedureOmissions.push(`${doc.label}: ${heading.title}`);
+          const end = headings[index + 1]?.line ?? lines.length;
+          for (let line = heading.line; line < end; line++) omitted.add(line);
+        }
+        return { ...doc, text: lines.filter((_, index) => !omitted.has(index)).join('\n') };
+      })
+    : discovered.docs;
   return renderGuidelineBlock(
-    guidelineSources(discovered.docs, effectiveRelevance),
+    guidelineSources(docs, effectiveRelevance),
     capBytes,
     (fragmentOmissions) => {
       const omitted = uniqueLabels([
         ...fragmentOmissions,
         ...(!complianceCovers ? discovered.referenced : []),
       ]);
-      if (omitted.length === 0 && !discovered.budgetExhausted) return '';
+      if (omitted.length === 0 && !discovered.budgetExhausted && procedureOmissions.length === 0)
+        return '';
       const budgetNotes: string[] = [];
+      if (procedureOmissions.length > 0) {
+        budgetNotes.push(
+          `Development-procedure headings and introductory text omitted; nested subsections retained: ${boundedJoin(procedureOmissions, MAX_OMITTED_LABEL_BYTES)}`,
+        );
+      }
       if (fragmentOmissions.length > 0) {
         budgetNotes.push(
           `Guidance was partially or fully omitted from this pass to stay within the ${capBytes} byte finder budget; ${omittedLabelText(omitted)}`,
@@ -1305,7 +1347,9 @@ export function formatFinderGuidelines(
       }
       const coverage = complianceCovers
         ? 'The full set is reviewed by the separate guideline-compliance pass.'
-        : 'The guideline-compliance pass is not running this run. Read any omitted file that applies to the changed files.';
+        : options.canReadWorkspace === false
+          ? 'The guideline-compliance pass is not running this run. Omitted guidance is unavailable to this session.'
+          : 'The guideline-compliance pass is not running this run. Read any omitted file that applies to the changed files.';
       return `### Review guidance budget\n${budgetNotes.join('; ')}. ${coverage}`;
     },
   );
@@ -1328,14 +1372,16 @@ export function selectFinderGuidelineText(params: {
   mainCanReadWorkspace: boolean;
   widen: 'auto' | 'full';
   full: string;
+  lens?: boolean;
 }): string {
-  if (params.complianceRuns) {
-    return formatFinderGuidelines(params.discovered, { forFiles: params.forFiles });
-  }
-  if (params.widen === 'full' || !params.mainCanReadWorkspace) return params.full;
+  const full = !params.complianceRuns && (params.widen === 'full' || !params.mainCanReadWorkspace);
+  if (full && !params.lens) return params.full;
   return formatFinderGuidelines(params.discovered, {
     forFiles: params.forFiles,
-    complianceCovers: false,
+    complianceCovers: params.complianceRuns,
+    canReadWorkspace: params.mainCanReadWorkspace,
+    capBytes: full ? MAX_GUIDELINE_TOTAL_BYTES : undefined,
+    lens: params.lens,
   });
 }
 

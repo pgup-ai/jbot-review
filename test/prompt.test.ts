@@ -383,6 +383,8 @@ describe('REVIEW_LENSES', () => {
         assert.equal(prompt.includes('use the git diff command identified'), !embeddedFirst);
         assert.doesNotMatch(prompt, /Read every changed hunk to identify affected contracts/);
         assert.match(prompt, /Return findings within this lens/);
+        assert.match(prompt, /Batch independent searches or file reads/);
+        assert.match(prompt, /Never batch a dependent lookup/);
         assert.doesNotMatch(prompt, /Still report any other clear bug/);
         assert.match(prompt, /Do not modify files/);
         assert.match(prompt, /Do not run repository code/);
