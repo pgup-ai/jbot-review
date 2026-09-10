@@ -197,3 +197,19 @@ coverage was folded into the existing lens case. No extra provider cap, repair
 time cap, or finding-disposition change was introduced. The full adjudicated
 corpus remains outstanding. The hosted app's static model catalog requires a
 separate repository update and deployment.
+
+## Incomplete auxiliary responses
+
+The local Devin run returned narration from guideline-compliance, but permissive
+parsing converted it to zero findings and recorded completed coverage. Guideline
+and addressed-thread responses now require their respective result arrays via
+the existing strict parser. Malformed replies reach the runner's existing
+fail-open handlers, which record incomplete coverage and retain completed
+findings. Explicit empty arrays remain valid.
+
+One regression case exercises both methods with narration, non-object JSON,
+missing arrays, and explicit empty results. Self-review kept this case because
+it catches the observed false-success path; no new comments, retries, prompts,
+or deadlines were added. All 1,032 tests, typecheck, lint, and build pass.
+A new live model run was not used for this deterministic parsing fix; the
+previously documented full-corpus merge gate remains outstanding.

@@ -290,7 +290,10 @@ export function createDevinCliBackend(
           log,
           timeoutMs,
         );
-        return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
+        return parseReview(raw, 'addressed-prior-comments', log, {
+          strict: true,
+          field: 'addressedPriorComments',
+        }).addressedPriorComments;
       });
     },
     async runGuidelineComplianceCheck(model, prContext, guidelines, log, timeoutMs) {
@@ -304,7 +307,7 @@ export function createDevinCliBackend(
           log,
           timeoutMs,
         );
-        return parseReview(raw, 'guideline-compliance', log).findings;
+        return parseReview(raw, 'guideline-compliance', log, { strict: true }).findings;
       });
     },
     async runFindingVerification(model, prContext, findings, log, timeoutMs) {

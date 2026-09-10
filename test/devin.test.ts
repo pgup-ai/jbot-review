@@ -308,6 +308,44 @@ setInterval(() => {}, 1000);
     }
   });
 
+  it('rejects incomplete auxiliary replies while accepting explicit empty results', async () => {
+    for (const response of [
+      "I'll audit this PR. Let me regenerate the complete current diff.",
+      '{}',
+      '[]',
+      '{"findings":[]}',
+      '{"addressedPriorComments":[]}',
+    ]) {
+      const fake = fakeDevin('process.stdout.write(' + JSON.stringify(response) + ');');
+      try {
+        const guideline = fake.backend.runGuidelineComplianceCheck(
+          'devin/default',
+          'context',
+          'guidelines',
+          fake.log,
+          60000,
+        );
+        if (response === '{"findings":[]}') assert.deepEqual(await guideline, []);
+        else await assert.rejects(guideline, /unparseable JSON|non-object|findings array/);
+
+        const addressed = fake.backend.runAddressedPriorCommentsCheck(
+          'devin/default',
+          'context',
+          fake.log,
+          60000,
+        );
+        if (response === '{"addressedPriorComments":[]}') assert.deepEqual(await addressed, []);
+        else
+          await assert.rejects(
+            addressed,
+            /unparseable JSON|non-object|addressedPriorComments array/,
+          );
+      } finally {
+        await fake.restore();
+      }
+    }
+  });
+
   it('shares the review deadline with continuation and JSON repair', async () => {
     for (const response of ['I will inspect the code.', '{"summary":']) {
       const fake = fakeDevin(
