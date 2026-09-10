@@ -159,7 +159,7 @@ and nested sections; no other new code comments were needed for this follow-up.
 
 ## Validation limits
 
-The full unit suite passes: 1,031 tests. Typecheck, lint, formatting, and build
+The full unit suite passes. Typecheck, lint, formatting, and build
 pass. Regression coverage checks independent homes, credential permissions,
 label cancellation, remaining-session teardown, descendant pipe cleanup, and
 the distinction between empty catalogs and unsupported models.
@@ -210,6 +210,23 @@ findings. Explicit empty arrays remain valid.
 One regression case exercises both methods with narration, non-object JSON,
 missing arrays, and explicit empty results. Self-review kept this case because
 it catches the observed false-success path; no new comments, retries, prompts,
-or deadlines were added. All 1,032 tests, typecheck, lint, and build pass.
+or deadlines were added. The full suite, typecheck, lint, and build pass.
 A new live model run was not used for this deterministic parsing fix; the
 previously documented full-corpus merge gate remains outstanding.
+
+## Shutdown follow-up
+
+Fatal shutdown allows five seconds for graceful CLI cleanup, then re-raises the
+signal even if an escaped descendant keeps pipes open. A repeated fatal signal
+forces termination immediately. Normal cleanup preserves host-owned signal
+listeners; forced termination overrides them. A forced exit can leave temporary
+homes or escaped descendants for the disposable environment to reclaim.
+
+All CLI-home cleanup paths now stop the managed backends first, including setup
+failures, so Devin's signal registration is released before credentials are
+removed. One subprocess regression covers stuck cleanup, repeated signals, and
+the surviving-host-listener path. Self-review kept the one-line rationale and
+this regression; the existing deadline test remains deterministic and restores
+its clock override. Full-suite totals are reported only in the PR update to avoid
+conflicting counts as coverage grows. No model prompts or defaults changed in
+this follow-up; the previously documented corpus gate remains pending.

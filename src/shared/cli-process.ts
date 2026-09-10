@@ -8,14 +8,25 @@ const fatalSignals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
 const fatalCleanups = new Set<() => void | Promise<void>>();
 let handlingSignal = false;
 
-async function handleFatalSignal(signal: NodeJS.Signals): Promise<void> {
-  if (handlingSignal) return;
-  handlingSignal = true;
-  await Promise.allSettled([...fatalCleanups].map((cleanup) => Promise.resolve().then(cleanup)));
-  fatalCleanups.clear();
+function finishFatalSignal(signal: NodeJS.Signals, force = false): void {
   for (const name of fatalSignals) process.removeListener(name, handleFatalSignal);
-  handlingSignal = false;
+  if (force) process.removeAllListeners(signal);
   if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
+}
+
+async function handleFatalSignal(signal: NodeJS.Signals): Promise<void> {
+  if (handlingSignal) {
+    finishFatalSignal(signal, true);
+    return;
+  }
+  handlingSignal = true;
+  // Escaped descendants can retain pipes after process-group cancellation.
+  const timer = setTimeout(() => finishFatalSignal(signal, true), 5000);
+  await Promise.allSettled([...fatalCleanups].map((cleanup) => Promise.resolve().then(cleanup)));
+  clearTimeout(timer);
+  fatalCleanups.clear();
+  handlingSignal = false;
+  finishFatalSignal(signal);
 }
 
 // The protocol's synchronous signal hook cannot await child reaping before HOME cleanup.

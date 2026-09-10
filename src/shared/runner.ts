@@ -1740,7 +1740,8 @@ async function runReviewPipeline(params: {
   };
   // Multiple CLI homes can be live at once (e.g. main=codex, aux=commandcode), so
   // clean every one at every downstream failure/exit point.
-  const cleanupCliHomes = (): void => {
+  const cleanupCliHomes = async (): Promise<void> => {
+    await Promise.all([commandCodeBackend?.stop(), devinBackend?.stop()]);
     // Independently: force only suppresses a missing path, so one failed
     // removal would otherwise leave the remaining credential homes on disk.
     for (const cleanup of [
@@ -1768,16 +1769,13 @@ async function runReviewPipeline(params: {
   // materialized provider credentials and must not outlive an interrupted run.
   let unregisterCliHomes: (() => void) | undefined;
   const guardCliHomes = (): void => {
-    unregisterCliHomes ??= onCliFatalSignal(async () => {
-      await Promise.all([commandCodeBackend?.stop(), devinBackend?.stop()]);
-      cleanupCliHomes();
-    });
+    unregisterCliHomes ??= onCliFatalSignal(cleanupCliHomes);
   };
 
   if (!remoteAcp && (mainCliBackend === DEVIN_PROVIDER_ID || auxCliBackend === DEVIN_PROVIDER_ID)) {
     const devinApiKey = backendSelection.devinApiKey;
     if (!devinApiKey) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw new Error(`Missing API key for ${DEVIN_PROVIDER_ID} provider.`);
     }
     let credentialsPath: string;
@@ -1787,7 +1785,7 @@ async function runReviewPipeline(params: {
       credentialsPath = writeDevinCredentials(devinApiKey, devinHome);
       devinBackend = createDevinCliBackend(workspace, devinHome);
     } catch (error) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw error;
     }
     log(`Devin CLI credentials configured at ${credentialsPath}.`);
@@ -1800,7 +1798,7 @@ async function runReviewPipeline(params: {
   ) {
     const cursorApiKey = backendSelection.cursorApiKey;
     if (!cursorApiKey) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw new Error(`Missing API key for ${CURSOR_PROVIDER_ID} provider.`);
     }
     // Cursor authenticates from CURSOR_API_KEY in each spawn's env — no
@@ -1813,7 +1811,7 @@ async function runReviewPipeline(params: {
 
   if (mainCliBackend === COMMANDCODE_PROVIDER_ID || auxCliBackend === COMMANDCODE_PROVIDER_ID) {
     if (!commandCodeAccessKey) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw new Error(`Missing access key for ${COMMANDCODE_PROVIDER_ID} provider.`);
     }
     let authPath: string;
@@ -1823,7 +1821,7 @@ async function runReviewPipeline(params: {
       authPath = writeCommandCodeAuth(commandCodeAccessKey, commandCodeHome);
       writeCommandCodeReadOnlySettings(commandCodeHome, options.commandCodeTools);
     } catch (error) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw error;
     }
     log(`CommandCode CLI auth configured at ${authPath}.`);
@@ -1859,7 +1857,7 @@ async function runReviewPipeline(params: {
   if (!remoteAcp && (mainCliBackend === CODEX_PROVIDER_ID || auxCliBackend === CODEX_PROVIDER_ID)) {
     const codexAuth = backendSelection.codexAuth;
     if (!codexAuth) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw new Error(`Missing auth for ${CODEX_PROVIDER_ID} provider.`);
     }
     let authPath: string;
@@ -1869,7 +1867,7 @@ async function runReviewPipeline(params: {
       guardCliHomes();
       authPath = writeCodexAuth(codexAuth, codexHome);
     } catch (error) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw error;
     }
     log(`Codex CLI auth configured at ${authPath}.`);
@@ -1884,7 +1882,7 @@ async function runReviewPipeline(params: {
   if (mainCliBackend === CLINE_PROVIDER_ID || auxCliBackend === CLINE_PROVIDER_ID) {
     const clineAuth = backendSelection.clineAuth;
     if (!clineAuth) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw new Error(`Missing auth for ${CLINE_PROVIDER_ID} provider.`);
     }
     let authPath: string;
@@ -1893,7 +1891,7 @@ async function runReviewPipeline(params: {
       guardCliHomes();
       authPath = writeClineAuth(clineAuth, clineHome);
     } catch (error) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw error;
     }
     log(`Cline CLI auth configured at ${authPath}.`);
@@ -1906,7 +1904,7 @@ async function runReviewPipeline(params: {
   if (mainCliBackend === GROK_PROVIDER_ID || auxCliBackend === GROK_PROVIDER_ID) {
     const grokCredential = backendSelection.grokAuth;
     if (!grokCredential) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw new Error(`Missing credential for ${GROK_PROVIDER_ID} provider.`);
     }
     let runtime: GrokRuntime;
@@ -1916,7 +1914,7 @@ async function runReviewPipeline(params: {
       runtime = configureGrokHome(grokCredential, grokHome);
       await assertGrokAuthenticated(runtime);
     } catch (error) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw error;
     }
     log(
@@ -1935,13 +1933,13 @@ async function runReviewPipeline(params: {
   if (!remoteAcp && (mainCliBackend === KILO_PROVIDER_ID || auxCliBackend === KILO_PROVIDER_ID)) {
     const kiloAuth = backendSelection.kiloAuth;
     if (!kiloAuth) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw new Error(`Missing auth for ${KILO_PROVIDER_ID} provider.`);
     }
     try {
       assertValidKiloAuth(kiloAuth); // fail fast on a malformed secret
     } catch (error) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw error;
     }
     // No credential file/home to allocate: KILO_AUTH_CONTENT is env-injected and each
@@ -1954,7 +1952,7 @@ async function runReviewPipeline(params: {
   if (mainCliBackend === QODER_PROVIDER_ID || auxCliBackend === QODER_PROVIDER_ID) {
     const qoderToken = backendSelection.qoderToken;
     if (!qoderToken) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw new Error(`Missing personal access token for ${QODER_PROVIDER_ID} provider.`);
     }
     log(
@@ -1966,7 +1964,7 @@ async function runReviewPipeline(params: {
   if (mainCliBackend === DIM_PROVIDER_ID || auxCliBackend === DIM_PROVIDER_ID) {
     const dimAuth = backendSelection.dimAuth;
     if (!dimAuth) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw new Error(`Missing auth for ${DIM_PROVIDER_ID} provider.`);
     }
     let runtime: DimRuntime;
@@ -1976,7 +1974,7 @@ async function runReviewPipeline(params: {
       guardCliHomes();
       runtime = { parent: dimHome, bundle };
     } catch (error) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw error;
     }
     log(
@@ -1999,7 +1997,7 @@ async function runReviewPipeline(params: {
       Boolean(auxModelOptions && Object.keys(auxModelOptions).length > 0) ||
       verifierNeedsOwnOptions);
   if (auxNeedsOwnKey && !options.auxApiKey) {
-    cleanupCliHomes();
+    await cleanupCliHomes();
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
   }
 
@@ -2008,7 +2006,7 @@ async function runReviewPipeline(params: {
   if (backendSelection.pi) {
     const piConfig = backendSelection.pi;
     if (!piConfig.apiKey) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw new Error(`Missing API key for provider "${piConfig.providerID}".`);
     }
     log('Starting pi engine');
@@ -2048,7 +2046,7 @@ async function runReviewPipeline(params: {
         log('pi git_diff tool unavailable (no base sha); large diffs may be reviewed truncated.');
       }
     } catch (error) {
-      cleanupCliHomes();
+      await cleanupCliHomes();
       throw error;
     }
     piBackend = createPiBackend(piRuntime.runtime);
@@ -2104,7 +2102,7 @@ async function runReviewPipeline(params: {
     } catch (error) {
       if (mainOnOpencode) {
         piRuntime?.stop();
-        cleanupCliHomes();
+        await cleanupCliHomes();
         throw error;
       }
       // Opencode serves only aux roles here — invariant #3: a broken aux
@@ -3096,8 +3094,7 @@ async function runReviewPipeline(params: {
     let teardownCompleted = false;
     try {
       stop();
-      await Promise.all([commandCodeBackend?.stop(), devinBackend?.stop()]);
-      cleanupCliHomes();
+      await cleanupCliHomes();
       teardownCompleted = true;
     } finally {
       teardownDone(teardownCompleted ? 'completed' : 'failed');

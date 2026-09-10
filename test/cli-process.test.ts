@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -83,4 +85,51 @@ it('stops queued work before spawn and reaps a timed-out child before rejecting'
     scope.run('later', async () => {}),
     /runtime stopped/,
   );
+});
+
+it('bounds fatal cleanup, forces repeated signals, and preserves a surviving host listener', async () => {
+  const execute = promisify(execFile);
+  const moduleUrl = new URL('../src/shared/cli-process.ts', import.meta.url).href;
+  for (const mode of ['timeout', 'repeat', 'host']) {
+    const script = `
+      import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+      import { onCliFatalSignal } from ${JSON.stringify(moduleUrl)};
+      const mode = ${JSON.stringify(mode)};
+      let cleanups = 0;
+      let signals = 0;
+      const host = () => { signals++; };
+      if (mode === 'host') process.on('SIGTERM', host);
+      onCliFatalSignal(async () => {
+        cleanups++;
+        if (mode !== 'host') await new Promise(() => {});
+      });
+      process.emit('SIGTERM', 'SIGTERM');
+      setImmediate(() => {
+        assert.equal(cleanups, 1);
+        if (mode === 'repeat') process.emit('SIGTERM', 'SIGTERM');
+        if (mode === 'host') {
+          assert.equal(signals, 1);
+          assert.deepEqual(process.listeners('SIGTERM'), [host]);
+          process.removeListener('SIGTERM', host);
+          console.log('host retained');
+        }
+      });
+    `;
+    const result = execute(
+      process.execPath,
+      ['--import', 'tsx', '--input-type=module', '-e', script],
+      {
+        timeout: 10000,
+        killSignal: 'SIGKILL',
+      },
+    );
+    if (mode === 'host') assert.equal((await result).stdout.trim(), 'host retained');
+    else
+      await assert.rejects(result, (error: NodeJS.ErrnoException & { signal?: string }) => {
+        assert.equal(error.signal, 'SIGTERM');
+        return true;
+      });
+  }
 });
