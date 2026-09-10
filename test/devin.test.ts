@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, statSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import {
   buildDevinReadOnlyConfig,
@@ -145,6 +154,7 @@ describe('Devin CLI provider helpers', () => {
     const workspace = join(root, 'workspace');
     const previousPath = process.env.PATH!;
     mkdirSync(home);
+    writeDevinCredentials('test-key', home);
     mkdirSync(workspace);
     writeFileSync(
       join(root, 'devin'),
@@ -163,6 +173,8 @@ ${script}
     process.env.PATH = `${root}:${previousPath}`;
     const logs: string[] = [];
     return {
+      root,
+      home,
       backend: createDevinCliBackend(workspace, home),
       logs,
       log: (message: string) => logs.push(message),
@@ -205,6 +217,90 @@ else {
       assert.equal(review.summary, 'ok');
       assert.equal(fake.logs.filter((message) => message.includes('first-run setup')).length, 1);
     } finally {
+      fake.restore();
+    }
+  });
+
+  it('retries an empty model catalog once but preserves an unsupported-model error', async () => {
+    for (const [available, recovers] of [
+      ['', true],
+      ['', false],
+      ['swe-1', false],
+    ] as const) {
+      const fake = fakeDevin(`
+const attempt = fs.existsSync(stamp) ? Number(fs.readFileSync(stamp, 'utf8')) + 1 : 1;
+fs.writeFileSync(stamp, String(attempt));
+if (${recovers} && attempt > 1) process.stdout.write('{"summary":"recovered","findings":[]}');
+else {
+  process.stderr.write("Error: Unknown model: 'swe-2'\\nAvailable: " + ${JSON.stringify(available)} + "\\n");
+  process.exitCode = 1;
+}
+`);
+      try {
+        const review = fake.backend.runReview('devin/swe-2', 'context', '', fake.log, {
+          timeoutMs: 3000,
+        });
+        if (recovers) assert.equal((await review).summary, 'recovered');
+        else await assert.rejects(review, /Unknown model/);
+        assert.equal(readFileSync(join(fake.root, 'onboarded'), 'utf8'), available ? '1' : '2');
+        assert.equal(
+          fake.logs.some((line) => line.includes('empty model catalog')),
+          !available,
+        );
+      } finally {
+        await fake.backend.stop();
+        fake.restore();
+      }
+    }
+  });
+
+  it('cancels only the selected Devin session and reaps remaining sessions before cleanup', async () => {
+    const fake = fakeDevin(`
+const prompt = fs.readFileSync(process.argv[process.argv.indexOf('--prompt-file') + 1], 'utf8');
+const label = prompt.includes('LENS_MARKER') ? 'lens' : 'main';
+fs.writeFileSync(stamp + '-' + label, JSON.stringify({ home: process.env.HOME, pid: process.pid }));
+setInterval(() => {}, 1000);
+`);
+    const lens = fake.backend.runReview('devin/default', 'LENS_MARKER', '', fake.log, {
+      label: 'review-interactions',
+      timeoutMs: 10000,
+    });
+    const main = fake.backend.runReview('devin/default', 'MAIN_MARKER', '', fake.log, {
+      timeoutMs: 10000,
+    });
+    const lensRejected = assert.rejects(lens, /aborted/);
+    const mainRejected = assert.rejects(main, /runtime stopped/);
+    try {
+      const records = ['lens', 'main'].map((label) => join(fake.root, 'onboarded-' + label));
+      const deadline = Date.now() + 5000;
+      while (!records.every(existsSync) && Date.now() < deadline) await delay(10);
+      assert.ok(records.every(existsSync));
+      const [a, b] = records.map((path) => JSON.parse(readFileSync(path, 'utf8')));
+      assert.notEqual(a.home, b.home);
+      for (const session of [a, b]) {
+        assert.equal(dirname(session.home), fake.home);
+        const config = JSON.parse(readFileSync(join(session.home, 'config.json'), 'utf8'));
+        assert.ok(config.permissions.deny.includes(`Read(${fake.home}/**)`));
+        assert.equal(statSync(devinCredentialsPath(session.home)).mode & 0o777, 0o600);
+        assert.equal(
+          readFileSync(devinCredentialsPath(session.home), 'utf8'),
+          readFileSync(devinCredentialsPath(fake.home), 'utf8'),
+        );
+      }
+      assert.equal(fake.backend.abortSessionsByLabel!('review-interactions', fake.log), 1);
+      await lensRejected;
+      assert.equal(existsSync(a.home), false);
+      assert.throws(() => process.kill(a.pid, 0));
+      process.kill(b.pid, 0);
+      assert.equal(existsSync(b.home), true);
+      await fake.backend.stop();
+      await mainRejected;
+      assert.equal(existsSync(b.home), false);
+      assert.throws(() => process.kill(b.pid, 0));
+      assert.equal(existsSync(devinCredentialsPath(fake.home)), true);
+    } finally {
+      await fake.backend.stop();
+      await Promise.allSettled([lensRejected, mainRejected]);
       fake.restore();
     }
   });

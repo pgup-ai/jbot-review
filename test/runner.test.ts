@@ -1330,7 +1330,9 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   assert.equal(completedReviewHead(PRIOR_JBOT_REVIEW), undefined);
   assert.match(body, /Review incomplete/);
   assert.match(body, /review-interactions/);
-  assert.match(body, /completed passes only/);
+  assert.match(body, /Main review completed/);
+  assert.match(body, /Findings from completed passes are included/);
+  assert.doesNotMatch(body, /unverified concerns/);
   assert.doesNotMatch(body, /✅|Good to go|No new findings were found/);
   const blocked = buildBody(
     '',
@@ -1348,6 +1350,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   );
   assert.match(blocked, /Needs changes before approval/);
   assert.match(blocked, /Review incomplete/);
+  assert.match(blocked, /incomplete verification are marked as unverified concerns/);
   assert.match(blocked, /Address the P0\/P1\/P2 findings/);
   const uncertain = buildBody(
     '',

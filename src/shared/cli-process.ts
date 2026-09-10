@@ -4,7 +4,7 @@ import { spawnWithTimeout, type CliProcessOptions, type CliProcessResult } from 
 
 const sessionSignal = new AsyncLocalStorage<AbortSignal>();
 
-export function createCommandCodeProcessScope() {
+export function createCliProcessScope() {
   const sessions = new Set<{
     label: string;
     controller: AbortController;
@@ -13,7 +13,7 @@ export function createCommandCodeProcessScope() {
   let stopped = false;
   return {
     async run<T>(label: string, task: () => Promise<T>): Promise<T> {
-      if (stopped) throw new Error('CommandCode runtime stopped');
+      if (stopped) throw new Error('CLI runtime stopped');
       const controller = new AbortController();
       const done = Promise.resolve().then(() => sessionSignal.run(controller.signal, task));
       const session = { label, controller, done };
@@ -28,21 +28,20 @@ export function createCommandCodeProcessScope() {
       let count = 0;
       for (const session of sessions) {
         if (session.label !== label) continue;
-        session.controller.abort(new Error(`CommandCode ${label} aborted`));
+        session.controller.abort(new Error(`CLI ${label} aborted`));
         count++;
       }
       return count;
     },
     async stop(): Promise<void> {
       stopped = true;
-      for (const session of sessions)
-        session.controller.abort(new Error('CommandCode runtime stopped'));
+      for (const session of sessions) session.controller.abort(new Error('CLI runtime stopped'));
       await Promise.allSettled([...sessions].map((session) => session.done));
     },
   };
 }
 
-export function runCommandCodeProcess(
+export function runCliProcess(
   command: string,
   args: string[],
   options: CliProcessOptions & { onStdout?: (chunk: string) => void },
@@ -93,7 +92,7 @@ export function runCommandCodeProcess(
       // until close, rather than treating the parent's exit as tree cleanup.
       killTimer = setTimeout(() => kill('SIGKILL'), options.killGraceMs ?? 2000);
     };
-    const abort = () => cancel(new Error(String(signal?.reason ?? 'CommandCode aborted')));
+    const abort = () => cancel(new Error(String(signal?.reason ?? 'CLI aborted')));
     signal?.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(() => cancel(new Error(options.timeoutMessage)), options.timeoutMs);
     child.stdout?.setEncoding('utf8');

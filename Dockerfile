@@ -11,15 +11,15 @@ RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000
 
-RUN npm install -g opencode-ai@1.18.27 command-code@1.44.0 \
+RUN npm install -g opencode-ai@1.18.27 command-code@1.53.0 \
   && npm cache clean --force \
   && opencode --version \
   && command-code --no-auto-update --version
 
 # Devin CLI (optional devin provider); strip the installer's interactive setup step.
-ARG DEVIN_CLI_VERSION=3000.4.25
+ARG DEVIN_CLI_VERSION=3000.10.21
 RUN curl -fsSL "https://static.devin.ai/cli/${DEVIN_CLI_VERSION}/setup.sh" -o /tmp/devin-install.sh \
-  && echo "9687335c83c70b8de7ebceb5f94dfe3d8cb025f8d46bd22ad03e21b994bf93c2  /tmp/devin-install.sh" | sha256sum -c - \
+  && echo "dac95d1301198bd3ab80c39a6634b38f6ed180e3db438074225351e8f2efd01d  /tmp/devin-install.sh" | sha256sum -c - \
   && grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install.sh \
   && sed '/"\$VERSION_DIR\/bin\/\$COMPILED_BIN_NAME" setup/d' /tmp/devin-install.sh > /tmp/devin-install-no-setup.sh \
   && ! grep -q '"\$VERSION_DIR/bin/\$COMPILED_BIN_NAME" setup' /tmp/devin-install-no-setup.sh \

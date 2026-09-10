@@ -1,16 +1,15 @@
 import type { ReviewResult } from './types.ts';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 
 import {
   buildDevinReadOnlyConfig,
   DEVIN_CLI_BIN,
   DEVIN_PROVIDER_ID,
+  devinCredentialsPath,
   onFatalSignal,
   parseModelName,
-  spawnWithTimeout,
   truncateForLog,
 } from '@symma/protocol';
 
@@ -30,6 +29,7 @@ import {
   parseReview,
   sessionEnvDenyKeys,
 } from './opencode.ts';
+import { createCliProcessScope, runCliProcess } from './cli-process.ts';
 import type { ReviewBackend } from './session-concurrency.ts';
 
 const DEVIN_CLI_TELEMETRY_CAPABILITY = 'opaque' as const;
@@ -104,27 +104,34 @@ export function parseDevinCliOutput(output: string): { response: string; setupOn
 async function runDevinPrompt(
   workspace: string,
   home: string,
-  configFile: string,
   model: string,
   prompt: string,
   label: string,
   log: (msg: string) => void,
   timeoutMs = DEVIN_PROMPT_TIMEOUT_MS,
 ): Promise<string> {
-  const root = mkdtempSync(join(tmpdir(), 'jbot-devin-session-'));
+  const deadlineAt = Date.now() + timeoutMs;
+  const root = mkdtempSync(join(home, 'session-'));
   const unregister = onFatalSignal(() => removeDevinSession(root, log));
   const promptFile = join(root, 'prompt.txt');
+  const configFile = join(root, 'config.json');
   try {
+    const credentials = devinCredentialsPath(root);
+    mkdirSync(dirname(credentials), { recursive: true, mode: 0o700 });
+    writeFileSync(credentials, readFileSync(devinCredentialsPath(home)), { mode: 0o600 });
+    writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home)), { mode: 0o600 });
     writeFileSync(promptFile, prompt, { mode: 0o600 });
     log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
     for (let attempt = 0; ; attempt += 1) {
-      const result = await spawnWithTimeout(
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) throw new Error(`devin ${label} prompt deadline expired`);
+      const result = await runCliProcess(
         DEVIN_CLI_BIN,
         buildDevinCliArgs(model, promptFile, configFile),
         {
           cwd: workspace,
-          env: { ...devinEnvForHome(home), GIT_OPTIONAL_LOCKS: '0' },
-          timeoutMs,
+          env: { ...devinEnvForHome(root), GIT_OPTIONAL_LOCKS: '0' },
+          timeoutMs: remainingMs,
           timeoutMessage: `devin ${label} prompt timed out after ${Math.round(timeoutMs / 1000)}s`,
         },
       );
@@ -137,6 +144,11 @@ async function runDevinPrompt(
         throw new Error(`devin ${label} returned setup output instead of a prompt response.`);
       }
       if (result.exitCode !== 0) {
+        const errorOutput = stripVTControlCharacters(result.stderr || result.stdout);
+        if (attempt === 0 && /Unknown model: '[^'\r\n]+'\r?\nAvailable:\s*$/.test(errorOutput)) {
+          log(`${label} devin returned an empty model catalog; retrying startup once.`);
+          continue;
+        }
         throw new Error(
           `devin ${label} exited ${result.exitCode}: ${truncateForLog(
             result.stderr || result.stdout,
@@ -168,146 +180,152 @@ export function devinEnvForHome(home: string): NodeJS.ProcessEnv {
   return env;
 }
 
-export function createDevinCliBackend(workspace: string, home: string): ReviewBackend {
-  const configFile = join(home, 'config.json');
-  writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home)), { mode: 0o600 });
+export function createDevinCliBackend(
+  workspace: string,
+  home: string,
+): ReviewBackend & { stop(): Promise<void> } {
+  const processes = createCliProcessScope();
   return {
     name: DEVIN_PROVIDER_ID,
+    stop: processes.stop,
+    abortSessionsByLabel: (label) => processes.abort(label),
     observability: DEVIN_CLI_TELEMETRY_CAPABILITY,
     async runReview(model, prContext, guidelines, log, options = {}) {
       const label = options.label ?? 'review';
-      const prompt = assembleReviewPrompt(
-        prContext,
-        guidelines,
-        options.lensAddendum ?? '',
-        options.evidenceQuotes ?? false,
-        options.embeddedFirstPrompt ?? false,
-      );
-      log(
-        `Prompt assembled (${label}, devin-cli): ${prompt.length} chars, guidelines=${!!guidelines}`,
-      );
-      const raw = await runDevinPrompt(
-        workspace,
-        home,
-        configFile,
-        model,
-        prompt,
-        label,
-        log,
-        options.timeoutMs,
-      );
-      // Two recoveries, one attempt each, mirroring the ACP runner: a
-      // delimiter-free reply is an abandoned turn (glm-5.2 announces a plan
-      // and stops; the reformat prompt then returns an empty review), so it
-      // gets a continuation re-carrying the prompt; a malformed attempt gets
-      // the reformat repair. Spawns are one-shot, so both re-carry.
-      const repair = async (invalid: string, parseError: string): Promise<ReviewResult> => {
+      return processes.run(label, async () => {
+        const prompt = assembleReviewPrompt(
+          prContext,
+          guidelines,
+          options.lensAddendum ?? '',
+          options.evidenceQuotes ?? false,
+          options.embeddedFirstPrompt ?? false,
+        );
         log(
-          `${label} response unparseable; sending one JSON repair prompt via devin: ${parseError}`,
+          `Prompt assembled (${label}, devin-cli): ${prompt.length} chars, guidelines=${!!guidelines}`,
         );
-        const repaired = await runDevinPrompt(
+        const raw = await runDevinPrompt(
           workspace,
           home,
-          configFile,
           model,
-          buildJsonRepairFollowupPrompt({
-            originalPrompt: prompt,
-            invalidResponse: invalid,
-            parseError,
-            promptBudgetBytes: DEVIN_REPAIR_PROMPT_BUDGET_BYTES,
-            responseBudgetBytes: DEVIN_REPAIR_RESPONSE_BUDGET_BYTES,
-          }),
-          `${label}-repair`,
+          prompt,
+          label,
           log,
           options.timeoutMs,
         );
-        return parseReview(repaired, `${label}-repair`, log, { strict: true });
-      };
-      if (isNoAttemptReply(raw)) {
-        log(`${label} ended its turn without attempting the task; sending one continuation prompt`);
-        const continued = await runDevinPrompt(
-          workspace,
-          home,
-          configFile,
-          model,
-          buildContinuationFollowupPrompt({
-            originalPrompt: prompt,
-            previousResponse: raw,
-            promptBudgetBytes: DEVIN_REPAIR_PROMPT_BUDGET_BYTES,
-            responseBudgetBytes: DEVIN_REPAIR_RESPONSE_BUDGET_BYTES,
-          }),
-          `${label}-continue`,
-          log,
-          options.timeoutMs,
-        );
-        if (isNoAttemptReply(continued)) {
-          throw new Error(
-            `${label}: the agent twice ended its turn without attempting the task (an announcement, then again after an explicit continuation). This model/CLI pairing appears unable to complete a session of this size in one turn — try more shards (review-shards: 0 for auto) or a different model/backend.`,
+        // A delimiter-free reply can be an abandoned turn, not JSON to repair.
+        // Both recovery launches are fresh sessions, so re-carry the prompt.
+        const repair = async (invalid: string, parseError: string): Promise<ReviewResult> => {
+          log(
+            `${label} response unparseable; sending one JSON repair prompt via devin: ${parseError}`,
           );
+          const repaired = await runDevinPrompt(
+            workspace,
+            home,
+            model,
+            buildJsonRepairFollowupPrompt({
+              originalPrompt: prompt,
+              invalidResponse: invalid,
+              parseError,
+              promptBudgetBytes: DEVIN_REPAIR_PROMPT_BUDGET_BYTES,
+              responseBudgetBytes: DEVIN_REPAIR_RESPONSE_BUDGET_BYTES,
+            }),
+            `${label}-repair`,
+            log,
+            options.timeoutMs,
+          );
+          return parseReview(repaired, `${label}-repair`, log, { strict: true });
+        };
+        if (isNoAttemptReply(raw)) {
+          log(
+            `${label} ended its turn without attempting the task; sending one continuation prompt`,
+          );
+          const continued = await runDevinPrompt(
+            workspace,
+            home,
+            model,
+            buildContinuationFollowupPrompt({
+              originalPrompt: prompt,
+              previousResponse: raw,
+              promptBudgetBytes: DEVIN_REPAIR_PROMPT_BUDGET_BYTES,
+              responseBudgetBytes: DEVIN_REPAIR_RESPONSE_BUDGET_BYTES,
+            }),
+            `${label}-continue`,
+            log,
+            options.timeoutMs,
+          );
+          if (isNoAttemptReply(continued)) {
+            throw new Error(
+              `${label}: the agent twice ended its turn without attempting the task (an announcement, then again after an explicit continuation). This model/CLI pairing appears unable to complete a session of this size in one turn — try more shards (review-shards: 0 for auto) or a different model/backend.`,
+            );
+          }
+          try {
+            return parseReview(continued, `${label}-continue`, log, { strict: true });
+          } catch (error) {
+            return repair(continued, error instanceof Error ? error.message : String(error));
+          }
         }
         try {
-          return parseReview(continued, `${label}-continue`, log, { strict: true });
+          return parseReview(raw, label, log, { strict: true });
         } catch (error) {
-          return repair(continued, error instanceof Error ? error.message : String(error));
+          return repair(raw, error instanceof Error ? error.message : String(error));
         }
-      }
-      try {
-        return parseReview(raw, label, log, { strict: true });
-      } catch (error) {
-        return repair(raw, error instanceof Error ? error.message : String(error));
-      }
+      });
     },
     async runAddressedPriorCommentsCheck(model, prContext, log, timeoutMs) {
-      const raw = await runDevinPrompt(
-        workspace,
-        home,
-        configFile,
-        model,
-        assembleAddressedPriorCommentsPrompt(prContext),
-        'addressed-prior-comments',
-        log,
-        timeoutMs,
-      );
-      return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
+      return processes.run('addressed-prior-comments', async () => {
+        const raw = await runDevinPrompt(
+          workspace,
+          home,
+          model,
+          assembleAddressedPriorCommentsPrompt(prContext),
+          'addressed-prior-comments',
+          log,
+          timeoutMs,
+        );
+        return parseReview(raw, 'addressed-prior-comments', log).addressedPriorComments;
+      });
     },
     async runGuidelineComplianceCheck(model, prContext, guidelines, log, timeoutMs) {
-      const raw = await runDevinPrompt(
-        workspace,
-        home,
-        configFile,
-        model,
-        assembleGuidelineCompliancePrompt(prContext, guidelines),
-        'guideline-compliance',
-        log,
-        timeoutMs,
-      );
-      return parseReview(raw, 'guideline-compliance', log).findings;
+      return processes.run('guideline-compliance', async () => {
+        const raw = await runDevinPrompt(
+          workspace,
+          home,
+          model,
+          assembleGuidelineCompliancePrompt(prContext, guidelines),
+          'guideline-compliance',
+          log,
+          timeoutMs,
+        );
+        return parseReview(raw, 'guideline-compliance', log).findings;
+      });
     },
     async runFindingVerification(model, prContext, findings, log, timeoutMs) {
-      const raw = await runDevinPrompt(
-        workspace,
-        home,
-        configFile,
-        model,
-        assembleFindingVerificationPrompt(prContext, findings),
-        'finding-verification',
-        log,
-        timeoutMs,
-      );
-      return parseFindingVerdicts(raw, findings.length, log);
+      return processes.run('finding-verification', async () => {
+        const raw = await runDevinPrompt(
+          workspace,
+          home,
+          model,
+          assembleFindingVerificationPrompt(prContext, findings),
+          'finding-verification',
+          log,
+          timeoutMs,
+        );
+        return parseFindingVerdicts(raw, findings.length, log);
+      });
     },
     async runChangesSinceLastReview(model, deltaContext, log, timeoutMs) {
-      const raw = await runDevinPrompt(
-        workspace,
-        home,
-        configFile,
-        model,
-        assembleChangesSinceLastReviewPrompt(deltaContext),
-        'changes-since-last-review',
-        log,
-        timeoutMs,
-      );
-      return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
+      return processes.run('changes-since-last-review', async () => {
+        const raw = await runDevinPrompt(
+          workspace,
+          home,
+          model,
+          assembleChangesSinceLastReviewPrompt(deltaContext),
+          'changes-since-last-review',
+          log,
+          timeoutMs,
+        );
+        return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
+      });
     },
   };
 }

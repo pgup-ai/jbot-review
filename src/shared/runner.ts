@@ -10,7 +10,7 @@ import {
   computeAuxiliaryGraceMs,
   AUXILIARY_SETTLE_GRACE_MS,
 } from './time-budget.ts';
-import { createCommandCodeProcessScope } from './commandcode-process.ts';
+import { createCliProcessScope } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
 
@@ -453,7 +453,7 @@ function createCommandCodeBackend(
   runtime: CommandCodeRuntime,
   effortFor: (model: string, override?: Record<string, unknown>) => string | undefined,
 ): ReviewBackend & { stop(): Promise<void> } {
-  const processes = createCommandCodeProcessScope();
+  const processes = createCliProcessScope();
   return {
     name: COMMANDCODE_PROVIDER_ID,
     supportsGuidelineSweep: true,
@@ -1686,7 +1686,7 @@ async function runReviewPipeline(params: {
   // With a gateway configured, these providers run on a remote companion's
   // agent instead of a local CLI — so their local setup (credentials, temp
   // homes) is skipped entirely.
-  let devinBackend: ReviewBackend | undefined;
+  let devinBackend: ReturnType<typeof createDevinCliBackend> | undefined;
   let commandCodeBackend: ReturnType<typeof createCommandCodeBackend> | undefined;
   let cursorBackend: ReviewBackend | undefined;
   let codexBackend: ReviewBackend | undefined;
@@ -1791,7 +1791,6 @@ async function runReviewPipeline(params: {
     }
     log(`Devin CLI credentials configured at ${credentialsPath}.`);
     log('Devin CLI token usage is unavailable for these sessions.');
-    serializedBackends.set(devinBackend, new Semaphore(1));
   }
 
   if (
@@ -3090,7 +3089,7 @@ async function runReviewPipeline(params: {
     let teardownCompleted = false;
     try {
       stop();
-      await commandCodeBackend?.stop();
+      await Promise.all([commandCodeBackend?.stop(), devinBackend?.stop()]);
       cleanupCliHomes();
       teardownCompleted = true;
     } finally {

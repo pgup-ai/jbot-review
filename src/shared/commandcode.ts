@@ -34,7 +34,7 @@ import {
   type TokenUsageRecorder,
 } from './opencode.ts';
 import { truncateForLog } from '@symma/protocol';
-import { runCommandCodeProcess } from './commandcode-process.ts';
+import { runCliProcess } from './cli-process.ts';
 import { clampReasoningEffort } from './config.ts';
 import { isFiniteNumber, isNonArrayRecord, isRecord } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
@@ -649,7 +649,7 @@ async function runCommandCodePrompt(
   }, 60_000);
   heartbeat.unref();
   try {
-    const result = await runCommandCodeProcess(COMMANDCODE_CLI_BIN, args, {
+    const result = await runCliProcess(COMMANDCODE_CLI_BIN, args, {
       cwd: runtime ? join(runtime.home, 'launch') : workspace,
       input,
       env: {
