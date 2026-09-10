@@ -226,17 +226,29 @@ else {
   });
 
   it('retries an empty model catalog once but preserves an unsupported-model error', async () => {
-    for (const [available, recovers] of [
-      ['', true],
-      ['', false],
-      ['swe-1', false],
+    for (const [available, recovers, acp] of [
+      ['', true, false],
+      ['', false, false],
+      ['swe-1', false, false],
+      ['', true, true],
+      ['', false, true],
+      ['swe-1', false, true],
     ] as const) {
+      const error = acp
+        ? 'Error: session/set_config_option (model) failed: Resource not found: ' +
+          JSON.stringify(
+            { uri: 'Model not found: swe-2-high. Available models: ' + available },
+            null,
+            2,
+          )
+        : "Error: Unknown model: 'swe-2'\nAvailable: " + available + '\n';
       const fake = fakeDevin(`
 const attempt = fs.existsSync(stamp) ? Number(fs.readFileSync(stamp, 'utf8')) + 1 : 1;
 fs.writeFileSync(stamp, String(attempt));
-if (${recovers} && attempt > 1) process.stdout.write('{"summary":"recovered","findings":[]}');
+if (${acp && recovers} && attempt === 1) process.stdout.write('');
+else if (${recovers} && attempt > ${acp ? 2 : 1}) process.stdout.write('{"summary":"recovered","findings":[]}');
 else {
-  process.stderr.write("Error: Unknown model: 'swe-2'\\nAvailable: " + ${JSON.stringify(available)} + "\\n");
+  process.stderr.write(${JSON.stringify(error)});
   process.exitCode = 1;
 }
 `);
@@ -245,8 +257,11 @@ else {
           timeoutMs: 3000,
         });
         if (recovers) assert.equal((await review).summary, 'recovered');
-        else await assert.rejects(review, /Unknown model/);
-        assert.equal(readFileSync(join(fake.root, 'onboarded'), 'utf8'), available ? '1' : '2');
+        else await assert.rejects(review, /Unknown model|Model not found/);
+        assert.equal(
+          readFileSync(join(fake.root, 'onboarded'), 'utf8'),
+          acp && recovers ? '3' : available ? '1' : '2',
+        );
         assert.equal(
           fake.logs.some((line) => line.includes('empty model catalog')),
           !available,

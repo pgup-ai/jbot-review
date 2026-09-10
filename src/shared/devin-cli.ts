@@ -143,7 +143,12 @@ async function runDevinPrompt(
       }
       if (result.exitCode !== 0) {
         const errorOutput = stripVTControlCharacters(result.stderr || result.stdout);
-        if (attempt === 0 && /Unknown model: '[^'\r\n]+'\r?\nAvailable:\s*$/.test(errorOutput)) {
+        const emptyCatalog =
+          /Unknown model: '[^'\r\n]+'\r?\nAvailable:\s*$/.test(errorOutput) ||
+          /session\/set_config_option \(model\) failed: Resource not found:\s*\{\s*"uri":\s*"Model not found: [^"\r\n]+\. Available models:\s*"\s*\}\s*$/.test(
+            errorOutput,
+          );
+        if (attempt === 0 && emptyCatalog) {
           log(`${label} devin returned an empty model catalog; retrying startup once.`);
           continue;
         }

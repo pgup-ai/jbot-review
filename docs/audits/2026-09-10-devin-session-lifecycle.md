@@ -230,3 +230,20 @@ this regression; the existing deadline test remains deterministic and restores
 its clock override. Full-suite totals are reported only in the PR update to avoid
 conflicting counts as coverage grows. No model prompts or defaults changed in
 this follow-up; the previously documented corpus gate remains pending.
+
+## Current Devin catalog error format
+
+Devin 3000.10.21 can report an empty catalog through
+`session/set_config_option (model) failed: Resource not found`, with a JSON
+`uri` containing `Model not found: swe-2-high. Available models: `.
+The startup retry now recognizes this form as well as the older `Unknown model`
+message. Both require an empty available-model list, retry only once, and use
+the remaining invocation deadline. Nonempty catalogs still fail immediately.
+
+The existing regression now covers both formats, repeated empty catalogs, real
+unsupported models, and the observed empty-main → continuation-error → recovered
+result sequence. Three concurrent live `devin/swe-2` probes on the pinned CLI
+correctly read distinct random file contents in 6.8, 7.1, and 6.1 seconds.
+These smoke tests did not reproduce the transient error and do not establish
+full-review reliability or explain the original empty response. No fresh full
+review or adjudicated corpus was run for this classification fix.
