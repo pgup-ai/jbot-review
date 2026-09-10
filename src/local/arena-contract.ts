@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { renameSync, rmSync, writeFileSync } from 'node:fs';
 
+import { resolveModelSelection } from '../shared/model.ts';
 import { isNonArrayRecord as isRecord } from '../shared/text.ts';
 import {
   VALID_CONFIDENCES,
@@ -434,6 +435,20 @@ export function selectArenaModel(
     throw new Error(`Selected model "${selectedModels[0]}" is not present in comparison.models.`);
   }
   return selected;
+}
+
+export function resolveArenaModelSelection(
+  manifest: ComparisonManifestV1,
+  requested: string | undefined,
+): string[] {
+  const selected = selectArenaModel(
+    manifest,
+    (requested ?? '')
+      .split(',')
+      .map((model) => model.trim())
+      .filter(Boolean),
+  );
+  return resolveModelSelection(selected.model);
 }
 
 export function emptyArenaUsage(): ArenaUsageV1 {
