@@ -375,6 +375,7 @@ describe('REVIEW_LENSES', () => {
     assert.match(withTools, /Batch independent searches/);
     assert.doesNotMatch(noTools, /targeted reads|Batch independent searches|file reads/);
     assert.match(noTools, /No repository reads are available/);
+    assert.match(noTools, /read, follow, or inspect[\s\S]*embedded\s+evidence/);
     assert.match(noTools, /"investigate"/);
     assert.ok(noTools.trimEnd().endsWith(REVIEW_OUTPUT_REMINDER.trimEnd()));
     assert.equal(

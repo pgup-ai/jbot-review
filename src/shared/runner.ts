@@ -1373,7 +1373,7 @@ async function runReviewPipeline(params: {
     auxModel,
     auxProviderID,
     auxModelID,
-    servedByOpencode: (id) => (id === providerID ? mainOnOpencode : auxOnOpencode),
+    servedByOpencode: (role) => (role === 'main' ? mainOnOpencode : auxOnOpencode),
   });
   if (promptCachePolicy.disabledPromptCacheModels.length > 0) {
     log(
@@ -1613,7 +1613,6 @@ async function runReviewPipeline(params: {
       : diffHunksBlock;
   const auxPrContext = joinContext(coreContext, auxDiffBlockText);
   const lensContextBlocks = [
-    UNTRUSTED_PR_CONTENT_NOTE,
     buildReviewScopeContext({
       pullTitle,
       pullBody,
@@ -1624,9 +1623,10 @@ async function runReviewPipeline(params: {
     blastRadiusBlock,
     LENS_CONTEXT_NOTE,
   ];
+  // The trust boundary leads either way; the shared-prefix arm moves only the diff.
   const lensPrContext = options.sharedPrefixPrompt
-    ? joinContext(auxDiffBlockText, ...lensContextBlocks)
-    : joinContext(...lensContextBlocks, auxDiffBlockText);
+    ? joinContext(UNTRUSTED_PR_CONTENT_NOTE, auxDiffBlockText, ...lensContextBlocks)
+    : joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks, auxDiffBlockText);
   // TASK-065 arm (JBOT_VERIFIER_SLIM_CONTEXT): the verifier judges a handful
   // of findings against the diff; the finder supplements around it are pure
   // prefill. Same diff block as the aux path, so a slim verifier never judges
@@ -2669,11 +2669,18 @@ async function runReviewPipeline(params: {
     // made, so awaiting them one by one would give the group N graces of tail
     // rather than one. Each falls back to its own empty result — the same value
     // these sessions produce when they fail open on their own.
+    // Staggered lenses launch after auxLaunchedAt; the runway counts from the
+    // last scheduled launch so the stagger never eats into it.
+    const auxRunwayStartedAt =
+      auxLaunchedAt +
+      (options.sharedPrefixPrompt && candidateLensKeys.length > 0
+        ? sharedPrefixLaunchDelayMs(candidateLensKeys.length - 1, auxModel === model)
+        : 0);
     const auxiliaryGraceMs = computeAuxiliaryGraceMs(
       options.timeBudgetMinutes,
       Date.now() - runStartedAt,
       verificationEnabled,
-      Date.now() - auxLaunchedAt,
+      Date.now() - auxRunwayStartedAt,
     );
     const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
     const abandonAuxSession = (label: string) => () => {
@@ -3624,6 +3631,11 @@ export function buildShardPlans(params: {
     diffHunksOptions,
     diffFirst = false,
   } = params;
+  // The runner heads coreContext with the trust boundary; diff-first moves only
+  // the blocks behind it, so author-controlled text never precedes the guard.
+  const [boundary, coreBody] = coreContext.startsWith(UNTRUSTED_PR_CONTENT_NOTE)
+    ? [UNTRUSTED_PR_CONTENT_NOTE, coreContext.slice(UNTRUSTED_PR_CONTENT_NOTE.length).trimStart()]
+    : ['', coreContext];
   if (shards.length <= 1) {
     const diffResult = requireCompleteEmbeddedDiff
       ? buildDiffHunksBlockWithMetadata(shards[0] ?? [], diffHunksOptions)
@@ -3633,7 +3645,7 @@ export function buildShardPlans(params: {
     }
     const diffText = diffResult?.text ?? fullDiffBlock;
     const baseContext = diffFirst
-      ? joinContext(diffText, coreContext)
+      ? joinContext(boundary, diffText, coreBody)
       : joinContext(coreContext, diffText);
     return [
       {
@@ -3659,10 +3671,10 @@ export function buildShardPlans(params: {
     return {
       label: `review-shard-${index + 1}`,
       context: diffFirst
-        ? joinContext(diffResult.text, coreContext, context7Block, assignment)
+        ? joinContext(boundary, diffResult.text, coreBody, context7Block, assignment)
         : joinContext(coreContext, context7Block, assignment, diffResult.text),
       baseContext: diffFirst
-        ? joinContext(diffResult.text, coreContext, assignment)
+        ? joinContext(boundary, diffResult.text, coreBody, assignment)
         : joinContext(coreContext, assignment, diffResult.text),
       assignedFiles,
     };

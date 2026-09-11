@@ -350,10 +350,15 @@ No repository reads are available in this pass. Review every changed hunk in
 the embedded diff and the changed-symbol usage block, and establish expected
 behavior from PR intent and the retained guidelines. When a lens question
 depends on code outside the embedded evidence, report an "investigate" advisory
-that names the file or symbol to check instead of asserting the premise. Do not
-describe reads or commands you did not run.`;
+that names the file or symbol to check instead of asserting the premise. Where
+the lens below says to read, follow, or inspect code, apply it to the embedded
+evidence only. Do not describe reads or commands you did not run.`;
 
 function buildLensReviewPrompt(embeddedFirstPrompt: boolean, toolsAvailable: boolean): string {
+  const missingCodeNote = toolsAvailable
+    ? `Repository reads are available only when
+tools are enabled; missing code is not evidence of missing behavior.`
+    : `Missing code is not evidence of missing behavior.`;
   return `You are performing a focused recall pass alongside a separate general PR review.
 Investigate the failure classes in the review lens below across the COMPLETE
 base...head diff, including earlier commits and changes already reviewed.
@@ -362,11 +367,7 @@ Return findings within this lens's responsibility. Do not start a general bug,
 style, architecture, guideline-compliance, or other lens's investigation.
 
 Use PR intent, linked issues, relevant repository guidelines, and changed-symbol
-usage to establish expected behavior. ${
-    toolsAvailable
-      ? 'Repository reads are available only when\ntools are enabled; missing'
-      : 'Missing'
-  } code is not evidence of missing behavior. This is a
+usage to establish expected behavior. ${missingCodeNote} This is a
 read-only review. Do not modify files. Prior-comment suppression and thread
 resolution are handled separately.
 ${

@@ -56,10 +56,11 @@ Cline 33/33).
 
 ## How the deadlines actually work
 
-Every auxiliary session is submitted in the same second as the main shard and
-inherits the finder timeout (1470 s at the 30-minute budget). But when the main
-pass finishes, `computeAuxiliaryGraceMs` starts a settle grace of
-`min(300 s, budget − elapsed − 30 s − 300 s)`; at these run lengths that is
+At the time of this audit (before the change on this branch), every auxiliary
+session was submitted in the same second as the main shard and inherited the
+finder timeout (1470 s at the 30-minute budget). But when the main pass
+finished, `computeAuxiliaryGraceMs` started a settle grace of
+`min(300 s, budget − elapsed − 30 s − 300 s)`; at these run lengths that was
 always 300 s. Anything still running is abandoned and aborted by label. So the
 effective auxiliary deadline is **main duration + 300 s**, independent of the
 auxiliary route's own speed and of the 24 minutes of budget still unused.

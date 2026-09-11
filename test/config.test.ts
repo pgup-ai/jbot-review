@@ -573,7 +573,7 @@ describe('resolvePoolCredentials', () => {
 });
 
 describe('resolvePromptCachePolicy', () => {
-  it('reports a disabled cache only for models the opencode server actually serves', () => {
+  it('scopes the cache diagnostics to the roles the opencode server actually serves', () => {
     const input = {
       promptCache: true,
       mainModel: 'commandcode/meta/muse-spark-1.3-contributor',
@@ -588,11 +588,28 @@ describe('resolvePromptCachePolicy', () => {
     ]);
     // The CLI talks to its own gateway; opencode's promptCacheKey never reaches it.
     assert.deepEqual(
-      resolvePromptCachePolicy({
-        ...input,
-        servedByOpencode: (providerID) => providerID !== 'commandcode',
-      }).disabledPromptCacheModels,
+      resolvePromptCachePolicy({ ...input, servedByOpencode: (role) => role !== 'main' })
+        .disabledPromptCacheModels,
       [],
     );
+    // Same provider, but the aux model runs elsewhere (pi): the server still
+    // caches for main, and nothing is disabled for the provider on aux's behalf.
+    const split = {
+      promptCache: true,
+      mainModel: 'opencode/big-pickle',
+      mainProviderID: 'opencode',
+      mainModelID: 'big-pickle',
+      auxModel: 'opencode/glm-5.2',
+      auxProviderID: 'opencode',
+      auxModelID: 'glm-5.2',
+    };
+    assert.equal(resolvePromptCachePolicy(split).sharedProviderCacheDisabled, true);
+    const auxOnPi = resolvePromptCachePolicy({
+      ...split,
+      servedByOpencode: (role) => role === 'main',
+    });
+    assert.equal(auxOnPi.providerPromptCache, true);
+    assert.equal(auxOnPi.sharedProviderCacheDisabled, false);
+    assert.deepEqual(auxOnPi.disabledPromptCacheModels, []);
   });
 });

@@ -35,6 +35,7 @@ import { buildDiffHunksBlockWithMetadata } from '../src/shared/diff-context.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import type { Octokit, PrFile } from '../src/shared/github.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
+import { UNTRUSTED_PR_CONTENT_NOTE } from '../src/shared/prompt.ts';
 import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
 import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
 import { completedReviewHead } from '../src/shared/github.ts';
@@ -91,17 +92,33 @@ describe('buildShardPlans cache-stable prefix', () => {
 
   it('leads every shard with the diff block under the shared-prefix arm', () => {
     const base = {
-      coreContext: '## Pull request\nCORE',
+      coreContext: `${UNTRUSTED_PR_CONTENT_NOTE}\n\n## Pull request\nCORE`,
       fullDiffBlock: '## Diff hunks\nFULL_DIFF',
       context7Block: '## Context7 docs\nC7',
+    };
+    // The trust boundary the runner put at the head of the core context stays
+    // first and is stated once; only the blocks behind it move behind the diff.
+    const order = (text: string) => [
+      text.indexOf(UNTRUSTED_PR_CONTENT_NOTE),
+      text.indexOf('## Diff hunks'),
+      text.indexOf('CORE'),
+    ];
+    const assertBoundaryThenDiff = (text: string, label: string) => {
+      assert.ok(text.startsWith(UNTRUSTED_PR_CONTENT_NOTE), label);
+      assert.equal(text.split(UNTRUSTED_PR_CONTENT_NOTE).length, 2, label);
+      assert.deepEqual(
+        [...order(text)].sort((a, b) => a - b),
+        order(text),
+        label,
+      );
     };
     const single = buildShardPlans({
       ...base,
       shards: [[{ filename: 'src/a.ts' }]],
       diffFirst: true,
     });
-    assert.ok(single[0].context.startsWith(base.fullDiffBlock));
-    assert.ok(single[0].baseContext.startsWith(base.fullDiffBlock));
+    assertBoundaryThenDiff(single[0].context, 'single context');
+    assertBoundaryThenDiff(single[0].baseContext, 'single base');
     assert.ok(single[0].context.indexOf('CORE') < single[0].context.indexOf('C7'));
     const control = buildShardPlans({ ...base, shards: [[{ filename: 'src/a.ts' }]] });
     assert.ok(control[0].context.startsWith(base.coreContext));
@@ -115,8 +132,8 @@ describe('buildShardPlans cache-stable prefix', () => {
       diffFirst: true,
     });
     for (const plan of sharded) {
-      assert.ok(plan.context.startsWith('## Diff hunks'), plan.label);
-      assert.ok(plan.baseContext.startsWith('## Diff hunks'), plan.label);
+      assertBoundaryThenDiff(plan.context, plan.label);
+      assertBoundaryThenDiff(plan.baseContext, plan.label);
     }
   });
 

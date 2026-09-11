@@ -815,7 +815,7 @@ describe('formatFinderGuidelines', () => {
     // pass's job, and the lens is told not to audit them.
     const lensSlice = selectFinderGuidelineText({ ...embeddedOnly, lens: true });
     assert.match(lensSlice, /DOMAIN_RULE/);
-    assert.ok(Buffer.byteLength(lensSlice, 'utf8') <= MAX_LENS_GUIDELINE_BYTES + 256);
+    assert.ok(Buffer.byteLength(lensSlice, 'utf8') <= MAX_LENS_GUIDELINE_BYTES);
     const missing = selectFinderGuidelineText({
       discovered: { ...large, referenced: ['docs/missing.md'] },
       forFiles: ['index.ts'],
