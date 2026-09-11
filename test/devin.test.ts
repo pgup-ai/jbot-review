@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   statSync,
   rmSync,
@@ -136,8 +137,15 @@ describe('Devin CLI provider helpers', () => {
       process.env.XDG_DATA_HOME = '/tmp/ambient-data';
       process.env.XDG_CACHE_HOME = '/tmp/ambient-cache';
       process.env.XDG_RUNTIME_DIR = '/tmp/ambient-runtime';
+      process.env.GIT_CONFIG_GLOBAL = '/tmp/ambient-gitconfig';
+      process.env.GIT_CONFIG_COUNT = '1';
+      process.env.GIT_DIR = '/tmp/elsewhere/.git';
       const env = devinEnvForHome('/tmp/devin-home');
       assert.equal(env.HOME, '/tmp/devin-home');
+      assert.equal(env.GIT_CONFIG_GLOBAL, '/tmp/devin-home/.gitconfig');
+      assert.equal(env.GIT_CONFIG_NOSYSTEM, '1');
+      assert.equal(env.GIT_CONFIG_COUNT, undefined);
+      assert.equal(env.GIT_DIR, undefined);
       assert.equal(env.DEVIN_TEST_TOKEN, undefined);
       assert.equal(env.INPUT_DEVIN_TEST, undefined);
       assert.equal(env.DEVIN_TEST_SAFE, 'kept');
@@ -153,7 +161,8 @@ describe('Devin CLI provider helpers', () => {
   function fakeDevin(script: string) {
     const root = mkdtempSync(join(tmpdir(), 'jbot-devin-test-'));
     const home = join(root, 'home');
-    const workspace = join(root, 'workspace');
+    // Git-config-sensitive characters: the safe.directory entry must survive them.
+    const workspace = join(root, 'ws #1;"\\x');
     const previousPath = process.env.PATH!;
     mkdirSync(home);
     writeDevinCredentials('test-key', home);
@@ -178,6 +187,7 @@ ${script}
     return {
       root,
       home,
+      workspace,
       backend,
       logs,
       log: (message: string) => logs.push(message),
@@ -326,6 +336,13 @@ setInterval(() => {}, 1000);
         assert.equal(dirname(session.home), fake.home);
         const config = JSON.parse(readFileSync(join(session.home, 'config.json'), 'utf8'));
         assert.ok(config.permissions.deny.includes(`Read(${fake.home}/**)`));
+        assert.equal(
+          execFileSync('git', ['config', '--get', 'safe.directory'], {
+            env: devinEnvForHome(session.home),
+            encoding: 'utf8',
+          }).trim(),
+          fake.workspace,
+        );
         assert.equal(statSync(devinCredentialsPath(session.home)).mode & 0o777, 0o600);
         assert.equal(
           readFileSync(devinCredentialsPath(session.home), 'utf8'),
@@ -347,6 +364,81 @@ setInterval(() => {}, 1000);
       await fake.backend.stop();
       await Promise.allSettled([lensRejected, mainRejected]);
       await fake.restore();
+    }
+  });
+
+  it('relaunches once and surfaces the CLI log when Devin exits 0 without output', async () => {
+    for (const [logLines, stderr, expected, exitCode, stdout] of [
+      [
+        [
+          'INFO chisel: CLI init complete',
+          'ERROR handoff: session/new failed: 429 Too Many Requests',
+        ],
+        '',
+        /exited 0 with no output[\s\S]*429 Too Many Requests/,
+      ],
+      [
+        ['INFO chisel: CLI init complete', 'INFO repl_mode: close time.idle=21s'],
+        '',
+        /close time\.idle=21s/,
+      ],
+      [
+        [],
+        'warning: bridge closed',
+        /exited 0 with no output[\s\S]*stderr: warning: bridge closed/,
+      ],
+      [
+        ['INFO chisel: CLI init complete', 'ERROR bridge: handshake failed'],
+        '',
+        /exited 3: [\s\S]*handshake failed/,
+        3,
+      ],
+      [
+        ['ERROR bridge: handshake failed'],
+        '',
+        /exited 3: partial[\s\S]*handshake failed/,
+        3,
+        'partial'.padEnd(1200, 'x'),
+      ],
+    ] as const) {
+      const fake = fakeDevin(`
+fs.appendFileSync(stamp, 'launch\\n');
+const logs = process.env.HOME + '/.local/share/devin/cli/logs';
+fs.mkdirSync(logs, { recursive: true });
+fs.writeFileSync(logs + '/devin_20260911-000000_1.log', ${JSON.stringify(logLines.map((line) => `2026-09-11T00:00:00Z  ${line}`).join('\n'))});
+process.stdout.write(${JSON.stringify(stdout ?? '')});
+process.stderr.write(${JSON.stringify(stderr)});
+process.exitCode = ${exitCode ?? 0};
+`);
+      try {
+        await assert.rejects(
+          fake.backend.runReview('devin/default', 'context', '', fake.log, { timeoutMs: 5000 }),
+          expected,
+        );
+        await assert.rejects(
+          fake.backend.runGuidelineComplianceCheck('devin/default', 'context', '', fake.log, 5000),
+          expected,
+        );
+        // A nonzero exit is final; only a silent exit 0 earns the relaunch.
+        assert.equal(
+          readFileSync(join(fake.root, 'onboarded'), 'utf8'),
+          'launch\n'.repeat(exitCode ? 2 : 4),
+        );
+        assert.equal(
+          fake.logs.filter((line) => line.includes('no output; retrying once')).length,
+          exitCode ? 0 : 2,
+        );
+        assert.equal(
+          fake.logs.some((line) => line.includes('continuation')),
+          false,
+        );
+        assert.deepEqual(
+          readdirSync(fake.home).filter((entry) => entry.startsWith('session-')),
+          [],
+        );
+      } finally {
+        await fake.restore();
+      }
     }
   });
 
@@ -438,7 +530,7 @@ setInterval(() => {}, 1000);
 import { rmSync } from 'node:fs';
 import { createDevinCliBackend } from ${JSON.stringify(new URL('../src/shared/devin-cli.ts', import.meta.url).href)};
 import { onCliFatalSignal } from ${JSON.stringify(new URL('../src/shared/cli-process.ts', import.meta.url).href)};
-const backend = createDevinCliBackend(${JSON.stringify(join(fake.root, 'workspace'))}, ${JSON.stringify(fake.home)});
+const backend = createDevinCliBackend(${JSON.stringify(fake.workspace)}, ${JSON.stringify(fake.home)});
 onCliFatalSignal(async () => {
   await backend.stop();
   rmSync(${JSON.stringify(fake.home)}, { recursive: true, force: true });

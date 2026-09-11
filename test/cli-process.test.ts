@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -63,6 +63,133 @@ it('cancels one session and waits for descendant pipes to close without cancelli
     assert.equal(result.stdout.trim(), 'alive');
     assert.equal(scope.abort('lens'), 0);
   } finally {
+    await scope.stop();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+it('settles and releases the pipes once the CLI exits even when an escaped descendant keeps them open', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'jbot-cli-escape-'));
+  const scope = createCliProcessScope();
+  const escape = (pidFile: string) =>
+    `const child = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'inherit' });
+     require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+     child.unref();`;
+  const options = { cwd: workspace, timeoutMs: 1500, timeoutMessage: 'deadline', killGraceMs: 50 };
+  try {
+    // A driver process shows the settled runner no longer holds the event loop open.
+    const exitPid = join(workspace, 'exit-pid');
+    const driver = join(workspace, 'driver.mjs');
+    writeFileSync(
+      driver,
+      `
+import { createCliProcessScope, runCliProcess } from ${JSON.stringify(new URL('../src/shared/cli-process.ts', import.meta.url).href)};
+const result = await createCliProcessScope().run('exit', () =>
+  runCliProcess(process.execPath, ['-e', ${JSON.stringify(`${escape(exitPid)} console.log('done');`)}], ${JSON.stringify(options)}),
+);
+console.log(JSON.stringify(result));
+`,
+    );
+    const started = Date.now();
+    const driven = await promisify(execFile)(process.execPath, ['--import', 'tsx', driver], {
+      timeout: 10000,
+      killSignal: 'SIGKILL',
+    });
+    const result = JSON.parse(driven.stdout);
+    assert.equal(result.stdout.trim(), 'done');
+    assert.equal(result.exitCode, 0);
+    assert.ok(Date.now() - started < 8000);
+
+    // A finished run's deadline must not fire during its post-exit grace.
+    const latePid = join(workspace, 'late-pid');
+    const late = await scope.run('late', () =>
+      runCliProcess(process.execPath, ['-e', `${escape(latePid)} console.log('late');`], {
+        ...options,
+        timeoutMs: 600,
+        killGraceMs: 1200,
+      }),
+    );
+    assert.equal(late.stdout.trim(), 'late');
+
+    const hangPid = join(workspace, 'hang-pid');
+    const hung = Date.now();
+    await assert.rejects(
+      scope.run('hang', () =>
+        runCliProcess(process.execPath, ['-e', `${escape(hangPid)} setInterval(() => {}, 1000);`], {
+          ...options,
+          timeoutMs: 200,
+        }),
+      ),
+      /deadline/,
+    );
+    assert.ok(Date.now() - hung < 1500);
+  } finally {
+    // Escaped children outlive their parents; reap every one that got as far as a pid file.
+    for (const name of readdirSync(workspace).filter((name) => name.endsWith('-pid'))) {
+      try {
+        process.kill(Number(readFileSync(join(workspace, name), 'utf8')), 'SIGKILL');
+      } catch {}
+    }
+    await scope.stop();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+it('reaps in-group descendants left behind by an exited leader, with or without an abort', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'jbot-cli-linger-'));
+  const scope = createCliProcessScope();
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const reaped = async (pid: number) => {
+    const limit = Date.now() + 2000;
+    while (alive(pid) && Date.now() < limit) await delay(10);
+    return !alive(pid);
+  };
+  const pidFile = join(workspace, 'pid');
+  const lingerer = `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`;
+  // The parent exits at once; its in-group child keeps the inherited pipes open.
+  const parent = `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(lingerer)}], { stdio: 'inherit' }).unref(); console.log('done');`;
+  try {
+    const pending = scope.run('linger', () =>
+      runCliProcess(process.execPath, ['-e', parent], {
+        cwd: workspace,
+        timeoutMs: 5000,
+        timeoutMessage: 'deadline',
+        killGraceMs: 1500,
+      }),
+    );
+    const limit = Date.now() + 3000;
+    while (!existsSync(pidFile) && Date.now() < limit) await delay(10);
+    await delay(100);
+    assert.equal(scope.abort('linger'), 1);
+    const result = await pending;
+    assert.equal(result.stdout.trim(), 'done');
+    assert.equal(result.exitCode, 0);
+    // The orphan is reaped by init after the pipes close; allow it that moment.
+    assert.equal(await reaped(Number(readFileSync(pidFile, 'utf8'))), true);
+
+    // With no abort at all, the grace still ends by reaping what the leader left behind.
+    rmSync(pidFile, { force: true });
+    const settled = await scope.run('linger-again', () =>
+      runCliProcess(process.execPath, ['-e', parent], {
+        cwd: workspace,
+        timeoutMs: 5000,
+        timeoutMessage: 'deadline',
+        killGraceMs: 200,
+      }),
+    );
+    assert.equal(settled.stdout.trim(), 'done');
+    assert.equal(await reaped(Number(readFileSync(pidFile, 'utf8'))), true);
+  } finally {
+    try {
+      process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');
+    } catch {}
     await scope.stop();
     rmSync(workspace, { recursive: true, force: true });
   }

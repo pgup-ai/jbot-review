@@ -96,6 +96,7 @@ export function runCliProcess(
     let stdout = '';
     let stderr = '';
     let failure: Error | undefined;
+    let exited = false;
     let treeKill: Promise<void> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     const kill = (value: NodeJS.Signals) => {
@@ -122,6 +123,11 @@ export function runCliProcess(
       }
     };
     const cancel = (error: Error) => {
+      // After exit only lingering descendants remain; reap them, keep the outcome.
+      if (exited) {
+        kill('SIGKILL');
+        return;
+      }
       if (failure) return;
       failure = error;
       kill('SIGTERM');
@@ -148,13 +154,31 @@ export function runCliProcess(
     child.on('error', (error) => {
       failure ??= error;
     });
-    child.on('close', async (exitCode) => {
+    let exitTimer: ReturnType<typeof setTimeout> | undefined;
+    const settle = async (exitCode: number | null) => {
       clearTimeout(timer);
       clearTimeout(killTimer);
+      clearTimeout(exitTimer);
       signal?.removeEventListener('abort', abort);
       await treeKill;
       if (failure) reject(failure);
       else resolve({ stdout, stderr, exitCode });
+    };
+    // A descendant that left the process group (setsid) survives the group kill
+    // and holds the pipes open, so 'close' would never come; settle on exit then.
+    // Exit fixes the outcome: a deadline landing in that grace is moot. Once the
+    // grace is up, nothing a straggler still writes can reach us, so reap the
+    // group and drop our pipe ends, which would otherwise keep the loop alive.
+    child.on('exit', (exitCode) => {
+      exited = true;
+      clearTimeout(timer);
+      exitTimer = setTimeout(() => {
+        kill('SIGKILL');
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        void settle(exitCode);
+      }, options.killGraceMs ?? 2000);
     });
+    child.once('close', settle);
   });
 }

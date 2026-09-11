@@ -1,5 +1,5 @@
 import type { ReviewResult } from './types.ts';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 
@@ -36,6 +36,26 @@ const DEVIN_CLI_TELEMETRY_CAPABILITY = 'opaque' as const;
 const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const DEVIN_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const DEVIN_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
+const DEVIN_CLI_LOG_TAIL_LINES = 12;
+
+/** The CLI and its ACP child each log under the session root. */
+function devinCliLogTail(root: string): string {
+  const dir = join(dirname(devinCredentialsPath(root)), 'cli', 'logs');
+  let lines: string[];
+  try {
+    lines = readdirSync(dir)
+      .filter((name) => name.endsWith('.log'))
+      .sort()
+      .flatMap((name) => readFileSync(join(dir, name), 'utf8').split(/\r?\n/));
+  } catch {
+    return '';
+  }
+  const notable = lines.filter((line) => / (WARN|ERROR) /.test(line));
+  return truncateForLog(
+    (notable.length ? notable : lines.filter(Boolean)).slice(-DEVIN_CLI_LOG_TAIL_LINES).join('\n'),
+    2000,
+  );
+}
 
 function removeDevinSession(dir: string, log: (msg: string) => void): void {
   try {
@@ -119,9 +139,17 @@ async function runDevinPrompt(
     writeFileSync(credentials, readFileSync(devinCredentialsPath(home)), { mode: 0o600 });
     writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home)), { mode: 0o600 });
     writeFileSync(promptFile, prompt, { mode: 0o600 });
+    // The Action's safe.directory entry lives under the process HOME; git run
+    // from this HOME refuses a checkout owned by another uid without its own.
+    // Double-quoted: `#`, `;` and whitespace are literal only inside quotes.
+    const directory = `"${workspace.replace(/[\\"]/g, '\\$&').replace(/\n/g, '\\n')}"`;
+    writeFileSync(join(root, '.gitconfig'), `[safe]\n\tdirectory = ${directory}\n`, {
+      mode: 0o600,
+    });
     log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
     let retriedSetup = false;
     let retriedCatalog = false;
+    let retriedEmpty = false;
     for (;;) {
       const remainingMs = deadlineAt - Date.now();
       if (remainingMs <= 0) throw new Error(`devin ${label} prompt deadline expired`);
@@ -156,18 +184,36 @@ async function runDevinPrompt(
           log(`${label} devin returned an empty model catalog; retrying startup once.`);
           continue;
         }
+        // Truncate the CLI's own output apart from the tail so long output can't hide it.
         throw new Error(
-          `devin ${label} exited ${result.exitCode}: ${truncateForLog(
-            result.stderr || result.stdout,
-            1000,
-          )}`,
+          `devin ${label} exited ${result.exitCode}: ${
+            result.stderr
+              ? truncateForLog(result.stderr, 1000)
+              : [truncateForLog(result.stdout, 1000), devinCliLogTail(root)]
+                  .filter(Boolean)
+                  .join('\n')
+          }`,
         );
       }
       log(
         `${label} prompt complete via devin: stdout=${result.stdout.length} chars stderr=${result.stderr.length} chars`,
       );
-      if (!output.response && result.stderr) {
-        log(`${label} returned empty stdout; stderr: ${truncateForLog(result.stderr, 1000)}`);
+      // Nothing on stdout is a CLI-level failure, not an announced-then-stopped
+      // turn: relaunch the same prompt once instead of sending a continuation.
+      if (!output.response.trim()) {
+        const detail = [
+          result.stderr && `stderr: ${truncateForLog(result.stderr, 1000)}`,
+          devinCliLogTail(root),
+        ]
+          .filter(Boolean)
+          .join('\n');
+        const suffix = detail && `\n${detail}`;
+        if (!retriedEmpty) {
+          retriedEmpty = true;
+          log(`${label} devin exited 0 with no output; retrying once.${suffix}`);
+          continue;
+        }
+        throw new Error(`devin ${label} exited 0 with no output${suffix}`);
       }
       return output.response;
     }
@@ -183,6 +229,11 @@ export function devinEnvForHome(home: string): NodeJS.ProcessEnv {
   delete env.XDG_DATA_HOME;
   delete env.XDG_CACHE_HOME;
   delete env.XDG_RUNTIME_DIR;
+  // Inherited GIT_* overrides (GIT_CONFIG_GLOBAL, GIT_CONFIG_COUNT, GIT_DIR…)
+  // would bypass the session's own gitconfig; pin git to it instead.
+  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
+  env.GIT_CONFIG_NOSYSTEM = '1';
+  env.GIT_CONFIG_GLOBAL = join(home, '.gitconfig');
   return env;
 }
 
