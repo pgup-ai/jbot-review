@@ -1364,8 +1364,10 @@ export function formatFinderGuidelines(
  * it is skipped, only backends that cannot read the checkout still widen to
  * the full set ("no doc seen by zero sessions" is load-bearing only there);
  * tool-capable finders keep the slice with the omitted docs named for
- * on-demand reads. `widen: 'full'` (JBOT_GUIDELINE_WIDEN=full) restores the
- * old widen-everywhere behavior.
+ * on-demand reads. Lenses never widen: the main finder carries the full set
+ * in that case and a lens keeps its `MAX_LENS_GUIDELINE_BYTES` excerpt.
+ * `widen: 'full'` (JBOT_GUIDELINE_WIDEN=full) restores the old
+ * widen-everywhere behavior.
  */
 export function selectFinderGuidelineText(params: {
   discovered: DiscoveredGuidelines;

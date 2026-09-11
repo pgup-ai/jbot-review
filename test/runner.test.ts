@@ -4,6 +4,7 @@ import {
   computeRetryTimeoutMs,
   computeVerificationTimeoutMs,
   computeAuxiliaryGraceMs,
+  computeLensGraceMs,
   sharedPrefixLaunchDelayMs,
   SHARED_PREFIX_STAGGER_MS,
 } from '../src/shared/time-budget.ts';
@@ -90,7 +91,7 @@ describe('buildShardPlans cache-stable prefix', () => {
     assert.doesNotMatch(prefix, /reviewer 2\b/);
   });
 
-  it('leads every shard with the diff block under the shared-prefix arm', () => {
+  it('leads a single-shard review with the diff block and keeps sharded plans on their shared core prefix', () => {
     const base = {
       coreContext: `${UNTRUSTED_PR_CONTENT_NOTE}\n\n## Pull request\nCORE`,
       fullDiffBlock: '## Diff hunks\nFULL_DIFF',
@@ -1408,6 +1409,14 @@ it('staggers shared-prefix launches so the first prefill lands before the next r
   // On the main model itself the first lens waits for main's prefill too.
   assert.equal(sharedPrefixLaunchDelayMs(0, true), SHARED_PREFIX_STAGGER_MS);
   assert.equal(sharedPrefixLaunchDelayMs(2, true), 3 * SHARED_PREFIX_STAGGER_MS);
+  // Staggered lenses launched later, so their runway ends later: the last
+  // scheduled delay comes off the elapsed time before the floor applies.
+  assert.equal(computeLensGraceMs(30, 90_000, true, 12_000, 2, true), 604_000);
+  assert.equal(computeLensGraceMs(30, 90_000, true, 12_000, 1, false), 588_000);
+  assert.equal(
+    computeLensGraceMs(30, 90_000, true, 12_000, 0, true),
+    computeAuxiliaryGraceMs(30, 90_000, true, 12_000),
+  );
 });
 
 it('marks incomplete review bodies without claiming an all-clear result', () => {

@@ -9,6 +9,7 @@ import {
   computeVerificationTimeoutMs,
   computeAuxiliaryGraceMs,
   AUXILIARY_SETTLE_GRACE_MS,
+  computeLensGraceMs,
   sharedPrefixLaunchDelayMs,
 } from './time-budget.ts';
 import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
@@ -2467,6 +2468,9 @@ async function runReviewPipeline(params: {
     });
 
     const auxLaunchedAt = Date.now();
+    // Only a single-shard main leads with the diff, so only then does a lens on
+    // the same model gain from waiting for main's prefill.
+    const lensSharesMainPrefix = auxModel === model && shardPlans.length <= 1;
     const addressedPriorCheck = trackAux(
       'addressed-prior-comments',
       startAddressedPriorCommentsCheck({
@@ -2554,7 +2558,7 @@ async function runReviewPipeline(params: {
       embeddedFirstPrompt: options.embeddedFirstPrompt,
       contextFirst: options.sharedPrefixPrompt,
       launchDelayMs: options.sharedPrefixPrompt
-        ? (index) => sharedPrefixLaunchDelayMs(index, auxModel === model)
+        ? (index) => sharedPrefixLaunchDelayMs(index, lensSharesMainPrefix)
         : undefined,
       isAbandoned: (label) => abandonedAuxLabels.has(label),
       log,
@@ -2675,19 +2679,16 @@ async function runReviewPipeline(params: {
       verificationEnabled,
       Date.now() - auxLaunchedAt,
     );
-    // Staggered lenses launched later, so their runway ends later; the other
-    // checks launched at auxLaunchedAt and keep the shorter grace.
-    const lensGraceMs =
-      options.sharedPrefixPrompt && candidateLensKeys.length > 0
-        ? computeAuxiliaryGraceMs(
-            options.timeBudgetMinutes,
-            Date.now() - runStartedAt,
-            verificationEnabled,
-            Date.now() -
-              auxLaunchedAt -
-              sharedPrefixLaunchDelayMs(candidateLensKeys.length - 1, auxModel === model),
-          )
-        : auxiliaryGraceMs;
+    const lensGraceMs = options.sharedPrefixPrompt
+      ? computeLensGraceMs(
+          options.timeBudgetMinutes,
+          Date.now() - runStartedAt,
+          verificationEnabled,
+          Date.now() - auxLaunchedAt,
+          candidateLensKeys.length,
+          lensSharesMainPrefix,
+        )
+      : auxiliaryGraceMs;
     const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
     const abandonAuxSession = (label: string, graceMs: number) => () => {
       const aborted = auxBackend.abortSessionsByLabel?.(label, log);

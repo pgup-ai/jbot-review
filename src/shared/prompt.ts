@@ -352,9 +352,12 @@ behavior from PR intent and the retained guidelines. When a lens question
 depends on code outside the embedded evidence, report an "investigate" advisory
 that names the file or symbol to check instead of asserting the premise. Where
 the lens below says to read, follow, or inspect code, apply it to the embedded
-evidence only. Do not describe reads or commands you did not run.`;
+evidence only. Do not describe reads or commands you did not run, and do not
+report a violation merely because you did not execute a command.`;
 
 function buildLensReviewPrompt(embeddedFirstPrompt: boolean, toolsAvailable: boolean): string {
+  // No tools, no commands to police: only the "did not execute" rule survives, in the policy above.
+  const commandPolicy = toolsAvailable ? `${REVIEW_COMMAND_POLICY}\n\n` : '';
   const missingCodeNote = toolsAvailable
     ? `Repository reads are available only when
 tools are enabled; missing code is not evidence of missing behavior.`
@@ -380,21 +383,19 @@ contract question unresolved. Never batch a dependent lookup by guessing its inp
 `
     : ''
 }
-${REVIEW_COMMAND_POLICY}
-
-${
-  !toolsAvailable
-    ? EMBEDDED_ONLY_LENS_EXPLORATION_POLICY
-    : embeddedFirstPrompt
-      ? EMBEDDED_FIRST_EXPLORATION_POLICY
-      : `## Repository exploration policy
+${commandPolicy}${
+    !toolsAvailable
+      ? EMBEDDED_ONLY_LENS_EXPLORATION_POLICY
+      : embeddedFirstPrompt
+        ? EMBEDDED_FIRST_EXPLORATION_POLICY
+        : `## Repository exploration policy
 
 Read the full diff hunks for every changed file. For omitted or truncated hunks,
 use the git diff command identified in the Pull request section. Cross-reference
 changed contracts relevant to this lens against unchanged callers, definitions,
 configuration, and tests. Follow dependencies until the lens-specific behavior
 is established; do not explore unrelated code.`
-}
+  }
 
 ${REVIEW_SEVERITY_POLICY}
 
@@ -1058,16 +1059,17 @@ export function assembleChangesSinceLastReviewPrompt(
   ].join('\n\n');
 }
 
-/** Keep the lens near the output contract; dynamic context must not bury either. */
 // Under the shared-prefix arm the instructions follow the context they describe
 // as "below"; this keeps their section references resolvable without editing them.
 const CONTEXT_FIRST_ORIENTATION = `## Reading order
 
 The pull request context, diff hunks, and repository guidelines for this review
-appear above these instructions. Where an instruction says a section is
-"below", read that section above; the review lens and the final output reminder
-still follow.`;
+appear above these instructions: where an instruction says PR metadata, diff
+hunks, guidelines, prior threads, or changed-symbol usage are "below", read them
+above. Sections of these instructions keep their stated order; the review lens
+and the final output reminder still follow.`;
 
+/** Keep the lens near the output contract; dynamic context must not bury either. */
 export function assembleReviewPrompt(
   prContext: string,
   guidelines: string,

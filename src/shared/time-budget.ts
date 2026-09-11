@@ -89,3 +89,22 @@ export const SHARED_PREFIX_STAGGER_MS = 8_000;
 export function sharedPrefixLaunchDelayMs(index: number, sharesMainModel: boolean): number {
   return (index + (sharesMainModel ? 1 : 0)) * SHARED_PREFIX_STAGGER_MS;
 }
+
+/** Staggered lenses launch later, so their runway is measured from the last scheduled launch. */
+export function computeLensGraceMs(
+  timeBudgetMinutes: number,
+  elapsedMs: number,
+  verificationEnabled: boolean,
+  auxElapsedMs: number,
+  lensCount: number,
+  sharesMainModel: boolean,
+): number {
+  const lastLaunchDelayMs =
+    lensCount > 0 ? sharedPrefixLaunchDelayMs(lensCount - 1, sharesMainModel) : 0;
+  return computeAuxiliaryGraceMs(
+    timeBudgetMinutes,
+    elapsedMs,
+    verificationEnabled,
+    auxElapsedMs - lastLaunchDelayMs,
+  );
+}

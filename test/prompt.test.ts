@@ -375,6 +375,10 @@ describe('REVIEW_LENSES', () => {
     assert.match(withTools, /Batch independent searches/);
     assert.doesNotMatch(noTools, /targeted reads|Batch independent searches|file reads/);
     assert.match(noTools, /No repository reads are available/);
+    // No tools means no command policy to obey, only its one load-bearing rule.
+    assert.doesNotMatch(noTools, /## Command policy/);
+    assert.match(noTools, /not report a violation merely because you did not execute a command/);
+    assert.match(withTools, /## Command policy/);
     assert.match(noTools, /read, follow, or inspect[\s\S]*embedded\s+evidence/);
     assert.match(noTools, /"investigate"/);
     assert.ok(noTools.trimEnd().endsWith(REVIEW_OUTPUT_REMINDER.trimEnd()));
@@ -403,6 +407,8 @@ describe('REVIEW_LENSES', () => {
     assert.ok(at('## Repository review guidelines') < at('appear above these instructions'));
     assert.ok(at('appear above these instructions') < at('## Command policy'));
     assert.doesNotMatch(control, /appear above these instructions/);
+    // Only PR-context references flip; instruction sections keep their own order.
+    assert.match(prompt, /keep their stated order/);
     assert.match(
       assembleReviewPrompt('CTX-BLOCK', '', '', true, true, { contextFirst: true }),
       /appear above these instructions/,
