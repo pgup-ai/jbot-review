@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import {
   existsSync,
@@ -154,7 +154,8 @@ describe('Devin CLI provider helpers', () => {
   function fakeDevin(script: string) {
     const root = mkdtempSync(join(tmpdir(), 'jbot-devin-test-'));
     const home = join(root, 'home');
-    const workspace = join(root, 'workspace');
+    // Git-config-sensitive characters: the safe.directory entry must survive them.
+    const workspace = join(root, 'ws #1;"\\x');
     const previousPath = process.env.PATH!;
     mkdirSync(home);
     writeDevinCredentials('test-key', home);
@@ -179,6 +180,7 @@ ${script}
     return {
       root,
       home,
+      workspace,
       backend,
       logs,
       log: (message: string) => logs.push(message),
@@ -328,8 +330,12 @@ setInterval(() => {}, 1000);
         const config = JSON.parse(readFileSync(join(session.home, 'config.json'), 'utf8'));
         assert.ok(config.permissions.deny.includes(`Read(${fake.home}/**)`));
         assert.equal(
-          readFileSync(join(session.home, '.gitconfig'), 'utf8'),
-          `[safe]\n\tdirectory = ${join(fake.root, 'workspace')}\n`,
+          execFileSync(
+            'git',
+            ['config', '--file', join(session.home, '.gitconfig'), '--get', 'safe.directory'],
+            { encoding: 'utf8' },
+          ).trim(),
+          fake.workspace,
         );
         assert.equal(statSync(devinCredentialsPath(session.home)).mode & 0o777, 0o600);
         assert.equal(
@@ -356,7 +362,7 @@ setInterval(() => {}, 1000);
   });
 
   it('relaunches once and surfaces the CLI log when Devin exits 0 without output', async () => {
-    for (const [logLines, stderr, expected] of [
+    for (const [logLines, stderr, expected, exitCode] of [
       [
         [
           'INFO chisel: CLI init complete',
@@ -375,6 +381,12 @@ setInterval(() => {}, 1000);
         'warning: bridge closed',
         /exited 0 with no output[\s\S]*stderr: warning: bridge closed/,
       ],
+      [
+        ['INFO chisel: CLI init complete', 'ERROR bridge: handshake failed'],
+        '',
+        /exited 3: [\s\S]*handshake failed/,
+        3,
+      ],
     ] as const) {
       const fake = fakeDevin(`
 fs.appendFileSync(stamp, 'launch\\n');
@@ -382,6 +394,7 @@ const logs = process.env.HOME + '/.local/share/devin/cli/logs';
 fs.mkdirSync(logs, { recursive: true });
 fs.writeFileSync(logs + '/devin_20260911-000000_1.log', ${JSON.stringify(logLines.map((line) => `2026-09-11T00:00:00Z  ${line}`).join('\n'))});
 process.stderr.write(${JSON.stringify(stderr)});
+process.exitCode = ${exitCode ?? 0};
 `);
       try {
         await assert.rejects(
@@ -392,10 +405,14 @@ process.stderr.write(${JSON.stringify(stderr)});
           fake.backend.runGuidelineComplianceCheck('devin/default', 'context', '', fake.log, 5000),
           expected,
         );
-        assert.equal(readFileSync(join(fake.root, 'onboarded'), 'utf8'), 'launch\n'.repeat(4));
+        // A nonzero exit is final; only a silent exit 0 earns the relaunch.
+        assert.equal(
+          readFileSync(join(fake.root, 'onboarded'), 'utf8'),
+          'launch\n'.repeat(exitCode ? 2 : 4),
+        );
         assert.equal(
           fake.logs.filter((line) => line.includes('no output; retrying once')).length,
-          2,
+          exitCode ? 0 : 2,
         );
         assert.equal(
           fake.logs.some((line) => line.includes('continuation')),
@@ -499,7 +516,7 @@ setInterval(() => {}, 1000);
 import { rmSync } from 'node:fs';
 import { createDevinCliBackend } from ${JSON.stringify(new URL('../src/shared/devin-cli.ts', import.meta.url).href)};
 import { onCliFatalSignal } from ${JSON.stringify(new URL('../src/shared/cli-process.ts', import.meta.url).href)};
-const backend = createDevinCliBackend(${JSON.stringify(join(fake.root, 'workspace'))}, ${JSON.stringify(fake.home)});
+const backend = createDevinCliBackend(${JSON.stringify(fake.workspace)}, ${JSON.stringify(fake.home)});
 onCliFatalSignal(async () => {
   await backend.stop();
   rmSync(${JSON.stringify(fake.home)}, { recursive: true, force: true });

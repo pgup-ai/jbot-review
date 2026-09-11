@@ -102,6 +102,18 @@ console.log(JSON.stringify(result));
     assert.equal(result.exitCode, 0);
     assert.ok(Date.now() - started < 8000);
 
+    // A finished run's deadline must not fire during its post-exit grace.
+    const latePid = join(workspace, 'late-pid');
+    const late = await scope.run('late', () =>
+      runCliProcess(process.execPath, ['-e', `${escape(latePid)} console.log('late');`], {
+        ...options,
+        timeoutMs: 600,
+        killGraceMs: 1200,
+      }),
+    );
+    pids.push(Number(readFileSync(latePid, 'utf8')));
+    assert.equal(late.stdout.trim(), 'late');
+
     const hangPid = join(workspace, 'hang-pid');
     const hung = Date.now();
     await assert.rejects(

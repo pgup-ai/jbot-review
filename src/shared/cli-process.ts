@@ -161,7 +161,10 @@ export function runCliProcess(
     // A descendant that left the process group (setsid) survives the group kill
     // and holds the pipes open, so 'close' would never come; settle on exit then
     // and drop our pipe ends, which would otherwise keep the event loop alive.
+    // Exit fixes the outcome: a deadline or abort landing in that grace is moot.
     child.on('exit', (exitCode) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
       exitTimer = setTimeout(() => {
         child.stdout?.destroy();
         child.stderr?.destroy();
