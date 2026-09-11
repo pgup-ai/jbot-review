@@ -148,11 +148,10 @@ Implemented on this branch: 1 (lens guideline slice capped at 8 KB) and 2
    separately. That is the larger quality problem this data exposes; the
    lenses are compensating for it.
 
-The runway-floor grace change decided in the timeout audit
-(`max(300 s, 600 s − auxiliary runtime)`, still clamped by the remaining budget
-and the verification and posting reserves) addresses the cut-offs independently
-of any of these; 1–3 change model inputs and fall under the review-quality gate
-in AGENTS.md.
+The runway-floor grace change decided in
+[the timeout audit](2026-09-11-auxiliary-session-timeouts.md#options) addresses
+the cut-offs independently of any of these; 1–3 change model inputs and fall
+under the review-quality gate in AGENTS.md.
 
 ## Limits
 

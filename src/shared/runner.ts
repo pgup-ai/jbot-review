@@ -2669,21 +2669,27 @@ async function runReviewPipeline(params: {
     // made, so awaiting them one by one would give the group N graces of tail
     // rather than one. Each falls back to its own empty result — the same value
     // these sessions produce when they fail open on their own.
-    // Staggered lenses launch after auxLaunchedAt; the runway counts from the
-    // last scheduled launch so the stagger never eats into it.
-    const auxRunwayStartedAt =
-      auxLaunchedAt +
-      (options.sharedPrefixPrompt && candidateLensKeys.length > 0
-        ? sharedPrefixLaunchDelayMs(candidateLensKeys.length - 1, auxModel === model)
-        : 0);
     const auxiliaryGraceMs = computeAuxiliaryGraceMs(
       options.timeBudgetMinutes,
       Date.now() - runStartedAt,
       verificationEnabled,
-      Date.now() - auxRunwayStartedAt,
+      Date.now() - auxLaunchedAt,
     );
+    // Staggered lenses launched later, so their runway ends later; the other
+    // checks launched at auxLaunchedAt and keep the shorter grace.
+    const lensGraceMs =
+      options.sharedPrefixPrompt && candidateLensKeys.length > 0
+        ? computeAuxiliaryGraceMs(
+            options.timeBudgetMinutes,
+            Date.now() - runStartedAt,
+            verificationEnabled,
+            Date.now() -
+              auxLaunchedAt -
+              sharedPrefixLaunchDelayMs(candidateLensKeys.length - 1, auxModel === model),
+          )
+        : auxiliaryGraceMs;
     const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
-    const abandonAuxSession = (label: string) => () => {
+    const abandonAuxSession = (label: string, graceMs: number) => () => {
       const aborted = auxBackend.abortSessionsByLabel?.(label, log);
       // Zero registered processes can also mean queued work; only a terminal
       // coverage row proves the pass has already settled.
@@ -2692,7 +2698,7 @@ async function runReviewPipeline(params: {
         session: label,
         state: 'failed',
         error: new Error(
-          `${aborted ? 'aborted' : 'abandoned'}-after-grace (${Math.round(auxiliaryGraceMs / 1000)}s)`,
+          `${aborted ? 'aborted' : 'abandoned'}-after-grace (${Math.round(graceMs / 1000)}s)`,
         ),
       });
       abandonedAuxLabels.add(label);
@@ -2707,7 +2713,7 @@ async function runReviewPipeline(params: {
     ] = await Promise.all([
       Promise.all(
         lensPasses.map((lens) =>
-          settleWithinGrace(lens, [], log, auxiliaryGraceMs, abandonAuxSession(lens.label)),
+          settleWithinGrace(lens, [], log, lensGraceMs, abandonAuxSession(lens.label, lensGraceMs)),
         ),
       ),
       settleWithinGrace(
@@ -2715,21 +2721,21 @@ async function runReviewPipeline(params: {
         [],
         log,
         auxiliaryGraceMs,
-        abandonAuxSession('addressed-prior-comments'),
+        abandonAuxSession('addressed-prior-comments', auxiliaryGraceMs),
       ),
       settleWithinGrace(
         guidelineComplianceCheck,
         [],
         log,
         auxiliaryGraceMs,
-        abandonAuxSession('guideline-compliance'),
+        abandonAuxSession('guideline-compliance', auxiliaryGraceMs),
       ),
       settleWithinGrace(
         changesSinceLastReview,
         '',
         log,
         auxiliaryGraceMs,
-        abandonAuxSession('changes-since-last-review'),
+        abandonAuxSession('changes-since-last-review', auxiliaryGraceMs),
       ),
     ]);
     graceDone();
