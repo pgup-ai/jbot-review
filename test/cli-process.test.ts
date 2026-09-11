@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -71,7 +71,6 @@ it('cancels one session and waits for descendant pipes to close without cancelli
 it('settles and releases the pipes once the CLI exits even when an escaped descendant keeps them open', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-cli-escape-'));
   const scope = createCliProcessScope();
-  const pids: number[] = [];
   const escape = (pidFile: string) =>
     `const child = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'inherit' });
      require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
@@ -96,7 +95,6 @@ console.log(JSON.stringify(result));
       timeout: 10000,
       killSignal: 'SIGKILL',
     });
-    pids.push(Number(readFileSync(exitPid, 'utf8')));
     const result = JSON.parse(driven.stdout);
     assert.equal(result.stdout.trim(), 'done');
     assert.equal(result.exitCode, 0);
@@ -111,7 +109,6 @@ console.log(JSON.stringify(result));
         killGraceMs: 1200,
       }),
     );
-    pids.push(Number(readFileSync(latePid, 'utf8')));
     assert.equal(late.stdout.trim(), 'late');
 
     const hangPid = join(workspace, 'hang-pid');
@@ -125,12 +122,12 @@ console.log(JSON.stringify(result));
       ),
       /deadline/,
     );
-    pids.push(Number(readFileSync(hangPid, 'utf8')));
     assert.ok(Date.now() - hung < 1500);
   } finally {
-    for (const pid of pids) {
+    // Escaped children outlive their parents; reap every one that got as far as a pid file.
+    for (const name of readdirSync(workspace).filter((name) => name.endsWith('-pid'))) {
       try {
-        process.kill(pid, 'SIGKILL');
+        process.kill(Number(readFileSync(join(workspace, name), 'utf8')), 'SIGKILL');
       } catch {}
     }
     await scope.stop();

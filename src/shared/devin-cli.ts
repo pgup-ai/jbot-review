@@ -193,7 +193,7 @@ async function runDevinPrompt(
         }
         throw new Error(
           `devin ${label} exited ${result.exitCode}: ${truncateForLog(
-            result.stderr || result.stdout || devinCliLogTail(root),
+            result.stderr || [result.stdout, devinCliLogTail(root)].filter(Boolean).join('\n'),
             1000,
           )}`,
         );

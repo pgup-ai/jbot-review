@@ -362,7 +362,7 @@ setInterval(() => {}, 1000);
   });
 
   it('relaunches once and surfaces the CLI log when Devin exits 0 without output', async () => {
-    for (const [logLines, stderr, expected, exitCode] of [
+    for (const [logLines, stderr, expected, exitCode, stdout] of [
       [
         [
           'INFO chisel: CLI init complete',
@@ -387,12 +387,20 @@ setInterval(() => {}, 1000);
         /exited 3: [\s\S]*handshake failed/,
         3,
       ],
+      [
+        ['ERROR bridge: handshake failed'],
+        '',
+        /exited 3: partial[\s\S]*handshake failed/,
+        3,
+        'partial',
+      ],
     ] as const) {
       const fake = fakeDevin(`
 fs.appendFileSync(stamp, 'launch\\n');
 const logs = process.env.HOME + '/.local/share/devin/cli/logs';
 fs.mkdirSync(logs, { recursive: true });
 fs.writeFileSync(logs + '/devin_20260911-000000_1.log', ${JSON.stringify(logLines.map((line) => `2026-09-11T00:00:00Z  ${line}`).join('\n'))});
+process.stdout.write(${JSON.stringify(stdout ?? '')});
 process.stderr.write(${JSON.stringify(stderr)});
 process.exitCode = ${exitCode ?? 0};
 `);
