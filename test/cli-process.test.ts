@@ -158,7 +158,19 @@ it('reaps in-group descendants on abort during the pipe grace without changing t
     const result = await pending;
     assert.equal(result.stdout.trim(), 'done');
     assert.equal(result.exitCode, 0);
-    assert.throws(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0));
+    // The orphan is reaped by init after the pipes close; allow it that moment.
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const reaped = Date.now() + 2000;
+    while (alive() && Date.now() < reaped) await delay(10);
+    assert.equal(alive(), false);
   } finally {
     try {
       process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');
