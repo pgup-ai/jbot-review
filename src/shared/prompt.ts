@@ -351,9 +351,10 @@ the embedded diff and the changed-symbol usage block, and establish expected
 behavior from PR intent and the retained guidelines. When a lens question
 depends on code outside the embedded evidence, report an "investigate" advisory
 that names the file or symbol to check instead of asserting the premise. Where
-the lens below says to read, follow, or inspect code, apply it to the embedded
-evidence only. Do not describe reads or commands you did not run, and do not
-report a violation merely because you did not execute a command.`;
+these instructions or the lens below say to read, follow, grep, or inspect code,
+apply that to the embedded evidence only. Do not describe reads or commands you
+did not run, and do not report a violation merely because you did not execute a
+command.`;
 
 function buildLensReviewPrompt(embeddedFirstPrompt: boolean, toolsAvailable: boolean): string {
   // No tools, no commands to police: only the "did not execute" rule survives, in the policy above.
@@ -1064,10 +1065,11 @@ export function assembleChangesSinceLastReviewPrompt(
 const CONTEXT_FIRST_ORIENTATION = `## Reading order
 
 The pull request context, diff hunks, and repository guidelines for this review
-appear above these instructions: where an instruction says PR metadata, diff
-hunks, guidelines, prior threads, or changed-symbol usage are "below", read them
-above. Sections of these instructions keep their stated order; the review lens
-and the final output reminder still follow.`;
+appear above these instructions: where an instruction says a PR-context section
+(metadata, summary instructions, diff hunks, guidelines, prior threads,
+changed-symbol usage) is "below", read it above. Sections of these instructions
+keep their stated order; the review lens and the final output reminder still
+follow.`;
 
 /** Keep the lens near the output contract; dynamic context must not bury either. */
 export function assembleReviewPrompt(
