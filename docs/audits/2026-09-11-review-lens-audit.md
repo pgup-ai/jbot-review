@@ -23,7 +23,8 @@ duplicate each other's output. Three things do stand out:
    with targeted reads of callers, definitions, configuration, and tests" and
    whose interactions addendum says "follow both ends of a changed contract
    until its actual behavior is established". Cline gets the same pairing.
-3. **The time is hidden reasoning, not prompt volume.** On CommandCode, 94–99%
+3. **The time is hidden reasoning, not prompt volume.** On CommandCode review
+   and lens sessions, 94–99%
    of reported output tokens never appear in the result; the interactions
    lens returns a median 415 visible characters from a median 3,962 output
    tokens. A lens pass costs roughly what a main pass costs on the same model,
@@ -95,8 +96,11 @@ tokens and findings over the same heads.
 
 ## Do the lenses earn their pass?
 
-Raw yield over 98 attempts with a completed pipeline: main 45 findings, lenses
-50 (interactions 33, frontend 17), compliance 22; 90 posted after filters.
+Raw yield over the 98 attempts whose pipeline completed, counted from the
+`Review complete` line: main 45 findings, lenses 50 (interactions 33, frontend
+17), compliance 22; 90 posted after filters. The per-lens table below counts
+every completed pass, including attempts whose pipeline did not finish, so its
+totals run higher.
 Lenses are not redundant with a working main pass: they supply 43% of raw
 findings, and in this pool they are often the only finder that produces any.
 Main passes with zero findings, by route: `gpt-5.6-luna` 13 of 14 (median

@@ -131,10 +131,12 @@ describe('buildShardPlans cache-stable prefix', () => {
       ],
       diffFirst: true,
     });
-    for (const plan of sharded) {
-      assertBoundaryThenDiff(plan.context, plan.label);
-      assertBoundaryThenDiff(plan.baseContext, plan.label);
-    }
+    // Shards carry different diffs, so leading with them would destroy the
+    // prefix they share; sharded plans keep the default order.
+    const [shardA, shardB] = sharded;
+    assert.ok(shardA.context.startsWith(base.coreContext), shardA.label);
+    assert.ok(shardB.context.startsWith(base.coreContext), shardB.label);
+    assert.ok(commonPrefix(shardA.context, shardB.context).includes('C7'));
   });
 
   it('uses treatment shard instructions only when enabled', () => {

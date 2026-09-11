@@ -28,7 +28,7 @@ muse route), and the in-session retry reused that model and failed again.
 What is **not** the cause: the global session cap of 5 (auxiliary queue time
 was 0 s in every attempt; only `-continue`/`-repair` follow-ups start late),
 the 30-minute time budget (never binding: the grace formula returns the full
-300 s whenever less than 24.5 minutes have elapsed), verification budget
+300 s whenever less than 19.5 minutes have elapsed with verification on), verification budget
 (no run skipped verification for lack of time), and Devin or Cline as the
 auxiliary backend (both completed every session: Devin 37/37,
 Cline 33/33).

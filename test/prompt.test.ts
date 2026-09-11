@@ -399,6 +399,14 @@ describe('REVIEW_LENSES', () => {
     assert.ok(at('## Repository review guidelines') < at('## Command policy'));
     assert.ok(at('## Command policy') < at(REVIEW_LENSES.frontend));
     assert.ok(prompt.trimEnd().endsWith(REVIEW_OUTPUT_REMINDER.trimEnd()));
+    // The instructions still say "below" for sections that now sit above them.
+    assert.ok(at('## Repository review guidelines') < at('appear above these instructions'));
+    assert.ok(at('appear above these instructions') < at('## Command policy'));
+    assert.doesNotMatch(control, /appear above these instructions/);
+    assert.match(
+      assembleReviewPrompt('CTX-BLOCK', '', '', true, true, { contextFirst: true }),
+      /appear above these instructions/,
+    );
   });
 
   it('keeps each specialist in its role without losing evidence rules or tail ordering', () => {

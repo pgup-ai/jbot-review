@@ -1059,6 +1059,15 @@ export function assembleChangesSinceLastReviewPrompt(
 }
 
 /** Keep the lens near the output contract; dynamic context must not bury either. */
+// Under the shared-prefix arm the instructions follow the context they describe
+// as "below"; this keeps their section references resolvable without editing them.
+const CONTEXT_FIRST_ORIENTATION = `## Reading order
+
+The pull request context, diff hunks, and repository guidelines for this review
+appear above these instructions. Where an instruction says a section is
+"below", read that section above; the review lens and the final output reminder
+still follow.`;
+
 export function assembleReviewPrompt(
   prContext: string,
   guidelines: string,
@@ -1084,7 +1093,7 @@ export function assembleReviewPrompt(
       : REVIEW_PROMPT;
   const guidelineBlock = guidelines ? ['## Repository review guidelines\n', guidelines] : [];
   const parts = options.contextFirst
-    ? [prContext, ...guidelineBlock, instructions]
+    ? [prContext, ...guidelineBlock, CONTEXT_FIRST_ORIENTATION, instructions]
     : [instructions, ...guidelineBlock, prContext];
   if (lensAddendum) parts.push(lensAddendum);
   if (evidenceQuotes) parts.push(EVIDENCE_INSTRUCTION);

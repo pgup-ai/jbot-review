@@ -3619,7 +3619,7 @@ export function buildShardPlans(params: {
   requireCompleteEmbeddedDiff?: boolean;
   diffHunksOptions?: DiffHunksOptions;
   embeddedFirstPrompt?: boolean;
-  /** Shared-prefix arm: the diff block leads every shard so sessions share a cache prefix. */
+  /** Shared-prefix arm: a single-shard plan leads with the diff; sharded plans keep the core prefix they share. */
   diffFirst?: boolean;
 }): ShardPlan[] {
   const {
@@ -3631,12 +3631,12 @@ export function buildShardPlans(params: {
     diffHunksOptions,
     diffFirst = false,
   } = params;
-  // The runner heads coreContext with the trust boundary; diff-first moves only
-  // the blocks behind it, so author-controlled text never precedes the guard.
-  const [boundary, coreBody] = coreContext.startsWith(UNTRUSTED_PR_CONTENT_NOTE)
-    ? [UNTRUSTED_PR_CONTENT_NOTE, coreContext.slice(UNTRUSTED_PR_CONTENT_NOTE.length).trimStart()]
-    : ['', coreContext];
   if (shards.length <= 1) {
+    // The runner heads coreContext with the trust boundary; diff-first moves only
+    // the blocks behind it, so author-controlled text never precedes the guard.
+    const [boundary, coreBody] = coreContext.startsWith(UNTRUSTED_PR_CONTENT_NOTE)
+      ? [UNTRUSTED_PR_CONTENT_NOTE, coreContext.slice(UNTRUSTED_PR_CONTENT_NOTE.length).trimStart()]
+      : ['', coreContext];
     const diffResult = requireCompleteEmbeddedDiff
       ? buildDiffHunksBlockWithMetadata(shards[0] ?? [], diffHunksOptions)
       : undefined;
@@ -3670,12 +3670,8 @@ export function buildShardPlans(params: {
     }
     return {
       label: `review-shard-${index + 1}`,
-      context: diffFirst
-        ? joinContext(boundary, diffResult.text, coreBody, context7Block, assignment)
-        : joinContext(coreContext, context7Block, assignment, diffResult.text),
-      baseContext: diffFirst
-        ? joinContext(boundary, diffResult.text, coreBody, assignment)
-        : joinContext(coreContext, assignment, diffResult.text),
+      context: joinContext(coreContext, context7Block, assignment, diffResult.text),
+      baseContext: joinContext(coreContext, assignment, diffResult.text),
       assignedFiles,
     };
   });
