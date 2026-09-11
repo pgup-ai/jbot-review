@@ -135,6 +135,39 @@ console.log(JSON.stringify(result));
   }
 });
 
+it('reaps in-group descendants on abort during the pipe grace without changing the outcome', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'jbot-cli-linger-'));
+  const scope = createCliProcessScope();
+  const pidFile = join(workspace, 'pid');
+  const lingerer = `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`;
+  // The parent exits at once; its in-group child keeps the inherited pipes open.
+  const parent = `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(lingerer)}], { stdio: 'inherit' }).unref(); console.log('done');`;
+  try {
+    const pending = scope.run('linger', () =>
+      runCliProcess(process.execPath, ['-e', parent], {
+        cwd: workspace,
+        timeoutMs: 5000,
+        timeoutMessage: 'deadline',
+        killGraceMs: 1500,
+      }),
+    );
+    const limit = Date.now() + 3000;
+    while (!existsSync(pidFile) && Date.now() < limit) await delay(10);
+    await delay(100);
+    assert.equal(scope.abort('linger'), 1);
+    const result = await pending;
+    assert.equal(result.stdout.trim(), 'done');
+    assert.equal(result.exitCode, 0);
+    assert.throws(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0));
+  } finally {
+    try {
+      process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');
+    } catch {}
+    await scope.stop();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 it('stops queued work before spawn and reaps a timed-out child before rejecting', async () => {
   const scope = createCliProcessScope();
   const options = { cwd: tmpdir(), timeoutMs: 30, timeoutMessage: 'deadline', killGraceMs: 20 };

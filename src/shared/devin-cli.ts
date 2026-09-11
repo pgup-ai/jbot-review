@@ -191,11 +191,15 @@ async function runDevinPrompt(
           log(`${label} devin returned an empty model catalog; retrying startup once.`);
           continue;
         }
+        // Truncate the CLI's own output apart from the tail so long output can't hide it.
         throw new Error(
-          `devin ${label} exited ${result.exitCode}: ${truncateForLog(
-            result.stderr || [result.stdout, devinCliLogTail(root)].filter(Boolean).join('\n'),
-            1000,
-          )}`,
+          `devin ${label} exited ${result.exitCode}: ${
+            result.stderr
+              ? truncateForLog(result.stderr, 1000)
+              : [truncateForLog(result.stdout, 1000), devinCliLogTail(root)]
+                  .filter(Boolean)
+                  .join('\n')
+          }`,
         );
       }
       log(

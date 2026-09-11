@@ -392,7 +392,7 @@ setInterval(() => {}, 1000);
         '',
         /exited 3: partial[\s\S]*handshake failed/,
         3,
-        'partial',
+        'partial'.padEnd(1200, 'x'),
       ],
     ] as const) {
       const fake = fakeDevin(`
