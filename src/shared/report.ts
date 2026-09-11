@@ -327,10 +327,28 @@ export function formatSummaryMarkdown(
   return out.join('\n');
 }
 
-export function formatIncompleteCoverage(sessions: readonly string[]): string {
+export interface IncompleteSession {
+  label: string;
+  reason: string;
+}
+
+/** Footer-safe reason: the raw error may carry provider text and stays in the log. */
+export function describeIncompleteReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const grace = /after-grace(?: \((\d+)s\))?/.exec(message);
+  if (grace)
+    return grace[1]
+      ? `cut off ${grace[1]}s after the main review`
+      : 'cut off after the main review';
+  if (/timed?\s*out|did not finish within|deadline/i.test(message)) return 'timed out';
+  return 'failed';
+}
+
+export function formatIncompleteCoverage(sessions: readonly IncompleteSession[]): string {
   if (sessions.length === 0) return '';
   const verificationFailed = sessions.some(
-    (session) => session === 'finding-verification' || session === 'late-finding-verification',
+    ({ label }) => label === 'finding-verification' || label === 'late-finding-verification',
   );
-  return `⚠️ **Review incomplete:** Main review completed; ${sessions.map((session) => `\`${session}\``).join(', ')} did not complete successfully. Findings from completed passes are included.${verificationFailed ? ' Findings affected by incomplete verification are marked as unverified concerns.' : ''}`;
+  const list = sessions.map(({ label, reason }) => `\`${label}\` (${reason})`).join(', ');
+  return `⚠️ **Review incomplete:** Main review completed; ${list} did not complete successfully. Findings from completed passes are included.${verificationFailed ? ' Findings affected by incomplete verification are marked as unverified concerns.' : ''}`;
 }

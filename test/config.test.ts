@@ -17,6 +17,7 @@ import {
   resolveProviderBaseURL,
   resolveProviderCredential,
   verificationModelOptions,
+  resolvePromptCachePolicy,
 } from '../src/shared/config.ts';
 import { buildConfig } from '../src/shared/opencode.ts';
 
@@ -567,6 +568,31 @@ describe('resolvePoolCredentials', () => {
       () =>
         resolvePoolCredentials(['openai-compatible/m'], keys(['JBOT_OPENAI_COMPATIBLE_API_KEY'])),
       /Missing base URL for provider "openai-compatible"/,
+    );
+  });
+});
+
+describe('resolvePromptCachePolicy', () => {
+  it('reports a disabled cache only for models the opencode server actually serves', () => {
+    const input = {
+      promptCache: true,
+      mainModel: 'commandcode/meta/muse-spark-1.3-contributor',
+      mainProviderID: 'commandcode',
+      mainModelID: 'meta/muse-spark-1.3-contributor',
+      auxModel: 'opencode/muse-spark-1.3-contributor-free',
+      auxProviderID: 'opencode',
+      auxModelID: 'muse-spark-1.3-contributor-free',
+    };
+    assert.deepEqual(resolvePromptCachePolicy(input).disabledPromptCacheModels, [
+      'commandcode/meta/muse-spark-1.3-contributor',
+    ]);
+    // The CLI talks to its own gateway; opencode's promptCacheKey never reaches it.
+    assert.deepEqual(
+      resolvePromptCachePolicy({
+        ...input,
+        servedByOpencode: (providerID) => providerID !== 'commandcode',
+      }).disabledPromptCacheModels,
+      [],
     );
   });
 });

@@ -342,7 +342,18 @@ JSON. Do not keep exploring solely for completeness or reread code already
 provided unless a specific uncertainty requires it. Report supported findings
 and identify material uncertainties without asserting unverified premises.`;
 
-function buildLensReviewPrompt(embeddedFirstPrompt: boolean): string {
+// Lens body for backends whose read-only mode denies every tool: the base's
+// read/grep steps would only be negated by the no-tools directive in front.
+const EMBEDDED_ONLY_LENS_EXPLORATION_POLICY = `## Repository exploration policy
+
+No repository reads are available in this pass. Review every changed hunk in
+the embedded diff and the changed-symbol usage block, and establish expected
+behavior from PR intent and the retained guidelines. When a lens question
+depends on code outside the embedded evidence, report an "investigate" advisory
+that names the file or symbol to check instead of asserting the premise. Do not
+describe reads or commands you did not run.`;
+
+function buildLensReviewPrompt(embeddedFirstPrompt: boolean, toolsAvailable: boolean): string {
   return `You are performing a focused recall pass alongside a separate general PR review.
 Investigate the failure classes in the review lens below across the COMPLETE
 base...head diff, including earlier commits and changes already reviewed.
@@ -351,22 +362,31 @@ Return findings within this lens's responsibility. Do not start a general bug,
 style, architecture, guideline-compliance, or other lens's investigation.
 
 Use PR intent, linked issues, relevant repository guidelines, and changed-symbol
-usage to establish expected behavior. Repository reads are available only when
-tools are enabled; missing code is not evidence of missing behavior. This is a
+usage to establish expected behavior. ${
+    toolsAvailable
+      ? 'Repository reads are available only when\ntools are enabled; missing'
+      : 'Missing'
+  } code is not evidence of missing behavior. This is a
 read-only review. Do not modify files. Prior-comment suppression and thread
 resolution are handled separately.
-
+${
+  toolsAvailable
+    ? `
 Batch independent searches or file reads in one tool turn when supported.
 Use search locations to read related caller/callee sections together. Reuse
 already inspected evidence; investigate further when it leaves a concrete
 contract question unresolved. Never batch a dependent lookup by guessing its input.
-
+`
+    : ''
+}
 ${REVIEW_COMMAND_POLICY}
 
 ${
-  embeddedFirstPrompt
-    ? EMBEDDED_FIRST_EXPLORATION_POLICY
-    : `## Repository exploration policy
+  !toolsAvailable
+    ? EMBEDDED_ONLY_LENS_EXPLORATION_POLICY
+    : embeddedFirstPrompt
+      ? EMBEDDED_FIRST_EXPLORATION_POLICY
+      : `## Repository exploration policy
 
 Read the full diff hunks for every changed file. For omitted or truncated hunks,
 use the git diff command identified in the Pull request section. Cross-reference
@@ -1044,19 +1064,27 @@ export function assembleReviewPrompt(
   lensAddendum = '',
   evidenceQuotes = false,
   embeddedFirstPrompt = false,
+  options: {
+    /** False on backends that deny every tool; only lens bodies change (the main prompt keeps its directive). */
+    toolsAvailable?: boolean;
+    /**
+     * JBOT_SHARED_PREFIX_PROMPT: context, then guidelines, then instructions,
+     * so sessions sharing a diff block share a provider cache prefix. The
+     * reminder stays last (invariant #5).
+     */
+    contextFirst?: boolean;
+  } = {},
 ): string {
   const focusedLens = Object.values(REVIEW_LENSES).includes(lensAddendum);
-  const parts = [
-    focusedLens
-      ? buildLensReviewPrompt(embeddedFirstPrompt)
-      : embeddedFirstPrompt
-        ? EMBEDDED_FIRST_REVIEW_PROMPT
-        : REVIEW_PROMPT,
-  ];
-  if (guidelines) {
-    parts.push('## Repository review guidelines\n', guidelines);
-  }
-  parts.push(prContext);
+  const instructions = focusedLens
+    ? buildLensReviewPrompt(embeddedFirstPrompt, options.toolsAvailable ?? true)
+    : embeddedFirstPrompt
+      ? EMBEDDED_FIRST_REVIEW_PROMPT
+      : REVIEW_PROMPT;
+  const guidelineBlock = guidelines ? ['## Repository review guidelines\n', guidelines] : [];
+  const parts = options.contextFirst
+    ? [prContext, ...guidelineBlock, instructions]
+    : [instructions, ...guidelineBlock, prContext];
   if (lensAddendum) parts.push(lensAddendum);
   if (evidenceQuotes) parts.push(EVIDENCE_INSTRUCTION);
   parts.push(REVIEW_OUTPUT_REMINDER);

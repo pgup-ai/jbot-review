@@ -13,6 +13,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { REVIEW_LENSES } from '../src/shared/prompt.ts';
+
 import {
   buildCommandCodeCliArgs,
   runCommandCodeReview,
@@ -748,6 +750,13 @@ process.stdin.on('end', async () => {
           );
       }),
     );
+    // A tool-less lens gets the embedded-only lens prompt: no read/grep steps
+    // for the directive to contradict.
+    await runCommandCodeReview(home, 'commandcode/first', 'LENS_CTX', '', () => {}, {
+      runtime: { home, tools: false },
+      lensAddendum: REVIEW_LENSES.interactions,
+      timeoutMs: 5000,
+    });
     await runCommandCodeFindingVerification(
       home,
       'commandcode/verifier',
@@ -762,8 +771,12 @@ process.stdin.on('end', async () => {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
-    assert.equal(calls.length, 13);
+    assert.equal(calls.length, 14);
+    const lensCall = calls.find((call) => call.input.includes('LENS_CTX'));
+    assert.match(lensCall.input, /Tool use disabled/);
+    assert.doesNotMatch(lensCall.input, /targeted reads|Batch independent searches/);
     for (const call of calls) {
+      if (call === lensCall) continue;
       assert.equal(call.cwd, realpathSync(join(home, 'launch')));
       assert.equal(call.args[call.args.indexOf('--permission-mode') + 1], 'plan');
       assert.equal(call.args[call.args.indexOf('--mod') + 1], join(home, 'review.mjs'));

@@ -27,6 +27,7 @@ export interface ReviewBackend {
       guidelineSweep?: GuidelineSweep;
       deadlineAt?: number;
       lensAddendum?: string;
+      contextFirst?: boolean;
       label?: string;
       timeoutMs?: number;
       onTokenUsage?: TokenUsageRecorder;

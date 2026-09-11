@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import {
   ORPHANED_FINDINGS_HEADING,
+  describeIncompleteReason,
+  formatIncompleteCoverage,
   renderOrphanedSection,
   condenseSummary,
   formatSummaryMarkdown,
@@ -337,4 +339,38 @@ test('formatSummaryMarkdown preserves existing links, bare URLs, and code spans'
     out,
     '- Keeps `alreadyFormatted`, https://example.com/business-events.common.service.ts, and [business-events.common.service.ts](https://example.com/path.ts) untouched while formatting `updateOne`',
   );
+});
+
+test('incomplete-coverage notice names why each auxiliary session is missing', () => {
+  const notice = formatIncompleteCoverage([
+    { label: 'review-interactions', reason: 'cut off 300s after the main review' },
+    { label: 'guideline-compliance', reason: 'timed out' },
+    { label: 'finding-verification', reason: 'failed' },
+  ]);
+  assert.match(notice, /`review-interactions` \(cut off 300s after the main review\)/);
+  assert.match(notice, /`guideline-compliance` \(timed out\)/);
+  assert.match(notice, /`finding-verification` \(failed\)/);
+  assert.match(notice, /marked as unverified concerns/);
+  assert.equal(formatIncompleteCoverage([]), '');
+});
+
+test('coverage errors collapse to a short reason without leaking provider text', () => {
+  assert.equal(
+    describeIncompleteReason(new Error('aborted-after-grace (300s)')),
+    'cut off 300s after the main review',
+  );
+  assert.equal(
+    describeIncompleteReason(new Error('abandoned-after-grace')),
+    'cut off after the main review',
+  );
+  assert.equal(describeIncompleteReason(new Error('review-interactions timed out')), 'timed out');
+  assert.equal(
+    describeIncompleteReason(new Error('opencode x prompt did not finish within 600s')),
+    'timed out',
+  );
+  assert.equal(
+    describeIncompleteReason(new Error('exited 9: https://secret.example/token=abc')),
+    'failed',
+  );
+  assert.equal(describeIncompleteReason(undefined), 'failed');
 });

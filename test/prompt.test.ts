@@ -366,6 +366,40 @@ describe('REVIEW_LENSES', () => {
     assert.match(REVIEW_LENSES.integrity, /served|bundled|mask/i);
   });
 
+  it('drops repository-read instructions from a lens when the backend has no tools', () => {
+    const withTools = assembleReviewPrompt('CTX', '', REVIEW_LENSES.interactions, true, true);
+    const noTools = assembleReviewPrompt('CTX', '', REVIEW_LENSES.interactions, true, true, {
+      toolsAvailable: false,
+    });
+    assert.match(withTools, /targeted reads of\s+callers/);
+    assert.match(withTools, /Batch independent searches/);
+    assert.doesNotMatch(noTools, /targeted reads|Batch independent searches|file reads/);
+    assert.match(noTools, /No repository reads are available/);
+    assert.match(noTools, /"investigate"/);
+    assert.ok(noTools.trimEnd().endsWith(REVIEW_OUTPUT_REMINDER.trimEnd()));
+    assert.equal(
+      assembleReviewPrompt('CTX', '', '', true, true, { toolsAvailable: false }),
+      assembleReviewPrompt('CTX', '', '', true, true),
+    );
+  });
+
+  it('leads with the shared context under the shared-prefix arm and keeps the reminder last', () => {
+    const control = assembleReviewPrompt('CTX-BLOCK', 'GUIDE', REVIEW_LENSES.frontend, true, true);
+    const prompt = assembleReviewPrompt('CTX-BLOCK', 'GUIDE', REVIEW_LENSES.frontend, true, true, {
+      contextFirst: true,
+    });
+    assert.ok(!control.startsWith('CTX-BLOCK'));
+    assert.ok(prompt.startsWith('CTX-BLOCK'));
+    const at = (needle: string) => {
+      const index = prompt.indexOf(needle);
+      assert.ok(index >= 0, `missing ${needle}`);
+      return index;
+    };
+    assert.ok(at('## Repository review guidelines') < at('## Command policy'));
+    assert.ok(at('## Command policy') < at(REVIEW_LENSES.frontend));
+    assert.ok(prompt.trimEnd().endsWith(REVIEW_OUTPUT_REMINDER.trimEnd()));
+  });
+
   it('keeps each specialist in its role without losing evidence rules or tail ordering', () => {
     for (const lens of Object.values(REVIEW_LENSES)) {
       for (const embeddedFirst of [false, true]) {

@@ -569,6 +569,8 @@ export interface PromptCachePolicyInput {
   auxModel: string;
   auxProviderID: string;
   auxModelID: string;
+  /** The policy drives opencode's promptCacheKey; a CLI route never sees it. */
+  servedByOpencode?: (providerID: string) => boolean;
 }
 
 export interface PromptCachePolicy {
@@ -584,11 +586,17 @@ export function resolvePromptCachePolicy(input: PromptCachePolicyInput): PromptC
   const auxSupportsPromptCache = modelSupportsPromptCache(input.auxProviderID, input.auxModelID);
   const sameProvider = input.auxProviderID === input.mainProviderID;
   const disabledPromptCacheModels: string[] = [];
+  const served = input.servedByOpencode ?? (() => true);
 
-  if (promptCache && !mainSupportsPromptCache) {
+  if (promptCache && !mainSupportsPromptCache && served(input.mainProviderID)) {
     disabledPromptCacheModels.push(input.mainModel);
   }
-  if (promptCache && input.auxModel !== input.mainModel && !auxSupportsPromptCache) {
+  if (
+    promptCache &&
+    input.auxModel !== input.mainModel &&
+    !auxSupportsPromptCache &&
+    served(input.auxProviderID)
+  ) {
     disabledPromptCacheModels.push(input.auxModel);
   }
 

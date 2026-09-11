@@ -1265,6 +1265,8 @@ export function formatGuidelines(discovered: DiscoveredGuidelines): string {
  * spend attention on the diff, not on the full standards corpus.
  */
 export const MAX_FINDER_GUIDELINE_BYTES = 24 * 1024;
+/** Lens passes keep a contract excerpt only: rules are the compliance pass's job. */
+export const MAX_LENS_GUIDELINE_BYTES = 8 * 1024;
 // Rendered omitted-doc labels in the budget note (invariant #4 backstop).
 const MAX_OMITTED_LABEL_BYTES = 1024;
 
@@ -1380,7 +1382,7 @@ export function selectFinderGuidelineText(params: {
     forFiles: params.forFiles,
     complianceCovers: params.complianceRuns,
     canReadWorkspace: params.mainCanReadWorkspace,
-    capBytes: full ? MAX_GUIDELINE_TOTAL_BYTES : undefined,
+    capBytes: params.lens ? MAX_LENS_GUIDELINE_BYTES : full ? MAX_GUIDELINE_TOTAL_BYTES : undefined,
     lens: params.lens,
   });
 }

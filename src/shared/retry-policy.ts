@@ -10,6 +10,7 @@
 export type MainShardFailureClass =
   | 'auth'
   | 'model-not-found'
+  | 'model-no-response'
   | 'context-length'
   | 'unsupported-effort'
   | 'rate-limit'
@@ -21,6 +22,7 @@ export type MainShardFailureClass =
 const NON_RETRYABLE: ReadonlySet<MainShardFailureClass> = new Set([
   'auth',
   'model-not-found',
+  'model-no-response',
   'context-length',
   'unsupported-effort',
 ]);
@@ -39,33 +41,36 @@ export function classifyMainShardFailure(error: unknown): {
           /unknown model|model.{0,24}not (found|exist)|no such model|\bmodel\s+["'][^"'\r\n]+["']\s+(?:is\s+)?not (?:offered by the agent|found|existent)\b/i,
         )
       ? 'model-not-found'
-      : matches(
-            // `too large|long` needs context/size wording nearby: bare "took
-            // too long" is a timeout, and misreading it here skips the retry.
-            /context.{0,12}length|maximum context|\b413\b|(context|prompt|input|message|tokens?).{0,24}too (large|long)|too (large|long).{0,32}(context|window|tokens?|limit)|exceeds.{0,24}(context|token)/i,
-          )
-        ? 'context-length'
+      : // A CLI that re-prompted the model to exhaustion re-buys the same silence.
+        matches(/produced no response|continuation budget exhausted/i)
+        ? 'model-no-response'
         : matches(
-              // Anchored on the refusal and on the tier NAMES the provider
-              // enumerates ("[1210] ... please use low, high, or max"): a generic
-              // verb like "please use" would swallow timeouts, which keep retrying.
-              /\b(?:reasoning|thinking)\b[\s\S]{0,80}?(?:cannot be disabled|\b(?:minimal|low|medium|high|xhigh|max)\b[\s\S]{0,16}?\b(?:minimal|low|medium|high|xhigh|max)\b)/i,
+              // `too large|long` needs context/size wording nearby: bare "took
+              // too long" is a timeout, and misreading it here skips the retry.
+              /context.{0,12}length|maximum context|\b413\b|(context|prompt|input|message|tokens?).{0,24}too (large|long)|too (large|long).{0,32}(context|window|tokens?|limit)|exceeds.{0,24}(context|token)/i,
             )
-          ? 'unsupported-effort'
-          : matches(/\b429\b|rate.?limit|quota/i)
-            ? 'rate-limit'
-            : matches(/timed?\s*out|timeout|deadline|did not finish within|took too long/i)
-              ? 'timeout'
-              : matches(/parse|json|schema|repair/i)
-                ? 'parse'
-                : matches(
-                      // No bare `api` token: it labeled any stray mention as
-                      // provider-transient when `unknown` (equally retryable)
-                      // is the honest class for unrecognized shapes.
-                      /\b5\d\d\b|overloaded|upstream|stream|socket|econn|enotfound|fetch failed|network|unavailable/i,
-                    )
-                  ? 'provider-transient'
-                  : 'unknown';
+          ? 'context-length'
+          : matches(
+                // Anchored on the refusal and on the tier NAMES the provider
+                // enumerates ("[1210] ... please use low, high, or max"): a generic
+                // verb like "please use" would swallow timeouts, which keep retrying.
+                /\b(?:reasoning|thinking)\b[\s\S]{0,80}?(?:cannot be disabled|\b(?:minimal|low|medium|high|xhigh|max)\b[\s\S]{0,16}?\b(?:minimal|low|medium|high|xhigh|max)\b)/i,
+              )
+            ? 'unsupported-effort'
+            : matches(/\b429\b|rate.?limit|quota/i)
+              ? 'rate-limit'
+              : matches(/timed?\s*out|timeout|deadline|did not finish within|took too long/i)
+                ? 'timeout'
+                : matches(/parse|json|schema|repair/i)
+                  ? 'parse'
+                  : matches(
+                        // No bare `api` token: it labeled any stray mention as
+                        // provider-transient when `unknown` (equally retryable)
+                        // is the honest class for unrecognized shapes.
+                        /\b5\d\d\b|overloaded|upstream|stream|socket|econn|enotfound|fetch failed|network|unavailable/i,
+                      )
+                    ? 'provider-transient'
+                    : 'unknown';
   return { failureClass, retryable: !NON_RETRYABLE.has(failureClass) };
 }
 

@@ -27,6 +27,7 @@ const POLICY_KEYS = [
   'verifierSlimContext',
   'commandCodeTools',
   'verifyOverlapGrace',
+  'sharedPrefixPrompt',
   'reviewPasses',
   'verifyFindings',
   'timeBudgetMinutes',

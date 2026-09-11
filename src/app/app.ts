@@ -142,6 +142,7 @@ export function handlePrEvent(event: PullRequestEvent, cfg: AppConfig): void {
           guidelineSweep: parseEnvBoolean('JBOT_GUIDELINE_SWEEP', false),
           verifierSlimContext: parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
           verifyOverlapGrace: parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
+          sharedPrefixPrompt: parseEnvBoolean('JBOT_SHARED_PREFIX_PROMPT', false),
         },
         log: (msg: string) => console.log(`[jbot-review] ${msg}`),
       });
