@@ -278,7 +278,8 @@ By session label:
 Implemented on this branch: the runway floor from option 1 (grace =
 `max(300 s, 600 s − aux runtime)`), the non-retryable no-response class from
 option 3, and the footer reasons from option 4. Route changes and the
-quota/auth fail-fast stay separate.
+quota/auth fail-fast stay separate. No benchmark-ledger row exists for the
+branch; the core-subset run was skipped and the pull request says so.
 
 1. **Give auxiliary sessions a deadline of their own.** The grace should not
    be the only clock: a floor measured from the auxiliary session's own start
@@ -298,8 +299,11 @@ quota/auth fail-fast stay separate.
 4. **Name the cutoff in the footer and telemetry.** "Did not complete" hides
    four causes; coverage rows already carry `aborted-after-grace` vs
    `timeout`, so the posted footer could say which.
-5. The 600 s interactions cap can stay or go; the data does not justify
-   touching it before 1–3.
+5. The 600 s interactions cap was removed on this branch once the runway
+   floor made it the binding limit for every slow interactions lens: a local
+   dogfood run cut the lens at 600 s while the guideline check on the same
+   Devin route needed 800 s and the main pass 1079 s. The runway floor, the
+   finder timeout and the run deadline now bound every lens alike.
 
 Any change to 1–3 alters model inputs or finding disposition and falls under
 the review-quality gate in AGENTS.md.

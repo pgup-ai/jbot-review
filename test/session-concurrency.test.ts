@@ -211,7 +211,7 @@ describe('limitReviewBackendSessions', () => {
     assert.deepEqual(order, ['main-1', 'main-2', 'aux']);
   });
 
-  it('bounds interactions after queueing and cancels at the run deadline', async () => {
+  it('bounds a lens after queueing and cancels at the run deadline', async () => {
     const slots = new Semaphore(1);
     const release = await slots.acquire();
     let started = false;
@@ -273,10 +273,10 @@ describe('limitReviewBackendSessions', () => {
       finish();
     }
     const fast = makeBackend();
-    const observedTimeouts: number[] = [];
+    const observedTimeouts: Array<number | undefined> = [];
     const run = fast.runReview;
     fast.runReview = async (...args) => {
-      observedTimeouts.push(args[4]!.timeoutMs!);
+      observedTimeouts.push(args[4]?.timeoutMs);
       return run(...args);
     };
     fast.abortSessionsByLabel = () => {
@@ -293,7 +293,8 @@ describe('limitReviewBackendSessions', () => {
     await limitReviewBackendSessions(fast, 'aux', undefined).runReview('model', '', '', noLog, {
       label: 'review-interactions',
     });
-    assert.deepEqual(observedTimeouts, [10, 600_000, 600_000]);
+    // No lens-specific clamp: the runway floor and run deadline bound every lens alike.
+    assert.deepEqual(observedTimeouts, [10, 1_200_000, undefined]);
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
 

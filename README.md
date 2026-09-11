@@ -1155,14 +1155,13 @@ Specialists do not start general reviews or another specialist's audit. Independ
 verification intentionally rechecks evidence; deterministic deduplication still
 handles findings that describe the same defect from different perspectives.
 
-After main review completes, auxiliary sessions have at most five minutes to
-settle, bounded by the run budget with verification and posting time reserved.
-Unfinished sessions are cancelled and reported as incomplete coverage.
-
-Interactions has a ten-minute execution limit starting after session-slot
-acquisition, bounded by the remaining run deadline. The run deadline also applies
-while queued. Expiry requests backend cancellation and marks coverage incomplete;
-completed main findings survive. The cap includes any repairs inside the session.
+After main review completes, auxiliary sessions get a settle grace of at least
+five minutes, stretched so every auxiliary session has ten minutes from its
+launch, bounded by the run budget with verification and posting time reserved.
+Unfinished sessions are cancelled and reported as incomplete coverage, and the
+review footer names the cutoff (cut off after the main review, timed out, or
+failed). The run deadline also applies while queued; expiry requests backend
+cancellation, and completed main findings survive.
 
 Set `JBOT_GUIDELINE_SWEEP=true` to run guideline checking as a follow-up in each
 OpenCode, Pi, or CommandCode main review session, reusing its investigation.
