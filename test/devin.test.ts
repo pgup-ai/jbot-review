@@ -137,8 +137,15 @@ describe('Devin CLI provider helpers', () => {
       process.env.XDG_DATA_HOME = '/tmp/ambient-data';
       process.env.XDG_CACHE_HOME = '/tmp/ambient-cache';
       process.env.XDG_RUNTIME_DIR = '/tmp/ambient-runtime';
+      process.env.GIT_CONFIG_GLOBAL = '/tmp/ambient-gitconfig';
+      process.env.GIT_CONFIG_COUNT = '1';
+      process.env.GIT_DIR = '/tmp/elsewhere/.git';
       const env = devinEnvForHome('/tmp/devin-home');
       assert.equal(env.HOME, '/tmp/devin-home');
+      assert.equal(env.GIT_CONFIG_GLOBAL, '/tmp/devin-home/.gitconfig');
+      assert.equal(env.GIT_CONFIG_NOSYSTEM, '1');
+      assert.equal(env.GIT_CONFIG_COUNT, undefined);
+      assert.equal(env.GIT_DIR, undefined);
       assert.equal(env.DEVIN_TEST_TOKEN, undefined);
       assert.equal(env.INPUT_DEVIN_TEST, undefined);
       assert.equal(env.DEVIN_TEST_SAFE, 'kept');
@@ -330,11 +337,10 @@ setInterval(() => {}, 1000);
         const config = JSON.parse(readFileSync(join(session.home, 'config.json'), 'utf8'));
         assert.ok(config.permissions.deny.includes(`Read(${fake.home}/**)`));
         assert.equal(
-          execFileSync(
-            'git',
-            ['config', '--file', join(session.home, '.gitconfig'), '--get', 'safe.directory'],
-            { encoding: 'utf8' },
-          ).trim(),
+          execFileSync('git', ['config', '--get', 'safe.directory'], {
+            env: devinEnvForHome(session.home),
+            encoding: 'utf8',
+          }).trim(),
           fake.workspace,
         );
         assert.equal(statSync(devinCredentialsPath(session.home)).mode & 0o777, 0o600);

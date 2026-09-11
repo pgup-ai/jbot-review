@@ -236,6 +236,11 @@ export function devinEnvForHome(home: string): NodeJS.ProcessEnv {
   delete env.XDG_DATA_HOME;
   delete env.XDG_CACHE_HOME;
   delete env.XDG_RUNTIME_DIR;
+  // Inherited GIT_* overrides (GIT_CONFIG_GLOBAL, GIT_CONFIG_COUNT, GIT_DIR…)
+  // would bypass the session's own gitconfig; pin git to it instead.
+  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
+  env.GIT_CONFIG_NOSYSTEM = '1';
+  env.GIT_CONFIG_GLOBAL = join(home, '.gitconfig');
   return env;
 }
 
