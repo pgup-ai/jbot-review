@@ -165,13 +165,15 @@ export function runCliProcess(
       else resolve({ stdout, stderr, exitCode });
     };
     // A descendant that left the process group (setsid) survives the group kill
-    // and holds the pipes open, so 'close' would never come; settle on exit then
-    // and drop our pipe ends, which would otherwise keep the event loop alive.
-    // Exit fixes the outcome: a deadline landing in that grace is moot.
+    // and holds the pipes open, so 'close' would never come; settle on exit then.
+    // Exit fixes the outcome: a deadline landing in that grace is moot. Once the
+    // grace is up, nothing a straggler still writes can reach us, so reap the
+    // group and drop our pipe ends, which would otherwise keep the loop alive.
     child.on('exit', (exitCode) => {
       exited = true;
       clearTimeout(timer);
       exitTimer = setTimeout(() => {
+        kill('SIGKILL');
         child.stdout?.destroy();
         child.stderr?.destroy();
         void settle(exitCode);

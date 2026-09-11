@@ -135,9 +135,22 @@ console.log(JSON.stringify(result));
   }
 });
 
-it('reaps in-group descendants on abort during the pipe grace without changing the outcome', async () => {
+it('reaps in-group descendants left behind by an exited leader, with or without an abort', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-cli-linger-'));
   const scope = createCliProcessScope();
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const reaped = async (pid: number) => {
+    const limit = Date.now() + 2000;
+    while (alive(pid) && Date.now() < limit) await delay(10);
+    return !alive(pid);
+  };
   const pidFile = join(workspace, 'pid');
   const lingerer = `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`;
   // The parent exits at once; its in-group child keeps the inherited pipes open.
@@ -159,18 +172,20 @@ it('reaps in-group descendants on abort during the pipe grace without changing t
     assert.equal(result.stdout.trim(), 'done');
     assert.equal(result.exitCode, 0);
     // The orphan is reaped by init after the pipes close; allow it that moment.
-    const pid = Number(readFileSync(pidFile, 'utf8'));
-    const alive = () => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-    const reaped = Date.now() + 2000;
-    while (alive() && Date.now() < reaped) await delay(10);
-    assert.equal(alive(), false);
+    assert.equal(await reaped(Number(readFileSync(pidFile, 'utf8'))), true);
+
+    // With no abort at all, the grace still ends by reaping what the leader left behind.
+    rmSync(pidFile, { force: true });
+    const settled = await scope.run('linger-again', () =>
+      runCliProcess(process.execPath, ['-e', parent], {
+        cwd: workspace,
+        timeoutMs: 5000,
+        timeoutMessage: 'deadline',
+        killGraceMs: 200,
+      }),
+    );
+    assert.equal(settled.stdout.trim(), 'done');
+    assert.equal(await reaped(Number(readFileSync(pidFile, 'utf8'))), true);
   } finally {
     try {
       process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');

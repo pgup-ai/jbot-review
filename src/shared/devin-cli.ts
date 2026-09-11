@@ -57,11 +57,6 @@ function devinCliLogTail(root: string): string {
   );
 }
 
-/** Double-quoted git config value: `#`, `;` and whitespace are literal only inside quotes. */
-function gitConfigString(value: string): string {
-  return `"${value.replace(/[\\"]/g, '\\$&').replace(/\n/g, '\\n')}"`;
-}
-
 function removeDevinSession(dir: string, log: (msg: string) => void): void {
   try {
     rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -146,13 +141,11 @@ async function runDevinPrompt(
     writeFileSync(promptFile, prompt, { mode: 0o600 });
     // The Action's safe.directory entry lives under the process HOME; git run
     // from this HOME refuses a checkout owned by another uid without its own.
-    writeFileSync(
-      join(root, '.gitconfig'),
-      `[safe]\n\tdirectory = ${gitConfigString(workspace)}\n`,
-      {
-        mode: 0o600,
-      },
-    );
+    // Double-quoted: `#`, `;` and whitespace are literal only inside quotes.
+    const directory = `"${workspace.replace(/[\\"]/g, '\\$&').replace(/\n/g, '\\n')}"`;
+    writeFileSync(join(root, '.gitconfig'), `[safe]\n\tdirectory = ${directory}\n`, {
+      mode: 0o600,
+    });
     log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
     let retriedSetup = false;
     let retriedCatalog = false;
