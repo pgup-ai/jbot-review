@@ -9,6 +9,8 @@ import {
   computeVerificationTimeoutMs,
   computeAuxiliaryGraceMs,
   AUXILIARY_SETTLE_GRACE_MS,
+  computeLensGraceMs,
+  sharedPrefixLaunchDelayMs,
 } from './time-budget.ts';
 import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
@@ -262,6 +264,7 @@ import {
   type PriorJbotThreads,
 } from './github.ts';
 import { isDefinitiveApprovalRejection, type AutoApprovalDecision } from './approval.ts';
+import { setTimeout as sleep } from 'node:timers/promises';
 import {
   classifyReviewStaleness,
   classifyMainShardFailure,
@@ -270,7 +273,9 @@ import {
 } from './retry-policy.ts';
 import {
   condenseSummary,
+  describeIncompleteReason,
   formatIncompleteCoverage,
+  type IncompleteSession,
   formatSummaryMarkdown,
   ORPHANED_FINDINGS_HEADING,
   renderOrphanedSection,
@@ -822,6 +827,12 @@ export interface ReviewRunOptions {
    */
   verifyOverlapGrace?: boolean;
   /**
+   * JBOT_SHARED_PREFIX_PROMPT arm: main and lens prompts lead with the diff
+   * block and lens launches are staggered, so sessions on one provider can
+   * share its prefix cache. Off by default pending benchmark evidence.
+   */
+  sharedPrefixPrompt?: boolean;
+  /**
    * TASK-065 arm: verification judges from a slim claim-checking context
    * (title/body/diff scope, linked issues, changed files, full diff) instead
    * of the whole finder context. Off by default — the verifier is a precision
@@ -1030,25 +1041,6 @@ async function runReviewPipeline(params: {
   const { providerID, modelID } = parseModelName(model);
   const auxModel = options.auxModel || model;
   const { providerID: auxProviderID, modelID: auxModelID } = parseModelName(auxModel);
-  const promptCachePolicy = resolvePromptCachePolicy({
-    promptCache: options.promptCache,
-    mainModel: model,
-    mainProviderID: providerID,
-    mainModelID: modelID,
-    auxModel,
-    auxProviderID,
-    auxModelID,
-  });
-  if (promptCachePolicy.disabledPromptCacheModels.length > 0) {
-    log(
-      `Prompt cache disabled for unsupported model(s): ${promptCachePolicy.disabledPromptCacheModels.join(', ')}.`,
-    );
-  }
-  if (promptCachePolicy.sharedProviderCacheDisabled) {
-    log(
-      `Prompt cache disabled for provider ${providerID} because aux model ${auxModel} does not support it; main model ${model} shares that provider config.`,
-    );
-  }
   const tokenUsage = createReviewTokenUsageAccumulator();
   const telemetry = createTelemetryRecorder(options.reviewTelemetry);
   const phases = createPhaseTelemetryTracker(telemetry);
@@ -1098,12 +1090,15 @@ async function runReviewPipeline(params: {
   // terminal state: the abort settles the underlying promise promptly, whose
   // own catch handler would otherwise append a second, conflicting row.
   const abandonedAuxLabels = new Set<string>();
-  const auxCoverage = new Map<string, boolean>();
+  const auxCoverage = new Map<string, { complete: boolean; error?: unknown }>();
   const recordCoverage: SessionCoverageRecorder = (coverage) => {
     if (abandonedAuxLabels.has(coverage.session)) return;
     if (coverage.session !== 'review' && !coverage.session.startsWith('review-shard-')) {
       if (coverage.state === 'failed' || coverage.state === 'completed')
-        auxCoverage.set(coverage.session, coverage.state === 'completed');
+        auxCoverage.set(coverage.session, {
+          complete: coverage.state === 'completed',
+          error: coverage.error,
+        });
     }
     telemetry.recordCoverage(coverage);
   };
@@ -1371,6 +1366,26 @@ async function runReviewPipeline(params: {
   const auxOnPoolside = backendSelection.auxSdkEngine === 'poolside';
   const mainOnOpencode = !mainCliBackend && !mainOnPi && !mainOnPoolside;
   const auxOnOpencode = !auxCliBackend && !auxOnPi && !auxOnPoolside;
+  const promptCachePolicy = resolvePromptCachePolicy({
+    promptCache: options.promptCache,
+    mainModel: model,
+    mainProviderID: providerID,
+    mainModelID: modelID,
+    auxModel,
+    auxProviderID,
+    auxModelID,
+    servedByOpencode: (role) => (role === 'main' ? mainOnOpencode : auxOnOpencode),
+  });
+  if (promptCachePolicy.disabledPromptCacheModels.length > 0) {
+    log(
+      `Prompt cache disabled for unsupported model(s): ${promptCachePolicy.disabledPromptCacheModels.join(', ')}.`,
+    );
+  }
+  if (promptCachePolicy.sharedProviderCacheDisabled) {
+    log(
+      `Prompt cache disabled for provider ${providerID} because aux model ${auxModel} does not support it; main model ${model} shares that provider config.`,
+    );
+  }
   if (mainOnPi || auxOnPi || mainOnPoolside || auxOnPoolside) {
     log(
       `Backend routing: main=${mainCliBackend ?? backendSelection.mainSdkEngine ?? 'opencode'} aux=${auxCliBackend ?? backendSelection.auxSdkEngine ?? 'opencode'}`,
@@ -1598,8 +1613,7 @@ async function runReviewPipeline(params: {
       ? embeddedOnlyBackendDiffHunks.text
       : diffHunksBlock;
   const auxPrContext = joinContext(coreContext, auxDiffBlockText);
-  const lensPrContext = joinContext(
-    UNTRUSTED_PR_CONTENT_NOTE,
+  const lensContextBlocks = [
     buildReviewScopeContext({
       pullTitle,
       pullBody,
@@ -1609,8 +1623,11 @@ async function runReviewPipeline(params: {
     }),
     blastRadiusBlock,
     LENS_CONTEXT_NOTE,
-    auxDiffBlockText,
-  );
+  ];
+  // The trust boundary leads either way; the shared-prefix arm moves only the diff.
+  const lensPrContext = options.sharedPrefixPrompt
+    ? joinContext(UNTRUSTED_PR_CONTENT_NOTE, auxDiffBlockText, ...lensContextBlocks)
+    : joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks, auxDiffBlockText);
   // TASK-065 arm (JBOT_VERIFIER_SLIM_CONTEXT): the verifier judges a handful
   // of findings against the diff; the finder supplements around it are pure
   // prefill. Same diff block as the aux path, so a slim verifier never judges
@@ -2351,6 +2368,7 @@ async function runReviewPipeline(params: {
         ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
         : undefined,
       embeddedFirstPrompt: options.embeddedFirstPrompt,
+      diffFirst: options.sharedPrefixPrompt,
     });
 
     // Opt-in via an operator-configured directory, NEVER a path inside the
@@ -2390,6 +2408,7 @@ async function runReviewPipeline(params: {
               modelOptions: options.modelOptions,
               baseURL,
               ...(options.embeddedFirstPrompt ? { embeddedFirstPrompt: true } : {}),
+              ...(options.sharedPrefixPrompt ? { sharedPrefixPrompt: true } : {}),
             }),
           }
         : undefined;
@@ -2429,6 +2448,7 @@ async function runReviewPipeline(params: {
         : undefined,
       evidenceQuotes: options.evidenceQuotes,
       embeddedFirstPrompt: options.embeddedFirstPrompt,
+      contextFirst: options.sharedPrefixPrompt,
       // Local mode has no PR to go stale; GitHub runs re-check before a retry
       // of a long attempt. Fetch failures fail open inside runShardedReview.
       ...(!localDiff && headSha
@@ -2447,6 +2467,10 @@ async function runReviewPipeline(params: {
       sweepGuidelines,
     });
 
+    const auxLaunchedAt = Date.now();
+    // Only a single-shard main leads with the diff, so only then does a lens on
+    // the same model gain from waiting for main's prefill.
+    const lensSharesMainPrefix = auxModel === model && shardPlans.length <= 1;
     const addressedPriorCheck = trackAux(
       'addressed-prior-comments',
       startAddressedPriorCommentsCheck({
@@ -2532,6 +2556,11 @@ async function runReviewPipeline(params: {
       deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt, verificationEnabled),
       evidenceQuotes: options.evidenceQuotes,
       embeddedFirstPrompt: options.embeddedFirstPrompt,
+      contextFirst: options.sharedPrefixPrompt,
+      launchDelayMs: options.sharedPrefixPrompt
+        ? (index) => sharedPrefixLaunchDelayMs(index, lensSharesMainPrefix)
+        : undefined,
+      isAbandoned: (label) => abandonedAuxLabels.has(label),
       log,
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
@@ -2648,9 +2677,20 @@ async function runReviewPipeline(params: {
       options.timeBudgetMinutes,
       Date.now() - runStartedAt,
       verificationEnabled,
+      Date.now() - auxLaunchedAt,
     );
+    const lensGraceMs = options.sharedPrefixPrompt
+      ? computeLensGraceMs(
+          options.timeBudgetMinutes,
+          Date.now() - runStartedAt,
+          verificationEnabled,
+          Date.now() - auxLaunchedAt,
+          candidateLensKeys.length,
+          lensSharesMainPrefix,
+        )
+      : auxiliaryGraceMs;
     const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
-    const abandonAuxSession = (label: string) => () => {
+    const abandonAuxSession = (label: string, graceMs: number) => () => {
       const aborted = auxBackend.abortSessionsByLabel?.(label, log);
       // Zero registered processes can also mean queued work; only a terminal
       // coverage row proves the pass has already settled.
@@ -2658,7 +2698,9 @@ async function runReviewPipeline(params: {
       recordCoverage({
         session: label,
         state: 'failed',
-        error: new Error(aborted ? 'aborted-after-grace' : 'abandoned-after-grace'),
+        error: new Error(
+          `${aborted ? 'aborted' : 'abandoned'}-after-grace (${Math.round(graceMs / 1000)}s)`,
+        ),
       });
       abandonedAuxLabels.add(label);
     };
@@ -2672,7 +2714,7 @@ async function runReviewPipeline(params: {
     ] = await Promise.all([
       Promise.all(
         lensPasses.map((lens) =>
-          settleWithinGrace(lens, [], log, auxiliaryGraceMs, abandonAuxSession(lens.label)),
+          settleWithinGrace(lens, [], log, lensGraceMs, abandonAuxSession(lens.label, lensGraceMs)),
         ),
       ),
       settleWithinGrace(
@@ -2680,21 +2722,21 @@ async function runReviewPipeline(params: {
         [],
         log,
         auxiliaryGraceMs,
-        abandonAuxSession('addressed-prior-comments'),
+        abandonAuxSession('addressed-prior-comments', auxiliaryGraceMs),
       ),
       settleWithinGrace(
         guidelineComplianceCheck,
         [],
         log,
         auxiliaryGraceMs,
-        abandonAuxSession('guideline-compliance'),
+        abandonAuxSession('guideline-compliance', auxiliaryGraceMs),
       ),
       settleWithinGrace(
         changesSinceLastReview,
         '',
         log,
         auxiliaryGraceMs,
-        abandonAuxSession('changes-since-last-review'),
+        abandonAuxSession('changes-since-last-review', auxiliaryGraceMs),
       ),
     ]);
     graceDone();
@@ -2807,9 +2849,9 @@ async function runReviewPipeline(params: {
     telemetry.snapshot('verified', verifiedFindings);
     const finalFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
     const filteredFindings = filterFindings(verifiedFindings, options);
-    const incompleteSessions = [...auxCoverage]
-      .filter(([, complete]) => !complete)
-      .map(([label]) => label);
+    const incompleteSessions: IncompleteSession[] = [...auxCoverage]
+      .filter(([, row]) => !row.complete)
+      .map(([label, row]) => ({ label, reason: describeIncompleteReason(row.error) }));
     const coverageNotice = formatIncompleteCoverage(incompleteSessions);
     if (coverageNotice) log(coverageNotice);
     telemetry.snapshot('filtered', filteredFindings);
@@ -3220,6 +3262,7 @@ export function normalizeOptions(
     verifierSlimContext: options?.verifierSlimContext ?? false,
     commandCodeTools: options?.commandCodeTools ?? false,
     verifyOverlapGrace: options?.verifyOverlapGrace ?? false,
+    sharedPrefixPrompt: options?.sharedPrefixPrompt ?? false,
     auxModel: options?.auxModel ?? '',
     modelPool: options?.modelPool ?? [],
     auxApiKey: options?.auxApiKey ?? '',
@@ -3274,7 +3317,8 @@ export function emitReviewTelemetry(
   }
 }
 
-function startLensPasses(params: {
+/** Exported for the stagger tests; the pipeline is the only production caller. */
+export function startLensPasses(params: {
   backend: ReviewBackend;
   model: string;
   lensPrContext: string;
@@ -3284,6 +3328,11 @@ function startLensPasses(params: {
   deadlineAt?: number;
   evidenceQuotes?: boolean;
   embeddedFirstPrompt?: boolean;
+  contextFirst?: boolean;
+  /** Shared-prefix arm: per-lens launch delay so each request can hit the prefix the previous one built. */
+  launchDelayMs?: (index: number) => number;
+  /** The grace can expire during that delay; a launch must not outlive its abandonment. */
+  isAbandoned?: (label: string) => boolean;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
@@ -3291,40 +3340,52 @@ function startLensPasses(params: {
   const { lensKeys } = params;
   if (lensKeys.length === 0) return [];
 
-  params.log(`Starting ${lensKeys.length} lens pass(es) in parallel: ${lensKeys.join(', ')}.`);
-  return lensKeys.map((key) => {
-    const startedAt = Date.now();
-    return params.backend
-      .runReview(params.model, params.lensPrContext, params.guidelinesForPrompt, params.log, {
-        lensAddendum: REVIEW_LENSES[key],
-        label: `review-${key}`,
-        timeoutMs: params.timeoutMs,
-        deadlineAt: params.deadlineAt,
-        onTokenUsage: params.onTokenUsage,
-        evidenceQuotes: params.evidenceQuotes,
-        embeddedFirstPrompt: params.embeddedFirstPrompt,
-      })
-      .then((result) => {
-        params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
-        params.onCoverage?.({
-          session: `review-${key}`,
-          state: 'completed',
-          durationMs: Date.now() - startedAt,
+  params.log(
+    `Starting ${lensKeys.length} lens pass(es) in parallel: ${lensKeys.join(', ')}.${
+      params.launchDelayMs ? ' Launches are staggered for prefix caching.' : ''
+    }`,
+  );
+  return lensKeys.map((key, index) => {
+    const run = () => {
+      const startedAt = Date.now();
+      return params.backend
+        .runReview(params.model, params.lensPrContext, params.guidelinesForPrompt, params.log, {
+          lensAddendum: REVIEW_LENSES[key],
+          label: `review-${key}`,
+          timeoutMs: params.timeoutMs,
+          deadlineAt: params.deadlineAt,
+          onTokenUsage: params.onTokenUsage,
+          evidenceQuotes: params.evidenceQuotes,
+          embeddedFirstPrompt: params.embeddedFirstPrompt,
+          contextFirst: params.contextFirst,
+        })
+        .then((result) => {
+          params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
+          params.onCoverage?.({
+            session: `review-${key}`,
+            state: 'completed',
+            durationMs: Date.now() - startedAt,
+          });
+          return result.findings;
+        })
+        .catch((error) => {
+          params.log(
+            `(skipped ${key} lens pass: ${error instanceof Error ? error.message : String(error)})`,
+          );
+          params.onCoverage?.({
+            session: `review-${key}`,
+            state: 'failed',
+            error,
+            durationMs: Date.now() - startedAt,
+          });
+          return [];
         });
-        return result.findings;
-      })
-      .catch((error) => {
-        params.log(
-          `(skipped ${key} lens pass: ${error instanceof Error ? error.message : String(error)})`,
-        );
-        params.onCoverage?.({
-          session: `review-${key}`,
-          state: 'failed',
-          error,
-          durationMs: Date.now() - startedAt,
-        });
-        return [];
-      });
+    };
+    const delayMs = params.launchDelayMs?.(index) ?? 0;
+    if (delayMs <= 0) return run();
+    return sleep(delayMs).then(() =>
+      params.isAbandoned?.(`review-${key}`) ? ([] as Finding[]) : run(),
+    );
   });
 }
 
@@ -3565,6 +3626,8 @@ export function buildShardPlans(params: {
   requireCompleteEmbeddedDiff?: boolean;
   diffHunksOptions?: DiffHunksOptions;
   embeddedFirstPrompt?: boolean;
+  /** Shared-prefix arm: a single-shard plan leads with the diff; sharded plans keep the core prefix they share. */
+  diffFirst?: boolean;
 }): ShardPlan[] {
   const {
     coreContext,
@@ -3573,15 +3636,24 @@ export function buildShardPlans(params: {
     shards,
     requireCompleteEmbeddedDiff = false,
     diffHunksOptions,
+    diffFirst = false,
   } = params;
   if (shards.length <= 1) {
+    // The runner heads coreContext with the trust boundary; diff-first moves only
+    // the blocks behind it, so author-controlled text never precedes the guard.
+    const [boundary, coreBody] = coreContext.startsWith(UNTRUSTED_PR_CONTENT_NOTE)
+      ? [UNTRUSTED_PR_CONTENT_NOTE, coreContext.slice(UNTRUSTED_PR_CONTENT_NOTE.length).trimStart()]
+      : ['', coreContext];
     const diffResult = requireCompleteEmbeddedDiff
       ? buildDiffHunksBlockWithMetadata(shards[0] ?? [], diffHunksOptions)
       : undefined;
     if (diffResult) {
       assertCompleteEmbeddedDiff(diffResult, 'review');
     }
-    const baseContext = joinContext(coreContext, diffResult?.text ?? fullDiffBlock);
+    const diffText = diffResult?.text ?? fullDiffBlock;
+    const baseContext = diffFirst
+      ? joinContext(boundary, diffText, coreBody)
+      : joinContext(coreContext, diffText);
     return [
       {
         label: 'review',
@@ -3693,6 +3765,7 @@ export async function runShardedReview(params: {
   disableContext7?: () => Promise<void>;
   evidenceQuotes?: boolean;
   embeddedFirstPrompt?: boolean;
+  contextFirst?: boolean;
   /**
    * TASK-155: re-checks PR state before a retry of a long attempt; a returned
    * error aborts the run (thrown) instead of retrying against a stale head.
@@ -3804,6 +3877,7 @@ export async function runShardedReview(params: {
           onTokenUsage: params.onTokenUsage,
           evidenceQuotes: params.evidenceQuotes,
           embeddedFirstPrompt: params.embeddedFirstPrompt,
+          contextFirst: params.contextFirst,
         });
         persist(result, primaryFingerprint);
         cover('completed');
@@ -3902,6 +3976,7 @@ export async function runShardedReview(params: {
               onTokenUsage: params.onTokenUsage,
               evidenceQuotes: params.evidenceQuotes,
               embeddedFirstPrompt: params.embeddedFirstPrompt,
+              contextFirst: params.contextFirst,
             },
           );
           persist(result, retryFingerprint);
@@ -4442,7 +4517,7 @@ export function buildBody(
   tokenUsage?: ReviewTokenUsage,
   engineByModel?: Record<string, string>,
   reasoningEffort?: string,
-  incompleteSessions: readonly string[] = [],
+  incompleteSessions: readonly IncompleteSession[] = [],
 ): string {
   const total = all.length;
   const lines = ['## J-Bot Code Review', ''];

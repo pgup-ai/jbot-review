@@ -4,6 +4,9 @@ import {
   computeRetryTimeoutMs,
   computeVerificationTimeoutMs,
   computeAuxiliaryGraceMs,
+  computeLensGraceMs,
+  sharedPrefixLaunchDelayMs,
+  SHARED_PREFIX_STAGGER_MS,
 } from '../src/shared/time-budget.ts';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -21,6 +24,7 @@ import {
   emitReviewTelemetry,
   formatReviewedWith,
   normalizeOptions,
+  startLensPasses,
   renderReviewMetadataBlock,
   settleWithinGrace,
   runPrReview,
@@ -32,6 +36,7 @@ import { buildDiffHunksBlockWithMetadata } from '../src/shared/diff-context.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import type { Octokit, PrFile } from '../src/shared/github.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
+import { UNTRUSTED_PR_CONTENT_NOTE } from '../src/shared/prompt.ts';
 import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
 import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
 import { completedReviewHead } from '../src/shared/github.ts';
@@ -84,6 +89,55 @@ describe('buildShardPlans cache-stable prefix', () => {
     // ...and none of the per-shard assignment (which is what diverges).
     assert.doesNotMatch(prefix, /reviewer 1\b/);
     assert.doesNotMatch(prefix, /reviewer 2\b/);
+  });
+
+  it('leads a single-shard review with the diff block and keeps sharded plans on their shared core prefix', () => {
+    const base = {
+      coreContext: `${UNTRUSTED_PR_CONTENT_NOTE}\n\n## Pull request\nCORE`,
+      fullDiffBlock: '## Diff hunks\nFULL_DIFF',
+      context7Block: '## Context7 docs\nC7',
+    };
+    // The trust boundary the runner put at the head of the core context stays
+    // first and is stated once; only the blocks behind it move behind the diff.
+    const order = (text: string) => [
+      text.indexOf(UNTRUSTED_PR_CONTENT_NOTE),
+      text.indexOf('## Diff hunks'),
+      text.indexOf('CORE'),
+    ];
+    const assertBoundaryThenDiff = (text: string, label: string) => {
+      assert.ok(text.startsWith(UNTRUSTED_PR_CONTENT_NOTE), label);
+      assert.equal(text.split(UNTRUSTED_PR_CONTENT_NOTE).length, 2, label);
+      assert.deepEqual(
+        [...order(text)].sort((a, b) => a - b),
+        order(text),
+        label,
+      );
+    };
+    const single = buildShardPlans({
+      ...base,
+      shards: [[{ filename: 'src/a.ts' }]],
+      diffFirst: true,
+    });
+    assertBoundaryThenDiff(single[0].context, 'single context');
+    assertBoundaryThenDiff(single[0].baseContext, 'single base');
+    assert.ok(single[0].context.indexOf('CORE') < single[0].context.indexOf('C7'));
+    const control = buildShardPlans({ ...base, shards: [[{ filename: 'src/a.ts' }]] });
+    assert.ok(control[0].context.startsWith(base.coreContext));
+
+    const sharded = buildShardPlans({
+      ...base,
+      shards: [
+        [{ filename: 'src/a.ts', patch: '@@ -1 +1 @@\n+a' }],
+        [{ filename: 'src/b.ts', patch: '@@ -1 +1 @@\n+b' }],
+      ],
+      diffFirst: true,
+    });
+    // Shards carry different diffs, so leading with them would destroy the
+    // prefix they share; sharded plans keep the default order.
+    const [shardA, shardB] = sharded;
+    assert.ok(shardA.context.startsWith(base.coreContext), shardA.label);
+    assert.ok(shardB.context.startsWith(base.coreContext), shardB.label);
+    assert.ok(commonPrefix(shardA.context, shardB.context).includes('C7'));
   });
 
   it('uses treatment shard instructions only when enabled', () => {
@@ -1158,6 +1212,7 @@ describe('normalizeOptions defaults', () => {
     assert.equal(defaults.guidelineWiden, 'auto');
     assert.equal(defaults.verifierSlimContext, false);
     assert.equal(defaults.verifyOverlapGrace, false);
+    assert.equal(defaults.sharedPrefixPrompt, false);
     assert.equal(defaults.guidelineSweep, false);
     assert.equal(
       normalizeOptions({ guidelineSweep: true, dynamicFanout: true }).guidelineSweep,
@@ -1301,6 +1356,69 @@ it('caps auxiliary grace at five minutes while reserving verification and postin
   assert.equal(computeAuxiliaryGraceMs(0, 9_000_000), 300_000);
 });
 
+it("floors the auxiliary runway at ten minutes from the sessions' own start", () => {
+  // A 12 s main pass no longer leaves a slow lens 312 s of life: the grace
+  // stretches to whatever completes a 600 s runway...
+  assert.equal(computeAuxiliaryGraceMs(30, 90_000, true, 12_000), 588_000);
+  // ...never below the five-minute post-main grace when main itself was slow...
+  assert.equal(computeAuxiliaryGraceMs(30, 400_000, true, 350_000), 300_000);
+  // ...and never past the verification and posting reserves.
+  assert.equal(computeAuxiliaryGraceMs(10, 130_000, true, 60_000), 140_000);
+  assert.equal(computeAuxiliaryGraceMs(0, 0, true, 100_000), 500_000);
+});
+
+it('never launches a staggered lens that was abandoned while it waited', async () => {
+  const calls: string[] = [];
+  const backend = {
+    name: 'fake',
+    runReview: async (
+      _model: string,
+      _context: string,
+      _guidelines: string,
+      _log: unknown,
+      options: { label?: string },
+    ) => {
+      calls.push(options.label ?? 'review');
+      return { summary: '', findings: [] };
+    },
+  } as unknown as ReviewBackend;
+  const start = (isAbandoned: () => boolean) =>
+    Promise.all(
+      startLensPasses({
+        backend,
+        model: 'fake/model',
+        lensPrContext: 'CTX',
+        guidelinesForPrompt: '',
+        lensKeys: ['interactions'],
+        launchDelayMs: () => 5,
+        isAbandoned,
+        log: () => {},
+      }),
+    );
+  // The grace can expire while the timer is still pending; the launch must not
+  // outlive the abandonment that already recorded the lens as failed.
+  assert.deepEqual(await start(() => true), [[]]);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(await start(() => false), [[]]);
+  assert.deepEqual(calls, ['review-interactions']);
+});
+
+it('staggers shared-prefix launches so the first prefill lands before the next request', () => {
+  assert.equal(sharedPrefixLaunchDelayMs(0, false), 0);
+  assert.equal(sharedPrefixLaunchDelayMs(1, false), SHARED_PREFIX_STAGGER_MS);
+  // On the main model itself the first lens waits for main's prefill too.
+  assert.equal(sharedPrefixLaunchDelayMs(0, true), SHARED_PREFIX_STAGGER_MS);
+  assert.equal(sharedPrefixLaunchDelayMs(2, true), 3 * SHARED_PREFIX_STAGGER_MS);
+  // Staggered lenses launched later, so their runway ends later: the last
+  // scheduled delay comes off the elapsed time before the floor applies.
+  assert.equal(computeLensGraceMs(30, 90_000, true, 12_000, 2, true), 604_000);
+  assert.equal(computeLensGraceMs(30, 90_000, true, 12_000, 1, false), 588_000);
+  assert.equal(
+    computeLensGraceMs(30, 90_000, true, 12_000, 0, true),
+    computeAuxiliaryGraceMs(30, 90_000, true, 12_000),
+  );
+});
+
 it('marks incomplete review bodies without claiming an all-clear result', () => {
   const body = buildBody(
     '',
@@ -1314,8 +1432,9 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
     undefined,
     undefined,
     undefined,
-    ['review-interactions'],
+    [{ label: 'review-interactions', reason: 'timed out' }],
   );
+  assert.match(body, /`review-interactions` \(timed out\)/);
   assert.equal(completedReviewHead(body), undefined);
   const head = 'a'.repeat(40);
   const complete = buildBody('', '', [], [], 'model', 'owner', 'repo', head);
@@ -1346,7 +1465,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
     undefined,
     undefined,
     undefined,
-    ['finding-verification'],
+    [{ label: 'finding-verification', reason: 'failed' }],
   );
   assert.match(blocked, /Needs changes before approval/);
   assert.match(blocked, /Review incomplete/);

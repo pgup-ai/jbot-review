@@ -93,6 +93,7 @@ function manifest(): ComparisonManifestV1 {
       commandCodeTools: true,
       verifierSlimContext: false,
       verifyOverlapGrace: false,
+      sharedPrefixPrompt: false,
     },
     models,
   };
@@ -137,6 +138,12 @@ describe('comparison manifest validation', () => {
     const missing = manifest();
     Reflect.deleteProperty(missing.reviewConfig, 'commandCodeTools');
     assert.equal(validateComparisonManifest(missing).reviewConfig.commandCodeTools, true);
+    // Manifests written before the shared-prefix arm existed keep it off.
+    Reflect.deleteProperty(missing.reviewConfig, 'sharedPrefixPrompt');
+    assert.equal(validateComparisonManifest(missing).reviewConfig.sharedPrefixPrompt, false);
+    const shared = manifest();
+    shared.reviewConfig.sharedPrefixPrompt = true;
+    assert.equal(validateComparisonManifest(shared).reviewConfig.sharedPrefixPrompt, true);
     const legacy = manifest();
     const parsedLegacy = validateComparisonManifest({
       ...legacy,

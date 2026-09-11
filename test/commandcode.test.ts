@@ -13,6 +13,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { REVIEW_LENSES } from '../src/shared/prompt.ts';
+
 import {
   buildCommandCodeCliArgs,
   runCommandCodeReview,
@@ -501,7 +503,7 @@ describe('CommandCode plan usage', () => {
 });
 
 describe('CommandCode multi-key pick', () => {
-  const usage = (monthlyCredits, fiveExceeded = false, weekExceeded = false) => ({
+  const usage = (monthlyCredits: number, fiveExceeded = false, weekExceeded = false) => ({
     monthlyCredits,
     purchasedCredits: 0,
     fiveHour: { used: 1, cap: 14, resetAt: 1, exceeded: fiveExceeded },
@@ -517,10 +519,14 @@ describe('CommandCode multi-key pick', () => {
   it('checks monthly credits for single keys and normalized lists', async (t) => {
     let remaining = 1;
     const requests: string[] = [];
-    t.mock.method(globalThis, 'fetch', async (_url, options) => {
-      requests.push(options.headers.Authorization);
-      return new Response(JSON.stringify({ credits: { monthlyCredits: remaining } }));
-    });
+    t.mock.method(
+      globalThis,
+      'fetch',
+      async (_url: unknown, options: { headers: Record<string, string> }) => {
+        requests.push(options.headers.Authorization);
+        return new Response(JSON.stringify({ credits: { monthlyCredits: remaining } }));
+      },
+    );
     for (const [raw, key] of [
       [' solo ', ' solo '],
       ['key,', 'key'],
@@ -596,7 +602,7 @@ describe('CommandCode multi-key pick', () => {
   it('picks window-open keys by most remaining credits, failing back sanely', () => {
     // Share of the WEEKLY limit still open ranks first — read from the credits
     // payload, so the pick never depends on the slower monthly enrichment.
-    const withWeekly = (monthlyCredits, used, cap) => ({
+    const withWeekly = (monthlyCredits: number, used: number, cap: number) => ({
       ...usage(monthlyCredits),
       weekly: { used, cap, resetAt: 1, exceeded: false },
     });
@@ -720,7 +726,7 @@ process.stdin.on('end', async () => {
     await Promise.all(
       ['first', 'second', 'repair', 'missing', 'mismatch', 'invalid'].map(async (model) => {
         const coverage: Array<{ state: string }> = [];
-        const usage: Array<{ estimatedCostUsd?: number }> = [];
+        const usage: Array<{ estimatedCostUsd?: number; promptBytes?: number }> = [];
         const result = await runCommandCodeReview(
           home,
           `commandcode/${model}`,
@@ -748,6 +754,13 @@ process.stdin.on('end', async () => {
           );
       }),
     );
+    // A tool-less lens gets the embedded-only lens prompt: no read/grep steps
+    // for the directive to contradict.
+    await runCommandCodeReview(home, 'commandcode/first', 'LENS_CTX', '', () => {}, {
+      runtime: { home, tools: false },
+      lensAddendum: REVIEW_LENSES.interactions,
+      timeoutMs: 5000,
+    });
     await runCommandCodeFindingVerification(
       home,
       'commandcode/verifier',
@@ -762,8 +775,12 @@ process.stdin.on('end', async () => {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
-    assert.equal(calls.length, 13);
+    assert.equal(calls.length, 14);
+    const lensCall = calls.find((call) => call.input.includes('LENS_CTX'));
+    assert.match(lensCall.input, /Tool use disabled/);
+    assert.doesNotMatch(lensCall.input, /targeted reads|Batch independent searches/);
     for (const call of calls) {
+      if (call === lensCall) continue;
       assert.equal(call.cwd, realpathSync(join(home, 'launch')));
       assert.equal(call.args[call.args.indexOf('--permission-mode') + 1], 'plan');
       assert.equal(call.args[call.args.indexOf('--mod') + 1], join(home, 'review.mjs'));

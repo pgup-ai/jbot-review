@@ -408,16 +408,17 @@ Changes-since summaries receive up to 256 KiB
 of delta diff plus a bounded file overview; larger deltas disclose summary-only
 omissions. Main reviews continue to cover the full base-to-head diff.
 
-**Prompt/context arms (env, not inputs).** `JBOT_EMBEDDED_FIRST_PROMPT` (on)
-and `JBOT_CONTEXT_TRIM` (off) are set by environment rather than action input;
-the [local review](#local-review) knob list describes what each changes. Map
-them onto the `uses:` step to switch one from a repo variable without editing a
-file:
+**Prompt/context arms (env, not inputs).** `JBOT_EMBEDDED_FIRST_PROMPT` (on),
+`JBOT_CONTEXT_TRIM` (off) and `JBOT_SHARED_PREFIX_PROMPT` (off) are set by
+environment rather than action input; the [local review](#local-review) knob
+list describes what each changes. Map them onto the `uses:` step to switch one
+from a repo variable without editing a file:
 
 ```yaml
 env:
   JBOT_CONTEXT_TRIM: ${{ vars.JBOT_CONTEXT_TRIM }}
   JBOT_EMBEDDED_FIRST_PROMPT: ${{ vars.JBOT_EMBEDDED_FIRST_PROMPT }}
+  JBOT_SHARED_PREFIX_PROMPT: ${{ vars.JBOT_SHARED_PREFIX_PROMPT }}
 ```
 
 Only the literal `true`/`false` count; anything else, including an unset
@@ -913,6 +914,11 @@ and precision against seeded defects.
   minimizing tool calls. Earlier latency measurements in
   `plan/review-prompt-embedded-first-phase3-ab.md` used the previous, restrictive
   prompt and do not validate this version),
+  `JBOT_SHARED_PREFIX_PROMPT` (off by default; main and lens prompts lead with
+  the diff block, then guidelines, then instructions, and lens launches are
+  staggered 8 s apart so sessions on one provider can hit its automatic prefix
+  cache. The output reminder stays last. Cache hits only follow when sessions
+  share a model and a byte-identical leading block; measure before flipping it),
   `JBOT_SDK_ENGINE` (see
   [Provider configuration](#provider-configuration-in-repo)). The
   opencode server uses a free ephemeral port automatically;
@@ -1149,14 +1155,13 @@ Specialists do not start general reviews or another specialist's audit. Independ
 verification intentionally rechecks evidence; deterministic deduplication still
 handles findings that describe the same defect from different perspectives.
 
-After main review completes, auxiliary sessions have at most five minutes to
-settle, bounded by the run budget with verification and posting time reserved.
-Unfinished sessions are cancelled and reported as incomplete coverage.
-
-Interactions has a ten-minute execution limit starting after session-slot
-acquisition, bounded by the remaining run deadline. The run deadline also applies
-while queued. Expiry requests backend cancellation and marks coverage incomplete;
-completed main findings survive. The cap includes any repairs inside the session.
+After main review completes, auxiliary sessions get a settle grace of at least
+five minutes, stretched so every auxiliary session has ten minutes from its
+launch, bounded by the run budget with verification and posting time reserved.
+Unfinished sessions are cancelled and reported as incomplete coverage, and the
+review footer names the cutoff (cut off after the main review, timed out, or
+failed). The run deadline also applies while queued; expiry requests backend
+cancellation, and completed main findings survive.
 
 Set `JBOT_GUIDELINE_SWEEP=true` to run guideline checking as a follow-up in each
 OpenCode, Pi, or CommandCode main review session, reusing its investigation.

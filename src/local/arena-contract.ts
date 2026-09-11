@@ -55,6 +55,7 @@ export interface ComparisonReviewConfigV1 {
   commandCodeTools: boolean;
   verifierSlimContext: boolean;
   verifyOverlapGrace: boolean;
+  sharedPrefixPrompt: boolean;
 }
 
 export interface ComparisonModelV1 {
@@ -277,6 +278,11 @@ function validateReviewConfig(value: unknown): ComparisonReviewConfigV1 {
       config.verifyOverlapGrace,
       'reviewConfig.verifyOverlapGrace',
     ),
+    // Manifests predating the arm keep it off.
+    sharedPrefixPrompt:
+      config.sharedPrefixPrompt === undefined
+        ? false
+        : requireBoolean(config.sharedPrefixPrompt, 'reviewConfig.sharedPrefixPrompt'),
   };
 }
 

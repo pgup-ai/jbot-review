@@ -20,6 +20,7 @@ import {
   MAX_CHANGED_FILES_BYTES,
   MAX_COMMITS_BYTES,
   MAX_FINDER_GUIDELINE_BYTES,
+  MAX_LENS_GUIDELINE_BYTES,
   MAX_LINKED_ISSUES_BYTES,
   MAX_PR_BODY_BYTES,
   MAX_PRIOR_COMMENTS_BYTES,
@@ -800,16 +801,21 @@ describe('formatFinderGuidelines', () => {
         },
       ],
     };
-    const embeddedOnly = selectFinderGuidelineText({
+    const embeddedOnly = {
       discovered: large,
       forFiles: ['index.ts'],
       complianceRuns: false,
       mainCanReadWorkspace: false,
-      widen: 'auto',
+      widen: 'auto' as const,
       full: formatGuidelines(large),
-      lens: true,
-    });
-    assert.match(embeddedOnly, /FINAL_CONTRACT/);
+    };
+    // The checkout-blind main finder still widens to the whole set...
+    assert.match(selectFinderGuidelineText(embeddedOnly), /FINAL_CONTRACT/);
+    // ...while a lens keeps a small contract excerpt: rules are the compliance
+    // pass's job, and the lens is told not to audit them.
+    const lensSlice = selectFinderGuidelineText({ ...embeddedOnly, lens: true });
+    assert.match(lensSlice, /DOMAIN_RULE/);
+    assert.ok(Buffer.byteLength(lensSlice, 'utf8') <= MAX_LENS_GUIDELINE_BYTES);
     const missing = selectFinderGuidelineText({
       discovered: { ...large, referenced: ['docs/missing.md'] },
       forFiles: ['index.ts'],
@@ -861,6 +867,7 @@ describe('formatFinderGuidelines', () => {
 
   it('uses MAX_FINDER_GUIDELINE_BYTES by default and is smaller than the total cap', () => {
     assert.ok(MAX_FINDER_GUIDELINE_BYTES < 96 * 1024);
+    assert.ok(MAX_LENS_GUIDELINE_BYTES < MAX_FINDER_GUIDELINE_BYTES);
   });
 
   it('demotes .mdc rules whose declared globs match none of the changed files', async () => {

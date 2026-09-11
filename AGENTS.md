@@ -61,8 +61,10 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    fragments.
 5. **Prompt assembly order:** base instructions → guidelines → PR context →
    optional lens → output reminder LAST (recency bias for small models).
-   Schemas use concrete JSON examples, never union syntax. Each rule is
-   stated exactly once.
+   The opt-in `JBOT_SHARED_PREFIX_PROMPT` arm moves the PR context (diff block
+   first) ahead of guidelines and instructions for prefix caching; the
+   reminder stays last there too. Schemas use concrete JSON examples, never
+   union syntax. Each rule is stated exactly once.
 6. **Markers are contracts.** `FINDING_MARKER` / `REVIEW_MARKER` /
    `ADDRESSED_MARKER` in `github.ts` are how prior runs recognize their own
    output; every posting path must include them (use the shared body

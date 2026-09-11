@@ -569,6 +569,8 @@ export interface PromptCachePolicyInput {
   auxModel: string;
   auxProviderID: string;
   auxModelID: string;
+  /** The policy drives opencode's promptCacheKey; a role the server does not run never sees it. */
+  servedByOpencode?: (role: 'main' | 'aux') => boolean;
 }
 
 export interface PromptCachePolicy {
@@ -584,22 +586,27 @@ export function resolvePromptCachePolicy(input: PromptCachePolicyInput): PromptC
   const auxSupportsPromptCache = modelSupportsPromptCache(input.auxProviderID, input.auxModelID);
   const sameProvider = input.auxProviderID === input.mainProviderID;
   const disabledPromptCacheModels: string[] = [];
+  const served = input.servedByOpencode ?? (() => true);
+  const auxServed = served('aux');
 
-  if (promptCache && !mainSupportsPromptCache) {
+  if (promptCache && !mainSupportsPromptCache && served('main')) {
     disabledPromptCacheModels.push(input.mainModel);
   }
-  if (promptCache && input.auxModel !== input.mainModel && !auxSupportsPromptCache) {
+  if (promptCache && input.auxModel !== input.mainModel && !auxSupportsPromptCache && auxServed) {
     disabledPromptCacheModels.push(input.auxModel);
   }
 
   return {
     providerPromptCache:
-      promptCache && mainSupportsPromptCache && (!sameProvider || auxSupportsPromptCache),
+      promptCache &&
+      mainSupportsPromptCache &&
+      (!sameProvider || !auxServed || auxSupportsPromptCache),
     auxProviderPromptCache: promptCache && auxSupportsPromptCache,
     disabledPromptCacheModels,
     sharedProviderCacheDisabled:
       promptCache &&
       sameProvider &&
+      auxServed &&
       mainSupportsPromptCache &&
       !auxSupportsPromptCache &&
       input.auxModel !== input.mainModel,

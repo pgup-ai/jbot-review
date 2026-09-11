@@ -32,6 +32,14 @@ describe('classifyMainShardFailure', () => {
     ]) {
       assert.deepEqual(classify(message), { failureClass: 'model-not-found', retryable: false });
     }
+    // A CLI that already re-prompted the model to exhaustion re-buys the same
+    // silence in a fresh session; only a different route can help.
+    assert.deepEqual(
+      classify(
+        'commandcode review exited 9: Warning: The model produced no response (continuation budget exhausted). Retry, or try a different model.',
+      ),
+      { failureClass: 'model-no-response', retryable: false },
+    );
     for (const message of [
       'model "provider/a-very-long-model-identifier" not available (503)',
       'model "provider/a-very-long-model-identifier" temporarily unavailable (503)',

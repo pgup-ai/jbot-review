@@ -765,6 +765,8 @@ async function review(
         config?.verifierSlimContext ?? parseEnvBoolean('JBOT_VERIFIER_SLIM_CONTEXT', false),
       verifyOverlapGrace:
         config?.verifyOverlapGrace ?? parseEnvBoolean('JBOT_VERIFY_OVERLAP_GRACE', false),
+      sharedPrefixPrompt:
+        config?.sharedPrefixPrompt ?? parseEnvBoolean('JBOT_SHARED_PREFIX_PROMPT', false),
       ...(opencodePort ? { opencodePort } : {}),
       onReviewResult: (result) => {
         reviewResult = result;

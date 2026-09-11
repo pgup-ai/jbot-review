@@ -95,6 +95,7 @@ function arenaManifest(baseSha: string, headSha: string): ComparisonManifestV1 {
       guidelineWiden: 'auto',
       verifierSlimContext: false,
       verifyOverlapGrace: false,
+      sharedPrefixPrompt: false,
     },
     models: [
       {

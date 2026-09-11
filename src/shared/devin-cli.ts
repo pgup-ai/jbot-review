@@ -216,6 +216,7 @@ export function createDevinCliBackend(
           options.lensAddendum ?? '',
           options.evidenceQuotes ?? false,
           options.embeddedFirstPrompt ?? false,
+          { contextFirst: options.contextFirst },
         );
         log(
           `Prompt assembled (${label}, devin-cli): ${prompt.length} chars, guidelines=${!!guidelines}`,

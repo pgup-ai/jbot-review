@@ -27,6 +27,7 @@ export interface ReviewBackend {
       guidelineSweep?: GuidelineSweep;
       deadlineAt?: number;
       lensAddendum?: string;
+      contextFirst?: boolean;
       label?: string;
       timeoutMs?: number;
       onTokenUsage?: TokenUsageRecorder;
@@ -228,16 +229,11 @@ export function limitReviewBackendSessions(
       return queued + (backend.abortSessionsByLabel?.(label, log) ?? 0);
     },
     runReview: (model, context, guidelines, log, options) => {
+      // Every lens shares the same bound: its own timeout after slot acquisition
+      // and the run deadline (also while queued). The settle grace does the rest.
       const budget =
-        options?.label === 'review-interactions' || options?.deadlineAt !== undefined
-          ? {
-              timeoutMs: Math.min(
-                options.label === 'review-interactions' ? 600_000 : Infinity,
-                options.timeoutMs ?? Infinity,
-              ),
-              deadlineAt: options.deadlineAt,
-              log,
-            }
+        options?.deadlineAt !== undefined || options?.timeoutMs !== undefined
+          ? { timeoutMs: options.timeoutMs ?? Infinity, deadlineAt: options.deadlineAt, log }
           : undefined;
       return withSlots(
         options?.label ?? 'review',

@@ -1110,6 +1110,7 @@ export async function runPiReview(
   options: {
     guidelineSweep?: GuidelineSweep;
     lensAddendum?: string;
+    contextFirst?: boolean;
     evidenceQuotes?: boolean;
     embeddedFirstPrompt?: boolean;
     label?: string;
@@ -1125,6 +1126,7 @@ export async function runPiReview(
     options.lensAddendum ?? '',
     options.evidenceQuotes ?? false,
     options.embeddedFirstPrompt ?? false,
+    { contextFirst: options.contextFirst },
   );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const session = await createPiSession(runtime, model, false, true, undefined, label);

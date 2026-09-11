@@ -17,6 +17,7 @@ import {
   resolveProviderBaseURL,
   resolveProviderCredential,
   verificationModelOptions,
+  resolvePromptCachePolicy,
 } from '../src/shared/config.ts';
 import { buildConfig } from '../src/shared/opencode.ts';
 
@@ -568,5 +569,47 @@ describe('resolvePoolCredentials', () => {
         resolvePoolCredentials(['openai-compatible/m'], keys(['JBOT_OPENAI_COMPATIBLE_API_KEY'])),
       /Missing base URL for provider "openai-compatible"/,
     );
+  });
+});
+
+describe('resolvePromptCachePolicy', () => {
+  it('scopes the cache diagnostics to the roles the opencode server actually serves', () => {
+    const input = {
+      promptCache: true,
+      mainModel: 'commandcode/meta/muse-spark-1.3-contributor',
+      mainProviderID: 'commandcode',
+      mainModelID: 'meta/muse-spark-1.3-contributor',
+      auxModel: 'opencode/muse-spark-1.3-contributor-free',
+      auxProviderID: 'opencode',
+      auxModelID: 'muse-spark-1.3-contributor-free',
+    };
+    assert.deepEqual(resolvePromptCachePolicy(input).disabledPromptCacheModels, [
+      'commandcode/meta/muse-spark-1.3-contributor',
+    ]);
+    // The CLI talks to its own gateway; opencode's promptCacheKey never reaches it.
+    assert.deepEqual(
+      resolvePromptCachePolicy({ ...input, servedByOpencode: (role) => role !== 'main' })
+        .disabledPromptCacheModels,
+      [],
+    );
+    // Same provider, but the aux model runs elsewhere (pi): the server still
+    // caches for main, and nothing is disabled for the provider on aux's behalf.
+    const split = {
+      promptCache: true,
+      mainModel: 'opencode/big-pickle',
+      mainProviderID: 'opencode',
+      mainModelID: 'big-pickle',
+      auxModel: 'opencode/glm-5.2',
+      auxProviderID: 'opencode',
+      auxModelID: 'glm-5.2',
+    };
+    assert.equal(resolvePromptCachePolicy(split).sharedProviderCacheDisabled, true);
+    const auxOnPi = resolvePromptCachePolicy({
+      ...split,
+      servedByOpencode: (role) => role === 'main',
+    });
+    assert.equal(auxOnPi.providerPromptCache, true);
+    assert.equal(auxOnPi.sharedProviderCacheDisabled, false);
+    assert.deepEqual(auxOnPi.disabledPromptCacheModels, []);
   });
 });
