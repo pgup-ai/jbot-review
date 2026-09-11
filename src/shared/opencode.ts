@@ -7,6 +7,7 @@ import {
   type ServerOptions,
   type SessionStatus,
 } from '@opencode-ai/sdk';
+export type { OpencodeClient };
 
 import { isContext7QuotaError } from './context7.ts';
 import { modelSupportsAgenticTools, PROVIDERS, supportedModelOptions } from './config.ts';
