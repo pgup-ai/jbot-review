@@ -163,7 +163,6 @@ export function runCliProcess(
     // and drop our pipe ends, which would otherwise keep the event loop alive.
     child.on('exit', (exitCode) => {
       exitTimer = setTimeout(() => {
-        kill('SIGKILL');
         child.stdout?.destroy();
         child.stderr?.destroy();
         void settle(exitCode);

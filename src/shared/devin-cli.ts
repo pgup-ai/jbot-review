@@ -139,6 +139,11 @@ async function runDevinPrompt(
     writeFileSync(credentials, readFileSync(devinCredentialsPath(home)), { mode: 0o600 });
     writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home)), { mode: 0o600 });
     writeFileSync(promptFile, prompt, { mode: 0o600 });
+    // The Action's safe.directory entry lives under the process HOME; git run
+    // from this HOME refuses a checkout owned by another uid without its own.
+    writeFileSync(join(root, '.gitconfig'), `[safe]\n\tdirectory = ${workspace}\n`, {
+      mode: 0o600,
+    });
     log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
     let retriedSetup = false;
     let retriedCatalog = false;

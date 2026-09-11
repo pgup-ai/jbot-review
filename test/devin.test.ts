@@ -327,6 +327,10 @@ setInterval(() => {}, 1000);
         assert.equal(dirname(session.home), fake.home);
         const config = JSON.parse(readFileSync(join(session.home, 'config.json'), 'utf8'));
         assert.ok(config.permissions.deny.includes(`Read(${fake.home}/**)`));
+        assert.equal(
+          readFileSync(join(session.home, '.gitconfig'), 'utf8'),
+          `[safe]\n\tdirectory = ${join(fake.root, 'workspace')}\n`,
+        );
         assert.equal(statSync(devinCredentialsPath(session.home)).mode & 0o777, 0o600);
         assert.equal(
           readFileSync(devinCredentialsPath(session.home), 'utf8'),
