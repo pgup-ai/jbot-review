@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   statSync,
   rmSync,
@@ -347,6 +348,62 @@ setInterval(() => {}, 1000);
       await fake.backend.stop();
       await Promise.allSettled([lensRejected, mainRejected]);
       await fake.restore();
+    }
+  });
+
+  it('relaunches once and surfaces the CLI log when Devin exits 0 without output', async () => {
+    for (const [logLines, stderr, expected] of [
+      [
+        [
+          'INFO chisel: CLI init complete',
+          'ERROR handoff: session/new failed: 429 Too Many Requests',
+        ],
+        '',
+        /exited 0 with no output[\s\S]*429 Too Many Requests/,
+      ],
+      [
+        ['INFO chisel: CLI init complete', 'INFO repl_mode: close time.idle=21s'],
+        '',
+        /close time\.idle=21s/,
+      ],
+      [
+        [],
+        'warning: bridge closed',
+        /exited 0 with no output[\s\S]*stderr: warning: bridge closed/,
+      ],
+    ] as const) {
+      const fake = fakeDevin(`
+fs.appendFileSync(stamp, 'launch\\n');
+const logs = process.env.HOME + '/.local/share/devin/cli/logs';
+fs.mkdirSync(logs, { recursive: true });
+fs.writeFileSync(logs + '/devin_20260911-000000_1.log', ${JSON.stringify(logLines.map((line) => `2026-09-11T00:00:00Z  ${line}`).join('\n'))});
+process.stderr.write(${JSON.stringify(stderr)});
+`);
+      try {
+        await assert.rejects(
+          fake.backend.runReview('devin/default', 'context', '', fake.log, { timeoutMs: 5000 }),
+          expected,
+        );
+        await assert.rejects(
+          fake.backend.runGuidelineComplianceCheck('devin/default', 'context', '', fake.log, 5000),
+          expected,
+        );
+        assert.equal(readFileSync(join(fake.root, 'onboarded'), 'utf8'), 'launch\n'.repeat(4));
+        assert.equal(
+          fake.logs.filter((line) => line.includes('no output; retrying once')).length,
+          2,
+        );
+        assert.equal(
+          fake.logs.some((line) => line.includes('continuation')),
+          false,
+        );
+        assert.deepEqual(
+          readdirSync(fake.home).filter((entry) => entry.startsWith('session-')),
+          [],
+        );
+      } finally {
+        await fake.restore();
+      }
     }
   });
 

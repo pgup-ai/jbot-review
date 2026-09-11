@@ -148,13 +148,27 @@ export function runCliProcess(
     child.on('error', (error) => {
       failure ??= error;
     });
-    child.on('close', async (exitCode) => {
+    let exitTimer: ReturnType<typeof setTimeout> | undefined;
+    const settle = async (exitCode: number | null) => {
       clearTimeout(timer);
       clearTimeout(killTimer);
+      clearTimeout(exitTimer);
       signal?.removeEventListener('abort', abort);
       await treeKill;
       if (failure) reject(failure);
       else resolve({ stdout, stderr, exitCode });
+    };
+    // A descendant that left the process group (setsid) survives the group kill
+    // and holds the pipes open, so 'close' would never come; settle on exit then
+    // and drop our pipe ends, which would otherwise keep the event loop alive.
+    child.on('exit', (exitCode) => {
+      exitTimer = setTimeout(() => {
+        kill('SIGKILL');
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        void settle(exitCode);
+      }, options.killGraceMs ?? 2000);
     });
+    child.once('close', settle);
   });
 }

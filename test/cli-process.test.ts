@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -63,6 +63,64 @@ it('cancels one session and waits for descendant pipes to close without cancelli
     assert.equal(result.stdout.trim(), 'alive');
     assert.equal(scope.abort('lens'), 0);
   } finally {
+    await scope.stop();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+it('settles and releases the pipes once the CLI exits even when an escaped descendant keeps them open', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'jbot-cli-escape-'));
+  const scope = createCliProcessScope();
+  const pids: number[] = [];
+  const escape = (pidFile: string) =>
+    `const child = require('child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'inherit' });
+     require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+     child.unref();`;
+  const options = { cwd: workspace, timeoutMs: 1500, timeoutMessage: 'deadline', killGraceMs: 50 };
+  try {
+    // A driver process shows the settled runner no longer holds the event loop open.
+    const exitPid = join(workspace, 'exit-pid');
+    const driver = join(workspace, 'driver.mjs');
+    writeFileSync(
+      driver,
+      `
+import { createCliProcessScope, runCliProcess } from ${JSON.stringify(new URL('../src/shared/cli-process.ts', import.meta.url).href)};
+const result = await createCliProcessScope().run('exit', () =>
+  runCliProcess(process.execPath, ['-e', ${JSON.stringify(`${escape(exitPid)} console.log('done');`)}], ${JSON.stringify(options)}),
+);
+console.log(JSON.stringify(result));
+`,
+    );
+    const started = Date.now();
+    const driven = await promisify(execFile)(process.execPath, ['--import', 'tsx', driver], {
+      timeout: 10000,
+      killSignal: 'SIGKILL',
+    });
+    pids.push(Number(readFileSync(exitPid, 'utf8')));
+    const result = JSON.parse(driven.stdout);
+    assert.equal(result.stdout.trim(), 'done');
+    assert.equal(result.exitCode, 0);
+    assert.ok(Date.now() - started < 8000);
+
+    const hangPid = join(workspace, 'hang-pid');
+    const hung = Date.now();
+    await assert.rejects(
+      scope.run('hang', () =>
+        runCliProcess(process.execPath, ['-e', `${escape(hangPid)} setInterval(() => {}, 1000);`], {
+          ...options,
+          timeoutMs: 200,
+        }),
+      ),
+      /deadline/,
+    );
+    pids.push(Number(readFileSync(hangPid, 'utf8')));
+    assert.ok(Date.now() - hung < 1500);
+  } finally {
+    for (const pid of pids) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
+    }
     await scope.stop();
     rmSync(workspace, { recursive: true, force: true });
   }
