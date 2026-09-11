@@ -503,7 +503,7 @@ describe('CommandCode plan usage', () => {
 });
 
 describe('CommandCode multi-key pick', () => {
-  const usage = (monthlyCredits, fiveExceeded = false, weekExceeded = false) => ({
+  const usage = (monthlyCredits: number, fiveExceeded = false, weekExceeded = false) => ({
     monthlyCredits,
     purchasedCredits: 0,
     fiveHour: { used: 1, cap: 14, resetAt: 1, exceeded: fiveExceeded },
@@ -519,10 +519,14 @@ describe('CommandCode multi-key pick', () => {
   it('checks monthly credits for single keys and normalized lists', async (t) => {
     let remaining = 1;
     const requests: string[] = [];
-    t.mock.method(globalThis, 'fetch', async (_url, options) => {
-      requests.push(options.headers.Authorization);
-      return new Response(JSON.stringify({ credits: { monthlyCredits: remaining } }));
-    });
+    t.mock.method(
+      globalThis,
+      'fetch',
+      async (_url: unknown, options: { headers: Record<string, string> }) => {
+        requests.push(options.headers.Authorization);
+        return new Response(JSON.stringify({ credits: { monthlyCredits: remaining } }));
+      },
+    );
     for (const [raw, key] of [
       [' solo ', ' solo '],
       ['key,', 'key'],
@@ -598,7 +602,7 @@ describe('CommandCode multi-key pick', () => {
   it('picks window-open keys by most remaining credits, failing back sanely', () => {
     // Share of the WEEKLY limit still open ranks first — read from the credits
     // payload, so the pick never depends on the slower monthly enrichment.
-    const withWeekly = (monthlyCredits, used, cap) => ({
+    const withWeekly = (monthlyCredits: number, used: number, cap: number) => ({
       ...usage(monthlyCredits),
       weekly: { used, cap, resetAt: 1, exceeded: false },
     });
@@ -722,7 +726,7 @@ process.stdin.on('end', async () => {
     await Promise.all(
       ['first', 'second', 'repair', 'missing', 'mismatch', 'invalid'].map(async (model) => {
         const coverage: Array<{ state: string }> = [];
-        const usage: Array<{ estimatedCostUsd?: number }> = [];
+        const usage: Array<{ estimatedCostUsd?: number; promptBytes?: number }> = [];
         const result = await runCommandCodeReview(
           home,
           `commandcode/${model}`,

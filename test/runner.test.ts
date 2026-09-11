@@ -1386,7 +1386,7 @@ it('never launches a staggered lens that was abandoned while it waited', async (
 it('staggers shared-prefix launches so the first prefill lands before the next request', () => {
   assert.equal(sharedPrefixLaunchDelayMs(0, false), 0);
   assert.equal(sharedPrefixLaunchDelayMs(1, false), SHARED_PREFIX_STAGGER_MS);
-  // On the main pass's provider the first lens waits for main's prefill too.
+  // On the main model itself the first lens waits for main's prefill too.
   assert.equal(sharedPrefixLaunchDelayMs(0, true), SHARED_PREFIX_STAGGER_MS);
   assert.equal(sharedPrefixLaunchDelayMs(2, true), 3 * SHARED_PREFIX_STAGGER_MS);
 });

@@ -2554,7 +2554,7 @@ async function runReviewPipeline(params: {
       embeddedFirstPrompt: options.embeddedFirstPrompt,
       contextFirst: options.sharedPrefixPrompt,
       launchDelayMs: options.sharedPrefixPrompt
-        ? (index) => sharedPrefixLaunchDelayMs(index, auxProviderID === providerID)
+        ? (index) => sharedPrefixLaunchDelayMs(index, auxModel === model)
         : undefined,
       isAbandoned: (label) => abandonedAuxLabels.has(label),
       log,

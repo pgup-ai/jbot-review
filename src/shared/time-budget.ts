@@ -81,10 +81,11 @@ export function computeAuxiliaryGraceMs(
 /**
  * Provider prefix caches (DeepSeek, z.ai) serve a request only after the
  * request that built the prefix has been processed, so sessions meant to share
- * a prefix launch this far apart.
+ * a prefix launch this far apart. A KV prefix is model-specific: only an
+ * auxiliary session on the exact main model waits for main's prefill.
  */
 export const SHARED_PREFIX_STAGGER_MS = 8_000;
 
-export function sharedPrefixLaunchDelayMs(index: number, sharesMainProvider: boolean): number {
-  return (index + (sharesMainProvider ? 1 : 0)) * SHARED_PREFIX_STAGGER_MS;
+export function sharedPrefixLaunchDelayMs(index: number, sharesMainModel: boolean): number {
+  return (index + (sharesMainModel ? 1 : 0)) * SHARED_PREFIX_STAGGER_MS;
 }
