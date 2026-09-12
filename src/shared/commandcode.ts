@@ -161,6 +161,7 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
 // 1.53.0): `--effort` validates per model and exits nonzero on values outside
 // the model's set; muse-spark rejects the flag outright. Unflagged, v4.1-flash
 // reasons like `high` (~2× its `low` output) and v4-flash-fast like `low`.
+// Tiers are listed ascending; defaults take the first.
 const COMMANDCODE_MODEL_EFFORTS: Record<string, readonly string[]> = {
   'deepseek/deepseek-v4-flash': ['high', 'max'],
   'deepseek/deepseek-v4.1-flash': ['low', 'high', 'max'],
@@ -171,10 +172,11 @@ const COMMANDCODE_MODEL_EFFORTS: Record<string, readonly string[]> = {
 };
 
 /**
- * The `--effort` value for a session; undefined omits the flag. An explicit
- * effort clamps to the nearest declared tier (one knob: "low" means "as low
- * as this model goes"); the built-in defaults deliver only on an exact
- * match, so a default `medium` is never silently promoted to a `high` floor.
+ * The `--effort` value for a session; undefined omits the flag. The built-in
+ * defaults run at the model's lowest declared tier: a tool-less review gains
+ * nothing from deeper reasoning, and the unflagged gateway default runs
+ * v4.1-flash at `high`. An explicit effort clamps to the nearest declared
+ * tier (one knob: "low" means "as low as this model goes").
  */
 function commandCodeReasoningEffort(
   model: string,
@@ -185,8 +187,8 @@ function commandCodeReasoningEffort(
   const effort = modelOptions?.reasoningEffort;
   const supported = COMMANDCODE_MODEL_EFFORTS[modelID];
   if (typeof effort !== 'string' || !supported?.length) return undefined;
-  if (supported.includes(effort)) return effort;
-  return explicit ? clampReasoningEffort(effort, supported) : undefined;
+  if (!explicit) return supported[0];
+  return supported.includes(effort) ? effort : clampReasoningEffort(effort, supported);
 }
 
 /**

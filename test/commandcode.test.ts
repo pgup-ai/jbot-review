@@ -105,17 +105,18 @@ describe('CommandCode CLI provider helpers', () => {
     );
   });
 
-  it('delivers --effort from the per-model allowlist: exact for defaults, clamped when explicit', () => {
-    // Defaults must never be promoted to a restricted model's floor; explicit
-    // efforts clamp so one global knob still reaches restricted models. The
-    // override path exercises the raw allowlist matrix.
+  it('delivers --effort from the per-model allowlist: the floor for defaults, clamped when explicit', () => {
+    // A tool-less review gains nothing from deeper reasoning, so built-in
+    // defaults run at the model's lowest declared tier; explicit efforts clamp
+    // so one global knob still reaches restricted models. The override path
+    // exercises the raw allowlist matrix.
     const deepseek = 'commandcode/deepseek/deepseek-v4-flash';
     const effortOf = (model: string, opts: Record<string, unknown> | undefined, explicit = false) =>
       commandCodeSessionEffort(model, opts, { auxModel: 'commandcode/unused', explicit });
     assert.equal(effortOf(deepseek, { reasoningEffort: 'high' }), 'high');
-    assert.equal(effortOf(deepseek, { reasoningEffort: 'max' }), 'max');
-    assert.equal(effortOf(deepseek, { reasoningEffort: 'low' }), undefined);
-    assert.equal(effortOf(deepseek, { reasoningEffort: 'medium' }), undefined);
+    assert.equal(effortOf(deepseek, { reasoningEffort: 'max' }), 'high');
+    assert.equal(effortOf(deepseek, { reasoningEffort: 'low' }), 'high');
+    assert.equal(effortOf(deepseek, { reasoningEffort: 'medium' }), 'high');
     assert.equal(effortOf(deepseek, { reasoningEffort: 'low' }, true), 'high');
     assert.equal(effortOf(deepseek, { reasoningEffort: 'max' }, true), 'max');
     for (const explicit of [false, true]) {
@@ -132,29 +133,26 @@ describe('CommandCode CLI provider helpers', () => {
     }
     assert.equal(effortOf(deepseek, {}), undefined);
     assert.equal(effortOf(deepseek, undefined), undefined);
-    // The flash variants take low, so the aux default reaches them; medium
-    // still needs an explicit knob and clamps upward.
+    // The flash variants declare low, so every default lands there; an
+    // explicit medium clamps upward.
     for (const flash of ['deepseek-v4.1-flash', 'deepseek-v4-flash-fast']) {
       assert.equal(effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'low' }), 'low');
-      assert.equal(
-        effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'medium' }),
-        undefined,
-      );
+      assert.equal(effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'medium' }), 'low');
       assert.equal(
         effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'medium' }, true),
         'high',
       );
     }
 
-    // Role selection: the aux default never clamps, main options and the
-    // verifier override do; an aux model sharing the main entry follows it.
+    // Role selection: the aux default takes the floor, main options and the
+    // verifier override clamp; an aux model sharing the main entry follows it.
     const ctx = {
       auxModel: deepseek,
       auxModelOptions: { reasoningEffort: 'low' },
       mainModelOptions: { reasoningEffort: 'low' },
       explicit: true,
     };
-    assert.equal(commandCodeSessionEffort(deepseek, undefined, ctx), undefined);
+    assert.equal(commandCodeSessionEffort(deepseek, undefined, ctx), 'high');
     assert.equal(commandCodeSessionEffort(deepseek, { reasoningEffort: 'low' }, ctx), 'high');
     assert.equal(
       commandCodeSessionEffort(deepseek, undefined, { ...ctx, auxModelOptions: undefined }),
