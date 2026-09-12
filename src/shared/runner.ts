@@ -1411,6 +1411,7 @@ async function runReviewPipeline(params: {
   // Stamped into the posted review's metadata: the arm identity for effort
   // A/Bs. Undefined wherever the main engine does not consume the option.
   const commandCodeEffortContext = {
+    mainModel: model,
     auxModel,
     auxModelOptions,
     mainModelOptions: options.modelOptions,
@@ -1863,6 +1864,7 @@ async function runReviewPipeline(params: {
       },
       (m, override) =>
         commandCodeSessionEffort(m, override, {
+          mainModel: model,
           auxModel,
           auxModelOptions,
           mainModelOptions: options.modelOptions,

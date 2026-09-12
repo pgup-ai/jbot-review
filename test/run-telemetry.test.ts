@@ -87,6 +87,7 @@ test('attempt identity distinguishes reruns without confusing the reviewed SHA w
 
 test('effective effort follows the backend contract rather than claiming every requested option was applied', () => {
   const ctx = {
+    mainModel: 'devin/a',
     auxModel: 'commandcode/zai/glm-5.3-flash',
     mainModelOptions: { reasoningEffort: 'medium' },
     auxModelOptions: { reasoningEffort: 'low' },

@@ -157,21 +157,27 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
   return args;
 }
 
-// Probed 2026-08-22 (1.3 variants 2026-09-02): `--effort` validates per model
-// and exits nonzero on values outside the model's set; muse-spark rejects the
-// flag outright.
-const COMMANDCODE_MODEL_EFFORTS: Record<string, readonly string[]> = {
-  'deepseek/deepseek-v4-flash': ['high', 'max'],
-  'meta/muse-spark-1.2-contributor': [],
-  'meta/muse-spark-1.3': [],
-  'meta/muse-spark-1.3-contributor': [],
+// Probed on CLI 1.53.0 (2026-09-11; v4-flash 2026-08-22): `--effort` validates
+// per model and exits nonzero on values outside the model's set; longcat has
+// no adjustable effort. Unflagged, v4.1-flash reasons like `high` (~2× its
+// `low` output) and v4-flash-fast like `low`; `fallback` is where a built-in
+// default the model lacks lands: the lowest tier, because a tool-less review
+// gains nothing from deeper reasoning (v4-flash has no `low`, so `high`).
+const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fallback?: string }> = {
+  'deepseek/deepseek-v4-flash': { tiers: ['high', 'max'], fallback: 'high' },
+  'deepseek/deepseek-v4.1-flash': { tiers: ['low', 'high', 'max'], fallback: 'low' },
+  'deepseek/deepseek-v4-flash-fast': { tiers: ['low', 'high', 'max'], fallback: 'low' },
+  'gpt-5.6-luna': { tiers: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  'meta/muse-spark-1.3': { tiers: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  'meta/muse-spark-1.2-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
+  'meta/muse-spark-1.3-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
 };
 
 /**
- * The `--effort` value for a session; undefined omits the flag. An explicit
- * effort clamps to the nearest declared tier (one knob: "low" means "as low
- * as this model goes"); the built-in defaults deliver only on an exact
- * match, so a default `medium` is never silently promoted to a `high` floor.
+ * The `--effort` value for a session; undefined omits the flag. The built-in
+ * defaults (main medium, aux low) deliver where the model declares that tier
+ * and otherwise take the entry's fallback. An explicit effort clamps to the
+ * nearest declared tier (one knob: "low" means "as low as this model goes").
  */
 function commandCodeReasoningEffort(
   model: string,
@@ -180,32 +186,43 @@ function commandCodeReasoningEffort(
 ): string | undefined {
   const { modelID } = parseModelName(model);
   const effort = modelOptions?.reasoningEffort;
-  const supported = COMMANDCODE_MODEL_EFFORTS[modelID];
-  if (typeof effort !== 'string' || !supported?.length) return undefined;
-  if (supported.includes(effort)) return effort;
-  return explicit ? clampReasoningEffort(effort, supported) : undefined;
+  const entry = COMMANDCODE_MODEL_EFFORTS[modelID];
+  if (typeof effort !== 'string' || !entry?.tiers.length) return undefined;
+  if (entry.tiers.includes(effort)) return effort;
+  return explicit ? clampReasoningEffort(effort, entry.tiers) : entry.fallback;
 }
 
 /**
  * Role-aware effort for one session: aux sessions run the built-in aux
- * defaults (never clamped); main options and the verifier's floored
- * override carry user intent, so they clamp when the options are explicit.
+ * defaults; main options clamp when explicit; the verifier's floored override
+ * clamps to the finder's EFFECTIVE effort, so a CommandCode flash main whose
+ * built-in medium fell back to low does not buy a high verifier.
  */
 export function commandCodeSessionEffort(
   model: string,
   override: Record<string, unknown> | undefined,
   ctx: {
+    mainModel: string;
     auxModel: string;
     auxModelOptions?: Record<string, unknown>;
     mainModelOptions?: Record<string, unknown>;
     explicit: boolean;
   },
 ): string | undefined {
-  const auxCall =
-    override === undefined && model === ctx.auxModel && ctx.auxModelOptions !== undefined;
+  if (override) {
+    const mainEffort = isCommandCodeProvider(parseModelName(ctx.mainModel).providerID)
+      ? commandCodeReasoningEffort(ctx.mainModel, ctx.mainModelOptions, ctx.explicit)
+      : undefined;
+    return commandCodeReasoningEffort(
+      model,
+      mainEffort ? { ...override, reasoningEffort: mainEffort } : override,
+      true,
+    );
+  }
+  const auxCall = model === ctx.auxModel && ctx.auxModelOptions !== undefined;
   return commandCodeReasoningEffort(
     model,
-    override ?? (auxCall ? ctx.auxModelOptions : ctx.mainModelOptions),
+    auxCall ? ctx.auxModelOptions : ctx.mainModelOptions,
     !auxCall && ctx.explicit,
   );
 }
