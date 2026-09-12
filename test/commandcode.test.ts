@@ -105,26 +105,25 @@ describe('CommandCode CLI provider helpers', () => {
     );
   });
 
-  it('delivers --effort from the per-model allowlist: declared defaults, clamped when explicit', () => {
-    // DeepSeek entries declare a default (a tool-less review gains nothing
-    // from deeper reasoning); explicit efforts clamp so one global knob still
+  it('delivers --effort from the per-model allowlist: built-in defaults on match or fallback, clamped when explicit', () => {
+    // Built-in defaults (main medium, aux low) deliver where the model
+    // declares that tier and otherwise take the entry's fallback, so DeepSeek
+    // flash mains run low; explicit efforts clamp so one global knob still
     // reaches restricted models. The override path exercises the raw matrix.
     const deepseek = 'commandcode/deepseek/deepseek-v4-flash';
     const effortOf = (model: string, opts: Record<string, unknown> | undefined, explicit = false) =>
       commandCodeSessionEffort(model, opts, { auxModel: 'commandcode/unused', explicit });
     assert.equal(effortOf(deepseek, { reasoningEffort: 'high' }), 'high');
-    assert.equal(effortOf(deepseek, { reasoningEffort: 'max' }), 'high');
+    assert.equal(effortOf(deepseek, { reasoningEffort: 'max' }), 'max');
     assert.equal(effortOf(deepseek, { reasoningEffort: 'low' }), 'high');
     assert.equal(effortOf(deepseek, { reasoningEffort: 'medium' }), 'high');
     assert.equal(effortOf(deepseek, { reasoningEffort: 'low' }, true), 'high');
     assert.equal(effortOf(deepseek, { reasoningEffort: 'max' }, true), 'max');
     for (const explicit of [false, true]) {
-      for (const muse of ['1.2-contributor', '1.3', '1.3-contributor']) {
-        assert.equal(
-          effortOf(`commandcode/meta/muse-spark-${muse}`, { reasoningEffort: 'high' }, explicit),
-          undefined,
-        );
-      }
+      assert.equal(
+        effortOf('commandcode/meituan/longcat-2.0:free', { reasoningEffort: 'high' }, explicit),
+        undefined,
+      );
       assert.equal(
         effortOf('commandcode/Qwen/Qwen3.7-Max', { reasoningEffort: 'high' }, explicit),
         undefined,
@@ -132,7 +131,8 @@ describe('CommandCode CLI provider helpers', () => {
     }
     assert.equal(effortOf(deepseek, {}), undefined);
     assert.equal(effortOf(deepseek, undefined), undefined);
-    // The flash variants default to low; an explicit medium clamps upward.
+    // The flash variants have no medium: mains fall back to low, an explicit
+    // medium clamps upward.
     for (const flash of ['deepseek-v4.1-flash', 'deepseek-v4-flash-fast']) {
       assert.equal(effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'low' }), 'low');
       assert.equal(effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'medium' }), 'low');
@@ -141,8 +141,18 @@ describe('CommandCode CLI provider helpers', () => {
         'high',
       );
     }
+    // Models that declare medium get it for mains and low for aux sessions.
+    for (const model of ['gpt-5.6-luna', 'meta/muse-spark-1.3-contributor']) {
+      assert.equal(effortOf(`commandcode/${model}`, { reasoningEffort: 'medium' }), 'medium');
+      assert.equal(effortOf(`commandcode/${model}`, { reasoningEffort: 'low' }), 'low');
+    }
+    assert.equal(effortOf('commandcode/gpt-5.6-luna', { reasoningEffort: 'max' }, true), 'max');
+    assert.equal(
+      effortOf('commandcode/meta/muse-spark-1.3-contributor', { reasoningEffort: 'max' }, true),
+      'xhigh',
+    );
 
-    // Role selection: the aux default delivers the declared default, main
+    // Role selection: the aux default delivers low or the fallback, main
     // options and the verifier override clamp; an aux model sharing the main
     // entry follows it.
     const ctx = {

@@ -157,26 +157,28 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
   return args;
 }
 
-// Probed 2026-08-22 (1.3 variants 2026-09-02, flash variants 2026-09-11 on CLI
-// 1.53.0): `--effort` validates per model and exits nonzero on values outside
-// the model's set; muse-spark rejects the flag outright. Unflagged, v4.1-flash
-// reasons like `high` (~2× its `low` output) and v4-flash-fast like `low`;
-// DeepSeek defaults to its lowest tier because a tool-less review gains
-// nothing from deeper reasoning.
-const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; default?: string }> = {
-  'deepseek/deepseek-v4-flash': { tiers: ['high', 'max'], default: 'high' },
-  'deepseek/deepseek-v4.1-flash': { tiers: ['low', 'high', 'max'], default: 'low' },
-  'deepseek/deepseek-v4-flash-fast': { tiers: ['low', 'high', 'max'], default: 'low' },
-  'meta/muse-spark-1.2-contributor': { tiers: [] },
-  'meta/muse-spark-1.3': { tiers: [] },
-  'meta/muse-spark-1.3-contributor': { tiers: [] },
+// Probed on CLI 1.53.0 (2026-09-11; v4-flash 2026-08-22): `--effort` validates
+// per model and exits nonzero on values outside the model's set; longcat has
+// no adjustable effort. Unflagged, v4.1-flash reasons like `high` (~2× its
+// `low` output) and v4-flash-fast like `low`; `fallback` is where a built-in
+// default the model lacks lands, low for the flash tier because a tool-less
+// review gains nothing from deeper reasoning.
+const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fallback?: string }> = {
+  'deepseek/deepseek-v4-flash': { tiers: ['high', 'max'], fallback: 'high' },
+  'deepseek/deepseek-v4.1-flash': { tiers: ['low', 'high', 'max'], fallback: 'low' },
+  'deepseek/deepseek-v4-flash-fast': { tiers: ['low', 'high', 'max'], fallback: 'low' },
+  'gpt-5.6-luna': { tiers: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  'meta/muse-spark-1.3': { tiers: ['low', 'medium', 'high', 'xhigh', 'max'] },
+  'meta/muse-spark-1.2-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
+  'meta/muse-spark-1.3-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
+  'meituan/longcat-2.0:free': { tiers: [] },
 };
 
 /**
  * The `--effort` value for a session; undefined omits the flag. The built-in
- * defaults deliver the entry's declared default (only DeepSeek has one; other
- * models keep the CLI default). An explicit effort clamps to the nearest
- * declared tier (one knob: "low" means "as low as this model goes").
+ * defaults (main medium, aux low) deliver where the model declares that tier
+ * and otherwise take the entry's fallback. An explicit effort clamps to the
+ * nearest declared tier (one knob: "low" means "as low as this model goes").
  */
 function commandCodeReasoningEffort(
   model: string,
@@ -187,8 +189,8 @@ function commandCodeReasoningEffort(
   const effort = modelOptions?.reasoningEffort;
   const entry = COMMANDCODE_MODEL_EFFORTS[modelID];
   if (typeof effort !== 'string' || !entry?.tiers.length) return undefined;
-  if (!explicit) return entry.default;
-  return entry.tiers.includes(effort) ? effort : clampReasoningEffort(effort, entry.tiers);
+  if (entry.tiers.includes(effort)) return effort;
+  return explicit ? clampReasoningEffort(effort, entry.tiers) : entry.fallback;
 }
 
 /**
