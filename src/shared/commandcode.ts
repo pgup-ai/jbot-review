@@ -157,11 +157,14 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
   return args;
 }
 
-// Probed 2026-08-22 (1.3 variants 2026-09-02): `--effort` validates per model
-// and exits nonzero on values outside the model's set; muse-spark rejects the
-// flag outright.
+// Probed 2026-08-22 (1.3 variants 2026-09-02, flash variants 2026-09-11 on CLI
+// 1.53.0): `--effort` validates per model and exits nonzero on values outside
+// the model's set; muse-spark rejects the flag outright. Unflagged, v4.1-flash
+// reasons like `high` (~2× its `low` output) and v4-flash-fast like `low`.
 const COMMANDCODE_MODEL_EFFORTS: Record<string, readonly string[]> = {
   'deepseek/deepseek-v4-flash': ['high', 'max'],
+  'deepseek/deepseek-v4.1-flash': ['low', 'high', 'max'],
+  'deepseek/deepseek-v4-flash-fast': ['low', 'high', 'max'],
   'meta/muse-spark-1.2-contributor': [],
   'meta/muse-spark-1.3': [],
   'meta/muse-spark-1.3-contributor': [],

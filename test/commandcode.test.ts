@@ -132,6 +132,19 @@ describe('CommandCode CLI provider helpers', () => {
     }
     assert.equal(effortOf(deepseek, {}), undefined);
     assert.equal(effortOf(deepseek, undefined), undefined);
+    // The flash variants take low, so the aux default reaches them; medium
+    // still needs an explicit knob and clamps upward.
+    for (const flash of ['deepseek-v4.1-flash', 'deepseek-v4-flash-fast']) {
+      assert.equal(effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'low' }), 'low');
+      assert.equal(
+        effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'medium' }),
+        undefined,
+      );
+      assert.equal(
+        effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'medium' }, true),
+        'high',
+      );
+    }
 
     // Role selection: the aux default never clamps, main options and the
     // verifier override do; an aux model sharing the main entry follows it.
@@ -147,6 +160,8 @@ describe('CommandCode CLI provider helpers', () => {
       commandCodeSessionEffort(deepseek, undefined, { ...ctx, auxModelOptions: undefined }),
       'high',
     );
+    const flash = 'commandcode/deepseek/deepseek-v4.1-flash';
+    assert.equal(commandCodeSessionEffort(flash, undefined, { ...ctx, auxModel: flash }), 'low');
   });
 
   it('denies all CommandCode tools when disabled', () => {
