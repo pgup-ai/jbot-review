@@ -125,10 +125,6 @@ describe('CommandCode CLI provider helpers', () => {
     assert.equal(effortOf(deepseek, { reasoningEffort: 'max' }, true), 'max');
     for (const explicit of [false, true]) {
       assert.equal(
-        effortOf('commandcode/meituan/longcat-2.0:free', { reasoningEffort: 'high' }, explicit),
-        undefined,
-      );
-      assert.equal(
         effortOf('commandcode/Qwen/Qwen3.7-Max', { reasoningEffort: 'high' }, explicit),
         undefined,
       );

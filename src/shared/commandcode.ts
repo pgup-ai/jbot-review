@@ -161,8 +161,8 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
 // per model and exits nonzero on values outside the model's set; longcat has
 // no adjustable effort. Unflagged, v4.1-flash reasons like `high` (~2× its
 // `low` output) and v4-flash-fast like `low`; `fallback` is where a built-in
-// default the model lacks lands, low for the flash tier because a tool-less
-// review gains nothing from deeper reasoning.
+// default the model lacks lands: the lowest tier, because a tool-less review
+// gains nothing from deeper reasoning (v4-flash has no `low`, so `high`).
 const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fallback?: string }> = {
   'deepseek/deepseek-v4-flash': { tiers: ['high', 'max'], fallback: 'high' },
   'deepseek/deepseek-v4.1-flash': { tiers: ['low', 'high', 'max'], fallback: 'low' },
@@ -171,7 +171,6 @@ const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fall
   'meta/muse-spark-1.3': { tiers: ['low', 'medium', 'high', 'xhigh', 'max'] },
   'meta/muse-spark-1.2-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
   'meta/muse-spark-1.3-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
-  'meituan/longcat-2.0:free': { tiers: [] },
 };
 
 /**
