@@ -160,23 +160,23 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
 // Probed 2026-08-22 (1.3 variants 2026-09-02, flash variants 2026-09-11 on CLI
 // 1.53.0): `--effort` validates per model and exits nonzero on values outside
 // the model's set; muse-spark rejects the flag outright. Unflagged, v4.1-flash
-// reasons like `high` (~2× its `low` output) and v4-flash-fast like `low`.
-// Tiers are listed ascending; defaults take the first.
-const COMMANDCODE_MODEL_EFFORTS: Record<string, readonly string[]> = {
-  'deepseek/deepseek-v4-flash': ['high', 'max'],
-  'deepseek/deepseek-v4.1-flash': ['low', 'high', 'max'],
-  'deepseek/deepseek-v4-flash-fast': ['low', 'high', 'max'],
-  'meta/muse-spark-1.2-contributor': [],
-  'meta/muse-spark-1.3': [],
-  'meta/muse-spark-1.3-contributor': [],
+// reasons like `high` (~2× its `low` output) and v4-flash-fast like `low`;
+// DeepSeek defaults to its lowest tier because a tool-less review gains
+// nothing from deeper reasoning.
+const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; default?: string }> = {
+  'deepseek/deepseek-v4-flash': { tiers: ['high', 'max'], default: 'high' },
+  'deepseek/deepseek-v4.1-flash': { tiers: ['low', 'high', 'max'], default: 'low' },
+  'deepseek/deepseek-v4-flash-fast': { tiers: ['low', 'high', 'max'], default: 'low' },
+  'meta/muse-spark-1.2-contributor': { tiers: [] },
+  'meta/muse-spark-1.3': { tiers: [] },
+  'meta/muse-spark-1.3-contributor': { tiers: [] },
 };
 
 /**
  * The `--effort` value for a session; undefined omits the flag. The built-in
- * defaults run at the model's lowest declared tier: a tool-less review gains
- * nothing from deeper reasoning, and the unflagged gateway default runs
- * v4.1-flash at `high`. An explicit effort clamps to the nearest declared
- * tier (one knob: "low" means "as low as this model goes").
+ * defaults deliver the entry's declared default (only DeepSeek has one; other
+ * models keep the CLI default). An explicit effort clamps to the nearest
+ * declared tier (one knob: "low" means "as low as this model goes").
  */
 function commandCodeReasoningEffort(
   model: string,
@@ -185,10 +185,10 @@ function commandCodeReasoningEffort(
 ): string | undefined {
   const { modelID } = parseModelName(model);
   const effort = modelOptions?.reasoningEffort;
-  const supported = COMMANDCODE_MODEL_EFFORTS[modelID];
-  if (typeof effort !== 'string' || !supported?.length) return undefined;
-  if (!explicit) return supported[0];
-  return supported.includes(effort) ? effort : clampReasoningEffort(effort, supported);
+  const entry = COMMANDCODE_MODEL_EFFORTS[modelID];
+  if (typeof effort !== 'string' || !entry?.tiers.length) return undefined;
+  if (!explicit) return entry.default;
+  return entry.tiers.includes(effort) ? effort : clampReasoningEffort(effort, entry.tiers);
 }
 
 /**

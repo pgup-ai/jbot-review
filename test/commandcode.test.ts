@@ -105,11 +105,10 @@ describe('CommandCode CLI provider helpers', () => {
     );
   });
 
-  it('delivers --effort from the per-model allowlist: the floor for defaults, clamped when explicit', () => {
-    // A tool-less review gains nothing from deeper reasoning, so built-in
-    // defaults run at the model's lowest declared tier; explicit efforts clamp
-    // so one global knob still reaches restricted models. The override path
-    // exercises the raw allowlist matrix.
+  it('delivers --effort from the per-model allowlist: declared defaults, clamped when explicit', () => {
+    // DeepSeek entries declare a default (a tool-less review gains nothing
+    // from deeper reasoning); explicit efforts clamp so one global knob still
+    // reaches restricted models. The override path exercises the raw matrix.
     const deepseek = 'commandcode/deepseek/deepseek-v4-flash';
     const effortOf = (model: string, opts: Record<string, unknown> | undefined, explicit = false) =>
       commandCodeSessionEffort(model, opts, { auxModel: 'commandcode/unused', explicit });
@@ -133,8 +132,7 @@ describe('CommandCode CLI provider helpers', () => {
     }
     assert.equal(effortOf(deepseek, {}), undefined);
     assert.equal(effortOf(deepseek, undefined), undefined);
-    // The flash variants declare low, so every default lands there; an
-    // explicit medium clamps upward.
+    // The flash variants default to low; an explicit medium clamps upward.
     for (const flash of ['deepseek-v4.1-flash', 'deepseek-v4-flash-fast']) {
       assert.equal(effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'low' }), 'low');
       assert.equal(effortOf(`commandcode/deepseek/${flash}`, { reasoningEffort: 'medium' }), 'low');
@@ -144,8 +142,9 @@ describe('CommandCode CLI provider helpers', () => {
       );
     }
 
-    // Role selection: the aux default takes the floor, main options and the
-    // verifier override clamp; an aux model sharing the main entry follows it.
+    // Role selection: the aux default delivers the declared default, main
+    // options and the verifier override clamp; an aux model sharing the main
+    // entry follows it.
     const ctx = {
       auxModel: deepseek,
       auxModelOptions: { reasoningEffort: 'low' },
