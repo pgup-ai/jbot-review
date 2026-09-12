@@ -195,8 +195,8 @@ function commandCodeReasoningEffort(
 
 /**
  * Role-aware effort for one session: aux sessions run the built-in aux
- * defaults (never clamped); main options and the verifier's floored
- * override carry user intent, so they clamp when the options are explicit.
+ * defaults; main options clamp when explicit; the verifier's floored override
+ * always clamps, since a verifier must not reason below the finder.
  */
 export function commandCodeSessionEffort(
   model: string,
@@ -208,11 +208,11 @@ export function commandCodeSessionEffort(
     explicit: boolean;
   },
 ): string | undefined {
-  const auxCall =
-    override === undefined && model === ctx.auxModel && ctx.auxModelOptions !== undefined;
+  if (override) return commandCodeReasoningEffort(model, override, true);
+  const auxCall = model === ctx.auxModel && ctx.auxModelOptions !== undefined;
   return commandCodeReasoningEffort(
     model,
-    override ?? (auxCall ? ctx.auxModelOptions : ctx.mainModelOptions),
+    auxCall ? ctx.auxModelOptions : ctx.mainModelOptions,
     !auxCall && ctx.explicit,
   );
 }

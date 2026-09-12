@@ -109,10 +109,14 @@ describe('CommandCode CLI provider helpers', () => {
     // Built-in defaults (main medium, aux low) deliver where the model
     // declares that tier and otherwise take the entry's fallback, so DeepSeek
     // flash mains run low; explicit efforts clamp so one global knob still
-    // reaches restricted models. The override path exercises the raw matrix.
+    // reaches restricted models. The main path exercises the raw matrix.
     const deepseek = 'commandcode/deepseek/deepseek-v4-flash';
     const effortOf = (model: string, opts: Record<string, unknown> | undefined, explicit = false) =>
-      commandCodeSessionEffort(model, opts, { auxModel: 'commandcode/unused', explicit });
+      commandCodeSessionEffort(model, undefined, {
+        auxModel: 'commandcode/unused',
+        mainModelOptions: opts,
+        explicit,
+      });
     assert.equal(effortOf(deepseek, { reasoningEffort: 'high' }), 'high');
     assert.equal(effortOf(deepseek, { reasoningEffort: 'max' }), 'max');
     assert.equal(effortOf(deepseek, { reasoningEffort: 'low' }), 'high');
@@ -169,6 +173,21 @@ describe('CommandCode CLI provider helpers', () => {
     );
     const flash = 'commandcode/deepseek/deepseek-v4.1-flash';
     assert.equal(commandCodeSessionEffort(flash, undefined, { ...ctx, auxModel: flash }), 'low');
+    // The verifier's floored override clamps even under built-in defaults: it
+    // must not reason below a medium main on a model without medium.
+    assert.equal(
+      commandCodeSessionEffort(
+        flash,
+        { reasoningEffort: 'medium' },
+        {
+          ...ctx,
+          auxModel: flash,
+          mainModelOptions: { reasoningEffort: 'medium' },
+          explicit: false,
+        },
+      ),
+      'high',
+    );
   });
 
   it('denies all CommandCode tools when disabled', () => {
