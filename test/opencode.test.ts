@@ -88,6 +88,20 @@ describe('parseChangesSinceLastReviewSummary', () => {
   it('returns empty string when summary is missing or not a string', () => {
     assert.equal(parseChangesSinceLastReviewSummary('{"findings":[]}', 'changes-since', noop), '');
     assert.equal(parseChangesSinceLastReviewSummary('{"summary":42}', 'changes-since', noop), '');
+    assert.throws(
+      () =>
+        parseChangesSinceLastReviewSummary('not json at all', 'changes-since', noop, {
+          strict: true,
+        }),
+      /unparseable JSON/,
+    );
+    assert.throws(
+      () =>
+        parseChangesSinceLastReviewSummary('{"summary":42}', 'changes-since', noop, {
+          strict: true,
+        }),
+      /summary string/,
+    );
   });
 });
 
