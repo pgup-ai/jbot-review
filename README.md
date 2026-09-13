@@ -577,8 +577,10 @@ J-Bot resolves `devin/swe-2` and `devin/swe` to `devin/swe-2-medium`.
 Use `devin/swe-2-high` or `devin/swe-2-max` to select those reasoning levels explicitly.
 Devin shares the global `max-concurrent-sessions` limit
 (`JBOT_MAX_CONCURRENT_SESSIONS`, default 3), with no separate provider cap.
-Each invocation has its own CLI state; abandoned
-sessions are cancelled before their temporary files are removed.
+Each review pass has its own CLI state: a turn that ends on a plan instead of
+the review is nudged to continue in that same session by a Stop hook, and JSON
+repair resumes it with `-c`. Abandoned sessions are cancelled before their
+temporary files are removed.
 Use `provider: commandcode` with `commandcode-access-key` /
 `COMMANDCODE_ACCESS_KEY` for the CommandCode CLI backend. The Docker image
 includes the CommandCode CLI, but `.commandcode/auth.json` is written under an
