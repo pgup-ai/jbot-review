@@ -25,11 +25,12 @@ import {
 import {
   buildDevinCliArgs,
   buildDevinCliConfig,
+  buildDevinStopHookScript,
   createDevinCliBackend,
   devinEnvForHome,
   parseDevinCliOutput,
 } from '../src/shared/devin-cli.ts';
-import { truncateUtf8WithNotice } from '../src/shared/prompt.ts';
+import { CONTINUATION_NUDGE_PROMPT, truncateUtf8WithNotice } from '../src/shared/prompt.ts';
 
 describe('Devin CLI provider helpers', () => {
   it('matches only the explicit devin provider id', () => {
@@ -100,6 +101,10 @@ describe('Devin CLI provider helpers', () => {
       buildDevinCliArgs('devin/default', '/tmp/prompt', '/tmp/config').includes('--model'),
       false,
     );
+    assert.deepEqual(
+      buildDevinCliArgs('devin/default', '/tmp/prompt', '/tmp/config', true).slice(-2),
+      ['-c', '-p'],
+    );
 
     assert.deepEqual(
       parseDevinCliOutput(
@@ -118,8 +123,28 @@ describe('Devin CLI provider helpers', () => {
   });
 
   it('isolates the Devin child environment and disables background updates', () => {
-    const config = buildDevinCliConfig('/tmp/devin-home');
+    const config = buildDevinCliConfig(
+      '/tmp/devin-home',
+      '/tmp/devin-home/session-1/stop-hook.mjs',
+    );
     assert.equal(config.auto_update, false);
+    assert.deepEqual(config.hooks, {
+      Stop: [
+        {
+          hooks: [
+            {
+              type: 'command',
+              command: `'${process.execPath}' '/tmp/devin-home/session-1/stop-hook.mjs'`,
+              timeout: 10,
+            },
+          ],
+        },
+      ],
+    });
+    assert.equal(
+      buildDevinCliConfig('/h', "/h/it's.mjs").hooks.Stop[0].hooks[0].command,
+      `'${process.execPath}' '/h/it'\\''s.mjs'`,
+    );
     assert.deepEqual(config.permissions.deny, [
       'edit',
       'write',
@@ -571,6 +596,122 @@ setInterval(() => {}, 1000);
       }
       await closed;
       await fake.restore();
+    }
+  });
+
+  it('nudges an announced-then-stopped turn from the Stop hook and never blocks twice', () => {
+    const root = mkdtempSync(join(tmpdir(), 'jbot-devin-hook-'));
+    const marker = join(root, 'nudged');
+    const script = join(root, 'stop-hook.mjs');
+    writeFileSync(script, buildDevinStopHookScript(marker));
+    const stop = (payload: unknown) =>
+      execFileSync(process.execPath, [script], {
+        input: typeof payload === 'string' ? payload : JSON.stringify(payload),
+        encoding: 'utf8',
+      });
+    try {
+      assert.deepEqual(
+        JSON.parse(
+          stop({ stop_hook_active: false, last_assistant_message: 'I will inspect the code.' }),
+        ),
+        { decision: 'block', reason: CONTINUATION_NUDGE_PROMPT },
+      );
+      assert.equal(existsSync(marker), true);
+      rmSync(marker);
+      // The CLI's own loop guard: the second stop of a nudged turn is final.
+      assert.equal(
+        stop({ stop_hook_active: true, last_assistant_message: 'I will inspect the code.' }),
+        '',
+      );
+      assert.equal(
+        stop({ stop_hook_active: false, last_assistant_message: '{"summary":"ok","findings":[]}' }),
+        '',
+      );
+      assert.equal(stop('not json'), '');
+      assert.equal(existsSync(marker), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('continues an announced-then-stopped turn in-session via the Stop hook and repairs with -c', async () => {
+    const fake = fakeDevin(`
+const { execSync } = require('node:child_process');
+const promptText = fs.readFileSync(process.argv[process.argv.indexOf('--prompt-file') + 1], 'utf8');
+if (process.argv.includes('-c')) {
+  fs.appendFileSync(stamp, 'continue:' + promptText.split('\\n')[0] + '\\n');
+  process.stdout.write('{"summary":"ok","findings":[]}');
+} else {
+  fs.appendFileSync(stamp, 'launch\\n');
+  const plan = 'I will inspect the code.';
+  process.stdout.write(plan);
+  const verdict = execSync(config.hooks.Stop[0].hooks[0].command, {
+    input: JSON.stringify({ stop_hook_active: false, last_assistant_message: plan }),
+    encoding: 'utf8',
+  });
+  if (JSON.parse(verdict).decision === 'block') process.stdout.write('{"summary": "ok", "findings": [');
+}
+`);
+    try {
+      const review = await fake.backend.runReview('devin/default', 'context', '', fake.log, {
+        timeoutMs: 5000,
+      });
+      assert.equal(review.summary, 'ok');
+      assert.equal(
+        readFileSync(join(fake.root, 'onboarded'), 'utf8'),
+        'launch\ncontinue:Your previous response could not be parsed as JSON.\n',
+      );
+      assert.equal(
+        fake.logs.some((line) => line.includes('Stop hook continued')),
+        true,
+      );
+      assert.deepEqual(
+        readdirSync(fake.home).filter((entry) => entry.startsWith('session-')),
+        [],
+      );
+    } finally {
+      await fake.restore();
+    }
+  });
+
+  it('falls back to a -c continuation when the hook did not fire and stops after a second announcement', async () => {
+    for (const hooked of [false, true]) {
+      const fake = fakeDevin(`
+const { execSync } = require('node:child_process');
+const promptText = fs.readFileSync(process.argv[process.argv.indexOf('--prompt-file') + 1], 'utf8');
+if (process.argv.includes('-c')) {
+  fs.appendFileSync(stamp, 'continue:' + promptText + '\\n');
+  process.stdout.write('{"summary":"ok","findings":[]}');
+} else {
+  fs.appendFileSync(stamp, 'launch\\n');
+  const plan = 'I will inspect the code.';
+  process.stdout.write(plan);
+  if (${hooked}) {
+    execSync(config.hooks.Stop[0].hooks[0].command, {
+      input: JSON.stringify({ stop_hook_active: false, last_assistant_message: plan }),
+      encoding: 'utf8',
+    });
+    process.stdout.write(' Then I will report.');
+  }
+}
+`);
+      try {
+        const run = fake.backend.runReview('devin/default', 'context', '', fake.log, {
+          timeoutMs: 5000,
+        });
+        if (hooked) {
+          await assert.rejects(run, /twice ended its turn/);
+          assert.equal(readFileSync(join(fake.root, 'onboarded'), 'utf8'), 'launch\n');
+        } else {
+          assert.equal((await run).summary, 'ok');
+          assert.equal(
+            readFileSync(join(fake.root, 'onboarded'), 'utf8'),
+            `launch\ncontinue:${CONTINUATION_NUDGE_PROMPT}\n`,
+          );
+        }
+      } finally {
+        await fake.restore();
+      }
     }
   });
 
