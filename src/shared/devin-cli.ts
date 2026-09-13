@@ -99,11 +99,11 @@ export function buildDevinCliArgs(
 const shellQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
 
 /**
- * Stop hook: block an announced-then-stopped turn's first stop so the model
- * continues in-session instead of the driver relaunching with the whole prompt.
- * The CLI sets `stop_hook_active` on the retry, so a second announcement is
- * final; the marker tells the driver the nudge happened. The classifier source
- * is embedded so the abandoned-turn rule stays defined once.
+ * Stop hook: block an abandoned turn's first stop so the model continues
+ * in-session instead of the driver relaunching with the whole prompt. The CLI
+ * sets `stop_hook_active` on its retry, so a second announcement is final. The
+ * marker tells the driver the nudge happened; the classifier is embedded by
+ * source so the abandoned-turn rule stays defined once.
  */
 export function buildDevinStopHookScript(nudgedMarker: string): string {
   return `import { writeFileSync } from 'node:fs';
