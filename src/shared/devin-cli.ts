@@ -1,4 +1,3 @@
-import type { ReviewResult } from './types.ts';
 import {
   existsSync,
   mkdirSync,
@@ -44,6 +43,8 @@ const DEVIN_CLI_TELEMETRY_CAPABILITY = 'opaque' as const;
 const DEVIN_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const DEVIN_CLI_LOG_TAIL_LINES = 12;
 const DEVIN_STOP_HOOK_TIMEOUT_S = 10;
+
+const deadline = (timeoutMs = DEVIN_PROMPT_TIMEOUT_MS) => Date.now() + timeoutMs;
 
 /** The CLI and its ACP child each log under the session root. */
 function devinCliLogTail(root: string): string {
@@ -113,7 +114,11 @@ process.stdin.setEncoding('utf8');
 for await (const chunk of process.stdin) raw += chunk;
 try {
   const stop = JSON.parse(raw);
-  if (!stop.stop_hook_active && isNoAttemptReply(String(stop.last_assistant_message ?? ''))) {
+  if (
+    !stop.stop_hook_active &&
+    typeof stop.last_assistant_message === 'string' &&
+    isNoAttemptReply(stop.last_assistant_message)
+  ) {
     writeFileSync(${JSON.stringify(nudgedMarker)}, '');
     process.stdout.write(
       JSON.stringify({ decision: 'block', reason: ${JSON.stringify(CONTINUATION_NUDGE_PROMPT)} }),
@@ -285,18 +290,56 @@ function openDevinSession(
   };
 }
 
-async function runDevinPrompt(
+/**
+ * One prompt with two one-shot recoveries, shared by the main and auxiliary
+ * sessions: an in-session continuation for an abandoned turn (the Stop hook's
+ * when it ran, the driver's otherwise), and one JSON repair for a malformed one.
+ */
+async function promptWithRecovery<T>(
   workspace: string,
   home: string,
   model: string,
   prompt: string,
   label: string,
   log: (msg: string) => void,
-  timeoutMs?: number,
-): Promise<string> {
+  deadlineAt: number,
+  parse: (raw: string, parseLabel: string) => T,
+): Promise<T> {
   const session = openDevinSession(workspace, home, model, log);
+  const remaining = () => Math.max(0, deadlineAt - Date.now());
+  const parseWithRepair = async (raw: string, parseLabel: string): Promise<T> => {
+    try {
+      return parse(raw, parseLabel);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log(
+        `${parseLabel} response unparseable; sending one JSON repair prompt via devin: ${message}`,
+      );
+      const repaired = await session.prompt(
+        buildJsonRepairPrompt(message),
+        `${parseLabel}-repair`,
+        remaining(),
+      );
+      return parse(repaired, `${parseLabel}-repair`);
+    }
+  };
+  const twice = () =>
+    new Error(
+      `${label}: the agent twice ended its turn without attempting the task (an announcement, then again after an explicit continuation). This model/CLI pairing appears unable to complete a session of this size in one turn — try more shards (review-shards: 0 for auto) or a different model/backend.`,
+    );
   try {
-    return await session.prompt(prompt, label, timeoutMs);
+    const raw = await session.prompt(prompt, label, remaining());
+    if (!isNoAttemptReply(raw)) return await parseWithRepair(raw, label);
+    // A second announcement is final whichever side sent the first continuation.
+    if (session.nudged()) throw twice();
+    log(`${label} ended its turn without attempting the task; sending one continuation prompt`);
+    const continued = await session.prompt(
+      CONTINUATION_NUDGE_PROMPT,
+      `${label}-continue`,
+      remaining(),
+    );
+    if (isNoAttemptReply(continued)) throw twice();
+    return await parseWithRepair(continued, `${label}-continue`);
   } finally {
     session.close();
   }
@@ -341,7 +384,6 @@ export function createDevinCliBackend(
           options.deadlineAt ?? Infinity,
           Date.now() + (options.timeoutMs ?? DEVIN_PROMPT_TIMEOUT_MS),
         );
-        const remaining = () => Math.max(0, deadlineAt - Date.now());
         const prompt = assembleReviewPrompt(
           prContext,
           guidelines,
@@ -353,109 +395,75 @@ export function createDevinCliBackend(
         log(
           `Prompt assembled (${label}, devin-cli): ${prompt.length} chars, guidelines=${!!guidelines}`,
         );
-        const session = openDevinSession(workspace, home, model, log);
-        try {
-          const parseWithRepair = async (
-            raw: string,
-            parseLabel: string,
-          ): Promise<ReviewResult> => {
-            try {
-              return parseReview(raw, parseLabel, log, { strict: true });
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error);
-              log(
-                `${parseLabel} response unparseable; sending one JSON repair prompt via devin: ${message}`,
-              );
-              const repaired = await session.prompt(
-                buildJsonRepairPrompt(message),
-                `${parseLabel}-repair`,
-                remaining(),
-              );
-              return parseReview(repaired, `${parseLabel}-repair`, log, { strict: true });
-            }
-          };
-          const twice = () =>
-            new Error(
-              `${label}: the agent twice ended its turn without attempting the task (an announcement, then again after an explicit continuation). This model/CLI pairing appears unable to complete a session of this size in one turn — try more shards (review-shards: 0 for auto) or a different model/backend.`,
-            );
-          // An abandoned turn gets one continuation: the Stop hook's when it ran,
-          // the driver's otherwise. A second announcement is final either way.
-          const raw = await session.prompt(prompt, label, remaining());
-          if (!isNoAttemptReply(raw)) return await parseWithRepair(raw, label);
-          if (session.nudged()) throw twice();
-          log(
-            `${label} ended its turn without attempting the task; sending one continuation prompt`,
-          );
-          const continued = await session.prompt(
-            CONTINUATION_NUDGE_PROMPT,
-            `${label}-continue`,
-            remaining(),
-          );
-          if (isNoAttemptReply(continued)) throw twice();
-          return await parseWithRepair(continued, `${label}-continue`);
-        } finally {
-          session.close();
-        }
+        return promptWithRecovery(
+          workspace,
+          home,
+          model,
+          prompt,
+          label,
+          log,
+          deadlineAt,
+          (raw, parseLabel) => parseReview(raw, parseLabel, log, { strict: true }),
+        );
       });
     },
     async runAddressedPriorCommentsCheck(model, prContext, log, timeoutMs) {
-      return processes.run('addressed-prior-comments', async () => {
-        const raw = await runDevinPrompt(
+      return processes.run('addressed-prior-comments', () =>
+        promptWithRecovery(
           workspace,
           home,
           model,
           assembleAddressedPriorCommentsPrompt(prContext),
           'addressed-prior-comments',
           log,
-          timeoutMs,
-        );
-        return parseReview(raw, 'addressed-prior-comments', log, {
-          strict: true,
-          field: 'addressedPriorComments',
-        }).addressedPriorComments;
-      });
+          deadline(timeoutMs),
+          (raw, parseLabel) =>
+            parseReview(raw, parseLabel, log, { strict: true, field: 'addressedPriorComments' })
+              .addressedPriorComments,
+        ),
+      );
     },
     async runGuidelineComplianceCheck(model, prContext, guidelines, log, timeoutMs) {
-      return processes.run('guideline-compliance', async () => {
-        const raw = await runDevinPrompt(
+      return processes.run('guideline-compliance', () =>
+        promptWithRecovery(
           workspace,
           home,
           model,
           assembleGuidelineCompliancePrompt(prContext, guidelines),
           'guideline-compliance',
           log,
-          timeoutMs,
-        );
-        return parseReview(raw, 'guideline-compliance', log, { strict: true }).findings;
-      });
+          deadline(timeoutMs),
+          (raw, parseLabel) => parseReview(raw, parseLabel, log, { strict: true }).findings,
+        ),
+      );
     },
     async runFindingVerification(model, prContext, findings, log, timeoutMs) {
-      return processes.run('finding-verification', async () => {
-        const raw = await runDevinPrompt(
+      return processes.run('finding-verification', () =>
+        promptWithRecovery(
           workspace,
           home,
           model,
           assembleFindingVerificationPrompt(prContext, findings),
           'finding-verification',
           log,
-          timeoutMs,
-        );
-        return parseFindingVerdicts(raw, findings.length, log);
-      });
+          deadline(timeoutMs),
+          (raw) => parseFindingVerdicts(raw, findings.length, log),
+        ),
+      );
     },
     async runChangesSinceLastReview(model, deltaContext, log, timeoutMs) {
-      return processes.run('changes-since-last-review', async () => {
-        const raw = await runDevinPrompt(
+      return processes.run('changes-since-last-review', () =>
+        promptWithRecovery(
           workspace,
           home,
           model,
           assembleChangesSinceLastReviewPrompt(deltaContext),
           'changes-since-last-review',
           log,
-          timeoutMs,
-        );
-        return parseChangesSinceLastReviewSummary(raw, 'changes-since-last-review', log);
-      });
+          deadline(timeoutMs),
+          (raw, parseLabel) => parseChangesSinceLastReviewSummary(raw, parseLabel, log),
+        ),
+      );
     },
   };
 }

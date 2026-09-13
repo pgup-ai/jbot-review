@@ -485,7 +485,11 @@ process.exitCode = ${exitCode ?? 0};
           60000,
         );
         if (response === '{"findings":[]}') assert.deepEqual(await guideline, []);
-        else await assert.rejects(guideline, /unparseable JSON|non-object|findings array/);
+        else
+          await assert.rejects(
+            guideline,
+            /unparseable JSON|non-object|findings array|twice ended its turn/,
+          );
 
         const addressed = fake.backend.runAddressedPriorCommentsCheck(
           'devin/default',
@@ -497,7 +501,7 @@ process.exitCode = ${exitCode ?? 0};
         else
           await assert.rejects(
             addressed,
-            /unparseable JSON|non-object|addressedPriorComments array/,
+            /unparseable JSON|non-object|addressedPriorComments array|twice ended its turn/,
           );
       } finally {
         await fake.restore();
@@ -628,6 +632,8 @@ setInterval(() => {}, 1000);
         '',
       );
       assert.equal(stop('not json'), '');
+      // Older CLIs omit last_assistant_message: no evidence, no nudge.
+      assert.equal(stop({ stop_hook_active: false }), '');
       assert.equal(existsSync(marker), false);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -709,6 +715,30 @@ if (process.argv.includes('-c')) {
             `launch\ncontinue:${CONTINUATION_NUDGE_PROMPT}\n`,
           );
         }
+      } finally {
+        await fake.restore();
+      }
+    }
+  });
+
+  it('recovers auxiliary replies in the same session like the main review', async () => {
+    for (const first of ['{"guidelines": []}', 'I will audit the guidelines first.']) {
+      const fake = fakeDevin(`
+fs.appendFileSync(stamp, process.argv.includes('-c') ? 'continue\\n' : 'launch\\n');
+process.stdout.write(process.argv.includes('-c') ? '{"findings":[]}' : ${JSON.stringify(first)});
+`);
+      try {
+        assert.deepEqual(
+          await fake.backend.runGuidelineComplianceCheck(
+            'devin/default',
+            'context',
+            '',
+            fake.log,
+            5000,
+          ),
+          [],
+        );
+        assert.equal(readFileSync(join(fake.root, 'onboarded'), 'utf8'), 'launch\ncontinue\n');
       } finally {
         await fake.restore();
       }
