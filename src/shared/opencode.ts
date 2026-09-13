@@ -1562,25 +1562,31 @@ export function parseReview(
 const VALID_VERDICTS = new Set<FindingVerdict['verdict']>(['confirmed', 'refuted', 'uncertain']);
 
 /**
- * Returns undefined for unusable responses and skips malformed entries.
+ * Returns undefined for unusable responses and skips malformed entries;
+ * `strict` throws instead so a caller can repair first.
  * Callers retain findings with missing verdicts as unverified advisories.
  */
 export function parseFindingVerdicts(
   raw: string,
   findingCount: number,
   log: (msg: string) => void,
+  options: { strict?: boolean } = {},
 ): FindingVerdict[] | undefined {
   let parsed: unknown;
   try {
     parsed = parseJsonObject(raw);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (options.strict)
+      throw new Error(`finding-verification returned unparseable JSON: ${message}`);
     log(`finding-verification response was not valid JSON: ${message}`);
     return undefined;
   }
 
   const obj = parsed as Record<string, unknown>;
   if (!Array.isArray(obj.verdicts)) {
+    if (options.strict)
+      throw new Error('finding-verification returned JSON without a verdicts array');
     log('finding-verification response had no "verdicts" array.');
     return undefined;
   }
@@ -1612,23 +1618,29 @@ export function parseFindingVerdicts(
 /**
  * Parses the "changes since last review" pass output. Unlike parseReview, an
  * unparseable or summary-less response yields '' (not a placeholder string) so
- * the caller OMITS the block — the pass fails open.
+ * the caller OMITS the block — the pass fails open. `strict` throws instead so
+ * a caller can repair first.
  */
 export function parseChangesSinceLastReviewSummary(
   raw: string,
   label: string,
   log: (msg: string) => void,
+  options: { strict?: boolean } = {},
 ): string {
+  let summary: unknown;
   try {
-    const obj = parseJsonObject(raw) as Record<string, unknown>;
-    return typeof obj.summary === 'string' ? obj.summary.trim() : '';
+    summary = (parseJsonObject(raw) as Record<string, unknown>).summary;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (options.strict) throw new Error(`${label} returned unparseable JSON: ${message}`);
     log(
       `${label} response was not valid JSON; omitting the changes-since-last-review block: ${message}`,
     );
     return '';
   }
+  if (typeof summary === 'string') return summary.trim();
+  if (options.strict) throw new Error(`${label} returned JSON without a summary string`);
+  return '';
 }
 
 function parseJsonObject(raw: string): unknown {

@@ -192,29 +192,38 @@ function openDevinSession(
   const configFile = join(root, 'config.json');
   const stopHook = join(root, 'stop-hook.mjs');
   const nudgedMarker = join(root, 'nudged');
-  const credentials = devinCredentialsPath(root);
-  mkdirSync(dirname(credentials), { recursive: true, mode: 0o700 });
-  writeFileSync(credentials, readFileSync(devinCredentialsPath(home)), { mode: 0o600 });
-  writeFileSync(stopHook, buildDevinStopHookScript(nudgedMarker), { mode: 0o600 });
-  writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home, stopHook)), { mode: 0o600 });
-  // The Action's safe.directory entry lives under the process HOME; git run
-  // from this HOME refuses a checkout owned by another uid without its own.
-  // Double-quoted: `#`, `;` and whitespace are literal only inside quotes.
-  const directory = `"${workspace.replace(/[\\"]/g, '\\$&').replace(/\n/g, '\\n')}"`;
-  writeFileSync(join(root, '.gitconfig'), `[safe]\n\tdirectory = ${directory}\n`, {
-    mode: 0o600,
-  });
+  try {
+    const credentials = devinCredentialsPath(root);
+    mkdirSync(dirname(credentials), { recursive: true, mode: 0o700 });
+    writeFileSync(credentials, readFileSync(devinCredentialsPath(home)), { mode: 0o600 });
+    writeFileSync(stopHook, buildDevinStopHookScript(nudgedMarker), { mode: 0o600 });
+    writeFileSync(configFile, JSON.stringify(buildDevinCliConfig(home, stopHook)), {
+      mode: 0o600,
+    });
+    // The Action's safe.directory entry lives under the process HOME; git run
+    // from this HOME refuses a checkout owned by another uid without its own.
+    // Double-quoted: `#`, `;` and whitespace are literal only inside quotes.
+    const directory = `"${workspace.replace(/[\\"]/g, '\\$&').replace(/\n/g, '\\n')}"`;
+    writeFileSync(join(root, '.gitconfig'), `[safe]\n\tdirectory = ${directory}\n`, {
+      mode: 0o600,
+    });
+  } catch (error) {
+    // No session handle exists yet, so nothing else would reclaim the credential copy.
+    removeDevinSession(root, log);
+    throw error;
+  }
   let launched = false;
   return {
     async prompt(prompt: string, label: string, timeoutMs = DEVIN_PROMPT_TIMEOUT_MS) {
       const deadlineAt = Date.now() + timeoutMs;
       writeFileSync(promptFile, prompt, { mode: 0o600 });
-      rmSync(nudgedMarker, { force: true });
       log(`Calling ${label} prompt (agent=devin-cli, model=${model})`);
       let retriedSetup = false;
       let retriedCatalog = false;
       let retriedEmpty = false;
       for (;;) {
+        // Per attempt: a relaunch must not inherit a nudge from the attempt it replaces.
+        rmSync(nudgedMarker, { force: true });
         const remainingMs = deadlineAt - Date.now();
         if (remainingMs <= 0) throw new Error(`devin ${label} prompt deadline expired`);
         const result = await runCliProcess(
@@ -447,7 +456,7 @@ export function createDevinCliBackend(
           'finding-verification',
           log,
           deadline(timeoutMs),
-          (raw) => parseFindingVerdicts(raw, findings.length, log),
+          (raw) => parseFindingVerdicts(raw, findings.length, log, { strict: true }),
         ),
       );
     },
@@ -461,7 +470,8 @@ export function createDevinCliBackend(
           'changes-since-last-review',
           log,
           deadline(timeoutMs),
-          (raw, parseLabel) => parseChangesSinceLastReviewSummary(raw, parseLabel, log),
+          (raw, parseLabel) =>
+            parseChangesSinceLastReviewSummary(raw, parseLabel, log, { strict: true }),
         ),
       );
     },

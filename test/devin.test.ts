@@ -722,26 +722,103 @@ if (process.argv.includes('-c')) {
   });
 
   it('recovers auxiliary replies in the same session like the main review', async () => {
-    for (const first of ['{"guidelines": []}', 'I will audit the guidelines first.']) {
-      const fake = fakeDevin(`
-fs.appendFileSync(stamp, process.argv.includes('-c') ? 'continue\\n' : 'launch\\n');
-process.stdout.write(process.argv.includes('-c') ? '{"findings":[]}' : ${JSON.stringify(first)});
-`);
-      try {
-        assert.deepEqual(
-          await fake.backend.runGuidelineComplianceCheck(
+    type Fake = ReturnType<typeof fakeDevin>;
+    const finding = { path: 'a.ts', line: 1, severity: 'P1', title: 't', body: 'b' };
+    const guideline = (fake: Fake) =>
+      fake.backend.runGuidelineComplianceCheck('devin/default', 'context', '', fake.log, 5000);
+    const cases: {
+      first: string;
+      repaired: string;
+      run: (fake: Fake) => Promise<unknown>;
+      expected: unknown;
+    }[] = [
+      { first: '{"guidelines": []}', repaired: '{"findings":[]}', run: guideline, expected: [] },
+      {
+        first: 'I will audit the guidelines first.',
+        repaired: '{"findings":[]}',
+        run: guideline,
+        expected: [],
+      },
+      {
+        first: '{"verdicts": "none"}',
+        repaired: '{"verdicts":[{"index":0,"verdict":"refuted"}]}',
+        run: (fake) =>
+          fake.backend.runFindingVerification(
             'devin/default',
             'context',
-            '',
+            [finding],
             fake.log,
             5000,
           ),
-          [],
-        );
+        expected: [{ index: 0, verdict: 'refuted', reason: undefined }],
+      },
+      {
+        first: '{"summary": 5}',
+        repaired: '{"summary":"Renamed the helper."}',
+        run: (fake) =>
+          fake.backend.runChangesSinceLastReview('devin/default', 'delta', fake.log, 5000),
+        expected: 'Renamed the helper.',
+      },
+    ];
+    for (const { first, repaired, run, expected } of cases) {
+      const fake = fakeDevin(`
+fs.appendFileSync(stamp, process.argv.includes('-c') ? 'continue\\n' : 'launch\\n');
+process.stdout.write(process.argv.includes('-c') ? ${JSON.stringify(repaired)} : ${JSON.stringify(first)});
+`);
+      try {
+        assert.deepEqual(await run(fake), expected);
         assert.equal(readFileSync(join(fake.root, 'onboarded'), 'utf8'), 'launch\ncontinue\n');
       } finally {
         await fake.restore();
       }
+    }
+  });
+
+  it('removes the session root when setup fails before the first launch', async () => {
+    const fake = fakeDevin('');
+    try {
+      rmSync(devinCredentialsPath(fake.home));
+      await assert.rejects(
+        fake.backend.runReview('devin/default', 'context', '', fake.log, { timeoutMs: 5000 }),
+        /ENOENT/,
+      );
+      assert.deepEqual(
+        readdirSync(fake.home).filter((entry) => entry.startsWith('session-')),
+        [],
+      );
+    } finally {
+      await fake.restore();
+    }
+  });
+
+  it('clears the nudge marker per CLI attempt so a relaunch cannot inherit it', async () => {
+    const fake = fakeDevin(`
+const { execSync } = require('node:child_process');
+const launches = fs.existsSync(stamp) ? fs.readFileSync(stamp, 'utf8').split('\\n').filter(Boolean).length : 0;
+fs.appendFileSync(stamp, process.argv.includes('-c') ? 'continue\\n' : 'launch\\n');
+if (process.argv.includes('-c')) {
+  process.stdout.write('{"summary":"ok","findings":[]}');
+} else if (launches === 0) {
+  // An empty final message is nudged too, then the CLI exits with nothing on stdout.
+  execSync(config.hooks.Stop[0].hooks[0].command, {
+    input: JSON.stringify({ stop_hook_active: false, last_assistant_message: '' }),
+    encoding: 'utf8',
+  });
+} else {
+  process.stdout.write('I will inspect the code.');
+}
+`);
+    try {
+      const review = await fake.backend.runReview('devin/default', 'context', '', fake.log, {
+        timeoutMs: 5000,
+      });
+      assert.equal(review.summary, 'ok');
+      assert.equal(
+        readFileSync(join(fake.root, 'onboarded'), 'utf8'),
+        'launch\nlaunch\ncontinue\n',
+      );
+    } finally {
+      await fake.restore();
     }
   });
 

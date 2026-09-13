@@ -267,6 +267,14 @@ describe('parseFindingVerdicts', () => {
   it('returns undefined (fail-open signal) on unusable responses', () => {
     assert.equal(parseFindingVerdicts('not json at all', 2, noLog), undefined);
     assert.equal(parseFindingVerdicts('{"something": []}', 2, noLog), undefined);
+    assert.throws(
+      () => parseFindingVerdicts('not json at all', 2, noLog, { strict: true }),
+      /unparseable JSON/,
+    );
+    assert.throws(
+      () => parseFindingVerdicts('{"something": []}', 2, noLog, { strict: true }),
+      /verdicts array/,
+    );
   });
 
   it('extracts verdicts from fenced output like the review parser does', () => {
