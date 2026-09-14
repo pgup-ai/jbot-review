@@ -5,6 +5,7 @@ import {
   computeVerificationTimeoutMs,
   computeAuxiliaryGraceMs,
   computeLensGraceMs,
+  wrapUpReserveMs,
   sharedPrefixLaunchDelayMs,
   SHARED_PREFIX_STAGGER_MS,
 } from '../src/shared/time-budget.ts';
@@ -1265,6 +1266,16 @@ describe('normalizeOptions defaults', () => {
   });
 });
 
+describe('wrapUpReserveMs', () => {
+  it('holds back a fifth of a budget for the wrap-up turn, capped and floored', () => {
+    assert.equal(wrapUpReserveMs(300_000), 60_000);
+    assert.equal(wrapUpReserveMs(600_000), 90_000);
+    assert.equal(wrapUpReserveMs(75_000), 15_000);
+    assert.equal(wrapUpReserveMs(60_000), 0);
+    assert.equal(wrapUpReserveMs(0), 0);
+  });
+});
+
 describe('settleWithinGrace', () => {
   const session = <T>(promise: Promise<T>, settled = false) => ({
     label: 'lens',
@@ -1321,6 +1332,71 @@ describe('settleWithinGrace', () => {
       () => abandoned.push('settled'),
     );
     assert.deepEqual(abandoned, ['stuck']);
+  });
+
+  it('asks the backend to wrap up before the grace ends and keeps a result that lands in the reserve', async () => {
+    const events: string[] = [];
+    let resolveStuck!: (value: string[]) => void;
+    const stuck = new Promise<string[]>((resolve) => {
+      resolveStuck = resolve;
+    });
+    const wrapUp = {
+      reserveMs: 30,
+      finalize: (budgetMs: number) => {
+        events.push(`finalize:${budgetMs}`);
+        setTimeout(() => resolveStuck(['wrapped']), 5);
+        return 1;
+      },
+    };
+    assert.deepEqual(
+      await settleWithinGrace(
+        session(stuck),
+        [],
+        () => {},
+        60,
+        () => events.push('abandon'),
+        wrapUp,
+      ),
+      ['wrapped'],
+    );
+    assert.deepEqual(events, ['finalize:30']);
+
+    // Nothing signalled (no wrap-up support, or everything already settled):
+    // the rest of the grace still runs out and the session is abandoned.
+    const never = new Promise<string[]>(() => {});
+    const none = {
+      reserveMs: 30,
+      finalize: () => {
+        events.push('finalize-none');
+        return 0;
+      },
+    };
+    assert.deepEqual(
+      await settleWithinGrace(
+        session(never),
+        [],
+        () => {},
+        60,
+        () => events.push('abandon-none'),
+        none,
+      ),
+      [],
+    );
+    assert.deepEqual(events.slice(1), ['finalize-none', 'abandon-none']);
+
+    // A session that settles before the wrap-up point is never asked to wrap up.
+    assert.deepEqual(
+      await settleWithinGrace(
+        session(Promise.resolve(['done'])),
+        [],
+        () => {},
+        60,
+        undefined,
+        none,
+      ),
+      ['done'],
+    );
+    assert.equal(events.length, 3);
   });
 
   it('returns the real value when it lands inside the grace', async () => {

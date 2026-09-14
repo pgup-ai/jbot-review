@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   CONTINUATION_NUDGE_PROMPT,
+  WRAP_UP_PROMPT,
   isNoAttemptReply,
   ADDRESSED_PRIOR_COMMENTS_PROMPT,
   CHANGES_SINCE_CONTEXT_BUDGET,
@@ -62,6 +63,9 @@ describe('no-attempt reply recovery', () => {
     assert.match(CONTINUATION_NUDGE_PROMPT, /finish the task now, in this turn/);
     assert.match(CONTINUATION_NUDGE_PROMPT, /Do not reply with a plan or preamble/);
     assert.match(CONTINUATION_NUDGE_PROMPT, /ONLY the JSON/);
+    assert.match(WRAP_UP_PROMPT, /Time is up/);
+    assert.match(WRAP_UP_PROMPT, /no further investigation/i);
+    assert.match(WRAP_UP_PROMPT, /ONLY the JSON/);
   });
 });
 

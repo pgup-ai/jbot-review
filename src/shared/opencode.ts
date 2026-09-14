@@ -24,9 +24,11 @@ import {
   buildJsonRepairPrompt,
   CONTINUATION_NUDGE_PROMPT,
   isNoAttemptReply,
+  WRAP_UP_PROMPT,
   withNoToolsReviewDirective,
 } from './prompt.ts';
 import { isFiniteNumber, isRecord } from './text.ts';
+import { WRAP_UP_MARGIN_MS, wrapUpReserveMs } from './time-budget.ts';
 import {
   classifyReadonlyTool,
   serializedBytes,
@@ -43,6 +45,21 @@ import {
 
 const READY_TIMEOUT_MS = 15_000;
 const PROMPT_TIMEOUT_MS = 15 * 60_000;
+const NO_TOOLS: Record<string, boolean> = {
+  bash: false,
+  read: false,
+  grep: false,
+  glob: false,
+  list: false,
+  webfetch: false,
+  task: false,
+  todowrite: false,
+  skill: false,
+  question: false,
+  write: false,
+  edit: false,
+  patch: false,
+};
 const PROMPT_POLL_INTERVAL_MS = 2_000;
 const PROMPT_POLL_REQUEST_TIMEOUT_MS = 10_000;
 const opencodeToolTelemetry = new WeakMap<object, ToolTelemetryAccumulator>();
@@ -815,6 +832,7 @@ export async function runReview(
   );
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
 
+  const outcome: PromptOutcome = { wrappedUp: false };
   const { raw, sessionID } = await promptPlanAgent(
     client,
     model,
@@ -823,6 +841,8 @@ export async function runReview(
     log,
     options.timeoutMs,
     options.onTokenUsage,
+    undefined,
+    outcome,
   );
   let result: ReviewResult;
   try {
@@ -841,6 +861,7 @@ export async function runReview(
     );
     result = parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
+  if (outcome.wrappedUp) result.partial = true;
   if (!options.guidelineSweep) return result;
   const sweep = options.guidelineSweep;
   const sweepLabel = `guideline-sweep-${label}`;
@@ -1077,6 +1098,7 @@ export async function runFindingVerification(
 // the model answers in ONE turn. A lingering `question` tool would also hang a
 // headless run. (resolveSessionTools decides which set a session gets.)
 const READONLY_TOOLS = { write: false, edit: false, patch: false } as const;
+const EXPLORATION_TOOLS = ['bash', 'read', 'grep', 'glob'] as const;
 const SINGLE_SHOT_TOOLS = {
   write: false,
   edit: false,
@@ -1127,6 +1149,7 @@ async function promptPlanAgent(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   tools?: Record<string, boolean>,
+  outcome?: PromptOutcome,
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
   // The title makes parallel sessions distinguishable in opencode's own
@@ -1149,8 +1172,15 @@ async function promptPlanAgent(
     timeoutMs,
     onTokenUsage,
     tools,
+    label,
+    outcome,
   );
   return { raw, sessionID: session.id };
+}
+
+/** Set by promptPlanAgentInSession when the turn was cut off and wrapped up. */
+export interface PromptOutcome {
+  wrappedUp: boolean;
 }
 
 async function promptPlanAgentInSession(
@@ -1165,6 +1195,7 @@ async function promptPlanAgentInSession(
   tools?: Record<string, boolean>,
   /** Grace-abort registry key; repair/continue prompts keep the BASE label. */
   abortLabel = label,
+  outcome?: PromptOutcome,
 ): Promise<string> {
   const release = sessionSlots ? await sessionSlots.acquire() : undefined;
   try {
@@ -1179,6 +1210,7 @@ async function promptPlanAgentInSession(
       onTokenUsage,
       tools,
       abortLabel,
+      outcome,
     );
   } finally {
     release?.();
@@ -1196,6 +1228,7 @@ async function promptInSessionHoldingSlot(
   onTokenUsage?: TokenUsageRecorder,
   tools?: Record<string, boolean>,
   abortLabel = label,
+  outcome?: PromptOutcome,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
   const resolvedTools = resolveSessionTools(model, tools);
@@ -1232,21 +1265,69 @@ async function promptInSessionHoldingSlot(
     const promptError = getResultError(promptRes);
     if (promptError) throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
 
+    // A tool-using turn that runs out of time is wrapped up rather than lost:
+    // at the reserve boundary, or when the runner asks (grace expiry), the
+    // turn is aborted and one tool-less answer is requested in the same
+    // session. A tool-less turn (single-shot, or the wrap-up itself) has
+    // nothing to interrupt and keeps the plain deadline.
+    // opencode keeps unlisted builtins on, so only an explicit exploration blackout is tool-less.
+    const canWrapUp = !EXPLORATION_TOOLS.every((tool) => resolvedTools[tool] === false);
+    const reserve = canWrapUp ? wrapUpReserveMs(timeoutMs) : 0;
+    let requestWrapUp: ((budgetMs: number) => void) | undefined;
+    const wrapUpDue = new Promise<number>((resolve) => {
+      requestWrapUp = resolve;
+    });
+    const unregister = canWrapUp
+      ? registerFinalizeTrigger(client, abortLabel, requestWrapUp!)
+      : () => undefined;
+    const reserveTimer =
+      reserve > 0 ? setTimeout(() => requestWrapUp!(reserve), timeoutMs - reserve) : undefined;
+    const waiting = { cancelled: false };
     let data;
     try {
-      data = await waitForAssistantMessage(
-        client,
-        sessionID,
-        label,
-        log,
-        previousMessageID,
-        timeoutMs,
-      );
+      const settled = await Promise.race([
+        waitForAssistantMessage(
+          client,
+          sessionID,
+          label,
+          log,
+          previousMessageID,
+          timeoutMs,
+          waiting,
+        ).then((message) => ({ message })),
+        wrapUpDue.then((budgetMs) => ({ budgetMs })),
+      ]);
+      if ('budgetMs' in settled) {
+        waiting.cancelled = true;
+        log(
+          `${label} prompt cut off; wrapping up in-session within ${Math.round(settled.budgetMs / 1000)}s`,
+        );
+        await abortSessionBestEffort(client, sessionID, label, log);
+        const raw = await promptInSessionHoldingSlot(
+          client,
+          model,
+          sessionID,
+          WRAP_UP_PROMPT,
+          `${label}-wrap-up`,
+          log,
+          Math.max(0, settled.budgetMs - WRAP_UP_MARGIN_MS),
+          onTokenUsage,
+          NO_TOOLS,
+          abortLabel,
+        );
+        if (outcome) outcome.wrappedUp = true;
+        return raw;
+      }
+      data = settled.message;
     } catch (error) {
+      waiting.cancelled = true;
       // A timed-out or failed wait leaves the session generating (and
       // spending tokens) until the server shuts down; stop it now.
       await abortSessionBestEffort(client, sessionID, label, log);
       throw error;
+    } finally {
+      clearTimeout(reserveTimer);
+      unregister();
     }
 
     const parts = data.parts;
@@ -1298,6 +1379,41 @@ export function registerOpencodeSessionForAbort(
   const ids = byLabel.get(label) ?? new Set<string>();
   byLabel.set(label, ids);
   ids.add(sessionID);
+}
+
+/** Wrap-up triggers of in-flight prompts, keyed like the abort registry. */
+const finalizeTriggersByLabel = new WeakMap<
+  OpencodeClient,
+  Map<string, Set<(budgetMs: number) => void>>
+>();
+
+function registerFinalizeTrigger(
+  client: OpencodeClient,
+  label: string,
+  trigger: (budgetMs: number) => void,
+): () => void {
+  const byLabel = finalizeTriggersByLabel.get(client) ?? new Map<string, Set<typeof trigger>>();
+  finalizeTriggersByLabel.set(client, byLabel);
+  const triggers = byLabel.get(label) ?? new Set<typeof trigger>();
+  byLabel.set(label, triggers);
+  triggers.add(trigger);
+  return () => triggers.delete(trigger);
+}
+
+/** Wraps up every in-flight prompt under label (the ReviewBackend.finalizeSessionsByLabel contract). */
+export function finalizeOpencodeSessionsByLabel(
+  client: OpencodeClient,
+  label: string,
+  log: (msg: string) => void,
+  budgetMs: number,
+): number {
+  const triggers = finalizeTriggersByLabel.get(client)?.get(label);
+  if (!triggers || triggers.size === 0) return 0;
+  const count = triggers.size;
+  for (const trigger of triggers) trigger(budgetMs);
+  triggers.clear();
+  log(`Asked ${count} ${label} session(s) to wrap up within ${Math.round(budgetMs / 1000)}s.`);
+  return count;
 }
 
 export function unregisterOpencodeSessionForAbort(
@@ -1354,6 +1470,8 @@ async function waitForAssistantMessage(
   log: (msg: string) => void,
   ignoreMessageID?: string,
   timeoutMs = PROMPT_TIMEOUT_MS,
+  /** Set by a caller that stopped waiting (a wrap-up took over), so the poll loop exits. */
+  waiting?: { cancelled: boolean },
 ): Promise<{
   info: AssistantMessage;
   parts: ReadonlyArray<Part>;
@@ -1363,7 +1481,7 @@ async function waitForAssistantMessage(
   let lastStatus = 'unknown';
   let lastProgressLogAt = startedAt;
 
-  while (Date.now() - startedAt < timeoutMs) {
+  while (Date.now() - startedAt < timeoutMs && !waiting?.cancelled) {
     const latest = await getLatestAssistantMessage(client, sessionID, label, ignoreMessageID);
     const message = latest && latest.info.id === ignoreMessageID ? undefined : latest;
     if (message?.info.error) {

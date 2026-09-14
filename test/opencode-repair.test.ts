@@ -3,6 +3,7 @@ import { afterEach, describe, it } from 'node:test';
 
 import {
   abortOpencodeSessionsByLabel,
+  finalizeOpencodeSessionsByLabel,
   Semaphore,
   buildConfig,
   extractPromptTokenUsage,
@@ -14,7 +15,7 @@ import {
   runReview,
   type SemaphorePriority,
 } from '../src/shared/opencode.ts';
-import { CONTINUATION_NUDGE_PROMPT } from '../src/shared/prompt.ts';
+import { CONTINUATION_NUDGE_PROMPT, WRAP_UP_PROMPT } from '../src/shared/prompt.ts';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 
 const noLog = (): void => undefined;
@@ -102,6 +103,39 @@ const VALID_REVIEW = JSON.stringify({
 });
 
 describe('runReview JSON repair loop', () => {
+  it('wraps up a cut-off review in the same session with tools off and marks it partial', async () => {
+    const { client, prompts, aborted, tools } = makeFakeClient(['HANG', VALID_REVIEW]);
+    const logs: string[] = [];
+    const pending = runReview(
+      client,
+      'opencode/deepseek-v4-flash',
+      'CTX',
+      '',
+      (m) => logs.push(m),
+      {
+        timeoutMs: 10_000,
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      finalizeOpencodeSessionsByLabel(client, 'review', (m) => logs.push(m), 20_000),
+      1,
+    );
+    const result = await pending;
+    assert.equal(result.partial, true);
+    assert.equal(result.findings.length, 1);
+    assert.deepEqual(aborted, ['session-1']);
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /Time is up/);
+    assert.equal(Object.values(tools[1]).some(Boolean), false);
+    assert.equal(WRAP_UP_PROMPT.length > 0, true);
+    assert.equal(
+      finalizeOpencodeSessionsByLabel(client, 'review', () => {}, 20_000),
+      0,
+    );
+    assert.match(logs.join('\n'), /wrap/i);
+  });
+
   it('reuses the main session for a guideline sweep without losing findings on failure', async () => {
     for (const response of [
       JSON.stringify({

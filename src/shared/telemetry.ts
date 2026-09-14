@@ -214,7 +214,7 @@ export type SessionFailureClass = 'timeout' | 'provider' | 'parse' | 'aborted' |
 
 export interface SessionCoverage {
   session: string;
-  state: 'completed' | 'failed' | 'skipped' | 'reused';
+  state: 'completed' | 'partial' | 'failed' | 'skipped' | 'reused';
   /** Classified into a failureClass; the error's own text is never persisted. */
   error?: unknown;
   durationMs?: number;

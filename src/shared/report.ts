@@ -327,6 +327,8 @@ export function formatSummaryMarkdown(
   return out.join('\n');
 }
 
+export const PARTIAL_COVERAGE_REASON = 'cut short, partial findings included';
+
 export interface IncompleteSession {
   label: string;
   reason: string;

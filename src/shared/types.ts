@@ -100,6 +100,8 @@ export interface ReviewResult {
   summary: string;
   findings: Finding[];
   addressedPriorComments: AddressedPriorComment[];
+  /** The turn was cut off at its deadline and wrapped up: findings cover only what it had established. */
+  partial?: boolean;
 }
 
 export type VerificationVerdict = 'confirmed' | 'refuted' | 'uncertain';

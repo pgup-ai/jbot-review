@@ -9,6 +9,7 @@ import { describe, it } from 'node:test';
 
 import {
   abortPiSessionsByLabel,
+  finalizePiSessionsByLabel,
   PI_MIN_NODE_VERSION,
   PI_TELEMETRY_CAPABILITY,
   runPiAddressedPriorCommentsCheck,
@@ -605,6 +606,59 @@ describe('Pi review sessions', () => {
     assert.equal(result.summary, 'done');
     assert.equal(prompts.length, 2);
     assert.equal(prompts[1], CONTINUATION_NUDGE_PROMPT);
+  });
+
+  it('wraps up a cut-off review in the same session with tools off and marks it partial', async () => {
+    const events: string[] = [];
+    const runtime = fakeRuntime(false, events, []);
+    runtime.sdk.createAgentSession = async () => {
+      let release!: () => void;
+      let active = ['read_file', 'search_repo'];
+      const session = {
+        messages: [] as unknown[],
+        prompt: async () => {
+          events.push(`prompted:${active.length}`);
+          if (active.length) {
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            return;
+          }
+          session.messages.push({
+            role: 'assistant',
+            content: reviewResultJson,
+            stopReason: 'stop',
+          });
+        },
+        abort: async () => {
+          events.push('aborted');
+          session.messages.push({ role: 'assistant', content: '', stopReason: 'aborted' });
+          release();
+        },
+        getActiveToolNames: () => active,
+        setActiveToolsByName: (names: string[]) => {
+          active = names;
+          events.push(`tools:${names.join(',')}`);
+        },
+        dispose: () => events.push('disposed'),
+      };
+      return { session };
+    };
+    const pending = runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}, {
+      timeoutMs: 10_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(
+      finalizePiSessionsByLabel(runtime, 'review', () => {}, 20_000),
+      1,
+    );
+    const result = await pending;
+    assert.equal(result.partial, true);
+    assert.deepEqual(events, ['prompted:2', 'aborted', 'tools:', 'prompted:0', 'disposed']);
+    assert.equal(
+      finalizePiSessionsByLabel(runtime, 'review', () => {}, 20_000),
+      0,
+    );
   });
 
   it('aborts an in-flight labeled session at grace abandonment (TASK-077)', async () => {

@@ -5,6 +5,7 @@ import {
   ORPHANED_FINDINGS_HEADING,
   describeIncompleteReason,
   formatIncompleteCoverage,
+  PARTIAL_COVERAGE_REASON,
   renderOrphanedSection,
   condenseSummary,
   formatSummaryMarkdown,
@@ -346,8 +347,10 @@ test('incomplete-coverage notice names why each auxiliary session is missing', (
     { label: 'review-interactions', reason: 'cut off 300s after the main review' },
     { label: 'guideline-compliance', reason: 'timed out' },
     { label: 'finding-verification', reason: 'failed' },
+    { label: 'review-shard-2', reason: PARTIAL_COVERAGE_REASON },
   ]);
   assert.match(notice, /`review-interactions` \(cut off 300s after the main review\)/);
+  assert.match(notice, /`review-shard-2` \(cut short, partial findings included\)/);
   assert.match(notice, /`guideline-compliance` \(timed out\)/);
   assert.match(notice, /`finding-verification` \(failed\)/);
   assert.match(notice, /marked as unverified concerns/);
