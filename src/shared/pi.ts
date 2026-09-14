@@ -921,7 +921,6 @@ function piSessionMessages(session: PiAgentSessionLike): unknown[] {
   return Array.isArray(messages) ? messages : [];
 }
 
-/** Wrap-up triggers of in-flight prompts; finalizePiSessionsByLabel fires them. */
 const finalizeTriggerBySession = new WeakMap<PiAgentSessionLike, (budgetMs: number) => void>();
 
 async function promptPiSession(

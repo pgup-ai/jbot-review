@@ -92,6 +92,7 @@ function makeFakeClient(
       messages: async () => ({ data: [...messages] }),
       status: async () => ({ data: { 'session-1': { type: 'idle' } } }),
     },
+    tool: { ids: async () => ({ data: ['read', 'bash', 'websearch', 'mcp_search'] }) },
   } as unknown as OpencodeClient;
 
   return { client, prompts, aborted, tools };
@@ -144,6 +145,9 @@ describe('runReview JSON repair loop', () => {
     assert.equal(prompts.length, 2);
     assert.match(prompts[1], /Time is up/);
     assert.equal(Object.values(tools[1]).some(Boolean), false);
+    // Every id the server reports is denied, not just the built-ins we know about.
+    assert.equal(tools[1].websearch, false);
+    assert.equal(tools[1].mcp_search, false);
     assert.equal(WRAP_UP_PROMPT.length > 0, true);
     assert.equal(
       finalizeOpencodeSessionsByLabel(client, 'review', () => {}, 20_000),

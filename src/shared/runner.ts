@@ -279,6 +279,7 @@ import {
   describeIncompleteReason,
   formatIncompleteCoverage,
   type IncompleteSession,
+  isMainReviewLabel,
   PARTIAL_COVERAGE_REASON,
   formatSummaryMarkdown,
   ORPHANED_FINDINGS_HEADING,
@@ -1109,7 +1110,7 @@ async function runReviewPipeline(params: {
         ? 'partial'
         : coverage.state;
     if (state === 'partial') partialSessions.add(coverage.session);
-    if (coverage.session !== 'review' && !coverage.session.startsWith('review-shard-')) {
+    if (!isMainReviewLabel(coverage.session)) {
       if (state === 'failed' || state === 'completed' || state === 'partial')
         auxCoverage.set(coverage.session, { complete: state !== 'failed', error: coverage.error });
     }

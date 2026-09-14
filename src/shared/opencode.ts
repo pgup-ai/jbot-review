@@ -1181,7 +1181,6 @@ async function promptPlanAgent(
   return { raw, sessionID: session.id };
 }
 
-/** Set by promptPlanAgentInSession when the turn was cut off and wrapped up. */
 export interface PromptOutcome {
   wrappedUp: boolean;
 }
@@ -1317,7 +1316,7 @@ async function promptInSessionHoldingSlot(
           log,
           Math.max(0, wrapUpDeadline - Date.now()),
           onTokenUsage,
-          NO_TOOLS,
+          await wrapUpToolMap(client),
           abortLabel,
         );
         if (outcome) outcome.wrappedUp = true;
@@ -1386,7 +1385,6 @@ export function registerOpencodeSessionForAbort(
   ids.add(sessionID);
 }
 
-/** Wrap-up triggers of in-flight prompts, keyed like the abort registry. */
 const finalizeTriggersByLabel = new WeakMap<
   OpencodeClient,
   Map<string, Set<(budgetMs: number) => void>>
@@ -1403,6 +1401,27 @@ function registerFinalizeTrigger(
   byLabel.set(label, triggers);
   triggers.add(trigger);
   return () => triggers.delete(trigger);
+}
+
+const wrapUpToolMaps = new WeakMap<OpencodeClient, Promise<Record<string, boolean>>>();
+
+/**
+ * The prompt API denies only the tool ids it is handed, and the runtime can
+ * expose more than the built-ins (websearch, MCP, custom), so the wrap-up's
+ * deny map is built from the server's own id list; the static list stands in
+ * when that endpoint is unavailable.
+ */
+function wrapUpToolMap(client: OpencodeClient): Promise<Record<string, boolean>> {
+  let map = wrapUpToolMaps.get(client);
+  if (!map) {
+    map = Promise.resolve()
+      .then(() => client.tool.ids({ query: queryDirectory(client) }))
+      .then((result) => (Array.isArray(result.data) ? result.data : []))
+      .catch(() => [] as string[])
+      .then((ids) => ({ ...NO_TOOLS, ...Object.fromEntries(ids.map((id) => [id, false])) }));
+    wrapUpToolMaps.set(client, map);
+  }
+  return map;
 }
 
 /** Wraps up every in-flight prompt under label (the ReviewBackend.finalizeSessionsByLabel contract). */

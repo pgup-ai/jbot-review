@@ -329,6 +329,10 @@ export function formatSummaryMarkdown(
 
 export const PARTIAL_COVERAGE_REASON = 'cut short, partial findings included';
 
+/** Main review passes: the single session, a shard, or the fresh-session retry of either. */
+export const isMainReviewLabel = (label: string): boolean =>
+  /^review(-shard-\d+)?(-retry)?$/.test(label);
+
 export interface IncompleteSession {
   label: string;
   reason: string;
@@ -352,8 +356,6 @@ export function formatIncompleteCoverage(sessions: readonly IncompleteSession[])
     ({ label }) => label === 'finding-verification' || label === 'late-finding-verification',
   );
   const list = sessions.map(({ label, reason }) => `\`${label}\` (${reason})`).join(', ');
-  const main = sessions.some(({ label }) => label === 'review' || label.startsWith('review-shard-'))
-    ? 'cut short'
-    : 'completed';
+  const main = sessions.some(({ label }) => isMainReviewLabel(label)) ? 'cut short' : 'completed';
   return `⚠️ **Review incomplete:** Main review ${main}; ${list} did not complete successfully. Findings from completed passes are included.${verificationFailed ? ' Findings affected by incomplete verification are marked as unverified concerns.' : ''}`;
 }
