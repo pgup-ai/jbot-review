@@ -133,7 +133,7 @@ describe('limitReviewBackendSessions', () => {
     }
   });
 
-  it('passes the verifier model options through the limiter (TASK-157)', async () => {
+  it('passes the verifier model options through the limiter', async () => {
     const seen: unknown[] = [];
     const backend = makeBackend();
     backend.runFindingVerification = async (...args) => {

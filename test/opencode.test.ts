@@ -341,9 +341,9 @@ describe('aux model options', () => {
     );
   });
 
-  it('registers a verifier alias entry carrying the floored effort (TASK-157)', () => {
-    // No per-session options in the prompt API: the floored effort rides a
-    // model alias whose `id` routes back to the real model (probe-verified).
+  it('registers a verifier alias entry carrying the verifier effort', () => {
+    // No per-session options in the prompt API: the verifier's own effort rides
+    // a model alias whose `id` routes back to the real model (probe-verified).
     const config = buildConfig('opencode', 'main-model', 'k', { reasoningEffort: 'medium' }, true, [
       {
         providerID: 'opencode',
@@ -372,6 +372,22 @@ describe('aux model options', () => {
       [],
       undefined,
       { reasoningEffort: 'medium' },
+    );
+    // The alias is the verifier's own entry, so a target tier the ladder lacks
+    // rounds DOWN there (x-preview-f-free: low/high/max, medium requested).
+    const gapped = buildConfig('opencode', 'main-model', 'k', { reasoningEffort: 'high' }, true, [
+      {
+        providerID: 'opencode',
+        apiKey: 'k',
+        modelID: 'x-preview-f-free',
+        modelOptions: { reasoningEffort: 'low' },
+        verificationModelOptions: { reasoningEffort: 'medium' },
+      },
+    ]);
+    assert.deepEqual(
+      (gapped as { provider: Record<string, { models: Record<string, unknown> }> }).provider
+        .opencode.models['x-preview-f-free--jbot-verify'],
+      { id: 'x-preview-f-free', options: { reasoningEffort: 'low' } },
     );
     assert.deepEqual(
       (root as { provider: Record<string, { models: Record<string, unknown> }> }).provider.opencode

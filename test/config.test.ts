@@ -148,57 +148,53 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
     assert.equal(clampReasoningEffort('minimal', ['low', 'high', 'max']), 'low');
     assert.equal(clampReasoningEffort('max', ['minimal', 'low']), 'low');
     assert.equal(clampReasoningEffort('medium', ['low', 'high', 'max']), 'high');
+    assert.equal(clampReasoningEffort('medium', ['low', 'high', 'max'], 'down'), 'low');
+    assert.equal(clampReasoningEffort('medium', ['high', 'max'], 'down'), 'high');
     assert.equal(clampReasoningEffort('high', ['low', 'high']), 'high');
     // Unrankable entries can't be chosen; an all-unrankable ladder means no clamp.
     assert.equal(clampReasoningEffort('medium', ['low', 'turbo']), 'low');
     assert.equal(clampReasoningEffort('medium', ['default']), undefined);
     assert.equal(clampReasoningEffort('default', ['low', 'high']), undefined);
-    // pi's xhigh is rankable (between high and max), so an xhigh finder floors
-    // the verifier and an xhigh request clamps upward on ladders without it.
+    // pi's xhigh is rankable (between high and max), so an xhigh finder gets a
+    // high verifier and an xhigh request clamps upward on ladders without it.
     assert.deepEqual(
       verificationModelOptions({ reasoningEffort: 'xhigh' }, { reasoningEffort: 'low' }),
-      { reasoningEffort: 'xhigh' },
+      { reasoningEffort: 'high' },
     );
     assert.equal(clampReasoningEffort('xhigh', ['low', 'high', 'max']), 'max');
   });
 });
 
-describe('verification effort floor (TASK-157)', () => {
-  it('floors the verifier at the main-pass effort, never lowering a higher aux effort', () => {
-    // Aux shares the main entry: no separate options, parity already holds.
-    assert.equal(verificationModelOptions({ reasoningEffort: 'medium' }, undefined), undefined);
-    // The defaultAuxModelOptions 'low' was argued from lens throughput, never
-    // from verification; the verifier gets main parity instead.
-    assert.deepEqual(
-      verificationModelOptions({ reasoningEffort: 'medium' }, { reasoningEffort: 'low' }),
-      { reasoningEffort: 'medium' },
-    );
+describe('verification effort: one tier below the finder', () => {
+  it('steps the verifier one tier down from the main effort, never below low', () => {
+    // Aux already sits one below: identity, so no alias entry is built.
+    const low = { reasoningEffort: 'low' };
+    assert.equal(verificationModelOptions({ reasoningEffort: 'medium' }, low), low);
+    // Aux shares the main entry: the verifier gets its own lowered options.
+    assert.deepEqual(verificationModelOptions({ reasoningEffort: 'medium' }, undefined), low);
+    assert.equal(verificationModelOptions({ reasoningEffort: 'low' }, undefined), undefined);
+    assert.deepEqual(verificationModelOptions({ reasoningEffort: 'high' }, low), {
+      reasoningEffort: 'medium',
+    });
     assert.deepEqual(
       verificationModelOptions({ reasoningEffort: 'medium' }, { reasoningEffort: 'high' }),
-      { reasoningEffort: 'high' },
+      low,
     );
+    assert.deepEqual(verificationModelOptions({ reasoningEffort: 'minimal' }, low), {
+      reasoningEffort: 'minimal',
+    });
     // Custom providers carry no effort; the aux entry rides unchanged.
-    assert.deepEqual(verificationModelOptions({}, { reasoningEffort: 'low' }), {
-      reasoningEffort: 'low',
-    });
-    // Provider-managed main efforts ('default') are outside the order — no floor.
-    assert.deepEqual(
-      verificationModelOptions({ reasoningEffort: 'default' }, { reasoningEffort: 'low' }),
-      { reasoningEffort: 'low' },
-    );
-    // A provider-managed AUX effort is left alone too (poolside's 'default'):
-    // the floor never overwrites a value the provider manages itself.
-    assert.deepEqual(
-      verificationModelOptions({ reasoningEffort: 'medium' }, { reasoningEffort: 'default' }),
-      { reasoningEffort: 'default' },
-    );
+    assert.equal(verificationModelOptions({}, low), low);
+    // Provider-managed efforts ('default') sit outside the order on either side.
+    assert.equal(verificationModelOptions({ reasoningEffort: 'default' }, low), low);
+    const managed = { reasoningEffort: 'default' };
+    assert.equal(verificationModelOptions({ reasoningEffort: 'medium' }, managed), managed);
     // Effort-less aux entries stay effort-less: custom providers ({}) omit the
-    // key BY POLICY — arbitrary endpoints may reject provider-specific options,
-    // and an injected floor would 400 the verifier into fail-open.
-    assert.deepEqual(verificationModelOptions({ reasoningEffort: 'medium' }, { temperature: 0 }), {
-      temperature: 0,
-    });
-    assert.deepEqual(verificationModelOptions({ reasoningEffort: 'medium' }, {}), {});
+    // key BY POLICY — arbitrary endpoints may reject provider-specific options.
+    const bare = { temperature: 0 };
+    assert.equal(verificationModelOptions({ reasoningEffort: 'medium' }, bare), bare);
+    const empty = {};
+    assert.equal(verificationModelOptions({ reasoningEffort: 'medium' }, empty), empty);
   });
 });
 

@@ -183,42 +183,33 @@ function commandCodeReasoningEffort(
   model: string,
   modelOptions: Record<string, unknown> | undefined,
   explicit: boolean,
+  ties: 'up' | 'down' = 'up',
 ): string | undefined {
   const { modelID } = parseModelName(model);
   const effort = modelOptions?.reasoningEffort;
   const entry = COMMANDCODE_MODEL_EFFORTS[modelID];
   if (typeof effort !== 'string' || !entry?.tiers.length) return undefined;
   if (entry.tiers.includes(effort)) return effort;
-  return explicit ? clampReasoningEffort(effort, entry.tiers) : entry.fallback;
+  return explicit ? clampReasoningEffort(effort, entry.tiers, ties) : entry.fallback;
 }
 
 /**
  * Role-aware effort for one session: aux sessions run the built-in aux
- * defaults; main options clamp when explicit; the verifier's floored override
- * clamps to the finder's EFFECTIVE effort, so a CommandCode flash main whose
- * built-in medium fell back to low does not buy a high verifier.
+ * defaults; main options clamp when explicit; the verifier's override already
+ * sits one tier below the finder and rounds down when the ladder lacks that
+ * tier, so a medium target lands on `low` for the flash models.
  */
 export function commandCodeSessionEffort(
   model: string,
   override: Record<string, unknown> | undefined,
   ctx: {
-    mainModel: string;
     auxModel: string;
     auxModelOptions?: Record<string, unknown>;
     mainModelOptions?: Record<string, unknown>;
     explicit: boolean;
   },
 ): string | undefined {
-  if (override) {
-    const mainEffort = isCommandCodeProvider(parseModelName(ctx.mainModel).providerID)
-      ? commandCodeReasoningEffort(ctx.mainModel, ctx.mainModelOptions, ctx.explicit)
-      : undefined;
-    return commandCodeReasoningEffort(
-      model,
-      mainEffort ? { ...override, reasoningEffort: mainEffort } : override,
-      true,
-    );
-  }
+  if (override) return commandCodeReasoningEffort(model, override, true, 'down');
   const auxCall = model === ctx.auxModel && ctx.auxModelOptions !== undefined;
   return commandCodeReasoningEffort(
     model,

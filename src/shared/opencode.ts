@@ -146,15 +146,15 @@ export interface OpencodeProviderConfig extends ProviderKeyConfig {
   /** Provider options for this entry's model, scoped to it alone. */
   modelOptions?: Record<string, unknown>;
   /**
-   * TASK-157: options for the verifier alias entry on this model (effort
-   * floored at the main pass). The prompt API has no per-session options, so
-   * the alias `<modelID>--jbot-verify` carries them, with `id` pointing back
-   * at the real model.
+   * Options for the verifier alias entry on this model (one effort tier below
+   * the finder). The prompt API has no per-session options, so the alias
+   * `<modelID>--jbot-verify` carries them, with `id` pointing back at the
+   * real model.
    */
   verificationModelOptions?: Record<string, unknown>;
 }
 
-/** Config-time model alias that carries the verifier's own options (TASK-157). */
+/** Config-time model alias that carries the verifier's own options. */
 export const VERIFICATION_MODEL_ALIAS_SUFFIX = '--jbot-verify';
 
 type ProviderEntry = NonNullable<NonNullable<ServerOptions['config']>['provider']>[string];
@@ -217,7 +217,8 @@ function verificationAliasEntry(
   verificationModelOptions?: Record<string, unknown>,
 ): Record<string, { id: string; name?: string; options: Record<string, unknown> }> | undefined {
   if (!modelID) return undefined;
-  const options = supportedModelOptions(providerID, modelID, verificationModelOptions);
+  // The verifier's tier rounds down on ladders that lack it.
+  const options = supportedModelOptions(providerID, modelID, verificationModelOptions, 'down');
   if (!options || Object.keys(options).length === 0) return undefined;
   return {
     [`${modelID}${VERIFICATION_MODEL_ALIAS_SUFFIX}`]: {
@@ -1070,9 +1071,9 @@ export async function runFindingVerification(
   onTokenUsage?: TokenUsageRecorder,
   modelOptions?: Record<string, unknown>,
 ): Promise<FindingVerdict[] | undefined> {
-  // TASK-157: per-session options don't exist in the prompt API; when the
-  // runner passed verifier options it also registered the matching alias
-  // entry at boot, so the floored effort rides the alias model id.
+  // Per-session options don't exist in the prompt API; when the runner passed
+  // verifier options it also registered the matching alias entry at boot, so
+  // the verifier's own effort rides the alias model id.
   const verificationModel = modelOptions ? `${model}${VERIFICATION_MODEL_ALIAS_SUFFIX}` : model;
   // Pass findings through unprojected: Finding is structurally a VerifiableFinding.
   // An earlier field-subset projection here silently dropped `evidence` and
@@ -1089,7 +1090,8 @@ export async function runFindingVerification(
     'finding-verification',
     log,
     timeoutMs,
-    onTokenUsage,
+    // The alias is routing plumbing; usage and the posted footer name the real model.
+    onTokenUsage && ((usage, _alias, label) => onTokenUsage(usage, model, label)),
   );
   return parseFindingVerdicts(raw, findings.length, log);
 }

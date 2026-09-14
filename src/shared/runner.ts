@@ -1415,19 +1415,22 @@ async function runReviewPipeline(params: {
 
   const auxModelOptions = auxModelOptionsFor(providerID, modelID, auxProviderID, auxModelID);
   const resolvedMainOptions = supportedModelOptions(providerID, modelID, options.modelOptions);
-  // TASK-157: the verifier floors at the main-pass effort. An identity return
+  // The verifier runs one effort tier below the finder. An identity return
   // means the aux entry already delivers it, so no per-session override (and
-  // no opencode alias entry) is needed.
+  // no opencode alias entry) is needed; the verifier's own tier rounds down
+  // on ladders that lack it.
   const verifyModelOptions = verificationModelOptions(resolvedMainOptions, auxModelOptions);
   const verifierNeedsOwnOptions =
     verifyModelOptions !== undefined && verifyModelOptions !== auxModelOptions;
   const verifierSessionOptions = verifierNeedsOwnOptions
-    ? supportedModelOptions(auxProviderID, auxModelID, verifyModelOptions)
+    ? supportedModelOptions(auxProviderID, auxModelID, verifyModelOptions, 'down')
     : undefined;
+  // Undefined aux options mean the aux role shares the main entry, so a
+  // verifier alias there hangs off the main (root) entry.
+  const verifierOnMainEntry = verifierNeedsOwnOptions && auxModelOptions === undefined;
   // Stamped into the posted review's metadata: the arm identity for effort
   // A/Bs. Undefined wherever the main engine does not consume the option.
   const commandCodeEffortContext = {
-    mainModel: model,
     auxModel,
     auxModelOptions,
     mainModelOptions: options.modelOptions,
@@ -1880,7 +1883,6 @@ async function runReviewPipeline(params: {
       },
       (m, override) =>
         commandCodeSessionEffort(m, override, {
-          mainModel: model,
           auxModel,
           auxModelOptions,
           mainModelOptions: options.modelOptions,
@@ -2030,7 +2032,7 @@ async function runReviewPipeline(params: {
     auxOnOpencode &&
     (needsAuxOpencodeConfig(providerID, modelID, auxProviderID, auxModelID) ||
       Boolean(auxModelOptions && Object.keys(auxModelOptions).length > 0) ||
-      verifierNeedsOwnOptions);
+      (verifierNeedsOwnOptions && !verifierOnMainEntry));
   if (auxNeedsOwnKey && !options.auxApiKey) {
     await cleanupCliHomes();
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
@@ -2106,7 +2108,7 @@ async function runReviewPipeline(params: {
           // root model IS the aux model, so it carries the aux options — and
           // the verifier alias, since verification runs on the aux model.
           modelOptions: mainOnOpencode ? options.modelOptions : auxModelOptions,
-          ...(!mainOnOpencode && verifierNeedsOwnOptions
+          ...((!mainOnOpencode && verifierNeedsOwnOptions) || verifierOnMainEntry
             ? { verificationModelOptions: verifyModelOptions }
             : {}),
           baseURL: mainOnOpencode ? baseURL : options.auxBaseURL,
