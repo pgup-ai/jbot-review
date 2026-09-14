@@ -79,6 +79,12 @@ export interface ReviewBackend {
    * already settled.
    */
   abortSessionsByLabel?(label: string, log: (msg: string) => void): number;
+  /**
+   * Best-effort wrap-up of this backend's in-flight sessions for a prompt
+   * label: the turn is aborted, tools are dropped, and one final answer is
+   * requested within budgetMs. Returns the number of sessions signalled.
+   */
+  finalizeSessionsByLabel?(label: string, log: (msg: string) => void, budgetMs: number): number;
 }
 
 export interface SessionSlots {
@@ -228,6 +234,10 @@ export function limitReviewBackendSessions(
       }
       return queued + (backend.abortSessionsByLabel?.(label, log) ?? 0);
     },
+    // Queued sessions have no turn to wrap up; they settle at grace expiry as before.
+    ...(backend.finalizeSessionsByLabel
+      ? { finalizeSessionsByLabel: backend.finalizeSessionsByLabel.bind(backend) }
+      : {}),
     runReview: (model, context, guidelines, log, options) => {
       // Every lens shares the same bound: its own timeout after slot acquisition
       // and the run deadline (also while queued). The settle grace does the rest.

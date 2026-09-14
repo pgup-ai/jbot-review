@@ -23,4 +23,7 @@ export interface JobUpdate {
   tokensOutput?: number;
   // Per-severity finding counts for the control plane's check-run gate.
   findingsBySeverity?: Partial<Record<Severity, number>>;
+  // 'incomplete' when a pass was cut short or failed: empty counts then mean
+  // "not fully reviewed", not "no findings", and the check must not read as clean.
+  coverage?: 'complete' | 'incomplete';
 }

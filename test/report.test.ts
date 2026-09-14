@@ -5,6 +5,8 @@ import {
   ORPHANED_FINDINGS_HEADING,
   describeIncompleteReason,
   formatIncompleteCoverage,
+  isMainReviewLabel,
+  PARTIAL_COVERAGE_REASON,
   renderOrphanedSection,
   condenseSummary,
   formatSummaryMarkdown,
@@ -346,8 +348,23 @@ test('incomplete-coverage notice names why each auxiliary session is missing', (
     { label: 'review-interactions', reason: 'cut off 300s after the main review' },
     { label: 'guideline-compliance', reason: 'timed out' },
     { label: 'finding-verification', reason: 'failed' },
+    { label: 'review-shard-2', reason: PARTIAL_COVERAGE_REASON },
   ]);
   assert.match(notice, /`review-interactions` \(cut off 300s after the main review\)/);
+  assert.match(notice, /`review-shard-2` \(cut short, partial findings included\)/);
+  assert.match(notice, /Main review cut short;/);
+  assert.match(
+    formatIncompleteCoverage([{ label: 'review-retry', reason: PARTIAL_COVERAGE_REASON }]),
+    /Main review cut short;/,
+  );
+  for (const label of ['review', 'review-shard-2', 'review-retry', 'review-shard-3-retry'])
+    assert.equal(isMainReviewLabel(label), true, label);
+  for (const label of ['review-interactions', 'guideline-compliance', 'finding-verification'])
+    assert.equal(isMainReviewLabel(label), false, label);
+  assert.match(
+    formatIncompleteCoverage([{ label: 'guideline-compliance', reason: 'failed' }]),
+    /Main review completed;/,
+  );
   assert.match(notice, /`guideline-compliance` \(timed out\)/);
   assert.match(notice, /`finding-verification` \(failed\)/);
   assert.match(notice, /marked as unverified concerns/);

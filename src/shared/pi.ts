@@ -15,6 +15,7 @@ import {
   parseFindingVerdicts,
   parseReview,
   withTimeout,
+  type PromptOutcome,
 } from './opencode.ts';
 import type { PromptTokenUsage, ProviderKeyConfig, TokenUsageRecorder } from './opencode.ts';
 import {
@@ -30,7 +31,9 @@ import {
   CONTINUATION_NUDGE_PROMPT,
   isNoAttemptReply,
   REPOSITORY_SEARCH_DESCRIPTION,
+  WRAP_UP_PROMPT,
 } from './prompt.ts';
+import { WRAP_UP_MARGIN_MS, wrapUpReserveMs } from './time-budget.ts';
 import { isFiniteNumber, isRecord, truncateForLog } from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 import { serializedBytes, type ToolTelemetryAccumulator } from './tool-telemetry.ts';
@@ -364,6 +367,8 @@ interface PiResourceLoaderLike {
 interface PiAgentSessionLike {
   prompt(text: string, options?: { expandPromptTemplates?: boolean }): Promise<unknown>;
   abort(): Promise<void>;
+  getActiveToolNames?(): string[];
+  setActiveToolsByName?(names: string[]): void;
   dispose?: () => unknown;
   messages?: unknown;
   agent?: { state?: { messages?: unknown } };
@@ -916,6 +921,8 @@ function piSessionMessages(session: PiAgentSessionLike): unknown[] {
   return Array.isArray(messages) ? messages : [];
 }
 
+const finalizeTriggerBySession = new WeakMap<PiAgentSessionLike, (budgetMs: number) => void>();
+
 async function promptPiSession(
   session: PiAgentSessionLike,
   model: string,
@@ -924,23 +931,60 @@ async function promptPiSession(
   log: (msg: string) => void,
   timeoutMs = PI_PROMPT_TIMEOUT_MS,
   onTokenUsage?: TokenUsageRecorder,
+  outcome?: PromptOutcome,
 ): Promise<string> {
   const { providerID, modelID } = parseModelName(model);
   log(`Calling ${label} prompt (engine=pi, provider=${providerID} model=${modelID})`);
   // Sessions outlive a single prompt (the JSON repair re-prompts in place), so
   // only the turns appended by THIS prompt may be read or billed.
   const priorTurns = piSessionMessages(session).length;
+  // A cut-off tool-using turn is wrapped up (reserve boundary, or the runner's
+  // grace request) rather than lost; a tool-less session keeps the plain deadline.
+  const canWrapUp =
+    Boolean(session.setActiveToolsByName) && (session.getActiveToolNames?.().length ?? 0) > 0;
+  // Only a caller that records the partial outcome takes the reserve; a
+  // wrapped-up verifier would otherwise pass off premature verdicts as complete.
+  const reserve = canWrapUp && outcome ? wrapUpReserveMs(timeoutMs) : 0;
+  let requestWrapUp: ((budgetMs: number) => void) | undefined;
+  const wrapUpDue = new Promise<number>((resolve) => {
+    requestWrapUp = resolve;
+  });
+  if (canWrapUp) finalizeTriggerBySession.set(session, requestWrapUp!);
+  const reserveTimer =
+    reserve > 0 ? setTimeout(() => requestWrapUp!(reserve), timeoutMs - reserve) : undefined;
   try {
     // prompt() resolves when the full agent turn completes — no polling.
     // Template expansion stays off: prompts embed arbitrary diff text that
     // must never trigger pi's /template expansion.
-    await piTelemetryContext.run({ session: label }, () =>
-      withTimeout(
-        session.prompt(prompt, { expandPromptTemplates: false }),
-        timeoutMs,
-        `pi ${label} prompt did not finish within ${Math.round(timeoutMs / 1000)}s`,
-      ),
+    const settled = await piTelemetryContext.run({ session: label }, () =>
+      Promise.race([
+        withTimeout(
+          session.prompt(prompt, { expandPromptTemplates: false }),
+          timeoutMs,
+          `pi ${label} prompt did not finish within ${Math.round(timeoutMs / 1000)}s`,
+        ).then(() => ({ done: true as const })),
+        wrapUpDue.then((budgetMs) => ({ budgetMs })),
+      ]),
     );
+    if ('budgetMs' in settled) {
+      // The abort's own latency comes out of the budget: the reply must land
+      // before the deadline the caller's timer enforces.
+      const wrapUpDeadline = Date.now() + settled.budgetMs - WRAP_UP_MARGIN_MS;
+      log(
+        `${label} prompt cut off; wrapping up in-session within ${Math.round(settled.budgetMs / 1000)}s`,
+      );
+      // abort() waits for the agent to go idle; the tool change lands on the next turn.
+      await abortPiSessionBestEffort(session, label, log);
+      session.setActiveToolsByName!([]);
+      await piTelemetryContext.run({ session: `${label}-wrap-up` }, () =>
+        withTimeout(
+          session.prompt(WRAP_UP_PROMPT, { expandPromptTemplates: false }),
+          Math.max(0, wrapUpDeadline - Date.now()),
+          `pi ${label} wrap-up did not finish within ${Math.round(settled.budgetMs / 1000)}s`,
+        ),
+      );
+      if (outcome) outcome.wrappedUp = true;
+    }
   } catch (error) {
     piSessionTelemetry.get(session)?.finishSession({
       session: label,
@@ -953,6 +997,9 @@ async function promptPiSession(
     await abortPiSessionBestEffort(session, label, log);
     onTokenUsage?.({ promptBytes: Buffer.byteLength(prompt, 'utf8') }, model, label);
     throw error;
+  } finally {
+    clearTimeout(reserveTimer);
+    finalizeTriggerBySession.delete(session);
   }
   const allMessages = piSessionMessages(session);
   const messages = allMessages.slice(priorTurns);
@@ -1055,6 +1102,26 @@ export function abortPiSessionsByLabel(
   return count;
 }
 
+/** Wraps up every in-flight prompt under label (the ReviewBackend.finalizeSessionsByLabel contract). */
+export function finalizePiSessionsByLabel(
+  runtime: PiRuntime,
+  label: string,
+  log: (msg: string) => void,
+  budgetMs: number,
+): number {
+  let count = 0;
+  for (const session of runtime.sessionsByLabel?.get(label) ?? []) {
+    const trigger = finalizeTriggerBySession.get(session);
+    if (!trigger) continue;
+    finalizeTriggerBySession.delete(session);
+    trigger(budgetMs);
+    count++;
+  }
+  if (count)
+    log(`Asked ${count} ${label} session(s) to wrap up within ${Math.round(budgetMs / 1000)}s.`);
+  return count;
+}
+
 /**
  * Releases a session nothing is waiting on (teardown, or one born after the
  * teardown sweep). Never awaits the abort: abortPiSessionBestEffort's timeout
@@ -1131,6 +1198,7 @@ export async function runPiReview(
   log(`Prompt assembled (${label}): ${prompt.length} chars, guidelines=${!!guidelines}`);
   const session = await createPiSession(runtime, model, false, true, undefined, label);
   try {
+    const outcome: PromptOutcome = { wrappedUp: false };
     const raw = await promptPiSession(
       session,
       model,
@@ -1139,11 +1207,14 @@ export async function runPiReview(
       log,
       options.timeoutMs,
       options.onTokenUsage,
+      outcome,
     );
     let result: ReviewResult;
     try {
       result = parseReview(raw, label, log, { strict: true });
     } catch (error) {
+      // A wrap-up reply is the last answer its deadline allows: no repair turn.
+      if (outcome.wrappedUp) throw error;
       const repaired = await repromptPiForJson(
         session,
         model,
@@ -1156,7 +1227,8 @@ export async function runPiReview(
       );
       result = parseReview(repaired, `${label}-repair`, log, { strict: true });
     }
-    if (!options.guidelineSweep) return result;
+    if (outcome.wrappedUp) result.partial = true;
+    if (!options.guidelineSweep || outcome.wrappedUp) return result;
     const sweep = options.guidelineSweep;
     const sweepLabel = `guideline-sweep-${label}`;
     return await appendGuidelineSweep(

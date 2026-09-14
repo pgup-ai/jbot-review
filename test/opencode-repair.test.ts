@@ -3,6 +3,7 @@ import { afterEach, describe, it } from 'node:test';
 
 import {
   abortOpencodeSessionsByLabel,
+  finalizeOpencodeSessionsByLabel,
   Semaphore,
   buildConfig,
   extractPromptTokenUsage,
@@ -14,7 +15,7 @@ import {
   runReview,
   type SemaphorePriority,
 } from '../src/shared/opencode.ts';
-import { CONTINUATION_NUDGE_PROMPT } from '../src/shared/prompt.ts';
+import { CONTINUATION_NUDGE_PROMPT, WRAP_UP_PROMPT } from '../src/shared/prompt.ts';
 import type { OpencodeClient } from '@opencode-ai/sdk';
 
 const noLog = (): void => undefined;
@@ -91,6 +92,7 @@ function makeFakeClient(
       messages: async () => ({ data: [...messages] }),
       status: async () => ({ data: { 'session-1': { type: 'idle' } } }),
     },
+    tool: { ids: async () => ({ data: ['read', 'bash', 'websearch', 'mcp_search'] }) },
   } as unknown as OpencodeClient;
 
   return { client, prompts, aborted, tools };
@@ -102,6 +104,105 @@ const VALID_REVIEW = JSON.stringify({
 });
 
 describe('runReview JSON repair loop', () => {
+  it('fails a cut-off review outright when its wrap-up reply cannot be parsed', async () => {
+    const { client, prompts, tools } = makeFakeClient(['HANG', 'sorry, out of time']);
+    const pending = runReview(client, 'opencode/deepseek-v4-flash', 'CTX', '', () => {}, {
+      timeoutMs: 10_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      finalizeOpencodeSessionsByLabel(client, 'review', () => {}, 20_000),
+      1,
+    );
+    await assert.rejects(pending, /unparseable JSON/);
+    // No repair turn: it would re-enable tools and a fresh timeout after the deadline.
+    assert.equal(prompts.length, 2);
+    assert.equal(Object.values(tools[1]).some(Boolean), false);
+  });
+
+  it('skips the guideline sweep after a wrap-up', async () => {
+    const { client, prompts } = makeFakeClient(['HANG', VALID_REVIEW, '{"findings":[]}']);
+    const pending = runReview(client, 'opencode/deepseek-v4-flash', 'CTX', '', () => {}, {
+      timeoutMs: 10_000,
+      guidelineSweep: { guidelines: 'G' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      finalizeOpencodeSessionsByLabel(client, 'review', () => {}, 20_000),
+      1,
+    );
+    const result = await pending;
+    assert.equal(result.partial, true);
+    assert.equal(prompts.length, 2);
+  });
+
+  it('denies only the built-in tools when the id lookup fails or stalls, and retries it on the next wrap-up', async () => {
+    const { client, tools } = makeFakeClient(Array(5).fill(['HANG', VALID_REVIEW]).flat());
+    const lookups = [
+      () => new Promise(() => {}),
+      () => Promise.reject(new Error('boom')),
+      () => Promise.resolve({ data: 'nope' }),
+      () => Promise.resolve({ data: ['mcp_search'] }),
+    ];
+    let calls = 0;
+    (client as unknown as { tool: { ids: () => Promise<unknown> } }).tool.ids = () =>
+      lookups[calls++]();
+    const wrapUp = async (budgetMs = 20_000) => {
+      const pending = runReview(client, 'opencode/deepseek-v4-flash', 'CTX', '', () => {}, {
+        timeoutMs: 10_000,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      finalizeOpencodeSessionsByLabel(client, 'review', () => {}, budgetMs);
+      await pending.catch(() => undefined);
+      return tools[tools.length - 1];
+    };
+    // A stalled lookup is bounded by the wrap-up's remaining budget (here ~50 ms past the
+    // margin), then rejected and malformed lookups: each falls back to the static list, uncached.
+    assert.equal((await wrapUp(5_050)).mcp_search, undefined);
+    assert.equal((await wrapUp()).mcp_search, undefined);
+    assert.equal((await wrapUp()).mcp_search, undefined);
+    assert.equal((await wrapUp()).mcp_search, false);
+    // Only the successful lookup is cached.
+    assert.equal((await wrapUp()).mcp_search, false);
+    assert.equal(calls, 4);
+  });
+
+  it('wraps up a cut-off review in the same session with tools off and marks it partial', async () => {
+    const { client, prompts, aborted, tools } = makeFakeClient(['HANG', VALID_REVIEW]);
+    const logs: string[] = [];
+    const pending = runReview(
+      client,
+      'opencode/deepseek-v4-flash',
+      'CTX',
+      '',
+      (m) => logs.push(m),
+      {
+        timeoutMs: 10_000,
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      finalizeOpencodeSessionsByLabel(client, 'review', (m) => logs.push(m), 20_000),
+      1,
+    );
+    const result = await pending;
+    assert.equal(result.partial, true);
+    assert.equal(result.findings.length, 1);
+    assert.deepEqual(aborted, ['session-1']);
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /Time is up/);
+    assert.equal(Object.values(tools[1]).some(Boolean), false);
+    // Every id the server reports is denied, not just the built-ins we know about.
+    assert.equal(tools[1].websearch, false);
+    assert.equal(tools[1].mcp_search, false);
+    assert.equal(WRAP_UP_PROMPT.length > 0, true);
+    assert.equal(
+      finalizeOpencodeSessionsByLabel(client, 'review', () => {}, 20_000),
+      0,
+    );
+    assert.match(logs.join('\n'), /wrap/i);
+  });
+
   it('reuses the main session for a guideline sweep without losing findings on failure', async () => {
     for (const response of [
       JSON.stringify({

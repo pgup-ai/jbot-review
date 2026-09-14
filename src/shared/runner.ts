@@ -11,6 +11,7 @@ import {
   AUXILIARY_SETTLE_GRACE_MS,
   computeLensGraceMs,
   sharedPrefixLaunchDelayMs,
+  wrapUpReserveMs,
 } from './time-budget.ts';
 import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
@@ -77,6 +78,7 @@ import {
 } from './acp-remote.ts';
 import {
   abortPiSessionsByLabel,
+  finalizePiSessionsByLabel,
   piModelAvailable,
   piSupportsProvider,
   resolvePiEngine,
@@ -135,6 +137,7 @@ import {
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
 import {
   abortOpencodeSessionsByLabel,
+  finalizeOpencodeSessionsByLabel,
   startOpencode,
   withTimeout,
   configureSessionConcurrency,
@@ -276,6 +279,8 @@ import {
   describeIncompleteReason,
   formatIncompleteCoverage,
   type IncompleteSession,
+  isMainReviewLabel,
+  PARTIAL_COVERAGE_REASON,
   formatSummaryMarkdown,
   ORPHANED_FINDINGS_HEADING,
   renderOrphanedSection,
@@ -307,6 +312,8 @@ function createOpencodeBackend(
     supportsGuidelineSweep: true,
     observability: OPENCODE_TELEMETRY_CAPABILITY,
     abortSessionsByLabel: (label, log) => abortOpencodeSessionsByLabel(client, label, log),
+    finalizeSessionsByLabel: (label, log, budgetMs) =>
+      finalizeOpencodeSessionsByLabel(client, label, log, budgetMs),
     runReview: (model, prContext, guidelines, log, options) =>
       runOpencodeReview(client, model, prContext, guidelines, log, options),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
@@ -358,6 +365,8 @@ function createPiBackend(runtime: PiRuntime): ReviewBackend {
     supportsGuidelineSweep: true,
     observability: PI_TELEMETRY_CAPABILITY,
     abortSessionsByLabel: (label, log) => abortPiSessionsByLabel(runtime, label, log),
+    finalizeSessionsByLabel: (label, log, budgetMs) =>
+      finalizePiSessionsByLabel(runtime, label, log, budgetMs),
     runReview: (model, prContext, guidelines, log, options) =>
       runPiReview(runtime, model, prContext, guidelines, log, options),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
@@ -955,6 +964,8 @@ export interface ReviewRunOptions {
     addressedPriorComments: AddressedPriorComment[];
     /** JSONL telemetry (finding + session rows); present when reviewTelemetry is on. */
     telemetry?: string;
+    /** Passes that were cut short or failed; empty means full coverage. */
+    incompleteSessions: IncompleteSession[];
   }) => void;
 }
 
@@ -1091,16 +1102,21 @@ async function runReviewPipeline(params: {
   // own catch handler would otherwise append a second, conflicting row.
   const abandonedAuxLabels = new Set<string>();
   const auxCoverage = new Map<string, { complete: boolean; error?: unknown }>();
+  // Sessions asked to wrap up at grace expiry, or main shards that wrapped up
+  // on their own deadline: their findings cover only part of the scope.
+  const partialSessions = new Set<string>();
   const recordCoverage: SessionCoverageRecorder = (coverage) => {
     if (abandonedAuxLabels.has(coverage.session)) return;
-    if (coverage.session !== 'review' && !coverage.session.startsWith('review-shard-')) {
-      if (coverage.state === 'failed' || coverage.state === 'completed')
-        auxCoverage.set(coverage.session, {
-          complete: coverage.state === 'completed',
-          error: coverage.error,
-        });
+    const state =
+      coverage.state === 'completed' && partialSessions.has(coverage.session)
+        ? 'partial'
+        : coverage.state;
+    if (state === 'partial') partialSessions.add(coverage.session);
+    if (!isMainReviewLabel(coverage.session)) {
+      if (state === 'failed' || state === 'completed' || state === 'partial')
+        auxCoverage.set(coverage.session, { complete: state !== 'failed', error: coverage.error });
     }
-    telemetry.recordCoverage(coverage);
+    telemetry.recordCoverage({ ...coverage, state });
   };
   const trackedAux: AuxiliarySession<unknown>[] = [];
   const trackAux = <T>(label: string, promise: Promise<T>): AuxiliarySession<T> => {
@@ -2692,6 +2708,14 @@ async function runReviewPipeline(params: {
         )
       : auxiliaryGraceMs;
     const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
+    const wrapUpAuxSession = (label: string, graceMs: number) => ({
+      reserveMs: wrapUpReserveMs(graceMs),
+      finalize: (budgetMs: number) => {
+        const signalled = auxBackend.finalizeSessionsByLabel?.(label, log, budgetMs) ?? 0;
+        if (signalled > 0) partialSessions.add(label);
+        return signalled;
+      },
+    });
     const abandonAuxSession = (label: string, graceMs: number) => () => {
       const aborted = auxBackend.abortSessionsByLabel?.(label, log);
       // Zero registered processes can also mean queued work; only a terminal
@@ -2716,7 +2740,14 @@ async function runReviewPipeline(params: {
     ] = await Promise.all([
       Promise.all(
         lensPasses.map((lens) =>
-          settleWithinGrace(lens, [], log, lensGraceMs, abandonAuxSession(lens.label, lensGraceMs)),
+          settleWithinGrace(
+            lens,
+            [],
+            log,
+            lensGraceMs,
+            abandonAuxSession(lens.label, lensGraceMs),
+            wrapUpAuxSession(lens.label, lensGraceMs),
+          ),
         ),
       ),
       settleWithinGrace(
@@ -2725,6 +2756,7 @@ async function runReviewPipeline(params: {
         log,
         auxiliaryGraceMs,
         abandonAuxSession('addressed-prior-comments', auxiliaryGraceMs),
+        wrapUpAuxSession('addressed-prior-comments', auxiliaryGraceMs),
       ),
       settleWithinGrace(
         guidelineComplianceCheck,
@@ -2732,6 +2764,7 @@ async function runReviewPipeline(params: {
         log,
         auxiliaryGraceMs,
         abandonAuxSession('guideline-compliance', auxiliaryGraceMs),
+        wrapUpAuxSession('guideline-compliance', auxiliaryGraceMs),
       ),
       settleWithinGrace(
         changesSinceLastReview,
@@ -2739,6 +2772,7 @@ async function runReviewPipeline(params: {
         log,
         auxiliaryGraceMs,
         abandonAuxSession('changes-since-last-review', auxiliaryGraceMs),
+        wrapUpAuxSession('changes-since-last-review', auxiliaryGraceMs),
       ),
     ]);
     graceDone();
@@ -2851,9 +2885,15 @@ async function runReviewPipeline(params: {
     telemetry.snapshot('verified', verifiedFindings);
     const finalFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
     const filteredFindings = filterFindings(verifiedFindings, options);
-    const incompleteSessions: IncompleteSession[] = [...auxCoverage]
-      .filter(([, row]) => !row.complete)
-      .map(([label, row]) => ({ label, reason: describeIncompleteReason(row.error) }));
+    const incompleteSessions: IncompleteSession[] = [
+      ...[...auxCoverage]
+        .filter(([, row]) => !row.complete)
+        .map(([label, row]) => ({ label, reason: describeIncompleteReason(row.error) })),
+      // A wrap-up that itself failed is already listed above as a failure.
+      ...[...partialSessions]
+        .filter((label) => auxCoverage.get(label)?.complete !== false)
+        .map((label) => ({ label, reason: PARTIAL_COVERAGE_REASON })),
+    ];
     const coverageNotice = formatIncompleteCoverage(incompleteSessions);
     if (coverageNotice) log(coverageNotice);
     telemetry.snapshot('filtered', filteredFindings);
@@ -2896,6 +2936,7 @@ async function runReviewPipeline(params: {
         findings: filteredFindings,
         addressedPriorComments: verifiedAddressedPriorComments,
         ...(telemetry.enabled ? { telemetry: telemetry.toJsonl() } : {}),
+        incompleteSessions,
       });
     } catch (err) {
       log(`onReviewResult hook threw (ignored): ${String(err)}`);
@@ -3365,7 +3406,7 @@ export function startLensPasses(params: {
           params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
           params.onCoverage?.({
             session: `review-${key}`,
-            state: 'completed',
+            state: result.partial ? 'partial' : 'completed',
             durationMs: Date.now() - startedAt,
           });
           return result.findings;
@@ -3416,6 +3457,7 @@ function pendingAuxiliarySessionLabels(
 
 /** Distinguishes the grace expiring from the session failing on its own. */
 const GRACE_EXPIRED = 'jbot: auxiliary settle grace expired';
+const WRAP_UP_DUE = 'jbot: auxiliary wrap-up due';
 
 /**
  * Resolves to the session's value, or to `fallback` if it has not settled
@@ -3438,9 +3480,11 @@ export function settleWithinGrace<T>(
   log: (msg: string) => void,
   graceMs = AUXILIARY_SETTLE_GRACE_MS,
   onAbandon?: () => void,
+  /** Asks the backend to wrap up reserveMs before the grace ends; finalize returns the sessions signalled. */
+  wrapUp?: { reserveMs: number; finalize: (budgetMs: number) => number },
 ): Promise<T> {
   if (session.isSettled()) return session.promise.catch(() => fallback);
-  return withTimeout(session.promise, graceMs, GRACE_EXPIRED).catch((error: unknown) => {
+  const settle = (error: unknown): T => {
     // Only the grace expiring is worth a line; a session that failed on its own
     // already logged why.
     if (error instanceof Error && error.message === GRACE_EXPIRED) {
@@ -3450,7 +3494,16 @@ export function settleWithinGrace<T>(
       if (!session.isSettled()) onAbandon?.();
     }
     return fallback;
-  });
+  };
+  const plan = wrapUp && wrapUp.reserveMs > 0 && wrapUp.reserveMs < graceMs ? wrapUp : undefined;
+  if (!plan) return withTimeout(session.promise, graceMs, GRACE_EXPIRED).catch(settle);
+  return withTimeout(session.promise, graceMs - plan.reserveMs, WRAP_UP_DUE).catch(
+    (error: unknown) => {
+      if (!(error instanceof Error && error.message === WRAP_UP_DUE)) return settle(error);
+      if (!session.isSettled()) plan.finalize(plan.reserveMs);
+      return withTimeout(session.promise, plan.reserveMs, GRACE_EXPIRED).catch(settle);
+    },
+  );
 }
 
 async function verifyFindings(params: {
@@ -3812,7 +3865,7 @@ export async function runShardedReview(params: {
         Buffer.byteLength(plan.context, 'utf8') + Buffer.byteLength(guidelinesForPrompt, 'utf8');
       const oversized = assembledContextWarning(plan.label, promptBytes);
       if (oversized) log(oversized);
-      const cover = (state: 'completed' | 'failed', error?: unknown) =>
+      const cover = (state: 'completed' | 'partial' | 'failed', error?: unknown) =>
         params.onCoverage?.({
           session: plan.label,
           state,
@@ -3881,8 +3934,8 @@ export async function runShardedReview(params: {
           embeddedFirstPrompt: params.embeddedFirstPrompt,
           contextFirst: params.contextFirst,
         });
-        persist(result, primaryFingerprint);
-        cover('completed');
+        if (!result.partial) persist(result, primaryFingerprint);
+        cover(result.partial ? 'partial' : 'completed');
         return { plan, result };
       } catch (error) {
         // One retry per shard in a fresh session, for ANY failure: upstream
@@ -3956,7 +4009,7 @@ export async function runShardedReview(params: {
           )}`,
         );
         const retryStartedAt = Date.now();
-        const coverRetry = (state: 'completed' | 'failed', retryError?: unknown) =>
+        const coverRetry = (state: 'completed' | 'partial' | 'failed', retryError?: unknown) =>
           params.onCoverage?.({
             session: `${plan.label}-retry`,
             state,
@@ -3981,8 +4034,8 @@ export async function runShardedReview(params: {
               contextFirst: params.contextFirst,
             },
           );
-          persist(result, retryFingerprint);
-          coverRetry('completed');
+          if (!result.partial) persist(result, retryFingerprint);
+          coverRetry(result.partial ? 'partial' : 'completed');
           return { plan, result };
         } catch (retryError) {
           coverRetry('failed', retryError);

@@ -48,6 +48,21 @@ export function computeVerificationTimeoutMs(
 }
 
 export const AUXILIARY_SETTLE_GRACE_MS = 5 * 60_000;
+
+/** Keeps a wrap-up reply inside the deadline the caller's own timer enforces. */
+export const WRAP_UP_MARGIN_MS = 5_000;
+
+/**
+ * Held back from a session's budget for its wrap-up turn (abort, tools off,
+ * one final answer): a fifth of the budget, at most 90 s. A reasoning model
+ * needs ~45 s to reason and emit a findings JSON (measured: glm-5.2 never
+ * answered inside 10 s), so a reserve that leaves less than that after the
+ * margin is not taken and the session keeps its whole budget.
+ */
+export function wrapUpReserveMs(budgetMs: number): number {
+  const reserve = Math.min(90_000, Math.floor(budgetMs / 5));
+  return reserve - WRAP_UP_MARGIN_MS >= 45_000 ? reserve : 0;
+}
 /**
  * Minimum life of an auxiliary session measured from its own launch. The
  * grace is anchored to the main pass finishing, so a 10 s main would otherwise

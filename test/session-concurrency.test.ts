@@ -87,6 +87,10 @@ describe('limitReviewBackendSessions', () => {
         aborted.push(label);
         return 1;
       },
+      finalizeSessionsByLabel: (label: string, _log: unknown, budgetMs: number) => {
+        aborted.push(`finalize:${label}:${budgetMs}`);
+        return 1;
+      },
     };
     const limited = limitReviewBackendSessions(backend, 'aux', {
       acquire: async () => () => undefined,
@@ -94,7 +98,11 @@ describe('limitReviewBackendSessions', () => {
 
     assert.equal(limited.canReadWorkspace, true);
     limited.abortSessionsByLabel?.('review-frontend', () => {});
-    assert.deepEqual(aborted, ['review-frontend']);
+    assert.equal(
+      limited.finalizeSessionsByLabel?.('review-frontend', () => {}, 60_000),
+      1,
+    );
+    assert.deepEqual(aborted, ['review-frontend', 'finalize:review-frontend:60000']);
   });
 
   it('cancels waiters at either queue without launching or leaking a slot', async () => {

@@ -9,6 +9,7 @@ import { describe, it } from 'node:test';
 
 import {
   abortPiSessionsByLabel,
+  finalizePiSessionsByLabel,
   PI_MIN_NODE_VERSION,
   PI_TELEMETRY_CAPABILITY,
   runPiAddressedPriorCommentsCheck,
@@ -605,6 +606,183 @@ describe('Pi review sessions', () => {
     assert.equal(result.summary, 'done');
     assert.equal(prompts.length, 2);
     assert.equal(prompts[1], CONTINUATION_NUDGE_PROMPT);
+  });
+
+  it('fails a cut-off review outright when its wrap-up cannot be parsed, and skips the sweep after a wrap-up', async () => {
+    for (const wrapReply of ['sorry, out of time', reviewResultJson]) {
+      const events: string[] = [];
+      const runtime = fakeRuntime(false, events, []);
+      runtime.sdk.createAgentSession = async () => {
+        let release!: () => void;
+        let active = ['read_file'];
+        const session = {
+          messages: [] as unknown[],
+          prompt: async (text: string) => {
+            events.push(`prompted:${active.length}:${text.slice(0, 12)}`);
+            if (active.length) {
+              await new Promise<void>((resolve) => {
+                release = resolve;
+              });
+              return;
+            }
+            session.messages.push({ role: 'assistant', content: wrapReply, stopReason: 'stop' });
+          },
+          abort: async () => {
+            events.push('aborted');
+            session.messages.push({ role: 'assistant', content: '', stopReason: 'aborted' });
+            release();
+          },
+          getActiveToolNames: () => active,
+          setActiveToolsByName: (names: string[]) => {
+            active = names;
+          },
+          dispose: () => events.push('disposed'),
+        };
+        return { session };
+      };
+      const pending = runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}, {
+        timeoutMs: 10_000,
+        guidelineSweep: { guidelines: 'G' },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(
+        finalizePiSessionsByLabel(runtime, 'review', () => {}, 20_000),
+        1,
+      );
+      if (wrapReply === reviewResultJson) {
+        assert.equal((await pending).partial, true);
+      } else {
+        await assert.rejects(pending, /unparseable JSON/);
+      }
+      // Two prompts only: no repair turn and no guideline sweep after a wrap-up.
+      assert.equal(events.filter((e) => e.startsWith('prompted:')).length, 2, events.join(','));
+    }
+  });
+
+  it('takes the reserve only for callers that record a partial outcome', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    const hangingRuntime = (events: string[]) => {
+      const runtime = fakeRuntime(false, events, []);
+      runtime.sdk.createAgentSession = async () => {
+        let active = ['read_file'];
+        const session = {
+          messages: [] as unknown[],
+          prompt: async () => {
+            events.push(`prompted:${active.length}`);
+            if (active.length) await new Promise<void>(() => {});
+            else
+              session.messages.push({
+                role: 'assistant',
+                content: reviewResultJson,
+                stopReason: 'stop',
+              });
+          },
+          abort: async () => void events.push('aborted'),
+          getActiveToolNames: () => active,
+          setActiveToolsByName: (names: string[]) => {
+            active = names;
+            events.push(`tools:${names.join(',')}`);
+          },
+          dispose: () => events.push('disposed'),
+        };
+        return { session };
+      };
+      return runtime;
+    };
+    const flush = async () => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    };
+
+    // The main review records the outcome: its reserve timer fires at 240 s of a 300 s budget.
+    const mainEvents: string[] = [];
+    const main = runPiReview(
+      hangingRuntime(mainEvents),
+      'deepseek/deepseek-v4-flash',
+      'ctx',
+      '',
+      () => {},
+      {
+        timeoutMs: 300_000,
+      },
+    );
+    await flush();
+    t.mock.timers.tick(240_000);
+    await flush();
+    assert.deepEqual(mainEvents, ['prompted:1', 'aborted', 'tools:', 'prompted:0', 'disposed']);
+    assert.equal((await main).partial, true);
+
+    // An auxiliary pass has no partial recorder of its own: no timer, plain timeout at 300 s.
+    const auxEvents: string[] = [];
+    const aux = runPiGuidelineComplianceCheck(
+      hangingRuntime(auxEvents),
+      'deepseek/deepseek-v4-flash',
+      'ctx',
+      'g',
+      () => {},
+      300_000,
+    );
+    aux.catch(() => {});
+    await flush();
+    t.mock.timers.tick(240_000);
+    await flush();
+    assert.deepEqual(auxEvents, ['prompted:1']);
+    t.mock.timers.tick(60_000);
+    await flush();
+    await assert.rejects(aux, /did not finish within 300s/);
+    assert.equal(auxEvents.includes('tools:'), false);
+  });
+
+  it('wraps up a cut-off review in the same session with tools off and marks it partial', async () => {
+    const events: string[] = [];
+    const runtime = fakeRuntime(false, events, []);
+    runtime.sdk.createAgentSession = async () => {
+      let release!: () => void;
+      let active = ['read_file', 'search_repo'];
+      const session = {
+        messages: [] as unknown[],
+        prompt: async () => {
+          events.push(`prompted:${active.length}`);
+          if (active.length) {
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            return;
+          }
+          session.messages.push({
+            role: 'assistant',
+            content: reviewResultJson,
+            stopReason: 'stop',
+          });
+        },
+        abort: async () => {
+          events.push('aborted');
+          session.messages.push({ role: 'assistant', content: '', stopReason: 'aborted' });
+          release();
+        },
+        getActiveToolNames: () => active,
+        setActiveToolsByName: (names: string[]) => {
+          active = names;
+          events.push(`tools:${names.join(',')}`);
+        },
+        dispose: () => events.push('disposed'),
+      };
+      return { session };
+    };
+    const pending = runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}, {
+      timeoutMs: 10_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(
+      finalizePiSessionsByLabel(runtime, 'review', () => {}, 20_000),
+      1,
+    );
+    const result = await pending;
+    assert.equal(result.partial, true);
+    assert.deepEqual(events, ['prompted:2', 'aborted', 'tools:', 'prompted:0', 'disposed']);
+    assert.equal(
+      finalizePiSessionsByLabel(runtime, 'review', () => {}, 20_000),
+      0,
+    );
   });
 
   it('aborts an in-flight labeled session at grace abandonment (TASK-077)', async () => {

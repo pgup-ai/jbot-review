@@ -214,7 +214,7 @@ export type SessionFailureClass = 'timeout' | 'provider' | 'parse' | 'aborted' |
 
 export interface SessionCoverage {
   session: string;
-  state: 'completed' | 'failed' | 'skipped' | 'reused';
+  state: 'completed' | 'partial' | 'failed' | 'skipped' | 'reused';
   /** Classified into a failureClass; the error's own text is never persisted. */
   error?: unknown;
   durationMs?: number;
@@ -454,7 +454,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
       });
     },
     toJsonl() {
-      const header = run ? [{ kind: 'run', schemaVersion: 2, ...run }] : [];
+      const header = run ? [{ kind: 'run', schemaVersion: 3, ...run }] : [];
       const lines = [
         ...header,
         ...phases,
