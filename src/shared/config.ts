@@ -545,9 +545,10 @@ export function supportedModelOptions(
 }
 
 /**
- * The verifier's model options: one effort tier below the finder, never below
- * `low`. Verification re-checks evidence the finder already produced, so it
- * needs less reasoning than finding (this supersedes TASK-157's parity floor).
+ * The verifier's model options: one effort tier below the finder, not below
+ * `low` unless the finder already sits lower. Verification re-checks evidence
+ * the finder already produced, so it needs less reasoning than finding (this
+ * supersedes TASK-157's parity floor).
  * Returns the aux options themselves when they already sit on that tier, so
  * no alias entry is built; `undefined` aux options (the verifier shares the
  * main entry) yield its own lowered copy of the main options. Efforts outside

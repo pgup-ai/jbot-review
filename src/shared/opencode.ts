@@ -217,7 +217,8 @@ function verificationAliasEntry(
   verificationModelOptions?: Record<string, unknown>,
 ): Record<string, { id: string; name?: string; options: Record<string, unknown> }> | undefined {
   if (!modelID) return undefined;
-  const options = supportedModelOptions(providerID, modelID, verificationModelOptions);
+  // The verifier's tier rounds down on ladders that lack it.
+  const options = supportedModelOptions(providerID, modelID, verificationModelOptions, 'down');
   if (!options || Object.keys(options).length === 0) return undefined;
   return {
     [`${modelID}${VERIFICATION_MODEL_ALIAS_SUFFIX}`]: {

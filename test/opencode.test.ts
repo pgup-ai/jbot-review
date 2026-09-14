@@ -373,6 +373,22 @@ describe('aux model options', () => {
       undefined,
       { reasoningEffort: 'medium' },
     );
+    // The alias is the verifier's own entry, so a target tier the ladder lacks
+    // rounds DOWN there (x-preview-f-free: low/high/max, medium requested).
+    const gapped = buildConfig('opencode', 'main-model', 'k', { reasoningEffort: 'high' }, true, [
+      {
+        providerID: 'opencode',
+        apiKey: 'k',
+        modelID: 'x-preview-f-free',
+        modelOptions: { reasoningEffort: 'low' },
+        verificationModelOptions: { reasoningEffort: 'medium' },
+      },
+    ]);
+    assert.deepEqual(
+      (gapped as { provider: Record<string, { models: Record<string, unknown> }> }).provider
+        .opencode.models['x-preview-f-free--jbot-verify'],
+      { id: 'x-preview-f-free', options: { reasoningEffort: 'low' } },
+    );
     assert.deepEqual(
       (root as { provider: Record<string, { models: Record<string, unknown> }> }).provider.opencode
         .models,
