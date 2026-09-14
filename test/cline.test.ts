@@ -189,16 +189,22 @@ describe('Cline CLI provider helpers', () => {
   });
 
   it('drops @-mention ENOENT warnings from failure output so the real error survives the cap', () => {
-    // 3.0.60 (the image) says `statx`, 3.0.61 says `stat`; both must match.
+    // 3.0.60 (the image) says `statx`, 3.0.61 says `stat`; the mention regex
+    // swallows the import's closing quote and punctuation, which is what
+    // separates these from a genuinely missing file.
     const warnings = Array.from(
       { length: 40 },
       (_, i) =>
-        `[warning] ENOENT: no such file or directory, stat${i % 2 ? 'x' : ''} '/api/module-${i}';'`,
+        `[warning] ENOENT: no such file or directory, stat${i % 2 ? 'x' : ''} '/api/module-${i}${i % 3 ? "';'" : '",\''}`,
     ).join('\n');
-    const detail = clineFailureDetail(`${warnings}\nError: context length exceeded`, 'events');
+    const missing = "[warning] ENOENT: no such file or directory, stat '/root/.cline/rules'";
+    const detail = clineFailureDetail(
+      `${warnings}\n${missing}\nError: context length exceeded`,
+      'events',
+    );
     assert.match(
       detail,
-      /^Error: context length exceeded \(40 @-mention ENOENT warnings dropped\)$/,
+      /^\[warning\] ENOENT: no such file or directory, stat '\/root\/\.cline\/rules'\nError: context length exceeded \(40 @-mention ENOENT warnings dropped\)$/,
     );
     // Only warnings: fall back to stdout rather than an empty message.
     assert.match(clineFailureDetail(warnings, 'events'), /^events \(40 @-mention/);

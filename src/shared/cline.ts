@@ -153,13 +153,16 @@ export function clineEnvForHome(clineHome: string | undefined): NodeJS.ProcessEn
 /**
  * Failure output minus Cline's `@/` mention warnings: it reads the diff's
  * `'@/api/x'` imports as file mentions and logs one harmless ENOENT each
- * (probed on 3.0.61), which would bury the real error under the log cap.
+ * (probed on 3.0.61), which would bury the real error under the log cap. The
+ * swallowed closing quote and punctuation mark them; a real missing file has
+ * neither.
  */
+const CLINE_MENTION_WARNING =
+  /^\[warning\] ENOENT: no such file or directory, statx? '\/.*["'][;,]?'$/;
+
 export function clineFailureDetail(stderr: string, stdout: string): string {
   const lines = stderr.split('\n');
-  const kept = lines.filter(
-    (line) => !line.startsWith('[warning] ENOENT: no such file or directory, stat'),
-  );
+  const kept = lines.filter((line) => !CLINE_MENTION_WARNING.test(line));
   const dropped = lines.length - kept.length;
   const text = truncateForLog(kept.join('\n').trim() || stdout, 1000);
   return dropped ? `${text} (${dropped} @-mention ENOENT warnings dropped)` : text;
