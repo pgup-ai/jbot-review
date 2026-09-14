@@ -1160,10 +1160,16 @@ handles findings that describe the same defect from different perspectives.
 After main review completes, auxiliary sessions get a settle grace of at least
 five minutes, stretched so every auxiliary session has ten minutes from its
 launch, bounded by the run budget with verification and posting time reserved.
-Unfinished sessions are cancelled and reported as incomplete coverage, and the
-review footer names the cutoff (cut off after the main review, timed out, or
-failed). The run deadline also applies while queued; expiry requests backend
-cancellation, and completed main findings survive.
+Before a cancellation, OpenCode and Pi sessions are asked to wrap up: in the
+last fifth of the grace (at most 90 seconds) the turn is interrupted, tools are
+dropped, and the model reports what it had already established; a main review
+shard gets the same treatment in the last fifth of its own deadline. Those
+findings are posted, the pass is listed as cut short with partial findings
+included, and a wrapped-up shard is never cached. Sessions that still do not
+finish are cancelled and reported as incomplete coverage, and the review footer
+names the cutoff (cut off after the main review, timed out, or failed). The run
+deadline also applies while queued; expiry requests backend cancellation, and
+completed main findings survive.
 
 Set `JBOT_GUIDELINE_SWEEP=true` to run guideline checking as a follow-up in each
 OpenCode, Pi, or CommandCode main review session, reusing its investigation.

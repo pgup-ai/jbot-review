@@ -1265,11 +1265,8 @@ async function promptInSessionHoldingSlot(
     const promptError = getResultError(promptRes);
     if (promptError) throw new Error(`opencode ${label} prompt was rejected: ${promptError}`);
 
-    // A tool-using turn that runs out of time is wrapped up rather than lost:
-    // at the reserve boundary, or when the runner asks (grace expiry), the
-    // turn is aborted and one tool-less answer is requested in the same
-    // session. A tool-less turn (single-shot, or the wrap-up itself) has
-    // nothing to interrupt and keeps the plain deadline.
+    // A cut-off tool-using turn is wrapped up (reserve boundary, or the runner's
+    // grace request) rather than lost; a tool-less turn keeps the plain deadline.
     // opencode keeps unlisted builtins on, so only an explicit exploration blackout is tool-less.
     const canWrapUp = !EXPLORATION_TOOLS.every((tool) => resolvedTools[tool] === false);
     const reserve = canWrapUp ? wrapUpReserveMs(timeoutMs) : 0;

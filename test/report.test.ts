@@ -351,6 +351,11 @@ test('incomplete-coverage notice names why each auxiliary session is missing', (
   ]);
   assert.match(notice, /`review-interactions` \(cut off 300s after the main review\)/);
   assert.match(notice, /`review-shard-2` \(cut short, partial findings included\)/);
+  assert.match(notice, /Main review cut short;/);
+  assert.match(
+    formatIncompleteCoverage([{ label: 'guideline-compliance', reason: 'failed' }]),
+    /Main review completed;/,
+  );
   assert.match(notice, /`guideline-compliance` \(timed out\)/);
   assert.match(notice, /`finding-verification` \(failed\)/);
   assert.match(notice, /marked as unverified concerns/);

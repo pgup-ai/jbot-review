@@ -352,5 +352,8 @@ export function formatIncompleteCoverage(sessions: readonly IncompleteSession[])
     ({ label }) => label === 'finding-verification' || label === 'late-finding-verification',
   );
   const list = sessions.map(({ label, reason }) => `\`${label}\` (${reason})`).join(', ');
-  return `⚠️ **Review incomplete:** Main review completed; ${list} did not complete successfully. Findings from completed passes are included.${verificationFailed ? ' Findings affected by incomplete verification are marked as unverified concerns.' : ''}`;
+  const main = sessions.some(({ label }) => label === 'review' || label.startsWith('review-shard-'))
+    ? 'cut short'
+    : 'completed';
+  return `⚠️ **Review incomplete:** Main review ${main}; ${list} did not complete successfully. Findings from completed passes are included.${verificationFailed ? ' Findings affected by incomplete verification are marked as unverified concerns.' : ''}`;
 }

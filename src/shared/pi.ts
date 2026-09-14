@@ -939,11 +939,8 @@ async function promptPiSession(
   // Sessions outlive a single prompt (the JSON repair re-prompts in place), so
   // only the turns appended by THIS prompt may be read or billed.
   const priorTurns = piSessionMessages(session).length;
-  // A tool-using turn that runs out of time is wrapped up rather than lost:
-  // at the reserve boundary, or when the runner asks (grace expiry), the turn
-  // is aborted, tools are dropped, and one final answer is requested in the
-  // same session. A tool-less session (single-shot, or after a wrap-up) keeps
-  // the plain deadline.
+  // A cut-off tool-using turn is wrapped up (reserve boundary, or the runner's
+  // grace request) rather than lost; a tool-less session keeps the plain deadline.
   const canWrapUp =
     Boolean(session.setActiveToolsByName) && (session.getActiveToolNames?.().length ?? 0) > 0;
   const reserve = canWrapUp ? wrapUpReserveMs(timeoutMs) : 0;
