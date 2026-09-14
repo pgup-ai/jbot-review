@@ -1307,6 +1307,7 @@ async function promptInSessionHoldingSlot(
           `${label} prompt cut off; wrapping up in-session within ${Math.round(settled.budgetMs / 1000)}s`,
         );
         await abortSessionBestEffort(client, sessionID, label, log);
+        const tools = await wrapUpToolMap(client, wrapUpDeadline - Date.now(), log);
         const raw = await promptInSessionHoldingSlot(
           client,
           model,
@@ -1316,7 +1317,7 @@ async function promptInSessionHoldingSlot(
           log,
           Math.max(0, wrapUpDeadline - Date.now()),
           onTokenUsage,
-          await wrapUpToolMap(client, log),
+          tools,
           abortLabel,
         );
         if (outcome) outcome.wrappedUp = true;
@@ -1411,28 +1412,31 @@ const TOOL_IDS_TIMEOUT_MS = 5_000;
  * expose more than the built-ins (websearch, MCP, custom), so the wrap-up's
  * deny map is built from the server's own id list. Only a successful lookup
  * is cached: a failed or stalled one falls back to the static list for this
- * wrap-up and is retried by the next.
+ * wrap-up, bounded so it cannot eat the reply window, and is retried by the next.
  */
 function wrapUpToolMap(
   client: OpencodeClient,
+  budgetMs: number,
   log: (msg: string) => void,
 ): Promise<Record<string, boolean>> {
-  let map = wrapUpToolMaps.get(client);
-  if (!map) {
-    map = Promise.resolve()
+  const cached = wrapUpToolMaps.get(client);
+  const lookup =
+    cached ??
+    Promise.resolve()
       .then(() => client.tool.ids({ query: queryDirectory(client) }))
       .then((result) => {
         if (!Array.isArray(result.data)) throw new Error('tool id list is not an array');
         return { ...NO_TOOLS, ...Object.fromEntries(result.data.map((id) => [id, false])) };
       });
-    wrapUpToolMaps.set(client, map);
-    map.catch(() => wrapUpToolMaps.delete(client));
-  }
+  if (!cached) wrapUpToolMaps.set(client, lookup);
+  const timeoutMs = Math.max(0, Math.min(TOOL_IDS_TIMEOUT_MS, budgetMs));
   return withTimeout(
-    map,
-    TOOL_IDS_TIMEOUT_MS,
-    `tool id lookup did not finish within ${TOOL_IDS_TIMEOUT_MS / 1000}s`,
+    lookup,
+    timeoutMs,
+    `tool id lookup did not finish within ${Math.round(timeoutMs / 1000)}s`,
   ).catch((error) => {
+    // Evict this lookup only: a newer one may already have replaced it.
+    if (wrapUpToolMaps.get(client) === lookup) wrapUpToolMaps.delete(client);
     log(`wrap-up denies the built-in tools only: ${formatUnknownError(error)}`);
     return NO_TOOLS;
   });

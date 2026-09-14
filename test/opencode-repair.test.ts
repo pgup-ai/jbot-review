@@ -136,9 +136,10 @@ describe('runReview JSON repair loop', () => {
     assert.equal(prompts.length, 2);
   });
 
-  it('denies only the built-in tools when the id lookup fails, and retries it on the next wrap-up', async () => {
-    const { client, tools } = makeFakeClient(Array(4).fill(['HANG', VALID_REVIEW]).flat());
+  it('denies only the built-in tools when the id lookup fails or stalls, and retries it on the next wrap-up', async () => {
+    const { client, tools } = makeFakeClient(Array(5).fill(['HANG', VALID_REVIEW]).flat());
     const lookups = [
+      () => new Promise(() => {}),
       () => Promise.reject(new Error('boom')),
       () => Promise.resolve({ data: 'nope' }),
       () => Promise.resolve({ data: ['mcp_search'] }),
@@ -146,22 +147,24 @@ describe('runReview JSON repair loop', () => {
     let calls = 0;
     (client as unknown as { tool: { ids: () => Promise<unknown> } }).tool.ids = () =>
       lookups[calls++]();
-    const wrapUp = async () => {
+    const wrapUp = async (budgetMs = 20_000) => {
       const pending = runReview(client, 'opencode/deepseek-v4-flash', 'CTX', '', () => {}, {
         timeoutMs: 10_000,
       });
       await new Promise((resolve) => setTimeout(resolve, 20));
-      finalizeOpencodeSessionsByLabel(client, 'review', () => {}, 20_000);
-      await pending;
+      finalizeOpencodeSessionsByLabel(client, 'review', () => {}, budgetMs);
+      await pending.catch(() => undefined);
       return tools[tools.length - 1];
     };
-    // A rejected and a malformed lookup each fall back to the static list, uncached.
+    // A stalled lookup is bounded by the wrap-up's remaining budget (here ~50 ms past the
+    // margin), then rejected and malformed lookups: each falls back to the static list, uncached.
+    assert.equal((await wrapUp(5_050)).mcp_search, undefined);
     assert.equal((await wrapUp()).mcp_search, undefined);
     assert.equal((await wrapUp()).mcp_search, undefined);
     assert.equal((await wrapUp()).mcp_search, false);
     // Only the successful lookup is cached.
     assert.equal((await wrapUp()).mcp_search, false);
-    assert.equal(calls, 3);
+    assert.equal(calls, 4);
   });
 
   it('wraps up a cut-off review in the same session with tools off and marks it partial', async () => {
