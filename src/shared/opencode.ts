@@ -1071,9 +1071,9 @@ export async function runFindingVerification(
   onTokenUsage?: TokenUsageRecorder,
   modelOptions?: Record<string, unknown>,
 ): Promise<FindingVerdict[] | undefined> {
-  // TASK-157: per-session options don't exist in the prompt API; when the
-  // runner passed verifier options it also registered the matching alias
-  // entry at boot, so the floored effort rides the alias model id.
+  // Per-session options don't exist in the prompt API; when the runner passed
+  // verifier options it also registered the matching alias entry at boot, so
+  // the verifier's own effort rides the alias model id.
   const verificationModel = modelOptions ? `${model}${VERIFICATION_MODEL_ALIAS_SUFFIX}` : model;
   // Pass findings through unprojected: Finding is structurally a VerifiableFinding.
   // An earlier field-subset projection here silently dropped `evidence` and
@@ -1090,7 +1090,8 @@ export async function runFindingVerification(
     'finding-verification',
     log,
     timeoutMs,
-    onTokenUsage,
+    // The alias is routing plumbing; usage and the posted footer name the real model.
+    onTokenUsage && ((usage, _alias, label) => onTokenUsage(usage, model, label)),
   );
   return parseFindingVerdicts(raw, findings.length, log);
 }

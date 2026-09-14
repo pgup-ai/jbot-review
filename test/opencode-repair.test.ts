@@ -492,6 +492,22 @@ describe('runFindingVerification evidence grounding', () => {
     assert.deepEqual(tools[0], { write: false, edit: false, patch: false });
     assert.match(prompts[0], /read\n  the actual code/);
   });
+
+  it('attributes the verifier alias session to the real model', async () => {
+    const { client } = makeFakeClient(['{"verdicts":[{"index":0,"verdict":"confirmed"}]}']);
+    const models: string[] = [];
+    await runFindingVerification(
+      client,
+      'prov/model',
+      'CTX',
+      [{ path: 'a.ts', line: 3, severity: 'P1', title: 'T', body: 'B' }],
+      noLog,
+      undefined,
+      (_usage, model) => void models.push(model),
+      { reasoningEffort: 'low' },
+    );
+    assert.deepEqual(models, ['prov/model']);
+  });
 });
 
 describe('Semaphore', () => {
