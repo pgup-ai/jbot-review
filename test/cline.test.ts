@@ -10,6 +10,7 @@ import {
   buildClinePromptArg,
   CLINE_MAX_ARGV_BYTES,
   clineEnvForHome,
+  clineFailureDetail,
   clineProvidersPath,
   formatClinePromptTimeoutMessage,
   isClineProvider,
@@ -185,6 +186,23 @@ describe('Cline CLI provider helpers', () => {
     assert.equal(parseClineFinalMessage('{"type":"agent_event","event":{}}'), '');
     assert.equal(parseClineFinalMessage('garbage\nlines'), '');
     assert.equal(parseClineFinalMessage('{"type":"run_result","text":""}'), '');
+  });
+
+  it('drops @-mention ENOENT warnings from failure output so the real error survives the cap', () => {
+    // 3.0.60 (the image) says `statx`, 3.0.61 says `stat`; both must match.
+    const warnings = Array.from(
+      { length: 40 },
+      (_, i) =>
+        `[warning] ENOENT: no such file or directory, stat${i % 2 ? 'x' : ''} '/api/module-${i}';'`,
+    ).join('\n');
+    const detail = clineFailureDetail(`${warnings}\nError: context length exceeded`, 'events');
+    assert.match(
+      detail,
+      /^Error: context length exceeded \(40 @-mention ENOENT warnings dropped\)$/,
+    );
+    // Only warnings: fall back to stdout rather than an empty message.
+    assert.match(clineFailureDetail(warnings, 'events'), /^events \(40 @-mention/);
+    assert.equal(clineFailureDetail('', ''), '');
   });
 
   it('labels prompt timeouts with the session and model', () => {
