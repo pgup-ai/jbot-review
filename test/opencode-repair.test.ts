@@ -103,6 +103,22 @@ const VALID_REVIEW = JSON.stringify({
 });
 
 describe('runReview JSON repair loop', () => {
+  it('fails a cut-off review outright when its wrap-up reply cannot be parsed', async () => {
+    const { client, prompts, tools } = makeFakeClient(['HANG', 'sorry, out of time']);
+    const pending = runReview(client, 'opencode/deepseek-v4-flash', 'CTX', '', () => {}, {
+      timeoutMs: 10_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      finalizeOpencodeSessionsByLabel(client, 'review', () => {}, 20_000),
+      1,
+    );
+    await assert.rejects(pending, /unparseable JSON/);
+    // No repair turn: it would re-enable tools and a fresh timeout after the deadline.
+    assert.equal(prompts.length, 2);
+    assert.equal(Object.values(tools[1]).some(Boolean), false);
+  });
+
   it('wraps up a cut-off review in the same session with tools off and marks it partial', async () => {
     const { client, prompts, aborted, tools } = makeFakeClient(['HANG', VALID_REVIEW]);
     const logs: string[] = [];

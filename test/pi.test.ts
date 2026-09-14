@@ -608,6 +608,79 @@ describe('Pi review sessions', () => {
     assert.equal(prompts[1], CONTINUATION_NUDGE_PROMPT);
   });
 
+  it('takes the reserve only for callers that record a partial outcome', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    const hangingRuntime = (events: string[]) => {
+      const runtime = fakeRuntime(false, events, []);
+      runtime.sdk.createAgentSession = async () => {
+        let active = ['read_file'];
+        const session = {
+          messages: [] as unknown[],
+          prompt: async () => {
+            events.push(`prompted:${active.length}`);
+            if (active.length) await new Promise<void>(() => {});
+            else
+              session.messages.push({
+                role: 'assistant',
+                content: reviewResultJson,
+                stopReason: 'stop',
+              });
+          },
+          abort: async () => void events.push('aborted'),
+          getActiveToolNames: () => active,
+          setActiveToolsByName: (names: string[]) => {
+            active = names;
+            events.push(`tools:${names.join(',')}`);
+          },
+          dispose: () => events.push('disposed'),
+        };
+        return { session };
+      };
+      return runtime;
+    };
+    const flush = async () => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    };
+
+    // The main review records the outcome: its reserve timer fires at 240 s of a 300 s budget.
+    const mainEvents: string[] = [];
+    const main = runPiReview(
+      hangingRuntime(mainEvents),
+      'deepseek/deepseek-v4-flash',
+      'ctx',
+      '',
+      () => {},
+      {
+        timeoutMs: 300_000,
+      },
+    );
+    await flush();
+    t.mock.timers.tick(240_000);
+    await flush();
+    assert.deepEqual(mainEvents, ['prompted:1', 'aborted', 'tools:', 'prompted:0', 'disposed']);
+    assert.equal((await main).partial, true);
+
+    // An auxiliary pass has no partial recorder of its own: no timer, plain timeout at 300 s.
+    const auxEvents: string[] = [];
+    const aux = runPiGuidelineComplianceCheck(
+      hangingRuntime(auxEvents),
+      'deepseek/deepseek-v4-flash',
+      'ctx',
+      'g',
+      () => {},
+      300_000,
+    );
+    aux.catch(() => {});
+    await flush();
+    t.mock.timers.tick(240_000);
+    await flush();
+    assert.deepEqual(auxEvents, ['prompted:1']);
+    t.mock.timers.tick(60_000);
+    await flush();
+    await assert.rejects(aux, /did not finish within 300s/);
+    assert.equal(auxEvents.includes('tools:'), false);
+  });
+
   it('wraps up a cut-off review in the same session with tools off and marks it partial', async () => {
     const events: string[] = [];
     const runtime = fakeRuntime(false, events, []);

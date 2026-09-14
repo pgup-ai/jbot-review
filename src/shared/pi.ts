@@ -943,7 +943,9 @@ async function promptPiSession(
   // grace request) rather than lost; a tool-less session keeps the plain deadline.
   const canWrapUp =
     Boolean(session.setActiveToolsByName) && (session.getActiveToolNames?.().length ?? 0) > 0;
-  const reserve = canWrapUp ? wrapUpReserveMs(timeoutMs) : 0;
+  // Only a caller that records the partial outcome takes the reserve; a
+  // wrapped-up verifier would otherwise pass off premature verdicts as complete.
+  const reserve = canWrapUp && outcome ? wrapUpReserveMs(timeoutMs) : 0;
   let requestWrapUp: ((budgetMs: number) => void) | undefined;
   const wrapUpDue = new Promise<number>((resolve) => {
     requestWrapUp = resolve;
@@ -1212,6 +1214,8 @@ export async function runPiReview(
     try {
       result = parseReview(raw, label, log, { strict: true });
     } catch (error) {
+      // A wrap-up reply is the last answer its deadline allows: no repair turn.
+      if (outcome.wrappedUp) throw error;
       const repaired = await repromptPiForJson(
         session,
         model,
@@ -1225,7 +1229,7 @@ export async function runPiReview(
       result = parseReview(repaired, `${label}-repair`, log, { strict: true });
     }
     if (outcome.wrappedUp) result.partial = true;
-    if (!options.guidelineSweep) return result;
+    if (!options.guidelineSweep || outcome.wrappedUp) return result;
     const sweep = options.guidelineSweep;
     const sweepLabel = `guideline-sweep-${label}`;
     return await appendGuidelineSweep(
