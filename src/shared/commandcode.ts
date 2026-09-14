@@ -183,20 +183,22 @@ function commandCodeReasoningEffort(
   model: string,
   modelOptions: Record<string, unknown> | undefined,
   explicit: boolean,
+  ties: 'up' | 'down' = 'up',
 ): string | undefined {
   const { modelID } = parseModelName(model);
   const effort = modelOptions?.reasoningEffort;
   const entry = COMMANDCODE_MODEL_EFFORTS[modelID];
   if (typeof effort !== 'string' || !entry?.tiers.length) return undefined;
   if (entry.tiers.includes(effort)) return effort;
-  return explicit ? clampReasoningEffort(effort, entry.tiers) : entry.fallback;
+  return explicit ? clampReasoningEffort(effort, entry.tiers, ties) : entry.fallback;
 }
 
 /**
  * Role-aware effort for one session: aux sessions run the built-in aux
  * defaults; main options clamp when explicit; the verifier's floored override
- * clamps to the finder's EFFECTIVE effort, so a CommandCode flash main whose
- * built-in medium fell back to low does not buy a high verifier.
+ * tracks the finder's EFFECTIVE effort and rounds down when its ladder lacks
+ * that tier — verification needs less reasoning than finding, so a medium
+ * finder gets a `low` flash verifier, never a `high` one.
  */
 export function commandCodeSessionEffort(
   model: string,
@@ -217,6 +219,7 @@ export function commandCodeSessionEffort(
       model,
       mainEffort ? { ...override, reasoningEffort: mainEffort } : override,
       true,
+      'down',
     );
   }
   const auxCall = model === ctx.auxModel && ctx.auxModelOptions !== undefined;

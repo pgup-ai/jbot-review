@@ -148,6 +148,8 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
     assert.equal(clampReasoningEffort('minimal', ['low', 'high', 'max']), 'low');
     assert.equal(clampReasoningEffort('max', ['minimal', 'low']), 'low');
     assert.equal(clampReasoningEffort('medium', ['low', 'high', 'max']), 'high');
+    assert.equal(clampReasoningEffort('medium', ['low', 'high', 'max'], 'down'), 'low');
+    assert.equal(clampReasoningEffort('medium', ['high', 'max'], 'down'), 'high');
     assert.equal(clampReasoningEffort('high', ['low', 'high']), 'high');
     // Unrankable entries can't be chosen; an all-unrankable ladder means no clamp.
     assert.equal(clampReasoningEffort('medium', ['low', 'turbo']), 'low');

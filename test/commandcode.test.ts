@@ -171,8 +171,10 @@ describe('CommandCode CLI provider helpers', () => {
     );
     const flash = 'commandcode/deepseek/deepseek-v4.1-flash';
     assert.equal(commandCodeSessionEffort(flash, undefined, { ...ctx, auxModel: flash }), 'low');
-    // The verifier floors at the finder's EFFECTIVE effort: a medium main on
-    // another provider clamps it up to high, while a CommandCode flash main
+    // The verifier floors at the finder's EFFECTIVE effort and rounds DOWN
+    // when its ladder lacks that tier (verification needs less reasoning than
+    // finding): a medium main on another provider gives a flash verifier low,
+    // an explicit high main keeps it at high, and a CommandCode flash main
     // whose built-in medium fell back to low keeps the verifier at low.
     const floored = { reasoningEffort: 'medium' };
     const verifierCtx = {
@@ -181,7 +183,15 @@ describe('CommandCode CLI provider helpers', () => {
       mainModelOptions: { reasoningEffort: 'medium' },
       explicit: false,
     };
-    assert.equal(commandCodeSessionEffort(flash, floored, verifierCtx), 'high');
+    assert.equal(commandCodeSessionEffort(flash, floored, verifierCtx), 'low');
+    assert.equal(
+      commandCodeSessionEffort(
+        flash,
+        { reasoningEffort: 'high' },
+        { ...verifierCtx, explicit: true },
+      ),
+      'high',
+    );
     assert.equal(
       commandCodeSessionEffort(flash, floored, {
         ...verifierCtx,

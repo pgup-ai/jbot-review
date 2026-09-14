@@ -496,14 +496,17 @@ function effortRank(effort: string): number {
 }
 
 /**
- * Nearest supported tier for a requested effort, ties resolved UPWARD so a
- * ladder without `medium` cannot quietly reinstate a lower tier (TASK-157).
- * Out-of-range requests clamp to the ladder's end; efforts outside the rank
- * order (provider-managed values) return undefined — the caller drops them.
+ * Nearest supported tier for a requested effort. Ties resolve UPWARD by
+ * default so a ladder without `medium` cannot quietly reinstate a lower tier
+ * (TASK-157); a caller that needs less reasoning than requested (the
+ * CommandCode verifier) asks for `down`. Out-of-range requests clamp to the
+ * ladder's end; efforts outside the rank order (provider-managed values)
+ * return undefined — the caller drops them.
  */
 export function clampReasoningEffort(
   requested: string,
   supported: readonly string[],
+  ties: 'up' | 'down' = 'up',
 ): string | undefined {
   const want = effortRank(requested);
   if (want < 0) return undefined;
@@ -514,7 +517,9 @@ export function clampReasoningEffort(
       const distance = Math.abs(effortRank(effort) - want);
       const bestDistance = Math.abs(effortRank(best) - want);
       if (distance < bestDistance) return effort;
-      return distance === bestDistance && effortRank(effort) > effortRank(best) ? effort : best;
+      if (distance > bestDistance) return best;
+      const higher = effortRank(effort) > effortRank(best);
+      return higher === (ties === 'up') ? effort : best;
     }, undefined);
 }
 
