@@ -150,6 +150,24 @@ export function clineEnvForHome(clineHome: string | undefined): NodeJS.ProcessEn
   return env;
 }
 
+/**
+ * Failure output minus Cline's `@/` mention warnings: it reads the diff's
+ * `'@/api/x'` imports as file mentions and logs one harmless ENOENT each
+ * (probed on 3.0.61), which would bury the real error under the log cap. The
+ * swallowed closing quote and punctuation mark them; a real missing file has
+ * neither.
+ */
+const CLINE_MENTION_WARNING =
+  /^\[warning\] ENOENT: no such file or directory, statx? '\/.*["'][;,]?'$/;
+
+export function clineFailureDetail(stderr: string, stdout: string): string {
+  const lines = stderr.split('\n');
+  const kept = lines.filter((line) => !CLINE_MENTION_WARNING.test(line));
+  const dropped = lines.length - kept.length;
+  const text = truncateForLog(kept.join('\n').trim() || stdout, 1000);
+  return dropped ? `${text} (${dropped} @-mention ENOENT warnings dropped)` : text;
+}
+
 /** The clean final message is the `run_result` event's `text` (NDJSON stdout). */
 export function parseClineFinalMessage(stdout: string): string {
   let text = '';
@@ -381,10 +399,7 @@ async function runClinePrompt(
     });
     if (result.exitCode !== 0) {
       throw new Error(
-        `cline ${label} exited ${result.exitCode}: ${truncateForLog(
-          result.stderr || result.stdout,
-          1000,
-        )}`,
+        `cline ${label} exited ${result.exitCode}: ${clineFailureDetail(result.stderr, result.stdout)}`,
       );
     }
     const finalMessage = parseClineFinalMessage(result.stdout).trim();
@@ -395,9 +410,9 @@ async function runClinePrompt(
     // than parse the noisy event stream.
     if (!finalMessage) {
       throw new Error(
-        `cline ${label} produced no run_result message; stderr: ${truncateForLog(
-          result.stderr || result.stdout,
-          1000,
+        `cline ${label} produced no run_result message; stderr: ${clineFailureDetail(
+          result.stderr,
+          result.stdout,
         )}`,
       );
     }
