@@ -966,6 +966,9 @@ async function promptPiSession(
       ]),
     );
     if ('budgetMs' in settled) {
+      // The abort's own latency comes out of the budget: the reply must land
+      // before the deadline the caller's timer enforces.
+      const wrapUpDeadline = Date.now() + settled.budgetMs - WRAP_UP_MARGIN_MS;
       log(
         `${label} prompt cut off; wrapping up in-session within ${Math.round(settled.budgetMs / 1000)}s`,
       );
@@ -975,7 +978,7 @@ async function promptPiSession(
       await piTelemetryContext.run({ session: `${label}-wrap-up` }, () =>
         withTimeout(
           session.prompt(WRAP_UP_PROMPT, { expandPromptTemplates: false }),
-          Math.max(0, settled.budgetMs - WRAP_UP_MARGIN_MS),
+          Math.max(0, wrapUpDeadline - Date.now()),
           `pi ${label} wrap-up did not finish within ${Math.round(settled.budgetMs / 1000)}s`,
         ),
       );

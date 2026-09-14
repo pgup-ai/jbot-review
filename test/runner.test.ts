@@ -1270,8 +1270,8 @@ describe('wrapUpReserveMs', () => {
   it('holds back a fifth of a budget for the wrap-up turn, capped and floored', () => {
     assert.equal(wrapUpReserveMs(300_000), 60_000);
     assert.equal(wrapUpReserveMs(600_000), 90_000);
-    assert.equal(wrapUpReserveMs(75_000), 15_000);
-    assert.equal(wrapUpReserveMs(60_000), 0);
+    assert.equal(wrapUpReserveMs(225_000), 45_000);
+    assert.equal(wrapUpReserveMs(224_999), 0);
     assert.equal(wrapUpReserveMs(0), 0);
   });
 });

@@ -54,12 +54,14 @@ export const WRAP_UP_MARGIN_MS = 5_000;
 
 /**
  * Held back from a session's budget for its wrap-up turn (abort, tools off,
- * one final answer): a fifth of the budget, at most 90 s. Below 15 s a reply
- * cannot land, so no reserve — the session keeps its whole budget.
+ * one final answer): a fifth of the budget, at most 90 s. A reasoning model
+ * needs ~45 s to reason and emit a findings JSON (measured: glm-5.2 never
+ * answered inside 10 s), so below that there is no reserve and the session
+ * keeps its whole budget.
  */
 export function wrapUpReserveMs(budgetMs: number): number {
   const reserve = Math.min(90_000, Math.floor(budgetMs / 5));
-  return reserve >= 15_000 ? reserve : 0;
+  return reserve >= 45_000 ? reserve : 0;
 }
 /**
  * Minimum life of an auxiliary session measured from its own launch. The
