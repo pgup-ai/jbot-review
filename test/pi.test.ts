@@ -608,6 +608,57 @@ describe('Pi review sessions', () => {
     assert.equal(prompts[1], CONTINUATION_NUDGE_PROMPT);
   });
 
+  it('fails a cut-off review outright when its wrap-up cannot be parsed, and skips the sweep after a wrap-up', async () => {
+    for (const wrapReply of ['sorry, out of time', reviewResultJson]) {
+      const events: string[] = [];
+      const runtime = fakeRuntime(false, events, []);
+      runtime.sdk.createAgentSession = async () => {
+        let release!: () => void;
+        let active = ['read_file'];
+        const session = {
+          messages: [] as unknown[],
+          prompt: async (text: string) => {
+            events.push(`prompted:${active.length}:${text.slice(0, 12)}`);
+            if (active.length) {
+              await new Promise<void>((resolve) => {
+                release = resolve;
+              });
+              return;
+            }
+            session.messages.push({ role: 'assistant', content: wrapReply, stopReason: 'stop' });
+          },
+          abort: async () => {
+            events.push('aborted');
+            session.messages.push({ role: 'assistant', content: '', stopReason: 'aborted' });
+            release();
+          },
+          getActiveToolNames: () => active,
+          setActiveToolsByName: (names: string[]) => {
+            active = names;
+          },
+          dispose: () => events.push('disposed'),
+        };
+        return { session };
+      };
+      const pending = runPiReview(runtime, 'deepseek/deepseek-v4-flash', 'ctx', '', () => {}, {
+        timeoutMs: 10_000,
+        guidelineSweep: { guidelines: 'G' },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(
+        finalizePiSessionsByLabel(runtime, 'review', () => {}, 20_000),
+        1,
+      );
+      if (wrapReply === reviewResultJson) {
+        assert.equal((await pending).partial, true);
+      } else {
+        await assert.rejects(pending, /unparseable JSON/);
+      }
+      // Two prompts only: no repair turn and no guideline sweep after a wrap-up.
+      assert.equal(events.filter((e) => e.startsWith('prompted:')).length, 2, events.join(','));
+    }
+  });
+
   it('takes the reserve only for callers that record a partial outcome', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
     const hangingRuntime = (events: string[]) => {

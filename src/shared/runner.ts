@@ -964,6 +964,8 @@ export interface ReviewRunOptions {
     addressedPriorComments: AddressedPriorComment[];
     /** JSONL telemetry (finding + session rows); present when reviewTelemetry is on. */
     telemetry?: string;
+    /** Passes that were cut short or failed; empty means full coverage. */
+    incompleteSessions: IncompleteSession[];
   }) => void;
 }
 
@@ -2934,6 +2936,7 @@ async function runReviewPipeline(params: {
         findings: filteredFindings,
         addressedPriorComments: verifiedAddressedPriorComments,
         ...(telemetry.enabled ? { telemetry: telemetry.toJsonl() } : {}),
+        incompleteSessions,
       });
     } catch (err) {
       log(`onReviewResult hook threw (ignored): ${String(err)}`);
@@ -3403,7 +3406,7 @@ export function startLensPasses(params: {
           params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
           params.onCoverage?.({
             session: `review-${key}`,
-            state: 'completed',
+            state: result.partial ? 'partial' : 'completed',
             durationMs: Date.now() - startedAt,
           });
           return result.findings;

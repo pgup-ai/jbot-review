@@ -541,7 +541,7 @@ describe('run and coverage telemetry', () => {
       .split('\n')
       .map((line) => JSON.parse(line));
     assert.equal(lines[0].kind, 'run');
-    assert.equal(lines[0].schemaVersion, 2);
+    assert.equal(lines[0].schemaVersion, 3);
     assert.equal(lines[0].headSha, 'head');
     assert.equal(lines[0].terminalState, 'completed');
     assert.equal(lines[0].elapsedMs, 123_456);

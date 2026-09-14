@@ -1316,7 +1316,7 @@ async function promptInSessionHoldingSlot(
           log,
           Math.max(0, wrapUpDeadline - Date.now()),
           onTokenUsage,
-          await wrapUpToolMap(client),
+          await wrapUpToolMap(client, log),
           abortLabel,
         );
         if (outcome) outcome.wrappedUp = true;
@@ -1404,24 +1404,38 @@ function registerFinalizeTrigger(
 }
 
 const wrapUpToolMaps = new WeakMap<OpencodeClient, Promise<Record<string, boolean>>>();
+const TOOL_IDS_TIMEOUT_MS = 5_000;
 
 /**
  * The prompt API denies only the tool ids it is handed, and the runtime can
  * expose more than the built-ins (websearch, MCP, custom), so the wrap-up's
- * deny map is built from the server's own id list; the static list stands in
- * when that endpoint is unavailable.
+ * deny map is built from the server's own id list. Only a successful lookup
+ * is cached: a failed or stalled one falls back to the static list for this
+ * wrap-up and is retried by the next.
  */
-function wrapUpToolMap(client: OpencodeClient): Promise<Record<string, boolean>> {
+function wrapUpToolMap(
+  client: OpencodeClient,
+  log: (msg: string) => void,
+): Promise<Record<string, boolean>> {
   let map = wrapUpToolMaps.get(client);
   if (!map) {
     map = Promise.resolve()
       .then(() => client.tool.ids({ query: queryDirectory(client) }))
-      .then((result) => (Array.isArray(result.data) ? result.data : []))
-      .catch(() => [] as string[])
-      .then((ids) => ({ ...NO_TOOLS, ...Object.fromEntries(ids.map((id) => [id, false])) }));
+      .then((result) => {
+        if (!Array.isArray(result.data)) throw new Error('tool id list is not an array');
+        return { ...NO_TOOLS, ...Object.fromEntries(result.data.map((id) => [id, false])) };
+      });
     wrapUpToolMaps.set(client, map);
+    map.catch(() => wrapUpToolMaps.delete(client));
   }
-  return map;
+  return withTimeout(
+    map,
+    TOOL_IDS_TIMEOUT_MS,
+    `tool id lookup did not finish within ${TOOL_IDS_TIMEOUT_MS / 1000}s`,
+  ).catch((error) => {
+    log(`wrap-up denies the built-in tools only: ${formatUnknownError(error)}`);
+    return NO_TOOLS;
+  });
 }
 
 /** Wraps up every in-flight prompt under label (the ReviewBackend.finalizeSessionsByLabel contract). */

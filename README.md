@@ -1161,10 +1161,10 @@ After main review completes, auxiliary sessions get a settle grace of at least
 five minutes, stretched so every auxiliary session has ten minutes from its
 launch, bounded by the run budget with verification and posting time reserved.
 Before a cancellation, OpenCode and Pi sessions are asked to wrap up: in the
-last fifth of the grace (at most 90 seconds, and only when that leaves at least
-45 seconds) the turn is interrupted, tools are dropped, and the model reports
-what it had already established; a main review
-shard gets the same treatment in the last fifth of its own deadline. Those
+last fifth of the grace (at most 90 seconds, and only when the model keeps at
+least 45 seconds to answer) the turn is interrupted, tools are dropped, and the
+model reports what it had already established; a main review shard gets the
+same treatment in the last fifth of its own deadline. Those
 findings are posted, the pass is listed as cut short with partial findings
 included, and a wrapped-up shard is never cached. Sessions that still do not
 finish are cancelled and reported as incomplete coverage, and the review footer

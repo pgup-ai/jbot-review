@@ -1270,8 +1270,9 @@ describe('wrapUpReserveMs', () => {
   it('holds back a fifth of a budget for the wrap-up turn, capped and floored', () => {
     assert.equal(wrapUpReserveMs(300_000), 60_000);
     assert.equal(wrapUpReserveMs(600_000), 90_000);
-    assert.equal(wrapUpReserveMs(225_000), 45_000);
-    assert.equal(wrapUpReserveMs(224_999), 0);
+    // The floor is measured after the margin: 45 s must remain for the answer.
+    assert.equal(wrapUpReserveMs(250_000), 50_000);
+    assert.equal(wrapUpReserveMs(249_999), 0);
     assert.equal(wrapUpReserveMs(0), 0);
   });
 });
@@ -1477,6 +1478,26 @@ it('never launches a staggered lens that was abandoned while it waited', async (
   assert.deepEqual(calls, []);
   assert.deepEqual(await start(() => false), [[]]);
   assert.deepEqual(calls, ['review-interactions']);
+});
+
+it('records a lens that wrapped up on its own deadline as partial coverage', async () => {
+  const rows: string[] = [];
+  const backend = {
+    name: 'fake',
+    runReview: async () => ({ summary: '', findings: [], partial: true }),
+  } as unknown as ReviewBackend;
+  await Promise.all(
+    startLensPasses({
+      backend,
+      model: 'fake/model',
+      lensPrContext: 'CTX',
+      guidelinesForPrompt: '',
+      lensKeys: ['interactions'],
+      log: () => {},
+      onCoverage: (row) => rows.push(`${row.session}:${row.state}`),
+    }),
+  );
+  assert.deepEqual(rows, ['review-interactions:partial']);
 });
 
 it('staggers shared-prefix launches so the first prefill lands before the next request', () => {

@@ -454,7 +454,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
       });
     },
     toJsonl() {
-      const header = run ? [{ kind: 'run', schemaVersion: 2, ...run }] : [];
+      const header = run ? [{ kind: 'run', schemaVersion: 3, ...run }] : [];
       const lines = [
         ...header,
         ...phases,

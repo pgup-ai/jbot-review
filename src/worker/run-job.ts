@@ -7,8 +7,9 @@ import { clonePr } from '../app/clone.ts';
 import { defaultModelOptions, parseEnvBoolean } from '../shared/config.ts';
 import { parseModelName } from '@symma/protocol';
 import { runPrReview } from '../shared/runner.ts';
-import type { Severity } from '../shared/types.ts';
+import type { Finding, Severity } from '../shared/types.ts';
 import type { ClaimedJob, JobUpdate } from '../shared/worker-contract.ts';
+import type { IncompleteSession } from '../shared/report.ts';
 
 const TokenOctokit = CoreOctokit.plugin(paginateRest, restEndpointMethods);
 
@@ -21,13 +22,36 @@ export function octokitForToken(token: string): Octokit {
   return new TokenOctokit({ auth: token }) as Octokit;
 }
 
+interface ReviewOutcome {
+  findings: Finding[];
+  incompleteSessions: IncompleteSession[];
+}
+
+/** Terminal update for a finished review: per-severity counts plus whether every pass covered its scope. */
+export function jobUpdateForReview(
+  claimToken: string,
+  durationMs: number,
+  review: ReviewOutcome,
+): JobUpdate {
+  const findingsBySeverity: Partial<Record<Severity, number>> = {};
+  for (const f of review.findings)
+    findingsBySeverity[f.severity] = (findingsBySeverity[f.severity] ?? 0) + 1;
+  return {
+    claimToken,
+    status: 'success',
+    durationMs,
+    findingsBySeverity,
+    coverage: review.incompleteSessions.length > 0 ? 'incomplete' : 'complete',
+  };
+}
+
 /** Run one claimed job; resolves to the terminal JobUpdate (never throws). */
 export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise<JobUpdate> {
   const startedAt = Date.now();
   let cleanup: (() => void) | null = null;
   // Captured from runPrReview's onReviewResult hook → forwarded so the control plane's
-  // check-run can gate on real per-severity counts.
-  let findingsBySeverity: Partial<Record<Severity, number>> | undefined;
+  // check-run can gate on real per-severity counts and coverage.
+  let review: ReviewOutcome | undefined;
   try {
     assertImageSupportsModels([job.model, ...(job.auxModel ? [job.auxModel] : [])], process.env);
     // Exactly "owner/repo" — reject empty segments AND extra slashes (e.g. "a/b/c").
@@ -83,21 +107,16 @@ export async function runJob(job: ClaimedJob, log: (m: string) => void): Promise
         guidelineSweep: parseEnvBoolean('JBOT_GUIDELINE_SWEEP', false),
         embeddedFirstPrompt: parseEnvBoolean('JBOT_EMBEDDED_FIRST_PROMPT', true),
         onReviewResult: (r) => {
-          const counts: Partial<Record<Severity, number>> = {};
-          for (const f of r.findings) counts[f.severity] = (counts[f.severity] ?? 0) + 1;
-          findingsBySeverity = counts;
+          review = { findings: r.findings, incompleteSessions: r.incompleteSessions };
         },
         ...(job.auxModel ? { auxModel: job.auxModel } : {}),
         ...(job.auxApiKey ? { auxApiKey: job.auxApiKey } : {}),
       },
       log,
     });
-    return {
-      claimToken: job.claimToken,
-      status: 'success',
-      durationMs: Date.now() - startedAt,
-      ...(findingsBySeverity ? { findingsBySeverity } : {}),
-    };
+    return review
+      ? jobUpdateForReview(job.claimToken, Date.now() - startedAt, review)
+      : { claimToken: job.claimToken, status: 'success', durationMs: Date.now() - startedAt };
   } catch (err) {
     log(`job ${job.jobId} failed: ${String(err)}`);
     return { claimToken: job.claimToken, status: 'failed', durationMs: Date.now() - startedAt };
