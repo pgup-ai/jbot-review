@@ -195,33 +195,21 @@ function commandCodeReasoningEffort(
 
 /**
  * Role-aware effort for one session: aux sessions run the built-in aux
- * defaults; main options clamp when explicit; the verifier's floored override
- * tracks the finder's EFFECTIVE effort and rounds down when its ladder lacks
- * that tier — verification needs less reasoning than finding, so a medium
- * finder gets a `low` flash verifier, never a `high` one.
+ * defaults; main options clamp when explicit; the verifier's override already
+ * sits one tier below the finder and rounds down when the ladder lacks that
+ * tier, so a medium target lands on `low` for the flash models.
  */
 export function commandCodeSessionEffort(
   model: string,
   override: Record<string, unknown> | undefined,
   ctx: {
-    mainModel: string;
     auxModel: string;
     auxModelOptions?: Record<string, unknown>;
     mainModelOptions?: Record<string, unknown>;
     explicit: boolean;
   },
 ): string | undefined {
-  if (override) {
-    const mainEffort = isCommandCodeProvider(parseModelName(ctx.mainModel).providerID)
-      ? commandCodeReasoningEffort(ctx.mainModel, ctx.mainModelOptions, ctx.explicit)
-      : undefined;
-    return commandCodeReasoningEffort(
-      model,
-      mainEffort ? { ...override, reasoningEffort: mainEffort } : override,
-      true,
-      'down',
-    );
-  }
+  if (override) return commandCodeReasoningEffort(model, override, true, 'down');
   const auxCall = model === ctx.auxModel && ctx.auxModelOptions !== undefined;
   return commandCodeReasoningEffort(
     model,

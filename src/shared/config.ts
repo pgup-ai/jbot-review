@@ -534,36 +534,38 @@ export function supportedModelOptions(
   providerID: string,
   modelID: string,
   modelOptions?: Record<string, unknown>,
+  ties: 'up' | 'down' = 'up',
 ): Record<string, unknown> | undefined {
   const supported = modelConfigFor(providerID, modelID)?.reasoningEfforts;
   const effort = modelOptions?.reasoningEffort;
   if (!supported || typeof effort !== 'string' || supported.includes(effort)) return modelOptions;
-  const clamped = clampReasoningEffort(effort, supported);
+  const clamped = clampReasoningEffort(effort, supported, ties);
   const { reasoningEffort: _dropped, ...rest } = modelOptions!;
   return clamped ? { ...rest, reasoningEffort: clamped } : rest;
 }
 
 /**
- * The verifier's model options (TASK-157): a verifier reasoning below the
- * finder cannot overturn the finder's reasoning errors, so parity with the
- * main pass is the floor. `undefined` aux options mean the verifier shares
- * the main model entry, where parity already holds. Efforts outside the rank
- * order (provider-managed) are left alone.
+ * The verifier's model options: one effort tier below the finder, never below
+ * `low`. Verification re-checks evidence the finder already produced, so it
+ * needs less reasoning than finding (this supersedes TASK-157's parity floor).
+ * Returns the aux options themselves when they already sit on that tier, so
+ * no alias entry is built; `undefined` aux options (the verifier shares the
+ * main entry) yield its own lowered copy of the main options. Efforts outside
+ * the rank order (provider-managed) and effort-less entries stay as-is.
  */
 export function verificationModelOptions(
   mainOptions: Record<string, unknown> | undefined,
   auxOptions: Record<string, unknown> | undefined,
 ): Record<string, unknown> | undefined {
-  if (!auxOptions) return undefined;
   const mainEffort = mainOptions?.reasoningEffort;
   if (typeof mainEffort !== 'string' || effortRank(mainEffort) < 0) return auxOptions;
-  const auxEffort = auxOptions.reasoningEffort;
-  // Floor only a RANKABLE aux effort below the main one. Provider-managed
-  // values (poolside 'default') and effort-less entries (custom providers
-  // omit the key by policy — arbitrary endpoints may reject it) stay as-is.
-  if (typeof auxEffort !== 'string' || effortRank(auxEffort) < 0) return auxOptions;
-  if (effortRank(auxEffort) >= effortRank(mainEffort)) return auxOptions;
-  return { ...auxOptions, reasoningEffort: mainEffort };
+  const base = auxOptions ?? mainOptions!;
+  const baseEffort = base.reasoningEffort;
+  if (auxOptions && (typeof baseEffort !== 'string' || effortRank(baseEffort) < 0))
+    return auxOptions;
+  const rank = effortRank(mainEffort);
+  const target = REASONING_EFFORT_ORDER[Math.max(Math.min(effortRank('low'), rank), rank - 1)];
+  return baseEffort === target ? auxOptions : { ...base, reasoningEffort: target };
 }
 
 export interface PromptCachePolicyInput {

@@ -823,9 +823,9 @@ describe('Pi review sessions', () => {
     assert.equal('input' in usage[0], false);
   });
 
-  it('delivers the verifier effort as a per-session thinking level (TASK-157)', async () => {
-    // Without the override a distinct-aux verification session runs at the
-    // provider default, below the finder — the accident TASK-157 closes.
+  it('delivers the verifier effort as a per-session thinking level', async () => {
+    // Without the override a distinct-aux verification session would run at
+    // the provider default instead of the tier the runner chose for it.
     const sessions: Array<Record<string, unknown>> = [];
     const runtime = fakeRuntime(false, []);
     runtime.thinkingLevel = 'medium';

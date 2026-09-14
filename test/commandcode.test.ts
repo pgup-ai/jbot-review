@@ -113,7 +113,6 @@ describe('CommandCode CLI provider helpers', () => {
     const deepseek = 'commandcode/deepseek/deepseek-v4-flash';
     const effortOf = (model: string, opts: Record<string, unknown> | undefined, explicit = false) =>
       commandCodeSessionEffort(model, undefined, {
-        mainModel: model,
         auxModel: 'commandcode/unused',
         mainModelOptions: opts,
         explicit,
@@ -157,7 +156,6 @@ describe('CommandCode CLI provider helpers', () => {
     // options and the verifier override clamp; an aux model sharing the main
     // entry follows it.
     const ctx = {
-      mainModel: 'devin/swe-2-low',
       auxModel: deepseek,
       auxModelOptions: { reasoningEffort: 'low' },
       mainModelOptions: { reasoningEffort: 'low' },
@@ -171,36 +169,18 @@ describe('CommandCode CLI provider helpers', () => {
     );
     const flash = 'commandcode/deepseek/deepseek-v4.1-flash';
     assert.equal(commandCodeSessionEffort(flash, undefined, { ...ctx, auxModel: flash }), 'low');
-    // The verifier floors at the finder's EFFECTIVE effort and rounds DOWN
-    // when its ladder lacks that tier (verification needs less reasoning than
-    // finding): a medium main on another provider gives a flash verifier low,
-    // an explicit high main keeps it at high, and a CommandCode flash main
-    // whose built-in medium fell back to low keeps the verifier at low.
-    const floored = { reasoningEffort: 'medium' };
-    const verifierCtx = {
-      ...ctx,
-      auxModel: flash,
-      mainModelOptions: { reasoningEffort: 'medium' },
-      explicit: false,
-    };
-    assert.equal(commandCodeSessionEffort(flash, floored, verifierCtx), 'low');
+    // The verifier's override (already one tier below the finder) rounds DOWN
+    // when the ladder lacks that tier: a medium target lands on low for the
+    // flash models, an exact high stays high.
+    const verifierCtx = { ...ctx, auxModel: flash, explicit: false };
+    assert.equal(commandCodeSessionEffort(flash, { reasoningEffort: 'low' }, verifierCtx), 'low');
     assert.equal(
-      commandCodeSessionEffort(
-        flash,
-        { reasoningEffort: 'high' },
-        { ...verifierCtx, explicit: true },
-      ),
-      'high',
-    );
-    assert.equal(
-      commandCodeSessionEffort(flash, floored, {
-        ...verifierCtx,
-        mainModel: 'commandcode/deepseek/deepseek-v4-flash-fast',
-      }),
+      commandCodeSessionEffort(flash, { reasoningEffort: 'medium' }, verifierCtx),
       'low',
     );
+    assert.equal(commandCodeSessionEffort(flash, { reasoningEffort: 'high' }, verifierCtx), 'high');
     assert.equal(
-      commandCodeSessionEffort(flash, floored, { ...verifierCtx, mainModel: deepseek }),
+      commandCodeSessionEffort(deepseek, { reasoningEffort: 'low' }, verifierCtx),
       'high',
     );
   });

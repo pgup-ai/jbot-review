@@ -146,15 +146,15 @@ export interface OpencodeProviderConfig extends ProviderKeyConfig {
   /** Provider options for this entry's model, scoped to it alone. */
   modelOptions?: Record<string, unknown>;
   /**
-   * TASK-157: options for the verifier alias entry on this model (effort
-   * floored at the main pass). The prompt API has no per-session options, so
-   * the alias `<modelID>--jbot-verify` carries them, with `id` pointing back
-   * at the real model.
+   * Options for the verifier alias entry on this model (one effort tier below
+   * the finder). The prompt API has no per-session options, so the alias
+   * `<modelID>--jbot-verify` carries them, with `id` pointing back at the
+   * real model.
    */
   verificationModelOptions?: Record<string, unknown>;
 }
 
-/** Config-time model alias that carries the verifier's own options (TASK-157). */
+/** Config-time model alias that carries the verifier's own options. */
 export const VERIFICATION_MODEL_ALIAS_SUFFIX = '--jbot-verify';
 
 type ProviderEntry = NonNullable<NonNullable<ServerOptions['config']>['provider']>[string];
