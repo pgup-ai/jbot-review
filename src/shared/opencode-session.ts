@@ -266,21 +266,26 @@ async function latestAssistant(
   return page.data?.[0] as unknown as AssistantMessage | undefined;
 }
 
+/** The turn's assistant messages, oldest first; `complete` is false when the page ended before the previous turn. */
 async function assistantsSince(
   client: OpenCodeClient,
   sessionID: string,
   previousID: string | undefined,
-): Promise<AssistantMessage[]> {
+): Promise<{ messages: AssistantMessage[]; complete: boolean }> {
   const page = await client.message.list(
-    { sessionID, type: 'assistant', order: 'desc', limit: 50 },
+    { sessionID, type: 'assistant', order: 'desc', limit: 500 },
     { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
   );
-  const newer: AssistantMessage[] = [];
+  const messages: AssistantMessage[] = [];
+  let complete = previousID === undefined;
   for (const message of (page.data ?? []) as unknown as AssistantMessage[]) {
-    if (message.id === previousID) break;
-    newer.unshift(message);
+    if (message.id === previousID) {
+      complete = true;
+      break;
+    }
+    messages.unshift(message);
   }
-  return newer;
+  return { messages, complete };
 }
 
 function assistantText(message: AssistantMessage): string {
@@ -543,7 +548,9 @@ async function promptHoldingSlot(
     let turn: AssistantMessage[] = [message];
     try {
       const since = await assistantsSince(client, sessionID, previous?.id);
-      if (since.length > 0) turn = since;
+      if (since.messages.length > 0) turn = since.messages;
+      if (!since.complete)
+        log(`${label} turn listing incomplete; usage and tools are under-counted`);
     } catch (error) {
       log(`${label} turn listing failed; counting the final message only: ${formatUnknown(error)}`);
     }
@@ -575,7 +582,9 @@ async function promptHoldingSlot(
 function sumUsage(messages: AssistantMessage[]): TokenUsageInfo {
   const tokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
   let cost: number | undefined;
+  let counted = false;
   for (const message of messages) {
+    if (message.tokens) counted = true;
     tokens.input += message.tokens?.input ?? 0;
     tokens.output += message.tokens?.output ?? 0;
     tokens.reasoning += message.tokens?.reasoning ?? 0;
@@ -583,7 +592,8 @@ function sumUsage(messages: AssistantMessage[]): TokenUsageInfo {
     tokens.cache.write += message.tokens?.cache?.write ?? 0;
     if (typeof message.cost === 'number') cost = (cost ?? 0) + message.cost;
   }
-  return { cost, tokens };
+  // No message reported tokens: leave usage unknown rather than record zeros.
+  return { cost, tokens: counted ? tokens : undefined };
 }
 
 function formatUnknown(value: unknown): string {

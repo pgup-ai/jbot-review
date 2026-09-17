@@ -1530,11 +1530,11 @@ export function isNoAttemptReply(raw: string): boolean {
 export const WRAP_UP_PROMPT = `Time is up. Do no further investigation and call no tools. Output ONLY the JSON object the original instructions specify, using only what you have already established in this conversation; omit anything you have not confirmed. If you have nothing to report, output that JSON object with empty lists.`;
 
 /** In-session continuation for an announced-then-stopped turn (multi-turn engines). */
+export const CONTINUATION_NUDGE_PROMPT = `Continue: perform the review you described and finish the task now, in this turn. Do not reply with a plan or preamble again. When done, output ONLY the JSON object the original instructions specify.`;
+
 /** The plugin's answer to any permission prompt (there is nobody to ask). */
 export const PERMISSION_DENIED_MESSAGE =
   'jbot-review runs headless; nothing can answer a permission prompt.';
-
-export const CONTINUATION_NUDGE_PROMPT = `Continue: perform the review you described and finish the task now, in this turn. Do not reply with a plan or preamble again. When done, output ONLY the JSON object the original instructions specify.`;
 
 export function buildJsonRepairPrompt(parseError: string): string {
   return [

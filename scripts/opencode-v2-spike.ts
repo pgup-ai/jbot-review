@@ -107,13 +107,13 @@ try {
   const stash = await createReviewSession(runtime, { label: 'shell-filter', model });
   const stashReply = await promptInSession(runtime, stash, {
     model,
-    text: 'Use your shell tool to run exactly: git stash list. Then use it to run exactly: git stash. Reply with both raw outcomes (including any denial text), nothing else.',
+    text: 'Use your shell tool to run exactly: git status --short. Then use it to run exactly: git stash. Reply with both raw outcomes (including any denial text), nothing else.',
     label: 'shell-filter',
     timeoutMs: 120_000,
     log,
   });
   log(
-    `shell filter reply (expect the second command denied): ${stashReply.replace(/\s+/g, ' ').slice(0, 300)}`,
+    `shell filter reply (expect the first allowed, the second denied): ${stashReply.replace(/\s+/g, ' ').slice(0, 300)}`,
   );
 
   // Effort options reach the provider: Zen's x-preview-f rejects medium; any other provider gets an invalid value.
