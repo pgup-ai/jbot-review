@@ -11,6 +11,7 @@ import {
   resolveOpencodeBin,
   startOpencode,
   waitForModels,
+  waitForPlugin,
 } from '../src/shared/opencode-server.ts';
 import { OpenCode } from '@opencode/client';
 import { fakeOpencodeServer } from './support/opencode-fake.ts';
@@ -120,6 +121,43 @@ describe('startOpencode', () => {
         else process.env[name] = value;
       }
     }
+  });
+});
+
+describe('waitForPlugin', () => {
+  const listing = (status: string) =>
+    new Response(
+      JSON.stringify({
+        data: [{ source: { path: '/cfg/opencode/plugins/jbot-review.js' }, state: { status } }],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  const client = (responses: Array<() => Response>) => {
+    let calls = 0;
+    return OpenCode.make({
+      baseUrl: 'http://fake.local',
+      fetch: async () => responses[Math.min(calls++, responses.length - 1)]!(),
+    });
+  };
+
+  it('polls through errors and a pending plugin, fails fast on a failed one, and gives up at the deadline', async () => {
+    await waitForPlugin(
+      client([
+        () => new Response('booting', { status: 503 }),
+        () => listing('pending'),
+        () => listing('active'),
+      ]),
+      '/ws',
+      5_000,
+    );
+    await assert.rejects(
+      waitForPlugin(client([() => listing('failed')]), '/ws', 5_000),
+      /failed to load/,
+    );
+    await assert.rejects(
+      waitForPlugin(client([() => listing('pending')]), '/ws', 600),
+      /did not load/,
+    );
   });
 });
 

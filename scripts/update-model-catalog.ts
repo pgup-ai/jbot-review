@@ -96,13 +96,6 @@ function dockerPackageVersion(packageName: string): string {
   return match[1];
 }
 
-/** kilo auto-activates every provider whose key sits in its env and pads its list with those models. */
-function withoutProviderKeys(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(
-    Object.entries(env).filter(([name]) => !/_API_KEY$|_TOKEN$|_SECRET$|_AUTH_JSON$/.test(name)),
-  );
-}
-
 function npmCliOutput(
   packageName: string,
   bin: string,
@@ -289,7 +282,17 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   const clineFreeValues = clineFreeModels.map((model) => `cline/${model}`);
   const grokModels = parseGrokModels(npmCliOutput('@xai-official/grok', 'grok', ['models']));
   const kiloModels = parseKiloModelList(
-    npmCliOutput('@kilocode/cli', 'kilo', ['models', '--pure'], withoutProviderKeys(process.env)),
+    // kilo auto-activates every provider whose key sits in its env and pads its list with those models
+    npmCliOutput(
+      '@kilocode/cli',
+      'kilo',
+      ['models', '--pure'],
+      Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([name]) => !/_API_KEY$|_TOKEN$|_SECRET$|_AUTH_JSON$/.test(name),
+        ),
+      ),
+    ),
   );
   for (const [providerID, models] of Object.entries({
     opencode: opencodeModels,

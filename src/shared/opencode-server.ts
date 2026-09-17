@@ -146,24 +146,32 @@ export function childEnv(input: ChildEnvInput): Record<string, string> {
 }
 
 interface SpawnedServer extends ServerBanner {
-  /** SIGTERM, then SIGKILL after the grace; `onExit` runs once the process is gone. */
-  close(onExit?: () => void): void;
+  /** SIGTERM, then SIGKILL after the grace. */
+  close(): void;
 }
 
+/** `onExit` runs once, when the child is gone (or never started) — the moment its files can go. */
 function spawnServer(
   bin: string,
   port: number,
   env: Record<string, string>,
   log: (msg: string) => void,
+  onExit: () => void,
 ): Promise<SpawnedServer> {
   const child = spawn(bin, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  let exited = false;
+  const gone = () => {
+    if (exited) return;
+    exited = true;
+    onExit();
+  };
+  child.once('exit', gone);
   let stopping = false;
-  const close = (onExit?: () => void) => {
+  const close = () => {
     stopping = true;
-    if (onExit) child.once('exit', onExit);
     child.kill('SIGTERM');
     setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS).unref();
   };
@@ -192,6 +200,7 @@ function spawnServer(
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
     child.on('error', (error) => {
+      gone(); // a spawn failure emits no exit
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -250,22 +259,35 @@ export async function waitForPlugin(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   type Listed = { source?: { path?: string }; state?: { status?: string } };
+  let failure: unknown;
   while (Date.now() < deadline) {
-    const listed = (await client.plugin.list(
-      { location: { directory: workspace } },
-      { signal: AbortSignal.timeout(Math.max(1_000, deadline - Date.now())) },
-    )) as unknown;
-    const plugins = (
-      Array.isArray(listed) ? listed : ((listed as { data?: Listed[] }).data ?? [])
-    ) as Listed[];
+    let plugins: Listed[] = [];
+    try {
+      const listed = (await client.plugin.list(
+        { location: { directory: workspace } },
+        { signal: AbortSignal.timeout(Math.max(1_000, deadline - Date.now())) },
+      )) as unknown;
+      plugins = (
+        Array.isArray(listed) ? listed : ((listed as { data?: Listed[] }).data ?? [])
+      ) as Listed[];
+    } catch (error) {
+      failure = error; // the registry may still be initializing
+    }
     const jbot = plugins.find((entry) =>
       String(entry.source?.path ?? '').endsWith('opencode/plugins/jbot-review.js'),
     );
     if (jbot?.state?.status === 'active') return;
-    if (jbot?.state?.status === 'failed') break;
+    if (jbot?.state?.status === 'failed') {
+      throw new Error(`the jbot plugin failed to load: ${JSON.stringify(jbot.state)}`);
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error('opencode server did not load the jbot plugin from its hermetic config home.');
+  throw new Error(
+    'opencode server did not load the jbot plugin from its hermetic config home.' +
+      (failure
+        ? ` Last error: ${failure instanceof Error ? failure.message : String(failure)}`
+        : ''),
+  );
 }
 
 export interface OpencodeRuntime {
@@ -320,7 +342,8 @@ export async function startOpencode(
   const dataHome = mkdtempSync(join(tmpdir(), 'jbot-opencode-data-'));
   const sessionOptionsFile = join(dataHome, 'jbot-session-options.json');
   let server: SpawnedServer | undefined;
-  // Removed once the child has exited: a stopping server still writes there.
+  let spawned = false;
+  // Removed once the child is gone: a stopping server still writes there.
   const removeDataHome = () => {
     try {
       rmSync(dataHome, { recursive: true, force: true });
@@ -330,7 +353,7 @@ export async function startOpencode(
       );
     }
   };
-  const stopServer = () => (server ? server.close(removeDataHome) : removeDataHome());
+  const stopServer = () => (spawned ? server?.close() : removeDataHome());
   let client: OpenCodeClient;
   try {
     writeFileSync(sessionOptionsFile, '{}');
@@ -346,7 +369,8 @@ export async function startOpencode(
     });
     // 0: the OS picks a free port and the banner reports it.
     const port = options.port ?? parsePortEnv('JBOT_OPENCODE_PORT', 0);
-    server = await spawnServer(resolveOpencodeBin(), port, env, log);
+    spawned = true;
+    server = await spawnServer(resolveOpencodeBin(), port, env, log, removeDataHome);
     client = OpenCode.make({
       baseUrl: server.url,
       headers: { authorization: basicAuthHeader(server.password) },

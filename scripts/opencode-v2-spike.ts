@@ -138,9 +138,12 @@ try {
       `effort probe (${probeModel} effort=${probeEffort}): accepted — inconclusive unless the provider validates the value (reply: ${reply.slice(0, 40)})`,
     );
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const rejected = /reasoning[_ ]?effort|unknown variant|invalid|1210|\b400\b/i.test(message);
     log(
-      `effort probe (${probeModel} effort=${probeEffort}): options reached the provider (${(error instanceof Error ? error.message : String(error)).slice(0, 200)})`,
+      `effort probe (${probeModel} effort=${probeEffort}): ${rejected ? 'options reached the provider' : 'INCONCLUSIVE, unrelated failure'} (${message.slice(0, 200)})`,
     );
+    if (!rejected) process.exitCode = 1;
   }
 } finally {
   runtime.stop();
