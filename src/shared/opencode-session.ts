@@ -266,11 +266,12 @@ async function latestAssistant(
   return page.data?.[0] as unknown as AssistantMessage | undefined;
 }
 
-/** The turn's assistant messages, oldest first; `complete` is false when the page ended before the previous turn. */
+/** The turn's assistant messages, oldest first; `complete` is false when the page ended inside the turn. */
 async function assistantsSince(
   client: OpenCodeClient,
   sessionID: string,
   previousID: string | undefined,
+  startedAt: number,
 ): Promise<{ messages: AssistantMessage[]; complete: boolean }> {
   const page = await client.message.list(
     { sessionID, type: 'assistant', order: 'desc', limit: 500 },
@@ -279,7 +280,8 @@ async function assistantsSince(
   const messages: AssistantMessage[] = [];
   let complete = previousID === undefined;
   for (const message of (page.data ?? []) as unknown as AssistantMessage[]) {
-    if (message.id === previousID) {
+    // The previous turn's message may be gone (compaction); the turn's start bounds it too.
+    if (message.id === previousID || message.time.created < startedAt) {
       complete = true;
       break;
     }
@@ -474,6 +476,7 @@ async function promptHoldingSlot(
   let usage: PromptTokenUsage | undefined;
   try {
     const previous = await latestAssistant(client, sessionID);
+    const startedAt = Date.now();
     log(`Calling ${label} prompt (${spec.model})`);
     attempted = true;
     // No caller-supplied message id: the earlier v2 attempt stalled with one (ROADMAP).
@@ -547,7 +550,7 @@ async function promptHoldingSlot(
     // Usage spans the whole turn: V2 writes one assistant message per step.
     let turn: AssistantMessage[] = [message];
     try {
-      const since = await assistantsSince(client, sessionID, previous?.id);
+      const since = await assistantsSince(client, sessionID, previous?.id, startedAt);
       if (since.messages.length > 0) turn = since.messages;
       if (!since.complete)
         log(`${label} turn listing incomplete; usage and tools are under-counted`);
