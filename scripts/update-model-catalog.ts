@@ -78,7 +78,7 @@ function run(command: string, args: string[], label: string, env?: NodeJS.Proces
       maxBuffer: 20 * 1024 * 1024,
       timeout: COMMAND_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: env && { ...process.env, ...env },
+      env, // verbatim: callers that want the ambient env spread it themselves
     });
   } catch (cause) {
     throw new Error(
@@ -278,7 +278,10 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   );
   const dimModels = parseDimModelList(
     // The CLI self-updates by default, which would drift from the pinned image.
-    npmCliOutput('dimcode', 'dim', ['model', 'list'], { DIMCODE_DISABLE_AUTOUPDATE: '1' }),
+    npmCliOutput('dimcode', 'dim', ['model', 'list'], {
+      ...process.env,
+      DIMCODE_DISABLE_AUTOUPDATE: '1',
+    }),
   );
   const { opencode: opencodeModels, 'opencode-go': opencodeGoModels } = await listOpencodeModels();
   const { models: clineModels, llmsVersion } = await loadClineModels();
