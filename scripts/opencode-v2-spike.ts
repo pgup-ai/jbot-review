@@ -116,30 +116,31 @@ try {
     `shell filter reply (expect the second command denied): ${stashReply.replace(/\s+/g, ' ').slice(0, 300)}`,
   );
 
-  // Effort options reach the provider: x-preview-f rejects medium with a 400.
-  if (providerID === 'opencode') {
-    const probeModel = 'opencode/x-preview-f-free';
-    const probe = await createReviewSession(runtime, { label: 'effort-probe', model: probeModel });
-    const file = runtime.sessionOptionsFile;
-    const map = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-    map[probe] = { reasoningEffort: 'medium' };
-    writeFileSync(file, JSON.stringify(map));
-    try {
-      const reply = await promptInSession(runtime, probe, {
-        model: probeModel,
-        text: 'Reply with the single word ok.',
-        label: 'effort-probe',
-        timeoutMs: 120_000,
-        log,
-      });
-      log(
-        `effort probe: NOT applied — the provider accepted medium (reply: ${reply.slice(0, 60)})`,
-      );
-    } catch (error) {
-      log(
-        `effort probe: options reached the provider (${(error instanceof Error ? error.message : String(error)).slice(0, 160)})`,
-      );
-    }
+  // Effort options reach the provider: Zen's x-preview-f rejects medium; any other provider gets an invalid value.
+  const probeModel = providerID === 'opencode' ? 'opencode/x-preview-f-free' : model;
+  const probeEffort = providerID === 'opencode' ? 'medium' : 'bogus-effort';
+  const probe = await createReviewSession(runtime, { label: 'effort-probe', model: probeModel });
+  const map = JSON.parse(readFileSync(runtime.sessionOptionsFile, 'utf8')) as Record<
+    string,
+    unknown
+  >;
+  map[probe] = { reasoningEffort: probeEffort };
+  writeFileSync(runtime.sessionOptionsFile, JSON.stringify(map));
+  try {
+    const reply = await promptInSession(runtime, probe, {
+      model: probeModel,
+      text: 'Reply with the single word ok.',
+      label: 'effort-probe',
+      timeoutMs: 120_000,
+      log,
+    });
+    log(
+      `effort probe (${probeModel} effort=${probeEffort}): accepted — inconclusive unless the provider validates the value (reply: ${reply.slice(0, 40)})`,
+    );
+  } catch (error) {
+    log(
+      `effort probe (${probeModel} effort=${probeEffort}): options reached the provider (${(error instanceof Error ? error.message : String(error)).slice(0, 200)})`,
+    );
   }
 } finally {
   runtime.stop();
