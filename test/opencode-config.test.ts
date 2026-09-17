@@ -17,7 +17,9 @@ describe('permissionRules', () => {
     const rules = permissionRules();
     assert.deepEqual(rules[0], { action: 'shell', resource: '*', effect: 'allow' });
     assert.ok(
-      rules.some((r) => r.action === 'shell' && r.resource === 'git commit*' && r.effect === 'deny'),
+      rules.some(
+        (r) => r.action === 'shell' && r.resource === 'git commit*' && r.effect === 'deny',
+      ),
     );
     assert.deepEqual(rules.slice(-3), [
       { action: 'edit', resource: '*', effect: 'deny' },

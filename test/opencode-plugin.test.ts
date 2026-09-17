@@ -22,7 +22,10 @@ const tools = () => ({
     description: 'run',
     input: {
       type: 'object',
-      properties: { command: { type: 'string' }, timeout: { type: 'integer', exclusiveMinimum: 0 } },
+      properties: {
+        command: { type: 'string' },
+        timeout: { type: 'integer', exclusiveMinimum: 0 },
+      },
     },
   },
   read: { description: 'read', input: { type: 'object', properties: {} } },

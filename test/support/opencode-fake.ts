@@ -137,11 +137,13 @@ export function fakeOpencodeServer(
       };
       sessions.set(created.id, created);
       return json({
-        id: created.id,
-        agent: created.agent,
-        model: created.model,
-        title: body?.title,
-        location: body?.location,
+        data: {
+          id: created.id,
+          agent: created.agent,
+          model: created.model,
+          title: body?.title,
+          location: body?.location,
+        },
       });
     }
     if (session && method === 'POST' && path.endsWith('/fork')) {
@@ -154,7 +156,7 @@ export function fakeOpencodeServer(
         forkedFrom: session.id,
       };
       sessions.set(forked.id, forked);
-      return json({ id: forked.id, agent: forked.agent, model: forked.model });
+      return json({ data: { id: forked.id, agent: forked.agent, model: forked.model } });
     }
     if (session && method === 'PUT' && path.endsWith('/environment')) {
       session.environment = body.variables;
@@ -189,12 +191,14 @@ export function fakeOpencodeServer(
       pending.set(session.id, { done, finish });
       if (!r.hang) setTimeout(finish, r.delayMs ?? 0);
       return json({
-        id: next('inb'),
-        sessionID: session.id,
-        type: 'user',
-        time: { created: Date.now() },
-        payload: { text: body.text },
-        delivery: 'queue',
+        data: {
+          id: next('inb'),
+          sessionID: session.id,
+          type: 'user',
+          time: { created: Date.now() },
+          payload: { text: body.text },
+          delivery: 'queue',
+        },
       });
     }
     if (session && method === 'POST' && path.endsWith('/wait')) {
@@ -223,16 +227,20 @@ export function fakeOpencodeServer(
       return json({ data: data.slice(0, limit), cursor: {} });
     }
     if (session && method === 'GET' && path.endsWith('/export')) {
-      return json({ info: { id: session.id, agent: session.agent }, messages: session.messages });
+      return json({
+        data: { info: { id: session.id, agent: session.agent }, messages: session.messages },
+      });
     }
     if (method === 'GET' && path.endsWith('/stats')) {
       return json({
-        sessions: sessions.size,
-        prompts: prompts.length,
-        steps: prompts.length,
-        tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
-        cost: 0,
-        tools: {},
+        data: {
+          sessions: sessions.size,
+          prompts: prompts.length,
+          steps: prompts.length,
+          tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
+          cost: 0,
+          tools: {},
+        },
       });
     }
     if (method === 'GET' && path.endsWith('/plugin')) return json({ data: [] });
