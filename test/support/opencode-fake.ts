@@ -33,7 +33,7 @@ export interface FakeServer {
   calls: string[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   prompts: Array<{ sessionID: string; body: any }>;
-  models: Array<{ providerID: string; id: string; variants?: Array<{ id: string }> }>;
+  models: Array<{ providerID: string; id: string }>;
   /** Push an event to every open `/api/event` subscriber. */
   emit(event: Record<string, unknown>): void;
 }
@@ -51,9 +51,7 @@ export function fakeOpencodeServer(
   const subscribers = new Set<(chunk: string) => void>();
   const calls: string[] = [];
   const prompts: FakeServer['prompts'] = [];
-  const models = options.models ?? [
-    { providerID: 'openai', id: 'gpt-5', variants: [{ id: 'low' }, { id: 'jbot-verify' }] },
-  ];
+  const models = options.models ?? [{ providerID: 'openai', id: 'gpt-5' }];
 
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {

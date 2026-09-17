@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { OpenCodeClient } from '@opencode/client';
 import { parseModelName } from '@symma/protocol';
@@ -9,6 +9,8 @@ import {
   WRAPUP_AGENT,
   permissionRules,
   sessionEnvironment,
+  sessionModelOptions,
+  type OptionTier,
 } from './opencode-config.ts';
 import type { OpencodeRuntime } from './opencode-server.ts';
 import { WRAP_UP_PROMPT } from './prompt.ts';
@@ -183,7 +185,8 @@ export interface PromptResult {
 export interface CreateSessionSpec {
   label: string;
   model: string;
-  variant?: string;
+  /** Which configured options the session gets; verification runs one tier below the finder. */
+  tier?: OptionTier;
   /** Defaults to the plan agent; single-shot models get jbot-plain. */
   agent?: string;
   /** Fork this session's history instead of starting empty. */
@@ -194,9 +197,9 @@ function location(runtime: OpencodeRuntime) {
   return { directory: runtime.workspace };
 }
 
-function modelRef(model: string, variant?: string) {
+function modelRef(model: string) {
   const { providerID, modelID } = parseModelName(model);
-  return { providerID, id: modelID, ...(variant ? { variant } : {}) };
+  return { providerID, id: modelID };
 }
 
 /** A session at the workspace with the ruleset, the agent, the model, and an allowlisted shell env. */
@@ -206,7 +209,7 @@ export async function createReviewSession(
 ): Promise<string> {
   const { client } = runtime;
   const agent = spec.agent ?? MAIN_AGENT;
-  const model = modelRef(spec.model, spec.variant);
+  const model = modelRef(spec.model);
   let sessionID: string;
   if (spec.forkFrom) {
     sessionID = (await client.session.fork({ sessionID: spec.forkFrom })).id;
@@ -225,7 +228,34 @@ export async function createReviewSession(
   }
   await client.session.environment({ sessionID, variables: sessionEnvironment() });
   rememberLabel(client, sessionID, spec.label);
+  registerSessionOptions(runtime, sessionID, spec.model, spec.tier ?? 'main');
   return sessionID;
+}
+
+const sessionOptionsByRuntime = new WeakMap<
+  OpencodeRuntime,
+  Record<string, Record<string, unknown>>
+>();
+
+/**
+ * Publishes the session's provider options for the plugin's `context` hook,
+ * which re-reads the file per request. The whole map is swapped in atomically.
+ */
+function registerSessionOptions(
+  runtime: OpencodeRuntime,
+  sessionID: string,
+  model: string,
+  tier: OptionTier,
+): void {
+  if (!runtime.sessionOptionsFile || !runtime.modelOptions) return;
+  const options = sessionModelOptions(runtime.modelOptions, model, tier);
+  if (!options) return;
+  const map = sessionOptionsByRuntime.get(runtime) ?? {};
+  map[sessionID] = options;
+  sessionOptionsByRuntime.set(runtime, map);
+  const tmp = `${runtime.sessionOptionsFile}.tmp`;
+  writeFileSync(tmp, JSON.stringify(map));
+  renameSync(tmp, runtime.sessionOptionsFile);
 }
 
 async function latestAssistant(
@@ -649,12 +679,9 @@ export function startProgressLogger(
   void (async () => {
     try {
       for await (const event of client.event.subscribe({ signal: controller.signal })) {
-        const raw = event as {
-          type?: string;
-          properties?: Record<string, unknown>;
-          sessionID?: string;
-        };
-        const props = (raw.properties ?? raw) as Record<string, unknown>;
+        // V2 events carry their payload under `data` (measured; V1 used `properties`).
+        const raw = event as { type?: string; data?: Record<string, unknown>; sessionID?: string };
+        const props = (raw.data ?? raw) as Record<string, unknown>;
         const sessionID = (props.sessionID ?? raw.sessionID) as string | undefined;
         const label = sessionID ? labelsByClient.get(client)?.get(sessionID) : undefined;
         if (!label) continue;

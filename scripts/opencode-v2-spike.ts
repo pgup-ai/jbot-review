@@ -2,7 +2,7 @@
 //   JBOT_SPIKE_MODEL=openai/gpt-5 JBOT_SPIKE_KEY=$OPENAI_API_KEY npx tsx scripts/opencode-v2-spike.ts
 // Re-run after every @opencode/cli bump; it exercises the real server + driver.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -45,12 +45,11 @@ const runtime = await startOpencode(
 );
 process.env.JBOT_SPIKE_CANARY = 'canary-value';
 try {
-  // S6: do config overrides on a catalog model surface as variants?
-  const listed =
-    (await runtime.client.model.list({ location: { directory: workspace } })).data ?? [];
-  const mine = listed.find((m) => m.providerID === providerID && m.id === modelID);
+  // S6: config model overrides do not apply to catalog models (measured 2026-09-17), so
+  // tier options travel per session through the plugin; this shows what it will read.
+  const verifyID = await createReviewSession(runtime, { label: 'verify', model, tier: 'verify' });
   log(
-    `S6 ${model}: settings=${JSON.stringify(mine?.settings ?? null)} variants=${(mine?.variants ?? []).map((v) => v.id).join('|') || 'none'} (expect reasoningEffort medium + jbot-verify when config overrides apply)`,
+    `S6 session options file: ${readFileSync(runtime.sessionOptionsFile!, 'utf8')} (expect ${verifyID} → the verify tier)`,
   );
 
   // S7: raw shape of one tool event from the global stream, for the progress logger.
@@ -59,7 +58,7 @@ try {
     try {
       for await (const event of runtime.client.event.subscribe({ signal: ac.signal })) {
         if ((event as { type?: string }).type === 'session.tool.called') {
-          log(`S7 tool event: ${JSON.stringify(event).slice(0, 300)}`);
+          log(`S7 tool event: ${JSON.stringify(event).slice(0, 900)}`);
           break;
         }
       }

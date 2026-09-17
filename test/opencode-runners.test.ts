@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { OpencodeRuntime } from '../src/shared/opencode-server.ts';
 import {
@@ -75,25 +78,23 @@ describe('runReview on V2', () => {
 });
 
 describe('runFindingVerification on V2', () => {
-  it('selects the jbot-verify variant only when verifier options were configured', async () => {
+  it('registers the verify tier only when verifier options were configured', async () => {
     const fake = fakeOpencodeServer(() => ({ text: verdicts }));
-    await runFindingVerification(
-      runtime(fake),
-      'openai/gpt-5',
-      'ctx',
-      [finding],
-      log,
-      undefined,
-      undefined,
-      {
-        reasoningEffort: 'low',
+    const sessionOptionsFile = join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json');
+    const rt = runtime(fake, {
+      sessionOptionsFile,
+      modelOptions: {
+        'openai/gpt-5': { main: { reasoningEffort: 'medium' }, verify: { reasoningEffort: 'low' } },
       },
+    });
+    await runFindingVerification(rt, 'openai/gpt-5', 'ctx', [finding], log, undefined, undefined, {
+      reasoningEffort: 'low',
+    });
+    await runFindingVerification(rt, 'openai/gpt-5', 'ctx', [finding], log);
+    const tiers = Object.values(JSON.parse(readFileSync(sessionOptionsFile, 'utf8'))).map(
+      (o) => (o as { reasoningEffort: string }).reasoningEffort,
     );
-    await runFindingVerification(runtime(fake), 'openai/gpt-5', 'ctx', [finding], log);
-    const models = [...fake.sessions.values()].map(
-      (s) => (s.model as { variant?: string }).variant,
-    );
-    assert.deepEqual(models, ['jbot-verify', undefined]);
+    assert.deepEqual(tiers, ['low', 'medium']);
   });
 
   it('forks the single main review session when JBOT_VERIFY_FORK is on', async () => {

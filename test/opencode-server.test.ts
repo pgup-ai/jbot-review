@@ -57,6 +57,7 @@ describe('childEnv', () => {
     config: { a: 1 },
     configHome: '/cfg',
     dataHome: '/data',
+    sessionOptionsFile: '/data/jbot-session-options.json',
   };
 
   it('scrubs credentials, adds provider keys, and pins the hermetic V2 variables', () => {
@@ -70,6 +71,7 @@ describe('childEnv', () => {
       XDG_CONFIG_HOME: '/cfg',
       XDG_DATA_HOME: '/data',
       OPENCODE_CONFIG_CONTENT: '{"a":1}',
+      JBOT_OPENCODE_SESSION_OPTIONS: '/data/jbot-session-options.json',
     });
   });
 

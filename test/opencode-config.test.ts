@@ -4,12 +4,13 @@ import {
   MAIN_AGENT,
   PLAIN_AGENT,
   REVIEWER_AGENT,
-  VERIFY_VARIANT,
   WRAPUP_AGENT,
   buildConfig,
+  modelOptionsByModel,
   permissionRules,
   providerKeyVariables,
   sessionEnvironment,
+  sessionModelOptions,
 } from '../src/shared/opencode-config.ts';
 
 describe('permissionRules', () => {
@@ -53,7 +54,7 @@ describe('buildConfig', () => {
     assert.equal(MAIN_AGENT, 'plan');
   });
 
-  it('writes main options as model settings and verifier options as the jbot-verify variant', () => {
+  it('keeps a catalog provider to its cache setting; options never go through config', () => {
     const config = buildConfig({
       models: [
         {
@@ -67,17 +68,7 @@ describe('buildConfig', () => {
       ],
       reviewerSystem: 's',
     });
-    assert.deepEqual(config.providers, {
-      openai: {
-        settings: { setCacheKey: true },
-        models: {
-          'gpt-5': {
-            settings: { reasoningEffort: 'medium' },
-            variants: [{ id: VERIFY_VARIANT, settings: { reasoningEffort: 'low' } }],
-          },
-        },
-      },
-    });
+    assert.deepEqual(config.providers, { openai: { settings: { setCacheKey: true } } });
   });
 
   it('emits a full custom provider entry with the key in config', () => {
@@ -120,28 +111,39 @@ describe('buildConfig', () => {
       /base URL/,
     );
   });
+});
 
-  it('merges a second model of the same provider instead of replacing it', () => {
-    const config = buildConfig({
-      models: [
-        {
-          providerID: 'openai',
-          modelID: 'gpt-5',
-          apiKey: 'k',
-          promptCache: false,
-          modelOptions: { reasoningEffort: 'high' },
-        },
-        {
-          providerID: 'openai',
-          modelID: 'gpt-5-mini',
-          apiKey: 'k',
-          promptCache: false,
-          modelOptions: { reasoningEffort: 'low' },
-        },
-      ],
-      reviewerSystem: 's',
+describe('modelOptionsByModel', () => {
+  it('keys supported options by model and tier; a session falls back to the main tier', () => {
+    const byModel = modelOptionsByModel([
+      {
+        providerID: 'openai',
+        modelID: 'gpt-5',
+        apiKey: 'k',
+        promptCache: false,
+        modelOptions: { reasoningEffort: 'medium' },
+        verificationModelOptions: { reasoningEffort: 'low' },
+      },
+      {
+        providerID: 'openai',
+        modelID: 'gpt-5-mini',
+        apiKey: 'k',
+        promptCache: false,
+        modelOptions: { reasoningEffort: 'high' },
+      },
+      { providerID: 'opencode', modelID: 'mimo-v2.5-free', apiKey: 'k', promptCache: false },
+    ]);
+    assert.deepEqual(byModel, {
+      'openai/gpt-5': { main: { reasoningEffort: 'medium' }, verify: { reasoningEffort: 'low' } },
+      'openai/gpt-5-mini': { main: { reasoningEffort: 'high' } },
     });
-    assert.deepEqual(Object.keys(config.providers.openai.models), ['gpt-5', 'gpt-5-mini']);
+    assert.deepEqual(sessionModelOptions(byModel, 'openai/gpt-5', 'verify'), {
+      reasoningEffort: 'low',
+    });
+    assert.deepEqual(sessionModelOptions(byModel, 'openai/gpt-5-mini', 'verify'), {
+      reasoningEffort: 'high',
+    });
+    assert.equal(sessionModelOptions(byModel, 'opencode/mimo-v2.5-free', 'main'), undefined);
   });
 });
 

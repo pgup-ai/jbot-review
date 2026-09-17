@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -57,6 +58,28 @@ describe('jbot opencode plugin', () => {
       const event = { agent, tools: tools() };
       context(event);
       assert.deepEqual(event.tools, {}, agent);
+    }
+  });
+
+  it('applies the options registered for the session and nothing for unknown ones', async () => {
+    const { context } = await loadPlugin();
+    const file = join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json');
+    writeFileSync(file, JSON.stringify({ ses_1: { reasoningEffort: 'low' } }));
+    process.env.JBOT_OPENCODE_SESSION_OPTIONS = file;
+    try {
+      const known = {
+        agent: 'plan',
+        tools: tools(),
+        sessionID: 'ses_1',
+        options: { temperature: 0 },
+      };
+      context(known);
+      assert.deepEqual(known.options, { temperature: 0, reasoningEffort: 'low' });
+      const unknown = { agent: 'plan', tools: tools(), sessionID: 'ses_2', options: {} };
+      context(unknown);
+      assert.deepEqual(unknown.options, {});
+    } finally {
+      delete process.env.JBOT_OPENCODE_SESSION_OPTIONS;
     }
   });
 

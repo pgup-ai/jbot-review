@@ -1,9 +1,15 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpenCode, type OpenCodeClient } from '@opencode/client';
-import { buildConfig, providerKeyVariables, type ModelEntry } from './opencode-config.ts';
+import {
+  buildConfig,
+  modelOptionsByModel,
+  providerKeyVariables,
+  type ModelEntry,
+  type ModelOptionsByModel,
+} from './opencode-config.ts';
 import { hermeticOpencodeConfigHome } from './opencode-plugin.ts';
 import { startProgressLogger } from './opencode-session.ts';
 import { REVIEWER_SYSTEM_PROMPT } from './prompt.ts';
@@ -105,6 +111,8 @@ export interface ChildEnvInput {
   config: unknown;
   configHome: string;
   dataHome: string;
+  /** JSON map sessionID → provider options, read by the jbot plugin per request. */
+  sessionOptionsFile: string;
   proxyEnv?: NodeJS.ProcessEnv;
 }
 
@@ -127,6 +135,7 @@ export function childEnv(input: ChildEnvInput): Record<string, string> {
     XDG_CONFIG_HOME: input.configHome,
     XDG_DATA_HOME: input.dataHome,
     OPENCODE_CONFIG_CONTENT: JSON.stringify(input.config),
+    JBOT_OPENCODE_SESSION_OPTIONS: input.sessionOptionsFile,
   });
   return env;
 }
@@ -219,6 +228,9 @@ export async function waitForModels(
 export interface OpencodeRuntime {
   client: OpenCodeClient;
   workspace: string;
+  /** Provider options per model and tier; sessions register theirs in sessionOptionsFile. */
+  modelOptions?: ModelOptionsByModel;
+  sessionOptionsFile?: string;
   /** Directory for `session.export` transcripts; unset = no export. */
   transcriptDir?: string;
   /** JBOT_VERIFY_FORK: verification forks the single main review session. */
@@ -276,6 +288,8 @@ export async function startOpencode(
   ];
   const config = buildConfig({ models, reviewerSystem: REVIEWER_SYSTEM_PROMPT });
   const dataHome = mkdtempSync(join(tmpdir(), 'jbot-opencode-data-'));
+  const sessionOptionsFile = join(dataHome, 'jbot-session-options.json');
+  writeFileSync(sessionOptionsFile, '{}');
   const env = childEnv({
     base: process.env,
     scrub: options.scrubEnv !== false,
@@ -283,6 +297,7 @@ export async function startOpencode(
     config,
     configHome: hermeticOpencodeConfigHome(),
     dataHome,
+    sessionOptionsFile,
     proxyEnv: options.proxyEnv,
   });
   const port = options.port ?? parsePortEnv('JBOT_OPENCODE_PORT', 4096);
@@ -324,6 +339,8 @@ export async function startOpencode(
   return {
     client,
     workspace,
+    modelOptions: modelOptionsByModel(models),
+    sessionOptionsFile,
     transcriptDir: options.transcriptDir,
     verifyFork: options.verifyFork,
     reviewerAgent: options.reviewerAgent,

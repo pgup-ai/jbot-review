@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { OpencodeRuntime } from '../src/shared/opencode-server.ts';
 import {
@@ -11,23 +14,23 @@ import {
 import { fakeOpencodeServer } from './support/opencode-fake.ts';
 
 const log = () => undefined;
-const runtime = (fake: ReturnType<typeof fakeOpencodeServer>): OpencodeRuntime => ({
+const runtime = (
+  fake: ReturnType<typeof fakeOpencodeServer>,
+  extra: Partial<OpencodeRuntime> = {},
+): OpencodeRuntime => ({
   client: fake.client,
   workspace: '/ws',
   stop: () => undefined,
+  ...extra,
 });
 
 describe('createReviewSession', () => {
   it('creates a plan session at the workspace with the ruleset and replaces its shell env', async () => {
     const fake = fakeOpencodeServer(() => ({ text: '{}' }));
-    const id = await createReviewSession(runtime(fake), {
-      label: 'review',
-      model: 'openai/gpt-5',
-      variant: 'jbot-verify',
-    });
+    const id = await createReviewSession(runtime(fake), { label: 'review', model: 'openai/gpt-5' });
     const session = fake.sessions.get(id)!;
     assert.equal(session.agent, 'plan');
-    assert.deepEqual(session.model, { providerID: 'openai', id: 'gpt-5', variant: 'jbot-verify' });
+    assert.deepEqual(session.model, { providerID: 'openai', id: 'gpt-5' });
     assert.ok(Array.isArray(session.permissions) && session.permissions.length > 0);
     assert.ok(session.environment && 'PATH' in session.environment);
     assert.equal('OPENCODE_CONFIG_CONTENT' in session.environment!, false);
@@ -42,13 +45,33 @@ describe('createReviewSession', () => {
     const id = await createReviewSession(runtime(fake), {
       label: 'finding-verification',
       model: 'openai/gpt-5',
-      variant: 'jbot-verify',
       forkFrom: main,
     });
     const forked = fake.sessions.get(id)!;
     assert.equal(forked.forkedFrom, main);
     assert.equal(forked.agent, 'plan');
-    assert.deepEqual(forked.model, { providerID: 'openai', id: 'gpt-5', variant: 'jbot-verify' });
+    assert.deepEqual(forked.model, { providerID: 'openai', id: 'gpt-5' });
+  });
+
+  it("publishes each session's tier options to the file the plugin reads", async () => {
+    const fake = fakeOpencodeServer(() => ({ text: '{}' }));
+    const sessionOptionsFile = join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json');
+    const rt = runtime(fake, {
+      sessionOptionsFile,
+      modelOptions: {
+        'openai/gpt-5': { main: { reasoningEffort: 'medium' }, verify: { reasoningEffort: 'low' } },
+      },
+    });
+    const main = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
+    const verify = await createReviewSession(rt, {
+      label: 'finding-verification',
+      model: 'openai/gpt-5',
+      tier: 'verify',
+    });
+    assert.deepEqual(JSON.parse(readFileSync(sessionOptionsFile, 'utf8')), {
+      [main]: { reasoningEffort: 'medium' },
+      [verify]: { reasoningEffort: 'low' },
+    });
   });
 });
 
@@ -203,14 +226,11 @@ describe('startProgressLogger', () => {
     const stop = startProgressLogger(rt.client, (m) => lines.push(m));
     const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
     await new Promise((r) => setTimeout(r, 50));
-    fake.emit({ type: 'session.tool.called', properties: { sessionID: id, tool: 'shell' } });
-    fake.emit({
-      type: 'session.tool.called',
-      properties: { sessionID: 'ses_unknown', tool: 'read' },
-    });
+    fake.emit({ type: 'session.tool.called', data: { sessionID: id, tool: 'shell' } });
+    fake.emit({ type: 'session.tool.called', data: { sessionID: 'ses_unknown', tool: 'read' } });
     fake.emit({
       type: 'session.execution.failed',
-      properties: { sessionID: id, error: { message: 'quota' } },
+      data: { sessionID: id, error: { message: 'quota' } },
     });
     await new Promise((r) => setTimeout(r, 50));
     stop();

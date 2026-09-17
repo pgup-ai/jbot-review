@@ -12,13 +12,17 @@ import { join } from 'node:path';
  * (wrap-up, single-shot models). `question` goes too: it waits for an
  * interactive form nothing in CI can answer. The schema walk keeps
  * Gemini-backed proxies happy (they 400 on `exclusiveMinimum`; `minimum: 1`
- * is the same contract for integers). The permission hook answers any `ask`
- * with deny. Plain object export: V2's `Plugin.define` is the identity
- * function, so no import is needed. Setup runs lazily on the first prompt.
- * JBOT_OPENCODE_PLUGIN_MARKER lets the E2E test prove the plugin loaded.
+ * is the same contract for integers). Per-session provider options (effort
+ * tiers) come from the JSON file JBOT_OPENCODE_SESSION_OPTIONS names — V2
+ * ignores config model overrides on catalog providers, and `event.options`
+ * is the request-time equivalent of V1's per-model options. The permission
+ * hook answers any `ask` with deny. Plain object export: V2's `Plugin.define`
+ * is the identity function, so no import is needed. Setup runs lazily on the
+ * first prompt. JBOT_OPENCODE_PLUGIN_MARKER lets the E2E test prove the
+ * plugin loaded.
  */
 const PLUGIN_SOURCE = `// jbot-review opencode plugin; rationale in src/shared/opencode-plugin.ts.
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 const STRIP = new Set(['write', 'edit', 'patch', 'multiedit', 'question']);
 const TOOL_LESS_AGENTS = new Set(['jbot-wrapup', 'jbot-plain']);
 
@@ -37,6 +41,16 @@ function geminiSafe(node) {
   for (const value of Object.values(node)) geminiSafe(value);
 }
 
+function sessionOptions(sessionID) {
+  const file = process.env.JBOT_OPENCODE_SESSION_OPTIONS;
+  if (!file) return undefined;
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'))[sessionID];
+  } catch {
+    return undefined;
+  }
+}
+
 export default {
   id: 'jbot-review',
   async setup(ctx) {
@@ -44,6 +58,8 @@ export default {
     await ctx.session.hook('context', (event) => {
       stripTools(event.tools, event.agent);
       geminiSafe(event.tools);
+      const options = sessionOptions(event.sessionID);
+      if (options) Object.assign(event.options, options);
     });
     await ctx.permission.hook('evaluate', (event) => {
       if (event.effect === 'ask') {

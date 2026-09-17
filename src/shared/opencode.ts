@@ -2,7 +2,7 @@ import { parseModelName } from '@symma/protocol';
 import { modelSupportsAgenticTools } from './config.ts';
 import { isContext7QuotaError } from './context7.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
-import { VERIFY_VARIANT } from './opencode-config.ts';
+import type { OptionTier } from './opencode-config.ts';
 import type { OpencodeRuntime } from './opencode-server.ts';
 import {
   agentForModel,
@@ -461,8 +461,8 @@ export async function runFindingVerification(
     onTokenUsage,
     undefined,
     {
-      // The verifier's own tier rides the variant buildConfig registered for it.
-      variant: modelOptions ? VERIFY_VARIANT : undefined,
+      // Its own tier exists only when the runner registered verifier options at boot (V1's alias rule).
+      tier: modelOptions ? 'verify' : 'main',
       forkFrom,
     },
   );
@@ -508,13 +508,13 @@ async function promptPlanAgent(
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
   outcome?: PromptOutcome,
-  session: { variant?: string; forkFrom?: string } = {},
+  session: { tier?: OptionTier; forkFrom?: string } = {},
 ): Promise<{ raw: string; sessionID: string }> {
   log(`Creating ${label} session`);
   const sessionID = await createReviewSession(runtime, {
     label,
     model,
-    variant: session.variant,
+    tier: session.tier,
     forkFrom: session.forkFrom,
     agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent),
   });

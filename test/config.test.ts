@@ -412,7 +412,7 @@ describe('openai-compatible custom provider', () => {
     assert.equal(entry.settings.baseURL, 'https://proxy.example/v1');
     assert.equal('setCacheKey' in entry.settings, false);
     assert.equal(entry.models['served-model'].modelID, 'served-model');
-    assert.deepEqual(entry.models['served-model'].settings, { temperature: 0 });
+    assert.equal('settings' in entry.models['served-model'], false, 'options go per session');
   });
 
   it('embeds a custom provider selected only for auxiliary sessions', () => {
@@ -459,8 +459,6 @@ describe('openai-compatible custom provider', () => {
     });
     const models = config.providers['openai-compatible'].models;
     assert.deepEqual(Object.keys(models), ['main-model', 'aux-model']);
-    assert.deepEqual(models['main-model'].settings, { temperature: 0 });
-    assert.equal('settings' in models['aux-model'], false);
   });
 
   it('rejects incomplete custom entries before starting OpenCode', () => {

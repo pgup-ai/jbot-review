@@ -8,8 +8,6 @@ export const REVIEWER_AGENT = 'jbot-reviewer';
 /** jbot agents whose deny-all ruleset hides every tool; the plugin strips them too. */
 export const WRAPUP_AGENT = 'jbot-wrapup';
 export const PLAIN_AGENT = 'jbot-plain';
-/** Variant carrying the verifier's own options (one effort tier below the finder). */
-export const VERIFY_VARIANT = 'jbot-verify';
 
 export interface PermissionRule {
   action: string;
@@ -116,18 +114,11 @@ export function sessionEnvironment(env: NodeJS.ProcessEnv = process.env): Record
   return variables;
 }
 
-export interface OpencodeConfigInput {
-  /** Root model first, then auxiliary entries. */
-  models: ModelEntry[];
-  /** System prompt of the opt-in reviewer agent (REVIEWER_SYSTEM_PROMPT). */
-  reviewerSystem: string;
-}
-
-type ModelOverride = Record<string, unknown>;
-type ProviderEntry = {
-  settings?: Record<string, unknown>;
-  models?: Record<string, ModelOverride>;
-} & Record<string, unknown>;
+export type OptionTier = 'main' | 'verify';
+export type ModelOptionsByModel = Record<
+  string,
+  Partial<Record<OptionTier, Record<string, unknown>>>
+>;
 
 function nonEmpty(
   options: Record<string, unknown> | undefined,
@@ -135,31 +126,61 @@ function nonEmpty(
   return options && Object.keys(options).length > 0 ? options : undefined;
 }
 
-function modelOverride(entry: ModelEntry, custom: boolean): ModelOverride {
-  const { providerID, modelID } = entry;
-  const main = nonEmpty(supportedModelOptions(providerID, modelID, entry.modelOptions));
-  // The verifier's tier rounds down on ladders that lack it (same rule as V1's alias).
-  const verify = nonEmpty(
-    supportedModelOptions(providerID, modelID, entry.verificationModelOptions, 'down'),
-  );
-  return {
-    ...(custom
-      ? {
-          name: modelID,
-          modelID,
-          capabilities: { tools: true, input: ['text'], output: ['text'] },
-          // Conservative: V2 compacts by context limit; an undeclared custom model gets these.
-          limit: { context: 200_000, output: 32_000 },
-        }
-      : {}),
-    ...(main ? { settings: main } : {}),
-    ...(verify ? { variants: [{ id: VERIFY_VARIANT, settings: verify }] } : {}),
-  };
+/**
+ * Provider options per `provider/model` and tier. V2 ignores config model
+ * overrides on catalog providers (measured), so the jbot plugin applies these
+ * per session through its `context` hook instead — V1's per-model options,
+ * one mechanism for every provider. The verifier's tier rounds down on
+ * ladders that lack it, as V1's alias entry did.
+ */
+export function modelOptionsByModel(models: ModelEntry[]): ModelOptionsByModel {
+  const byModel: ModelOptionsByModel = {};
+  for (const entry of models) {
+    if (!entry.modelID) continue;
+    const main = nonEmpty(
+      supportedModelOptions(entry.providerID, entry.modelID, entry.modelOptions),
+    );
+    const verify = nonEmpty(
+      supportedModelOptions(
+        entry.providerID,
+        entry.modelID,
+        entry.verificationModelOptions,
+        'down',
+      ),
+    );
+    if (!main && !verify) continue;
+    byModel[`${entry.providerID}/${entry.modelID}`] = {
+      ...(main ? { main } : {}),
+      ...(verify ? { verify } : {}),
+    };
+  }
+  return byModel;
 }
+
+/** Options for one session: the verify tier when it was configured, else the model's own. */
+export function sessionModelOptions(
+  byModel: ModelOptionsByModel,
+  model: string,
+  tier: OptionTier,
+): Record<string, unknown> | undefined {
+  const entry = byModel[model];
+  return (tier === 'verify' ? entry?.verify : undefined) ?? entry?.main;
+}
+
+export interface OpencodeConfigInput {
+  /** Root model first, then auxiliary entries. */
+  models: ModelEntry[];
+  /** System prompt of the opt-in reviewer agent (REVIEWER_SYSTEM_PROMPT). */
+  reviewerSystem: string;
+}
+
+type ProviderEntry = {
+  settings?: Record<string, unknown>;
+  models?: Record<string, Record<string, unknown>>;
+} & Record<string, unknown>;
 
 function mergeProvider(providers: Record<string, ProviderEntry>, entry: ModelEntry): void {
   const custom = PROVIDERS[entry.providerID]?.custom;
-  const override = modelOverride(entry, Boolean(custom));
   const existing = providers[entry.providerID];
   // `setCacheKey` is V1's promptCacheKey toggle; spike S3 confirms the V2 key name.
   const settings = entry.promptCache ? { setCacheKey: true } : {};
@@ -177,19 +198,21 @@ function mergeProvider(providers: Record<string, ProviderEntry>, entry: ModelEnt
         baseURL: entry.baseURL,
         apiKey: entry.apiKey,
       },
-      models: { ...existing?.models, [entry.modelID]: override },
+      models: {
+        ...existing?.models,
+        [entry.modelID]: {
+          name: entry.modelID,
+          modelID: entry.modelID,
+          capabilities: { tools: true, input: ['text'], output: ['text'] },
+          // Conservative: V2 compacts by context limit; an undeclared custom model gets these.
+          limit: { context: 200_000, output: 32_000 },
+        },
+      },
     };
     return;
   }
-  const hasOverride = Object.keys(override).length > 0;
-  if (!hasOverride && Object.keys(settings).length === 0) return;
-  providers[entry.providerID] = {
-    ...existing,
-    ...(Object.keys(settings).length ? { settings: { ...existing?.settings, ...settings } } : {}),
-    ...(hasOverride || existing?.models
-      ? { models: { ...existing?.models, ...(hasOverride ? { [entry.modelID]: override } : {}) } }
-      : {}),
-  };
+  if (Object.keys(settings).length === 0) return;
+  providers[entry.providerID] = { ...existing, settings: { ...existing?.settings, ...settings } };
 }
 
 /** Native V2 config for OPENCODE_CONFIG_CONTENT. Pure; exported for tests. */
