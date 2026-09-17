@@ -5,12 +5,16 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import type { OpencodeRuntime } from '../src/shared/opencode-server.ts';
 import {
+  abortOpencodeSessionsByLabel,
   disableContext7Mcp,
   enableContext7Mcp,
   finalizeOpencodeSessionsByLabel,
+  runAddressedPriorCommentsCheck,
   runFindingVerification,
+  runGuidelineComplianceCheck,
   runReview,
 } from '../src/shared/opencode.ts';
+import { CONTINUATION_NUDGE_PROMPT, NO_TOOLS_REVIEW_DIRECTIVE } from '../src/shared/prompt.ts';
 import type { Finding } from '../src/shared/types.ts';
 import { fakeOpencodeServer } from './support/opencode-fake.ts';
 
@@ -21,6 +25,8 @@ const runtime = (
 ): OpencodeRuntime => ({
   client: fake.client,
   workspace: '/ws',
+  modelOptions: {},
+  sessionOptionsFile: join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json'),
   stop: () => undefined,
   ...extra,
 });
@@ -41,23 +47,118 @@ describe('runReview on V2', () => {
     assert.deepEqual(result.findings, []);
     assert.equal(fake.prompts.length, 1);
     assert.equal([...fake.sessions.values()][0]!.agent, 'plan');
-  });
-
-  it('uses the reviewer agent when opted in', async () => {
-    const fake = fakeOpencodeServer(() => ({ text: '{"findings":[]}' }));
     await runReview(runtime(fake, { reviewerAgent: true }), 'openai/gpt-5', 'ctx', '', log);
-    assert.equal([...fake.sessions.values()][0]!.agent, 'jbot-reviewer');
+    assert.equal([...fake.sessions.values()][1]!.agent, 'jbot-reviewer');
   });
 
   it('repairs a malformed attempt with one same-session re-prompt', async () => {
     let n = 0;
     const fake = fakeOpencodeServer(() =>
-      ++n === 1 ? { text: 'not json' } : { text: '{"findings":[]}' },
+      ++n === 1 ? { text: '{"summary": "broken' } : { text: '{"findings":[]}' },
     );
     const result = await runReview(runtime(fake), 'openai/gpt-5', 'ctx', '', log);
     assert.deepEqual(result.findings, []);
     assert.equal(fake.prompts.length, 2);
     assert.equal(new Set(fake.prompts.map((p) => p.sessionID)).size, 1);
+    assert.match(fake.prompts[1]!.body.text, /could not be parsed as JSON/);
+  });
+
+  it('continues an abandoned turn (prose or reasoning-only) with one same-session nudge', async () => {
+    for (const first of [{ text: 'this is not json at all, sorry' }, {}]) {
+      let n = 0;
+      const fake = fakeOpencodeServer(() =>
+        ++n === 1 ? first : { text: '{"findings":[],"summary":"ok"}' },
+      );
+      const result = await runReview(runtime(fake), 'openai/gpt-5', 'ctx', '', log);
+      assert.equal(fake.prompts.length, 2);
+      assert.equal(fake.prompts[1]!.body.text, CONTINUATION_NUDGE_PROMPT);
+      assert.equal(result.summary, 'ok');
+    }
+  });
+
+  it('fails the run when the repair is also malformed or the wrap-up reply cannot be parsed', async () => {
+    const twice = fakeOpencodeServer(() => ({ text: '{"summary": "broken' }));
+    await assert.rejects(
+      runReview(runtime(twice), 'openai/gpt-5', 'ctx', '', log),
+      /unparseable JSON/,
+    );
+    assert.equal(twice.prompts.length, 2);
+    const cut = fakeOpencodeServer((session) =>
+      session.agent === 'jbot-wrapup' ? { text: 'not json' } : { hang: true },
+    );
+    const rt = runtime(cut);
+    const review = runReview(rt, 'openai/gpt-5', 'ctx', '', log, { timeoutMs: 60_000 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'review', log, 30_000), 1);
+    await assert.rejects(review, /unparseable JSON/);
+  });
+
+  it('keeps the BASE label abortable while a repair prompt is in flight', async () => {
+    let n = 0;
+    const fake = fakeOpencodeServer(() =>
+      ++n === 1 ? { text: '{"summary": "broken' } : { hang: true },
+    );
+    const rt = runtime(fake);
+    const pending = runReview(rt, 'openai/gpt-5', 'ctx', '', log, { timeoutMs: 5_000 }).catch(
+      (error: unknown) => error,
+    );
+    while (fake.prompts.length < 2) await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(abortOpencodeSessionsByLabel(rt.client, 'review', log), 1);
+    await pending;
+    assert.equal([...fake.sessions.values()][0]!.interrupted, 1);
+  });
+
+  it('reuses the main session for the guideline sweep and keeps main findings when it fails', async () => {
+    const main =
+      '{"findings":[{"path":"a.ts","line":1,"severity":"P1","title":"t","body":"b"}],"summary":"ok"}';
+    for (const sweep of [
+      { text: '{"findings":[{"path":"b.ts","line":2,"severity":"P2","title":"rule","body":"v"}]}' },
+      { text: '{}' },
+      { text: 'x', error: 'sweep unavailable' },
+    ]) {
+      let n = 0;
+      const fake = fakeOpencodeServer(() => (++n === 1 ? { text: main } : sweep));
+      const coverage: Array<{ state: string }> = [];
+      const result = await runReview(runtime(fake), 'openai/gpt-5', 'CTX', 'GUIDES', log, {
+        guidelineSweep: {
+          guidelines: 'FULL GUIDES',
+          onCoverage: (row) => coverage.push(row as { state: string }),
+        },
+      });
+      const ok = sweep.text?.startsWith('{"findings"');
+      assert.equal(fake.sessions.size, 1);
+      assert.equal(fake.prompts.length, 2);
+      assert.match(fake.prompts[1]!.body.text, /FULL GUIDES/);
+      assert.equal(result.findings.length, ok ? 2 : 1);
+      assert.equal(coverage[0]?.state, ok ? 'completed' : 'failed');
+    }
+  });
+
+  it('routes a single-shot model to the tool-less agent with the no-tools directive', async () => {
+    const fake = fakeOpencodeServer(() => ({ text: '{"findings":[]}' }));
+    await runReview(runtime(fake), 'openai-compatible/gemini-2.5-pro', 'ctx', '', log);
+    assert.equal([...fake.sessions.values()][0]!.agent, 'jbot-plain');
+    assert.ok(fake.prompts[0]!.body.text.includes(NO_TOOLS_REVIEW_DIRECTIVE.split('\n')[0]!));
+  });
+
+  it('records one usage row per attempted prompt, repair and failure included', async () => {
+    for (const replies of [
+      [{ text: '{"summary": "broken' }, { text: '{"findings":[]}' }],
+      [{ text: 'x', error: 'rejected' }],
+    ]) {
+      let n = 0;
+      const fake = fakeOpencodeServer(() => replies[Math.min(n++, replies.length - 1)]!);
+      const usages: Array<{ promptBytes?: number }> = [];
+      const run = runReview(runtime(fake), 'openai/gpt-5', 'ctx', '', log, {
+        onTokenUsage: (usage) => usages.push(usage),
+      });
+      if (replies.some((r) => r.error)) await assert.rejects(run, /rejected/);
+      else await run;
+      assert.deepEqual(
+        usages.map((u) => u.promptBytes),
+        fake.prompts.map((p) => Buffer.byteLength(p.body.text, 'utf8')),
+      );
+    }
   });
 
   it('marks a review wrapped up by the grace finalize partial and skips the guideline sweep', async () => {
@@ -77,7 +178,57 @@ describe('runReview on V2', () => {
   });
 });
 
+describe('auxiliary runners on V2', () => {
+  it('nudges an abandoned turn once, rejects wrong-field or malformed repairs, propagates transport failures', async () => {
+    const compliance = (fake: ReturnType<typeof fakeOpencodeServer>) =>
+      runGuidelineComplianceCheck(runtime(fake), 'openai/gpt-5', 'ctx', 'guides', log);
+    const addressed = (fake: ReturnType<typeof fakeOpencodeServer>) =>
+      runAddressedPriorCommentsCheck(runtime(fake), 'openai/gpt-5', 'ctx', log);
+    const sequence = (...replies: Array<Record<string, unknown>>) => {
+      let n = 0;
+      return fakeOpencodeServer(() => replies[Math.min(n++, replies.length - 1)]!);
+    };
+    let fake = sequence(
+      { text: 'prose, not json' },
+      { text: '{"findings":[{"path":"a.ts","line":1,"severity":"P2","title":"t","body":"b"}]}' },
+    );
+    assert.equal((await compliance(fake)).length, 1);
+    assert.equal(fake.prompts[1]!.body.text, CONTINUATION_NUDGE_PROMPT);
+    fake = sequence(
+      { text: 'prose' },
+      {
+        text: '{"summary":"","findings":[],"addressedPriorComments":[{"id":"PRRT_abc","addressedByCommit":"abc1234"}]}',
+      },
+    );
+    assert.deepEqual(await addressed(fake), [{ id: 'PRRT_abc', addressedByCommit: 'abc1234' }]);
+    await assert.rejects(
+      compliance(sequence({ text: '{}' }, { text: '{"addressedPriorComments":[]}' })),
+      /findings array/,
+    );
+    await assert.rejects(
+      addressed(sequence({ text: '{}' }, { text: '{"findings":[]}' })),
+      /addressedPriorComments array/,
+    );
+    await assert.rejects(
+      compliance(sequence({ text: 'prose' }, { text: 'x', error: 'socket hang up' })),
+      /socket hang up/,
+    );
+  });
+});
+
 describe('runFindingVerification on V2', () => {
+  it("cites each finding's evidence quote in the verifier prompt", async () => {
+    const fake = fakeOpencodeServer(() => ({ text: verdicts }));
+    await runFindingVerification(
+      runtime(fake),
+      'openai/gpt-5',
+      'ctx',
+      [{ ...finding, evidence: 'return x - tax;' } as Finding],
+      log,
+    );
+    assert.match(fake.prompts[0]!.body.text, /Cited line: return x - tax;/);
+  });
+
   it('registers the verify tier only when verifier options were configured', async () => {
     const fake = fakeOpencodeServer(() => ({ text: verdicts }));
     const sessionOptionsFile = join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json');
@@ -117,7 +268,7 @@ describe('runFindingVerification on V2', () => {
 });
 
 describe('context7 MCP on V2', () => {
-  it('adds and connects the remote server with Code Mode off, then disconnects it', async () => {
+  it('adds and connects the remote server, then disconnects it', async () => {
     const fake = fakeOpencodeServer(() => ({ text: '' }));
     const rt = runtime(fake);
     assert.equal(await enableContext7Mcp(rt, 'ctx7-key', log), true);

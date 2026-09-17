@@ -141,7 +141,9 @@ caret pin on `^1.x`.
 - Whole-stack change: V2 binary pin, config shape, plugin port, session-driving
   rewrite, auth plumbing, tests, docs. `src/shared/opencode.ts` is a
   review-quality trigger path, so the core benchmark subset should run
-  (three repetitions) before merge.
+  (three repetitions) before merge. (Cutover PR: the maintainer scaled this
+  down to one smoke pair × 2 arms × 1 repetition on the free Zen model,
+  advisory only, no ledger row; see the PR.)
 - Same failure class as the abandoned `sdk/v2` attempt; isolate the
   non-termination on a throwaway branch first, as ROADMAP prescribes.
 - Experimental endpoints on the critical path; `effect` is at an RC.

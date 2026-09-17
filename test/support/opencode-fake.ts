@@ -27,13 +27,11 @@ export interface FakeSession {
 
 export interface FakeServer {
   client: OpenCodeClient;
-  fetch: typeof fetch;
   sessions: Map<string, FakeSession>;
   /** `METHOD /path` in call order. */
   calls: string[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   prompts: Array<{ sessionID: string; body: any }>;
-  models: Array<{ providerID: string; id: string }>;
   /** Push an event to every open `/api/event` subscriber. */
   emit(event: Record<string, unknown>): void;
 }
@@ -229,21 +227,7 @@ export function fakeOpencodeServer(
         data: { info: { id: session.id, agent: session.agent }, messages: session.messages },
       });
     }
-    if (method === 'GET' && path.endsWith('/stats')) {
-      return json({
-        data: {
-          sessions: sessions.size,
-          prompts: prompts.length,
-          steps: prompts.length,
-          tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
-          cost: 0,
-          tools: {},
-        },
-      });
-    }
-    if (method === 'GET' && path.endsWith('/plugin')) return json({ data: [] });
     if (/\/mcp\//.test(path)) return noContent();
-    if (method === 'GET' && path.endsWith('/mcp')) return json({ data: [] });
     return json({ error: `unhandled ${method} ${path}` }, 404);
   };
 
@@ -256,5 +240,5 @@ export function fakeOpencodeServer(
     const chunk = `data: ${JSON.stringify(event)}\n\n`;
     for (const push of subscribers) push(chunk);
   };
-  return { client, fetch: fakeFetch, sessions, calls, prompts, models, emit };
+  return { client, sessions, calls, prompts, emit };
 }

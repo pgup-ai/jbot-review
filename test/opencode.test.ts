@@ -4,13 +4,15 @@ import { describe, it } from 'node:test';
 import {
   abortOpencodeSessionsByLabel,
   parseChangesSinceLastReviewSummary,
-  registerOpencodeSessionForAbort,
   sessionEnvDenyKeys,
   takeOpencodeProxyEnv,
-  unregisterOpencodeSessionForAbort,
   withCredentialEnvWithheld,
 } from '../src/shared/opencode.ts';
-import { recordAssistantTools } from '../src/shared/opencode-session.ts';
+import {
+  recordAssistantTools,
+  registerOpencodeSessionForAbort,
+  unregisterOpencodeSessionForAbort,
+} from '../src/shared/opencode-session.ts';
 import { fakeOpencodeServer } from './support/opencode-fake.ts';
 
 const noop = () => {};

@@ -1630,12 +1630,7 @@ export function formatUnverifiedFinding(finding: Pick<Finding, 'title' | 'body'>
   };
 }
 
-/**
- * System prompt of the opt-in jbot-reviewer agent (JBOT_REVIEWER_AGENT=1).
- * Replaces opencode's coding-agent system prompt for review turns; every
- * task-specific instruction still arrives in the user prompt, so this stays
- * short and stable (a cacheable prefix across sessions on one server).
- */
+/** System prompt of the opt-in jbot-reviewer agent; task instructions stay in the user prompt so this remains a short, cacheable prefix. */
 export const REVIEWER_SYSTEM_PROMPT = `You are an automated pull-request reviewer working in a read-only checkout.
 You never modify files or run commands that change state; you read, search, and run read-only git commands to establish facts.
 Follow the review instructions in the user message exactly, including the required output format.`;

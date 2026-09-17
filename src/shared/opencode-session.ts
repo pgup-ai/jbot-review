@@ -33,10 +33,10 @@ const PROMPT_TIMEOUT_MS = 15 * 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 /** Below undici's 300 s headersTimeout: `session.wait` answers only when the turn is idle. */
 const WAIT_SLICE_MS = 240_000;
-/** `session.wait` returned with the turn complete in every probe; this bounds the documented-but-unseen "admitted, not started" gap. */
+/** Bounds the documented but never-observed gap between `session.wait` returning and the message completing. */
 const SETTLE_POLL_MS = 1_000;
 const SETTLE_POLL_LIMIT = 10;
-const TRANSCRIPT_CAP_BYTES = 2 * 1024 * 1024;
+const TRANSCRIPT_CAP_CHARS = 2 * 1024 * 1024;
 export const OPENCODE_TELEMETRY_CAPABILITY = 'observable' as const;
 /** V2 tool ids → the names the shared telemetry classifier knows. */
 const TOOL_CLASS_ALIASES: Record<string, string> = { shell: 'bash', execute: 'bash' };
@@ -178,7 +178,7 @@ export interface PromptSpec {
   onTokenUsage?: TokenUsageRecorder;
   /** Grace-abort registry key; repair/continue prompts keep the BASE label. */
   abortLabel?: string;
-  /** Present only for callers that record a partial outcome (they may take the wrap-up reserve). */
+  /** Set by callers that accept a partial answer; its presence enables the wrap-up reserve. */
   outcome?: PromptOutcome;
   /** Test hook: reserve to keep for the wrap-up instead of wrapUpReserveMs(timeoutMs). */
   wrapUpReserveMs?: number;
@@ -186,24 +186,12 @@ export interface PromptSpec {
   waitSliceMs?: number;
 }
 
-export interface PromptResult {
-  text: string;
-  message: AssistantMessage;
-}
-
 export interface CreateSessionSpec {
   label: string;
   model: string;
-  /** Which configured options the session gets; verification runs one tier below the finder. */
   tier?: OptionTier;
-  /** Defaults to the plan agent; single-shot models get jbot-plain. */
   agent?: string;
-  /** Fork this session's history instead of starting empty. */
   forkFrom?: string;
-}
-
-function location(runtime: OpencodeRuntime) {
-  return { directory: runtime.workspace };
 }
 
 function modelRef(model: string) {
@@ -211,7 +199,6 @@ function modelRef(model: string) {
   return { providerID, id: modelID };
 }
 
-/** A session at the workspace with the ruleset, the agent, the model, and an allowlisted shell env. */
 export async function createReviewSession(
   runtime: OpencodeRuntime,
   spec: CreateSessionSpec,
@@ -227,7 +214,7 @@ export async function createReviewSession(
   } else {
     sessionID = (
       await client.session.create({
-        location: location(runtime),
+        location: { directory: runtime.workspace },
         agent,
         model,
         title: `jbot-review ${spec.label}`,
@@ -247,17 +234,13 @@ const sessionOptionsByRuntime = new WeakMap<
   Record<string, Record<string, unknown>>
 >();
 
-/**
- * Publishes the session's provider options for the plugin's `context` hook,
- * which re-reads the file per request. The whole map is swapped in atomically.
- */
+/** The file the plugin re-reads per request; tmp+rename so a read never sees a partial map. */
 function registerSessionOptions(
   runtime: OpencodeRuntime,
   sessionID: string,
   model: string,
   tier: OptionTier,
 ): void {
-  if (!runtime.sessionOptionsFile || !runtime.modelOptions) return;
   const options = sessionModelOptions(runtime.modelOptions, model, tier);
   if (!options) return;
   const map = sessionOptionsByRuntime.get(runtime) ?? {};
@@ -296,7 +279,7 @@ async function assistantsSince(
   return newer;
 }
 
-export function assistantText(message: AssistantMessage): string {
+function assistantText(message: AssistantMessage): string {
   return (message.content ?? [])
     .filter(
       (part): part is { type: 'text'; text: string } => part.type === 'text' && Boolean(part.text),
@@ -387,7 +370,6 @@ function isAbort(error: unknown): boolean {
   return names.some((name) => name === 'TimeoutError' || name === 'AbortError');
 }
 
-/** Blocks in `session.wait` (in slices below the fetch header timeout) until the turn is idle or the deadline passes. */
 async function waitForTurn(
   client: OpenCodeClient,
   sessionID: string,
@@ -444,9 +426,9 @@ async function exportTranscript(
       { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
     );
     let body = JSON.stringify(transcript, null, 2);
-    if (body.length > TRANSCRIPT_CAP_BYTES) {
+    if (body.length > TRANSCRIPT_CAP_CHARS) {
       body =
-        body.slice(0, TRANSCRIPT_CAP_BYTES) + `\n/* truncated at ${TRANSCRIPT_CAP_BYTES} bytes */`;
+        body.slice(0, TRANSCRIPT_CAP_CHARS) + `\n/* truncated at ${TRANSCRIPT_CAP_CHARS} chars */`;
     }
     mkdirSync(runtime.transcriptDir, { recursive: true });
     writeFileSync(join(runtime.transcriptDir, `${label}-${sessionID}.json`), body);
@@ -457,12 +439,11 @@ async function exportTranscript(
   }
 }
 
-/** One prompt turn in an existing session: prompt → wait → newest assistant message; wrap-up on a cut-off. */
 export async function promptInSession(
   runtime: OpencodeRuntime,
   sessionID: string,
   spec: PromptSpec,
-): Promise<PromptResult> {
+): Promise<string> {
   const release = sessionSlots ? await sessionSlots.acquire() : undefined;
   try {
     return await promptHoldingSlot(runtime, sessionID, spec);
@@ -475,7 +456,7 @@ async function promptHoldingSlot(
   runtime: OpencodeRuntime,
   sessionID: string,
   spec: PromptSpec,
-): Promise<PromptResult> {
+): Promise<string> {
   const { client } = runtime;
   const { label, log } = spec;
   const abortLabel = spec.abortLabel ?? label;
@@ -566,7 +547,7 @@ async function promptHoldingSlot(
       );
     }
     await exportTranscript(runtime, sessionID, label, log);
-    return { text, message };
+    return text;
   } finally {
     unregisterOpencodeSessionForAbort(client, abortLabel, sessionID);
     if (attempted) {
@@ -590,14 +571,9 @@ function formatUnknown(value: unknown): string {
   ) {
     return (value as { message: string }).message;
   }
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+  return JSON.stringify(value) ?? String(value);
 }
 
-/** Agent for a model: tool-less for single-shot models, the reviewer when opted in, plan otherwise. */
 export function agentForModel(singleShot: boolean, reviewerAgent = false): string {
   if (singleShot) return PLAIN_AGENT;
   return reviewerAgent ? REVIEWER_AGENT : MAIN_AGENT;
@@ -679,11 +655,6 @@ export function abortOpencodeSessionsByLabel(
   return count;
 }
 
-/**
- * Live progress from the global event stream: one line per tool call and per
- * failed execution, keyed by the session's label. Best effort — a broken
- * stream is logged once and never affects the review (invariant 3).
- */
 /** V2's tool events carry the call input but no tool name; the first string argument identifies it. */
 function describeToolCall(props: Record<string, unknown>): string {
   const input = props.input as Record<string, unknown> | undefined;
@@ -693,6 +664,7 @@ function describeToolCall(props: Record<string, unknown>): string {
   return `${arg[0]}=${value.length > 120 ? `${value.slice(0, 120)}…` : value}`;
 }
 
+/** Best effort: a broken stream is logged once and never affects the review (invariant 3). */
 export function startProgressLogger(
   client: OpenCodeClient,
   log: (msg: string) => void,
@@ -701,7 +673,7 @@ export function startProgressLogger(
   void (async () => {
     try {
       for await (const event of client.event.subscribe({ signal: controller.signal })) {
-        // V2 events carry their payload under `data` (measured; V1 used `properties`).
+        // payload sits under `data` (measured)
         const raw = event as { type?: string; data?: Record<string, unknown>; sessionID?: string };
         const props = (raw.data ?? raw) as Record<string, unknown>;
         const sessionID = (props.sessionID ?? raw.sessionID) as string | undefined;

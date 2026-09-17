@@ -21,14 +21,11 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const KILL_GRACE_MS = 5_000;
 
 /**
- * Env vars withheld from the opencode server — and therefore from every
- * session's bash children, which inherit its environment. The Action maps ALL
- * inputs to INPUT_* (the write-scoped GitHub token plus every provider key),
- * and app/local modes hold credential-suffixed vars; sessions need none of
- * them, since provider auth travels inside the opencode config. With these
- * gone, "prompt injection runs `env`" stops yielding tokens that act OUTSIDE
- * the container (post as the bot, spend provider credits) — the exfil surface
- * the bash accident-filter above explicitly does not close.
+ * Withheld from the server and thus from every session's bash child. The
+ * Action maps ALL inputs to INPUT_* (write-scoped GitHub token, every provider
+ * key) and app/local modes hold credential-suffixed vars; sessions need none
+ * (provider auth rides the config), so "prompt injection runs `env`" yields
+ * nothing that acts outside the container.
  */
 export function sessionEnvDenyKeys(keys: string[]): string[] {
   // Match the trailing WORD, not a fixed suffix list: `STRIPE_SECRET_KEY` ends
@@ -78,12 +75,10 @@ export function parsePortEnv(name: string, defaultValue: number): number {
   return Number.isInteger(value) && value >= 1 && value <= 65535 ? value : defaultValue;
 }
 
-/** Env override, then the pinned devDependency binary, then whatever `opencode` is on PATH (the image). */
 /**
- * The pinned launcher when @opencode/cli is installed beside this package
- * (dev, tests, the benchmark harness — whatever the cwd; a cwd-relative
- * lookup once picked a global V1 binary), else `opencode` on PATH, which the
- * image installs globally. JBOT_OPENCODE_BIN overrides both.
+ * JBOT_OPENCODE_BIN, else the launcher of the @opencode/cli installed beside
+ * this package (resolved by package, not cwd — a cwd lookup once picked a
+ * global V1 binary), else `opencode` on PATH (the image).
  */
 export function resolveOpencodeBin(
   env: NodeJS.ProcessEnv = process.env,
@@ -127,11 +122,7 @@ export interface ChildEnvInput {
   proxyEnv?: NodeJS.ProcessEnv;
 }
 
-/**
- * The server's env, composed on the child only (never by mutating
- * process.env): inherited env minus credentials, plus proxy vars, the run's
- * provider keys, the hermetic config/data homes and the inline config.
- */
+/** Composed on the child only — never by mutating process.env as V1 did. */
 export function childEnv(input: ChildEnvInput): Record<string, string> {
   const denied = new Set(input.scrub ? sessionEnvDenyKeys(Object.keys(input.base)) : []);
   const env: Record<string, string> = {};
@@ -193,8 +184,8 @@ function spawnServer(
       clearTimeout(timer);
       resolve({ ...banner, close });
     };
-    child.stdout?.on('data', onData);
-    child.stderr?.on('data', onData);
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
     child.on('error', (error) => {
       if (settled) return;
       settled = true;
@@ -241,14 +232,11 @@ export async function waitForModels(
 export interface OpencodeRuntime {
   client: OpenCodeClient;
   workspace: string;
-  /** Provider options per model and tier; sessions register theirs in sessionOptionsFile. */
-  modelOptions?: ModelOptionsByModel;
-  sessionOptionsFile?: string;
-  /** Directory for `session.export` transcripts; unset = no export. */
+  modelOptions: ModelOptionsByModel;
+  sessionOptionsFile: string;
   transcriptDir?: string;
   /** JBOT_VERIFY_FORK: verification forks the single main review session. */
   verifyFork?: boolean;
-  /** JBOT_REVIEWER_AGENT: review turns use jbot-reviewer instead of plan. */
   reviewerAgent?: boolean;
   stop(): void;
 }
@@ -267,11 +255,9 @@ export interface StartOpencodeOptions {
   transcriptDir?: string;
   verifyFork?: boolean;
   reviewerAgent?: boolean;
-  /** JBOT_RUN_STATS: log session.stats at stop. */
   runStats?: boolean;
 }
 
-/** Boots one V2 server for this run and returns an authenticated client. */
 export async function startOpencode(
   workspace: string,
   providerID: string,
@@ -291,13 +277,11 @@ export async function startOpencode(
       modelOptions: options.modelOptions,
       verificationModelOptions: options.verificationModelOptions,
     },
-    ...(options.additionalProviderKeys ?? [])
-      .filter((entry) => entry.providerID)
-      .map((entry) => ({
-        ...entry,
-        modelID: entry.modelID ?? '',
-        promptCache: entry.promptCache ?? promptCache,
-      })),
+    ...(options.additionalProviderKeys ?? []).map((entry) => ({
+      ...entry,
+      modelID: entry.modelID ?? '',
+      promptCache: entry.promptCache ?? promptCache,
+    })),
   ];
   const config = buildConfig({ models, reviewerSystem: REVIEWER_SYSTEM_PROMPT });
   const dataHome = mkdtempSync(join(tmpdir(), 'jbot-opencode-data-'));
@@ -329,7 +313,7 @@ export async function startOpencode(
     await waitForModels(
       client,
       workspace,
-      models.filter((m) => m.modelID).map((m) => `${m.providerID}/${m.modelID}`),
+      models.map((m) => `${m.providerID}/${m.modelID}`),
     );
   } catch (error) {
     stopServer();

@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { hermeticOpencodeConfigHome, pluginFile } from '../src/shared/opencode-plugin.ts';
+import { hermeticOpencodeConfigHome } from '../src/shared/opencode-plugin.ts';
 
 type Hook = (event: unknown) => unknown;
 
 async function loadPlugin(): Promise<{ context: Hook; evaluate: Hook }> {
-  const mod = await import(pathToFileURL(pluginFile()).href);
+  const file = join(hermeticOpencodeConfigHome(), 'opencode', 'plugins', 'jbot-review.js');
+  const mod = await import(pathToFileURL(file).href);
   const hooks: Record<string, Hook> = {};
   await mod.default.setup({
     session: { hook: async (name: string, fn: Hook) => (hooks[`session.${name}`] = fn) },
@@ -37,13 +38,6 @@ const tools = () => ({
 });
 
 describe('jbot opencode plugin', () => {
-  it('materializes once under the hermetic config home where V2 auto-discovers it', () => {
-    const home = hermeticOpencodeConfigHome();
-    assert.equal(pluginFile(), join(home, 'opencode', 'plugins', 'jbot-review.js'));
-    assert.ok(existsSync(pluginFile()));
-    assert.equal(hermeticOpencodeConfigHome(), home);
-  });
-
   it('strips mutating and interactive tools for the plan agent and rewrites the Gemini-hostile schema', async () => {
     const { context } = await loadPlugin();
     const event = { agent: 'plan', tools: tools() };

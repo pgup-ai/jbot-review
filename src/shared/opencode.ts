@@ -34,7 +34,6 @@ import {
 // Every name another module imports from here keeps resolving here.
 export { type ProviderKeyConfig } from './opencode-config.ts';
 export {
-  parsePortEnv,
   sessionEnvDenyKeys,
   startOpencode,
   takeOpencodeProxyEnv,
@@ -47,19 +46,11 @@ export {
   configureSessionConcurrency,
   finalizeOpencodeSessionsByLabel,
   OPENCODE_TELEMETRY_CAPABILITY,
-  registerOpencodeSessionForAbort,
   Semaphore,
-  unregisterOpencodeSessionForAbort,
   type PromptOutcome,
   type SemaphorePriority,
 } from './opencode-session.ts';
-export {
-  extractPromptTokenUsage,
-  formatTokenUsage,
-  type PromptTokenUsage,
-  type TokenUsageInfo,
-  type TokenUsageRecorder,
-} from './token-usage.ts';
+export { formatTokenUsage, type PromptTokenUsage, type TokenUsageRecorder } from './token-usage.ts';
 
 const CONTEXT7_MCP_NAME = 'context7';
 const CONTEXT7_MCP_URL = 'https://mcp.context7.com/mcp';
@@ -165,16 +156,10 @@ export async function withTimeout<T>(
 }
 
 /**
- * Runs one review session and returns structured findings.
- *
- * Runs on a V2 session as the read-only plan agent (or the opt-in reviewer
- * agent). An optional lens addendum (REVIEW_LENSES) turns the session into
- * a focused recall pass; the label keeps log lines distinguishable when
- * several passes run in parallel.
- *
- * Main-review output is strict: if the response fails JSON parsing, ONE
- * repair prompt is sent in the same session (the model sees its own
- * malformed output) before the run fails.
+ * One review session → structured findings. A lens addendum (REVIEW_LENSES)
+ * makes it a focused recall pass; the label keeps parallel passes' log lines
+ * apart. Output is strict: an unparseable response gets ONE same-session
+ * repair prompt before the run fails.
  */
 export async function runReview(
   runtime: OpencodeRuntime,
@@ -461,7 +446,7 @@ export async function runFindingVerification(
     onTokenUsage,
     undefined,
     {
-      // Its own tier exists only when the runner registered verifier options at boot (V1's alias rule).
+      // 'verify' options exist only when the runner registered them at boot.
       tier: modelOptions ? 'verify' : 'main',
       forkFrom,
     },
@@ -483,7 +468,7 @@ function singleReviewSession(runtime: OpencodeRuntime): string | undefined {
   return sessions.length === 1 ? sessions[0] : undefined;
 }
 
-export function isSingleShotModel(model: string): boolean {
+function isSingleShotModel(model: string): boolean {
   const { providerID, modelID } = parseModelName(model);
   return !modelSupportsAgenticTools(providerID, modelID);
 }
@@ -495,7 +480,7 @@ export function isSingleShotModel(model: string): boolean {
  * JSON. Passes with a tailored single-shot prompt variant (changes-since,
  * verification) use that instead. Agentic models are unchanged.
  */
-export function promptForModel(model: string, prompt: string): string {
+function promptForModel(model: string, prompt: string): string {
   return isSingleShotModel(model) ? withNoToolsReviewDirective(prompt) : prompt;
 }
 
@@ -519,7 +504,7 @@ async function promptPlanAgent(
     agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent),
   });
   log(`${label} session created: ${sessionID}`);
-  const { text } = await promptInSession(runtime, sessionID, {
+  const text = await promptInSession(runtime, sessionID, {
     model,
     text: prompt,
     label,
@@ -540,10 +525,9 @@ async function promptPlanAgentInSession(
   log: (msg: string) => void,
   timeoutMs?: number,
   onTokenUsage?: TokenUsageRecorder,
-  /** Grace-abort registry key; repair/continue prompts keep the BASE label. */
   abortLabel = label,
 ): Promise<string> {
-  const { text } = await promptInSession(runtime, sessionID, {
+  const text = await promptInSession(runtime, sessionID, {
     model,
     text: prompt,
     label,
@@ -554,11 +538,6 @@ async function promptPlanAgentInSession(
   });
   return text;
 }
-
-// Evidence quotes parse from any backend regardless of the prompt flag; the cap
-// defends against runaway quotes.
-// Room for the two or three consecutive lines EVIDENCE_INSTRUCTION asks for:
-// a quote truncated mid-line cannot match the file exactly.
 
 /**
  * Defensively parses the agent's JSON. Main review output is strict so we

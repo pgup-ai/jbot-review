@@ -18,10 +18,9 @@ export interface PermissionRule {
 }
 
 /**
- * V1 bash globs as ordered V2 rules (last match wins, so the catch-all leads),
- * plus the denies V1 expressed elsewhere: edits (covers write/patch), reads
- * outside the workspace, and `question`, which would wait for an interactive
- * form nothing in CI can answer.
+ * V1's bash globs as ordered V2 rules (last match wins, so the catch-all leads)
+ * plus the edit/external_directory/question denies V1 kept elsewhere;
+ * `question` would block on a form nothing in CI answers.
  */
 export function permissionRules(): PermissionRule[] {
   const { '*': catchAll, ...denies } = BASH_PERMISSIONS;
@@ -129,16 +128,13 @@ function nonEmpty(
 }
 
 /**
- * Provider options per `provider/model` and tier. V2 ignores config model
- * overrides on catalog providers (measured), so the jbot plugin applies these
- * per session through its `context` hook instead — V1's per-model options,
- * one mechanism for every provider. The verifier's tier rounds down on
- * ladders that lack it, as V1's alias entry did.
+ * Options per `provider/model` and tier. V2 ignores config model overrides on
+ * catalog providers (measured), so the plugin applies these per session; the
+ * verify tier rounds down on gapped ladders.
  */
 export function modelOptionsByModel(models: ModelEntry[]): ModelOptionsByModel {
   const byModel: ModelOptionsByModel = {};
   for (const entry of models) {
-    if (!entry.modelID) continue;
     const main = nonEmpty(
       supportedModelOptions(entry.providerID, entry.modelID, entry.modelOptions),
     );
@@ -159,7 +155,6 @@ export function modelOptionsByModel(models: ModelEntry[]): ModelOptionsByModel {
   return byModel;
 }
 
-/** Options for one session: the verify tier when it was configured, else the model's own. */
 export function sessionModelOptions(
   byModel: ModelOptionsByModel,
   model: string,
@@ -172,7 +167,6 @@ export function sessionModelOptions(
 export interface OpencodeConfigInput {
   /** Root model first, then auxiliary entries. */
   models: ModelEntry[];
-  /** System prompt of the opt-in reviewer agent (REVIEWER_SYSTEM_PROMPT). */
   reviewerSystem: string;
 }
 
@@ -184,7 +178,7 @@ type ProviderEntry = {
 function mergeProvider(providers: Record<string, ProviderEntry>, entry: ModelEntry): void {
   const custom = PROVIDERS[entry.providerID]?.custom;
   const existing = providers[entry.providerID];
-  // `setCacheKey` is V1's promptCacheKey toggle; spike S3 confirms the V2 key name.
+  // V2's name for the promptCacheKey toggle.
   const settings = entry.promptCache ? { setCacheKey: true } : {};
   if (custom) {
     if (!entry.baseURL) {
@@ -217,7 +211,7 @@ function mergeProvider(providers: Record<string, ProviderEntry>, entry: ModelEnt
   providers[entry.providerID] = { ...existing, settings: { ...existing?.settings, ...settings } };
 }
 
-/** Native V2 config for OPENCODE_CONFIG_CONTENT. Pure; exported for tests. */
+/** Native V2 config for OPENCODE_CONFIG_CONTENT. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function buildConfig(input: OpencodeConfigInput): Record<string, any> {
   const providers: Record<string, ProviderEntry> = {};

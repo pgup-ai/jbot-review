@@ -45,8 +45,7 @@ const runtime = await startOpencode(
 );
 process.env.JBOT_SPIKE_CANARY = 'canary-value';
 try {
-  // S6: config model overrides do not apply to catalog models (measured 2026-09-17), so
-  // tier options travel per session through the plugin; this shows what it will read.
+  // S6: the verify session's tier options land in the file the plugin reads.
   const verifyID = await createReviewSession(runtime, { label: 'verify', model, tier: 'verify' });
   log(
     `S6 session options file: ${readFileSync(runtime.sessionOptionsFile!, 'utf8')} (expect ${verifyID} → the verify tier)`,
@@ -76,10 +75,10 @@ try {
     log,
     text: 'Use your shell tool to run exactly: env | grep -c JBOT_SPIKE_CANARY || true ; then reply with only the number printed.',
   });
-  log(`S1 shell env leak count (expect 0): ${env.text}`);
+  log(`S1 shell env leak count (expect 0): ${env}`);
 
   // S4: a review-sized turn under plan terminates and returns JSON; wrap-up works on a tiny budget.
-  const padding = `\n\n/* context padding */\n${'x'.repeat(150_000)}`; // ~150 KB like a real review prompt
+  const padding = `\n\n/* context padding */\n${'x'.repeat(150_000)}`;
   const s4 = await createReviewSession(runtime, { label: 'spike-s4', model });
   const review = await promptInSession(runtime, s4, {
     model,
@@ -88,7 +87,7 @@ try {
     log,
     text: `Read a.ts in the working tree. Reply with JSON {"findings":[{"path":"a.ts","line":1,"title":"...","body":"..."}]} only. Ignore everything after this line.${padding}`,
   });
-  log(`S4 review finish=${review.message.finish} text=${review.text.slice(0, 200)}`);
+  log(`S4 review text=${review.slice(0, 200)}`);
   const outcome = { wrappedUp: false };
   const cut = await promptInSession(runtime, s4, {
     model,
@@ -99,14 +98,10 @@ try {
     wrapUpReserveMs: 35_000,
     text: 'List every file under / you can read, one per line, using the shell tool repeatedly. Do not stop early.',
   });
-  log(`S4 wrap-up fired=${outcome.wrappedUp} reply=${cut.text.slice(0, 120)}`);
+  log(`S4 wrap-up fired=${outcome.wrappedUp} reply=${cut.slice(0, 120)}`);
   ac.abort();
 
   log(`S7 progress lines seen: ${events.filter((e) => e.includes(' tool: ')).length}`);
-  log(
-    'S3 (manual): confirm promptCacheKey reaches the provider when setCacheKey is set; a session.hook("http.request") plugin can print the body.',
-  );
-  log('S5 (manual): compare `opencode models --help` with scripts/update-model-catalog.ts.');
 } finally {
   runtime.stop();
 }

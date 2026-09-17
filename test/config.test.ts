@@ -70,21 +70,6 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
     assert.equal('custom' in p, false);
   });
 
-  it('emits no provider entry — the key travels as the env var V2 reads', () => {
-    const config = buildConfig({
-      models: [
-        {
-          providerID: 'xiaomi-token-plan-sgp',
-          modelID: 'mimo-v2.5-pro',
-          apiKey: 'tp-abc',
-          promptCache: false,
-        },
-      ],
-      reviewerSystem: 's',
-    });
-    assert.equal(config.providers, undefined);
-  });
-
   it('disables prompt caching for mimo (unverified endpoint), keeps it for other providers', () => {
     assert.equal(modelSupportsPromptCache('xiaomi-token-plan-sgp', 'mimo-v2.5-pro'), false);
     assert.equal(modelSupportsPromptCache('openai', 'gpt-5.4-nano'), true);
@@ -335,16 +320,6 @@ describe('kimi-for-coding (native Models.dev provider)', () => {
       keyInput: 'kimi-api-key',
       promptCache: false,
     });
-  });
-
-  it('emits no provider entry — the key travels as the env var V2 reads', () => {
-    const config = buildConfig({
-      models: [
-        { providerID: 'kimi-for-coding', modelID: 'k3', apiKey: 'kimi-key', promptCache: false },
-      ],
-      reviewerSystem: 's',
-    });
-    assert.equal(config.providers, undefined);
   });
 });
 

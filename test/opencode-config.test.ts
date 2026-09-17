@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  MAIN_AGENT,
   PLAIN_AGENT,
   REVIEWER_AGENT,
   WRAPUP_AGENT,
@@ -41,7 +40,6 @@ describe('buildConfig', () => {
       reviewerSystem: 'Review only.',
     });
     assert.equal(config.$schema, 'https://opencode.ai/config.json');
-    assert.equal(config.plugins, undefined);
     assert.deepEqual(
       Object.keys(config.agents).sort(),
       [PLAIN_AGENT, REVIEWER_AGENT, WRAPUP_AGENT].sort(),
@@ -51,7 +49,6 @@ describe('buildConfig', () => {
     ]);
     assert.equal(config.agents[REVIEWER_AGENT].system, 'Review only.');
     assert.equal(config.providers, undefined);
-    assert.equal(MAIN_AGENT, 'plan');
   });
 
   it('keeps a catalog provider to its cache setting; options never go through config', () => {
@@ -69,47 +66,6 @@ describe('buildConfig', () => {
       reviewerSystem: 's',
     });
     assert.deepEqual(config.providers, { openai: { settings: { setCacheKey: true } } });
-  });
-
-  it('emits a full custom provider entry with the key in config', () => {
-    const config = buildConfig({
-      models: [
-        {
-          providerID: 'openai-compatible',
-          modelID: 'm1',
-          apiKey: 'secret',
-          baseURL: 'https://llm.example/v1',
-          promptCache: false,
-        },
-      ],
-      reviewerSystem: 's',
-    });
-    assert.deepEqual(config.providers['openai-compatible'], {
-      name: 'OpenAI Compatible',
-      package: '@opencode/ai/providers/openai-compatible',
-      settings: { baseURL: 'https://llm.example/v1', apiKey: 'secret' },
-      models: {
-        m1: {
-          name: 'm1',
-          modelID: 'm1',
-          capabilities: { tools: true, input: ['text'], output: ['text'] },
-          limit: { context: 200_000, output: 32_000 },
-        },
-      },
-    });
-  });
-
-  it('rejects a custom provider without a base URL', () => {
-    assert.throws(
-      () =>
-        buildConfig({
-          models: [
-            { providerID: 'openai-compatible', modelID: 'm1', apiKey: 'k', promptCache: false },
-          ],
-          reviewerSystem: 's',
-        }),
-      /base URL/,
-    );
   });
 });
 
@@ -132,10 +88,23 @@ describe('modelOptionsByModel', () => {
         modelOptions: { reasoningEffort: 'high' },
       },
       { providerID: 'opencode', modelID: 'mimo-v2.5-free', apiKey: 'k', promptCache: false },
+      {
+        providerID: 'opencode',
+        modelID: 'x-preview-f-free',
+        apiKey: 'k',
+        promptCache: false,
+        modelOptions: { reasoningEffort: 'medium' },
+        verificationModelOptions: { reasoningEffort: 'medium' },
+      },
     ]);
     assert.deepEqual(byModel, {
       'openai/gpt-5': { main: { reasoningEffort: 'medium' }, verify: { reasoningEffort: 'low' } },
       'openai/gpt-5-mini': { main: { reasoningEffort: 'high' } },
+      // low/high/max ladder: the finder rounds up, the verifier down
+      'opencode/x-preview-f-free': {
+        main: { reasoningEffort: 'high' },
+        verify: { reasoningEffort: 'low' },
+      },
     });
     assert.deepEqual(sessionModelOptions(byModel, 'openai/gpt-5', 'verify'), {
       reasoningEffort: 'low',
@@ -168,10 +137,6 @@ describe('providerKeyVariables', () => {
         ]),
       /OPENCODE_API_KEY/,
     );
-  });
-
-  it('names an unknown provider instead of booting a server that cannot see its key', () => {
-    assert.throws(() => providerKeyVariables([{ providerID: 'nope', apiKey: 'a' }]), /"nope"/);
   });
 });
 

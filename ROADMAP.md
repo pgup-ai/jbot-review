@@ -2,8 +2,8 @@
 
 ## Done: OpenCode V2 cutover (2026-09)
 
-- The backend now targets `@opencode/client` + `@opencode/cli` 2.x (design:
-  `docs/superpowers/specs/2026-09-16-opencode-v2-migration-design.md`). The
+- The backend now targets `@opencode/client` + `@opencode/cli` 2.x (audit:
+  `docs/audits/2026-09-16-opencode-sdk-v2-audit.md`). The
   earlier `@opencode-ai/sdk/v2` stall was a caller-supplied message id on the
   1.x server's v2 routes; the V2 driver sends none and waits with `session.wait`.
 - Follow-ups: flip `JBOT_VERIFY_FORK` / `JBOT_REVIEWER_AGENT` defaults after

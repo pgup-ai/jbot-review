@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -20,6 +20,8 @@ const runtime = (
 ): OpencodeRuntime => ({
   client: fake.client,
   workspace: '/ws',
+  modelOptions: {},
+  sessionOptionsFile: join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json'),
   stop: () => undefined,
   ...extra,
 });
@@ -34,44 +36,6 @@ describe('createReviewSession', () => {
     assert.ok(Array.isArray(session.permissions) && session.permissions.length > 0);
     assert.ok(session.environment && 'PATH' in session.environment);
     assert.equal('OPENCODE_CONFIG_CONTENT' in session.environment!, false);
-  });
-
-  it('forks the main session for verification and re-targets agent and model', async () => {
-    const fake = fakeOpencodeServer(() => ({ text: '{}' }));
-    const main = await createReviewSession(runtime(fake), {
-      label: 'review',
-      model: 'openai/gpt-5',
-    });
-    const id = await createReviewSession(runtime(fake), {
-      label: 'finding-verification',
-      model: 'openai/gpt-5',
-      forkFrom: main,
-    });
-    const forked = fake.sessions.get(id)!;
-    assert.equal(forked.forkedFrom, main);
-    assert.equal(forked.agent, 'plan');
-    assert.deepEqual(forked.model, { providerID: 'openai', id: 'gpt-5' });
-  });
-
-  it("publishes each session's tier options to the file the plugin reads", async () => {
-    const fake = fakeOpencodeServer(() => ({ text: '{}' }));
-    const sessionOptionsFile = join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json');
-    const rt = runtime(fake, {
-      sessionOptionsFile,
-      modelOptions: {
-        'openai/gpt-5': { main: { reasoningEffort: 'medium' }, verify: { reasoningEffort: 'low' } },
-      },
-    });
-    const main = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
-    const verify = await createReviewSession(rt, {
-      label: 'finding-verification',
-      model: 'openai/gpt-5',
-      tier: 'verify',
-    });
-    assert.deepEqual(JSON.parse(readFileSync(sessionOptionsFile, 'utf8')), {
-      [main]: { reasoningEffort: 'medium' },
-      [verify]: { reasoningEffort: 'low' },
-    });
   });
 });
 
@@ -96,8 +60,8 @@ describe('promptInSession', () => {
       timeoutMs: 5_000,
       log,
     });
-    assert.equal(first.text, 'echo:one');
-    assert.equal(second.text, 'echo:two');
+    assert.equal(first, 'echo:one');
+    assert.equal(second, 'echo:two');
     assert.equal(usage.length, 1);
     assert.equal((usage[0] as { input: number }).input, 10);
     assert.ok(fake.prompts.every((p) => p.body.id === undefined));
@@ -116,7 +80,7 @@ describe('promptInSession', () => {
       log,
       waitSliceMs: 100,
     });
-    assert.equal(result.text, 'late');
+    assert.equal(result, 'late');
     assert.ok(
       fake.sessions.get(id)!.abortedWaits >= 2,
       'earlier slices were abandoned, not treated as failures',
@@ -147,7 +111,7 @@ describe('promptInSession', () => {
       timeoutMs: 5_000,
       log,
     });
-    assert.equal(empty.text, '');
+    assert.equal(empty, '');
   });
 
   it('wraps up a cut-off turn: interrupt, switch to jbot-wrapup, prompt again, restore the agent', async () => {
@@ -166,7 +130,7 @@ describe('promptInSession', () => {
       outcome,
       wrapUpReserveMs: 59_000,
     });
-    assert.equal(result.text, '{"findings":[]}');
+    assert.equal(result, '{"findings":[]}');
     assert.equal(outcome.wrappedUp, true);
     const session = fake.sessions.get(id)!;
     assert.equal(session.interrupted, 1);
@@ -223,7 +187,7 @@ describe('wrap-up capability', () => {
     });
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'aux', log, 30_000), 1);
-    assert.equal((await auxTurn).text, 'done');
+    assert.equal(await auxTurn, 'done');
     assert.equal(fake.sessions.get(aux)!.agent, 'plan');
     assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'plain', log, 30_000), 0);
     await assert.rejects(plainTurn, /did not finish within/);

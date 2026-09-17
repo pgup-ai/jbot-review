@@ -12,6 +12,7 @@ import {
 } from '../src/shared/commandcode.ts';
 import { PROVIDERS } from '../src/shared/config.ts';
 import { parseDimModelList } from '../src/shared/dim.ts';
+import { parseModelName } from '@symma/protocol';
 import { startOpencode } from '../src/shared/opencode-server.ts';
 import { parseCursorModelList, parseKiloModelList } from '@symma/protocol';
 
@@ -225,27 +226,20 @@ async function loadClineRecommendedModels(): Promise<{
   return parseClineRecommendedModels(payload);
 }
 
-/**
- * V2's `opencode models` needs an interactive session, so the catalog is read
- * from a private server's API. `OPENCODE_API_KEY` (Zen) also unlocks the
- * opencode-go list; without it only the public Zen models appear.
- */
+/** V2's `opencode models` is interactive, so the catalog is read over a private server's API; OPENCODE_API_KEY (Zen) also unlocks opencode-go. */
 async function listOpencodeModels(): Promise<Record<'opencode' | 'opencode-go', string[]>> {
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-catalog-opencode-'));
   const runtime = await startOpencode(
     workspace,
     'opencode',
-    '',
+    parseModelName(PROVIDERS.opencode!.defaultModel!).modelID,
     process.env.OPENCODE_API_KEY?.trim() || 'unused',
     () => undefined,
     { port: 47_000 + Math.floor(Math.random() * 1000) },
   );
   try {
-    let listed: Array<{ providerID: string; id: string }> = [];
-    for (let attempt = 0; attempt < 40 && listed.length === 0; attempt++) {
-      listed = (await runtime.client.model.list({ location: { directory: workspace } })).data ?? [];
-      if (listed.length === 0) await new Promise((resolve) => setTimeout(resolve, 500));
-    }
+    const listed =
+      (await runtime.client.model.list({ location: { directory: workspace } })).data ?? [];
     const byProvider = (providerID: string) =>
       uniqueSorted(
         listed.filter((m) => m.providerID === providerID).map((m) => `${providerID}/${m.id}`),

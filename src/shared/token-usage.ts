@@ -44,13 +44,7 @@ export function extractPromptTokenUsage(info: TokenUsageInfo): PromptTokenUsage 
   };
 }
 
-/**
- * One-line token/cost summary for a completed session. Defensive about
- * missing fields: gateways like opencode-go may not populate every counter,
- * and cache read/write are the signal for whether prompt caching is actually
- * working (cache.read > 0 on a later shard or re-review means a hit).
- * Exported for unit testing (pure).
- */
+/** One-line token/cost summary. cache.read > 0 on a later shard or re-review means prompt caching hit. */
 export function formatTokenUsage(info: TokenUsageInfo): string {
   const tokens = info.tokens ?? {};
   const cache = tokens.cache ?? {};

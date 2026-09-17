@@ -1246,7 +1246,7 @@ CI reviews; there is no supported `AGENT` env override.
   Provider keys reach the server as its documented env var; every session's
   shell env is replaced with an allowlist, so keys never appear in a tool call.
   `JBOT_OPENCODE_BIN` points local runs at a specific binary (default: the
-  pinned `node_modules/.bin/opencode`, then PATH); `JBOT_TRANSCRIPT_DIR`
+  `@opencode/cli` launcher installed with the package, then PATH); `JBOT_TRANSCRIPT_DIR`
   exports sanitized session transcripts; `JBOT_RUN_STATS=1` logs run totals;
   `JBOT_VERIFY_FORK=1` forks the main review session for verification and
   `JBOT_REVIEWER_AGENT=1` swaps opencode's coding system prompt for a review

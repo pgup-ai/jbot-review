@@ -3,23 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /**
- * jbot's opencode plugin. V2 auto-discovers plain plugin files under a config
- * directory's `plugins/` folder, so it lives in the hermetic XDG_CONFIG_HOME
- * (a configured `plugins:` entry must be a package directory instead). It is
- * the third read-only layer (invariant 8): the `plan` agent and the permission
- * ruleset deny mutations at call time; this removes the tools from the request
- * and empties the tool list for the agents jbot uses for a tool-less reply
- * (wrap-up, single-shot models). `question` goes too: it waits for an
- * interactive form nothing in CI can answer. The schema walk keeps
- * Gemini-backed proxies happy (they 400 on `exclusiveMinimum`; `minimum: 1`
- * is the same contract for integers). Per-session provider options (effort
- * tiers) come from the JSON file JBOT_OPENCODE_SESSION_OPTIONS names — V2
- * ignores config model overrides on catalog providers, and `event.options`
- * is the request-time equivalent of V1's per-model options. The permission
- * hook answers any `ask` with deny. Plain object export: V2's `Plugin.define`
- * is the identity function, so no import is needed. Setup runs lazily on the
- * first prompt. JBOT_OPENCODE_PLUGIN_MARKER lets the E2E test prove the
- * plugin loaded.
+ * Read-only layer 3 (invariant 8), auto-discovered from the hermetic
+ * XDG_CONFIG_HOME's `plugins/` dir (a configured `plugins:` entry would need a
+ * package directory). Strips mutating tools per request and every tool for the
+ * tool-less agents; rewrites `exclusiveMinimum: 0` → `minimum: 1` because
+ * Gemini-backed proxies 400 on it; applies the per-session options file
+ * because V2 ignores config model overrides on catalog providers. Plain object
+ * export: V2's `Plugin.define` is the identity.
  */
 const PLUGIN_SOURCE = `// jbot-review opencode plugin; rationale in src/shared/opencode-plugin.ts.
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -73,21 +63,12 @@ export default {
 
 let configHome: string | undefined;
 
-/**
- * XDG_CONFIG_HOME for the opencode child: empty except for jbot's own plugin,
- * so the operator's global config (ambient MCP servers, plugins) never enters
- * a review. Memoized so repeated spawns in one process share a single dir.
- */
+/** XDG_CONFIG_HOME for the opencode child: only jbot's plugin, so the operator's global config (ambient MCP servers, plugins) never enters a review. */
 export function hermeticOpencodeConfigHome(): string {
   if (!configHome) {
     configHome = mkdtempSync(join(tmpdir(), 'jbot-opencode-config-'));
     mkdirSync(join(configHome, 'opencode', 'plugins'), { recursive: true });
-    writeFileSync(pluginFile(configHome), PLUGIN_SOURCE);
+    writeFileSync(join(configHome, 'opencode', 'plugins', 'jbot-review.js'), PLUGIN_SOURCE);
   }
   return configHome;
-}
-
-/** Where the plugin is materialized (exported for the tests that import it). */
-export function pluginFile(home = hermeticOpencodeConfigHome()): string {
-  return join(home, 'opencode', 'plugins', 'jbot-review.js');
 }

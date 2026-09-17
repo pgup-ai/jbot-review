@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 import {
   basicAuthHeader,
   childEnv,
+  parsePortEnv,
   parseServerBanner,
   resolveOpencodeBin,
   startOpencode,
@@ -22,12 +23,22 @@ describe('parseServerBanner', () => {
       ),
       { url: 'http://127.0.0.1:4096', password: 'abc-DEF_1' },
     );
+    assert.equal(basicAuthHeader('pw'), `Basic ${Buffer.from('opencode:pw').toString('base64')}`);
   });
 });
 
-describe('basicAuthHeader', () => {
-  it('encodes opencode:<password>', () => {
-    assert.equal(basicAuthHeader('pw'), `Basic ${Buffer.from('opencode:pw').toString('base64')}`);
+describe('parsePortEnv', () => {
+  it('falls back when unset or 0 (a fixed listener needs a real port) and takes a valid port', () => {
+    delete process.env.JBOT_TEST_PORT;
+    assert.equal(parsePortEnv('JBOT_TEST_PORT', 4096), 4096);
+    process.env.JBOT_TEST_PORT = '4097';
+    try {
+      assert.equal(parsePortEnv('JBOT_TEST_PORT', 4096), 4097);
+      process.env.JBOT_TEST_PORT = '0';
+      assert.equal(parsePortEnv('JBOT_TEST_PORT', 4096), 4096);
+    } finally {
+      delete process.env.JBOT_TEST_PORT;
+    }
   });
 });
 
@@ -83,12 +94,9 @@ describe('childEnv', () => {
       OPENCODE_CONFIG_CONTENT: '{"a":1}',
       JBOT_OPENCODE_SESSION_OPTIONS: '/data/jbot-session-options.json',
     });
-  });
-
-  it('keeps inherited credentials when the scrub is off (multi-run app)', () => {
-    const env = childEnv({ base, scrub: false, ...common });
-    assert.equal(env.INPUT_GITHUB_TOKEN, 'gh');
-    assert.equal(env.OPENAI_API_KEY, 'k');
+    const kept = childEnv({ base, scrub: false, ...common });
+    assert.equal(kept.INPUT_GITHUB_TOKEN, 'gh');
+    assert.equal(kept.OPENAI_API_KEY, 'k');
   });
 });
 
