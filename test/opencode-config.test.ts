@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { cliBackendForProvider } from '../src/shared/backend-selection.ts';
+import { PROVIDERS } from '../src/shared/config.ts';
+import { isPoolsideProvider } from '../src/shared/poolside.ts';
 import {
   PLAIN_AGENT,
   REVIEWER_AGENT,
@@ -132,6 +135,18 @@ describe('providerKeyVariables', () => {
           { providerID: 'opencode-go', apiKey: 'b' },
         ]),
       /OPENCODE_API_KEY/,
+    );
+  });
+});
+
+describe('providerKeyVariables coverage', () => {
+  it('knows the key env var of every provider the opencode engine can serve', () => {
+    const served = Object.keys(PROVIDERS).filter(
+      (id) => !PROVIDERS[id]?.custom && !cliBackendForProvider(id) && !isPoolsideProvider(id),
+    );
+    assert.ok(served.length > 0);
+    assert.doesNotThrow(() =>
+      providerKeyVariables(served.map((providerID) => ({ providerID, apiKey: 'k' }))),
     );
   });
 });

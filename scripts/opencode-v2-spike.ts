@@ -137,6 +137,7 @@ try {
     log(
       `effort probe (${probeModel} effort=${probeEffort}): accepted — inconclusive unless the provider validates the value (reply: ${reply.slice(0, 40)})`,
     );
+    process.exitCode = 1;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const rejected = /reasoning[_ ]?effort|unknown variant|invalid|1210|\b400\b/i.test(message);

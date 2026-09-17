@@ -134,6 +134,27 @@ describe('promptInSession', () => {
     assert.equal(fake.prompts.length, 2);
   });
 
+  it('reports a listing that stops short and leaves usage unknown without token counts', async () => {
+    const fake = fakeOpencodeServer((_s, text) =>
+      text === 'deep' ? { text: 'x', steps: 600 } : { text: 'x', noTokens: true },
+    );
+    const rt = runtime(fake);
+    const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
+    const lines: string[] = [];
+    const usage: object[] = [];
+    const spec = {
+      model: 'openai/gpt-5',
+      label: 'review',
+      timeoutMs: 5_000,
+      log: (m: string) => lines.push(m),
+      onTokenUsage: (u: object) => usage.push(u),
+    };
+    await promptInSession(rt, id, { ...spec, text: 'first' });
+    await promptInSession(rt, id, { ...spec, text: 'deep' });
+    assert.deepEqual(Object.keys(usage[0]!), ['promptBytes']);
+    assert.ok(lines.some((line) => line.includes('turn listing incomplete')));
+  });
+
   it('interrupts the session when the prompt request itself fails', async () => {
     const fake = fakeOpencodeServer(() => ({ rejectPrompt: true }));
     const rt = runtime(fake);

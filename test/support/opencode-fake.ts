@@ -12,6 +12,8 @@ export interface FakeReply {
   steps?: number;
   /** Fail the prompt POST itself (500) instead of answering. */
   rejectPrompt?: boolean;
+  /** The assistant message reports no tokens or cost. */
+  noTokens?: boolean;
   /** Milliseconds before the turn completes (the wait call blocks this long). */
   delayMs?: number;
   /** Never complete until interrupted. */
@@ -87,8 +89,12 @@ export function fakeOpencodeServer(
         ? [{ type: 'reasoning', text: 'thinking' }]
         : [{ type: 'text', text: r.text }]),
     ],
-    tokens: { input: 10, output: 5, reasoning: 1, cache: { read: 2, write: 0 } },
-    cost: 0.001,
+    ...(r.noTokens
+      ? {}
+      : {
+          tokens: { input: 10, output: 5, reasoning: 1, cache: { read: 2, write: 0 } },
+          cost: 0.001,
+        }),
     ...(r.error ? { error: { message: r.error } } : {}),
   });
 

@@ -274,7 +274,9 @@ export async function waitForPlugin(
       failure = error; // the registry may still be initializing
     }
     const jbot = plugins.find((entry) =>
-      String(entry.source?.path ?? '').endsWith('opencode/plugins/jbot-review.js'),
+      String(entry.source?.path ?? '')
+        .replace(/\\/g, '/')
+        .endsWith('opencode/plugins/jbot-review.js'),
     );
     if (jbot?.state?.status === 'active') return;
     if (jbot?.state?.status === 'failed') {
