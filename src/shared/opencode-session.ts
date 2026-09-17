@@ -273,13 +273,15 @@ async function assistantsSince(
   previousID: string | undefined,
   startedAt: number,
 ): Promise<{ messages: AssistantMessage[]; complete: boolean }> {
+  const limit = 500;
   const page = await client.message.list(
-    { sessionID, type: 'assistant', order: 'desc', limit: 500 },
+    { sessionID, type: 'assistant', order: 'desc', limit },
     { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
   );
   const messages: AssistantMessage[] = [];
-  let complete = previousID === undefined;
-  for (const message of (page.data ?? []) as unknown as AssistantMessage[]) {
+  const listed = (page.data ?? []) as unknown as AssistantMessage[];
+  let complete = false;
+  for (const message of listed) {
     // The previous turn's message may be gone (compaction); the turn's start bounds it too.
     if (message.id === previousID || message.time.created < startedAt) {
       complete = true;
@@ -287,7 +289,8 @@ async function assistantsSince(
     }
     messages.unshift(message);
   }
-  return { messages, complete };
+  // No boundary seen: a partial page still holds the whole session, a full one may not.
+  return { messages, complete: complete || listed.length < limit };
 }
 
 function assistantText(message: AssistantMessage): string {
