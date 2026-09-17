@@ -21,10 +21,11 @@ describe('permissionRules', () => {
         (r) => r.action === 'shell' && r.resource === 'git commit*' && r.effect === 'deny',
       ),
     );
-    assert.deepEqual(rules.slice(-3), [
+    assert.deepEqual(rules.slice(-4), [
       { action: 'edit', resource: '*', effect: 'deny' },
       { action: 'external_directory', resource: '*', effect: 'deny' },
       { action: 'question', resource: '*', effect: 'deny' },
+      { action: 'subagent', resource: '*', effect: 'deny' },
     ]);
     assert.ok(
       rules.every((r) => r.effect !== 'ask'),

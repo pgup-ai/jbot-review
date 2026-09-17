@@ -28,7 +28,6 @@ describe('tokenrouter (native Models.dev provider)', () => {
     assert.equal(p.keyEnv, 'TOKENROUTER_API_KEY');
     assert.equal(p.keyInput, 'tokenrouter-api-key');
     // V2's catalog lacks the router, so it is a custom endpoint with a default base URL.
-    assert.equal(p.custom?.npm, '@ai-sdk/openai-compatible');
     assert.equal(p.custom?.baseURL.default, 'https://api.tokenrouter.com/v1');
     // The router is unverified for opencode's promptCacheKey.
     assert.equal(modelSupportsPromptCache('tokenrouter', 'z-ai/glm-5.3-free'), false);

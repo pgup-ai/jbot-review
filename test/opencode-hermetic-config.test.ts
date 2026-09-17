@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -14,6 +14,16 @@ describe('opencode V2 sessions are hermetic', { skip: !hasV2 }, () => {
   it('runs the jbot plugin, ignores the reviewed repo config and plugin, and rejects unauthenticated calls', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'jbot-hermetic-'));
     const projectMarker = join(workspace, 'project-plugin-ran.txt');
+    // An operator's global config home with its own plugin must stay outside the review.
+    const ambientHome = mkdtempSync(join(tmpdir(), 'jbot-ambient-'));
+    const ambientMarker = join(ambientHome, 'ambient-plugin-ran.txt');
+    mkdirSync(join(ambientHome, 'opencode', 'plugins'), { recursive: true });
+    writeFileSync(
+      join(ambientHome, 'opencode', 'plugins', 'ambient.js'),
+      `import { writeFileSync } from "node:fs";\nexport default { id: "ambient", async setup() { writeFileSync(${JSON.stringify(ambientMarker)}, "ran"); } };\n`,
+    );
+    const savedConfigHome = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = ambientHome;
     mkdirSync(join(workspace, '.opencode', 'plugins'), { recursive: true });
     writeFileSync(
       join(workspace, '.opencode', 'opencode.json'),
@@ -66,6 +76,7 @@ describe('opencode V2 sessions are hermetic', { skip: !hasV2 }, () => {
         false,
       );
       assert.equal(existsSync(projectMarker), false, 'project plugin must not execute');
+      assert.equal(existsSync(ambientMarker), false, 'ambient global plugin must not execute');
       const documents = await runtime.client.config.get({ location: { directory: workspace } });
       assert.equal(
         documents.some((d: { path?: string }) =>
@@ -78,6 +89,9 @@ describe('opencode V2 sessions are hermetic', { skip: !hasV2 }, () => {
       assert.equal(anonymous.status, 401);
     } finally {
       runtime.stop();
+      if (savedConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = savedConfigHome;
+      for (const dir of [ambientHome, workspace]) rmSync(dir, { recursive: true, force: true });
     }
   });
 });

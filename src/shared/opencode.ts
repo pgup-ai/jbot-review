@@ -204,7 +204,6 @@ export async function runReview(
     options.onTokenUsage,
     outcome,
   );
-  rememberReviewSession(runtime, label, sessionID);
   let result: ReviewResult;
   try {
     result = parseReview(raw, label, log, { strict: true });
@@ -225,6 +224,8 @@ export async function runReview(
     );
     result = parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
+  // Only a session that produced a result is a fork candidate (a failed attempt's retry is not).
+  rememberReviewSession(runtime, label, sessionID);
   if (outcome.wrappedUp) result.partial = true;
   if (!options.guidelineSweep || outcome.wrappedUp) return result;
   const sweep = options.guidelineSweep;

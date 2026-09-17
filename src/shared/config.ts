@@ -8,7 +8,6 @@ export interface ProviderConfig {
   fallbackKey?: { env: string; input: string };
   custom?: {
     name: string;
-    npm: string;
     baseURL: { env: string; input: string; default?: string };
   };
   promptCache?: boolean;
@@ -245,7 +244,6 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyInput: 'openai-compatible-api-key',
     custom: {
       name: 'OpenAI Compatible',
-      npm: '@ai-sdk/openai-compatible',
       baseURL: {
         env: 'JBOT_OPENAI_COMPATIBLE_BASE_URL',
         input: 'openai-compatible-base-url',
@@ -325,7 +323,6 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // V2's catalog has no tokenrouter entry, so it is served as a custom endpoint.
     custom: {
       name: 'TokenRouter',
-      npm: '@ai-sdk/openai-compatible',
       baseURL: {
         env: 'JBOT_TOKENROUTER_BASE_URL',
         input: 'tokenrouter-base-url',

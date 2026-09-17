@@ -64,6 +64,7 @@ describe('recordAssistantTools', () => {
       session?: { turnCount?: number };
     }>;
     assert.equal(rows.length, 3);
+    assert.doesNotMatch(JSON.stringify(rows), /git diff|nope|"x"/, 'raw tool data never persists');
     assert.equal(read!.finish!.success, true);
     assert.equal(read!.finish!.durationMs, 2);
     assert.equal(shell!.input!.diffScope, 'whole');

@@ -6,6 +6,7 @@ import {
   promptInSession,
   startProgressLogger,
 } from '../src/shared/opencode-session.ts';
+import { DENY_ALL } from '../src/shared/opencode-config.ts';
 import { fakeOpencodeServer, fakeRuntime as runtime } from './support/opencode-fake.ts';
 
 const log = () => undefined;
@@ -20,12 +21,23 @@ describe('createReviewSession', () => {
     assert.ok(Array.isArray(session.permissions) && session.permissions.length > 0);
     assert.ok(session.environment && 'PATH' in session.environment);
     assert.equal('OPENCODE_CONFIG_CONTENT' in session.environment!, false);
+    const plain = await createReviewSession(runtime(fake), {
+      label: 'plain',
+      model: 'openai/gpt-5',
+      agent: 'jbot-plain',
+    });
+    // session rules append after the agent's, so a tool-less session carries deny-all itself
+    assert.deepEqual(fake.sessions.get(plain)!.permissions, DENY_ALL);
   });
 });
 
 describe('promptInSession', () => {
   it('returns the newest completed assistant text and records usage once, sending no message id', async () => {
-    const fake = fakeOpencodeServer((_s, text) => ({ text: `echo:${text}`, delayMs: 20 }));
+    const fake = fakeOpencodeServer((_s, text) => ({
+      text: `echo:${text}`,
+      delayMs: 20,
+      steps: 3,
+    }));
     const rt = runtime(fake);
     const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
     const usage: unknown[] = [];
@@ -47,7 +59,7 @@ describe('promptInSession', () => {
     assert.equal(first, 'echo:one');
     assert.equal(second, 'echo:two');
     assert.equal(usage.length, 1);
-    assert.equal((usage[0] as { input: number }).input, 10);
+    assert.equal((usage[0] as { input: number }).input, 30, 'usage spans every step of the turn');
     assert.ok(fake.prompts.every((p) => p.body.id === undefined));
     assert.ok(fake.calls.some((c) => /POST .*\/wait$/.test(c)));
   });
@@ -122,6 +134,22 @@ describe('promptInSession', () => {
     assert.equal(fake.prompts.length, 2);
   });
 
+  it('interrupts the session when the prompt request itself fails', async () => {
+    const fake = fakeOpencodeServer(() => ({ rejectPrompt: true }));
+    const rt = runtime(fake);
+    const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
+    await assert.rejects(
+      promptInSession(rt, id, {
+        model: 'openai/gpt-5',
+        text: 'x',
+        label: 'review',
+        timeoutMs: 5_000,
+        log,
+      }),
+    );
+    assert.equal(fake.sessions.get(id)!.interrupted, 1);
+  });
+
   it('interrupts on timeout when no wrap-up is possible', async () => {
     const fake = fakeOpencodeServer(() => ({ hang: true }));
     const rt = runtime(fake);
@@ -169,7 +197,7 @@ describe('wrap-up capability', () => {
       outcome,
       wrapUpReserveMs: 250,
     });
-    await new Promise((r) => setTimeout(r, 20));
+    while (fake.prompts.length < 2) await new Promise((r) => setTimeout(r, 5));
     assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'aux', log, 30_000), 1);
     assert.equal(await auxTurn, 'done');
     assert.equal(fake.sessions.get(aux)!.agent, 'plan');

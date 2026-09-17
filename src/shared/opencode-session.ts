@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { OpenCodeClient } from '@opencode/client';
 import { parseModelName } from '@symma/protocol';
 import {
+  DENY_ALL,
   MAIN_AGENT,
   PLAIN_AGENT,
   REVIEWER_AGENT,
@@ -18,6 +19,7 @@ import { WRAP_UP_PROMPT } from './prompt.ts';
 import { WRAP_UP_MARGIN_MS, wrapUpReserveMs } from './time-budget.ts';
 import {
   extractPromptTokenUsage,
+  type TokenUsageInfo,
   formatTokenUsage,
   type PromptTokenUsage,
   type TokenUsageRecorder,
@@ -215,7 +217,7 @@ export async function createReviewSession(
         agent,
         model,
         title: `jbot-review ${spec.label}`,
-        permissions: permissionRules(),
+        permissions: TOOL_LESS_AGENTS.has(agent) ? DENY_ALL : permissionRules(),
       })
     ).id;
   }
@@ -464,10 +466,16 @@ async function promptHoldingSlot(
     log(`Calling ${label} prompt (${spec.model})`);
     attempted = true;
     // No caller-supplied message id: the earlier v2 attempt stalled with one (ROADMAP).
-    await client.session.prompt(
-      { sessionID, text: spec.text },
-      { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
-    );
+    try {
+      await client.session.prompt(
+        { sessionID, text: spec.text },
+        { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
+      );
+    } catch (error) {
+      // The server may have accepted the prompt before the request failed.
+      await interruptBestEffort(client, sessionID, label, log);
+      throw error;
+    }
 
     const agent = sessionsByClient.get(client)?.get(sessionID)?.agent ?? MAIN_AGENT;
     const canWrapUp = !TOOL_LESS_AGENTS.has(agent);
@@ -525,16 +533,19 @@ async function promptHoldingSlot(
     if (message.error) {
       throw new Error(`opencode ${label} prompt failed: ${formatUnknown(message.error)}`);
     }
-    const telemetry = toolTelemetry.get(client);
-    if (telemetry) {
-      recordAssistantTools(
-        telemetry,
-        label,
-        await assistantsSince(client, sessionID, previous?.id),
-      );
+    // Usage spans the whole turn: V2 writes one assistant message per step.
+    let turn: AssistantMessage[] = [message];
+    try {
+      const since = await assistantsSince(client, sessionID, previous?.id);
+      if (since.length > 0) turn = since;
+    } catch (error) {
+      log(`${label} turn listing failed; counting the final message only: ${formatUnknown(error)}`);
     }
-    log(`${label} ${formatTokenUsage({ cost: message.cost, tokens: message.tokens })}`);
-    usage = extractPromptTokenUsage({ cost: message.cost, tokens: message.tokens });
+    const telemetry = toolTelemetry.get(client);
+    if (telemetry) recordAssistantTools(telemetry, label, turn);
+    const turnUsage = sumUsage(turn);
+    log(`${label} ${formatTokenUsage(turnUsage)}`);
+    usage = extractPromptTokenUsage(turnUsage);
     const text = assistantText(message);
     if (!text) {
       log(
@@ -553,6 +564,20 @@ async function promptHoldingSlot(
       );
     }
   }
+}
+
+function sumUsage(messages: AssistantMessage[]): TokenUsageInfo {
+  const tokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
+  let cost: number | undefined;
+  for (const message of messages) {
+    tokens.input += message.tokens?.input ?? 0;
+    tokens.output += message.tokens?.output ?? 0;
+    tokens.reasoning += message.tokens?.reasoning ?? 0;
+    tokens.cache.read += message.tokens?.cache?.read ?? 0;
+    tokens.cache.write += message.tokens?.cache?.write ?? 0;
+    if (typeof message.cost === 'number') cost = (cost ?? 0) + message.cost;
+  }
+  return { cost, tokens };
 }
 
 function formatUnknown(value: unknown): string {

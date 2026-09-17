@@ -5,7 +5,12 @@ import { BASH_PERMISSIONS, CLI_ENV_ALLOWLIST } from './shell-policy.ts';
 export const MAIN_AGENT = 'plan';
 /** Opt-in (JBOT_REVIEWER_AGENT=1): plan's policy with a review system prompt instead of the coding-agent one. */
 export const REVIEWER_AGENT = 'jbot-reviewer';
-/** jbot agents whose deny-all ruleset hides every tool; the plugin strips them too. */
+/**
+ * Tool-less jbot agents: deny-all at the agent level and, for sessions created
+ * on them, at the session level too (session rules append last); the plugin
+ * strips their tools in every request, which also covers a mid-turn switch to
+ * jbot-wrapup.
+ */
 export const WRAPUP_AGENT = 'jbot-wrapup';
 export const PLAIN_AGENT = 'jbot-plain';
 /** A tool-less turn is one completion: no wrap-up reserve, no finalize trigger. */
@@ -17,6 +22,8 @@ export interface PermissionRule {
   effect: 'allow' | 'deny' | 'ask';
 }
 
+export const DENY_ALL: PermissionRule[] = [{ action: '*', resource: '*', effect: 'deny' }];
+
 /** Ordered rules, last match wins, so the shell catch-all leads. `question` is denied because nothing in CI answers a form. */
 export function permissionRules(): PermissionRule[] {
   const { '*': catchAll, ...denies } = BASH_PERMISSIONS;
@@ -26,6 +33,8 @@ export function permissionRules(): PermissionRule[] {
     { action: 'edit', resource: '*', effect: 'deny' },
     { action: 'external_directory', resource: '*', effect: 'deny' },
     { action: 'question', resource: '*', effect: 'deny' },
+    // A child session would not carry this session's env allowlist.
+    { action: 'subagent', resource: '*', effect: 'deny' },
   ];
 }
 
@@ -209,7 +218,6 @@ function mergeProvider(providers: Record<string, ProviderEntry>, entry: ModelEnt
 export function buildConfig(input: OpencodeConfigInput): Record<string, any> {
   const providers: Record<string, ProviderEntry> = {};
   for (const entry of input.models) mergeProvider(providers, entry);
-  const denyAll = [{ action: '*', resource: '*', effect: 'deny' }];
   return {
     $schema: 'https://opencode.ai/config.json',
     permissions: permissionRules(),
@@ -222,12 +230,12 @@ export function buildConfig(input: OpencodeConfigInput): Record<string, any> {
       [WRAPUP_AGENT]: {
         mode: 'primary',
         description: 'jbot-review: final answer, tools off',
-        permissions: denyAll,
+        permissions: DENY_ALL,
       },
       [PLAIN_AGENT]: {
         mode: 'primary',
         description: 'jbot-review: single-shot model, tools off',
-        permissions: denyAll,
+        permissions: DENY_ALL,
       },
     },
     ...(Object.keys(providers).length ? { providers } : {}),

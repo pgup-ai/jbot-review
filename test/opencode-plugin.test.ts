@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { hermeticOpencodeConfigHome } from '../src/shared/opencode-plugin.ts';
+import { PERMISSION_DENIED_MESSAGE } from '../src/shared/prompt.ts';
 
 type Hook = (event: unknown) => unknown;
 
@@ -27,6 +28,7 @@ const tools = () => ({
       properties: {
         command: { type: 'string' },
         timeout: { type: 'integer', exclusiveMinimum: 0 },
+        limit: { type: 'integer', exclusiveMinimum: 0, minimum: 0 },
       },
     },
   },
@@ -35,6 +37,15 @@ const tools = () => ({
   write: { description: 'write', input: { type: 'object', properties: {} } },
   edit: { description: 'edit', input: { type: 'object', properties: {} } },
   patch: { description: 'patch', input: { type: 'object', properties: {} } },
+  apply_patch: { description: 'patch', input: { type: 'object', properties: {} } },
+  subagent: { description: 'spawn', input: { type: 'object', properties: {} } },
+  task: { description: 'spawn', input: { type: 'object', properties: {} } },
+});
+
+const temps: string[] = [];
+after(() => {
+  for (const dir of [hermeticOpencodeConfigHome(), ...temps])
+    rmSync(dir, { recursive: true, force: true });
 });
 
 describe('jbot opencode plugin', () => {
@@ -44,6 +55,7 @@ describe('jbot opencode plugin', () => {
     context(event);
     assert.deepEqual(Object.keys(event.tools).sort(), ['read', 'shell']);
     assert.deepEqual(event.tools.shell.input.properties.timeout, { type: 'integer', minimum: 1 });
+    assert.deepEqual(event.tools.shell.input.properties.limit, { type: 'integer', minimum: 1 });
   });
 
   it('strips every tool for the wrap-up and single-shot agents', async () => {
@@ -57,7 +69,9 @@ describe('jbot opencode plugin', () => {
 
   it('applies the options registered for the session and nothing for unknown ones', async () => {
     const { context } = await loadPlugin();
-    const file = join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json');
+    const dir = mkdtempSync(join(tmpdir(), 'jbot-opts-'));
+    temps.push(dir);
+    const file = join(dir, 'opts.json');
     writeFileSync(file, JSON.stringify({ ses_1: { reasoningEffort: 'low' } }));
     process.env.JBOT_OPENCODE_SESSION_OPTIONS = file;
     try {
@@ -82,6 +96,7 @@ describe('jbot opencode plugin', () => {
     const ask = { effect: 'ask', message: '' };
     evaluate(ask);
     assert.equal(ask.effect, 'deny');
+    assert.equal(ask.message, PERMISSION_DENIED_MESSAGE);
     const allow = { effect: 'allow', message: '' };
     evaluate(allow);
     assert.equal(allow.effect, 'allow');

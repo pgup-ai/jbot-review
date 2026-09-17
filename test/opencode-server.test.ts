@@ -12,6 +12,7 @@ import {
   startOpencode,
   waitForModels,
 } from '../src/shared/opencode-server.ts';
+import { OpenCode } from '@opencode/client';
 import { fakeOpencodeServer } from './support/opencode-fake.ts';
 
 describe('parseServerBanner', () => {
@@ -72,6 +73,7 @@ describe('childEnv', () => {
     JBOT_OPENAI_API_KEY: 'jbot',
     STRIPE_SECRET: 's',
     LANG: 'C',
+    OPENCODE_CONFIG_DIR: '/operator/config',
   };
   const common = {
     keys: { OPENAI_API_KEY: 'k' },
@@ -113,13 +115,31 @@ describe('startOpencode', () => {
         [],
       );
     } finally {
-      process.env.TMPDIR = saved.TMPDIR;
-      process.env.JBOT_OPENCODE_BIN = saved.JBOT_OPENCODE_BIN;
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
     }
   });
 });
 
 describe('waitForModels', () => {
+  it('keeps polling through a server that is still booting', async () => {
+    let calls = 0;
+    const client = OpenCode.make({
+      baseUrl: 'http://fake.local',
+      fetch: async () =>
+        ++calls === 1
+          ? new Response('booting', { status: 503 })
+          : new Response(JSON.stringify({ data: [{ providerID: 'openai', id: 'gpt-5' }] }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+    });
+    await waitForModels(client, '/ws', ['openai/gpt-5'], 5_000);
+    assert.equal(calls, 2);
+  });
+
   it('resolves once every requested model is listed and names the missing ones otherwise', async () => {
     const fake = fakeOpencodeServer(() => ({ text: '' }), {
       models: [{ providerID: 'openai', id: 'gpt-5' }],

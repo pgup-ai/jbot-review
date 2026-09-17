@@ -8,6 +8,10 @@ export interface FakeReply {
   /** Assistant text; omitted = reasoning-only turn. */
   text?: string;
   error?: string;
+  /** Completed assistant messages before the final one (V2 writes one per step). */
+  steps?: number;
+  /** Fail the prompt POST itself (500) instead of answering. */
+  rejectPrompt?: boolean;
   /** Milliseconds before the turn completes (the wait call blocks this long). */
   delayMs?: number;
   /** Never complete until interrupted. */
@@ -177,12 +181,17 @@ export function fakeOpencodeServer(
         content: [{ type: 'text', text: body.text }],
       });
       const r = reply(session, body.text);
+      if (r.rejectPrompt) return json({ error: 'prompt rejected' }, 500);
+      for (let i = 1; i < (r.steps ?? 1); i++) {
+        session.messages.push(assistant(session, { text: 'step' }, true));
+      }
       const draft = assistant(session, r, false);
       session.messages.push(draft);
       let finish!: () => void;
       const done = new Promise<void>((resolve) => {
         finish = () => {
           Object.assign(draft, assistant(session, r, true), { id: draft.id });
+          pending.delete(session.id);
           resolve();
         };
       });

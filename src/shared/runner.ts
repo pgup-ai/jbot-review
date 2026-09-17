@@ -789,12 +789,7 @@ function missingOctokit(): Octokit {
 
 export interface ReviewRunOptions {
   enhancedContext?: boolean;
-  /**
-   * Withhold credential env vars from the opencode child (default on). The
-   * scrub mutates process-global env for the spawn window, so a process that
-   * runs REVIEWS CONCURRENTLY (the webhook app) must turn it off — a sibling
-   * run's env reads would race the window.
-   */
+  /** Withhold credential env vars from the opencode child (default on); the env is composed per spawn, so concurrent runs never race it. */
   scrubSessionEnv?: boolean;
   /** Environment scoped to the opencode child process. */
   opencodeProxyEnv?: NodeJS.ProcessEnv;

@@ -16,8 +16,9 @@ import { startProgressLogger } from './opencode-session.ts';
 import { REVIEWER_SYSTEM_PROMPT } from './prompt.ts';
 
 const READY_TIMEOUT_MS = 15_000;
+/** Bounds how long a stopping server keeps its port for the optional stats line. */
+const STATS_TIMEOUT_MS = 5_000;
 const MODELS_TIMEOUT_MS = 15_000;
-const REQUEST_TIMEOUT_MS = 10_000;
 const KILL_GRACE_MS = 5_000;
 
 /**
@@ -131,6 +132,9 @@ export function childEnv(input: ChildEnvInput): Record<string, string> {
   for (const [name, value] of Object.entries(input.proxyEnv ?? {})) {
     if (value !== undefined) env[name] = value;
   }
+  // An operator's own config pointers would re-enter the hermetic child.
+  delete env.OPENCODE_CONFIG;
+  delete env.OPENCODE_CONFIG_DIR;
   Object.assign(env, input.keys, {
     OPENCODE_DISABLE_PROJECT_CONFIG: '1',
     XDG_CONFIG_HOME: input.configHome,
@@ -142,7 +146,8 @@ export function childEnv(input: ChildEnvInput): Record<string, string> {
 }
 
 interface SpawnedServer extends ServerBanner {
-  close(): void;
+  /** SIGTERM, then SIGKILL after the grace; `onExit` runs once the process is gone. */
+  close(onExit?: () => void): void;
 }
 
 function spawnServer(
@@ -156,8 +161,9 @@ function spawnServer(
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stopping = false;
-  const close = () => {
+  const close = (onExit?: () => void) => {
     stopping = true;
+    if (onExit) child.once('exit', onExit);
     child.kill('SIGTERM');
     setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS).unref();
   };
@@ -213,19 +219,53 @@ export async function waitForModels(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let missing = models;
+  let failure: unknown;
   while (Date.now() < deadline) {
-    const listed = new Set(
-      ((await client.model.list({ location: { directory: workspace } })).data ?? []).map(
-        (m) => `${m.providerID}/${m.id}`,
-      ),
-    );
-    missing = models.filter((model) => !listed.has(model));
-    if (missing.length === 0) return;
+    try {
+      const page = await client.model.list(
+        { location: { directory: workspace } },
+        { signal: AbortSignal.timeout(Math.max(1_000, deadline - Date.now())) },
+      );
+      const listed = new Set((page.data ?? []).map((m) => `${m.providerID}/${m.id}`));
+      missing = models.filter((model) => !listed.has(model));
+      if (missing.length === 0) return;
+    } catch (error) {
+      failure = error; // a server still booting answers with errors first
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(
-    `opencode server never listed ${missing.join(', ')}; check the provider key env var and config entry.`,
+    `opencode server never listed ${missing.join(', ')}; check the provider key env var and config entry.` +
+      (failure
+        ? ` Last error: ${failure instanceof Error ? failure.message : String(failure)}`
+        : ''),
   );
+}
+
+/** The jbot plugin is the layer that keeps tool-less turns tool-less; a boot without it is not a review server. */
+export async function waitForPlugin(
+  client: OpenCodeClient,
+  workspace: string,
+  timeoutMs = MODELS_TIMEOUT_MS,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  type Listed = { source?: { path?: string }; state?: { status?: string } };
+  while (Date.now() < deadline) {
+    const listed = (await client.plugin.list(
+      { location: { directory: workspace } },
+      { signal: AbortSignal.timeout(Math.max(1_000, deadline - Date.now())) },
+    )) as unknown;
+    const plugins = (
+      Array.isArray(listed) ? listed : ((listed as { data?: Listed[] }).data ?? [])
+    ) as Listed[];
+    const jbot = plugins.find((entry) =>
+      String(entry.source?.path ?? '').endsWith('opencode/plugins/jbot-review.js'),
+    );
+    if (jbot?.state?.status === 'active') return;
+    if (jbot?.state?.status === 'failed') break;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error('opencode server did not load the jbot plugin from its hermetic config home.');
 }
 
 export interface OpencodeRuntime {
@@ -280,10 +320,17 @@ export async function startOpencode(
   const dataHome = mkdtempSync(join(tmpdir(), 'jbot-opencode-data-'));
   const sessionOptionsFile = join(dataHome, 'jbot-session-options.json');
   let server: SpawnedServer | undefined;
-  const stopServer = () => {
-    server?.close();
-    rmSync(dataHome, { recursive: true, force: true });
+  // Removed once the child has exited: a stopping server still writes there.
+  const removeDataHome = () => {
+    try {
+      rmSync(dataHome, { recursive: true, force: true });
+    } catch (error) {
+      log(
+        `opencode data home not removed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   };
+  const stopServer = () => (server ? server.close(removeDataHome) : removeDataHome());
   let client: OpenCodeClient;
   try {
     writeFileSync(sessionOptionsFile, '{}');
@@ -297,7 +344,8 @@ export async function startOpencode(
       sessionOptionsFile,
       proxyEnv: options.proxyEnv,
     });
-    const port = options.port ?? parsePortEnv('JBOT_OPENCODE_PORT', 4096);
+    // 0: the OS picks a free port and the banner reports it.
+    const port = options.port ?? parsePortEnv('JBOT_OPENCODE_PORT', 0);
     server = await spawnServer(resolveOpencodeBin(), port, env, log);
     client = OpenCode.make({
       baseUrl: server.url,
@@ -308,6 +356,7 @@ export async function startOpencode(
       workspace,
       models.map((m) => `${m.providerID}/${m.modelID}`),
     );
+    await waitForPlugin(client, workspace);
   } catch (error) {
     stopServer();
     throw error;
@@ -319,7 +368,7 @@ export async function startOpencode(
     stopProgress();
     if (!options.runStats) return stopServer();
     void client.session
-      .stats(undefined, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+      .stats(undefined, { signal: AbortSignal.timeout(STATS_TIMEOUT_MS) })
       .then((s) =>
         log(
           `opencode run stats: prompts=${s.prompts} steps=${s.steps} tokens=${JSON.stringify(s.tokens)} cost=${s.cost}`,

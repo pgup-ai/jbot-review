@@ -1243,11 +1243,13 @@ CI reviews; there is no supported `AGENT` env override.
 - **Fork PRs** won't have the secret (GitHub withholds secrets from fork-triggered
   runs in Actions).
 - **OpenCode**: this repo drives OpenCode V2 (`@opencode/cli` 2.x, `@opencode/client`).
-  Provider keys reach the server as its documented env var; every session's
-  shell env is replaced with an allowlist, so keys never appear in a tool call.
+  Catalog provider keys reach the server as its documented env var and
+  custom-endpoint keys ride the server-only config; every session's shell env
+  is replaced with an allowlist, so neither appears in a tool call.
   `JBOT_OPENCODE_BIN` points local runs at a specific binary (default: the
   `@opencode/cli` launcher installed with the package, then PATH); `JBOT_TRANSCRIPT_DIR`
   exports sanitized session transcripts; `JBOT_RUN_STATS=1` logs run totals;
-  `JBOT_VERIFY_FORK=1` forks the main review session for verification and
+  `JBOT_VERIFY_FORK=1` forks the main review session for verification when the
+  review ran as one session (sharded runs verify from a fresh session) and
   `JBOT_REVIEWER_AGENT=1` swaps opencode's coding system prompt for a review
-  one (both off by default until evaluated).
+  one on agentic models (both off by default until evaluated).

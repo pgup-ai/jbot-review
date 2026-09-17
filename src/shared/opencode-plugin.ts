@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PERMISSION_DENIED_MESSAGE } from './prompt.ts';
 
 /**
  * Read-only layer 3 (invariant 8), auto-discovered from the hermetic
@@ -13,7 +14,7 @@ import { join } from 'node:path';
  */
 const PLUGIN_SOURCE = `// jbot-review opencode plugin; rationale in src/shared/opencode-plugin.ts.
 import { readFileSync } from 'node:fs';
-const STRIP = new Set(['write', 'edit', 'patch', 'multiedit', 'question']);
+const STRIP = new Set(['write', 'edit', 'patch', 'apply_patch', 'multiedit', 'question', 'subagent', 'task']);
 const TOOL_LESS_AGENTS = new Set(['jbot-wrapup', 'jbot-plain']);
 
 function stripTools(tools, agent) {
@@ -26,7 +27,7 @@ function geminiSafe(node) {
   if (!node || typeof node !== 'object') return;
   if (node.type === 'integer' && node.exclusiveMinimum === 0) {
     delete node.exclusiveMinimum;
-    if (node.minimum === undefined) node.minimum = 1;
+    node.minimum = Math.max(node.minimum ?? 1, 1);
   }
   for (const value of Object.values(node)) geminiSafe(value);
 }
@@ -53,7 +54,7 @@ export default {
     await ctx.permission.hook('evaluate', (event) => {
       if (event.effect === 'ask') {
         event.effect = 'deny';
-        event.message = 'jbot-review runs headless; nothing can answer a permission prompt.';
+        event.message = ${JSON.stringify(PERMISSION_DENIED_MESSAGE)};
       }
     });
   },

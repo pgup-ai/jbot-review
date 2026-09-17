@@ -12,7 +12,7 @@ import {
 } from '../src/shared/commandcode.ts';
 import { PROVIDERS } from '../src/shared/config.ts';
 import { parseDimModelList } from '../src/shared/dim.ts';
-import { startOpencode } from '../src/shared/opencode-server.ts';
+import { startOpencode, type OpencodeRuntime } from '../src/shared/opencode-server.ts';
 import { parseCursorModelList, parseKiloModelList, parseModelName } from '@symma/protocol';
 
 const MODELS_DEV_URL = 'https://models.dev/api.json';
@@ -94,6 +94,13 @@ function dockerPackageVersion(packageName: string): string {
   const match = dockerfile.match(new RegExp(`${escaped}@([^\\s\\\\]+)`));
   if (!match?.[1]) throw new Error(`Missing ${packageName} version in Dockerfile.`);
   return match[1];
+}
+
+/** kilo auto-activates every provider whose key sits in its env and pads its list with those models. */
+function withoutProviderKeys(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(env).filter(([name]) => !/_API_KEY$|_TOKEN$|_SECRET$|_AUTH_JSON$/.test(name)),
+  );
 }
 
 function npmCliOutput(
@@ -228,24 +235,30 @@ async function loadClineRecommendedModels(): Promise<{
 /** V2's `opencode models` is interactive, so the catalog is read over a private server's API; OPENCODE_API_KEY (Zen) also unlocks opencode-go. */
 async function listOpencodeModels(): Promise<Record<'opencode' | 'opencode-go', string[]>> {
   const workspace = mkdtempSync(join(tmpdir(), 'jbot-catalog-opencode-'));
-  const runtime = await startOpencode(
-    workspace,
-    'opencode',
-    parseModelName(PROVIDERS.opencode!.defaultModel!).modelID,
-    process.env.OPENCODE_API_KEY?.trim() || 'unused',
-    () => undefined,
-    { port: 47_000 + Math.floor(Math.random() * 1000) },
-  );
+  let runtime: OpencodeRuntime | undefined;
   try {
+    runtime = await startOpencode(
+      workspace,
+      'opencode',
+      parseModelName(PROVIDERS.opencode!.defaultModel!).modelID,
+      process.env.OPENCODE_API_KEY?.trim() || 'unused',
+      () => undefined,
+      { port: 0 },
+    );
     const listed =
-      (await runtime.client.model.list({ location: { directory: workspace } })).data ?? [];
+      (
+        await runtime.client.model.list(
+          { location: { directory: workspace } },
+          { signal: AbortSignal.timeout(30_000) },
+        )
+      ).data ?? [];
     const byProvider = (providerID: string) =>
       uniqueSorted(
         listed.filter((m) => m.providerID === providerID).map((m) => `${providerID}/${m.id}`),
       );
     return { opencode: byProvider('opencode'), 'opencode-go': byProvider('opencode-go') };
   } finally {
-    runtime.stop();
+    runtime?.stop();
     rmSync(workspace, { recursive: true, force: true });
   }
 }
@@ -273,7 +286,7 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   const clineFreeValues = clineFreeModels.map((model) => `cline/${model}`);
   const grokModels = parseGrokModels(npmCliOutput('@xai-official/grok', 'grok', ['models']));
   const kiloModels = parseKiloModelList(
-    npmCliOutput('@kilocode/cli', 'kilo', ['models', '--pure']),
+    npmCliOutput('@kilocode/cli', 'kilo', ['models', '--pure'], withoutProviderKeys(process.env)),
   );
   for (const [providerID, models] of Object.entries({
     opencode: opencodeModels,

@@ -80,7 +80,7 @@ describe('runReview on V2', () => {
     );
     const rt = runtime(cut);
     const review = runReview(rt, 'openai/gpt-5', 'ctx', '', log, { timeoutMs: 60_000 });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    while (cut.prompts.length < 1) await new Promise((resolve) => setTimeout(resolve, 5));
     assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'review', log, 30_000), 1);
     await assert.rejects(review, /unparseable JSON/);
   });
@@ -162,7 +162,7 @@ describe('runReview on V2', () => {
       timeoutMs: 60_000,
       guidelineSweep: { guidelines: 'g', findings: [] } as never,
     });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    while (fake.prompts.length < 1) await new Promise((resolve) => setTimeout(resolve, 5));
     assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'review', log, 30_000), 1);
     const result = await review;
     assert.equal(result.partial, true);
@@ -256,6 +256,21 @@ describe('runFindingVerification on V2', () => {
     assert.equal(forked?.forkedFrom, main);
     assert.equal(forked?.agent, 'plan');
     assert.deepEqual(forked?.model, { providerID: 'openai', id: 'gpt-5' });
+    // a failed attempt is not a fork candidate: its retry's session is
+    let n = 0;
+    const retried = fakeOpencodeServer((session) =>
+      session.forkedFrom
+        ? { text: verdicts }
+        : ++n <= 2
+          ? { text: '{"summary": "broken' }
+          : { text: '{"findings":[]}' },
+    );
+    const rt2 = runtime(retried, { verifyFork: true });
+    await assert.rejects(runReview(rt2, 'openai/gpt-5', 'ctx', '', log));
+    await runReview(rt2, 'openai/gpt-5', 'ctx', '', log);
+    await runFindingVerification(rt2, 'openai/gpt-5', 'ctx', [finding], log);
+    const second = [...retried.sessions.keys()][1];
+    assert.equal([...retried.sessions.values()].find((s) => s.forkedFrom)?.forkedFrom, second);
   });
 });
 

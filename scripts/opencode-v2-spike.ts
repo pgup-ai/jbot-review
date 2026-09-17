@@ -28,6 +28,7 @@ execFileSync('git', ['-c', 'user.email=s@s', '-c', 'user.name=s', 'commit', '-qm
 });
 
 const events: string[] = [];
+process.env.JBOT_SPIKE_CANARY = 'canary-value'; // in the server env from the start
 const runtime = await startOpencode(
   workspace,
   providerID,
@@ -43,7 +44,6 @@ const runtime = await startOpencode(
     verificationModelOptions: { reasoningEffort: 'low' },
   },
 );
-process.env.JBOT_SPIKE_CANARY = 'canary-value';
 try {
   // The verify session's tier options land in the file the plugin reads.
   const verifyID = await createReviewSession(runtime, { label: 'verify', model, tier: 'verify' });
@@ -102,6 +102,45 @@ try {
   ac.abort();
 
   log(`progress lines seen: ${events.filter((e) => e.includes(' tool: ')).length}`);
+
+  // The shell accident filter on V2 rules: a read is allowed, a clobber is denied.
+  const stash = await createReviewSession(runtime, { label: 'shell-filter', model });
+  const stashReply = await promptInSession(runtime, stash, {
+    model,
+    text: 'Use your shell tool to run exactly: git stash list. Then use it to run exactly: git stash. Reply with both raw outcomes (including any denial text), nothing else.',
+    label: 'shell-filter',
+    timeoutMs: 120_000,
+    log,
+  });
+  log(
+    `shell filter reply (expect the second command denied): ${stashReply.replace(/\s+/g, ' ').slice(0, 300)}`,
+  );
+
+  // Effort options reach the provider: x-preview-f rejects medium with a 400.
+  if (providerID === 'opencode') {
+    const probeModel = 'opencode/x-preview-f-free';
+    const probe = await createReviewSession(runtime, { label: 'effort-probe', model: probeModel });
+    const file = runtime.sessionOptionsFile;
+    const map = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    map[probe] = { reasoningEffort: 'medium' };
+    writeFileSync(file, JSON.stringify(map));
+    try {
+      const reply = await promptInSession(runtime, probe, {
+        model: probeModel,
+        text: 'Reply with the single word ok.',
+        label: 'effort-probe',
+        timeoutMs: 120_000,
+        log,
+      });
+      log(
+        `effort probe: NOT applied — the provider accepted medium (reply: ${reply.slice(0, 60)})`,
+      );
+    } catch (error) {
+      log(
+        `effort probe: options reached the provider (${(error instanceof Error ? error.message : String(error)).slice(0, 160)})`,
+      );
+    }
+  }
 } finally {
   runtime.stop();
 }
