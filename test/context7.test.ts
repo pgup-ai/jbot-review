@@ -164,8 +164,10 @@ describe('enableContext7Mcp', () => {
       },
     };
 
-    const enabled = await enableContext7Mcp(client as never, 'ctx7sk-test', (msg) =>
-      logs.push(msg),
+    const enabled = await enableContext7Mcp(
+      { client, workspace: '/ws', stop() {} } as never,
+      'ctx7sk-test',
+      (msg) => logs.push(msg),
     );
 
     assert.equal(enabled, false);
@@ -189,7 +191,11 @@ describe('enableContext7Mcp', () => {
       },
     };
 
-    const enabled = await enableContext7Mcp(client as never, 'ctx7sk-test', () => undefined);
+    const enabled = await enableContext7Mcp(
+      { client, workspace: '/ws', stop() {} } as never,
+      'ctx7sk-test',
+      () => undefined,
+    );
 
     assert.equal(enabled, false);
     assert.equal(disconnected, true);
