@@ -28,6 +28,8 @@ import {
   piModelCandidates,
   piProviderIDFor,
   piRuntimeSupported,
+  piModelAvailable,
+  piServesModel,
   piSupportsProvider,
   piThinkingLevel,
   sumPiUsage,
@@ -38,6 +40,16 @@ import { CONTINUATION_NUDGE_PROMPT, REPOSITORY_PAGE_BYTES } from '../src/shared/
 import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts';
+
+describe('piServesModel', () => {
+  it('keeps Zen free-tier models off pi, decided before any catalog loads', async () => {
+    assert.equal(piServesModel('opencode', 'mimo-v2.5-free'), false);
+    assert.equal(piServesModel('opencode-go', 'glm-5.2-free'), false);
+    assert.equal(piServesModel('opencode', 'mimo-v2.5-pro'), true);
+    assert.equal(piServesModel('cline', 'cline-free'), false);
+    assert.equal(await piModelAvailable('opencode', 'mimo-v2.5-free'), false);
+  });
+});
 
 describe('piSupportsProvider', () => {
   it('accepts every non-CLI jbot provider pi can also serve', () => {

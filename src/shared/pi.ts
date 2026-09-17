@@ -88,6 +88,16 @@ export function piSupportsProvider(providerID: string): boolean {
 }
 
 /**
+ * Zen's free tier answers 403 to any client but opencode itself (measured
+ * 2026-09-17), so those models stay on the opencode engine.
+ */
+export function piServesModel(providerID: string, modelID: string): boolean {
+  const zenFree =
+    (providerID === 'opencode' || providerID === 'opencode-go') && modelID.endsWith('-free');
+  return piSupportsProvider(providerID) && !zenFree;
+}
+
+/**
  * Model IDs to try against pi's registry, in order. jbot's config IDs come from
  * models.dev (bare stems, e.g. `nemotron-3-ultra-550b-a55b`), but multi-vendor
  * gateways like NVIDIA NIM namespace the same model with a vendor prefix
@@ -654,7 +664,7 @@ function createPiModelRuntime(sdk: PiSdkLike): Promise<PiModelRuntimeLike> {
 let piCatalogPromise: Promise<ReadonlyArray<PiCatalogModel>> | undefined;
 
 export async function piModelAvailable(providerID: string, modelID: string): Promise<boolean> {
-  if (!piSupportsProvider(providerID)) return false;
+  if (!piServesModel(providerID, modelID)) return false;
   piCatalogPromise ??= loadPiSdk()
     .then(async (sdk) => {
       const runtime = await createPiModelRuntime(sdk);
