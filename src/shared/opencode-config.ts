@@ -117,7 +117,9 @@ export function sessionEnvironment(env: NodeJS.ProcessEnv = process.env): Record
     const value = env[name];
     if (value === undefined) continue;
     // Proxy URLs keep their route but not their userinfo: tools need no proxy credentials.
-    variables[name] = name.endsWith('PROXY') ? value.replace(/\/\/[^@/]+@/, '//') : value;
+    variables[name] = name.toUpperCase().endsWith('PROXY')
+      ? value.replace(/\/\/[^@/]+@/, '//')
+      : value;
   }
   return variables;
 }
