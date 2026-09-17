@@ -193,6 +193,9 @@ export interface CreateSessionSpec {
   forkFrom?: string;
 }
 
+/** Control-plane calls never wait on a wedged server longer than one request timeout. */
+const control = () => ({ signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+
 function modelRef(model: string) {
   const { providerID, modelID } = parseModelName(model);
   return { providerID, id: modelID };
@@ -207,21 +210,24 @@ export async function createReviewSession(
   const model = modelRef(spec.model);
   let sessionID: string;
   if (spec.forkFrom) {
-    sessionID = (await client.session.fork({ sessionID: spec.forkFrom })).id;
-    await client.session.switchAgent({ sessionID, agent });
-    await client.session.switchModel({ sessionID, model });
+    sessionID = (await client.session.fork({ sessionID: spec.forkFrom }, control())).id;
+    await client.session.switchAgent({ sessionID, agent }, control());
+    await client.session.switchModel({ sessionID, model }, control());
   } else {
     sessionID = (
-      await client.session.create({
-        location: { directory: runtime.workspace },
-        agent,
-        model,
-        title: `jbot-review ${spec.label}`,
-        permissions: TOOL_LESS_AGENTS.has(agent) ? DENY_ALL : permissionRules(),
-      })
+      await client.session.create(
+        {
+          location: { directory: runtime.workspace },
+          agent,
+          model,
+          title: `jbot-review ${spec.label}`,
+          permissions: TOOL_LESS_AGENTS.has(agent) ? DENY_ALL : permissionRules(),
+        },
+        control(),
+      )
     ).id;
   }
-  await client.session.environment({ sessionID, variables: sessionEnvironment() });
+  await client.session.environment({ sessionID, variables: sessionEnvironment() }, control());
   rememberSession(client, sessionID, { label: spec.label, agent });
   registerSessionOptions(runtime, sessionID, spec.model, spec.tier ?? 'main');
   return sessionID;
@@ -502,7 +508,7 @@ async function promptHoldingSlot(
           `${label} prompt cut off; wrapping up in-session within ${Math.round(settled.budgetMs / 1000)}s`,
         );
         await interruptBestEffort(client, sessionID, label, log);
-        await client.session.switchAgent({ sessionID, agent: WRAPUP_AGENT });
+        await client.session.switchAgent({ sessionID, agent: WRAPUP_AGENT }, control());
         rememberSession(client, sessionID, { agent: WRAPUP_AGENT });
         try {
           const wrapped = await promptHoldingSlot(runtime, sessionID, {
@@ -517,7 +523,7 @@ async function promptHoldingSlot(
           return wrapped;
         } finally {
           rememberSession(client, sessionID, { agent });
-          await client.session.switchAgent({ sessionID, agent }).catch(() => undefined);
+          await client.session.switchAgent({ sessionID, agent }, control()).catch(() => undefined);
         }
       }
       message = settled.message;
