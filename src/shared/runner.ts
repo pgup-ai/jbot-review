@@ -1343,10 +1343,10 @@ async function runReviewPipeline(params: {
     : [false, false];
   if (piEngine.enabled) {
     if (piSupportsProvider(providerID) && !mainPiModelAvailable) {
-      log(`pi catalog has no ${model}; routing main sessions through opencode.`);
+      log(`pi engine does not serve ${model}; routing main sessions through opencode.`);
     }
     if (piSupportsProvider(auxProviderID) && !auxPiModelAvailable && auxModel !== model) {
-      log(`pi catalog has no ${auxModel}; routing auxiliary sessions through opencode.`);
+      log(`pi engine does not serve ${auxModel}; routing auxiliary sessions through opencode.`);
     }
   }
   const backendSelection = selectReviewBackends({
