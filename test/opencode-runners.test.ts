@@ -267,7 +267,7 @@ describe('runFindingVerification on V2', () => {
     );
     const rt2 = runtime(retried, { verifyFork: true });
     await assert.rejects(runReview(rt2, 'openai/gpt-5', 'ctx', '', log));
-    await runReview(rt2, 'openai/gpt-5', 'ctx', '', log);
+    await runReview(rt2, 'openai/gpt-5', 'ctx', '', log, { label: 'review-retry' });
     await runFindingVerification(rt2, 'openai/gpt-5', 'ctx', [finding], log);
     const second = [...retried.sessions.keys()][1];
     assert.equal([...retried.sessions.values()].find((s) => s.forkedFrom)?.forkedFrom, second);

@@ -460,7 +460,9 @@ const reviewSessionsByRuntime = new WeakMap<object, Map<string, string[]>>();
 function rememberReviewSession(runtime: OpencodeRuntime, label: string, sessionID: string): void {
   const byLabel = reviewSessionsByRuntime.get(runtime) ?? new Map<string, string[]>();
   reviewSessionsByRuntime.set(runtime, byLabel);
-  byLabel.set(label, [...(byLabel.get(label) ?? []), sessionID]);
+  // The runner's retry of a failed attempt runs under `<label>-retry`; it is the same pass.
+  const pass = label.replace(/-retry$/, '');
+  byLabel.set(pass, [...(byLabel.get(pass) ?? []), sessionID]);
 }
 
 /** The one main review session; lens passes never count, and a sharded run yields none (a fork of one shard would bias the verifier). */
