@@ -671,6 +671,15 @@ export function abortOpencodeSessionsByLabel(
  * failed execution, keyed by the session's label. Best effort — a broken
  * stream is logged once and never affects the review (invariant 3).
  */
+/** V2's tool events carry the call input but no tool name; the first string argument identifies it. */
+function describeToolCall(props: Record<string, unknown>): string {
+  const input = props.input as Record<string, unknown> | undefined;
+  const arg = input && Object.entries(input).find(([, value]) => typeof value === 'string');
+  if (!arg) return '?';
+  const value = String(arg[1]).replace(/\s+/g, ' ');
+  return `${arg[0]}=${value.length > 120 ? `${value.slice(0, 120)}…` : value}`;
+}
+
 export function startProgressLogger(
   client: OpenCodeClient,
   log: (msg: string) => void,
@@ -686,7 +695,7 @@ export function startProgressLogger(
         const label = sessionID ? labelsByClient.get(client)?.get(sessionID) : undefined;
         if (!label) continue;
         if (raw.type === 'session.tool.called') {
-          log(`${label} tool: ${String(props.tool ?? props.name ?? '?')}`);
+          log(`${label} tool: ${describeToolCall(props)}`);
         } else if (raw.type === 'session.execution.failed') {
           log(
             `${label} execution failed: ${formatUnknown(props.error ?? props.message ?? 'unknown')}`,

@@ -226,14 +226,23 @@ describe('startProgressLogger', () => {
     const stop = startProgressLogger(rt.client, (m) => lines.push(m));
     const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
     await new Promise((r) => setTimeout(r, 50));
-    fake.emit({ type: 'session.tool.called', data: { sessionID: id, tool: 'shell' } });
-    fake.emit({ type: 'session.tool.called', data: { sessionID: 'ses_unknown', tool: 'read' } });
+    fake.emit({
+      type: 'session.tool.called',
+      data: { sessionID: id, input: { command: 'git  diff\n--stat' } },
+    });
+    fake.emit({
+      type: 'session.tool.called',
+      data: { sessionID: 'ses_unknown', input: { filePath: 'x' } },
+    });
     fake.emit({
       type: 'session.execution.failed',
       data: { sessionID: id, error: { message: 'quota' } },
     });
     await new Promise((r) => setTimeout(r, 50));
     stop();
-    assert.deepEqual(lines, ['review tool: shell', 'review execution failed: quota']);
+    assert.deepEqual(lines, [
+      'review tool: command=git diff --stat',
+      'review execution failed: quota',
+    ]);
   });
 });
