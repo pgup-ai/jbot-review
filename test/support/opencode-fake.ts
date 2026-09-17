@@ -235,6 +235,7 @@ export function fakeOpencodeServer(
     if (session && method === 'GET' && path.endsWith('/message')) {
       const type = url.searchParams.get('type');
       const limit = Number(url.searchParams.get('limit') ?? '100');
+      if (limit > 200) return json({ error: 'Expected a value less than or equal to 200' }, 400);
       let data = session.messages.filter((m) => !type || m.type === type);
       if (url.searchParams.get('order') === 'desc') data = [...data].reverse();
       return json({ data: data.slice(0, limit), cursor: {} });

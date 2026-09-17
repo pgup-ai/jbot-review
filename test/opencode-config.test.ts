@@ -160,7 +160,13 @@ describe('sessionEnvironment', () => {
       OPENAI_API_KEY: 'leak',
       OPENCODE_CONFIG_CONTENT: '{}',
       INPUT_GITHUB_TOKEN: 'leak',
+      HTTPS_PROXY: 'http://user:secret@proxy.local:3128',
     });
-    assert.deepEqual(env, { PATH: '/bin', HOME: '/h', GIT_AUTHOR_NAME: 'j' });
+    assert.deepEqual(env, {
+      PATH: '/bin',
+      HOME: '/h',
+      GIT_AUTHOR_NAME: 'j',
+      HTTPS_PROXY: 'http://proxy.local:3128',
+    });
   });
 });

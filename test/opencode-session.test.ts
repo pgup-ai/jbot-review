@@ -136,7 +136,7 @@ describe('promptInSession', () => {
 
   it('reports a listing that stops short and leaves usage unknown without token counts', async () => {
     const fake = fakeOpencodeServer((_s, text) =>
-      text === 'deep' ? { text: 'x', steps: 600 } : { text: 'x', noTokens: true },
+      text === 'deep' ? { text: 'x', steps: 250 } : { text: 'x', noTokens: true },
     );
     const rt = runtime(fake);
     const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });

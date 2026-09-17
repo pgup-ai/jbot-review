@@ -40,9 +40,7 @@ describe('opencode V2 sessions are hermetic', { skip: !hasV2 }, () => {
       'gpt-5',
       'sk-not-a-real-key',
       () => undefined,
-      {
-        port: 47_000 + Math.floor(Math.random() * 1000),
-      },
+      { port: 0 },
     );
     try {
       const session = await runtime.client.session.create({

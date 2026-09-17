@@ -273,7 +273,7 @@ async function assistantsSince(
   previousID: string | undefined,
   startedAt: number,
 ): Promise<{ messages: AssistantMessage[]; complete: boolean }> {
-  const limit = 500;
+  const limit = 200; // the server's cap (measured: a larger value is rejected)
   const page = await client.message.list(
     { sessionID, type: 'assistant', order: 'desc', limit },
     { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
