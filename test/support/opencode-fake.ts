@@ -159,6 +159,7 @@ export function fakeOpencodeServer(
         ...session,
         id: next('ses'),
         messages: [...session.messages],
+        permissions: undefined, // the driver must set the fork's own ruleset
         interrupted: 0,
         abortedWaits: 0,
         forkedFrom: session.id,

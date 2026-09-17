@@ -13,6 +13,7 @@ import {
   runGuidelineComplianceCheck,
   runReview,
 } from '../src/shared/opencode.ts';
+import { permissionRules } from '../src/shared/opencode-config.ts';
 import { CONTINUATION_NUDGE_PROMPT, NO_TOOLS_REVIEW_DIRECTIVE } from '../src/shared/prompt.ts';
 import type { Finding } from '../src/shared/types.ts';
 import {
@@ -128,8 +129,15 @@ describe('runReview on V2', () => {
 
   it('routes a single-shot model to the tool-less agent with the no-tools directive', async () => {
     const fake = fakeOpencodeServer(() => ({ text: '{"findings":[]}' }));
-    await runReview(runtime(fake), 'openai-compatible/gemini-2.5-pro', 'ctx', '', log);
+    const rt = runtime(fake, { verifyFork: true });
+    await runReview(rt, 'openai-compatible/gemini-2.5-pro', 'ctx', '', log);
     assert.equal([...fake.sessions.values()][0]!.agent, 'jbot-plain');
+    // a tool-less main session is never a fork candidate
+    await runFindingVerification(rt, 'openai/gpt-5', 'ctx', [finding], log);
+    assert.equal(
+      [...fake.sessions.values()].some((s) => s.forkedFrom),
+      false,
+    );
     assert.ok(fake.prompts[0]!.body.text.includes(NO_TOOLS_REVIEW_DIRECTIVE.split('\n')[0]!));
   });
 
@@ -255,7 +263,7 @@ describe('runFindingVerification on V2', () => {
     const forked = [...fake.sessions.values()].find((s) => s.forkedFrom);
     assert.equal(forked?.forkedFrom, main);
     assert.equal(forked?.agent, 'plan');
-    assert.ok((forked?.permissions?.length ?? 0) > 0, 'a fork carries its own ruleset');
+    assert.deepEqual(forked?.permissions, permissionRules(), 'a fork carries its own ruleset');
     assert.deepEqual(forked?.model, { providerID: 'openai', id: 'gpt-5' });
     // a failed attempt is not a fork candidate: its retry's session is
     let n = 0;

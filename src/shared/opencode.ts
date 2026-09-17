@@ -224,8 +224,9 @@ export async function runReview(
     );
     result = parseReview(repaired, `${label}-repair`, log, { strict: true });
   }
-  // Only a session that produced a result is a fork candidate (a failed attempt's retry is not).
-  rememberReviewSession(runtime, label, sessionID);
+  // A fork candidate produced a result and carries the review ruleset (a tool-less
+  // session's deny-all would stay under any rules added to its fork).
+  if (!isSingleShotModel(model)) rememberReviewSession(runtime, label, sessionID);
   if (outcome.wrappedUp) result.partial = true;
   if (!options.guidelineSweep || outcome.wrappedUp) return result;
   const sweep = options.guidelineSweep;
