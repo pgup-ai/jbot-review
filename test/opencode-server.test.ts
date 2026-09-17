@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
   basicAuthHeader,
@@ -28,18 +29,24 @@ describe('basicAuthHeader', () => {
 });
 
 describe('resolveOpencodeBin', () => {
-  it('prefers the env override, then the pinned local binary, then PATH', () => {
+  it('prefers the env override, then the installed package launcher, then PATH', () => {
     assert.equal(
-      resolveOpencodeBin({ JBOT_OPENCODE_BIN: '/x/opencode' }, () => true),
+      resolveOpencodeBin({ JBOT_OPENCODE_BIN: '/x/opencode' }, () => '/x/pkg/package.json'),
       '/x/opencode',
     );
-    assert.match(
-      resolveOpencodeBin({}, () => true),
-      /node_modules\/\.bin\/opencode$/,
+    assert.equal(
+      resolveOpencodeBin({}, () => '/x/node_modules/@opencode/cli/package.json'),
+      '/x/node_modules/@opencode/cli/bin/opencode.exe',
     );
     assert.equal(
-      resolveOpencodeBin({}, () => false),
+      resolveOpencodeBin({}, () => {
+        throw new Error('not installed');
+      }),
       'opencode',
+    );
+    assert.ok(
+      existsSync(resolveOpencodeBin({})),
+      'the pinned package still ships bin/opencode.exe',
     );
   });
 });

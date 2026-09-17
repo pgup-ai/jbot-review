@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { OpenCode, type OpenCodeClient } from '@opencode/client';
 import {
   buildConfig,
@@ -78,14 +79,24 @@ export function parsePortEnv(name: string, defaultValue: number): number {
 }
 
 /** Env override, then the pinned devDependency binary, then whatever `opencode` is on PATH (the image). */
+/**
+ * The pinned launcher when @opencode/cli is installed beside this package
+ * (dev, tests, the benchmark harness — whatever the cwd; a cwd-relative
+ * lookup once picked a global V1 binary), else `opencode` on PATH, which the
+ * image installs globally. JBOT_OPENCODE_BIN overrides both.
+ */
 export function resolveOpencodeBin(
   env: NodeJS.ProcessEnv = process.env,
-  exists: (path: string) => boolean = existsSync,
+  resolvePackage: () => string = () =>
+    createRequire(import.meta.url).resolve('@opencode/cli/package.json'),
 ): string {
   const override = env.JBOT_OPENCODE_BIN?.trim();
   if (override) return override;
-  const local = join(process.cwd(), 'node_modules', '.bin', 'opencode');
-  return exists(local) ? local : 'opencode';
+  try {
+    return join(dirname(resolvePackage()), 'bin', 'opencode.exe');
+  } catch {
+    return 'opencode';
+  }
 }
 
 export interface ServerBanner {
