@@ -8,6 +8,8 @@ export const REVIEWER_AGENT = 'jbot-reviewer';
 /** jbot agents whose deny-all ruleset hides every tool; the plugin strips them too. */
 export const WRAPUP_AGENT = 'jbot-wrapup';
 export const PLAIN_AGENT = 'jbot-plain';
+/** A tool-less turn is one completion: no wrap-up reserve, no finalize trigger. */
+export const TOOL_LESS_AGENTS: ReadonlySet<string> = new Set([WRAPUP_AGENT, PLAIN_AGENT]);
 
 export interface PermissionRule {
   action: string;

@@ -192,29 +192,43 @@ describe('promptInSession', () => {
   });
 });
 
-describe('label registries', () => {
-  it('aborts and finalizes only in-flight sessions under the label', async () => {
+describe('wrap-up capability', () => {
+  it('follows the agent: every tool-bearing turn can be finalized, a tool-less one never reserves', async () => {
     const fake = fakeOpencodeServer((session) =>
       session.agent === 'jbot-wrapup' ? { text: 'done' } : { hang: true },
     );
     const rt = runtime(fake);
-    const a = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
-    const b = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
-    const outcome = { wrappedUp: false };
-    const inFlight = promptInSession(rt, a, {
+    const aux = await createReviewSession(rt, { label: 'aux', model: 'openai/gpt-5' });
+    const plain = await createReviewSession(rt, {
+      label: 'plain',
+      model: 'openai/gpt-5',
+      agent: 'jbot-plain',
+    });
+    const auxTurn = promptInSession(rt, aux, {
       model: 'openai/gpt-5',
       text: 'x',
-      label: 'review',
+      label: 'aux',
       timeoutMs: 60_000,
       log,
+    });
+    const outcome = { wrappedUp: false };
+    const plainTurn = promptInSession(rt, plain, {
+      model: 'openai/gpt-5',
+      text: 'x',
+      label: 'plain',
+      timeoutMs: 300,
+      log,
       outcome,
+      wrapUpReserveMs: 250,
     });
     await new Promise((r) => setTimeout(r, 20));
-    assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'review', log, 30_000), 1);
-    assert.equal((await inFlight).text, 'done');
-    assert.equal(abortOpencodeSessionsByLabel(rt.client, 'review', log), 0);
+    assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'aux', log, 30_000), 1);
+    assert.equal((await auxTurn).text, 'done');
+    assert.equal(fake.sessions.get(aux)!.agent, 'plan');
+    assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'plain', log, 30_000), 0);
+    await assert.rejects(plainTurn, /did not finish within/);
+    assert.equal(outcome.wrappedUp, false);
     assert.equal(abortOpencodeSessionsByLabel(rt.client, 'unknown', log), 0);
-    assert.equal(fake.sessions.get(b)!.interrupted, 0);
   });
 });
 

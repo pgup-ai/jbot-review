@@ -6,6 +6,7 @@ import {
   MAIN_AGENT,
   PLAIN_AGENT,
   REVIEWER_AGENT,
+  TOOL_LESS_AGENTS,
   WRAPUP_AGENT,
   permissionRules,
   sessionEnvironment,
@@ -124,6 +125,14 @@ function rememberLabel(client: OpenCodeClient, sessionID: string, label: string)
   labels.set(sessionID, label);
 }
 
+/** sessionID → current agent; decides wrap-up capability and what to restore after one. */
+const agentsByClient = new WeakMap<object, Map<string, string>>();
+function rememberAgent(client: OpenCodeClient, sessionID: string, agent: string): void {
+  const agents = agentsByClient.get(client) ?? new Map<string, string>();
+  agentsByClient.set(client, agents);
+  agents.set(sessionID, agent);
+}
+
 /** The fields jbot reads from a V2 assistant message (structural; no generated-type import). */
 export interface AssistantMessage {
   id: string;
@@ -228,6 +237,7 @@ export async function createReviewSession(
   }
   await client.session.environment({ sessionID, variables: sessionEnvironment() });
   rememberLabel(client, sessionID, spec.label);
+  rememberAgent(client, sessionID, agent);
   registerSessionOptions(runtime, sessionID, spec.model, spec.tier ?? 'main');
   return sessionID;
 }
@@ -483,12 +493,15 @@ async function promptHoldingSlot(
       { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
     );
 
-    const reserve = spec.outcome ? (spec.wrapUpReserveMs ?? wrapUpReserveMs(timeoutMs)) : 0;
+    const agent = agentsByClient.get(client)?.get(sessionID) ?? MAIN_AGENT;
+    const canWrapUp = !TOOL_LESS_AGENTS.has(agent);
+    const reserve =
+      canWrapUp && spec.outcome ? (spec.wrapUpReserveMs ?? wrapUpReserveMs(timeoutMs)) : 0;
     let requestWrapUp: ((budgetMs: number) => void) | undefined;
     const wrapUpDue = new Promise<number>((resolve) => {
       requestWrapUp = resolve;
     });
-    const unregister = spec.outcome
+    const unregister = canWrapUp
       ? registerFinalizeTrigger(client, abortLabel, requestWrapUp!)
       : () => undefined;
     const reserveTimer =
@@ -505,8 +518,8 @@ async function promptHoldingSlot(
           `${label} prompt cut off; wrapping up in-session within ${Math.round(settled.budgetMs / 1000)}s`,
         );
         await interruptBestEffort(client, sessionID, label, log);
-        const previousAgent = runtime.reviewerAgent ? REVIEWER_AGENT : MAIN_AGENT;
         await client.session.switchAgent({ sessionID, agent: WRAPUP_AGENT });
+        rememberAgent(client, sessionID, WRAPUP_AGENT);
         try {
           const wrapped = await promptHoldingSlot(runtime, sessionID, {
             ...spec,
@@ -516,12 +529,11 @@ async function promptHoldingSlot(
             abortLabel,
             outcome: undefined,
           });
-          spec.outcome!.wrappedUp = true;
+          if (spec.outcome) spec.outcome.wrappedUp = true;
           return wrapped;
         } finally {
-          await client.session
-            .switchAgent({ sessionID, agent: previousAgent })
-            .catch(() => undefined);
+          rememberAgent(client, sessionID, agent);
+          await client.session.switchAgent({ sessionID, agent }).catch(() => undefined);
         }
       }
       message = settled.message;

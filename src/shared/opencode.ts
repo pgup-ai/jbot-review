@@ -477,9 +477,9 @@ function rememberReviewSession(runtime: OpencodeRuntime, label: string, sessionI
   byLabel.set(label, [...(byLabel.get(label) ?? []), sessionID]);
 }
 
-/** The one main review session, or undefined when the run sharded (a fork of one shard would bias the verifier). */
+/** The one main review session; lens passes never count, and a sharded run yields none (a fork of one shard would bias the verifier). */
 function singleReviewSession(runtime: OpencodeRuntime): string | undefined {
-  const sessions = [...(reviewSessionsByRuntime.get(runtime)?.values() ?? [])].flat();
+  const sessions = reviewSessionsByRuntime.get(runtime)?.get('review') ?? [];
   return sessions.length === 1 ? sessions[0] : undefined;
 }
 

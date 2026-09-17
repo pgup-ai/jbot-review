@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import {
   basicAuthHeader,
   childEnv,
   parseServerBanner,
   resolveOpencodeBin,
+  startOpencode,
   waitForModels,
 } from '../src/shared/opencode-server.ts';
 import { fakeOpencodeServer } from './support/opencode-fake.ts';
@@ -86,6 +89,25 @@ describe('childEnv', () => {
     const env = childEnv({ base, scrub: false, ...common });
     assert.equal(env.INPUT_GITHUB_TOKEN, 'gh');
     assert.equal(env.OPENAI_API_KEY, 'k');
+  });
+});
+
+describe('startOpencode', () => {
+  it('removes the per-run data home when the server fails to boot', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'jbot-boot-'));
+    const saved = { TMPDIR: process.env.TMPDIR, JBOT_OPENCODE_BIN: process.env.JBOT_OPENCODE_BIN };
+    process.env.TMPDIR = tmp;
+    process.env.JBOT_OPENCODE_BIN = join(tmp, 'missing-opencode');
+    try {
+      await assert.rejects(startOpencode('/ws', 'openai', 'gpt-5', 'k', () => undefined, {}));
+      assert.deepEqual(
+        readdirSync(tmp).filter((name) => name.startsWith('jbot-opencode-data-')),
+        [],
+      );
+    } finally {
+      process.env.TMPDIR = saved.TMPDIR;
+      process.env.JBOT_OPENCODE_BIN = saved.JBOT_OPENCODE_BIN;
+    }
   });
 });
 

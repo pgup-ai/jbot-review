@@ -97,15 +97,22 @@ describe('runFindingVerification on V2', () => {
     assert.deepEqual(tiers, ['low', 'medium']);
   });
 
-  it('forks the single main review session when JBOT_VERIFY_FORK is on', async () => {
+  it('forks the main review session, not a lens pass, when JBOT_VERIFY_FORK is on', async () => {
     const fake = fakeOpencodeServer((session) =>
       session.forkedFrom ? { text: verdicts } : { text: '{"findings":[]}' },
     );
     const rt = runtime(fake, { verifyFork: true });
     await runReview(rt, 'openai/gpt-5', 'ctx', '', log);
+    await runReview(rt, 'openai/gpt-5', 'ctx', '', log, {
+      label: 'review-interactions',
+      lensAddendum: 'lens',
+    });
     await runFindingVerification(rt, 'openai/gpt-5', 'ctx', [finding], log);
+    const main = [...fake.sessions.keys()][0];
     const forked = [...fake.sessions.values()].find((s) => s.forkedFrom);
-    assert.ok(forked, 'verification session was forked from the review session');
+    assert.equal(forked?.forkedFrom, main);
+    assert.equal(forked?.agent, 'plan');
+    assert.deepEqual(forked?.model, { providerID: 'openai', id: 'gpt-5' });
   });
 });
 

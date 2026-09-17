@@ -302,28 +302,30 @@ export async function startOpencode(
   const config = buildConfig({ models, reviewerSystem: REVIEWER_SYSTEM_PROMPT });
   const dataHome = mkdtempSync(join(tmpdir(), 'jbot-opencode-data-'));
   const sessionOptionsFile = join(dataHome, 'jbot-session-options.json');
-  writeFileSync(sessionOptionsFile, '{}');
-  const env = childEnv({
-    base: process.env,
-    scrub: options.scrubEnv !== false,
-    keys: providerKeyVariables(models),
-    config,
-    configHome: hermeticOpencodeConfigHome(),
-    dataHome,
-    sessionOptionsFile,
-    proxyEnv: options.proxyEnv,
-  });
-  const port = options.port ?? parsePortEnv('JBOT_OPENCODE_PORT', 4096);
-  const server = await spawnServer(resolveOpencodeBin(), port, env, log);
-  const client = OpenCode.make({
-    baseUrl: server.url,
-    headers: { authorization: basicAuthHeader(server.password) },
-  });
+  let server: SpawnedServer | undefined;
   const stopServer = () => {
-    server.close();
+    server?.close();
     rmSync(dataHome, { recursive: true, force: true });
   };
+  let client: OpenCodeClient;
   try {
+    writeFileSync(sessionOptionsFile, '{}');
+    const env = childEnv({
+      base: process.env,
+      scrub: options.scrubEnv !== false,
+      keys: providerKeyVariables(models),
+      config,
+      configHome: hermeticOpencodeConfigHome(),
+      dataHome,
+      sessionOptionsFile,
+      proxyEnv: options.proxyEnv,
+    });
+    const port = options.port ?? parsePortEnv('JBOT_OPENCODE_PORT', 4096);
+    server = await spawnServer(resolveOpencodeBin(), port, env, log);
+    client = OpenCode.make({
+      baseUrl: server.url,
+      headers: { authorization: basicAuthHeader(server.password) },
+    });
     await waitForModels(
       client,
       workspace,

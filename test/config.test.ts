@@ -368,6 +368,7 @@ describe('openai-compatible custom provider', () => {
     assert.equal('custom' in PROVIDERS.openai, false);
     assert.deepEqual(defaultModelOptions('openai-compatible'), {});
     assert.deepEqual(defaultModelOptions('openai'), { reasoningEffort: 'medium' });
+    assert.deepEqual(defaultModelOptions('tokenrouter'), { reasoningEffort: 'medium' });
   });
 
   it('requires and validates an HTTP(S) base URL', () => {

@@ -95,10 +95,11 @@ export function providerConfig(providerID: string, source?: string): ProviderCon
 }
 
 function reasoningOptions(providerID: string, effort: string): Record<string, unknown> {
-  // Poolside manages reasoning itself, and arbitrary custom endpoints may
-  // reject provider-specific options.
+  // Poolside manages reasoning itself, and a custom endpoint with no declared
+  // catalog (openai-compatible) may reject provider-specific options.
   if (providerID === 'poolside') return { reasoningEffort: 'default' };
-  return PROVIDERS[providerID]?.custom ? {} : { reasoningEffort: effort };
+  const provider = PROVIDERS[providerID];
+  return provider?.custom && !provider.defaultModel ? {} : { reasoningEffort: effort };
 }
 
 export function defaultModelOptions(providerID: string): Record<string, unknown> {
