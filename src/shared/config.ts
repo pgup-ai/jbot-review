@@ -9,7 +9,7 @@ export interface ProviderConfig {
   custom?: {
     name: string;
     npm: string;
-    baseURL: { env: string; input: string };
+    baseURL: { env: string; input: string; default?: string };
   };
   promptCache?: boolean;
   sessionConcurrency?: number;
@@ -153,7 +153,7 @@ export function resolveProviderBaseURL(
 ): string | undefined {
   const source = config.custom?.baseURL;
   if (!source) return undefined;
-  const value = read(source)?.trim();
+  const value = read(source)?.trim() || source.default;
   if (!value) {
     throw new Error(
       `Missing base URL for provider "${providerID}". Pass "${source.input}" or ${source.env}.`,
@@ -321,6 +321,16 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'tokenrouter/z-ai/glm-5.3-free',
     keyEnv: 'TOKENROUTER_API_KEY',
     keyInput: 'tokenrouter-api-key',
+    // V2's catalog has no tokenrouter entry, so it is served as a custom endpoint.
+    custom: {
+      name: 'TokenRouter',
+      npm: '@ai-sdk/openai-compatible',
+      baseURL: {
+        env: 'JBOT_TOKENROUTER_BASE_URL',
+        input: 'tokenrouter-base-url',
+        default: 'https://api.tokenrouter.com/v1',
+      },
+    },
     promptCache: false,
     // glm-5.3 declares low/high/max only (Models.dev reasoning_options).
     models: { 'z-ai/glm-5.3': { reasoningEfforts: ['low', 'high', 'max'] } },

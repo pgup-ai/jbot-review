@@ -349,7 +349,7 @@ const CLI_BINS: Record<CliBackendID, string | null> = {
 // Install hints mirror the Dockerfile's installer lines — the source of truth
 // for each backend's real package/installer.
 const INSTALL_HINTS: Record<string, string> = {
-  opencode: 'npm i -g opencode-ai',
+  opencode: 'npm i -g @opencode/cli',
   [COMMANDCODE_CLI_BIN]: 'npm i -g command-code',
   [CODEX_ACP_BIN]: 'npm i -g @agentclientprotocol/codex-acp',
   [CLINE_CLI_BIN]: 'npm i -g cline',

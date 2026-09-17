@@ -303,22 +303,22 @@ export const EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
 };
 
 function createOpencodeBackend(
-  client: Awaited<ReturnType<typeof startOpencode>>['client'],
+  runtime: Awaited<ReturnType<typeof startOpencode>>,
   toolTelemetry?: ToolTelemetryAccumulator,
 ): ReviewBackend {
-  if (toolTelemetry) configureOpencodeTelemetry(client, toolTelemetry);
+  if (toolTelemetry) configureOpencodeTelemetry(runtime.client, toolTelemetry);
   return {
     name: 'opencode',
     supportsGuidelineSweep: true,
     observability: OPENCODE_TELEMETRY_CAPABILITY,
-    abortSessionsByLabel: (label, log) => abortOpencodeSessionsByLabel(client, label, log),
+    abortSessionsByLabel: (label, log) => abortOpencodeSessionsByLabel(runtime.client, label, log),
     finalizeSessionsByLabel: (label, log, budgetMs) =>
-      finalizeOpencodeSessionsByLabel(client, label, log, budgetMs),
+      finalizeOpencodeSessionsByLabel(runtime.client, label, log, budgetMs),
     runReview: (model, prContext, guidelines, log, options) =>
-      runOpencodeReview(client, model, prContext, guidelines, log, options),
+      runOpencodeReview(runtime, model, prContext, guidelines, log, options),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
       runOpencodeAddressedPriorCommentsCheck(
-        client,
+        runtime,
         model,
         prContext,
         log,
@@ -327,7 +327,7 @@ function createOpencodeBackend(
       ),
     runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
       runOpencodeGuidelineComplianceCheck(
-        client,
+        runtime,
         model,
         prContext,
         guidelines,
@@ -345,7 +345,7 @@ function createOpencodeBackend(
       modelOptions,
     ) =>
       runOpencodeFindingVerification(
-        client,
+        runtime,
         model,
         prContext,
         findings,
@@ -355,7 +355,7 @@ function createOpencodeBackend(
         modelOptions,
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runOpencodeChangesSinceLastReview(client, model, deltaContext, log, timeoutMs, onTokenUsage),
+      runOpencodeChangesSinceLastReview(runtime, model, deltaContext, log, timeoutMs, onTokenUsage),
   };
 }
 
@@ -2118,6 +2118,10 @@ async function runReviewPipeline(params: {
           port: options.opencodePort > 0 ? options.opencodePort : undefined,
           scrubEnv: options.scrubSessionEnv !== false,
           proxyEnv: options.opencodeProxyEnv,
+          transcriptDir: process.env.JBOT_TRANSCRIPT_DIR?.trim() || undefined,
+          verifyFork: process.env.JBOT_VERIFY_FORK === '1',
+          reviewerAgent: process.env.JBOT_REVIEWER_AGENT === '1',
+          runStats: process.env.JBOT_RUN_STATS === '1',
           additionalProviderKeys: auxNeedsOpencodeConfig
             ? [
                 {
@@ -2135,7 +2139,7 @@ async function runReviewPipeline(params: {
             : undefined,
         },
       );
-      opencodeBackend = createOpencodeBackend(opencodeRuntime.client, backendToolTelemetry);
+      opencodeBackend = createOpencodeBackend(opencodeRuntime, backendToolTelemetry);
     } catch (error) {
       if (mainOnOpencode) {
         piRuntime?.stop();
@@ -2259,11 +2263,7 @@ async function runReviewPipeline(params: {
     if (context7.enabled && opencodeRuntime && mainBackend.name === 'opencode') {
       if (opencodeModelsAgentic) {
         log(`Context7 MCP requested: ${context7.reason}`);
-        context7Active = await enableContext7Mcp(
-          opencodeRuntime.client,
-          options.context7ApiKey,
-          log,
-        );
+        context7Active = await enableContext7Mcp(opencodeRuntime, options.context7ApiKey, log);
         if (context7Active) context7Block = buildContext7PromptBlock(context7.reason);
       } else {
         log('Context7 MCP skipped: a single-shot model runs the review without tools.');
@@ -2464,7 +2464,7 @@ async function runReviewPipeline(params: {
       context7Active,
       context7ApiKey: options.context7ApiKey,
       disableContext7: opencodeRuntime
-        ? () => disableContext7Mcp(opencodeRuntime!.client, log)
+        ? () => disableContext7Mcp(opencodeRuntime!, log)
         : undefined,
       evidenceQuotes: options.evidenceQuotes,
       embeddedFirstPrompt: options.embeddedFirstPrompt,

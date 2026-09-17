@@ -171,7 +171,12 @@ function mergeProvider(providers: Record<string, ProviderEntry>, entry: ModelEnt
     providers[entry.providerID] = {
       name: custom.name,
       package: '@opencode/ai/providers/openai-compatible',
-      settings: { ...existing?.settings, ...settings, baseURL: entry.baseURL, apiKey: entry.apiKey },
+      settings: {
+        ...existing?.settings,
+        ...settings,
+        baseURL: entry.baseURL,
+        apiKey: entry.apiKey,
+      },
       models: { ...existing?.models, [entry.modelID]: override },
     };
     return;
