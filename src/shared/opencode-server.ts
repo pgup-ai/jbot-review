@@ -154,7 +154,9 @@ function spawnServer(
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  let stopping = false;
   const close = () => {
+    stopping = true;
     child.kill('SIGTERM');
     setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS).unref();
   };
@@ -189,7 +191,7 @@ function spawnServer(
       reject(error);
     });
     child.on('exit', (code) => {
-      log(`opencode server exited with code ${code}`);
+      if (!stopping) log(`opencode server exited with code ${code}`);
       if (settled) return;
       settled = true;
       clearTimeout(timer);

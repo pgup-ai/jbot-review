@@ -385,7 +385,8 @@ async function waitForTurn(
   spec: PromptSpec,
   timeoutMs: number,
 ): Promise<AssistantMessage> {
-  const deadline = Date.now() + timeoutMs;
+  const started = Date.now();
+  const deadline = started + timeoutMs;
   const slice = spec.waitSliceMs ?? WAIT_SLICE_MS;
   const timedOut = () =>
     new Error(
@@ -404,7 +405,7 @@ async function waitForTurn(
       if (!isAbort(error)) throw error;
       if (remaining <= slice) throw timedOut();
       spec.log(
-        `${spec.label} prompt still running (${Math.round((timeoutMs - remaining) / 1000)}s)`,
+        `${spec.label} prompt still running (${Math.round((Date.now() - started) / 1000)}s)`,
       );
     }
   }
