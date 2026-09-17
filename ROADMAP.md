@@ -1,25 +1,16 @@
 # Roadmap
 
-## Abandoned: `@opencode-ai/sdk/v2` client migration
+## Done: OpenCode V2 cutover (2026-09)
 
-- **The v2 client (`@opencode-ai/sdk/v2`) breaks review completion** and was
-  reverted to the proven v1 client (`@opencode-ai/sdk`). Same installed package
-  (`1.17.5`) and same spawned server in both cases — only the client API surface
-  differs. Under v2, every review shard streamed `busy` for the full per-prompt
-  budget and never produced a completed assistant message, so the run timed out
-  (`did not finish within 1770s`). The v1 client completes the same PRs in
-  minutes (confirmed against other branches' runs). Root cause was upstream of
-  the wait: the model session never terminates under the v2 `promptAsync` path
-  (suspected `agent: 'plan'` / caller-supplied `messageID` semantics), so no
-  wait logic — message-completion or session-idle — could help.
-- Native JSON-schema `format` and the SSE/`event.subscribe()` wait were part of
-  the same v2 effort and went with it. They added no production value: `format`
-  was inert for the live `opencode-go` provider, and the SSE wait keyed on a
-  session-idle signal that never fires under that gateway. Prompt-level JSON +
-  `parseJsonObject` + the one-shot repair loop remain the validation path.
-- If v2 is revisited, isolate the non-termination first (drop the caller
-  `messageID`, verify the `plan` agent is honored) on a throwaway branch before
-  touching the review runtime.
+- The backend now targets `@opencode/client` + `@opencode/cli` 2.x (design:
+  `docs/superpowers/specs/2026-09-16-opencode-v2-migration-design.md`). The
+  earlier `@opencode-ai/sdk/v2` stall was a caller-supplied message id on the
+  1.x server's v2 routes; the V2 driver sends none and waits with `session.wait`.
+- Follow-ups: flip `JBOT_VERIFY_FORK` / `JBOT_REVIEWER_AGENT` defaults after
+  the eval; the durable session log (`session.log`) as a telemetry source once
+  `follow` works upstream; run stats as a telemetry row; guideline text as
+  API-managed instruction entries; agent `steps` caps as a harness-level
+  exploration budget; review playbooks as opencode skills.
 
 ## Later: feedback memory for review quality
 

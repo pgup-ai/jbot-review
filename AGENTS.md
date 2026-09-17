@@ -17,25 +17,25 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 
 ## Architecture
 
-| Module                              | Responsibility                                                                                                                                                                                 |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/workflow/index.ts`             | GitHub Action entry: parse inputs → `runPrReview`                                                                                                                                              |
-| `src/app/*`                         | Webhook-app entry: auth, clone, queue → `runPrReview`                                                                                                                                          |
-| `src/local/*`                       | `npm run review:local` entry: merge-base→worktree git diff → `PrFile[]` → `runPrReview` dry-run; zero GitHub                                                                                   |
-| `src/shared/runner.ts`              | Orchestrator: context assembly → parallel sessions → finding pipeline → post. Keep it THIN.                                                                                                    |
-| `src/shared/prompt.ts`              | ALL prompt text + pure assembly functions. No prompt strings anywhere else.                                                                                                                    |
-| `src/shared/opencode.ts`            | opencode server lifecycle, sessions, response parsing (strict + repair)                                                                                                                        |
-| `@symma/protocol` (npm)             | ACP engine: framing, JSON-RPC peer, session driving, read-only permission floor, agent specs and their credential helpers, relay controls. Extracted from this repo; the local copies are gone |
-| `@symma/client` (npm)               | Drives one ACP prompt: local child-process lifecycle, timeouts, teardown, and the gateway transport. Extracted from this repo                                                                  |
-| `src/shared/acp.ts`                 | ACP ReviewBackends over those runners: the shared backend surface both local and gateway-remote use, plus response parsing                                                                     |
-| `src/shared/session-concurrency.ts` | Priority-aware global and provider-local session limiting                                                                                                                                      |
-| `src/shared/review-context.ts`      | PR metadata context + budgeted guideline discovery/preloading                                                                                                                                  |
-| `src/shared/diff-context.ts`        | Budgeted diff-hunk embedding + the shared path-risk taxonomy (`PATH_PATTERNS`)                                                                                                                 |
-| `src/shared/fanout.ts`              | Pure dynamic fan-out: scale recall-supplement sessions (lenses, guideline pass) to diff shape; never gates the main review or verify                                                           |
-| `src/shared/blast-radius.ts`        | Call sites of changed exported symbols (git grep, best-effort)                                                                                                                                 |
-| `src/shared/filter.ts`              | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts                                                                                                |
-| `src/shared/report.ts`              | Pure review-body layout: outside-the-diff findings section + multi-shard summary dedupe                                                                                                        |
-| `src/shared/github.ts`              | GitHub REST/GraphQL: listing, posting, markers, thread resolution                                                                                                                              |
+| Module                              | Responsibility                                                                                                                                                                                                                                         |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/workflow/index.ts`             | GitHub Action entry: parse inputs → `runPrReview`                                                                                                                                                                                                      |
+| `src/app/*`                         | Webhook-app entry: auth, clone, queue → `runPrReview`                                                                                                                                                                                                  |
+| `src/local/*`                       | `npm run review:local` entry: merge-base→worktree git diff → `PrFile[]` → `runPrReview` dry-run; zero GitHub                                                                                                                                           |
+| `src/shared/runner.ts`              | Orchestrator: context assembly → parallel sessions → finding pipeline → post. Keep it THIN.                                                                                                                                                            |
+| `src/shared/prompt.ts`              | ALL prompt text + pure assembly functions. No prompt strings anywhere else.                                                                                                                                                                            |
+| `src/shared/opencode.ts`            | OpenCode V2 runners (review, aux checks, verification), JSON parsing (strict + repair), context7 MCP; boot lives in `opencode-server.ts`, session driving in `opencode-session.ts`, config in `opencode-config.ts`, the plugin in `opencode-plugin.ts` |
+| `@symma/protocol` (npm)             | ACP engine: framing, JSON-RPC peer, session driving, read-only permission floor, agent specs and their credential helpers, relay controls. Extracted from this repo; the local copies are gone                                                         |
+| `@symma/client` (npm)               | Drives one ACP prompt: local child-process lifecycle, timeouts, teardown, and the gateway transport. Extracted from this repo                                                                                                                          |
+| `src/shared/acp.ts`                 | ACP ReviewBackends over those runners: the shared backend surface both local and gateway-remote use, plus response parsing                                                                                                                             |
+| `src/shared/session-concurrency.ts` | Priority-aware global and provider-local session limiting                                                                                                                                                                                              |
+| `src/shared/review-context.ts`      | PR metadata context + budgeted guideline discovery/preloading                                                                                                                                                                                          |
+| `src/shared/diff-context.ts`        | Budgeted diff-hunk embedding + the shared path-risk taxonomy (`PATH_PATTERNS`)                                                                                                                                                                         |
+| `src/shared/fanout.ts`              | Pure dynamic fan-out: scale recall-supplement sessions (lenses, guideline pass) to diff shape; never gates the main review or verify                                                                                                                   |
+| `src/shared/blast-radius.ts`        | Call sites of changed exported symbols (git grep, best-effort)                                                                                                                                                                                         |
+| `src/shared/filter.ts`              | Pure finding pipeline: noise files, dedupe, prior-thread suppression, confidence gate, verdicts                                                                                                                                                        |
+| `src/shared/report.ts`              | Pure review-body layout: outside-the-diff findings section + multi-shard summary dedupe                                                                                                                                                                |
+| `src/shared/github.ts`              | GitHub REST/GraphQL: listing, posting, markers, thread resolution                                                                                                                                                                                      |
 
 ## Invariants — do not break these
 
@@ -78,16 +78,19 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    gateway pins the right side back to HEAD in a throwaway linked worktree —
    the companion clones a committed ref, and the two must agree.
 8. **Read-only enforced in four layers** for every opencode session: the
-   `plan` agent, config-level `permission.edit/external_directory: deny`,
-   per-prompt `tools: { write/edit/patch: false }`, and
-   `OPENCODE_DISABLE_PROJECT_CONFIG` on the server child so the reviewed
-   repo's committed `.opencode/` (plugins, tools, agents, config) never
-   loads — that code runs at session start OUTSIDE the tool sandbox, so the
-   first three layers cannot see it. Sessions are hermetic on both sides: the
-   operator's global config is excluded too (empty `XDG_CONFIG_HOME`), so
-   ambient MCP servers — unvetted, sometimes write-capable — never enter a
-   review; the child uses only jbot's `OPENCODE_CONFIG_CONTENT` plus the
-   runtime-added context7 MCP. The sessions must never mutate the workspace;
+   `plan` agent (or the opt-in `jbot-reviewer` with the same session rules),
+   the ordered `permissions` ruleset (config-level and repeated on
+   `session.create`: `edit`/`external_directory`/`question` deny, the shell
+   globs from `BASH_PERMISSIONS`), the jbot plugin's `context` hook (removes
+   write/edit/patch/question from every request and every tool for the
+   wrap-up and single-shot agents), and `OPENCODE_DISABLE_PROJECT_CONFIG` on
+   the server child so the reviewed repo's committed `.opencode/` (plugins,
+   config) never loads — that code runs at server start OUTSIDE the tool
+   sandbox. Sessions are hermetic on both sides: the operator's global config
+   is excluded too (`XDG_CONFIG_HOME` is a jbot-owned dir holding only the jbot
+   plugin; per-run `XDG_DATA_HOME`), and each session's shell env is replaced
+   with an allowlist (`sessionEnvironment`) so provider keys and
+   `OPENCODE_CONFIG_CONTENT` never reach a tool call. The sessions must never mutate the workspace;
    bash stays allowed for git diff/log/grep. Scope is the model sessions — the
    local driver's opt-in, gitignored `.jbot-review/last-run.md` report is
    post-review output, not a session write.

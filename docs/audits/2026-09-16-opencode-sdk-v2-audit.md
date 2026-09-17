@@ -32,7 +32,7 @@ reasons:
    copying its environment at spawn.
 2. **The real V2 target is a whole-stack migration, not a package swap:**
    `@opencode/client` (network client) + `@opencode/cli` (the V2 `opencode
-   serve` binary) + V2 config shape + a V2 plugin port + a rewrite of the
+serve` binary) + V2 config shape + a V2 plugin port + a rewrite of the
    session-driving code. The V2 docs are explicit: "Integrations that call the
    V1 server API must migrate to the V2 API" and "V1 plugin implementations do
    not run in V2".
@@ -51,12 +51,12 @@ agent selection).
 
 ## What the packages actually are
 
-| Package | What it is | State on 2026-09-16 |
-| --- | --- | --- |
-| `@opencode-ai/sdk` | V1: hey-api HTTP client + `createOpencode` child-process spawner. 777 KB, one dependency. | 1.18.31 (2026-09-14). Not deprecated. Upstream calls it "legacy"; the `sdk-next` README says the new host "will replace the existing generated `@opencode-ai/sdk` after its consumers migrate". |
-| `@opencode/sdk` | V2 in-process host: `OpenCode.create()` runs the server's HTTP router in memory, no listener. Also exports `/workerd` (Cloudflare). | 2.0.5. Bun-only as published (see above). |
-| `@opencode/client` | V2 network client. Promise root export, `/effect`, `/solid`, `/service` (machine-wide shared background service discovery). | 2.0.5. Loads on Node 24; 12 packages / 62 MB (`effect` arrives via `@opencode/schema`). |
-| `@opencode/cli` | V2 server binary (`opencode serve`). | 2.0.5. 188 MB unpacked (darwin-arm64). |
+| Package            | What it is                                                                                                                          | State on 2026-09-16                                                                                                                                                                             |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@opencode-ai/sdk` | V1: hey-api HTTP client + `createOpencode` child-process spawner. 777 KB, one dependency.                                           | 1.18.31 (2026-09-14). Not deprecated. Upstream calls it "legacy"; the `sdk-next` README says the new host "will replace the existing generated `@opencode-ai/sdk` after its consumers migrate". |
+| `@opencode/sdk`    | V2 in-process host: `OpenCode.create()` runs the server's HTTP router in memory, no listener. Also exports `/workerd` (Cloudflare). | 2.0.5. Bun-only as published (see above).                                                                                                                                                       |
+| `@opencode/client` | V2 network client. Promise root export, `/effect`, `/solid`, `/service` (machine-wide shared background service discovery).         | 2.0.5. Loads on Node 24; 12 packages / 62 MB (`effect` arrives via `@opencode/schema`).                                                                                                         |
+| `@opencode/cli`    | V2 server binary (`opencode serve`).                                                                                                | 2.0.5. 188 MB unpacked (darwin-arm64).                                                                                                                                                          |
 
 Upstream layout (`anomalyco/opencode`, default branch `dev`): the 1.x SDK is
 `packages/sdk/js`; the V2 host is `packages/sdk-next` (workspace name
@@ -108,19 +108,19 @@ caret pin on `^1.x`.
 
 ## V1 → V2 mapping for jbot's call sites
 
-| jbot today (V1) | V2 equivalent | Note |
-| --- | --- | --- |
-| `createOpencode()` spawner | none in the client; spawn `opencode serve` yourself and parse URL + password | `Service.ensure()` manages one shared background service per machine, wrong model for per-run config |
-| `OPENCODE_CONFIG_CONTENT` | same env var, V1 shape auto-normalized | provider activation open question above |
-| `session.create({ body, query: { directory } })` | `session.create({ location: { directory }, agent, model, permissions })` | agent, model and permission rules move to session level |
-| `session.promptAsync({ body: { agent, model, tools, parts } })` | `session.prompt({ sessionID, text, files?, resume? })` | no per-prompt agent/model/tools; layer 3 of invariant 8 becomes a `permissions` ruleset |
-| poll `session.status` / `session.messages` | `session.wait` (experimental) or `session.log({ after, follow })` durable stream; `message.list` is cursor-paginated | the replayable log is the one thing V1 lacks |
-| `session.abort` | `session.interrupt` | |
-| `tool.ids` | no tool-listing endpoint in the V2 client | used today for the readiness probe and tool telemetry |
-| `mcp.add/connect/disconnect` | same names, `/api/experimental/mcp/...` routes | context7 injection survives |
-| plugin `tool.definition` hook | no equivalent; `session.hook("context")` can edit `event.tools` | or show V2's bash schema no longer emits `exclusiveMinimum` |
-| `permission: { edit: 'deny', external_directory: 'deny', bash }` | ordered `permissions: [{ action, resource, effect }]` | V1 object form is auto-normalized per the migration guide |
-| `plan` agent | still built in: denies edits except `~/.opencode/plan`, shell stays permission-controlled | |
+| jbot today (V1)                                                  | V2 equivalent                                                                                                        | Note                                                                                                 |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `createOpencode()` spawner                                       | none in the client; spawn `opencode serve` yourself and parse URL + password                                         | `Service.ensure()` manages one shared background service per machine, wrong model for per-run config |
+| `OPENCODE_CONFIG_CONTENT`                                        | same env var, V1 shape auto-normalized                                                                               | provider activation open question above                                                              |
+| `session.create({ body, query: { directory } })`                 | `session.create({ location: { directory }, agent, model, permissions })`                                             | agent, model and permission rules move to session level                                              |
+| `session.promptAsync({ body: { agent, model, tools, parts } })`  | `session.prompt({ sessionID, text, files?, resume? })`                                                               | no per-prompt agent/model/tools; layer 3 of invariant 8 becomes a `permissions` ruleset              |
+| poll `session.status` / `session.messages`                       | `session.wait` (experimental) or `session.log({ after, follow })` durable stream; `message.list` is cursor-paginated | the replayable log is the one thing V1 lacks                                                         |
+| `session.abort`                                                  | `session.interrupt`                                                                                                  |                                                                                                      |
+| `tool.ids`                                                       | no tool-listing endpoint in the V2 client                                                                            | used today for the readiness probe and tool telemetry                                                |
+| `mcp.add/connect/disconnect`                                     | same names, `/api/experimental/mcp/...` routes                                                                       | context7 injection survives                                                                          |
+| plugin `tool.definition` hook                                    | no equivalent; `session.hook("context")` can edit `event.tools`                                                      | or show V2's bash schema no longer emits `exclusiveMinimum`                                          |
+| `permission: { edit: 'deny', external_directory: 'deny', bash }` | ordered `permissions: [{ action, resource, effect }]`                                                                | V1 object form is auto-normalized per the migration guide                                            |
+| `plan` agent                                                     | still built in: denies edits except `~/.opencode/plan`, shell stays permission-controlled                            |                                                                                                      |
 
 ## What a switch would buy
 

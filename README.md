@@ -1211,7 +1211,7 @@ the complete PR diff and must report only concrete, code-grounded findings.
 src/
   shared/
     runner.ts       # shared orchestration (all entrypoints call this)
-    opencode.ts     # opencode serve + SDK review
+    opencode.ts     # OpenCode V2 runners (server/session/config/plugin siblings)
     github.ts       # list files, post review, verdict
     prompt.ts       # system prompt
     patch.ts        # diff line parser
@@ -1242,6 +1242,12 @@ CI reviews; there is no supported `AGENT` env override.
 
 - **Fork PRs** won't have the secret (GitHub withholds secrets from fork-triggered
   runs in Actions).
-- **OpenCode SDK**: this repo uses `@opencode-ai/sdk` 1.x and
-  `client.session.prompt()`. If you bump the SDK, re-check the response shape in
-  `opencode.ts`.
+- **OpenCode**: this repo drives OpenCode V2 (`@opencode/cli` 2.x, `@opencode/client`).
+  Provider keys reach the server as its documented env var; every session's
+  shell env is replaced with an allowlist, so keys never appear in a tool call.
+  `JBOT_OPENCODE_BIN` points local runs at a specific binary (default: the
+  pinned `node_modules/.bin/opencode`, then PATH); `JBOT_TRANSCRIPT_DIR`
+  exports sanitized session transcripts; `JBOT_RUN_STATS=1` logs run totals;
+  `JBOT_VERIFY_FORK=1` forks the main review session for verification and
+  `JBOT_REVIEWER_AGENT=1` swaps opencode's coding system prompt for a review
+  one (both off by default until evaluated).
