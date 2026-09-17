@@ -17,11 +17,7 @@ export interface PermissionRule {
   effect: 'allow' | 'deny' | 'ask';
 }
 
-/**
- * V1's bash globs as ordered V2 rules (last match wins, so the catch-all leads)
- * plus the edit/external_directory/question denies V1 kept elsewhere;
- * `question` would block on a form nothing in CI answers.
- */
+/** Ordered rules, last match wins, so the shell catch-all leads. `question` is denied because nothing in CI answers a form. */
 export function permissionRules(): PermissionRule[] {
   const { '*': catchAll, ...denies } = BASH_PERMISSIONS;
   return [
@@ -165,7 +161,6 @@ export function sessionModelOptions(
 }
 
 export interface OpencodeConfigInput {
-  /** Root model first, then auxiliary entries. */
   models: ModelEntry[];
   reviewerSystem: string;
 }
@@ -211,8 +206,6 @@ function mergeProvider(providers: Record<string, ProviderEntry>, entry: ModelEnt
   providers[entry.providerID] = { ...existing, settings: { ...existing?.settings, ...settings } };
 }
 
-/** Native V2 config for OPENCODE_CONFIG_CONTENT. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function buildConfig(input: OpencodeConfigInput): Record<string, any> {
   const providers: Record<string, ProviderEntry> = {};
   for (const entry of input.models) mergeProvider(providers, entry);

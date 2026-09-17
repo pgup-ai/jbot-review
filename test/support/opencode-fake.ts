@@ -1,4 +1,8 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { OpenCode, type OpenCodeClient } from '@opencode/client';
+import type { OpencodeRuntime } from '../../src/shared/opencode-server.ts';
 
 export interface FakeReply {
   /** Assistant text; omitted = reasoning-only turn. */
@@ -17,7 +21,6 @@ export interface FakeSession {
   model: unknown;
   permissions: unknown;
   environment?: Record<string, string>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   messages: any[];
   interrupted: number;
   /** Number of wait calls that were aborted by the client. */
@@ -30,7 +33,6 @@ export interface FakeServer {
   sessions: Map<string, FakeSession>;
   /** `METHOD /path` in call order. */
   calls: string[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   prompts: Array<{ sessionID: string; body: any }>;
   /** Push an event to every open `/api/event` subscriber. */
   emit(event: Record<string, unknown>): void;
@@ -42,7 +44,7 @@ const next = (prefix: string) => `${prefix}_${(++counter).toString().padStart(4,
 /** A scripted V2 server behind `fetch`. `reply` decides each prompt's outcome. */
 export function fakeOpencodeServer(
   reply: (session: FakeSession, text: string) => FakeReply,
-  options: { models?: FakeServer['models'] } = {},
+  options: { models?: Array<{ providerID: string; id: string }> } = {},
 ): FakeServer {
   const sessions = new Map<string, FakeSession>();
   const pending = new Map<string, { done: Promise<void>; finish: () => void }>();
@@ -241,4 +243,19 @@ export function fakeOpencodeServer(
     for (const push of subscribers) push(chunk);
   };
   return { client, sessions, calls, prompts, emit };
+}
+
+/** A runtime over the fake; its own options file so tier registration has somewhere to write. */
+export function fakeRuntime(
+  fake: FakeServer,
+  extra: Partial<OpencodeRuntime> = {},
+): OpencodeRuntime {
+  return {
+    client: fake.client,
+    workspace: '/ws',
+    modelOptions: {},
+    sessionOptionsFile: join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json'),
+    stop: () => undefined,
+    ...extra,
+  };
 }

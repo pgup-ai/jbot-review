@@ -1,30 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import type { OpencodeRuntime } from '../src/shared/opencode-server.ts';
 import {
-  abortOpencodeSessionsByLabel,
   createReviewSession,
   finalizeOpencodeSessionsByLabel,
   promptInSession,
   startProgressLogger,
 } from '../src/shared/opencode-session.ts';
-import { fakeOpencodeServer } from './support/opencode-fake.ts';
+import { fakeOpencodeServer, fakeRuntime as runtime } from './support/opencode-fake.ts';
 
 const log = () => undefined;
-const runtime = (
-  fake: ReturnType<typeof fakeOpencodeServer>,
-  extra: Partial<OpencodeRuntime> = {},
-): OpencodeRuntime => ({
-  client: fake.client,
-  workspace: '/ws',
-  modelOptions: {},
-  sessionOptionsFile: join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json'),
-  stop: () => undefined,
-  ...extra,
-});
 
 describe('createReviewSession', () => {
   it('creates a plan session at the workspace with the ruleset and replaces its shell env', async () => {
@@ -192,7 +176,6 @@ describe('wrap-up capability', () => {
     assert.equal(finalizeOpencodeSessionsByLabel(rt.client, 'plain', log, 30_000), 0);
     await assert.rejects(plainTurn, /did not finish within/);
     assert.equal(outcome.wrappedUp, false);
-    assert.equal(abortOpencodeSessionsByLabel(rt.client, 'unknown', log), 0);
   });
 });
 

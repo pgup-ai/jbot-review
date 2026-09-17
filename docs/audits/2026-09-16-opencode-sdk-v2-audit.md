@@ -11,9 +11,9 @@ an isolated end-to-end probe of `opencode serve` 2.0.5 driven by
 
 Overridden the same day: the maintainer chose to migrate to V2 anyway, as a
 hard cutover targeting `@opencode/client` + `@opencode/cli`, to get the
-stronger harness. The risks below became plan items; the design lives in
-`docs/superpowers/specs/2026-09-16-opencode-v2-migration-design.md`. The
-recommendation is kept as written for the record.
+stronger harness. The risks below became plan items (the design record is
+kept in the maintainer's local notes). The recommendation is kept as written
+for the record.
 
 ## Answer
 
@@ -160,9 +160,6 @@ caret pin on `^1.x`.
 
 ## Re-running the probe
 
-In a scratch directory with `HOME` and `XDG_*` pointed inside it:
-`npm i @opencode/cli@<v> @opencode/client@<v>`, start
-`node_modules/.bin/opencode serve --hostname 127.0.0.1 --port <p>` with
-`OPENCODE_CONFIG_CONTENT` set, read the printed password, then call the API
-with `OpenCode.make({ baseUrl, headers: { authorization: 'Basic ' +
-base64('opencode:' + password) } })`.
+`scripts/opencode-v2-spike.ts` boots a real V2 server through jbot's own
+modules and prints the measured facts above (env leak count, a review-sized
+turn with wrap-up, the per-session options file, one raw tool event).

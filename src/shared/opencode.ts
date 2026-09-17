@@ -527,7 +527,7 @@ async function promptPlanAgentInSession(
   onTokenUsage?: TokenUsageRecorder,
   abortLabel = label,
 ): Promise<string> {
-  const text = await promptInSession(runtime, sessionID, {
+  return promptInSession(runtime, sessionID, {
     model,
     text: prompt,
     label,
@@ -536,7 +536,6 @@ async function promptPlanAgentInSession(
     onTokenUsage,
     abortLabel,
   });
-  return text;
 }
 
 /**

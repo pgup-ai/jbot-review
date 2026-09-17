@@ -59,12 +59,14 @@ describe('recordAssistantTools', () => {
       },
     ]);
     const [read, shell, session] = rows as Array<{
-      input?: { toolClass: string };
-      finish?: { success: boolean; failureClass?: string };
+      input?: { toolClass: string; diffScope?: string };
+      finish?: { success: boolean; failureClass?: string; durationMs?: number };
       session?: { turnCount?: number };
     }>;
     assert.equal(rows.length, 3);
     assert.equal(read!.finish!.success, true);
+    assert.equal(read!.finish!.durationMs, 2);
+    assert.equal(shell!.input!.diffScope, 'whole');
     // 'shell' reaches the classifier as bash, so its `git diff` command classifies as diff-recovery.
     assert.equal(shell!.input!.toolClass, 'diff-recovery');
     assert.equal(shell!.finish!.failureClass, 'execution');

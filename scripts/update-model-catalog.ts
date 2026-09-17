@@ -12,9 +12,8 @@ import {
 } from '../src/shared/commandcode.ts';
 import { PROVIDERS } from '../src/shared/config.ts';
 import { parseDimModelList } from '../src/shared/dim.ts';
-import { parseModelName } from '@symma/protocol';
 import { startOpencode } from '../src/shared/opencode-server.ts';
-import { parseCursorModelList, parseKiloModelList } from '@symma/protocol';
+import { parseCursorModelList, parseKiloModelList, parseModelName } from '@symma/protocol';
 
 const MODELS_DEV_URL = 'https://models.dev/api.json';
 const CLINE_RECOMMENDED_MODELS_URL = 'https://api.cline.bot/api/v1/ai/cline/recommended-models';

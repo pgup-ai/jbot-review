@@ -349,3 +349,23 @@ describe('limitReviewBackendSessions', () => {
     );
   });
 });
+
+describe('Semaphore', () => {
+  it('treats 0 as unlimited and frees one slot per acquisition even when released twice', async () => {
+    await Promise.all([new Semaphore(0).acquire(), new Semaphore(0).acquire()]);
+    const one = new Semaphore(1);
+    const releaseA = await one.acquire();
+    let b: (() => void) | undefined;
+    let c: (() => void) | undefined;
+    const waitB = one.acquire().then((release) => (b = release));
+    const waitC = one.acquire().then((release) => (c = release));
+    releaseA();
+    releaseA();
+    await waitB;
+    assert.ok(b);
+    assert.equal(c, undefined, 'a double release must not admit a second waiter');
+    b!();
+    await waitC;
+    assert.ok(c);
+  });
+});

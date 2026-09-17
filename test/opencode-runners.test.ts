@@ -3,7 +3,6 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import type { OpencodeRuntime } from '../src/shared/opencode-server.ts';
 import {
   abortOpencodeSessionsByLabel,
   disableContext7Mcp,
@@ -16,20 +15,13 @@ import {
 } from '../src/shared/opencode.ts';
 import { CONTINUATION_NUDGE_PROMPT, NO_TOOLS_REVIEW_DIRECTIVE } from '../src/shared/prompt.ts';
 import type { Finding } from '../src/shared/types.ts';
-import { fakeOpencodeServer } from './support/opencode-fake.ts';
+import {
+  fakeOpencodeServer,
+  fakeRuntime as runtime,
+  type FakeReply,
+} from './support/opencode-fake.ts';
 
 const log = () => undefined;
-const runtime = (
-  fake: ReturnType<typeof fakeOpencodeServer>,
-  extra: Partial<OpencodeRuntime> = {},
-): OpencodeRuntime => ({
-  client: fake.client,
-  workspace: '/ws',
-  modelOptions: {},
-  sessionOptionsFile: join(mkdtempSync(join(tmpdir(), 'jbot-opts-')), 'opts.json'),
-  stop: () => undefined,
-  ...extra,
-});
 const finding = {
   path: 'a.ts',
   line: 1,
@@ -145,7 +137,7 @@ describe('runReview on V2', () => {
     for (const replies of [
       [{ text: '{"summary": "broken' }, { text: '{"findings":[]}' }],
       [{ text: 'x', error: 'rejected' }],
-    ]) {
+    ] as FakeReply[][]) {
       let n = 0;
       const fake = fakeOpencodeServer(() => replies[Math.min(n++, replies.length - 1)]!);
       const usages: Array<{ promptBytes?: number }> = [];

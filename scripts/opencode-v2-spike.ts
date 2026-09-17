@@ -45,19 +45,19 @@ const runtime = await startOpencode(
 );
 process.env.JBOT_SPIKE_CANARY = 'canary-value';
 try {
-  // S6: the verify session's tier options land in the file the plugin reads.
+  // The verify session's tier options land in the file the plugin reads.
   const verifyID = await createReviewSession(runtime, { label: 'verify', model, tier: 'verify' });
   log(
-    `S6 session options file: ${readFileSync(runtime.sessionOptionsFile!, 'utf8')} (expect ${verifyID} → the verify tier)`,
+    `session options file: ${readFileSync(runtime.sessionOptionsFile, 'utf8')} (expect ${verifyID} → the verify tier)`,
   );
 
-  // S7: raw shape of one tool event from the global stream, for the progress logger.
+  // Raw shape of one tool event from the global stream, for the progress logger.
   const ac = new AbortController();
   void (async () => {
     try {
       for await (const event of runtime.client.event.subscribe({ signal: ac.signal })) {
         if ((event as { type?: string }).type === 'session.tool.called') {
-          log(`S7 tool event: ${JSON.stringify(event).slice(0, 900)}`);
+          log(`tool event: ${JSON.stringify(event).slice(0, 900)}`);
           break;
         }
       }
@@ -66,7 +66,7 @@ try {
     }
   })();
 
-  // S1: the model's own shell tool must not see the server env.
+  // The model's own shell tool must not see the server env.
   const s1 = await createReviewSession(runtime, { label: 'spike-s1', model });
   const env = await promptInSession(runtime, s1, {
     model,
@@ -75,9 +75,9 @@ try {
     log,
     text: 'Use your shell tool to run exactly: env | grep -c JBOT_SPIKE_CANARY || true ; then reply with only the number printed.',
   });
-  log(`S1 shell env leak count (expect 0): ${env}`);
+  log(`shell env leak count (expect 0): ${env}`);
 
-  // S4: a review-sized turn under plan terminates and returns JSON; wrap-up works on a tiny budget.
+  // A review-sized turn under plan terminates and returns JSON; wrap-up works on a tiny budget.
   const padding = `\n\n/* context padding */\n${'x'.repeat(150_000)}`;
   const s4 = await createReviewSession(runtime, { label: 'spike-s4', model });
   const review = await promptInSession(runtime, s4, {
@@ -87,7 +87,7 @@ try {
     log,
     text: `Read a.ts in the working tree. Reply with JSON {"findings":[{"path":"a.ts","line":1,"title":"...","body":"..."}]} only. Ignore everything after this line.${padding}`,
   });
-  log(`S4 review text=${review.slice(0, 200)}`);
+  log(`review text=${review.slice(0, 200)}`);
   const outcome = { wrappedUp: false };
   const cut = await promptInSession(runtime, s4, {
     model,
@@ -98,10 +98,10 @@ try {
     wrapUpReserveMs: 35_000,
     text: 'List every file under / you can read, one per line, using the shell tool repeatedly. Do not stop early.',
   });
-  log(`S4 wrap-up fired=${outcome.wrappedUp} reply=${cut.slice(0, 120)}`);
+  log(`wrap-up fired=${outcome.wrappedUp} reply=${cut.slice(0, 120)}`);
   ac.abort();
 
-  log(`S7 progress lines seen: ${events.filter((e) => e.includes(' tool: ')).length}`);
+  log(`progress lines seen: ${events.filter((e) => e.includes(' tool: ')).length}`);
 } finally {
   runtime.stop();
 }

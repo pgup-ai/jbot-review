@@ -49,10 +49,7 @@ describe('buildConfig', () => {
     ]);
     assert.equal(config.agents[REVIEWER_AGENT].system, 'Review only.');
     assert.equal(config.providers, undefined);
-  });
-
-  it('keeps a catalog provider to its cache setting; options never go through config', () => {
-    const config = buildConfig({
+    const cached = buildConfig({
       models: [
         {
           providerID: 'openai',
@@ -65,7 +62,8 @@ describe('buildConfig', () => {
       ],
       reviewerSystem: 's',
     });
-    assert.deepEqual(config.providers, { openai: { settings: { setCacheKey: true } } });
+    // options never go through config: they travel per session
+    assert.deepEqual(cached.providers, { openai: { settings: { setCacheKey: true } } });
   });
 });
 
@@ -126,9 +124,6 @@ describe('providerKeyVariables', () => {
       ]),
       { OPENAI_API_KEY: 'a', ZHIPU_API_KEY: 'b' },
     );
-  });
-
-  it('rejects two providers that share an env var with different keys', () => {
     assert.throws(
       () =>
         providerKeyVariables([

@@ -122,7 +122,6 @@ export interface ChildEnvInput {
   proxyEnv?: NodeJS.ProcessEnv;
 }
 
-/** Composed on the child only — never by mutating process.env as V1 did. */
 export function childEnv(input: ChildEnvInput): Record<string, string> {
   const denied = new Set(input.scrub ? sessionEnvDenyKeys(Object.keys(input.base)) : []);
   const env: Record<string, string> = {};
@@ -176,8 +175,8 @@ function spawnServer(
       );
     }, READY_TIMEOUT_MS);
     const onData = (chunk: Buffer) => {
-      output += chunk.toString();
       if (settled) return;
+      output += chunk.toString();
       const banner = parseServerBanner(output);
       if (!banner) return;
       settled = true;
@@ -247,9 +246,7 @@ export interface StartOpencodeOptions {
   port?: number;
   promptCache?: boolean;
   baseURL?: string;
-  additionalProviderKeys?: Array<
-    Omit<ModelEntry, 'promptCache' | 'modelID'> & { modelID?: string; promptCache?: boolean }
-  >;
+  additionalProviderKeys?: ModelEntry[];
   proxyEnv?: NodeJS.ProcessEnv;
   scrubEnv?: boolean;
   transcriptDir?: string;
@@ -277,11 +274,7 @@ export async function startOpencode(
       modelOptions: options.modelOptions,
       verificationModelOptions: options.verificationModelOptions,
     },
-    ...(options.additionalProviderKeys ?? []).map((entry) => ({
-      ...entry,
-      modelID: entry.modelID ?? '',
-      promptCache: entry.promptCache ?? promptCache,
-    })),
+    ...(options.additionalProviderKeys ?? []),
   ];
   const config = buildConfig({ models, reviewerSystem: REVIEWER_SYSTEM_PROMPT });
   const dataHome = mkdtempSync(join(tmpdir(), 'jbot-opencode-data-'));

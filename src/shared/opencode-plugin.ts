@@ -12,7 +12,7 @@ import { join } from 'node:path';
  * export: V2's `Plugin.define` is the identity.
  */
 const PLUGIN_SOURCE = `// jbot-review opencode plugin; rationale in src/shared/opencode-plugin.ts.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 const STRIP = new Set(['write', 'edit', 'patch', 'multiedit', 'question']);
 const TOOL_LESS_AGENTS = new Set(['jbot-wrapup', 'jbot-plain']);
 
@@ -44,7 +44,6 @@ function sessionOptions(sessionID) {
 export default {
   id: 'jbot-review',
   async setup(ctx) {
-    if (process.env.JBOT_OPENCODE_PLUGIN_MARKER) writeFileSync(process.env.JBOT_OPENCODE_PLUGIN_MARKER, 'jbot-review plugin loaded');
     await ctx.session.hook('context', (event) => {
       stripTools(event.tools, event.agent);
       geminiSafe(event.tools);

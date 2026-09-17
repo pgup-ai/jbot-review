@@ -14,7 +14,6 @@ describe('opencode V2 sessions are hermetic', { skip: !hasV2 }, () => {
   it('runs the jbot plugin, ignores the reviewed repo config and plugin, and rejects unauthenticated calls', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'jbot-hermetic-'));
     const projectMarker = join(workspace, 'project-plugin-ran.txt');
-    const jbotMarker = join(workspace, 'jbot-plugin-ran.txt');
     mkdirSync(join(workspace, '.opencode', 'plugins'), { recursive: true });
     writeFileSync(
       join(workspace, '.opencode', 'opencode.json'),
@@ -25,7 +24,6 @@ describe('opencode V2 sessions are hermetic', { skip: !hasV2 }, () => {
       `import { writeFileSync } from "node:fs";\nexport default { id: "probe", async setup() { writeFileSync(${JSON.stringify(projectMarker)}, "ran"); } };\n`,
     );
     spawnSync('git', ['init', '-q'], { cwd: workspace });
-    process.env.JBOT_OPENCODE_PLUGIN_MARKER = jbotMarker;
     const runtime = await startOpencode(
       workspace,
       'openai',
@@ -44,11 +42,29 @@ describe('opencode V2 sessions are hermetic', { skip: !hasV2 }, () => {
       });
       assert.ok(session.id.startsWith('ses_'));
       // Plugins load on first use of the registry for a location.
-      await runtime.client.plugin.list({ location: { directory: workspace } });
-      for (let i = 0; i < 40 && !existsSync(jbotMarker); i++) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
+      type Listed = { source?: { path?: string }; state?: { status?: string } };
+      const jbotPlugin = (plugins: Listed[]) =>
+        plugins.find((entry) =>
+          String(entry.source?.path ?? '').endsWith('opencode/plugins/jbot-review.js'),
+        );
+      let plugins: Listed[] = [];
+      for (let i = 0; i < 40 && jbotPlugin(plugins)?.state?.status !== 'active'; i++) {
+        const listed = await runtime.client.plugin.list({ location: { directory: workspace } });
+        plugins = (
+          Array.isArray(listed) ? listed : ((listed as { data?: Listed[] }).data ?? [])
+        ) as Listed[];
+        if (jbotPlugin(plugins)?.state?.status !== 'active')
+          await new Promise((r) => setTimeout(r, 250));
       }
-      assert.ok(existsSync(jbotMarker), 'jbot plugin must load from the hermetic config home');
+      assert.equal(
+        jbotPlugin(plugins)?.state?.status,
+        'active',
+        `jbot plugin must load from the hermetic config home: ${JSON.stringify(plugins)}`,
+      );
+      assert.equal(
+        plugins.some((entry) => String(entry.source?.path ?? '').includes('/.opencode/')),
+        false,
+      );
       assert.equal(existsSync(projectMarker), false, 'project plugin must not execute');
       const documents = await runtime.client.config.get({ location: { directory: workspace } });
       assert.equal(
@@ -61,7 +77,6 @@ describe('opencode V2 sessions are hermetic', { skip: !hasV2 }, () => {
       const anonymous = await fetch(`${status.urls[0]}/api/status`);
       assert.equal(anonymous.status, 401);
     } finally {
-      delete process.env.JBOT_OPENCODE_PLUGIN_MARKER;
       runtime.stop();
     }
   });

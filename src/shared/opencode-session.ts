@@ -117,20 +117,17 @@ export function configureOpencodeTelemetry(
   toolTelemetry.set(client, telemetry);
 }
 
-/** sessionID → label, for the progress logger; sessions are never removed (ids are unique per run). */
-const labelsByClient = new WeakMap<object, Map<string, string>>();
-function rememberLabel(client: OpenCodeClient, sessionID: string, label: string): void {
-  const labels = labelsByClient.get(client) ?? new Map<string, string>();
-  labelsByClient.set(client, labels);
-  labels.set(sessionID, label);
-}
-
-/** sessionID → current agent; decides wrap-up capability and what to restore after one. */
-const agentsByClient = new WeakMap<object, Map<string, string>>();
-function rememberAgent(client: OpenCodeClient, sessionID: string, agent: string): void {
-  const agents = agentsByClient.get(client) ?? new Map<string, string>();
-  agentsByClient.set(client, agents);
-  agents.set(sessionID, agent);
+/** sessionID → label (progress logger) and current agent (wrap-up capability, restore); never removed, ids are unique per run. */
+const sessionsByClient = new WeakMap<object, Map<string, { label: string; agent: string }>>();
+function rememberSession(
+  client: OpenCodeClient,
+  sessionID: string,
+  patch: Partial<{ label: string; agent: string }>,
+): void {
+  const sessions =
+    sessionsByClient.get(client) ?? new Map<string, { label: string; agent: string }>();
+  sessionsByClient.set(client, sessions);
+  sessions.set(sessionID, { label: '', agent: MAIN_AGENT, ...sessions.get(sessionID), ...patch });
 }
 
 /** The fields jbot reads from a V2 assistant message (structural; no generated-type import). */
@@ -223,8 +220,7 @@ export async function createReviewSession(
     ).id;
   }
   await client.session.environment({ sessionID, variables: sessionEnvironment() });
-  rememberLabel(client, sessionID, spec.label);
-  rememberAgent(client, sessionID, agent);
+  rememberSession(client, sessionID, { label: spec.label, agent });
   registerSessionOptions(runtime, sessionID, spec.model, spec.tier ?? 'main');
   return sessionID;
 }
@@ -289,7 +285,6 @@ function assistantText(message: AssistantMessage): string {
     .trim();
 }
 
-/** V2 tool content → the shared tool telemetry (same rows the V1 parts produced). */
 export function recordAssistantTools(
   telemetry: ToolTelemetryAccumulator,
   session: string,
@@ -474,7 +469,7 @@ async function promptHoldingSlot(
       { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
     );
 
-    const agent = agentsByClient.get(client)?.get(sessionID) ?? MAIN_AGENT;
+    const agent = sessionsByClient.get(client)?.get(sessionID)?.agent ?? MAIN_AGENT;
     const canWrapUp = !TOOL_LESS_AGENTS.has(agent);
     const reserve =
       canWrapUp && spec.outcome ? (spec.wrapUpReserveMs ?? wrapUpReserveMs(timeoutMs)) : 0;
@@ -500,7 +495,7 @@ async function promptHoldingSlot(
         );
         await interruptBestEffort(client, sessionID, label, log);
         await client.session.switchAgent({ sessionID, agent: WRAPUP_AGENT });
-        rememberAgent(client, sessionID, WRAPUP_AGENT);
+        rememberSession(client, sessionID, { agent: WRAPUP_AGENT });
         try {
           const wrapped = await promptHoldingSlot(runtime, sessionID, {
             ...spec,
@@ -513,7 +508,7 @@ async function promptHoldingSlot(
           if (spec.outcome) spec.outcome.wrappedUp = true;
           return wrapped;
         } finally {
-          rememberAgent(client, sessionID, agent);
+          rememberSession(client, sessionID, { agent });
           await client.session.switchAgent({ sessionID, agent }).catch(() => undefined);
         }
       }
@@ -677,7 +672,7 @@ export function startProgressLogger(
         const raw = event as { type?: string; data?: Record<string, unknown>; sessionID?: string };
         const props = (raw.data ?? raw) as Record<string, unknown>;
         const sessionID = (props.sessionID ?? raw.sessionID) as string | undefined;
-        const label = sessionID ? labelsByClient.get(client)?.get(sessionID) : undefined;
+        const label = sessionID ? sessionsByClient.get(client)?.get(sessionID)?.label : undefined;
         if (!label) continue;
         if (raw.type === 'session.tool.called') {
           log(`${label} tool: ${describeToolCall(props)}`);
