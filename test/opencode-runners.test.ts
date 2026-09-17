@@ -255,6 +255,7 @@ describe('runFindingVerification on V2', () => {
     const forked = [...fake.sessions.values()].find((s) => s.forkedFrom);
     assert.equal(forked?.forkedFrom, main);
     assert.equal(forked?.agent, 'plan');
+    assert.ok((forked?.permissions?.length ?? 0) > 0, 'a fork carries its own ruleset');
     assert.deepEqual(forked?.model, { providerID: 'openai', id: 'gpt-5' });
     // a failed attempt is not a fork candidate: its retry's session is
     let n = 0;

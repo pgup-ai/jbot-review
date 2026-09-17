@@ -208,11 +208,14 @@ export async function createReviewSession(
   const { client } = runtime;
   const agent = spec.agent ?? MAIN_AGENT;
   const model = modelRef(spec.model);
+  const permissions = TOOL_LESS_AGENTS.has(agent) ? DENY_ALL : permissionRules();
   let sessionID: string;
   if (spec.forkFrom) {
     sessionID = (await client.session.fork({ sessionID: spec.forkFrom }, control())).id;
     await client.session.switchAgent({ sessionID, agent }, control());
     await client.session.switchModel({ sessionID, model }, control());
+    // A fork keeps its source's rules; the verifier gets its own agent's.
+    await client.session.update({ sessionID, permissions }, control());
   } else {
     sessionID = (
       await client.session.create(
@@ -221,7 +224,7 @@ export async function createReviewSession(
           agent,
           model,
           title: `jbot-review ${spec.label}`,
-          permissions: TOOL_LESS_AGENTS.has(agent) ? DENY_ALL : permissionRules(),
+          permissions,
         },
         control(),
       )

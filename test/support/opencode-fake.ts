@@ -166,6 +166,10 @@ export function fakeOpencodeServer(
       sessions.set(forked.id, forked);
       return json({ data: { id: forked.id, agent: forked.agent, model: forked.model } });
     }
+    if (session && method === 'PATCH' && path.endsWith(`/${session.id}`)) {
+      if (body.permissions) session.permissions = body.permissions;
+      return noContent();
+    }
     if (session && method === 'PUT' && path.endsWith('/environment')) {
       session.environment = body.variables;
       return noContent();
