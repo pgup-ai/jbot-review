@@ -283,11 +283,19 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     keyInput: 'zai-api-key',
     models: GLM_PROMPT_CACHE_UNSUPPORTED_MODELS,
   },
-  'kimi-for-coding': {
-    defaultModel: 'kimi-for-coding/k3',
+  // Models.dev split Kimi For Coding by sign-up domain — global is kimi.ai, cn
+  // is kimi.com — and a key works only on the domain that issued it. Neither
+  // advertises opencode's promptCacheKey.
+  'kimi-code-plan-global': {
+    defaultModel: 'kimi-code-plan-global/k3',
     keyEnv: 'KIMI_API_KEY',
     keyInput: 'kimi-api-key',
-    // Models.dev does not advertise support for opencode's promptCacheKey.
+    promptCache: false,
+  },
+  'kimi-code-plan-cn': {
+    defaultModel: 'kimi-code-plan-cn/k3',
+    keyEnv: 'KIMI_API_KEY',
+    keyInput: 'kimi-api-key',
     promptCache: false,
   },
   xai: {

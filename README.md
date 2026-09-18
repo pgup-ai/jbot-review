@@ -87,7 +87,7 @@ release tag if you need fully stable action behavior.
 >
 > The standalone worker's mirrored control-plane payload carries models and
 > keys, but no custom base URL, so it does not support `openai-compatible` yet.
-> Native providers, including `kimi-for-coding`, work there unchanged.
+> Native providers, including `kimi-code-plan-global`, work there unchanged.
 
 ### For the user (repo owner who wants reviews)
 
@@ -461,7 +461,7 @@ allowlist covers `anthropic`, `openai`,
 `google`, `deepseek`, `xai`, `openrouter`,
 `fireworks-ai`, `zai-coding-plan`, `xiaomi-token-plan-sgp`, `nvidia`, and the
 `opencode`/`opencode-go` Zen gateways (which pi reaches over their HTTP
-endpoint directly, not through the opencode server). `kimi-for-coding`, `tokenrouter`, and
+endpoint directly, not through the opencode server). The Kimi providers, `tokenrouter`, and
 `openai-compatible` stay on opencode. Set the Action input `sdk-engine: opencode`
 or, for hosted/local runs, `JBOT_SDK_ENGINE=opencode` to pin every SDK session
 to opencode — the one-line rollback if pi misbehaves, and the path CLI backends'
@@ -515,7 +515,8 @@ jbot-review does not use them for smart key rotation.
 | `openrouter`            | `openrouter/openai/gpt-4o-mini`                                 | `openrouter-api-key`            | `OPENROUTER_API_KEY`                 |
 | `nvidia`                | `nvidia/nemotron-3-ultra-550b-a55b`                             | `nvidia-api-key`                | `NVIDIA_API_KEY`                     |
 | `zai-coding-plan`       | `zai-coding-plan/glm-5.2`                                       | `zai-api-key`                   | `ZAI_API_KEY`                        |
-| `kimi-for-coding`       | `kimi-for-coding/k3`                                            | `kimi-api-key`                  | `KIMI_API_KEY`                       |
+| `kimi-code-plan-global` | `kimi-code-plan-global/k3`                                      | `kimi-api-key`                  | `KIMI_API_KEY`                       |
+| `kimi-code-plan-cn`     | `kimi-code-plan-cn/k3`                                          | `kimi-api-key`                  | `KIMI_API_KEY`                       |
 | `xai`                   | `xai/grok-4.3`                                                  | `xai-api-key`                   | `XAI_API_KEY`                        |
 | `fireworks-ai`          | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` | `fireworks-api-key`             | `FIREWORKS_API_KEY`                  |
 | `xiaomi-token-plan-sgp` | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                           | `mimo-api-key`                  | `MIMO_API_KEY`                       |
@@ -535,11 +536,13 @@ CommandCode checks remaining monthly plan credits for single keys and key lists.
 
 Use `provider: zai-coding-plan` with `zai-api-key` / `ZAI_API_KEY` for the
 Z.AI GLM Coding Plan subscription endpoint.
-Use `provider: kimi-for-coding` with `kimi-api-key` / `KIMI_API_KEY` for the
-native Models.dev Kimi Coding Plan provider. Its current default is Kimi K3.
+Use `provider: kimi-code-plan-global` (kimi.ai) or `kimi-code-plan-cn`
+(kimi.com) with `kimi-api-key` / `KIMI_API_KEY` for the native Models.dev Kimi
+Coding Plan providers; pick the domain that issued the key. Their current
+default is Kimi K3.
 
 ```yaml
-provider: kimi-for-coding
+provider: kimi-code-plan-global
 kimi-api-key: ${{ secrets.KIMI_API_KEY }}
 ```
 
@@ -563,7 +566,7 @@ JBOT_OPENAI_COMPATIBLE_API_KEY=sk-example
 JBOT_OPENAI_COMPATIBLE_BASE_URL=https://proxy.example/v1
 ```
 
-J-Bot omits its `setCacheKey` option for both `kimi-for-coding` and
+J-Bot omits its `setCacheKey` option for both Kimi providers and
 `openai-compatible`: the live catalog does not advertise it for Kimi, and a
 generic endpoint may reject the extra request field.
 
@@ -773,7 +776,7 @@ documentation lookup.
 | `openrouter-api-key`         | No       | —                     | Used when the main or aux model names `openrouter`                                                                                                                                                                                                                           |
 | `nvidia-api-key`             | No       | —                     | Used when the main or aux model names `nvidia`                                                                                                                                                                                                                               |
 | `zai-api-key`                | No       | —                     | Used when the main or aux model names `zai-coding-plan`                                                                                                                                                                                                                      |
-| `kimi-api-key`               | No       | —                     | Used when the main or aux model names `kimi-for-coding`                                                                                                                                                                                                                      |
+| `kimi-api-key`               | No       | —                     | Used when the main or aux model names a Kimi provider                                                                                                                                                                                                                        |
 | `xai-api-key`                | No       | —                     | Used by `xai`, or by `grok` when `grok-auth` is empty                                                                                                                                                                                                                        |
 | `fireworks-api-key`          | No       | —                     | Used when the main or aux model names `fireworks-ai`                                                                                                                                                                                                                         |
 | `mimo-api-key`               | No       | —                     | Used when the main or aux model names `xiaomi-token-plan-sgp`                                                                                                                                                                                                                |

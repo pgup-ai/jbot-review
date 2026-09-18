@@ -174,6 +174,9 @@ const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fall
   'meta/muse-spark-1.2-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
   'meta/muse-spark-1.3-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
   'qwen/qwen3.8-omni-flash': { tiers: ['low', 'medium', 'xhigh'] },
+  'z-ai/glm-5.3-flash': { tiers: ['low', 'high', 'max'], fallback: 'low' },
+  'z-ai/glm-5.3-flashx': { tiers: ['low', 'high', 'max'], fallback: 'low' },
+  'zai-org/glm-5.3': { tiers: ['low', 'high', 'max'], fallback: 'low' },
 };
 
 /**

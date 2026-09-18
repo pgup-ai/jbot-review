@@ -11,7 +11,7 @@ RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000
 
-RUN npm install -g @opencode/cli@2.0.5 command-code@1.56.1 \
+RUN npm install -g @opencode/cli@2.0.5 command-code@1.56.2 \
   && npm cache clean --force \
   && opencode --version \
   && command-code --no-auto-update --version

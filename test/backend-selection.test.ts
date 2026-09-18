@@ -1055,7 +1055,7 @@ describe('selectReviewBackends pi engine routing', () => {
   });
 
   it('keeps Kimi and generic OpenAI-compatible main and aux roles on opencode', () => {
-    for (const providerID of ['kimi-for-coding', 'openai-compatible']) {
+    for (const providerID of ['kimi-code-plan-global', 'openai-compatible']) {
       const main = selectReviewBackends({
         providerID,
         modelID: 'model',
