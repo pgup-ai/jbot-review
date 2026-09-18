@@ -609,7 +609,7 @@ repository-relative files or directories. For example,
 in one call. Searches use current worktree contents, preserve each backend's
 file-access rules, and support the existing pagination; no index is introduced.
 
-The tools use a trusted mod with the image's pinned CommandCode 1.53.0; local
+The tools use a trusted mod with the image's pinned CommandCode 1.56.1; local
 runs need that version. Mod initialization failure stops the CLI. Logs record
 sanitized tool outcome counts and effective workspace access; per-tool timing
 remains unavailable. See the [tooling evaluation](docs/audits/2026-09-07-commandcode-repository-tools.md)

@@ -172,24 +172,22 @@ describe('CommandCode CLI provider helpers', () => {
     );
     const flash = 'commandcode/deepseek/deepseek-v4.1-flash';
     assert.equal(commandCodeSessionEffort(flash, undefined, { ...ctx, auxModel: flash }), 'low');
-    // The verifier's override (already one tier below the finder) rounds DOWN
-    // when the ladder lacks that tier: a medium target lands on low for the
-    // flash models, an exact high stays high.
+    // The verifier runs one ladder step below the finder's effective tier,
+    // floored at the ladder's lowest; a max request on omni-flash lands the
+    // finder on xhigh and the verifier on medium rather than beside it.
     const verifierCtx = { ...ctx, auxModel: flash, explicit: false };
     assert.equal(commandCodeSessionEffort(flash, { reasoningEffort: 'low' }, verifierCtx), 'low');
     assert.equal(
       commandCodeSessionEffort(flash, { reasoningEffort: 'medium' }, verifierCtx),
       'low',
     );
-    assert.equal(commandCodeSessionEffort(flash, { reasoningEffort: 'high' }, verifierCtx), 'high');
     assert.equal(
       commandCodeSessionEffort(deepseek, { reasoningEffort: 'low' }, verifierCtx),
       'high',
     );
-    assert.equal(
-      commandCodeSessionEffort(omni, { reasoningEffort: 'high' }, verifierCtx),
-      'medium',
-    );
+    const maxCtx = { ...verifierCtx, mainModelOptions: { reasoningEffort: 'max' }, explicit: true };
+    assert.equal(commandCodeSessionEffort(flash, { reasoningEffort: 'xhigh' }, maxCtx), 'high');
+    assert.equal(commandCodeSessionEffort(omni, { reasoningEffort: 'xhigh' }, maxCtx), 'medium');
   });
 
   it('denies all CommandCode tools when disabled', () => {

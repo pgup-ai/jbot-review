@@ -198,9 +198,10 @@ function commandCodeReasoningEffort(
 
 /**
  * Role-aware effort for one session: aux sessions run the built-in aux
- * defaults; main options clamp when explicit; the verifier's override already
- * sits one tier below the finder and rounds down when the ladder lacks that
- * tier, so a medium target lands on `low` for the flash models.
+ * defaults; main options clamp when explicit; the verifier (an override) runs
+ * one ladder step below the tier the finder lands on here, floored at the
+ * ladder's lowest, so a `max` request on a ladder ending at `xhigh` puts the
+ * finder on `xhigh` and the verifier below it rather than beside it.
  */
 export function commandCodeSessionEffort(
   model: string,
@@ -212,7 +213,12 @@ export function commandCodeSessionEffort(
     explicit: boolean;
   },
 ): string | undefined {
-  if (override) return commandCodeReasoningEffort(model, override, true, 'down');
+  if (override) {
+    const finder = commandCodeReasoningEffort(model, ctx.mainModelOptions, ctx.explicit);
+    const tiers = COMMANDCODE_MODEL_EFFORTS[parseModelName(model).modelID]?.tiers;
+    if (!finder || !tiers) return commandCodeReasoningEffort(model, override, true, 'down');
+    return tiers[Math.max(0, tiers.indexOf(finder) - 1)];
+  }
   const auxCall = model === ctx.auxModel && ctx.auxModelOptions !== undefined;
   return commandCodeReasoningEffort(
     model,
