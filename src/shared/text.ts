@@ -29,3 +29,17 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 export function isNonArrayRecord(value: unknown): value is Record<string, unknown> {
   return isRecord(value) && !Array.isArray(value);
 }
+
+// Sub-percent spend must stay distinguishable from a meter at zero.
+export function percentLabel(used: number, cap: number): string {
+  const percent = (used / cap) * 100;
+  return percent > 0 && percent < 1 ? '<1%' : `${Math.round(percent)}%`;
+}
+
+export function formatShortDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}

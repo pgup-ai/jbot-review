@@ -36,7 +36,13 @@ import {
 import { truncateForLog } from '@symma/protocol';
 import { runCliProcess } from './cli-process.ts';
 import { clampReasoningEffort } from './config.ts';
-import { isFiniteNumber, isNonArrayRecord, isRecord } from './text.ts';
+import {
+  formatShortDuration,
+  isFiniteNumber,
+  isNonArrayRecord,
+  isRecord,
+  percentLabel,
+} from './text.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const COMMANDCODE_PROMPT_TIMEOUT_MS = 20 * 60_000;
@@ -887,12 +893,6 @@ export function composeCommandCodeMonthlyWindow(
   return remainingCredits >= 0 && cap > 0 ? { used: spentCredits, cap, periodEndMs } : undefined;
 }
 
-// Sub-percent spend must stay distinguishable from a meter at zero.
-function percentLabel(used: number, cap: number): string {
-  const percent = (used / cap) * 100;
-  return percent > 0 && percent < 1 ? '<1%' : `${Math.round(percent)}%`;
-}
-
 export function formatCommandCodePlanUsage(usage: CommandCodePlanUsage, now: number): string {
   return `CommandCode plan usage: ${formatCommandCodePlanUsageBody(usage, now)}`;
 }
@@ -920,14 +920,6 @@ function formatCommandCodePlanUsageBody(usage: CommandCodePlanUsage, now: number
   const purchased =
     usage.purchasedCredits > 0 ? ` + ${usage.purchasedCredits.toFixed(1)} purchased` : '';
   return `${windows ? `${windows}; ` : ''}${usage.monthlyCredits.toFixed(1)} plan credits remaining${purchased}.`;
-}
-
-function formatShortDuration(ms: number): string {
-  const minutes = Math.round(ms / 60_000);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours}h ${minutes % 60}m`;
-  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
 async function commandCodeApiJson(

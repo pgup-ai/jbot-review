@@ -156,6 +156,7 @@ import {
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
 import { DEVIN_PROVIDER_ID, writeDevinCredentials } from '@symma/protocol';
 import { createDevinCliBackend } from './devin-cli.ts';
+import { isOpencodeAccountProvider, selectOpencodeApiKey } from './opencode-usage.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
   COMMANDCODE_TELEMETRY_CAPABILITY,
@@ -1016,7 +1017,7 @@ async function runReviewPipeline(params: {
     workspace,
     telemetryDirectory,
     model,
-    apiKey,
+    apiKey: rawApiKey,
     baseURL,
     headSha,
     baseRef,
@@ -1344,13 +1345,26 @@ async function runReviewPipeline(params: {
       log(`pi engine does not serve ${auxModel}; routing auxiliary sessions through opencode.`);
     }
   }
+  // A comma-separated opencode key list resolves to the account with the most
+  // weekly plan allowance left. Resolved before backend selection so the
+  // opencode server, pi, and both roles all receive the same single key.
+  const apiKey = await selectOpencodeApiKey(providerID, rawApiKey, log);
+  const rawAuxApiKey = options.auxApiKey ?? '';
+  // Both roles on one account's key list share the main pick instead of
+  // probing it twice; anything else resolves on its own (a no-op off opencode).
+  const auxApiKey =
+    rawAuxApiKey === rawApiKey &&
+    isOpencodeAccountProvider(providerID) &&
+    isOpencodeAccountProvider(auxProviderID)
+      ? apiKey
+      : await selectOpencodeApiKey(auxProviderID, rawAuxApiKey, log);
   const backendSelection = selectReviewBackends({
     providerID,
     modelID,
     apiKey,
     auxProviderID,
     auxModelID,
-    auxApiKey: options.auxApiKey,
+    auxApiKey,
     piEnabled: piEngine.enabled,
     mainPiModelAvailable,
     auxPiModelAvailable,
@@ -1405,7 +1419,7 @@ async function runReviewPipeline(params: {
   const mainPoolsideBackend = mainOnPoolside
     ? createPoolsideBackend(apiKey, options.modelOptions)
     : undefined;
-  const auxPoolsideKey = options.auxApiKey || (auxProviderID === providerID ? apiKey : '');
+  const auxPoolsideKey = auxApiKey || (auxProviderID === providerID ? apiKey : '');
   const auxPoolsideBackend = auxOnPoolside ? createPoolsideBackend(auxPoolsideKey) : undefined;
 
   const auxModelOptions = auxModelOptionsFor(providerID, modelID, auxProviderID, auxModelID);
@@ -2028,7 +2042,7 @@ async function runReviewPipeline(params: {
     (needsAuxOpencodeConfig(providerID, modelID, auxProviderID, auxModelID) ||
       Boolean(auxModelOptions && Object.keys(auxModelOptions).length > 0) ||
       (verifierNeedsOwnOptions && !verifierOnMainEntry));
-  if (auxNeedsOwnKey && !options.auxApiKey) {
+  if (auxNeedsOwnKey && !auxApiKey) {
     await cleanupCliHomes();
     throw new Error(`Missing API key for auxiliary provider "${auxProviderID}".`);
   }
@@ -2062,7 +2076,7 @@ async function runReviewPipeline(params: {
           // pi's prompt caching is provider-managed (no setCacheKey knob);
           // resolvePromptCachePolicy applies to the opencode server only.
           additionalProviderKeys: auxNeedsOwnKey
-            ? [{ providerID: auxProviderID, apiKey: options.auxApiKey }]
+            ? [{ providerID: auxProviderID, apiKey: auxApiKey }]
             : undefined,
           toolTelemetry: backendToolTelemetry,
           embeddedFirstPrompt: options.embeddedFirstPrompt,
@@ -2121,7 +2135,7 @@ async function runReviewPipeline(params: {
             ? [
                 {
                   providerID: auxProviderID,
-                  apiKey: auxNeedsOwnKey ? options.auxApiKey : opencodeApiKey,
+                  apiKey: auxNeedsOwnKey ? auxApiKey : opencodeApiKey,
                   modelID: auxModelID,
                   baseURL: auxNeedsOwnKey ? options.auxBaseURL : baseURL,
                   promptCache: promptCachePolicy.auxProviderPromptCache,
