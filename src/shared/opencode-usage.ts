@@ -7,11 +7,11 @@ const OPENCODE_GO_STATUS_URL = 'https://opencode.ai/console/api/go/status';
 const OPENCODE_USAGE_TIMEOUT_MS = 4_000;
 
 /** Providers whose key is an opencode.ai account credential. */
-export function isOpencodeAccountProvider(providerID: string): boolean {
+function isOpencodeAccountProvider(providerID: string): boolean {
   return providerID === 'opencode' || providerID === 'opencode-go';
 }
 
-export interface OpencodeUsageWindow {
+interface OpencodeUsageWindow {
   /** Microcents: the plan meters allowance in money, not tokens. */
   used: number;
   limit: number;
@@ -40,10 +40,11 @@ export function parseOpencodeGoStatus(payload: unknown): OpencodeGoUsage | undef
   const { meters } = payload.access;
   if (meters != null && !isNonArrayRecord(meters)) return undefined;
   const windows = isNonArrayRecord(meters) ? meters : undefined;
-  // null = present but malformed, undefined = absent. Malformed poisons the
-  // whole payload so a partial line cannot hide a real cap.
+  // Absent drops just that segment; present but unreadable (an explicit null
+  // included) poisons the payload, because a meter that parses as "unlimited"
+  // would rank its key best. Returns null for unreadable, undefined for absent.
   const windowOf = (value: unknown): OpencodeUsageWindow | null | undefined => {
-    if (value == null) return undefined;
+    if (value === undefined) return undefined;
     if (!isNonArrayRecord(value)) return null;
     const used = microCents(value.usedMicroCents);
     const limit = microCents(value.limitMicroCents);
@@ -133,7 +134,10 @@ export function pickOpencodeApiKey(probes: readonly OpencodeKeyProbe[]): {
   const windowOpen = reachable.filter(
     (probe) => !spent(probe.usage.fiveHour) && !spent(probe.usage.week),
   );
-  const pool = windowOpen.length > 0 ? windowOpen : reachable;
+  // Every window spent: a plan that bills overage to the balance still serves,
+  // one with overage blocked cannot — so it only wins if nothing else is left.
+  const overageOk = reachable.filter((probe) => probe.usage.useBalance);
+  const pool = windowOpen.length > 0 ? windowOpen : overageOk.length > 0 ? overageOk : reachable;
   const best = pool.reduce((a, b) => {
     const headroomA = weeklyHeadroom(a.usage);
     const headroomB = weeklyHeadroom(b.usage);
@@ -194,7 +198,7 @@ async function fetchOpencodeGoUsage(key: string): Promise<OpencodeGoUsage | unde
  * A single key — or any non-opencode provider — is returned untouched, so the
  * common case costs no request.
  */
-export async function selectOpencodeApiKey(
+async function selectOpencodeApiKey(
   providerID: string,
   rawValue: string,
   log: (msg: string) => void,
@@ -213,4 +217,26 @@ export async function selectOpencodeApiKey(
   const picked = pickOpencodeApiKey(probes);
   log(`Opencode key: ${picked.reason}`);
   return picked.key;
+}
+
+/**
+ * The key each role runs with. Roles sharing one account's key list share the
+ * pick instead of probing it twice; anything else resolves on its own, which is
+ * a no-op off opencode.
+ */
+export async function resolveOpencodeApiKeys(
+  roles: { providerID: string; apiKey: string; auxProviderID: string; auxApiKey: string },
+  log: (msg: string) => void,
+): Promise<{ apiKey: string; auxApiKey: string }> {
+  const apiKey = await selectOpencodeApiKey(roles.providerID, roles.apiKey, log);
+  const shared =
+    roles.auxApiKey === roles.apiKey &&
+    isOpencodeAccountProvider(roles.providerID) &&
+    isOpencodeAccountProvider(roles.auxProviderID);
+  return {
+    apiKey,
+    auxApiKey: shared
+      ? apiKey
+      : await selectOpencodeApiKey(roles.auxProviderID, roles.auxApiKey, log),
+  };
 }

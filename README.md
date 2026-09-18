@@ -182,7 +182,9 @@ Empty provider key inputs are ignored; an auxiliary model on a different
 provider needs that provider's own key, which is never reused across providers.
 `opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`; comma-separate
 several of them and each run picks the account with the most weekly Go-plan
-allowance left, the same way CommandCode keys are chosen. Ranking needs keys
+allowance left, the same way CommandCode keys are chosen. Unlike CommandCode a
+spent plan is not fatal: the key stays selectable and overage bills the credit
+balance, so a run continues instead of stopping. Ranking needs keys
 with the console's `all` permission — an inference-only key cannot read plan
 meters, and its probe degrades to "usage unavailable" rather than failing.
 

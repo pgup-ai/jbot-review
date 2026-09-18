@@ -4,7 +4,7 @@ import {
   formatOpencodeKeyProbeLine,
   parseOpencodeGoStatus,
   pickOpencodeApiKey,
-  selectOpencodeApiKey,
+  resolveOpencodeApiKeys,
   type OpencodeGoUsage,
 } from '../src/shared/opencode-usage.ts';
 
@@ -31,6 +31,19 @@ const statusPayload = (weekUsed: string, monthUsed = '100') => ({
     },
   },
 });
+
+/** Both roles on one value, which is how the runner resolves a shared list. */
+const resolveKey = async (
+  providerID: string,
+  raw: string,
+  log: (msg: string) => void = () => {},
+): Promise<string> =>
+  (
+    await resolveOpencodeApiKeys(
+      { providerID, apiKey: raw, auxProviderID: providerID, auxApiKey: raw },
+      log,
+    )
+  ).apiKey;
 
 const usage = (weekUsed: number, monthUsed = 0): OpencodeGoUsage => ({
   week: { used: weekUsed, limit: 1000 },
@@ -63,6 +76,7 @@ describe('opencode Go plan usage', () => {
     // A present-but-malformed field poisons the whole payload, so a partial
     // line can never hide a real cap.
     for (const meters of [
+      { week: null },
       { week: { limitMicroCents: '1000' } },
       { week: { limitMicroCents: '0', usedMicroCents: '1' } },
       { week: { limitMicroCents: '1000', usedMicroCents: '-1' } },
@@ -104,12 +118,20 @@ describe('opencode Go plan usage', () => {
       ]).key,
       'b',
     );
-    // Every window spent still yields a key rather than failing the run.
+    // Every window spent still yields a key rather than failing the run, and a
+    // plan that can bill overage outranks one where overage is blocked.
     const allSpent = pickOpencodeApiKey([
       { key: 'a', usage: usage(1000) },
       { key: 'b', usage: usage(1200) },
     ]);
     assert.equal(allSpent.key, 'a');
+    assert.equal(
+      pickOpencodeApiKey([
+        { key: 'blocked', usage: { ...usage(1000), useBalance: false } },
+        { key: 'overage-ok', usage: usage(1200) },
+      ]).key,
+      'overage-ok',
+    );
     assert.match(
       allSpent.reason,
       /all 2 window-limited; picked 1\/2 \(…a, 0% of weekly limit left\)/,
@@ -169,7 +191,7 @@ describe('opencode Go plan usage', () => {
     );
     const logs: string[] = [];
     assert.equal(
-      await selectOpencodeApiKey('opencode-go', 'k-poor, k-rich', (line) => logs.push(line)),
+      await resolveKey('opencode-go', 'k-poor, k-rich', (line) => logs.push(line)),
       'k-rich',
     );
     assert.deepEqual(requests, ['Bearer k-poor', 'Bearer k-rich']);
@@ -185,19 +207,28 @@ describe('opencode Go plan usage', () => {
       ['opencode', 'a,', 'a'],
       ['opencode', ',,', ',,'],
     ] as const) {
-      assert.equal(await selectOpencodeApiKey(providerID, raw, () => {}), expected);
+      assert.equal(await resolveKey(providerID, raw), expected);
     }
     assert.deepEqual(requests, []);
   });
 
-  it('treats an unreachable or drifting status endpoint as no usage', async (t) => {
-    t.mock.method(globalThis, 'fetch', async (_url: unknown, init: { headers: unknown }) => {
-      void init;
-      return new Response('nope', { status: 403 });
-    });
-    const logs: string[] = [];
-    assert.equal(await selectOpencodeApiKey('opencode', 'a,b', (line) => logs.push(line)), 'a');
-    assert.ok(logs.some((line) => line.includes('plan usage unavailable')));
-    assert.ok(logs.at(-1)?.includes('probes unavailable'));
+  it('treats a refused, unparseable, or throwing status endpoint as no usage', async (t) => {
+    // The refusal path returns !ok; the other two reject inside the probe, so
+    // only these reach the catch that keeps a broken endpoint from failing a run.
+    let respond: () => Response = () => new Response('nope', { status: 403 });
+    t.mock.method(globalThis, 'fetch', async () => respond());
+    for (const stub of [
+      () => new Response('nope', { status: 403 }),
+      () => new Response('not json', { status: 200 }),
+      (): Response => {
+        throw new Error('network down');
+      },
+    ]) {
+      respond = stub;
+      const logs: string[] = [];
+      assert.equal(await resolveKey('opencode', 'a,b', (line) => logs.push(line)), 'a');
+      assert.ok(logs.some((line) => line.includes('plan usage unavailable')));
+      assert.ok(logs.at(-1)?.includes('probes unavailable'));
+    }
   });
 });

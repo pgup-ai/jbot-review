@@ -156,7 +156,7 @@ import {
 import type { PromptTokenUsage, TokenUsageRecorder } from './opencode.ts';
 import { DEVIN_PROVIDER_ID, writeDevinCredentials } from '@symma/protocol';
 import { createDevinCliBackend } from './devin-cli.ts';
-import { isOpencodeAccountProvider, selectOpencodeApiKey } from './opencode-usage.ts';
+import { resolveOpencodeApiKeys } from './opencode-usage.ts';
 import {
   COMMANDCODE_PROVIDER_ID,
   COMMANDCODE_TELEMETRY_CAPABILITY,
@@ -1348,16 +1348,15 @@ async function runReviewPipeline(params: {
   // A comma-separated opencode key list resolves to the account with the most
   // weekly plan allowance left. Resolved before backend selection so the
   // opencode server, pi, and both roles all receive the same single key.
-  const apiKey = await selectOpencodeApiKey(providerID, rawApiKey, log);
-  const rawAuxApiKey = options.auxApiKey ?? '';
-  // Both roles on one account's key list share the main pick instead of
-  // probing it twice; anything else resolves on its own (a no-op off opencode).
-  const auxApiKey =
-    rawAuxApiKey === rawApiKey &&
-    isOpencodeAccountProvider(providerID) &&
-    isOpencodeAccountProvider(auxProviderID)
-      ? apiKey
-      : await selectOpencodeApiKey(auxProviderID, rawAuxApiKey, log);
+  const { apiKey, auxApiKey } = await resolveOpencodeApiKeys(
+    {
+      providerID,
+      apiKey: rawApiKey,
+      auxProviderID,
+      auxApiKey: options.auxApiKey ?? '',
+    },
+    log,
+  );
   const backendSelection = selectReviewBackends({
     providerID,
     modelID,
