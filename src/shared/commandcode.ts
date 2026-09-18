@@ -160,11 +160,10 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
 // Probed on CLI 1.53.0 (2026-09-11; v4-flash 2026-08-22): `--effort` validates
 // per model and exits nonzero on values outside the model's set; longcat has
 // no adjustable effort. Ladders match the `reasoningEfforts` arrays baked into
-// the CLI bundle (omni-flash: 1.56.1). Unflagged, v4.1-flash reasons like
-// `high` (~2× its `low` output) and v4-flash-fast like `low`; `fallback` is
-// where a built-in default the model lacks lands: the lowest tier, because a
-// tool-less review gains nothing from deeper reasoning (v4-flash has no
-// `low`, so `high`).
+// the pinned CLI bundle. Unflagged, v4.1-flash reasons like `high` (~2× its
+// `low` output) and v4-flash-fast like `low`; `fallback` is where a built-in
+// default the model lacks lands: the lowest tier, because a tool-less review
+// gains nothing from deeper reasoning (v4-flash has no `low`, so `high`).
 const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fallback?: string }> = {
   'deepseek/deepseek-v4-flash': { tiers: ['high', 'max'], fallback: 'high' },
   'deepseek/deepseek-v4.1-flash': { tiers: ['low', 'high', 'max'], fallback: 'low' },
