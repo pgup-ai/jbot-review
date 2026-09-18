@@ -151,6 +151,9 @@ describe('CommandCode CLI provider helpers', () => {
       effortOf('commandcode/meta/muse-spark-1.3-contributor', { reasoningEffort: 'max' }, true),
       'xhigh',
     );
+    // Gapped ladder (low, medium, xhigh): an explicit high ties up to xhigh.
+    const omni = 'commandcode/qwen/qwen3.8-omni-flash';
+    assert.equal(effortOf(omni, { reasoningEffort: 'high' }, true), 'xhigh');
 
     // Role selection: the aux default delivers low or the fallback, main
     // options and the verifier override clamp; an aux model sharing the main
@@ -182,6 +185,10 @@ describe('CommandCode CLI provider helpers', () => {
     assert.equal(
       commandCodeSessionEffort(deepseek, { reasoningEffort: 'low' }, verifierCtx),
       'high',
+    );
+    assert.equal(
+      commandCodeSessionEffort(omni, { reasoningEffort: 'high' }, verifierCtx),
+      'medium',
     );
   });
 

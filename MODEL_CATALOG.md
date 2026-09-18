@@ -30,7 +30,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `opencode`              | CLI snapshot         |      70 | `opencode/deepseek-v4-flash`                                    |
 | `opencode-go`           | CLI snapshot         |      28 | `opencode-go/deepseek-v4-flash`                                 |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                                 |
-| `commandcode`           | CLI snapshot         |      69 | `commandcode/default`                                           |
+| `commandcode`           | CLI snapshot         |      70 | `commandcode/default`                                           |
 | `cursor`                | CLI snapshot         |     224 | `cursor/default`                                                |
 | `qoder`                 | CLI snapshot         |       2 | `qoder/auto`                                                    |
 | `codex`                 | CLI snapshot         |       7 | `codex/default`                                                 |
@@ -887,11 +887,11 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.53.0`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Source: Docker-pinned npm package [`command-code@1.56.1`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
-69 J-Bot model values:
+70 J-Bot model values:
 
 - `commandcode/claude-fable-5`
 - `commandcode/claude-fable-5-1`
@@ -945,6 +945,7 @@ The CLI does not expose a complete list.
 - `commandcode/qwen/qwen3.8-flash`
 - `commandcode/qwen/qwen3.8-max`
 - `commandcode/qwen/qwen3.8-max-0902`
+- `commandcode/qwen/qwen3.8-omni-flash`
 - `commandcode/sakana/fugu-ultra`
 - `commandcode/stepfun/step-3.5-flash`
 - `commandcode/stepfun/step-3.7-flash`
