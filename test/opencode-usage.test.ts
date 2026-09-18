@@ -247,6 +247,12 @@ describe('opencode Go plan usage', () => {
       assert.equal(await resolveKey('opencode', 'a,b', (line) => logs.push(line)), 'a');
       assert.ok(logs.some((line) => line.includes('plan usage unavailable')));
       assert.ok(logs.at(-1)?.includes('probes unavailable'));
+
+      // One key has no pick to make, so it reports the absence on its own line
+      // and still hands back the key.
+      const soloLogs: string[] = [];
+      assert.equal(await resolveKey('opencode', 'solo', (line) => soloLogs.push(line)), 'solo');
+      assert.deepEqual(soloLogs, ['Opencode plan usage unavailable.']);
     }
   });
 });
