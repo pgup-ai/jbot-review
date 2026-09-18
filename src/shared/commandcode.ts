@@ -186,14 +186,13 @@ function commandCodeReasoningEffort(
   model: string,
   modelOptions: Record<string, unknown> | undefined,
   explicit: boolean,
-  ties: 'up' | 'down' = 'up',
 ): string | undefined {
   const { modelID } = parseModelName(model);
   const effort = modelOptions?.reasoningEffort;
   const entry = COMMANDCODE_MODEL_EFFORTS[modelID];
   if (typeof effort !== 'string' || !entry?.tiers.length) return undefined;
   if (entry.tiers.includes(effort)) return effort;
-  return explicit ? clampReasoningEffort(effort, entry.tiers, ties) : entry.fallback;
+  return explicit ? clampReasoningEffort(effort, entry.tiers) : entry.fallback;
 }
 
 /**
@@ -201,7 +200,9 @@ function commandCodeReasoningEffort(
  * defaults; main options clamp when explicit; the verifier (an override) runs
  * one ladder step below the tier the finder lands on here, floored at the
  * ladder's lowest, so a `max` request on a ladder ending at `xhigh` puts the
- * finder on `xhigh` and the verifier below it rather than beside it.
+ * finder on `xhigh` and the verifier below it rather than beside it. Only the
+ * override's presence is read: its rank-derived tier (config.ts) cannot see
+ * this ladder.
  */
 export function commandCodeSessionEffort(
   model: string,
@@ -216,8 +217,7 @@ export function commandCodeSessionEffort(
   if (override) {
     const finder = commandCodeReasoningEffort(model, ctx.mainModelOptions, ctx.explicit);
     const tiers = COMMANDCODE_MODEL_EFFORTS[parseModelName(model).modelID]?.tiers;
-    if (!finder || !tiers) return commandCodeReasoningEffort(model, override, true, 'down');
-    return tiers[Math.max(0, tiers.indexOf(finder) - 1)];
+    return finder && tiers ? tiers[Math.max(0, tiers.indexOf(finder) - 1)] : undefined;
   }
   const auxCall = model === ctx.auxModel && ctx.auxModelOptions !== undefined;
   return commandCodeReasoningEffort(
