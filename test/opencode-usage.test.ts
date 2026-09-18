@@ -208,18 +208,26 @@ describe('opencode Go plan usage', () => {
     assert.ok(logs.some((line) => line.startsWith('Opencode key 1/2')));
     assert.ok(logs.at(-1)?.includes('picked 2/2'));
 
-    // A single key, a non-opencode provider, and an unparseable list all skip
-    // the probe entirely, so the common case adds no request.
+    // A non-opencode provider and an unparseable list never reach the endpoint.
     requests.length = 0;
-    for (const [providerID, raw, expected] of [
-      ['opencode', 'only-key', 'only-key'],
-      ['deepseek', 'a,b', 'a,b'],
-      ['opencode', 'a,', 'a'],
-      ['opencode', ',,', ',,'],
+    for (const [providerID, raw] of [
+      ['deepseek', 'a,b'],
+      ['opencode', ',,'],
     ] as const) {
-      assert.equal(await resolveKey(providerID, raw), expected);
+      assert.equal(await resolveKey(providerID, raw), raw);
     }
     assert.deepEqual(requests, []);
+
+    // A single key has no pick to make but still reports its meters, and a
+    // trailing comma resolves to the key the run actually uses.
+    const soloLogs: string[] = [];
+    assert.equal(
+      await resolveKey('opencode', 'only-key,', (line) => soloLogs.push(line)),
+      'only-key',
+    );
+    assert.deepEqual(requests, ['Bearer only-key']);
+    assert.equal(soloLogs.length, 1);
+    assert.match(soloLogs[0], /^Opencode plan usage: 5h \$/);
   });
 
   it('treats a refused, unparseable, or throwing status endpoint as no usage', async (t) => {

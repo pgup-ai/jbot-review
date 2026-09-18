@@ -202,18 +202,29 @@ async function fetchOpencodeGoUsage(key: string): Promise<OpencodeGoUsage | unde
 /**
  * Resolves a comma-separated opencode key list to the account with the most
  * weekly allowance left, probing once per run so both roles share that account.
- * A single key — or any non-opencode provider — is returned untouched, so the
- * common case costs no request.
+ * A single key still reports its meters; a non-opencode provider is returned
+ * untouched without a request.
  */
 async function selectOpencodeApiKey(
   providerID: string,
   rawValue: string,
   log: (msg: string) => void,
 ): Promise<string> {
-  if (!isOpencodeAccountProvider(providerID) || !rawValue.includes(',')) return rawValue;
+  if (!isOpencodeAccountProvider(providerID)) return rawValue;
   const keys = splitOpencodeApiKeys(rawValue);
   // Nothing parseable keeps the raw value: legacy garbage-in behavior.
-  if (keys.length < 2) return keys[0] ?? rawValue;
+  if (keys.length === 0) return rawValue;
+  if (keys.length === 1) {
+    // No pick to make, but the meters still go up front so the allowance left
+    // is visible before the run spends into it, as the CommandCode path does.
+    const usage = await fetchOpencodeGoUsage(keys[0]);
+    log(
+      usage
+        ? `Opencode plan usage: ${formatOpencodeGoUsageBody(usage, Date.now())}`
+        : 'Opencode plan usage unavailable.',
+    );
+    return keys[0];
+  }
   const probes = await Promise.all(
     keys.map(async (key) => ({ key, usage: await fetchOpencodeGoUsage(key) })),
   );

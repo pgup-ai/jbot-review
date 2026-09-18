@@ -207,6 +207,11 @@ describe('provider credentials', () => {
       'oc_sk_aaaaaaaaaaaaaaaa',
       'oc_sk_bbbbbbbbbbbbbbbb',
     ]);
+    // A lone key that the selectors would strip is registered in its used form.
+    assert.deepEqual(credentialSecretValues('oc_sk_aaaaaaaaaaaaaaaa,'), [
+      'oc_sk_aaaaaaaaaaaaaaaa,',
+      'oc_sk_aaaaaaaaaaaaaaaa',
+    ]);
     // A trailing comma still expands: the selectors drop empty segments too.
     assert.deepEqual(credentialSecretValues('oc_sk_aaaaaaaaaaaaaaaa,oc_sk_bbbbbbbbbbbbbbbb,'), [
       'oc_sk_aaaaaaaaaaaaaaaa,oc_sk_bbbbbbbbbbbbbbbb,',
