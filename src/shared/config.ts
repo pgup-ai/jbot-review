@@ -27,7 +27,12 @@ export interface ProviderCredentialSource {
 const BARE_CREDENTIAL_KEY = /^[A-Za-z0-9._-]{16,}$/;
 
 export function credentialSecretValues(value: string): string[] {
-  const parts = value.split(',').map((part) => part.trim());
+  // Empty segments drop here exactly as the key splitters drop them, so a
+  // trailing comma cannot leave the keys themselves unregistered.
+  const parts = value
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
   if (parts.length < 2 || !parts.every((part) => BARE_CREDENTIAL_KEY.test(part))) return [value];
   return [value, ...parts];
 }

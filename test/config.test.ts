@@ -207,6 +207,12 @@ describe('provider credentials', () => {
       'oc_sk_aaaaaaaaaaaaaaaa',
       'oc_sk_bbbbbbbbbbbbbbbb',
     ]);
+    // A trailing comma still expands: the selectors drop empty segments too.
+    assert.deepEqual(credentialSecretValues('oc_sk_aaaaaaaaaaaaaaaa,oc_sk_bbbbbbbbbbbbbbbb,'), [
+      'oc_sk_aaaaaaaaaaaaaaaa,oc_sk_bbbbbbbbbbbbbbbb,',
+      'oc_sk_aaaaaaaaaaaaaaaa',
+      'oc_sk_bbbbbbbbbbbbbbbb',
+    ]);
     assert.deepEqual(credentialSecretValues(' key-with-spaces-around , second-key-value '), [
       ' key-with-spaces-around , second-key-value ',
       'key-with-spaces-around',
@@ -217,6 +223,7 @@ describe('provider credentials', () => {
     for (const value of [
       '{"type":"oauth","token":"aaaaaaaaaaaaaaaaaaaa"}',
       'oc_sk_aaaaaaaaaaaaaaaa,short',
+      ',,',
       'https://proxy.example/v1,https://other.example/v1',
       'single-key-value-long-enough',
     ]) {
