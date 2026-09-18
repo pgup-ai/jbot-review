@@ -90,7 +90,6 @@ function formatOpencodeGoUsageBody(usage: OpencodeGoUsage, now: number): string 
     .filter(Boolean)
     .join(', ');
   if (!meters) return 'plan reports no meters.';
-  // Whether a spent cap stops the run or quietly bills the credit balance.
   return `${meters}; overage ${usage.useBalance ? 'draws on the credit balance' : 'is blocked'}.`;
 }
 
