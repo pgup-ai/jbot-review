@@ -311,14 +311,16 @@ describe('provider configuration resolution', () => {
   });
 });
 
-describe('kimi-for-coding (native Models.dev provider)', () => {
-  it('uses the direct Kimi key surface and current K3 default', () => {
-    assert.deepEqual(PROVIDERS['kimi-for-coding'], {
-      defaultModel: 'kimi-for-coding/k3',
-      keyEnv: 'KIMI_API_KEY',
-      keyInput: 'kimi-api-key',
-      promptCache: false,
-    });
+describe('Kimi For Coding (native Models.dev providers)', () => {
+  it('shares one key surface across both sign-up domains, each on its own K3', () => {
+    for (const providerID of ['kimi-code-plan-global', 'kimi-code-plan-cn']) {
+      assert.deepEqual(PROVIDERS[providerID], {
+        defaultModel: `${providerID}/k3`,
+        keyEnv: 'KIMI_API_KEY',
+        keyInput: 'kimi-api-key',
+        promptCache: false,
+      });
+    }
   });
 });
 

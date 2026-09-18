@@ -141,6 +141,10 @@ describe('CommandCode CLI provider helpers', () => {
         'high',
       );
     }
+    // The GLM 5.3 family declares no medium, so mains take the low fallback.
+    for (const glm of ['z-ai/glm-5.3-flash', 'z-ai/glm-5.3-flashx', 'zai-org/glm-5.3']) {
+      assert.equal(effortOf(`commandcode/${glm}`, { reasoningEffort: 'medium' }), 'low');
+    }
     // Models that declare medium get it for mains and low for aux sessions.
     for (const model of ['gpt-5.6-luna', 'meta/muse-spark-1.3-contributor']) {
       assert.equal(effortOf(`commandcode/${model}`, { reasoningEffort: 'medium' }), 'medium');

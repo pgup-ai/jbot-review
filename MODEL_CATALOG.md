@@ -2,7 +2,7 @@
 
 # J-Bot model ID catalog
 
-Generated on **2026-09-17** from the live [Models.dev catalog](https://models.dev/api.json), Docker-pinned CLI npm packages, and authenticated CLI catalogs by `npm run models:update`.
+Generated on **2026-09-18** from the live [Models.dev catalog](https://models.dev/api.json), Docker-pinned CLI npm packages, and authenticated CLI catalogs by `npm run models:update`.
 
 J-Bot model values use `provider/model-id`. You may pass either the full value shown here or the model-id portion when `provider` is configured separately. Provider access, region, account tier, and model retirement can change independently of this snapshot.
 
@@ -18,26 +18,27 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 | `openai`                | Models.dev           |      48 | `openai/gpt-5.4-nano`                                           |
 | `anthropic`             | Models.dev           |      14 | `anthropic/claude-sonnet-4-6`                                   |
 | `google`                | Models.dev           |      39 | `google/gemini-2.5-flash`                                       |
-| `openrouter`            | Models.dev           |     369 | `openrouter/openai/gpt-4o-mini`                                 |
+| `openrouter`            | Models.dev           |     371 | `openrouter/openai/gpt-4o-mini`                                 |
 | `nvidia`                | Models.dev           |     105 | `nvidia/nemotron-3-ultra-550b-a55b`                             |
 | `zai-coding-plan`       | Models.dev           |       9 | `zai-coding-plan/glm-5.2`                                       |
-| `kimi-for-coding`       | Models.dev           |       4 | `kimi-for-coding/k3`                                            |
-| `xai`                   | Models.dev           |      12 | `xai/grok-4.3`                                                  |
+| `kimi-code-plan-global` | Models.dev           |       4 | `kimi-code-plan-global/k3`                                      |
+| `kimi-code-plan-cn`     | Models.dev           |       4 | `kimi-code-plan-cn/k3`                                          |
+| `xai`                   | Models.dev           |      10 | `xai/grok-4.3`                                                  |
 | `xiaomi-token-plan-sgp` | Models.dev           |       7 | `xiaomi-token-plan-sgp/mimo-v2.5-pro`                           |
 | `fireworks-ai`          | Models.dev           |      33 | `fireworks-ai/accounts/fireworks/models/deepseek-v4-flash-0731` |
 | `tokenrouter`           | Models.dev           |       2 | `tokenrouter/z-ai/glm-5.3-free`                                 |
 | `poolside`              | Models.dev           |       3 | `poolside/laguna-s-2.1`                                         |
 | `opencode`              | CLI snapshot         |      70 | `opencode/deepseek-v4-flash`                                    |
-| `opencode-go`           | CLI snapshot         |      28 | `opencode-go/deepseek-v4-flash`                                 |
+| `opencode-go`           | CLI snapshot         |      27 | `opencode-go/deepseek-v4-flash`                                 |
 | `devin`                 | CLI (not enumerable) |       — | `devin/default`                                                 |
-| `commandcode`           | CLI snapshot         |      70 | `commandcode/default`                                           |
+| `commandcode`           | CLI snapshot         |      71 | `commandcode/default`                                           |
 | `cursor`                | CLI snapshot         |     224 | `cursor/default`                                                |
-| `qoder`                 | CLI snapshot         |       2 | `qoder/auto`                                                    |
+| `qoder`                 | CLI snapshot         |       3 | `qoder/auto`                                                    |
 | `codex`                 | CLI snapshot         |       7 | `codex/default`                                                 |
 | `grok`                  | CLI snapshot         |       2 | `grok/default`                                                  |
-| `cline`                 | CLI snapshot         |     293 | `cline/default`                                                 |
+| `cline`                 | CLI snapshot         |     292 | `cline/default`                                                 |
 | `cline-pass`            | CLI snapshot         |      17 | `cline-pass/default`                                            |
-| `kilo`                  | CLI snapshot         |     307 | `kilo/kilo-auto/free`                                           |
+| `kilo`                  | CLI snapshot         |     309 | `kilo/kilo-auto/free`                                           |
 | `dim`                   | CLI snapshot         |       4 | `dim/dimcode-api-oauth/deepseek-v4-flash`                       |
 | `openai-compatible`     | Custom endpoint      | dynamic | required                                                        |
 
@@ -170,7 +171,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 
 ### `openrouter`
 
-369 model IDs. Default: `openrouter/openai/gpt-4o-mini`.
+371 model IDs. Default: `openrouter/openai/gpt-4o-mini`.
 
 - `openrouter/~anthropic/claude-fable-latest`
 - `openrouter/~anthropic/claude-haiku-latest`
@@ -241,6 +242,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/deepseek/deepseek-v3.2-exp`
 - `openrouter/deepseek/deepseek-v4-flash`
 - `openrouter/deepseek/deepseek-v4-flash-0731`
+- `openrouter/deepseek/deepseek-v4-flash-0731:free`
 - `openrouter/deepseek/deepseek-v4-flash-vision-exp`
 - `openrouter/deepseek/deepseek-v4-pro`
 - `openrouter/deepseek/deepseek-v4-pro-0813`
@@ -325,7 +327,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/mistralai/ministral-8b-2512`
 - `openrouter/mistralai/mistral-large`
 - `openrouter/mistralai/mistral-large-2407`
-- `openrouter/mistralai/mistral-large-2512`
 - `openrouter/mistralai/mistral-medium-3`
 - `openrouter/mistralai/mistral-medium-3-5`
 - `openrouter/mistralai/mistral-medium-3.1`
@@ -435,6 +436,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/poolside/laguna-s-2.1:free`
 - `openrouter/poolside/laguna-xs-2.1`
 - `openrouter/poolside/laguna-xs-2.1:free`
+- `openrouter/prism-ml/ternary-bonsai-2-27b`
 - `openrouter/qwen/qwen-2.5-72b-instruct`
 - `openrouter/qwen/qwen-2.5-7b-instruct`
 - `openrouter/qwen/qwen-2.5-coder-32b-instruct`
@@ -484,6 +486,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/qwen/qwen3.7-plus`
 - `openrouter/qwen/qwen3.8-2.4t-a95b`
 - `openrouter/qwen/qwen3.8-27b`
+- `openrouter/qwen/qwen3.8-27b:free`
 - `openrouter/qwen/qwen3.8-flash`
 - `openrouter/qwen/qwen3.8-max-0902`
 - `openrouter/rekaai/reka-edge`
@@ -497,7 +500,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/sao10k/l3-lunaris-8b`
 - `openrouter/sao10k/l3.1-euryale-70b`
 - `openrouter/sao10k/l3.3-euryale-70b`
-- `openrouter/stealth/union-alpha`
 - `openrouter/stepfun/step-3.5-flash`
 - `openrouter/stepfun/step-3.7-flash`
 - `openrouter/tencent/hunyuan-a13b-instruct`
@@ -514,6 +516,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `openrouter/thinkingmachines/inkling-small`
 - `openrouter/thinkingmachines/inkling-small:free`
 - `openrouter/thinkingmachines/inkling:free`
+- `openrouter/unbiased/pareto`
 - `openrouter/undi95/remm-slerp-l2-13b`
 - `openrouter/upstage/solar-pro-3`
 - `openrouter/upstage/solar-pro4`
@@ -666,18 +669,27 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `zai-coding-plan/glm-5.3-flash`
 - `zai-coding-plan/glm-5.3-highspeed`
 
-### `kimi-for-coding`
+### `kimi-code-plan-global`
 
-4 model IDs. Default: `kimi-for-coding/k3`.
+4 model IDs. Default: `kimi-code-plan-global/k3`.
 
-- `kimi-for-coding/k3` **(default)**
-- `kimi-for-coding/k3-256k`
-- `kimi-for-coding/kimi-for-coding`
-- `kimi-for-coding/kimi-for-coding-highspeed`
+- `kimi-code-plan-global/k3` **(default)**
+- `kimi-code-plan-global/k3-256k`
+- `kimi-code-plan-global/kimi-for-coding`
+- `kimi-code-plan-global/kimi-for-coding-highspeed`
+
+### `kimi-code-plan-cn`
+
+4 model IDs. Default: `kimi-code-plan-cn/k3`.
+
+- `kimi-code-plan-cn/k3` **(default)**
+- `kimi-code-plan-cn/k3-256k`
+- `kimi-code-plan-cn/kimi-for-coding`
+- `kimi-code-plan-cn/kimi-for-coding-highspeed`
 
 ### `xai`
 
-12 model IDs. Default: `xai/grok-4.3`.
+10 model IDs. Default: `xai/grok-4.3`.
 
 - `xai/grok-4.20-0309-non-reasoning`
 - `xai/grok-4.20-0309-reasoning`
@@ -687,8 +699,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `xai/grok-4.6`
 - `xai/grok-build-0.1`
 - `xai/grok-imagine-image`
-- `xai/grok-imagine-image-2.0`
-- `xai/grok-imagine-image-quality`
 - `xai/grok-imagine-video`
 - `xai/grok-imagine-video-1.5`
 
@@ -819,6 +829,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/grok-4.5`
 - `opencode/grok-4.6`
 - `opencode/grok-build-0.1`
+- `opencode/jev-latest`
 - `opencode/kimi-k2.5`
 - `opencode/kimi-k2.6`
 - `opencode/kimi-k2.7-code`
@@ -836,7 +847,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode/nemotron-3.5-lightning-free`
 - `opencode/qwen3.5-plus`
 - `opencode/qwen3.6-plus`
-- `opencode/union-alpha`
 
 ### `opencode-go`
 
@@ -844,7 +854,7 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - Refresh/list: `npm run models:update` (read over a private V2 server’s API; needs `OPENCODE_API_KEY`).
 - Note: Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.
 
-28 J-Bot model values:
+27 J-Bot model values:
 
 - `opencode-go/deepseek-v4-flash` **(default)**
 - `opencode-go/deepseek-v4-flash-vision-exp`
@@ -873,7 +883,6 @@ Refreshing CLI sections requires the Docker-pinned npm packages plus valid local
 - `opencode-go/qwen3.7-plus`
 - `opencode-go/qwen3.8-flash`
 - `opencode-go/qwen3.8-max`
-- `opencode-go/union-alpha`
 
 ### `devin`
 
@@ -887,11 +896,11 @@ The CLI does not expose a complete list.
 
 ### `commandcode`
 
-- Source: Docker-pinned npm package [`command-code@1.56.1`](https://www.npmjs.com/package/command-code) authenticated catalog.
+- Source: Docker-pinned npm package [`command-code@1.56.2`](https://www.npmjs.com/package/command-code) authenticated catalog.
 - Refresh/list: `command-code --no-auto-update --list-models`.
 - Note: CommandCode hard-codes selectable model IDs in the CLI package. If it rejects a new model, bump the Docker pin before refreshing this account-visible catalog.
 
-70 J-Bot model values:
+71 J-Bot model values:
 
 - `commandcode/claude-fable-5`
 - `commandcode/claude-fable-5-1`
@@ -958,6 +967,7 @@ The CLI does not expose a complete list.
 - `commandcode/xiaomi/mimo-v2.5`
 - `commandcode/xiaomi/mimo-v2.5-pro`
 - `commandcode/z-ai/glm-5.3-flash`
+- `commandcode/z-ai/glm-5.3-flashx`
 - `commandcode/zai-org/glm-5`
 - `commandcode/zai-org/glm-5.1`
 - `commandcode/zai-org/glm-5.2`
@@ -1203,9 +1213,10 @@ The CLI does not expose a complete list.
 - Refresh/list: `qodercli --list-models`.
 - Note: Names are passed unchanged to the Qoder Agent SDK; `Auto` is normalized to the SDK value `auto`.
 
-2 J-Bot model values:
+3 J-Bot model values:
 
 - `qoder/auto` **(default)**
+- `qoder/Qwen3.8-Flash`
 - `qoder/Qwen3.8-Max`
 
 ### `codex`
@@ -1241,7 +1252,7 @@ The CLI does not expose a complete list.
 - Refresh/list: the `@cline/llms` catalog bundled by `cline@3.0.60`.
 - Note: Pay-as-you-go IDs include the upstream model type; entries marked free come from Cline's live recommended-models endpoint.
 
-293 J-Bot model values:
+292 J-Bot model values:
 
 - `cline/~anthropic/claude-fable-latest`
 - `cline/~anthropic/claude-haiku-latest`
@@ -1500,7 +1511,6 @@ The CLI does not expose a complete list.
 - `cline/sakana/sakana-namazu`
 - `cline/sao10k/l3.1-euryale-70b`
 - `cline/stealth/ox-alpha`
-- `cline/stealth/union-alpha` **(free)**
 - `cline/stepfun/step-3.5-flash`
 - `cline/stepfun/step-3.7-flash`
 - `cline/tencent/hy3`
@@ -1569,7 +1579,7 @@ The CLI does not expose a complete list.
 - Refresh/list: `kilo models --pure`.
 - Note: Kilo already prints fully qualified J-Bot values such as `kilo/openai/gpt-5.4`; do not add another `kilo/` prefix.
 
-307 J-Bot model values:
+309 J-Bot model values:
 
 - `kilo/~anthropic/claude-fable-latest`
 - `kilo/~anthropic/claude-haiku-latest`
@@ -1632,6 +1642,7 @@ The CLI does not expose a complete list.
 - `kilo/deepseek/deepseek-v3.2-exp`
 - `kilo/deepseek/deepseek-v4-flash`
 - `kilo/deepseek/deepseek-v4-flash-0731`
+- `kilo/deepseek/deepseek-v4-flash-0731:free`
 - `kilo/deepseek/deepseek-v4-flash-vision-exp`
 - `kilo/deepseek/deepseek-v4-pro`
 - `kilo/deepseek/deepseek-v4-pro-0813`
@@ -1697,7 +1708,6 @@ The CLI does not expose a complete list.
 - `kilo/mistralai/ministral-8b-2512`
 - `kilo/mistralai/mistral-large`
 - `kilo/mistralai/mistral-large-2407`
-- `kilo/mistralai/mistral-large-2512`
 - `kilo/mistralai/mistral-medium-3`
 - `kilo/mistralai/mistral-medium-3-5`
 - `kilo/mistralai/mistral-medium-3.1`
@@ -1784,6 +1794,7 @@ The CLI does not expose a complete list.
 - `kilo/poolside/laguna-s-2.1:free`
 - `kilo/poolside/laguna-xs-2.1`
 - `kilo/poolside/laguna-xs-2.1:free`
+- `kilo/prism-ml/ternary-bonsai-2-27b`
 - `kilo/qwen/qwen-2.5-72b-instruct`
 - `kilo/qwen/qwen-2.5-7b-instruct`
 - `kilo/qwen/qwen-plus`
@@ -1831,6 +1842,7 @@ The CLI does not expose a complete list.
 - `kilo/qwen/qwen3.7-plus`
 - `kilo/qwen/qwen3.8-2.4t-a95b`
 - `kilo/qwen/qwen3.8-27b`
+- `kilo/qwen/qwen3.8-27b:free`
 - `kilo/qwen/qwen3.8-flash`
 - `kilo/qwen/qwen3.8-max-0902`
 - `kilo/rekaai/reka-edge`
@@ -1845,7 +1857,6 @@ The CLI does not expose a complete list.
 - `kilo/stealth/claude-opus-4.8`
 - `kilo/stealth/claude-sonnet-4.6`
 - `kilo/stealth/qwen3.6-plus`
-- `kilo/stealth/union-alpha`
 - `kilo/stepfun/step-3.5-flash`
 - `kilo/stepfun/step-3.7-flash`
 - `kilo/stepfun/step-3.7-flash:free`
@@ -1855,6 +1866,7 @@ The CLI does not expose a complete list.
 - `kilo/thinkingmachines/inkling`
 - `kilo/thinkingmachines/inkling-small`
 - `kilo/thinkingmachines/inkling-small:free`
+- `kilo/unbiased/pareto`
 - `kilo/upstage/solar-pro-3`
 - `kilo/upstage/solar-pro4`
 - `kilo/x-ai/grok-4.20`
