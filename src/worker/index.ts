@@ -1,4 +1,5 @@
 import { loadWorkerConfig } from './config.ts';
+import { credentialSecretValues } from '../shared/config.ts';
 import { makeClient } from './client.ts';
 import type { WorkerClient } from './client.ts';
 import { runJob } from './run-job.ts';
@@ -11,8 +12,11 @@ function maskGitHubActionsValue(value: string | null | undefined): void {
 }
 
 function maskClaimSecrets(job: ClaimedJob): void {
-  maskGitHubActionsValue(job.apiKey);
-  maskGitHubActionsValue(job.auxApiKey);
+  // Provider keys arrive as one value or as a comma-separated list; mask each
+  // key too, since add-mask only ever matches the exact string it was given.
+  for (const key of [job.apiKey, job.auxApiKey]) {
+    if (key) credentialSecretValues(key).forEach(maskGitHubActionsValue);
+  }
   maskGitHubActionsValue(job.installationToken);
   maskGitHubActionsValue(job.claimToken);
 }

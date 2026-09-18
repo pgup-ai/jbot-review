@@ -180,7 +180,15 @@ you want to use, such as `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY
 as an Actions variable when using the generic `openai-compatible` provider.
 Empty provider key inputs are ignored; an auxiliary model on a different
 provider needs that provider's own key, which is never reused across providers.
-`opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`.
+`opencode-go` uses the same `OPENCODE_API_KEY` as `opencode`; comma-separate
+several of them and each run picks the account with the most weekly Go-plan
+allowance left, the same way CommandCode keys are chosen. Unlike CommandCode a
+spent plan is not fatal on its own: accounts that bill overage to the credit
+balance keep serving and are preferred, while one with overage blocked is
+picked only when nothing else is left, and its requests can still fail. Ranking
+needs keys with the console's `all` permission — an inference-only key cannot
+read plan meters, and its probe degrades to "usage unavailable" rather than
+failing.
 
 **CLI-backend credentials — where to get each one.** Unlike the model-provider keys
 above, these authenticate with a local CLI login or a dashboard key. You paste the
