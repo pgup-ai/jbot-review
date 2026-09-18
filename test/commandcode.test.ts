@@ -151,6 +151,9 @@ describe('CommandCode CLI provider helpers', () => {
       effortOf('commandcode/meta/muse-spark-1.3-contributor', { reasoningEffort: 'max' }, true),
       'xhigh',
     );
+    // Gapped ladder (low, medium, xhigh): an explicit high ties up to xhigh.
+    const omni = 'commandcode/qwen/qwen3.8-omni-flash';
+    assert.equal(effortOf(omni, { reasoningEffort: 'high' }, true), 'xhigh');
 
     // Role selection: the aux default delivers low or the fallback, main
     // options and the verifier override clamp; an aux model sharing the main
@@ -169,20 +172,22 @@ describe('CommandCode CLI provider helpers', () => {
     );
     const flash = 'commandcode/deepseek/deepseek-v4.1-flash';
     assert.equal(commandCodeSessionEffort(flash, undefined, { ...ctx, auxModel: flash }), 'low');
-    // The verifier's override (already one tier below the finder) rounds DOWN
-    // when the ladder lacks that tier: a medium target lands on low for the
-    // flash models, an exact high stays high.
+    // The verifier runs one ladder step below the finder's effective tier,
+    // floored at the ladder's lowest; a max request on omni-flash lands the
+    // finder on xhigh and the verifier on medium rather than beside it.
     const verifierCtx = { ...ctx, auxModel: flash, explicit: false };
     assert.equal(commandCodeSessionEffort(flash, { reasoningEffort: 'low' }, verifierCtx), 'low');
     assert.equal(
       commandCodeSessionEffort(flash, { reasoningEffort: 'medium' }, verifierCtx),
       'low',
     );
-    assert.equal(commandCodeSessionEffort(flash, { reasoningEffort: 'high' }, verifierCtx), 'high');
     assert.equal(
       commandCodeSessionEffort(deepseek, { reasoningEffort: 'low' }, verifierCtx),
       'high',
     );
+    const maxCtx = { ...verifierCtx, mainModelOptions: { reasoningEffort: 'max' }, explicit: true };
+    assert.equal(commandCodeSessionEffort(flash, { reasoningEffort: 'xhigh' }, maxCtx), 'high');
+    assert.equal(commandCodeSessionEffort(omni, { reasoningEffort: 'xhigh' }, maxCtx), 'medium');
   });
 
   it('denies all CommandCode tools when disabled', () => {

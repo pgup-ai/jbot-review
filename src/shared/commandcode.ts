@@ -159,10 +159,12 @@ export function buildCommandCodeCliArgs(input: CommandCodeCliArgsInput): string[
 
 // Probed on CLI 1.53.0 (2026-09-11; v4-flash 2026-08-22): `--effort` validates
 // per model and exits nonzero on values outside the model's set; longcat has
-// no adjustable effort. Unflagged, v4.1-flash reasons like `high` (~2× its
-// `low` output) and v4-flash-fast like `low`; `fallback` is where a built-in
-// default the model lacks lands: the lowest tier, because a tool-less review
-// gains nothing from deeper reasoning (v4-flash has no `low`, so `high`).
+// no adjustable effort. Ladders match the `reasoningEfforts` arrays baked into
+// the CLI bundle (omni-flash: 1.56.1). Unflagged, v4.1-flash reasons like
+// `high` (~2× its `low` output) and v4-flash-fast like `low`; `fallback` is
+// where a built-in default the model lacks lands: the lowest tier, because a
+// tool-less review gains nothing from deeper reasoning (v4-flash has no
+// `low`, so `high`).
 const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fallback?: string }> = {
   'deepseek/deepseek-v4-flash': { tiers: ['high', 'max'], fallback: 'high' },
   'deepseek/deepseek-v4.1-flash': { tiers: ['low', 'high', 'max'], fallback: 'low' },
@@ -171,6 +173,7 @@ const COMMANDCODE_MODEL_EFFORTS: Record<string, { tiers: readonly string[]; fall
   'meta/muse-spark-1.3': { tiers: ['low', 'medium', 'high', 'xhigh', 'max'] },
   'meta/muse-spark-1.2-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
   'meta/muse-spark-1.3-contributor': { tiers: ['low', 'medium', 'high', 'xhigh'] },
+  'qwen/qwen3.8-omni-flash': { tiers: ['low', 'medium', 'xhigh'] },
 };
 
 /**
@@ -183,21 +186,23 @@ function commandCodeReasoningEffort(
   model: string,
   modelOptions: Record<string, unknown> | undefined,
   explicit: boolean,
-  ties: 'up' | 'down' = 'up',
 ): string | undefined {
   const { modelID } = parseModelName(model);
   const effort = modelOptions?.reasoningEffort;
   const entry = COMMANDCODE_MODEL_EFFORTS[modelID];
   if (typeof effort !== 'string' || !entry?.tiers.length) return undefined;
   if (entry.tiers.includes(effort)) return effort;
-  return explicit ? clampReasoningEffort(effort, entry.tiers, ties) : entry.fallback;
+  return explicit ? clampReasoningEffort(effort, entry.tiers) : entry.fallback;
 }
 
 /**
  * Role-aware effort for one session: aux sessions run the built-in aux
- * defaults; main options clamp when explicit; the verifier's override already
- * sits one tier below the finder and rounds down when the ladder lacks that
- * tier, so a medium target lands on `low` for the flash models.
+ * defaults; main options clamp when explicit; the verifier (an override) runs
+ * one ladder step below the tier the finder lands on here, floored at the
+ * ladder's lowest, so a `max` request on a ladder ending at `xhigh` puts the
+ * finder on `xhigh` and the verifier below it rather than beside it. Only the
+ * override's presence is read: its rank-derived tier (config.ts) cannot see
+ * this ladder.
  */
 export function commandCodeSessionEffort(
   model: string,
@@ -209,7 +214,11 @@ export function commandCodeSessionEffort(
     explicit: boolean;
   },
 ): string | undefined {
-  if (override) return commandCodeReasoningEffort(model, override, true, 'down');
+  if (override) {
+    const finder = commandCodeReasoningEffort(model, ctx.mainModelOptions, ctx.explicit);
+    const tiers = COMMANDCODE_MODEL_EFFORTS[parseModelName(model).modelID]?.tiers;
+    return finder && tiers ? tiers[Math.max(0, tiers.indexOf(finder) - 1)] : undefined;
+  }
   const auxCall = model === ctx.auxModel && ctx.auxModelOptions !== undefined;
   return commandCodeReasoningEffort(
     model,
