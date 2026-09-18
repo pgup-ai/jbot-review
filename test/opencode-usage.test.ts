@@ -76,6 +76,7 @@ describe('opencode Go plan usage', () => {
     // A present-but-malformed field poisons the whole payload, so a partial
     // line can never hide a real cap.
     for (const meters of [
+      null,
       { week: null },
       { week: { limitMicroCents: '1000' } },
       { week: { limitMicroCents: '0', usedMicroCents: '1' } },
@@ -117,6 +118,15 @@ describe('opencode Go plan usage', () => {
         { key: 'b', usage: usage(800) },
       ]).key,
       'b',
+    );
+    // A spent monthly cap with overage blocked cannot serve at all, so it loses
+    // to a key with far less weekly room.
+    assert.equal(
+      pickOpencodeApiKey([
+        { key: 'monthly-dead', usage: { ...usage(0, 1000), useBalance: false } },
+        { key: 'usable', usage: usage(900) },
+      ]).key,
+      'usable',
     );
     // Every window spent still yields a key rather than failing the run, and a
     // plan that can bill overage outranks one where overage is blocked.

@@ -38,11 +38,12 @@ function microCents(value: unknown): number | undefined {
 export function parseOpencodeGoStatus(payload: unknown): OpencodeGoUsage | undefined {
   if (!isNonArrayRecord(payload) || !isNonArrayRecord(payload.access)) return undefined;
   const { meters } = payload.access;
-  if (meters != null && !isNonArrayRecord(meters)) return undefined;
+  // A present `meters` that is not a record (null included) is drift, not an
+  // unmetered account: reading it as "unlimited" would rank its key best.
+  if (meters !== undefined && !isNonArrayRecord(meters)) return undefined;
   const windows = isNonArrayRecord(meters) ? meters : undefined;
-  // Absent drops just that segment; present but unreadable (an explicit null
-  // included) poisons the payload, because a meter that parses as "unlimited"
-  // would rank its key best. Returns null for unreadable, undefined for absent.
+  // Absent drops just that segment, present but unreadable poisons the payload.
+  // Returns null for unreadable, undefined for absent.
   const windowOf = (value: unknown): OpencodeUsageWindow | null | undefined => {
     if (value === undefined) return undefined;
     if (!isNonArrayRecord(value)) return null;
@@ -111,6 +112,11 @@ function spent(window?: OpencodeUsageWindow): boolean {
   return window !== undefined && window.used >= window.limit;
 }
 
+/** A spent monthly cap ends the plan only when overage cannot bill the balance. */
+function hardBlocked(usage: OpencodeGoUsage): boolean {
+  return spent(usage.month) && !usage.useBalance;
+}
+
 interface OpencodeKeyProbe {
   key: string;
   usage?: OpencodeGoUsage;
@@ -132,7 +138,8 @@ export function pickOpencodeApiKey(probes: readonly OpencodeKeyProbe[]): {
     return { key: probes[0].key, reason: `probes unavailable; using first of ${probes.length}` };
   }
   const windowOpen = reachable.filter(
-    (probe) => !spent(probe.usage.fiveHour) && !spent(probe.usage.week),
+    (probe) =>
+      !hardBlocked(probe.usage) && !spent(probe.usage.fiveHour) && !spent(probe.usage.week),
   );
   // Every window spent: a plan that bills overage to the balance still serves,
   // one with overage blocked cannot — so it only wins if nothing else is left.
