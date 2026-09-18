@@ -12,7 +12,8 @@ import {
 } from '../src/shared/commandcode.ts';
 import { PROVIDERS } from '../src/shared/config.ts';
 import { parseDimModelList } from '../src/shared/dim.ts';
-import { parseCursorModelList, parseKiloModelList } from '@symma/protocol';
+import { startOpencode, type OpencodeRuntime } from '../src/shared/opencode-server.ts';
+import { parseCursorModelList, parseKiloModelList, parseModelName } from '@symma/protocol';
 
 const MODELS_DEV_URL = 'https://models.dev/api.json';
 const CLINE_RECOMMENDED_MODELS_URL = 'https://api.cline.bot/api/v1/ai/cline/recommended-models';
@@ -77,7 +78,7 @@ function run(command: string, args: string[], label: string, env?: NodeJS.Proces
       maxBuffer: 20 * 1024 * 1024,
       timeout: COMMAND_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: env && { ...process.env, ...env },
+      env, // verbatim: callers that want the ambient env spread it themselves
     });
   } catch (cause) {
     throw new Error(
@@ -134,16 +135,6 @@ function parseGrokModels(output: string): string[] {
     const match = line.match(/^\s*\*\s+(\S+)/);
     return match?.[1] ? [match[1]] : [];
   });
-}
-
-export function parseQualifiedModelList(output: string, providerID: string): string[] {
-  const prefix = `${providerID}/`;
-  return uniqueSorted(
-    output
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith(prefix) && !line.includes(' ')),
-  );
 }
 
 export function parseClineRecommendedModels(payload: ClineRecommendedModels): {
@@ -234,6 +225,37 @@ async function loadClineRecommendedModels(): Promise<{
   return parseClineRecommendedModels(payload);
 }
 
+/** V2's `opencode models` is interactive, so the catalog is read over a private server's API; OPENCODE_API_KEY (Zen) also unlocks opencode-go. */
+async function listOpencodeModels(): Promise<Record<'opencode' | 'opencode-go', string[]>> {
+  const workspace = mkdtempSync(join(tmpdir(), 'jbot-catalog-opencode-'));
+  let runtime: OpencodeRuntime | undefined;
+  try {
+    runtime = await startOpencode(
+      workspace,
+      'opencode',
+      parseModelName(PROVIDERS.opencode!.defaultModel!).modelID,
+      process.env.OPENCODE_API_KEY?.trim() || 'unused',
+      () => undefined,
+      { port: 0 },
+    );
+    const listed =
+      (
+        await runtime.client.model.list(
+          { location: { directory: workspace } },
+          { signal: AbortSignal.timeout(30_000) },
+        )
+      ).data ?? [];
+    const byProvider = (providerID: string) =>
+      uniqueSorted(
+        listed.filter((m) => m.providerID === providerID).map((m) => `${providerID}/${m.id}`),
+      );
+    return { opencode: byProvider('opencode'), 'opencode-go': byProvider('opencode-go') };
+  } finally {
+    runtime?.stop();
+    rmSync(workspace, { recursive: true, force: true });
+  }
+}
+
 async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   const commandCodeModels = parseCommandCodeModelList(
     npmCliOutput('command-code', 'command-code', COMMANDCODE_MODEL_LIST_ARGS),
@@ -249,22 +271,28 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
   );
   const dimModels = parseDimModelList(
     // The CLI self-updates by default, which would drift from the pinned image.
-    npmCliOutput('dimcode', 'dim', ['model', 'list'], { DIMCODE_DISABLE_AUTOUPDATE: '1' }),
+    npmCliOutput('dimcode', 'dim', ['model', 'list'], {
+      ...process.env,
+      DIMCODE_DISABLE_AUTOUPDATE: '1',
+    }),
   );
-  const opencodeModels = parseQualifiedModelList(
-    npmCliOutput('opencode-ai', 'opencode', ['models', 'opencode', '--pure', '--refresh']),
-    'opencode',
-  );
-  const opencodeGoModels = parseQualifiedModelList(
-    npmCliOutput('opencode-ai', 'opencode', ['models', 'opencode-go', '--pure', '--refresh']),
-    'opencode-go',
-  );
+  const { opencode: opencodeModels, 'opencode-go': opencodeGoModels } = await listOpencodeModels();
   const { models: clineModels, llmsVersion } = await loadClineModels();
   const { clinePass: clinePassModels, free: clineFreeModels } = await loadClineRecommendedModels();
   const clineFreeValues = clineFreeModels.map((model) => `cline/${model}`);
   const grokModels = parseGrokModels(npmCliOutput('@xai-official/grok', 'grok', ['models']));
   const kiloModels = parseKiloModelList(
-    npmCliOutput('@kilocode/cli', 'kilo', ['models', '--pure']),
+    // kilo auto-activates every provider whose key sits in its env and pads its list with those models
+    npmCliOutput(
+      '@kilocode/cli',
+      'kilo',
+      ['models', '--pure'],
+      Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([name]) => !/_API_KEY$|_TOKEN$|_SECRET$|_AUTH_JSON$/.test(name),
+        ),
+      ),
+    ),
   );
   for (const [providerID, models] of Object.entries({
     opencode: opencodeModels,
@@ -284,16 +312,18 @@ async function loadRuntimeCatalogs(): Promise<Record<string, RuntimeCatalog>> {
 
   return {
     opencode: {
-      discovery: '`opencode models opencode --pure --refresh`',
-      source: `${npmSource('opencode-ai')} live provider catalog`,
-      note: 'Exact model values exposed by the pinned OpenCode runtime; the CLI refreshes its Models.dev cache before listing.',
+      discovery:
+        '`npm run models:update` (read over a private V2 server’s API; export `OPENCODE_API_KEY`)',
+      source: `${npmSource('@opencode/cli')} live provider catalog`,
+      note: 'Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.',
       models: opencodeModels,
       defaultValidationModels: opencodeModels,
     },
     'opencode-go': {
-      discovery: '`opencode models opencode-go --pure --refresh`',
-      source: `${npmSource('opencode-ai')} live provider catalog`,
-      note: 'Exact model values exposed by the pinned OpenCode runtime; the CLI refreshes its Models.dev cache before listing.',
+      discovery:
+        '`npm run models:update` (read over a private V2 server’s API; needs `OPENCODE_API_KEY`)',
+      source: `${npmSource('@opencode/cli')} live provider catalog`,
+      note: 'Exact model values exposed by the pinned OpenCode V2 runtime; the server refreshes its Models.dev catalog at boot.',
       models: opencodeGoModels,
       defaultValidationModels: opencodeGoModels,
     },
@@ -403,7 +433,8 @@ async function main(): Promise<void> {
   const customProviders: Array<{ providerID: string; name: string }> = [];
 
   for (const [providerID, config] of Object.entries(PROVIDERS)) {
-    if (config.custom) {
+    // A custom endpoint with a default model (tokenrouter) is still catalogued on Models.dev.
+    if (config.custom && !config.defaultModel) {
       customProviders.push({ providerID, name: config.custom.name });
       continue;
     }

@@ -6,29 +6,12 @@ import { PROVIDERS } from '../src/shared/config.ts';
 import {
   assertRuntimeDefaultListed,
   parseClineRecommendedModels,
-  parseQualifiedModelList,
 } from '../scripts/update-model-catalog.ts';
 
 const catalog = readFileSync(new URL('../MODEL_CATALOG.md', import.meta.url), 'utf8');
 const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
 
 describe('model catalog', () => {
-  it('parses live OpenCode provider lists without status output or other providers', () => {
-    assert.deepEqual(
-      parseQualifiedModelList(
-        [
-          'Models cache refreshed',
-          'opencode/zeta',
-          'opencode-go/not-this-provider',
-          'opencode/alpha',
-          '',
-        ].join('\n'),
-        'opencode',
-      ),
-      ['opencode/alpha', 'opencode/zeta'],
-    );
-  });
-
   it('keeps Cline free-menu IDs separate from ClinePass IDs', () => {
     assert.deepEqual(
       parseClineRecommendedModels({
@@ -104,9 +87,9 @@ describe('model catalog', () => {
     assert.match(catalog, /`grok models`/);
     assert.match(catalog, /authenticated remote catalog/);
     for (const model of [
-      'cline/cline-free/longcat-2.0',
+      'cline/cline-free/deepseek-v4.1-flash',
       'cline/z-ai/glm-5.3-flash',
-      'cline/deepseek/deepseek-v4-flash',
+      'cline/cline-free/solar-pro4',
     ]) {
       assert.ok(catalog.includes(`- \`${model}\` **(free)**`));
     }
@@ -137,12 +120,12 @@ describe('model catalog', () => {
     assert.deepEqual([...new Set(claims.map(([pkg]) => pkg))].sort(), [
       '@agentclientprotocol/codex-acp',
       '@kilocode/cli',
+      '@opencode/cli',
       '@qoder-ai/qodercli',
       '@xai-official/grok',
       'cline',
       'command-code',
       'dimcode',
-      'opencode-ai',
     ]);
     for (const [pkg, version] of claims) {
       assert.equal(pins.get(pkg), version, `${pkg} claims ${version}`);

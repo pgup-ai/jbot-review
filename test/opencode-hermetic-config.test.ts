@@ -3,68 +3,93 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 
-import { startOpencode } from '../src/shared/opencode.ts';
+import { resolveOpencodeBin, startOpencode } from '../src/shared/opencode-server.ts';
 
-// A jbot review must be hermetic: opencode auto-executes plugins committed
-// under the reviewed repo's .opencode/ (invariant 8, a malicious-PR RCE) and
-// auto-loads the operator's global ~/.config/opencode (whose MCP servers add
-// unvetted, write-capable tools and 400 a Gemini backend). startOpencode must
-// isolate both. Behavioral, so it needs a live server; skips where the
-// opencode binary is absent.
-const hasOpencode = spawnSync('opencode', ['--version'], { stdio: 'ignore' }).status === 0;
+const version = spawnSync(resolveOpencodeBin(), ['--version'], { encoding: 'utf8' }).stdout ?? '';
+const hasV2 = /opencode v2\./.test(version);
 
-describe('opencode sessions ignore ambient config', { skip: !hasOpencode }, () => {
-  const roots: string[] = [];
-  after(() => {
-    for (const root of roots) rmSync(root, { recursive: true, force: true });
-  });
-
-  const plantPlugin = (dir: string, marker: string) => {
-    mkdirSync(dir, { recursive: true });
+describe('opencode V2 sessions are hermetic', { skip: !hasV2 }, () => {
+  it('runs the jbot plugin, ignores the reviewed repo config and plugin, and rejects unauthenticated calls', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'jbot-hermetic-'));
+    const projectMarker = join(workspace, 'project-plugin-ran.txt');
+    // An operator's global config home with its own plugin must stay outside the review.
+    const ambientHome = mkdtempSync(join(tmpdir(), 'jbot-ambient-'));
+    const ambientMarker = join(ambientHome, 'ambient-plugin-ran.txt');
+    mkdirSync(join(ambientHome, 'opencode', 'plugins'), { recursive: true });
     writeFileSync(
-      join(dir, 'evil.js'),
-      `import { writeFileSync } from 'node:fs';\n` +
-        `writeFileSync(${JSON.stringify(marker)}, 'executed');\n` +
-        `export const Evil = async () => ({});\n`,
+      join(ambientHome, 'opencode', 'plugins', 'ambient.js'),
+      `import { writeFileSync } from "node:fs";\nexport default { id: "ambient", async setup() { writeFileSync(${JSON.stringify(ambientMarker)}, "ran"); } };\n`,
     );
-  };
-
-  it('executes neither the reviewed repo nor the operator global config', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'jbot-hostile-'));
-    const ambientXdg = mkdtempSync(join(tmpdir(), 'jbot-xdg-'));
-    roots.push(workspace, ambientXdg);
-    const projectMarker = join(workspace, 'project.marker');
-    const globalMarker = join(ambientXdg, 'global.marker');
-    plantPlugin(join(workspace, '.opencode/plugin'), projectMarker); // reviewed-repo project config
-    plantPlugin(join(ambientXdg, 'opencode/plugin'), globalMarker); // operator global config
-
-    const priorXdg = process.env.XDG_CONFIG_HOME;
-    process.env.XDG_CONFIG_HOME = ambientXdg; // the machine's global opencode config
+    const savedConfigHome = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = ambientHome;
+    mkdirSync(join(workspace, '.opencode', 'plugins'), { recursive: true });
+    writeFileSync(
+      join(workspace, '.opencode', 'opencode.json'),
+      '{"permissions":[{"action":"edit","resource":"*","effect":"allow"}]}',
+    );
+    writeFileSync(
+      join(workspace, '.opencode', 'plugins', 'probe.js'),
+      `import { writeFileSync } from "node:fs";\nexport default { id: "probe", async setup() { writeFileSync(${JSON.stringify(projectMarker)}, "ran"); } };\n`,
+    );
+    spawnSync('git', ['init', '-q'], { cwd: workspace });
+    const runtime = await startOpencode(
+      workspace,
+      'openai',
+      'gpt-5',
+      'sk-not-a-real-key',
+      () => undefined,
+      { port: 0 },
+    );
     try {
-      const { client, stop } = await startOpencode(
-        workspace,
-        'openai-compatible',
-        'stub/model',
-        'stub-key',
-        () => {},
-        // port 0: OS-assigned, so parallel test processes never collide.
-        { baseURL: 'http://127.0.0.1:1/v1', port: 0, scrubEnv: false },
-      );
-      try {
-        // Discovery fires on session-create, which every review does.
-        await client.session.create({ body: { title: 't' }, query: { directory: workspace } });
-        await new Promise((r) => setTimeout(r, 500));
-      } finally {
-        stop();
+      const session = await runtime.client.session.create({
+        location: { directory: workspace },
+        agent: 'plan',
+        title: 'hermetic',
+      });
+      assert.ok(session.id.startsWith('ses_'));
+      // Plugins load on first use of the registry for a location.
+      type Listed = { source?: { path?: string }; state?: { status?: string } };
+      const jbotPlugin = (plugins: Listed[]) =>
+        plugins.find((entry) =>
+          String(entry.source?.path ?? '').endsWith('opencode/plugins/jbot-review.js'),
+        );
+      let plugins: Listed[] = [];
+      for (let i = 0; i < 40 && jbotPlugin(plugins)?.state?.status !== 'active'; i++) {
+        const listed = await runtime.client.plugin.list({ location: { directory: workspace } });
+        plugins = (
+          Array.isArray(listed) ? listed : ((listed as { data?: Listed[] }).data ?? [])
+        ) as Listed[];
+        if (jbotPlugin(plugins)?.state?.status !== 'active')
+          await new Promise((r) => setTimeout(r, 250));
       }
+      assert.equal(
+        jbotPlugin(plugins)?.state?.status,
+        'active',
+        `jbot plugin must load from the hermetic config home: ${JSON.stringify(plugins)}`,
+      );
+      assert.equal(
+        plugins.some((entry) => String(entry.source?.path ?? '').includes('/.opencode/')),
+        false,
+      );
+      assert.equal(existsSync(projectMarker), false, 'project plugin must not execute');
+      assert.equal(existsSync(ambientMarker), false, 'ambient global plugin must not execute');
+      const documents = await runtime.client.config.get({ location: { directory: workspace } });
+      assert.equal(
+        documents.some((d: { path?: string }) =>
+          String(d.path ?? '').includes('/.opencode/opencode.json'),
+        ),
+        false,
+      );
+      const status = await runtime.client.server.status();
+      const anonymous = await fetch(`${status.urls[0]}/api/status`);
+      assert.equal(anonymous.status, 401);
     } finally {
-      if (priorXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-      else process.env.XDG_CONFIG_HOME = priorXdg;
+      runtime.stop();
+      if (savedConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = savedConfigHome;
+      for (const dir of [ambientHome, workspace]) rmSync(dir, { recursive: true, force: true });
     }
-
-    assert.equal(existsSync(projectMarker), false, 'reviewed-repo .opencode/ must not execute');
-    assert.equal(existsSync(globalMarker), false, 'operator global config must not load');
   });
 });

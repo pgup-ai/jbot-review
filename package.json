@@ -41,12 +41,13 @@
     "@octokit/plugin-paginate-rest": "^15.0.0",
     "@octokit/plugin-rest-endpoint-methods": "^18.0.0",
     "@octokit/webhooks": "^14.2.0",
-    "@opencode-ai/sdk": "^1.18.27",
+    "@opencode/client": "2.0.5",
     "@qoder-ai/qoder-agent-sdk": "^1.0.19",
     "@symma/client": "0.5.0",
     "@symma/protocol": "0.7.0"
   },
   "devDependencies": {
+    "@opencode/cli": "2.0.5",
     "@types/node": "^22.20.1",
     "esbuild": "^0.28.1",
     "oxlint": "^1.77.0",

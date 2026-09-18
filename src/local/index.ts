@@ -36,6 +36,7 @@ import { exitOnLingeringHandles } from '../shared/exit.ts';
 import { isNoiseFile } from '../shared/filter.ts';
 import { observerEnabled, setRunName } from '../shared/observer.ts';
 import { withCredentialEnvWithheld } from '../shared/opencode.ts';
+import { resolveOpencodeBin } from '../shared/opencode-server.ts';
 import { GROK_CLI_BIN, GROK_PROVIDER_ID } from '../shared/grok.ts';
 import { DIM_CLI_BIN, DIM_PROVIDER_ID } from '../shared/dim.ts';
 import { KILO_CLI_BIN, KILO_PROVIDER_ID, parseModelName } from '@symma/protocol';
@@ -349,7 +350,7 @@ const CLI_BINS: Record<CliBackendID, string | null> = {
 // Install hints mirror the Dockerfile's installer lines — the source of truth
 // for each backend's real package/installer.
 const INSTALL_HINTS: Record<string, string> = {
-  opencode: 'npm i -g opencode-ai',
+  opencode: 'npm i -g @opencode/cli',
   [COMMANDCODE_CLI_BIN]: 'npm i -g command-code',
   [CODEX_ACP_BIN]: 'npm i -g @agentclientprotocol/codex-acp',
   [CLINE_CLI_BIN]: 'npm i -g cline',
@@ -671,18 +672,19 @@ async function review(
       : (selection.mainSdkEngine ?? 'opencode');
     arenaRunState.resolvedModelOptions = resolvedModelOptions;
   }
-  const requiredBins = new Set<string>();
-  if (selection.needsOpencode) requiredBins.add('opencode');
+  // binary → install hint; opencode resolves to the package launcher, not PATH
+  const requiredBins = new Map<string, string | undefined>();
+  if (selection.needsOpencode) requiredBins.set(resolveOpencodeBin(), INSTALL_HINTS.opencode);
   const addCliBin = (backend: CliBackendID | undefined): void => {
     if (!backend) return;
     const bin = CLI_BINS[backend];
-    if (bin) requiredBins.add(bin);
+    if (bin) requiredBins.set(bin, INSTALL_HINTS[bin]);
   };
   addCliBin(selection.mainCliBackend);
   addCliBin(selection.auxCliBackend);
-  for (const bin of requiredBins) {
+  for (const [bin, install] of requiredBins) {
     if (!(await binaryUsable(bin))) {
-      const hint = INSTALL_HINTS[bin] ? ` Install: \`${INSTALL_HINTS[bin]}\`.` : '';
+      const hint = install ? ` Install: \`${install}\`.` : '';
       throw new Error(
         `Required CLI "${bin}" not found or not executable on PATH for provider "${provider}".${hint}`,
       );

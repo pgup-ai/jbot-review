@@ -19,14 +19,7 @@ import {
   verificationModelOptions,
   resolvePromptCachePolicy,
 } from '../src/shared/config.ts';
-import { buildConfig } from '../src/shared/opencode.ts';
-
-function providerEntry(
-  config: ReturnType<typeof buildConfig>,
-  providerID: string,
-): Record<string, unknown> {
-  return (config as { provider: Record<string, Record<string, unknown>> }).provider[providerID];
-}
+import { buildConfig } from '../src/shared/opencode-config.ts';
 
 describe('tokenrouter (native Models.dev provider)', () => {
   it('registers the router with no custom def and prompt caching off', () => {
@@ -34,20 +27,29 @@ describe('tokenrouter (native Models.dev provider)', () => {
     assert.equal(p.defaultModel, 'tokenrouter/z-ai/glm-5.3-free');
     assert.equal(p.keyEnv, 'TOKENROUTER_API_KEY');
     assert.equal(p.keyInput, 'tokenrouter-api-key');
-    // Models.dev supplies the base URL + model catalog; we pin only the key.
-    assert.equal('custom' in p, false);
+    // V2's catalog lacks the router, so it is a custom endpoint with a default base URL.
+    assert.equal(p.custom?.baseURL.default, 'https://api.tokenrouter.com/v1');
     // The router is unverified for opencode's promptCacheKey.
     assert.equal(modelSupportsPromptCache('tokenrouter', 'z-ai/glm-5.3-free'), false);
   });
 
-  it('emits only the key and clamps efforts to the glm-5.3 ladder', () => {
-    const config = buildConfig('tokenrouter', 'z-ai/glm-5.3-free', 'tr-abc', undefined, false);
-    const entry = providerEntry(config, 'tokenrouter');
-    const options = entry.options as Record<string, unknown>;
-    assert.equal(options.apiKey, 'tr-abc');
-    assert.equal('baseURL' in options, false);
-    assert.equal('npm' in entry, false);
-    assert.equal('setCacheKey' in options, false, 'prompt cache off for this provider');
+  it('emits a custom entry carrying the key and clamps efforts to the glm-5.3 ladder', () => {
+    const config = buildConfig({
+      models: [
+        {
+          providerID: 'tokenrouter',
+          modelID: 'z-ai/glm-5.3-free',
+          apiKey: 'tr-abc',
+          baseURL: 'https://api.tokenrouter.com/v1',
+          promptCache: false,
+        },
+      ],
+      reviewerSystem: 's',
+    });
+    const entry = config.providers.tokenrouter;
+    assert.equal(entry.settings.apiKey, 'tr-abc');
+    assert.equal(entry.settings.baseURL, 'https://api.tokenrouter.com/v1');
+    assert.equal('setCacheKey' in entry.settings, false, 'prompt cache off for this provider');
     // The default main effort `medium` is off the declared ladder; `-free`
     // normalizes to the bare model key and the tie resolves upward.
     assert.deepEqual(
@@ -65,22 +67,6 @@ describe('xiaomi-token-plan-sgp (native Models.dev provider)', () => {
     assert.equal(p.keyInput, 'mimo-api-key');
     // Models.dev supplies the base URL + model catalog; we pin only the key.
     assert.equal('custom' in p, false);
-  });
-
-  it('emits only the key — opencode resolves base URL/models from Models.dev', () => {
-    const config = buildConfig(
-      'xiaomi-token-plan-sgp',
-      'mimo-v2.5-pro',
-      'tp-abc',
-      undefined,
-      false,
-    );
-    const entry = providerEntry(config, 'xiaomi-token-plan-sgp');
-    const options = entry.options as Record<string, unknown>;
-    assert.equal(options.apiKey, 'tp-abc');
-    assert.equal('baseURL' in options, false);
-    assert.equal('npm' in entry, false);
-    assert.equal('setCacheKey' in options, false, 'prompt cache off for this model');
   });
 
   it('disables prompt caching for mimo (unverified endpoint), keeps it for other providers', () => {
@@ -334,18 +320,6 @@ describe('kimi-for-coding (native Models.dev provider)', () => {
       promptCache: false,
     });
   });
-
-  it('emits a native provider entry without duplicating Models.dev metadata', () => {
-    const config = buildConfig('kimi-for-coding', 'k3', 'kimi-key', undefined, false);
-    const entry = providerEntry(config, 'kimi-for-coding');
-    const options = entry.options as Record<string, unknown>;
-
-    assert.equal(options.apiKey, 'kimi-key');
-    assert.equal('baseURL' in options, false);
-    assert.equal('npm' in entry, false);
-    assert.equal('models' in entry, false);
-    assert.equal('setCacheKey' in options, false);
-  });
 });
 
 describe('openai-compatible custom provider', () => {
@@ -368,6 +342,7 @@ describe('openai-compatible custom provider', () => {
     assert.equal('custom' in PROVIDERS.openai, false);
     assert.deepEqual(defaultModelOptions('openai-compatible'), {});
     assert.deepEqual(defaultModelOptions('openai'), { reasoningEffort: 'medium' });
+    assert.deepEqual(defaultModelOptions('tokenrouter'), { reasoningEffort: 'medium' });
   });
 
   it('requires and validates an HTTP(S) base URL', () => {
@@ -392,60 +367,61 @@ describe('openai-compatible custom provider', () => {
   });
 
   it('builds the documented custom OpenCode provider entry', () => {
-    const config = buildConfig(
-      'openai-compatible',
-      'served-model',
-      'proxy-key',
-      { temperature: 0 },
-      false,
-      [],
-      'https://proxy.example/v1',
-    );
-    const entry = providerEntry(config, 'openai-compatible');
-    const options = entry.options as Record<string, unknown>;
-    const models = entry.models as Record<
-      string,
-      { name: string; options?: Record<string, unknown> }
-    >;
-
-    assert.equal(entry.name, 'OpenAI Compatible');
-    assert.equal(entry.npm, '@ai-sdk/openai-compatible');
-    assert.equal(options.apiKey, 'proxy-key');
-    assert.equal(options.baseURL, 'https://proxy.example/v1');
-    assert.equal('setCacheKey' in options, false);
-    assert.deepEqual(models['served-model'], {
-      name: 'served-model',
-      options: { temperature: 0 },
+    const config = buildConfig({
+      models: [
+        {
+          providerID: 'openai-compatible',
+          modelID: 'served-model',
+          apiKey: 'proxy-key',
+          baseURL: 'https://proxy.example/v1',
+          promptCache: false,
+          modelOptions: { temperature: 0 },
+        },
+      ],
+      reviewerSystem: 's',
     });
+    const entry = config.providers['openai-compatible'];
+    assert.equal(entry.name, 'OpenAI Compatible');
+    assert.equal(entry.package, '@opencode/ai/providers/openai-compatible');
+    assert.equal(entry.settings.apiKey, 'proxy-key');
+    assert.equal(entry.settings.baseURL, 'https://proxy.example/v1');
+    assert.equal('setCacheKey' in entry.settings, false);
+    assert.equal(entry.models['served-model'].modelID, 'served-model');
+    assert.equal('settings' in entry.models['served-model'], false, 'options go per session');
   });
 
   it('embeds a custom provider selected only for auxiliary sessions', () => {
-    const config = buildConfig('openai', 'gpt-5', 'openai-key', undefined, true, [
-      {
-        providerID: 'openai-compatible',
-        modelID: 'aux-model',
-        apiKey: 'aux-key',
-        baseURL: 'https://aux.example/v1',
-        promptCache: false,
-      },
-    ]);
-    const entry = providerEntry(config, 'openai-compatible');
-    const options = entry.options as Record<string, unknown>;
-
-    assert.equal(options.apiKey, 'aux-key');
-    assert.equal(options.baseURL, 'https://aux.example/v1');
-    assert.equal('setCacheKey' in options, false);
-    assert.deepEqual(entry.models, { 'aux-model': { name: 'aux-model' } });
+    const config = buildConfig({
+      models: [
+        { providerID: 'openai', modelID: 'gpt-5', apiKey: 'openai-key', promptCache: true },
+        {
+          providerID: 'openai-compatible',
+          modelID: 'aux-model',
+          apiKey: 'aux-key',
+          baseURL: 'https://aux.example/v1',
+          promptCache: false,
+        },
+      ],
+      reviewerSystem: 's',
+    });
+    const entry = config.providers['openai-compatible'];
+    assert.equal(entry.settings.apiKey, 'aux-key');
+    assert.equal(entry.settings.baseURL, 'https://aux.example/v1');
+    assert.equal('setCacheKey' in entry.settings, false);
+    assert.deepEqual(Object.keys(entry.models), ['aux-model']);
+    assert.deepEqual(config.providers.openai, { settings: { setCacheKey: true } });
   });
-
   it('registers distinct main and auxiliary models on the same custom endpoint', () => {
-    const config = buildConfig(
-      'openai-compatible',
-      'main-model',
-      'proxy-key',
-      { temperature: 0 },
-      false,
-      [
+    const config = buildConfig({
+      models: [
+        {
+          providerID: 'openai-compatible',
+          modelID: 'main-model',
+          apiKey: 'proxy-key',
+          baseURL: 'https://proxy.example/v1',
+          promptCache: false,
+          modelOptions: { temperature: 0 },
+        },
         {
           providerID: 'openai-compatible',
           modelID: 'aux-model',
@@ -454,31 +430,42 @@ describe('openai-compatible custom provider', () => {
           promptCache: false,
         },
       ],
-      'https://proxy.example/v1',
-    );
-    const entry = providerEntry(config, 'openai-compatible');
-
-    assert.deepEqual(entry.models, {
-      'main-model': { name: 'main-model', options: { temperature: 0 } },
-      'aux-model': { name: 'aux-model' },
+      reviewerSystem: 's',
     });
+    const models = config.providers['openai-compatible'].models;
+    assert.deepEqual(Object.keys(models), ['main-model', 'aux-model']);
   });
 
   it('rejects incomplete custom entries before starting OpenCode', () => {
     assert.throws(
-      () => buildConfig('openai-compatible', 'model', 'key', undefined, false),
+      () =>
+        buildConfig({
+          models: [
+            {
+              providerID: 'openai-compatible',
+              modelID: 'model',
+              apiKey: 'key',
+              promptCache: false,
+            },
+          ],
+          reviewerSystem: 's',
+        }),
       /Missing base URL for custom provider/,
     );
     assert.throws(
       () =>
-        buildConfig('openai', 'gpt-5', 'openai-key', undefined, true, [
-          {
-            providerID: 'openai-compatible',
-            apiKey: 'aux-key',
-            baseURL: 'https://aux.example/v1',
-            promptCache: false,
-          },
-        ]),
+        buildConfig({
+          models: [
+            {
+              providerID: 'openai-compatible',
+              modelID: '',
+              apiKey: 'aux-key',
+              baseURL: 'https://aux.example/v1',
+              promptCache: false,
+            },
+          ],
+          reviewerSystem: 's',
+        }),
       /Missing model for custom provider/,
     );
   });

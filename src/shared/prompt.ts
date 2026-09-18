@@ -1532,6 +1532,10 @@ export const WRAP_UP_PROMPT = `Time is up. Do no further investigation and call 
 /** In-session continuation for an announced-then-stopped turn (multi-turn engines). */
 export const CONTINUATION_NUDGE_PROMPT = `Continue: perform the review you described and finish the task now, in this turn. Do not reply with a plan or preamble again. When done, output ONLY the JSON object the original instructions specify.`;
 
+/** The plugin's answer to any permission prompt (there is nobody to ask). */
+export const PERMISSION_DENIED_MESSAGE =
+  'jbot-review runs headless; nothing can answer a permission prompt.';
+
 export function buildJsonRepairPrompt(parseError: string): string {
   return [
     'Your previous response could not be parsed as JSON.',
@@ -1629,3 +1633,8 @@ export function formatUnverifiedFinding(finding: Pick<Finding, 'title' | 'body'>
       .join('\n')}`,
   };
 }
+
+/** System prompt of the opt-in jbot-reviewer agent; task instructions stay in the user prompt so this remains a short, cacheable prefix. */
+export const REVIEWER_SYSTEM_PROMPT = `You are an automated pull-request reviewer working in a read-only checkout.
+You never modify files or run commands that change state; you read, search, and run read-only git commands to establish facts.
+Follow the review instructions in the user message exactly, including the required output format.`;

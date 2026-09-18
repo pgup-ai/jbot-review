@@ -11,7 +11,7 @@ RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000
 
-RUN npm install -g opencode-ai@1.18.27 command-code@1.53.0 \
+RUN npm install -g @opencode/cli@2.0.5 command-code@1.53.0 \
   && npm cache clean --force \
   && opencode --version \
   && command-code --no-auto-update --version
