@@ -6,6 +6,7 @@ import {
   PROVIDERS,
   auxModelOptionsFor,
   clampReasoningEffort,
+  credentialSecretValues,
   defaultModelOptions,
   modelSupportsPromptCache,
   supportedModelOptions,
@@ -198,6 +199,31 @@ describe('poolside', () => {
 });
 
 describe('provider credentials', () => {
+  it('expands key lists for redaction without shredding JSON auth blobs', () => {
+    // Exact-match redaction only ever sees what it is handed, so a list must
+    // yield the individual keys too.
+    assert.deepEqual(credentialSecretValues('oc_sk_aaaaaaaaaaaaaaaa,oc_sk_bbbbbbbbbbbbbbbb'), [
+      'oc_sk_aaaaaaaaaaaaaaaa,oc_sk_bbbbbbbbbbbbbbbb',
+      'oc_sk_aaaaaaaaaaaaaaaa',
+      'oc_sk_bbbbbbbbbbbbbbbb',
+    ]);
+    assert.deepEqual(credentialSecretValues(' key-with-spaces-around , second-key-value '), [
+      ' key-with-spaces-around , second-key-value ',
+      'key-with-spaces-around',
+      'second-key-value',
+    ]);
+    // A comma inside a JSON blob, a short fragment, or a base URL must not
+    // become a mask pattern: masking `"type"` would redact ordinary log text.
+    for (const value of [
+      '{"type":"oauth","token":"aaaaaaaaaaaaaaaaaaaa"}',
+      'oc_sk_aaaaaaaaaaaaaaaa,short',
+      'https://proxy.example/v1,https://other.example/v1',
+      'single-key-value-long-enough',
+    ]) {
+      assert.deepEqual(credentialSecretValues(value), [value]);
+    }
+  });
+
   it('prefers Grok account auth and falls back to the xAI API key', () => {
     const grok = PROVIDERS.grok;
     assert.deepEqual(providerCredentialSources(grok), [

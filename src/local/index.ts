@@ -20,6 +20,7 @@ import { CLINE_CLI_BIN, CLINE_PROVIDER_ID } from '../shared/cline.ts';
 import { CODEX_ACP_BIN, CODEX_PROVIDER_ID } from '@symma/protocol';
 import { COMMANDCODE_CLI_BIN, COMMANDCODE_PROVIDER_ID } from '../shared/commandcode.ts';
 import {
+  credentialSecretValues,
   defaultModelOptions,
   parseEnvBoolean,
   parseEnvGuidelineWiden,
@@ -627,9 +628,9 @@ async function review(
   const auxBaseURL = auxCredential?.baseURL;
   if (arenaRunState) {
     arenaRunState.secretValues.push(
-      ...[apiKey, baseURL, auxApiKey, auxBaseURL].filter(
-        (value): value is string => typeof value === 'string' && Boolean(value),
-      ),
+      ...[apiKey, baseURL, auxApiKey, auxBaseURL]
+        .filter((value): value is string => typeof value === 'string' && Boolean(value))
+        .flatMap(credentialSecretValues),
     );
   }
 

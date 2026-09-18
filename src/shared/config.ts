@@ -20,6 +20,18 @@ export interface ProviderCredentialSource {
   input: string;
 }
 
+// A key list's individual keys, not just the raw value. Exact-match redaction
+// (`::add-mask::`, replaceAll) never matches the one key a run actually uses
+// otherwise. JSON auth blobs hold commas too, so a split only counts when every
+// part is a bare key — masking a `"type"` fragment would redact ordinary text.
+const BARE_CREDENTIAL_KEY = /^[A-Za-z0-9._-]{16,}$/;
+
+export function credentialSecretValues(value: string): string[] {
+  const parts = value.split(',').map((part) => part.trim());
+  if (parts.length < 2 || !parts.every((part) => BARE_CREDENTIAL_KEY.test(part))) return [value];
+  return [value, ...parts];
+}
+
 export function providerCredentialSources(config: ProviderConfig): ProviderCredentialSource[] {
   return [
     { env: config.keyEnv, input: config.keyInput },
