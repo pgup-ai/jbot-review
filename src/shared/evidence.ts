@@ -1,9 +1,9 @@
 import { parse } from '@babel/parser';
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { posix, relative, isAbsolute } from 'node:path';
+import { posix } from 'node:path';
+import { reviewReadLocations } from './review-read-locations.ts';
 import { promisify } from 'node:util';
 import {
   readTrackedSource,
@@ -11,7 +11,7 @@ import {
   buildFindingSourceContext,
   SourceCache,
 } from './finding-context.ts';
-import { EvidenceDiskCache } from './evidence-cache.ts';
+import { EvidenceDiskCache, evidenceHash } from './evidence-cache.ts';
 import { buildJevPrefetch, type JevPrefetchMode, type JevPrefetchStats } from './jev-prefetch.ts';
 import {
   JEV_MODEL,
@@ -24,7 +24,6 @@ import type { PrFile } from './github.ts';
 import type { Finding } from './types.ts';
 
 const exec = promisify(execFile);
-const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 const JS_SOURCE = /\.[cm]?[jt]sx?$/;
 const SOURCE = /\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|cs|rb|php|swift|c|h|cpp|hpp|sql)$/;
 type Ast = {
@@ -37,7 +36,7 @@ const name = (value: unknown) => {
   const n = ast(value);
   return typeof n?.name === 'string' ? n.name : typeof n?.value === 'string' ? n.value : '';
 };
-export type SourceIndex = {
+type SourceIndex = {
   definitions: { symbol: string; start: number; end: number }[];
   imports: { local: string; imported: string; from: string }[];
   uses: { symbol: string; line: number }[];
@@ -226,17 +225,11 @@ export class EvidenceStore {
   }
 
   observe(tool: string, input: Record<string, unknown>) {
-    if (!this.reuse.handoff || !['read', 'read_file'].includes(tool)) return;
-    const raw = input.filePath ?? input.path ?? input.file;
-    if (typeof raw !== 'string') return;
-    const path = isAbsolute(raw) ? relative(this.workspace, raw) : raw;
-    const line =
-      typeof input.offset === 'number' && Number.isSafeInteger(input.offset) && input.offset > 0
-        ? input.offset
-        : 1;
-    if (!path || path.startsWith('../') || path.length > 512 || this.observations.size >= 64)
-      return;
-    this.observations.set(`${path}:${line}`, { path, line });
+    if (!this.reuse.handoff) return;
+    for (const ref of reviewReadLocations(this.workspace, tool, input)) {
+      if (this.observations.size >= 64) break;
+      this.observations.set(`${ref.path}:${ref.line}`, ref);
+    }
   }
 
   private async tracked(signal: AbortSignal): Promise<Set<string>> {
@@ -288,7 +281,7 @@ export class EvidenceStore {
   }
 
   async warm(options: { log: (s: string) => void; onStats: (s: JevPrefetchStats) => void }) {
-    if (!this.reuse.prefetch) return;
+    if (!this.reuse.prefetch || !this.reuse.shared) return;
     const started = Date.now();
     this.prefetchStatus = 'running';
     const existing = new Set(this.cache.keys());
@@ -539,7 +532,7 @@ export class EvidenceStore {
   private async load(path: string, signal: AbortSignal, tracked: Set<string>) {
     const source = await this.read(path, signal, tracked);
     if (!source) return undefined;
-    const digest = hash(source.text);
+    const digest = evidenceHash(source.text);
     const old = this.cache.get(path);
     if (old?.digest === digest && old.truncated === source.truncated) return old;
     const key = JSON.stringify(['index-v1-babel-7.29.9', path, digest, source.truncated]);
@@ -600,7 +593,7 @@ export class EvidenceStore {
         symbol: d.version,
         line: 1,
         kind: `documentation snapshot ${d.retrievedAt}`,
-        sourceHash: hash(d.text),
+        sourceHash: evidenceHash(d.text),
         completeFile: false,
         text: formatSourceExcerpt(d.text.split('\n'), 1, 1, 2048),
       };

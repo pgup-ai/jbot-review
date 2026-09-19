@@ -213,13 +213,23 @@ test('shared reads preserve packets, invalidate same-size edits, and reject remo
   execFileSync('git', ['add', '.'], { cwd: workspace });
   const options = { timeoutMs: 5000, log: () => {}, onStats: () => {} };
   const baseline = new EvidenceStore(workspace, files);
+  const unused = new EvidenceStore(workspace, files, undefined, {
+    shared: false,
+    handoff: false,
+    prefetch: true,
+  });
+  await unused.warm(options);
+  assert.equal(unused.stats().inventoryReads, 0);
+  assert.equal(unused.stats().prefetchStatus, 'disabled');
   const store = new EvidenceStore(workspace, files, undefined, {
     shared: true,
     handoff: false,
     prefetch: true,
   });
   const logs = [];
-  await store.warm({ ...options, log: (line) => logs.push(line) });
+  const warming = store.warm({ ...options, log: (line) => logs.push(line) });
+  assert.equal(store.stats().prefetchStatus, 'running');
+  await warming;
   const logged = JSON.parse(logs[0].slice('Evidence preparation: '.length));
   assert.equal(logged.speculative, true);
   assert.equal(logged.injectedBytes, 0);
@@ -262,8 +272,8 @@ test('handoff reloads bounded review read locations without executing shell or c
     handoff: true,
     prefetch: false,
   });
-  store.observe('read', { filePath: join(workspace, 'guard.ts') });
-  store.observe('shell', { command: 'cat secret.ts', path: 'secret.ts' });
+  store.observe('shell', { command: `cd ${workspace} && sed -n '1,20p' guard.ts` });
+  store.observe('shell', { command: 'cat $(pwd)/secret.ts', path: 'secret.ts' });
   store.observe('read', { path: '../secret.ts' });
   assert.equal(store.stats().observedLocations, 1);
   const rows = [];

@@ -663,7 +663,6 @@ export function buildJevRequest(files: PrFile[], input: JevCandidate[], task?: s
         ]),
       ),
     });
-    // A byte cap also bounds worst-case tokenization, including escaped JSON and every question.
     if (Buffer.byteLength(body) <= MAX_JEV_REQUEST_BYTES) break;
     candidates.pop();
   }

@@ -1,4 +1,5 @@
 import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import type { OpenCodeClient } from '@opencode/client';
 import { parseModelName } from '@symma/protocol';
@@ -330,6 +331,9 @@ export function recordAssistantTools(
         capability: OPENCODE_TELEMETRY_CAPABILITY,
         toolClass,
         inputBytes: serializedBytes(part.state.input),
+        exactRequest: createHash('sha256')
+          .update(JSON.stringify([part.name, part.state.input]))
+          .digest('hex'),
         ...identity,
         ...(toolClass === 'diff-recovery'
           ? { diffScope: identity.identityKind === 'path' ? ('path' as const) : ('whole' as const) }
@@ -342,6 +346,9 @@ export function recordAssistantTools(
         ...(part.state.status === 'error' ? { failureClass: 'execution' as const } : {}),
         outputBytesBeforeCap: outputBytes,
         outputBytesAfterCap: outputBytes,
+        resultIdentity: createHash('sha256')
+          .update(JSON.stringify(output) ?? '')
+          .digest('hex'),
         durationMs: Math.max((part.time.completed ?? part.time.created) - part.time.created, 0),
       });
     }
@@ -483,6 +490,31 @@ async function promptHoldingSlot(
   try {
     const previous = await latestAssistant(client, sessionID);
     const startedAt = Date.now();
+    const recordTurn = async (fallback: AssistantMessage[]) => {
+      // Usage spans the whole turn: V2 writes one assistant message per step.
+      let turn = fallback;
+      try {
+        const since = await assistantsSince(client, sessionID, previous?.id, startedAt);
+        if (since.messages.length > 0) turn = since.messages;
+        if (!since.complete)
+          log(`${label} turn listing incomplete; usage and tools are under-counted`);
+      } catch (error) {
+        log(`${label} turn listing failed; using available messages: ${formatUnknown(error)}`);
+      }
+      if (runtime.onSourceRead && !label.includes('verification')) {
+        for (const assistant of turn) {
+          for (const part of assistant.content ?? []) {
+            if (part.type === 'tool' && part.state.status === 'completed' && part.state.input)
+              runtime.onSourceRead(part.name, part.state.input);
+          }
+        }
+      }
+      const telemetry = toolTelemetry.get(client);
+      if (telemetry) recordAssistantTools(telemetry, label, turn);
+      const turnUsage = sumUsage(turn);
+      log(`${label} ${formatTokenUsage(turnUsage)}`);
+      usage = extractPromptTokenUsage(turnUsage);
+    };
     log(`Calling ${label} prompt (${spec.model})`);
     attempted = true;
     // No caller-supplied message id: the earlier v2 attempt stalled with one (ROADMAP).
@@ -522,6 +554,7 @@ async function promptHoldingSlot(
           `${label} prompt cut off; wrapping up in-session within ${Math.round(settled.budgetMs / 1000)}s`,
         );
         await interruptBestEffort(client, sessionID, label, log);
+        await recordTurn([]);
         await client.session.switchAgent({ sessionID, agent: WRAPUP_AGENT }, control());
         rememberSession(client, sessionID, { agent: WRAPUP_AGENT });
         try {
@@ -553,29 +586,7 @@ async function promptHoldingSlot(
     if (message.error) {
       throw new Error(`opencode ${label} prompt failed: ${formatUnknown(message.error)}`);
     }
-    // Usage spans the whole turn: V2 writes one assistant message per step.
-    let turn: AssistantMessage[] = [message];
-    try {
-      const since = await assistantsSince(client, sessionID, previous?.id, startedAt);
-      if (since.messages.length > 0) turn = since.messages;
-      if (!since.complete)
-        log(`${label} turn listing incomplete; usage and tools are under-counted`);
-    } catch (error) {
-      log(`${label} turn listing failed; counting the final message only: ${formatUnknown(error)}`);
-    }
-    if (runtime.onSourceRead && !label.includes('verification')) {
-      for (const assistant of turn) {
-        for (const part of assistant.content ?? []) {
-          if (part.type === 'tool' && part.state.status === 'completed' && part.state.input)
-            runtime.onSourceRead(part.name, part.state.input);
-        }
-      }
-    }
-    const telemetry = toolTelemetry.get(client);
-    if (telemetry) recordAssistantTools(telemetry, label, turn);
-    const turnUsage = sumUsage(turn);
-    log(`${label} ${formatTokenUsage(turnUsage)}`);
-    usage = extractPromptTokenUsage(turnUsage);
+    await recordTurn([message]);
     const text = assistantText(message);
     if (!text) {
       log(

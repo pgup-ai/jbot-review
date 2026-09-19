@@ -2,12 +2,16 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   createReviewSession,
+  configureOpencodeTelemetry,
   finalizeOpencodeSessionsByLabel,
   promptInSession,
   startProgressLogger,
 } from '../src/shared/opencode-session.ts';
 import { DENY_ALL } from '../src/shared/opencode-config.ts';
 import { fakeOpencodeServer, fakeRuntime as runtime } from './support/opencode-fake.ts';
+
+import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
+import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts';
 
 const log = () => undefined;
 
@@ -144,9 +148,16 @@ describe('promptInSession', () => {
 
   it('wraps up a cut-off turn: interrupt, switch to jbot-wrapup, prompt again, restore the agent', async () => {
     const fake = fakeOpencodeServer((session, text) =>
-      session.agent === 'jbot-wrapup' ? { text: '{"findings":[]}' } : { hang: true, text },
+      session.agent === 'jbot-wrapup'
+        ? { text: '{"findings":[]}' }
+        : { hang: true, text, tools: [{ name: 'read', input: { filePath: 'guard.ts' } }] },
     );
     const rt = runtime(fake);
+    const recorder = createTelemetryRecorder(true);
+    configureOpencodeTelemetry(fake.client, createToolTelemetryAccumulator(recorder, 'salt'));
+    const reads = [],
+      usage = [];
+    rt.onSourceRead = (tool, input) => reads.push({ tool, input });
     const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
     const outcome = { wrappedUp: false };
     const result = await promptInSession(rt, id, {
@@ -157,6 +168,7 @@ describe('promptInSession', () => {
       log,
       outcome,
       wrapUpReserveMs: 59_000,
+      onTokenUsage: (value, _model, label) => usage.push({ label, ...value }),
     });
     assert.equal(result, '{"findings":[]}');
     assert.equal(outcome.wrappedUp, true);
@@ -164,6 +176,26 @@ describe('promptInSession', () => {
     assert.equal(session.interrupted, 1);
     assert.equal(session.agent, 'plan');
     assert.equal(fake.prompts.length, 2);
+    assert.deepEqual(reads, [{ tool: 'read', input: { filePath: 'guard.ts' } }]);
+    const rows = recorder
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(
+      rows.find((row) => row.session === 'review' && row.kind === 'exploration').toolCalls,
+      1,
+    );
+    assert.equal(
+      rows.find((row) => row.session === 'review-wrap-up' && row.kind === 'exploration').toolCalls,
+      0,
+    );
+    assert.deepEqual(
+      usage.map((row) => [row.label, row.input]),
+      [
+        ['review-wrap-up', 10],
+        ['review', 10],
+      ],
+    );
   });
 
   it('reports a listing that stops short and leaves usage unknown without token counts', async () => {

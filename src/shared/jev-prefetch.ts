@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-import type { EvidenceDiskCache } from './evidence-cache.ts';
+import { evidenceHash, type EvidenceDiskCache } from './evidence-cache.ts';
 import { readTrackedSource } from './finding-context.ts';
 import type { PrFile } from './github.ts';
 import {
@@ -252,9 +251,7 @@ export async function buildJevPrefetch(
       return '';
     }
     signal.throwIfAborted();
-    stats.candidateHash = createHash('sha256')
-      .update(JSON.stringify(request.candidates))
-      .digest('hex');
+    stats.candidateHash = evidenceHash(JSON.stringify(request.candidates));
     const baseline = selectPrefetchCandidates(
       request.candidates,
       request.candidates.map((_, i) => i),
@@ -267,7 +264,7 @@ export async function buildJevPrefetch(
     } else {
       stats.scoredCandidates = request.candidates.length;
       stats.requestBytes = Buffer.byteLength(request.body);
-      stats.requestHash = createHash('sha256').update(request.body).digest('hex');
+      stats.requestHash = evidenceHash(request.body);
       let value = await options.judgmentCache?.get('jev-v1:' + stats.requestHash);
       let cached = false;
       if (value !== undefined) {
@@ -327,9 +324,7 @@ export async function buildJevPrefetch(
       stats.rawScores = result.rawScores;
       selected = result.selected;
     }
-    stats.selectedHash = createHash('sha256')
-      .update(JSON.stringify(selected.map((i) => request.candidates[i])))
-      .digest('hex');
+    stats.selectedHash = evidenceHash(JSON.stringify(selected.map((i) => request.candidates[i])));
     stats.selectedCandidates = selected.length;
     stats.selectedReadLocations = selected.filter(
       (i) => request.candidates[i].kind === 'revalidated review read',

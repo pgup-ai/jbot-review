@@ -795,7 +795,6 @@ export interface ReviewRunOptions {
   explorationEvidence?: JevPrefetchMode;
   verificationEvidence?: JevPrefetchMode;
 
-  /** Opt-in caller-evidence ranking; shadow records decisions without changing prompts. */
   jevPrefetch?: JevPrefetchMode;
   enhancedContext?: boolean;
   /** Withhold credential env vars from the opencode child (default on); the env is composed per spawn, so concurrent runs never race it. */
@@ -3375,15 +3374,7 @@ export function normalizeOptions(
       options?.explorationEvidence ?? evidenceMode(process.env.JBOT_EXPLORATION_EVIDENCE),
     verificationEvidence:
       options?.verificationEvidence ?? evidenceMode(process.env.JBOT_VERIFICATION_EVIDENCE),
-    jevPrefetch:
-      options?.jevPrefetch ??
-      (process.env.JBOT_JEV_PREFETCH === 'on'
-        ? 'on'
-        : process.env.JBOT_JEV_PREFETCH === 'shadow'
-          ? 'shadow'
-          : process.env.JBOT_JEV_PREFETCH === 'deterministic'
-            ? 'deterministic'
-            : 'off'),
+    jevPrefetch: options?.jevPrefetch ?? evidenceMode(process.env.JBOT_JEV_PREFETCH),
     enhancedContext: options?.enhancedContext ?? false,
     scrubSessionEnv: options?.scrubSessionEnv ?? true,
     opencodeProxyEnv: options?.opencodeProxyEnv ?? {},

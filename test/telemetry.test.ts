@@ -68,6 +68,49 @@ describe('createTelemetryRecorder (disabled = inert)', () => {
 });
 
 describe('phase and tool telemetry', () => {
+  it('distinguishes identical results from changed results and failed requests without retaining inputs', () => {
+    const recorder = createTelemetryRecorder(true);
+    const tools = createToolTelemetryAccumulator(recorder, 'salt');
+    for (const [exactRequest, resultIdentity, success] of [
+      ['read secret.ts 1:10', 'old-secret', true],
+      ['read secret.ts 1:10', 'error-secret', false],
+      ['read secret.ts 1:10', 'old-secret', true],
+      ['read secret.ts 1:10', 'new-secret', true],
+      ['read secret.ts 11:20', 'new-secret', true],
+    ] as const) {
+      tools.startTool({
+        session: 'review',
+        backend: 'opencode',
+        capability: 'observable',
+        toolClass: 'file-read',
+        inputBytes: 1,
+        exactRequest,
+      })({
+        success,
+        resultIdentity,
+        durationMs: 7,
+        outputBytesBeforeCap: 1,
+        outputBytesAfterCap: 1,
+      });
+    }
+    tools.finishSession({
+      session: 'review',
+      backend: 'opencode',
+      capability: 'observable',
+      budgetTier: 'observe-only',
+      stopReason: 'completed',
+    });
+    const rows = recorder
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const row = rows.find((row) => row.kind === 'exploration');
+    assert.equal(row.exactRepeatCalls, 2);
+    assert.equal(row.unchangedRepeatCalls, 1);
+    assert.equal(row.changedRepeatCalls, 1);
+    assert.equal(row.unchangedRepeatDurationMs, 7);
+    assert.doesNotMatch(recorder.toJsonl(), /secret/);
+  });
   it('classifies external documentation tools before generic searches', () => {
     assert.equal(classifyReadonlyTool('web_search'), 'external-docs');
     assert.equal(classifyReadonlyTool('context7_query_docs'), 'external-docs');

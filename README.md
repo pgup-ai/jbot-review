@@ -990,15 +990,18 @@ JBOT_EXPLORATION_EVIDENCE=on JBOT_VERIFICATION_EVIDENCE=on npm run review:local 
 
 All additional controls default off:
 
-| Environment variable       | Behavior                                                                                                                                                                                                                                             |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `JBOT_EVIDENCE_SHARED=1`   | Share guarded source reads between preparation and cited-source preload. Recheck tracked membership and file identity, size, mtime and ctime before reuse; deduplicate in-flight inventory/search/read requests.                                     |
-| `JBOT_EVIDENCE_HANDOFF=1`  | Collect up to 64 successful OpenCode native read locations for verification candidate selection. Reload current tracked source; carry no reviewer conclusions or tool-output text. Requires an active verification-evidence mode to inject excerpts. |
-| `JBOT_EVIDENCE_PREFETCH=1` | Prepare bounded source candidates in the background during backend startup/review, without injecting a packet or calling Jev. Combine with shared reuse.                                                                                             |
-| `JBOT_EVIDENCE_CACHE_DIR`  | Persist source indexes and validated Jev responses outside the checkout, namespaced by workspace. Content/model/question changes invalidate reuse. Entries expire after 24 hours, with at most 256 entries of 256 KiB per workspace.                 |
+| Environment variable       | Behavior                                                                                                                                                                                                                                      |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JBOT_EVIDENCE_SHARED=1`   | Share guarded source reads between preparation and cited-source preload. Recheck tracked membership and file identity, size, mtime and ctime before reuse; deduplicate in-flight inventory/search/read requests.                              |
+| `JBOT_EVIDENCE_HANDOFF=1`  | Collect up to 64 successful OpenCode read locations for verification candidate selection. Reload current tracked source; carry no reviewer conclusions or tool-output text. Requires an active verification-evidence mode to inject excerpts. |
+| `JBOT_EVIDENCE_PREFETCH=1` | Prepare bounded source candidates in the background during backend startup/review, without injecting a packet or calling Jev. Requires shared reuse.                                                                                          |
+| `JBOT_EVIDENCE_CACHE_DIR`  | Persist source indexes and validated Jev responses outside the checkout, namespaced by workspace. Content/model/question changes invalidate reuse. Entries expire after 24 hours, with at most 256 entries of 256 KiB per workspace.          |
 
 Source caching does not intercept OpenCode's native tools. Handoff supports native
-`read`/`read_file` inputs; arbitrary shell commands are not parsed or replayed.
+`read`/`read_file` inputs and literal `cat path` / `sed -n 'N,Mp' path`
+shell reads, optionally preceded by `cd` and joined with `&&`. Substitution,
+pipes, redirects, globs and other commands are ignored. Only locations transfer;
+source is revalidated and read afresh, never replayed from shell output.
 Inventories and searches share only in-flight requests: completed search results
 are not reused across mutable working-tree snapshots. Provider prompt caching
 and exact shard-result caching remain separate mechanisms.
@@ -1013,8 +1016,17 @@ The reuse switches participate in the configuration fingerprint; cache paths are
 excluded. No source text, credentials or endpoint overrides enter these logs.
 The `evidence-cache` row records cumulative source reads/hits/bytes, in-flight
 sharing, disk activity, observed read locations, handoff candidates and
-prefetched files reused or unused by host preparation. Native tool reuse and
-avoided model turns must be measured separately. Documentation stays in frozen,
+prefetched files reused or unused by host preparation. These are snapshots:
+when `prefetchStatus` is `running`, counts are incomplete and must not be treated
+as final reuse/waste totals. Background preparation is not awaited solely for
+metrics, so it cannot extend a fast review. Tool rows additionally report `exactRepeat` and `unchangedResult` for successful
+OpenCode requests. Exploration rows total `exactRepeatCalls`,
+`unchangedRepeatCalls`, `changedRepeatCalls` and `unchangedRepeatDurationMs`.
+Identity includes the tool name and complete serialized input, including ranges
+and flags. Only salted digests are held in memory; no identities or raw results
+are logged. Different JSON key order or descriptions conservatively miss a repeat.
+These are observations, not cache hits or a freshness guarantee. Summed tool
+durations can overlap and do not measure model round trips or wall time saved. Documentation stays in frozen,
 versioned operator snapshots; there is no speculative network crawler.
 
 The experiment driver accepts `"reuse": true` in its plan to compare baseline

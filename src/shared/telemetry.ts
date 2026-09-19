@@ -100,6 +100,8 @@ export interface ToolTelemetryRow {
   outputBytesBeforeCap: number;
   outputBytesAfterCap: number;
   duplicate: boolean;
+  exactRepeat?: boolean;
+  unchangedResult?: boolean;
   success: boolean;
   failureClass?: 'denied' | 'budget' | 'timeout' | 'execution' | 'invalid-input' | 'unknown';
   diffScope?: 'whole' | 'path';
@@ -123,6 +125,10 @@ export interface ExplorationTelemetryRow {
   duplicateReads: number;
   repeatedSearches: number;
   droppedToolRows: number;
+  exactRepeatCalls?: number;
+  unchangedRepeatCalls?: number;
+  changedRepeatCalls?: number;
+  unchangedRepeatDurationMs?: number;
 }
 
 export interface PhaseTelemetryStart {
