@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 
 import type { PrFile } from './github.ts';
 import { formatBlastRadiusContext } from './prompt.ts';
+import { buildJevPrefetch } from './jev-prefetch.ts';
 
 // Preload unchanged callers because smaller models may not investigate them unaided.
 export const MAX_BLAST_SYMBOLS = 20;
@@ -111,11 +112,11 @@ export async function buildBlastRadiusBlock(
   workspace: string,
   files: PrFile[],
   grep: SymbolGrep = gitGrepFiles,
+  prefetch?: Parameters<typeof buildJevPrefetch>[3],
 ): Promise<string> {
   try {
     const allSymbols = extractChangedExportedSymbols(files);
     const symbols = allSymbols.slice(0, MAX_BLAST_SYMBOLS);
-    if (symbols.length === 0) return '';
 
     const changed = new Set(files.map((file) => file.filename));
     // One grep per symbol, all in parallel: serial greps over a large
@@ -126,12 +127,16 @@ export async function buildBlastRadiusBlock(
         callSites: (await grep(workspace, symbol)).filter((file) => !changed.has(file)),
       })),
     );
-    return formatBlastRadiusContext(
+    const block = formatBlastRadiusContext(
       callSiteLists.filter(({ callSites }) => callSites.length > 0),
       allSymbols.length,
       symbols.length,
       MAX_CALLSITE_FILES_PER_SYMBOL,
     );
+    const evidence = prefetch
+      ? await buildJevPrefetch(workspace, files, callSiteLists, prefetch)
+      : '';
+    return [block, evidence].filter(Boolean).join('\n\n');
   } catch {
     return '';
   }

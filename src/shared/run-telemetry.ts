@@ -11,6 +11,7 @@ import type { ReviewRunOptions } from './runner.ts';
 declare const __JBOT_REVIEWER_REVISION__: string;
 
 const POLICY_KEYS = [
+  'jevPrefetch',
   'enhancedContext',
   'scrubSessionEnv',
   'dryRun',

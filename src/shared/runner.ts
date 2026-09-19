@@ -103,6 +103,7 @@ import {
   POOLSIDE_TELEMETRY_CAPABILITY,
 } from './poolside.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
+import type { JevPrefetchMode } from './jev-prefetch.ts';
 import {
   type DiffHunksOptions,
   buildDiffHunksBlockWithMetadata,
@@ -789,6 +790,8 @@ function missingOctokit(): Octokit {
 }
 
 export interface ReviewRunOptions {
+  /** Opt-in caller-evidence ranking; shadow records decisions without changing prompts. */
+  jevPrefetch?: JevPrefetchMode;
   enhancedContext?: boolean;
   /** Withhold credential env vars from the opencode child (default on); the env is composed per spawn, so concurrent runs never race it. */
   scrubSessionEnv?: boolean;
@@ -1540,7 +1543,16 @@ async function runReviewPipeline(params: {
     );
   }
   const blastRadiusBlock = options.enhancedContext
-    ? await buildBlastRadiusBlock(workspace, files)
+    ? await buildBlastRadiusBlock(workspace, files, undefined, {
+        mode: options.jevPrefetch,
+        apiKey: process.env.TYPESAFE_API_KEY,
+        timeoutMs:
+          options.timeBudgetMinutes > 0
+            ? Math.max(0, options.timeBudgetMinutes * 60_000 - (Date.now() - runStartedAt))
+            : 5000,
+        log,
+        onStats: (stats) => telemetry.recordJevPrefetch(stats),
+      })
     : '';
   if (blastRadiusBlock) log('Embedded changed-symbol usage block.');
 
@@ -3295,6 +3307,13 @@ export function normalizeOptions(
   // raise the useful pass ceiling.
   const maxPasses = 1 + COUNTED_LENS_KEYS.length;
   return {
+    jevPrefetch:
+      options?.jevPrefetch ??
+      (process.env.JBOT_JEV_PREFETCH === 'on'
+        ? 'on'
+        : process.env.JBOT_JEV_PREFETCH === 'shadow'
+          ? 'shadow'
+          : 'off'),
     enhancedContext: options?.enhancedContext ?? false,
     scrubSessionEnv: options?.scrubSessionEnv ?? true,
     opencodeProxyEnv: options?.opencodeProxyEnv ?? {},
@@ -3360,10 +3379,26 @@ export function emitReviewTelemetry(
     .map(([disposition, n]) => `${n} ${disposition}`)
     .join(', ');
   log(`Telemetry: ${rows.length} finding(s) produced${breakdown ? ` (${breakdown})` : ''}.`);
+  const jsonl = telemetry.toJsonl();
+  const measurements = jsonl
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  if (measurements.some((row) => row.kind === 'jev-prefetch')) {
+    const run = measurements.find((row) => row.kind === 'run');
+    if (run)
+      log(
+        `Review timing: ${JSON.stringify({ elapsedMs: run.elapsedMs, terminalState: run.terminalState })}`,
+      );
+    for (const row of measurements.filter(
+      (row) => row.kind === 'session' || row.kind === 'exploration',
+    ))
+      log(`Review metrics: ${JSON.stringify(row)}`);
+  }
   try {
     const dir = telemetryDirectory ?? join(workspace, '.jbot-review');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'telemetry.jsonl'), `${telemetry.toJsonl()}\n`);
+    writeFileSync(join(dir, 'telemetry.jsonl'), `${jsonl}\n`);
     log('Telemetry written to .jbot-review/telemetry.jsonl');
   } catch (err) {
     log(`(telemetry write skipped: ${err instanceof Error ? err.message : String(err)})`);

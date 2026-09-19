@@ -11,6 +11,42 @@ const execFileAsync = promisify(execFile);
 const MAX_SOURCE_BYTES = 256 * 1024;
 const MAX_SOURCE_LOCATIONS = 20;
 
+export async function readTrackedSource(
+  workspace: string,
+  path: string,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  const root = resolveWithinWorkspace(workspace, '.');
+  if (!root) return undefined;
+  const target = resolveWithinWorkspace(root, path);
+  // Tracked source only: never follow a cited symlink into runtime credentials.
+  if (!target || target !== resolve(root, path)) return undefined;
+  try {
+    await execFileAsync('git', ['--literal-pathspecs', 'ls-files', '--error-unmatch', '--', path], {
+      cwd: root,
+      signal,
+      maxBuffer: 2048,
+    });
+    const handle = await open(
+      target,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) return undefined;
+      const buffer = Buffer.alloc(MAX_SOURCE_BYTES);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      if (buffer.subarray(0, bytesRead).includes(0)) return undefined;
+      const text = buffer.toString('utf8', 0, bytesRead);
+      return stat.size > bytesRead ? text.slice(0, Math.max(0, text.lastIndexOf('\n'))) : text;
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
 export function findingSourceLocations(findings: Pick<Finding, 'path' | 'line' | 'body'>[]) {
   const locations = new Map<string, { path: string; line: number }>();
   const omitted = new Map<string, { path: string; line: number }>();
@@ -45,50 +81,14 @@ export async function buildFindingSourceContext(
   findings: Finding[],
 ): Promise<string> {
   const { locations, omitted } = findingSourceLocations(findings);
-  const root = resolveWithinWorkspace(workspace, '.');
   const files = new Map<string, Promise<string | undefined>>();
   const signal = AbortSignal.timeout(1500);
-
-  async function readSource(path: string): Promise<string | undefined> {
-    if (!root) return undefined;
-    const target = resolveWithinWorkspace(root, path);
-    // Tracked source only: never follow a cited symlink into runtime credentials.
-    if (!target || target !== resolve(root, path)) return undefined;
-    try {
-      await execFileAsync(
-        'git',
-        ['--literal-pathspecs', 'ls-files', '--error-unmatch', '--', path],
-        {
-          cwd: root,
-          signal,
-          maxBuffer: 2048,
-        },
-      );
-      const handle = await open(
-        target,
-        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-      );
-      try {
-        const stat = await handle.stat();
-        if (!stat.isFile()) return undefined;
-        const buffer = Buffer.alloc(MAX_SOURCE_BYTES);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        if (buffer.subarray(0, bytesRead).includes(0)) return undefined;
-        const text = buffer.toString('utf8', 0, bytesRead);
-        return stat.size > bytesRead ? text.slice(0, Math.max(0, text.lastIndexOf('\n'))) : text;
-      } finally {
-        await handle.close();
-      }
-    } catch {
-      return undefined;
-    }
-  }
 
   const sources: FindingSource[] = await Promise.all(
     locations.slice(0, MAX_SOURCE_LOCATIONS).map(async (ref) => {
       let file = files.get(ref.path);
       if (!file) {
-        file = readSource(ref.path);
+        file = readTrackedSource(workspace, ref.path, signal);
         files.set(ref.path, file);
       }
       const text = await file;

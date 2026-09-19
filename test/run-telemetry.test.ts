@@ -51,6 +51,10 @@ test('configuration fingerprints policy changes while excluding credentials and 
     first.configurationHash,
     runConfiguration({ ...options, sharedPrefixPrompt: true }, 'opencode/a').configurationHash,
   );
+  assert.notEqual(
+    first.configurationHash,
+    runConfiguration({ ...options, jevPrefetch: 'on' }, 'opencode/a').configurationHash,
+  );
   assert.equal(
     runConfiguration({ ...options, sdkEngine: 'https://secret.example' }, 'opencode/a')
       .configuration.sdkEngine,

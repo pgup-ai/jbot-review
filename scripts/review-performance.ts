@@ -195,6 +195,9 @@ export function aggregatePerformance(rows: Row[]) {
         auxModel: run.auxModel,
         terminalState: run.terminalState,
         elapsedMs: number(run, 'elapsedMs'),
+        jevPrefetch: source
+          .filter((row) => row.kind === 'jev-prefetch')
+          .map(({ _source, ...row }) => row),
         promptUsage: source
           .filter((row) => row.kind === 'session')
           .map((row) => ({

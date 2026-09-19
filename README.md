@@ -939,6 +939,77 @@ and precision against seeded defects.
 
 ## Comparing review runs
 
+### Jev caller-evidence experiment
+
+`JBOT_JEV_PREFETCH=on` adds up to four caller source excerpts to the existing
+changed-symbol usage context. The existing reviewers, full diff, caller list,
+verification, and finding filters stay active. This experiment requires enhanced
+context (enabled by local review), `TYPESAFE_API_KEY`, and outbound access to
+TypeSafe. Set the key in the launch directory's ignored `.env` for local use;
+hosted runs use an environment secret. It is not a review-provider setting.
+
+Modes: `off` (default, no extra source reads or API call), `shadow` (collect,
+rank, and measure without injecting excerpts), and `on` (inject the ranked
+excerpts). An explicit `ReviewRunOptions.jevPrefetch` overrides the environment.
+Unknown environment values disable the experiment.
+
+The first version reuses exported-symbol discovery, so body-only changes with
+no changed export declaration may have no candidates. It samples at most 12
+tracked source files in round-robin symbol order, three occurrences per file,
+and scores at most 24 excerpts. Jev receives bounded diff fragments and source
+windows, not the whole repository. This sends those fragments to TypeSafe in
+both `shadow` and `on` modes. Ignored/untracked files, symlinks, and non-source
+files are excluded. No API key or provider response text is logged.
+
+Requests pin `jev-1.13.0`, use independent Noul relevance questions referencing
+explicit candidate indexes, and cap the complete JSON request at 30,000 bytes.
+The additive context is capped at 6,000 bytes with omitted locations disclosed.
+Collection and the API share a five-second deadline, also capped by remaining
+run time. No retries extend the critical path: missing credentials, timeouts,
+rate limits, or invalid responses leave the original context intact. Scores
+rank evidence; they are not bug probabilities or finding verdicts. Excerpts
+scoring below 0.5 are not injected, and at most one excerpt per file is kept.
+
+```sh
+JBOT_JEV_PREFETCH=off JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
+JBOT_JEV_PREFETCH=shadow JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
+JBOT_JEV_PREFETCH=on JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
+```
+
+Every eligible run logs one `Jev prefetch: {...}` row, also saved as
+`kind: "jev-prefetch"` when review telemetry is enabled. It reports mode,
+algorithm version, pinned model, status/fallback reason, candidate and selected
+counts, collection/API/total milliseconds, request hash and byte size,
+selected scores, proposed/injected context bytes, and provider token usage.
+With telemetry enabled, final `Review timing` and `Review metrics` log rows
+also expose total elapsed time, terminal state, per-session tokens, observed
+tool calls, repeated reads/searches, output bytes, and available turn counts.
+`estimatedCostUsd` uses the published $0.042/M input-token rate (free output);
+it is an estimate, not billed spend. `baselineOverlap` counts selected indexes
+within the first N scored candidates, where N is the selected count. It measures
+selection changes, not selection accuracy. Unknown usage after a failed request
+is absent, not zero.
+
+Preserve each run's log and `.jbot-review/telemetry.jsonl` before the next run.
+`performance:review` exposes these rows under `auxiliaryRuns[].jevPrefetch`;
+the run policy hash also distinguishes the modes. Compare the same diff and
+model/settings, alternating off/on across at least three repetitions. Include
+context-assembly overhead in wall time, compare reviewer input/cache/output
+tokens and the exploration rows' observed tool calls and turns. OpenCode's
+`JBOT_RUN_STATS=1` additionally reports server-wide steps and tokens. Incomplete
+or opaque sessions do not establish zero tool use. Inspect retained findings
+for precision and recall.
+Shadow measures ranking and overhead only; it cannot demonstrate faster reviews.
+The core quality benchmark remains recommended before adoption, and the full
+quality gate is required before enabling this by default.
+
+API and design references: [TypeSafe introduction](https://docs.typesafe.ai/introduction),
+[reranking](https://docs.typesafe.ai/cookbooks/rerank_typesafe),
+[API](https://docs.typesafe.ai/api), [model limits/pricing](https://docs.typesafe.ai/models),
+and [known limitations](https://docs.typesafe.ai/model-jaggedness/jev-1.13).
+
+### Run telemetry
+
 The telemetry `run` header records the repository, reviewed base/head, selected
 models, and GitHub workflow run ID, attempt, and job key when available. Bundles
 embed the reviewer commit at build time (`-dirty` for uncommitted builds);
