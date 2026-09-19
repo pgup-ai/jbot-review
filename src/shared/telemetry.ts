@@ -1,3 +1,4 @@
+import type { EvidenceCacheStats } from './evidence.ts';
 import type { CommandCodeProgress } from './commandcode-progress.ts';
 import type { JevPrefetchStats } from './jev-prefetch.ts';
 import type { runConfiguration, runIdentity, roleTelemetry } from './run-telemetry.ts';
@@ -265,6 +266,7 @@ export type TelemetryStage = 'gated' | 'deduped' | 'suppressed' | 'verified' | '
 const STAGE_ORDER: TelemetryStage[] = ['gated', 'deduped', 'suppressed', 'verified', 'filtered'];
 
 export interface TelemetryRecorder {
+  recordEvidenceCache(row: EvidenceCacheStats): void;
   recordJevPrefetch(row: JevPrefetchStats): void;
   readonly enabled: boolean;
   /** Tag findings with a stable id + origin session; returns the tagged copies. */
@@ -291,6 +293,7 @@ export interface TelemetryRecorder {
 }
 
 const DISABLED: TelemetryRecorder = {
+  recordEvidenceCache: () => undefined,
   recordJevPrefetch: () => undefined,
   enabled: false,
   produced: (_session, findings) => findings,
@@ -339,6 +342,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   const routedLine = new Map<string, number>();
   const sessions: SessionTelemetryRow[] = [];
   const prefetch: JevPrefetchStats[] = [];
+  let evidenceCache: EvidenceCacheStats | undefined;
   const progress: CommandCodeProgressTelemetryRow[] = [];
   const phases: PhaseTelemetryRow[] = [];
   const tools: ToolTelemetryRow[] = [];
@@ -426,6 +430,9 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
           : row,
       );
     },
+    recordEvidenceCache(row) {
+      evidenceCache = row;
+    },
     recordJevPrefetch(row) {
       prefetch.push(row);
     },
@@ -466,6 +473,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
         ...header,
         ...phases,
         ...prefetch,
+        ...(evidenceCache ? [evidenceCache] : []),
         ...coverage,
         ...outcomes,
         ...this.findingRows(),

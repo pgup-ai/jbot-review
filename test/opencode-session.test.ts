@@ -64,6 +64,38 @@ describe('promptInSession', () => {
     assert.ok(fake.calls.some((c) => /POST .*\/wait$/.test(c)));
   });
 
+  it('hands off successful tool inputs from review without copying outputs or verification history', async () => {
+    const fake = fakeOpencodeServer(() => ({
+      text: '{}',
+      tools: [
+        {
+          name: 'read',
+          input: { filePath: 'guard.ts', offset: 20 },
+          output: 'source; reviewer conclusion',
+        },
+      ],
+    }));
+    const rt = runtime(fake);
+    const observed = [];
+    rt.onSourceRead = (tool, input) => observed.push({ tool, input });
+    const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
+    await promptInSession(rt, id, {
+      model: 'openai/gpt-5',
+      text: 'review',
+      label: 'review',
+      timeoutMs: 5000,
+      log,
+    });
+    await promptInSession(rt, id, {
+      model: 'openai/gpt-5',
+      text: 'verify',
+      label: 'finding-verification',
+      timeoutMs: 5000,
+      log,
+    });
+    assert.deepEqual(observed, [{ tool: 'read', input: { filePath: 'guard.ts', offset: 20 } }]);
+  });
+
   it('waits in slices shorter than the fetch header timeout and keeps waiting across them', async () => {
     const fake = fakeOpencodeServer(() => ({ text: 'late', delayMs: 250 }));
     const rt = runtime(fake);

@@ -156,7 +156,7 @@ test('off and shadow preserve baseline context; on adds only tracked source and 
   assert.equal(rows[1].injectedBytes, 0);
   assert.ok(rows[2].injectedBytes > 0);
   assert.equal(rows[2].inputTokens, 1234);
-  assert.equal(rows[2].version, 5);
+  assert.equal(rows[2].version, 6);
   assert.equal(rows[2].completeFileCandidates, 1);
   assert.match(applied, /complete file/);
   assert.match(applied, /Do not spend a tool call rereading supplied lines/);

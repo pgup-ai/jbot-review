@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { EvidenceDiskCache } from './evidence-cache.ts';
 import { readTrackedSource } from './finding-context.ts';
 import type { PrFile } from './github.ts';
 import {
@@ -18,7 +19,10 @@ export type JevPrefetchMode = 'off' | 'shadow' | 'on' | 'deterministic';
 
 export interface JevPrefetchStats {
   kind: 'jev-prefetch';
-  version: 5;
+  version: 6;
+  speculative?: boolean;
+  judgmentCacheHit?: boolean;
+  rawScores?: number[];
   scope?: 'exploration' | 'verification';
   selectedHash?: string;
   coverageBytes?: number;
@@ -99,7 +103,13 @@ export function selectJevCandidates(
     indexes.filter((i) => scores[i] >= 0.5),
     allCandidates,
   );
-  return { selected, scores: selected.map((i) => scores[i]), inputTokens, outputTokens };
+  return {
+    selected,
+    scores: selected.map((i) => scores[i]),
+    rawScores: scores,
+    inputTokens,
+    outputTokens,
+  };
 }
 
 function selectPrefetchCandidates(
@@ -140,6 +150,7 @@ export async function buildJevPrefetch(
       omittedFiles: number;
       elapsedMs: number;
     };
+    judgmentCache?: EvidenceDiskCache;
     apiKey?: string;
     timeoutMs: number;
     log: (message: string) => void;
@@ -149,7 +160,7 @@ export async function buildJevPrefetch(
   const started = Date.now() - (options.prepared?.elapsedMs ?? 0);
   const stats: JevPrefetchStats = {
     kind: 'jev-prefetch',
-    version: 5,
+    version: 6,
     ...(options.prepared
       ? {
           scope: options.prepared.scope,
@@ -256,39 +267,63 @@ export async function buildJevPrefetch(
       stats.scoredCandidates = request.candidates.length;
       stats.requestBytes = Buffer.byteLength(request.body);
       stats.requestHash = createHash('sha256').update(request.body).digest('hex');
-      apiStarted = Date.now();
-      stats.collectMs = apiStarted - started;
-      const response = await fetch('https://api.typesafe.ai/v1/systemone', {
-        method: 'POST',
-        redirect: 'error',
-        signal,
-        headers: { Authorization: `Bearer ${options.apiKey}`, 'Content-Type': 'application/json' },
-        body: request.body,
-      });
-      stats.httpStatus = response.status;
-      if (!response.ok) {
-        await response.body?.cancel();
-        stats.reason = 'http';
-        return '';
+      let value = await options.judgmentCache?.get('jev-v1:' + stats.requestHash);
+      let cached = false;
+      if (value !== undefined) {
+        try {
+          selectJevCandidates(value, request.candidates, candidates);
+          cached = true;
+        } catch {
+          value = undefined;
+        }
       }
-      const chunks: Uint8Array[] = [];
-      let responseBytes = 0;
-      for await (const chunk of response.body ?? []) {
-        responseBytes += chunk.byteLength;
-        if (responseBytes > 16_384) throw new Error('invalid-response');
-        chunks.push(chunk);
-      }
-      let value: unknown;
-      try {
-        value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      } catch {
-        throw new Error('invalid-response');
+      stats.judgmentCacheHit = cached;
+      if (!cached) {
+        apiStarted = Date.now();
+        stats.collectMs = apiStarted - started;
+        const response = await fetch('https://api.typesafe.ai/v1/systemone', {
+          method: 'POST',
+          redirect: 'error',
+          signal,
+          headers: {
+            Authorization: `Bearer ${options.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: request.body,
+        });
+        stats.httpStatus = response.status;
+        if (!response.ok) {
+          await response.body?.cancel();
+          stats.reason = 'http';
+          return '';
+        }
+        const chunks: Uint8Array[] = [];
+        let responseBytes = 0;
+        for await (const chunk of response.body ?? []) {
+          responseBytes += chunk.byteLength;
+          if (responseBytes > 16_384) throw new Error('invalid-response');
+          chunks.push(chunk);
+        }
+        try {
+          value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        } catch {
+          throw new Error('invalid-response');
+        }
       }
       const result = selectJevCandidates(value, request.candidates, candidates);
-      stats.inputTokens = result.inputTokens;
-      stats.outputTokens = result.outputTokens;
-      stats.estimatedCostUsd = (result.inputTokens * 0.042) / 1_000_000;
+      if (!cached)
+        await options.judgmentCache?.set('jev-v1:' + stats.requestHash, {
+          model: JEV_MODEL,
+          answers: Object.fromEntries(
+            result.rawScores.map((noul, i) => [`c${i}`, { type: 'noul', noul }]),
+          ),
+          usage: { input_tokens: result.inputTokens, output_tokens: result.outputTokens },
+        });
+      stats.inputTokens = cached ? 0 : result.inputTokens;
+      stats.outputTokens = cached ? 0 : result.outputTokens;
+      stats.estimatedCostUsd = (stats.inputTokens * 0.042) / 1_000_000;
       stats.selectedScores = result.scores;
+      stats.rawScores = result.rawScores;
       selected = result.selected;
     }
     stats.selectedHash = createHash('sha256')

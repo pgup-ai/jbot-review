@@ -975,7 +975,7 @@ checkout and freeze their contents when comparing arms.
 
 Each packet permits four excerpts within 6,000 bytes plus a bounded coverage
 notice (under 900 bytes). Missing evidence never narrows review scope.
-Version 5 `jev-prefetch` log/telemetry rows distinguish `scope`, source-cache
+Version 6 `jev-prefetch` log/telemetry rows distinguish `scope`, source-cache
 hits, parsed files, omitted files, candidate/selection hashes, coverage bytes,
 collection/API time, tokens, and estimated Jev cost. `injectedBytes` excludes
 `coverageBytes`; add both for the complete packet. Existing phase/session rows
@@ -985,6 +985,40 @@ measure review and verification time, tool calls, turns, and model cost.
 JBOT_EXPLORATION_EVIDENCE=deterministic JBOT_VERIFICATION_EVIDENCE=deterministic npm run review:local -- --base origin/main
 JBOT_EXPLORATION_EVIDENCE=on JBOT_VERIFICATION_EVIDENCE=on npm run review:local -- --base origin/main
 ```
+
+### Shared evidence reuse experiment
+
+All additional controls default off:
+
+| Environment variable       | Behavior                                                                                                                                                                                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JBOT_EVIDENCE_SHARED=1`   | Share guarded source reads between preparation and cited-source preload. Recheck tracked membership and file identity, size, mtime and ctime before reuse; deduplicate in-flight inventory/search/read requests.                                     |
+| `JBOT_EVIDENCE_HANDOFF=1`  | Collect up to 64 successful OpenCode native read locations for verification candidate selection. Reload current tracked source; carry no reviewer conclusions or tool-output text. Requires an active verification-evidence mode to inject excerpts. |
+| `JBOT_EVIDENCE_PREFETCH=1` | Prepare bounded source candidates in the background during backend startup/review, without injecting a packet or calling Jev. Combine with shared reuse.                                                                                             |
+| `JBOT_EVIDENCE_CACHE_DIR`  | Persist source indexes and validated Jev responses outside the checkout, namespaced by workspace. Content/model/question changes invalidate reuse. Entries expire after 24 hours, with at most 256 entries of 256 KiB per workspace.                 |
+
+Source caching does not intercept OpenCode's native tools. Handoff supports native
+`read`/`read_file` inputs; arbitrary shell commands are not parsed or replayed.
+Inventories and searches share only in-flight requests: completed search results
+are not reused across mutable working-tree snapshots. Provider prompt caching
+and exact shard-result caching remain separate mechanisms.
+
+Persistent index keys include parser version, path, source hash and truncation.
+Jev keys include the complete request (pinned model, state and questions).
+Cached responses pass the same schema checks as live responses; cache hits record
+zero newly billed tokens/cost. Version 6 rows retain all candidate `rawScores`
+for offline threshold analysis and mark `judgmentCacheHit` and `speculative`
+preparation. No source text, credentials or endpoint overrides enter these logs.
+The `evidence-cache` row records cumulative source reads/hits/bytes, in-flight
+sharing, disk activity, observed read locations, handoff candidates and
+prefetched files reused or unused by host preparation. Native tool reuse and
+avoided model turns must be measured separately. Documentation stays in frozen,
+versioned operator snapshots; there is no speculative network crawler.
+
+The experiment driver accepts `"reuse": true` in its plan to compare baseline
+verification preloading, shared reads, handoff, background prefetch, Jev selection
+and cold/warm persistent reuse. Cold/warm disk pairs run consecutively with a
+fresh cache per fixture and repetition. Provider prompt-cache state is uncontrolled.
 
 ### Jev caller-evidence experiment
 

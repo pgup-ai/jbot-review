@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, symlink, readFile, readdir, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -12,6 +12,7 @@ import {
   evidenceMode,
 } from '../src/shared/evidence.ts';
 import { normalizeOptions, requestFindingVerdicts } from '../src/shared/runner.ts';
+import { EvidenceDiskCache, evidenceHash } from '../src/shared/evidence-cache.ts';
 import { JEV_MODEL } from '../src/shared/prompt.ts';
 
 const files = [
@@ -197,4 +198,141 @@ test('failed or budget-starved evidence preparation cannot skip independent veri
   assert.equal(prepared, false);
   assert.equal(calls, 2);
   assert.equal(tight[0].verdict, 'confirmed');
+});
+
+test('shared reads preserve packets, invalidate same-size edits, and reject removed tracking and symlinks', async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), 'evidence-shared-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', workspace]);
+  const path = join(workspace, 'money.ts');
+  await writeFile(path, 'export function total(n: number) {\nreturn n * 100;\n}\n');
+  execFileSync('git', ['add', '.'], { cwd: workspace });
+  const options = { timeoutMs: 5000, log: () => {}, onStats: () => {} };
+  const baseline = new EvidenceStore(workspace, files);
+  const store = new EvidenceStore(workspace, files, undefined, {
+    shared: true,
+    handoff: false,
+    prefetch: true,
+  });
+  await store.warm(options);
+  assert.equal(store.stats().prefetchedFiles, 1);
+  assert.match(await store.sourceContext([finding]), /n \* 100/);
+  assert.equal(
+    await store.prepare('verification', [finding], 'deterministic', options),
+    await baseline.prepare('verification', [finding], 'deterministic', options),
+  );
+  assert.equal(store.stats().sourceReads, 1);
+  assert.ok(store.stats().sourceHits >= 2);
+  assert.equal(store.stats().reusedPrefetchedFiles, 1);
+  await writeFile(path, 'export function total(n: number) {\nreturn n * 200;\n}\n');
+  assert.match(await store.sourceContext([finding]), /n \* 200/);
+  assert.equal(store.stats().sourceReads, 2);
+  execFileSync('git', ['rm', '--cached', '-f', 'money.ts'], { cwd: workspace });
+  assert.doesNotMatch(await store.sourceContext([finding]), /n \* 200/);
+  await rm(path);
+  await writeFile(join(workspace, 'secret.ts'), 'DO_NOT_READ_SECRET');
+  await symlink('secret.ts', path);
+  execFileSync('git', ['add', 'money.ts'], { cwd: workspace });
+  assert.doesNotMatch(await store.sourceContext([finding]), /DO_NOT_READ_SECRET/);
+});
+
+test('handoff reloads bounded review read locations without executing shell or carrying conclusions', async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), 'evidence-handoff-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', workspace]);
+  await writeFile(join(workspace, 'guard.ts'), 'export const approvalRequired = true;');
+  execFileSync('git', ['add', '.'], { cwd: workspace });
+  const store = new EvidenceStore(workspace, [], undefined, {
+    shared: true,
+    handoff: true,
+    prefetch: false,
+  });
+  store.observe('read', { filePath: join(workspace, 'guard.ts') });
+  store.observe('shell', { command: 'cat secret.ts', path: 'secret.ts' });
+  store.observe('read', { path: '../secret.ts' });
+  assert.equal(store.stats().observedLocations, 1);
+  const packet = await store.prepare('verification', [finding], 'deterministic', {
+    timeoutMs: 5000,
+    log: () => {},
+    onStats: () => {},
+  });
+  assert.match(packet, /guard.ts/);
+  assert.match(packet, /revalidated review read/);
+  assert.match(packet, /approvalRequired = true/);
+  assert.equal(store.stats().handoffCandidates, 1);
+});
+
+test('persistent cache reuses indexes and exact judgments with zero rebilling; changes and corrupt entries miss', async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), 'evidence-disk-source-'));
+  const cacheDir = await mkdtemp(join(tmpdir(), 'evidence-disk-cache-'));
+  t.after(() =>
+    Promise.all([workspace, cacheDir].map((p) => rm(p, { recursive: true, force: true }))),
+  );
+  execFileSync('git', ['init', '-q', workspace]);
+  await writeFile(
+    join(workspace, 'money.ts'),
+    'export function total(n: number) {\nreturn n * 100;\n}\n',
+  );
+  execFileSync('git', ['add', '.'], { cwd: workspace });
+  const fetch = t.mock.method(globalThis, 'fetch', async (_, init) => {
+    const body = JSON.parse(init.body);
+    return Response.json({
+      model: JEV_MODEL,
+      answers: Object.fromEntries(
+        Object.keys(body.questions).map((k) => [k, { type: 'noul', noul: 0.8 }]),
+      ),
+      usage: { input_tokens: 100, output_tokens: 5 },
+    });
+  });
+  const reuse = { shared: true, handoff: false, prefetch: false, cacheDir };
+  const rows = [];
+  const options = {
+    timeoutMs: 5000,
+    apiKey: 'TEST_ONLY',
+    log: () => {},
+    onStats: (s) => rows.push(s),
+  };
+  const cold = new EvidenceStore(workspace, files, undefined, reuse);
+  const packet = await cold.prepare('verification', [finding], 'on', options);
+  const warm = new EvidenceStore(workspace, files, undefined, reuse);
+  assert.equal(await warm.prepare('verification', [finding], 'on', options), packet);
+  assert.equal(fetch.mock.callCount(), 1);
+  assert.equal(warm.stats().indexDiskHits, 1);
+  assert.equal(rows[1].judgmentCacheHit, true);
+  assert.equal(rows[1].apiMs, 0);
+  assert.equal(rows[1].estimatedCostUsd, 0);
+  assert.deepEqual(rows[1].rawScores, rows[0].rawScores);
+  const namespace = join(cacheDir, evidenceHash(workspace));
+  const judgment = join(namespace, evidenceHash('jev-v1:' + rows[0].requestHash) + '.json');
+  await writeFile(judgment, JSON.stringify({ model: 'other-model', answers: {} }));
+  await warm.prepare('verification', [finding], 'on', options);
+  assert.equal(fetch.mock.callCount(), 2);
+  await warm.prepare(
+    'verification',
+    [{ ...finding, body: 'A different hypothesis' }],
+    'on',
+    options,
+  );
+  assert.equal(fetch.mock.callCount(), 3);
+  await writeFile(
+    join(workspace, 'money.ts'),
+    'export function total(n: number) {\nreturn n;\n}\n',
+  );
+  const changed = await warm.prepare('verification', [finding], 'on', options);
+  assert.doesNotMatch(changed, /n \* 100/);
+  assert.equal(fetch.mock.callCount(), 4);
+  assert.notEqual(rows[4].requestHash, rows[0].requestHash);
+  const raw = await readFile(judgment, 'utf8');
+  assert.doesNotMatch(raw, /TEST_ONLY|return n/);
+  assert.ok((await readdir(namespace)).every((n) => n.endsWith('.json')));
+  assert.equal(new EvidenceDiskCache(workspace, join(workspace, 'cache')).enabled, false);
+  const disk = new EvidenceDiskCache(workspace, cacheDir);
+  await utimes(judgment, new Date(0), new Date(0));
+  assert.equal(await disk.get('jev-v1:' + rows[0].requestHash), undefined);
+  await writeFile(judgment, '{broken');
+  assert.equal(await disk.get('jev-v1:' + rows[0].requestHash), undefined);
+  assert.equal(
+    await new EvidenceDiskCache(cacheDir, cacheDir + '-other').get('jev-v1:' + rows[0].requestHash),
+    undefined,
+  );
 });

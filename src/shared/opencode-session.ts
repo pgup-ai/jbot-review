@@ -563,6 +563,14 @@ async function promptHoldingSlot(
     } catch (error) {
       log(`${label} turn listing failed; counting the final message only: ${formatUnknown(error)}`);
     }
+    if (runtime.onSourceRead && !label.includes('verification')) {
+      for (const assistant of turn) {
+        for (const part of assistant.content ?? []) {
+          if (part.type === 'tool' && part.state.status === 'completed' && part.state.input)
+            runtime.onSourceRead(part.name, part.state.input);
+        }
+      }
+    }
     const telemetry = toolTelemetry.get(client);
     if (telemetry) recordAssistantTools(telemetry, label, turn);
     const turnUsage = sumUsage(turn);

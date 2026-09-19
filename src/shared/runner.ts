@@ -16,7 +16,7 @@ import {
 } from './time-budget.ts';
 import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
-import { EvidenceStore, evidenceMode } from './evidence.ts';
+import { evidenceReuseOptions, EvidenceStore, evidenceMode } from './evidence.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
 
 import {
@@ -1547,7 +1547,12 @@ async function runReviewPipeline(params: {
       `Embedded-only backend diff hunks block: ${embeddedOnlyBackendDiffHunks.text.length} chars.`,
     );
   }
-  const evidence = new EvidenceStore(workspace, files, process.env.JBOT_EVIDENCE_DOCS);
+  const evidence = new EvidenceStore(
+    workspace,
+    files,
+    process.env.JBOT_EVIDENCE_DOCS,
+    evidenceReuseOptions(process.env),
+  );
   const prepareEvidence = (
     scope: 'exploration' | 'verification',
     findings: Finding[],
@@ -2145,6 +2150,10 @@ async function runReviewPipeline(params: {
   }
 
   let auxOpencodeBootError: unknown;
+  void evidence.warm({
+    log,
+    onStats: (row) => telemetry.recordJevPrefetch(row),
+  });
   if (needsOpencode) {
     const { opencodeProviderID, opencodeModelID, opencodeApiKey } = backendSelection;
     try {
@@ -2175,6 +2184,9 @@ async function runReviewPipeline(params: {
           proxyEnv: options.opencodeProxyEnv,
           transcriptDir: process.env.JBOT_TRANSCRIPT_DIR?.trim() || undefined,
           verifyFork: process.env.JBOT_VERIFY_FORK === '1',
+          onSourceRead: evidence.reuse.handoff
+            ? (tool, input) => evidence.observe(tool, input)
+            : undefined,
           reviewerAgent: process.env.JBOT_REVIEWER_AGENT === '1',
           runStats: process.env.JBOT_RUN_STATS === '1',
           additionalProviderKeys: auxNeedsOpencodeConfig
@@ -2714,6 +2726,9 @@ async function runReviewPipeline(params: {
       const targets = indexes.map((index) => settled[index]);
       log(`Verifying ${targets.length} finding(s) concurrently with the aux settle grace.`);
       const verdicts = await requestFindingVerdicts({
+        sourceContext: evidence.reuse.shared
+          ? (targets) => evidence.sourceContext(targets)
+          : undefined,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
         workspace,
@@ -2902,6 +2917,9 @@ async function runReviewPipeline(params: {
       );
       logVerdictOutcomes(merge, log);
       const late = await verifyFindings({
+        sourceContext: evidence.reuse.shared
+          ? (targets) => evidence.sourceContext(targets)
+          : undefined,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
         workspace,
@@ -2923,6 +2941,9 @@ async function runReviewPipeline(params: {
       verifiedFindings = [...merge.findings.filter((finding) => !lateSet.has(finding)), ...late];
     } else {
       verifiedFindings = await verifyFindings({
+        sourceContext: evidence.reuse.shared
+          ? (targets) => evidence.sourceContext(targets)
+          : undefined,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
         workspace,
@@ -2946,6 +2967,8 @@ async function runReviewPipeline(params: {
       telemetry.enabled ? Buffer.byteLength(JSON.stringify(verifiedFindings)) : undefined,
     );
     telemetry.snapshot('verified', verifiedFindings);
+    telemetry.recordEvidenceCache(evidence.stats());
+    log(`Evidence cache: ${JSON.stringify(evidence.stats())}`);
     const finalFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
     const filteredFindings = filterFindings(verifiedFindings, options);
     const incompleteSessions: IncompleteSession[] = [
@@ -3599,6 +3622,7 @@ export function settleWithinGrace<T>(
 }
 
 async function verifyFindings(params: {
+  sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
   workspace: string;
   backend: ReviewBackend;
@@ -3647,6 +3671,7 @@ async function verifyFindings(params: {
 
 /** A failed batch must not discard verdicts from successful batches. */
 export async function requestFindingVerdicts(params: {
+  sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
   workspace: string;
   backend: Pick<ReviewBackend, 'runFindingVerification'>;
@@ -3666,7 +3691,8 @@ export async function requestFindingVerdicts(params: {
   for (let offset = 0; offset < params.targets.length; offset += VERIFICATION_BATCH_SIZE) {
     const targets = params.targets.slice(offset, offset + VERIFICATION_BATCH_SIZE);
     try {
-      const sourceContext = await buildFindingSourceContext(params.workspace, targets);
+      const sourceContext = await (params.sourceContext?.(targets) ??
+        buildFindingSourceContext(params.workspace, targets));
       const evidenceTimeoutMs = computeEvidenceTimeoutMs(
         params.timeoutMs === undefined ? undefined : params.timeoutMs - (Date.now() - startedAt),
       );

@@ -3,9 +3,15 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { posix } from 'node:path';
+import { posix, relative, isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
-import { readTrackedSource, findingSourceLocations } from './finding-context.ts';
+import {
+  readTrackedSource,
+  findingSourceLocations,
+  buildFindingSourceContext,
+  SourceCache,
+} from './finding-context.ts';
+import { EvidenceDiskCache } from './evidence-cache.ts';
 import { buildJevPrefetch, type JevPrefetchMode, type JevPrefetchStats } from './jev-prefetch.ts';
 import {
   formatSourceExcerpt,
@@ -118,16 +124,183 @@ export function evidenceMode(value: string | undefined): JevPrefetchMode {
   return value === 'on' || value === 'deterministic' || value === 'shadow' ? value : 'off';
 }
 
+export interface EvidenceReuseOptions {
+  shared: boolean;
+  handoff: boolean;
+  prefetch: boolean;
+  cacheDir?: string;
+}
+
+export function evidenceReuseOptions(env: NodeJS.ProcessEnv): EvidenceReuseOptions {
+  return {
+    shared: env.JBOT_EVIDENCE_SHARED === '1',
+    handoff: env.JBOT_EVIDENCE_HANDOFF === '1',
+    prefetch: env.JBOT_EVIDENCE_PREFETCH === '1',
+    cacheDir: env.JBOT_EVIDENCE_CACHE_DIR || undefined,
+  };
+}
+
+export interface EvidenceCacheStats {
+  kind: 'evidence-cache';
+  version: 1;
+  shared: boolean;
+  handoff: boolean;
+  prefetch: boolean;
+  persistent: boolean;
+  sourceHits: number;
+  sourceReads: number;
+  sourceBytes: number;
+  sharedRequests: number;
+  inventoryReads: number;
+  searchCalls: number;
+  searchSharedRequests: number;
+  indexDiskHits: number;
+  diskHits: number;
+  diskMisses: number;
+  diskWrites: number;
+  observedLocations: number;
+  handoffCandidates: number;
+  prefetchedFiles: number;
+  reusedPrefetchedFiles: number;
+  unusedPrefetchedFiles: number;
+  prefetchMs: number;
+  prefetchStatus: 'disabled' | 'running' | 'completed';
+}
+
 export class EvidenceStore {
   private cache = new Map<
     string,
-    { text: string; truncated: boolean; index: SourceIndex; digest: string }
+    { text: string; truncated: boolean; index: SourceIndex; digest: string; parsed: boolean }
   >();
+  private sources = new SourceCache();
+  private observations = new Map<string, { path: string; line: number }>();
+  private inventory?: Promise<Set<string>>;
+  private searches = new Map<string, Promise<string[]>>();
+  private inventoryReads = 0;
+  private searchCalls = 0;
+  private searchSharedRequests = 0;
+  private indexDiskHits = 0;
+  private handoffCandidates = 0;
+  private prefetched = new Set<string>();
+  private reusedPrefetched = new Set<string>();
+  private prefetchMs = 0;
+  private prefetchStatus: EvidenceCacheStats['prefetchStatus'] = 'disabled';
+  readonly disk: EvidenceDiskCache;
   constructor(
     private workspace: string,
     private files: PrFile[],
     private docsPath?: string,
-  ) {}
+    readonly reuse: EvidenceReuseOptions = { shared: false, handoff: false, prefetch: false },
+  ) {
+    this.disk = new EvidenceDiskCache(workspace, reuse.cacheDir);
+  }
+
+  stats(): EvidenceCacheStats {
+    return {
+      kind: 'evidence-cache',
+      version: 1,
+      shared: this.reuse.shared,
+      handoff: this.reuse.handoff,
+      prefetch: this.reuse.prefetch,
+      persistent: this.disk.enabled,
+      sourceHits: this.sources.hits,
+      sourceReads: this.sources.reads,
+      sourceBytes: this.sources.bytes,
+      sharedRequests: this.sources.sharedRequests,
+      inventoryReads: this.inventoryReads,
+      searchCalls: this.searchCalls,
+      searchSharedRequests: this.searchSharedRequests,
+      indexDiskHits: this.indexDiskHits,
+      diskHits: this.disk.hits,
+      diskMisses: this.disk.misses,
+      diskWrites: this.disk.writes,
+      observedLocations: this.observations.size,
+      handoffCandidates: this.handoffCandidates,
+      prefetchedFiles: this.prefetched.size,
+      reusedPrefetchedFiles: this.reusedPrefetched.size,
+      unusedPrefetchedFiles: this.prefetched.size - this.reusedPrefetched.size,
+      prefetchMs: this.prefetchMs,
+      prefetchStatus: this.prefetchStatus,
+    };
+  }
+
+  observe(tool: string, input: Record<string, unknown>) {
+    if (!this.reuse.handoff || !['read', 'read_file'].includes(tool)) return;
+    const raw = input.filePath ?? input.path ?? input.file;
+    if (typeof raw !== 'string') return;
+    const path = isAbsolute(raw) ? relative(this.workspace, raw) : raw;
+    const line =
+      typeof input.offset === 'number' && Number.isSafeInteger(input.offset) && input.offset > 0
+        ? input.offset
+        : 1;
+    if (!path || path.startsWith('../') || path.length > 512 || this.observations.size >= 64)
+      return;
+    this.observations.set(`${path}:${line}`, { path, line });
+  }
+
+  private async tracked(signal: AbortSignal): Promise<Set<string>> {
+    if (this.reuse.shared && this.inventory) return waitForEvidence(this.inventory, signal);
+    this.inventoryReads++;
+    const pending = exec('git', ['ls-files', '-z'], {
+      cwd: this.workspace,
+      signal,
+      maxBuffer: 2 * 1024 * 1024,
+    }).then(({ stdout }) => new Set(stdout.split('\0').filter(Boolean)));
+    if (this.reuse.shared) this.inventory = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.inventory === pending) this.inventory = undefined;
+    }
+  }
+
+  private async read(path: string, signal: AbortSignal, tracked: Set<string>) {
+    if (!this.reuse.shared) return readTrackedSource(this.workspace, path, signal);
+    if (!tracked.has(path)) return undefined;
+    if (this.prefetched.has(path)) this.reusedPrefetched.add(path);
+    const old = this.sources.pending.get(path);
+    if (old) {
+      this.sources.sharedRequests++;
+      return waitForEvidence(old, signal);
+    }
+    const pending = readTrackedSource(this.workspace, path, signal, {
+      tracked,
+      cache: this.sources,
+    });
+    this.sources.pending.set(path, pending);
+    try {
+      return await pending;
+    } finally {
+      this.sources.pending.delete(path);
+    }
+  }
+
+  async sourceContext(findings: Finding[]) {
+    try {
+      const tracked = await this.tracked(AbortSignal.timeout(1500));
+      return await buildFindingSourceContext(this.workspace, findings, (path, signal) =>
+        this.read(path, signal, tracked),
+      );
+    } catch {
+      return buildFindingSourceContext(this.workspace, findings);
+    }
+  }
+
+  async warm(options: { log: (s: string) => void; onStats: (s: JevPrefetchStats) => void }) {
+    if (!this.reuse.prefetch) return;
+    const started = Date.now();
+    this.prefetchStatus = 'running';
+    const existing = new Set(this.cache.keys());
+    await this.prepare('exploration', [], 'deterministic', {
+      ...options,
+      timeoutMs: 4000,
+      onStats: (row) =>
+        options.onStats({ ...row, speculative: true, injectedBytes: 0, coverageBytes: 0 }),
+    });
+    for (const path of this.cache.keys()) if (!existing.has(path)) this.prefetched.add(path);
+    this.prefetchMs = Date.now() - started;
+    this.prefetchStatus = 'completed';
+  }
 
   async prepare(
     scope: 'exploration' | 'verification',
@@ -148,12 +321,8 @@ export class EvidenceStore {
       bytes = 0;
     const loaded = new Map<string, NonNullable<Awaited<ReturnType<EvidenceStore['load']>>>>();
     try {
-      const { stdout } = await exec('git', ['ls-files', '-z'], {
-        cwd: this.workspace,
-        signal,
-        maxBuffer: 2 * 1024 * 1024,
-      });
-      const paths = new Set(stdout.split('\0').filter((p) => SOURCE.test(p)));
+      const tracked = await this.tracked(signal);
+      const paths = new Set([...tracked].filter((p) => SOURCE.test(p)));
       const refs = findingSourceLocations(findings).locations;
       const seeds =
         scope === 'verification' ? refs.map((r) => r.path) : this.files.map((f) => f.filename);
@@ -162,10 +331,10 @@ export class EvidenceStore {
         if (loaded.size >= 64 || bytes >= 2 * 1024 * 1024 || !paths.has(path)) return undefined;
         signal.throwIfAborted();
         const old = this.cache.get(path);
-        const source = await this.load(path, signal);
+        const source = await this.load(path, signal, tracked);
         if (!source || bytes + Buffer.byteLength(source.text) > 2 * 1024 * 1024) return undefined;
         if (source === old) cacheHits++;
-        else parsedFiles++;
+        else if (source.parsed) parsedFiles++;
         loaded.set(path, source);
         bytes += Buffer.byteLength(source.text);
         return source;
@@ -187,12 +356,23 @@ export class EvidenceStore {
       let matches: string[] = [];
       if (symbols.length) {
         try {
-          const found = await exec(
-            'git',
-            ['grep', '-l', '-z', '-w', '-F', ...symbols.flatMap((s) => ['-e', s]), '--'],
-            { cwd: this.workspace, signal, maxBuffer: 1024 * 1024 },
-          );
-          matches = found.stdout.split('\0').filter((p) => paths.has(p));
+          const key = JSON.stringify(symbols);
+          let pending = this.reuse.shared ? this.searches.get(key) : undefined;
+          if (pending) this.searchSharedRequests++;
+          else {
+            this.searchCalls++;
+            pending = exec(
+              'git',
+              ['grep', '-l', '-z', '-w', '-F', ...symbols.flatMap((s) => ['-e', s]), '--'],
+              { cwd: this.workspace, signal, maxBuffer: 1024 * 1024 },
+            ).then(({ stdout }) => stdout.split('\0'));
+            if (this.reuse.shared) this.searches.set(key, pending);
+          }
+          try {
+            matches = (await waitForEvidence(pending, signal)).filter((p) => paths.has(p));
+          } finally {
+            if (this.searches.get(key) === pending) this.searches.delete(key);
+          }
         } catch (error) {
           if ((error as { code?: number }).code !== 1) throw error;
         }
@@ -211,6 +391,9 @@ export class EvidenceStore {
           const target = resolveEvidenceImport(path, imp.from, paths);
           if (target) await read(target);
         }
+      }
+      if (scope === 'verification' && this.reuse.handoff) {
+        for (const { path } of this.observations.values()) await read(path);
       }
       for (const path of matches.slice(0, 64)) await read(path);
       const candidates: JevCandidate[] = [];
@@ -237,6 +420,12 @@ export class EvidenceStore {
             : formatSourceExcerpt(lines.slice(start, line + 16), start + 1, line, 2048),
         });
       };
+      if (scope === 'verification' && this.reuse.handoff) {
+        const before = candidates.length;
+        for (const ref of this.observations.values())
+          add(ref.path, 'review source location', ref.line, 'revalidated review read');
+        this.handoffCandidates += candidates.length - before;
+      }
       for (const t of targets.slice(0, 20)) {
         add(t.path, t.symbol, t.start, 'definition');
         for (const [path, source] of loaded) {
@@ -295,6 +484,7 @@ export class EvidenceStore {
           options.log(`Evidence preparation: ${JSON.stringify(measured)}`);
         },
         mode,
+        judgmentCache: this.disk,
         timeoutMs: Math.max(0, options.timeoutMs - (Date.now() - started)),
         prepared: {
           candidates: pool,
@@ -336,19 +526,28 @@ export class EvidenceStore {
     }
   }
 
-  private async load(path: string, signal: AbortSignal) {
-    const source = await readTrackedSource(this.workspace, path, signal);
+  private async load(path: string, signal: AbortSignal, tracked: Set<string>) {
+    const source = await this.read(path, signal, tracked);
     if (!source) return undefined;
     const digest = hash(source.text);
     const old = this.cache.get(path);
     if (old?.digest === digest && old.truncated === source.truncated) return old;
-    let index: SourceIndex = { definitions: [], imports: [], uses: [] };
-    try {
-      index = indexEvidenceSource(path, source.text);
-    } catch {
-      /* Unsupported syntax retains bounded text references. */
+    const key = JSON.stringify(['index-v1-babel-7.29.9', path, digest, source.truncated]);
+    const persisted = await this.disk.get(key);
+    let index: SourceIndex;
+    if (validSourceIndex(persisted)) {
+      index = persisted;
+      this.indexDiskHits++;
+    } else {
+      index = { definitions: [], imports: [], uses: [] };
+      try {
+        index = indexEvidenceSource(path, source.text);
+      } catch {
+        /* Unsupported syntax retains bounded text references. */
+      }
+      await this.disk.set(key, index);
     }
-    const value = { ...source, digest, index };
+    const value = { ...source, digest, index, parsed: !validSourceIndex(persisted) };
     if (this.cache.size >= 64) this.cache.delete(this.cache.keys().next().value!);
     this.cache.set(path, value);
     return value;
@@ -395,5 +594,41 @@ export class EvidenceStore {
         text: formatSourceExcerpt(d.text.split('\n'), 1, 1, 2048),
       };
     });
+  }
+}
+
+function validSourceIndex(value: unknown): value is SourceIndex {
+  const v = value as SourceIndex | null;
+  const line = (n: unknown) => Number.isSafeInteger(n) && Number(n) > 0;
+  return Boolean(
+    v &&
+    Array.isArray(v.definitions) &&
+    Array.isArray(v.imports) &&
+    Array.isArray(v.uses) &&
+    v.definitions.every(
+      (d) => d && typeof d.symbol === 'string' && line(d.start) && line(d.end) && d.end >= d.start,
+    ) &&
+    v.imports.every(
+      (i) =>
+        i &&
+        typeof i.local === 'string' &&
+        typeof i.imported === 'string' &&
+        typeof i.from === 'string',
+    ) &&
+    v.uses.every((u) => u && typeof u.symbol === 'string' && line(u.line)),
+  );
+}
+
+async function waitForEvidence<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  let aborted: () => void = () => {};
+  const timeout = new Promise<never>((_, reject) => {
+    aborted = () => reject(signal.reason);
+    signal.addEventListener('abort', aborted, { once: true });
+  });
+  try {
+    return await Promise.race([pending, timeout]);
+  } finally {
+    signal.removeEventListener('abort', aborted);
   }
 }

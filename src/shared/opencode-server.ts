@@ -300,6 +300,7 @@ export interface OpencodeRuntime {
   transcriptDir?: string;
   /** JBOT_VERIFY_FORK: verification forks the single main review session. */
   verifyFork?: boolean;
+  onSourceRead?: (tool: string, input: Record<string, unknown>) => void;
   reviewerAgent?: boolean;
   stop(): void;
 }
@@ -315,6 +316,7 @@ export interface StartOpencodeOptions {
   scrubEnv?: boolean;
   transcriptDir?: string;
   verifyFork?: boolean;
+  onSourceRead?: (tool: string, input: Record<string, unknown>) => void;
   reviewerAgent?: boolean;
   runStats?: boolean;
 }
@@ -410,6 +412,7 @@ export async function startOpencode(
     sessionOptionsFile,
     transcriptDir: options.transcriptDir,
     verifyFork: options.verifyFork,
+    onSourceRead: options.onSourceRead,
     reviewerAgent: options.reviewerAgent,
     stop,
   };

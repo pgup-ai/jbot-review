@@ -1,6 +1,15 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadDotEnv } from '../src/local/util.ts';
@@ -15,7 +24,15 @@ type Case = {
   pr?: string;
   findings?: string;
 };
-type Arm = 'off' | 'deterministic' | 'on';
+type Arm = {
+  id: string;
+  exploration: 'off' | 'deterministic' | 'on';
+  verification: 'off' | 'deterministic' | 'on';
+  shared?: boolean;
+  handoff?: boolean;
+  prefetch?: boolean;
+  persistent?: boolean;
+};
 type Plan = {
   seed: string;
   model: string;
@@ -23,6 +40,7 @@ type Plan = {
   repetitions?: number;
   evidence?: boolean;
   docs?: string;
+  reuse?: boolean;
 };
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const planPath = process.argv[2];
@@ -86,15 +104,63 @@ const config = {
   JBOT_BENCHMARK_DRY_RUN: 'true',
   CONTEXT7_API_KEY: '',
 };
-const arms: Arm[] = ['off', 'deterministic', 'on'];
+const arms: Arm[] = plan.reuse
+  ? [
+      { id: 'baseline', exploration: 'off', verification: 'deterministic' },
+      { id: 'shared', exploration: 'off', verification: 'deterministic', shared: true },
+      {
+        id: 'handoff',
+        exploration: 'off',
+        verification: 'deterministic',
+        shared: true,
+        handoff: true,
+      },
+      {
+        id: 'prefetch',
+        exploration: 'off',
+        verification: 'deterministic',
+        shared: true,
+        handoff: true,
+        prefetch: true,
+      },
+      {
+        id: 'jev',
+        exploration: 'off',
+        verification: 'on',
+        shared: true,
+        handoff: true,
+        prefetch: true,
+      },
+      {
+        id: 'persistent',
+        exploration: 'off',
+        verification: 'on',
+        shared: true,
+        handoff: true,
+        prefetch: true,
+        persistent: true,
+      },
+    ]
+  : ['off', 'deterministic', 'on'].map((id) => ({ id, exploration: id, verification: id }) as Arm);
+const cacheRoot = plan.reuse
+  ? mkdtempSync(resolve(tmpdir(), 'jbot-evidence-experiment-'))
+  : undefined;
 const schedule = Array.from({ length: plan.repetitions ?? 5 }, (_, repetition) =>
   plan.cases
-    .flatMap((c) => arms.map((arm) => ({ caseId: c.id, arm, repetition: repetition + 1 })))
+    .flatMap((c) => arms.map(({ id }) => ({ caseId: c.id, arm: id, repetition: repetition + 1 })))
     .sort((a, b) =>
       hash(plan.seed + JSON.stringify(a)).localeCompare(hash(plan.seed + JSON.stringify(b))),
     ),
 )
   .flat()
+  .flatMap((run) =>
+    arms.find((a) => a.id === run.arm)?.persistent
+      ? [
+          { ...run, cacheState: 'cold' },
+          { ...run, cacheState: 'warm' },
+        ]
+      : [{ ...run, cacheState: 'disabled' }],
+  )
   .map((run, i) => ({ ...run, id: String(i + 1).padStart(2, '0') }));
 mkdirSync(out, { recursive: true });
 writeFileSync(
@@ -107,7 +173,8 @@ writeFileSync(
       inputHashes: JSON.parse(frozenInputs),
       config,
       schedule,
-      cacheState: 'uncontrolled',
+      cacheState: 'provider cache uncontrolled; evidence disk cache cold/warm pairs when enabled',
+      arms,
       credentialPolicy: 'first-configured-opencode-key',
       concurrency: 1,
       retries: 0,
@@ -138,6 +205,10 @@ for (const run of schedule) {
     JSON.stringify(inputHashes()) !== frozenInputs
   )
     throw new Error('Driver changed during the experiment');
+  const arm = arms.find((a) => a.id === run.arm)!;
+  const cacheDirectory = cacheRoot ? resolve(cacheRoot, `${run.caseId}-${run.repetition}`) : '';
+  if (arm.persistent && run.cacheState === 'cold')
+    rmSync(cacheDirectory, { recursive: true, force: true });
   const c = plan.cases.find((c) => c.id === run.caseId)!;
   checkCase(c);
   const dir = resolve(out, run.id);
@@ -162,9 +233,14 @@ for (const run of schedule) {
       env: {
         ...env,
         ...config,
-        JBOT_JEV_PREFETCH: plan.evidence ? 'off' : run.arm,
-        JBOT_EXPLORATION_EVIDENCE: plan.evidence ? run.arm : 'off',
-        JBOT_VERIFICATION_EVIDENCE: plan.evidence ? run.arm : 'off',
+        JBOT_JEV_PREFETCH: plan.evidence || plan.reuse ? 'off' : run.arm,
+        JBOT_EXPLORATION_EVIDENCE: plan.reuse ? arm.exploration : plan.evidence ? run.arm : 'off',
+        JBOT_VERIFICATION_EVIDENCE: plan.reuse ? arm.verification : plan.evidence ? run.arm : 'off',
+        JBOT_EVIDENCE_SHARED: arm.shared ? '1' : '0',
+        JBOT_EVIDENCE_HANDOFF: arm.handoff ? '1' : '0',
+        JBOT_EVIDENCE_PREFETCH: arm.prefetch ? '1' : '0',
+        JBOT_EVIDENCE_CACHE_DIR: arm.persistent ? cacheDirectory : '',
+
         JBOT_EVIDENCE_DOCS: plan.docs ?? '',
         JBOT_BENCHMARK_OUTPUT: output,
       },
@@ -213,6 +289,7 @@ for (const run of schedule) {
       ? usage.costUsd + prefetch.reduce((sum, r) => sum + Number(r.estimatedCostUsd ?? 0), 0)
       : null,
     prefetch,
+    evidenceCache: rows.find((r) => r.kind === 'evidence-cache'),
     phases: rows.filter((r) => r.kind === 'phase' && r.scope === 'run'),
     exploration: rows.filter((r) => r.kind === 'exploration'),
     policy: header?.policy,

@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { parseModelName } from '@symma/protocol';
 import { parseGitDiff } from '../src/shared/git.ts';
 import { buildDiffHunksBlock } from '../src/shared/diff-context.ts';
-import { EvidenceStore, evidenceMode } from '../src/shared/evidence.ts';
+import { EvidenceStore, evidenceMode, evidenceReuseOptions } from '../src/shared/evidence.ts';
 import { requestFindingVerdicts } from '../src/shared/runner.ts';
 import { startOpencode } from '../src/shared/opencode-server.ts';
 import { runFindingVerification } from '../src/shared/opencode.ts';
@@ -27,8 +27,14 @@ const model = process.env.MODEL!;
 const { providerID, modelID } = parseModelName(model);
 const log = (message: string) => console.log(message);
 const telemetry = createTelemetryRecorder(true);
-const store = new EvidenceStore(workspace, files, process.env.JBOT_EVIDENCE_DOCS);
+const store = new EvidenceStore(
+  workspace,
+  files,
+  process.env.JBOT_EVIDENCE_DOCS,
+  evidenceReuseOptions(process.env),
+);
 const mode = evidenceMode(process.env.JBOT_VERIFICATION_EVIDENCE);
+const warming = store.warm({ log, onStats: (row) => telemetry.recordJevPrefetch(row) });
 const runtime = await startOpencode(
   workspace,
   providerID,
@@ -43,7 +49,9 @@ const runtime = await startOpencode(
 configureOpencodeTelemetry(runtime.client, createToolTelemetryAccumulator(telemetry, randomUUID()));
 const started = Date.now();
 try {
+  await warming;
   const verdicts = await requestFindingVerdicts({
+    sourceContext: store.reuse.shared ? (targets) => store.sourceContext(targets) : undefined,
     workspace,
     model,
     targets: findings,
@@ -77,6 +85,7 @@ try {
           : {}),
       }),
   });
+  telemetry.recordEvidenceCache(store.stats());
   writeFileSync(
     process.env.JBOT_BENCHMARK_OUTPUT,
     JSON.stringify(

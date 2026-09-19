@@ -11,10 +11,21 @@ const execFileAsync = promisify(execFile);
 const MAX_SOURCE_BYTES = 256 * 1024;
 const MAX_SOURCE_LOCATIONS = 20;
 
+type Source = { text: string; truncated: boolean };
+export class SourceCache {
+  entries = new Map<string, { signature: string; source: Source }>();
+  pending = new Map<string, Promise<Source | undefined>>();
+  hits = 0;
+  reads = 0;
+  sharedRequests = 0;
+  bytes = 0;
+}
+
 export async function readTrackedSource(
   workspace: string,
   path: string,
   signal: AbortSignal,
+  options?: { tracked: Set<string>; cache?: SourceCache },
 ): Promise<{ text: string; truncated: boolean } | undefined> {
   const root = resolveWithinWorkspace(workspace, '.');
   if (!root) return undefined;
@@ -22,27 +33,48 @@ export async function readTrackedSource(
   // Tracked source only: never follow a cited symlink into runtime credentials.
   if (!target || target !== resolve(root, path)) return undefined;
   try {
-    await execFileAsync('git', ['--literal-pathspecs', 'ls-files', '--error-unmatch', '--', path], {
-      cwd: root,
-      signal,
-      maxBuffer: 2048,
-    });
+    if (options && !options.tracked.has(path)) return undefined;
+    if (!options)
+      await execFileAsync(
+        'git',
+        ['--literal-pathspecs', 'ls-files', '--error-unmatch', '--', path],
+        {
+          cwd: root,
+          signal,
+          maxBuffer: 2048,
+        },
+      );
     const handle = await open(
       target,
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
     );
     try {
-      const stat = await handle.stat();
+      const stat = await handle.stat({ bigint: true });
       if (!stat.isFile()) return undefined;
+      signal.throwIfAborted();
+      const signature = [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(':');
+      const cached = options?.cache?.entries.get(path);
+      if (cached?.signature === signature) {
+        options!.cache!.hits++;
+        return cached.source;
+      }
       const buffer = Buffer.alloc(MAX_SOURCE_BYTES);
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
       if (buffer.subarray(0, bytesRead).includes(0)) return undefined;
       const text = buffer.toString('utf8', 0, bytesRead);
-      const truncated = stat.size > bytesRead;
-      return {
+      const truncated = stat.size > BigInt(bytesRead);
+      const source = {
         text: truncated ? text.slice(0, Math.max(0, text.lastIndexOf('\n'))) : text,
         truncated,
       };
+      if (options?.cache) {
+        const cache = options.cache;
+        cache.reads++;
+        cache.bytes += bytesRead;
+        if (cache.entries.size >= 64) cache.entries.delete(cache.entries.keys().next().value!);
+        cache.entries.set(path, { signature, source });
+      }
+      return source;
     } finally {
       await handle.close();
     }
@@ -83,6 +115,10 @@ export function findingSourceLocations(findings: Pick<Finding, 'path' | 'line' |
 export async function buildFindingSourceContext(
   workspace: string,
   findings: Finding[],
+  read: (path: string, signal: AbortSignal) => ReturnType<typeof readTrackedSource> = (
+    path,
+    signal,
+  ) => readTrackedSource(workspace, path, signal),
 ): Promise<string> {
   const { locations, omitted } = findingSourceLocations(findings);
   const files = new Map<string, ReturnType<typeof readTrackedSource>>();
@@ -92,7 +128,7 @@ export async function buildFindingSourceContext(
     locations.slice(0, MAX_SOURCE_LOCATIONS).map(async (ref) => {
       let file = files.get(ref.path);
       if (!file) {
-        file = readTrackedSource(workspace, ref.path, signal);
+        file = read(ref.path, signal);
         files.set(ref.path, file);
       }
       const source = await file;
