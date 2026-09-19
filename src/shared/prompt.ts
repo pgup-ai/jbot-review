@@ -343,7 +343,9 @@ JSON. Do not keep exploring solely for completeness or reread code already
 provided unless a specific uncertainty requires it. Report supported findings
 and identify material uncertainties without asserting unverified premises.`;
 
-export const REVIEW_RETRIEVAL_DESCRIPTION = `Retrieve a bounded source packet for a repository-relative path and line: enclosing definitions, import-linked references, imported definitions, and tests when discoverable. Use this to batch related context before individual searches. Results are partial source evidence, not findings or exhaustive call graphs; follow unresolved contracts with further reads. The full changed diff still requires review.`;
+export const REVIEW_RETRIEVAL_DESCRIPTION = `Retrieve a bounded source packet for a repository-relative path and line: enclosing definitions, import-linked references, imported definitions, and tests when discoverable. Results are partial source evidence, not findings or exhaustive call graphs; follow unresolved contracts with further reads. The full changed diff still requires review.`;
+
+export const REVIEW_RETRIEVAL_POLICY = `When you need related repository source beyond the supplied diff, first use review_context with a known repository-relative path and line to retrieve a combined packet. If the packet leaves a question unresolved, use ordinary read/search tools or retrieve the next dependency. Do not call it merely to reread evidence already supplied.`;
 
 export const REVIEW_RETRIEVAL_UNAVAILABLE = `No source packet available. Use ordinary read/search tools to resolve this question; absence of retrieved evidence does not establish absence of behavior.`;
 

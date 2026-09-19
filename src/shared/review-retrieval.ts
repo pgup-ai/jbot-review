@@ -6,6 +6,7 @@ import { explorationCheckpoint } from './exploration-policy.ts';
 import {
   EXPLORATION_CHECKPOINT,
   REVIEW_RETRIEVAL_DESCRIPTION,
+  REVIEW_RETRIEVAL_POLICY,
   REVIEW_RETRIEVAL_UNAVAILABLE,
 } from './prompt.ts';
 import type { JevPrefetchStats } from './jev-prefetch.ts';
@@ -134,6 +135,7 @@ export async function installReviewRetrieval(
   };
   await ctx.session.hook('context', (event) => {
     if (event.agent === 'jbot-wrapup' || event.agent === 'jbot-plain') return;
+    if (options.retrieval) event.system.push({ type: 'text', text: REVIEW_RETRIEVAL_POLICY });
     const state = session(event.sessionID);
     state.progress.requests++;
     const reason = options.checkpoints
