@@ -15,7 +15,7 @@ export async function readTrackedSource(
   workspace: string,
   path: string,
   signal: AbortSignal,
-): Promise<string | undefined> {
+): Promise<{ text: string; truncated: boolean } | undefined> {
   const root = resolveWithinWorkspace(workspace, '.');
   if (!root) return undefined;
   const target = resolveWithinWorkspace(root, path);
@@ -38,7 +38,11 @@ export async function readTrackedSource(
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
       if (buffer.subarray(0, bytesRead).includes(0)) return undefined;
       const text = buffer.toString('utf8', 0, bytesRead);
-      return stat.size > bytesRead ? text.slice(0, Math.max(0, text.lastIndexOf('\n'))) : text;
+      const truncated = stat.size > bytesRead;
+      return {
+        text: truncated ? text.slice(0, Math.max(0, text.lastIndexOf('\n'))) : text,
+        truncated,
+      };
     } finally {
       await handle.close();
     }
@@ -81,7 +85,7 @@ export async function buildFindingSourceContext(
   findings: Finding[],
 ): Promise<string> {
   const { locations, omitted } = findingSourceLocations(findings);
-  const files = new Map<string, Promise<string | undefined>>();
+  const files = new Map<string, ReturnType<typeof readTrackedSource>>();
   const signal = AbortSignal.timeout(1500);
 
   const sources: FindingSource[] = await Promise.all(
@@ -91,9 +95,9 @@ export async function buildFindingSourceContext(
         file = readTrackedSource(workspace, ref.path, signal);
         files.set(ref.path, file);
       }
-      const text = await file;
-      if (!text) return { ...ref };
-      const lines = text.split(/\r?\n/);
+      const source = await file;
+      if (!source?.text) return { ...ref };
+      const lines = source.text.split(/\r?\n/);
       if (ref.line > lines.length) return { ...ref };
       const startLine = Math.max(1, ref.line - 20);
       return { ...ref, startLine, lines: lines.slice(startLine - 1, ref.line + 20) };

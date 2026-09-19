@@ -18,7 +18,7 @@ export type JevPrefetchMode = 'off' | 'shadow' | 'on';
 
 export interface JevPrefetchStats {
   kind: 'jev-prefetch';
-  version: 1;
+  version: 2;
   mode: JevPrefetchMode;
   model: typeof JEV_MODEL;
   status: 'disabled' | 'skipped' | 'shadow' | 'applied' | 'fallback';
@@ -37,6 +37,7 @@ export interface JevPrefetchStats {
   scoredCandidates: number;
   selectedCandidates: number;
   baselineOverlap: number;
+  completeFileCandidates: number;
   requestBytes: number;
   contextBytes: number;
   injectedBytes: number;
@@ -124,7 +125,7 @@ export async function buildJevPrefetch(
   const started = Date.now();
   const stats: JevPrefetchStats = {
     kind: 'jev-prefetch',
-    version: 1,
+    version: 2,
     mode: options.mode,
     model: JEV_MODEL,
     status: 'disabled',
@@ -134,6 +135,7 @@ export async function buildJevPrefetch(
     scoredCandidates: 0,
     selectedCandidates: 0,
     baselineOverlap: 0,
+    completeFileCandidates: 0,
     requestBytes: 0,
     contextBytes: 0,
     injectedBytes: 0,
@@ -166,10 +168,12 @@ export async function buildJevPrefetch(
     const candidates: JevCandidate[] = [];
     for (const path of paths) {
       signal.throwIfAborted();
-      const text = await readTrackedSource(workspace, path, signal);
-      if (!text) continue;
+      const source = await readTrackedSource(workspace, path, signal);
+      if (!source?.text) continue;
       stats.sampledFiles++;
-      const lines = text.split(/\r?\n/);
+      const lines = source.text.split(/\r?\n/);
+      const numbered = lines.map((line, i) => `${i + 1}: ${line}`).join('\n');
+      const completeFile = !source.truncated && Buffer.byteLength(numbered) <= 2048;
       const symbols = eligible.filter((e) => e.callSites.includes(path)).map((e) => e.symbol);
       let hits = 0;
       for (let i = 0; i < lines.length && hits < 3; i++) {
@@ -177,12 +181,15 @@ export async function buildJevPrefetch(
           new RegExp(`(?<![\\w$])${s.replace(/\$/g, '\\$')}(?![\\w$])`).test(lines[i]),
         );
         if (!symbol) continue;
-        const start = Math.max(0, i - 5);
+        const start = Math.max(0, i - 12);
         candidates.push({
           symbol,
           path,
           line: i + 1,
-          text: formatSourceExcerpt(lines.slice(start, i + 6), start + 1, i + 1, 1024),
+          completeFile,
+          text: completeFile
+            ? numbered
+            : formatSourceExcerpt(lines.slice(start, i + 13), start + 1, i + 1, 2048),
         });
         hits++;
       }
@@ -232,6 +239,9 @@ export async function buildJevPrefetch(
     stats.estimatedCostUsd = (result.inputTokens * 0.042) / 1_000_000;
     stats.selectedScores = result.scores;
     stats.selectedCandidates = result.selected.length;
+    stats.completeFileCandidates = result.selected.filter(
+      (i) => request.candidates[i].completeFile,
+    ).length;
     if (!result.selected.length) {
       stats.reason = 'no-relevant-candidates';
       return '';

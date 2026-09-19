@@ -23,7 +23,13 @@ const files = [
     patch: '@@ -1 +1 @@\n-export function pay() {}\n+export function pay(amount: number) {}',
   },
 ];
-const candidate = { symbol: 'pay', path: 'consumer.ts', line: 1, text: '1: pay(10);' };
+const candidate = {
+  completeFile: false,
+  symbol: 'pay',
+  path: 'consumer.ts',
+  line: 1,
+  text: '1: pay(10);',
+};
 const answer = (scores: number[]) => ({
   model: JEV_MODEL,
   answers: Object.fromEntries(scores.map((noul, i) => [`c${i}`, { type: 'noul', noul }])),
@@ -142,6 +148,10 @@ test('off and shadow preserve baseline context; on adds only tracked source and 
   assert.equal(rows[1].injectedBytes, 0);
   assert.ok(rows[2].injectedBytes > 0);
   assert.equal(rows[2].inputTokens, 1234);
+  assert.equal(rows[2].version, 2);
+  assert.equal(rows[2].completeFileCandidates, 1);
+  assert.match(applied, /complete file/);
+  assert.match(applied, /Do not spend a tool call rereading supplied lines/);
   assert.equal(rows[2].estimatedCostUsd, (1234 * 0.042) / 1_000_000);
   assert.doesNotMatch(
     logs.join('\n') + recorder.toJsonl(),
@@ -220,4 +230,39 @@ test('HTTP errors, invalid or oversized responses, and timeout fail open without
   assert.equal(rows.at(-1).reason, 'no-candidates');
   assert.equal(mock.mock.callCount(), count);
   assert.doesNotMatch(logs.join('\n'), /SECRET_ERROR|TEST_KEY/);
+});
+
+test('source completeness never hides byte truncation or a dependency beyond a partial window', async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), 'jbot-jev-windows-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', workspace]);
+  await writeFile(join(workspace, 'complete.ts'), 'pay(1);\n' + '\n'.repeat(18) + 'checkResult();');
+  await writeFile(join(workspace, 'partial.ts'), 'pay(1);\n' + 'const padding = 1;\n'.repeat(200));
+  await writeFile(join(workspace, 'clipped.ts'), 'pay(1);\n//' + 'x'.repeat(300_000));
+  execFileSync('git', ['add', '.'], { cwd: workspace });
+  t.mock.method(globalThis, 'fetch', async (_, init) => {
+    const { state, questions } = JSON.parse(init.body);
+    const byPath = Object.fromEntries(state.candidates.map((c) => [c.path, c]));
+    assert.equal(byPath['complete.ts'].completeFile, true);
+    assert.match(byPath['complete.ts'].text, /checkResult/);
+    assert.equal(byPath['partial.ts'].completeFile, false);
+    assert.equal(byPath['clipped.ts'].completeFile, false);
+    return Response.json(answer(Object.keys(questions).map(() => 0.9)));
+  });
+  const block = await buildJevPrefetch(
+    workspace,
+    files,
+    [{ symbol: 'pay', callSites: ['complete.ts', 'partial.ts', 'clipped.ts'] }],
+    {
+      mode: 'on',
+      apiKey: 'TEST_KEY',
+      timeoutMs: 5000,
+      log: () => {},
+      onStats: () => {},
+    },
+  );
+  assert.match(block, /complete.ts:1 \(pay; complete file\)/);
+  assert.match(block, /partial.ts:1 \(pay; partial file/);
+  assert.match(block, /clipped.ts:1 \(pay; partial file/);
+  assert.ok(Buffer.byteLength(block) <= 6000);
 });

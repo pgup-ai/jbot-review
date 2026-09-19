@@ -953,7 +953,7 @@ rank, and measure without injecting excerpts), and `on` (inject the ranked
 excerpts). An explicit `ReviewRunOptions.jevPrefetch` overrides the environment.
 Unknown environment values disable the experiment.
 
-The first version reuses exported-symbol discovery, so body-only changes with
+The experiment reuses exported-symbol discovery, so body-only changes with
 no changed export declaration may have no candidates. It samples at most 12
 tracked source files in round-robin symbol order, three occurrences per file,
 and scores at most 24 excerpts. Jev receives bounded diff fragments and source
@@ -970,6 +970,13 @@ rate limits, or invalid responses leave the original context intact. Scores
 rank evidence; they are not bug probabilities or finding verdicts. Excerpts
 scoring below 0.5 are not injected, and at most one excerpt per file is kept.
 
+Version 2 supplies a complete source file when its numbered contents fit 2,048
+bytes; otherwise it supplies a bounded window around the match and labels it
+partial. Source clipped by the file-read limit is always partial. Reviewers are
+instructed to use supplied lines directly for caller checks, fetching more when
+missing dependencies or conflicting evidence require it. Omitted callers remain
+in scope; Jev's ranking cannot waive coverage or verification.
+
 ```sh
 JBOT_JEV_PREFETCH=off JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
 JBOT_JEV_PREFETCH=shadow JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
@@ -980,7 +987,8 @@ Every eligible run logs one `Jev prefetch: {...}` row, also saved as
 `kind: "jev-prefetch"` when review telemetry is enabled. It reports mode,
 algorithm version, pinned model, status/fallback reason, candidate and selected
 counts, collection/API/total milliseconds, request hash and byte size,
-selected scores, proposed/injected context bytes, and provider token usage.
+selected scores, complete-file selection count (`completeFileCandidates`),
+proposed/injected context bytes, and provider token usage.
 With telemetry enabled, final `Review timing` and `Review metrics` log rows
 also expose total elapsed time, terminal state, per-session tokens, observed
 tool calls, repeated reads/searches, output bytes, and available turn counts.
@@ -1000,6 +1008,9 @@ tokens and the exploration rows' observed tool calls and turns. OpenCode's
 or opaque sessions do not establish zero tool use. Inspect retained findings
 for precision and recall.
 Shadow measures ranking and overhead only; it cannot demonstrate faster reviews.
+The [evidence-reuse audit](docs/audits/2026-09-19-jev-evidence-reuse.md)
+records the version 2 comparison: fewer source reads and turns, without a
+reliable end-to-end speedup.
 The core quality benchmark remains recommended before adoption, and the full
 quality gate is required before enabling this by default.
 
