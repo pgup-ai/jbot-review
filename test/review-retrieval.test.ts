@@ -96,6 +96,12 @@ test('retrieval batches linked callers and imports, refreshes sources, and exclu
 });
 
 test('plugin checkpoint hooks preserve tool access, skip tool-less agents, and persist only counters', async (t) => {
+  const previous = process.env.JBOT_EXPLORATION_CHECKPOINTS;
+  process.env.JBOT_EXPLORATION_CHECKPOINTS = '1';
+  t.after(() => {
+    if (previous === undefined) delete process.env.JBOT_EXPLORATION_CHECKPOINTS;
+    else process.env.JBOT_EXPLORATION_CHECKPOINTS = previous;
+  });
   const directory = await mkdtemp(join(tmpdir(), 'checkpoint-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   let onContext: Parameters<
@@ -120,7 +126,6 @@ test('plugin checkpoint hooks preserve tool access, skip tool-less agents, and p
     },
     directory,
     directory,
-    { retrieval: false, checkpoints: true },
   );
   const event = () => ({
     sessionID: 'session',

@@ -13,6 +13,10 @@ const MAX_FILES = 12;
 const MAX_CONTEXT_BYTES = 6_000;
 const MAX_SELECTED = 4;
 
+export function symbolPattern(symbol: string) {
+  return new RegExp(`(?<![\\w$])${symbol.replace(/\$/g, '\\$')}(?![\\w$])`);
+}
+
 export type JevPrefetchMode = 'off' | 'shadow' | 'on' | 'deterministic';
 
 export interface JevPrefetchStats {
@@ -223,9 +227,7 @@ export async function buildJevPrefetch(
         const symbols = eligible.filter((e) => e.callSites.includes(path)).map((e) => e.symbol);
         let hits = 0;
         for (let i = 0; i < lines.length && hits < 3; i++) {
-          const symbol = symbols.find((s) =>
-            new RegExp(`(?<![\\w$])${s.replace(/\$/g, '\\$')}(?![\\w$])`).test(lines[i]),
-          );
+          const symbol = symbols.find((s) => symbolPattern(s).test(lines[i]));
           if (!symbol) continue;
           const start = Math.max(0, i - 12);
           candidates.push({

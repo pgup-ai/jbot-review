@@ -2,7 +2,11 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EvidenceStore, JS_SOURCE } from './evidence.ts';
 import { evidenceHash } from './evidence-cache.ts';
-import { explorationCheckpoint, selectReadEvidence } from './exploration-policy.ts';
+import {
+  explorationCheckpoint,
+  explorationExperiment,
+  selectReadEvidence,
+} from './exploration-policy.ts';
 import { reviewReadLocations } from './review-read-locations.ts';
 import {
   EXPLORATION_CHECKPOINT,
@@ -97,7 +101,11 @@ export async function installReviewRetrieval(
   ctx: PluginContext,
   workspace: string,
   statsDirectory: string,
-  options: { retrieval: boolean; checkpoints: boolean; readEvidence?: boolean | 'linked' },
+  options: {
+    retrieval: boolean;
+    checkpoints: boolean;
+    readEvidence?: boolean | 'linked';
+  } = explorationExperiment(process.env),
 ) {
   const tool = reviewRetrievalTool(workspace);
   const linkedStore =

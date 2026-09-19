@@ -13,7 +13,12 @@ import {
   SOURCE_FILE,
 } from './finding-context.ts';
 import { EvidenceDiskCache, evidenceHash } from './evidence-cache.ts';
-import { buildJevPrefetch, type JevPrefetchMode, type JevPrefetchStats } from './jev-prefetch.ts';
+import {
+  buildJevPrefetch,
+  symbolPattern,
+  type JevPrefetchMode,
+  type JevPrefetchStats,
+} from './jev-prefetch.ts';
 import {
   JEV_MODEL,
   formatSourceExcerpt,
@@ -477,9 +482,8 @@ export class EvidenceStore {
       for (const [path, source] of loaded) {
         const lines = source.text.split(/\r?\n/);
         for (const symbol of symbols) {
-          const line = lines.findIndex((l) =>
-            new RegExp(`(?<![\\w$])${symbol.replace(/\$/g, '\\$')}(?![\\w$])`).test(l),
-          );
+          const pattern = symbolPattern(symbol);
+          const line = lines.findIndex((l) => pattern.test(l));
           if (line >= 0) add(path, symbol, line + 1, 'text reference; binding unresolved');
         }
       }

@@ -194,3 +194,146 @@ existing regression case now covers default, zero and capped explicit limits.
 All confirmation source files are at most 18 lines, so the correction cannot
 change their selections; the timing results still refer to `68fcfa0`, not the
 later corrected revision. Earlier byte truncation remains possible.
+
+## Full-branch dogfood
+
+The built local pipeline reviewed `2d8f923...58863d3` in a clean throwaway
+worktree: linked first, then baseline, with identical diff hash, model route,
+effort and other experiment settings. One run per arm; provider cache state and
+model generation are uncontrolled. The guideline pass and independent verifier
+ran in both. The worktree stayed clean and was removed after both completed.
+
+| Measure                  |  Baseline |    Linked |
+| ------------------------ | --------: | --------: |
+| Total seconds            |    194.02 |    138.29 |
+| Main phase seconds       |    150.21 |    111.27 |
+| Verification seconds     |     42.77 |     25.79 |
+| Tool calls               |        46 |        38 |
+| Model turns              |        46 |        36 |
+| Tool-output bytes        |   313,596 |   301,416 |
+| Uncached input tokens    |   219,883 |   213,607 |
+| Output tokens            |    55,153 |    38,007 |
+| Cache-read tokens        | 3,196,928 | 2,151,424 |
+| Reported model cost, USD |   0.13574 |   0.10079 |
+| Retained P3 suggestions  |         3 |         3 |
+| Incomplete sessions      |         0 |         0 |
+
+Linked delivered five packets / 25,522 added bytes, with 453 ms preparation,
+no fallback and one observed later-turn request for a supplied path. The
+verifier received two packets and returned usable verdicts. This confirms the
+feature runs on the full branch; it does not erase the confirmation failure or
+establish a general 29% speedup. The arms produced different low-priority
+suggestions and different output-token counts, so the timing difference cannot
+be attributed solely to delivery. There is no known-defect recall oracle for
+this branch diff.
+
+Sanitized transcripts preserve tool/turn sequences but redact tool inputs,
+outputs and metadata. Therefore they cannot establish which supplied source
+lines were reused. The separate mechanism probe retains source-read locations;
+the full-branch evidence is limited to numeric counters and bounded progress
+logs. Many logged calls retrieve diff sections and are outside this feature's
+source-read grammar. Batching omitted diff recovery is a separate candidate for
+the next experiment, alongside isolating main-review and verifier delivery.
+
+## Self-review and de-slop
+
+Applied `jbot-review-pr-self-review` and `jbot-review-de-slop` against the fetched
+base `2d8f923`. Reviewed all branch source/test/config changes, current docs and
+prior audit decisions. Rechecked guarded source admission, freshness, budgets,
+concurrent delivery, failure paths, prompt ordering, configuration identity,
+numeric-only counters and read-only plugin behavior. Full-diff scope and
+independent verdict handling remain unchanged; the runner is unchanged this
+round. No remaining P1/P2 issue was found.
+
+All six dogfood suggestions were adjudicated:
+
+- **Applied:** the generated plugin now lets `installReviewRetrieval` read its
+  options through the existing `explorationExperiment` helper. A cheap import
+  gate remains so disabled experiments do not load the retrieval module.
+  Existing checkpoint coverage now exercises the omitted-options entry point.
+- **Applied:** the two symbol-boundary expressions share `symbolPattern`, with
+  two production callers. Matching semantics are unchanged; the collector
+  compiles the pattern once before scanning lines.
+- **Not applied:** moving Babel to dev-only dependencies would break runtime
+  experiments. The eager-load concern is plausible, but the reported 2 MB parser
+  is not the measured source size (513,377 bytes), and no startup penalty was
+  established. A packaging split needs its own measured tradeoff.
+- **Not applied:** accepting a prefix of an unsupported shell chain changes the
+  observer's deliberately conservative contract. Unknown grammar is recorded
+  as unclassified; original commands still run. The existing regression rejects
+  `cat a.ts && git diff`. No shell grammar expansion was folded into this trial.
+- **Not applied:** the parser pin and cache-key version currently agree. The
+  suggested future upgrade hazard does not demonstrate a current invalidation
+  failure; keep them synchronized when upgrading the parser.
+- **Not applied:** required legacy counters and optional newer counters have
+  separate validation for compatibility. All current producer fields are read;
+  no missing counter was identified. A generalized schema is unnecessary here.
+
+These two cleanup refactors follow the frozen timing runs. They do not change
+the selection policy, prompts or budgets; no measured speedup is attributed to
+them. The native range correction above also follows confirmation. Existing
+assertions were preserved, with default/capped range checks folded into the
+existing read-parser case.
+
+Comment adjudication for the final branch (two moved blocks count once):
+
+| TypeScript block                 | Verdict and reason                                      |
+| -------------------------------- | ------------------------------------------------------- |
+| Optional persistence catch       | keep: explains fail-open storage errors                 |
+| Imports/citations priority       | keep: explains scarce read-slot ordering                |
+| Documentation priority           | keep: protects contract evidence from a full code pool  |
+| Unsupported syntax catch         | keep: explains retained text fallback                   |
+| Tracked-source symlink guard     | keep: explains the credential boundary                  |
+| Whole-turn usage accounting      | keep: explains V2's per-step assistant messages         |
+| Literal shell grammar            | keep: explains why syntax is never evaluated            |
+| Counter-file write catch         | keep: explains why telemetry cannot interrupt review    |
+| Attempt reservation before await | keep: explains the concurrent budget race               |
+| Serialized packet preparation    | keep: explains duplicate dependency delivery prevention |
+
+All eight added `.env.example` comment blocks are kept as operator-facing mode,
+credential, cache and documentation-path instructions. One was added this round.
+
+The 16 cases adjudicated in
+[the tool-reuse audit](2026-09-19-tool-reuse-investigation.md#full-branch-self-review-and-de-slop)
+were rechecked and retained for the same distinct failures. The other eight
+branch-added cases were individually retained:
+
+| Case                       | Unique failure caught                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------- |
+| Source admission budget    | A ninth oversized source is indexed/persisted outside the budget                    |
+| Failed wrap-up accounting  | Failed nested wrap-up counts the main turn twice                                    |
+| Checkpoint decision        | Pressure is ignored or a second checkpoint fires without runway                     |
+| Linked candidate selection | Seed/known/unbound paths or duplicate files consume selection slots                 |
+| Retrieval integration      | Tool registration returns stale or unsafe source despite valid inputs               |
+| Checkpoint plugin          | Hook targets tool-less agents, ignores mode options or persists source text         |
+| Automatic read evidence    | Parallel calls exceed the attempt cap or mutate original result/metadata            |
+| Linked delivery            | Concurrent packets repeat dependencies or same-turn reads inflate later-read counts |
+
+Cut: duplicate execution-option parsing and duplicate symbol regex construction.
+Comments: 10 TypeScript blocks and eight configuration blocks kept, none rewritten
+or cut in this round. Tests: 24 branch-added cases kept, no new-case folds or
+cuts; two cases were added this round. Existing cases received additional
+assertions without weakening prior contracts.
+
+Validation after cleanup: all 1,092 tests pass, including 28 focused tests;
+formatting, typecheck, lint, build and diff checks pass. A scan of 381 changed
+files and local artifacts found no configured credential values; `.env` remains
+ignored. The two full-branch dogfoods precede the final
+refactors and are not claimed as reruns of the final source. No packaging entry
+point or dependency changed this round; the preceding audit records the Docker
+slim build/import check. The advisory core corpus with three repetitions and
+independent adjudication was not run. These selected fixtures and local dogfoods
+do not establish broad quality equivalence or a benchmark-ledger pass. All
+experiment defaults remain off.
+
+Local artifacts are retained in `.jbot-review/jev-experiment-v9/`: fixture recipe
+and executable oracles, probe data, pilot, confirmation manifest/results/labels,
+dogfood manifests/reviews/sanitized transcripts and validation logs. Confirmation
+SHA-256: `manifest.json` =
+`879c94a97b4876d414729df6da6919e7ba3b1d1f80e4624e0c289e30d26ca605`;
+`results.json` =
+`2f1049fd14f19e33581b76306e660ba48121acc0783bbc51ccd3971b27567c26`;
+`adjudication.json` =
+`5804c4fa8680e36a9511a84a9910e565d9ce5a2e40a0582d1a88fd84ffe93dcd`.
+
+Round diff from `d0e0dbe`: 694 additions, 64 deletions (net +630) across 14 tracked files. No untracked deliverables remain.
