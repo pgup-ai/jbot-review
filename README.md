@@ -939,6 +939,51 @@ and precision against seeded defects.
 
 ## Comparing review runs
 
+### Exploration and verification evidence experiment
+
+`JBOT_EXPLORATION_EVIDENCE` and `JBOT_VERIFICATION_EVIDENCE` independently
+accept `off` (default), `deterministic`, `shadow`, or `on`. They use the same
+TypeSafe credential and Jev request limits described below. Exploration needs
+enhanced context and supersedes the older caller-prefetch arm when enabled.
+Verification prepares evidence separately for each finding batch; the existing
+independent verifier and fail-open verdict handling remain authoritative.
+
+The collector parses JS/TS syntax with `@babel/parser` to locate declarations
+containing changed body lines, then gathers named-import-linked references,
+nearby guards/tests, imported definitions, and bounded text matches. It does
+not execute repository configuration or code. Links are syntactic evidence,
+not a type-checked call graph: reexports, package aliases, shadowed bindings,
+and unsupported syntax require ordinary reviewer exploration. Source must be
+tracked, regular, and inside the workspace. Up to 20 seed files, 64 loaded
+files, 2 MiB of admitted source, 64 collected candidates, and 24 scored
+candidates bound each preparation. Each read is capped at 256 KiB. A run-local
+cache reuses parsed syntax after rechecking the content hash; it is shared
+between exploration and verification and never crosses repositories.
+
+An optional `JBOT_EVIDENCE_DOCS=/absolute/path/docs.json` supplies operator-owned
+documentation snapshots to verification. The file is an array of
+`{ "url": "https://official.example/docs", "version": "v1", "retrievedAt": "2026-09-19", "text": "Relevant contract excerpt or attributed summary" }`.
+Use authoritative sources for the installed API/version. URLs must be HTTPS
+without credentials, queries, or fragments. The loader performs no network
+fetches. The file is capped at 64 KiB, six documents, and 6,000 bytes per
+text; each candidate remains a 2,048-byte excerpt. Snapshots are untrusted
+context, not instructions or proof that a finding is false. They include URL,
+version, retrieval date, and content hash. Keep snapshots outside the reviewed
+checkout and freeze their contents when comparing arms.
+
+Each packet permits four excerpts within 6,000 bytes plus a bounded coverage
+notice (under 800 bytes). Missing evidence never narrows review scope.
+Version 4 `jev-prefetch` log/telemetry rows distinguish `scope`, source-cache
+hits, parsed files, omitted files, candidate/selection hashes, coverage bytes,
+collection/API time, tokens, and estimated Jev cost. `injectedBytes` excludes
+`coverageBytes`; add both for the complete packet. Existing phase/session rows
+measure review and verification time, tool calls, turns, and model cost.
+
+```sh
+JBOT_EXPLORATION_EVIDENCE=deterministic JBOT_VERIFICATION_EVIDENCE=deterministic npm run review:local -- --base origin/main
+JBOT_EXPLORATION_EVIDENCE=on JBOT_VERIFICATION_EVIDENCE=on npm run review:local -- --base origin/main
+```
+
 ### Jev caller-evidence experiment
 
 `JBOT_JEV_PREFETCH=on` adds up to four caller source excerpts to the existing

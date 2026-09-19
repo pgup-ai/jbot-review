@@ -15,6 +15,7 @@ import {
 } from './time-budget.ts';
 import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
+import { EvidenceStore, evidenceMode } from './evidence.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
 
 import {
@@ -790,6 +791,9 @@ function missingOctokit(): Octokit {
 }
 
 export interface ReviewRunOptions {
+  explorationEvidence?: JevPrefetchMode;
+  verificationEvidence?: JevPrefetchMode;
+
   /** Opt-in caller-evidence ranking; shadow records decisions without changing prompts. */
   jevPrefetch?: JevPrefetchMode;
   enhancedContext?: boolean;
@@ -1542,9 +1546,26 @@ async function runReviewPipeline(params: {
       `Embedded-only backend diff hunks block: ${embeddedOnlyBackendDiffHunks.text.length} chars.`,
     );
   }
+  const evidence = new EvidenceStore(workspace, files, process.env.JBOT_EVIDENCE_DOCS);
+  const prepareEvidence = (
+    scope: 'exploration' | 'verification',
+    findings: Finding[],
+    timeoutMs: number,
+  ) =>
+    evidence.prepare(
+      scope,
+      findings,
+      scope === 'exploration' ? options.explorationEvidence : options.verificationEvidence,
+      {
+        timeoutMs,
+        apiKey: process.env.TYPESAFE_API_KEY,
+        log,
+        onStats: (stats) => telemetry.recordJevPrefetch(stats),
+      },
+    );
   const blastRadiusBlock = options.enhancedContext
     ? await buildBlastRadiusBlock(workspace, files, undefined, {
-        mode: options.jevPrefetch,
+        mode: options.explorationEvidence === 'off' ? options.jevPrefetch : 'off',
         apiKey: process.env.TYPESAFE_API_KEY,
         timeoutMs:
           options.timeBudgetMinutes > 0
@@ -1555,6 +1576,18 @@ async function runReviewPipeline(params: {
       })
     : '';
   if (blastRadiusBlock) log('Embedded changed-symbol usage block.');
+  const explorationEvidence = options.enhancedContext
+    ? await prepareEvidence(
+        'exploration',
+        [],
+        options.timeBudgetMinutes > 0
+          ? Math.max(
+              0,
+              Math.min(5000, options.timeBudgetMinutes * 60_000 - (Date.now() - runStartedAt)),
+            )
+          : 5000,
+      )
+    : '';
 
   const diffScope = { baseRef, baseSha, headSha, worktree: !!localDiff };
 
@@ -1603,7 +1636,7 @@ async function runReviewPipeline(params: {
       summaryScope: summaryScopeBlock,
       reviewFocus: reviewFocusBlock,
       priorJbotThreads: priorJbotThreadBlock,
-      blastRadius: blastRadiusBlock,
+      blastRadius: joinContext(blastRadiusBlock, explorationEvidence),
     });
     baseCoreContext = coreContext;
     coreContext = joinContext(coreContext, ...supplementaryBlocks.map((block) => block.text));
@@ -1662,6 +1695,7 @@ async function runReviewPipeline(params: {
       ...linkedIssueContext,
     }),
     blastRadiusBlock,
+    explorationEvidence,
     LENS_CONTEXT_NOTE,
   ];
   // The trust boundary leads either way; the shared-prefix arm moves only the diff.
@@ -2679,6 +2713,8 @@ async function runReviewPipeline(params: {
       const targets = indexes.map((index) => settled[index]);
       log(`Verifying ${targets.length} finding(s) concurrently with the aux settle grace.`);
       const verdicts = await requestFindingVerdicts({
+        prepareEvidence: (targets, timeoutMs) =>
+          prepareEvidence('verification', targets, timeoutMs),
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -2865,6 +2901,8 @@ async function runReviewPipeline(params: {
       );
       logVerdictOutcomes(merge, log);
       const late = await verifyFindings({
+        prepareEvidence: (targets, timeoutMs) =>
+          prepareEvidence('verification', targets, timeoutMs),
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -2884,6 +2922,8 @@ async function runReviewPipeline(params: {
       verifiedFindings = [...merge.findings.filter((finding) => !lateSet.has(finding)), ...late];
     } else {
       verifiedFindings = await verifyFindings({
+        prepareEvidence: (targets, timeoutMs) =>
+          prepareEvidence('verification', targets, timeoutMs),
         workspace,
         backend: auxBackend,
         model: auxModel,
@@ -3307,6 +3347,10 @@ export function normalizeOptions(
   // raise the useful pass ceiling.
   const maxPasses = 1 + COUNTED_LENS_KEYS.length;
   return {
+    explorationEvidence:
+      options?.explorationEvidence ?? evidenceMode(process.env.JBOT_EXPLORATION_EVIDENCE),
+    verificationEvidence:
+      options?.verificationEvidence ?? evidenceMode(process.env.JBOT_VERIFICATION_EVIDENCE),
     jevPrefetch:
       options?.jevPrefetch ??
       (process.env.JBOT_JEV_PREFETCH === 'on'
@@ -3554,6 +3598,7 @@ export function settleWithinGrace<T>(
 }
 
 async function verifyFindings(params: {
+  prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
   workspace: string;
   backend: ReviewBackend;
   model: string;
@@ -3601,8 +3646,9 @@ async function verifyFindings(params: {
 
 /** A failed batch must not discard verdicts from successful batches. */
 export async function requestFindingVerdicts(params: {
+  prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
   workspace: string;
-  backend: ReviewBackend;
+  backend: Pick<ReviewBackend, 'runFindingVerification'>;
   model: string;
   prContext: string;
   targets: Finding[];
@@ -3620,6 +3666,16 @@ export async function requestFindingVerdicts(params: {
     const targets = params.targets.slice(offset, offset + VERIFICATION_BATCH_SIZE);
     try {
       const sourceContext = await buildFindingSourceContext(params.workspace, targets);
+      let evidenceContext = '';
+      try {
+        evidenceContext =
+          (await params.prepareEvidence?.(
+            targets,
+            Math.max(0, Math.min(5000, (params.timeoutMs ?? Infinity) - (Date.now() - startedAt))),
+          )) ?? '';
+      } catch {
+        params.log('Verification evidence unavailable; continuing with cited source.');
+      }
       const timeoutMs =
         params.timeoutMs === undefined
           ? undefined
@@ -3627,7 +3683,7 @@ export async function requestFindingVerdicts(params: {
       if (timeoutMs === 0) throw new Error('Finding verification budget exhausted.');
       const batch = await params.backend.runFindingVerification(
         params.model,
-        [params.prContext, sourceContext].filter(Boolean).join('\n\n'),
+        [params.prContext, sourceContext, evidenceContext].filter(Boolean).join('\n\n'),
         targets,
         params.log,
         timeoutMs,

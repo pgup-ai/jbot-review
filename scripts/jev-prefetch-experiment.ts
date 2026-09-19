@@ -7,15 +7,28 @@ import { loadDotEnv } from '../src/local/util.ts';
 import { parseBenchmarkTelemetry } from '../src/shared/benchmark-runner.ts';
 import type { ReviewResult } from '../src/shared/types.ts';
 
-type Case = { id: string; workspace: string; base: string; head: string; pr: string };
+type Case = {
+  id: string;
+  workspace: string;
+  base: string;
+  head: string;
+  pr?: string;
+  findings?: string;
+};
 type Arm = 'off' | 'deterministic' | 'on';
-type Plan = { seed: string; model: string; cases: Case[] };
+type Plan = {
+  seed: string;
+  model: string;
+  cases: Case[];
+  repetitions?: number;
+  evidence?: boolean;
+  docs?: string;
+};
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const planPath = process.argv[2];
 if (!planPath) throw new Error('Usage: tsx scripts/jev-prefetch-experiment.ts <plan.json>');
 const plan: Plan = JSON.parse(readFileSync(planPath, 'utf8'));
-if (!plan.seed || !plan.model || plan.cases.length !== 2)
-  throw new Error('Expected a seeded two-case plan');
+if (!plan.seed || !plan.model || !plan.cases.length) throw new Error('Expected a seeded plan');
 const out = resolve(dirname(planPath), 'runs');
 if (existsSync(out))
   throw new Error('Run directory already exists; preserve it and use a fresh plan directory');
@@ -40,9 +53,21 @@ function checkCase(c: Case) {
 }
 plan.cases.forEach(checkCase);
 const driverHead = git(root, 'rev-parse', 'HEAD');
-const runtimeHash = hash(
-  execFileSync('git', ['diff', 'HEAD', '--', 'src', 'scripts'], { cwd: root }),
-);
+const runtimeHash = () =>
+  hash(
+    execFileSync('git', ['diff', 'HEAD', '--', 'src', 'scripts', 'package-lock.json'], {
+      cwd: root,
+    }),
+  );
+const initialRuntimeHash = runtimeHash();
+const inputHashes = () =>
+  Object.fromEntries(
+    [
+      ...(plan.docs ? [plan.docs] : []),
+      ...plan.cases.flatMap((c) => (c.findings ? [c.findings] : [])),
+    ].map((path) => [path, hash(readFileSync(path))]),
+  );
+const frozenInputs = JSON.stringify(inputHashes());
 const config = {
   PROVIDER: 'opencode',
   MODEL: plan.model,
@@ -62,7 +87,7 @@ const config = {
   CONTEXT7_API_KEY: '',
 };
 const arms: Arm[] = ['off', 'deterministic', 'on'];
-const schedule = Array.from({ length: 5 }, (_, repetition) =>
+const schedule = Array.from({ length: plan.repetitions ?? 5 }, (_, repetition) =>
   plan.cases
     .flatMap((c) => arms.map((arm) => ({ caseId: c.id, arm, repetition: repetition + 1 })))
     .sort((a, b) =>
@@ -78,7 +103,8 @@ writeFileSync(
     {
       ...plan,
       driverHead,
-      runtimeHash,
+      runtimeHash: initialRuntimeHash,
+      inputHashes: JSON.parse(frozenInputs),
       config,
       schedule,
       cacheState: 'uncontrolled',
@@ -108,8 +134,8 @@ const results: unknown[] = [];
 for (const run of schedule) {
   if (
     git(root, 'rev-parse', 'HEAD') !== driverHead ||
-    hash(execFileSync('git', ['diff', 'HEAD', '--', 'src', 'scripts'], { cwd: root })) !==
-      runtimeHash
+    runtimeHash() !== initialRuntimeHash ||
+    JSON.stringify(inputHashes()) !== frozenInputs
   )
     throw new Error('Driver changed during the experiment');
   const c = plan.cases.find((c) => c.id === run.caseId)!;
@@ -119,21 +145,29 @@ for (const run of schedule) {
   const output = resolve(dir, 'review.json');
   const stream = createWriteStream(resolve(dir, 'review.log'));
   const started = Date.now();
-  console.log(`Starting ${run.id}/30 ${run.caseId} ${run.arm} repetition ${run.repetition}`);
+  console.log(
+    `Starting ${run.id}/${schedule.length} ${run.caseId} ${run.arm} repetition ${run.repetition}`,
+  );
   const child = spawn(
     process.execPath,
     [
       '--import',
       fileURLToPath(import.meta.resolve('tsx')),
-      resolve(root, 'src/local/index.ts'),
-      '--workspace',
-      c.workspace,
-      '--base',
-      c.base,
+      ...(c.findings
+        ? [resolve(root, 'scripts/jev-verification-trial.ts'), c.workspace, c.base, c.findings]
+        : [resolve(root, 'src/local/index.ts'), '--workspace', c.workspace, '--base', c.base]),
     ],
     {
       cwd: dir,
-      env: { ...env, ...config, JBOT_JEV_PREFETCH: run.arm, JBOT_BENCHMARK_OUTPUT: output },
+      env: {
+        ...env,
+        ...config,
+        JBOT_JEV_PREFETCH: plan.evidence ? 'off' : run.arm,
+        JBOT_EXPLORATION_EVIDENCE: plan.evidence ? run.arm : 'off',
+        JBOT_VERIFICATION_EVIDENCE: plan.evidence ? run.arm : 'off',
+        JBOT_EVIDENCE_DOCS: plan.docs ?? '',
+        JBOT_BENCHMARK_OUTPUT: output,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -145,9 +179,9 @@ for (const run of schedule) {
   });
   await new Promise<void>((done) => stream.end(done));
   checkCase(c);
-  const review: (ReviewResult & { telemetry?: string }) | undefined = existsSync(output)
-    ? JSON.parse(readFileSync(output, 'utf8'))
-    : undefined;
+  const review:
+    (ReviewResult & { telemetry?: string; verdicts?: unknown[]; elapsedMs?: number }) | undefined =
+    existsSync(output) ? JSON.parse(readFileSync(output, 'utf8')) : undefined;
   const telemetryPath = resolve(dir, '.jbot-review/telemetry.jsonl');
   const telemetry =
     review?.telemetry ?? (existsSync(telemetryPath) ? readFileSync(telemetryPath, 'utf8') : '');
@@ -158,23 +192,25 @@ for (const run of schedule) {
   const header = rows.find((r) => r.kind === 'run');
   const usage = parseBenchmarkTelemetry(telemetry);
   const sessions = rows.filter((r) => r.kind === 'session');
-  const prefetch = rows.find((r) => r.kind === 'jev-prefetch');
+  const prefetch = rows.filter((r) => r.kind === 'jev-prefetch');
   const knownCost =
     sessions.length > 0 &&
     sessions.every((r) => typeof r.costUsd === 'number') &&
-    (run.arm !== 'on' || typeof prefetch?.estimatedCostUsd === 'number');
+    prefetch.every((r) => !r.apiMs || typeof r.estimatedCostUsd === 'number');
   const result = {
     ...run,
     code,
     startedAt: new Date(started).toISOString(),
     processMs: Date.now() - started,
-    terminalState: header?.terminalState ?? 'missing-output',
-    runMs: header?.elapsedMs ?? null,
+    terminalState:
+      header?.terminalState ?? (review?.verdicts ? 'verification-output' : 'missing-output'),
+    runMs: header?.elapsedMs ?? review?.elapsedMs ?? null,
+    verdicts: review?.verdicts,
     retainedFindings: review?.findings.length ?? null,
     usage,
     costAvailable: knownCost,
     totalEstimatedCostUsd: knownCost
-      ? usage.costUsd + Number(prefetch?.estimatedCostUsd ?? 0)
+      ? usage.costUsd + prefetch.reduce((sum, r) => sum + Number(r.estimatedCostUsd ?? 0), 0)
       : null,
     prefetch,
     phases: rows.filter((r) => r.kind === 'phase' && r.scope === 'run'),

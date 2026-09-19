@@ -18,7 +18,13 @@ export type JevPrefetchMode = 'off' | 'shadow' | 'on' | 'deterministic';
 
 export interface JevPrefetchStats {
   kind: 'jev-prefetch';
-  version: 3;
+  version: 3 | 4;
+  scope?: 'exploration' | 'verification';
+  selectedHash?: string;
+  coverageBytes?: number;
+  cacheHits?: number;
+  parsedFiles?: number;
+  omittedFiles?: number;
   mode: JevPrefetchMode;
   model: typeof JEV_MODEL | null;
   status: 'disabled' | 'skipped' | 'shadow' | 'applied' | 'fallback';
@@ -125,16 +131,33 @@ export async function buildJevPrefetch(
   entries: { symbol: string; callSites: string[] }[],
   options: {
     mode: JevPrefetchMode;
+    prepared?: {
+      candidates: JevCandidate[];
+      task: string;
+      scope: 'exploration' | 'verification';
+      cacheHits: number;
+      parsedFiles: number;
+      omittedFiles: number;
+      elapsedMs: number;
+    };
     apiKey?: string;
     timeoutMs: number;
     log: (message: string) => void;
     onStats: (stats: JevPrefetchStats) => void;
   },
 ): Promise<string> {
-  const started = Date.now();
+  const started = Date.now() - (options.prepared?.elapsedMs ?? 0);
   const stats: JevPrefetchStats = {
     kind: 'jev-prefetch',
-    version: 3,
+    version: options.prepared ? 4 : 3,
+    ...(options.prepared
+      ? {
+          scope: options.prepared.scope,
+          cacheHits: options.prepared.cacheHits,
+          parsedFiles: options.prepared.parsedFiles,
+          omittedFiles: options.prepared.omittedFiles,
+        }
+      : {}),
     mode: options.mode,
     model: options.mode === 'deterministic' ? null : JEV_MODEL,
     status: 'disabled',
@@ -162,50 +185,56 @@ export async function buildJevPrefetch(
       return '';
     }
     signal = AbortSignal.timeout(Math.max(0, Math.min(5000, Math.floor(options.timeoutMs))));
-    const eligible = entries.map((e) => ({
-      ...e,
-      callSites: e.callSites.filter((p) => SOURCE_FILE.test(p)),
-    }));
-    stats.candidateFiles = new Set(eligible.flatMap((e) => e.callSites)).size;
-    const paths = new Set<string>();
-    for (let i = 0; paths.size < MAX_FILES && eligible.some((e) => i < e.callSites.length); i++) {
-      for (const e of eligible) {
-        if (e.callSites[i]) paths.add(e.callSites[i]);
-        if (paths.size === MAX_FILES) break;
+    const candidates: JevCandidate[] = options.prepared?.candidates ?? [];
+    if (!options.prepared) {
+      const eligible = entries.map((e) => ({
+        ...e,
+        callSites: e.callSites.filter((p) => SOURCE_FILE.test(p)),
+      }));
+      stats.candidateFiles = new Set(eligible.flatMap((e) => e.callSites)).size;
+      const paths = new Set<string>();
+      for (let i = 0; paths.size < MAX_FILES && eligible.some((e) => i < e.callSites.length); i++) {
+        for (const e of eligible) {
+          if (e.callSites[i]) paths.add(e.callSites[i]);
+          if (paths.size === MAX_FILES) break;
+        }
       }
-    }
-    const candidates: JevCandidate[] = [];
-    for (const path of paths) {
-      signal.throwIfAborted();
-      const source = await readTrackedSource(workspace, path, signal);
-      if (!source?.text) continue;
-      stats.sampledFiles++;
-      const lines = source.text.split(/\r?\n/);
-      const numbered = lines.map((line, i) => `${i + 1}: ${line}`).join('\n');
-      const completeFile = !source.truncated && Buffer.byteLength(numbered) <= 2048;
-      const symbols = eligible.filter((e) => e.callSites.includes(path)).map((e) => e.symbol);
-      let hits = 0;
-      for (let i = 0; i < lines.length && hits < 3; i++) {
-        const symbol = symbols.find((s) =>
-          new RegExp(`(?<![\\w$])${s.replace(/\$/g, '\\$')}(?![\\w$])`).test(lines[i]),
-        );
-        if (!symbol) continue;
-        const start = Math.max(0, i - 12);
-        candidates.push({
-          symbol,
-          path,
-          line: i + 1,
-          completeFile,
-          text: completeFile
-            ? numbered
-            : formatSourceExcerpt(lines.slice(start, i + 13), start + 1, i + 1, 2048),
-        });
-        hits++;
+
+      for (const path of paths) {
+        signal.throwIfAborted();
+        const source = await readTrackedSource(workspace, path, signal);
+        if (!source?.text) continue;
+        stats.sampledFiles++;
+        const lines = source.text.split(/\r?\n/);
+        const numbered = lines.map((line, i) => `${i + 1}: ${line}`).join('\n');
+        const completeFile = !source.truncated && Buffer.byteLength(numbered) <= 2048;
+        const symbols = eligible.filter((e) => e.callSites.includes(path)).map((e) => e.symbol);
+        let hits = 0;
+        for (let i = 0; i < lines.length && hits < 3; i++) {
+          const symbol = symbols.find((s) =>
+            new RegExp(`(?<![\\w$])${s.replace(/\$/g, '\\$')}(?![\\w$])`).test(lines[i]),
+          );
+          if (!symbol) continue;
+          const start = Math.max(0, i - 12);
+          candidates.push({
+            symbol,
+            path,
+            line: i + 1,
+            completeFile,
+            text: completeFile
+              ? numbered
+              : formatSourceExcerpt(lines.slice(start, i + 13), start + 1, i + 1, 2048),
+          });
+          hits++;
+        }
       }
+    } else {
+      stats.candidateFiles = new Set(candidates.map((c) => c.path)).size;
+      stats.sampledFiles = stats.candidateFiles;
     }
     stats.collectedCandidates = candidates.length;
     stats.collectMs = Date.now() - started;
-    const request = buildJevRequest(files, candidates);
+    const request = buildJevRequest(files, candidates, options.prepared?.task);
     if (!request.candidates.length) {
       stats.reason = 'no-candidates';
       return '';
@@ -261,6 +290,9 @@ export async function buildJevPrefetch(
       stats.selectedScores = result.scores;
       selected = result.selected;
     }
+    stats.selectedHash = createHash('sha256')
+      .update(JSON.stringify(selected.map((i) => request.candidates[i])))
+      .digest('hex');
     stats.selectedCandidates = selected.length;
     stats.completeFileCandidates = selected.filter(
       (i) => request.candidates[i].completeFile,

@@ -12,6 +12,8 @@ declare const __JBOT_REVIEWER_REVISION__: string;
 
 const POLICY_KEYS = [
   'jevPrefetch',
+  'explorationEvidence',
+  'verificationEvidence',
   'enhancedContext',
   'scrubSessionEnv',
   'dryRun',
