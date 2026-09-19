@@ -3313,7 +3313,9 @@ export function normalizeOptions(
         ? 'on'
         : process.env.JBOT_JEV_PREFETCH === 'shadow'
           ? 'shadow'
-          : 'off'),
+          : process.env.JBOT_JEV_PREFETCH === 'deterministic'
+            ? 'deterministic'
+            : 'off'),
     enhancedContext: options?.enhancedContext ?? false,
     scrubSessionEnv: options?.scrubSessionEnv ?? true,
     opencodeProxyEnv: options?.opencodeProxyEnv ?? {},

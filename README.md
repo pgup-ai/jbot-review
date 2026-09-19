@@ -949,9 +949,15 @@ TypeSafe. Set the key in the launch directory's ignored `.env` for local use;
 hosted runs use an environment secret. It is not a review-provider setting.
 
 Modes: `off` (default, no extra source reads or API call), `shadow` (collect,
-rank, and measure without injecting excerpts), and `on` (inject the ranked
-excerpts). An explicit `ReviewRunOptions.jevPrefetch` overrides the environment.
+rank, and measure without injecting excerpts), `on` (inject the ranked
+excerpts), and `deterministic` (inject in collection order without an API call
+or TypeSafe key). An explicit `ReviewRunOptions.jevPrefetch` overrides the environment.
 Unknown environment values disable the experiment.
+The deterministic control shares candidate collection, request-budget trimming,
+one-excerpt-per-file selection, prompt wording, and the context byte cap with
+Jev. It takes the first fitting candidates, without a relevance threshold.
+Version 3 logs a candidate-pool hash for matching the two arms; deterministic
+rows report no model, scores, or token usage, and zero API cost.
 
 The experiment reuses exported-symbol discovery, so body-only changes with
 no changed export declaration may have no candidates. It samples at most 12

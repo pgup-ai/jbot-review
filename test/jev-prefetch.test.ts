@@ -15,7 +15,7 @@ import { sessionEnvironment } from '../src/shared/opencode-config.ts';
 import { sessionEnvDenyKeys } from '../src/shared/opencode-server.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import { aggregatePerformance } from '../scripts/review-performance.ts';
-import { emitReviewTelemetry } from '../src/shared/runner.ts';
+import { emitReviewTelemetry, normalizeOptions } from '../src/shared/runner.ts';
 
 const files = [
   {
@@ -148,7 +148,7 @@ test('off and shadow preserve baseline context; on adds only tracked source and 
   assert.equal(rows[1].injectedBytes, 0);
   assert.ok(rows[2].injectedBytes > 0);
   assert.equal(rows[2].inputTokens, 1234);
-  assert.equal(rows[2].version, 2);
+  assert.equal(rows[2].version, 3);
   assert.equal(rows[2].completeFileCandidates, 1);
   assert.match(applied, /complete file/);
   assert.match(applied, /Do not spend a tool call rereading supplied lines/);
@@ -265,4 +265,62 @@ test('source completeness never hides byte truncation or a dependency beyond a p
   assert.match(block, /partial.ts:1 \(pay; partial file/);
   assert.match(block, /clipped.ts:1 \(pay; partial file/);
   assert.ok(Buffer.byteLength(block) <= 6000);
+});
+
+test('deterministic control uses the same candidate pool and budgets without credentials or API usage', async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), 'jbot-prefetch-control-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', workspace]);
+  const paths = Array.from({ length: 7 }, (_, i) => `consumer-${i}.ts`);
+  for (const path of paths) await writeFile(join(workspace, path), 'pay(1);\n//' + 'x'.repeat(500));
+  execFileSync('git', ['add', '.'], { cwd: workspace });
+  const fetch = t.mock.method(globalThis, 'fetch', async (_, init) => {
+    const { questions } = JSON.parse(init.body);
+    return Response.json(answer(Object.keys(questions).map((_, i) => 0.5 + i / 20)));
+  });
+  const rows: JevPrefetchStats[] = [];
+  const options = {
+    timeoutMs: 5000,
+    log: () => {},
+    onStats: (s: JevPrefetchStats) => rows.push(s),
+  };
+  const entries = [{ symbol: 'pay', callSites: paths }];
+  const control = await buildJevPrefetch(workspace, files, entries, {
+    ...options,
+    mode: 'deterministic',
+  });
+  assert.equal(fetch.mock.callCount(), 0);
+  assert.equal(rows[0].status, 'applied');
+  assert.equal(rows[0].model, null);
+  assert.equal(rows[0].apiMs, 0);
+  assert.equal(rows[0].requestBytes, 0);
+  assert.equal(rows[0].scoredCandidates, 0);
+  assert.equal(rows[0].estimatedCostUsd, 0);
+  assert.equal(rows[0].selectedScores, undefined);
+  assert.equal(rows[0].inputTokens, undefined);
+  assert.deepEqual(
+    [...control.matchAll(/^### (consumer-\d.ts)/gm)].map((m) => m[1]),
+    paths.slice(0, 4),
+  );
+  const treatment = await buildJevPrefetch(workspace, files, entries, {
+    ...options,
+    mode: 'on',
+    apiKey: 'TEST_KEY',
+  });
+  assert.equal(rows[0].candidateHash, rows[1].candidateHash);
+  assert.equal(rows[0].collectedCandidates, rows[1].scoredCandidates);
+  assert.equal(fetch.mock.callCount(), 1);
+  assert.deepEqual(
+    [...treatment.matchAll(/^### (consumer-\d.ts)/gm)].map((m) => m[1]),
+    paths.slice(3).reverse(),
+  );
+  assert.ok(Buffer.byteLength(control) <= 6000 && Buffer.byteLength(treatment) <= 6000);
+  const previous = process.env.JBOT_JEV_PREFETCH;
+  t.after(() => {
+    if (previous === undefined) delete process.env.JBOT_JEV_PREFETCH;
+    else process.env.JBOT_JEV_PREFETCH = previous;
+  });
+  process.env.JBOT_JEV_PREFETCH = 'deterministic';
+  assert.equal(normalizeOptions(undefined).jevPrefetch, 'deterministic');
+  assert.equal(normalizeOptions({ jevPrefetch: 'off' }).jevPrefetch, 'off');
 });

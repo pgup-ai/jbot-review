@@ -14,13 +14,13 @@ const MAX_CONTEXT_BYTES = 6_000;
 const MAX_SELECTED = 4;
 const SOURCE_FILE = /\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|cs|rb|php|swift|c|h|cpp|hpp|sql)$/i;
 
-export type JevPrefetchMode = 'off' | 'shadow' | 'on';
+export type JevPrefetchMode = 'off' | 'shadow' | 'on' | 'deterministic';
 
 export interface JevPrefetchStats {
   kind: 'jev-prefetch';
-  version: 2;
+  version: 3;
   mode: JevPrefetchMode;
-  model: typeof JEV_MODEL;
+  model: typeof JEV_MODEL | null;
   status: 'disabled' | 'skipped' | 'shadow' | 'applied' | 'fallback';
   reason?:
     | 'missing-key'
@@ -49,6 +49,7 @@ export interface JevPrefetchStats {
   estimatedCostUsd?: number;
   selectedScores?: number[];
   requestHash?: string;
+  candidateHash?: string;
 }
 
 export function selectJevCandidates(
@@ -87,11 +88,24 @@ export function selectJevCandidates(
   )
     throw new Error('invalid-response');
   const indexes = scores.map((_, i) => i).sort((a, b) => scores[b] - scores[a] || a - b);
+  const selected = selectPrefetchCandidates(
+    candidates,
+    indexes.filter((i) => scores[i] >= 0.5),
+    allCandidates,
+  );
+  return { selected, scores: selected.map((i) => scores[i]), inputTokens, outputTokens };
+}
+
+function selectPrefetchCandidates(
+  candidates: JevCandidate[],
+  indexes: number[],
+  allCandidates: JevCandidate[],
+) {
   const selected: number[] = [];
   const locations = new Set<string>();
   for (const index of indexes) {
     const c = candidates[index];
-    if (scores[index] < 0.5 || locations.has(c.path)) continue;
+    if (locations.has(c.path)) continue;
     const next = [...selected, index];
     const block = formatJevPrefetch(
       next.map((i) => candidates[i]),
@@ -102,12 +116,7 @@ export function selectJevCandidates(
     locations.add(c.path);
     if (selected.length === MAX_SELECTED) break;
   }
-  return {
-    selected,
-    scores: selected.map((i) => scores[i]),
-    inputTokens,
-    outputTokens,
-  };
+  return selected;
 }
 
 export async function buildJevPrefetch(
@@ -125,9 +134,9 @@ export async function buildJevPrefetch(
   const started = Date.now();
   const stats: JevPrefetchStats = {
     kind: 'jev-prefetch',
-    version: 2,
+    version: 3,
     mode: options.mode,
-    model: JEV_MODEL,
+    model: options.mode === 'deterministic' ? null : JEV_MODEL,
     status: 'disabled',
     candidateFiles: 0,
     sampledFiles: 0,
@@ -148,7 +157,7 @@ export async function buildJevPrefetch(
   try {
     if (options.mode === 'off') return '';
     stats.status = 'skipped';
-    if (!options.apiKey) {
+    if (options.mode !== 'deterministic' && !options.apiKey) {
       stats.reason = 'missing-key';
       return '';
     }
@@ -197,64 +206,78 @@ export async function buildJevPrefetch(
     stats.collectedCandidates = candidates.length;
     stats.collectMs = Date.now() - started;
     const request = buildJevRequest(files, candidates);
-    stats.scoredCandidates = request.candidates.length;
     if (!request.candidates.length) {
       stats.reason = 'no-candidates';
       return '';
     }
     signal.throwIfAborted();
-    stats.requestBytes = Buffer.byteLength(request.body);
-    stats.requestHash = createHash('sha256').update(request.body).digest('hex');
-    apiStarted = Date.now();
-    stats.collectMs = apiStarted - started;
-    const response = await fetch('https://api.typesafe.ai/v1/systemone', {
-      method: 'POST',
-      redirect: 'error',
-      signal,
-      headers: { Authorization: `Bearer ${options.apiKey}`, 'Content-Type': 'application/json' },
-      body: request.body,
-    });
-    stats.httpStatus = response.status;
-    if (!response.ok) {
-      await response.body?.cancel();
-      stats.reason = 'http';
-      return '';
+    stats.candidateHash = createHash('sha256')
+      .update(JSON.stringify(request.candidates))
+      .digest('hex');
+    let selected: number[];
+    if (options.mode === 'deterministic') {
+      selected = selectPrefetchCandidates(
+        request.candidates,
+        request.candidates.map((_, i) => i),
+        candidates,
+      );
+      stats.estimatedCostUsd = 0;
+    } else {
+      stats.scoredCandidates = request.candidates.length;
+      stats.requestBytes = Buffer.byteLength(request.body);
+      stats.requestHash = createHash('sha256').update(request.body).digest('hex');
+      apiStarted = Date.now();
+      stats.collectMs = apiStarted - started;
+      const response = await fetch('https://api.typesafe.ai/v1/systemone', {
+        method: 'POST',
+        redirect: 'error',
+        signal,
+        headers: { Authorization: `Bearer ${options.apiKey}`, 'Content-Type': 'application/json' },
+        body: request.body,
+      });
+      stats.httpStatus = response.status;
+      if (!response.ok) {
+        await response.body?.cancel();
+        stats.reason = 'http';
+        return '';
+      }
+      const chunks: Uint8Array[] = [];
+      let responseBytes = 0;
+      for await (const chunk of response.body ?? []) {
+        responseBytes += chunk.byteLength;
+        if (responseBytes > 16_384) throw new Error('invalid-response');
+        chunks.push(chunk);
+      }
+      let value: unknown;
+      try {
+        value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      } catch {
+        throw new Error('invalid-response');
+      }
+      const result = selectJevCandidates(value, request.candidates, candidates);
+      stats.inputTokens = result.inputTokens;
+      stats.outputTokens = result.outputTokens;
+      stats.estimatedCostUsd = (result.inputTokens * 0.042) / 1_000_000;
+      stats.selectedScores = result.scores;
+      selected = result.selected;
     }
-    const chunks: Uint8Array[] = [];
-    let responseBytes = 0;
-    for await (const chunk of response.body ?? []) {
-      responseBytes += chunk.byteLength;
-      if (responseBytes > 16_384) throw new Error('invalid-response');
-      chunks.push(chunk);
-    }
-    let value: unknown;
-    try {
-      value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    } catch {
-      throw new Error('invalid-response');
-    }
-    const result = selectJevCandidates(value, request.candidates, candidates);
-    stats.inputTokens = result.inputTokens;
-    stats.outputTokens = result.outputTokens;
-    stats.estimatedCostUsd = (result.inputTokens * 0.042) / 1_000_000;
-    stats.selectedScores = result.scores;
-    stats.selectedCandidates = result.selected.length;
-    stats.completeFileCandidates = result.selected.filter(
+    stats.selectedCandidates = selected.length;
+    stats.completeFileCandidates = selected.filter(
       (i) => request.candidates[i].completeFile,
     ).length;
-    if (!result.selected.length) {
+    if (!selected.length) {
       stats.reason = 'no-relevant-candidates';
       return '';
     }
-    stats.baselineOverlap = result.selected.filter((i) => i < result.selected.length).length;
+    stats.baselineOverlap = selected.filter((i) => i < selected.length).length;
     const block = formatJevPrefetch(
-      result.selected.map((i) => request.candidates[i]),
-      candidates.filter((c) => !result.selected.some((i) => request.candidates[i] === c)),
+      selected.map((i) => request.candidates[i]),
+      candidates.filter((c) => !selected.some((i) => request.candidates[i] === c)),
     );
     stats.contextBytes = Buffer.byteLength(block);
     stats.status = options.mode === 'shadow' ? 'shadow' : 'applied';
-    stats.injectedBytes = options.mode === 'on' ? stats.contextBytes : 0;
-    return options.mode === 'on' ? block : '';
+    stats.injectedBytes = options.mode === 'shadow' ? 0 : stats.contextBytes;
+    return options.mode === 'shadow' ? '' : block;
   } catch (error) {
     stats.reason = signal?.aborted
       ? 'timeout'
