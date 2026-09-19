@@ -43,6 +43,7 @@ export interface ExplorationTelemetryFinish {
   stopReason: TelemetryStopReason;
   turnCount?: number;
   explorationMode?: ExplorationMode;
+  experiment?: Record<string, number>;
 }
 
 export interface ToolTelemetryAccumulator {
@@ -204,6 +205,7 @@ export function createToolTelemetryAccumulator(
         explorationMode: input.explorationMode ?? deriveExplorationMode(counters.classes),
         budgetTier: input.budgetTier,
         stopReason: input.stopReason,
+        ...(input.experiment ? { experiment: input.experiment } : {}),
         turnCountAvailable: input.turnCount !== undefined,
         ...(input.turnCount !== undefined ? { turnCount: boundedCount(input.turnCount) } : {}),
         toolCalls: counters.toolCalls,

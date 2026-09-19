@@ -343,6 +343,12 @@ JSON. Do not keep exploring solely for completeness or reread code already
 provided unless a specific uncertainty requires it. Report supported findings
 and identify material uncertainties without asserting unverified premises.`;
 
+export const REVIEW_RETRIEVAL_DESCRIPTION = `Retrieve a bounded source packet for a repository-relative path and line: enclosing definitions, import-linked references, imported definitions, and tests when discoverable. Use this to batch related context before individual searches. Results are partial source evidence, not findings or exhaustive call graphs; follow unresolved contracts with further reads. The full changed diff still requires review.`;
+
+export const REVIEW_RETRIEVAL_UNAVAILABLE = `No source packet available. Use ordinary read/search tools to resolve this question; absence of retrieved evidence does not establish absence of behavior.`;
+
+export const EXPLORATION_CHECKPOINT = `Repository exploration checkpoint: reassess which changed hunks and concrete contract questions remain unresolved. Batch independent reads that answer those questions and reuse evidence already present. Continue beyond direct dependencies when a plausible failure path requires it, and recover any omitted or truncated diff coverage. Once coverage and plausible failure paths are complete, return the requested output. Preserve supported findings and report material uncertainties; this checkpoint is not a depth limit or a reason to discard findings. Do not add a separate progress response.`;
+
 // Lens body for backends whose read-only mode denies every tool: the base's
 // read/grep steps would only be negated by the no-tools directive in front.
 const EMBEDDED_ONLY_LENS_EXPLORATION_POLICY = `## Repository exploration policy

@@ -371,6 +371,8 @@ export async function startOpencode(
       sessionOptionsFile,
       proxyEnv: options.proxyEnv,
     });
+    env.JBOT_RETRIEVAL_WORKSPACE = workspace;
+    env.JBOT_EXPLORATION_STATS_DIR = dataHome;
     // 0: the OS picks a free port and the banner reports it.
     const port = options.port ?? parsePortEnv('JBOT_OPENCODE_PORT', 0);
     spawned = true;

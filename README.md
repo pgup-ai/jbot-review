@@ -1034,6 +1034,38 @@ verification preloading, shared reads, handoff, background prefetch, Jev selecti
 and cold/warm persistent reuse. Cold/warm disk pairs run consecutively with a
 fresh cache per fixture and repetition. Provider prompt-cache state is uncontrolled.
 
+### Targeted retrieval and exploration checkpoints
+
+Two independent, default-off OpenCode experiments:
+
+- `JBOT_TARGETED_RETRIEVAL=1` exposes `review_context(path, line)`, batching the
+  enclosing definition, import-linked references, imported definitions and tests
+  into a source packet. It reuses guarded source reads and the evidence collector:
+  at most 64 files / 2 MiB inspected, four excerpts / 6,000 bytes selected,
+  plus a bounded omission notice, within four seconds. It calls no model.
+  Files are revalidated before reuse. Unsupported syntax and unresolved bindings
+  leave ordinary read/search tools available; this is not a complete call graph.
+- `JBOT_EXPLORATION_CHECKPOINTS=1` injects a short reassessment instruction after
+  eight model requests, 32 KiB of tool output, or two repeated successful result
+  bodies since the previous checkpoint, with at least two requests between
+  checkpoints. These experimental thresholds are soft: they do not remove tools,
+  cap dependency depth, skip changed hunks, or discard findings. Existing time
+  limits and the verification reserve still apply. Tool-less wrap-up is unchanged.
+
+Use both switches for the combined arm. Exploration rows include an `experiment`
+object with checkpoint counts by trigger, retrieval calls/fallbacks, candidates
+selected/collected and preparation milliseconds. Counts are per prompt, including
+continuations and pre-wrap-up work. Internal counter files contain no source text
+and live in the server's temporary data home, removed during teardown. These
+counters measure activity, not evidence usefulness or time saved. Other backends
+ignore these switches; the run configuration records the requested settings.
+
+Set `"retrieval": true` in a `scripts/jev-prefetch-experiment.ts` plan to compare
+current behavior, retrieval alone, and retrieval plus checkpoints using the same
+frozen cases and seeded run order. This comparison disables Jev preloading in all
+three arms and requires no TypeSafe key. Judge retained findings against the
+fixture contracts before interpreting latency, tool counts or token costs.
+
 ### Jev caller-evidence experiment
 
 `JBOT_JEV_PREFETCH=on` adds up to four caller source excerpts to the existing

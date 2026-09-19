@@ -1,3 +1,4 @@
+import { explorationExperiment } from './exploration-policy.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -2491,6 +2492,7 @@ async function runReviewPipeline(params: {
             // old entry.
             config: JSON.stringify({
               engine: mainBackend.name,
+              explorationExperiment: explorationExperiment(process.env),
               modelOptions: options.modelOptions,
               baseURL,
               ...(options.embeddedFirstPrompt ? { embeddedFirstPrompt: true } : {}),

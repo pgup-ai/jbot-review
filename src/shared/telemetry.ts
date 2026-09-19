@@ -108,6 +108,7 @@ export interface ToolTelemetryRow {
 }
 
 export interface ExplorationTelemetryRow {
+  experiment?: Record<string, number>;
   kind: 'exploration';
   session: string;
   backend: string;
@@ -426,6 +427,9 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
         current
           ? {
               ...row,
+              ...((row.experiment ?? current.experiment)
+                ? { experiment: row.experiment ?? current.experiment }
+                : {}),
               ...(current.turnCountAvailable && !row.turnCountAvailable
                 ? { turnCountAvailable: true, turnCount: current.turnCount }
                 : {}),

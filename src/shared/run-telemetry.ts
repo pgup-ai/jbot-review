@@ -1,3 +1,4 @@
+import { explorationExperiment } from './exploration-policy.ts';
 import { evidenceReuseOptions } from './evidence.ts';
 import { createHash } from 'node:crypto';
 import { parseModelName } from '@symma/protocol';
@@ -58,6 +59,7 @@ export function runConfiguration(
       : 'unrecognized',
     shardCacheEnabled: Boolean(options.shardCachePath),
     evidenceReuse: { ...reuse, persistent: Boolean(cacheDir) },
+    explorationExperiment: explorationExperiment(env),
     modelPool: options.modelPool?.length ? options.modelPool : [model],
     requestedReasoningEffort: knownEffort(options.modelOptions?.reasoningEffort),
   };

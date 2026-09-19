@@ -100,11 +100,27 @@ describe('phase and tool telemetry', () => {
       budgetTier: 'observe-only',
       stopReason: 'completed',
     });
+    tools.finishSession({
+      session: 'review',
+      backend: 'opencode',
+      capability: 'observable',
+      budgetTier: 'observe-only',
+      stopReason: 'completed',
+      experiment: { checkpoints: 2 },
+    });
+    tools.finishSession({
+      session: 'review',
+      backend: 'opencode',
+      capability: 'observable',
+      budgetTier: 'observe-only',
+      stopReason: 'completed',
+    });
     const rows = recorder
       .toJsonl()
       .split('\n')
       .map((line) => JSON.parse(line));
     const row = rows.find((row) => row.kind === 'exploration');
+    assert.equal(row.experiment.checkpoints, 2);
     assert.equal(row.exactRepeatCalls, 2);
     assert.equal(row.unchangedRepeatCalls, 1);
     assert.equal(row.changedRepeatCalls, 1);

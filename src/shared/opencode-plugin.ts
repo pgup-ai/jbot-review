@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PERMISSION_DENIED_MESSAGE } from './prompt.ts';
 
 /**
@@ -45,6 +46,13 @@ function sessionOptions(sessionID) {
 export default {
   id: 'jbot-review',
   async setup(ctx) {
+    if (process.env.JBOT_TARGETED_RETRIEVAL === '1' || process.env.JBOT_EXPLORATION_CHECKPOINTS === '1') {
+      const { installReviewRetrieval } = await import(RETRIEVAL_MODULE);
+      await installReviewRetrieval(ctx, process.env.JBOT_RETRIEVAL_WORKSPACE, process.env.JBOT_EXPLORATION_STATS_DIR, {
+        retrieval: process.env.JBOT_TARGETED_RETRIEVAL === '1',
+        checkpoints: process.env.JBOT_EXPLORATION_CHECKPOINTS === '1',
+      });
+    }
     await ctx.session.hook('context', (event) => {
       stripTools(event.tools, event.agent);
       geminiSafe(event.tools);
@@ -68,7 +76,14 @@ export function hermeticOpencodeConfigHome(): string {
   if (!configHome) {
     configHome = mkdtempSync(join(tmpdir(), 'jbot-opencode-config-'));
     mkdirSync(join(configHome, 'opencode', 'plugins'), { recursive: true });
-    writeFileSync(join(configHome, 'opencode', 'plugins', 'jbot-review.js'), PLUGIN_SOURCE);
+    const bundled = new URL('../review-retrieval.js', import.meta.url);
+    const module = existsSync(fileURLToPath(bundled))
+      ? bundled
+      : new URL('./review-retrieval.ts', import.meta.url);
+    writeFileSync(
+      join(configHome, 'opencode', 'plugins', 'jbot-review.js'),
+      PLUGIN_SOURCE.replace('RETRIEVAL_MODULE', JSON.stringify(module.href)),
+    );
   }
   return configHome;
 }

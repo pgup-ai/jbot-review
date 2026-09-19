@@ -57,6 +57,8 @@ test('configuration fingerprints policy changes while excluding credentials and 
   );
   const baseline = runConfiguration(options, 'opencode/a', {});
   for (const variable of [
+    'JBOT_TARGETED_RETRIEVAL',
+    'JBOT_EXPLORATION_CHECKPOINTS',
     'JBOT_EVIDENCE_SHARED',
     'JBOT_EVIDENCE_HANDOFF',
     'JBOT_EVIDENCE_PREFETCH',

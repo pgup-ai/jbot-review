@@ -309,6 +309,7 @@ export class EvidenceStore {
       apiKey?: string;
       log: (s: string) => void;
       onStats: (s: JevPrefetchStats) => void;
+      locations?: { path: string; line: number }[];
     },
   ): Promise<string> {
     if (mode === 'off') return '';
@@ -321,7 +322,7 @@ export class EvidenceStore {
     try {
       const tracked = await this.tracked(signal);
       const paths = new Set([...tracked].filter((p) => SOURCE.test(p)));
-      const refs = findingSourceLocations(findings).locations;
+      const refs = options.locations ?? findingSourceLocations(findings).locations;
       const seeds =
         scope === 'verification' ? refs.map((r) => r.path) : this.files.map((f) => f.filename);
       const read = async (path: string) => {

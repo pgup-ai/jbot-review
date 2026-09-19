@@ -1,6 +1,7 @@
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { readExplorationStats } from './exploration-policy.ts';
 import type { OpenCodeClient } from '@opencode/client';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -311,6 +312,7 @@ export function recordAssistantTools(
   telemetry: ToolTelemetryAccumulator,
   session: string,
   messages: AssistantMessage[],
+  experiment?: ReturnType<typeof readExplorationStats>,
 ): void {
   for (const message of messages) {
     for (const part of message.content ?? []) {
@@ -359,6 +361,7 @@ export function recordAssistantTools(
     capability: OPENCODE_TELEMETRY_CAPABILITY,
     budgetTier: 'observe-only',
     stopReason: 'completed',
+    ...(experiment ? { experiment } : {}),
     ...(messages.length > 0 ? { turnCount: messages.length } : {}),
   });
 }
@@ -475,6 +478,18 @@ export async function promptInSession(
   }
 }
 
+function sessionExplorationStats(runtime: OpencodeRuntime, sessionID: string) {
+  try {
+    const file = join(
+      dirname(runtime.sessionOptionsFile),
+      `exploration-${createHash('sha256').update(sessionID).digest('hex')}.json`,
+    );
+    return readExplorationStats(JSON.parse(readFileSync(file, 'utf8')));
+  } catch {
+    return undefined;
+  }
+}
+
 async function promptHoldingSlot(
   runtime: OpencodeRuntime,
   sessionID: string,
@@ -489,6 +504,7 @@ async function promptHoldingSlot(
   let usage: PromptTokenUsage | undefined;
   try {
     const previous = await latestAssistant(client, sessionID);
+    const initialExperiment = sessionExplorationStats(runtime, sessionID);
     const startedAt = Date.now();
     const recordTurn = async (fallback: AssistantMessage[]) => {
       // Usage spans the whole turn: V2 writes one assistant message per step.
@@ -510,7 +526,18 @@ async function promptHoldingSlot(
         }
       }
       const telemetry = toolTelemetry.get(client);
-      if (telemetry) recordAssistantTools(telemetry, label, turn);
+      if (telemetry) {
+        const current = sessionExplorationStats(runtime, sessionID);
+        const experiment =
+          current &&
+          Object.fromEntries(
+            Object.entries(current).map(([key, value]) => [
+              key,
+              value - (initialExperiment?.[key] ?? 0),
+            ]),
+          );
+        recordAssistantTools(telemetry, label, turn, experiment);
+      }
       const turnUsage = sumUsage(turn);
       log(`${label} ${formatTokenUsage(turnUsage)}`);
       usage = extractPromptTokenUsage(turnUsage);
