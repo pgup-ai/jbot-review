@@ -5,6 +5,7 @@ import { evidenceHash } from './evidence-cache.ts';
 import {
   explorationCheckpoint,
   explorationExperiment,
+  readEvidenceSession,
   selectReadEvidence,
 } from './exploration-policy.ts';
 import { reviewReadLocations } from './review-read-locations.ts';
@@ -105,7 +106,9 @@ export async function installReviewRetrieval(
     retrieval: boolean;
     checkpoints: boolean;
     readEvidence?: boolean | 'linked';
+    readEvidencePhase?: 'all' | 'review' | 'verification';
   } = explorationExperiment(process.env),
+  sessionLabel?: (sessionID: string) => string | undefined,
 ) {
   const tool = reviewRetrievalTool(workspace);
   const linkedStore =
@@ -213,6 +216,7 @@ export async function installReviewRetrieval(
       state.stats.readEvidenceUnclassifiedShellCalls++;
     if (
       options.readEvidence &&
+      readEvidenceSession(options.readEvidencePhase ?? 'all', sessionLabel?.(event.sessionID)) &&
       event.status === 'completed' &&
       event.result &&
       event.agent !== 'jbot-wrapup' &&

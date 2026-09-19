@@ -71,6 +71,32 @@ function commonPrefix(a: string, b: string): string {
 }
 
 describe('buildShardPlans cache-stable prefix', () => {
+  it('batches only missing diffs in the owning main shard and keeps recovery in retries', () => {
+    const patch = '@@ -1 +1 @@\n-old\n+new';
+    const files = ['a.ts', 'b.ts'].map((filename) => ({ filename, patch }));
+    const base = {
+      coreContext: 'core',
+      fullDiffBlock: 'diff',
+      context7Block: 'C7',
+      diffHunksOptions: { totalBudgetBytes: 1 },
+    };
+    const batchDiffScope = { baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40) };
+    for (const shards of [[files], files.map((f) => [f])]) {
+      const control = buildShardPlans({ ...base, shards });
+      const plans = buildShardPlans({ ...base, shards, batchDiffScope });
+      for (const [i, plan] of plans.entries()) {
+        assert.doesNotMatch(control[i].context, /Batched missing-diff/);
+        for (const text of [plan.context, plan.baseContext]) {
+          const commands = text.split('\n').filter((line) => line.startsWith('    git'));
+          assert.equal(commands.length, 1);
+          for (const file of shards[i]) assert.ok(commands[0].includes(`'${file.filename}'`));
+          for (const file of files.filter((f) => !shards[i].includes(f)))
+            assert.ok(!commands[0].includes(`'${file.filename}'`));
+        }
+      }
+    }
+  });
+
   it('keeps the shared context as a byte-identical prefix across shards', () => {
     const coreContext = '## Pull request\nTitle: T\nDescription: shared core context';
     const context7Block = '## Context7 docs\nSHARED_CONTEXT7';

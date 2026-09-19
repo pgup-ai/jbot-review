@@ -49,13 +49,16 @@ export default {
     const readEvidence = process.env.JBOT_READ_EVIDENCE;
     if (process.env.JBOT_TARGETED_RETRIEVAL === '1' || process.env.JBOT_EXPLORATION_CHECKPOINTS === '1' || readEvidence === '1' || readEvidence === 'linked') {
       const { installReviewRetrieval } = await import(RETRIEVAL_MODULE);
-      await installReviewRetrieval(ctx, process.env.JBOT_RETRIEVAL_WORKSPACE, process.env.JBOT_EXPLORATION_STATS_DIR);
+      await installReviewRetrieval(ctx, process.env.JBOT_RETRIEVAL_WORKSPACE, process.env.JBOT_EXPLORATION_STATS_DIR, undefined, (id) => sessionOptions(id)?.jbotSessionLabel);
     }
     await ctx.session.hook('context', (event) => {
       stripTools(event.tools, event.agent);
       geminiSafe(event.tools);
       const options = sessionOptions(event.sessionID);
-      if (options) Object.assign(event.options, options);
+      if (options) {
+        delete options.jbotSessionLabel;
+        Object.assign(event.options, options);
+      }
     });
     await ctx.permission.hook('evaluate', (event) => {
       if (event.effect === 'ask') {

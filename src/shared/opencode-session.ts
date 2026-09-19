@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { readExplorationStats } from './exploration-policy.ts';
+import { explorationExperiment, readExplorationStats } from './exploration-policy.ts';
 import type { OpenCodeClient } from '@opencode/client';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -234,7 +234,7 @@ export async function createReviewSession(
   }
   await client.session.environment({ sessionID, variables: sessionEnvironment() }, control());
   rememberSession(client, sessionID, { label: spec.label, agent });
-  registerSessionOptions(runtime, sessionID, spec.model, spec.tier ?? 'main');
+  registerSessionOptions(runtime, sessionID, spec);
   return sessionID;
 }
 
@@ -247,13 +247,14 @@ const sessionOptionsByRuntime = new WeakMap<
 function registerSessionOptions(
   runtime: OpencodeRuntime,
   sessionID: string,
-  model: string,
-  tier: OptionTier,
+  spec: CreateSessionSpec,
 ): void {
-  const options = sessionModelOptions(runtime.modelOptions, model, tier);
-  if (!options) return;
+  const options = sessionModelOptions(runtime.modelOptions, spec.model, spec.tier ?? 'main');
+  const experiment = explorationExperiment(process.env);
+  const label = experiment.readEvidence && experiment.readEvidencePhase !== 'all';
+  if (!options && !label) return;
   const map = sessionOptionsByRuntime.get(runtime) ?? {};
-  map[sessionID] = options;
+  map[sessionID] = { ...options, ...(label ? { jbotSessionLabel: spec.label } : {}) };
   sessionOptionsByRuntime.set(runtime, map);
   const tmp = `${runtime.sessionOptionsFile}.tmp`;
   writeFileSync(tmp, JSON.stringify(map));

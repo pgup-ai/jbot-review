@@ -136,6 +136,7 @@ import {
   buildContextTrimNotice,
   buildReviewFocusBlock,
   buildShardAssignmentBlock,
+  buildDiffRecoveryBlock,
   selectLensKeys,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
@@ -2456,6 +2457,10 @@ async function runReviewPipeline(params: {
         : undefined,
       embeddedFirstPrompt: options.embeddedFirstPrompt,
       diffFirst: options.sharedPrefixPrompt,
+      batchDiffScope:
+        explorationExperiment(process.env).batchDiffRecovery && !mainRequiresCompleteEmbeddedDiff
+          ? diffScope
+          : undefined,
     });
 
     // Opt-in via an operator-configured directory, NEVER a path inside the
@@ -3809,6 +3814,7 @@ export function buildShardPlans(params: {
   embeddedFirstPrompt?: boolean;
   /** Shared-prefix arm: a single-shard plan leads with the diff; sharded plans keep the core prefix they share. */
   diffFirst?: boolean;
+  batchDiffScope?: Parameters<typeof buildDiffRecoveryBlock>[2];
 }): ShardPlan[] {
   const {
     coreContext,
@@ -3825,13 +3831,22 @@ export function buildShardPlans(params: {
     const [boundary, coreBody] = coreContext.startsWith(UNTRUSTED_PR_CONTENT_NOTE)
       ? [UNTRUSTED_PR_CONTENT_NOTE, coreContext.slice(UNTRUSTED_PR_CONTENT_NOTE.length).trimStart()]
       : ['', coreContext];
-    const diffResult = requireCompleteEmbeddedDiff
-      ? buildDiffHunksBlockWithMetadata(shards[0] ?? [], diffHunksOptions)
-      : undefined;
-    if (diffResult) {
+    const diffResult =
+      requireCompleteEmbeddedDiff || params.batchDiffScope
+        ? buildDiffHunksBlockWithMetadata(shards[0] ?? [], diffHunksOptions)
+        : undefined;
+    if (diffResult && requireCompleteEmbeddedDiff) {
       assertCompleteEmbeddedDiff(diffResult, 'review');
     }
-    const diffText = diffResult?.text ?? fullDiffBlock;
+    const recovery =
+      params.batchDiffScope && diffResult
+        ? buildDiffRecoveryBlock(
+            shards[0] ?? [],
+            incompleteDiffFiles(diffResult),
+            params.batchDiffScope,
+          )
+        : '';
+    const diffText = joinContext(diffResult?.text ?? fullDiffBlock, recovery);
     const baseContext = diffFirst
       ? joinContext(boundary, diffText, coreBody)
       : joinContext(coreContext, diffText);
@@ -3856,10 +3871,13 @@ export function buildShardPlans(params: {
     if (requireCompleteEmbeddedDiff) {
       assertCompleteEmbeddedDiff(diffResult, `review-shard-${index + 1}`);
     }
+    const recovery = params.batchDiffScope
+      ? buildDiffRecoveryBlock(shard, incompleteDiffFiles(diffResult), params.batchDiffScope)
+      : '';
     return {
       label: `review-shard-${index + 1}`,
-      context: joinContext(coreContext, context7Block, assignment, diffResult.text),
-      baseContext: joinContext(coreContext, assignment, diffResult.text),
+      context: joinContext(coreContext, context7Block, assignment, diffResult.text, recovery),
+      baseContext: joinContext(coreContext, assignment, diffResult.text, recovery),
       assignedFiles,
     };
   });

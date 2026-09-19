@@ -10,6 +10,7 @@ import {
   readExplorationStats,
   explorationExperiment,
   selectReadEvidence,
+  readEvidenceSession,
 } from '../src/shared/exploration-policy.ts';
 import { evidenceHash } from '../src/shared/evidence-cache.ts';
 
@@ -32,9 +33,19 @@ test('checkpoints react to new pressure and leave a two-request runway after a c
     retrieval: false,
     checkpoints: false,
     readEvidence: false,
+    readEvidencePhase: 'all',
+    batchDiffRecovery: false,
   });
   assert.equal(readExplorationStats({ checkpoints: 'secret' }), undefined);
   assert.equal(explorationExperiment({ JBOT_READ_EVIDENCE: 'linked' }).readEvidence, 'linked');
+  assert.equal(explorationExperiment({ JBOT_READ_EVIDENCE_PHASE: 'bad' }).readEvidencePhase, 'all');
+  for (const label of ['review', 'review-shard-2', 'review-retry', 'review-shard-2-retry'])
+    assert.ok(readEvidenceSession('review', label));
+  for (const label of [undefined, 'review-interactions', 'finding-verification'])
+    assert.equal(readEvidenceSession('review', label), false);
+  assert.equal(readEvidenceSession('verification', 'review'), false);
+  assert.ok(readEvidenceSession('verification', 'finding-verification'));
+  assert.ok(readEvidenceSession('all'));
 });
 
 test('linked selection excludes the seed, known paths and unbound matches before reserving two files', () => {
@@ -259,7 +270,8 @@ test('linked packets exclude concurrent reads and prior delivery while reporting
     },
     root,
     root,
-    { retrieval: false, checkpoints: false, readEvidence: 'linked' },
+    { retrieval: false, checkpoints: false, readEvidence: 'linked', readEvidencePhase: 'review' },
+    (id) => (id === 'unknown' ? undefined : id),
   );
   const event = (path: string) => ({
     sessionID: 'review',
@@ -271,6 +283,15 @@ test('linked packets exclude concurrent reads and prior delivery while reporting
   });
   const first = event('a.ts'),
     concurrent = event('d.ts');
+  for (const sessionID of ['finding-verification', 'review-interactions', 'unknown']) {
+    const blocked = { ...event('a.ts'), sessionID };
+    await onTool(blocked);
+    assert.equal(blocked.result.content, 'original');
+    const stats = JSON.parse(
+      await readFile(join(root, `exploration-${evidenceHash(sessionID)}.json`), 'utf8'),
+    );
+    assert.equal(stats.readEvidenceAttempts, 0);
+  }
   await Promise.all([onTool(first), onTool(concurrent)]);
   assert.match(first.result.content, /### b.ts:/);
   assert.match(first.result.content, /### c.ts:/);

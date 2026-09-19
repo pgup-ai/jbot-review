@@ -1,8 +1,53 @@
 import type { Finding } from './types.ts';
 import type { PrFile } from './github.ts';
+import type { DiffScope } from './review-context.ts';
+import { GIT_DIFF_ARGS } from './git.ts';
 
 import { PATH_PATTERNS, type ChangeShape } from './diff-context.ts';
 import { changedFilesIncludeFrontend, selectReviewPlaybookIds } from './review-playbooks.ts';
+
+export function buildDiffRecoveryBlock(
+  files: PrFile[],
+  missing: string[],
+  scope: DiffScope,
+): string {
+  if (!/^[a-f0-9]{40}$/.test(scope.baseSha ?? '')) return '';
+  if (!scope.worktree && !/^[a-f0-9]{40}$/.test(scope.headSha ?? '')) return '';
+  const revision = scope.worktree ? scope.baseSha : `${scope.baseSha}...${scope.headSha}`;
+  const command = `git --literal-pathspecs ${GIT_DIFF_ARGS.join(' ')} ${revision} --`;
+  const byPath = new Map(files.map((file) => [file.filename, file]));
+  const paths = [...new Set(missing)];
+  const groups: { paths: string[]; bytes: number }[] = [];
+  for (const path of paths) {
+    const file = byPath.get(path);
+    if (!file?.patch || /\p{Cc}/u.test(path)) continue;
+    const bytes = Buffer.byteLength(file.patch) + Buffer.byteLength(path) * 4 + 512;
+    if (bytes > 8192) continue;
+    let group = groups.at(-1);
+    if (!group || group.paths.length === 8 || group.bytes + bytes > 8192) {
+      group = { paths: [], bytes: 0 };
+      groups.push(group);
+    }
+    group.paths.push(path);
+    group.bytes += bytes;
+  }
+  const lines = [
+    '## Batched missing-diff reads',
+    'Read the missing hunks in these batches instead of one command per file. If output truncates, recover the remaining hunks separately. These commands do not replace source or dependency checks.',
+  ];
+  let delivered = 0;
+  for (const group of groups) {
+    const line = `    ${command} ${group.paths.map((path) => `'${path.replace(/'/g, "'\\''")}'`).join(' ')}`;
+    if (Buffer.byteLength([...lines, line].join('\n')) > 3900) break;
+    lines.push(line);
+    delivered += group.paths.length;
+  }
+  if (!delivered) return '';
+  lines.push(
+    `${delivered} missing paths batched; ${paths.length - delivered} omitted from this plan (large, unknown, or budget-limited). Read those remaining diffs separately.`,
+  );
+  return lines.join('\n');
+}
 
 const REVIEW_COMMAND_POLICY = `## Command policy
 

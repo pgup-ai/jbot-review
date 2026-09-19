@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { readFileSync } from 'node:fs';
 import {
   createReviewSession,
   configureOpencodeTelemetry,
@@ -16,6 +17,30 @@ import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts'
 const log = () => undefined;
 
 describe('createReviewSession', () => {
+  it('registers independent phase labels without model options, including forked verifiers', async (t) => {
+    const before = { ...process.env };
+    process.env.JBOT_READ_EVIDENCE = 'linked';
+    process.env.JBOT_READ_EVIDENCE_PHASE = 'verification';
+    t.after(() => {
+      for (const key of ['JBOT_READ_EVIDENCE', 'JBOT_READ_EVIDENCE_PHASE']) {
+        if (before[key] === undefined) delete process.env[key];
+        else process.env[key] = before[key];
+      }
+    });
+    const fake = fakeOpencodeServer(() => ({ text: '{}' }));
+    const rt = runtime(fake);
+    const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
+    const fork = await createReviewSession(rt, {
+      label: 'finding-verification',
+      model: 'openai/gpt-5',
+      forkFrom: id,
+    });
+    const options = JSON.parse(readFileSync(rt.sessionOptionsFile, 'utf8'));
+    assert.deepEqual(options[id], { jbotSessionLabel: 'review' });
+    assert.deepEqual(options[fork], { jbotSessionLabel: 'finding-verification' });
+    assert.equal('JBOT_READ_EVIDENCE_PHASE' in fake.sessions.get(fork)!.environment!, false);
+  });
+
   it('creates a plan session at the workspace with the ruleset and replaces its shell env', async () => {
     const fake = fakeOpencodeServer(() => ({ text: '{}' }));
     const id = await createReviewSession(runtime(fake), { label: 'review', model: 'openai/gpt-5' });

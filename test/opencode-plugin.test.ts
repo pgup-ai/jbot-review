@@ -72,7 +72,10 @@ describe('jbot opencode plugin', () => {
     const dir = mkdtempSync(join(tmpdir(), 'jbot-opts-'));
     temps.push(dir);
     const file = join(dir, 'opts.json');
-    writeFileSync(file, JSON.stringify({ ses_1: { reasoningEffort: 'low' } }));
+    writeFileSync(
+      file,
+      JSON.stringify({ ses_1: { reasoningEffort: 'low', jbotSessionLabel: 'review' } }),
+    );
     process.env.JBOT_OPENCODE_SESSION_OPTIONS = file;
     try {
       const known = {

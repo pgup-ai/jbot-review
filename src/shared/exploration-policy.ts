@@ -21,9 +21,19 @@ export function explorationExperiment(env: NodeJS.ProcessEnv) {
   return {
     retrieval: env.JBOT_TARGETED_RETRIEVAL === '1',
     checkpoints: env.JBOT_EXPLORATION_CHECKPOINTS === '1',
-    readEvidence:
-      env.JBOT_READ_EVIDENCE === 'linked' ? ('linked' as const) : env.JBOT_READ_EVIDENCE === '1',
-  };
+    readEvidence: env.JBOT_READ_EVIDENCE === 'linked' ? 'linked' : env.JBOT_READ_EVIDENCE === '1',
+    readEvidencePhase:
+      env.JBOT_READ_EVIDENCE_PHASE === 'review' || env.JBOT_READ_EVIDENCE_PHASE === 'verification'
+        ? env.JBOT_READ_EVIDENCE_PHASE
+        : 'all',
+    batchDiffRecovery: env.JBOT_BATCH_DIFF_RECOVERY === '1',
+  } as const;
+}
+
+export function readEvidenceSession(phase: 'all' | 'review' | 'verification', label?: string) {
+  if (phase === 'all') return true;
+  if (phase === 'verification') return label === 'finding-verification';
+  return /^review(?:-shard-\d+)?(?:-retry)?$/.test(label ?? '');
 }
 
 export function selectReadEvidence(

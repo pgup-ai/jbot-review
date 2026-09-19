@@ -57,12 +57,23 @@ test('configuration fingerprints policy changes while excluding credentials and 
   );
   const baseline = runConfiguration(options, 'opencode/a', {});
   assert.notEqual(
+    runConfiguration(options, 'opencode/a', {
+      JBOT_READ_EVIDENCE: 'linked',
+      JBOT_READ_EVIDENCE_PHASE: 'review',
+    }).configurationHash,
+    runConfiguration(options, 'opencode/a', {
+      JBOT_READ_EVIDENCE: 'linked',
+      JBOT_READ_EVIDENCE_PHASE: 'verification',
+    }).configurationHash,
+  );
+  assert.notEqual(
     runConfiguration(options, 'opencode/a', { JBOT_READ_EVIDENCE: 'linked' }).configurationHash,
     runConfiguration(options, 'opencode/a', { JBOT_READ_EVIDENCE: '1' }).configurationHash,
   );
   for (const variable of [
     'JBOT_TARGETED_RETRIEVAL',
     'JBOT_READ_EVIDENCE',
+    'JBOT_BATCH_DIFF_RECOVERY',
     'JBOT_EXPLORATION_CHECKPOINTS',
     'JBOT_EVIDENCE_SHARED',
     'JBOT_EVIDENCE_HANDOFF',
