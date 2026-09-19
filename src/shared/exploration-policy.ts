@@ -19,6 +19,7 @@ export function explorationExperiment(env: NodeJS.ProcessEnv) {
   return {
     retrieval: env.JBOT_TARGETED_RETRIEVAL === '1',
     checkpoints: env.JBOT_EXPLORATION_CHECKPOINTS === '1',
+    readEvidence: env.JBOT_READ_EVIDENCE === '1',
   };
 }
 
@@ -37,6 +38,18 @@ export function readExplorationStats(value: unknown) {
     'preparationMs',
   ]) {
     const n = (value as Record<string, unknown>)[key];
+    if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return undefined;
+    result[key] = n;
+  }
+  for (const key of [
+    'readEvidenceAttempts',
+    'readEvidencePackets',
+    'readEvidenceBytes',
+    'readEvidenceFallbacks',
+    'readEvidencePreparationMs',
+  ]) {
+    const n = (value as Record<string, unknown>)[key];
+    if (n === undefined) continue;
     if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return undefined;
     result[key] = n;
   }

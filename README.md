@@ -1036,7 +1036,7 @@ fresh cache per fixture and repetition. Provider prompt-cache state is uncontrol
 
 ### Targeted retrieval and exploration checkpoints
 
-Two independent, default-off OpenCode experiments:
+Three independent, default-off OpenCode experiments:
 
 - `JBOT_TARGETED_RETRIEVAL=1` exposes `review_context(path, line)`, batching the
   enclosing definition, import-linked references, imported definitions and tests
@@ -1053,8 +1053,18 @@ Two independent, default-off OpenCode experiments:
   checkpoints. These experimental thresholds are soft: they do not remove tools,
   cap dependency depth, skip changed hunks, or discard findings. Existing time
   limits and the verification reserve still apply. Tool-less wrap-up is unchanged.
+- `JBOT_READ_EVIDENCE=1` appends a related source packet to an ordinary successful
+  source read, without requiring a separate retrieval call. It recognizes native
+  reads and the existing literal `cat`/`sed` grammar; other commands are unchanged.
+  Each session attempts at most two distinct JS/TS paths, with at most 7,000 added
+  text bytes and four seconds of preparation per attempt. Original tool output,
+  metadata, failures and access to deeper reads are preserved. Packets enter the
+  current tool result; earlier history and system prompts are unchanged. Preparation
+  failure leaves the original result intact. Counter fields `readEvidenceAttempts`,
+  `readEvidencePackets`, `readEvidenceBytes`, `readEvidenceFallbacks` and
+  `readEvidencePreparationMs` measure delivery and overhead, not reads saved.
 
-Use both switches for the combined arm. Exploration rows include an `experiment`
+Use the first two switches for the combined retrieval/checkpoint arm. Exploration rows include an `experiment`
 object with checkpoint counts by trigger, retrieval calls/fallbacks, candidates
 selected/collected and preparation milliseconds. Counts are per prompt, including
 continuations and pre-wrap-up work. Internal counter files contain no source text
@@ -1067,6 +1077,8 @@ current behavior, retrieval alone, and retrieval plus checkpoints using the same
 frozen cases and seeded run order. This comparison disables Jev preloading in all
 three arms and requires no TypeSafe key. Judge retained findings against the
 fixture contracts before interpreting latency, tool counts or token costs.
+Use `"readEvidence": true` instead for baseline versus automatic read evidence,
+with composite-tool prompting, checkpoints and Jev preloading disabled in both arms.
 
 ### Jev caller-evidence experiment
 

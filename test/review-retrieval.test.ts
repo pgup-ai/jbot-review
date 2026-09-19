@@ -27,7 +27,11 @@ test('checkpoints react to new pressure and leave a two-request runway after a c
     explorationCheckpoint({ ...large, requests: 4, repeatedResults: 2 }, large),
     'repetition',
   );
-  assert.deepEqual(explorationExperiment({}), { retrieval: false, checkpoints: false });
+  assert.deepEqual(explorationExperiment({}), {
+    retrieval: false,
+    checkpoints: false,
+    readEvidence: false,
+  });
   assert.equal(readExplorationStats({ checkpoints: 'secret' }), undefined);
 });
 
@@ -120,4 +124,70 @@ test('plugin checkpoint hooks preserve tool access, skip tool-less agents, and p
   );
   assert.ok(!raw.includes('sensitive'));
   assert.equal(readExplorationStats(JSON.parse(raw))?.turnCheckpoints, 1);
+});
+
+test('read evidence preserves results and failures while bounding concurrent delivery per session', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'read-evidence-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', root]);
+  for (const path of ['a.ts', 'b.ts', 'c.ts'])
+    await writeFile(join(root, path), 'export const value = 123;\n');
+  execFileSync('git', ['add', '.'], { cwd: root });
+  let onTool: Parameters<
+    Parameters<typeof installReviewRetrieval>[0]['tool']['hook']
+  >[1] = () => {};
+  await installReviewRetrieval(
+    {
+      session: { hook: async () => {} },
+      tool: {
+        transform: async () => assert.fail('no extra tool needed'),
+        hook: async (_name, fn) => {
+          onTool = fn;
+        },
+      },
+    },
+    root,
+    root,
+    { retrieval: false, checkpoints: false, readEvidence: true },
+  );
+  const event = (path: string, sessionID = 'review') => ({
+    sessionID,
+    agent: 'plan',
+    tool: 'read',
+    status: 'completed',
+    input: { path },
+    result: { content: [{ type: 'text', text: 'original' }], metadata: { original: true } },
+  });
+  const failed = { ...event('a.ts'), status: 'error' };
+  const wrap = { ...event('a.ts'), agent: 'jbot-wrapup' };
+  await onTool(failed);
+  await onTool(wrap);
+  assert.equal(failed.result.content.length, 1);
+  assert.equal(wrap.result.content.length, 1);
+  const events = ['a.ts', 'b.ts', 'c.ts'].map((p) => event(p));
+  await Promise.all(events.map((e) => onTool(e)));
+  assert.deepEqual(
+    events.map((e) => e.result.content.length),
+    [2, 2, 1],
+  );
+  for (const e of events) {
+    assert.deepEqual(e.result.content[0], { type: 'text', text: 'original' });
+    assert.deepEqual(e.result.metadata, { original: true });
+  }
+  const stats = readExplorationStats(
+    JSON.parse(await readFile(join(root, `exploration-${evidenceHash('review')}.json`), 'utf8')),
+  )!;
+  assert.equal(stats.readEvidenceAttempts, 2);
+  assert.equal(stats.readEvidencePackets, 2);
+  assert.ok(stats.readEvidenceBytes > 0 && stats.readEvidenceBytes <= 14000);
+  const untracked = event('secret.ts', 'other');
+  await writeFile(join(root, 'secret.ts'), 'UNTRACKED_SECRET');
+  await onTool(untracked);
+  await onTool(untracked);
+  assert.equal(untracked.result.content.length, 1);
+  const other = readExplorationStats(
+    JSON.parse(await readFile(join(root, `exploration-${evidenceHash('other')}.json`), 'utf8')),
+  )!;
+  assert.equal(other.readEvidenceAttempts, 1);
+  assert.equal(other.readEvidenceFallbacks, 1);
 });

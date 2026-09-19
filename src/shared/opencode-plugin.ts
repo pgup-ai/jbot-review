@@ -46,11 +46,12 @@ function sessionOptions(sessionID) {
 export default {
   id: 'jbot-review',
   async setup(ctx) {
-    if (process.env.JBOT_TARGETED_RETRIEVAL === '1' || process.env.JBOT_EXPLORATION_CHECKPOINTS === '1') {
+    if (process.env.JBOT_TARGETED_RETRIEVAL === '1' || process.env.JBOT_EXPLORATION_CHECKPOINTS === '1' || process.env.JBOT_READ_EVIDENCE === '1') {
       const { installReviewRetrieval } = await import(RETRIEVAL_MODULE);
       await installReviewRetrieval(ctx, process.env.JBOT_RETRIEVAL_WORKSPACE, process.env.JBOT_EXPLORATION_STATS_DIR, {
         retrieval: process.env.JBOT_TARGETED_RETRIEVAL === '1',
         checkpoints: process.env.JBOT_EXPLORATION_CHECKPOINTS === '1',
+        readEvidence: process.env.JBOT_READ_EVIDENCE === '1',
       });
     }
     await ctx.session.hook('context', (event) => {

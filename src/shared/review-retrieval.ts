@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { EvidenceStore } from './evidence.ts';
 import { evidenceHash } from './evidence-cache.ts';
 import { explorationCheckpoint } from './exploration-policy.ts';
+import { reviewReadLocations } from './review-read-locations.ts';
 import {
   EXPLORATION_CHECKPOINT,
   REVIEW_RETRIEVAL_DESCRIPTION,
@@ -20,6 +21,8 @@ interface ToolEvent {
   sessionID: string;
   tool: string;
   status: string;
+  agent?: string;
+  input?: unknown;
   result?: { content?: unknown; metadata?: Record<string, unknown> };
 }
 interface PluginContext {
@@ -27,7 +30,7 @@ interface PluginContext {
     transform(
       fn: (editor: { add(tool: ReturnType<typeof reviewRetrievalTool>): void }) => void,
     ): Promise<unknown>;
-    hook(name: 'execute.after', fn: (event: ToolEvent) => void): Promise<unknown>;
+    hook(name: 'execute.after', fn: (event: ToolEvent) => void | Promise<void>): Promise<unknown>;
   };
   session: { hook(name: 'context', fn: (event: ContextEvent) => void): Promise<unknown> };
 }
@@ -89,10 +92,10 @@ export async function installReviewRetrieval(
   ctx: PluginContext,
   workspace: string,
   statsDirectory: string,
-  options: { retrieval: boolean; checkpoints: boolean },
+  options: { retrieval: boolean; checkpoints: boolean; readEvidence?: boolean },
 ) {
+  const tool = reviewRetrievalTool(workspace);
   if (options.retrieval) {
-    const tool = reviewRetrievalTool(workspace);
     await ctx.tool.transform((editor) => editor.add(tool));
   }
   const sessions = new Map<string, ReturnType<typeof newSession>>();
@@ -101,6 +104,7 @@ export async function installReviewRetrieval(
       progress: { requests: 0, outputBytes: 0, repeatedResults: 0 },
       previous: { requests: 0, outputBytes: 0, repeatedResults: 0 },
       seen: new Set<string>(),
+      evidencePaths: new Set<string>(),
       stats: {
         checkpoints: 0,
         turnCheckpoints: 0,
@@ -111,6 +115,11 @@ export async function installReviewRetrieval(
         selectedCandidates: 0,
         candidates: 0,
         preparationMs: 0,
+        readEvidenceAttempts: 0,
+        readEvidencePackets: 0,
+        readEvidenceBytes: 0,
+        readEvidenceFallbacks: 0,
+        readEvidencePreparationMs: 0,
       },
     };
   }
@@ -153,8 +162,51 @@ export async function installReviewRetrieval(
     if (reason === 'repetition') state.stats.repetitionCheckpoints++;
     save(event.sessionID);
   });
-  await ctx.tool.hook('execute.after', (event) => {
+  await ctx.tool.hook('execute.after', async (event) => {
     const state = session(event.sessionID);
+    if (
+      options.readEvidence &&
+      event.status === 'completed' &&
+      event.result &&
+      event.agent !== 'jbot-wrapup' &&
+      event.agent !== 'jbot-plain' &&
+      state.stats.readEvidenceAttempts < 2 &&
+      event.input &&
+      typeof event.input === 'object' &&
+      (typeof event.result.content === 'string' || Array.isArray(event.result.content))
+    ) {
+      const ref = reviewReadLocations(
+        workspace,
+        event.tool,
+        event.input as Record<string, unknown>,
+      ).find((r) => /\.[cm]?[jt]sx?$/.test(r.path) && !state.evidencePaths.has(r.path));
+      if (ref) {
+        // Reserve before awaiting so parallel reads cannot exceed the session budget.
+        state.evidencePaths.add(ref.path);
+        state.stats.readEvidenceAttempts++;
+        const started = Date.now();
+        try {
+          const packet = await tool.execute(ref);
+          const text = '\n\n' + packet.content;
+          const bytes = Buffer.byteLength(text);
+          if (packet.metadata?.jbotRetrieval.selected && bytes <= 7000) {
+            event.result = {
+              ...event.result,
+              content:
+                typeof event.result.content === 'string'
+                  ? event.result.content + text
+                  : [...event.result.content, { type: 'text', text }],
+            };
+            state.stats.readEvidencePackets++;
+            state.stats.readEvidenceBytes += bytes;
+          } else state.stats.readEvidenceFallbacks++;
+        } catch {
+          state.stats.readEvidenceFallbacks++;
+        } finally {
+          state.stats.readEvidencePreparationMs += Date.now() - started;
+        }
+      }
+    }
     if (event.status === 'completed') {
       const content = JSON.stringify(event.result?.content) ?? '';
       state.progress.outputBytes += Buffer.byteLength(content);

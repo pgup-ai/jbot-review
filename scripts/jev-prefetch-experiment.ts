@@ -34,6 +34,7 @@ type Arm = {
   persistent?: boolean;
   retrieval?: boolean;
   checkpoints?: boolean;
+  readEvidence?: boolean;
 };
 type Plan = {
   seed: string;
@@ -44,6 +45,7 @@ type Plan = {
   docs?: string;
   reuse?: boolean;
   retrieval?: boolean;
+  readEvidence?: boolean;
 };
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const planPath = process.argv[2];
@@ -107,58 +109,63 @@ const config = {
   JBOT_BENCHMARK_DRY_RUN: 'true',
   CONTEXT7_API_KEY: '',
 };
-const arms: Arm[] = plan.retrieval
+const arms: Arm[] = plan.readEvidence
   ? [
       { id: 'baseline', exploration: 'off', verification: 'off' },
-      { id: 'retrieval', exploration: 'off', verification: 'off', retrieval: true },
-      {
-        id: 'checkpoints',
-        exploration: 'off',
-        verification: 'off',
-        retrieval: true,
-        checkpoints: true,
-      },
+      { id: 'read-evidence', exploration: 'off', verification: 'off', readEvidence: true },
     ]
-  : plan.reuse
+  : plan.retrieval
     ? [
-        { id: 'baseline', exploration: 'off', verification: 'deterministic' },
-        { id: 'shared', exploration: 'off', verification: 'deterministic', shared: true },
+        { id: 'baseline', exploration: 'off', verification: 'off' },
+        { id: 'retrieval', exploration: 'off', verification: 'off', retrieval: true },
         {
-          id: 'handoff',
+          id: 'checkpoints',
           exploration: 'off',
-          verification: 'deterministic',
-          shared: true,
-          handoff: true,
-        },
-        {
-          id: 'prefetch',
-          exploration: 'off',
-          verification: 'deterministic',
-          shared: true,
-          handoff: true,
-          prefetch: true,
-        },
-        {
-          id: 'jev',
-          exploration: 'off',
-          verification: 'on',
-          shared: true,
-          handoff: true,
-          prefetch: true,
-        },
-        {
-          id: 'persistent',
-          exploration: 'off',
-          verification: 'on',
-          shared: true,
-          handoff: true,
-          prefetch: true,
-          persistent: true,
+          verification: 'off',
+          retrieval: true,
+          checkpoints: true,
         },
       ]
-    : ['off', 'deterministic', 'on'].map(
-        (id) => ({ id, exploration: id, verification: id }) as Arm,
-      );
+    : plan.reuse
+      ? [
+          { id: 'baseline', exploration: 'off', verification: 'deterministic' },
+          { id: 'shared', exploration: 'off', verification: 'deterministic', shared: true },
+          {
+            id: 'handoff',
+            exploration: 'off',
+            verification: 'deterministic',
+            shared: true,
+            handoff: true,
+          },
+          {
+            id: 'prefetch',
+            exploration: 'off',
+            verification: 'deterministic',
+            shared: true,
+            handoff: true,
+            prefetch: true,
+          },
+          {
+            id: 'jev',
+            exploration: 'off',
+            verification: 'on',
+            shared: true,
+            handoff: true,
+            prefetch: true,
+          },
+          {
+            id: 'persistent',
+            exploration: 'off',
+            verification: 'on',
+            shared: true,
+            handoff: true,
+            prefetch: true,
+            persistent: true,
+          },
+        ]
+      : ['off', 'deterministic', 'on'].map(
+          (id) => ({ id, exploration: id, verification: id }) as Arm,
+        );
 const cacheRoot = plan.reuse
   ? mkdtempSync(resolve(tmpdir(), 'jbot-evidence-experiment-'))
   : undefined;
@@ -213,7 +220,7 @@ for (const key of Object.keys(env)) {
     delete env[key];
 }
 if (env.OPENCODE_API_KEY) env.OPENCODE_API_KEY = env.OPENCODE_API_KEY.split(',')[0].trim();
-if (!plan.retrieval && !env.TYPESAFE_API_KEY)
+if (!plan.retrieval && !plan.readEvidence && !env.TYPESAFE_API_KEY)
   throw new Error('TYPESAFE_API_KEY is required for the on arm');
 const results: unknown[] = [];
 for (const run of schedule) {
@@ -251,9 +258,11 @@ for (const run of schedule) {
       env: {
         ...env,
         ...config,
-        JBOT_JEV_PREFETCH: plan.evidence || plan.reuse || plan.retrieval ? 'off' : run.arm,
+        JBOT_JEV_PREFETCH:
+          plan.evidence || plan.reuse || plan.retrieval || plan.readEvidence ? 'off' : run.arm,
         JBOT_TARGETED_RETRIEVAL: arm.retrieval ? '1' : '0',
         JBOT_EXPLORATION_CHECKPOINTS: arm.checkpoints ? '1' : '0',
+        JBOT_READ_EVIDENCE: arm.readEvidence ? '1' : '0',
         JBOT_EXPLORATION_EVIDENCE: plan.reuse ? arm.exploration : plan.evidence ? run.arm : 'off',
         JBOT_VERIFICATION_EVIDENCE: plan.reuse ? arm.verification : plan.evidence ? run.arm : 'off',
         JBOT_EVIDENCE_SHARED: arm.shared ? '1' : '0',
