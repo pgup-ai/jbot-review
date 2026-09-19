@@ -1070,10 +1070,12 @@ Three independent, default-off OpenCode experiments:
   delivery. Path suppression is an optimization, not a claim that an earlier
   partial read supplied the whole file. Unresolved and deeper dependencies remain
   available through ordinary tools.
-  Additional counters record delivered files, observed reads, subsequent requests
+  Additional counters record delivered files, observed reads, later-turn requests
   for delivered files, unclassified shell calls, excluded candidates and empty
   packets. A subsequent request may legitimately seek lines outside a supplied
   excerpt; unclassified shell calls prevent these counters from proving avoidance.
+  Same-turn completions are excluded from the subsequent-read counter because
+  they can belong to an already running tool batch.
 
 Use the first two switches for the combined retrieval/checkpoint arm. Exploration rows include an `experiment`
 object with checkpoint counts by trigger, retrieval calls/fallbacks, candidates

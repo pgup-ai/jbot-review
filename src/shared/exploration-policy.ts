@@ -1,3 +1,5 @@
+import type { JevCandidate } from './prompt.ts';
+
 export interface ExplorationProgress {
   requests: number;
   outputBytes: number;
@@ -27,10 +29,10 @@ export function explorationExperiment(env: NodeJS.ProcessEnv) {
 export function selectReadEvidence(
   candidates: JevCandidate[],
   path: string,
-  supplied: ReadonlySet<string>,
+  knownPaths: ReadonlySet<string>,
 ) {
   const selected: JevCandidate[] = [];
-  const paths = new Set(supplied);
+  const paths = new Set(knownPaths);
   for (const c of candidates) {
     if (c.relatedTo !== path || c.path === path || paths.has(c.path)) continue;
     selected.push(c);
@@ -78,4 +80,3 @@ export function readExplorationStats(value: unknown) {
   }
   return result;
 }
-import type { JevCandidate } from './prompt.ts';

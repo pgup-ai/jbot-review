@@ -119,7 +119,7 @@ export async function installReviewRetrieval(
       seen: new Set<string>(),
       evidencePaths: new Set<string>(),
       knownPaths: new Set<string>(),
-      deliveredPaths: new Set<string>(),
+      deliveredPaths: new Map<string, number>(),
       preparation: Promise.resolve(),
       stats: {
         checkpoints: 0,
@@ -192,7 +192,9 @@ export async function installReviewRetrieval(
         : [];
     for (const ref of reads) {
       state.stats.readEvidenceObservedReads++;
-      if (state.deliveredPaths.has(ref.path)) state.stats.readEvidenceSubsequentReads++;
+      const deliveredTurn = state.deliveredPaths.get(ref.path);
+      if (deliveredTurn !== undefined && deliveredTurn < state.progress.requests)
+        state.stats.readEvidenceSubsequentReads++;
       if (state.knownPaths.size < 256) state.knownPaths.add(ref.path);
     }
     if (
@@ -259,7 +261,7 @@ export async function installReviewRetrieval(
               state.stats.readEvidencePackets++;
               state.stats.readEvidenceBytes += bytes;
               for (const path of packet.metadata.jbotRetrieval.paths) {
-                state.deliveredPaths.add(path);
+                state.deliveredPaths.set(path, state.progress.requests);
                 state.knownPaths.add(path);
               }
               state.stats.readEvidenceDeliveredFiles = state.deliveredPaths.size;

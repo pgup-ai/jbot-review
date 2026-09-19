@@ -235,9 +235,16 @@ test('linked packets exclude concurrent reads and prior delivery while reporting
   let onTool: Parameters<
     Parameters<typeof installReviewRetrieval>[0]['tool']['hook']
   >[1] = () => {};
+  let onContext: Parameters<
+    Parameters<typeof installReviewRetrieval>[0]['session']['hook']
+  >[1] = () => {};
   await installReviewRetrieval(
     {
-      session: { hook: async () => {} },
+      session: {
+        hook: async (_, fn) => {
+          onContext = fn;
+        },
+      },
       tool: {
         transform: async () => assert.fail('no new tool'),
         hook: async (_, fn) => {
@@ -267,13 +274,15 @@ test('linked packets exclude concurrent reads and prior delivery while reporting
   assert.equal(concurrent.result.content, 'original');
   assert.deepEqual(first.result.metadata, { original: true });
   await onTool(event('b.ts'));
+  onContext({ sessionID: 'review', agent: 'plan', system: [] });
+  await onTool(event('b.ts'));
   await onTool({ ...event('a.ts'), tool: 'shell', input: { command: 'cat $(pwd)/secret.ts' } });
   const raw = await readFile(join(root, `exploration-${evidenceHash('review')}.json`), 'utf8');
   const stats = readExplorationStats(JSON.parse(raw))!;
   assert.equal(stats.readEvidenceAttempts, 2);
   assert.equal(stats.readEvidencePackets, 1);
   assert.equal(stats.readEvidenceDeliveredFiles, 2);
-  assert.equal(stats.readEvidenceObservedReads, 3);
+  assert.equal(stats.readEvidenceObservedReads, 4);
   assert.equal(stats.readEvidenceSubsequentReads, 1);
   assert.equal(stats.readEvidenceUnclassifiedShellCalls, 1);
   assert.equal(stats.readEvidenceEmptyPackets, 1);

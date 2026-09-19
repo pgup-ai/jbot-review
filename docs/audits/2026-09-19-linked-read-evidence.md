@@ -73,3 +73,45 @@ defects. Before confirmation, add an unseen clean/defective contract pair and
 freeze source, fixture SHAs, seed and settings. Compare findings against concrete
 fixture contracts before interpreting time. A small synthetic comparison cannot
 establish broad quality equivalence or justify a default-policy change.
+
+## Pilot and confirmation decision
+
+Pilot revision `cd923e2`; all 12 reviews completed, no incomplete session. Each
+arm retained all four seeded P1 defects and produced no clean-case finding.
+All 12 retained findings were manually checked in an arm-masked list against
+the fixture contracts; this is not independent blind adjudication.
+
+| Pilot mean        | Baseline |  Broad | Linked |
+| ----------------- | -------: | -----: | -----: |
+| Total seconds     |    22.37 |  16.44 |  13.95 |
+| Tool calls        |    13.50 |  10.75 |   6.75 |
+| Model turns       |     6.00 |   5.75 |   5.00 |
+| Tool-output bytes |    5,996 | 11,181 |  7,671 |
+
+Linked delivered eight packets, 13,908 added bytes, with 126 ms preparation and
+no fallback. In chain-defect trial 04 the main reviewer used native reads,
+received two packets, and omitted the separate checkout/queue reads present in
+baseline trial 02. It retained the downstream defect. Its verifier used an
+unclassified shell loop, so not all of the total tool reduction can be credited
+to injection. In trial 05 a shell loop preceded the first packet: path-level
+suppression cannot recognize source supplied by arbitrary shell programs.
+
+The pilot supports replication, not a speedup claim. Before confirmation the
+subsequent-read counter was tightened to count only reads completed in a later
+model request than delivery. Same-turn completions can belong to an already
+running tool batch. A regression assertion covers both cases. Selection,
+rendered prompts and packet budgets are unchanged by this instrumentation fix.
+
+Confirmation uses six fixtures, three arms and three repetitions (54 reviews),
+seed `linked-read-confirmation-2026-09-19`. The added pair exposes `recordId` in
+a webhook receipt: the clean adapter keeps `ok: true`; the defective adapter
+uses `record.inserted`, causing an existing duplicate to return 503/retry instead
+of 204/no-retry. Both have identical supported entrypoints and test contracts.
+Their local executable oracle passes the clean version and fails the defect.
+The pair is held out from the pilot and selection-policy development.
+
+The expected currency defects must retain confirmed P1; the new retry defect
+accepts confirmed P1/P2. Clean-case assumptions about unsupported external callers
+do not qualify as defects. Frozen expectations are in
+`confirmation/quality-contract.json`; fixture SHAs and settings are in the plan
+and generated manifest. All scheduled rows remain in the results.
