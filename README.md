@@ -1008,7 +1008,9 @@ Jev keys include the complete request (pinned model, state and questions).
 Cached responses pass the same schema checks as live responses; cache hits record
 zero newly billed tokens/cost. Version 6 rows retain all candidate `rawScores`
 for offline threshold analysis and mark `judgmentCacheHit` and `speculative`
-preparation. No source text, credentials or endpoint overrides enter these logs.
+preparation. `selectedReadLocations` counts handed-off candidates actually selected.
+The reuse switches participate in the configuration fingerprint; cache paths are
+excluded. No source text, credentials or endpoint overrides enter these logs.
 The `evidence-cache` row records cumulative source reads/hits/bytes, in-flight
 sharing, disk activity, observed read locations, handoff candidates and
 prefetched files reused or unused by host preparation. Native tool reuse and

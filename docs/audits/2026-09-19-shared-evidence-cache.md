@@ -127,3 +127,69 @@ The existing provider prefix-cache/fork controls were not changed: sharing raw s
 Across both suites, 15 live Jev calls cost an estimated $0.004780; all model calls together cost approximately $0.416378. Provider-reported costs and pinned Jev input pricing are estimates. Full logs, packets' hashes, raw numeric scores, exact finding/verdict output and manifests remain ignored under `.jbot-review/jev-experiment-v5/`. No credentials or source bodies are in telemetry.
 
 After freezing these measurements, the continuation corrects speculative text-log injection accounting, includes reuse switches (without cache paths) in the configuration fingerprint, reports selected read-location count, and includes unloaded observed files in the bounded omission notice. Candidate selection and source text are unchanged for these fixtures. The source-index cache now validates each entry once; this is cleanup, not a new ranking treatment.
+
+## Repository preparation measurement
+
+On `dae73b5`, five repetitions of each cold/warm preparation arm (30 preparations) used this repository's complete `origin/main...HEAD` diff. No model/API requests ran during this measurement. All preparations succeeded and produced the same selected-evidence hash and packet byte count. OS filesystem caches and JIT warm-up are uncontrolled; modes run in a fixed order. These are host-work measurements, not full-review latency results.
+
+| Mode       | Cold mean ms | Warm mean ms | Warm persistent index hits |
+| ---------- | -----------: | -----------: | -------------------------: |
+| baseline   |        501.1 |        387.0 |                          0 |
+| shared     |        211.0 |        129.4 |                          0 |
+| persistent |        226.4 |        153.1 |                         63 |
+
+Baseline warm reuses the previous parsed-index cache but still runs guarded source reads. Shared warm additionally avoids repeated file-content reads and per-file membership subprocesses. Persistent warm constructs a fresh store and reloads indexes from disk; source bytes are freshly validated/read, not persisted. Full-review savings remain limited by much longer model execution.
+
+Local artifact: `.jbot-review/jev-experiment-v5/repository-cache.json`, SHA-256 `071244c291f54964469329f5e1cef1df0950e7b6332db0c797a5c271350c8e11`.
+
+## Final dogfood and cleanup
+
+The built `dae73b5` runtime reviewed the full branch locally in **180.333 s**.
+Main review, guideline compliance and independent verification all completed;
+no GitHub review was posted. Source code stayed fixed during the run; the
+repository-measurement audit appendix was drafted while it ran and was not a
+frozen document target. Artifacts are under `jev-experiment-v5/dogfood/`.
+
+The single retained P3 identified a real telemetry defect: collector failure
+built a deterministic fallback row and restored `mode` without restoring the
+configured Jev model. Fixed by preserving `JEV_MODEL` for on/shadow failures;
+API time and usage remain zero/absent when collection fails before any request.
+The existing failure-path test now asserts both identities and zero API activity.
+No paid rerun was needed for this telemetry-only correction; model inputs,
+selection and finding disposition are unchanged.
+
+The run captured one native read location; most exploration used shell reads.
+Jev selected none of the handed-off locations in the final verification packet.
+Of 64 prefetched files, eight were reused by host preparation and 56 were unused;
+prefetch took 341 ms. Verification reused eight parsed indexes, parsed three
+new files, and spent 261 ms preparing its packet, including 209 ms on Jev.
+This validates plumbing and fallbacks, not a real-repository handoff speedup.
+
+Self-review: no remaining P1/P2 issues found. Seams checked: guarded source
+reading, mutable-worktree invalidation, operator cache ownership, exact request
+identity, bounded observation handoff, verifier fail-open behavior, telemetry,
+and default-off configuration. The advisory core corpus was not run; these
+small targeted fixtures do not establish general review-quality non-regression.
+
+Cleanup: removed duplicate persistent-index validation and unnecessary public
+cache exposure. Two comment blocks were kept: unsupported syntax retains text
+fallback; optional cache failure must not fail review. Four new tests were kept:
+
+- Shared-read freshness catches same-size edits, removed tracking and symlink
+  replacement; also checks concurrent request sharing and speculative logs.
+- Handoff catches source-location transfer accidentally executing shell inputs
+  or admitting escaped paths.
+- Persistence catches stale/corrupt/model-mismatched judgments and rebilling a
+  hit, while pinning content/task invalidation and index reuse.
+- OpenCode callback integration catches copying tool output/reasoning or
+  feeding verification history back into evidence selection.
+
+Comments: 2 adjudicated — 2 kept, 0 rewritten, 0 cut. Tests: 4 adjudicated —
+4 kept, 0 folded, 0 cut. Assertions were added to existing telemetry/failure
+cases without weakening prior contracts. No dependencies were added this round.
+
+Validation: 1,082 tests pass; typecheck, lint, formatting, build and
+`git diff --check` pass. The credential scan reports no configured secrets in
+the branch diff; `.env` remains ignored. All switches remain opt-in.
+
+Net line delta since `3585943`: +981 across 18 files; no untracked source files.

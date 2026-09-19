@@ -14,6 +14,7 @@ import {
 import { EvidenceDiskCache } from './evidence-cache.ts';
 import { buildJevPrefetch, type JevPrefetchMode, type JevPrefetchStats } from './jev-prefetch.ts';
 import {
+  JEV_MODEL,
   formatSourceExcerpt,
   evidenceTask,
   formatEvidenceCoverage,
@@ -522,6 +523,7 @@ export class EvidenceStore {
           const failed: JevPrefetchStats = {
             ...row,
             mode,
+            model: mode === 'deterministic' ? null : JEV_MODEL,
             status: 'fallback',
             reason: signal.aborted ? 'timeout' : 'unavailable',
           };

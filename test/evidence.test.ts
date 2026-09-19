@@ -152,11 +152,15 @@ test('invalid docs and timeouts fail open with measurable fallback and no provid
   assert.equal(await store.prepare('verification', [finding], 'on', options), '');
   assert.equal(rows[0].status, 'fallback');
   assert.equal(rows[0].scope, 'verification');
+  assert.equal(rows[0].model, JEV_MODEL);
+  assert.equal(rows[0].apiMs, 0);
+  assert.equal(rows[0].inputTokens, undefined);
   assert.equal(
     await store.prepare('exploration', [], 'deterministic', { ...options, timeoutMs: 0 }),
     '',
   );
   assert.equal(rows[1].status, 'fallback');
+  assert.equal(rows[1].model, null);
   assert.ok(!logs.join('').includes('x'.repeat(50)));
 });
 
