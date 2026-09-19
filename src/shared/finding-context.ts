@@ -53,9 +53,10 @@ export async function readTrackedSource(
       if (!stat.isFile()) return undefined;
       signal.throwIfAborted();
       const signature = [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(':');
-      const cached = options?.cache?.entries.get(path);
-      if (cached?.signature === signature) {
-        options!.cache!.hits++;
+      const cache = options?.cache;
+      const cached = cache?.entries.get(path);
+      if (cache && cached?.signature === signature) {
+        cache.hits++;
         return cached.source;
       }
       const buffer = Buffer.alloc(MAX_SOURCE_BYTES);
@@ -67,8 +68,7 @@ export async function readTrackedSource(
         text: truncated ? text.slice(0, Math.max(0, text.lastIndexOf('\n'))) : text,
         truncated,
       };
-      if (options?.cache) {
-        const cache = options.cache;
+      if (cache) {
         cache.reads++;
         cache.bytes += bytesRead;
         if (cache.entries.size >= 64) cache.entries.delete(cache.entries.keys().next().value!);

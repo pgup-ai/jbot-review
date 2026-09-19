@@ -164,7 +164,7 @@ export interface EvidenceCacheStats {
   reusedPrefetchedFiles: number;
   unusedPrefetchedFiles: number;
   prefetchMs: number;
-  prefetchStatus: 'disabled' | 'running' | 'completed';
+  prefetchStatus: 'disabled' | 'running' | 'completed' | 'failed';
 }
 
 export class EvidenceStore {
@@ -185,7 +185,7 @@ export class EvidenceStore {
   private reusedPrefetched = new Set<string>();
   private prefetchMs = 0;
   private prefetchStatus: EvidenceCacheStats['prefetchStatus'] = 'disabled';
-  readonly disk: EvidenceDiskCache;
+  private readonly disk: EvidenceDiskCache;
   constructor(
     private workspace: string,
     private files: PrFile[],
@@ -292,14 +292,18 @@ export class EvidenceStore {
     this.prefetchStatus = 'running';
     const existing = new Set(this.cache.keys());
     await this.prepare('exploration', [], 'deterministic', {
-      ...options,
+      log: () => {},
       timeoutMs: 4000,
-      onStats: (row) =>
-        options.onStats({ ...row, speculative: true, injectedBytes: 0, coverageBytes: 0 }),
+      onStats: (row) => {
+        const measured = { ...row, speculative: true, injectedBytes: 0, coverageBytes: 0 };
+        if (row.status === 'fallback') this.prefetchStatus = 'failed';
+        options.onStats(measured);
+        options.log(`Evidence preparation: ${JSON.stringify(measured)}`);
+      },
     });
     for (const path of this.cache.keys()) if (!existing.has(path)) this.prefetched.add(path);
     this.prefetchMs = Date.now() - started;
-    this.prefetchStatus = 'completed';
+    if (this.prefetchStatus === 'running') this.prefetchStatus = 'completed';
   }
 
   async prepare(
@@ -468,9 +472,13 @@ export class EvidenceStore {
       // Reserve documentation candidates so a large code pool cannot evict all external contracts.
       const pool = [...candidates.slice(0, 2), ...docs, ...candidates.slice(2)];
       const task = evidenceTask(findings);
-      const omitted = [...new Set([...seeds, ...matches])].filter(
-        (p) => paths.has(p) && !loaded.has(p),
-      );
+      const omitted = [
+        ...new Set([
+          ...seeds,
+          ...matches,
+          ...Array.from(this.observations.values(), (ref) => ref.path),
+        ]),
+      ].filter((p) => paths.has(p) && !loaded.has(p));
       const coverage = formatEvidenceCoverage(omitted);
       const packet = await buildJevPrefetch(this.workspace, this.files, [], {
         ...options,
@@ -535,7 +543,8 @@ export class EvidenceStore {
     const key = JSON.stringify(['index-v1-babel-7.29.9', path, digest, source.truncated]);
     const persisted = await this.disk.get(key);
     let index: SourceIndex;
-    if (validSourceIndex(persisted)) {
+    const fromDisk = validSourceIndex(persisted);
+    if (fromDisk) {
       index = persisted;
       this.indexDiskHits++;
     } else {
@@ -547,7 +556,7 @@ export class EvidenceStore {
       }
       await this.disk.set(key, index);
     }
-    const value = { ...source, digest, index, parsed: !validSourceIndex(persisted) };
+    const value = { ...source, digest, index, parsed: !fromDisk };
     if (this.cache.size >= 64) this.cache.delete(this.cache.keys().next().value!);
     this.cache.set(path, value);
     return value;

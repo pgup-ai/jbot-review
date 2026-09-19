@@ -214,7 +214,18 @@ test('shared reads preserve packets, invalidate same-size edits, and reject remo
     handoff: false,
     prefetch: true,
   });
-  await store.warm(options);
+  const logs = [];
+  await store.warm({ ...options, log: (line) => logs.push(line) });
+  const logged = JSON.parse(logs[0].slice('Evidence preparation: '.length));
+  assert.equal(logged.speculative, true);
+  assert.equal(logged.injectedBytes, 0);
+  assert.equal(logged.coverageBytes, 0);
+  const [first, second] = await Promise.all([
+    store.sourceContext([finding]),
+    store.sourceContext([finding]),
+  ]);
+  assert.equal(first, second);
+  assert.ok(store.stats().sharedRequests > 0);
   assert.equal(store.stats().prefetchedFiles, 1);
   assert.match(await store.sourceContext([finding]), /n \* 100/);
   assert.equal(
@@ -251,11 +262,13 @@ test('handoff reloads bounded review read locations without executing shell or c
   store.observe('shell', { command: 'cat secret.ts', path: 'secret.ts' });
   store.observe('read', { path: '../secret.ts' });
   assert.equal(store.stats().observedLocations, 1);
+  const rows = [];
   const packet = await store.prepare('verification', [finding], 'deterministic', {
     timeoutMs: 5000,
     log: () => {},
-    onStats: () => {},
+    onStats: (row) => rows.push(row),
   });
+  assert.equal(rows[0].selectedReadLocations, 1);
   assert.match(packet, /guard.ts/);
   assert.match(packet, /revalidated review read/);
   assert.match(packet, /approvalRequired = true/);

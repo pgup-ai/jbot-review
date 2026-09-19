@@ -55,6 +55,19 @@ test('configuration fingerprints policy changes while excluding credentials and 
     first.configurationHash,
     runConfiguration({ ...options, jevPrefetch: 'on' }, 'opencode/a').configurationHash,
   );
+  const baseline = runConfiguration(options, 'opencode/a', {});
+  for (const variable of [
+    'JBOT_EVIDENCE_SHARED',
+    'JBOT_EVIDENCE_HANDOFF',
+    'JBOT_EVIDENCE_PREFETCH',
+    'JBOT_EVIDENCE_CACHE_DIR',
+  ]) {
+    const changed = runConfiguration(options, 'opencode/a', {
+      [variable]: variable.endsWith('_DIR') ? '/private/operator/cache' : '1',
+    });
+    assert.notEqual(changed.configurationHash, baseline.configurationHash);
+    assert.doesNotMatch(JSON.stringify(changed), /private|operator/);
+  }
   assert.equal(
     runConfiguration({ ...options, sdkEngine: 'https://secret.example' }, 'opencode/a')
       .configuration.sdkEngine,

@@ -21,6 +21,7 @@ export interface JevPrefetchStats {
   kind: 'jev-prefetch';
   version: 6;
   speculative?: boolean;
+  selectedReadLocations?: number;
   judgmentCacheHit?: boolean;
   rawScores?: number[];
   scope?: 'exploration' | 'verification';
@@ -330,6 +331,9 @@ export async function buildJevPrefetch(
       .update(JSON.stringify(selected.map((i) => request.candidates[i])))
       .digest('hex');
     stats.selectedCandidates = selected.length;
+    stats.selectedReadLocations = selected.filter(
+      (i) => request.candidates[i].kind === 'revalidated review read',
+    ).length;
     stats.completeFileCandidates = selected.filter(
       (i) => request.candidates[i].completeFile,
     ).length;
