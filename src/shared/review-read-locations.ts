@@ -15,11 +15,15 @@ export function reviewReadLocations(
   if (tool === 'read' || tool === 'read_file') {
     const line =
       Number.isSafeInteger(input.offset) && Number(input.offset) > 0 ? Number(input.offset) : 1;
-    const endLine =
+    const limit =
       Number.isSafeInteger(input.limit) && Number(input.limit) > 0
-        ? Math.min(Number.MAX_SAFE_INTEGER, line + Number(input.limit) - 1)
-        : Number.MAX_SAFE_INTEGER;
-    add(input.filePath ?? input.path ?? input.file, line, endLine);
+        ? Math.min(2000, Number(input.limit))
+        : 2000;
+    add(
+      input.filePath ?? input.path ?? input.file,
+      line,
+      Math.min(Number.MAX_SAFE_INTEGER, line + limit - 1),
+    );
     return locations;
   }
   if (!['shell', 'bash', 'execute', 'exec'].includes(tool)) return [];

@@ -1066,7 +1066,8 @@ Three independent, default-off OpenCode experiments:
   Set `JBOT_READ_EVIDENCE=linked` to select at most two directly import-linked
   files around the requested range, excluding the seed and paths previously
   requested or delivered in that session. It uses the same budgets and preserves
-  every original read. Concurrent augmentation is serialized to avoid duplicate
+  every original read. Native ranges use OpenCode's 2,000-line default and cap;
+  byte truncation can shorten the actual output. Concurrent augmentation is serialized to avoid duplicate
   delivery. Path suppression is an optimization, not a claim that an earlier
   partial read supplied the whole file. Unresolved and deeper dependencies remain
   available through ordinary tools.

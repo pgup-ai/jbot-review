@@ -16,8 +16,9 @@ unrestricted follow-up exploration remain available.
 The existing tracked-source collector, freshness checks, byte budgets and
 fail-open behavior remain. Native read ranges and literal numeric `sed` ranges
 identify relevant definitions; literal multi-file `cat` is observed without
-evaluating shell syntax. A read without an explicit limit is treated as a request
-for the file, not proof that the provider returned every line. Path suppression
+evaluating shell syntax. Native reads are bounded to the installed OpenCode
+version's 2,000-line default and cap, not proof that the provider returned every
+requested line. Path suppression
 can omit useful unseen portions of a previously requested file; ordinary reads
 remain the recovery path. Two attempts per session, four seconds per preparation
 and 7,000 added bytes per result are unchanged. No model call prepares evidence.
@@ -115,3 +116,81 @@ accepts confirmed P1/P2. Clean-case assumptions about unsupported external calle
 do not qualify as defects. Frozen expectations are in
 `confirmation/quality-contract.json`; fixture SHAs and settings are in the plan
 and generated manifest. All scheduled rows remain in the results.
+
+## Frozen confirmation results
+
+Revision `68fcfa0`, 18 reviews per arm. All 54 processes completed; one linked
+verification session was incomplete. None were retried or excluded. All 44
+retained findings were manually checked in arm-masked form against the fixture
+contracts, then mapped to their runs. This is not independent blind adjudication.
+
+| Measure                         | Baseline |   Broad |  Linked |
+| ------------------------------- | -------: | ------: | ------: |
+| Median total seconds            |    16.98 |   15.09 |   15.42 |
+| Mean total seconds              |    24.44 |   14.68 |   13.39 |
+| Mean tool calls                 |     9.83 |    7.83 |    7.11 |
+| Mean model turns                |     5.39 |    4.44 |    4.67 |
+| Mean tool-output bytes          |    4,166 |   7,854 |   6,554 |
+| Mean uncached input tokens      |   40,943 |  40,331 |  41,239 |
+| Mean cache-read tokens          |  105,088 |  81,749 |  86,471 |
+| Mean reported cost, USD         |  0.00927 | 0.00850 | 0.00875 |
+| Seeded roots retained           |    15/15 |   14/15 |   15/15 |
+| Roots at required confirmation  |    15/15 |   14/15 |   12/15 |
+| Unverified P3 roots             |        0 |       0 |       3 |
+| Findings on clean cases         |        0 |       0 |       0 |
+| Incomplete verification batches |        0 |       0 |       1 |
+
+The linked arm used 27.7% fewer tools and 13.4% fewer turns; its median elapsed
+time was 9.2% lower. These are sample observations, not an established general
+speedup. Baseline row 24 spent almost 149 seconds before its first model reply
+without logged tool activity; baseline row 41 took 51 seconds. Both remain in
+the mean. Their cause is unresolved, and the mean difference must not be
+attributed entirely to evidence delivery. Provider cache state is uncontrolled.
+
+Case medians show the mixed result more clearly (three repetitions each):
+
+| Fixture                  | Baseline seconds | Broad seconds | Linked seconds |
+| ------------------------ | ---------------: | ------------: | -------------: |
+| Clean currency adapter   |             4.62 |          5.19 |           5.30 |
+| Defective adapters       |            20.60 |         24.29 |          17.65 |
+| Clean dependency chain   |            13.38 |         17.73 |          17.04 |
+| Defective chain          |            24.31 |         20.09 |          18.14 |
+| Clean receipt contract   |             5.92 |          6.33 |           5.62 |
+| Defective retry contract |            18.49 |         14.50 |          13.85 |
+
+In linked row 49 the verifier returned no `verdicts` array. All three currency
+roots survived as explicitly unverified P3 concerns, so this arm **fails the
+preregistered confirmed-severity criterion**. In broad row 53 the reviewer read
+the adapter, store and handler but returned no finding for the retry regression;
+the failing executable oracle establishes the missed root. These observations
+do not establish that either selection policy caused its quality failure.
+
+Linked delivery produced 36 packets / 59,804 added bytes, with 740 ms total
+preparation and no delivery fallback. It supplied 37 distinct paths summed
+across sessions, observed two later-turn requests for supplied paths, excluded
+281 candidates and returned 12 empty packets. There were 13 unclassified shell
+calls, versus six in the broad arm. Baseline observation counters are absent
+because its hook is disabled; zeroes in the raw summary are not evidence that
+baseline made no shell calls. Packet counts and absence of recognized rereads
+cannot prove how many calls were saved.
+
+The mechanism probe and pilot trace demonstrate that selective delivery can
+replace a dependency read. Confirmation supports continuing that direction but
+does not clear a quality gate or justify enabling it by default. The next useful
+check is a larger real-repository review with retained transcripts, including
+whether the verifier actually reuses supplied evidence and still returns usable
+structured verdicts. Do not add a retry or weaken verification merely to improve
+this experiment's score.
+
+## Installed read contract correction
+
+After the frozen confirmation, the native range observer was aligned with the
+2,000-line default/cap in installed OpenCode 2.0.5. Source was checked at
+[`79169fe` read tool](https://github.com/anomalyco/opencode/blob/79169fe966d58fb0e0a5e41133716184a0ab4ca6/packages/core/src/tool/plugin/read.ts)
+and [filesystem implementation](https://github.com/anomalyco/opencode/blob/79169fe966d58fb0e0a5e41133716184a0ab4ca6/packages/core/src/tool/read-filesystem.ts),
+alongside the [current tool documentation](https://opencode.ai/v2/docs/tools).
+Previously an omitted limit was observed as an unbounded file request. An
+existing regression case now covers default, zero and capped explicit limits.
+All confirmation source files are at most 18 lines, so the correction cannot
+change their selections; the timing results still refer to `68fcfa0`, not the
+later corrected revision. Earlier byte truncation remains possible.
