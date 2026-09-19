@@ -156,7 +156,7 @@ test('off and shadow preserve baseline context; on adds only tracked source and 
   assert.equal(rows[1].injectedBytes, 0);
   assert.ok(rows[2].injectedBytes > 0);
   assert.equal(rows[2].inputTokens, 1234);
-  assert.equal(rows[2].version, 3);
+  assert.equal(rows[2].version, 5);
   assert.equal(rows[2].completeFileCandidates, 1);
   assert.match(applied, /complete file/);
   assert.match(applied, /Do not spend a tool call rereading supplied lines/);
@@ -282,9 +282,12 @@ test('deterministic control uses the same candidate pool and budgets without cre
   const paths = Array.from({ length: 7 }, (_, i) => `consumer-${i}.ts`);
   for (const path of paths) await writeFile(join(workspace, path), 'pay(1);\n//' + 'x'.repeat(500));
   execFileSync('git', ['add', '.'], { cwd: workspace });
+  let narrow = false;
   const fetch = t.mock.method(globalThis, 'fetch', async (_, init) => {
     const { questions } = JSON.parse(init.body);
-    return Response.json(answer(Object.keys(questions).map((_, i) => 0.5 + i / 20)));
+    return Response.json(
+      answer(Object.keys(questions).map((_, i) => (narrow ? (i === 3 ? 0.9 : 0.1) : 0.5 + i / 20))),
+    );
   });
   const rows: JevPrefetchStats[] = [];
   const options = {
@@ -323,6 +326,13 @@ test('deterministic control uses the same candidate pool and budgets without cre
     paths.slice(3).reverse(),
   );
   assert.ok(Buffer.byteLength(control) <= 6000 && Buffer.byteLength(treatment) <= 6000);
+  assert.equal(rows[0].deterministicOverlap, 4);
+  assert.equal(rows[1].deterministicOverlap, 1);
+  narrow = true;
+  await buildJevPrefetch(workspace, files, entries, { ...options, mode: 'on', apiKey: 'TEST_KEY' });
+  assert.equal(rows[2].selectedCandidates, 1);
+  assert.equal(rows[2].deterministicOverlap, 1);
+  assert.equal(fetch.mock.callCount(), 2);
   const previous = process.env.JBOT_JEV_PREFETCH;
   t.after(() => {
     if (previous === undefined) delete process.env.JBOT_JEV_PREFETCH;

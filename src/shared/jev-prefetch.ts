@@ -18,7 +18,7 @@ export type JevPrefetchMode = 'off' | 'shadow' | 'on' | 'deterministic';
 
 export interface JevPrefetchStats {
   kind: 'jev-prefetch';
-  version: 3 | 4;
+  version: 5;
   scope?: 'exploration' | 'verification';
   selectedHash?: string;
   coverageBytes?: number;
@@ -42,7 +42,7 @@ export interface JevPrefetchStats {
   collectedCandidates: number;
   scoredCandidates: number;
   selectedCandidates: number;
-  baselineOverlap: number;
+  deterministicOverlap: number;
   completeFileCandidates: number;
   requestBytes: number;
   contextBytes: number;
@@ -149,7 +149,7 @@ export async function buildJevPrefetch(
   const started = Date.now() - (options.prepared?.elapsedMs ?? 0);
   const stats: JevPrefetchStats = {
     kind: 'jev-prefetch',
-    version: options.prepared ? 4 : 3,
+    version: 5,
     ...(options.prepared
       ? {
           scope: options.prepared.scope,
@@ -166,7 +166,7 @@ export async function buildJevPrefetch(
     collectedCandidates: 0,
     scoredCandidates: 0,
     selectedCandidates: 0,
-    baselineOverlap: 0,
+    deterministicOverlap: 0,
     completeFileCandidates: 0,
     requestBytes: 0,
     contextBytes: 0,
@@ -243,13 +243,14 @@ export async function buildJevPrefetch(
     stats.candidateHash = createHash('sha256')
       .update(JSON.stringify(request.candidates))
       .digest('hex');
+    const baseline = selectPrefetchCandidates(
+      request.candidates,
+      request.candidates.map((_, i) => i),
+      candidates,
+    );
     let selected: number[];
     if (options.mode === 'deterministic') {
-      selected = selectPrefetchCandidates(
-        request.candidates,
-        request.candidates.map((_, i) => i),
-        candidates,
-      );
+      selected = baseline;
       stats.estimatedCostUsd = 0;
     } else {
       stats.scoredCandidates = request.candidates.length;
@@ -301,7 +302,7 @@ export async function buildJevPrefetch(
       stats.reason = 'no-relevant-candidates';
       return '';
     }
-    stats.baselineOverlap = selected.filter((i) => i < selected.length).length;
+    stats.deterministicOverlap = selected.filter((i) => baseline.includes(i)).length;
     const block = formatJevPrefetch(
       selected.map((i) => request.candidates[i]),
       candidates.filter((c) => !selected.some((i) => request.candidates[i] === c)),

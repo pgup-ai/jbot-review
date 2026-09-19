@@ -975,7 +975,7 @@ checkout and freeze their contents when comparing arms.
 
 Each packet permits four excerpts within 6,000 bytes plus a bounded coverage
 notice (under 900 bytes). Missing evidence never narrows review scope.
-Version 4 `jev-prefetch` log/telemetry rows distinguish `scope`, source-cache
+Version 5 `jev-prefetch` log/telemetry rows distinguish `scope`, source-cache
 hits, parsed files, omitted files, candidate/selection hashes, coverage bytes,
 collection/API time, tokens, and estimated Jev cost. `injectedBytes` excludes
 `coverageBytes`; add both for the complete packet. Existing phase/session rows
@@ -1046,9 +1046,11 @@ With telemetry enabled, final `Review timing` and `Review metrics` log rows
 also expose total elapsed time, terminal state, per-session tokens, observed
 tool calls, repeated reads/searches, output bytes, and available turn counts.
 `estimatedCostUsd` uses the published $0.042/M input-token rate (free output);
-it is an estimate, not billed spend. `baselineOverlap` counts selected indexes
-within the first N scored candidates, where N is the selected count. It measures
-selection changes, not selection accuracy. Unknown usage after a failed request
+it is an estimate, not billed spend. Version 5 `deterministicOverlap` counts
+selected excerpts also chosen by the actual deterministic selector with the same
+pool and budgets. Earlier versions used `baselineOverlap`, a first-N prefix
+comparison that must not be interpreted as overlap with the deterministic arm.
+Neither metric measures selection accuracy. Unknown usage after a failed request
 is absent, not zero.
 
 Preserve each run's log and `.jbot-review/telemetry.jsonl` before the next run.

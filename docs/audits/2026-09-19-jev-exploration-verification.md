@@ -218,3 +218,67 @@ The larger dogfood also exposed an imprecise README bound: the coverage notice
 was 826 bytes for 131 omitted files. Its path-list cap plus fixed text bounds it
 below 900 bytes, not the previously stated 800. Corrected the documentation and
 added a multi-byte omission-budget assertion to the existing request-budget test.
+
+The post-correction dogfood used built revision `e807aa3` and finished in
+185.677 seconds. Main review completed, but the guideline pass was interrupted
+at the auxiliary grace deadline and verification returned unusable output.
+It is therefore an **incomplete integration review**, not a clean quality pass.
+Its only retained item was an unverified P3 about the older `baselineOverlap`
+metric. Manual inspection rejected its claim that the deterministic branch
+returned before recording that field: both branches reached the same assignment.
+The README also explicitly defined the old field as a prefix comparison.
+However, overlap with the actual deterministic control is more useful here,
+so that suggestion was applied as a telemetry improvement.
+
+Current telemetry is version 5: `deterministicOverlap` replaces the old
+`baselineOverlap` and compares against the shared first-fitting selector's real
+output, including one-per-file and byte limits. A regression assertion covers
+Jev selecting just candidate index 3: it overlaps the deterministic four-item
+set even though it is outside a one-item prefix. Existing version assertions
+were updated for this intentional schema change, not weakened. The historical
+version-4 trial artifacts remain unchanged. None of the reported conclusions
+uses either overlap field. This final telemetry change preserves prompts and
+selection behavior and was validated with deterministic tests rather than
+another paid review.
+
+## Final self-review and validation
+
+Manual self-review: no remaining P1/P2 issue found. Seams checked: parser and
+import resolution, guarded reads, bounded prompts, source-cache invalidation,
+operator-owned documentation, independent verdict authority, auxiliary failure
+handling and deadlines, mode/environment wiring, telemetry versions, and frozen
+experiment inputs. Full-diff scope, review models, posting, confidence filtering,
+and default policy remain unchanged. No GitHub posting or CI run was performed.
+
+Validation after the corrections: all 1,078 tests, typecheck, lint, formatting,
+build, and diff checks passed. The built CLI executed both branch dogfoods;
+the second review's incomplete auxiliary coverage is retained above. Fixture
+workspaces and input hashes remained unchanged. Credential scans of changed
+files and experiment artifacts found no configured secret value; `.env` is
+still ignored and untracked.
+
+The advisory core corpus was not run. These fixtures, historical concern,
+manual labels, and incomplete final dogfood do not establish broad review-quality
+non-regression or meet the independent blind-adjudication gate. There is no
+benchmark-ledger pass and no default-policy flip.
+
+Cleanup applied: reused the existing Jev request/selection path, tracked-source
+reader, verifier batching, time-budget floor, and experiment driver. The deadline
+and metric corrections were folded into existing tests. No extra reviewer,
+provider backend, verdict filter, or speculative retrieval service was added.
+Comment blocks were individually retained: source/import priority, documentation
+admission priority, unsupported-syntax fallback, tracked-source protection,
+JSON-byte/token budgeting, and the shadow-mode option contract. All ten branch-added
+tests retain distinct failure cases; four belong to this continuation, with
+previous adjudications recorded in the earlier audits.
+
+Cut: ambiguous default/namespace import attribution was removed before timing;
+no additional dead surface remained in the final cleanup.
+Comments: 6 branch blocks — 6 kept, 0 rewritten, 0 cut.
+Tests: 10 branch cases — 10 kept, 0 folded, 0 cut; follow-up assertions extend
+existing cases rather than adding duplicate cases.
+Residual risks: small convenience sample, unstable external-contract verdicts,
+syntactic rather than compiler-resolved links, and incomplete final dogfood
+auxiliary coverage. Both new stages stay default off.
+
+Continuation net line delta: +1265 across 16 tracked files; no untracked source files.
