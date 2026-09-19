@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { EvidenceStore } from './evidence.ts';
+import { EvidenceStore, JS_SOURCE } from './evidence.ts';
 import { evidenceHash } from './evidence-cache.ts';
 import { explorationCheckpoint } from './exploration-policy.ts';
 import { reviewReadLocations } from './review-read-locations.ts';
@@ -179,7 +179,7 @@ export async function installReviewRetrieval(
         workspace,
         event.tool,
         event.input as Record<string, unknown>,
-      ).find((r) => /\.[cm]?[jt]sx?$/.test(r.path) && !state.evidencePaths.has(r.path));
+      ).find((r) => JS_SOURCE.test(r.path) && !state.evidencePaths.has(r.path));
       if (ref) {
         // Reserve before awaiting so parallel reads cannot exceed the session budget.
         state.evidencePaths.add(ref.path);

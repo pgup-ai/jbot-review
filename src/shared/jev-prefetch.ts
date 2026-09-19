@@ -1,5 +1,5 @@
 import { evidenceHash, type EvidenceDiskCache } from './evidence-cache.ts';
-import { readTrackedSource } from './finding-context.ts';
+import { readTrackedSource, SOURCE_FILE } from './finding-context.ts';
 import type { PrFile } from './github.ts';
 import {
   formatJevPrefetch,
@@ -12,7 +12,6 @@ import {
 const MAX_FILES = 12;
 const MAX_CONTEXT_BYTES = 6_000;
 const MAX_SELECTED = 4;
-const SOURCE_FILE = /\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|cs|rb|php|swift|c|h|cpp|hpp|sql)$/i;
 
 export type JevPrefetchMode = 'off' | 'shadow' | 'on' | 'deterministic';
 

@@ -10,6 +10,7 @@ import type { Finding } from './types.ts';
 const execFileAsync = promisify(execFile);
 const MAX_SOURCE_BYTES = 256 * 1024;
 const MAX_SOURCE_LOCATIONS = 20;
+export const SOURCE_FILE = /\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|cs|rb|php|swift|c|h|cpp|hpp|sql)$/i;
 
 type Source = { text: string; truncated: boolean };
 export class SourceCache {

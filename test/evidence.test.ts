@@ -37,7 +37,7 @@ const finding = {
 
 test('syntax collection finds body-only changes and named import aliases without executing source', () => {
   const source = indexEvidenceSource(
-    'money.ts',
+    'money.TS',
     'export function total(n: number) {\nreturn n * 100;\n}\nthrow new Error("never executed");',
   );
   assert.deepEqual(changedEvidenceLines(files[0].patch), [2]);
@@ -83,6 +83,7 @@ test('prepared arms share candidates, reuse hashes across phases, and invalidate
     join(workspace, 'unrelated.ts'),
     "import { total as amount } from 'other-package';\namount(1);\n",
   );
+  await writeFile(join(workspace, 'CONTRACT.PY'), 'total_unit = "cents"\n');
   execFileSync('git', ['add', '.'], { cwd: workspace });
   await writeFile(join(workspace, 'secret.ts'), 'DO_NOT_READ_SECRET');
   await symlink('secret.ts', join(workspace, 'link.ts'));
@@ -137,6 +138,49 @@ test('prepared arms share candidates, reuse hashes across phases, and invalidate
   assert.notEqual(rows[2].candidateHash, rows[3].candidateHash);
   assert.doesNotMatch(updated, /charge = amount\(1\) \* 100/);
   assert.equal(fetch.mock.callCount(), 1);
+  const contract = await store.prepare(
+    'verification',
+    [{ ...finding, path: 'CONTRACT.PY', line: 1, body: '' }],
+    'deterministic',
+    options,
+  );
+  assert.match(contract, /total_unit = "cents"/);
+});
+
+test('source exceeding the remaining admission budget is not indexed or persisted', async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), 'evidence-budget-'));
+  const cacheDir = await mkdtemp(join(tmpdir(), 'evidence-budget-cache-'));
+  t.after(() =>
+    Promise.all([workspace, cacheDir].map((p) => rm(p, { recursive: true, force: true }))),
+  );
+  execFileSync('git', ['init', '-q', workspace]);
+  const largeFiles = Array.from({ length: 9 }, (_, i) => ({
+    ...files[0],
+    filename: `source-${i}.ts`,
+  }));
+  for (const file of largeFiles)
+    await writeFile(
+      join(workspace, file.filename),
+      'export function total(n: number) {\nreturn n * 100;\n}\n/*' +
+        ' '.repeat(250 * 1024) +
+        '*/\n',
+    );
+  execFileSync('git', ['add', '.'], { cwd: workspace });
+  const store = new EvidenceStore(workspace, largeFiles, undefined, {
+    shared: true,
+    handoff: false,
+    prefetch: false,
+    cacheDir,
+  });
+  const rows = [];
+  await store.prepare('exploration', [], 'deterministic', {
+    timeoutMs: 4000,
+    log: () => {},
+    onStats: (s) => rows.push(s),
+  });
+  assert.equal(rows[0].status, 'applied');
+  assert.equal(rows[0].omittedFiles, 1);
+  assert.equal(store.stats().diskWrites, 8);
 });
 
 test('invalid docs and timeouts fail open with measurable fallback and no provider error text', async (t) => {

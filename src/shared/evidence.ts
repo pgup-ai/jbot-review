@@ -10,6 +10,7 @@ import {
   findingSourceLocations,
   buildFindingSourceContext,
   SourceCache,
+  SOURCE_FILE,
 } from './finding-context.ts';
 import { EvidenceDiskCache, evidenceHash } from './evidence-cache.ts';
 import { buildJevPrefetch, type JevPrefetchMode, type JevPrefetchStats } from './jev-prefetch.ts';
@@ -24,8 +25,7 @@ import type { PrFile } from './github.ts';
 import type { Finding } from './types.ts';
 
 const exec = promisify(execFile);
-const JS_SOURCE = /\.[cm]?[jt]sx?$/;
-const SOURCE = /\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|cs|rb|php|swift|c|h|cpp|hpp|sql)$/;
+export const JS_SOURCE = /\.[cm]?[jt]sx?$/i;
 type Ast = {
   type: string;
   loc?: { start: { line: number }; end: { line: number } };
@@ -321,7 +321,7 @@ export class EvidenceStore {
     const loaded = new Map<string, NonNullable<Awaited<ReturnType<EvidenceStore['load']>>>>();
     try {
       const tracked = await this.tracked(signal);
-      const paths = new Set([...tracked].filter((p) => SOURCE.test(p)));
+      const paths = new Set([...tracked].filter((p) => SOURCE_FILE.test(p)));
       const refs = options.locations ?? findingSourceLocations(findings).locations;
       const seeds =
         scope === 'verification' ? refs.map((r) => r.path) : this.files.map((f) => f.filename);
@@ -330,8 +330,8 @@ export class EvidenceStore {
         if (loaded.size >= 64 || bytes >= 2 * 1024 * 1024 || !paths.has(path)) return undefined;
         signal.throwIfAborted();
         const old = this.cache.get(path);
-        const source = await this.load(path, signal, tracked);
-        if (!source || bytes + Buffer.byteLength(source.text) > 2 * 1024 * 1024) return undefined;
+        const source = await this.load(path, signal, tracked, 2 * 1024 * 1024 - bytes);
+        if (!source) return undefined;
         if (source === old) cacheHits++;
         else if (source.parsed) parsedFiles++;
         loaded.set(path, source);
@@ -530,9 +530,9 @@ export class EvidenceStore {
     }
   }
 
-  private async load(path: string, signal: AbortSignal, tracked: Set<string>) {
+  private async load(path: string, signal: AbortSignal, tracked: Set<string>, maxBytes: number) {
     const source = await this.read(path, signal, tracked);
-    if (!source) return undefined;
+    if (!source || Buffer.byteLength(source.text) > maxBytes) return undefined;
     const digest = evidenceHash(source.text);
     const old = this.cache.get(path);
     if (old?.digest === digest && old.truncated === source.truncated) return old;
