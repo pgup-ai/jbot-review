@@ -7,6 +7,7 @@ import {
   computeRunDeadline,
   computeRetryTimeoutMs,
   computeVerificationTimeoutMs,
+  computeEvidenceTimeoutMs,
   computeAuxiliaryGraceMs,
   AUXILIARY_SETTLE_GRACE_MS,
   computeLensGraceMs,
@@ -3666,15 +3667,18 @@ export async function requestFindingVerdicts(params: {
     const targets = params.targets.slice(offset, offset + VERIFICATION_BATCH_SIZE);
     try {
       const sourceContext = await buildFindingSourceContext(params.workspace, targets);
+      const evidenceTimeoutMs = computeEvidenceTimeoutMs(
+        params.timeoutMs === undefined ? undefined : params.timeoutMs - (Date.now() - startedAt),
+      );
       let evidenceContext = '';
-      try {
-        evidenceContext =
-          (await params.prepareEvidence?.(
-            targets,
-            Math.max(0, Math.min(5000, (params.timeoutMs ?? Infinity) - (Date.now() - startedAt))),
-          )) ?? '';
-      } catch {
-        params.log('Verification evidence unavailable; continuing with cited source.');
+      if (evidenceTimeoutMs > 0) {
+        try {
+          evidenceContext = (await params.prepareEvidence?.(targets, evidenceTimeoutMs)) ?? '';
+        } catch {
+          params.log('Verification evidence unavailable; continuing with cited source.');
+        }
+      } else if (params.prepareEvidence) {
+        params.log('Skipping optional evidence preparation to preserve verification time.');
       }
       const timeoutMs =
         params.timeoutMs === undefined

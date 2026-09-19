@@ -3,6 +3,7 @@ import {
   computeRunDeadline,
   computeRetryTimeoutMs,
   computeVerificationTimeoutMs,
+  computeEvidenceTimeoutMs,
   computeAuxiliaryGraceMs,
   computeLensGraceMs,
   wrapUpReserveMs,
@@ -318,6 +319,12 @@ describe('session timeout budgeting', () => {
     assert.equal(computeVerificationTimeoutMs(6, 6 * 60_000), 0);
     // Huge budget: capped at 5 minutes.
     assert.equal(computeVerificationTimeoutMs(120, 0), 5 * 60_000);
+    assert.equal(computeEvidenceTimeoutMs(undefined), 5000);
+    assert.equal(computeEvidenceTimeoutMs(60_000), 5000);
+    assert.equal(computeEvidenceTimeoutMs(47_000), 2000);
+    assert.equal(computeEvidenceTimeoutMs(45_000), 0);
+    assert.equal(computeEvidenceTimeoutMs(5_000), 0);
+    assert.equal(computeEvidenceTimeoutMs(-1), 0);
   });
 });
 

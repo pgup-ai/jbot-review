@@ -10,7 +10,12 @@ import {
   selectJevCandidates,
   type JevPrefetchStats,
 } from '../src/shared/jev-prefetch.ts';
-import { buildJevRequest, formatJevPrefetch, JEV_MODEL } from '../src/shared/prompt.ts';
+import {
+  buildJevRequest,
+  formatJevPrefetch,
+  formatEvidenceCoverage,
+  JEV_MODEL,
+} from '../src/shared/prompt.ts';
 import { sessionEnvironment } from '../src/shared/opencode-config.ts';
 import { sessionEnvDenyKeys } from '../src/shared/opencode-server.ts';
 import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
@@ -54,6 +59,9 @@ test('request budgets bound escaped multi-byte state and explicitly bind indepen
   assert.match(parsed.questions.c1.instructions, /candidates\[1\]/);
   assert.match(parsed.state.changes[0].patch, /omitted|truncated/i);
   assert.equal(candidates.length, 36);
+  const coverage = formatEvidenceCoverage(Array.from({ length: 1000 }, () => '😀'.repeat(100)));
+  assert.ok(Buffer.byteLength(coverage) <= 900);
+  assert.match(coverage, /omitted/);
 });
 
 test('ranking keeps source identities, stable ties, and bounded excerpts with omission notices', () => {

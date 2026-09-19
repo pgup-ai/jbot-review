@@ -47,6 +47,10 @@ export function computeVerificationTimeoutMs(
   return Math.min(remaining, MAX_VERIFICATION_MS);
 }
 
+export function computeEvidenceTimeoutMs(remainingMs: number | undefined): number {
+  return Math.max(0, Math.min(5000, (remainingMs ?? Infinity) - MIN_VERIFICATION_MS));
+}
+
 export const AUXILIARY_SETTLE_GRACE_MS = 5 * 60_000;
 
 /** Keeps a wrap-up reply inside the deadline the caller's own timer enforces. */

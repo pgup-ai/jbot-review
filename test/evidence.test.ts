@@ -159,12 +159,12 @@ test('invalid docs and timeouts fail open with measurable fallback and no provid
   assert.ok(!logs.join('').includes('x'.repeat(50)));
 });
 
-test('failed evidence preparation cannot skip independent finding verification', async (t) => {
+test('failed or budget-starved evidence preparation cannot skip independent verification', async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), 'evidence-verdict-'));
   t.after(() => rm(workspace, { recursive: true, force: true }));
   execFileSync('git', ['init', '-q', workspace]);
   let calls = 0;
-  const verdicts = await requestFindingVerdicts({
+  const params = {
     workspace,
     model: 'opencode/test',
     prContext: 'full diff',
@@ -181,7 +181,20 @@ test('failed evidence preparation cannot skip independent finding verification',
         return [{ index: 0, verdict: 'confirmed', reason: 'actual trigger' }];
       },
     },
-  });
+  };
+  const verdicts = await requestFindingVerdicts(params);
   assert.equal(calls, 1);
   assert.equal(verdicts[0].verdict, 'confirmed');
+  let prepared = false;
+  const tight = await requestFindingVerdicts({
+    ...params,
+    timeoutMs: 5000,
+    prepareEvidence: async () => {
+      prepared = true;
+      return '';
+    },
+  });
+  assert.equal(prepared, false);
+  assert.equal(calls, 2);
+  assert.equal(tight[0].verdict, 'confirmed');
 });

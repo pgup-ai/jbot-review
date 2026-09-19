@@ -947,6 +947,8 @@ TypeSafe credential and Jev request limits described below. Exploration needs
 enhanced context and supersedes the older caller-prefetch arm when enabled.
 Verification prepares evidence separately for each finding batch; the existing
 independent verifier and fail-open verdict handling remain authoritative.
+Preparation uses at most five seconds above the existing 45-second verifier
+minimum; when time is tight, preparation is skipped.
 
 The collector parses JS/TS syntax with `@babel/parser` to locate declarations
 containing changed body lines, then gathers named-import-linked references,
@@ -955,8 +957,8 @@ not execute repository configuration or code. Links are syntactic evidence,
 not a type-checked call graph: reexports, package aliases, shadowed bindings,
 and unsupported syntax require ordinary reviewer exploration. Source must be
 tracked, regular, and inside the workspace. Up to 20 seed files, 64 loaded
-files, 2 MiB of admitted source, 64 collected candidates, and 24 scored
-candidates bound each preparation. Each read is capped at 256 KiB. A run-local
+files, 2 MiB of admitted source, 64 source candidates plus up to six
+documentation candidates, and 24 scored candidates bound each preparation. Each read is capped at 256 KiB. A run-local
 cache reuses parsed syntax after rechecking the content hash; it is shared
 between exploration and verification and never crosses repositories.
 
@@ -972,7 +974,7 @@ version, retrieval date, and content hash. Keep snapshots outside the reviewed
 checkout and freeze their contents when comparing arms.
 
 Each packet permits four excerpts within 6,000 bytes plus a bounded coverage
-notice (under 800 bytes). Missing evidence never narrows review scope.
+notice (under 900 bytes). Missing evidence never narrows review scope.
 Version 4 `jev-prefetch` log/telemetry rows distinguish `scope`, source-cache
 hits, parsed files, omitted files, candidate/selection hashes, coverage bytes,
 collection/API time, tokens, and estimated Jev cost. `injectedBytes` excludes
