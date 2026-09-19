@@ -198,6 +198,41 @@ describe('promptInSession', () => {
     );
   });
 
+  it('does not count the main turn again when wrap-up fails', async () => {
+    const fake = fakeOpencodeServer((session) =>
+      session.agent === 'jbot-wrapup'
+        ? { error: 'provider failure' }
+        : { hang: true, tools: [{ name: 'read', input: { path: 'guard.ts' } }] },
+    );
+    const rt = runtime(fake);
+    const recorder = createTelemetryRecorder(true);
+    configureOpencodeTelemetry(fake.client, createToolTelemetryAccumulator(recorder, 'salt'));
+    const usage: object[] = [];
+    const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
+    await assert.rejects(
+      promptInSession(rt, id, {
+        model: 'openai/gpt-5',
+        text: 'review',
+        label: 'review',
+        log,
+        timeoutMs: 60_000,
+        wrapUpReserveMs: 59_990,
+        outcome: { wrappedUp: false },
+        onTokenUsage: (row) => usage.push(row),
+      }),
+      /provider failure/,
+    );
+    const rows = recorder
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(rows.find((r) => r.kind === 'exploration' && r.session === 'review').toolCalls, 1);
+    assert.deepEqual(
+      usage.map((u) => (u as { input: number }).input),
+      [10, 10],
+    );
+  });
+
   it('reports a listing that stops short and leaves usage unknown without token counts', async () => {
     const fake = fakeOpencodeServer((_s, text) =>
       text === 'deep' ? { text: 'x', steps: 250 } : { text: 'x', noTokens: true },
@@ -236,8 +271,14 @@ describe('promptInSession', () => {
   });
 
   it('interrupts on timeout when no wrap-up is possible', async () => {
-    const fake = fakeOpencodeServer(() => ({ hang: true }));
+    const fake = fakeOpencodeServer(() => ({
+      hang: true,
+      tools: [{ name: 'read', input: { path: 'guard.ts' } }],
+    }));
     const rt = runtime(fake);
+    const recorder = createTelemetryRecorder(true);
+    configureOpencodeTelemetry(fake.client, createToolTelemetryAccumulator(recorder, 'salt'));
+    const usage: object[] = [];
     const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
     await assert.rejects(
       promptInSession(rt, id, {
@@ -246,10 +287,19 @@ describe('promptInSession', () => {
         label: 'verify',
         timeoutMs: 100,
         log,
+        onTokenUsage: (row) => usage.push(row),
       }),
       /did not finish within/,
     );
     assert.equal(fake.sessions.get(id)!.interrupted, 1);
+    const row = recorder
+      .toJsonl()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .find((row) => row.kind === 'exploration');
+    assert.equal(row.toolCalls, 1);
+    assert.equal(row.stopReason, 'failed');
+    assert.equal((usage[0] as { input: number }).input, 10);
   });
 });
 

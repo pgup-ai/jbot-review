@@ -312,7 +312,10 @@ export function recordAssistantTools(
   telemetry: ToolTelemetryAccumulator,
   session: string,
   messages: AssistantMessage[],
-  experiment?: ReturnType<typeof readExplorationStats>,
+  options: {
+    experiment?: ReturnType<typeof readExplorationStats>;
+    stopReason?: 'completed' | 'failed';
+  } = {},
 ): void {
   for (const message of messages) {
     for (const part of message.content ?? []) {
@@ -360,8 +363,8 @@ export function recordAssistantTools(
     backend: 'opencode',
     capability: OPENCODE_TELEMETRY_CAPABILITY,
     budgetTier: 'observe-only',
-    stopReason: 'completed',
-    ...(experiment ? { experiment } : {}),
+    stopReason: options.stopReason ?? 'completed',
+    ...(options.experiment ? { experiment: options.experiment } : {}),
     ...(messages.length > 0 ? { turnCount: messages.length } : {}),
   });
 }
@@ -506,7 +509,13 @@ async function promptHoldingSlot(
     const previous = await latestAssistant(client, sessionID);
     const initialExperiment = sessionExplorationStats(runtime, sessionID);
     const startedAt = Date.now();
-    const recordTurn = async (fallback: AssistantMessage[]) => {
+    let recorded = false;
+    const recordTurn = async (
+      fallback: AssistantMessage[],
+      stopReason: 'completed' | 'failed' = 'completed',
+    ) => {
+      if (recorded) return;
+      recorded = true;
       // Usage spans the whole turn: V2 writes one assistant message per step.
       let turn = fallback;
       try {
@@ -536,7 +545,7 @@ async function promptHoldingSlot(
               value - (initialExperiment?.[key] ?? 0),
             ]),
           );
-        recordAssistantTools(telemetry, label, turn, experiment);
+        recordAssistantTools(telemetry, label, turn, { experiment, stopReason });
       }
       const turnUsage = sumUsage(turn);
       log(`${label} ${formatTokenUsage(turnUsage)}`);
@@ -553,6 +562,7 @@ async function promptHoldingSlot(
     } catch (error) {
       // The server may have accepted the prompt before the request failed.
       await interruptBestEffort(client, sessionID, label, log);
+      await recordTurn([], 'failed');
       throw error;
     }
 
@@ -604,16 +614,17 @@ async function promptHoldingSlot(
     } catch (error) {
       // A timed-out or failed wait leaves the session generating; stop it now.
       await interruptBestEffort(client, sessionID, label, log);
+      await recordTurn([], 'failed');
       throw error;
     } finally {
       clearTimeout(reserveTimer);
       unregister();
     }
 
+    await recordTurn([message], message.error ? 'failed' : 'completed');
     if (message.error) {
       throw new Error(`opencode ${label} prompt failed: ${formatUnknown(message.error)}`);
     }
-    await recordTurn([message]);
     const text = assistantText(message);
     if (!text) {
       log(

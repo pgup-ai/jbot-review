@@ -1043,6 +1043,8 @@ Two independent, default-off OpenCode experiments:
   into a source packet. It reuses guarded source reads and the evidence collector:
   at most 64 files / 2 MiB inspected, four excerpts / 6,000 bytes selected,
   plus a bounded omission notice, within four seconds. It calls no model.
+  Its source/index cache is shared across tool calls, separately from the runner;
+  runner handoff and persistent-cache settings do not apply to this tool.
   Files are revalidated before reuse. Unsupported syntax and unresolved bindings
   leave ordinary read/search tools available; this is not a complete call graph.
 - `JBOT_EXPLORATION_CHECKPOINTS=1` injects a short reassessment instruction after
