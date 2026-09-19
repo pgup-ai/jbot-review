@@ -9,6 +9,7 @@ import {
   explorationCheckpoint,
   readExplorationStats,
   explorationExperiment,
+  selectReadEvidence,
 } from '../src/shared/exploration-policy.ts';
 import { evidenceHash } from '../src/shared/evidence-cache.ts';
 
@@ -33,6 +34,31 @@ test('checkpoints react to new pressure and leave a two-request runway after a c
     readEvidence: false,
   });
   assert.equal(readExplorationStats({ checkpoints: 'secret' }), undefined);
+  assert.equal(explorationExperiment({ JBOT_READ_EVIDENCE: 'linked' }).readEvidence, 'linked');
+});
+
+test('linked selection excludes the seed, known paths and unbound matches before reserving two files', () => {
+  const candidate = (path: string, relatedTo?: string) => ({
+    path,
+    relatedTo,
+    line: 1,
+    symbol: 'total',
+    text: 'source',
+    completeFile: true,
+  });
+  const candidates = [
+    candidate('value.ts', 'value.ts'),
+    candidate('name-match.ts'),
+    candidate('seen.ts', 'value.ts'),
+    candidate('rate.ts', 'value.ts'),
+    candidate('rate.ts', 'value.ts'),
+    candidate('caller.ts', 'value.ts'),
+    candidate('third.ts', 'value.ts'),
+  ];
+  assert.deepEqual(
+    selectReadEvidence(candidates, 'value.ts', new Set(['seen.ts'])).map((c) => c.path),
+    ['rate.ts', 'caller.ts'],
+  );
 });
 
 test('retrieval batches linked callers and imports, refreshes sources, and excludes symlinks and untracked files', async (t) => {
@@ -190,4 +216,68 @@ test('read evidence preserves results and failures while bounding concurrent del
   )!;
   assert.equal(other.readEvidenceAttempts, 1);
   assert.equal(other.readEvidenceFallbacks, 1);
+});
+
+test('linked packets exclude concurrent reads and prior delivery while reporting subsequent requests', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'linked-evidence-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', root]);
+  for (const [path, text] of Object.entries({
+    'a.ts':
+      "import { rate } from './b.js';\nexport function total(n: number) { return n * rate; }\n",
+    'b.ts': 'export const rate = 137;\n',
+    'c.ts': "import { total } from './a.js';\nexport const charge = total(2);\n",
+    'd.ts': "import { rate } from './b.js';\nexport const discount = rate / 2;\n",
+    'noise.ts': 'export const total = 42;\n',
+  }))
+    await writeFile(join(root, path), text);
+  execFileSync('git', ['add', '.'], { cwd: root });
+  let onTool: Parameters<
+    Parameters<typeof installReviewRetrieval>[0]['tool']['hook']
+  >[1] = () => {};
+  await installReviewRetrieval(
+    {
+      session: { hook: async () => {} },
+      tool: {
+        transform: async () => assert.fail('no new tool'),
+        hook: async (_, fn) => {
+          onTool = fn;
+        },
+      },
+    },
+    root,
+    root,
+    { retrieval: false, checkpoints: false, readEvidence: 'linked' },
+  );
+  const event = (path: string) => ({
+    sessionID: 'review',
+    agent: 'plan',
+    tool: 'read',
+    status: 'completed',
+    input: { path },
+    result: { content: 'original', metadata: { original: true } },
+  });
+  const first = event('a.ts'),
+    concurrent = event('d.ts');
+  await Promise.all([onTool(first), onTool(concurrent)]);
+  assert.match(first.result.content, /### b.ts:/);
+  assert.match(first.result.content, /### c.ts:/);
+  for (const path of ['a.ts', 'd.ts', 'noise.ts'])
+    assert.ok(!first.result.content.includes(`### ${path}:`));
+  assert.equal(concurrent.result.content, 'original');
+  assert.deepEqual(first.result.metadata, { original: true });
+  await onTool(event('b.ts'));
+  await onTool({ ...event('a.ts'), tool: 'shell', input: { command: 'cat $(pwd)/secret.ts' } });
+  const raw = await readFile(join(root, `exploration-${evidenceHash('review')}.json`), 'utf8');
+  const stats = readExplorationStats(JSON.parse(raw))!;
+  assert.equal(stats.readEvidenceAttempts, 2);
+  assert.equal(stats.readEvidencePackets, 1);
+  assert.equal(stats.readEvidenceDeliveredFiles, 2);
+  assert.equal(stats.readEvidenceObservedReads, 3);
+  assert.equal(stats.readEvidenceSubsequentReads, 1);
+  assert.equal(stats.readEvidenceUnclassifiedShellCalls, 1);
+  assert.equal(stats.readEvidenceEmptyPackets, 1);
+  assert.equal(stats.readEvidenceFallbacks, 0);
+  assert.ok(stats.readEvidenceExcludedCandidates > 0);
+  assert.doesNotMatch(raw, /a.ts|b.ts|secret/);
 });

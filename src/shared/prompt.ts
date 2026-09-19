@@ -606,6 +606,7 @@ export function formatBlastRadiusContext(
 
 export interface JevCandidate {
   kind?: string;
+  relatedTo?: string;
   sourceHash?: string;
   completeFile: boolean;
   symbol: string;

@@ -1063,6 +1063,17 @@ Three independent, default-off OpenCode experiments:
   failure leaves the original result intact. Counter fields `readEvidenceAttempts`,
   `readEvidencePackets`, `readEvidenceBytes`, `readEvidenceFallbacks` and
   `readEvidencePreparationMs` measure delivery and overhead, not reads saved.
+  Set `JBOT_READ_EVIDENCE=linked` to select at most two directly import-linked
+  files around the requested range, excluding the seed and paths previously
+  requested or delivered in that session. It uses the same budgets and preserves
+  every original read. Concurrent augmentation is serialized to avoid duplicate
+  delivery. Path suppression is an optimization, not a claim that an earlier
+  partial read supplied the whole file. Unresolved and deeper dependencies remain
+  available through ordinary tools.
+  Additional counters record delivered files, observed reads, subsequent requests
+  for delivered files, unclassified shell calls, excluded candidates and empty
+  packets. A subsequent request may legitimately seek lines outside a supplied
+  excerpt; unclassified shell calls prevent these counters from proving avoidance.
 
 Use the first two switches for the combined retrieval/checkpoint arm. Exploration rows include an `experiment`
 object with checkpoint counts by trigger, retrieval calls/fallbacks, candidates
@@ -1079,6 +1090,8 @@ three arms and requires no TypeSafe key. Judge retained findings against the
 fixture contracts before interpreting latency, tool counts or token costs.
 Use `"readEvidence": true` instead for baseline versus automatic read evidence,
 with composite-tool prompting, checkpoints and Jev preloading disabled in both arms.
+Set `"readEvidence": "linked"` for a three-arm comparison that adds selective
+linked evidence to those same controls.
 
 ### Jev caller-evidence experiment
 

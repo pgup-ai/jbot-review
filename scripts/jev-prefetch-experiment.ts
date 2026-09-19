@@ -34,7 +34,7 @@ type Arm = {
   persistent?: boolean;
   retrieval?: boolean;
   checkpoints?: boolean;
-  readEvidence?: boolean;
+  readEvidence?: boolean | 'linked';
 };
 type Plan = {
   seed: string;
@@ -45,7 +45,7 @@ type Plan = {
   docs?: string;
   reuse?: boolean;
   retrieval?: boolean;
-  readEvidence?: boolean;
+  readEvidence?: boolean | 'linked';
 };
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const planPath = process.argv[2];
@@ -113,6 +113,16 @@ const arms: Arm[] = plan.readEvidence
   ? [
       { id: 'baseline', exploration: 'off', verification: 'off' },
       { id: 'read-evidence', exploration: 'off', verification: 'off', readEvidence: true },
+      ...(plan.readEvidence === 'linked'
+        ? [
+            {
+              id: 'linked-evidence',
+              exploration: 'off' as const,
+              verification: 'off' as const,
+              readEvidence: 'linked' as const,
+            },
+          ]
+        : []),
     ]
   : plan.retrieval
     ? [
@@ -262,7 +272,7 @@ for (const run of schedule) {
           plan.evidence || plan.reuse || plan.retrieval || plan.readEvidence ? 'off' : run.arm,
         JBOT_TARGETED_RETRIEVAL: arm.retrieval ? '1' : '0',
         JBOT_EXPLORATION_CHECKPOINTS: arm.checkpoints ? '1' : '0',
-        JBOT_READ_EVIDENCE: arm.readEvidence ? '1' : '0',
+        JBOT_READ_EVIDENCE: arm.readEvidence === 'linked' ? 'linked' : arm.readEvidence ? '1' : '0',
         JBOT_EXPLORATION_EVIDENCE: plan.reuse ? arm.exploration : plan.evidence ? run.arm : 'off',
         JBOT_VERIFICATION_EVIDENCE: plan.reuse ? arm.verification : plan.evidence ? run.arm : 'off',
         JBOT_EVIDENCE_SHARED: arm.shared ? '1' : '0',

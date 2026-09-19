@@ -6,13 +6,16 @@ test('literal shell reads preserve their directory and range without evaluating 
   const reads = (command: string, extra = {}) =>
     reviewReadLocations('/repo', 'shell', { command, ...extra });
   assert.deepEqual(reads("cd /repo && sed -n '40,80p' src/a.ts && cat 'src/b file.ts'"), [
-    { path: 'src/a.ts', line: 40 },
-    { path: 'src/b file.ts', line: 1 },
+    { path: 'src/a.ts', line: 40, endLine: 80 },
+    { path: 'src/b file.ts', line: 1, endLine: Number.MAX_SAFE_INTEGER },
   ]);
-  assert.deepEqual(reads('cat a.ts', { cwd: '/repo/src' }), [{ path: 'src/a.ts', line: 1 }]);
+  assert.deepEqual(reads('cat a.ts b.ts', { cwd: '/repo/src' }), [
+    { path: 'src/a.ts', line: 1, endLine: Number.MAX_SAFE_INTEGER },
+    { path: 'src/b.ts', line: 1, endLine: Number.MAX_SAFE_INTEGER },
+  ]);
   assert.deepEqual(
-    reviewReadLocations('/repo', 'read', { filePath: '/repo/src/a.ts', offset: 12 }),
-    [{ path: 'src/a.ts', line: 12 }],
+    reviewReadLocations('/repo', 'read', { filePath: '/repo/src/a.ts', offset: 12, limit: 6 }),
+    [{ path: 'src/a.ts', line: 12, endLine: 17 }],
   );
   for (const command of [
     'cat ../secret.ts',

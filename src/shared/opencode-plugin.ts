@@ -46,12 +46,13 @@ function sessionOptions(sessionID) {
 export default {
   id: 'jbot-review',
   async setup(ctx) {
-    if (process.env.JBOT_TARGETED_RETRIEVAL === '1' || process.env.JBOT_EXPLORATION_CHECKPOINTS === '1' || process.env.JBOT_READ_EVIDENCE === '1') {
+    const readEvidence = process.env.JBOT_READ_EVIDENCE;
+    if (process.env.JBOT_TARGETED_RETRIEVAL === '1' || process.env.JBOT_EXPLORATION_CHECKPOINTS === '1' || readEvidence === '1' || readEvidence === 'linked') {
       const { installReviewRetrieval } = await import(RETRIEVAL_MODULE);
       await installReviewRetrieval(ctx, process.env.JBOT_RETRIEVAL_WORKSPACE, process.env.JBOT_EXPLORATION_STATS_DIR, {
         retrieval: process.env.JBOT_TARGETED_RETRIEVAL === '1',
         checkpoints: process.env.JBOT_EXPLORATION_CHECKPOINTS === '1',
-        readEvidence: process.env.JBOT_READ_EVIDENCE === '1',
+        readEvidence: readEvidence === 'linked' ? 'linked' : readEvidence === '1',
       });
     }
     await ctx.session.hook('context', (event) => {

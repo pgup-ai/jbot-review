@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EvidenceStore, JS_SOURCE } from './evidence.ts';
 import { evidenceHash } from './evidence-cache.ts';
-import { explorationCheckpoint } from './exploration-policy.ts';
+import { explorationCheckpoint, selectReadEvidence } from './exploration-policy.ts';
 import { reviewReadLocations } from './review-read-locations.ts';
 import {
   EXPLORATION_CHECKPOINT,
@@ -65,12 +65,16 @@ export function reviewRetrievalTool(workspace: string) {
       )
         return { content: REVIEW_RETRIEVAL_UNAVAILABLE };
       let stats: JevPrefetchStats | undefined;
+      let paths: string[] = [];
       const content = await store.prepare('verification', [], 'deterministic', {
         timeoutMs: 4000,
         locations: [{ path: ref.path, line: Number(ref.line) }],
         log: () => {},
         onStats: (row) => {
           stats = row;
+        },
+        onSelection: (selected) => {
+          paths = selected.map((c) => c.path);
         },
       });
       return {
@@ -81,6 +85,7 @@ export function reviewRetrievalTool(workspace: string) {
             candidates: stats?.collectedCandidates ?? 0,
             preparationMs: stats?.elapsedMs ?? 0,
             fallback: !content,
+            paths,
           },
         },
       };
@@ -92,9 +97,17 @@ export async function installReviewRetrieval(
   ctx: PluginContext,
   workspace: string,
   statsDirectory: string,
-  options: { retrieval: boolean; checkpoints: boolean; readEvidence?: boolean },
+  options: { retrieval: boolean; checkpoints: boolean; readEvidence?: boolean | 'linked' },
 ) {
   const tool = reviewRetrievalTool(workspace);
+  const linkedStore =
+    options.readEvidence === 'linked'
+      ? new EvidenceStore(workspace, [], undefined, {
+          shared: true,
+          handoff: false,
+          prefetch: false,
+        })
+      : undefined;
   if (options.retrieval) {
     await ctx.tool.transform((editor) => editor.add(tool));
   }
@@ -105,6 +118,9 @@ export async function installReviewRetrieval(
       previous: { requests: 0, outputBytes: 0, repeatedResults: 0 },
       seen: new Set<string>(),
       evidencePaths: new Set<string>(),
+      knownPaths: new Set<string>(),
+      deliveredPaths: new Set<string>(),
+      preparation: Promise.resolve(),
       stats: {
         checkpoints: 0,
         turnCheckpoints: 0,
@@ -120,6 +136,12 @@ export async function installReviewRetrieval(
         readEvidenceBytes: 0,
         readEvidenceFallbacks: 0,
         readEvidencePreparationMs: 0,
+        readEvidenceDeliveredFiles: 0,
+        readEvidenceObservedReads: 0,
+        readEvidenceSubsequentReads: 0,
+        readEvidenceUnclassifiedShellCalls: 0,
+        readEvidenceExcludedCandidates: 0,
+        readEvidenceEmptyPackets: 0,
       },
     };
   }
@@ -164,6 +186,21 @@ export async function installReviewRetrieval(
   });
   await ctx.tool.hook('execute.after', async (event) => {
     const state = session(event.sessionID);
+    const reads =
+      event.status === 'completed' && event.input && typeof event.input === 'object'
+        ? reviewReadLocations(workspace, event.tool, event.input as Record<string, unknown>)
+        : [];
+    for (const ref of reads) {
+      state.stats.readEvidenceObservedReads++;
+      if (state.deliveredPaths.has(ref.path)) state.stats.readEvidenceSubsequentReads++;
+      if (state.knownPaths.size < 256) state.knownPaths.add(ref.path);
+    }
+    if (
+      event.status === 'completed' &&
+      ['shell', 'bash', 'execute', 'exec'].includes(event.tool) &&
+      !reads.length
+    )
+      state.stats.readEvidenceUnclassifiedShellCalls++;
     if (
       options.readEvidence &&
       event.status === 'completed' &&
@@ -175,36 +212,71 @@ export async function installReviewRetrieval(
       typeof event.input === 'object' &&
       (typeof event.result.content === 'string' || Array.isArray(event.result.content))
     ) {
-      const ref = reviewReadLocations(
-        workspace,
-        event.tool,
-        event.input as Record<string, unknown>,
-      ).find((r) => JS_SOURCE.test(r.path) && !state.evidencePaths.has(r.path));
+      const ref = reads.find((r) => JS_SOURCE.test(r.path) && !state.evidencePaths.has(r.path));
       if (ref) {
+        const originalResult = event.result;
+        const originalContent = event.result.content;
         // Reserve before awaiting so parallel reads cannot exceed the session budget.
         state.evidencePaths.add(ref.path);
         state.stats.readEvidenceAttempts++;
-        const started = Date.now();
-        try {
-          const packet = await tool.execute(ref);
-          const text = '\n\n' + packet.content;
-          const bytes = Buffer.byteLength(text);
-          if (packet.metadata?.jbotRetrieval.selected && bytes <= 7000) {
-            event.result = {
-              ...event.result,
-              content:
-                typeof event.result.content === 'string'
-                  ? event.result.content + text
-                  : [...event.result.content, { type: 'text', text }],
-            };
-            state.stats.readEvidencePackets++;
-            state.stats.readEvidenceBytes += bytes;
-          } else state.stats.readEvidenceFallbacks++;
-        } catch {
-          state.stats.readEvidenceFallbacks++;
-        } finally {
-          state.stats.readEvidencePreparationMs += Date.now() - started;
-        }
+        const prepare = async () => {
+          const started = Date.now();
+          try {
+            let paths: string[] = [];
+            let stats: JevPrefetchStats | undefined;
+            const packet = linkedStore
+              ? {
+                  content: await linkedStore.prepare('verification', [], 'deterministic', {
+                    timeoutMs: 4000,
+                    locations: [ref],
+                    log: () => {},
+                    onStats: (row) => {
+                      stats = row;
+                    },
+                    selectCandidates: (candidates) => {
+                      const selected = selectReadEvidence(candidates, ref.path, state.knownPaths);
+                      state.stats.readEvidenceExcludedCandidates +=
+                        candidates.length - selected.length;
+                      return selected;
+                    },
+                    onSelection: (selected) => {
+                      paths = selected.map((c) => c.path);
+                    },
+                  }),
+                  metadata: { jbotRetrieval: { selected: paths.length, paths } },
+                }
+              : await tool.execute(ref);
+            const text = '\n\n' + packet.content;
+            const bytes = Buffer.byteLength(text);
+            if (packet.metadata?.jbotRetrieval.selected && bytes <= 7000) {
+              event.result = {
+                ...originalResult,
+                content:
+                  typeof originalContent === 'string'
+                    ? originalContent + text
+                    : [...originalContent, { type: 'text', text }],
+              };
+              state.stats.readEvidencePackets++;
+              state.stats.readEvidenceBytes += bytes;
+              for (const path of packet.metadata.jbotRetrieval.paths) {
+                state.deliveredPaths.add(path);
+                state.knownPaths.add(path);
+              }
+              state.stats.readEvidenceDeliveredFiles = state.deliveredPaths.size;
+            } else if (linkedStore && stats?.status === 'skipped')
+              state.stats.readEvidenceEmptyPackets++;
+            else state.stats.readEvidenceFallbacks++;
+          } catch {
+            state.stats.readEvidenceFallbacks++;
+          } finally {
+            state.stats.readEvidencePreparationMs += Date.now() - started;
+          }
+        };
+        if (linkedStore) {
+          // Serialize augmentation so parallel reads cannot deliver the same dependency twice.
+          state.preparation = state.preparation.then(prepare);
+          await state.preparation;
+        } else await prepare();
       }
     }
     if (event.status === 'completed') {

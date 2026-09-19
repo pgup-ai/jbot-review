@@ -309,7 +309,9 @@ export class EvidenceStore {
       apiKey?: string;
       log: (s: string) => void;
       onStats: (s: JevPrefetchStats) => void;
-      locations?: { path: string; line: number }[];
+      locations?: { path: string; line: number; endLine?: number }[];
+      selectCandidates?: (candidates: JevCandidate[]) => JevCandidate[];
+      onSelection?: (selected: JevCandidate[]) => void;
     },
   ): Promise<string> {
     if (mode === 'off') return '';
@@ -349,7 +351,13 @@ export class EvidenceStore {
             : changedEvidenceLines(this.files.find((f) => f.filename === path)?.patch ?? '');
         focus.set(path, lines);
         for (const d of source.index.definitions)
-          if (lines.some((l) => l >= d.start && l <= d.end)) targets.push({ path, ...d });
+          if (
+            options.locations?.some(
+              (r) => r.path === path && r.line <= d.end && (r.endLine ?? r.line) >= d.start,
+            ) ||
+            lines.some((l) => l >= d.start && l <= d.end)
+          )
+            targets.push({ path, ...d });
       }
       const symbols = [...new Set(targets.map((t) => t.symbol))].slice(0, 20);
       let matches: string[] = [];
@@ -378,12 +386,15 @@ export class EvidenceStore {
       }
       // Imports and citations get a slot before broad symbol matches consume the read budget.
       for (const [path, source] of Array.from(loaded)) {
+        const ranges = options.locations?.filter((r) => r.path === path && r.endLine !== undefined);
         for (const imp of source.index.imports) {
           if (
             !source.index.uses.some(
               (u) =>
                 u.symbol === imp.local &&
-                (focus.get(path) ?? []).some((l) => Math.abs(l - u.line) <= 20),
+                (ranges?.length
+                  ? ranges.some((r) => u.line >= r.line && u.line <= (r.endLine ?? r.line))
+                  : (focus.get(path) ?? []).some((l) => Math.abs(l - u.line) <= 20)),
             )
           )
             continue;
@@ -397,7 +408,13 @@ export class EvidenceStore {
       for (const path of matches.slice(0, 64)) await read(path);
       const candidates: JevCandidate[] = [];
       const seen = new Set<string>();
-      const add = (path: string, symbol: string, line: number, kind: string) => {
+      const add = (
+        path: string,
+        symbol: string,
+        line: number,
+        kind: string,
+        relatedTo?: string,
+      ) => {
         const source = loaded.get(path);
         const key = `${path}:${line}`;
         if (!source || seen.has(key) || candidates.length >= 64) return;
@@ -412,6 +429,7 @@ export class EvidenceStore {
           symbol,
           line,
           kind,
+          ...(relatedTo ? { relatedTo } : {}),
           sourceHash: source.digest,
           completeFile,
           text: completeFile
@@ -440,6 +458,7 @@ export class EvidenceStore {
                 t.symbol,
                 u.line,
                 /(?:test|spec)/.test(path) ? 'import-linked test' : 'import-linked reference',
+                t.path,
               );
           }
         }
@@ -450,7 +469,8 @@ export class EvidenceStore {
           const resolved = resolveEvidenceImport(path, imp.from, paths);
           if (!resolved) continue;
           for (const d of loaded.get(resolved)?.index.definitions ?? []) {
-            if (d.symbol === imp.imported) add(resolved, d.symbol, d.start, 'imported definition');
+            if (d.symbol === imp.imported)
+              add(resolved, d.symbol, d.start, 'imported definition', path);
           }
         }
       }

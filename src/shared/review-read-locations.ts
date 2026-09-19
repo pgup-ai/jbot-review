@@ -4,19 +4,22 @@ export function reviewReadLocations(
   workspace: string,
   tool: string,
   input: Record<string, unknown>,
-): { path: string; line: number }[] {
+): { path: string; line: number; endLine: number }[] {
   let cwd = workspace;
-  const locations: { path: string; line: number }[] = [];
-  const add = (raw: unknown, line: number) => {
+  const locations: { path: string; line: number; endLine: number }[] = [];
+  const add = (raw: unknown, line: number, endLine = Number.MAX_SAFE_INTEGER) => {
     if (typeof raw !== 'string' || !raw || raw.length > 512 || raw.includes('\0')) return;
     const path = relative(workspace, resolve(cwd, raw));
-    if (path && path !== '..' && !path.startsWith('../')) locations.push({ path, line });
+    if (path && path !== '..' && !path.startsWith('../')) locations.push({ path, line, endLine });
   };
   if (tool === 'read' || tool === 'read_file') {
-    add(
-      input.filePath ?? input.path ?? input.file,
-      Number.isSafeInteger(input.offset) && Number(input.offset) > 0 ? Number(input.offset) : 1,
-    );
+    const line =
+      Number.isSafeInteger(input.offset) && Number(input.offset) > 0 ? Number(input.offset) : 1;
+    const endLine =
+      Number.isSafeInteger(input.limit) && Number(input.limit) > 0
+        ? Math.min(Number.MAX_SAFE_INTEGER, line + Number(input.limit) - 1)
+        : Number.MAX_SAFE_INTEGER;
+    add(input.filePath ?? input.path ?? input.file, line, endLine);
     return locations;
   }
   if (!['shell', 'bash', 'execute', 'exec'].includes(tool)) return [];
@@ -45,12 +48,13 @@ export function reviewReadLocations(
     const end = tokens.indexOf('&&', offset);
     const args = tokens.slice(offset, end < 0 ? undefined : end);
     if (offset === 0 && args.length === 2 && args[0] === 'cd') cwd = resolve(cwd, args[1]);
-    else if (args.length === 2 && args[0] === 'cat' && !args[1].startsWith('-')) add(args[1], 1);
+    else if (args.length > 1 && args[0] === 'cat' && args.slice(1).every((p) => !p.startsWith('-')))
+      for (const path of args.slice(1)) add(path, 1);
     else if (args.length === 4 && args[0] === 'sed' && args[1] === '-n') {
       const range = /^([1-9]\d*),([1-9]\d*)p$/.exec(args[2]);
       if (!range || Number(range[2]) < Number(range[1]) || !Number.isSafeInteger(Number(range[2])))
         return [];
-      add(args[3], Number(range[1]));
+      add(args[3], Number(range[1]), Number(range[2]));
     } else return [];
     if (end < 0) break;
     offset = end + 1;

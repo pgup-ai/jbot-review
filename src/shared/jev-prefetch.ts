@@ -154,6 +154,8 @@ export async function buildJevPrefetch(
     timeoutMs: number;
     log: (message: string) => void;
     onStats: (stats: JevPrefetchStats) => void;
+    selectCandidates?: (candidates: JevCandidate[]) => JevCandidate[];
+    onSelection?: (selected: JevCandidate[]) => void;
   },
 ): Promise<string> {
   const started = Date.now() - (options.prepared?.elapsedMs ?? 0);
@@ -244,7 +246,11 @@ export async function buildJevPrefetch(
     }
     stats.collectedCandidates = candidates.length;
     stats.collectMs = Date.now() - started;
-    const request = buildJevRequest(files, candidates, options.prepared?.task);
+    const request = buildJevRequest(
+      files,
+      options.selectCandidates?.(candidates) ?? candidates,
+      options.prepared?.task,
+    );
     if (!request.candidates.length) {
       stats.reason = 'no-candidates';
       return '';
@@ -343,6 +349,8 @@ export async function buildJevPrefetch(
     stats.contextBytes = Buffer.byteLength(block);
     stats.status = options.mode === 'shadow' ? 'shadow' : 'applied';
     stats.injectedBytes = options.mode === 'shadow' ? 0 : stats.contextBytes;
+    if (options.mode !== 'shadow')
+      options.onSelection?.(selected.map((i) => request.candidates[i]));
     return options.mode === 'shadow' ? '' : block;
   } catch (error) {
     stats.reason = signal?.aborted

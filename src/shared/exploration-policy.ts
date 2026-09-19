@@ -19,8 +19,25 @@ export function explorationExperiment(env: NodeJS.ProcessEnv) {
   return {
     retrieval: env.JBOT_TARGETED_RETRIEVAL === '1',
     checkpoints: env.JBOT_EXPLORATION_CHECKPOINTS === '1',
-    readEvidence: env.JBOT_READ_EVIDENCE === '1',
+    readEvidence:
+      env.JBOT_READ_EVIDENCE === 'linked' ? ('linked' as const) : env.JBOT_READ_EVIDENCE === '1',
   };
+}
+
+export function selectReadEvidence(
+  candidates: JevCandidate[],
+  path: string,
+  supplied: ReadonlySet<string>,
+) {
+  const selected: JevCandidate[] = [];
+  const paths = new Set(supplied);
+  for (const c of candidates) {
+    if (c.relatedTo !== path || c.path === path || paths.has(c.path)) continue;
+    selected.push(c);
+    paths.add(c.path);
+    if (selected.length === 2) break;
+  }
+  return selected;
 }
 
 export function readExplorationStats(value: unknown) {
@@ -47,6 +64,12 @@ export function readExplorationStats(value: unknown) {
     'readEvidenceBytes',
     'readEvidenceFallbacks',
     'readEvidencePreparationMs',
+    'readEvidenceDeliveredFiles',
+    'readEvidenceObservedReads',
+    'readEvidenceSubsequentReads',
+    'readEvidenceUnclassifiedShellCalls',
+    'readEvidenceExcludedCandidates',
+    'readEvidenceEmptyPackets',
   ]) {
     const n = (value as Record<string, unknown>)[key];
     if (n === undefined) continue;
@@ -55,3 +78,4 @@ export function readExplorationStats(value: unknown) {
   }
   return result;
 }
+import type { JevCandidate } from './prompt.ts';
