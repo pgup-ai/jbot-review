@@ -943,7 +943,7 @@ and precision against seeded defects.
 
 `JBOT_JEV_PREFETCH=on` adds up to four caller source excerpts to the existing
 changed-symbol usage context. The existing reviewers, full diff, caller list,
-verification, and finding filters stay active. This experiment requires enhanced
+verification, and finding filters stay active. Jev ranking requires enhanced
 context (enabled by local review), `TYPESAFE_API_KEY`, and outbound access to
 TypeSafe. Set the key in the launch directory's ignored `.env` for local use;
 hosted runs use an environment secret. It is not a review-provider setting.
@@ -1016,7 +1016,8 @@ for precision and recall.
 Shadow measures ranking and overhead only; it cannot demonstrate faster reviews.
 The [evidence-reuse audit](docs/audits/2026-09-19-jev-evidence-reuse.md)
 records the version 2 comparison: fewer source reads and turns, without a
-reliable end-to-end speedup.
+reliable end-to-end speedup. The [real-PR comparison](docs/audits/2026-09-19-jev-real-pr-comparison.md)
+adds a deterministic control and five randomized repetitions per arm.
 The core quality benchmark remains recommended before adoption, and the full
 quality gate is required before enabling this by default.
 
