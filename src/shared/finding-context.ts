@@ -161,10 +161,22 @@ export async function findNamedSourceLocations(
       ],
       { cwd: workspace, timeout: 1500, maxBuffer: 512 * 1024 },
     );
-    const matches = [...stdout.matchAll(/([^\0]+)\0(\d+)\0[^\n]*(?:\n|$)/g)].map((match) => ({
-      path: match[1],
-      line: Number(match[2]),
-    }));
+    const matches = [...stdout.matchAll(/([^\0]+)\0(\d+)\0([^\n]*)(?:\n|$)/g)]
+      .flatMap((match) => {
+        const index = symbols.findIndex((symbol) =>
+          match[3].match(/[A-Za-z_$][\w$]*/g)?.includes(symbol),
+        );
+        if (index < 0) return [];
+        const call = new RegExp(`(?<![\\w$])${symbols[index].replace(/\$/g, '\\$')}\\s*\\(`);
+        return [
+          {
+            path: match[1],
+            line: Number(match[2]),
+            rank: index * 2 + Number(!call.test(match[3])),
+          },
+        ];
+      })
+      .sort((a, b) => a.rank - b.rank);
     // Spread the bounded windows across files so one declaration cannot hide all callers.
     const selected: typeof matches = [];
     for (let perFile = 1; perFile <= 2; perFile++)

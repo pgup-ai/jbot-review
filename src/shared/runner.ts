@@ -4955,7 +4955,9 @@ export function buildBody(
   const total = all.length;
   const displayed = experiment?.advisorySummary
     ? all.map((finding) =>
-        isAdvisoryFinding(finding) ? { ...finding, verificationUncertain: true } : finding,
+        isAdvisoryFinding(finding)
+          ? { ...finding, severity: 'P3' as const, verificationUncertain: true }
+          : finding,
       )
     : all;
   const lines = ['## J-Bot Code Review', ''];

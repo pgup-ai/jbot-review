@@ -202,7 +202,7 @@ describe('buildBody', () => {
     const body = buildBody(
       '',
       '',
-      [finding, uncertain],
+      [uncertain],
       [],
       'model',
       'owner',
@@ -219,7 +219,8 @@ describe('buildBody', () => {
     assert.match(body, /The caller was not supplied/);
     assert.match(body, /<!-- jbot-review:finding -->/);
     assert.doesNotMatch(body, /Long hypothesis/);
-    assert.match(body, /\| 2 \| 0 \| 0 \| 1 \| 0 \| 0 \| 1 \|/);
+    assert.match(body, /\| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 1 \|/);
+    assert.match(body, /Review state:\*\* Unverified concerns remain/);
     assert.deepEqual(auxiliaryBaselines(body), [baseline]);
     assert.equal(completedReviewHead(body), 'd'.repeat(40));
     assert.equal(uncertain.verificationUncertain, undefined);

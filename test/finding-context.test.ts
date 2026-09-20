@@ -126,7 +126,7 @@ test('named evidence includes unchanged callers while bounding source delivery a
     );
     await writeFile(
       join(workspace, 'src/caller.ts'),
-      'import { validateOptions } from "./helper";\nvalidateOptions();\n',
+      'import { validateOptions } from "./helper";\n' + '\n'.repeat(60) + 'validateOptions();\n',
     );
     await writeFile(join(workspace, '.env'), 'validateOptions=SECRET_MUST_NOT_APPEAR');
     for (let i = 0; i < 10; i++)
