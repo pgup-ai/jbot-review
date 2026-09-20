@@ -29,6 +29,8 @@ settings, recorded as `custom`. They are not production configuration aliases.
 
 Results below are historical observations at the linked audits' frozen revisions.
 The current preset refactor does not turn them into a new performance benchmark.
+Older audits describe frozen revisions: their flags, telemetry versions and test
+counts are historical, not current configuration or final validation claims.
 
 | Direction                   | Measured benefit                                                                                                                                                                             | Counterevidence / limitation                                                                                                                                                                                                                  |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -77,3 +79,69 @@ uncached tokens and cost. Require a repeatable total-time benefit without missed
 confirmed defects or added unsupported findings; the advisory core corpus is
 still outstanding. Enabling a default additionally requires the repository's
 full quality gate. No existing result above meets that adoption standard.
+
+## Consolidation validation
+
+The selector was introduced at `9dd4639`; the final source revision is `8a32322`.
+Both repository self-review and de-slop skills were reapplied against
+`origin/main` at `2d8f923`. The pass removed the 13 environment readers and their
+configuration documentation. It also fixed optional retrieval setup aborting the
+main review, omission notices exceeding excerpt budgets, interrupted turns being
+reported as completed, shared reads inheriting one caller's cancellation, and
+byte offsets being mistaken for source lines. Research findings paths now resolve
+before the child changes directory. The Docker smoke checks the retrieval bundle.
+
+Four native OpenCode reviews ran through the compiled local entry at `8a32322`,
+with every retired flag deliberately set to an active value, including unusable
+cache/document paths. All processes exited zero, completed with no incomplete
+sessions, and reported the expected resolved preset:
+
+| Preset         | Retained seeded findings | Observed delivery                                                                                      |
+| -------------- | ------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `off`          | Three P1 currency roots  | No linked packets or Jev API activity.                                                                 |
+| `linked`       | Three P1 currency roots  | Two main preparation attempts; no eligible unseen packet, 19 candidate exclusions; no verifier packet. |
+| `jev`          | Three P1 currency roots  | Three caller excerpts selected; Jev API time 152 ms; no linked packets.                                |
+| `diff-batches` | One P1 currency root     | Two observed multi-file diff calls; no linked packets or Jev API activity.                             |
+
+The initial smoke harness incorrectly required positive packet delivery from
+`linked`; that assertion failed after the successful review above. The recorded
+reads and exclusions show why this is not a valid activation requirement. The
+failed harness/log was preserved, and only the two unstarted presets were then
+run. At `9dd4639`, an earlier four-preset smoke did deliver two main packets in its
+linked run, with zero verifier packets. Neither observation demonstrates saved
+sequential reads. A separate seven-run verifier-driver smoke at `9dd4639` confirmed
+the seeded defect and refuted the false hypothesis in every run; the handoff arm
+is a negative control without a preceding source-reading session.
+
+These are functional checks, not latency comparisons: one run per public preset,
+different batching fixture, uncontrolled provider cache, and local Docker work
+overlapping the checks. Raw reports, telemetry, manifests and the initial failed
+assertion remain in `.jbot-review/preset-consolidation*/`.
+
+Final source validation passed: all **1,099 tests**, typecheck, lint, formatting,
+bundle build and diff checks. A configured-secret scan of 301 tracked files and
+branch patch history found zero matches; `.env` is ignored, mode `0600`, with
+the preset set to `off`. No credential value appears in the committed evidence.
+
+The final `linux/amd64` slim image built, all five JavaScript entry checks passed,
+and importing the retrieval bundle passed. Image ID:
+`sha256:1de0e9766b27987255dbac2ecaeef99288b6bd41690639c5bda6fbfb668e9ed0`.
+The CLI portion of `smoke-image.sh` failed twice at `opencode --version` with a
+Bun 1.4.2 segmentation fault under QEMU; the same crash reproduced on the earlier
+`9dd4639` image. Native OpenCode 2.0.5 completed the reviews above. This is not a
+passed final container CLI smoke; no image was published.
+
+De-slop: 10 TypeScript comment blocks kept for their existing boundary rationale;
+the 10 previous configuration blocks became two rewritten blocks, with eight
+cut. All 31 branch-added test cases were kept for distinct failures; no cases
+were folded or cut, and existing assertions were preserved. Per-item verdicts
+are in `.jbot-review/pr-publication/consolidation-*-adjudication.json`. The README alone removed 231 net lines. Historical research code remains
+available to the driver.
+
+Final tracked delta versus `2fb93cc`: 30 files, +757/-602 lines (155 net). No untracked publication files.
+
+Residual limits: no independently blind core-corpus run, no repeated performance
+comparison at the final revision, and the container CLI limitation above. The
+research driver also remains intended for attended experiments: its per-review
+budget is not an outer startup/teardown watchdog. These results do not support
+enabling an experiment broadly in production.
