@@ -28,6 +28,7 @@ import {
 } from './token-usage.ts';
 import {
   classifyReadonlyTool,
+  countDiffFileHeaders,
   serializedBytes,
   toolIdentity,
   type ToolTelemetryAccumulator,
@@ -349,6 +350,9 @@ export function recordAssistantTools(
       const outputBytes = serializedBytes(output);
       finish({
         success: part.state.status === 'completed',
+        ...(toolClass === 'diff-recovery' && part.state.status === 'completed'
+          ? { diffFileHeaders: countDiffFileHeaders(output) }
+          : {}),
         ...(part.state.status === 'error' ? { failureClass: 'execution' as const } : {}),
         outputBytesBeforeCap: outputBytes,
         outputBytesAfterCap: outputBytes,

@@ -12,6 +12,7 @@ import {
 import {
   MAX_TOOL_TELEMETRY_ROWS,
   classifyReadonlyTool,
+  countDiffFileHeaders,
   createToolTelemetryAccumulator,
   toolIdentity,
 } from '../src/shared/tool-telemetry.ts';
@@ -93,6 +94,13 @@ describe('phase and tool telemetry', () => {
         outputBytesAfterCap: 1,
       });
     }
+    tools.startTool({
+      session: 'review',
+      backend: 'opencode',
+      capability: 'observable',
+      toolClass: 'diff-recovery',
+      inputBytes: 1,
+    })({ success: true, outputBytesBeforeCap: 1, outputBytesAfterCap: 1, diffFileHeaders: 2 });
     tools.finishSession({
       session: 'review',
       backend: 'opencode',
@@ -125,6 +133,12 @@ describe('phase and tool telemetry', () => {
     assert.equal(row.unchangedRepeatCalls, 1);
     assert.equal(row.changedRepeatCalls, 1);
     assert.equal(row.unchangedRepeatDurationMs, 7);
+    assert.equal(row.diffFileHeaders, 2);
+    assert.equal(row.multiFileDiffCalls, 1);
+    assert.equal(
+      rows.find((r) => r.kind === 'tool' && r.toolClass === 'diff-recovery').diffFileHeaders,
+      2,
+    );
     assert.doesNotMatch(recorder.toJsonl(), /secret/);
   });
   it('classifies external documentation tools before generic searches', () => {
@@ -136,6 +150,23 @@ describe('phase and tool telemetry', () => {
       'diff-recovery',
     );
     assert.equal(classifyReadonlyTool('exec', { command: 'git diff --stat' }), 'diff-recovery');
+    assert.equal(
+      classifyReadonlyTool('exec', {
+        command: 'git --literal-pathspecs -c diff.noprefix=false diff HEAD -- a.ts b.ts',
+      }),
+      'diff-recovery',
+    );
+    assert.equal(
+      countDiffFileHeaders([
+        {
+          type: 'text',
+          text: 'diff --git a/a b/a\n@@ -1 +1 @@\n-diff --git not-a-header\n+new\ndiff --git a/b b/b\ntruncated',
+        },
+        { type: 'image', text: 'diff --git not-text' },
+      ]),
+      2,
+    );
+    assert.equal(countDiffFileHeaders('diff --git a/a b/a'), 1);
     assert.equal(classifyReadonlyTool('bash', { command: 'git status --short' }), 'other-readonly');
     assert.deepEqual(toolIdentity('list', { pattern: 'src/**/*.ts' }), {
       identity: 'src/**/*.ts',

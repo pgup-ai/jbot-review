@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { buildDiffRecoveryBlock } from '../src/shared/prompt.ts';
+import { classifyReadonlyTool } from '../src/shared/tool-telemetry.ts';
 
 test('recovery batches bound estimated output and prompt bytes without hiding unplanned paths', () => {
   const scope = { baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40) };
@@ -73,6 +74,7 @@ test('recovery commands preserve literal hostile filenames, PR scope and uncommi
     const block = buildDiffRecoveryBlock(files, names.slice(0, 3), { baseSha, headSha, worktree });
     const commands = block.split('\n').filter((l) => l.startsWith('    git'));
     assert.equal(commands.length, 1);
+    assert.equal(classifyReadonlyTool('bash', { command: commands[0] }), 'diff-recovery');
     const output = execFileSync('/bin/sh', ['-c', commands[0]], { cwd: root, encoding: 'utf8' });
     assert.equal((output.match(/^diff --git /gm) ?? []).length, 3);
     assert.doesNotMatch(output, /other.ts/);

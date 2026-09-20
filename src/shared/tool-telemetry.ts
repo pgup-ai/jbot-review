@@ -33,6 +33,7 @@ export interface ToolTelemetryFinish {
   failureClass?: 'denied' | 'budget' | 'timeout' | 'execution' | 'invalid-input' | 'unknown';
   durationMs?: number;
   resultIdentity?: string;
+  diffFileHeaders?: number;
 }
 
 export interface ExplorationTelemetryFinish {
@@ -61,6 +62,8 @@ interface SessionCounters {
   repeatedSearches: number;
   droppedToolRows: number;
   classes: Set<ToolTelemetryClass>;
+  diffFileHeaders?: number;
+  multiFileDiffCalls?: number;
   exact?: { repeats: number; unchanged: number; changed: number; unchangedDurationMs: number };
 }
 
@@ -170,6 +173,11 @@ export function createToolTelemetryAccumulator(
         counters.toolInputBytes += boundedCount(input.inputBytes);
         counters.toolOutputBytes += boundedCount(finish.outputBytesAfterCap);
         counters.classes.add(input.toolClass);
+        if (finish.diffFileHeaders !== undefined) {
+          counters.diffFileHeaders = (counters.diffFileHeaders ?? 0) + finish.diffFileHeaders;
+          counters.multiFileDiffCalls =
+            (counters.multiFileDiffCalls ?? 0) + Number(finish.diffFileHeaders > 1);
+        }
         if (duplicate && input.toolClass === 'file-read') counters.duplicateReads += 1;
         if (duplicate && input.toolClass === 'search') counters.repeatedSearches += 1;
         if (rows >= MAX_TOOL_TELEMETRY_ROWS) {
@@ -189,6 +197,9 @@ export function createToolTelemetryAccumulator(
           outputBytesAfterCap: boundedCount(finish.outputBytesAfterCap),
           duplicate,
           success: finish.success,
+          ...(finish.diffFileHeaders !== undefined
+            ? { diffFileHeaders: finish.diffFileHeaders }
+            : {}),
           ...(exactRepeat !== undefined ? { exactRepeat, unchangedResult } : {}),
           ...(finish.failureClass ? { failureClass: finish.failureClass } : {}),
           ...(input.diffScope ? { diffScope: input.diffScope } : {}),
@@ -216,6 +227,12 @@ export function createToolTelemetryAccumulator(
         duplicateReads: counters.duplicateReads,
         repeatedSearches: counters.repeatedSearches,
         droppedToolRows: counters.droppedToolRows,
+        ...(counters.diffFileHeaders !== undefined
+          ? {
+              diffFileHeaders: counters.diffFileHeaders,
+              multiFileDiffCalls: counters.multiFileDiffCalls,
+            }
+          : {}),
         ...(counters.exact
           ? {
               exactRepeatCalls: counters.exact.repeats,
@@ -239,7 +256,10 @@ export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemet
     !Array.isArray(input)
       ? (input as Record<string, unknown>).command
       : undefined;
-  if (typeof command === 'string' && /\bgit\s+diff(?:\s|$)/i.test(command)) {
+  if (
+    typeof command === 'string' &&
+    /\bgit(?:\s+(?:--literal-pathspecs|-c\s+\S+))*\s+diff(?:\s|$)/i.test(command)
+  ) {
     return 'diff-recovery';
   }
   if (normalized === 'git_diff' || normalized.includes('diff')) return 'diff-recovery';
@@ -258,6 +278,18 @@ export function classifyReadonlyTool(name: string, input?: unknown): ToolTelemet
     return 'list';
   }
   return 'other-readonly';
+}
+
+export function countDiffFileHeaders(content: unknown): number {
+  const blocks = Array.isArray(content) ? content : [{ type: 'text', text: content }];
+  return blocks.reduce(
+    (count, block) =>
+      count +
+      (block?.type === 'text' && typeof block.text === 'string'
+        ? (block.text.match(/^diff --git /gm) ?? []).length
+        : 0),
+    0,
+  );
 }
 
 export function serializedBytes(value: unknown): number {

@@ -55,15 +55,38 @@ describe('recordAssistantTools', () => {
             state: { status: 'running', input: {} },
             time: { created: 1 },
           },
+          {
+            type: 'tool',
+            id: 't4',
+            name: 'shell',
+            state: {
+              status: 'completed',
+              input: {
+                command: 'git --literal-pathspecs -c diff.noprefix=false diff HEAD -- a.ts b.ts',
+              },
+              content: [
+                {
+                  type: 'text',
+                  text: 'diff --git a/a.ts b/a.ts\n+new\ndiff --git a/b.ts b/b.ts\n+new',
+                },
+              ],
+            },
+            time: { created: 1, completed: 3 },
+          },
         ],
       },
     ]);
-    const [read, shell, session] = rows as Array<{
+    const [read, shell, batch, session] = rows as Array<{
       input?: { toolClass: string; diffScope?: string };
-      finish?: { success: boolean; failureClass?: string; durationMs?: number };
+      finish?: {
+        success: boolean;
+        failureClass?: string;
+        durationMs?: number;
+        diffFileHeaders?: number;
+      };
       session?: { turnCount?: number };
     }>;
-    assert.equal(rows.length, 3);
+    assert.equal(rows.length, 4);
     assert.doesNotMatch(JSON.stringify(rows), /git diff|nope|"x"/, 'raw tool data never persists');
     assert.equal(read!.finish!.success, true);
     assert.equal(read!.finish!.durationMs, 2);
@@ -71,6 +94,9 @@ describe('recordAssistantTools', () => {
     // 'shell' reaches the classifier as bash, so its `git diff` command classifies as diff-recovery.
     assert.equal(shell!.input!.toolClass, 'diff-recovery');
     assert.equal(shell!.finish!.failureClass, 'execution');
+    assert.equal(shell!.finish!.diffFileHeaders, undefined);
+    assert.equal(batch!.input!.toolClass, 'diff-recovery');
+    assert.equal(batch!.finish!.diffFileHeaders, 2);
     assert.equal(session!.session!.turnCount, 1);
   });
 });

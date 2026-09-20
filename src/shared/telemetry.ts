@@ -105,9 +105,12 @@ export interface ToolTelemetryRow {
   success: boolean;
   failureClass?: 'denied' | 'budget' | 'timeout' | 'execution' | 'invalid-input' | 'unknown';
   diffScope?: 'whole' | 'path';
+  diffFileHeaders?: number;
 }
 
 export interface ExplorationTelemetryRow {
+  diffFileHeaders?: number;
+  multiFileDiffCalls?: number;
   experiment?: Record<string, number>;
   kind: 'exploration';
   session: string;
