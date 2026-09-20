@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
+import { finished } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { loadDotEnv } from '../src/local/util.ts';
 import {
@@ -292,6 +293,8 @@ try {
     mkdirSync(dir);
     const output = resolve(dir, 'review.json');
     const stream = createWriteStream(resolve(dir, 'review.log'));
+    // Observe write failures immediately, then rethrow after the child is reaped.
+    const logFinished = finished(stream).catch((error: Error) => error);
     const started = Date.now();
     console.log(
       `Starting ${run.id}/${schedule.length} ${run.caseId} ${run.arm} repetition ${run.repetition}`,
@@ -327,6 +330,7 @@ try {
     const experimentPath = resolve(dir, 'experiment.json');
     writeFileSync(experimentPath, JSON.stringify(experiment));
     let code: number | null;
+    let logError: Error | void;
     const timeoutMessage = 'Experiment process deadline exceeded';
     try {
       const child = await processes.run('trial', () =>
@@ -350,19 +354,16 @@ try {
             },
             timeoutMs: 15 * 60_000,
             timeoutMessage,
-            onStdout: (chunk) => {
-              stream.write(chunk);
-            },
+            output: stream,
           },
         ),
       );
       code = child.exitCode;
       if (code !== 0) process.exitCode = 1;
-      stream.write(child.stderr);
     } catch (error) {
       const terminalState =
         error instanceof Error && error.message === timeoutMessage ? 'timeout' : 'process-failed';
-      stream.write(`\nExperiment ${terminalState}.\n`);
+      if (!stream.destroyed) stream.write(`\nExperiment ${terminalState}.\n`);
       results.push({
         ...run,
         code: null,
@@ -373,8 +374,10 @@ try {
       writeFileSync(resolve(out, 'results.json'), JSON.stringify(results, null, 2) + '\n');
       throw error;
     } finally {
-      await new Promise<void>((done) => stream.end(done));
+      stream.end();
+      logError = await logFinished;
     }
+    if (logError) throw logError;
     checkCase(c);
     const review:
       | (ReviewResult & {
