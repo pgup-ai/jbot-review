@@ -1,4 +1,5 @@
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -145,7 +146,8 @@ export function clineEnvForHome(clineHome: string | undefined): NodeJS.ProcessEn
   if (!home) {
     throw new Error('Missing Cline home. A temp HOME is required for auth.');
   }
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+  // Isolated homes cannot see other sessions when Cline decides whether it is safe to self-update.
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, CLINE_NO_AUTO_UPDATE: '1' };
   for (const key of sessionEnvDenyKeys(Object.keys(env))) delete env[key];
   return env;
 }
@@ -418,6 +420,8 @@ async function runClinePrompt(
     }
     return finalMessage;
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(
+      (error: NodeJS.ErrnoException) => log(`Cline temporary-home cleanup failed: ${error.code}.`),
+    );
   }
 }

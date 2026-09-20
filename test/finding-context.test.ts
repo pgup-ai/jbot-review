@@ -96,9 +96,9 @@ test('source context reads tracked worktree helpers but excludes untracked files
       block,
       /Unavailable or omitted locations.*private.key:1.*src\/alias.ts:1.*src\/missing.ts:3/,
     );
-    assert.equal(
+    assert.match(
       await buildFindingSourceContext(workspace, [{ ...finding, line: 0, body: '' }]),
-      '',
+      /1: export function validate/,
     );
 
     await writeFile(join(workspace, finding.path), 'source\n'.repeat(21));

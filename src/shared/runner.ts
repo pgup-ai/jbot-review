@@ -138,6 +138,7 @@ import { parseAddedLines } from './patch.ts';
 import {
   COUNTED_LENS_KEYS,
   REVIEW_LENSES,
+  GUIDELINE_REVIEW_LENS,
   LENS_CONTEXT_NOTE,
   UNTRUSTED_PR_CONTENT_NOTE,
   buildAddressedPriorCommentsContext,
@@ -292,6 +293,8 @@ import {
   StaleReviewError,
 } from './retry-policy.ts';
 import {
+  getMergeGuidance,
+  buildSeverityTable,
   condenseSummary,
   describeIncompleteReason,
   formatIncompleteCoverage,
@@ -1550,12 +1553,20 @@ async function runReviewPipeline(params: {
       findings,
       scope === 'exploration'
         ? options.experiment.explorationEvidence
-        : options.experiment.verificationEvidence,
+        : options.experiment.verificationEvidence === 'off'
+          ? 'deterministic'
+          : options.experiment.verificationEvidence,
       {
         timeoutMs,
         apiKey: process.env.TYPESAFE_API_KEY,
         log,
         onStats: (stats) => telemetry.recordJevPrefetch(stats),
+        ...(scope === 'verification'
+          ? {
+              selectCandidates: (candidates) =>
+                candidates.filter((c) => c.kind !== 'cited context'),
+            }
+          : {}),
       },
     );
   const blastRadiusBlock = options.enhancedContext
@@ -2627,12 +2638,12 @@ async function runReviewPipeline(params: {
       mainCanReadWorkspace: auxBackend.canReadWorkspace ?? !auxRequiresCompleteEmbeddedDiff,
       lens: true,
     });
-    const prepareAuxPlans = async (lens?: string) => {
+    const prepareAuxPlans = async (lens?: string, lensRules = lensGuidelines) => {
       const render = (context: string) =>
         lens
           ? assembleReviewPrompt(
               context,
-              lensGuidelines,
+              lensRules,
               lens,
               options.evidenceQuotes,
               options.embeddedFirstPrompt,
@@ -2655,24 +2666,6 @@ async function runReviewPipeline(params: {
       await addReviewEvidence(plans, evidence, render, auxPromptBudget, log);
       return plans;
     };
-
-    const guidelineComplianceCheck = trackAux(
-      'guideline-compliance',
-      startGuidelineComplianceCheck({
-        backend: auxBackend,
-        model: auxModel,
-        prContext: coreContext,
-        plans: () => prepareAuxPlans(),
-        guidelinesForPrompt: guidelines,
-        hasGuidelines: Boolean(guidelines),
-        enabled: guidelineCandidate && !sweepGuidelines,
-        timeoutMs: finderTimeoutMs,
-        log,
-        onTokenUsage: recordTokenUsage,
-        onCoverage: recordCoverage,
-        onFindings: (findings) => collectAuxFindings('guideline-compliance', findings),
-      }),
-    );
 
     const changesSinceLastReview = trackAux(
       'changes-since-last-review',
@@ -2700,6 +2693,10 @@ async function runReviewPipeline(params: {
       }),
     );
 
+    const jointGuidelines =
+      guidelineCandidate && !sweepGuidelines && candidateLensKeys.length > 0 ? guidelines : '';
+    if (jointGuidelines)
+      log(`Guideline compliance shares review-${candidateLensKeys[0]} pages and evidence.`);
     // Lens passes run on the aux model (recall supplement, not the deep
     // pass) and use the aux context (no Context7 block): they have no
     // Context7 retry path, so a Context7 hiccup must not be able to zero a
@@ -2710,6 +2707,7 @@ async function runReviewPipeline(params: {
       lensPrContext,
       plans: prepareAuxPlans,
       guidelinesForPrompt: lensGuidelines,
+      guidelineCompliance: jointGuidelines,
       lensKeys: candidateLensKeys,
       timeoutMs: finderTimeoutMs,
       deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt, verificationEnabled),
@@ -2725,6 +2723,26 @@ async function runReviewPipeline(params: {
       onCoverage: recordCoverage,
       onFindings: collectAuxFindings,
     }).map((promise, index) => trackAux(`review-${candidateLensKeys[index]}`, promise));
+
+    const guidelineComplianceCheck = trackAux(
+      'guideline-compliance',
+      jointGuidelines
+        ? lensPasses[0].promise.then(() => [])
+        : startGuidelineComplianceCheck({
+            backend: auxBackend,
+            model: auxModel,
+            prContext: coreContext,
+            plans: () => prepareAuxPlans(),
+            guidelinesForPrompt: guidelines,
+            hasGuidelines: Boolean(guidelines),
+            enabled: guidelineCandidate && !sweepGuidelines,
+            timeoutMs: finderTimeoutMs,
+            log,
+            onTokenUsage: recordTokenUsage,
+            onCoverage: recordCoverage,
+            onFindings: (findings) => collectAuxFindings('guideline-compliance', findings),
+          }),
+    );
 
     let summary: string;
     let findings: Finding[];
@@ -2810,9 +2828,7 @@ async function runReviewPipeline(params: {
       const targets = indexes.map((index) => settled[index]);
       log(`Verifying ${targets.length} finding(s) concurrently with the aux settle grace.`);
       const verdicts = await requestFindingVerdicts({
-        sourceContext: evidence.reuse.shared
-          ? (targets) => evidence.sourceContext(targets)
-          : undefined,
+        sourceContext: (targets) => evidence.sourceContext(targets),
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
         workspace,
@@ -2964,9 +2980,7 @@ async function runReviewPipeline(params: {
       );
       logVerdictOutcomes(merge, log);
       const late = await verifyFindings({
-        sourceContext: evidence.reuse.shared
-          ? (targets) => evidence.sourceContext(targets)
-          : undefined,
+        sourceContext: (targets) => evidence.sourceContext(targets),
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
         workspace,
@@ -2990,9 +3004,7 @@ async function runReviewPipeline(params: {
       verifiedFindings = [...merge.findings.filter((finding) => !lateSet.has(finding)), ...late];
     } else {
       verifiedFindings = await verifyFindings({
-        sourceContext: evidence.reuse.shared
-          ? (targets) => evidence.sourceContext(targets)
-          : undefined,
+        sourceContext: (targets) => evidence.sourceContext(targets),
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
         workspace,
@@ -3516,8 +3528,9 @@ export function startLensPasses(params: {
   backend: ReviewBackend;
   model: string;
   lensPrContext: string;
-  plans?: (lens: string) => ShardPlan[] | Promise<ShardPlan[]>;
+  plans?: (lens: string, guidelines: string) => ShardPlan[] | Promise<ShardPlan[]>;
   guidelinesForPrompt: string;
+  guidelineCompliance?: string;
   lensKeys: string[];
   timeoutMs?: number;
   deadlineAt?: number;
@@ -3542,12 +3555,25 @@ export function startLensPasses(params: {
     }`,
   );
   return lensKeys.map((key, index) => {
+    const jointGuidelines = index === 0 ? params.guidelineCompliance : undefined;
+    const lens = [REVIEW_LENSES[key], jointGuidelines && GUIDELINE_REVIEW_LENS]
+      .filter(Boolean)
+      .join('\n\n');
+    const guidelines = jointGuidelines || params.guidelinesForPrompt;
+    const cover: SessionCoverageRecorder = (row) => {
+      params.onCoverage?.(row);
+      if (jointGuidelines && row.session === `review-${key}`)
+        params.onCoverage?.({ ...row, session: 'guideline-compliance' });
+    };
     const run = () => {
       const startedAt = Date.now();
       return Promise.resolve()
         .then(async () => {
           const plans: Array<Pick<ShardPlan, 'context'> & Partial<ShardPlan>> =
-            await (params.plans?.(REVIEW_LENSES[key]) ?? [{ context: params.lensPrContext }]);
+            await (params.plans?.(lens, guidelines) ?? [{ context: params.lensPrContext }]);
+          params.log(
+            `Auxiliary delivery (${key}): ${JSON.stringify({ pages: plans.length, jointGuidelines: !!jointGuidelines, promptBytes: plans.reduce((sum, plan) => sum + (plan.promptBytes ?? 0), 0) })}.`,
+          );
           const results = await Promise.all(
             plans.map(async (plan, page) => {
               try {
@@ -3556,10 +3582,10 @@ export function startLensPasses(params: {
                 const result = await params.backend.runReview(
                   params.model,
                   plan.context,
-                  params.guidelinesForPrompt,
+                  guidelines,
                   params.log,
                   {
-                    lensAddendum: REVIEW_LENSES[key],
+                    lensAddendum: lens,
                     label: `review-${key}`,
                     timeoutMs: params.timeoutMs,
                     deadlineAt: params.deadlineAt,
@@ -3571,7 +3597,7 @@ export function startLensPasses(params: {
                 );
                 params.onFindings?.(`review-${key}`, result.findings);
                 if (plans.length > 1)
-                  params.onCoverage?.({
+                  cover({
                     session: `review-${key}-page-${page + 1}`,
                     state: result.partial ? 'partial' : 'completed',
                     promptBytes: plan.promptBytes,
@@ -3582,7 +3608,7 @@ export function startLensPasses(params: {
                 params.log(
                   `review-${key}-page-${page + 1} failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 1000)}`,
                 );
-                params.onCoverage?.({
+                cover({
                   session: `review-${key}-page-${page + 1}`,
                   state: 'failed',
                   error,
@@ -3598,7 +3624,7 @@ export function startLensPasses(params: {
         })
         .then((result) => {
           params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
-          params.onCoverage?.({
+          cover({
             session: `review-${key}`,
             state: result.partial ? 'partial' : 'completed',
             durationMs: Date.now() - startedAt,
@@ -3609,7 +3635,7 @@ export function startLensPasses(params: {
           params.log(
             `(skipped ${key} lens pass: ${error instanceof Error ? error.message : String(error)})`,
           );
-          params.onCoverage?.({
+          cover({
             session: `review-${key}`,
             state: 'failed',
             error,
@@ -3768,7 +3794,7 @@ export async function requestFindingVerdicts(params: {
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
   workspace: string;
-  backend: Pick<ReviewBackend, 'runFindingVerification'>;
+  backend: Pick<ReviewBackend, 'runFindingVerification' | 'canReadWorkspace'>;
   model: string;
   prContext: string;
   targets: Finding[];
@@ -3783,7 +3809,10 @@ export async function requestFindingVerdicts(params: {
   const verdicts: FindingVerdictList = [];
   let failure: Error | undefined;
   for (let offset = 0; offset < params.targets.length;) {
-    let size = Math.min(VERIFICATION_BATCH_SIZE, params.targets.length - offset);
+    let size = Math.min(
+      params.backend.canReadWorkspace === false ? 4 : VERIFICATION_BATCH_SIZE,
+      params.targets.length - offset,
+    );
     let targets = params.targets.slice(offset, offset + size);
     try {
       let context: string;
@@ -4911,71 +4940,4 @@ export function formatReviewedWith(
 
 function uniqueModels(primary: string, others: string[]): string[] {
   return [...new Set([primary, ...others])];
-}
-
-function getMergeGuidance(
-  findings: Pick<Finding, 'severity' | 'verificationUncertain'>[],
-  incomplete: boolean,
-): {
-  state: string;
-  mergeGuidance: string;
-} {
-  const hasBlockingFinding = findings.some(
-    (finding) => SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2,
-  );
-  if (hasBlockingFinding) {
-    return {
-      state: 'Needs changes before approval',
-      mergeGuidance: 'Address the P0/P1/P2 findings before treating this PR as ready to approve.',
-    };
-  }
-
-  if (incomplete) {
-    return {
-      state: 'Review incomplete',
-      mergeGuidance: 'Do not treat incomplete coverage as an all-clear result.',
-    };
-  }
-
-  if (findings.some((finding) => finding.verificationUncertain)) {
-    return {
-      state: 'Unverified concerns remain',
-      mergeGuidance:
-        'Verification was inconclusive; review the unverified concerns before relying on this result.',
-    };
-  }
-
-  if (findings.length === 0) {
-    return {
-      state: 'Good to go from jbot-review',
-      mergeGuidance: 'No new findings were found in this review run.',
-    };
-  }
-
-  return {
-    state: 'Mergeable with non-blocking comments',
-    mergeGuidance: 'Only P3/nit findings were found; jbot-review does not consider these blocking.',
-  };
-}
-
-function buildSeverityTable(
-  findings: Pick<Finding, 'severity' | 'verificationUncertain'>[],
-): string[] {
-  const graded = findings.filter((finding) => !finding.verificationUncertain);
-  const counts = countBySeverity(graded);
-  const unverified = findings.length - graded.length;
-  return [
-    `| Total | P0 | P1 | P2 | P3 | nit |${unverified ? ' Unverified |' : ''}`,
-    `| ---: | ---: | ---: | ---: | ---: | ---: |${unverified ? ' ---: |' : ''}`,
-    `| ${findings.length} | ${counts.P0} | ${counts.P1} | ${counts.P2} | ${counts.P3} | ${counts.nit} |${unverified ? ` ${unverified} |` : ''}`,
-    ...(unverified ? ['', 'Unverified concerns are excluded from the severity counts.'] : []),
-  ];
-}
-
-function countBySeverity(findings: Pick<Finding, 'severity'>[]): Record<Severity, number> {
-  const counts: Record<Severity, number> = { P0: 0, P1: 0, P2: 0, P3: 0, nit: 0 };
-  for (const finding of findings) {
-    counts[finding.severity] += 1;
-  }
-  return counts;
 }

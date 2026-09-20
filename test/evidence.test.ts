@@ -49,7 +49,9 @@ test('syntax collection finds body-only changes and named import aliases without
     'consumer.ts',
     "import { total as amount } from './money.js';\namount(1); // total is only a comment here",
   );
-  assert.deepEqual(consumer.imports, [{ local: 'amount', imported: 'total', from: './money.js' }]);
+  assert.deepEqual(consumer.imports, [
+    { local: 'amount', imported: 'total', from: './money.js', line: 1 },
+  ]);
   assert.deepEqual(
     consumer.uses.filter((u) => u.symbol === 'amount'),
     [{ symbol: 'amount', line: 2 }],
@@ -117,6 +119,38 @@ test('retrieves unchanged callers of an unchanged export when an internal implem
   assert.match(evidence, /worker.ts/);
   assert.match(evidence, /reviewShards: 1/);
   assert.doesNotMatch(evidence, /WRONG_BINDING/);
+});
+
+test('verification supplies distant imports and option-normalization definitions', async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), 'verification-bindings-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', workspace]);
+  const source = [
+    "import { pathToFileURL } from 'node:url';",
+    ...Array(40).fill(''),
+    'function normalizeOptions(input) { return { experiment: input?.experiment ?? { enabled: true } }; }',
+    ...Array(40).fill(''),
+    'export function run(input) {',
+    '  const options = normalizeOptions(input);',
+    ...Array(40).fill(''),
+    '  return [pathToFileURL("test"), options.experiment.enabled];',
+    '}',
+  ];
+  await writeFile(join(workspace, 'entry.ts'), source.join('\n'));
+  execFileSync('git', ['add', '.'], { cwd: workspace });
+  const store = new EvidenceStore(workspace, []);
+  const context = await store.sourceContext([
+    {
+      ...finding,
+      path: 'entry.ts',
+      line: source.length - 1,
+      title: '`pathToFileURL` is missing and `options.experiment` has no default',
+      body: 'Verify the import and initialization.',
+    },
+  ]);
+  assert.match(context, /import \{ pathToFileURL \} from 'node:url'/);
+  assert.match(context, /const options = normalizeOptions\(input\)/);
+  assert.match(context, /experiment: input\?\.experiment \?\? \{ enabled: true \}/);
 });
 
 test('prepared arms share candidates, reuse hashes across phases, and invalidate changed source', async (t) => {

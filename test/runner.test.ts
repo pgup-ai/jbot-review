@@ -1493,9 +1493,16 @@ it('never launches a staggered lens that was abandoned while it waited', async (
 
 it('records a lens that wrapped up on its own deadline as partial coverage', async () => {
   const rows: string[] = [];
+  let calls = 0;
   const backend = {
     name: 'fake',
-    runReview: async () => ({ summary: '', findings: [], partial: true }),
+    runReview: async (_model, _context, guidelines, _log, options) => {
+      calls++;
+      assert.equal(guidelines, 'Full written rules');
+      assert.match(options.lensAddendum, /INTERACTION bugs/);
+      assert.match(options.lensAddendum, /Written-rule check/);
+      return { summary: '', findings: [], partial: true };
+    },
   } as unknown as ReviewBackend;
   await Promise.all(
     startLensPasses({
@@ -1503,12 +1510,14 @@ it('records a lens that wrapped up on its own deadline as partial coverage', asy
       model: 'fake/model',
       lensPrContext: 'CTX',
       guidelinesForPrompt: '',
+      guidelineCompliance: 'Full written rules',
       lensKeys: ['interactions'],
       log: () => {},
       onCoverage: (row) => rows.push(`${row.session}:${row.state}`),
     }),
   );
-  assert.deepEqual(rows, ['review-interactions:partial']);
+  assert.equal(calls, 1);
+  assert.deepEqual(rows, ['review-interactions:partial', 'guideline-compliance:partial']);
 });
 
 it('staggers shared-prefix launches so the first prefill lands before the next request', () => {
@@ -1666,15 +1675,19 @@ it('verifies every batch and preserves successful verdicts when another batch fa
     title: `finding ${i}`,
     body: 'claim',
   }));
-  for (const firstBatch of ['complete', 'failed', 'partial']) {
+  for (const [firstBatch, batchSize] of ['complete', 'failed', 'partial'].flatMap((state) =>
+    [10, 4].map((size) => [state, size] as const),
+  )) {
     const sizes: number[] = [];
     const coverage: string[] = [];
     const backend = {
+      canReadWorkspace: batchSize === 10,
       async runFindingVerification(_model: string, _context: string, targets: Finding[]) {
         sizes.push(targets.length);
         if (sizes.length === 1) {
           if (firstBatch === 'failed') throw new Error('provider unavailable');
-          if (firstBatch === 'partial') return [{ index: 9, verdict: 'refuted' as const }];
+          if (firstBatch === 'partial')
+            return [{ index: batchSize - 1, verdict: 'refuted' as const }];
         }
         return targets.map((_, index) => ({ index, verdict: 'refuted' as const }));
       },
@@ -1689,12 +1702,12 @@ it('verifies every batch and preserves successful verdicts when another batch fa
       log: () => {},
       onCoverage: (row) => coverage.push(row.state),
     });
-    assert.deepEqual(sizes, [10, 10, 3]);
+    assert.deepEqual(sizes, batchSize === 10 ? [10, 10, 3] : [4, 4, 4, 4, 4, 3]);
     assert.deepEqual(
       verdicts.map((v) => v.index),
       findings
         .map((_, i) => i)
-        .slice(firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0),
+        .slice(firstBatch === 'failed' ? batchSize : firstBatch === 'partial' ? batchSize - 1 : 0),
     );
     assert.deepEqual(coverage, [firstBatch === 'complete' ? 'completed' : 'failed']);
     const retained = applyFindingVerdicts(
@@ -1705,7 +1718,10 @@ it('verifies every batch and preserves successful verdicts when another batch fa
     assert.deepEqual(
       retained.map((f) => f.line),
       findings
-        .slice(0, firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0)
+        .slice(
+          0,
+          firstBatch === 'failed' ? batchSize : firstBatch === 'partial' ? batchSize - 1 : 0,
+        )
         .map((f) => f.line),
     );
     assert.ok(retained.every((f) => f.verificationUncertain && f.confidence === 'low'));

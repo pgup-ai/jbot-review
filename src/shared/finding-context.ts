@@ -94,7 +94,10 @@ export function findingSourceLocations(findings: Pick<Finding, 'path' | 'line' |
       ),
     ].map((match) => ({ path: match[1] ?? match[3], line: Number(match[2] ?? match[4]) }));
     let citations = 0;
-    for (const [index, ref] of [{ path: finding.path, line: finding.line }, ...refs].entries()) {
+    for (const [index, ref] of [
+      { path: finding.path, line: finding.line === 0 ? 1 : finding.line },
+      ...refs,
+    ].entries()) {
       if (
         !Number.isSafeInteger(ref.line) ||
         ref.line < 1 ||
@@ -120,8 +123,12 @@ export async function buildFindingSourceContext(
     path,
     signal,
   ) => readTrackedSource(workspace, path, signal),
+  related: { path: string; line: number }[] = [],
 ): Promise<string> {
   const { locations, omitted } = findingSourceLocations(findings);
+  for (const ref of related)
+    if (!locations.some((location) => location.path === ref.path && location.line === ref.line))
+      locations.push(ref);
   const files = new Map<string, ReturnType<typeof readTrackedSource>>();
   const signal = AbortSignal.timeout(1500);
 

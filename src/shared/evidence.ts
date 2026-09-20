@@ -43,7 +43,7 @@ const name = (value: unknown) => {
 };
 type SourceIndex = {
   definitions: { symbol: string; start: number; end: number }[];
-  imports: { local: string; imported: string; from: string }[];
+  imports: { local: string; imported: string; from: string; line: number }[];
   uses: { symbol: string; line: number }[];
 };
 
@@ -62,6 +62,7 @@ export function indexEvidenceSource(path: string, text: string): SourceIndex {
           local: name(s.local),
           imported: name(s.imported) || (s.type === 'ImportDefaultSpecifier' ? 'default' : '*'),
           from: name(n.source),
+          line: s.loc?.start?.line ?? n.loc!.start!.line,
         });
       return;
     }
@@ -294,9 +295,49 @@ export class EvidenceStore {
 
   async sourceContext(findings: Finding[]) {
     try {
-      const tracked = await this.tracked(AbortSignal.timeout(1500));
-      return await buildFindingSourceContext(this.workspace, findings, (path, signal) =>
-        this.read(path, signal, tracked),
+      const signal = AbortSignal.timeout(1500);
+      const tracked = await this.tracked(signal);
+      const refs = findingSourceLocations(findings).locations;
+      const related: { path: string; line: number }[] = [];
+      for (const path of [...new Set(refs.map((ref) => ref.path))].slice(0, 20)) {
+        const source = await this.load(path, signal, tracked, 256 * 1024);
+        if (!source) continue;
+        const mentioned = findings
+          .filter((f) => f.path === path)
+          .flatMap((f) => [...`${f.title} ${f.body}`.matchAll(/`([^`\n]+)`/g)])
+          .flatMap((match) => match[1].match(/[A-Za-z_$][\w$]*/g) ?? [])
+          .slice(0, 40);
+        let lines = refs.filter((ref) => ref.path === path).map((ref) => ref.line);
+        const seen = new Set(lines);
+        for (let hop = 0; hop < 2; hop++) {
+          const symbols = new Set([
+            ...(hop === 0 ? mentioned : []),
+            ...source.index.uses
+              .filter((use) => lines.some((line) => Math.abs(line - use.line) <= 2))
+              .map((use) => use.symbol),
+          ]);
+          const definitions = [...symbols].slice(0, 8).flatMap((symbol) => {
+            const matches = source.index.definitions.filter((d) => d.symbol === symbol);
+            const preceding = matches.filter((d) => d.start <= lines[0]);
+            return preceding.length ? preceding.slice(-1) : matches.slice(0, 1);
+          });
+          const candidates = [
+            ...source.index.imports.filter((imp) => symbols.has(imp.local)).map((imp) => imp.line),
+            ...definitions.map((d) => Math.min(d.end, d.start + 8)),
+          ];
+          for (const line of candidates.slice(0, 6))
+            if (![...seen].some((covered) => Math.abs(line - covered) <= 20)) {
+              seen.add(line);
+              related.push({ path, line });
+            }
+          lines = definitions.map((d) => d.start);
+        }
+      }
+      return await buildFindingSourceContext(
+        this.workspace,
+        findings,
+        (path, signal) => this.read(path, signal, tracked),
+        related,
       );
     } catch {
       return buildFindingSourceContext(this.workspace, findings);
@@ -629,7 +670,7 @@ export class EvidenceStore {
     const digest = evidenceHash(source.text);
     const old = this.cache.get(path);
     if (old?.digest === digest && old.truncated === source.truncated) return old;
-    const key = JSON.stringify(['index-v1-babel-7.29.9', path, digest, source.truncated]);
+    const key = JSON.stringify(['index-v2-babel-7.29.9', path, digest, source.truncated]);
     const persisted = await this.disk.get(key);
     let index: SourceIndex;
     const fromDisk = validSourceIndex(persisted);
@@ -711,7 +752,8 @@ function validSourceIndex(value: unknown): value is SourceIndex {
         i &&
         typeof i.local === 'string' &&
         typeof i.imported === 'string' &&
-        typeof i.from === 'string',
+        typeof i.from === 'string' &&
+        line(i.line),
     ) &&
     v.uses.every((u) => u && typeof u.symbol === 'string' && line(u.line)),
   );

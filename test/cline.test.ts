@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -15,6 +17,7 @@ import {
   formatClinePromptTimeoutMessage,
   isClineProvider,
   parseClineFinalMessage,
+  runClineReview,
   stripClineModelReasoning,
   writeClineAuth,
 } from '../src/shared/cline.ts';
@@ -160,6 +163,7 @@ describe('Cline CLI provider helpers', () => {
       const env = clineEnvForHome('/tmp/jbot-cline-home-test');
 
       assert.equal(env.HOME, '/tmp/jbot-cline-home-test');
+      assert.equal(env.CLINE_NO_AUTO_UPDATE, '1');
       for (const key of credentialKeys) {
         assert.equal(env[key], undefined, `${key} must be stripped from the child env`);
         assert.equal(process.env[key], `ambient-${key}`, `${key} ambient env must be intact`);
@@ -220,5 +224,51 @@ describe('Cline CLI provider helpers', () => {
       formatClinePromptTimeoutMessage('finding-verification', 'cline/default', 1200_000),
       'cline finding-verification prompt timed out after 1200s (model=cline/default)',
     );
+  });
+
+  it('preserves the prompt outcome when temporary-home cleanup fails', async (t) => {
+    const workspace = mkdtempSync(join(tmpdir(), 'cline-cleanup-'));
+    const originalPath = process.env.PATH;
+    const cleanup: string[] = [];
+    const logs: string[] = [];
+    t.after(() => {
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+      process.env.PATH = originalPath;
+      for (const path of [...cleanup, workspace]) rmSync(path, { recursive: true, force: true });
+    });
+    process.env.PATH = `${workspace}:${originalPath}`;
+    writeClineAuth('{"providers":{}}', workspace);
+    t.mock.method(fs, 'rm', async (path: string) => {
+      cleanup.push(path);
+      throw Object.assign(new Error('private filesystem detail'), { code: 'ENOTEMPTY' });
+    });
+    syncBuiltinESMExports();
+    for (const fail of [false, true]) {
+      writeFileSync(
+        join(workspace, 'cline'),
+        `#!/usr/bin/env node\nif (process.env.CLINE_NO_AUTO_UPDATE !== '1') process.exit(3);\n${
+          fail
+            ? "console.error('original provider failure'); process.exit(7);"
+            : 'console.log(JSON.stringify({type:"run_result",text:\'{"summary":"","findings":[]}\'}));'
+        }\n`,
+        { mode: 0o700 },
+      );
+      const result = runClineReview(
+        workspace,
+        'cline/default',
+        'context',
+        '',
+        (m) => logs.push(m),
+        {
+          home: workspace,
+          timeoutMs: 5000,
+        },
+      );
+      if (fail) await assert.rejects(result, /original provider failure/);
+      else assert.deepEqual((await result).findings, []);
+    }
+    assert.equal(logs.filter((m) => /cleanup failed: ENOTEMPTY/.test(m)).length, 2);
+    assert.doesNotMatch(logs.join('\n'), /private filesystem detail/);
   });
 });

@@ -1,4 +1,5 @@
-import type { Finding } from './types.ts';
+import type { Finding, Severity } from './types.ts';
+import { SEVERITY_RANK } from './filter.ts';
 import { formatFindingLabel, formatFindingLocation } from './github.ts';
 
 /**
@@ -380,4 +381,71 @@ export function formatIncompleteCoverage(sessions: readonly IncompleteSession[])
     '',
     `Findings from completed passes are included.${verificationFailed ? ' Findings affected by incomplete verification are marked as unverified concerns.' : ''}`,
   ].join('\n');
+}
+
+export function getMergeGuidance(
+  findings: Pick<Finding, 'severity' | 'verificationUncertain'>[],
+  incomplete: boolean,
+): {
+  state: string;
+  mergeGuidance: string;
+} {
+  const hasBlockingFinding = findings.some(
+    (finding) => SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2,
+  );
+  if (hasBlockingFinding) {
+    return {
+      state: 'Needs changes before approval',
+      mergeGuidance: 'Address the P0/P1/P2 findings before treating this PR as ready to approve.',
+    };
+  }
+
+  if (incomplete) {
+    return {
+      state: 'Review incomplete',
+      mergeGuidance: 'Do not treat incomplete coverage as an all-clear result.',
+    };
+  }
+
+  if (findings.some((finding) => finding.verificationUncertain)) {
+    return {
+      state: 'Unverified concerns remain',
+      mergeGuidance:
+        'Verification was inconclusive; review the unverified concerns before relying on this result.',
+    };
+  }
+
+  if (findings.length === 0) {
+    return {
+      state: 'Good to go from jbot-review',
+      mergeGuidance: 'No new findings were found in this review run.',
+    };
+  }
+
+  return {
+    state: 'Mergeable with non-blocking comments',
+    mergeGuidance: 'Only P3/nit findings were found; jbot-review does not consider these blocking.',
+  };
+}
+
+export function buildSeverityTable(
+  findings: Pick<Finding, 'severity' | 'verificationUncertain'>[],
+): string[] {
+  const graded = findings.filter((finding) => !finding.verificationUncertain);
+  const counts = countBySeverity(graded);
+  const unverified = findings.length - graded.length;
+  return [
+    `| Total | P0 | P1 | P2 | P3 | nit |${unverified ? ' Unverified |' : ''}`,
+    `| ---: | ---: | ---: | ---: | ---: | ---: |${unverified ? ' ---: |' : ''}`,
+    `| ${findings.length} | ${counts.P0} | ${counts.P1} | ${counts.P2} | ${counts.P3} | ${counts.nit} |${unverified ? ` ${unverified} |` : ''}`,
+    ...(unverified ? ['', 'Unverified concerns are excluded from the severity counts.'] : []),
+  ];
+}
+
+function countBySeverity(findings: Pick<Finding, 'severity'>[]): Record<Severity, number> {
+  const counts: Record<Severity, number> = { P0: 0, P1: 0, P2: 0, P3: 0, nit: 0 };
+  for (const finding of findings) {
+    counts[finding.severity] += 1;
+  }
+  return counts;
 }
