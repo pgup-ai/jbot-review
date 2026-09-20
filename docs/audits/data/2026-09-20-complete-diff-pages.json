@@ -185,6 +185,96 @@
           "error": null
         }
       ]
+    },
+    {
+      "treatmentCommit": "cdb449a50d405cfc04e0be03cb544aa53726f499",
+      "rawHash": "sha256:c1882f8ad96b33fcd27a4eb81d3d967cde68150d087f734f9c2660ec0a5c9f1d",
+      "rows": [
+        {
+          "arm": "control",
+          "repetition": 1,
+          "durationMs": 141,
+          "completed": false,
+          "delivery": null,
+          "incompleteSessions": null,
+          "knownRootFound": false,
+          "severities": [],
+          "error": "argv-limit"
+        },
+        {
+          "arm": "treatment",
+          "repetition": 1,
+          "durationMs": 39153,
+          "completed": true,
+          "delivery": {
+            "expectedHunks": 1,
+            "deliveredHunks": 1,
+            "expectedTasks": 4,
+            "completedTasks": 4,
+            "incompleteTasks": 0
+          },
+          "incompleteSessions": [],
+          "knownRootFound": true,
+          "severities": ["P0"],
+          "error": null
+        },
+        {
+          "arm": "treatment",
+          "repetition": 2,
+          "durationMs": 35643,
+          "completed": true,
+          "delivery": {
+            "expectedHunks": 1,
+            "deliveredHunks": 1,
+            "expectedTasks": 4,
+            "completedTasks": 4,
+            "incompleteTasks": 0
+          },
+          "incompleteSessions": [],
+          "knownRootFound": true,
+          "severities": ["P0"],
+          "error": null
+        },
+        {
+          "arm": "control",
+          "repetition": 2,
+          "durationMs": 9,
+          "completed": false,
+          "delivery": null,
+          "incompleteSessions": null,
+          "knownRootFound": false,
+          "severities": [],
+          "error": "argv-limit"
+        },
+        {
+          "arm": "control",
+          "repetition": 3,
+          "durationMs": 8,
+          "completed": false,
+          "delivery": null,
+          "incompleteSessions": null,
+          "knownRootFound": false,
+          "severities": [],
+          "error": "argv-limit"
+        },
+        {
+          "arm": "treatment",
+          "repetition": 3,
+          "durationMs": 47543,
+          "completed": true,
+          "delivery": {
+            "expectedHunks": 1,
+            "deliveredHunks": 1,
+            "expectedTasks": 4,
+            "completedTasks": 4,
+            "incompleteTasks": 0
+          },
+          "incompleteSessions": [],
+          "knownRootFound": true,
+          "severities": ["P0"],
+          "error": null
+        }
+      ]
     }
   ]
 }

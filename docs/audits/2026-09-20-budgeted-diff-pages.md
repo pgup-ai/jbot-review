@@ -1,6 +1,6 @@
 # Complete diff pages and PR #228 dogfood diagnosis
 
-Runtime: `5df64bce891f7fa5c0e80711b5fd146d12ce6bde`. Baseline:
+Runtime: `cdb449a50d405cfc04e0be03cb544aa53726f499`. Baseline:
 `868a476c9e915f0494d35903aaf275323d5d8d3f`.
 
 ## Delivery contract
@@ -31,7 +31,9 @@ tasks use the same planner; failed auxiliary pages retain successful findings an
 report incomplete coverage. Verification measures each candidate batch after
 adding cited source and optional evidence, reducing it until it fits. An
 oversized singleton stays explicitly unverified without a doomed API call.
-Missing evidence cannot justify refuting a finding.
+Targeted auxiliary diff text also has a finite block budget and explicit
+truncation/omission notices, so a file-level finding need not exhaust the request.
+Main-page diffs remain complete. Missing evidence cannot justify refuting a finding.
 
 Each task receives a bounded shared change map and actual caller/contract
 excerpts. These are supporting evidence, not an exhaustive dependency graph.
@@ -66,7 +68,7 @@ request one shard, use tool-less
 and run three alternating repetitions against the same fixture.
 
 The frozen baseline fails before model launch: the assembled prompt is
-228,627 bytes, exceeding Cline's 122,880-byte argv limit. Both committed-code
+228,627 bytes, exceeding Cline's 122,880-byte argv limit. All three committed-code
 trials completed three of three treatment runs, with four completed pages, one
 fully delivered original hunk, no incomplete tasks, and the late defect retained
 after verification.
@@ -75,8 +77,9 @@ after verification.
 | ------------------ | --------- | ------------- | ------------------------- |
 | `3dd54a1`          | 3/3       | 3/3           | 31.916s, 46.491s, 32.394s |
 | `df71e99`          | 3/3       | 3/3           | 37.172s, 37.319s, 31.703s |
+| `cdb449a`          | 3/3       | 3/3           | 39.153s, 35.643s, 47.543s |
 
-All 12 results, including six failed controls, are preserved in the
+All 18 results, including nine failed controls, are preserved in the
 [per-run data](data/2026-09-20-complete-diff-pages.json).
 
 This is delivery and root-detection evidence for one synthetic fixture, not a
@@ -168,6 +171,11 @@ use every runtime prompt option. The Pi catalog lookup respects the resolved
 engine kill switch and Node gate. Tests cover all five budget-wrapper operations
 and retain both exploration-policy branches.
 
+Targeted diff text composition now lives in `prompt.ts`, with selection in the
+planner. A smoke check of the installed offline catalog returned 1,047,576 context
+tokens and 32,768 output tokens for `openai/gpt-4.1`, and no limits for an unknown
+model or disabled Pi. No injectable registry layer was added solely for tests.
+
 The backend preflight deliberately uses a conservative assembled prompt. Existing
 Cline guideline truncation and auxiliary single-shot variants can shorten it;
 backend directives fit inside reserved harness capacity, and the Cline argv limit
@@ -199,14 +207,11 @@ pages, actual unchanged caller delivery, no-newline split boundaries and final
 verifier batch sizing. Seven older cases were replaced or
 folded into those regressions; existing prompt policy assertions remain.
 
-At the paging commit, all **1,104 tests**, typecheck, lint, formatting and build
-passed. After the Pi hint correction at `3dd54a1`, PR CI also passed lint,
-formatting, typecheck and the full test suite. The feedback fixes at `df71e99` passed all
-**1,106 tests**, typecheck, lint, formatting and build. The final Pi kill-switch and preview follow-up at `5df64bc` passed 213 focused
-tests, typecheck, lint, formatting and build; its Cline delivery path is unchanged
-from the live-tested `df71e99`. No dependencies or CLI packaging changed. Secrets
-remain outside tracked files.
+At `cdb449a`, all **1,106 tests** (260 suites), typecheck, lint, formatting
+and build passed. PR CI at `45498eb` independently passed all 1,106 tests,
+lint, formatting and typecheck. No dependencies or CLI packaging changed.
+Secrets remain outside tracked files.
 
-Follow-up tracked delta before this audit/data commit: **+1280 / −620, net +660 lines**
-across 21 files relative to `868a476`. The new audit and sanitized per-run
-data are listed separately in this commit.
+Follow-up tracked delta before this audit/data commit: **+1306 / −627, net +679 code/config/test lines**
+across 21 files relative to `868a476` (excluding the new audit and data).
+The new audit and sanitized per-run data are listed separately in this commit.
