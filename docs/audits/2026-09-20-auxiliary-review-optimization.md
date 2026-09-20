@@ -182,8 +182,30 @@ mixed verified/unverified counts, labels and incomplete-review markers.
 
 Validation: all 1,109 tests, typecheck, lint, formatting, build and diff checks
 passed. Self-review found no remaining P1/P2 issue in this presentation change.
-De-slop added no comment blocks or test cases; assertions extend four existing
+De-slop added no comment blocks or test cases; assertions extend five existing
 cases. No flags, dependencies or model calls were added.
+
+The [391f14b dogfood run](https://github.com/pgup-ai/jbot-review/actions/runs/35538259594/job/106151099414)
+finished during this follow-up. It took 318.7 seconds, with 37.9 seconds of
+post-main auxiliary waiting and all 253/253 hunks delivered in 37/37 main pages.
+Verification completed in 18.6 seconds of execution: one candidate was refuted,
+two remained uncertain, and one was confirmed. The three posted comments were
+all rejected after tracing their missing context:
+
+- Workspace-access telemetry already applies the model-aware gate; this helper
+  does not control diff delivery.
+- `EvidenceDiskCache.set()` catches the cited disk/permission failures. The
+  verifier-confirmed cache finding was a false positive.
+- Wrap-up recursively calls `promptHoldingSlot()` with a fresh recording guard
+  and its own `-wrap-up` telemetry label.
+
+Auxiliary coverage was still incomplete: 9/38 pages completed, while 29 failed
+in 8–55 ms after dispatch. Their errors were swallowed into an `unknown`
+telemetry class, so the saved run cannot establish the precise cause. Bounded
+page-error messages now reach the run log; raw errors remain excluded from
+telemetry and the posted report. This is not evidence that model generation
+timed out, and the faster run is not a paired improvement claim: the models,
+diff and completed auxiliary work differ from a27aef0.
 
 ## Release limit
 

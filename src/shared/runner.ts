@@ -82,7 +82,7 @@ import {
 } from './shard-cache.ts';
 import { closeObserver, reportRun, setRunName } from './observer.ts';
 import { createAcpBackend } from './acp.ts';
-import { codexAcpSpec, cursorAcpSpec, kiloAcpSpec } from '@symma/protocol';
+import { codexAcpSpec, cursorAcpSpec, kiloAcpSpec, truncateForLog } from '@symma/protocol';
 import {
   ACP_GATEWAY_PROVIDERS,
   checkAuxGatewayEndpointReady,
@@ -3579,6 +3579,9 @@ export function startLensPasses(params: {
                   });
                 return result;
               } catch (error) {
+                params.log(
+                  `review-${key}-page-${page + 1} failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 1000)}`,
+                );
                 params.onCoverage?.({
                   session: `review-${key}-page-${page + 1}`,
                   state: 'failed',
@@ -4608,6 +4611,9 @@ function startGuidelineComplianceCheck(params: {
             return findings;
           } catch (error) {
             partial = true;
+            params.log(
+              `${session}-page-${page + 1} failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 1000)}`,
+            );
             params.onCoverage?.({ session: `${session}-page-${page + 1}`, state: 'failed', error });
             return [];
           }

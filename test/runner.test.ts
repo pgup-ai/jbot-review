@@ -1405,11 +1405,13 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
     release = resolve;
   });
   const completed: (typeof finding)[] = [];
+  const logs: string[] = [];
   let settled = false;
   const [promise] = startLensPasses({
     backend: {
       name: 'fake',
       runReview: async (_m: string, context: string) => {
+        if (context === 'failed') throw new Error('page launch failed');
         if (context === 'pending') await pending;
         return { summary: '', findings: context === 'ready' ? [finding] : [] };
       },
@@ -1419,7 +1421,7 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
     guidelinesForPrompt: '',
     lensKeys: ['interactions'],
     plans: () =>
-      ['ready', 'pending'].map((context) => ({
+      ['ready', 'pending', 'failed'].map((context) => ({
         label: context,
         context,
         baseContext: context,
@@ -1433,7 +1435,7 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
         },
       })),
     onFindings: (_label, findings) => completed.push(...findings),
-    log: () => {},
+    log: (message) => logs.push(message),
   });
   const tracked = promise.finally(() => {
     settled = true;
@@ -1447,6 +1449,9 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
     release,
   );
   assert.deepEqual(result, [finding]);
+  assert.ok(
+    logs.some((line) => line.includes('review-interactions-page-3 failed: page launch failed')),
+  );
   await tracked;
 });
 
