@@ -56,7 +56,10 @@ export async function runVerificationTrial(experiment: ReviewExperiment, args: s
   try {
     await warming;
     const verdicts = await requestFindingVerdicts({
-      sourceContext: store.reuse.shared ? (targets) => store.sourceContext(targets) : undefined,
+      sourceContext:
+        store.reuse.shared || mode !== 'off'
+          ? (targets) => store.sourceContext(targets)
+          : undefined,
       workspace,
       model,
       targets: findings,
@@ -71,6 +74,7 @@ export async function runVerificationTrial(experiment: ReviewExperiment, args: s
           apiKey: process.env.TYPESAFE_API_KEY,
           log,
           onStats: (row) => telemetry.recordJevPrefetch(row),
+          selectCandidates: (candidates) => candidates.filter((c) => c.kind !== 'cited context'),
         }),
       onCoverage: (row) => telemetry.recordCoverage(row),
       onTokenUsage: (usage, model, session = 'finding-verification') =>

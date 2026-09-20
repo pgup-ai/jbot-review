@@ -1543,6 +1543,10 @@ async function runReviewPipeline(params: {
     options.experiment.docsPath,
     options.experiment.reuse,
   );
+  const verifierSourceContext =
+    evidence.reuse.shared || options.experiment.verificationEvidence !== 'off'
+      ? (targets: Finding[]) => evidence.sourceContext(targets)
+      : undefined;
   const prepareEvidence = (
     scope: 'exploration' | 'verification',
     findings: Finding[],
@@ -2832,7 +2836,7 @@ async function runReviewPipeline(params: {
       const targets = indexes.map((index) => settled[index]);
       log(`Verifying ${targets.length} finding(s) concurrently with the aux settle grace.`);
       const verdicts = await requestFindingVerdicts({
-        sourceContext: (targets) => evidence.sourceContext(targets),
+        sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
         workspace,
@@ -2984,7 +2988,7 @@ async function runReviewPipeline(params: {
       );
       logVerdictOutcomes(merge, log);
       const late = await verifyFindings({
-        sourceContext: (targets) => evidence.sourceContext(targets),
+        sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
         workspace,
@@ -3008,7 +3012,7 @@ async function runReviewPipeline(params: {
       verifiedFindings = [...merge.findings.filter((finding) => !lateSet.has(finding)), ...late];
     } else {
       verifiedFindings = await verifyFindings({
-        sourceContext: (targets) => evidence.sourceContext(targets),
+        sourceContext: verifierSourceContext,
         prepareEvidence: (targets, timeoutMs) =>
           prepareEvidence('verification', targets, timeoutMs),
         workspace,

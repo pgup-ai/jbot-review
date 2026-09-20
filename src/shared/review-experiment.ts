@@ -24,7 +24,7 @@ export function reviewExperiment(env: NodeJS.ProcessEnv = process.env): ReviewEx
     preset,
     jevPrefetch: preset === 'jev' ? 'on' : 'off',
     explorationEvidence: 'off',
-    verificationEvidence: 'deterministic',
+    verificationEvidence: 'off',
     reuse: { shared: false, handoff: false, prefetch: false },
     exploration: {
       retrieval: false,

@@ -988,9 +988,11 @@ compares historical benefits, quality failures and sample limits. The
 current delivery checks, dogfood diagnosis and unmet release gate. The
 [auxiliary timing audit](docs/audits/2026-09-20-auxiliary-review-optimization.md)
 records three paired trials of context compaction, scheduling and caller retrieval.
-The
-[latest per-run CSV](docs/audits/data/2026-09-19-evidence-runs.csv) contains all
-86 phase, diff-batching and full-branch reviews from the latest measured round.
+The [session-reuse audit](docs/audits/2026-09-20-auxiliary-session-reuse.md) measures
+combined auxiliary passes, Cline stability fixes and verifier evidence; it also
+records the rejected fixed-size verification batches.
+The [earlier per-run CSV](docs/audits/data/2026-09-19-evidence-runs.csv) contains
+86 phase, diff-batching and full-branch reviews from the preceding experiments.
 These results describe the recorded source revisions, not a new benchmark of
 this configuration refactor. Earlier audits retain their historical flag names;
 those flags are no longer read by the runtime.
@@ -1031,11 +1033,10 @@ at most 4 KiB of command instructions, with eight paths and an estimated 8 KiB o
 output per batch; actual output can be larger, so truncation recovery remains.
 Neither preset narrows full-diff scope or caps exploration depth.
 
-All presets give verification bounded cited source, nearby imports/local definitions
-and deterministic caller evidence. Failed verification preserves an unverified finding;
-retrieval does not decide
-the verdict. Guideline checks share the first auxiliary lens when one is selected,
-so the same diff and rules do not require a separate guideline pass.
+Guideline checks share the first auxiliary lens when one is selected, so the same
+diff and rules do not require a separate guideline pass. Verification keeps cited
+source windows and budget-based batching. Extra import/local-definition windows
+and caller packets remain research-only after inconclusive quality results.
 
 `policy.configuration.reviewExperiment` records the selected preset and the
 resolved behavior participates in the cache fingerprint. Jev rows record actual
@@ -1048,7 +1049,7 @@ Preserve the log and `.jbot-review/telemetry.jsonl` before the next run.
 The research driver `scripts/jev-prefetch-experiment.ts` retains historical
 ablation plans through explicit, per-run programmatic settings; they appear as
 `custom` in telemetry. Shared reads, handoff, persistent caches, background
-prefetch, broad packets and checkpoints are research-only.
+prefetch, broad packets, verifier delivery and checkpoints are research-only.
 No production environment switches or compatibility aliases enable those arms.
 Provider prompt caching is separate and remains provider-managed.
 

@@ -25,7 +25,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
     preset: 'off',
     jevPrefetch: 'off',
     explorationEvidence: 'off',
-    verificationEvidence: 'deterministic',
+    verificationEvidence: 'off',
     reuse: { shared: false, handoff: false, prefetch: false },
     exploration: {
       retrieval: false,
