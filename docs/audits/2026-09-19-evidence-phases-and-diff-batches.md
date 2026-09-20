@@ -6,6 +6,16 @@ returned no `verdicts` array. A malformed model response does not establish a
 retrieval implementation failure, and input changes can still affect model output.
 This round measures format failures separately from missed or unconfirmed defects.
 
+The [per-run CSV](data/2026-09-19-evidence-runs.csv) publishes all 86 measured
+reviews from this round: the 72 phase reviews, 12 diff-batching reviews and two
+full-branch runs. It contains numeric telemetry and manual contract counts, with
+no source excerpts, credentials, endpoints or spend. Empty quality cells for
+full-branch runs mean no known-root oracle; they do not mean zero missed defects.
+`confirmed_roots` counts distinct manually mapped roots; `severity_matched_roots`
+also requires the preregistered severity. Quality adjudication remains subject to
+the limitations below. Full-branch rows use run numbers 1/2 as execution order;
+each arm has only one repetition. The underlying artifact hashes are at the end.
+
 ## Experiments
 
 Revision `ceed7c1` adds two independent, default-off controls:
@@ -261,6 +271,9 @@ claimed as an improvement here.
 
 ## Self-review and cleanup
 
+This report was captured at the end of the experiment round (`5ddb46b`), before
+the publication-only documentation and numeric-data additions.
+
 Self-review: no confirmed P1/P2 issues found. Reviewed the complete branch against
 the fetched `origin/main`, including source/cache trust boundaries, Jev response
 validation, full-diff/shard/retry ownership, prompt budgets, provider options,
@@ -290,6 +303,45 @@ Residual risk: one model route, small synthetic workloads, uncontrolled provider
 cache state, non-independent adjudication, no core-corpus gate and no proof of
 downstream preservation of appended tool bytes. The batching output estimate is
 not a hard output bound. These limitations preclude a default-policy change.
+
+## Publication review
+
+Reapplied both repository skills to the entire branch against fetched
+`origin/main` (`2d8f923`). No remaining P1/P2 issue was found. Source, tests,
+experiment drivers and dependency manifests are unchanged from `c56d831`;
+the two full-branch dogfoods above cover that runtime. Publication changes add
+explicit reset instructions and the numeric CSV, with no further paid review
+claimed for these documentation/data additions.
+
+Cut: no further source deletions justified. Comments: all 10 TypeScript blocks
+and 10 `.env.example` instruction blocks kept, none rewritten/cut. Tests: all
+28 branch-added cases kept for distinct failures, none folded/cut. Existing
+assertions were preserved. The configuration instructions separately explain
+the credential, modes, phase-specific preparation, reuse, retrieval, broad/linked
+selection, delivery phase, diff batches, cache location and documentation input.
+Per-item adjudications and validation outputs remain in the ignored
+`.jbot-review/pr-publication/` and the earlier hashed artifacts below.
+
+Fresh validation passed: formatting/check, typecheck, lint, all 1,096 tests,
+bundle build and diff checks. The `linux/amd64` slim image built successfully;
+`scripts/smoke-image.sh slim` and importing `/app/dist/review-retrieval.js`
+inside it passed. Image ID:
+`sha256:5bdfae268e633217a32412ff685cb925f7a343a9505703cc5c6bf7fc6bfb7b8f`.
+No image was published; the full image remains a CI check.
+
+A fresh synthetic Jev request returned HTTP 200 with the pinned model and
+validated answer/usage: 772 request bytes, 474 input tokens, 21 output tokens,
+241 ms. This is a contract smoke test, not a latency benchmark. All 13 reset
+controls resisted conflicting local `.env` values. An exact-value scan of 297
+tracked/pending files and the branch's patch history found no configured
+credentials; `.env` remains ignored with owner-only permissions.
+
+The CSV's 86 rows were checked against every scheduled result and the frozen
+artifact hashes; the reported means and quality counts were recomputed from it.
+CSV SHA-256:
+`f134bc72737ec328c171b74a2351dc4be62614b09dbbe1d92c1be72b673ef534`.
+No qualifying core-corpus benchmark ledger exists. The earlier residual risks
+remain; this publication pass does not establish a speedup or quality gate.
 
 ## Artifact hashes
 

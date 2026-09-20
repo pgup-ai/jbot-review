@@ -939,6 +939,44 @@ and precision against seeded defects.
 
 ## Comparing review runs
 
+### Running isolated experiments
+
+Use a checkout or image containing the experiment code. The public Action points
+to the published `latest` image; selecting this source branch does not rebuild
+that image. For local comparisons, keep the reviewed revision, provider/model
+and other review settings fixed, and change one experiment at a time.
+Linked evidence, targeted retrieval and checkpoints require the OpenCode backend
+(`JBOT_SDK_ENGINE=opencode` for SDK models).
+
+Start with these values in your shell. Explicit exports override the local
+`.env`; unsetting a variable can allow `.env` to enable it again.
+
+```sh
+export JBOT_JEV_PREFETCH=off JBOT_EXPLORATION_EVIDENCE=off JBOT_VERIFICATION_EVIDENCE=off
+export JBOT_EVIDENCE_SHARED=0 JBOT_EVIDENCE_HANDOFF=0 JBOT_EVIDENCE_PREFETCH=0
+export JBOT_TARGETED_RETRIEVAL=0 JBOT_EXPLORATION_CHECKPOINTS=0
+export JBOT_READ_EVIDENCE=0 JBOT_READ_EVIDENCE_PHASE=all JBOT_BATCH_DIFF_RECOVERY=0
+export JBOT_EVIDENCE_CACHE_DIR= JBOT_EVIDENCE_DOCS=
+
+# Keep the SDK backend fixed across the baseline and treatments.
+export JBOT_SDK_ENGINE=opencode
+
+# Baseline; your configured review-provider credential is still required.
+JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
+
+# Linked evidence for the main review only; no TypeSafe key required.
+JBOT_READ_EVIDENCE=linked JBOT_READ_EVIDENCE_PHASE=review JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
+
+# Batch omitted diffs, independently of linked evidence.
+JBOT_BATCH_DIFF_RECOVERY=1 JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
+```
+
+The command-scoped settings leave the exported baseline intact. Reapply the
+exports above to turn all these experiments off. The sections below describe
+the other arms, dependencies and telemetry. See the
+[phase/batching audit](docs/audits/2026-09-19-evidence-phases-and-diff-batches.md)
+for measured outcomes and the per-run data; no arm has been promoted to a default.
+
 ### Exploration and verification evidence experiment
 
 `JBOT_EXPLORATION_EVIDENCE` and `JBOT_VERIFICATION_EVIDENCE` independently
