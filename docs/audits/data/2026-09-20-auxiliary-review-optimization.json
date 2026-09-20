@@ -1,0 +1,308 @@
+{
+  "schemaVersion": 1,
+  "model": "cline/cline-free/muse-spark-1.3-contributor",
+  "baselineCommit": "a27aef04ea35d843849f3dac3594396a4648519f",
+  "treatmentCommit": "3ff2465c559d596f2f521a6c4e85a803fe40c68a",
+  "repetitions": 3,
+  "files": 91,
+  "patchBytes": 173794,
+  "fixtureHash": "0313984f437eb10c34cc6680da79ef0f5d8618f272149634545e13d9e5a96df9",
+  "baseCount": 201,
+  "headCount": 100,
+  "expected": "src/batch.ts silently drops jobs after the first 100 through unchanged worker.ts",
+  "qualityGate": "targeted experiment only; not the full corpus",
+  "options": {
+    "dryRun": true,
+    "reviewShards": 1,
+    "reviewPasses": 2,
+    "dynamicFanout": false,
+    "enhancedContext": true,
+    "guidelinePass": true,
+    "verifyFindings": true,
+    "maxConcurrentSessions": 3,
+    "timeBudgetMinutes": 10
+  },
+  "rawRowsHash": "242dc47e07019b652319e8b94f27140a76e122fdf78313a40bd0c48f3a2942e2",
+  "rows": [
+    {
+      "arm": "control",
+      "repetition": 1,
+      "durationMs": 173846,
+      "completed": true,
+      "error": null,
+      "modelCalls": 18,
+      "plannedFinderPromptBytes": 1324956,
+      "phasesMs": {
+        "context-assembly": 744,
+        "main-execution": 62895,
+        "grace-wait": 99533,
+        "filtering": 0,
+        "verification": 10619
+      },
+      "delivery": {
+        "expectedHunks": 91,
+        "deliveredHunks": 91,
+        "expectedTasks": 7,
+        "completedTasks": 7,
+        "incompleteTasks": 0
+      },
+      "incompleteSessions": [],
+      "retainedFindings": [
+        {
+          "path": "src/batch.ts",
+          "line": 2,
+          "severity": "P0",
+          "title": "`partition()` drops all jobs beyond the first batch",
+          "body": "Trigger: any `reviewBatch(jobs, {limit})` call where `jobs.length > limit`. `partition()` now returns `[jobs.slice(0, limit)]` instead of chunking the full array, so jobs after `limit` are silently dropped and never returned in any batch. This breaks the retained contract in AGENTS.md that all submitted jobs must appear in the returned batches exactly once and that the limit is a per-batch capacity, not a limit on total jobs processed. Consider restoring the loop `for (let i = 0; i < jobs.length; i += limit) batches.push(jobs.slice(i, i + limit))`.",
+          "unverified": false
+        }
+      ],
+      "tokenUsage": null,
+      "reviewLogHash": "f7d192c5d212fb226a579ce721e7e374e7d8933156dbedc8a5050acbc4f005df",
+      "knownRootFound": true,
+      "additionalFindings": 0,
+      "unchangedWorkerCited": false
+    },
+    {
+      "arm": "treatment",
+      "repetition": 1,
+      "durationMs": 128058,
+      "completed": true,
+      "error": null,
+      "modelCalls": 15,
+      "plannedFinderPromptBytes": 1078266,
+      "phasesMs": {
+        "context-assembly": 183,
+        "main-execution": 58476,
+        "grace-wait": 60712,
+        "filtering": 0,
+        "verification": 8643
+      },
+      "delivery": {
+        "expectedHunks": 91,
+        "deliveredHunks": 91,
+        "expectedTasks": 5,
+        "completedTasks": 5,
+        "incompleteTasks": 0
+      },
+      "incompleteSessions": [],
+      "retainedFindings": [
+        {
+          "path": "src/batch.ts",
+          "line": 2,
+          "severity": "P0",
+          "title": "`partition()` drops jobs beyond `limit`",
+          "body": "Trigger: `drain()` in `src/worker.ts:2` calls `reviewBatch(jobs, { limit: 100 }).flat()` with more than `limit` jobs (e.g. 250 jobs). `partition()` now returns only `[jobs.slice(0, limit)]`, so jobs 100+ are never returned. This breaks the unchanged caller which expects full coverage via `.flat()`, and violates the retained `AGENTS.md` contract that all submitted jobs must appear in the returned batches exactly once with `limit` as per-batch capacity. Consider restoring the loop that slices all batches.",
+          "unverified": false
+        }
+      ],
+      "tokenUsage": null,
+      "reviewLogHash": "501613be0e11b251f9cf805fa3007edfae7576ba0aeafd246689b212f154aede",
+      "knownRootFound": true,
+      "additionalFindings": 0,
+      "unchangedWorkerCited": true
+    },
+    {
+      "arm": "treatment",
+      "repetition": 2,
+      "durationMs": 126723,
+      "completed": true,
+      "error": null,
+      "modelCalls": 15,
+      "plannedFinderPromptBytes": 1078266,
+      "phasesMs": {
+        "context-assembly": 220,
+        "main-execution": 55987,
+        "grace-wait": 64299,
+        "filtering": 0,
+        "verification": 6213
+      },
+      "delivery": {
+        "expectedHunks": 91,
+        "deliveredHunks": 91,
+        "expectedTasks": 5,
+        "completedTasks": 5,
+        "incompleteTasks": 0
+      },
+      "incompleteSessions": [],
+      "retainedFindings": [
+        {
+          "path": "src/batch.ts",
+          "line": 2,
+          "severity": "P0",
+          "title": "`partition()` drops all jobs beyond first batch",
+          "body": "Trigger: `drain()` in `src/worker.ts:2` calls `reviewBatch(jobs, { limit: 100 }).flat()` with more than `limit` jobs (e.g. 250 jobs). The new `partition()` returns only `[jobs.slice(0, limit)]`, so jobs 100..n are silently dropped instead of returned in subsequent batches. This breaks the unchanged caller `src/worker.ts:2` and violates the `AGENTS.md` contract that all submitted jobs must appear in the returned batches exactly once and that the limit is per-batch capacity. Consider restoring the loop that slices `jobs` in steps of `limit`.",
+          "unverified": false
+        }
+      ],
+      "tokenUsage": null,
+      "reviewLogHash": "fd716a2da2f77594c240dde48484f37f1cb6fef3ccb4fa837b6623c34527a978",
+      "knownRootFound": true,
+      "additionalFindings": 0,
+      "unchangedWorkerCited": true
+    },
+    {
+      "arm": "control",
+      "repetition": 2,
+      "durationMs": 137712,
+      "completed": true,
+      "error": null,
+      "modelCalls": 18,
+      "plannedFinderPromptBytes": 1324956,
+      "phasesMs": {
+        "context-assembly": 761,
+        "main-execution": 49955,
+        "grace-wait": 79085,
+        "filtering": 0,
+        "verification": 7906
+      },
+      "delivery": {
+        "expectedHunks": 91,
+        "deliveredHunks": 91,
+        "expectedTasks": 7,
+        "completedTasks": 7,
+        "incompleteTasks": 0
+      },
+      "incompleteSessions": [],
+      "retainedFindings": [
+        {
+          "path": "src/batch.ts",
+          "line": 2,
+          "severity": "P0",
+          "title": "`partition()` drops all jobs beyond the first batch",
+          "body": "Trigger: `reviewBatch([1,2,3,4,5], {limit: 2})` calls `partition()` with 5 jobs. The new code returns `[jobs.slice(0, limit)]` = `[[1,2]]`, discarding jobs 3-5. The prior loop `for (let i = 0; i < jobs.length; i += limit) batches.push(jobs.slice(i, i + limit))` returned all batches. This breaks the retained contract in `AGENTS.md` that all submitted jobs must appear in the returned batches exactly once, where the configured limit is per-batch capacity, not a total-jobs cap. It also changes empty input from `[]` to `[[]]`. Consider restoring the chunking loop.",
+          "unverified": false
+        }
+      ],
+      "tokenUsage": null,
+      "reviewLogHash": "2a62d5b0012d27336b034d392113bc036bce822cd15e00ab727a9907114d75fa",
+      "knownRootFound": true,
+      "additionalFindings": 0,
+      "unchangedWorkerCited": false
+    },
+    {
+      "arm": "control",
+      "repetition": 3,
+      "durationMs": 145356,
+      "completed": true,
+      "error": null,
+      "modelCalls": 18,
+      "plannedFinderPromptBytes": 1324956,
+      "phasesMs": {
+        "context-assembly": 710,
+        "main-execution": 67494,
+        "grace-wait": 69796,
+        "filtering": 0,
+        "verification": 7351
+      },
+      "delivery": {
+        "expectedHunks": 91,
+        "deliveredHunks": 91,
+        "expectedTasks": 7,
+        "completedTasks": 7,
+        "incompleteTasks": 0
+      },
+      "incompleteSessions": [],
+      "retainedFindings": [
+        {
+          "path": "src/batch.ts",
+          "line": 2,
+          "severity": "P0",
+          "title": "`partition()` drops all jobs beyond first batch",
+          "body": "Trigger: any `jobs` with `jobs.length > limit` via `reviewBatch(jobs, { limit })` in `src/batch.ts:4`. Wrong result: `partition()` returns only `[jobs.slice(0, limit)]`, so jobs after `limit` never appear in any batch and are silently lost. This violates the retained `AGENTS.md` contract that all submitted jobs must appear in the returned batches exactly once and that the batch limit is a per-batch capacity, not a total limit. Consider restoring the chunking loop that slices `jobs` in `limit`-sized steps.",
+          "unverified": false
+        }
+      ],
+      "tokenUsage": null,
+      "reviewLogHash": "51c968f52afba053d2caa801d297859ee5cd3f40a41dd10765b006dc79cb7826",
+      "knownRootFound": true,
+      "additionalFindings": 0,
+      "unchangedWorkerCited": false
+    },
+    {
+      "arm": "treatment",
+      "repetition": 3,
+      "durationMs": 114564,
+      "completed": true,
+      "error": null,
+      "modelCalls": 15,
+      "plannedFinderPromptBytes": 1078266,
+      "phasesMs": {
+        "context-assembly": 150,
+        "main-execution": 45664,
+        "grace-wait": 61302,
+        "filtering": 0,
+        "verification": 7444
+      },
+      "delivery": {
+        "expectedHunks": 91,
+        "deliveredHunks": 91,
+        "expectedTasks": 5,
+        "completedTasks": 5,
+        "incompleteTasks": 0
+      },
+      "incompleteSessions": [],
+      "retainedFindings": [
+        {
+          "path": "src/batch.ts",
+          "line": 2,
+          "severity": "P0",
+          "title": "`partition()` drops all jobs after the first batch",
+          "body": "Trigger: call `drain()` in `src/worker.ts:2` with more than 100 jobs, e.g. 250 jobs with `{ limit: 100 }`. `reviewBatch()` now calls `partition()` which returns `[jobs.slice(0, limit)]`, so `.flat()` yields only the first 100 jobs and silently drops the remaining 150. This is wrong because the prior `partition()` looped `i += limit` to cover every job, and `AGENTS.md` requires all submitted jobs appear in returned batches exactly once with the limit as per-batch capacity, not a total cap. Consider restoring the loop: `for (let i = 0; i < jobs.length; i += limit) batches.push(jobs.slice(i, i + limit))`.",
+          "unverified": false
+        }
+      ],
+      "tokenUsage": null,
+      "reviewLogHash": "394864a2b2e042a3afcfd3a695c3d05ae313c97d2a32aa07994302e9a5b14215",
+      "knownRootFound": true,
+      "additionalFindings": 0,
+      "unchangedWorkerCited": true
+    }
+  ],
+  "historicalRetrieval": {
+    "base": "2d8f9239424ba6644dcc36e0d45433eb74640974",
+    "head": "868a476c9e915f0494d35903aaf275323d5d8d3f",
+    "rawHash": "87d77eae7f929f65d9f8ed6f3faf32faf07f9e72c600304d9b0190d050a7a42f",
+    "rows": [
+      {
+        "arm": "control",
+        "durationMs": 1563,
+        "delivery": {
+          "expectedHunks": 194,
+          "deliveredHunks": 194,
+          "expectedTasks": 10,
+          "completedTasks": 10,
+          "incompleteTasks": 0
+        },
+        "availablePages": 6,
+        "workerPages": [],
+        "workerOptionPages": []
+      },
+      {
+        "arm": "treatment",
+        "durationMs": 827,
+        "delivery": {
+          "expectedHunks": 194,
+          "deliveredHunks": 194,
+          "expectedTasks": 10,
+          "completedTasks": 10,
+          "incompleteTasks": 0
+        },
+        "availablePages": 6,
+        "workerPages": ["review-shard-8"],
+        "workerOptionPages": ["review-shard-8"]
+      }
+    ]
+  },
+  "adjudication": "Unblinded manual review against the executable fixture: same known root retained in every run, no additional findings, P0 overstated for the conditional job-loss trigger.",
+  "means": {
+    "control": {
+      "durationMs": 152304.66666666666,
+      "auxiliaryWaitMs": 82804.66666666667
+    },
+    "treatment": {
+      "durationMs": 123115,
+      "auxiliaryWaitMs": 62104.333333333336
+    }
+  }
+}
