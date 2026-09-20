@@ -20,10 +20,13 @@ process.loadEnvFile();
 const root = process.cwd();
 const control = process.argv[2];
 const output = process.argv[3];
+const repetitions = Number(process.argv[4] ?? 3);
 if (!control || !output)
   throw new Error(
-    'Usage: tsx scripts/auxiliary-followup-experiment.ts <control-checkout> <output-dir>',
+    'Usage: tsx scripts/auxiliary-followup-experiment.ts <control-checkout> <output-dir> [repetitions]',
   );
+if (!Number.isSafeInteger(repetitions) || repetitions < 1)
+  throw new Error('Repetitions must be a positive integer.');
 for (const cwd of [root, control])
   if (execFileSync('git', ['status', '--porcelain'], { cwd, encoding: 'utf8' }).trim())
     throw new Error(`Experiment requires a clean checkout: ${cwd}`);
@@ -235,7 +238,7 @@ try {
         control: revision(control),
         treatmentCommit: revision(root),
         model,
-        repetitions: 3,
+        repetitions,
         baseCount,
         headCount,
         firstHead,
@@ -248,7 +251,7 @@ try {
   const prior = await run('treatment', 'initial-treatment');
   writeFileSync(join(workspace, 'README.md'), 'Document the regional capacity rollout.\n');
   commit('Document rollout');
-  for (let i = 1; i <= 3; i++)
+  for (let i = 1; i <= repetitions; i++)
     for (const arm of (i % 2
       ? ['control', 'treatment']
       : ['treatment', 'control']) as (keyof typeof reviewers)[])

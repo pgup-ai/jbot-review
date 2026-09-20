@@ -8,7 +8,6 @@ import { promisify } from 'node:util';
 import {
   buildFindingSourceContext,
   findingSourceLocations,
-  findNamedSourceLocations,
 } from '../src/shared/finding-context.ts';
 import {
   formatFindingSources,
@@ -115,50 +114,6 @@ test('source context reads tracked worktree helpers but excludes untracked files
   }
 });
 
-test('named evidence includes unchanged callers while bounding source delivery and excluding secrets', async () => {
-  const workspace = await mkdtemp(join(tmpdir(), 'jbot-named-source-'));
-  try {
-    await execFileAsync('git', ['init', '-q', workspace]);
-    await mkdir(join(workspace, 'src'));
-    await writeFile(
-      join(workspace, 'src/helper.ts'),
-      'export function validateOptions() { return true; }\n',
-    );
-    await writeFile(
-      join(workspace, 'src/caller.ts'),
-      'import { validateOptions } from "./helper";\n' + '\n'.repeat(60) + 'validateOptions();\n',
-    );
-    await writeFile(join(workspace, '.env'), 'validateOptions=SECRET_MUST_NOT_APPEAR');
-    for (let i = 0; i < 10; i++)
-      await writeFile(join(workspace, `src/caller_${i}.ts`), 'validateOptions();\n');
-    await execFileAsync('git', ['add', '.'], { cwd: workspace });
-    await writeFile(join(workspace, 'untracked.ts'), 'validateOptions(SECRET_MUST_NOT_APPEAR)');
-    const finding: Finding = {
-      path: 'src/helper.ts',
-      line: 1,
-      severity: 'P2',
-      title: '`validateOptions` may break callers',
-      body: 'Check the caller arguments.',
-    };
-    const refs = await findNamedSourceLocations(workspace, [finding]);
-    assert.ok(refs.locations.some((ref) => ref.path === 'src/caller.ts'));
-    assert.ok(refs.locations.length <= 8);
-    assert.ok(refs.omitted.some((ref) => ref.path === 'src/caller_9.ts'));
-    const context = await buildFindingSourceContext(workspace, [finding], undefined, refs);
-    assert.match(context, /validateOptions\(\);/);
-    assert.doesNotMatch(context, /SECRET_MUST_NOT_APPEAR/);
-    assert.ok(Buffer.byteLength(context) <= MAX_FINDING_SOURCE_CONTEXT_BYTES);
-    assert.match(context, /Unavailable or omitted locations.*src\/caller_9.ts:1/);
-    assert.doesNotMatch(context, /Unavailable or omitted locations.*src\/helper.ts:1/);
-    assert.deepEqual(
-      await findNamedSourceLocations(workspace, [{ title: '`missingSymbol`', body: '' }]),
-      { locations: [], omitted: [], unsearched: ['missingSymbol'] },
-    );
-  } finally {
-    await rm(workspace, { recursive: true, force: true });
-  }
-});
-
 test('source context stays within its byte budget and names omitted evidence', () => {
   for (const width of [80, 800]) {
     const excerpt = formatSourceExcerpt(Array(41).fill('🔍'.repeat(width)), 1, 21, 2048);
@@ -173,17 +128,12 @@ test('source context stays within its byte budget and names omitted evidence', (
     startLine: 1,
     lines: Array(41).fill('🔍'.repeat(800)),
   }));
-  const block = formatFindingSources(
-    sources,
-    [{ path: 'src/extra.ts', line: 100 }],
-    ['unresolvedCaller'],
-  );
+  const block = formatFindingSources(sources, [{ path: 'src/extra.ts', line: 100 }]);
   assert.ok(Buffer.byteLength(block) <= MAX_FINDING_SOURCE_CONTEXT_BYTES);
   assert.match(block, /21: 🔍/);
   assert.doesNotMatch(block, /\n1: 🔍/);
   assert.match(block, /Source excerpt truncated/);
   assert.match(block, /Surrounding lines omitted/);
   assert.match(block, /Unavailable or omitted locations.*src\/extra.ts:100/);
-  assert.match(block, /Symbols not resolved.*unresolvedCaller/);
   assert.match(block, /not whole files/);
 });

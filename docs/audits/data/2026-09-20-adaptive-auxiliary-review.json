@@ -1,0 +1,1038 @@
+{
+  "backendVersion": "Cline CLI 3.0.62",
+  "limits": [
+    "Targeted experiments, not the core or full corpus.",
+    "Session executions do not measure internal provider turns. Cline token, cache and cost data were unavailable.",
+    "The code follow-up is one pair. Replays reconstruct comments, not exact hosted prompts."
+  ],
+  "followup": {
+    "protocol": {
+      "control": "1d8013be1361d34bfe10876f9d0a151c36dc25a5",
+      "treatmentCommit": "b74889f4776ac2be02ec0ab9e7243e324dda2b90",
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "repetitions": 3,
+      "baseCount": 201,
+      "headCount": 100,
+      "firstHead": "ea6045be2be132ab5e9d85e34603e1f7268448cf",
+      "qualityGate": "Targeted follow-up experiment; not the full corpus."
+    },
+    "runs": [
+      {
+        "name": "initial-treatment",
+        "arm": "treatment",
+        "durationMs": 40795,
+        "sessionExecutions": 5,
+        "headSha": "ea6045be2be132ab5e9d85e34603e1f7268448cf",
+        "fixtureHash": "fc0937ef1f5e52f3676bdeee6f2f738fe23375b15b24c636fa4f7b0171f0f6f9",
+        "delivery": {
+          "expectedHunks": 47,
+          "deliveredHunks": 47,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": [],
+        "auxiliaryPromptBytes": 132909,
+        "phasesMs": {
+          "main-execution": 23728,
+          "grace-wait": 12278,
+          "verification": 4596
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P2",
+            "kind": "architecture",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "posted-inline": 2,
+          "deduped": 2
+        }
+      },
+      {
+        "name": "docs-control-1",
+        "arm": "control",
+        "durationMs": 56172,
+        "sessionExecutions": 6,
+        "headSha": "37ff1c76026dd1db500083f73c9ace371c7bde18",
+        "fixtureHash": "dbde395fe6941cc220339bd5fb17ac72c6ece57853f85af4af029bbc6123b650",
+        "delivery": {
+          "expectedHunks": 48,
+          "deliveredHunks": 48,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": [],
+        "auxiliaryPromptBytes": 133065,
+        "phasesMs": {
+          "main-execution": 39748,
+          "grace-wait": 5209,
+          "verification": 11076
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P0",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P1",
+            "kind": "architecture",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "deduped": 2,
+          "posted-inline": 2
+        }
+      },
+      {
+        "name": "docs-treatment-1",
+        "arm": "treatment",
+        "durationMs": 50595,
+        "sessionExecutions": 4,
+        "headSha": "37ff1c76026dd1db500083f73c9ace371c7bde18",
+        "fixtureHash": "dbde395fe6941cc220339bd5fb17ac72c6ece57853f85af4af029bbc6123b650",
+        "delivery": {
+          "expectedHunks": 48,
+          "deliveredHunks": 48,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": ["review-interactions", "guideline-compliance"],
+        "auxiliaryPromptBytes": 0,
+        "phasesMs": {
+          "main-execution": 45070,
+          "grace-wait": 0,
+          "verification": 5413
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P2",
+            "kind": "bug",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "posted-inline": 2
+        }
+      },
+      {
+        "name": "docs-treatment-2",
+        "arm": "treatment",
+        "durationMs": 31078,
+        "sessionExecutions": 4,
+        "headSha": "37ff1c76026dd1db500083f73c9ace371c7bde18",
+        "fixtureHash": "dbde395fe6941cc220339bd5fb17ac72c6ece57853f85af4af029bbc6123b650",
+        "delivery": {
+          "expectedHunks": 48,
+          "deliveredHunks": 48,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": ["review-interactions", "guideline-compliance"],
+        "auxiliaryPromptBytes": 0,
+        "phasesMs": {
+          "main-execution": 25326,
+          "grace-wait": 0,
+          "verification": 5647
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P2",
+            "kind": "architecture",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "posted-inline": 2
+        }
+      },
+      {
+        "name": "docs-control-2",
+        "arm": "control",
+        "durationMs": 45106,
+        "sessionExecutions": 6,
+        "headSha": "37ff1c76026dd1db500083f73c9ace371c7bde18",
+        "fixtureHash": "dbde395fe6941cc220339bd5fb17ac72c6ece57853f85af4af029bbc6123b650",
+        "delivery": {
+          "expectedHunks": 48,
+          "deliveredHunks": 48,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": [],
+        "auxiliaryPromptBytes": 133065,
+        "phasesMs": {
+          "main-execution": 29783,
+          "grace-wait": 8198,
+          "verification": 7040
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "posted-inline": 2,
+          "deduped": 2
+        }
+      },
+      {
+        "name": "docs-control-3",
+        "arm": "control",
+        "durationMs": 44571,
+        "sessionExecutions": 6,
+        "headSha": "37ff1c76026dd1db500083f73c9ace371c7bde18",
+        "fixtureHash": "dbde395fe6941cc220339bd5fb17ac72c6ece57853f85af4af029bbc6123b650",
+        "delivery": {
+          "expectedHunks": 48,
+          "deliveredHunks": 48,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": [],
+        "auxiliaryPromptBytes": 133065,
+        "phasesMs": {
+          "main-execution": 25707,
+          "grace-wait": 13317,
+          "verification": 5465
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P1",
+            "kind": "architecture",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "posted-inline": 2,
+          "deduped": 2
+        }
+      },
+      {
+        "name": "docs-treatment-3",
+        "arm": "treatment",
+        "durationMs": 34570,
+        "sessionExecutions": 4,
+        "headSha": "37ff1c76026dd1db500083f73c9ace371c7bde18",
+        "fixtureHash": "dbde395fe6941cc220339bd5fb17ac72c6ece57853f85af4af029bbc6123b650",
+        "delivery": {
+          "expectedHunks": 48,
+          "deliveredHunks": 48,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": ["review-interactions", "guideline-compliance"],
+        "auxiliaryPromptBytes": 0,
+        "phasesMs": {
+          "main-execution": 27369,
+          "grace-wait": 0,
+          "verification": 7107
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P1",
+            "kind": "architecture",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "posted-inline": 2
+        }
+      },
+      {
+        "name": "code-control",
+        "arm": "control",
+        "durationMs": 63686,
+        "sessionExecutions": 6,
+        "headSha": "21383d107372a2757dbd75f2a702655d11d4e22b",
+        "fixtureHash": "2c1589b86dbe55fe4406f2a0154940f50c5e4f1d72444c8a423b3fbe44f78c49",
+        "delivery": {
+          "expectedHunks": 49,
+          "deliveredHunks": 49,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": [],
+        "auxiliaryPromptBytes": 133409,
+        "phasesMs": {
+          "main-execution": 34117,
+          "grace-wait": 22602,
+          "verification": 6881
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P1",
+            "kind": "architecture",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "posted-inline": 2,
+          "deduped": 2
+        }
+      },
+      {
+        "name": "code-treatment",
+        "arm": "treatment",
+        "durationMs": 75339,
+        "sessionExecutions": 6,
+        "headSha": "21383d107372a2757dbd75f2a702655d11d4e22b",
+        "fixtureHash": "2c1589b86dbe55fe4406f2a0154940f50c5e4f1d72444c8a423b3fbe44f78c49",
+        "delivery": {
+          "expectedHunks": 49,
+          "deliveredHunks": 49,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": [],
+        "auxiliaryPromptBytes": 133409,
+        "phasesMs": {
+          "main-execution": 37273,
+          "grace-wait": 26326,
+          "verification": 11633
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/worker.ts",
+            "severity": "P3",
+            "kind": "investigate",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "posted-inline": 2,
+          "deduped": 2,
+          "posted-advisory": 1
+        }
+      }
+    ]
+  },
+  "verifierInputs": [
+    {
+      "index": 0,
+      "path": "src/shared/backend-selection.ts",
+      "line": 73,
+      "title": "`backendCanReadWorkspace` does not forward `opencodeModelID`",
+      "severity": "P1"
+    },
+    {
+      "index": 1,
+      "path": "src/shared/runner.ts",
+      "line": 1,
+      "title": "`options.experiment` dereference may break callers without a default",
+      "severity": "P2"
+    },
+    {
+      "index": 2,
+      "path": "src/shared/runner.ts",
+      "line": 1,
+      "title": "Removed/changed shared helpers need cross-file caller check",
+      "severity": "P2"
+    },
+    {
+      "index": 3,
+      "path": "src/shared/runner.ts",
+      "line": 1,
+      "title": "`startChangesSinceLastReviewSummary` new required `isAbandoned` may break callers",
+      "severity": "P2"
+    },
+    {
+      "index": 4,
+      "path": "src/shared/time-budget.ts",
+      "line": 1,
+      "title": "Removed `computeLensGraceMs` and narrowed `computeAuxiliaryGraceMs` may break callers",
+      "severity": "P2"
+    },
+    {
+      "index": 5,
+      "path": "src/shared/telemetry.ts",
+      "line": 1,
+      "title": "New required `recordEvidenceCache`/`recordJevPrefetch` may break `TelemetryRecorder` fakes",
+      "severity": "P2"
+    },
+    {
+      "index": 6,
+      "path": "src/shared/finding-context.ts",
+      "line": 69,
+      "title": "`readTrackedSource` returns empty text for newline-free truncated files",
+      "severity": "P2"
+    },
+    {
+      "index": 7,
+      "path": "src/shared/runner.ts",
+      "line": 1543,
+      "title": "`options.experiment` dereferenced without visible default",
+      "severity": "P2"
+    },
+    {
+      "index": 8,
+      "path": "src/shared/review-retrieval.ts",
+      "line": 76,
+      "title": "`review_context` path may escape workspace if store does not jail it",
+      "severity": "P2"
+    },
+    {
+      "index": 9,
+      "path": "src/shared/runner.ts",
+      "line": 2906,
+      "title": "Lens grace fallback key may miss collected findings",
+      "severity": "P2"
+    },
+    {
+      "index": 10,
+      "path": "src/shared/runner.ts",
+      "line": 3714,
+      "title": "`settleWithinGrace` invokes function-valued `fallback` as thunk",
+      "severity": "P2"
+    },
+    {
+      "index": 11,
+      "path": "src/shared/runner.ts",
+      "line": 3744,
+      "title": "`takeSettledAuxiliary` skip path may leave rejection unhandled",
+      "severity": "P2"
+    },
+    {
+      "index": 12,
+      "path": "test/review-retrieval.test.ts",
+      "line": 142,
+      "title": "`onTool()` result not awaited before reading stats file",
+      "severity": "P2"
+    },
+    {
+      "index": 13,
+      "path": "scripts/smoke-image.sh",
+      "line": 5,
+      "title": "`smoke-image.sh` expects new `review-retrieval.js` bundle",
+      "severity": "P2"
+    },
+    {
+      "index": 14,
+      "path": "src/local/index.ts",
+      "line": 592,
+      "title": "`renderReviewPreview` receives new `diffCoverage` shape",
+      "severity": "P2"
+    },
+    {
+      "index": 15,
+      "path": "src/shared/blast-radius.ts",
+      "line": 130,
+      "title": "`buildBlastRadiusBlock` empty-symbol path may change empty result",
+      "severity": "P2"
+    },
+    {
+      "index": 16,
+      "path": "src/shared/runner.ts",
+      "line": 2738,
+      "title": "`lensPasses[0]` access when guidelines are joint may crash with no lenses",
+      "severity": "P2"
+    }
+  ],
+  "manualChecks": {
+    "0": "The only source caller separately checks modelSupportsAgenticTools; no demonstrated new runtime regression.",
+    "6": "Newline-free truncation behavior exists on origin/main before this PR.",
+    "12": "With readEvidence disabled, the tested callback writes statistics before it returns."
+  },
+  "verifierOriginal": {
+    "protocol": {
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "treatmentCommit": "d592b8d026aa6d4848cc92bf7244cd991fcd747a",
+      "evidenceCommit": "1d8013be1361d34bfe10876f9d0a151c36dc25a5",
+      "inputHash": "c97a95fd9fe4b4a83f2e0878d7af60f5f8e6ef4b69fea8424ebdaec1b04b8a50",
+      "repetitions": 3,
+      "reconstruction": "Seventeen latest dogfood comments reconstructed without prior verifier conclusions. Identical targeted PR diff and findings in both arms; only named source lookup differs. This is a verifier replay, not a recall benchmark."
+    },
+    "runs": [
+      {
+        "arm": "control",
+        "repetition": 1,
+        "durationMs": 47844,
+        "contexts": [
+          {
+            "bytes": 37354,
+            "sha256": "725e1c9d616a5662f90a5c09e2d32e2963cb9c770f9d46da454207380523ffb6"
+          },
+          {
+            "bytes": 32058,
+            "sha256": "b4abeb2dc366c33722afc983c25ad81d64cc9d7f6387cff22d3e1d3f8ecc1db1"
+          }
+        ],
+        "coverage": [
+          {
+            "session": "finding-verification",
+            "state": "completed",
+            "durationMs": 47844
+          }
+        ],
+        "verdictsByInputIndex": [
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "treatment",
+        "repetition": 1,
+        "durationMs": 46919,
+        "contexts": [
+          {
+            "bytes": 38008,
+            "sha256": "059b15bdce4bc7a8ede79bbd9e2f11d1110b23fbf8e720a995c7cf31d6c3236d"
+          },
+          {
+            "bytes": 36135,
+            "sha256": "5219dbdf10a10c56b124b00dbe1821fd9c1a291318d48ea3c85aa1dbfff74f52"
+          }
+        ],
+        "coverage": [
+          {
+            "session": "finding-verification",
+            "state": "completed",
+            "durationMs": 46919
+          }
+        ],
+        "verdictsByInputIndex": [
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "treatment",
+        "repetition": 2,
+        "durationMs": 69793,
+        "contexts": [
+          {
+            "bytes": 38008,
+            "sha256": "059b15bdce4bc7a8ede79bbd9e2f11d1110b23fbf8e720a995c7cf31d6c3236d"
+          },
+          {
+            "bytes": 36135,
+            "sha256": "5219dbdf10a10c56b124b00dbe1821fd9c1a291318d48ea3c85aa1dbfff74f52"
+          }
+        ],
+        "coverage": [
+          {
+            "session": "finding-verification",
+            "state": "completed",
+            "durationMs": 69793
+          }
+        ],
+        "verdictsByInputIndex": [
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "control",
+        "repetition": 2,
+        "durationMs": 83351,
+        "contexts": [
+          {
+            "bytes": 37354,
+            "sha256": "725e1c9d616a5662f90a5c09e2d32e2963cb9c770f9d46da454207380523ffb6"
+          },
+          {
+            "bytes": 32058,
+            "sha256": "b4abeb2dc366c33722afc983c25ad81d64cc9d7f6387cff22d3e1d3f8ecc1db1"
+          }
+        ],
+        "coverage": [
+          {
+            "session": "finding-verification",
+            "state": "completed",
+            "durationMs": 83351
+          }
+        ],
+        "verdictsByInputIndex": [
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "control",
+        "repetition": 3,
+        "durationMs": 63939,
+        "contexts": [
+          {
+            "bytes": 37354,
+            "sha256": "725e1c9d616a5662f90a5c09e2d32e2963cb9c770f9d46da454207380523ffb6"
+          },
+          {
+            "bytes": 32058,
+            "sha256": "b4abeb2dc366c33722afc983c25ad81d64cc9d7f6387cff22d3e1d3f8ecc1db1"
+          }
+        ],
+        "coverage": [
+          {
+            "session": "finding-verification",
+            "state": "completed",
+            "durationMs": 63939
+          }
+        ],
+        "verdictsByInputIndex": [
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "treatment",
+        "repetition": 3,
+        "durationMs": 47449,
+        "contexts": [
+          {
+            "bytes": 38008,
+            "sha256": "059b15bdce4bc7a8ede79bbd9e2f11d1110b23fbf8e720a995c7cf31d6c3236d"
+          },
+          {
+            "bytes": 36135,
+            "sha256": "5219dbdf10a10c56b124b00dbe1821fd9c1a291318d48ea3c85aa1dbfff74f52"
+          }
+        ],
+        "coverage": [
+          {
+            "session": "finding-verification",
+            "state": "completed",
+            "durationMs": 47449
+          }
+        ],
+        "verdictsByInputIndex": [
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      }
+    ]
+  },
+  "verifierRanked": {
+    "protocol": {
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "treatmentCommit": "9e51be96ab4d9c0dc342fa1089c4be4bf57cad04",
+      "evidenceCommit": "1d8013be1361d34bfe10876f9d0a151c36dc25a5",
+      "inputHash": "c97a95fd9fe4b4a83f2e0878d7af60f5f8e6ef4b69fea8424ebdaec1b04b8a50",
+      "repetitions": 3,
+      "reconstruction": "Seventeen latest dogfood comments reconstructed without prior verifier conclusions. Identical targeted PR diff and findings in both arms; only named source lookup differs. This is a verifier replay, not a recall benchmark."
+    },
+    "runs": [
+      {
+        "arm": "control",
+        "repetition": 1,
+        "durationMs": 69793,
+        "contexts": [
+          {
+            "bytes": 37354,
+            "sha256": "725e1c9d616a5662f90a5c09e2d32e2963cb9c770f9d46da454207380523ffb6"
+          },
+          {
+            "bytes": 32058,
+            "sha256": "b4abeb2dc366c33722afc983c25ad81d64cc9d7f6387cff22d3e1d3f8ecc1db1"
+          }
+        ],
+        "coverage": [
+          {
+            "session": "finding-verification",
+            "state": "completed",
+            "durationMs": 69793
+          }
+        ],
+        "verdictsByInputIndex": [
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "treatment",
+        "repetition": 1,
+        "durationMs": 92964,
+        "contexts": [
+          {
+            "bytes": 38488,
+            "sha256": "b82f9031f141a25ae75a7b5738ea38054f2171052be39297a2ec83508e543616"
+          },
+          {
+            "bytes": 36474,
+            "sha256": "36e1a4f5fc9318dfca59f97df15b73efbc1179b05dd6deca06be305bb607fc40"
+          }
+        ],
+        "coverage": [
+          {
+            "session": "finding-verification",
+            "state": "completed",
+            "durationMs": 92964
+          }
+        ],
+        "verdictsByInputIndex": [
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "treatment",
+        "repetition": 2,
+        "durationMs": 63351,
+        "contexts": [
+          {
+            "bytes": 38488,
+            "sha256": "b82f9031f141a25ae75a7b5738ea38054f2171052be39297a2ec83508e543616"
+          },
+          {
+            "bytes": 36474,
+            "sha256": "36e1a4f5fc9318dfca59f97df15b73efbc1179b05dd6deca06be305bb607fc40"
+          }
+        ],
+        "coverage": [
+          {
+            "session": "finding-verification",
+            "state": "completed",
+            "durationMs": 63351
+          }
+        ],
+        "verdictsByInputIndex": [
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "control",
+        "repetition": 2,
+        "durationMs": 50618,
+        "contexts": [
+          {
+            "bytes": 37354,
+            "sha256": "725e1c9d616a5662f90a5c09e2d32e2963cb9c770f9d46da454207380523ffb6"
+          },
+          {
+            "bytes": 32058,
+            "sha256": "b4abeb2dc366c33722afc983c25ad81d64cc9d7f6387cff22d3e1d3f8ecc1db1"
+          }
+        ],
+        "coverage": [
+          {
+            "session": "finding-verification",
+            "state": "completed",
+            "durationMs": 50618
+          }
+        ],
+        "verdictsByInputIndex": [
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "control",
+        "repetition": 3,
+        "durationMs": 55398,
+        "contexts": [
+          {
+            "bytes": 37354,
+            "sha256": "725e1c9d616a5662f90a5c09e2d32e2963cb9c770f9d46da454207380523ffb6"
+          },
+          {
+            "bytes": 32058,
+            "sha256": "b4abeb2dc366c33722afc983c25ad81d64cc9d7f6387cff22d3e1d3f8ecc1db1"
+          }
+        ],
+        "coverage": [
+          {
+            "session": "finding-verification",
+            "state": "completed",
+            "durationMs": 55398
+          }
+        ],
+        "verdictsByInputIndex": [
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      },
+      {
+        "arm": "treatment",
+        "repetition": 3,
+        "durationMs": 63843,
+        "contexts": [
+          {
+            "bytes": 38488,
+            "sha256": "b82f9031f141a25ae75a7b5738ea38054f2171052be39297a2ec83508e543616"
+          },
+          {
+            "bytes": 36474,
+            "sha256": "36e1a4f5fc9318dfca59f97df15b73efbc1179b05dd6deca06be305bb607fc40"
+          }
+        ],
+        "coverage": [
+          {
+            "session": "finding-verification",
+            "state": "completed",
+            "durationMs": 63843
+          }
+        ],
+        "verdictsByInputIndex": [
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "confirmed",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain",
+          "uncertain"
+        ]
+      }
+    ]
+  },
+  "excludedPilot": "An earlier uncommitted pilot accidentally tracked Git setup configuration; no reported claim uses it."
+}

@@ -30,7 +30,7 @@ import {
 import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
 import { EvidenceStore } from './evidence.ts';
-import { buildFindingSourceContext, findNamedSourceLocations } from './finding-context.ts';
+import { buildFindingSourceContext } from './finding-context.ts';
 import {
   auxiliaryPolicy,
   planAuxiliaryReuse,
@@ -1556,19 +1556,9 @@ async function runReviewPipeline(params: {
     options.experiment.reuse,
   );
   const verifierSourceContext =
-    options.experiment.preset === 'adaptive'
-      ? async (targets: Finding[]) => {
-          const started = Date.now();
-          const related = await findNamedSourceLocations(workspace, targets);
-          const context = await buildFindingSourceContext(workspace, targets, undefined, related);
-          log(
-            `Verifier source lookup: ${JSON.stringify({ findings: targets.length, locations: related.locations.length, omittedLocations: related.omitted.length, unresolvedSymbols: related.unsearched.length, bytes: Buffer.byteLength(context), durationMs: Date.now() - started })}`,
-          );
-          return context;
-        }
-      : evidence.reuse.shared || options.experiment.verificationEvidence !== 'off'
-        ? (targets: Finding[]) => evidence.sourceContext(targets)
-        : undefined;
+    evidence.reuse.shared || options.experiment.verificationEvidence !== 'off'
+      ? (targets: Finding[]) => evidence.sourceContext(targets)
+      : undefined;
   const prepareEvidence = (
     scope: 'exploration' | 'verification',
     findings: Finding[],
