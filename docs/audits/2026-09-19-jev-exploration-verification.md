@@ -96,7 +96,7 @@ All 18 scheduled attempts produced artifacts without process failure or retries.
 
 Times include evidence collection and ranking, and exclude server startup; process times are separately recorded. Costs combine SDK-reported model estimates with Jev input pricing. Three repetitions cannot establish significance.
 
-The local true/false pair was adjudicated directly from unchanged consumers: invoice dollars are multiplied a second time; `processCredit` returns before calling the processor when `approved` is false. For the rerun concern, `run_attempt` does advance on any rerun, but that proves the mechanism rather than the alleged duplicate-thread harm. The frozen repo still calls `suppressPreviouslyReported` (runner.ts:2069) and avoids a redundant clean review through `shouldPostReviewComment` (filter.ts:370). Extra model cost is inherent to rerunning the review, not a defect introduced by selecting another model. Confirming this hypothesis is scored as unsupported; uncertainty is conservative but not a successful refutation. Labels are manual and unblinded, not an independent corpus gate.
+The local true/false pair was adjudicated directly from unchanged consumers: invoice dollars are multiplied a second time; `processCredit` returns before calling the processor when `approved` is false. For the rerun concern, `run_attempt` does advance on any rerun, but that proves the mechanism rather than the alleged duplicate-thread harm. The frozen repo still calls `suppressPreviouslyReported` (`src/shared/runner.ts`) and avoids a redundant clean review through `shouldPostReviewComment` (`src/shared/filter.ts`). Extra model cost is inherent to rerunning the review, not a defect introduced by selecting another model. Confirming this hypothesis is scored as unsupported; uncertainty is conservative but not a successful refutation. Labels are manual and unblinded, not an independent corpus gate.
 
 Jev versus off was faster in 2/3 local pairs but only 1/3 rerun pairs. Mean differences were −0.881 s and +4.027 s respectively. Versus deterministic, Jev was faster in 1/3 pairs for each case; mean differences were +1.723 s and +30.458 s. The deterministic rerun mean includes its unusable-output attempt; its two usable attempts averaged 41.628 s, still with no correct refutation.
 
@@ -230,13 +230,13 @@ The README also explicitly defined the old field as a prefix comparison.
 However, overlap with the actual deterministic control is more useful here,
 so that suggestion was applied as a telemetry improvement.
 
-Current telemetry is version 5: `deterministicOverlap` replaces the old
+This round introduced telemetry version 5: `deterministicOverlap` replaces the old
 `baselineOverlap` and compares against the shared first-fitting selector's real
 output, including one-per-file and byte limits. A regression assertion covers
 Jev selecting just candidate index 3: it overlaps the deterministic four-item
 set even though it is outside a one-item prefix. Existing version assertions
 were updated for this intentional schema change, not weakened. The historical
-version-4 trial artifacts remain unchanged. None of the reported conclusions
+version-4 trial artifacts remain unchanged; later cache experiments use version 6. None of the reported conclusions
 uses either overlap field. This final telemetry change preserves prompts and
 selection behavior and was validated with deterministic tests rather than
 another paid review.

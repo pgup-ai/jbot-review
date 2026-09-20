@@ -2458,7 +2458,7 @@ async function runReviewPipeline(params: {
       embeddedFirstPrompt: options.embeddedFirstPrompt,
       diffFirst: options.sharedPrefixPrompt,
       batchDiffScope:
-        options.experiment.exploration.batchDiffRecovery && !mainRequiresCompleteEmbeddedDiff
+        options.experiment.exploration.batchDiffRecovery && guidelineSelection.mainCanReadWorkspace
           ? diffScope
           : undefined,
     });

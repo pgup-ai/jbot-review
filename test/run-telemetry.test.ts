@@ -56,6 +56,14 @@ test('configuration fingerprints policy changes while excluding credentials and 
   const configuration = (experiment: ReviewExperiment) =>
     runConfiguration({ ...options, experiment }, 'opencode/a');
   const baseline = configuration(custom);
+  const documented = configuration({ ...custom, docsPath: '/private/docs.json' });
+  assert.notEqual(documented.configurationHash, baseline.configurationHash);
+  assert.equal(documented.configuration.evidenceDocsEnabled, true);
+  assert.doesNotMatch(JSON.stringify(documented), /private|docs\.json/);
+  assert.equal(
+    documented.configurationHash,
+    configuration({ ...custom, docsPath: '/another/location.json' }).configurationHash,
+  );
   for (const key of ['jevPrefetch', 'explorationEvidence', 'verificationEvidence'] as const)
     assert.notEqual(
       configuration({ ...custom, [key]: 'on' }).configurationHash,

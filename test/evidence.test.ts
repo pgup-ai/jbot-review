@@ -191,29 +191,35 @@ test('source exceeding the remaining admission budget is not indexed or persiste
   assert.equal(store.stats().diskWrites, 8);
 });
 
-test('invalid docs and timeouts fail open with measurable fallback and no provider error text', async (t) => {
+test('invalid docs preserve source evidence and timeouts fail open without leaking error text', async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), 'evidence-failure-'));
   t.after(() => rm(workspace, { recursive: true, force: true }));
   execFileSync('git', ['init', '-q', workspace]);
+  await writeFile(join(workspace, 'money.ts'), 'export function total(n) {\nreturn n * 100;\n}');
+  execFileSync('git', ['add', 'money.ts'], { cwd: workspace });
   const docs = join(workspace, 'docs.json');
-  await writeFile(docs, 'x'.repeat(70000));
   const rows = [],
     logs = [];
-  const store = new EvidenceStore(workspace, [], docs);
+  const store = new EvidenceStore(workspace, files, docs);
   const options = { timeoutMs: 5000, log: (s) => logs.push(s), onStats: (s) => rows.push(s) };
-  assert.equal(await store.prepare('verification', [finding], 'on', options), '');
-  assert.equal(rows[0].status, 'fallback');
-  assert.equal(rows[0].scope, 'verification');
-  assert.equal(rows[0].model, JEV_MODEL);
-  assert.equal(rows[0].apiMs, 0);
-  assert.equal(rows[0].inputTokens, undefined);
+  for (const invalid of ['x'.repeat(70000), '{"private":']) {
+    await writeFile(docs, invalid);
+    const packet = await store.prepare('verification', [finding], 'deterministic', options);
+    assert.match(packet, /export function total/);
+    assert.equal(rows.at(-1).status, 'applied');
+    assert.equal(rows.at(-1).scope, 'verification');
+    assert.equal(rows.at(-1).model, null);
+    assert.equal(rows.at(-1).apiMs, 0);
+    assert.equal(rows.at(-1).inputTokens, undefined);
+  }
   assert.equal(
     await store.prepare('exploration', [], 'deterministic', { ...options, timeoutMs: 0 }),
     '',
   );
-  assert.equal(rows[1].status, 'fallback');
-  assert.equal(rows[1].model, null);
-  assert.ok(!logs.join('').includes('x'.repeat(50)));
+  assert.equal(rows.at(-1).status, 'fallback');
+  assert.equal(rows.at(-1).model, null);
+  assert.match(logs.join('\n'), /Optional documentation unavailable/);
+  assert.doesNotMatch(logs.join('\n'), /x{50}|private/);
 });
 
 test('failed or budget-starved evidence preparation cannot skip independent verification', async (t) => {
@@ -401,6 +407,30 @@ test(
     assert.equal(store.stats().sourceReads, 1);
   },
 );
+
+test('already-aborted evidence waits still handle shared process rejection', () => {
+  execFileSync(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      '--input-type=module',
+      '-e',
+      `
+        import assert from 'node:assert/strict';
+        import { EvidenceStore } from ${JSON.stringify(new URL('../src/shared/evidence.ts', import.meta.url).href)};
+        AbortSignal.timeout = () => AbortSignal.abort(new Error('expired'));
+        const store = new EvidenceStore(process.cwd(), [], undefined, {
+          shared: true, handoff: false, prefetch: false,
+        });
+        assert.equal(await store.prepare('exploration', [], 'deterministic', {
+          timeoutMs: 0, log: () => {}, onStats: () => {},
+        }), '');
+      `,
+    ],
+    { timeout: 5000, stdio: 'pipe' },
+  );
+});
 
 test('persistent cache reuses indexes and exact judgments with zero rebilling; changes and corrupt entries miss', async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), 'evidence-disk-source-'));

@@ -59,6 +59,7 @@ export function runConfiguration(
     jevPrefetch: experiment.jevPrefetch,
     explorationEvidence: experiment.explorationEvidence,
     verificationEvidence: experiment.verificationEvidence,
+    evidenceDocsEnabled: Boolean(experiment.docsPath),
     evidenceReuse: { ...reuse, persistent: Boolean(cacheDir) },
     explorationExperiment: experiment.exploration,
     modelPool: options.modelPool?.length ? options.modelPool : [model],

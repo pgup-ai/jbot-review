@@ -9,11 +9,14 @@ import { PERMISSION_DENIED_MESSAGE } from '../src/shared/prompt.ts';
 
 type Hook = (event: unknown) => unknown;
 
-async function loadPlugin(): Promise<{ context: Hook; evaluate: Hook }> {
+async function loadPlugin(
+  tool = { transform: async () => {}, hook: async () => {} },
+): Promise<{ context: Hook; evaluate: Hook }> {
   const file = join(hermeticOpencodeConfigHome(), 'opencode', 'plugins', 'jbot-review.js');
   const mod = await import(pathToFileURL(file).href);
   const hooks: Record<string, Hook> = {};
   await mod.default.setup({
+    tool,
     session: { hook: async (name: string, fn: Hook) => (hooks[`session.${name}`] = fn) },
     permission: { hook: async (name: string, fn: Hook) => (hooks[`permission.${name}`] = fn) },
   });
@@ -56,9 +59,15 @@ describe('jbot opencode plugin', () => {
       else process.env.JBOT_EXPLORATION_CONFIG = previous;
     });
     const warnings = t.mock.method(console, 'warn', () => {});
+    const tool = {
+      transform: t.mock.fn(async () => {
+        throw new Error('retrieval registration failed');
+      }),
+      hook: async () => {},
+    };
     for (const config of ['invalid JSON', '{"retrieval":true}']) {
       process.env.JBOT_EXPLORATION_CONFIG = config;
-      const { context, evaluate } = await loadPlugin();
+      const { context, evaluate } = await loadPlugin(tool);
       const event = { agent: 'plan', tools: tools() };
       context(event);
       assert.deepEqual(Object.keys(event.tools).sort(), ['read', 'shell']);
@@ -67,6 +76,7 @@ describe('jbot opencode plugin', () => {
       assert.equal(permission.effect, 'deny');
     }
     assert.equal(warnings.mock.callCount(), 2);
+    assert.equal(tool.transform.mock.callCount(), 1);
     assert.doesNotMatch(
       JSON.stringify(warnings.mock.calls.map((c) => c.arguments)),
       /invalid JSON|TypeError/,

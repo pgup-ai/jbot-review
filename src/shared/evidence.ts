@@ -480,7 +480,13 @@ export class EvidenceStore {
           if (line >= 0) add(path, symbol, line + 1, 'text reference; binding unresolved');
         }
       }
-      const docs = scope === 'verification' && this.docsPath ? await this.documents() : [];
+      const docs =
+        scope === 'verification' && this.docsPath
+          ? await this.documents().catch(() => {
+              options.log('Optional documentation unavailable; keeping source evidence.');
+              return [];
+            })
+          : [];
       // Reserve documentation candidates so a large code pool cannot evict all external contracts.
       const pool = [...candidates.slice(0, 2), ...docs, ...candidates.slice(2)];
       const task = evidenceTask(findings);
@@ -642,14 +648,14 @@ function validSourceIndex(value: unknown): value is SourceIndex {
 }
 
 async function waitForEvidence<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
-  signal.throwIfAborted();
   let aborted: () => void = () => {};
   const timeout = new Promise<never>((_, reject) => {
     aborted = () => reject(signal.reason);
-    signal.addEventListener('abort', aborted, { once: true });
+    if (signal.aborted) aborted();
+    else signal.addEventListener('abort', aborted, { once: true });
   });
   try {
-    return await Promise.race([pending, timeout]);
+    return await Promise.race([timeout, pending]);
   } finally {
     signal.removeEventListener('abort', aborted);
   }

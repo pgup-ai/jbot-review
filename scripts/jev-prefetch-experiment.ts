@@ -1,6 +1,6 @@
 import { reviewExperiment, type ReviewExperiment } from '../src/shared/review-experiment.ts';
 import { evidenceMode } from '../src/shared/evidence.ts';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   createWriteStream,
@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadDotEnv } from '../src/local/util.ts';
+import { runCliProcess } from '../src/shared/cli-process.ts';
 import { parseBenchmarkTelemetry } from '../src/shared/benchmark-runner.ts';
 import type { ReviewResult } from '../src/shared/types.ts';
 
@@ -64,6 +65,7 @@ const hash = (text: string | Buffer) => createHash('sha256').update(text).digest
 const git = (workspace: string, ...args: string[]) =>
   execFileSync('git', args, {
     cwd: workspace,
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     encoding: 'utf8',
     maxBuffer: 20 * 1024 * 1024,
   }).trim();
@@ -97,6 +99,7 @@ const inputHashes = () =>
   );
 const frozenInputs = JSON.stringify(inputHashes());
 const config = {
+  GIT_OPTIONAL_LOCKS: '0',
   PROVIDER: 'opencode',
   MODEL: plan.model,
   JBOT_SDK_ENGINE: 'opencode',
@@ -198,9 +201,6 @@ const arms: Arm[] =
             : ['off', 'deterministic', 'on'].map(
                 (id) => ({ id, exploration: id, verification: id }) as Arm,
               );
-const cacheRoot = plan.reuse
-  ? mkdtempSync(resolve(tmpdir(), 'jbot-evidence-experiment-'))
-  : undefined;
 const schedule = Array.from({ length: plan.repetitions ?? 5 }, (_, repetition) =>
   plan.cases
     .flatMap((c) => arms.map(({ id }) => ({ caseId: c.id, arm: id, repetition: repetition + 1 })))
@@ -255,143 +255,174 @@ if (env.OPENCODE_API_KEY) env.OPENCODE_API_KEY = env.OPENCODE_API_KEY.split(',')
 if (!plan.experiment && !plan.retrieval && !plan.readEvidence && !env.TYPESAFE_API_KEY)
   throw new Error('TYPESAFE_API_KEY is required for the on arm');
 const results: unknown[] = [];
-for (const run of schedule) {
-  if (
-    git(root, 'rev-parse', 'HEAD') !== driverHead ||
-    runtimeHash() !== initialRuntimeHash ||
-    JSON.stringify(inputHashes()) !== frozenInputs
-  )
-    throw new Error('Driver changed during the experiment');
-  const arm = arms.find((a) => a.id === run.arm)!;
-  const cacheDirectory = cacheRoot ? resolve(cacheRoot, `${run.caseId}-${run.repetition}`) : '';
-  if (arm.persistent && run.cacheState === 'cold')
-    rmSync(cacheDirectory, { recursive: true, force: true });
-  const c = plan.cases.find((c) => c.id === run.caseId)!;
-  checkCase(c);
-  const dir = resolve(out, run.id);
-  mkdirSync(dir);
-  const output = resolve(dir, 'review.json');
-  const stream = createWriteStream(resolve(dir, 'review.log'));
-  const started = Date.now();
-  console.log(
-    `Starting ${run.id}/${schedule.length} ${run.caseId} ${run.arm} repetition ${run.repetition}`,
-  );
-  const experiment: ReviewExperiment = {
-    ...reviewExperiment({}),
-    preset: 'custom',
-    jevPrefetch:
-      plan.experiment || plan.evidence || plan.reuse || plan.retrieval || plan.readEvidence
-        ? 'off'
-        : evidenceMode(run.arm),
-    explorationEvidence: evidenceMode(
-      plan.reuse ? arm.exploration : plan.evidence ? run.arm : 'off',
-    ),
-    verificationEvidence: evidenceMode(
-      plan.reuse ? arm.verification : plan.evidence ? run.arm : 'off',
-    ),
-    reuse: {
-      shared: !!arm.shared,
-      handoff: !!arm.handoff,
-      prefetch: !!arm.prefetch,
-      cacheDir: arm.persistent ? cacheDirectory : undefined,
-    },
-    docsPath: plan.docs ? resolve(plan.docs) : undefined,
-    exploration: {
-      retrieval: !!arm.retrieval,
-      checkpoints: !!arm.checkpoints,
-      readEvidence: arm.readEvidence ?? false,
-      readEvidencePhase: arm.readEvidencePhase ?? 'all',
-      batchDiffRecovery: !!arm.batchDiffRecovery,
-    },
-  };
-  const experimentPath = resolve(dir, 'experiment.json');
-  writeFileSync(experimentPath, JSON.stringify(experiment));
-  const child = spawn(
-    process.execPath,
-    [
-      '--import',
-      fileURLToPath(import.meta.resolve('tsx')),
-      resolve(root, 'scripts/review-experiment-trial.ts'),
-      experimentPath,
-      ...(c.findings
-        ? ['verification', c.workspace, c.base, resolve(c.findings)]
-        : ['review', '--workspace', c.workspace, '--base', c.base]),
-    ],
-    {
-      cwd: dir,
-      env: {
-        ...env,
-        ...config,
-        JBOT_BENCHMARK_OUTPUT: output,
+const cacheRoot = plan.reuse
+  ? mkdtempSync(resolve(tmpdir(), 'jbot-evidence-experiment-'))
+  : undefined;
+try {
+  for (const run of schedule) {
+    if (
+      git(root, 'rev-parse', 'HEAD') !== driverHead ||
+      runtimeHash() !== initialRuntimeHash ||
+      JSON.stringify(inputHashes()) !== frozenInputs
+    )
+      throw new Error('Driver changed during the experiment');
+    const arm = arms.find((a) => a.id === run.arm)!;
+    const cacheDirectory = cacheRoot ? resolve(cacheRoot, `${run.caseId}-${run.repetition}`) : '';
+    if (arm.persistent && run.cacheState === 'cold')
+      rmSync(cacheDirectory, { recursive: true, force: true });
+    const c = plan.cases.find((c) => c.id === run.caseId)!;
+    checkCase(c);
+    const dir = resolve(out, run.id);
+    mkdirSync(dir);
+    const output = resolve(dir, 'review.json');
+    const stream = createWriteStream(resolve(dir, 'review.log'));
+    const started = Date.now();
+    console.log(
+      `Starting ${run.id}/${schedule.length} ${run.caseId} ${run.arm} repetition ${run.repetition}`,
+    );
+    const experiment: ReviewExperiment = {
+      ...reviewExperiment({}),
+      preset: 'custom',
+      jevPrefetch:
+        plan.experiment || plan.evidence || plan.reuse || plan.retrieval || plan.readEvidence
+          ? 'off'
+          : evidenceMode(run.arm),
+      explorationEvidence: evidenceMode(
+        plan.reuse ? arm.exploration : plan.evidence ? run.arm : 'off',
+      ),
+      verificationEvidence: evidenceMode(
+        plan.reuse ? arm.verification : plan.evidence ? run.arm : 'off',
+      ),
+      reuse: {
+        shared: !!arm.shared,
+        handoff: !!arm.handoff,
+        prefetch: !!arm.prefetch,
+        cacheDir: arm.persistent ? cacheDirectory : undefined,
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
-  child.stdout.pipe(stream, { end: false });
-  child.stderr.pipe(stream, { end: false });
-  const code = await new Promise<number | null>((done, reject) => {
-    child.on('error', reject);
-    child.on('close', done);
-  });
-  await new Promise<void>((done) => stream.end(done));
-  checkCase(c);
-  const review:
-    | (ReviewResult & {
-        telemetry?: string;
-        verdicts?: unknown[];
-        elapsedMs?: number;
-        incompleteSessions?: unknown[];
-      })
-    | undefined = existsSync(output) ? JSON.parse(readFileSync(output, 'utf8')) : undefined;
-  const telemetryPath = resolve(dir, '.jbot-review/telemetry.jsonl');
-  const telemetry =
-    review?.telemetry ?? (existsSync(telemetryPath) ? readFileSync(telemetryPath, 'utf8') : '');
-  const rows: Record<string, unknown>[] = telemetry
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
-  const header = rows.find((r) => r.kind === 'run');
-  const usage = parseBenchmarkTelemetry(telemetry);
-  const sessions = rows.filter((r) => r.kind === 'session');
-  const prefetch = rows.filter((r) => r.kind === 'jev-prefetch');
-  const knownCost =
-    sessions.length > 0 &&
-    sessions.every((r) => typeof r.costUsd === 'number') &&
-    prefetch.every((r) => !r.apiMs || typeof r.estimatedCostUsd === 'number');
-  const result = {
-    ...run,
-    code,
-    startedAt: new Date(started).toISOString(),
-    processMs: Date.now() - started,
-    terminalState:
-      header?.terminalState ?? (review?.verdicts ? 'verification-output' : 'missing-output'),
-    runMs: header?.elapsedMs ?? review?.elapsedMs ?? null,
-    verdicts: review?.verdicts,
-    retainedFindings: review?.findings.length ?? null,
-    incompleteSessions: review?.incompleteSessions ?? null,
-    usage,
-    costAvailable: knownCost,
-    totalEstimatedCostUsd: knownCost
-      ? usage.costUsd + prefetch.reduce((sum, r) => sum + Number(r.estimatedCostUsd ?? 0), 0)
-      : null,
-    prefetch,
-    evidenceCache: rows.find((r) => r.kind === 'evidence-cache'),
-    phases: rows.filter((r) => r.kind === 'phase' && r.scope === 'run'),
-    exploration: rows.filter((r) => r.kind === 'exploration'),
-    policy: header?.policy,
-    execution: header?.execution,
-  };
-  results.push(result);
-  writeFileSync(resolve(out, 'results.json'), JSON.stringify(results, null, 2) + '\n');
-  console.log(
-    JSON.stringify({
-      id: run.id,
-      case: run.caseId,
-      arm: run.arm,
+      docsPath: plan.docs ? resolve(plan.docs) : undefined,
+      exploration: {
+        retrieval: !!arm.retrieval,
+        checkpoints: !!arm.checkpoints,
+        readEvidence: arm.readEvidence ?? false,
+        readEvidencePhase: arm.readEvidencePhase ?? 'all',
+        batchDiffRecovery: !!arm.batchDiffRecovery,
+      },
+    };
+    const experimentPath = resolve(dir, 'experiment.json');
+    writeFileSync(experimentPath, JSON.stringify(experiment));
+    let code: number | null;
+    const timeoutMessage = 'Experiment process deadline exceeded';
+    try {
+      const child = await runCliProcess(
+        process.execPath,
+        [
+          '--import',
+          fileURLToPath(import.meta.resolve('tsx')),
+          resolve(root, 'scripts/review-experiment-trial.ts'),
+          experimentPath,
+          ...(c.findings
+            ? ['verification', c.workspace, c.base, resolve(c.findings)]
+            : ['review', '--workspace', c.workspace, '--base', c.base]),
+        ],
+        {
+          cwd: dir,
+          env: {
+            ...env,
+            ...config,
+            JBOT_BENCHMARK_OUTPUT: output,
+          },
+          timeoutMs: 15 * 60_000,
+          timeoutMessage,
+          onStdout: (chunk) => {
+            stream.write(chunk);
+          },
+        },
+      );
+      code = child.exitCode;
+      stream.write(child.stderr);
+    } catch (error) {
+      const terminalState =
+        error instanceof Error && error.message === timeoutMessage ? 'timeout' : 'process-failed';
+      stream.write(`\nExperiment ${terminalState}.\n`);
+      results.push({
+        ...run,
+        code: null,
+        startedAt: new Date(started).toISOString(),
+        processMs: Date.now() - started,
+        terminalState,
+      });
+      writeFileSync(resolve(out, 'results.json'), JSON.stringify(results, null, 2) + '\n');
+      throw error;
+    } finally {
+      await new Promise<void>((done) => stream.end(done));
+    }
+    checkCase(c);
+    const review:
+      | (ReviewResult & {
+          telemetry?: string;
+          verdicts?: unknown[];
+          elapsedMs?: number;
+          incompleteSessions?: unknown[];
+        })
+      | undefined = existsSync(output) ? JSON.parse(readFileSync(output, 'utf8')) : undefined;
+    const telemetryPath = resolve(dir, '.jbot-review/telemetry.jsonl');
+    const telemetry =
+      review?.telemetry ?? (existsSync(telemetryPath) ? readFileSync(telemetryPath, 'utf8') : '');
+    const rows: Record<string, unknown>[] = telemetry
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const header = rows.find((r) => r.kind === 'run');
+    const usage = parseBenchmarkTelemetry(telemetry);
+    const sessions = rows.filter((r) => r.kind === 'session');
+    const prefetch = rows.filter((r) => r.kind === 'jev-prefetch');
+    const knownCost =
+      sessions.length > 0 &&
+      sessions.every((r) => typeof r.costUsd === 'number') &&
+      prefetch.every((r) => !r.apiMs || typeof r.estimatedCostUsd === 'number');
+    const result = {
+      ...run,
       code,
-      status: result.terminalState,
-      ms: result.runMs,
-      findings: result.retainedFindings,
-    }),
-  );
+      startedAt: new Date(started).toISOString(),
+      processMs: Date.now() - started,
+      terminalState:
+        header?.terminalState ?? (review?.verdicts ? 'verification-output' : 'missing-output'),
+      runMs: header?.elapsedMs ?? review?.elapsedMs ?? null,
+      verdicts: review?.verdicts,
+      retainedFindings: review?.findings.length ?? null,
+      incompleteSessions: review?.incompleteSessions ?? null,
+      usage,
+      costAvailable: knownCost,
+      totalEstimatedCostUsd: knownCost
+        ? usage.costUsd + prefetch.reduce((sum, r) => sum + Number(r.estimatedCostUsd ?? 0), 0)
+        : null,
+      prefetch,
+      evidenceCache: rows.find((r) => r.kind === 'evidence-cache'),
+      phases: rows.filter((r) => r.kind === 'phase' && r.scope === 'run'),
+      exploration: rows.filter((r) => r.kind === 'exploration'),
+      policy: header?.policy,
+      execution: header?.execution,
+    };
+    results.push(result);
+    writeFileSync(resolve(out, 'results.json'), JSON.stringify(results, null, 2) + '\n');
+    console.log(
+      JSON.stringify({
+        id: run.id,
+        case: run.caseId,
+        arm: run.arm,
+        code,
+        status: result.terminalState,
+        ms: result.runMs,
+        findings: result.retainedFindings,
+      }),
+    );
+  }
+} finally {
+  if (cacheRoot) {
+    try {
+      rmSync(cacheRoot, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+    } catch {
+      console.warn('Could not remove experiment cache directory.');
+    }
+  }
 }
