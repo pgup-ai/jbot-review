@@ -129,6 +129,8 @@ test('named evidence includes unchanged callers while bounding source delivery a
       'import { validateOptions } from "./helper";\nvalidateOptions();\n',
     );
     await writeFile(join(workspace, '.env'), 'validateOptions=SECRET_MUST_NOT_APPEAR');
+    for (let i = 0; i < 10; i++)
+      await writeFile(join(workspace, `src/caller_${i}.ts`), 'validateOptions();\n');
     await execFileAsync('git', ['add', '.'], { cwd: workspace });
     await writeFile(join(workspace, 'untracked.ts'), 'validateOptions(SECRET_MUST_NOT_APPEAR)');
     const finding: Finding = {
@@ -141,10 +143,13 @@ test('named evidence includes unchanged callers while bounding source delivery a
     const refs = await findNamedSourceLocations(workspace, [finding]);
     assert.ok(refs.locations.some((ref) => ref.path === 'src/caller.ts'));
     assert.ok(refs.locations.length <= 8);
+    assert.ok(refs.omitted.some((ref) => ref.path === 'src/caller_9.ts'));
     const context = await buildFindingSourceContext(workspace, [finding], undefined, refs);
     assert.match(context, /validateOptions\(\);/);
     assert.doesNotMatch(context, /SECRET_MUST_NOT_APPEAR/);
     assert.ok(Buffer.byteLength(context) <= MAX_FINDING_SOURCE_CONTEXT_BYTES);
+    assert.match(context, /Unavailable or omitted locations.*src\/caller_9.ts:1/);
+    assert.doesNotMatch(context, /Unavailable or omitted locations.*src\/helper.ts:1/);
     assert.deepEqual(
       await findNamedSourceLocations(workspace, [{ title: '`missingSymbol`', body: '' }]),
       { locations: [], omitted: [], unsearched: ['missingSymbol'] },

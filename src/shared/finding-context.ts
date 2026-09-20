@@ -222,7 +222,13 @@ export async function buildFindingSourceContext(
   );
   return formatFindingSources(
     sources,
-    [...omitted, ...(related.omitted ?? []), ...locations.slice(MAX_SOURCE_LOCATIONS)],
+    [
+      ...[...omitted, ...(related.omitted ?? [])].filter(
+        (ref) =>
+          !locations.some((location) => location.path === ref.path && location.line === ref.line),
+      ),
+      ...locations.slice(MAX_SOURCE_LOCATIONS),
+    ],
     related.unsearched,
   );
 }
