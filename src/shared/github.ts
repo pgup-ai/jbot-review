@@ -849,8 +849,9 @@ export async function updateReviewBody(
 }
 
 export function formatFindingLabel(
-  finding: Pick<Finding, 'severity' | 'kind' | 'confidence'>,
+  finding: Pick<Finding, 'severity' | 'kind' | 'confidence' | 'verificationUncertain'>,
 ): string {
+  if (finding.verificationUncertain) return '**Unverified**';
   const kind = finding.kind ? ` · ${finding.kind}` : '';
   const confidence = finding.confidence
     ? ` (*conf: ${finding.confidence === 'medium' ? 'med' : finding.confidence}*)`

@@ -4908,7 +4908,7 @@ function uniqueModels(primary: string, others: string[]): string[] {
 }
 
 function getMergeGuidance(
-  findings: Pick<Finding, 'severity'>[],
+  findings: Pick<Finding, 'severity' | 'verificationUncertain'>[],
   incomplete: boolean,
 ): {
   state: string;
@@ -4931,6 +4931,14 @@ function getMergeGuidance(
     };
   }
 
+  if (findings.some((finding) => finding.verificationUncertain)) {
+    return {
+      state: 'Unverified concerns remain',
+      mergeGuidance:
+        'Verification was inconclusive; review the unverified concerns before relying on this result.',
+    };
+  }
+
   if (findings.length === 0) {
     return {
       state: 'Good to go from jbot-review',
@@ -4944,12 +4952,17 @@ function getMergeGuidance(
   };
 }
 
-function buildSeverityTable(findings: Pick<Finding, 'severity'>[]): string[] {
-  const counts = countBySeverity(findings);
+function buildSeverityTable(
+  findings: Pick<Finding, 'severity' | 'verificationUncertain'>[],
+): string[] {
+  const graded = findings.filter((finding) => !finding.verificationUncertain);
+  const counts = countBySeverity(graded);
+  const unverified = findings.length - graded.length;
   return [
-    '| Total | P0 | P1 | P2 | P3 | nit |',
-    '| ---: | ---: | ---: | ---: | ---: | ---: |',
-    `| ${findings.length} | ${counts.P0} | ${counts.P1} | ${counts.P2} | ${counts.P3} | ${counts.nit} |`,
+    `| Total | P0 | P1 | P2 | P3 | nit |${unverified ? ' Unverified |' : ''}`,
+    `| ---: | ---: | ---: | ---: | ---: | ---: |${unverified ? ' ---: |' : ''}`,
+    `| ${findings.length} | ${counts.P0} | ${counts.P1} | ${counts.P2} | ${counts.P3} | ${counts.nit} |${unverified ? ` ${unverified} |` : ''}`,
+    ...(unverified ? ['', 'Unverified concerns are excluded from the severity counts.'] : []),
   ];
 }
 

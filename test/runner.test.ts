@@ -1529,7 +1529,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
     undefined,
     [{ label: 'review-interactions', reason: 'timed out' }],
   );
-  assert.match(body, /`review-interactions` \(timed out\)/);
+  assert.match(body, /Review interactions:\*\* timed out/);
   assert.equal(completedReviewHead(body), undefined);
   const head = 'a'.repeat(40);
   const complete = buildBody('', '', [], [], 'model', 'owner', 'repo', head);
@@ -1543,7 +1543,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   assert.equal(completedReviewHead(complete + '\n\n<!-- jbot-review:incomplete -->'), undefined);
   assert.equal(completedReviewHead(PRIOR_JBOT_REVIEW), undefined);
   assert.match(body, /Review incomplete/);
-  assert.match(body, /review-interactions/);
+  assert.match(body, /Review interactions/);
   assert.match(body, /Main review completed/);
   assert.match(body, /Findings from completed passes are included/);
   assert.doesNotMatch(body, /unverified concerns/);
@@ -1578,6 +1578,15 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
         severity: 'P3',
         verificationUncertain: true,
       },
+      {
+        path: 'b.ts',
+        line: 1,
+        title: 'Unverified nit',
+        body: 'Claim',
+        severity: 'nit',
+        verificationUncertain: true,
+      },
+      { path: 'c.ts', line: 1, title: 'Minor bug', body: 'Evidence', severity: 'P3' },
     ],
     [],
     'model',
@@ -1585,6 +1594,10 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
     'repo',
   );
   assert.doesNotMatch(uncertain, /Definitely broken/);
+  assert.match(uncertain, /\| Total \| P0 \| P1 \| P2 \| P3 \| nit \| Unverified \|/);
+  assert.match(uncertain, /\| 3 \| 0 \| 0 \| 0 \| 1 \| 0 \| 2 \|/);
+  assert.match(uncertain, /Unverified concerns remain/);
+  assert.doesNotMatch(uncertain, /Mergeable with non-blocking comments/);
 });
 
 it('sizes verifier batches before optional evidence and rejects only oversized required context', async () => {

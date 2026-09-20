@@ -123,6 +123,8 @@ test('budgets instructions, guidelines, context and output separately from trans
     'Ranked caller evidence',
   );
   assert.equal(compactReviewPageContext('small context', 'scope', '', '', ''), 'small context');
+  const largeContext = 'context '.repeat(3000);
+  assert.equal(compactReviewPageContext(largeContext, largeContext, '', '', ''), largeContext);
   assert.ok(compact.startsWith(UNTRUSTED_PR_CONTENT_NOTE));
   assert.match(compact, /PR intent and linked issue contract/);
   assert.match(compact, /Ranked caller evidence/);

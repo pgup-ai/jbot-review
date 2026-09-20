@@ -355,7 +355,29 @@ export function formatIncompleteCoverage(sessions: readonly IncompleteSession[])
   const verificationFailed = sessions.some(
     ({ label }) => label === 'finding-verification' || label === 'late-finding-verification',
   );
-  const list = sessions.map(({ label, reason }) => `\`${label}\` (${reason})`).join(', ');
+  const groups = new Map<string, IncompleteSession[]>();
+  for (const session of sessions) {
+    const label = isMainReviewLabel(session.label)
+      ? 'review'
+      : session.label.replace(/-page-\d+$/, '');
+    const group = groups.get(label) ?? [];
+    group.push(session);
+    groups.set(label, group);
+  }
+  const list = [...groups].map(([label, group]) => {
+    const name = label === 'review' ? 'Main review' : label.replaceAll('-', ' ');
+    const reason =
+      group.find((session) => session.label === label)?.reason ??
+      [...new Set(group.map((session) => session.reason))].join('; ');
+    const pages = group.filter((session) => /-page-\d+$/.test(session.label)).length;
+    return `- **${name[0].toUpperCase()}${name.slice(1)}:** ${reason}${pages ? `; ${pages} page${pages === 1 ? '' : 's'} incomplete` : ''}.`;
+  });
   const main = sessions.some(({ label }) => isMainReviewLabel(label)) ? 'cut short' : 'completed';
-  return `⚠️ **Review incomplete:** Main review ${main}; ${list} did not complete successfully. Findings from completed passes are included.${verificationFailed ? ' Findings affected by incomplete verification are marked as unverified concerns.' : ''}`;
+  return [
+    `⚠️ **Review incomplete.** Main review ${main}.`,
+    '',
+    ...list,
+    '',
+    `Findings from completed passes are included.${verificationFailed ? ' Findings affected by incomplete verification are marked as unverified concerns.' : ''}`,
+  ].join('\n');
 }

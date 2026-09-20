@@ -153,6 +153,38 @@ did not demonstrate a worthwhile defect: existing guards, parsing, stream
 flushing, option rereads or failure handling already cover them; the exploration
 checkpoint is advisory, and the concurrency-policy change is intentional.
 
+## Dogfood report follow-up
+
+The [a27aef0 review](https://github.com/pgup-ai/jbot-review/pull/228#pullrequestreview-5261715539)
+listed 44 failure entries: verification, two auxiliary passes, and 41 child
+page failures from those passes. These were not 44 independent failures.
+Main coverage was complete; the auxiliary and verification failures made the
+overall review incomplete.
+
+Its 13 P3 comments were candidates demoted after verification timed out, not
+13 confirmed minor bugs. Manual triage accepted two verifier-budget fixes and
+the separate README nit. The other 11 P3 hypotheses were unsupported,
+unreachable or intentional behavior, as recorded in their resolved threads.
+This is one run's adjudication, not a general precision estimate.
+
+The report now groups child failures under their pass, retaining page counts
+and the incomplete warning. Replaying the exact failure rows reduces the
+notice from 2,021 to 387 UTF-8 bytes. Per-page telemetry remains unchanged.
+Unverified comments display an **Unverified** label and occupy a separate table
+column instead of inflating P3/nit counts. All 14 candidates remain present;
+finding disposition, filtering and approval policy are unchanged. Inconclusive
+verification also gets explicit merge guidance when all sessions completed.
+
+This follow-up changes presentation only. It does not establish that the
+verifier timeout or review precision is fixed, and no new model benchmark is
+needed for the report layout. Existing tests exercise grouped failures,
+mixed verified/unverified counts, labels and incomplete-review markers.
+
+Validation: all 1,109 tests, typecheck, lint, formatting, build and diff checks
+passed. Self-review found no remaining P1/P2 issue in this presentation change.
+De-slop added no comment blocks or test cases; assertions extend four existing
+cases. No flags, dependencies or model calls were added.
+
 ## Release limit
 
 This targeted fixture cannot establish corpus-wide recall, false-positive rate
