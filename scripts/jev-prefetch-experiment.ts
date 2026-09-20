@@ -329,8 +329,8 @@ try {
     };
     const experimentPath = resolve(dir, 'experiment.json');
     writeFileSync(experimentPath, JSON.stringify(experiment));
-    let code: number | null;
-    let logError: Error | void;
+    let code: number | null = null;
+    let processError: unknown;
     const timeoutMessage = 'Experiment process deadline exceeded';
     try {
       const child = await processes.run('trial', () =>
@@ -361,23 +361,24 @@ try {
       code = child.exitCode;
       if (code !== 0) process.exitCode = 1;
     } catch (error) {
+      processError = error;
+    }
+    stream.end();
+    const logError = await logFinished;
+    const error = processError ?? logError;
+    if (error) {
       const terminalState =
         error instanceof Error && error.message === timeoutMessage ? 'timeout' : 'process-failed';
-      if (!stream.destroyed) stream.write(`\nExperiment ${terminalState}.\n`);
       results.push({
         ...run,
-        code: null,
+        code,
         startedAt: new Date(started).toISOString(),
         processMs: Date.now() - started,
         terminalState,
       });
       writeFileSync(resolve(out, 'results.json'), JSON.stringify(results, null, 2) + '\n');
       throw error;
-    } finally {
-      stream.end();
-      logError = await logFinished;
     }
-    if (logError) throw logError;
     checkCase(c);
     const review:
       | (ReviewResult & {
