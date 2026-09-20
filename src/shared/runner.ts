@@ -2402,6 +2402,7 @@ async function runReviewPipeline(params: {
       configuration: runConfiguration(options, model).configurationHash,
       linkedIssueContext,
       experiment: options.experiment,
+      jointGuidelineLens: GUIDELINE_REVIEW_LENS,
       prompts: auxiliarySessions.map((session) =>
         session === 'guideline-compliance'
           ? assembleGuidelineCompliancePrompt('', guidelines)
