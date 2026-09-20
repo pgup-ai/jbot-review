@@ -102,7 +102,13 @@ it('cancels one session and waits for descendant pipes to close without cancelli
       ),
     );
     const limit = Date.now() + 3000;
-    while ((!existsSync(ready) || !existsSync(otherReady)) && Date.now() < limit) await delay(10);
+    while (
+      (!existsSync(ready) ||
+        !existsSync(otherReady) ||
+        !observed.includes('progress before abort')) &&
+      Date.now() < limit
+    )
+      await delay(10);
     assert.ok(existsSync(ready) && existsSync(otherReady));
     assert.match(observed, /progress before abort/);
     assert.equal(scope.abort('missing'), 0);
