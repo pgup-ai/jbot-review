@@ -1077,6 +1077,10 @@ Three independent, default-off OpenCode experiments:
   excerpt; unclassified shell calls prevent these counters from proving avoidance.
   Same-turn completions are excluded from the subsequent-read counter because
   they can belong to an already running tool batch.
+  `JBOT_READ_EVIDENCE_PHASE=review` restricts delivery to main review sessions;
+  `verification` restricts it to finding verification. The default `all` preserves
+  delivery in every eligible session. Phase selection uses host-registered session
+  labels, including forked verifiers; it does not change verification policy.
 
 Use the first two switches for the combined retrieval/checkpoint arm. Exploration rows include an `experiment`
 object with checkpoint counts by trigger, retrieval calls/fallbacks, candidates
@@ -1095,6 +1099,22 @@ Use `"readEvidence": true` instead for baseline versus automatic read evidence,
 with composite-tool prompting, checkpoints and Jev preloading disabled in both arms.
 Set `"readEvidence": "linked"` for a three-arm comparison that adds selective
 linked evidence to those same controls.
+Use `"experiment": "phases"` for baseline versus linked delivery to the main review,
+verifier, or both. Per-session packet counters make the routing observable.
+
+`JBOT_BATCH_DIFF_RECOVERY=1` is a separate, default-off prompt experiment for main
+review backends with repository tools. Missing small patches receive ready-to-run
+Git command batches, using immutable review revisions and literal path arguments.
+The plan is at most 4 KiB; each batch has at most eight path arguments and an
+estimated 8 KiB of diff output. Actual output can be larger, including path-limited
+renames, so normal truncation recovery still applies. Large, unknown and unplanned
+patches remain listed for ordinary retrieval. Full-diff scope is unchanged.
+Use `"experiment": "diff-batches"` for baseline versus this arm with source delivery
+and Jev preloading disabled. These switches do not cache model responses or verdicts.
+OpenCode tool rows count `diffFileHeaders`; session rows also count
+`multiFileDiffCalls`. These count returned diff headers, including repeated or
+partially truncated files, not unique files or proof of complete coverage. Diff
+classification recognizes the canonical Git options used by the batch plan.
 
 ### Jev caller-evidence experiment
 
