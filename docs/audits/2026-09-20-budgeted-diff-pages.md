@@ -1,6 +1,6 @@
 # Complete diff pages and PR #228 dogfood diagnosis
 
-Runtime: `cdb449a50d405cfc04e0be03cb544aa53726f499`. Baseline:
+Runtime: `15e5d7c95506c1ec6d2be33ed91516bd8e674696`. Baseline:
 `868a476c9e915f0494d35903aaf275323d5d8d3f`.
 
 ## Delivery contract
@@ -131,6 +131,55 @@ space by shrinking metadata, not mandatory hunks. It also fixes the separately
 reported no-newline split boundary, partial-main acceptance and verifier-source
 budget cases. This failed run provides no recall comparison with other reviewers.
 
+## Latest completed dogfood: delivery fixed, auxiliary coverage incomplete
+
+[Run 35535032749, job 106142411475](https://github.com/pgup-ai/jbot-review/actions/runs/35535032749/job/106142411475)
+at `45498eb` completed its main review: **225/225 original hunks, 34/34 main
+tasks, zero incomplete main tasks**. All main page rows reported zero omitted
+or truncated patches. The largest measured main prompt was 83,018 bytes.
+Main, auxiliary and verification roles all used tool-less CommandCode Muse Spark
+1.3 Contributor; batching hints were therefore inactive.
+
+The job succeeded, but its posted review explicitly reported **incomplete
+auxiliary coverage**. All 34 guideline pages completed; 13 of 14 interaction
+pages completed and the remaining page was aborted at the settlement deadline.
+The optional changes-since-last-review summary failed preflight at 156,028 bytes.
+Successful findings were retained, as required; this is not an all-clear result.
+
+This run took **617.8s**, including **277.1s main review** and **322.9s waiting
+for auxiliary work**, and made 85 model calls: 34 main, 34 guideline, 14 lens,
+two verification and one addressed check. The preceding completed run took
+125.4s, but changed code and selected models differ, so these are not paired
+latency measurements. The extra pages and auxiliary queue are observable costs;
+there is no evidence of a speed improvement here. Token totals were 2,646,665
+input, 200,262 output and 390,834 cached-input tokens. Counters and artifact hashes
+are in the per-run data. Optional context repeated across pages and auxiliary
+scheduling are concrete follow-up optimization targets.
+
+The five main candidates all survived filtering: one confirmed P2 and four
+uncertain findings posted as investigation notes. No P1 was generated.
+Manual adjudication found **one valid defect among those five**, in an uncertain
+note; the confirmed P2 was a false positive:
+
+| J-Bot result                              | Manual check                                                                                 | Action                                              |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Relative experiment workspace             | Valid: the child changes cwd before using the relative workspace.                            | Resolve workspace arguments in both trial branches. |
+| Raw diff headers treated as changed lines | Not reachable: GitHub patches are hunk-only and `parseGitDiff` removes raw file headers.     | Not applied.                                        |
+| Backend workspace capability              | The sole telemetry caller separately checks the model capability.                            | Not applied.                                        |
+| Missing experiment defaults               | `runReviewPipeline` calls `normalizeOptions` before the dereferences.                        | Not applied.                                        |
+| Removed blanket auxiliary diff gate       | Finder pages are complete; targeted checks explicitly fail open when evidence is incomplete. | Not applied.                                        |
+
+The verifier lacked the unchanged experiment child/parser/caller context. It
+therefore demoted the valid path bug to uncertain, and incorrectly confirmed the
+header hypothesis without proving that raw headers reach the function. Complete
+main delivery solved the delivery contract, but did not solve dependency evidence
+or verifier precision. This run does not establish a general recall improvement.
+CodeRabbit's separate model-limit finding was valid: reserving a model's entire
+maximum output can leave no input space when it equals the context window. The
+follow-up caps reserved output headroom while Pi's installed SDK independently
+clamps actual generation to remaining context. A real catalog entry with equal
+input/output ceilings now exercises that regression.
+
 The public Action's matching input descriptions are prepared in
 [draft wrapper PR #57](https://github.com/pgup-ai/jbot-review-action/pull/57).
 They should publish with the runtime after its release gate is satisfied.
@@ -208,10 +257,11 @@ verifier batch sizing. Seven older cases were replaced or
 folded into those regressions; existing prompt policy assertions remain.
 
 At `cdb449a`, all **1,106 tests** (260 suites), typecheck, lint, formatting
-and build passed. PR CI at `45498eb` independently passed all 1,106 tests,
+and build passed. The final catalog/workspace fixes passed the same full suite
+and focused planner/static/build checks; the default opaque-CLI budget is unchanged. PR CI at `45498eb` independently passed all 1,106 tests,
 lint, formatting and typecheck. No dependencies or CLI packaging changed.
 Secrets remain outside tracked files.
 
-Follow-up tracked delta before this audit/data commit: **+1306 / −627, net +679 code/config/test lines**
-across 21 files relative to `868a476` (excluding the new audit and data).
-The new audit and sanitized per-run data are listed separately in this commit.
+Follow-up delta relative to `868a476`, excluding these new evidence files:
+**+1314 / −623, net +691 lines** across 22 implementation and documentation files.
+New evidence files: this audit (267 lines) and the per-run JSON (340 lines).
