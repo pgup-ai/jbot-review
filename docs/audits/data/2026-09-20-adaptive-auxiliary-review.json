@@ -1034,5 +1034,223 @@
       }
     ]
   },
-  "excludedPilot": "An earlier uncommitted pilot accidentally tracked Git setup configuration; no reported claim uses it."
+  "excludedPilot": "An earlier uncommitted pilot accidentally tracked Git setup configuration; no reported claim uses it.",
+  "finalSmoke": {
+    "protocol": {
+      "control": "1d8013be1361d34bfe10876f9d0a151c36dc25a5",
+      "treatmentCommit": "132fc37daa9067b8870e282b2379d7421b12681e",
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "repetitions": 1,
+      "baseCount": 201,
+      "headCount": 100,
+      "firstHead": "f73e6b073a596db4e080a5979500003208a98f1d",
+      "qualityGate": "Targeted follow-up experiment; not the full corpus."
+    },
+    "runs": [
+      {
+        "name": "initial-treatment",
+        "arm": "treatment",
+        "durationMs": 44050,
+        "sessionExecutions": 5,
+        "headSha": "f73e6b073a596db4e080a5979500003208a98f1d",
+        "fixtureHash": "fc0937ef1f5e52f3676bdeee6f2f738fe23375b15b24c636fa4f7b0171f0f6f9",
+        "delivery": {
+          "expectedHunks": 47,
+          "deliveredHunks": 47,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": [],
+        "auxiliaryPromptBytes": 132909,
+        "phasesMs": {
+          "main-execution": 24214,
+          "grace-wait": 12291,
+          "verification": 7353
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P1",
+            "kind": "architecture",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "posted-inline": 2,
+          "deduped": 2
+        }
+      },
+      {
+        "name": "docs-control-1",
+        "arm": "control",
+        "durationMs": 41805,
+        "sessionExecutions": 6,
+        "headSha": "fa8c4966026e20575a8921ddab79c96be0127268",
+        "fixtureHash": "dbde395fe6941cc220339bd5fb17ac72c6ece57853f85af4af029bbc6123b650",
+        "delivery": {
+          "expectedHunks": 48,
+          "deliveredHunks": 48,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": [],
+        "auxiliaryPromptBytes": 133065,
+        "phasesMs": {
+          "main-execution": 22862,
+          "grace-wait": 11411,
+          "verification": 7396
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P0",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P1",
+            "kind": "architecture",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "deduped": 2,
+          "posted-inline": 2
+        }
+      },
+      {
+        "name": "docs-treatment-1",
+        "arm": "treatment",
+        "durationMs": 32542,
+        "sessionExecutions": 4,
+        "headSha": "fa8c4966026e20575a8921ddab79c96be0127268",
+        "fixtureHash": "dbde395fe6941cc220339bd5fb17ac72c6ece57853f85af4af029bbc6123b650",
+        "delivery": {
+          "expectedHunks": 48,
+          "deliveredHunks": 48,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": ["review-interactions", "guideline-compliance"],
+        "auxiliaryPromptBytes": 0,
+        "phasesMs": {
+          "main-execution": 21653,
+          "grace-wait": 0,
+          "verification": 10770
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P2",
+            "kind": "architecture",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "posted-inline": 2
+        }
+      },
+      {
+        "name": "code-control",
+        "arm": "control",
+        "durationMs": 53749,
+        "sessionExecutions": 6,
+        "headSha": "89d7b8631c802beaea1e6b8cb6d54159eed30f0d",
+        "fixtureHash": "2c1589b86dbe55fe4406f2a0154940f50c5e4f1d72444c8a423b3fbe44f78c49",
+        "delivery": {
+          "expectedHunks": 49,
+          "deliveredHunks": 49,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": [],
+        "auxiliaryPromptBytes": 133409,
+        "phasesMs": {
+          "main-execution": 29996,
+          "grace-wait": 16118,
+          "verification": 7542
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "posted-inline": 2,
+          "deduped": 2
+        }
+      },
+      {
+        "name": "code-treatment",
+        "arm": "treatment",
+        "durationMs": 43281,
+        "sessionExecutions": 6,
+        "headSha": "89d7b8631c802beaea1e6b8cb6d54159eed30f0d",
+        "fixtureHash": "2c1589b86dbe55fe4406f2a0154940f50c5e4f1d72444c8a423b3fbe44f78c49",
+        "delivery": {
+          "expectedHunks": 49,
+          "deliveredHunks": 49,
+          "expectedTasks": 2,
+          "completedTasks": 2,
+          "incompleteTasks": 0
+        },
+        "reusedPasses": [],
+        "auxiliaryPromptBytes": 133409,
+        "phasesMs": {
+          "main-execution": 30827,
+          "grace-wait": 4955,
+          "verification": 7386
+        },
+        "incomplete": [],
+        "retainedFindings": [
+          {
+            "path": "src/batch.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          },
+          {
+            "path": "src/policy.ts",
+            "severity": "P1",
+            "kind": "bug",
+            "uncertain": false
+          }
+        ],
+        "dispositions": {
+          "posted-inline": 2,
+          "deduped": 2
+        }
+      }
+    ]
+  }
 }

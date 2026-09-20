@@ -110,6 +110,24 @@ three); the initial review and code follow-up pair always run. The script assert
 that documentation reuse happens, code changes invalidate it and no pass is
 incomplete. Its temporary fixture and Git configuration are removed on exit.
 
+## Final runtime smoke
+
+After removing the unsuccessful caller lookup, the clean `132fc37` runtime ran
+one more initial review, documentation pair and code pair with the same driver
+and one repetition:
+
+| Stage                   |              Control |             Adaptive | Delivery      |
+| ----------------------- | -------------------: | -------------------: | ------------- |
+| Initial review          |                    — | 44.1s / 5 executions | 47/47 hunks   |
+| Documentation follow-up | 41.8s / 6 executions | 32.5s / 4 executions | 48/48 in both |
+| Code follow-up          | 53.7s / 6 executions | 43.3s / 6 executions | 49/49 in both |
+
+Both known roots survived all five runs, with no incomplete pass. The adaptive
+documentation run reused both completed auxiliary records; the code run reused
+neither. This validates the final scheduling path after cleanup. One pair per
+follow-up is a smoke test, not a replacement for the earlier three-pair estimate
+or evidence of a reliable speedup on code changes.
+
 ## Verifier evidence replay
 
 The 17 comments in the [latest inspected review](https://github.com/pgup-ai/jbot-review/pull/228#pullrequestreview-5261979603)
@@ -192,3 +210,5 @@ Self-review found no remaining P1/P2 issue in this increment. Validation passed:
 `npm run build` and `git diff --check`. No dependency or CLI packaging changed
 in this follow-up. A hosted run of the new preset and the full-corpus release
 gate remain unvalidated.
+
+Net line delta versus `1d8013b`: +2233 / -44 across runtime, tests, the reproduction driver and audit data. No untracked files remain.
