@@ -1675,19 +1675,15 @@ it('verifies every batch and preserves successful verdicts when another batch fa
     title: `finding ${i}`,
     body: 'claim',
   }));
-  for (const [firstBatch, batchSize] of ['complete', 'failed', 'partial'].flatMap((state) =>
-    [10, 4].map((size) => [state, size] as const),
-  )) {
+  for (const firstBatch of ['complete', 'failed', 'partial']) {
     const sizes: number[] = [];
     const coverage: string[] = [];
     const backend = {
-      canReadWorkspace: batchSize === 10,
       async runFindingVerification(_model: string, _context: string, targets: Finding[]) {
         sizes.push(targets.length);
         if (sizes.length === 1) {
           if (firstBatch === 'failed') throw new Error('provider unavailable');
-          if (firstBatch === 'partial')
-            return [{ index: batchSize - 1, verdict: 'refuted' as const }];
+          if (firstBatch === 'partial') return [{ index: 9, verdict: 'refuted' as const }];
         }
         return targets.map((_, index) => ({ index, verdict: 'refuted' as const }));
       },
@@ -1702,12 +1698,12 @@ it('verifies every batch and preserves successful verdicts when another batch fa
       log: () => {},
       onCoverage: (row) => coverage.push(row.state),
     });
-    assert.deepEqual(sizes, batchSize === 10 ? [10, 10, 3] : [4, 4, 4, 4, 4, 3]);
+    assert.deepEqual(sizes, [10, 10, 3]);
     assert.deepEqual(
       verdicts.map((v) => v.index),
       findings
         .map((_, i) => i)
-        .slice(firstBatch === 'failed' ? batchSize : firstBatch === 'partial' ? batchSize - 1 : 0),
+        .slice(firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0),
     );
     assert.deepEqual(coverage, [firstBatch === 'complete' ? 'completed' : 'failed']);
     const retained = applyFindingVerdicts(
@@ -1718,10 +1714,7 @@ it('verifies every batch and preserves successful verdicts when another batch fa
     assert.deepEqual(
       retained.map((f) => f.line),
       findings
-        .slice(
-          0,
-          firstBatch === 'failed' ? batchSize : firstBatch === 'partial' ? batchSize - 1 : 0,
-        )
+        .slice(0, firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0)
         .map((f) => f.line),
     );
     assert.ok(retained.every((f) => f.verificationUncertain && f.confidence === 'low'));

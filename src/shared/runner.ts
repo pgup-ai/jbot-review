@@ -3798,7 +3798,7 @@ export async function requestFindingVerdicts(params: {
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
   workspace: string;
-  backend: Pick<ReviewBackend, 'runFindingVerification' | 'canReadWorkspace'>;
+  backend: Pick<ReviewBackend, 'runFindingVerification'>;
   model: string;
   prContext: string;
   targets: Finding[];
@@ -3813,10 +3813,7 @@ export async function requestFindingVerdicts(params: {
   const verdicts: FindingVerdictList = [];
   let failure: Error | undefined;
   for (let offset = 0; offset < params.targets.length;) {
-    let size = Math.min(
-      params.backend.canReadWorkspace === false ? 4 : VERIFICATION_BATCH_SIZE,
-      params.targets.length - offset,
-    );
+    let size = Math.min(VERIFICATION_BATCH_SIZE, params.targets.length - offset);
     let targets = params.targets.slice(offset, offset + size);
     try {
       let context: string;

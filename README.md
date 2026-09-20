@@ -1032,8 +1032,8 @@ output per batch; actual output can be larger, so truncation recovery remains.
 Neither preset narrows full-diff scope or caps exploration depth.
 
 All presets give verification bounded cited source, nearby imports/local definitions
-and deterministic caller evidence. Tool-less verifiers receive at most four findings
-per batch. Missing evidence leaves a finding unverified; retrieval does not decide
+and deterministic caller evidence. Failed verification preserves an unverified finding;
+retrieval does not decide
 the verdict. Guideline checks share the first auxiliary lens when one is selected,
 so the same diff and rules do not require a separate guideline pass.
 
