@@ -1031,6 +1031,12 @@ at most 4 KiB of command instructions, with eight paths and an estimated 8 KiB o
 output per batch; actual output can be larger, so truncation recovery remains.
 Neither preset narrows full-diff scope or caps exploration depth.
 
+All presets give verification bounded cited source, nearby imports/local definitions
+and deterministic caller evidence. Tool-less verifiers receive at most four findings
+per batch. Missing evidence leaves a finding unverified; retrieval does not decide
+the verdict. Guideline checks share the first auxiliary lens when one is selected,
+so the same diff and rules do not require a separate guideline pass.
+
 `policy.configuration.reviewExperiment` records the selected preset and the
 resolved behavior participates in the cache fingerprint. Jev rows record actual
 selection/status/API usage; exploration rows record packets, preparation,
@@ -1042,7 +1048,7 @@ Preserve the log and `.jbot-review/telemetry.jsonl` before the next run.
 The research driver `scripts/jev-prefetch-experiment.ts` retains historical
 ablation plans through explicit, per-run programmatic settings; they appear as
 `custom` in telemetry. Shared reads, handoff, persistent caches, background
-prefetch, broad packets, verifier delivery and checkpoints are research-only.
+prefetch, broad packets and checkpoints are research-only.
 No production environment switches or compatibility aliases enable those arms.
 Provider prompt caching is separate and remains provider-managed.
 

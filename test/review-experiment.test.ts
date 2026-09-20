@@ -25,7 +25,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
     preset: 'off',
     jevPrefetch: 'off',
     explorationEvidence: 'off',
-    verificationEvidence: 'off',
+    verificationEvidence: 'deterministic',
     reuse: { shared: false, handoff: false, prefetch: false },
     exploration: {
       retrieval: false,
@@ -60,6 +60,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
     const { configuration, configurationHash } = runConfiguration(options, 'opencode/a', stale);
     assert.equal(configuration.reviewExperiment, preset.preset);
     assert.equal(configuration.jevPrefetch, preset.jevPrefetch);
+    assert.equal(configuration.verificationEvidence, preset.verificationEvidence);
     assert.deepEqual(configuration.explorationExperiment, preset.exploration);
     hashes.add(configurationHash);
   }

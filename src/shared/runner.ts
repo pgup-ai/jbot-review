@@ -1553,9 +1553,7 @@ async function runReviewPipeline(params: {
       findings,
       scope === 'exploration'
         ? options.experiment.explorationEvidence
-        : options.experiment.verificationEvidence === 'off'
-          ? 'deterministic'
-          : options.experiment.verificationEvidence,
+        : options.experiment.verificationEvidence,
       {
         timeoutMs,
         apiKey: process.env.TYPESAFE_API_KEY,
@@ -2262,7 +2260,10 @@ async function runReviewPipeline(params: {
   );
   const mainBackend = budgetReviewBackend(
     limitReviewBackendSessions(
-      mainBaseBackend,
+      {
+        ...mainBaseBackend,
+        canReadWorkspace: mainBaseBackend.canReadWorkspace ?? !mainRequiresCompleteEmbeddedDiff,
+      },
       'main',
       sessionSlots,
       providerLimiters.forProvider(providerID) ?? serializedBackends.get(mainBaseBackend),
@@ -2272,7 +2273,10 @@ async function runReviewPipeline(params: {
   );
   const auxBackend = budgetReviewBackend(
     limitReviewBackendSessions(
-      auxBaseBackend,
+      {
+        ...auxBaseBackend,
+        canReadWorkspace: auxBaseBackend.canReadWorkspace ?? !auxRequiresCompleteEmbeddedDiff,
+      },
       'aux',
       sessionSlots,
       providerLimiters.forProvider(auxProviderID) ?? serializedBackends.get(auxBaseBackend),
