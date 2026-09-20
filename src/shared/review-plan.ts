@@ -12,7 +12,7 @@ import {
   UNTRUSTED_PR_CONTENT_NOTE,
   BOUNDARY_EVIDENCE_NOTE,
   BOUNDARY_EVIDENCE_UNAVAILABLE,
-  truncateUtf8WithNotice,
+  boundedPromptContext,
   VERIFIER_TARGETED_DIFF_NOTE,
 } from './prompt.ts';
 
@@ -47,11 +47,16 @@ export function measureReviewPrompt(prompt: string, budget: ReviewPromptBudget, 
   return {
     promptBytes,
     inputTokenBound,
-    fits:
-      inputTokenBound <= 96 * 1024 &&
-      promptBytes + reserve <= budget.transportBytes &&
-      inputTokenBound + budget.outputTokens + budget.harnessTokens <= budget.contextTokens,
+    fits: inputTokenBound <= inputCapacity(budget),
   };
+}
+
+function inputCapacity(budget: ReviewPromptBudget): number {
+  return Math.min(
+    96 * 1024,
+    budget.transportBytes,
+    budget.contextTokens - budget.outputTokens - budget.harnessTokens,
+  );
 }
 
 export interface DiffUnit {
@@ -81,22 +86,22 @@ function diffUnits(file: PrFile): DiffUnit[] {
 
 function splitUnit(unit: DiffUnit): [DiffUnit, DiffUnit] {
   const lines = unit.file.patch!.split('\n');
-  const header = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(lines[0]);
+  const header = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/.exec(lines[0]);
   if (!header || lines.length < 3)
     throw new Error(
       `Incomplete diff delivery: one diff line in ${unit.file.filename} exceeds the assembled prompt budget.`,
     );
   const body = lines.slice(1);
   let mid = Math.ceil(body.length / 2);
-  if (body[mid]?.startsWith('\\')) mid++;
-  if (mid >= body.length)
+  if (body[mid]?.startsWith('\\')) mid += mid + 1 < body.length ? 1 : -1;
+  if (mid <= 0 || mid >= body.length)
     throw new Error(`Incomplete diff delivery: unsplittable hunk in ${unit.file.filename}.`);
-  let oldLine = Number(header[1]);
-  let newLine = Number(header[2]);
+  let oldLine = Number(header[1]) + (header[2] === '0' ? 1 : 0);
+  let newLine = Number(header[3]) + (header[4] === '0' ? 1 : 0);
   return [body.slice(0, mid), body.slice(mid)].map((part, index) => {
     const oldCount = part.filter((line) => line.startsWith('-') || line.startsWith(' ')).length;
     const newCount = part.filter((line) => line.startsWith('+') || line.startsWith(' ')).length;
-    const patch = `@@ -${oldLine},${oldCount} +${newLine},${newCount} @@${header[3]}\n${part.join('\n')}`;
+    const patch = `@@ -${oldCount ? oldLine : oldLine - 1},${oldCount} +${newCount ? newLine : newLine - 1},${newCount} @@${header[5]}\n${part.join('\n')}`;
     oldLine += oldCount;
     newLine += newCount;
     const neighbor = index === 0 ? body.slice(mid, mid + 6) : body.slice(Math.max(0, mid - 6), mid);
@@ -127,6 +132,9 @@ export function buildShardPlans(params: {
   const originals = params.shards.map((shard) => shard.flatMap(diffUnits));
   const map = buildReviewChangeMap(files);
   const reserve = params.evidenceReserveBytes ?? 0;
+  let core = params.coreContext.startsWith(UNTRUSTED_PR_CONTENT_NOTE)
+    ? params.coreContext.slice(UNTRUSTED_PR_CONTENT_NOTE.length).trimStart()
+    : params.coreContext;
   const render = (units: DiffUnit[], index: number, count: number): ShardPlan => {
     const assignedFiles = [...new Set(units.map((u) => u.file.filename))];
     const pageFiles = assignedFiles.map((filename) => ({
@@ -150,9 +158,6 @@ export function buildShardPlans(params: {
           params.batchDiffScope,
         )
       : '';
-    const core = params.coreContext.startsWith(UNTRUSTED_PR_CONTENT_NOTE)
-      ? params.coreContext.slice(UNTRUSTED_PR_CONTENT_NOTE.length).trimStart()
-      : params.coreContext;
     const parts =
       params.diffFirst && count === 1
         ? [UNTRUSTED_PR_CONTENT_NOTE, diff.text, core, map, assignment, recovery]
@@ -192,6 +197,14 @@ export function buildShardPlans(params: {
       params.budget,
       reserve,
     ).fits;
+  const fixedBytes =
+    Buffer.byteLength(params.renderPrompt(render([], 999999, 1000000).context)) -
+    Buffer.byteLength(core);
+  core = boundedPromptContext(
+    core,
+    Math.max(256, inputCapacity(params.budget) - reserve - fixedBytes - 24 * 1024),
+    'PR metadata and prior-review context',
+  );
   if (!fits([]))
     throw new Error(
       'Incomplete diff delivery: instructions, guidelines and shared context exhaust the assembled prompt budget before any diff can be delivered.',
@@ -283,7 +296,12 @@ export function targetedDiff(
       .map((u) => u.file.patch)
       .join('\n'),
   }));
-  return buildDiffHunksBlockWithMetadata(files, COMPLETE_DIFF_OPTIONS).text;
+  return [
+    buildDiffHunksBlockWithMetadata(files, COMPLETE_DIFF_OPTIONS).text,
+    buildAdjacentDiffContext(units.flatMap((unit) => unit.adjacent ?? [])),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export function targetedVerifierContext(
@@ -332,7 +350,7 @@ export async function addReviewEvidence(
                 })
                 .catch(() => '')
             : '';
-        const block = truncateUtf8WithNotice(
+        const block = boundedPromptContext(
           `${BOUNDARY_EVIDENCE_NOTE}\n${packet || BOUNDARY_EVIDENCE_UNAVAILABLE}`,
           REVIEW_EVIDENCE_BYTES - 2,
           'Caller evidence',

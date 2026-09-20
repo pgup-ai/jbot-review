@@ -2417,7 +2417,7 @@ async function runReviewPipeline(params: {
       batchDiffScope:
         options.experiment.exploration.batchDiffRecovery &&
         guidelineSelection.mainCanReadWorkspace &&
-        mainBackend.name !== 'pi'
+        !['pi', 'commandcode'].includes(mainBackend.name)
           ? diffScope
           : undefined,
     });
@@ -3773,34 +3773,43 @@ export async function requestFindingVerdicts(params: {
   for (let offset = 0; offset < params.targets.length;) {
     let size = Math.min(VERIFICATION_BATCH_SIZE, params.targets.length - offset);
     let targets = params.targets.slice(offset, offset + size);
-    if (params.promptBudget && params.contextForTargets) {
-      while (
-        size > 1 &&
-        !measureReviewPrompt(
-          assembleFindingVerificationPrompt(params.contextForTargets(targets), targets),
-          params.promptBudget,
-          REVIEW_EVIDENCE_BYTES,
-        ).fits
-      ) {
+    try {
+      let context: string;
+      for (;;) {
+        const sourceContext = await (params.sourceContext?.(targets) ??
+          buildFindingSourceContext(params.workspace, targets));
+        const evidenceTimeoutMs = computeEvidenceTimeoutMs(
+          params.timeoutMs === undefined ? undefined : params.timeoutMs - (Date.now() - startedAt),
+        );
+        let evidenceContext = '';
+        if (evidenceTimeoutMs > 0) {
+          try {
+            evidenceContext = (await params.prepareEvidence?.(targets, evidenceTimeoutMs)) ?? '';
+          } catch {
+            params.log('Verification evidence unavailable; continuing with cited source.');
+          }
+        } else if (params.prepareEvidence) {
+          params.log('Skipping optional evidence preparation to preserve verification time.');
+        }
+        context = [
+          params.contextForTargets?.(targets) ?? params.prContext,
+          sourceContext,
+          evidenceContext,
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+        if (
+          !params.promptBudget ||
+          measureReviewPrompt(
+            assembleFindingVerificationPrompt(context, targets),
+            params.promptBudget,
+          ).fits
+        )
+          break;
+        if (size === 1)
+          throw new Error('Finding verification singleton exceeds the assembled prompt budget.');
         size = Math.ceil(size / 2);
         targets = params.targets.slice(offset, offset + size);
-      }
-    }
-    try {
-      const sourceContext = await (params.sourceContext?.(targets) ??
-        buildFindingSourceContext(params.workspace, targets));
-      const evidenceTimeoutMs = computeEvidenceTimeoutMs(
-        params.timeoutMs === undefined ? undefined : params.timeoutMs - (Date.now() - startedAt),
-      );
-      let evidenceContext = '';
-      if (evidenceTimeoutMs > 0) {
-        try {
-          evidenceContext = (await params.prepareEvidence?.(targets, evidenceTimeoutMs)) ?? '';
-        } catch {
-          params.log('Verification evidence unavailable; continuing with cited source.');
-        }
-      } else if (params.prepareEvidence) {
-        params.log('Skipping optional evidence preparation to preserve verification time.');
       }
       const timeoutMs =
         params.timeoutMs === undefined
@@ -3809,9 +3818,7 @@ export async function requestFindingVerdicts(params: {
       if (timeoutMs === 0) throw new Error('Finding verification budget exhausted.');
       const batch = await params.backend.runFindingVerification(
         params.model,
-        [params.contextForTargets?.(targets) ?? params.prContext, sourceContext, evidenceContext]
-          .filter(Boolean)
-          .join('\n\n'),
+        context,
         targets,
         params.log,
         timeoutMs,
@@ -4205,20 +4212,26 @@ export async function runShardedReview(params: {
       delivery,
     });
   }
-  const successes = outcomes.filter((outcome) => outcome.result !== undefined);
-  const failures = outcomes.filter((outcome) => outcome.result === undefined);
+  const failures = outcomes.filter(
+    (outcome) => outcome.result === undefined || outcome.result.partial,
+  );
   for (const failure of failures) {
     log(
       `${failure.plan.label} failed permanently: ${
-        failure.error instanceof Error ? failure.error.message : String(failure.error)
+        failure.error instanceof Error
+          ? failure.error.message
+          : failure.result?.partial
+            ? 'incomplete partial result'
+            : String(failure.error)
       }`,
     );
   }
   if (failures.length > 0) {
-    const first = failures[0]?.error;
+    const first = failures[0]?.error ?? new Error('A main review page returned a partial result.');
     throw new Error(buildMainShardFailureMessage(failures.length, shardPlans.length, first));
   }
 
+  const successes = outcomes.filter((outcome) => outcome.result !== undefined);
   const findings = successes.flatMap(({ plan, result }) => {
     if (!sharded) return result.findings;
     // Anchoring clamp: findings in another shard's changed file are that

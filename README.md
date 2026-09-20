@@ -508,7 +508,9 @@ that cannot fit fails explicitly instead of truncating mandatory content.
 
 The planner measures instructions, guidelines, shared context, diff and evidence
 together. It checks transport bytes separately from a conservative UTF-8-byte
-bound on text tokens, reserving output and harness headroom. Known SDK models use
+bound on text tokens, reserving output and harness headroom (including backend
+tool directives). PR metadata and prior-review context shrink with an omission
+notice when needed to preserve room for the mandatory diff. Known SDK models use
 the installed offline catalog limits; opaque CLI models log an unknown model
 limit and use a conservative 128,000-token policy ceiling. This is not an exact
 provider tokenizer or a guarantee about a CLI's hidden prompt. Cline still has
@@ -519,8 +521,8 @@ too; oversized verification batches shrink and receive relevant diff pages plus
 cited source. Optional checks fail open with incomplete coverage. Logs and
 telemetry count expected/delivered hunks and expected/completed/incomplete tasks;
 file counts distinguish whole files from files continued on other pages. A
-hunk counts as delivered only when every part completes. These counts establish
-delivery, not model comprehension. Shared maps and bounded caller/contract
+hunk counts as delivered only when every part completes. Partial main results
+fail the run. These counts establish delivery, not model comprehension. Shared maps and bounded caller/contract
 excerpts support cross-file checks; they cannot prove exhaustive dependency
 coverage. The opencode server engine keeps serving SDK providers directly — its ACP mode
 would drop per-session token usage, provider model listing, and Context7 MCP.
@@ -966,10 +968,10 @@ and precision against seeded defects.
 
 `JBOT_REVIEW_EXPERIMENT` is the only operator control for the Jev/retrieval
 experiments. **`diff-batches` is the default**; set `off` to disable the batching
-hints. Complete diff paging and coverage accounting remain enabled in every
+hints. Complete diff paging, deterministic caller context and coverage accounting remain enabled in every
 preset. Batching has not established a reliable end-to-end speedup. The presets
-are mutually exclusive. Batching hints require repository shell tools; Pi's
-single-path `git_diff` and tool-less backends do not receive them.
+are mutually exclusive. Batching hints require repository shell tools; Pi,
+CommandCode and tool-less backends do not receive them.
 
 | Value                    | Behavior                                                                            | Evidence / recommendation                                                                                                                               |
 | ------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -979,7 +981,9 @@ single-path `git_diff` and tool-less backends do not receive them.
 | `jev`                    | Jev ranks caller excerpts from changed exported symbols                             | Some historical-PR cost savings, inconsistent latency and weak known-bug recall; keep experimental. Requires enhanced context and `TYPESAFE_API_KEY`.   |
 
 The [production decision and proof](docs/audits/2026-09-19-experiment-presets.md)
-compares benefits, quality failures and sample limits. The
+compares historical benefits, quality failures and sample limits. The
+[complete-page audit](docs/audits/2026-09-20-budgeted-diff-pages.md) records the
+current delivery checks, dogfood diagnosis and unmet release gate. The
 [latest per-run CSV](docs/audits/data/2026-09-19-evidence-runs.csv) contains all
 86 phase, diff-batching and full-branch reviews from the latest measured round.
 These results describe the recorded source revisions, not a new benchmark of

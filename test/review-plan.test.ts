@@ -18,6 +18,8 @@ import {
 import { assembleReviewPrompt, UNTRUSTED_PR_CONTENT_NOTE } from '../src/shared/prompt.ts';
 import { buildClinePromptArg, CLINE_MAX_ARGV_BYTES } from '../src/shared/cline.ts';
 import { runShardedReview } from '../src/shared/runner.ts';
+import { budgetReviewBackend } from '../src/shared/prompt-budget.ts';
+import { boundedPromptContext, withNoToolsReviewDirective } from '../src/shared/prompt.ts';
 import {
   limitReviewBackendSessions,
   type ReviewBackend,
@@ -59,7 +61,7 @@ test('one requested shard pages a huge hunk without losing late changes or excee
   );
 });
 
-test('budgets instructions, guidelines, context and output separately from transport bytes', () => {
+test('budgets instructions, guidelines, context and output separately from transport bytes', async () => {
   const tokenLimited = {
     ...budget,
     contextTokens: 100,
@@ -90,6 +92,75 @@ test('budgets instructions, guidelines, context and output separately from trans
       }),
     /one diff line/,
   );
+  const plans = buildShardPlans({
+    ...base,
+    coreContext: 'old review context '.repeat(8000),
+    shards: [[{ filename: 'a.ts', patch: '@@ -1 +1 @@\n-old\n+new' }]],
+  });
+  assert.match(plans[0].context, /PR metadata and prior-review context truncated/);
+  assert.match(plans[0].context, /\+new/);
+  assert.ok(measureReviewPrompt(renderPrompt(plans[0].context), budget).fits);
+  assert.ok(Buffer.byteLength(boundedPromptContext('東京'.repeat(1000), 256, 'Source')) <= 256);
+  assert.ok(Buffer.byteLength(withNoToolsReviewDirective('')) < budget.harnessTokens);
+
+  let calls = 0;
+  const backend = budgetReviewBackend(
+    {
+      name: 'test',
+      runReview: async () => {
+        calls++;
+        return { summary: '', findings: [] };
+      },
+      runGuidelineComplianceCheck: async () => {
+        calls++;
+        return [];
+      },
+      runFindingVerification: async () => {
+        calls++;
+        return [];
+      },
+      runAddressedPriorCommentsCheck: async () => {
+        calls++;
+        return [];
+      },
+      runChangesSinceLastReview: async () => {
+        calls++;
+        return '';
+      },
+    } as ReviewBackend,
+    budget,
+  );
+  const operations = [
+    (context: string) => backend.runReview('test/model', context, '', () => {}),
+    (context: string) => backend.runGuidelineComplianceCheck('test/model', context, '', () => {}),
+    (context: string) => backend.runFindingVerification('test/model', context, [], () => {}),
+    (context: string) => backend.runAddressedPriorCommentsCheck('test/model', context, () => {}),
+    (context: string) => backend.runChangesSinceLastReview('test/model', context, () => {}),
+  ];
+  for (const operation of operations) {
+    await operation('context');
+    const before = calls;
+    await assert.rejects(operation('x'.repeat(100000)), /assembled prompt/);
+    assert.equal(calls, before);
+  }
+  assert.equal(calls, operations.length);
+});
+
+test('a trailing no-newline marker stays with its line when a large replacement splits', () => {
+  const body = [`-${'a'.repeat(50000)}`, `+${'b'.repeat(50000)}`, '\\ No newline at end of file'];
+  const plans = buildShardPlans({
+    ...base,
+    shards: [[{ filename: 'a.ts', patch: `@@ -1 +1 @@\n${body.join('\n')}` }]],
+  });
+  assert.equal(plans.length, 2);
+  assert.match(plans[0].units![0].file.patch!, /^@@ -1,1 \+0,0 @@/);
+  assert.match(plans[1].units![0].file.patch!, /^@@ -1,0 \+1,1 @@/);
+  assert.match(targetedDiff(plans, [{ path: 'a.ts', line: 1, body: '' }]), /-aaaaa/);
+  assert.deepEqual(
+    plans.flatMap((p) => p.units!.flatMap((u) => u.file.patch!.split('\n').slice(1))),
+    body,
+  );
+  for (const plan of plans) assert.ok(measureReviewPrompt(renderPrompt(plan.context), budget).fits);
 });
 
 test('all assigned hunks are embedded; batched reads are supporting cross-shard context only', () => {
@@ -139,46 +210,51 @@ test('queued pages respect session concurrency and a failed page cannot count as
     { filename: `a${i}.ts`, patch: '@@ -1 +1 @@\n-old\n+new' },
   ]);
   const plans = buildShardPlans({ ...base, shards });
-  let active = 0,
-    maximum = 0;
-  const backend = limitReviewBackendSessions(
-    {
-      name: 'fake',
-      async runReview(_model, _context, _guidelines, _log, options) {
-        maximum = Math.max(maximum, ++active);
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        active--;
-        if (options?.label === 'review-shard-6') throw new Error('context length exceeded');
-        return { summary: '', findings: [] };
-      },
-    } as ReviewBackend,
-    'main',
-    new Semaphore(2),
-  );
-  const rows: Parameters<NonNullable<Parameters<typeof runShardedReview>[0]['onCoverage']>>[0][] =
-    [];
-  await assert.rejects(
-    runShardedReview({
-      backend,
-      model: 'test/model',
-      guidelinesForPrompt: '',
-      shardPlans: plans,
-      changedFiles: shards.flat().map((f) => f.filename),
-      context7Active: false,
-      context7ApiKey: '',
-      log: () => {},
-      onCoverage: (row) => rows.push(row),
-    }),
-    /refusing to post partial/,
-  );
-  assert.equal(maximum, 2);
-  assert.deepEqual(rows.find((row) => row.delivery)?.delivery, {
-    expectedHunks: 6,
-    deliveredHunks: 5,
-    expectedTasks: 6,
-    completedTasks: 5,
-    incompleteTasks: 1,
-  });
+  for (const failure of ['throw', 'partial']) {
+    let active = 0,
+      maximum = 0;
+    const backend = limitReviewBackendSessions(
+      {
+        name: 'fake',
+        async runReview(_model, _context, _guidelines, _log, options) {
+          maximum = Math.max(maximum, ++active);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          active--;
+          if (options?.label === 'review-shard-6') {
+            if (failure === 'throw') throw new Error('context length exceeded');
+            return { summary: '', findings: [], partial: true };
+          }
+          return { summary: '', findings: [] };
+        },
+      } as ReviewBackend,
+      'main',
+      new Semaphore(2),
+    );
+    const rows: Parameters<NonNullable<Parameters<typeof runShardedReview>[0]['onCoverage']>>[0][] =
+      [];
+    await assert.rejects(
+      runShardedReview({
+        backend,
+        model: 'test/model',
+        guidelinesForPrompt: '',
+        shardPlans: plans,
+        changedFiles: shards.flat().map((f) => f.filename),
+        context7Active: false,
+        context7ApiKey: '',
+        log: () => {},
+        onCoverage: (row) => rows.push(row),
+      }),
+      /refusing to post partial/,
+    );
+    assert.equal(maximum, 2);
+    assert.deepEqual(rows.find((row) => row.delivery)?.delivery, {
+      expectedHunks: 6,
+      deliveredHunks: 5,
+      expectedTasks: 6,
+      completedTasks: 5,
+      incompleteTasks: 1,
+    });
+  }
 });
 
 test('late diff pages receive actual unchanged caller code and verifier selection includes citations and file-level findings', async (t) => {

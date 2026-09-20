@@ -10,7 +10,7 @@ export function buildReviewChangeMap(files: PrFile[]): string {
   const rows = files.map(
     (file) => `${file.filename}: ${(file.patch?.match(/^@@ /gm) ?? []).length} hunks`,
   );
-  return truncateUtf8WithNotice(
+  return boundedPromptContext(
     [
       '## Shared change map',
       'This map is navigation, not code evidence. Each task receives its complete assigned diff page; other pages are reviewed separately. Check the actual caller and contract excerpts against your assigned code for cross-file regressions. A split hunk may continue in another task. Do not infer correctness from a file name or summary.',
@@ -32,7 +32,7 @@ These are the diff pages containing the finding locations and their cited code. 
 
 export function buildAdjacentDiffContext(excerpts: string[]): string {
   if (!excerpts.length) return '';
-  return truncateUtf8WithNotice(
+  return boundedPromptContext(
     [
       '## Adjacent split-hunk evidence',
       'The following patch lines border this page in the original hunk. They are supporting context; other tasks own their review. The original hunk header identifies their source region, not a new complete patch.',
@@ -1818,6 +1818,15 @@ export function truncateUtf8WithNotice(
     '',
     `[${label} truncated to ${keptBytes} bytes; omitted ${totalBytes - keptBytes} bytes.]`,
   ].join('\n');
+}
+
+export function boundedPromptContext(value: string, maxBytes: number, label: string): string {
+  const bytes = Buffer.byteLength(value);
+  if (bytes <= maxBytes) return value;
+  const noticeBytes = Buffer.byteLength(
+    `\n\n[${label} truncated to ${bytes} bytes; omitted ${bytes} bytes.]`,
+  );
+  return truncateUtf8WithNotice(value, Math.max(0, maxBytes - noticeBytes), label, bytes);
 }
 
 export function formatUnverifiedFinding(finding: Pick<Finding, 'title' | 'body'>, reason?: string) {

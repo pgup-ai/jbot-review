@@ -40,6 +40,8 @@ import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
 import { completedReviewHead } from '../src/shared/github.ts';
 import { applyFindingVerdicts, selectFindingIndexes } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
+import { measureReviewPrompt, reviewPromptBudget } from '../src/shared/review-plan.ts';
+import { assembleFindingVerificationPrompt } from '../src/shared/prompt.ts';
 
 const PRIOR_JBOT_REVIEW = [
   '## J-Bot Code Review',
@@ -1123,7 +1125,7 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions({ sdkEngine: 'opencode' }).sdkEngine, 'opencode');
   });
 
-  it('caps sessions at 3 by default and keeps explicit 0 as the unlimited escape hatch', () => {
+  it('caps sessions at 3 by default and preserves zero for default dispatch', () => {
     assert.equal(normalizeOptions(undefined).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({}).maxConcurrentSessions, 3);
     assert.equal(normalizeOptions({ maxConcurrentSessions: 0 }).maxConcurrentSessions, 0);
@@ -1480,6 +1482,46 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
     'repo',
   );
   assert.doesNotMatch(uncertain, /Definitely broken/);
+});
+
+it('sizes verifier batches after adding cited source and rejects oversized singletons before dispatch', async () => {
+  const budget = { ...reviewPromptBudget('test'), transportBytes: 40000 };
+  const targets: Finding[] = Array.from({ length: 7 }, (_, i) => ({
+    path: `file${i}.ts`,
+    line: 1,
+    severity: 'P2',
+    title: `finding ${i}`,
+    body: 'claim',
+  }));
+  const invoked: Finding[][] = [];
+  const coverage: string[] = [];
+  const verdicts = await requestFindingVerdicts({
+    workspace: '/unused',
+    model: 'test/model',
+    prContext: '',
+    contextForTargets: () => 'c'.repeat(10000),
+    sourceContext: async (findings) => 's'.repeat(findings.includes(targets[6]) ? 100000 : 16384),
+    prepareEvidence: async () => 'e'.repeat(6000),
+    promptBudget: budget,
+    targets,
+    backend: {
+      async runFindingVerification(_model, context, findings) {
+        assert.ok(
+          measureReviewPrompt(assembleFindingVerificationPrompt(context, findings), budget).fits,
+        );
+        invoked.push(findings);
+        return findings.map((_, index) => ({ index, verdict: 'confirmed' as const }));
+      },
+    },
+    log: () => {},
+    onCoverage: (row) => coverage.push(row.state),
+  });
+  assert.deepEqual(invoked.flat(), targets.slice(0, 6));
+  assert.deepEqual(
+    verdicts.map((v) => v.index),
+    [0, 1, 2, 3, 4, 5],
+  );
+  assert.deepEqual(coverage, ['failed']);
 });
 
 it('verifies every batch and preserves successful verdicts when another batch fails', async () => {
