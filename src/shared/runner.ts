@@ -2425,6 +2425,7 @@ async function runReviewPipeline(params: {
             workspace,
             base: baseSha,
             head: headSha,
+            reviewedHead,
             policy,
             sessions: auxiliarySessions,
             priorBodies: priorJbotReviewGroups.map((review) => review.body),

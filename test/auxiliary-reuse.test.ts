@@ -4,7 +4,6 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { withReviewCoverage } from '../src/shared/github.ts';
 import {
   auxiliaryBaselines,
   auxiliaryPolicy,
@@ -86,7 +85,7 @@ test('documentation reuse requires a successful ancestor with matching base and 
         { priorBodies: [...input.priorBodies, '<sup>Newer incomplete run</sup>'] },
         'no-completed-baseline',
       ],
-      [{ priorBodies: [withReviewCoverage(input.priorBodies[0], head, true)] }, 'explicit-rerun'],
+      [{ reviewedHead: head }, 'explicit-rerun'],
     ] as const) {
       const result = await planAuxiliaryReuse({ ...input, ...override });
       assert.equal(result[0].reason, reason);

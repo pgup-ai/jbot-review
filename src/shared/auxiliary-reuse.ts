@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
-import { completedReviewHead } from './github.ts';
 
 const execFileAsync = promisify(execFile);
 const MARKER = /<!-- jbot-review:auxiliary:(\[[^\n]*\]) -->/;
@@ -63,6 +62,7 @@ export async function planAuxiliaryReuse(input: {
   workspace: string;
   base?: string;
   head?: string;
+  reviewedHead?: string;
   policy: string;
   sessions: string[];
   priorBodies: string[];
@@ -77,11 +77,7 @@ export async function planAuxiliaryReuse(input: {
       if (!baseline) reason = 'no-completed-baseline';
       else if (baseline.base !== input.base) reason = 'base-changed';
       else if (baseline.policy !== input.policy) reason = 'policy-changed';
-      else if (
-        !input.head ||
-        baseline.head === input.head ||
-        completedReviewHead(latest) === input.head
-      )
+      else if (!input.head || baseline.head === input.head || input.reviewedHead === input.head)
         reason = 'explicit-rerun';
       else {
         let delta = deltas.get(baseline.head);
