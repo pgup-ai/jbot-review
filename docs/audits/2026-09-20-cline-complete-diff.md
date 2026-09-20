@@ -99,7 +99,7 @@ permission enforcement or diff completeness.
 
 ## Validation and cleanup
 
-- 1,105 tests, typecheck, lint, formatting and build passed.
+- At commit `868a476c9e915f0494d35903aaf275323d5d8d3f`, 1,105 tests, typecheck, lint, formatting and build passed.
 - Regression tests cover Cline/Cline-pass routing, OpenCode tool-less fallback,
   late hunks across single/automatic/per-file shards, rejected truncation,
   UTF-8 argv accounting, oversized main failure without retry, and telemetry.

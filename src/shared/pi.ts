@@ -110,6 +110,8 @@ export function piModelCandidates(providerID: string, modelID: string): string[]
 }
 
 interface PiCatalogModel {
+  contextWindow?: number;
+  maxTokens?: number;
   provider?: string;
   id?: string;
 }
@@ -665,6 +667,10 @@ let piCatalogPromise: Promise<ReadonlyArray<PiCatalogModel>> | undefined;
 
 export async function piModelAvailable(providerID: string, modelID: string): Promise<boolean> {
   if (!piServesModel(providerID, modelID)) return false;
+  return piCatalogHasModel(await loadPiCatalog(), providerID, modelID);
+}
+
+async function loadPiCatalog() {
   piCatalogPromise ??= loadPiSdk()
     .then(async (sdk) => {
       const runtime = await createPiModelRuntime(sdk);
@@ -674,7 +680,19 @@ export async function piModelAvailable(providerID: string, modelID: string): Pro
       piCatalogPromise = undefined;
       throw error;
     });
-  return piCatalogHasModel(await piCatalogPromise, providerID, modelID);
+  return piCatalogPromise;
+}
+
+export async function catalogModelLimits(
+  providerID: string,
+  modelID: string,
+): Promise<{ contextTokens: number; outputTokens?: number } | undefined> {
+  if (!piServesModel(providerID, modelID)) return undefined;
+  const catalog = await loadPiCatalog();
+  const match = catalog.find((model) => piCatalogHasModel([model], providerID, modelID));
+  return match?.contextWindow
+    ? { contextTokens: match.contextWindow, outputTokens: match.maxTokens }
+    : undefined;
 }
 
 export interface PiRuntime {

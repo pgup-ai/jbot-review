@@ -18,7 +18,7 @@ export interface ReviewExperiment {
 }
 
 export function reviewExperiment(env: NodeJS.ProcessEnv = process.env): ReviewExperiment {
-  const value = env.JBOT_REVIEW_EXPERIMENT;
+  const value = env.JBOT_REVIEW_EXPERIMENT ?? 'diff-batches';
   const preset = value === 'diff-batches' || value === 'linked' || value === 'jev' ? value : 'off';
   return {
     preset,

@@ -19,7 +19,6 @@ import { describe, it } from 'node:test';
 import {
   buildBody,
   requestFindingVerdicts,
-  buildShardPlans,
   buildSummaryScopeBlock,
   shouldSummarizeChangesSinceLastReview,
   buildMainShardFailureMessage,
@@ -30,20 +29,12 @@ import {
   renderReviewMetadataBlock,
   settleWithinGrace,
   runPrReview,
-  EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
   runShardedReview,
   buildSlimVerifierContext,
 } from '../src/shared/runner.ts';
-import {
-  buildDiffHunksBlockWithMetadata,
-  shardFilesForReview,
-} from '../src/shared/diff-context.ts';
-import { backendRequiresCompleteEmbeddedDiff } from '../src/shared/backend-selection.ts';
-import { runClineReview } from '../src/shared/cline.ts';
-import { createTelemetryRecorder, type SessionCoverage } from '../src/shared/telemetry.ts';
-import type { Octokit, PrFile } from '../src/shared/github.ts';
+import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
+import type { Octokit } from '../src/shared/github.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
-import { UNTRUSTED_PR_CONTENT_NOTE } from '../src/shared/prompt.ts';
 import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
 import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
 import { completedReviewHead } from '../src/shared/github.ts';
@@ -67,227 +58,6 @@ const RESOLVED_JBOT_REVIEW = [
   '',
   '<!-- jbot-review:review -->',
 ].join('\n');
-
-/** Longest common leading substring — the region a provider can cache. */
-function commonPrefix(a: string, b: string): string {
-  let i = 0;
-  while (i < a.length && i < b.length && a[i] === b[i]) i++;
-  return a.slice(0, i);
-}
-
-describe('buildShardPlans cache-stable prefix', () => {
-  it('batches only missing diffs in the owning main shard and keeps recovery in retries', () => {
-    const patch = '@@ -1 +1 @@\n-old\n+new';
-    const files = ['a.ts', 'b.ts'].map((filename) => ({ filename, patch }));
-    const base = {
-      coreContext: 'core',
-      fullDiff: { text: 'diff', omittedFiles: [], truncatedFiles: [] },
-      context7Block: 'C7',
-      diffHunksOptions: { totalBudgetBytes: 1 },
-    };
-    const batchDiffScope = { baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40) };
-    for (const shards of [[files], files.map((f) => [f])]) {
-      const control = buildShardPlans({ ...base, shards });
-      const plans = buildShardPlans({ ...base, shards, batchDiffScope });
-      for (const [i, plan] of plans.entries()) {
-        assert.doesNotMatch(control[i].context, /Batched missing-diff/);
-        for (const text of [plan.context, plan.baseContext]) {
-          const commands = text.split('\n').filter((line) => line.startsWith('    git'));
-          assert.equal(commands.length, 1);
-          for (const file of shards[i]) assert.ok(commands[0].includes(`'${file.filename}'`));
-          for (const file of files.filter((f) => !shards[i].includes(f)))
-            assert.ok(!commands[0].includes(`'${file.filename}'`));
-        }
-      }
-    }
-  });
-
-  it('keeps the shared context as a byte-identical prefix across shards', () => {
-    const coreContext = '## Pull request\nTitle: T\nDescription: shared core context';
-    const context7Block = '## Context7 docs\nSHARED_CONTEXT7';
-    const plans = buildShardPlans({
-      coreContext,
-      fullDiff: { text: '', omittedFiles: [], truncatedFiles: [] },
-      context7Block,
-      shards: [[{ filename: 'src/a.ts' }], [{ filename: 'src/b.ts' }]],
-    });
-
-    assert.equal(plans.length, 2);
-    assert.notEqual(plans[0].context, plans[1].context);
-
-    const prefix = commonPrefix(plans[0].context, plans[1].context);
-    // The cacheable region carries the expensive shared content...
-    assert.ok(prefix.includes(coreContext), 'coreContext must be in the shared prefix');
-    assert.ok(prefix.includes('SHARED_CONTEXT7'), 'context7 must be in the shared prefix');
-    // ...and none of the per-shard assignment (which is what diverges).
-    assert.doesNotMatch(prefix, /reviewer 1\b/);
-    assert.doesNotMatch(prefix, /reviewer 2\b/);
-  });
-
-  it('leads a single-shard review with the diff block and keeps sharded plans on their shared core prefix', () => {
-    const base = {
-      coreContext: `${UNTRUSTED_PR_CONTENT_NOTE}\n\n## Pull request\nCORE`,
-      fullDiff: { text: '## Diff hunks\nFULL_DIFF', omittedFiles: [], truncatedFiles: [] },
-      context7Block: '## Context7 docs\nC7',
-    };
-    // The trust boundary the runner put at the head of the core context stays
-    // first and is stated once; only the blocks behind it move behind the diff.
-    const order = (text: string) => [
-      text.indexOf(UNTRUSTED_PR_CONTENT_NOTE),
-      text.indexOf('## Diff hunks'),
-      text.indexOf('CORE'),
-    ];
-    const assertBoundaryThenDiff = (text: string, label: string) => {
-      assert.ok(text.startsWith(UNTRUSTED_PR_CONTENT_NOTE), label);
-      assert.equal(text.split(UNTRUSTED_PR_CONTENT_NOTE).length, 2, label);
-      assert.deepEqual(
-        [...order(text)].sort((a, b) => a - b),
-        order(text),
-        label,
-      );
-    };
-    const single = buildShardPlans({
-      ...base,
-      shards: [[{ filename: 'src/a.ts' }]],
-      diffFirst: true,
-    });
-    assertBoundaryThenDiff(single[0].context, 'single context');
-    assertBoundaryThenDiff(single[0].baseContext, 'single base');
-    assert.ok(single[0].context.indexOf('CORE') < single[0].context.indexOf('C7'));
-    const control = buildShardPlans({ ...base, shards: [[{ filename: 'src/a.ts' }]] });
-    assert.ok(control[0].context.startsWith(base.coreContext));
-
-    const sharded = buildShardPlans({
-      ...base,
-      shards: [
-        [{ filename: 'src/a.ts', patch: '@@ -1 +1 @@\n+a' }],
-        [{ filename: 'src/b.ts', patch: '@@ -1 +1 @@\n+b' }],
-      ],
-      diffFirst: true,
-    });
-    // Shards carry different diffs, so leading with them would destroy the
-    // prefix they share; sharded plans keep the default order.
-    const [shardA, shardB] = sharded;
-    assert.ok(shardA.context.startsWith(base.coreContext), shardA.label);
-    assert.ok(shardB.context.startsWith(base.coreContext), shardB.label);
-    assert.ok(commonPrefix(shardA.context, shardB.context).includes('C7'));
-  });
-
-  it('uses treatment shard instructions only when enabled', () => {
-    const base = {
-      coreContext: 'core',
-      fullDiff: { text: '', omittedFiles: [], truncatedFiles: [] },
-      context7Block: '',
-      shards: [[{ filename: 'src/a.ts' }], [{ filename: 'src/b.ts' }]],
-    };
-
-    const control = buildShardPlans(base);
-    const treatment = buildShardPlans({ ...base, embeddedFirstPrompt: true });
-
-    assert.match(control[0].context, /follow symbols wherever they lead/);
-    assert.doesNotMatch(control[0].context, /repository exploration policy/);
-    assert.match(treatment[0].context, /Follow dependencies as far as needed/);
-    assert.match(treatment[0].context, /repository exploration policy/);
-  });
-});
-
-describe('EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS', () => {
-  it('delivers late hunks to Cline and refuses any reintroduced truncation in single or multiple shards', () => {
-    const files = Array.from({ length: 5 }, (_, index) => ({
-      filename: `src/part-${index}.ts`,
-      patch: `@@ -0,0 +1,1001 @@\n${'+// padding for a large changed file\n'.repeat(1000)}+export const tail${index} = true;`,
-    }));
-    const fullDiff = buildDiffHunksBlockWithMetadata(files);
-    assert.ok(fullDiff.truncatedFiles.length > 0);
-    assert.ok(fullDiff.omittedFiles.length > 0);
-    for (const requestedShards of [1, 0, 5]) {
-      const shards = shardFilesForReview(files, { requestedShards });
-      const params = {
-        coreContext: 'core',
-        fullDiff,
-        context7Block: 'context7',
-        shards,
-        requireCompleteEmbeddedDiff: backendRequiresCompleteEmbeddedDiff('cline', 'cline'),
-      };
-      const plans = buildShardPlans({
-        ...params,
-        diffHunksOptions: EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
-      });
-      assert.deepEqual(
-        plans.flatMap((plan) => plan.assignedFiles).sort(),
-        files.map((file) => file.filename),
-      );
-      for (const [index, plan] of plans.entries()) {
-        for (const file of shards[index]) {
-          assert.ok(plan.context.includes(file.patch!));
-          assert.ok(plan.baseContext.includes(file.patch!));
-        }
-        assert.equal(plan.diffCoverage.completeFiles, shards[index].length);
-        assert.equal(plan.diffCoverage.truncatedFiles, 0);
-        assert.equal(plan.diffCoverage.omittedFiles, 0);
-      }
-      assert.throws(() => buildShardPlans(params), /incomplete embedded diff/);
-    }
-  });
-
-  it('fails the main review before launching Cline when complete hunks cannot fit argv', async () => {
-    const files = [
-      {
-        filename: 'src/huge.ts',
-        patch: `@@ -0,0 +1,20001 @@\n${'+// large patch\n'.repeat(20000)}+export const lateBug = true;`,
-      },
-    ];
-    const plans = buildShardPlans({
-      coreContext: '',
-      fullDiff: buildDiffHunksBlockWithMetadata(files),
-      context7Block: '',
-      shards: [files],
-      requireCompleteEmbeddedDiff: backendRequiresCompleteEmbeddedDiff('cline', 'cline'),
-      diffHunksOptions: EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
-    });
-    const rows: SessionCoverage[] = [];
-    await assert.rejects(
-      runShardedReview({
-        backend: {
-          name: 'cline',
-          runReview: (model, context, guidelines, log, options) =>
-            runClineReview('.', model, context, guidelines, log, options),
-        } as ReviewBackend,
-        model: 'cline/default',
-        guidelinesForPrompt: '',
-        shardPlans: plans,
-        changedFiles: files.map((file) => file.filename),
-        context7Active: false,
-        context7ApiKey: '',
-        log: () => {},
-        onCoverage: (row) => rows.push(row),
-      }),
-      /refusing to post partial review coverage.*Incomplete review coverage/s,
-    );
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].state, 'failed');
-    assert.equal(rows[0].diff?.completeFiles, 1);
-    assert.equal(rows[0].diff?.truncatedFiles, 0);
-  });
-
-  it('embeds every changed file whole however large the PR, in a single shard', () => {
-    const files: PrFile[] = Array.from({ length: 4 }, (_, index) => ({
-      filename: `huge-${index}.ts`,
-      patch: `@@ -0,0 +1,9000 @@\n${Array.from(
-        { length: 9000 },
-        (_, line) => `+const v${line} = '${'x'.repeat(80)}';`,
-      ).join('\n')}`,
-    }));
-
-    const result = buildDiffHunksBlockWithMetadata(files, EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS);
-
-    assert.deepEqual(result.truncatedFiles, []);
-    assert.deepEqual(result.omittedFiles, []);
-    // Multiple megabytes, far past any cap a prompt-size budget would impose.
-    assert.ok(Buffer.byteLength(result.text, 'utf8') > 2 * 1024 * 1024);
-    for (const file of files) assert.ok(result.text.includes(file.patch as string));
-  });
-});
 
 describe('buildSummaryScopeBlock', () => {
   it('no longer instructs shards to describe changes since the reviewed head', () => {

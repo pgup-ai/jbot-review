@@ -320,7 +320,9 @@ export class EvidenceStore {
       const paths = new Set([...tracked].filter((p) => SOURCE_FILE.test(p)));
       const refs = options.locations ?? findingSourceLocations(findings).locations;
       const seeds =
-        scope === 'verification' ? refs.map((r) => r.path) : this.files.map((f) => f.filename);
+        scope === 'verification' || options.locations
+          ? refs.map((r) => r.path)
+          : this.files.map((f) => f.filename);
       const read = async (path: string) => {
         if (loaded.has(path)) return loaded.get(path);
         if (loaded.size >= 64 || bytes >= 2 * 1024 * 1024 || !paths.has(path)) return undefined;
@@ -340,7 +342,7 @@ export class EvidenceStore {
         const source = await read(path);
         if (!source) continue;
         const lines =
-          scope === 'verification'
+          scope === 'verification' || options.locations
             ? refs.filter((r) => r.path === path).map((r) => r.line)
             : changedEvidenceLines(this.files.find((f) => f.filename === path)?.patch ?? '');
         focus.set(path, lines);

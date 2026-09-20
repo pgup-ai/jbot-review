@@ -778,7 +778,7 @@ describe('buildShardAssignmentBlock', () => {
 
   it('lists the assigned files and the shard position', () => {
     assert.match(block, /## Your assigned files/);
-    assert.match(block, /split across 3 parallel reviewers; you are reviewer 2/);
+    assert.match(block, /has 3 tasks; you are reviewer 2/);
     assert.match(block, /- src\/a\.ts/);
     assert.match(block, /- src\/b\.ts/);
   });

@@ -13,7 +13,6 @@ import { parseEnvInt, parseEnvJsonObject } from '../app/app.ts';
 import { gatewayRoutedModels, localRunId, remoteAcpConfigFromEnv } from '../shared/acp-remote.ts';
 import {
   assertImageSupportsModels,
-  backendRequiresCompleteEmbeddedDiff,
   cliBackendForProvider,
   selectReviewBackends,
   swallowedProviderWarnings,
@@ -49,7 +48,7 @@ import {
   removedAuxInputWarnings,
   resolveModelSelection,
 } from '../shared/model.ts';
-import { piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
+import { catalogModelLimits, piModelAvailable, resolvePiEngine } from '../shared/pi.ts';
 import { QODER_PROVIDER_ID } from '../shared/qoder.ts';
 import {
   discoverGuidelineDocs,
@@ -57,18 +56,18 @@ import {
   formatGuidelines,
   type ReviewCommit,
 } from '../shared/review-context.ts';
-import { EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS, runPrReview } from '../shared/runner.ts';
+import { runPrReview } from '../shared/runner.ts';
 import { onFatalSignal } from '@symma/protocol';
 import type { ReviewResult } from '../shared/types.ts';
 import { ensureGitSafeDirectory, GIT_DIFF_ARGS, parseGitDiff } from '../shared/git.ts';
 import {
-  buildDiffHunksBlockWithMetadata,
   classifyChangeShape,
   isDocOnlyChange,
   shardFilesForReview,
 } from '../shared/diff-context.ts';
 import { planReviewFanout } from '../shared/fanout.ts';
-import { selectLensKeys } from '../shared/prompt.ts';
+import { assembleReviewPrompt, selectLensKeys } from '../shared/prompt.ts';
+import { buildShardPlans, reviewPromptBudget } from '../shared/review-plan.ts';
 import {
   benchmarkReviewOutput,
   loadDotEnv,
@@ -560,48 +559,35 @@ async function review(
     const shards = shardFilesForReview(reviewable, {
       requestedShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
     });
-    const piEnabled = resolvePiEngine(process.env, process.version).enabled;
-    const requiresCompleteDiff = async (model: string) => {
-      const { providerID, modelID } = parseModelName(model);
-      const cli = cliBackendForProvider(providerID);
-      const onPi = !cli && piEnabled && (await piModelAvailable(providerID, modelID));
-      return backendRequiresCompleteEmbeddedDiff(
-        providerID,
-        cli,
-        !cli && !onPi ? modelID : undefined,
-      );
-    };
-    const [mainRequiresCompleteDiff, auxRequiresCompleteDiff] = await Promise.all([
-      requiresCompleteDiff(model),
-      requiresCompleteDiff(auxModel),
-    ]);
-    const diffHunksOptions = mainRequiresCompleteDiff
-      ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
-      : undefined;
-    const auxDiffComplete =
-      !auxRequiresCompleteDiff ||
-      (() => {
-        const aux = buildDiffHunksBlockWithMetadata(
-          reviewable,
-          EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
-        );
-        return aux.truncatedFiles.length === 0 && aux.omittedFiles.length === 0;
-      })();
-    const guidelinePass = (fanout?.guidelinePass ?? true) && auxDiffComplete;
+    const guidelinePass = fanout?.guidelinePass ?? true;
     const discovered = await discoverGuidelineDocs(process.cwd(), changedFilenames);
+    const { providerID, modelID } = parseModelName(model);
+    const plans = buildShardPlans({
+      coreContext: '',
+      context7Block: '',
+      shards,
+      budget: reviewPromptBudget(
+        cliBackendForProvider(providerID) ?? 'opencode',
+        await catalogModelLimits(providerID, modelID).catch(() => undefined),
+      ),
+      renderPrompt: (context) => assembleReviewPrompt(context, formatGuidelines(discovered)),
+    });
+    log(
+      'Preview budgets instructions and guidelines; runtime PR metadata and caller evidence may require additional pages.',
+    );
     console.log(
       `\n${renderReviewPreview({
-        shards: shards.map((shard, index) => {
-          const embedded = buildDiffHunksBlockWithMetadata(shard, diffHunksOptions);
-          return {
-            label: shards.length > 1 ? `review-shard-${index + 1}` : 'main-review',
-            files: shard.map((f) => f.filename),
-            diffBytes: shard.reduce((sum, f) => sum + Buffer.byteLength(f.patch ?? '', 'utf8'), 0),
-            embeddedBytes: Buffer.byteLength(embedded.text, 'utf8'),
-            truncated: embedded.truncatedFiles.length,
-            omitted: embedded.omittedFiles.length,
-          };
-        }),
+        shards: plans.map((plan) => ({
+          label: plan.label,
+          files: plan.assignedFiles,
+          diffBytes: plan.units!.reduce(
+            (sum, unit) => sum + Buffer.byteLength(unit.file.patch ?? ''),
+            0,
+          ),
+          embeddedBytes: plan.diffCoverage.bytes,
+          truncated: plan.diffCoverage.truncatedFiles,
+          omitted: plan.diffCoverage.omittedFiles,
+        })),
         lensKeys,
         guidelinePass,
         ...(fanout ? { fanoutTier: fanout.tier, fanoutReason: fanout.reason } : {}),

@@ -20,7 +20,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
     JBOT_READ_EVIDENCE_PHASE: 'verification',
     JBOT_BATCH_DIFF_RECOVERY: '1',
   };
-  const off = reviewExperiment({});
+  const off = reviewExperiment({ JBOT_REVIEW_EXPERIMENT: 'off' });
   assert.deepEqual(off, {
     preset: 'off',
     jevPrefetch: 'off',
@@ -35,7 +35,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
       batchDiffRecovery: false,
     },
   });
-  for (const value of [undefined, 'off', 'on', 'custom', 'linked,jev', 'secret'])
+  for (const value of ['off', 'on', 'custom', 'linked,jev', 'secret'])
     assert.deepEqual(reviewExperiment({ ...stale, JBOT_REVIEW_EXPERIMENT: value }), off);
   const expected = [
     { ...off, preset: 'jev', jevPrefetch: 'on' },
@@ -50,6 +50,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
       exploration: { ...off.exploration, readEvidence: 'linked', readEvidencePhase: 'review' },
     },
   ];
+  assert.deepEqual(reviewExperiment({}), expected[1]);
   const hashes = new Set<string>();
   for (const preset of expected) {
     const experiment = reviewExperiment({ ...stale, JBOT_REVIEW_EXPERIMENT: preset.preset });

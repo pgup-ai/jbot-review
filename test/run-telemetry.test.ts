@@ -90,8 +90,10 @@ test('configuration fingerprints policy changes while excluding credentials and 
   );
   for (const key of ['retrieval', 'checkpoints', 'readEvidence', 'batchDiffRecovery'] as const)
     assert.notEqual(
-      configuration({ ...custom, exploration: { ...custom.exploration, [key]: true } })
-        .configurationHash,
+      configuration({
+        ...custom,
+        exploration: { ...custom.exploration, [key]: !custom.exploration[key] },
+      }).configurationHash,
       baseline.configurationHash,
     );
   for (const key of ['shared', 'handoff', 'prefetch', 'cacheDir'] as const) {

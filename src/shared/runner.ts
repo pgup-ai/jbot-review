@@ -1,3 +1,16 @@
+import { budgetReviewBackend } from './prompt-budget.ts';
+import {
+  buildShardPlans,
+  addReviewEvidence,
+  targetedVerifierContext,
+  targetedDiff,
+  measureReviewPrompt,
+  reviewPromptBudget,
+  reviewDelivery,
+  REVIEW_EVIDENCE_BYTES,
+  type ShardPlan,
+} from './review-plan.ts';
+import { catalogModelLimits } from './pi.ts';
 import { reviewExperiment, type ReviewExperiment } from './review-experiment.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -106,9 +119,7 @@ import {
 } from './poolside.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
-  type DiffHunksOptions,
   buildDiffHunksBlockWithMetadata,
-  diffHunksCoverage,
   classifyChangeShape,
   isDocOnlyChange,
   samePatchSet,
@@ -134,8 +145,9 @@ import {
   buildContext7PromptBlock,
   buildContextTrimNotice,
   buildReviewFocusBlock,
-  buildShardAssignmentBlock,
-  buildDiffRecoveryBlock,
+  assembleReviewPrompt,
+  assembleGuidelineCompliancePrompt,
+  assembleFindingVerificationPrompt,
   selectLensKeys,
 } from './prompt.ts';
 import { ensureGitSafeDirectory, hydratePrFilePatches } from './git.ts';
@@ -294,18 +306,6 @@ import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
 import type { AddressedPriorComment, Finding, Severity } from './types.ts';
 
 const VERIFICATION_BATCH_SIZE = 10;
-/**
- * Unbounded on purpose. For a backend that can read the checkout a diff budget
- * caps prompt size, and anything it drops the model fetches with git. For a
- * backend that cannot, the same number caps coverage instead: a dropped file is
- * never reviewed. Every changed file is embedded whole at any shard count, and
- * an oversized PR fails loudly at the provider rather than being reviewed in
- * part and reported as whole.
- */
-export const EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS: DiffHunksOptions = {
-  totalBudgetBytes: Number.POSITIVE_INFINITY,
-  perFileBudgetBytes: Number.POSITIVE_INFINITY,
-};
 
 function createOpencodeBackend(
   runtime: Awaited<ReturnType<typeof startOpencode>>,
@@ -934,12 +934,7 @@ export interface ReviewRunOptions {
   skipUnchanged?: boolean;
   /** Scale recall-supplement fan-out down for low-risk diffs (see `fanout.ts`); default true. Never gates the main review or verify; false forces full fan-out. */
   dynamicFanout?: boolean;
-  /**
-   * Max model sessions in flight at once (0 = unlimited). Throttled provider
-   * tiers serialize one key's concurrent requests upstream; capping on our
-   * side keeps session deadlines measuring model time, not queue time.
-   * Try 2-3 on free tiers.
-   */
+  /** Maximum simultaneous model sessions; 0 uses the bounded default of 3. */
   maxConcurrentSessions?: number;
   /**
    * Override opencode server port for this run. Local benchmark workers use
@@ -1532,20 +1527,6 @@ async function runReviewPipeline(params: {
     auxCliBackend,
     auxOnOpencode ? auxModelID : undefined,
   );
-  const embeddedOnlyBackend = mainRequiresCompleteEmbeddedDiff || auxRequiresCompleteEmbeddedDiff;
-  const embeddedOnlyBackendDiffHunks = embeddedOnlyBackend
-    ? buildDiffHunksBlockWithMetadata(files, EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS)
-    : undefined;
-  const embeddedOnlyBackendIncompleteDiffFiles = embeddedOnlyBackendDiffHunks
-    ? incompleteDiffFiles(embeddedOnlyBackendDiffHunks)
-    : [];
-  const auxHasCompleteEmbeddedDiff =
-    !auxRequiresCompleteEmbeddedDiff || embeddedOnlyBackendIncompleteDiffFiles.length === 0;
-  if (embeddedOnlyBackendDiffHunks?.text) {
-    log(
-      `Embedded-only backend diff hunks block: ${embeddedOnlyBackendDiffHunks.text.length} chars.`,
-    );
-  }
   const evidence = new EvidenceStore(
     workspace,
     files,
@@ -1650,7 +1631,7 @@ async function runReviewPipeline(params: {
     coreContext = joinContext(coreContext, ...supplementaryBlocks.map((block) => block.text));
     linkedIssueContext = { linkedIssues, linkedIssuesOmitted };
   } else {
-    if (priorJbotThreads.length > 0 && auxHasCompleteEmbeddedDiff) {
+    if (priorJbotThreads.length > 0) {
       try {
         addressedCommits = formatReviewCommits(
           await listPrCommits(octokit, owner, repo, pullNumber),
@@ -1681,28 +1662,7 @@ async function runReviewPipeline(params: {
   // mark it once here so every session derived from coreContext (main + aux)
   // carries the guard. Static text, so it stays in the cache-stable prefix.
   coreContext = joinContext(UNTRUSTED_PR_CONTENT_NOTE, coreContext);
-  if (!auxHasCompleteEmbeddedDiff) {
-    recordCoverage({ session: 'aux-embedded-diff', state: 'failed' });
-    log(
-      `Skipping auxiliary sessions: embedded diff exceeds the backend hard budget (${formatFileList(
-        embeddedOnlyBackendIncompleteDiffFiles,
-      )}). Main review continues without aux findings or verification.`,
-    );
-  }
-  const auxDiffBlockText =
-    auxRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks && auxHasCompleteEmbeddedDiff
-      ? embeddedOnlyBackendDiffHunks.text
-      : diffHunksBlock;
-  log(
-    `Diff input (auxiliary): ${JSON.stringify(
-      diffHunksCoverage(
-        files,
-        auxRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks
-          ? embeddedOnlyBackendDiffHunks
-          : diffHunks,
-      ),
-    )}; requiresCompleteDiff=${auxRequiresCompleteEmbeddedDiff}.`,
-  );
+  const auxDiffBlockText = diffHunksBlock;
   const auxPrContext = joinContext(coreContext, auxDiffBlockText);
   const lensContextBlocks = [
     buildReviewScopeContext({
@@ -1749,7 +1709,7 @@ async function runReviewPipeline(params: {
   const remoteAcp = routedAgents.length > 0 ? remoteAcpConfigFromEnv() : undefined;
   // A missing main endpoint is fatal; an auxiliary-only endpoint fails open.
   // Cap sessions at the companion's available capacity.
-  let sessionCap = options.maxConcurrentSessions;
+  let sessionCap = options.maxConcurrentSessions || 3;
   let auxGatewayPreflightError: unknown;
   if (remoteAcp && routedAgents.length > 0) {
     const mainGatewayAgent =
@@ -2274,25 +2234,35 @@ async function runReviewPipeline(params: {
           ? // Fail-open stand-in only: auxSessionsEnabled keeps it undispatched.
             mainBaseBackend
           : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
-  const mainBackend = limitReviewBackendSessions(
-    mainBaseBackend,
-    'main',
-    sessionSlots,
-    providerLimiters.forProvider(providerID) ?? serializedBackends.get(mainBaseBackend),
-    sessionTelemetry,
+  const mainPromptBudget = reviewPromptBudget(
+    mainBaseBackend.name,
+    await catalogModelLimits(providerID, modelID).catch(() => undefined),
   );
-  const auxBackend = limitReviewBackendSessions(
-    auxBaseBackend,
-    'aux',
-    sessionSlots,
-    providerLimiters.forProvider(auxProviderID) ?? serializedBackends.get(auxBaseBackend),
-    sessionTelemetry,
+  const auxPromptBudget = reviewPromptBudget(
+    auxBaseBackend.name,
+    await catalogModelLimits(auxProviderID, auxModelID).catch(() => undefined),
   );
-  // Single gate for every aux session (lenses, guideline, addressed,
-  // changes-since, verification): an incomplete embedded diff and a failed
-  // aux-only opencode boot disable them the same way (invariant #3).
-  const auxSessionsEnabled =
-    auxHasCompleteEmbeddedDiff && !auxOpencodeBootError && !auxGatewayPreflightError;
+  const mainBackend = budgetReviewBackend(
+    limitReviewBackendSessions(
+      mainBaseBackend,
+      'main',
+      sessionSlots,
+      providerLimiters.forProvider(providerID) ?? serializedBackends.get(mainBaseBackend),
+      sessionTelemetry,
+    ),
+    mainPromptBudget,
+  );
+  const auxBackend = budgetReviewBackend(
+    limitReviewBackendSessions(
+      auxBaseBackend,
+      'aux',
+      sessionSlots,
+      providerLimiters.forProvider(auxProviderID) ?? serializedBackends.get(auxBaseBackend),
+      sessionTelemetry,
+    ),
+    auxPromptBudget,
+  );
+  const auxSessionsEnabled = !auxOpencodeBootError && !auxGatewayPreflightError;
   const verificationEnabled = options.verifyFindings && auxSessionsEnabled;
   const finderTimeoutMs = computeFinderTimeoutMs(options.timeBudgetMinutes, verificationEnabled);
   if (finderTimeoutMs) {
@@ -2378,18 +2348,7 @@ async function runReviewPipeline(params: {
     };
     const guidelinesForPrompt = selectFinderGuidelineText(guidelineSelection);
 
-    // Embedded-only main backends carry the unbounded block buildShardPlans
-    // renders for them, not the 40KB default. Shared with the budget log so
-    // both report the diff the main session actually receives.
-    const mainDiffBlock =
-      mainRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks
-        ? embeddedOnlyBackendDiffHunks.text
-        : diffHunksBlock;
-
-    // Trimmed here, not at assembly: every other byte of a shard prompt is now
-    // final, so the budget is exact rather than estimated. Only the main shards
-    // get the trimmed context — aux sessions keep the full one, since the
-    // dilution this targets is the finder's (#3 keeps them independent).
+    // Keep room for a useful diff page; the planner checks the final assembled prompt.
     const trimBudget = options.contextTrim
       ? ASSEMBLED_CONTEXT_WARN_BYTES -
         Buffer.byteLength(guidelinesForPrompt, 'utf8') -
@@ -2401,7 +2360,7 @@ async function runReviewPipeline(params: {
           'utf8',
         ) -
         Buffer.byteLength(baseCoreContext, 'utf8') -
-        Buffer.byteLength(mainDiffBlock, 'utf8')
+        24 * 1024
       : Infinity;
     const { kept, dropped } = trimContextBlocks(supplementaryBlocks, trimBudget);
     if (dropped.length > 0) log(`Context trim dropped: ${dropped.join(', ')}`);
@@ -2416,6 +2375,53 @@ async function runReviewPipeline(params: {
           );
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
+
+    const verifierContextForTargets = (targets: Finding[]) => {
+      const fits = measureReviewPrompt(
+        assembleFindingVerificationPrompt(verifierPrContext, targets),
+        auxPromptBudget,
+        REVIEW_EVIDENCE_BYTES,
+      ).fits;
+      return fits && diffHunks.truncatedFiles.length === 0 && diffHunks.omittedFiles.length === 0
+        ? verifierPrContext
+        : targetedVerifierContext(
+            shardPlans,
+            targets,
+            joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks),
+          );
+    };
+    const renderMainPrompt = (context: string) =>
+      assembleReviewPrompt(
+        context,
+        guidelinesForPrompt,
+        '',
+        options.evidenceQuotes,
+        options.embeddedFirstPrompt,
+        {
+          toolsAvailable: guidelineSelection.mainCanReadWorkspace,
+          contextFirst: options.sharedPrefixPrompt,
+        },
+      );
+    log(
+      `Main prompt budget: ${JSON.stringify(mainPromptBudget)}; input tokens conservatively bounded by UTF-8 bytes.`,
+    );
+    const shardPlans = buildShardPlans({
+      coreContext: mainCoreContext,
+      context7Block,
+      shards,
+      renderPrompt: renderMainPrompt,
+      budget: mainPromptBudget,
+      evidenceReserveBytes: REVIEW_EVIDENCE_BYTES,
+      embeddedFirstPrompt: options.embeddedFirstPrompt,
+      diffFirst: options.sharedPrefixPrompt,
+      batchDiffScope:
+        options.experiment.exploration.batchDiffRecovery && guidelineSelection.mainCanReadWorkspace
+          ? diffScope
+          : undefined,
+    });
+
+    await addReviewEvidence(shardPlans, evidence, renderMainPrompt, mainPromptBudget, log);
+
     if (telemetry.enabled) {
       const auxEffortOptions = auxOnPoolside
         ? undefined
@@ -2432,7 +2438,7 @@ async function runReviewPipeline(params: {
       );
       telemetry.recordExecution({
         reviewPasses: effectiveReviewPasses,
-        reviewShards: shards.length,
+        reviewShards: shardPlans.length,
         lensKeys: candidateLensKeys,
         guidelinePass: guidelineCandidate,
         context7Active,
@@ -2457,22 +2463,6 @@ async function runReviewPipeline(params: {
         },
       });
     }
-    const shardPlans = buildShardPlans({
-      coreContext: mainCoreContext,
-      fullDiff: diffHunks,
-      context7Block,
-      shards,
-      requireCompleteEmbeddedDiff: mainRequiresCompleteEmbeddedDiff,
-      diffHunksOptions: mainRequiresCompleteEmbeddedDiff
-        ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
-        : undefined,
-      embeddedFirstPrompt: options.embeddedFirstPrompt,
-      diffFirst: options.sharedPrefixPrompt,
-      batchDiffScope:
-        options.experiment.exploration.batchDiffRecovery && guidelineSelection.mainCanReadWorkspace
-          ? diffScope
-          : undefined,
-    });
 
     for (const plan of shardPlans) {
       log(
@@ -2527,7 +2517,6 @@ async function runReviewPipeline(params: {
       formatContextBudget([
         { name: 'guidelines', text: guidelinesForPrompt },
         { name: 'core', text: mainCoreContext },
-        { name: 'diff', text: mainDiffBlock },
         { name: 'context7', text: context7Block },
       ]),
     );
@@ -2538,7 +2527,7 @@ async function runReviewPipeline(params: {
       scope: 'run',
       backend: mainBackend.name,
       ...(telemetry.enabled
-        ? { inputBytes: Buffer.byteLength(mainCoreContext) + Buffer.byteLength(mainDiffBlock) }
+        ? { inputBytes: shardPlans.reduce((sum, plan) => sum + (plan.promptBytes ?? 0), 0) }
         : {}),
     });
     // Submit every main shard before auxiliary work. Priority ordering also
@@ -2592,7 +2581,14 @@ async function runReviewPipeline(params: {
                 diffScope: formatDiffScope(diffScope),
                 commits: addressedCommits,
                 threads: priorJbotThreadBlock,
-                diff: auxDiffBlockText,
+                diff: targetedDiff(
+                  shardPlans,
+                  priorJbotThreads.map((thread) => ({
+                    path: thread.path,
+                    line: thread.line ?? 0,
+                    body: thread.body,
+                  })),
+                ),
               })
             : '',
         priorJbotThreads: auxSessionsEnabled ? priorJbotThreads : [],
@@ -2603,12 +2599,47 @@ async function runReviewPipeline(params: {
       }),
     );
 
+    const lensGuidelines = selectFinderGuidelineText({
+      ...guidelineSelection,
+      mainCanReadWorkspace: auxBackend.canReadWorkspace ?? !auxRequiresCompleteEmbeddedDiff,
+      lens: true,
+    });
+    const prepareAuxPlans = async (lens?: string) => {
+      const render = (context: string) =>
+        lens
+          ? assembleReviewPrompt(
+              context,
+              lensGuidelines,
+              lens,
+              options.evidenceQuotes,
+              options.embeddedFirstPrompt,
+              {
+                toolsAvailable: auxBackend.canReadWorkspace,
+                contextFirst: options.sharedPrefixPrompt,
+              },
+            )
+          : assembleGuidelineCompliancePrompt(context, guidelines);
+      const plans = buildShardPlans({
+        coreContext: lens
+          ? joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks)
+          : coreContext,
+        context7Block: '',
+        shards,
+        budget: auxPromptBudget,
+        renderPrompt: render,
+        evidenceReserveBytes: REVIEW_EVIDENCE_BYTES,
+      });
+      await addReviewEvidence(plans, evidence, render, auxPromptBudget, log);
+      return plans;
+    };
+
     const guidelineComplianceCheck = trackAux(
       'guideline-compliance',
       startGuidelineComplianceCheck({
         backend: auxBackend,
         model: auxModel,
-        prContext: auxPrContext,
+        prContext: coreContext,
+        plans: () => prepareAuxPlans(),
         guidelinesForPrompt: guidelines,
         hasGuidelines: Boolean(guidelines),
         enabled: guidelineCandidate && !sweepGuidelines,
@@ -2652,11 +2683,8 @@ async function runReviewPipeline(params: {
       backend: auxBackend,
       model: auxModel,
       lensPrContext,
-      guidelinesForPrompt: selectFinderGuidelineText({
-        ...guidelineSelection,
-        mainCanReadWorkspace: auxBackend.canReadWorkspace ?? !auxRequiresCompleteEmbeddedDiff,
-        lens: true,
-      }),
+      plans: prepareAuxPlans,
+      guidelinesForPrompt: lensGuidelines,
       lensKeys: candidateLensKeys,
       timeoutMs: finderTimeoutMs,
       deadlineAt: computeRunDeadline(options.timeBudgetMinutes, runStartedAt, verificationEnabled),
@@ -2754,6 +2782,8 @@ async function runReviewPipeline(params: {
         backend: auxBackend,
         model: auxModel,
         prContext: verifierPrContext,
+        contextForTargets: verifierContextForTargets,
+        promptBudget: auxPromptBudget,
         targets,
         timeoutMs,
         modelOptions: verifierSessionOptions,
@@ -2945,6 +2975,8 @@ async function runReviewPipeline(params: {
         backend: auxBackend,
         model: auxModel,
         prContext: verifierPrContext,
+        contextForTargets: verifierContextForTargets,
+        promptBudget: auxPromptBudget,
         findings: merge.lateUnverified,
         enabled: verificationEnabled,
         timeoutMs: computeVerificationTimeoutMs(
@@ -2969,6 +3001,8 @@ async function runReviewPipeline(params: {
         backend: auxBackend,
         model: auxModel,
         prContext: verifierPrContext,
+        contextForTargets: verifierContextForTargets,
+        promptBudget: auxPromptBudget,
         timeoutMs: computeVerificationTimeoutMs(
           options.timeBudgetMinutes,
           Date.now() - runStartedAt,
@@ -3426,10 +3460,7 @@ export function normalizeOptions(
     skipDocOnly: options?.skipDocOnly ?? true,
     skipUnchanged: options?.skipUnchanged ?? true,
     dynamicFanout: options?.dynamicFanout ?? true,
-    // Capped by default: throttled tiers serialize upstream anyway, and an
-    // uncapped burst turns session deadlines into queue-time measurements
-    // (see the flash-tier note in opencode.ts). 3 matches the dogfood-proven
-    // cap; explicit 0 = unlimited.
+    // Throttled tiers serialize upstream; a cap keeps queued work out of session deadlines.
     maxConcurrentSessions: Math.max(options?.maxConcurrentSessions ?? 3, 0),
     opencodePort: Math.max(options?.opencodePort ?? 0, 0),
     reviewTelemetry: options?.reviewTelemetry ?? true,
@@ -3487,6 +3518,7 @@ export function startLensPasses(params: {
   backend: ReviewBackend;
   model: string;
   lensPrContext: string;
+  plans?: (lens: string) => ShardPlan[] | Promise<ShardPlan[]>;
   guidelinesForPrompt: string;
   lensKeys: string[];
   timeoutMs?: number;
@@ -3513,16 +3545,53 @@ export function startLensPasses(params: {
   return lensKeys.map((key, index) => {
     const run = () => {
       const startedAt = Date.now();
-      return params.backend
-        .runReview(params.model, params.lensPrContext, params.guidelinesForPrompt, params.log, {
-          lensAddendum: REVIEW_LENSES[key],
-          label: `review-${key}`,
-          timeoutMs: params.timeoutMs,
-          deadlineAt: params.deadlineAt,
-          onTokenUsage: params.onTokenUsage,
-          evidenceQuotes: params.evidenceQuotes,
-          embeddedFirstPrompt: params.embeddedFirstPrompt,
-          contextFirst: params.contextFirst,
+      return Promise.resolve()
+        .then(async () => {
+          const plans: Array<Pick<ShardPlan, 'context'> & Partial<ShardPlan>> =
+            await (params.plans?.(REVIEW_LENSES[key]) ?? [{ context: params.lensPrContext }]);
+          const results = await Promise.all(
+            plans.map(async (plan, page) => {
+              try {
+                if (params.isAbandoned?.(`review-${key}`))
+                  throw new Error('Lens page abandoned before dispatch.');
+                const result = await params.backend.runReview(
+                  params.model,
+                  plan.context,
+                  params.guidelinesForPrompt,
+                  params.log,
+                  {
+                    lensAddendum: REVIEW_LENSES[key],
+                    label: `review-${key}`,
+                    timeoutMs: params.timeoutMs,
+                    deadlineAt: params.deadlineAt,
+                    onTokenUsage: params.onTokenUsage,
+                    evidenceQuotes: params.evidenceQuotes,
+                    embeddedFirstPrompt: params.embeddedFirstPrompt,
+                    contextFirst: params.contextFirst,
+                  },
+                );
+                if (plans.length > 1)
+                  params.onCoverage?.({
+                    session: `review-${key}-page-${page + 1}`,
+                    state: result.partial ? 'partial' : 'completed',
+                    promptBytes: plan.promptBytes,
+                    diff: plan.diffCoverage,
+                  });
+                return result;
+              } catch (error) {
+                params.onCoverage?.({
+                  session: `review-${key}-page-${page + 1}`,
+                  state: 'failed',
+                  error,
+                });
+                return { findings: [], partial: true };
+              }
+            }),
+          );
+          return {
+            findings: results.flatMap((result) => result.findings),
+            partial: results.some((result) => result.partial),
+          };
         })
         .then((result) => {
           params.log(`${key} lens pass complete: ${result.findings.length} finding(s).`);
@@ -3629,6 +3698,8 @@ export function settleWithinGrace<T>(
 }
 
 async function verifyFindings(params: {
+  contextForTargets?: (targets: Finding[]) => string;
+  promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
   workspace: string;
@@ -3678,6 +3749,8 @@ async function verifyFindings(params: {
 
 /** A failed batch must not discard verdicts from successful batches. */
 export async function requestFindingVerdicts(params: {
+  contextForTargets?: (targets: Finding[]) => string;
+  promptBudget?: ReturnType<typeof reviewPromptBudget>;
   sourceContext?: (targets: Finding[]) => Promise<string>;
   prepareEvidence?: (targets: Finding[], timeoutMs: number) => Promise<string>;
   workspace: string;
@@ -3695,8 +3768,22 @@ export async function requestFindingVerdicts(params: {
   const startedAt = Date.now();
   const verdicts: FindingVerdictList = [];
   let failure: Error | undefined;
-  for (let offset = 0; offset < params.targets.length; offset += VERIFICATION_BATCH_SIZE) {
-    const targets = params.targets.slice(offset, offset + VERIFICATION_BATCH_SIZE);
+  for (let offset = 0; offset < params.targets.length;) {
+    let size = Math.min(VERIFICATION_BATCH_SIZE, params.targets.length - offset);
+    let targets = params.targets.slice(offset, offset + size);
+    if (params.promptBudget && params.contextForTargets) {
+      while (
+        size > 1 &&
+        !measureReviewPrompt(
+          assembleFindingVerificationPrompt(params.contextForTargets(targets), targets),
+          params.promptBudget,
+          REVIEW_EVIDENCE_BYTES,
+        ).fits
+      ) {
+        size = Math.ceil(size / 2);
+        targets = params.targets.slice(offset, offset + size);
+      }
+    }
     try {
       const sourceContext = await (params.sourceContext?.(targets) ??
         buildFindingSourceContext(params.workspace, targets));
@@ -3720,7 +3807,9 @@ export async function requestFindingVerdicts(params: {
       if (timeoutMs === 0) throw new Error('Finding verification budget exhausted.');
       const batch = await params.backend.runFindingVerification(
         params.model,
-        [params.prContext, sourceContext, evidenceContext].filter(Boolean).join('\n\n'),
+        [params.contextForTargets?.(targets) ?? params.prContext, sourceContext, evidenceContext]
+          .filter(Boolean)
+          .join('\n\n'),
         targets,
         params.log,
         timeoutMs,
@@ -3738,6 +3827,7 @@ export async function requestFindingVerdicts(params: {
       );
       if (params.timeoutMs !== undefined && Date.now() - startedAt >= params.timeoutMs) break;
     }
+    offset += size;
   }
   params.onCoverage?.({
     session,
@@ -3796,130 +3886,6 @@ function joinContext(...parts: string[]): string {
   return parts.filter(Boolean).join('\n\n');
 }
 
-interface ShardPlan {
-  label: string;
-  /** Context including the Context7 block (when active). */
-  context: string;
-  /** Context without the Context7 block, for the fallback retry. */
-  baseContext: string;
-  /** Changed files this shard may anchor findings in. */
-  assignedFiles: string[];
-  diffCoverage: ReturnType<typeof diffHunksCoverage>;
-}
-
-/**
- * One plan per main-review session. A single shard reproduces the classic
- * whole-PR review; multiple shards each get the full core context (PR
- * metadata, guidelines pointers, prior threads, blast radius) plus their own
- * assignment block and diff slice, so every shard can reason across the
- * whole PR but anchors only in its files.
- */
-export function buildShardPlans(params: {
-  coreContext: string;
-  fullDiff: ReturnType<typeof buildDiffHunksBlockWithMetadata>;
-  context7Block: string;
-  shards: ReturnType<typeof shardFilesForReview>;
-  requireCompleteEmbeddedDiff?: boolean;
-  diffHunksOptions?: DiffHunksOptions;
-  embeddedFirstPrompt?: boolean;
-  /** Shared-prefix arm: a single-shard plan leads with the diff; sharded plans keep the core prefix they share. */
-  diffFirst?: boolean;
-  batchDiffScope?: Parameters<typeof buildDiffRecoveryBlock>[2];
-}): ShardPlan[] {
-  const {
-    coreContext,
-    fullDiff,
-    context7Block,
-    shards,
-    requireCompleteEmbeddedDiff = false,
-    diffHunksOptions,
-    diffFirst = false,
-  } = params;
-  if (shards.length <= 1) {
-    // The runner heads coreContext with the trust boundary; diff-first moves only
-    // the blocks behind it, so author-controlled text never precedes the guard.
-    const [boundary, coreBody] = coreContext.startsWith(UNTRUSTED_PR_CONTENT_NOTE)
-      ? [UNTRUSTED_PR_CONTENT_NOTE, coreContext.slice(UNTRUSTED_PR_CONTENT_NOTE.length).trimStart()]
-      : ['', coreContext];
-    const diffResult =
-      requireCompleteEmbeddedDiff || params.batchDiffScope
-        ? buildDiffHunksBlockWithMetadata(shards[0] ?? [], diffHunksOptions)
-        : fullDiff;
-    if (requireCompleteEmbeddedDiff) {
-      assertCompleteEmbeddedDiff(diffResult, 'review');
-    }
-    const recovery = params.batchDiffScope
-      ? buildDiffRecoveryBlock(
-          shards[0] ?? [],
-          incompleteDiffFiles(diffResult),
-          params.batchDiffScope,
-        )
-      : '';
-    const diffText = joinContext(diffResult.text, recovery);
-    const baseContext = diffFirst
-      ? joinContext(boundary, diffText, coreBody)
-      : joinContext(coreContext, diffText);
-    return [
-      {
-        label: 'review',
-        context: joinContext(baseContext, context7Block),
-        baseContext,
-        assignedFiles: (shards[0] ?? []).map((file) => file.filename),
-        diffCoverage: diffHunksCoverage(shards[0] ?? [], diffResult),
-      },
-    ];
-  }
-  return shards.map((shard, index) => {
-    const assignedFiles = shard.map((file) => file.filename);
-    const assignment = buildShardAssignmentBlock(
-      assignedFiles,
-      index,
-      shards.length,
-      params.embeddedFirstPrompt,
-    );
-    const diffResult = buildDiffHunksBlockWithMetadata(shard, diffHunksOptions);
-    if (requireCompleteEmbeddedDiff) {
-      assertCompleteEmbeddedDiff(diffResult, `review-shard-${index + 1}`);
-    }
-    const recovery = params.batchDiffScope
-      ? buildDiffRecoveryBlock(shard, incompleteDiffFiles(diffResult), params.batchDiffScope)
-      : '';
-    return {
-      label: `review-shard-${index + 1}`,
-      context: joinContext(coreContext, context7Block, assignment, diffResult.text, recovery),
-      baseContext: joinContext(coreContext, assignment, diffResult.text, recovery),
-      assignedFiles,
-      diffCoverage: diffHunksCoverage(shard, diffResult),
-    };
-  });
-}
-
-function assertCompleteEmbeddedDiff(
-  result: ReturnType<typeof buildDiffHunksBlockWithMetadata>,
-  label: string,
-): void {
-  const incomplete = incompleteDiffFiles(result);
-  if (incomplete.length === 0) return;
-  throw new Error(
-    `Embedded-only backend ${label} would receive an incomplete embedded diff (${formatFileList(
-      incomplete,
-    )}). ` +
-      'The embed budget for these backends is unbounded, so this means it was reinstated somewhere; the provider cannot read the checkout, and partial coverage must never be reported as a whole review.',
-  );
-}
-
-function incompleteDiffFiles(result: ReturnType<typeof buildDiffHunksBlockWithMetadata>): string[] {
-  return [...new Set([...result.truncatedFiles, ...result.omittedFiles])];
-}
-
-/**
- * Runs the main review as parallel shard sessions and merges the results.
- * Wall clock is the slowest shard, not the whole PR. Each shard owns a slice
- * of the changed files, so an unrecovered main-shard failure is a coverage
- * hole and fails the main review. Auxiliary sessions fail open; main shards
- * do not. In sharded mode each shard's findings are clamped in code to its
- * assigned files so parallel shards cannot duplicate or poach each other.
- */
 /**
  * The verifier's slim context (TASK-065, JBOT_VERIFIER_SLIM_CONTEXT): the
  * claim-checking inputs — untrusted-input guard, PR title/body/diff scope,
@@ -4017,7 +3983,17 @@ export async function runShardedReview(params: {
     shardPlans.map(async (plan): Promise<ShardOutcome> => {
       const startedAt = Date.now();
       const promptBytes =
-        Buffer.byteLength(plan.context, 'utf8') + Buffer.byteLength(guidelinesForPrompt, 'utf8');
+        plan.promptBytes ??
+        Buffer.byteLength(
+          assembleReviewPrompt(
+            plan.context,
+            guidelinesForPrompt,
+            '',
+            params.evidenceQuotes,
+            params.embeddedFirstPrompt,
+            { contextFirst: params.contextFirst },
+          ),
+        );
       const oversized = assembledContextWarning(plan.label, promptBytes);
       if (oversized) log(oversized);
       const cover = (state: 'completed' | 'partial' | 'failed', error?: unknown) =>
@@ -4110,9 +4086,16 @@ export async function runShardedReview(params: {
         // The retry is its own attempt: its rows carry the -retry session
         // label (matching its token-usage rows), the base-context prompt
         // size, and a duration clocked from the retry itself.
-        const retryPromptBytes =
-          Buffer.byteLength(plan.baseContext, 'utf8') +
-          Buffer.byteLength(guidelinesForPrompt, 'utf8');
+        const retryPromptBytes = Buffer.byteLength(
+          assembleReviewPrompt(
+            plan.baseContext,
+            guidelinesForPrompt,
+            '',
+            params.evidenceQuotes,
+            params.embeddedFirstPrompt,
+            { contextFirst: params.contextFirst },
+          ),
+        );
         // A prior run's successful retry was saved under the base-context
         // key; the lookup costs no model time, so it runs even with no
         // retry budget left.
@@ -4208,6 +4191,18 @@ export async function runShardedReview(params: {
     }),
   );
 
+  const delivery = reviewDelivery(
+    shardPlans,
+    new Set(outcomes.filter((o) => o.result && !o.result.partial).map((o) => o.plan.label)),
+  );
+  if (delivery.expectedHunks) {
+    log(`Diff delivery: ${JSON.stringify(delivery)}`);
+    params.onCoverage?.({
+      session: 'diff-delivery',
+      state: delivery.incompleteTasks ? 'partial' : 'completed',
+      delivery,
+    });
+  }
   const successes = outcomes.filter((outcome) => outcome.result !== undefined);
   const failures = outcomes.filter((outcome) => outcome.result === undefined);
   for (const failure of failures) {
@@ -4258,6 +4253,7 @@ export function buildMainShardFailureMessage(
 }
 
 interface ReviewResultLike {
+  partial?: boolean;
   summary: string;
   findings: Finding[];
 }
@@ -4527,6 +4523,7 @@ function startGuidelineComplianceCheck(params: {
   model: string;
   prContext: string;
   guidelinesForPrompt: string;
+  plans?: () => ShardPlan[] | Promise<ShardPlan[]>;
   hasGuidelines: boolean;
   enabled: boolean;
   timeoutMs?: number;
@@ -4547,18 +4544,46 @@ function startGuidelineComplianceCheck(params: {
 
   const startedAt = Date.now();
   params.log('Starting guideline-compliance check in parallel.');
-  return params.backend
-    .runGuidelineComplianceCheck(
-      params.model,
-      params.prContext,
-      params.guidelinesForPrompt,
-      params.log,
-      params.timeoutMs,
-      params.onTokenUsage,
-    )
+  let partial = false;
+  return Promise.resolve()
+    .then(async () => {
+      const plans: Array<Pick<ShardPlan, 'context'> & Partial<ShardPlan>> =
+        await (params.plans?.() ?? [{ context: params.prContext }]);
+      const results = await Promise.all(
+        plans.map(async (plan, page) => {
+          try {
+            const findings = await params.backend.runGuidelineComplianceCheck(
+              params.model,
+              plan.context,
+              params.guidelinesForPrompt,
+              params.log,
+              params.timeoutMs,
+              params.onTokenUsage,
+            );
+            if (plans.length > 1)
+              params.onCoverage?.({
+                session: `${session}-page-${page + 1}`,
+                state: 'completed',
+                promptBytes: plan.promptBytes,
+                diff: plan.diffCoverage,
+              });
+            return findings;
+          } catch (error) {
+            partial = true;
+            params.onCoverage?.({ session: `${session}-page-${page + 1}`, state: 'failed', error });
+            return [];
+          }
+        }),
+      );
+      return results.flat();
+    })
     .then((findings) => {
       params.log(`Guideline-compliance check complete: ${findings.length} finding(s)`);
-      params.onCoverage?.({ session, state: 'completed', durationMs: Date.now() - startedAt });
+      params.onCoverage?.({
+        session,
+        state: partial ? 'partial' : 'completed',
+        durationMs: Date.now() - startedAt,
+      });
       return findings;
     })
     .catch((error) => {

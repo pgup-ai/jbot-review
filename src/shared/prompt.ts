@@ -6,6 +6,43 @@ import { GIT_DIFF_ARGS } from './git.ts';
 import { PATH_PATTERNS, type ChangeShape } from './diff-context.ts';
 import { changedFilesIncludeFrontend, selectReviewPlaybookIds } from './review-playbooks.ts';
 
+export function buildReviewChangeMap(files: PrFile[]): string {
+  const rows = files.map(
+    (file) => `${file.filename}: ${(file.patch?.match(/^@@ /gm) ?? []).length} hunks`,
+  );
+  return truncateUtf8WithNotice(
+    [
+      '## Shared change map',
+      'This map is navigation, not code evidence. Each task receives its complete assigned diff page; other pages are reviewed separately. Check the actual caller and contract excerpts against your assigned code for cross-file regressions. A split hunk may continue in another task. Do not infer correctness from a file name or summary.',
+      ...rows,
+    ].join('\n'),
+    8192,
+    'Change map',
+  );
+}
+
+export const BOUNDARY_EVIDENCE_NOTE = `## Caller and contract checks
+Check the supplied caller/contract code against the assigned diff, including changed files owned by another task. Report concrete incompatibilities at the assigned change. These bounded excerpts are supporting evidence, not complete dependency coverage. Missing excerpts do not establish that no affected callers exist.`;
+
+export const BOUNDARY_EVIDENCE_UNAVAILABLE =
+  'Caller/contract evidence unavailable or omitted by its collection budget; cross-file verification is limited to the supplied code and any repository reads.';
+
+export const VERIFIER_TARGETED_DIFF_NOTE = `## Verification diff scope
+These are the diff pages containing the finding locations and their cited code. Other PR hunks are omitted from this verification context; separate main tasks review them. Missing surrounding hunks or caller evidence cannot refute a finding. Retrieve the missing code when tools are available; otherwise return uncertain when that evidence is needed.`;
+
+export function buildAdjacentDiffContext(excerpts: string[]): string {
+  if (!excerpts.length) return '';
+  return truncateUtf8WithNotice(
+    [
+      '## Adjacent split-hunk evidence',
+      'The following patch lines border this page in the original hunk. They are supporting context; other tasks own their review. The original hunk header identifies their source region, not a new complete patch.',
+      ...new Set(excerpts),
+    ].join('\n\n'),
+    4096,
+    'Adjacent hunk excerpts',
+  );
+}
+
 export function buildDiffRecoveryBlock(
   files: PrFile[],
   missing: string[],
@@ -33,7 +70,7 @@ export function buildDiffRecoveryBlock(
   }
   const lines = [
     '## Batched missing-diff reads',
-    'Read the missing hunks in these batches instead of one command per file. If output truncates, recover the remaining hunks separately. These commands do not replace source or dependency checks.',
+    'When a caller or contract check needs another changed file not embedded here, read its diff in these batches instead of one command per file. Your assigned diff pages are delivered directly; do not re-review all other pages. If output truncates, recover the needed remaining hunks separately.',
   ];
   let delivered = 0;
   for (const group of groups) {
@@ -1073,16 +1110,16 @@ export function buildShardAssignmentBlock(
 ): string {
   const explorationRules = embeddedFirstPrompt
     ? [
-        '- Review every assigned file in full depth, including direct interactions with unchanged code and with OTHER changed files. Follow dependencies as far as needed to establish the consequences.',
+        '- Review every hunk in your assigned diff page in full depth, including direct interactions with unchanged code and with OTHER changed files. Follow dependencies as far as needed to establish the consequences.',
         '- Apply the repository exploration policy to the embedded hunks and any explicit coverage gaps.',
       ]
     : [
-        '- Review every assigned file in full depth, including its interactions with unchanged code and with OTHER changed files (the full checkout and the complete changed-file list are available — follow symbols wherever they lead).',
+        '- Review every hunk in your assigned diff page in full depth, including its interactions with unchanged code and with OTHER changed files (the full checkout and the complete changed-file list are available — follow symbols wherever they lead).',
         '- The diff hunks below cover your assigned files; use the git diff command for anything else you need to read.',
       ];
   return [
     '## Your assigned files',
-    `This review is split across ${shardCount} parallel reviewers; you are reviewer ${shardIndex + 1}.`,
+    `This review has ${shardCount} tasks; you are reviewer ${shardIndex + 1}. Large files may continue on other pages, which have their own tasks.`,
     'Your assigned changed files:',
     ...assignedFiles.map((file) => `- ${file}`),
     '',
