@@ -191,7 +191,6 @@ describe('buildBody', () => {
       ...finding,
       title: 'Unverified concern: Caller may be missing',
       kind: 'investigate',
-      verificationUncertain: true,
       body: 'The caller was not supplied.\n\nOriginal reviewer hypothesis (unverified):\n\nLong hypothesis.',
     };
     const baseline = {
@@ -223,6 +222,7 @@ describe('buildBody', () => {
     assert.match(body, /\| 2 \| 0 \| 0 \| 1 \| 0 \| 0 \| 1 \|/);
     assert.deepEqual(auxiliaryBaselines(body), [baseline]);
     assert.equal(completedReviewHead(body), 'd'.repeat(40));
+    assert.equal(uncertain.verificationUncertain, undefined);
   });
 });
 

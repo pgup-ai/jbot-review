@@ -4953,6 +4953,11 @@ export function buildBody(
   experiment?: { advisorySummary: boolean; auxiliaryBaselines: AuxiliaryBaseline[] },
 ): string {
   const total = all.length;
+  const displayed = experiment?.advisorySummary
+    ? all.map((finding) =>
+        isAdvisoryFinding(finding) ? { ...finding, verificationUncertain: true } : finding,
+      )
+    : all;
   const lines = ['## J-Bot Code Review', ''];
   const coverageNotice = formatIncompleteCoverage(incompleteSessions);
   if (coverageNotice) lines.push(coverageNotice, '');
@@ -4968,13 +4973,13 @@ export function buildBody(
   // renders nothing rather than a filler placeholder. The "Changes since last
   // review" block above is independent and still renders on re-reviews.
   const renderedSummary =
-    !all.some((finding) => finding.verificationUncertain) && summary.trim()
+    !displayed.some((finding) => finding.verificationUncertain) && summary.trim()
       ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: true })
       : '';
   if (total > 0 && renderedSummary.trim()) {
     lines.push(renderedSummary, '');
   }
-  const guidance = getMergeGuidance(all, Boolean(coverageNotice));
+  const guidance = getMergeGuidance(displayed, Boolean(coverageNotice));
   lines.push(`**Review state:** ${guidance.state}`, '');
   lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`, '');
   if (headSha) {
@@ -4986,12 +4991,12 @@ export function buildBody(
   if (total === 0) {
     lines.push(coverageNotice ? '_No findings from completed passes._' : '✅ _No new findings._');
   } else {
-    lines.push('### Findings Summary', '', ...buildSeverityTable(all), '');
+    lines.push('### Findings Summary', '', ...buildSeverityTable(displayed), '');
   }
   const orphanedSection = renderOrphanedSection(orphaned);
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
   if (experiment?.advisorySummary)
-    lines.push(...renderAdvisorySection(all.filter(isAdvisoryFinding)));
+    lines.push(...renderAdvisorySection(displayed.filter(isAdvisoryFinding)));
   lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));
   lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
   return withReviewCoverage(
