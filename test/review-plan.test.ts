@@ -59,6 +59,9 @@ test('one requested shard pages a huge hunk without losing late changes or excee
     reviewDelivery(plans, new Set(plans.slice(1).map((p) => p.label))).deliveredHunks,
     0,
   );
+  const verification = targetedDiff(plans, [{ path: 'src/huge.ts', line: 0, body: '' }]);
+  assert.ok(Buffer.byteLength(verification) <= 36 * 1024 + 2);
+  assert.match(verification, /Hunks truncated for src\/huge.ts/);
 });
 
 test('budgets instructions, guidelines, context and output separately from transport bytes', async () => {

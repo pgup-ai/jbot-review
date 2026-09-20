@@ -3,7 +3,11 @@ import type { PrFile } from './github.ts';
 import type { DiffScope } from './review-context.ts';
 import { GIT_DIFF_ARGS } from './git.ts';
 
-import { PATH_PATTERNS, type ChangeShape } from './diff-context.ts';
+import {
+  PATH_PATTERNS,
+  buildDiffHunksBlockWithMetadata,
+  type ChangeShape,
+} from './diff-context.ts';
 import { changedFilesIncludeFrontend, selectReviewPlaybookIds } from './review-playbooks.ts';
 
 export function buildReviewChangeMap(files: PrFile[]): string {
@@ -41,6 +45,19 @@ export function buildAdjacentDiffContext(excerpts: string[]): string {
     4096,
     'Adjacent hunk excerpts',
   );
+}
+
+export function buildTargetedDiffBlock(files: PrFile[], adjacent: string[]): string {
+  const diff = buildDiffHunksBlockWithMetadata(files, {
+    totalBudgetBytes: 24 * 1024,
+    perFileBudgetBytes: 24 * 1024,
+  });
+  return [
+    boundedPromptContext(diff.text, 32 * 1024, 'Targeted diff and omission list'),
+    buildAdjacentDiffContext(adjacent),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export function buildDiffRecoveryBlock(

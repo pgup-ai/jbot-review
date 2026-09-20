@@ -8,6 +8,7 @@ import {
   buildDiffRecoveryBlock,
   buildReviewChangeMap,
   buildAdjacentDiffContext,
+  buildTargetedDiffBlock,
   buildShardAssignmentBlock,
   UNTRUSTED_PR_CONTENT_NOTE,
   BOUNDARY_EVIDENCE_NOTE,
@@ -296,12 +297,10 @@ export function targetedDiff(
       .map((u) => u.file.patch)
       .join('\n'),
   }));
-  return [
-    buildDiffHunksBlockWithMetadata(files, COMPLETE_DIFF_OPTIONS).text,
-    buildAdjacentDiffContext(units.flatMap((unit) => unit.adjacent ?? [])),
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+  return buildTargetedDiffBlock(
+    files,
+    units.flatMap((unit) => unit.adjacent ?? []),
+  );
 }
 
 export function targetedVerifierContext(
