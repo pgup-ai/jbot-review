@@ -342,8 +342,8 @@ try {
             resolve(root, 'scripts/review-experiment-trial.ts'),
             experimentPath,
             ...(c.findings
-              ? ['verification', c.workspace, c.base, resolve(c.findings)]
-              : ['review', '--workspace', c.workspace, '--base', c.base]),
+              ? ['verification', resolve(c.workspace), c.base, resolve(c.findings)]
+              : ['review', '--workspace', resolve(c.workspace), '--base', c.base]),
           ],
           {
             cwd: dir,

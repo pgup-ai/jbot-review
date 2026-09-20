@@ -32,10 +32,16 @@ export function reviewPromptBudget(
   backend: string,
   limits?: { contextTokens: number; outputTokens?: number },
 ): ReviewPromptBudget {
+  const contextTokens = limits?.contextTokens ?? 128_000;
+  const harnessTokens = Math.min(8_192, Math.floor(contextTokens / 4));
   return {
-    contextTokens: limits?.contextTokens ?? 128_000,
-    outputTokens: limits?.outputTokens ?? 32_768,
-    harnessTokens: 8_192,
+    contextTokens,
+    outputTokens: Math.min(
+      limits?.outputTokens ?? 32_768,
+      32_768,
+      Math.floor((contextTokens - harnessTokens) / 2),
+    ),
+    harnessTokens,
     transportBytes: backend === 'cline' ? 120 * 1024 - 2048 : 256 * 1024,
     modelLimitKnown: limits !== undefined,
   };

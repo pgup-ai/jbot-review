@@ -20,6 +20,7 @@ import { buildClinePromptArg, CLINE_MAX_ARGV_BYTES } from '../src/shared/cline.t
 import { runShardedReview } from '../src/shared/runner.ts';
 import { budgetReviewBackend } from '../src/shared/prompt-budget.ts';
 import { boundedPromptContext, withNoToolsReviewDirective } from '../src/shared/prompt.ts';
+import { catalogModelLimits } from '../src/shared/pi.ts';
 import {
   limitReviewBackendSessions,
   type ReviewBackend,
@@ -65,6 +66,11 @@ test('one requested shard pages a huge hunk without losing late changes or excee
 });
 
 test('budgets instructions, guidelines, context and output separately from transport bytes', async () => {
+  const limits = await catalogModelLimits('opencode', 'kimi-k2.7-code', true);
+  assert.ok(limits);
+  assert.equal(limits.contextTokens, limits.outputTokens);
+  assert.ok(measureReviewPrompt(renderPrompt(''), reviewPromptBudget('pi', limits)).fits);
+  assert.equal(await catalogModelLimits('openai', 'jbot-nonexistent-model', true), undefined);
   const tokenLimited = {
     ...budget,
     contextTokens: 100,
