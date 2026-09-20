@@ -686,8 +686,9 @@ async function loadPiCatalog() {
 export async function catalogModelLimits(
   providerID: string,
   modelID: string,
+  piEnabled: boolean,
 ): Promise<{ contextTokens: number; outputTokens?: number } | undefined> {
-  if (!piServesModel(providerID, modelID)) return undefined;
+  if (!piEnabled || !piServesModel(providerID, modelID)) return undefined;
   const catalog = await loadPiCatalog();
   const match = catalog.find((model) => piCatalogHasModel([model], providerID, modelID));
   return match?.contextWindow

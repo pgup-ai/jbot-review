@@ -790,8 +790,11 @@ describe('buildShardAssignmentBlock', () => {
   });
 
   it('uses the exploration policy for embedded-first shards', () => {
+    const control = buildShardAssignmentBlock(['src/a.ts'], 0, 2, false);
     const treatment = buildShardAssignmentBlock(['src/a.ts'], 0, 2, true);
 
+    assert.match(control, /follow symbols wherever they lead/);
+    assert.doesNotMatch(control, /repository exploration policy/);
     assert.match(treatment, /Follow dependencies as far as needed/);
     assert.match(treatment, /Apply the repository exploration policy/);
     assert.doesNotMatch(treatment, /wherever they lead/);

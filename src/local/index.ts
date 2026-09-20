@@ -535,6 +535,10 @@ async function review(
     return;
   }
 
+  const piEngine = resolvePiEngine(
+    comparison ? { JBOT_SDK_ENGINE: comparison.reviewConfig.sdkEngine } : process.env,
+    process.version,
+  );
   // Before credential resolution on purpose: a preview must cost nothing and
   // need no key.
   if (preview) {
@@ -568,12 +572,12 @@ async function review(
       shards,
       budget: reviewPromptBudget(
         cliBackendForProvider(providerID) ?? 'opencode',
-        await catalogModelLimits(providerID, modelID).catch(() => undefined),
+        await catalogModelLimits(providerID, modelID, piEngine.enabled).catch(() => undefined),
       ),
       renderPrompt: (context) => assembleReviewPrompt(context, formatGuidelines(discovered)),
     });
     log(
-      'Preview budgets instructions and guidelines; runtime PR metadata and caller evidence may require additional pages.',
+      'Approximate preview: uses full guidelines and default prompt options. Runtime guideline selection, prompt options, PR metadata and caller evidence can change page counts and assignments.',
     );
     console.log(
       `\n${renderReviewPreview({
@@ -632,10 +636,6 @@ async function review(
   const aux = parseModelName(auxModel || model);
   // Preflight-only resolution (the runner re-resolves for its own routing):
   // roles served by the in-process pi engine need no opencode binary.
-  const piEngine = resolvePiEngine(
-    comparison ? { JBOT_SDK_ENGINE: comparison.reviewConfig.sdkEngine } : process.env,
-    process.version,
-  );
   const [mainPiModelAvailable, auxPiModelAvailable] = piEngine.enabled
     ? await Promise.all([
         piModelAvailable(providerID, modelID),

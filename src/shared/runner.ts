@@ -2236,11 +2236,11 @@ async function runReviewPipeline(params: {
           : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
   const mainPromptBudget = reviewPromptBudget(
     mainBaseBackend.name,
-    await catalogModelLimits(providerID, modelID).catch(() => undefined),
+    await catalogModelLimits(providerID, modelID, piEngine.enabled).catch(() => undefined),
   );
   const auxPromptBudget = reviewPromptBudget(
     auxBaseBackend.name,
-    await catalogModelLimits(auxProviderID, auxModelID).catch(() => undefined),
+    await catalogModelLimits(auxProviderID, auxModelID, piEngine.enabled).catch(() => undefined),
   );
   const mainBackend = budgetReviewBackend(
     limitReviewBackendSessions(
