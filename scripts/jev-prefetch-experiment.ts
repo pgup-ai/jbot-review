@@ -15,7 +15,11 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadDotEnv } from '../src/local/util.ts';
-import { runCliProcess } from '../src/shared/cli-process.ts';
+import {
+  createCliProcessScope,
+  onCliFatalSignal,
+  runCliProcess,
+} from '../src/shared/cli-process.ts';
 import { parseBenchmarkTelemetry } from '../src/shared/benchmark-runner.ts';
 import type { ReviewResult } from '../src/shared/types.ts';
 
@@ -258,6 +262,18 @@ const results: unknown[] = [];
 const cacheRoot = plan.reuse
   ? mkdtempSync(resolve(tmpdir(), 'jbot-evidence-experiment-'))
   : undefined;
+const processes = createCliProcessScope();
+const cleanup = async () => {
+  await processes.stop();
+  if (cacheRoot) {
+    try {
+      rmSync(cacheRoot, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+    } catch {
+      console.warn('Could not remove experiment cache directory.');
+    }
+  }
+};
+const removeSignalCleanup = onCliFatalSignal(cleanup);
 try {
   for (const run of schedule) {
     if (
@@ -313,32 +329,35 @@ try {
     let code: number | null;
     const timeoutMessage = 'Experiment process deadline exceeded';
     try {
-      const child = await runCliProcess(
-        process.execPath,
-        [
-          '--import',
-          fileURLToPath(import.meta.resolve('tsx')),
-          resolve(root, 'scripts/review-experiment-trial.ts'),
-          experimentPath,
-          ...(c.findings
-            ? ['verification', c.workspace, c.base, resolve(c.findings)]
-            : ['review', '--workspace', c.workspace, '--base', c.base]),
-        ],
-        {
-          cwd: dir,
-          env: {
-            ...env,
-            ...config,
-            JBOT_BENCHMARK_OUTPUT: output,
+      const child = await processes.run('trial', () =>
+        runCliProcess(
+          process.execPath,
+          [
+            '--import',
+            fileURLToPath(import.meta.resolve('tsx')),
+            resolve(root, 'scripts/review-experiment-trial.ts'),
+            experimentPath,
+            ...(c.findings
+              ? ['verification', c.workspace, c.base, resolve(c.findings)]
+              : ['review', '--workspace', c.workspace, '--base', c.base]),
+          ],
+          {
+            cwd: dir,
+            env: {
+              ...env,
+              ...config,
+              JBOT_BENCHMARK_OUTPUT: output,
+            },
+            timeoutMs: 15 * 60_000,
+            timeoutMessage,
+            onStdout: (chunk) => {
+              stream.write(chunk);
+            },
           },
-          timeoutMs: 15 * 60_000,
-          timeoutMessage,
-          onStdout: (chunk) => {
-            stream.write(chunk);
-          },
-        },
+        ),
       );
       code = child.exitCode;
+      if (code !== 0) process.exitCode = 1;
       stream.write(child.stderr);
     } catch (error) {
       const terminalState =
@@ -386,7 +405,10 @@ try {
       startedAt: new Date(started).toISOString(),
       processMs: Date.now() - started,
       terminalState:
-        header?.terminalState ?? (review?.verdicts ? 'verification-output' : 'missing-output'),
+        code !== 0
+          ? 'process-failed'
+          : (header?.terminalState ??
+            (review?.verdicts ? 'verification-output' : 'missing-output')),
       runMs: header?.elapsedMs ?? review?.elapsedMs ?? null,
       verdicts: review?.verdicts,
       retainedFindings: review?.findings.length ?? null,
@@ -418,11 +440,6 @@ try {
     );
   }
 } finally {
-  if (cacheRoot) {
-    try {
-      rmSync(cacheRoot, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
-    } catch {
-      console.warn('Could not remove experiment cache directory.');
-    }
-  }
+  await cleanup();
+  removeSignalCleanup();
 }

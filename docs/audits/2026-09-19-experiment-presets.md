@@ -68,9 +68,11 @@ JBOT_REVIEW_EXPERIMENT=off npm run review:local -- --base origin/main
 JBOT_REVIEW_EXPERIMENT=diff-batches npm run review:local -- --base origin/main
 ```
 
-Set the same variable on a hosted review process to select that preset. Returning
-it to `off` disables the treatment. The published Action's `latest` image does
-not acquire this branch's code simply by selecting the branch in `uses:`.
+These presets work in local runs and containers where the operator supplies the
+selector and required credentials. This PR does not configure managed hosted
+workers. Returning the selector to `off` disables the treatment. The published
+Action's `latest` image does not acquire this branch's code simply by selecting
+the branch in `uses:`.
 
 Before recommending any treatment for production, compare the same real PRs,
 models and review settings in randomized repeated runs. Preserve all failures
@@ -177,3 +179,12 @@ Node `execFile` claims were contradicted by current official documentation.
 The later [native PR checks](https://github.com/pgup-ai/jbot-review/actions/runs/35482093055)
 passed both image jobs at `ff350a6`; the earlier local QEMU limitation remains
 recorded above. No defaults changed, and the advisory blind core-corpus gap remains.
+
+A follow-up driver check covered nonzero children, spawn failure, timeout, SIGINT,
+SIGTERM and SIGHUP. Each produced a failed result, returned a nonzero driver
+status, and removed the temporary cache; the signal checks also proved the child
+was reaped. Completed failures still preserve all seven scheduled rows. Signal
+cleanup uses the existing cancellable process scope and fatal-signal helper.
+These checks are in `.jbot-review/pr-feedback/lifecycle/`; the full 1,100-test
+suite and static/build checks passed again. No review-runtime behavior changed
+in this driver follow-up.
