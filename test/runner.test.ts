@@ -36,7 +36,11 @@ import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
 import type { Octokit } from '../src/shared/github.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
 import { saveShardResult, shardFingerprint } from '../src/shared/shard-cache.ts';
-import type { ReviewBackend } from '../src/shared/session-concurrency.ts';
+import {
+  limitReviewBackendSessions,
+  type ReviewBackend,
+} from '../src/shared/session-concurrency.ts';
+import { Semaphore } from '../src/shared/opencode-session.ts';
 import { completedReviewHead } from '../src/shared/github.ts';
 import { applyFindingVerdicts, selectFindingIndexes } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
@@ -1358,6 +1362,34 @@ it('does not let optional bookkeeping delay posting, but keeps settled results',
     '',
   );
   assert.equal(skipped, 1);
+
+  const slots = new Semaphore(1);
+  let stop!: () => void;
+  const backend = limitReviewBackendSessions(
+    {
+      name: 'fake',
+      runChangesSinceLastReview: () =>
+        new Promise<string>((resolve) => {
+          stop = () => resolve('');
+        }),
+      abortSessionsByLabel: () => {
+        stop();
+        return 1;
+      },
+      runFindingVerification: async () => [],
+    } as unknown as ReviewBackend,
+    'aux',
+    slots,
+  );
+  const promise = backend.runChangesSinceLastReview('model', '', () => {});
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const verification = backend.runFindingVerification('model', '', [], () => {});
+  await takeSettledAuxiliary({ label: 'summary', promise, isSettled: () => false }, '', () =>
+    backend.abortSessionsByLabel?.('changes-since-last-review', () => {}),
+  );
+  assert.deepEqual(await verification, []);
+  await promise;
+  assert.equal(slots.isBusy(), false);
 });
 
 it('keeps finished lens-page findings when another page outlives the grace', async () => {
@@ -1397,7 +1429,7 @@ it('keeps finished lens-page findings when another page outlives the grace', asy
           completeFiles: 1,
           truncatedFiles: 0,
           omittedFiles: 0,
-          patchBytes: 1,
+          bytes: 1,
         },
       })),
     onFindings: (_label, findings) => completed.push(...findings),
@@ -1555,7 +1587,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   assert.doesNotMatch(uncertain, /Definitely broken/);
 });
 
-it('sizes verifier batches after adding cited source and rejects oversized singletons before dispatch', async () => {
+it('sizes verifier batches before optional evidence and rejects only oversized required context', async () => {
   const budget = { ...reviewPromptBudget('test'), transportBytes: 40000 };
   const targets: Finding[] = Array.from({ length: 7 }, (_, i) => ({
     path: `file${i}.ts`,
@@ -1564,35 +1596,48 @@ it('sizes verifier batches after adding cited source and rejects oversized singl
     title: `finding ${i}`,
     body: 'claim',
   }));
-  const invoked: Finding[][] = [];
-  const coverage: string[] = [];
-  const verdicts = await requestFindingVerdicts({
-    workspace: '/unused',
-    model: 'test/model',
-    prContext: '',
-    contextForTargets: () => 'c'.repeat(10000),
-    sourceContext: async (findings) => 's'.repeat(findings.includes(targets[6]) ? 100000 : 16384),
-    prepareEvidence: async () => 'e'.repeat(6000),
-    promptBudget: budget,
-    targets,
-    backend: {
-      async runFindingVerification(_model, context, findings) {
-        assert.ok(
-          measureReviewPrompt(assembleFindingVerificationPrompt(context, findings), budget).fits,
-        );
-        invoked.push(findings);
-        return findings.map((_, index) => ({ index, verdict: 'confirmed' as const }));
+  for (const evidenceBytes of [6000, 100000]) {
+    const invoked: Finding[][] = [];
+    const prepared: Finding[][] = [];
+    const coverage: string[] = [];
+    const logs: string[] = [];
+    const verdicts = await requestFindingVerdicts({
+      workspace: '/unused',
+      model: 'test/model',
+      prContext: '',
+      contextForTargets: () => 'c'.repeat(10000),
+      sourceContext: async (findings) => 's'.repeat(findings.includes(targets[6]) ? 100000 : 16384),
+      prepareEvidence: async (findings) => {
+        prepared.push(findings);
+        return 'e'.repeat(evidenceBytes);
       },
-    },
-    log: () => {},
-    onCoverage: (row) => coverage.push(row.state),
-  });
-  assert.deepEqual(invoked.flat(), targets.slice(0, 6));
-  assert.deepEqual(
-    verdicts.map((v) => v.index),
-    [0, 1, 2, 3, 4, 5],
-  );
-  assert.deepEqual(coverage, ['failed']);
+      promptBudget: budget,
+      targets,
+      backend: {
+        async runFindingVerification(_model, context, findings) {
+          assert.ok(
+            measureReviewPrompt(assembleFindingVerificationPrompt(context, findings), budget).fits,
+          );
+          assert.equal(context.includes('e'.repeat(6000)), evidenceBytes === 6000);
+          invoked.push(findings);
+          return findings.map((_, index) => ({ index, verdict: 'confirmed' as const }));
+        },
+      },
+      log: (message) => logs.push(message),
+      onCoverage: (row) => coverage.push(row.state),
+    });
+    assert.deepEqual(invoked.flat(), targets.slice(0, 6));
+    assert.deepEqual(prepared, invoked);
+    assert.deepEqual(
+      verdicts.map((v) => v.index),
+      [0, 1, 2, 3, 4, 5],
+    );
+    assert.deepEqual(coverage, ['failed']);
+    assert.equal(
+      logs.some((message) => /Optional verification evidence omitted/.test(message)),
+      evidenceBytes === 100000,
+    );
+  }
 });
 
 it('verifies every batch and preserves successful verdicts when another batch fails', async () => {

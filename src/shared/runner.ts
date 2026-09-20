@@ -2692,6 +2692,7 @@ async function runReviewPipeline(params: {
         enabled:
           shouldSummarizeChangesSinceLastReview(allPriorReviewComments, headSha) &&
           auxSessionsEnabled,
+        isAbandoned: () => abandonedAuxLabels.has('changes-since-last-review'),
         timeoutMs: finderTimeoutMs,
         log,
         onTokenUsage: recordTokenUsage,
@@ -2748,6 +2749,17 @@ async function runReviewPipeline(params: {
         ? Buffer.byteLength(summary) + Buffer.byteLength(JSON.stringify(findings))
         : undefined,
     );
+    const finishOptional = <T>(session: AuxiliarySession<T>, fallback: T) =>
+      takeSettledAuxiliary(session, fallback, () => {
+        abandonedAuxLabels.add(session.label);
+        auxBackend.abortSessionsByLabel?.(session.label, log);
+        telemetry.recordCoverage({ session: session.label, state: 'skipped' });
+        log(`Optional ${session.label} skipped: main review is complete; freeing session slots.`);
+      });
+    const [verifiedAddressedPriorComments, changesSinceText] = await Promise.all([
+      finishOptional(addressedPriorCheck, []),
+      finishOptional(changesSinceLastReview, ''),
+    ]);
     // Overlap only with auxiliary settling; the final pipeline owns telemetry and late arrivals.
     const startOverlapVerification = async (): Promise<
       { targets: Finding[]; verdicts: FindingVerdictList } | 'skipped'
@@ -2833,10 +2845,7 @@ async function runReviewPipeline(params: {
         )}.`,
       );
     }
-    // Started together, not awaited in turn: each grace begins when its call is
-    // made, so awaiting them one by one would give the group N graces of tail
-    // rather than one. Each falls back to its own empty result — the same value
-    // these sessions produce when they fail open on their own.
+    // Start all grace timers together so the waits cannot accumulate.
     const auxiliaryGraceMs = computeAuxiliaryGraceMs(
       options.timeBudgetMinutes,
       Date.now() - runStartedAt,
@@ -3008,17 +3017,6 @@ async function runReviewPipeline(params: {
       'completed',
       telemetry.enabled ? Buffer.byteLength(JSON.stringify(verifiedFindings)) : undefined,
     );
-    const finishOptional = <T>(session: AuxiliarySession<T>, fallback: T) =>
-      takeSettledAuxiliary(session, fallback, () => {
-        abandonedAuxLabels.add(session.label);
-        auxBackend.abortSessionsByLabel?.(session.label, log);
-        telemetry.recordCoverage({ session: session.label, state: 'skipped' });
-        log(`Optional ${session.label} skipped: review findings are ready to post.`);
-      });
-    const [verifiedAddressedPriorComments, changesSinceText] = await Promise.all([
-      finishOptional(addressedPriorCheck, []),
-      finishOptional(changesSinceLastReview, ''),
-    ]);
     telemetry.snapshot('verified', verifiedFindings);
     telemetry.recordEvidenceCache(evidence.stats());
     log(`Evidence cache: ${JSON.stringify(evidence.stats())}`);
@@ -3789,24 +3787,7 @@ export async function requestFindingVerdicts(params: {
       for (;;) {
         const sourceContext = await (params.sourceContext?.(targets) ??
           buildFindingSourceContext(params.workspace, targets));
-        const evidenceTimeoutMs = computeEvidenceTimeoutMs(
-          params.timeoutMs === undefined ? undefined : params.timeoutMs - (Date.now() - startedAt),
-        );
-        let evidenceContext = '';
-        if (evidenceTimeoutMs > 0) {
-          try {
-            evidenceContext = (await params.prepareEvidence?.(targets, evidenceTimeoutMs)) ?? '';
-          } catch {
-            params.log('Verification evidence unavailable; continuing with cited source.');
-          }
-        } else if (params.prepareEvidence) {
-          params.log('Skipping optional evidence preparation to preserve verification time.');
-        }
-        context = [
-          params.contextForTargets?.(targets) ?? params.prContext,
-          sourceContext,
-          evidenceContext,
-        ]
+        context = [params.contextForTargets?.(targets) ?? params.prContext, sourceContext]
           .filter(Boolean)
           .join('\n\n');
         if (
@@ -3821,6 +3802,33 @@ export async function requestFindingVerdicts(params: {
           throw new Error('Finding verification singleton exceeds the assembled prompt budget.');
         size = Math.ceil(size / 2);
         targets = params.targets.slice(offset, offset + size);
+      }
+      const evidenceTimeoutMs = computeEvidenceTimeoutMs(
+        params.timeoutMs === undefined ? undefined : params.timeoutMs - (Date.now() - startedAt),
+      );
+      if (params.prepareEvidence && evidenceTimeoutMs > 0) {
+        try {
+          const evidence = await params.prepareEvidence(targets, evidenceTimeoutMs);
+          if (evidence) {
+            const enriched = joinContext(context, evidence);
+            if (
+              !params.promptBudget ||
+              measureReviewPrompt(
+                assembleFindingVerificationPrompt(enriched, targets),
+                params.promptBudget,
+              ).fits
+            )
+              context = enriched;
+            else
+              params.log(
+                'Optional verification evidence omitted: assembled prompt exceeds budget.',
+              );
+          }
+        } catch {
+          params.log('Verification evidence unavailable; continuing with cited source.');
+        }
+      } else if (params.prepareEvidence) {
+        params.log('Skipping optional evidence preparation to preserve verification time.');
       }
       const timeoutMs =
         params.timeoutMs === undefined
@@ -4483,6 +4491,7 @@ function startChangesSinceLastReviewSummary(params: {
   reviewedHead?: string;
   headSha?: string;
   enabled: boolean;
+  isAbandoned: () => boolean;
   timeoutMs?: number;
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
@@ -4505,6 +4514,7 @@ function startChangesSinceLastReviewSummary(params: {
       headSha,
       params.embedDiff,
     );
+    if (params.isAbandoned()) return '';
     if (deltaContext === undefined) {
       params.log('changes-since-last-review skipped: no commits since last reviewed head.');
       return '';

@@ -439,17 +439,16 @@ longer timeout headroom): set the main `model` to the heavy tier, then
 model: ${{ vars.JBOT_REVIEW_MODEL }} # heavy tier first, then a fast tier for the aux draw
 review-shards: '0' # opt into auto-sharding on a paid concurrent tier
 max-concurrent-sessions: '6' # six concurrent sessions on a provider tier that supports it
-# defaults already active: review-shards 1 (off), time-budget-minutes 30,
+# defaults already active: review-shards 1 (initial group), time-budget-minutes 30,
 # model-options {"reasoningEffort":"medium"}; raise to high on paid heavy tiers.
 ```
 
-On a paid tier with real session concurrency, sharding keeps each heavy session
-small (one shard ≈ 24KB of diff), so reasoning time is bounded by the shard, not
-the PR; a main shard that still fails after its retry aborts the run rather than
-posting partial coverage (auxiliary sessions fail open and degrade only their
-own coverage). On free/throttled tiers the shards serialize on one key, so the
-default single session is both simpler and no slower — leave `review-shards` at
-`1` there.
+`review-shards` controls initial grouping. Complete diff pages are then fitted
+to the assembled prompt budget, so even `1` can produce several sessions.
+A main page that still fails after its retry aborts the run before posting
+partial coverage; auxiliary sessions fail open and report their incomplete
+coverage. On free/throttled tiers, leave the initial grouping at `1` and keep
+session concurrency within the provider's limits.
 
 ### Provider configuration (in-repo)
 
@@ -969,7 +968,10 @@ and precision against seeded defects.
 `JBOT_REVIEW_EXPERIMENT` is the only operator control for the Jev/retrieval
 experiments. **`diff-batches` is the default**; set `off` to disable the batching
 hints. Complete diff paging, deterministic caller context and coverage accounting remain enabled in every
-preset. Batching has not established a reliable end-to-end speedup. The presets
+preset. Finder pages also compact repeated metadata above 16 KiB while retaining
+PR intent, guidelines, caller evidence and mandatory diff content; the log records
+the bytes saved. This is independent of the older `JBOT_CONTEXT_TRIM` experiment.
+Batching has not established a reliable end-to-end speedup. The presets
 are mutually exclusive. Batching hints require repository shell tools; Pi,
 CommandCode and tool-less backends do not receive them.
 
@@ -984,6 +986,9 @@ The [production decision and proof](docs/audits/2026-09-19-experiment-presets.md
 compares historical benefits, quality failures and sample limits. The
 [complete-page audit](docs/audits/2026-09-20-budgeted-diff-pages.md) records the
 current delivery checks, dogfood diagnosis and unmet release gate. The
+[auxiliary timing audit](docs/audits/2026-09-20-auxiliary-review-optimization.md)
+records three paired trials of context compaction, scheduling and caller retrieval.
+The
 [latest per-run CSV](docs/audits/data/2026-09-19-evidence-runs.csv) contains all
 86 phase, diff-batching and full-branch reviews from the latest measured round.
 These results describe the recorded source revisions, not a new benchmark of
@@ -1272,9 +1277,11 @@ Specialists do not start general reviews or another specialist's audit. Independ
 verification intentionally rechecks evidence; deterministic deduplication still
 handles findings that describe the same defect from different perspectives.
 
-After main review completes, auxiliary sessions get a settle grace of at least
-five minutes, stretched so every auxiliary session has ten minutes from its
-launch, bounded by the run budget with verification and posting time reserved.
+Main review and verification take priority in the session queue. Pending pages
+from different finder passes take turns so one pass cannot monopolize the queue.
+After main review completes, finding-producing auxiliary passes get up to five
+minutes to finish, bounded by the run budget with verification and posting time
+reserved. Findings from completed pages survive if another page times out.
 Before a cancellation, OpenCode and Pi sessions are asked to wrap up: in the
 last fifth of the grace (at most 90 seconds, and only when the model keeps at
 least 45 seconds to answer) the turn is interrupted, tools are dropped, and the
@@ -1286,6 +1293,13 @@ finish are cancelled and reported as incomplete coverage, and the review footer
 names the cutoff (cut off after the main review, timed out, or failed). The run
 deadline also applies while queued; expiry requests backend cancellation, and
 completed main findings survive.
+
+The changes-since summary and addressed-thread check use low-priority slots.
+Their results are kept if they have finished when main review completes;
+otherwise they are skipped and cancelled before verification can need their
+session slots. Skips appear in the
+run logs and coverage telemetry. A skipped addressed-thread check leaves prior
+threads unresolved.
 
 Set `JBOT_GUIDELINE_SWEEP=true` to run guideline checking as a follow-up in each
 OpenCode, Pi, or CommandCode main review session, reusing its investigation.
