@@ -245,7 +245,7 @@ export class EvidenceStore {
   }
 
   private async read(path: string, signal: AbortSignal, tracked: Set<string>) {
-    if (!this.reuse.shared) return readTrackedSource(this.workspace, path, signal);
+    if (!this.reuse.shared) return readTrackedSource(this.workspace, path, signal, { tracked });
     if (!tracked.has(path)) return undefined;
     if (this.prefetched.has(path)) this.reusedPrefetched.add(path);
     const old = this.sources.pending.get(path);
@@ -260,6 +260,35 @@ export class EvidenceStore {
       this.sources.pending.delete(path);
     });
     this.sources.pending.set(path, pending);
+    return waitForEvidence(pending, signal);
+  }
+
+  private async search(patterns: string[], signal: AbortSignal): Promise<string[]> {
+    if (!patterns.length) return [];
+    const key = JSON.stringify(patterns);
+    let pending = this.reuse.shared ? this.searches.get(key) : undefined;
+    if (pending) this.searchSharedRequests++;
+    else {
+      this.searchCalls++;
+      pending = exec(
+        'git',
+        ['grep', '-l', '-z', '-F', ...patterns.flatMap((s) => ['-e', s]), '--'],
+        {
+          cwd: this.workspace,
+          signal: this.reuse.shared ? AbortSignal.timeout(4000) : signal,
+          maxBuffer: 1024 * 1024,
+        },
+      )
+        .then(({ stdout }) => stdout.split('\0').filter(Boolean))
+        .catch((error) => {
+          if (error.code === 1) return [];
+          throw error;
+        })
+        .finally(() => {
+          if (this.searches.get(key) === pending) this.searches.delete(key);
+        });
+      if (this.reuse.shared) this.searches.set(key, pending);
+    }
     return waitForEvidence(pending, signal);
   }
 
@@ -356,34 +385,33 @@ export class EvidenceStore {
             targets.push({ path, ...d });
       }
       const symbols = [...new Set(targets.map((t) => t.symbol))].slice(0, 20);
-      let matches: string[] = [];
-      if (symbols.length) {
-        try {
-          const key = JSON.stringify(symbols);
-          let pending = this.reuse.shared ? this.searches.get(key) : undefined;
-          if (pending) this.searchSharedRequests++;
-          else {
-            this.searchCalls++;
-            pending = exec(
-              'git',
-              ['grep', '-l', '-z', '-w', '-F', ...symbols.flatMap((s) => ['-e', s]), '--'],
-              {
-                cwd: this.workspace,
-                signal: this.reuse.shared ? AbortSignal.timeout(4000) : signal,
-                maxBuffer: 1024 * 1024,
-              },
-            )
-              .then(({ stdout }) => stdout.split('\0'))
-              .finally(() => {
-                if (this.searches.get(key) === pending) this.searches.delete(key);
-              });
-            if (this.reuse.shared) this.searches.set(key, pending);
-          }
-          matches = (await waitForEvidence(pending, signal)).filter((p) => paths.has(p));
-        } catch (error) {
-          if ((error as { code?: number }).code !== 1) throw error;
-        }
-      }
+      // A changed internal function can affect an unchanged exported wrapper's callers.
+      const modules = [
+        ...new Set(
+          seeds
+            .filter((p) => JS_SOURCE.test(p))
+            .map((p) => {
+              const stem = posix.basename(p, posix.extname(p));
+              return stem === 'index' ? posix.basename(posix.dirname(p)) : stem;
+            }),
+        ),
+      ].slice(0, 20);
+      const isTest = (path: string) =>
+        /(?:^|\/)(?:tests?|__tests__)\/|\.(?:test|spec)\./.test(path);
+      const changed = new Set(this.files.map((f) => f.filename));
+      const rank = (path: string) =>
+        Number(isTest(path)) * 4 + Number(/^scripts?\//.test(path)) * 2 + Number(changed.has(path));
+      const byRank = (a: string, b: string) => rank(a) - rank(b) || a.localeCompare(b);
+      const callers = (
+        await this.search(
+          modules.map((m) => `/${m}`),
+          signal,
+        )
+      )
+        .filter((p) => paths.has(p))
+        .sort(byRank);
+      for (const path of callers.slice(0, 20)) await read(path);
+      const matches = (await this.search(symbols, signal)).filter((p) => paths.has(p)).sort(byRank);
       // Imports and citations get a slot before broad symbol matches consume the read budget.
       for (const [path, source] of Array.from(loaded)) {
         const ranges = options.locations?.filter((r) => r.path === path && r.endLine !== undefined);
@@ -423,7 +451,8 @@ export class EvidenceStore {
         if (line < 1 || line > lines.length) return;
         const full = lines.map((l, i) => `${i + 1}: ${l}`).join('\n');
         const completeFile = !source.truncated && Buffer.byteLength(full) <= 2048;
-        const start = Math.max(0, line - 16);
+        const caller = kind === 'import-linked reference' || kind === 'import-linked test';
+        const start = Math.max(0, line - (caller ? 4 : 16));
         candidates.push({
           path,
           symbol,
@@ -434,7 +463,12 @@ export class EvidenceStore {
           completeFile,
           text: completeFile
             ? full
-            : formatSourceExcerpt(lines.slice(start, line + 16), start + 1, line, 2048),
+            : formatSourceExcerpt(
+                lines.slice(start, line + (caller ? 36 : 16)),
+                start + 1,
+                line,
+                2048,
+              ),
         });
       };
       if (scope === 'verification' && this.reuse.handoff) {
@@ -443,6 +477,39 @@ export class EvidenceStore {
           add(ref.path, 'review source location', ref.line, 'revalidated review read');
         this.handoffCandidates += candidates.length - before;
       }
+      if (scope === 'verification')
+        for (const ref of refs) add(ref.path, 'cited source', ref.line, 'cited context');
+      const changeWeight = new Map(
+        this.files.map((f) => [f.filename, Buffer.byteLength(f.patch ?? '')]),
+      );
+      const callerRefs = [...loaded]
+        .flatMap(([path, source]) => {
+          const refs = source.index.imports.flatMap((binding) => {
+            const related = resolveEvidenceImport(path, binding.from, paths);
+            if (!related || !seeds.includes(related)) return [];
+            return source.index.uses
+              .filter((u) => u.symbol === binding.local)
+              .slice(0, 1)
+              .map((use) => ({ path, symbol: binding.imported, line: use.line, related }));
+          });
+          return refs
+            .sort((a, b) => (changeWeight.get(b.related) ?? 0) - (changeWeight.get(a.related) ?? 0))
+            .slice(0, 2);
+        })
+        .sort(
+          (a, b) =>
+            rank(a.path) - rank(b.path) ||
+            (changeWeight.get(b.related) ?? 0) - (changeWeight.get(a.related) ?? 0) ||
+            a.path.localeCompare(b.path),
+        );
+      for (const ref of callerRefs)
+        add(
+          ref.path,
+          ref.symbol,
+          ref.line,
+          isTest(ref.path) ? 'import-linked test' : 'import-linked reference',
+          ref.related,
+        );
       for (const t of targets.slice(0, 20)) {
         add(t.path, t.symbol, t.start, 'definition');
         for (const [path, source] of loaded) {
@@ -495,6 +562,7 @@ export class EvidenceStore {
       const omitted = [
         ...new Set([
           ...seeds,
+          ...callers,
           ...matches,
           ...Array.from(this.observations.values(), (ref) => ref.path),
         ]),

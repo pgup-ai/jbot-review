@@ -88,7 +88,7 @@ export interface ReviewBackend {
 }
 
 export interface SessionSlots {
-  acquire(priority?: SemaphorePriority, signal?: AbortSignal): Promise<() => void>;
+  acquire(priority?: SemaphorePriority, signal?: AbortSignal, group?: string): Promise<() => void>;
 }
 
 export function createProviderSessionLimiters(
@@ -144,11 +144,19 @@ export function limitReviewBackendSessions(
     });
     try {
       providerRelease = providerSlots
-        ? await providerSlots.acquire(priority, controller.signal)
+        ? await providerSlots.acquire(
+            priority,
+            controller.signal,
+            role === 'aux' ? session : undefined,
+          )
         : undefined;
       controller.signal.throwIfAborted();
       globalRelease = globalSlots
-        ? await globalSlots.acquire(priority, controller.signal)
+        ? await globalSlots.acquire(
+            priority,
+            controller.signal,
+            role === 'aux' ? session : undefined,
+          )
         : undefined;
       controller.signal.throwIfAborted();
       pending.delete(controller);
@@ -268,7 +276,11 @@ export function limitReviewBackendSessions(
       );
     },
     runAddressedPriorCommentsCheck: (...args) =>
-      withSlots('addressed-prior-comments', () => backend.runAddressedPriorCommentsCheck(...args)),
+      withSlots(
+        'addressed-prior-comments',
+        () => backend.runAddressedPriorCommentsCheck(...args),
+        'low',
+      ),
     runGuidelineComplianceCheck: (...args) =>
       withSlots('guideline-compliance', () => backend.runGuidelineComplianceCheck(...args)),
     // The one auxiliary call the posting path awaits: never queue it behind
@@ -276,6 +288,10 @@ export function limitReviewBackendSessions(
     runFindingVerification: (...args) =>
       withSlots('finding-verification', () => backend.runFindingVerification(...args), 'high'),
     runChangesSinceLastReview: (...args) =>
-      withSlots('changes-since-last-review', () => backend.runChangesSinceLastReview(...args)),
+      withSlots(
+        'changes-since-last-review',
+        () => backend.runChangesSinceLastReview(...args),
+        'low',
+      ),
   };
 }

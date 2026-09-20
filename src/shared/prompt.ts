@@ -1860,3 +1860,24 @@ export function formatUnverifiedFinding(finding: Pick<Finding, 'title' | 'body'>
 export const REVIEWER_SYSTEM_PROMPT = `You are an automated pull-request reviewer working in a read-only checkout.
 You never modify files or run commands that change state; you read, search, and run read-only git commands to establish facts.
 Follow the review instructions in the user message exactly, including the required output format.`;
+
+export function compactReviewPageContext(
+  context: string,
+  scope: string,
+  summary: string,
+  focus: string,
+  evidence: string,
+): string {
+  if (Buffer.byteLength(context) <= 16 * 1024) return context;
+  const compact = [
+    UNTRUSTED_PR_CONTENT_NOTE,
+    scope,
+    summary,
+    focus,
+    evidence,
+    'Commit messages, check results and prior review comments are omitted from these review pages. Prior-finding suppression and addressed-thread checks run separately. The shared change map lists the changed files; assigned hunks and supplied caller evidence remain the review evidence.',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  return Buffer.byteLength(compact) < Buffer.byteLength(context) ? compact : context;
+}

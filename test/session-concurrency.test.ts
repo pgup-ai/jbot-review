@@ -28,6 +28,58 @@ function makeBackend(onReview: () => void | Promise<void> = () => undefined): Re
 }
 
 describe('limitReviewBackendSessions', () => {
+  it('rotates paged auxiliary passes ahead of optional bookkeeping without delaying verification', async () => {
+    const slots = new Semaphore(1);
+    const release = await slots.acquire();
+    const order: string[] = [];
+    const backend = limitReviewBackendSessions(
+      {
+        ...makeBackend(),
+        runReview: async (_m, context) => {
+          order.push(context);
+          return { summary: '', findings: [] };
+        },
+        runGuidelineComplianceCheck: async (_m, context) => {
+          order.push(context);
+          return [];
+        },
+        runFindingVerification: async () => {
+          order.push('verify');
+          return [];
+        },
+        runChangesSinceLastReview: async () => {
+          order.push('summary');
+          return '';
+        },
+      },
+      'aux',
+      slots,
+    );
+    const queued = [
+      backend.runChangesSinceLastReview('m', '', noLog),
+      ...[1, 2, 3].map((n) =>
+        backend.runGuidelineComplianceCheck('m', `guideline-${n}`, '', noLog),
+      ),
+      ...[1, 2].map((n) =>
+        backend.runReview('m', `interaction-${n}`, '', noLog, { label: 'review-interactions' }),
+      ),
+      backend.runReview('m', 'security', '', noLog, { label: 'review-security' }),
+      backend.runFindingVerification('m', '', [], noLog),
+    ];
+    release();
+    await Promise.all(queued);
+    assert.deepEqual(order, [
+      'verify',
+      'guideline-1',
+      'interaction-1',
+      'security',
+      'guideline-2',
+      'interaction-2',
+      'guideline-3',
+      'summary',
+    ]);
+    assert.equal(slots.isBusy(), false);
+  });
   it('owns provider slots independently for mixed-provider runs', () => {
     const limiters = createProviderSessionLimiters(['nvidia', 'openai', 'nvidia'], (providerID) =>
       providerID === 'nvidia' ? 1 : undefined,

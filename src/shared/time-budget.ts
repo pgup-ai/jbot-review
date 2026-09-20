@@ -67,28 +67,16 @@ export function wrapUpReserveMs(budgetMs: number): number {
   const reserve = Math.min(90_000, Math.floor(budgetMs / 5));
   return reserve - WRAP_UP_MARGIN_MS >= 45_000 ? reserve : 0;
 }
-/**
- * Minimum life of an auxiliary session measured from its own launch. The
- * grace is anchored to the main pass finishing, so a 10 s main would otherwise
- * leave a lens 310 s; the floor stretches the grace to cover this runway.
- */
-const AUXILIARY_RUNWAY_MS = 10 * 60_000;
-
 export function computeAuxiliaryGraceMs(
   timeBudgetMinutes: number,
   elapsedMs: number,
   verificationEnabled = true,
-  auxElapsedMs?: number,
 ): number {
-  const grace =
-    auxElapsedMs === undefined
-      ? AUXILIARY_SETTLE_GRACE_MS
-      : Math.max(AUXILIARY_SETTLE_GRACE_MS, AUXILIARY_RUNWAY_MS - auxElapsedMs);
-  if (timeBudgetMinutes <= 0) return grace;
+  if (timeBudgetMinutes <= 0) return AUXILIARY_SETTLE_GRACE_MS;
   return Math.max(
     0,
     Math.min(
-      grace,
+      AUXILIARY_SETTLE_GRACE_MS,
       timeBudgetMinutes * 60_000 -
         elapsedMs -
         POSTING_RESERVE_MS -
@@ -107,23 +95,4 @@ export const SHARED_PREFIX_STAGGER_MS = 8_000;
 
 export function sharedPrefixLaunchDelayMs(index: number, sharesMainModel: boolean): number {
   return (index + (sharesMainModel ? 1 : 0)) * SHARED_PREFIX_STAGGER_MS;
-}
-
-/** Staggered lenses launch later, so their runway is measured from the last scheduled launch. */
-export function computeLensGraceMs(
-  timeBudgetMinutes: number,
-  elapsedMs: number,
-  verificationEnabled: boolean,
-  auxElapsedMs: number,
-  lensCount: number,
-  sharesMainModel: boolean,
-): number {
-  const lastLaunchDelayMs =
-    lensCount > 0 ? sharedPrefixLaunchDelayMs(lensCount - 1, sharesMainModel) : 0;
-  return computeAuxiliaryGraceMs(
-    timeBudgetMinutes,
-    elapsedMs,
-    verificationEnabled,
-    auxElapsedMs - lastLaunchDelayMs,
-  );
 }

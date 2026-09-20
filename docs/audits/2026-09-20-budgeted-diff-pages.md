@@ -259,7 +259,8 @@ folded into those regressions; existing prompt policy assertions remain.
 At `cdb449a`, all **1,106 tests** (260 suites), typecheck, lint, formatting
 and build passed. The final catalog/workspace fixes passed the same full suite
 and focused planner/static/build checks; the default opaque-CLI budget is unchanged. PR CI at `45498eb` independently passed all 1,106 tests,
-lint, formatting and typecheck. No dependencies or CLI packaging changed.
+lint, formatting and typecheck. This follow-up did not change dependencies or CLI packaging;
+the complete PR adds the pinned `@babel/parser` production dependency for source evidence parsing.
 Secrets remain outside tracked files.
 
 Follow-up delta relative to `868a476`, excluding these new evidence files:

@@ -5,7 +5,6 @@ import {
   computeVerificationTimeoutMs,
   computeEvidenceTimeoutMs,
   computeAuxiliaryGraceMs,
-  computeLensGraceMs,
   wrapUpReserveMs,
   sharedPrefixLaunchDelayMs,
   SHARED_PREFIX_STAGGER_MS,
@@ -28,6 +27,7 @@ import {
   startLensPasses,
   renderReviewMetadataBlock,
   settleWithinGrace,
+  takeSettledAuxiliary,
   runPrReview,
   runShardedReview,
   buildSlimVerifierContext,
@@ -1328,15 +1328,94 @@ it('caps auxiliary grace at five minutes while reserving verification and postin
   assert.equal(computeAuxiliaryGraceMs(0, 9_000_000), 300_000);
 });
 
-it("floors the auxiliary runway at ten minutes from the sessions' own start", () => {
-  // A 12 s main pass no longer leaves a slow lens 312 s of life: the grace
-  // stretches to whatever completes a 600 s runway...
-  assert.equal(computeAuxiliaryGraceMs(30, 90_000, true, 12_000), 588_000);
-  // ...never below the five-minute post-main grace when main itself was slow...
-  assert.equal(computeAuxiliaryGraceMs(30, 400_000, true, 350_000), 300_000);
-  // ...and never past the verification and posting reserves.
-  assert.equal(computeAuxiliaryGraceMs(10, 130_000, true, 60_000), 140_000);
-  assert.equal(computeAuxiliaryGraceMs(0, 0, true, 100_000), 500_000);
+it('does not let optional bookkeeping delay posting, but keeps settled results', async () => {
+  let skipped = 0;
+  const skip = () => {
+    skipped++;
+  };
+  assert.equal(
+    await takeSettledAuxiliary(
+      { label: 'summary', isSettled: () => false, promise: new Promise<string>(() => {}) },
+      '',
+      skip,
+    ),
+    '',
+  );
+  assert.equal(
+    await takeSettledAuxiliary(
+      { label: 'summary', isSettled: () => true, promise: Promise.resolve('ready') },
+      '',
+      skip,
+    ),
+    'ready',
+  );
+  assert.equal(
+    await takeSettledAuxiliary(
+      { label: 'summary', isSettled: () => true, promise: Promise.reject(new Error('failed')) },
+      '',
+      skip,
+    ),
+    '',
+  );
+  assert.equal(skipped, 1);
+});
+
+it('keeps finished lens-page findings when another page outlives the grace', async () => {
+  const finding = {
+    path: 'a.ts',
+    line: 1,
+    severity: 'P1',
+    title: 'Bug',
+    body: 'A concrete defect.',
+  };
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const completed: (typeof finding)[] = [];
+  let settled = false;
+  const [promise] = startLensPasses({
+    backend: {
+      name: 'fake',
+      runReview: async (_m: string, context: string) => {
+        if (context === 'pending') await pending;
+        return { summary: '', findings: context === 'ready' ? [finding] : [] };
+      },
+    } as ReviewBackend,
+    model: 'fake/model',
+    lensPrContext: '',
+    guidelinesForPrompt: '',
+    lensKeys: ['interactions'],
+    plans: () =>
+      ['ready', 'pending'].map((context) => ({
+        label: context,
+        context,
+        baseContext: context,
+        assignedFiles: ['a.ts'],
+        diffCoverage: {
+          assignedFiles: 1,
+          completeFiles: 1,
+          truncatedFiles: 0,
+          omittedFiles: 0,
+          patchBytes: 1,
+        },
+      })),
+    onFindings: (_label, findings) => completed.push(...findings),
+    log: () => {},
+  });
+  const tracked = promise.finally(() => {
+    settled = true;
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const result = await settleWithinGrace(
+    { label: 'review-interactions', promise: tracked, isSettled: () => settled },
+    () => [...completed],
+    () => {},
+    1,
+    release,
+  );
+  assert.deepEqual(result, [finding]);
+  await tracked;
 });
 
 it('never launches a staggered lens that was abandoned while it waited', async () => {
@@ -1401,14 +1480,6 @@ it('staggers shared-prefix launches so the first prefill lands before the next r
   // On the main model itself the first lens waits for main's prefill too.
   assert.equal(sharedPrefixLaunchDelayMs(0, true), SHARED_PREFIX_STAGGER_MS);
   assert.equal(sharedPrefixLaunchDelayMs(2, true), 3 * SHARED_PREFIX_STAGGER_MS);
-  // Staggered lenses launched later, so their runway ends later: the last
-  // scheduled delay comes off the elapsed time before the floor applies.
-  assert.equal(computeLensGraceMs(30, 90_000, true, 12_000, 2, true), 604_000);
-  assert.equal(computeLensGraceMs(30, 90_000, true, 12_000, 1, false), 588_000);
-  assert.equal(
-    computeLensGraceMs(30, 90_000, true, 12_000, 0, true),
-    computeAuxiliaryGraceMs(30, 90_000, true, 12_000),
-  );
 });
 
 it('marks incomplete review bodies without claiming an all-clear result', () => {

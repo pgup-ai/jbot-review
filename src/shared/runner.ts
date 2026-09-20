@@ -24,7 +24,6 @@ import {
   computeEvidenceTimeoutMs,
   computeAuxiliaryGraceMs,
   AUXILIARY_SETTLE_GRACE_MS,
-  computeLensGraceMs,
   sharedPrefixLaunchDelayMs,
   wrapUpReserveMs,
 } from './time-budget.ts';
@@ -144,6 +143,7 @@ import {
   buildAddressedPriorCommentsContext,
   buildContext7PromptBlock,
   buildContextTrimNotice,
+  compactReviewPageContext,
   buildReviewFocusBlock,
   assembleReviewPrompt,
   assembleGuidelineCompliancePrompt,
@@ -1097,6 +1097,13 @@ async function runReviewPipeline(params: {
   // terminal state: the abort settles the underlying promise promptly, whose
   // own catch handler would otherwise append a second, conflicting row.
   const abandonedAuxLabels = new Set<string>();
+  const completedAuxFindings = new Map<string, Finding[]>();
+  const collectAuxFindings = (label: string, findings: Finding[]) => {
+    if (abandonedAuxLabels.has(label)) return;
+    const completed = completedAuxFindings.get(label) ?? [];
+    completed.push(...findings);
+    completedAuxFindings.set(label, completed);
+  };
   const auxCoverage = new Map<string, { complete: boolean; error?: unknown }>();
   // Sessions asked to wrap up at grace expiry, or main shards that wrapped up
   // on their own deadline: their findings cover only part of the scope.
@@ -2364,7 +2371,7 @@ async function runReviewPipeline(params: {
       : Infinity;
     const { kept, dropped } = trimContextBlocks(supplementaryBlocks, trimBudget);
     if (dropped.length > 0) log(`Context trim dropped: ${dropped.join(', ')}`);
-    const mainCoreContext =
+    let mainCoreContext =
       dropped.length === 0
         ? coreContext
         : joinContext(
@@ -2373,6 +2380,24 @@ async function runReviewPipeline(params: {
             ...kept.map((block) => block.text),
             buildContextTrimNotice(dropped),
           );
+
+    if (options.contextTrim) {
+      const compact = compactReviewPageContext(
+        mainCoreContext,
+        buildReviewScopeContext(
+          { pullTitle, pullBody, changedFiles, diffScope, ...linkedIssueContext },
+          false,
+        ),
+        summaryScopeBlock,
+        reviewFocusBlock,
+        joinContext(blastRadiusBlock, explorationEvidence),
+      );
+      if (compact !== mainCoreContext)
+        log(
+          `Finder context: ${Buffer.byteLength(mainCoreContext)} → ${Buffer.byteLength(compact)} bytes per page; metadata omitted, mandatory diff unchanged.`,
+        );
+      mainCoreContext = compact;
+    }
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
 
@@ -2568,7 +2593,6 @@ async function runReviewPipeline(params: {
       sweepGuidelines,
     });
 
-    const auxLaunchedAt = Date.now();
     // Only a single-shard main leads with the diff, so only then does a lens on
     // the same model gain from waiting for main's prefill.
     const lensSharesMainPrefix = auxModel === model && shardPlans.length <= 1;
@@ -2624,7 +2648,7 @@ async function runReviewPipeline(params: {
       const plans = buildShardPlans({
         coreContext: lens
           ? joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks)
-          : coreContext,
+          : mainCoreContext,
         context7Block: '',
         shards,
         budget: auxPromptBudget,
@@ -2649,6 +2673,7 @@ async function runReviewPipeline(params: {
         log,
         onTokenUsage: recordTokenUsage,
         onCoverage: recordCoverage,
+        onFindings: (findings) => collectAuxFindings('guideline-compliance', findings),
       }),
     );
 
@@ -2700,6 +2725,7 @@ async function runReviewPipeline(params: {
       log,
       onTokenUsage: recordTokenUsage,
       onCoverage: recordCoverage,
+      onFindings: collectAuxFindings,
     }).map((promise, index) => trackAux(`review-${candidateLensKeys[index]}`, promise));
 
     let summary: string;
@@ -2801,9 +2827,7 @@ async function runReviewPipeline(params: {
         : undefined;
     const auxiliaryWaitLabels = pendingAuxiliarySessionLabels([
       ...lensPasses,
-      addressedPriorCheck,
       guidelineComplianceCheck,
-      changesSinceLastReview,
     ]);
     if (auxiliaryWaitLabels.length > 0) {
       log(
@@ -2820,18 +2844,7 @@ async function runReviewPipeline(params: {
       options.timeBudgetMinutes,
       Date.now() - runStartedAt,
       verificationEnabled,
-      Date.now() - auxLaunchedAt,
     );
-    const lensGraceMs = options.sharedPrefixPrompt
-      ? computeLensGraceMs(
-          options.timeBudgetMinutes,
-          Date.now() - runStartedAt,
-          verificationEnabled,
-          Date.now() - auxLaunchedAt,
-          candidateLensKeys.length,
-          lensSharesMainPrefix,
-        )
-      : auxiliaryGraceMs;
     const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
     const wrapUpAuxSession = (label: string, graceMs: number) => ({
       reserveMs: wrapUpReserveMs(graceMs),
@@ -2855,49 +2868,26 @@ async function runReviewPipeline(params: {
       });
       abandonedAuxLabels.add(label);
     };
-    const [
-      lensFindingLists,
-      // The dedicated parallel session is the single owner of addressed-thread
-      // verification; the main review no longer reports them.
-      verifiedAddressedPriorComments,
-      complianceFindings,
-      changesSinceText,
-    ] = await Promise.all([
+    const [lensFindingLists, complianceFindings] = await Promise.all([
       Promise.all(
         lensPasses.map((lens) =>
           settleWithinGrace(
             lens,
-            [],
+            () => [...(completedAuxFindings.get(lens.label) ?? [])],
             log,
-            lensGraceMs,
-            abandonAuxSession(lens.label, lensGraceMs),
-            wrapUpAuxSession(lens.label, lensGraceMs),
+            auxiliaryGraceMs,
+            abandonAuxSession(lens.label, auxiliaryGraceMs),
+            wrapUpAuxSession(lens.label, auxiliaryGraceMs),
           ),
         ),
       ),
       settleWithinGrace(
-        addressedPriorCheck,
-        [],
-        log,
-        auxiliaryGraceMs,
-        abandonAuxSession('addressed-prior-comments', auxiliaryGraceMs),
-        wrapUpAuxSession('addressed-prior-comments', auxiliaryGraceMs),
-      ),
-      settleWithinGrace(
         guidelineComplianceCheck,
-        [],
+        () => [...(completedAuxFindings.get('guideline-compliance') ?? [])],
         log,
         auxiliaryGraceMs,
         abandonAuxSession('guideline-compliance', auxiliaryGraceMs),
         wrapUpAuxSession('guideline-compliance', auxiliaryGraceMs),
-      ),
-      settleWithinGrace(
-        changesSinceLastReview,
-        '',
-        log,
-        auxiliaryGraceMs,
-        abandonAuxSession('changes-since-last-review', auxiliaryGraceMs),
-        wrapUpAuxSession('changes-since-last-review', auxiliaryGraceMs),
       ),
     ]);
     graceDone();
@@ -3021,6 +3011,17 @@ async function runReviewPipeline(params: {
       'completed',
       telemetry.enabled ? Buffer.byteLength(JSON.stringify(verifiedFindings)) : undefined,
     );
+    const finishOptional = <T>(session: AuxiliarySession<T>, fallback: T) =>
+      takeSettledAuxiliary(session, fallback, () => {
+        abandonedAuxLabels.add(session.label);
+        auxBackend.abortSessionsByLabel?.(session.label, log);
+        telemetry.recordCoverage({ session: session.label, state: 'skipped' });
+        log(`Optional ${session.label} skipped: review findings are ready to post.`);
+      });
+    const [verifiedAddressedPriorComments, changesSinceText] = await Promise.all([
+      finishOptional(addressedPriorCheck, []),
+      finishOptional(changesSinceLastReview, ''),
+    ]);
     telemetry.snapshot('verified', verifiedFindings);
     telemetry.recordEvidenceCache(evidence.stats());
     log(`Evidence cache: ${JSON.stringify(evidence.stats())}`);
@@ -3535,6 +3536,7 @@ export function startLensPasses(params: {
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
+  onFindings?: (label: string, findings: Finding[]) => void;
 }): Promise<Finding[]>[] {
   const { lensKeys } = params;
   if (lensKeys.length === 0) return [];
@@ -3572,6 +3574,7 @@ export function startLensPasses(params: {
                     contextFirst: params.contextFirst,
                   },
                 );
+                params.onFindings?.(`review-${key}`, result.findings);
                 if (plans.length > 1)
                   params.onCoverage?.({
                     session: `review-${key}-page-${page + 1}`,
@@ -3669,14 +3672,15 @@ const WRAP_UP_DUE = 'jbot: auxiliary wrap-up due';
  */
 export function settleWithinGrace<T>(
   session: AuxiliarySession<T>,
-  fallback: T,
+  fallback: T | (() => T),
   log: (msg: string) => void,
   graceMs = AUXILIARY_SETTLE_GRACE_MS,
   onAbandon?: () => void,
   /** Asks the backend to wrap up reserveMs before the grace ends; finalize returns the sessions signalled. */
   wrapUp?: { reserveMs: number; finalize: (budgetMs: number) => number },
 ): Promise<T> {
-  if (session.isSettled()) return session.promise.catch(() => fallback);
+  const value = () => (typeof fallback === 'function' ? (fallback as () => T)() : fallback);
+  if (session.isSettled()) return session.promise.catch(value);
   const settle = (error: unknown): T => {
     // Only the grace expiring is worth a line; a session that failed on its own
     // already logged why.
@@ -3686,7 +3690,7 @@ export function settleWithinGrace<T>(
       );
       if (!session.isSettled()) onAbandon?.();
     }
-    return fallback;
+    return value();
   };
   const plan = wrapUp && wrapUp.reserveMs > 0 && wrapUp.reserveMs < graceMs ? wrapUp : undefined;
   if (!plan) return withTimeout(session.promise, graceMs, GRACE_EXPIRED).catch(settle);
@@ -3697,6 +3701,16 @@ export function settleWithinGrace<T>(
       return withTimeout(session.promise, plan.reserveMs, GRACE_EXPIRED).catch(settle);
     },
   );
+}
+
+export async function takeSettledAuxiliary<T>(
+  session: AuxiliarySession<T>,
+  fallback: T,
+  onSkip: () => void,
+): Promise<T> {
+  if (session.isSettled()) return session.promise.catch(() => fallback);
+  onSkip();
+  return fallback;
 }
 
 async function verifyFindings(params: {
@@ -4545,6 +4559,7 @@ function startGuidelineComplianceCheck(params: {
   log: (msg: string) => void;
   onTokenUsage?: TokenUsageRecorder;
   onCoverage?: SessionCoverageRecorder;
+  onFindings?: (findings: Finding[]) => void;
 }): Promise<Finding[]> {
   const session = 'guideline-compliance';
   if (!params.enabled) {
@@ -4575,6 +4590,7 @@ function startGuidelineComplianceCheck(params: {
               params.timeoutMs,
               params.onTokenUsage,
             );
+            params.onFindings?.(findings);
             if (plans.length > 1)
               params.onCoverage?.({
                 session: `${session}-page-${page + 1}`,

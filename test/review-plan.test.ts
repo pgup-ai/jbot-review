@@ -19,7 +19,11 @@ import { assembleReviewPrompt, UNTRUSTED_PR_CONTENT_NOTE } from '../src/shared/p
 import { buildClinePromptArg, CLINE_MAX_ARGV_BYTES } from '../src/shared/cline.ts';
 import { runShardedReview } from '../src/shared/runner.ts';
 import { budgetReviewBackend } from '../src/shared/prompt-budget.ts';
-import { boundedPromptContext, withNoToolsReviewDirective } from '../src/shared/prompt.ts';
+import {
+  boundedPromptContext,
+  withNoToolsReviewDirective,
+  compactReviewPageContext,
+} from '../src/shared/prompt.ts';
 import { catalogModelLimits } from '../src/shared/pi.ts';
 import {
   limitReviewBackendSessions,
@@ -111,6 +115,25 @@ test('budgets instructions, guidelines, context and output separately from trans
   assert.ok(measureReviewPrompt(renderPrompt(plans[0].context), budget).fits);
   assert.ok(Buffer.byteLength(boundedPromptContext('東京'.repeat(1000), 256, 'Source')) <= 256);
   assert.ok(Buffer.byteLength(withNoToolsReviewDirective('')) < budget.harnessTokens);
+  const compact = compactReviewPageContext(
+    'old comments '.repeat(5000),
+    'PR intent and linked issue contract',
+    'summary scope',
+    'review focus',
+    'Ranked caller evidence',
+  );
+  assert.equal(compactReviewPageContext('small context', 'scope', '', '', ''), 'small context');
+  assert.ok(compact.startsWith(UNTRUSTED_PR_CONTENT_NOTE));
+  assert.match(compact, /PR intent and linked issue contract/);
+  assert.match(compact, /Ranked caller evidence/);
+  assert.match(compact, /prior review comments are omitted/);
+  const paged = buildShardPlans({
+    ...base,
+    coreContext: compact,
+    shards: [[{ filename: 'a.ts', patch: '@@ -1 +1 @@\n-old\n+new' }]],
+  });
+  assert.match(paged[0].context, /\+new/);
+  assert.equal(reviewDelivery(paged, new Set(paged.map((p) => p.label))).deliveredHunks, 1);
 
   let calls = 0;
   const backend = budgetReviewBackend(

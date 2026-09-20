@@ -47,40 +47,41 @@ export const OPENCODE_TELEMETRY_CAPABILITY = 'observable' as const;
 /** V2 tool ids → the names the shared telemetry classifier knows. */
 const TOOL_CLASS_ALIASES: Record<string, string> = { shell: 'bash', execute: 'bash' };
 
-/**
- * Bounds in-flight model sessions. Free / throttled provider tiers serialize
- * concurrent requests on one API key upstream anyway — observed as a
- * flash-tier session taking 7+ minutes while queued behind parallel shards.
- * Capping concurrency on OUR side keeps each session's deadline measuring
- * model time, not queue time. High-priority waiters wake first; each priority
- * remains FIFO. 0 = unlimited.
- */
-export type SemaphorePriority = 'high' | 'normal';
+// Rotate paged passes so one cannot starve the others; main and verification retain priority.
+export type SemaphorePriority = 'high' | 'normal' | 'low';
 
 export class Semaphore {
-  private highPriorityQueue: Array<() => void> = [];
-  private normalPriorityQueue: Array<() => void> = [];
+  private queues: Record<SemaphorePriority, Array<{ grant: () => void; group?: string }>> = {
+    high: [],
+    normal: [],
+    low: [],
+  };
   private active = 0;
 
   constructor(private readonly limit: number) {}
 
-  async acquire(priority: SemaphorePriority = 'normal', signal?: AbortSignal): Promise<() => void> {
+  async acquire(
+    priority: SemaphorePriority = 'normal',
+    signal?: AbortSignal,
+    group?: string,
+  ): Promise<() => void> {
     signal?.throwIfAborted();
     if (this.limit === 0) return () => undefined;
     if (this.active < this.limit) {
       this.active += 1;
     } else {
-      const queue = priority === 'high' ? this.highPriorityQueue : this.normalPriorityQueue;
+      const queue = this.queues[priority];
       await new Promise<void>((resolve, reject) => {
         const grant = () => {
           signal?.removeEventListener('abort', abort);
           resolve();
         };
         const abort = () => {
-          queue.splice(queue.indexOf(grant), 1);
+          queue.splice(queue.indexOf(waiter), 1);
           reject(signal?.reason);
         };
-        queue.push(grant);
+        const waiter = { grant, group };
+        queue.push(waiter);
         signal?.addEventListener('abort', abort, { once: true });
       });
     }
@@ -88,9 +89,19 @@ export class Semaphore {
     return () => {
       if (released) return;
       released = true;
-      const next = this.highPriorityQueue.shift() ?? this.normalPriorityQueue.shift();
+      const queue = [this.queues.high, this.queues.normal, this.queues.low].find((q) => q.length);
+      const next = queue?.shift();
       if (next) {
-        next();
+        if (next.group && queue) {
+          const sameGroup = queue.filter((waiter) => waiter.group === next.group);
+          queue.splice(
+            0,
+            queue.length,
+            ...queue.filter((waiter) => waiter.group !== next.group),
+            ...sameGroup,
+          );
+        }
+        next.grant();
       } else {
         this.active -= 1;
       }
@@ -98,9 +109,7 @@ export class Semaphore {
   }
 
   isBusy(): boolean {
-    return (
-      this.active > 0 || this.highPriorityQueue.length > 0 || this.normalPriorityQueue.length > 0
-    );
+    return this.active > 0 || Object.values(this.queues).some((queue) => queue.length > 0);
   }
 }
 

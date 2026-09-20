@@ -75,6 +75,50 @@ test('syntax collection finds body-only changes and named import aliases without
   );
 });
 
+test('retrieves unchanged callers of an unchanged export when an internal implementation changes', async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), 'caller-evidence-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', workspace]);
+  await writeFile(
+    join(workspace, 'engine.ts'),
+    'function internal() {\nreturn 2;\n}\nexport function review(options: unknown) { return internal(); }\n',
+  );
+  await writeFile(
+    join(workspace, 'worker.ts'),
+    [
+      "import { review as run } from './engine.js';",
+      ...Array.from(
+        { length: 40 },
+        () => '// Other worker setup outside the call-site evidence window.',
+      ),
+      'run({',
+      ...Array.from({ length: 20 }, (_, i) => `  setting${i}: true,`),
+      '  reviewShards: 1,',
+      '});',
+    ].join('\n'),
+  );
+  await writeFile(
+    join(workspace, 'unrelated.ts'),
+    "import { review as run } from './another-engine.js';\nrun({ WRONG_BINDING: true });",
+  );
+  execFileSync('git', ['add', '.'], { cwd: workspace });
+  const store = new EvidenceStore(workspace, [
+    {
+      filename: 'engine.ts',
+      patch: '@@ -1,3 +1,3 @@\n function internal() {\n-return 1;\n+return 2;\n }',
+    },
+  ]);
+  const evidence = await store.prepare('exploration', [], 'deterministic', {
+    locations: [{ path: 'engine.ts', line: 2 }],
+    timeoutMs: 4000,
+    log: () => {},
+    onStats: () => {},
+  });
+  assert.match(evidence, /worker.ts/);
+  assert.match(evidence, /reviewShards: 1/);
+  assert.doesNotMatch(evidence, /WRONG_BINDING/);
+});
+
 test('prepared arms share candidates, reuse hashes across phases, and invalidate changed source', async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), 'evidence-'));
   t.after(() => rm(workspace, { recursive: true, force: true }));
