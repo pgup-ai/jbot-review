@@ -153,7 +153,13 @@ De-slop accounting for the follow-up from `3154f11`:
 - Cut the fixed batch-size policy and the unproven default verifier expansion.
 - Reporting policy reuses the existing report module. No new flags, dependencies,
   generalized scheduler or second evidence index were added.
-- Net incremental delta: +946/−138 lines (net +808) across 16 files.
+- Implementation delta through `71c70dd`: +946/−138 lines (net +808) across 16 files.
+
+The follow-up documentation review corrected the core Action and README promise
+of a dedicated guideline session. [Wrapper PR #58](https://github.com/pgup-ai/jbot-review-action/pull/58)
+updates the full/slim descriptors and input table to the same shared-session wording.
+Defaults and runtime behavior are unchanged; generated slim parity and exact
+canonical-description checks pass.
 
 ## Release limit
 
