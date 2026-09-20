@@ -497,8 +497,18 @@ Setting that URL routes gateway-supported providers (`devin`, `cursor`,
 [Agent Client Protocol](https://agentclientprotocol.com); the gateway token and
 endpoint are then required. Remote read-only enforcement combines the ACP
 permission policy with each agent's read-only configuration.
-`cline` stays on its argv driver: its ACP mode currently returns empty turns
-([cline/cline#11015](https://github.com/cline/cline/issues/11015)). The
+`cline` stays on its tool-less argv driver: the shared ACP permission policy
+allows shell execution and is not a sufficient read-only boundary for Cline.
+Cline, `cline-pass`, and OpenCode's tool-less model fallback receive every
+assigned patch in full. Cline rejects assembled prompts above
+120 KiB without truncating the diff. Increase `review-shards` (or
+`JBOT_REVIEW_SHARDS` locally) to split the files, or select a backend with
+repository tools if even one file cannot fit. A failed main shard fails the
+review; failed auxiliary sessions remain explicitly incomplete and fail open.
+Run logs report assigned, complete, truncated and omitted file counts per main
+shard; telemetry coverage rows include the same counts under `diff`. These
+describe assembled input; the session state records success or failure. They
+cannot establish whether the model understood every hunk. The
 opencode server engine keeps serving SDK providers directly — its ACP mode
 would drop per-session token usage, provider model listing, and Context7 MCP.
 

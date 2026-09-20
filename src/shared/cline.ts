@@ -27,9 +27,7 @@ import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } fro
 const CLINE_PROMPT_TIMEOUT_MS = 20 * 60_000;
 const CLINE_REPAIR_PROMPT_BUDGET_BYTES = 80_000;
 const CLINE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
-// Cline is argv-only headless — piped stdin is ignored under --json (verified through
-// 3.0.38) — and Linux caps one arg at 128KB. Summed context budgets (24KB guidelines,
-// 40KB diff, bounded PR context) keep prompts well under the guard; it is a backstop.
+// Linux caps a single argv entry at 128 KiB; Cline's complete diff must fit too.
 const CLINE_GUIDELINE_BUDGET_BYTES = 24 * 1024;
 export const CLINE_MAX_ARGV_BYTES = 120 * 1024;
 
@@ -134,7 +132,9 @@ export function assertClinePromptArgWithinBudget(label: string, prompt: string):
   const promptBytes = Buffer.byteLength(prompt, 'utf8');
   if (promptBytes > CLINE_MAX_ARGV_BYTES) {
     throw new Error(
-      `cline ${label} prompt is ${promptBytes} bytes, over the ${CLINE_MAX_ARGV_BYTES}-byte argv limit`,
+      `cline ${label} prompt is ${promptBytes} bytes, over the ${CLINE_MAX_ARGV_BYTES}-byte argv limit. ` +
+        'Incomplete review coverage: the full assigned diff cannot be delivered. ' +
+        'Increase review-shards or select a backend with repository tools; the diff will not be truncated.',
     );
   }
 }

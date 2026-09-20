@@ -47,7 +47,7 @@ export function classifyMainShardFailure(error: unknown): {
         : matches(
               // `too large|long` needs context/size wording nearby: bare "took
               // too long" is a timeout, and misreading it here skips the retry.
-              /context.{0,12}length|maximum context|\b413\b|(context|prompt|input|message|tokens?).{0,24}too (large|long)|too (large|long).{0,32}(context|window|tokens?|limit)|exceeds.{0,24}(context|token)/i,
+              /context.{0,12}length|maximum context|\b413\b|over the \d+-byte argv limit|(context|prompt|input|message|tokens?).{0,24}too (large|long)|too (large|long).{0,32}(context|window|tokens?|limit)|exceeds.{0,24}(context|token)/i,
             )
           ? 'context-length'
           : matches(

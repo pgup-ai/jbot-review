@@ -597,6 +597,13 @@ describe('run and coverage telemetry', () => {
       state: 'completed',
       durationMs: 1200,
       promptBytes: 64_000,
+      diff: {
+        assignedFiles: 4,
+        completeFiles: 1,
+        truncatedFiles: 1,
+        omittedFiles: 2,
+        bytes: 42_000,
+      },
     });
     t.recordCoverage({
       session: 'review-interactions',
@@ -648,6 +655,13 @@ describe('run and coverage telemetry', () => {
       ],
     );
     assert.equal(coverage[0].promptBytes, 64_000);
+    assert.deepEqual(coverage[0].diff, {
+      assignedFiles: 4,
+      completeFiles: 1,
+      truncatedFiles: 1,
+      omittedFiles: 2,
+      bytes: 42_000,
+    });
     // The redaction floor: only the class persists, never the error's own text.
     assert.doesNotMatch(t.toJsonl(), /secret\.example/);
   });

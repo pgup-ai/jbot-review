@@ -53,7 +53,6 @@ import {
 import { buildSupplementaryBlocks, trimContextBlocks } from './context-trim.ts';
 import type { ContextBlock } from './context-trim.ts';
 import {
-  backendCanReadWorkspace,
   backendRequiresCompleteEmbeddedDiff,
   selectReviewBackends,
   type CliBackendID,
@@ -109,6 +108,7 @@ import { buildBlastRadiusBlock } from './blast-radius.ts';
 import {
   type DiffHunksOptions,
   buildDiffHunksBlockWithMetadata,
+  diffHunksCoverage,
   classifyChangeShape,
   isDocOnlyChange,
   samePatchSet,
@@ -1525,10 +1525,12 @@ async function runReviewPipeline(params: {
   const mainRequiresCompleteEmbeddedDiff = backendRequiresCompleteEmbeddedDiff(
     providerID,
     mainCliBackend,
+    mainOnOpencode ? modelID : undefined,
   );
   const auxRequiresCompleteEmbeddedDiff = backendRequiresCompleteEmbeddedDiff(
     auxProviderID,
     auxCliBackend,
+    auxOnOpencode ? auxModelID : undefined,
   );
   const embeddedOnlyBackend = mainRequiresCompleteEmbeddedDiff || auxRequiresCompleteEmbeddedDiff;
   const embeddedOnlyBackendDiffHunks = embeddedOnlyBackend
@@ -1691,6 +1693,16 @@ async function runReviewPipeline(params: {
     auxRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks && auxHasCompleteEmbeddedDiff
       ? embeddedOnlyBackendDiffHunks.text
       : diffHunksBlock;
+  log(
+    `Diff input (auxiliary): ${JSON.stringify(
+      diffHunksCoverage(
+        files,
+        auxRequiresCompleteEmbeddedDiff && embeddedOnlyBackendDiffHunks
+          ? embeddedOnlyBackendDiffHunks
+          : diffHunks,
+      ),
+    )}; requiresCompleteDiff=${auxRequiresCompleteEmbeddedDiff}.`,
+  );
   const auxPrContext = joinContext(coreContext, auxDiffBlockText);
   const lensContextBlocks = [
     buildReviewScopeContext({
@@ -1993,8 +2005,8 @@ async function runReviewPipeline(params: {
     }
     log(`Cline CLI auth configured at ${authPath}.`);
     log('Cline CLI token usage is unavailable; review metadata may omit those sessions.');
-    // cline stays on the argv driver: its ACP prompt loop returns end_turn
-    // with no output (cline/cline#11015, reproduced on 3.0.34 and 3.0.46).
+    // The shared ACP permission policy permits shell execution; Cline needs a
+    // stricter permission hook before this tool-less route can be replaced.
     clineBackend = createClineBackend(workspace, clineHome);
   }
 
@@ -2360,8 +2372,7 @@ async function runReviewPipeline(params: {
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
       complianceRuns: guidelineCandidate,
-      mainCanReadWorkspace:
-        mainBackend.canReadWorkspace ?? backendCanReadWorkspace(providerID, mainCliBackend),
+      mainCanReadWorkspace: mainBackend.canReadWorkspace ?? !mainRequiresCompleteEmbeddedDiff,
       widen: options.guidelineWiden,
       full: guidelines,
     };
@@ -2448,7 +2459,7 @@ async function runReviewPipeline(params: {
     }
     const shardPlans = buildShardPlans({
       coreContext: mainCoreContext,
-      fullDiffBlock: diffHunksBlock,
+      fullDiff: diffHunks,
       context7Block,
       shards,
       requireCompleteEmbeddedDiff: mainRequiresCompleteEmbeddedDiff,
@@ -2462,6 +2473,12 @@ async function runReviewPipeline(params: {
           ? diffScope
           : undefined,
     });
+
+    for (const plan of shardPlans) {
+      log(
+        `Diff input (${plan.label}): ${JSON.stringify(plan.diffCoverage)}; requiresCompleteDiff=${mainRequiresCompleteEmbeddedDiff}.`,
+      );
+    }
 
     // Opt-in via an operator-configured directory, NEVER a path inside the
     // reviewed checkout: the workspace is the PR author's tree, so a cache
@@ -2608,10 +2625,7 @@ async function runReviewPipeline(params: {
         backend: auxBackend,
         model: auxModel,
         workspace,
-        embedDiff:
-          auxOnPi ||
-          !backendCanReadWorkspace(auxProviderID, auxCliBackend) ||
-          (auxOnOpencode && !modelSupportsAgenticTools(auxProviderID, auxModelID)),
+        embedDiff: auxOnPi || auxRequiresCompleteEmbeddedDiff,
         // Use allPriorReviewComments (always fetched), NOT the
         // includePriorComments-gated priorComments: whether to summarize the
         // delta is a re-review decision, independent of whether prior comments
@@ -2640,8 +2654,7 @@ async function runReviewPipeline(params: {
       lensPrContext,
       guidelinesForPrompt: selectFinderGuidelineText({
         ...guidelineSelection,
-        mainCanReadWorkspace:
-          auxBackend.canReadWorkspace ?? backendCanReadWorkspace(auxProviderID, auxCliBackend),
+        mainCanReadWorkspace: auxBackend.canReadWorkspace ?? !auxRequiresCompleteEmbeddedDiff,
         lens: true,
       }),
       lensKeys: candidateLensKeys,
@@ -3791,6 +3804,7 @@ interface ShardPlan {
   baseContext: string;
   /** Changed files this shard may anchor findings in. */
   assignedFiles: string[];
+  diffCoverage: ReturnType<typeof diffHunksCoverage>;
 }
 
 /**
@@ -3802,7 +3816,7 @@ interface ShardPlan {
  */
 export function buildShardPlans(params: {
   coreContext: string;
-  fullDiffBlock: string;
+  fullDiff: ReturnType<typeof buildDiffHunksBlockWithMetadata>;
   context7Block: string;
   shards: ReturnType<typeof shardFilesForReview>;
   requireCompleteEmbeddedDiff?: boolean;
@@ -3814,7 +3828,7 @@ export function buildShardPlans(params: {
 }): ShardPlan[] {
   const {
     coreContext,
-    fullDiffBlock,
+    fullDiff,
     context7Block,
     shards,
     requireCompleteEmbeddedDiff = false,
@@ -3830,19 +3844,18 @@ export function buildShardPlans(params: {
     const diffResult =
       requireCompleteEmbeddedDiff || params.batchDiffScope
         ? buildDiffHunksBlockWithMetadata(shards[0] ?? [], diffHunksOptions)
-        : undefined;
-    if (diffResult && requireCompleteEmbeddedDiff) {
+        : fullDiff;
+    if (requireCompleteEmbeddedDiff) {
       assertCompleteEmbeddedDiff(diffResult, 'review');
     }
-    const recovery =
-      params.batchDiffScope && diffResult
-        ? buildDiffRecoveryBlock(
-            shards[0] ?? [],
-            incompleteDiffFiles(diffResult),
-            params.batchDiffScope,
-          )
-        : '';
-    const diffText = joinContext(diffResult?.text ?? fullDiffBlock, recovery);
+    const recovery = params.batchDiffScope
+      ? buildDiffRecoveryBlock(
+          shards[0] ?? [],
+          incompleteDiffFiles(diffResult),
+          params.batchDiffScope,
+        )
+      : '';
+    const diffText = joinContext(diffResult.text, recovery);
     const baseContext = diffFirst
       ? joinContext(boundary, diffText, coreBody)
       : joinContext(coreContext, diffText);
@@ -3852,6 +3865,7 @@ export function buildShardPlans(params: {
         context: joinContext(baseContext, context7Block),
         baseContext,
         assignedFiles: (shards[0] ?? []).map((file) => file.filename),
+        diffCoverage: diffHunksCoverage(shards[0] ?? [], diffResult),
       },
     ];
   }
@@ -3875,6 +3889,7 @@ export function buildShardPlans(params: {
       context: joinContext(coreContext, context7Block, assignment, diffResult.text, recovery),
       baseContext: joinContext(coreContext, assignment, diffResult.text, recovery),
       assignedFiles,
+      diffCoverage: diffHunksCoverage(shard, diffResult),
     };
   });
 }
@@ -4012,6 +4027,7 @@ export async function runShardedReview(params: {
           ...(error !== undefined ? { error } : {}),
           durationMs: Date.now() - startedAt,
           promptBytes,
+          diff: plan.diffCoverage,
         });
       // Keyed by the exact prompt DELIVERED: the retry uses baseContext (no
       // Context7 block), a different prompt, so its result must never be
@@ -4039,7 +4055,12 @@ export async function runShardedReview(params: {
           log(
             `${plan.label}: reusing cached result for identical content (${primaryFingerprint}).`,
           );
-          params.onCoverage?.({ session: plan.label, state: 'reused', promptBytes });
+          params.onCoverage?.({
+            session: plan.label,
+            state: 'reused',
+            promptBytes,
+            diff: plan.diffCoverage,
+          });
           if (params.sweepGuidelines)
             params.onCoverage?.({ session: `guideline-sweep-${plan.label}`, state: 'reused' });
           return { plan, result: cached };
@@ -4110,6 +4131,7 @@ export async function runShardedReview(params: {
               session: `${plan.label}-retry`,
               state: 'reused',
               promptBytes: retryPromptBytes,
+              diff: plan.diffCoverage,
             });
             return { plan, result: cached };
           }
@@ -4156,6 +4178,7 @@ export async function runShardedReview(params: {
             ...(retryError !== undefined ? { error: retryError } : {}),
             durationMs: Date.now() - retryStartedAt,
             promptBytes: retryPromptBytes,
+            diff: plan.diffCoverage,
           });
         try {
           const result = await backend.runReview(

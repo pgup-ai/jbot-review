@@ -14,6 +14,7 @@ import { gatewayRoutedModels, localRunId, remoteAcpConfigFromEnv } from '../shar
 import {
   assertImageSupportsModels,
   backendRequiresCompleteEmbeddedDiff,
+  cliBackendForProvider,
   selectReviewBackends,
   swallowedProviderWarnings,
   type CliBackendID,
@@ -559,19 +560,21 @@ async function review(
     const shards = shardFilesForReview(reviewable, {
       requestedShards: parseEnvInt('JBOT_REVIEW_SHARDS', 0),
     });
-    // Mirror the runner for complete-diff backends: their sessions embed
-    // under the 512KiB hard budget, and an AUX overflow disables the
-    // compliance pass (widening finders to the full guideline set). Main and
-    // aux providers can differ, so each is checked separately. Provider id
-    // stands in for the CLI-backend id — for these backends they coincide.
-    const mainRequiresCompleteDiff = backendRequiresCompleteEmbeddedDiff(
-      provider,
-      provider as CliBackendID,
-    );
-    const auxRequiresCompleteDiff = backendRequiresCompleteEmbeddedDiff(
-      auxProviderID,
-      auxProviderID as CliBackendID,
-    );
+    const piEnabled = resolvePiEngine(process.env, process.version).enabled;
+    const requiresCompleteDiff = async (model: string) => {
+      const { providerID, modelID } = parseModelName(model);
+      const cli = cliBackendForProvider(providerID);
+      const onPi = !cli && piEnabled && (await piModelAvailable(providerID, modelID));
+      return backendRequiresCompleteEmbeddedDiff(
+        providerID,
+        cli,
+        !cli && !onPi ? modelID : undefined,
+      );
+    };
+    const [mainRequiresCompleteDiff, auxRequiresCompleteDiff] = await Promise.all([
+      requiresCompleteDiff(model),
+      requiresCompleteDiff(auxModel),
+    ]);
     const diffHunksOptions = mainRequiresCompleteDiff
       ? EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS
       : undefined;

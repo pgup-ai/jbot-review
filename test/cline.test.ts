@@ -80,7 +80,11 @@ describe('Cline CLI provider helpers', () => {
     );
     assert.throws(
       () => assertClinePromptArgWithinBudget('review', 'x'.repeat(CLINE_MAX_ARGV_BYTES + 1)),
-      /cline review prompt is \d+ bytes, over the \d+-byte argv limit/,
+      /cline review prompt is \d+ bytes, over the \d+-byte argv limit.*Incomplete review coverage/,
+    );
+    assert.throws(
+      () => assertClinePromptArgWithinBudget('review', '界'.repeat(CLINE_MAX_ARGV_BYTES / 2)),
+      /argv limit/,
     );
   });
 

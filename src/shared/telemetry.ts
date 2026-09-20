@@ -231,6 +231,13 @@ export interface SessionCoverage {
   error?: unknown;
   durationMs?: number;
   promptBytes?: number;
+  diff?: {
+    assignedFiles: number;
+    completeFiles: number;
+    truncatedFiles: number;
+    omittedFiles: number;
+    bytes: number;
+  };
 }
 
 export type SessionCoverageRecorder = (coverage: SessionCoverage) => void;
@@ -471,6 +478,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
         ...(cov.state === 'failed' ? { failureClass: classifySessionError(cov.error) } : {}),
         ...(cov.durationMs !== undefined ? { durationMs: cov.durationMs } : {}),
         ...(cov.promptBytes !== undefined ? { promptBytes: cov.promptBytes } : {}),
+        ...(cov.diff ? { diff: cov.diff } : {}),
       });
     },
     findingRows() {

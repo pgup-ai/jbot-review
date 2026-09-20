@@ -34,8 +34,13 @@ import {
   runShardedReview,
   buildSlimVerifierContext,
 } from '../src/shared/runner.ts';
-import { buildDiffHunksBlockWithMetadata } from '../src/shared/diff-context.ts';
-import { createTelemetryRecorder } from '../src/shared/telemetry.ts';
+import {
+  buildDiffHunksBlockWithMetadata,
+  shardFilesForReview,
+} from '../src/shared/diff-context.ts';
+import { backendRequiresCompleteEmbeddedDiff } from '../src/shared/backend-selection.ts';
+import { runClineReview } from '../src/shared/cline.ts';
+import { createTelemetryRecorder, type SessionCoverage } from '../src/shared/telemetry.ts';
 import type { Octokit, PrFile } from '../src/shared/github.ts';
 import { StaleReviewError } from '../src/shared/retry-policy.ts';
 import { UNTRUSTED_PR_CONTENT_NOTE } from '../src/shared/prompt.ts';
@@ -76,7 +81,7 @@ describe('buildShardPlans cache-stable prefix', () => {
     const files = ['a.ts', 'b.ts'].map((filename) => ({ filename, patch }));
     const base = {
       coreContext: 'core',
-      fullDiffBlock: 'diff',
+      fullDiff: { text: 'diff', omittedFiles: [], truncatedFiles: [] },
       context7Block: 'C7',
       diffHunksOptions: { totalBudgetBytes: 1 },
     };
@@ -102,7 +107,7 @@ describe('buildShardPlans cache-stable prefix', () => {
     const context7Block = '## Context7 docs\nSHARED_CONTEXT7';
     const plans = buildShardPlans({
       coreContext,
-      fullDiffBlock: '',
+      fullDiff: { text: '', omittedFiles: [], truncatedFiles: [] },
       context7Block,
       shards: [[{ filename: 'src/a.ts' }], [{ filename: 'src/b.ts' }]],
     });
@@ -122,7 +127,7 @@ describe('buildShardPlans cache-stable prefix', () => {
   it('leads a single-shard review with the diff block and keeps sharded plans on their shared core prefix', () => {
     const base = {
       coreContext: `${UNTRUSTED_PR_CONTENT_NOTE}\n\n## Pull request\nCORE`,
-      fullDiffBlock: '## Diff hunks\nFULL_DIFF',
+      fullDiff: { text: '## Diff hunks\nFULL_DIFF', omittedFiles: [], truncatedFiles: [] },
       context7Block: '## Context7 docs\nC7',
     };
     // The trust boundary the runner put at the head of the core context stays
@@ -171,7 +176,7 @@ describe('buildShardPlans cache-stable prefix', () => {
   it('uses treatment shard instructions only when enabled', () => {
     const base = {
       coreContext: 'core',
-      fullDiffBlock: '',
+      fullDiff: { text: '', omittedFiles: [], truncatedFiles: [] },
       context7Block: '',
       shards: [[{ filename: 'src/a.ts' }], [{ filename: 'src/b.ts' }]],
     };
@@ -187,6 +192,84 @@ describe('buildShardPlans cache-stable prefix', () => {
 });
 
 describe('EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS', () => {
+  it('delivers late hunks to Cline and refuses any reintroduced truncation in single or multiple shards', () => {
+    const files = Array.from({ length: 5 }, (_, index) => ({
+      filename: `src/part-${index}.ts`,
+      patch: `@@ -0,0 +1,1001 @@\n${'+// padding for a large changed file\n'.repeat(1000)}+export const tail${index} = true;`,
+    }));
+    const fullDiff = buildDiffHunksBlockWithMetadata(files);
+    assert.ok(fullDiff.truncatedFiles.length > 0);
+    assert.ok(fullDiff.omittedFiles.length > 0);
+    for (const requestedShards of [1, 0, 5]) {
+      const shards = shardFilesForReview(files, { requestedShards });
+      const params = {
+        coreContext: 'core',
+        fullDiff,
+        context7Block: 'context7',
+        shards,
+        requireCompleteEmbeddedDiff: backendRequiresCompleteEmbeddedDiff('cline', 'cline'),
+      };
+      const plans = buildShardPlans({
+        ...params,
+        diffHunksOptions: EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
+      });
+      assert.deepEqual(
+        plans.flatMap((plan) => plan.assignedFiles).sort(),
+        files.map((file) => file.filename),
+      );
+      for (const [index, plan] of plans.entries()) {
+        for (const file of shards[index]) {
+          assert.ok(plan.context.includes(file.patch!));
+          assert.ok(plan.baseContext.includes(file.patch!));
+        }
+        assert.equal(plan.diffCoverage.completeFiles, shards[index].length);
+        assert.equal(plan.diffCoverage.truncatedFiles, 0);
+        assert.equal(plan.diffCoverage.omittedFiles, 0);
+      }
+      assert.throws(() => buildShardPlans(params), /incomplete embedded diff/);
+    }
+  });
+
+  it('fails the main review before launching Cline when complete hunks cannot fit argv', async () => {
+    const files = [
+      {
+        filename: 'src/huge.ts',
+        patch: `@@ -0,0 +1,20001 @@\n${'+// large patch\n'.repeat(20000)}+export const lateBug = true;`,
+      },
+    ];
+    const plans = buildShardPlans({
+      coreContext: '',
+      fullDiff: buildDiffHunksBlockWithMetadata(files),
+      context7Block: '',
+      shards: [files],
+      requireCompleteEmbeddedDiff: backendRequiresCompleteEmbeddedDiff('cline', 'cline'),
+      diffHunksOptions: EMBEDDED_ONLY_BACKEND_DIFF_HUNKS_OPTIONS,
+    });
+    const rows: SessionCoverage[] = [];
+    await assert.rejects(
+      runShardedReview({
+        backend: {
+          name: 'cline',
+          runReview: (model, context, guidelines, log, options) =>
+            runClineReview('.', model, context, guidelines, log, options),
+        } as ReviewBackend,
+        model: 'cline/default',
+        guidelinesForPrompt: '',
+        shardPlans: plans,
+        changedFiles: files.map((file) => file.filename),
+        context7Active: false,
+        context7ApiKey: '',
+        log: () => {},
+        onCoverage: (row) => rows.push(row),
+      }),
+      /refusing to post partial review coverage.*Incomplete review coverage/s,
+    );
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].state, 'failed');
+    assert.equal(rows[0].diff?.completeFiles, 1);
+    assert.equal(rows[0].diff?.truncatedFiles, 0);
+  });
+
   it('embeds every changed file whole however large the PR, in a single shard', () => {
     const files: PrFile[] = Array.from({ length: 4 }, (_, index) => ({
       filename: `huge-${index}.ts`,
@@ -574,6 +657,13 @@ describe('runShardedReview retry policy (TASK-150/155)', () => {
     context: 'ctx',
     baseContext: 'base',
     assignedFiles: ['a.ts'],
+    diffCoverage: {
+      assignedFiles: 1,
+      completeFiles: 1,
+      truncatedFiles: 0,
+      omittedFiles: 0,
+      bytes: 3,
+    },
   };
   const okResult = { summary: 'ok', findings: [] };
   const backendThrowingOnce = (message: string, calls: string[]) =>

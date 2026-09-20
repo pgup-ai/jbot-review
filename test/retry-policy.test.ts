@@ -78,6 +78,13 @@ describe('classifyMainShardFailure', () => {
       failureClass: 'context-length',
       retryable: false,
     });
+    assert.deepEqual(
+      classify('cline review prompt is 200000 bytes, over the 122880-byte argv limit'),
+      {
+        failureClass: 'context-length',
+        retryable: false,
+      },
+    );
     // "too long" without context/size wording is a duration complaint, not a
     // context overflow — it must keep its retry.
     assert.deepEqual(classify('request took too long'), {
