@@ -975,12 +975,13 @@ Batching has not established a reliable end-to-end speedup. The presets
 are mutually exclusive. Batching hints require repository shell tools; Pi,
 CommandCode and tool-less backends do not receive them.
 
-| Value                    | Behavior                                                                            | Evidence / recommendation                                                                                                                               |
-| ------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `off`                    | Complete paged review without batching hints                                        | Rollback for the batching default.                                                                                                                      |
-| `diff-batches` (default) | Bounded batched reads for supporting diffs in other tasks, when needed              | Historical omitted-diff trials reduced tool-output bytes 44.1% with flat latency; that does not establish a speedup for the new complete-page workflow. |
-| `linked`                 | Append up to two unseen import-linked source excerpts to eligible main-review reads | Main-only trials had mixed quality and latency; keep experimental. OpenCode only.                                                                       |
-| `jev`                    | Jev ranks caller excerpts from changed exported symbols                             | Some historical-PR cost savings, inconsistent latency and weak known-bug recall; keep experimental. Requires enhanced context and `TYPESAFE_API_KEY`.   |
+| Value                    | Behavior                                                                                                                                                | Evidence / recommendation                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `off`                    | Complete paged review without batching hints                                                                                                            | Rollback for the batching default.                                                                                                                      |
+| `diff-batches` (default) | Bounded batched reads for supporting diffs in other tasks, when needed                                                                                  | Historical omitted-diff trials reduced tool-output bytes 44.1% with flat latency; that does not establish a speedup for the new complete-page workflow. |
+| `adaptive`               | Batching plus completed-auxiliary reuse for routine documentation follow-ups, named caller evidence for verification, and collapsed unverified concerns | Opt-in experiment; full main review and verification remain enabled.                                                                                    |
+| `linked`                 | Append up to two unseen import-linked source excerpts to eligible main-review reads                                                                     | Main-only trials had mixed quality and latency; keep experimental. OpenCode only.                                                                       |
+| `jev`                    | Jev ranks caller excerpts from changed exported symbols                                                                                                 | Some historical-PR cost savings, inconsistent latency and weak known-bug recall; keep experimental. Requires enhanced context and `TYPESAFE_API_KEY`.   |
 
 The [production decision and proof](docs/audits/2026-09-19-experiment-presets.md)
 compares historical benefits, quality failures and sample limits. The
@@ -1002,12 +1003,22 @@ Use a checkout or image containing this code. The public Action uses the publish
 Local comparisons require the usual provider credential and configured model.
 Keep the revision, model, backend and other review settings fixed:
 
+`adaptive` reuses a pass only when its last completed review has the same base,
+model, settings, instructions and PR intent, and every subsequent change is to a
+README, changelog or Markdown audit. Code, configuration, guidelines, unknown
+history and explicit same-head reruns run auxiliaries normally. Logs record each
+decision and the reused commit. Setting `dynamic-fanout: false` also forces normal
+auxiliary scheduling. Local mode has no prior GitHub review state, so it exercises
+only the evidence and reporting portions of this preset. Clean follow-ups that
+do not post a new review keep the older completion baseline.
+
 ```sh
 export JBOT_SDK_ENGINE=opencode JBOT_RUN_STATS=1 JBOT_REVIEW_TELEMETRY=true
 export JBOT_REVIEW_EXPERIMENT=off
 npm run review:local -- --base origin/main
 
 JBOT_REVIEW_EXPERIMENT=diff-batches npm run review:local -- --base origin/main
+JBOT_REVIEW_EXPERIMENT=adaptive npm run review:local -- --base origin/main
 JBOT_REVIEW_EXPERIMENT=linked npm run review:local -- --base origin/main
 JBOT_REVIEW_EXPERIMENT=jev npm run review:local -- --base origin/main
 ```
@@ -1016,7 +1027,7 @@ To disable the experiments, set `JBOT_REVIEW_EXPERIMENT=off`. Explicit environme
 values override local `.env`; unknown values disable the experiments. Removed
 flags cannot reactivate them. Keep the TypeSafe key in the ignored `.env` or a
 hosted secret. Only `jev` sends bounded diff/source fragments to TypeSafe;
-`off`, `diff-batches` and `linked` make no Jev API call.
+`off`, `diff-batches`, `adaptive` and `linked` make no Jev API call.
 
 The `jev` preset pins `jev-1.13.0`, scores at most 24 excerpts from 12 tracked
 source files, and bounds the complete JSON request to 30,000 bytes. Preparation

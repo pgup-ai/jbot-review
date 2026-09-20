@@ -30,7 +30,13 @@ import {
 import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
 import { EvidenceStore } from './evidence.ts';
-import { buildFindingSourceContext } from './finding-context.ts';
+import { buildFindingSourceContext, findNamedSourceLocations } from './finding-context.ts';
+import {
+  auxiliaryPolicy,
+  planAuxiliaryReuse,
+  withAuxiliaryBaselines,
+  type AuxiliaryBaseline,
+} from './auxiliary-reuse.ts';
 
 import {
   SEVERITY_RANK,
@@ -303,6 +309,9 @@ import {
   PARTIAL_COVERAGE_REASON,
   formatSummaryMarkdown,
   ORPHANED_FINDINGS_HEADING,
+  ADVISORY_FINDINGS_HEADING,
+  isAdvisoryFinding,
+  renderAdvisorySection,
   renderOrphanedSection,
 } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
@@ -1497,7 +1506,10 @@ async function runReviewPipeline(params: {
   // the same orphan on every re-review.
   const priorComments = options.includePriorComments
     ? allPriorReviewComments.filter(
-        (comment) => !isJbotReviewBody(comment) || comment.includes(ORPHANED_FINDINGS_HEADING),
+        (comment) =>
+          !isJbotReviewBody(comment) ||
+          comment.includes(ORPHANED_FINDINGS_HEADING) ||
+          comment.includes(ADVISORY_FINDINGS_HEADING),
       )
     : [];
   if (!options.includePriorComments) {
@@ -1544,9 +1556,19 @@ async function runReviewPipeline(params: {
     options.experiment.reuse,
   );
   const verifierSourceContext =
-    evidence.reuse.shared || options.experiment.verificationEvidence !== 'off'
-      ? (targets: Finding[]) => evidence.sourceContext(targets)
-      : undefined;
+    options.experiment.preset === 'adaptive'
+      ? async (targets: Finding[]) => {
+          const started = Date.now();
+          const related = await findNamedSourceLocations(workspace, targets);
+          const context = await buildFindingSourceContext(workspace, targets, undefined, related);
+          log(
+            `Verifier source lookup: ${JSON.stringify({ findings: targets.length, locations: related.locations.length, omittedLocations: related.omitted.length, unresolvedSymbols: related.unsearched.length, bytes: Buffer.byteLength(context), durationMs: Date.now() - started })}`,
+          );
+          return context;
+        }
+      : evidence.reuse.shared || options.experiment.verificationEvidence !== 'off'
+        ? (targets: Finding[]) => evidence.sourceContext(targets)
+        : undefined;
   const prepareEvidence = (
     scope: 'exploration' | 'verification',
     findings: Finding[],
@@ -2356,18 +2378,86 @@ async function runReviewPipeline(params: {
 
     const reviewedHead = findLatestReviewedHead(allPriorReviewComments.filter(isJbotReviewBody));
     // A reviewed-head marker does not prove that any prior auxiliary pass completed.
-    const guidelineCandidate = effectiveGuidelinePass && auxSessionsEnabled;
-    const candidateLensKeys = selectLensKeys(
+    let guidelineCandidate = effectiveGuidelinePass && auxSessionsEnabled;
+    let candidateLensKeys = selectLensKeys(
       auxSessionsEnabled ? effectiveReviewPasses : 1,
       changedFiles,
       changeShape,
     );
+    const auxiliarySessions = [
+      ...candidateLensKeys.map((key) => `review-${key}`),
+      ...(guidelineCandidate && guidelines && !options.guidelineSweep
+        ? ['guideline-compliance']
+        : []),
+    ];
+    const policy = auxiliaryPolicy({
+      model: auxModel,
+      backend: auxBackend.name,
+      modelOptions: options.modelOptions,
+      auxModelOptions,
+      baseURL: options.auxBaseURL || baseURL,
+      title: params.pullTitle,
+      body: params.pullBody,
+      context: options.enhancedContext,
+      configuration: runConfiguration(options, model).configurationHash,
+      linkedIssueContext,
+      experiment: options.experiment,
+      prompts: auxiliarySessions.map((session) =>
+        session === 'guideline-compliance'
+          ? assembleGuidelineCompliancePrompt('', guidelines)
+          : assembleReviewPrompt(
+              '',
+              guidelines,
+              REVIEW_LENSES[session.slice(7)],
+              options.evidenceQuotes,
+              options.embeddedFirstPrompt,
+              {
+                toolsAvailable: auxBackend.canReadWorkspace,
+                contextFirst: options.sharedPrefixPrompt,
+              },
+            ),
+      ),
+    });
+    const auxiliaryDecisions =
+      options.experiment.preset === 'adaptive' && options.dynamicFanout && !localDiff
+        ? await planAuxiliaryReuse({
+            workspace,
+            base: baseSha,
+            head: headSha,
+            policy,
+            sessions: auxiliarySessions,
+            priorBodies: priorJbotReviewGroups.map((review) => review.body),
+          })
+        : [];
+    const reusedAux = new Map(
+      auxiliaryDecisions.flatMap((decision) =>
+        decision.baseline ? [[decision.session, decision.baseline] as const] : [],
+      ),
+    );
+    for (const decision of auxiliaryDecisions) {
+      log(
+        `Auxiliary scheduling: ${JSON.stringify({
+          session: decision.session,
+          action: decision.baseline ? 'reuse' : 'run',
+          reason: decision.reason,
+          ...(decision.baseline ? { reviewedHead: decision.baseline.head } : {}),
+        })}`,
+      );
+      if (decision.baseline)
+        recordCoverage({
+          session: decision.session,
+          state: 'reused',
+          reusedFrom: decision.baseline.head,
+        });
+    }
+    candidateLensKeys = candidateLensKeys.filter((key) => !reusedAux.has(`review-${key}`));
+    guidelineCandidate &&= !reusedAux.has('guideline-compliance');
     // Slice-vs-widen policy lives in selectFinderGuidelineText; keyed on the
     // compliance session's own final enable, not the option.
     const guidelineSelection = {
       discovered: discoveredGuidelines,
       forFiles: changedFiles,
-      complianceRuns: guidelineCandidate,
+      complianceRuns: guidelineCandidate || reusedAux.has('guideline-compliance'),
       mainCanReadWorkspace: mainBackend.canReadWorkspace ?? !mainRequiresCompleteEmbeddedDiff,
       widen: options.guidelineWiden,
       full: guidelines,
@@ -2734,22 +2824,24 @@ async function runReviewPipeline(params: {
 
     const guidelineComplianceCheck = trackAux(
       'guideline-compliance',
-      jointGuidelines
-        ? lensPasses[0].promise.then(() => [])
-        : startGuidelineComplianceCheck({
-            backend: auxBackend,
-            model: auxModel,
-            prContext: coreContext,
-            plans: () => prepareAuxPlans(),
-            guidelinesForPrompt: guidelines,
-            hasGuidelines: Boolean(guidelines),
-            enabled: guidelineCandidate && !sweepGuidelines,
-            timeoutMs: finderTimeoutMs,
-            log,
-            onTokenUsage: recordTokenUsage,
-            onCoverage: recordCoverage,
-            onFindings: (findings) => collectAuxFindings('guideline-compliance', findings),
-          }),
+      reusedAux.has('guideline-compliance')
+        ? Promise.resolve([])
+        : jointGuidelines
+          ? lensPasses[0].promise.then(() => [])
+          : startGuidelineComplianceCheck({
+              backend: auxBackend,
+              model: auxModel,
+              prContext: coreContext,
+              plans: () => prepareAuxPlans(),
+              guidelinesForPrompt: guidelines,
+              hasGuidelines: Boolean(guidelines),
+              enabled: guidelineCandidate && !sweepGuidelines,
+              timeoutMs: finderTimeoutMs,
+              log,
+              onTokenUsage: recordTokenUsage,
+              onCoverage: recordCoverage,
+              onFindings: (findings) => collectAuxFindings('guideline-compliance', findings),
+            }),
     );
 
     let summary: string;
@@ -3052,14 +3144,26 @@ async function runReviewPipeline(params: {
         .map((label) => ({ label, reason: PARTIAL_COVERAGE_REASON })),
     ];
     const coverageNotice = formatIncompleteCoverage(incompleteSessions);
+    const auxiliaryBaselines: AuxiliaryBaseline[] =
+      options.experiment.preset === 'adaptive' && headSha && baseSha
+        ? auxiliarySessions.flatMap((session) => {
+            const prior = reusedAux.get(session);
+            if (prior) return [prior];
+            return auxCoverage.get(session)?.complete && !partialSessions.has(session)
+              ? [{ session, head: headSha, base: baseSha, policy }]
+              : [];
+          })
+        : [];
     if (coverageNotice) log(coverageNotice);
     telemetry.snapshot('filtered', filteredFindings);
     log(
       `Review ${coverageNotice ? 'incomplete' : 'complete'}: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
+    const advisories =
+      options.experiment.preset === 'adaptive' ? filteredFindings.filter(isAdvisoryFinding) : [];
     const { inline, fileLevel, orphaned, anchorMissed } = anchorFindings(
-      filteredFindings,
+      filteredFindings.filter((finding) => !advisories.includes(finding)),
       addable,
       !!headSha,
     );
@@ -3068,6 +3172,7 @@ async function runReviewPipeline(params: {
     const reanchoredIds = new Set(reanchored.map((f) => f.id));
     telemetry.route({
       inline,
+      advisory: advisories,
       fileLevel,
       orphaned,
       // Ids exist only while telemetry is on, and an undefined id matches every
@@ -3113,6 +3218,7 @@ async function runReviewPipeline(params: {
         engineByModel,
         mainReasoningEffort,
         incompleteSessions,
+        { advisorySummary: options.experiment.preset === 'adaptive', auxiliaryBaselines },
       );
       log(
         `Dry run enabled; would post verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
@@ -3124,6 +3230,8 @@ async function runReviewPipeline(params: {
       if (fileLevel.length > 0) {
         log(`Dry run file-level comments:\n${fileLevel.map(formatInlineFinding).join('\n\n')}`);
       }
+      if (advisories.length > 0)
+        log(`Dry run advisory details:\n${advisories.map(formatInlineFinding).join('\n\n')}`);
       if (verifiedAddressedPriorComments.length > 0) {
         log(
           `Dry run addressed prior comments:\n${verifiedAddressedPriorComments
@@ -3140,7 +3248,7 @@ async function runReviewPipeline(params: {
     // `priorJbotReviewCount` is computed
     // up front (independent of includePriorComments). Addressed-thread replies
     // (below) still run regardless.
-    const findingCount = inline.length + fileLevel.length + orphaned.length;
+    const findingCount = filteredFindings.length;
     const shouldPostComment = shouldPostReviewComment(
       priorJbotReviewCount,
       findingCount,
@@ -3161,6 +3269,7 @@ async function runReviewPipeline(params: {
         engineByModel,
         mainReasoningEffort,
         incompleteSessions,
+        { advisorySummary: options.experiment.preset === 'adaptive', auxiliaryBaselines },
       );
     const postCurrentReviewIfNeeded = async (): Promise<void> => {
       if (!shouldPostComment) {
@@ -4839,6 +4948,7 @@ export function buildBody(
   engineByModel?: Record<string, string>,
   reasoningEffort?: string,
   incompleteSessions: readonly IncompleteSession[] = [],
+  experiment?: { advisorySummary: boolean; auxiliaryBaselines: AuxiliaryBaseline[] },
 ): string {
   const total = all.length;
   const lines = ['## J-Bot Code Review', ''];
@@ -4878,9 +4988,15 @@ export function buildBody(
   }
   const orphanedSection = renderOrphanedSection(orphaned);
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
+  if (experiment?.advisorySummary)
+    lines.push(...renderAdvisorySection(all.filter(isAdvisoryFinding)));
   lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));
   lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
-  return withReviewCoverage(lines.join('\n'), headSha, incompleteSessions.length === 0);
+  return withReviewCoverage(
+    withAuxiliaryBaselines(lines.join('\n'), experiment?.auxiliaryBaselines ?? []),
+    headSha,
+    incompleteSessions.length === 0,
+  );
 }
 
 export function renderReviewMetadataBlock(

@@ -45,8 +45,10 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
    hunk into budgeted pages, with byte-conserving splits for oversized hunks).
    Every mandatory page must complete; repository access alone is not delivery.
    Findings remain clamped to assigned files in code. Never reintroduce delta-only review scope; "what changed
-   since the last run" applies to the summary TEXT only
-   (`buildSummaryScopeBlock`). Repeat-comment noise is handled downstream by
+   since the last run" applies to the summary TEXT (`buildSummaryScopeBlock`).
+   The opt-in `adaptive` preset may reuse a completed auxiliary pass after routine
+   documentation-only follow-ups with unchanged base and policy; the main review
+   and verification still cover the full PR. Repeat-comment noise is handled downstream by
    `suppressPreviouslyReported`, not by narrowing the model's input.
    Dynamic fan-out (`fanout.ts`) scales only the NUMBER of recall-supplement
    sessions (lens passes, guideline pass) by diff shape — it never narrows the

@@ -869,7 +869,7 @@ export function formatFindingLocation(finding: Pick<Finding, 'path' | 'line'>): 
  * load-bearing: isJbotFinding and duplicate suppression recognize prior
  * findings by it, so every posting path must go through here.
  */
-function formatFindingCommentBody(finding: Finding): string {
+export function formatFindingCommentBody(finding: Finding): string {
   return `${formatFindingLabel(finding)} — ${finding.title}\n\n${finding.body}\n\n${FINDING_MARKER}`;
 }
 

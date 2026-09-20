@@ -62,7 +62,7 @@ describe('review performance aggregation', () => {
         inputTokens: 100,
       },
       { kind: 'session', session: 'review-shard-1-retry' },
-      { kind: 'finding', disposition: 'posted-inline' },
+      { kind: 'finding', disposition: 'posted-advisory' },
     ]);
 
     assert.equal(report.phaseTime['run:filtering'].p50, 25);

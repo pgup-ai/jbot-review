@@ -438,6 +438,15 @@ describe('createTelemetryRecorder finding dispositions', () => {
     rec.route({ inline: [f], fileLevel: [], orphaned: [], rescued: [], anchorMissed: [] });
 
     assert.equal(rec.findingRows()[0].disposition, 'posted-inline');
+    rec.route({
+      inline: [],
+      fileLevel: [],
+      orphaned: [],
+      rescued: [],
+      anchorMissed: [],
+      advisory: [f],
+    });
+    assert.equal(rec.findingRows()[0].disposition, 'posted-advisory');
   });
 
   it('detects the stage each dropped finding fell out at', () => {

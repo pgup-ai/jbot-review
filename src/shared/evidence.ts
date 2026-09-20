@@ -337,7 +337,7 @@ export class EvidenceStore {
         this.workspace,
         findings,
         (path, signal) => this.read(path, signal, tracked),
-        related,
+        { locations: related },
       );
     } catch {
       return buildFindingSourceContext(this.workspace, findings);

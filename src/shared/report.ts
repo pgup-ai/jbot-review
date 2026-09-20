@@ -1,6 +1,6 @@
 import type { Finding, Severity } from './types.ts';
 import { SEVERITY_RANK } from './filter.ts';
-import { formatFindingLabel, formatFindingLocation } from './github.ts';
+import { formatFindingLabel, formatFindingLocation, formatFindingCommentBody } from './github.ts';
 
 /**
  * Pure review-body layout helpers. `runner.ts` wires these into the posted
@@ -18,6 +18,35 @@ function findingLine(finding: Finding): string {
  * listed flat with their full bodies (they are uncommon and self-contained).
  */
 export const ORPHANED_FINDINGS_HEADING = '### Findings (outside the diff)';
+export const ADVISORY_FINDINGS_HEADING = '### Unverified concerns';
+
+export function isAdvisoryFinding(finding: Finding): boolean {
+  return finding.verificationUncertain === true || finding.kind === 'investigate';
+}
+
+export function renderAdvisorySection(findings: Finding[]): string[] {
+  if (!findings.length) return [];
+  return [
+    ADVISORY_FINDINGS_HEADING,
+    '',
+    '<details>',
+    `<summary>${findings.length} ${findings.length === 1 ? 'concern needs' : 'concerns need'} more evidence</summary>`,
+    '',
+    'These are investigation leads, not confirmed bugs.',
+    '',
+    ...findings.map((finding) => {
+      const reason = finding.body.split('\n\n')[0].replace(/\s+/g, ' ').trim();
+      const body = formatFindingCommentBody({
+        ...finding,
+        title: finding.title.replace(/^Unverified concern: /, ''),
+        body: reason.length > 300 ? `${reason.slice(0, 297)}...` : reason,
+      });
+      return `- \`${formatFindingLocation(finding)}\` — ${body.replace(/\n/g, '\n  ')}`;
+    }),
+    '',
+    '</details>',
+  ];
+}
 
 export function renderOrphanedSection(orphaned: Finding[]): string[] {
   if (orphaned.length === 0) return [];

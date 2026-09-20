@@ -2,7 +2,7 @@ import type { EvidenceReuseOptions } from './evidence.ts';
 import type { JevPrefetchMode } from './jev-prefetch.ts';
 
 export interface ReviewExperiment {
-  preset: 'off' | 'diff-batches' | 'linked' | 'jev' | 'custom';
+  preset: 'off' | 'diff-batches' | 'linked' | 'jev' | 'adaptive' | 'custom';
   jevPrefetch: JevPrefetchMode;
   explorationEvidence: JevPrefetchMode;
   verificationEvidence: JevPrefetchMode;
@@ -19,7 +19,10 @@ export interface ReviewExperiment {
 
 export function reviewExperiment(env: NodeJS.ProcessEnv = process.env): ReviewExperiment {
   const value = env.JBOT_REVIEW_EXPERIMENT ?? 'diff-batches';
-  const preset = value === 'diff-batches' || value === 'linked' || value === 'jev' ? value : 'off';
+  const preset =
+    value === 'diff-batches' || value === 'linked' || value === 'jev' || value === 'adaptive'
+      ? value
+      : 'off';
   return {
     preset,
     jevPrefetch: preset === 'jev' ? 'on' : 'off',
@@ -31,7 +34,7 @@ export function reviewExperiment(env: NodeJS.ProcessEnv = process.env): ReviewEx
       checkpoints: false,
       readEvidence: preset === 'linked' ? 'linked' : false,
       readEvidencePhase: preset === 'linked' ? 'review' : 'all',
-      batchDiffRecovery: preset === 'diff-batches',
+      batchDiffRecovery: preset === 'diff-batches' || preset === 'adaptive',
     },
   };
 }

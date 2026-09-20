@@ -112,6 +112,7 @@ export function aggregatePerformance(rows: Row[]) {
   const retained = new Set([
     'posted-inline',
     'posted-file-level',
+    'posted-advisory',
     'rescued',
     'orphaned',
     'anchor-missed',

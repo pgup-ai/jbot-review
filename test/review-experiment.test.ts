@@ -49,6 +49,11 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
       preset: 'linked',
       exploration: { ...off.exploration, readEvidence: 'linked', readEvidencePhase: 'review' },
     },
+    {
+      ...off,
+      preset: 'adaptive',
+      exploration: { ...off.exploration, batchDiffRecovery: true },
+    },
   ];
   assert.deepEqual(reviewExperiment({}), expected[1]);
   const hashes = new Set<string>();
@@ -64,7 +69,7 @@ test('one preset isolates measured treatments and stale flags cannot reactivate 
     assert.deepEqual(configuration.explorationExperiment, preset.exploration);
     hashes.add(configurationHash);
   }
-  assert.equal(hashes.size, 3);
+  assert.equal(hashes.size, 4);
   off.reuse.shared = true;
   off.exploration.readEvidence = 'linked';
   assert.equal(reviewExperiment({}).reuse.shared, false);

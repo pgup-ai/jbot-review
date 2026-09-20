@@ -116,6 +116,75 @@ export function findingSourceLocations(findings: Pick<Finding, 'path' | 'line' |
   return { locations: [...locations.values()], omitted: [...omitted.values()] };
 }
 
+export async function findNamedSourceLocations(
+  workspace: string,
+  findings: Pick<Finding, 'title' | 'body'>[],
+): Promise<{
+  locations: { path: string; line: number }[];
+  omitted: { path: string; line: number }[];
+  unsearched: string[];
+}> {
+  const symbols = [
+    ...new Set(
+      findings.flatMap((finding) =>
+        [
+          ...`${finding.title}\n${finding.body}`.matchAll(
+            /`([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)`/g,
+          ),
+        ]
+          .map((match) => match[1].split('.').at(-1)!)
+          .filter((symbol) => symbol.length >= 5),
+      ),
+    ),
+  ];
+  if (!symbols.length) return { locations: [], omitted: [], unsearched: [] };
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      [
+        'grep',
+        '-n',
+        '-z',
+        '-I',
+        '-w',
+        '-F',
+        ...symbols.slice(0, 8).flatMap((symbol) => ['-e', symbol]),
+        '--',
+        '*.ts',
+        '*.tsx',
+        '*.js',
+        '*.jsx',
+        '*.mts',
+        '*.cts',
+        '*.mjs',
+        '*.cjs',
+      ],
+      { cwd: workspace, timeout: 1500, maxBuffer: 512 * 1024 },
+    );
+    const matches = [...stdout.matchAll(/([^\0]+)\0(\d+)\0[^\n]*(?:\n|$)/g)].map((match) => ({
+      path: match[1],
+      line: Number(match[2]),
+    }));
+    // Spread the bounded windows across files so one declaration cannot hide all callers.
+    const selected: typeof matches = [];
+    for (let perFile = 1; perFile <= 2; perFile++)
+      for (const ref of matches)
+        if (
+          selected.length < 8 &&
+          !selected.includes(ref) &&
+          selected.filter((row) => row.path === ref.path).length < perFile
+        )
+          selected.push(ref);
+    return {
+      locations: selected,
+      omitted: matches.filter((ref) => !selected.includes(ref)),
+      unsearched: symbols.slice(8),
+    };
+  } catch {
+    return { locations: [], omitted: [], unsearched: symbols };
+  }
+}
+
 export async function buildFindingSourceContext(
   workspace: string,
   findings: Finding[],
@@ -123,12 +192,16 @@ export async function buildFindingSourceContext(
     path,
     signal,
   ) => readTrackedSource(workspace, path, signal),
-  related: { path: string; line: number }[] = [],
+  related: {
+    locations: { path: string; line: number }[];
+    omitted?: { path: string; line: number }[];
+    unsearched?: string[];
+  } = { locations: [] },
 ): Promise<string> {
   const { locations, omitted } = findingSourceLocations(findings);
-  for (const ref of related)
+  for (const ref of [...related.locations].reverse())
     if (!locations.some((location) => location.path === ref.path && location.line === ref.line))
-      locations.push(ref);
+      locations.unshift(ref);
   const files = new Map<string, ReturnType<typeof readTrackedSource>>();
   const signal = AbortSignal.timeout(1500);
 
@@ -147,5 +220,9 @@ export async function buildFindingSourceContext(
       return { ...ref, startLine, lines: lines.slice(startLine - 1, ref.line + 20) };
     }),
   );
-  return formatFindingSources(sources, [...omitted, ...locations.slice(MAX_SOURCE_LOCATIONS)]);
+  return formatFindingSources(
+    sources,
+    [...omitted, ...(related.omitted ?? []), ...locations.slice(MAX_SOURCE_LOCATIONS)],
+    related.unsearched,
+  );
 }

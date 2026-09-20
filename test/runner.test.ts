@@ -42,6 +42,7 @@ import {
 } from '../src/shared/session-concurrency.ts';
 import { Semaphore } from '../src/shared/opencode-session.ts';
 import { completedReviewHead } from '../src/shared/github.ts';
+import { auxiliaryBaselines } from '../src/shared/auxiliary-reuse.ts';
 import { applyFindingVerdicts, selectFindingIndexes } from '../src/shared/filter.ts';
 import type { Finding } from '../src/shared/types.ts';
 import { measureReviewPrompt, reviewPromptBudget } from '../src/shared/review-plan.ts';
@@ -183,6 +184,45 @@ describe('buildBody', () => {
     assert.match(body, /\*\*Changes since last review\*\*/);
     assert.match(body, /Rebased onto main/);
     assert.doesNotMatch(body, /low-value verification narrative/);
+  });
+
+  it('preserves uncertain findings in a collapsed advisory section with reusable pass provenance', () => {
+    const uncertain: Finding = {
+      ...finding,
+      title: 'Unverified concern: Caller may be missing',
+      kind: 'investigate',
+      verificationUncertain: true,
+      body: 'The caller was not supplied.\n\nOriginal reviewer hypothesis (unverified):\n\nLong hypothesis.',
+    };
+    const baseline = {
+      session: 'review-interactions',
+      head: 'a'.repeat(40),
+      base: 'b'.repeat(40),
+      policy: 'c'.repeat(64),
+    };
+    const body = buildBody(
+      '',
+      '',
+      [finding, uncertain],
+      [],
+      'model',
+      'owner',
+      'repo',
+      'd'.repeat(40),
+      undefined,
+      undefined,
+      undefined,
+      [],
+      { advisorySummary: true, auxiliaryBaselines: [baseline] },
+    );
+    assert.match(body, /<summary>1 concern needs more evidence<\/summary>/);
+    assert.match(body, /Caller may be missing/);
+    assert.match(body, /The caller was not supplied/);
+    assert.match(body, /<!-- jbot-review:finding -->/);
+    assert.doesNotMatch(body, /Long hypothesis/);
+    assert.match(body, /\| 2 \| 0 \| 0 \| 1 \| 0 \| 0 \| 1 \|/);
+    assert.deepEqual(auxiliaryBaselines(body), [baseline]);
+    assert.equal(completedReviewHead(body), 'd'.repeat(40));
   });
 });
 

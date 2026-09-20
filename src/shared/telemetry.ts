@@ -16,6 +16,7 @@ export type FindingDisposition =
   | 'severity-filtered'
   | 'posted-inline'
   | 'posted-file-level'
+  | 'posted-advisory'
   | 'orphaned'
   | 'rescued'
   | 'anchor-missed';
@@ -184,6 +185,7 @@ export interface OutcomeTelemetryRow extends PriorThreadOutcome {
 
 export interface FindingRouting {
   inline: Finding[];
+  advisory?: Finding[];
   fileLevel: Finding[];
   orphaned: Finding[];
   rescued: Finding[];
@@ -238,6 +240,7 @@ export interface SessionCoverage {
     completedTasks: number;
     incompleteTasks: number;
   };
+  reusedFrom?: string;
   diff?: {
     assignedFiles: number;
     completeFiles: number;
@@ -357,6 +360,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   const stageSeverity = new Map<TelemetryStage, Map<string, Severity>>();
   const routing = {
     inline: new Set<string>(),
+    advisory: new Set<string>(),
     fileLevel: new Set<string>(),
     orphaned: new Set<string>(),
     rescued: new Set<string>(),
@@ -409,6 +413,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     route(routes) {
       const missed = idsOf(routes.anchorMissed);
       for (const id of idsOf(routes.inline)) routing.inline.add(id);
+      for (const id of idsOf(routes.advisory ?? [])) routing.advisory.add(id);
       for (const id of missed) routing.anchorMissed.add(id);
       for (const f of routes.fileLevel) {
         if (!f.id) continue;
@@ -486,6 +491,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
         ...(cov.state === 'failed' ? { failureClass: classifySessionError(cov.error) } : {}),
         ...(cov.durationMs !== undefined ? { durationMs: cov.durationMs } : {}),
         ...(cov.promptBytes !== undefined ? { promptBytes: cov.promptBytes } : {}),
+        ...(cov.reusedFrom ? { reusedFrom: cov.reusedFrom } : {}),
         ...(cov.diff ? { diff: cov.diff } : {}),
         ...(cov.delivery ? { delivery: cov.delivery } : {}),
       });
@@ -555,6 +561,7 @@ function deriveRow(
   stageSeverity: Map<TelemetryStage, Map<string, Severity>>,
   routing: {
     inline: Set<string>;
+    advisory: Set<string>;
     fileLevel: Set<string>;
     orphaned: Set<string>;
     rescued: Set<string>;
@@ -576,7 +583,8 @@ function deriveRow(
   const last = present[present.length - 1];
   let disposition: FindingDisposition;
   if (last === 'filtered') {
-    if (routing.rescued.has(id)) disposition = 'rescued';
+    if (routing.advisory.has(id)) disposition = 'posted-advisory';
+    else if (routing.rescued.has(id)) disposition = 'rescued';
     else if (routing.inline.has(id)) disposition = 'posted-inline';
     else if (routing.anchorMissed.has(id)) disposition = 'anchor-missed';
     else if (routing.fileLevel.has(id)) disposition = 'posted-file-level';
