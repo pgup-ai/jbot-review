@@ -2371,7 +2371,7 @@ async function runReviewPipeline(params: {
       : Infinity;
     const { kept, dropped } = trimContextBlocks(supplementaryBlocks, trimBudget);
     if (dropped.length > 0) log(`Context trim dropped: ${dropped.join(', ')}`);
-    let mainCoreContext =
+    const trimmedCoreContext =
       dropped.length === 0
         ? coreContext
         : joinContext(
@@ -2381,23 +2381,20 @@ async function runReviewPipeline(params: {
             buildContextTrimNotice(dropped),
           );
 
-    if (options.contextTrim) {
-      const compact = compactReviewPageContext(
-        mainCoreContext,
-        buildReviewScopeContext(
-          { pullTitle, pullBody, changedFiles, diffScope, ...linkedIssueContext },
-          false,
-        ),
-        summaryScopeBlock,
-        reviewFocusBlock,
-        joinContext(blastRadiusBlock, explorationEvidence),
+    const mainCoreContext = compactReviewPageContext(
+      trimmedCoreContext,
+      buildReviewScopeContext(
+        { pullTitle, pullBody, changedFiles, diffScope, ...linkedIssueContext },
+        false,
+      ),
+      summaryScopeBlock,
+      reviewFocusBlock,
+      joinContext(blastRadiusBlock, explorationEvidence),
+    );
+    if (mainCoreContext !== trimmedCoreContext)
+      log(
+        `Finder context: ${Buffer.byteLength(trimmedCoreContext)} → ${Buffer.byteLength(mainCoreContext)} bytes per page; metadata omitted, mandatory diff unchanged.`,
       );
-      if (compact !== mainCoreContext)
-        log(
-          `Finder context: ${Buffer.byteLength(mainCoreContext)} → ${Buffer.byteLength(compact)} bytes per page; metadata omitted, mandatory diff unchanged.`,
-        );
-      mainCoreContext = compact;
-    }
 
     const shards = shardFilesForReview(files, { requestedShards: options.reviewShards });
 
