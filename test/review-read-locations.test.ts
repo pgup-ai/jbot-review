@@ -17,6 +17,13 @@ test('literal shell reads preserve their directory and range without evaluating 
     reviewReadLocations('/repo', 'read', { filePath: '/repo/src/a.ts', offset: 12, limit: 6 }),
     [{ path: 'src/a.ts', line: 12, endLine: 17 }],
   );
+  assert.deepEqual(reviewReadLocations('/repo', 'read_file', { path: 'src/a.ts', line: 40 }), [
+    { path: 'src/a.ts', line: 40, endLine: 40 },
+  ]);
+  assert.deepEqual(
+    reviewReadLocations('/repo', 'read_file', { path: 'src/a.ts', offset: 4096 }),
+    [],
+  );
   for (const limit of [undefined, 0, 3000]) {
     assert.deepEqual(
       reviewReadLocations('/repo', 'read', { filePath: '/repo/a.ts', offset: 12, limit }),

@@ -199,14 +199,14 @@ describe('promptInSession', () => {
       .toJsonl()
       .split('\n')
       .map((line) => JSON.parse(line));
-    assert.equal(
-      rows.find((row) => row.session === 'review' && row.kind === 'exploration').toolCalls,
-      1,
-    );
-    assert.equal(
-      rows.find((row) => row.session === 'review-wrap-up' && row.kind === 'exploration').toolCalls,
-      0,
-    );
+    const main = rows.find((row) => row.session === 'review' && row.kind === 'exploration');
+    const wrap = rows.find((row) => row.session === 'review-wrap-up' && row.kind === 'exploration');
+    assert.ok(main);
+    assert.ok(wrap);
+    assert.equal(main.toolCalls, 1);
+    assert.equal(main.stopReason, 'aborted');
+    assert.equal(wrap.toolCalls, 0);
+    assert.equal(wrap.stopReason, 'completed');
     assert.deepEqual(
       usage.map((row) => [row.label, row.input]),
       [

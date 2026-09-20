@@ -12,7 +12,14 @@ export function reviewReadLocations(
     const path = relative(workspace, resolve(cwd, raw));
     if (path && path !== '..' && !path.startsWith('../')) locations.push({ path, line, endLine });
   };
-  if (tool === 'read' || tool === 'read_file') {
+  if (tool === 'read_file') {
+    if (input.offset !== undefined && input.offset !== 0) return [];
+    const line =
+      Number.isSafeInteger(input.line) && Number(input.line) > 0 ? Number(input.line) : 1;
+    add(input.path, line, line);
+    return locations;
+  }
+  if (tool === 'read') {
     const line =
       Number.isSafeInteger(input.offset) && Number(input.offset) > 0 ? Number(input.offset) : 1;
     const limit =

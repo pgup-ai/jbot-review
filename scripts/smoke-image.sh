@@ -2,7 +2,7 @@
 set -eu
 variant="$1"
 test "$JBOT_IMAGE_VARIANT" = "$variant"
-for entry in workflow/index.js app/server.js worker/index.js local/index.js; do
+for entry in workflow/index.js app/server.js worker/index.js local/index.js review-retrieval.js; do
   test -s "/app/dist/$entry"
   node --check "/app/dist/$entry"
 done

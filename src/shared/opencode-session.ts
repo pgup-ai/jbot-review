@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { readExplorationStats } from './exploration-policy.ts';
+import type { TelemetryStopReason } from './telemetry.ts';
 import type { OpenCodeClient } from '@opencode/client';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -316,7 +317,7 @@ export function recordAssistantTools(
   messages: AssistantMessage[],
   options: {
     experiment?: ReturnType<typeof readExplorationStats>;
-    stopReason?: 'completed' | 'failed';
+    stopReason?: TelemetryStopReason;
   } = {},
 ): void {
   for (const message of messages) {
@@ -517,7 +518,7 @@ async function promptHoldingSlot(
     let recorded = false;
     const recordTurn = async (
       fallback: AssistantMessage[],
-      stopReason: 'completed' | 'failed' = 'completed',
+      stopReason: TelemetryStopReason = 'completed',
     ) => {
       if (recorded) return;
       recorded = true;
@@ -596,7 +597,7 @@ async function promptHoldingSlot(
           `${label} prompt cut off; wrapping up in-session within ${Math.round(settled.budgetMs / 1000)}s`,
         );
         await interruptBestEffort(client, sessionID, label, log);
-        await recordTurn([]);
+        await recordTurn([], 'aborted');
         await client.session.switchAgent({ sessionID, agent: WRAPUP_AGENT }, control());
         rememberSession(client, sessionID, { agent: WRAPUP_AGENT });
         try {

@@ -1575,16 +1575,20 @@ export function formatSourceExcerpt(
   maxBytes: number,
 ): string {
   const numbered = lines.map((text, index) => `${startLine + index}: ${text}`);
+  if (Buffer.byteLength(numbered.join('\n')) <= maxBytes) return numbered.join('\n');
+  const notice = '\n[Source excerpt truncated. Surrounding lines omitted.]';
+  const budget = Math.max(0, maxBytes - Buffer.byteLength(notice));
   let focus = line - startLine;
-  while (numbered.length > 1 && Buffer.byteLength(numbered.join('\n')) > maxBytes) {
+  while (numbered.length > 1 && Buffer.byteLength(numbered.join('\n')) > budget) {
     if (focus >= numbered.length - focus - 1) {
       numbered.shift();
       focus--;
     } else numbered.pop();
   }
-  const narrowed =
-    numbered.length < lines.length ? '\n[Surrounding lines omitted to fit excerpt budget.]' : '';
-  return truncateUtf8WithNotice(numbered.join('\n'), maxBytes, 'Source excerpt') + narrowed;
+  const bytes = Buffer.from(numbered.join('\n'));
+  let end = Math.min(bytes.length, budget);
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
+  return bytes.toString('utf8', 0, end) + notice.slice(0, maxBytes);
 }
 
 export function formatFindingSources(

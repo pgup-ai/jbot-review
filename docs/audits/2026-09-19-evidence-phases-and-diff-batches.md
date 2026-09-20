@@ -100,7 +100,7 @@ row 43 retained it as explicitly unverified P3. All remain quality failures unde
 the frozen clean-case contract.
 
 Baseline missed the chain root in row 36 and retry root in row 67. Main-only
-missed the retry root in row 46; verifier-only missed that root in rows 41/61.
+missed the retry root in row 46; verifier-only missed that root in rows 41/62.
 The verifier-only misses happened before verification was invoked, with zero
 main delivery packets, so verifier delivery cannot explain them. No row was
 retried or removed. All arms fail at least one preregistered quality criterion.

@@ -9,7 +9,11 @@ import {
   buildFindingSourceContext,
   findingSourceLocations,
 } from '../src/shared/finding-context.ts';
-import { formatFindingSources, MAX_FINDING_SOURCE_CONTEXT_BYTES } from '../src/shared/prompt.ts';
+import {
+  formatFindingSources,
+  formatSourceExcerpt,
+  MAX_FINDING_SOURCE_CONTEXT_BYTES,
+} from '../src/shared/prompt.ts';
 import type { Finding } from '../src/shared/types.ts';
 
 const execFileAsync = promisify(execFile);
@@ -111,6 +115,13 @@ test('source context reads tracked worktree helpers but excludes untracked files
 });
 
 test('source context stays within its byte budget and names omitted evidence', () => {
+  for (const width of [80, 800]) {
+    const excerpt = formatSourceExcerpt(Array(41).fill('🔍'.repeat(width)), 1, 21, 2048);
+    assert.ok(Buffer.byteLength(excerpt) <= 2048);
+    assert.match(excerpt, /21: 🔍/);
+    assert.match(excerpt, /omitted/);
+    assert.doesNotMatch(excerpt, /\uFFFD/);
+  }
   const sources = Array.from({ length: 20 }, (_, i) => ({
     path: `src/${i}.ts`,
     line: 21,

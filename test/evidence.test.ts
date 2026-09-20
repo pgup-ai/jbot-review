@@ -2,6 +2,8 @@ import { reviewExperiment } from '../src/shared/review-experiment.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdtemp, writeFile, rm, symlink, readFile, readdir, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -338,6 +340,67 @@ test('handoff reloads bounded review read locations without executing shell or c
   assert.match(packet, /approvalRequired = true/);
   assert.equal(store.stats().handoffCandidates, 1);
 });
+
+test(
+  'an expired evidence caller releases its wait without cancelling shared reads',
+  { timeout: 5000 },
+  async (t) => {
+    const workspace = await mkdtemp(join(tmpdir(), 'evidence-cancellation-'));
+    t.after(() => rm(workspace, { recursive: true, force: true }));
+    execFileSync('git', ['init', '-q', workspace]);
+    await writeFile(
+      join(workspace, 'money.ts'),
+      'export function total(n: number) {\nreturn n * 100;\n}\n',
+    );
+    execFileSync('git', ['add', '.'], { cwd: workspace });
+    let entered!: () => void, release!: () => void;
+    const reading = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const open = fs.open;
+    t.mock.method(fs, 'open', async (...args) => {
+      const handle = await open(...args);
+      const stat = handle.stat.bind(handle);
+      handle.stat = async (...statArgs) => {
+        entered();
+        await gate;
+        return stat(...statArgs);
+      };
+      return handle;
+    });
+    syncBuiltinESMExports();
+    t.after(() => {
+      release();
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+    });
+    const caller = new AbortController();
+    const timeout = AbortSignal.timeout;
+    let first = true;
+    t.mock.method(AbortSignal, 'timeout', (ms) => {
+      if (!first) return timeout(ms);
+      first = false;
+      return caller.signal;
+    });
+    const store = new EvidenceStore(workspace, files, undefined, {
+      shared: true,
+      handoff: false,
+      prefetch: false,
+    });
+    const options = { timeoutMs: 4000, log: () => {}, onStats: () => {} };
+    const expired = store.prepare('exploration', [], 'deterministic', options);
+    await reading;
+    const active = store.prepare('exploration', [], 'deterministic', options);
+    caller.abort();
+    assert.equal(await expired, '');
+    release();
+    assert.match(await active, /return n \* 100/);
+    assert.equal(store.stats().sourceReads, 1);
+  },
+);
 
 test('persistent cache reuses indexes and exact judgments with zero rebilling; changes and corrupt entries miss', async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), 'evidence-disk-source-'));

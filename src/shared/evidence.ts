@@ -233,15 +233,15 @@ export class EvidenceStore {
     this.inventoryReads++;
     const pending = exec('git', ['ls-files', '-z'], {
       cwd: this.workspace,
-      signal,
+      signal: this.reuse.shared ? AbortSignal.timeout(4000) : signal,
       maxBuffer: 2 * 1024 * 1024,
-    }).then(({ stdout }) => new Set(stdout.split('\0').filter(Boolean)));
+    })
+      .then(({ stdout }) => new Set(stdout.split('\0').filter(Boolean)))
+      .finally(() => {
+        if (this.inventory === pending) this.inventory = undefined;
+      });
     if (this.reuse.shared) this.inventory = pending;
-    try {
-      return await pending;
-    } finally {
-      if (this.inventory === pending) this.inventory = undefined;
-    }
+    return waitForEvidence(pending, signal);
   }
 
   private async read(path: string, signal: AbortSignal, tracked: Set<string>) {
@@ -253,16 +253,14 @@ export class EvidenceStore {
       this.sources.sharedRequests++;
       return waitForEvidence(old, signal);
     }
-    const pending = readTrackedSource(this.workspace, path, signal, {
+    const pending = readTrackedSource(this.workspace, path, AbortSignal.timeout(4000), {
       tracked,
       cache: this.sources,
+    }).finally(() => {
+      this.sources.pending.delete(path);
     });
     this.sources.pending.set(path, pending);
-    try {
-      return await pending;
-    } finally {
-      this.sources.pending.delete(path);
-    }
+    return waitForEvidence(pending, signal);
   }
 
   async sourceContext(findings: Finding[]) {
@@ -367,15 +365,19 @@ export class EvidenceStore {
             pending = exec(
               'git',
               ['grep', '-l', '-z', '-w', '-F', ...symbols.flatMap((s) => ['-e', s]), '--'],
-              { cwd: this.workspace, signal, maxBuffer: 1024 * 1024 },
-            ).then(({ stdout }) => stdout.split('\0'));
+              {
+                cwd: this.workspace,
+                signal: this.reuse.shared ? AbortSignal.timeout(4000) : signal,
+                maxBuffer: 1024 * 1024,
+              },
+            )
+              .then(({ stdout }) => stdout.split('\0'))
+              .finally(() => {
+                if (this.searches.get(key) === pending) this.searches.delete(key);
+              });
             if (this.reuse.shared) this.searches.set(key, pending);
           }
-          try {
-            matches = (await waitForEvidence(pending, signal)).filter((p) => paths.has(p));
-          } finally {
-            if (this.searches.get(key) === pending) this.searches.delete(key);
-          }
+          matches = (await waitForEvidence(pending, signal)).filter((p) => paths.has(p));
         } catch (error) {
           if ((error as { code?: number }).code !== 1) throw error;
         }
