@@ -49,6 +49,30 @@ after(() => {
 });
 
 describe('jbot opencode plugin', () => {
+  it('keeps core read-only hooks when optional retrieval setup fails', async (t) => {
+    const previous = process.env.JBOT_EXPLORATION_CONFIG;
+    t.after(() => {
+      if (previous === undefined) delete process.env.JBOT_EXPLORATION_CONFIG;
+      else process.env.JBOT_EXPLORATION_CONFIG = previous;
+    });
+    const warnings = t.mock.method(console, 'warn', () => {});
+    for (const config of ['invalid JSON', '{"retrieval":true}']) {
+      process.env.JBOT_EXPLORATION_CONFIG = config;
+      const { context, evaluate } = await loadPlugin();
+      const event = { agent: 'plan', tools: tools() };
+      context(event);
+      assert.deepEqual(Object.keys(event.tools).sort(), ['read', 'shell']);
+      const permission = { effect: 'ask', message: '' };
+      evaluate(permission);
+      assert.equal(permission.effect, 'deny');
+    }
+    assert.equal(warnings.mock.callCount(), 2);
+    assert.doesNotMatch(
+      JSON.stringify(warnings.mock.calls.map((c) => c.arguments)),
+      /invalid JSON|TypeError/,
+    );
+  });
+
   it('strips mutating and interactive tools for the plan agent and rewrites the Gemini-hostile schema', async () => {
     const { context } = await loadPlugin();
     const event = { agent: 'plan', tools: tools() };

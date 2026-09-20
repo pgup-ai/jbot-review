@@ -1,3 +1,4 @@
+import { reviewExperiment, type ReviewExperiment } from '../src/shared/review-experiment.ts';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { normalizeOptions } from '../src/shared/runner.ts';
@@ -51,37 +52,45 @@ test('configuration fingerprints policy changes while excluding credentials and 
     first.configurationHash,
     runConfiguration({ ...options, sharedPrefixPrompt: true }, 'opencode/a').configurationHash,
   );
+  const custom = { ...reviewExperiment({}), preset: 'custom' as const };
+  const configuration = (experiment: ReviewExperiment) =>
+    runConfiguration({ ...options, experiment }, 'opencode/a');
+  const baseline = configuration(custom);
+  for (const key of ['jevPrefetch', 'explorationEvidence', 'verificationEvidence'] as const)
+    assert.notEqual(
+      configuration({ ...custom, [key]: 'on' }).configurationHash,
+      baseline.configurationHash,
+    );
+  const linked = {
+    ...custom,
+    exploration: { ...custom.exploration, readEvidence: 'linked' as const },
+  };
   assert.notEqual(
-    first.configurationHash,
-    runConfiguration({ ...options, jevPrefetch: 'on' }, 'opencode/a').configurationHash,
+    configuration(linked).configurationHash,
+    configuration({ ...linked, exploration: { ...linked.exploration, readEvidence: true } })
+      .configurationHash,
   );
-  const baseline = runConfiguration(options, 'opencode/a', {});
   assert.notEqual(
-    runConfiguration(options, 'opencode/a', {
-      JBOT_READ_EVIDENCE: 'linked',
-      JBOT_READ_EVIDENCE_PHASE: 'review',
+    configuration({
+      ...linked,
+      exploration: { ...linked.exploration, readEvidencePhase: 'review' },
     }).configurationHash,
-    runConfiguration(options, 'opencode/a', {
-      JBOT_READ_EVIDENCE: 'linked',
-      JBOT_READ_EVIDENCE_PHASE: 'verification',
+    configuration({
+      ...linked,
+      exploration: { ...linked.exploration, readEvidencePhase: 'verification' },
     }).configurationHash,
   );
-  assert.notEqual(
-    runConfiguration(options, 'opencode/a', { JBOT_READ_EVIDENCE: 'linked' }).configurationHash,
-    runConfiguration(options, 'opencode/a', { JBOT_READ_EVIDENCE: '1' }).configurationHash,
-  );
-  for (const variable of [
-    'JBOT_TARGETED_RETRIEVAL',
-    'JBOT_READ_EVIDENCE',
-    'JBOT_BATCH_DIFF_RECOVERY',
-    'JBOT_EXPLORATION_CHECKPOINTS',
-    'JBOT_EVIDENCE_SHARED',
-    'JBOT_EVIDENCE_HANDOFF',
-    'JBOT_EVIDENCE_PREFETCH',
-    'JBOT_EVIDENCE_CACHE_DIR',
-  ]) {
-    const changed = runConfiguration(options, 'opencode/a', {
-      [variable]: variable.endsWith('_DIR') ? '/private/operator/cache' : '1',
+  for (const key of ['retrieval', 'checkpoints', 'readEvidence', 'batchDiffRecovery'] as const)
+    assert.notEqual(
+      configuration({ ...custom, exploration: { ...custom.exploration, [key]: true } })
+        .configurationHash,
+      baseline.configurationHash,
+    );
+  for (const key of ['shared', 'handoff', 'prefetch', 'cacheDir'] as const) {
+    const changed = configuration({
+      ...custom,
+      reuse: { ...custom.reuse, [key]: key === 'cacheDir' ? '/private/operator/cache' : true },
+      docsPath: '/private/operator/docs.json',
     });
     assert.notEqual(changed.configurationHash, baseline.configurationHash);
     assert.doesNotMatch(JSON.stringify(changed), /private|operator/);

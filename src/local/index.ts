@@ -1,3 +1,5 @@
+import { pathToFileURL } from 'node:url';
+import type { ReviewExperiment } from '../shared/review-experiment.ts';
 import { execFile, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
@@ -105,6 +107,7 @@ const execFileAsync = promisify(execFile);
 const REPORT_DIR = '.jbot-review';
 
 interface LocalInvocation {
+  experiment?: ReviewExperiment;
   args: LocalArgs;
   paths: LocalPaths;
   comparison?: ComparisonManifestV1;
@@ -726,6 +729,7 @@ async function review(
     baseSha: mergeBase,
     localDiff: { files, commits },
     options: {
+      experiment: invocation.experiment,
       modelPool: pool,
       enhancedContext: config?.enhancedContext ?? true,
       scrubSessionEnv: config?.scrubSessionEnv ?? true,
@@ -829,7 +833,7 @@ async function review(
   }
 }
 
-async function bootstrap(): Promise<void> {
+async function bootstrap(experiment?: ReviewExperiment): Promise<void> {
   const launchDirectory = process.cwd();
   const args = parseLocalArgs(process.argv.slice(2));
   if (!args.prContext && loadDotEnv(join(launchDirectory, '.env'))) log('Loaded .env');
@@ -858,6 +862,7 @@ async function bootstrap(): Promise<void> {
   process.chdir(workspace);
   if (args.workspace) log(`Workspace: ${workspace}`);
   await main({
+    experiment,
     args,
     paths: { ...paths, workspace },
     ...(comparison ? { comparison, arenaAuth } : {}),
@@ -866,23 +871,29 @@ async function bootstrap(): Promise<void> {
 
 // Run verdict + observer flush live in runPrReview; here we only surface the
 // error, set the exit code, and guarantee the process actually ends.
-bootstrap()
-  .catch((error: unknown) => {
-    try {
-      writeArenaFailure(error);
-    } catch (outputError) {
-      console.error(
-        `[jbot-review] Could not write arena failure output: ${
-          outputError instanceof Error ? outputError.message : String(outputError)
-        }`,
-      );
-    }
-    const message = arenaRunState
-      ? sanitizeArenaFailureMessage(error, arenaRunState.secretValues)
-      : error instanceof Error
-        ? error.message
-        : String(error);
-    console.error(`[jbot-review] Local review failed: ${message}`);
-    process.exitCode = 1;
-  })
-  .finally(() => exitOnLingeringHandles(log));
+export function runLocalReview(experiment?: ReviewExperiment): Promise<void> {
+  return bootstrap(experiment)
+    .catch((error: unknown) => {
+      try {
+        writeArenaFailure(error);
+      } catch (outputError) {
+        console.error(
+          `[jbot-review] Could not write arena failure output: ${
+            outputError instanceof Error ? outputError.message : String(outputError)
+          }`,
+        );
+      }
+      const message = arenaRunState
+        ? sanitizeArenaFailureMessage(error, arenaRunState.secretValues)
+        : error instanceof Error
+          ? error.message
+          : String(error);
+      console.error(`[jbot-review] Local review failed: ${message}`);
+      process.exitCode = 1;
+    })
+    .finally(() => exitOnLingeringHandles(log));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void runLocalReview();
+}

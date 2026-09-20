@@ -136,15 +136,6 @@ export interface EvidenceReuseOptions {
   cacheDir?: string;
 }
 
-export function evidenceReuseOptions(env: NodeJS.ProcessEnv): EvidenceReuseOptions {
-  return {
-    shared: env.JBOT_EVIDENCE_SHARED === '1',
-    handoff: env.JBOT_EVIDENCE_HANDOFF === '1',
-    prefetch: env.JBOT_EVIDENCE_PREFETCH === '1',
-    cacheDir: env.JBOT_EVIDENCE_CACHE_DIR || undefined,
-  };
-}
-
 export interface EvidenceCacheStats {
   kind: 'evidence-cache';
   version: 1;

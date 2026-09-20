@@ -1,10 +1,10 @@
+import { reviewExperiment } from './review-experiment.ts';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EvidenceStore, JS_SOURCE } from './evidence.ts';
 import { evidenceHash } from './evidence-cache.ts';
 import {
   explorationCheckpoint,
-  explorationExperiment,
   readEvidenceSession,
   selectReadEvidence,
 } from './exploration-policy.ts';
@@ -107,7 +107,7 @@ export async function installReviewRetrieval(
     checkpoints: boolean;
     readEvidence?: boolean | 'linked';
     readEvidencePhase?: 'all' | 'review' | 'verification';
-  } = explorationExperiment(process.env),
+  } = reviewExperiment().exploration,
   sessionLabel?: (sessionID: string) => string | undefined,
 ) {
   const tool = reviewRetrievalTool(workspace);

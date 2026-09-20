@@ -1,3 +1,4 @@
+import { reviewExperiment } from '../src/shared/review-experiment.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -61,8 +62,13 @@ test('syntax collection finds body-only changes and named import aliases without
   );
   assert.equal(evidenceMode('oops'), 'off');
   assert.equal(
-    normalizeOptions({ explorationEvidence: 'off', verificationEvidence: 'deterministic' })
-      .verificationEvidence,
+    normalizeOptions({
+      experiment: {
+        ...reviewExperiment({}),
+        preset: 'custom',
+        verificationEvidence: 'deterministic',
+      },
+    }).experiment.verificationEvidence,
     'deterministic',
   );
 });

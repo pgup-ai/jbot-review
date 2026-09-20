@@ -17,18 +17,11 @@ import { createToolTelemetryAccumulator } from '../src/shared/tool-telemetry.ts'
 const log = () => undefined;
 
 describe('createReviewSession', () => {
-  it('registers independent phase labels without model options, including forked verifiers', async (t) => {
-    const before = { ...process.env };
-    process.env.JBOT_READ_EVIDENCE = 'linked';
-    process.env.JBOT_READ_EVIDENCE_PHASE = 'verification';
-    t.after(() => {
-      for (const key of ['JBOT_READ_EVIDENCE', 'JBOT_READ_EVIDENCE_PHASE']) {
-        if (before[key] === undefined) delete process.env[key];
-        else process.env[key] = before[key];
-      }
-    });
+  it('registers independent phase labels without model options, including forked verifiers', async () => {
     const fake = fakeOpencodeServer(() => ({ text: '{}' }));
     const rt = runtime(fake);
+    rt.explorationExperiment.readEvidence = 'linked';
+    rt.explorationExperiment.readEvidencePhase = 'verification';
     const id = await createReviewSession(rt, { label: 'review', model: 'openai/gpt-5' });
     const fork = await createReviewSession(rt, {
       label: 'finding-verification',
@@ -38,7 +31,7 @@ describe('createReviewSession', () => {
     const options = JSON.parse(readFileSync(rt.sessionOptionsFile, 'utf8'));
     assert.deepEqual(options[id], { jbotSessionLabel: 'review' });
     assert.deepEqual(options[fork], { jbotSessionLabel: 'finding-verification' });
-    assert.equal('JBOT_READ_EVIDENCE_PHASE' in fake.sessions.get(fork)!.environment!, false);
+    assert.equal('JBOT_EXPLORATION_CONFIG' in fake.sessions.get(fork)!.environment!, false);
   });
 
   it('creates a plan session at the workspace with the ruleset and replaces its shell env', async () => {

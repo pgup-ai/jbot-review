@@ -1,3 +1,4 @@
+import { reviewExperiment } from '../src/shared/review-experiment.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
@@ -333,12 +334,15 @@ test('deterministic control uses the same candidate pool and budgets without cre
   assert.equal(rows[2].selectedCandidates, 1);
   assert.equal(rows[2].deterministicOverlap, 1);
   assert.equal(fetch.mock.callCount(), 2);
-  const previous = process.env.JBOT_JEV_PREFETCH;
+  const previous = process.env.JBOT_REVIEW_EXPERIMENT;
   t.after(() => {
-    if (previous === undefined) delete process.env.JBOT_JEV_PREFETCH;
-    else process.env.JBOT_JEV_PREFETCH = previous;
+    if (previous === undefined) delete process.env.JBOT_REVIEW_EXPERIMENT;
+    else process.env.JBOT_REVIEW_EXPERIMENT = previous;
   });
-  process.env.JBOT_JEV_PREFETCH = 'deterministic';
-  assert.equal(normalizeOptions(undefined).jevPrefetch, 'deterministic');
-  assert.equal(normalizeOptions({ jevPrefetch: 'off' }).jevPrefetch, 'off');
+  process.env.JBOT_REVIEW_EXPERIMENT = 'jev';
+  assert.equal(normalizeOptions(undefined).experiment.jevPrefetch, 'on');
+  assert.equal(
+    normalizeOptions({ experiment: reviewExperiment({}) }).experiment.jevPrefetch,
+    'off',
+  );
 });

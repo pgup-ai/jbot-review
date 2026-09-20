@@ -939,309 +939,78 @@ and precision against seeded defects.
 
 ## Comparing review runs
 
-### Running isolated experiments
+### Review experiment preset
 
-Use a checkout or image containing the experiment code. The public Action points
-to the published `latest` image; selecting this source branch does not rebuild
-that image. For local comparisons, keep the reviewed revision, provider/model
-and other review settings fixed, and change one experiment at a time.
-Linked evidence, targeted retrieval and checkpoints require the OpenCode backend
-(`JBOT_SDK_ENGINE=opencode` for SDK models).
+`JBOT_REVIEW_EXPERIMENT` is the only operator control for the Jev/retrieval
+experiments. **Use `off` in production:** no treatment has established a reliable
+end-to-end speedup with preserved review quality. The presets are mutually
+exclusive and reproduce individual measured treatments, not untested bundles.
 
-Start with these values in your shell. Explicit exports override the local
-`.env`; unsetting a variable can allow `.env` to enable it again.
+| Value           | Behavior                                                                            | Evidence / recommendation                                                                                                                             |
+| --------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `off` (default) | Existing review and verification                                                    | Recommended for production.                                                                                                                           |
+| `diff-batches`  | Bounded command batches for small patches omitted from the main prompt              | Tool-output bytes fell 44.1%; total time was flat. Best candidate for a controlled canary, not a proven production speedup.                           |
+| `linked`        | Append up to two unseen import-linked source excerpts to eligible main-review reads | Main-only trials had mixed quality and latency; keep experimental. OpenCode only.                                                                     |
+| `jev`           | Jev ranks caller excerpts from changed exported symbols                             | Some historical-PR cost savings, inconsistent latency and weak known-bug recall; keep experimental. Requires enhanced context and `TYPESAFE_API_KEY`. |
 
-```sh
-export JBOT_JEV_PREFETCH=off JBOT_EXPLORATION_EVIDENCE=off JBOT_VERIFICATION_EVIDENCE=off
-export JBOT_EVIDENCE_SHARED=0 JBOT_EVIDENCE_HANDOFF=0 JBOT_EVIDENCE_PREFETCH=0
-export JBOT_TARGETED_RETRIEVAL=0 JBOT_EXPLORATION_CHECKPOINTS=0
-export JBOT_READ_EVIDENCE=0 JBOT_READ_EVIDENCE_PHASE=all JBOT_BATCH_DIFF_RECOVERY=0
-export JBOT_EVIDENCE_CACHE_DIR= JBOT_EVIDENCE_DOCS=
+The [production decision and proof](docs/audits/2026-09-19-experiment-presets.md)
+compares benefits, quality failures and sample limits. The
+[latest per-run CSV](docs/audits/data/2026-09-19-evidence-runs.csv) contains all
+86 phase, diff-batching and full-branch reviews from the latest measured round.
+These results describe the recorded source revisions, not a new benchmark of
+this configuration refactor. Earlier audits retain their historical flag names;
+those flags are no longer read by the runtime.
 
-# Keep the SDK backend fixed across the baseline and treatments.
-export JBOT_SDK_ENGINE=opencode
-
-# Baseline; your configured review-provider credential is still required.
-JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
-
-# Linked evidence for the main review only; no TypeSafe key required.
-JBOT_READ_EVIDENCE=linked JBOT_READ_EVIDENCE_PHASE=review JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
-
-# Batch omitted diffs, independently of linked evidence.
-JBOT_BATCH_DIFF_RECOVERY=1 JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
-```
-
-The command-scoped settings leave the exported baseline intact. Reapply the
-exports above to turn all these experiments off. The sections below describe
-the other arms, dependencies and telemetry. See the
-[phase/batching audit](docs/audits/2026-09-19-evidence-phases-and-diff-batches.md)
-for measured outcomes and the per-run data; no arm has been promoted to a default.
-
-### Exploration and verification evidence experiment
-
-`JBOT_EXPLORATION_EVIDENCE` and `JBOT_VERIFICATION_EVIDENCE` independently
-accept `off` (default), `deterministic`, `shadow`, or `on`. They use the same
-TypeSafe credential and Jev request limits described below. Exploration needs
-enhanced context and supersedes the older caller-prefetch arm when enabled.
-Verification prepares evidence separately for each finding batch; the existing
-independent verifier and fail-open verdict handling remain authoritative.
-Preparation uses at most five seconds above the existing 45-second verifier
-minimum; when time is tight, preparation is skipped.
-
-The collector parses JS/TS syntax with `@babel/parser` to locate declarations
-containing changed body lines, then gathers named-import-linked references,
-nearby guards/tests, imported definitions, and bounded text matches. It does
-not execute repository configuration or code. Links are syntactic evidence,
-not a type-checked call graph: reexports, package aliases, shadowed bindings,
-and unsupported syntax require ordinary reviewer exploration. Source must be
-tracked, regular, and inside the workspace. Up to 20 seed files, 64 loaded
-files, 2 MiB of admitted source, 64 source candidates plus up to six
-documentation candidates, and 24 scored candidates bound each preparation. Each read is capped at 256 KiB. A run-local
-cache reuses parsed syntax after rechecking the content hash; it is shared
-between exploration and verification and never crosses repositories.
-
-An optional `JBOT_EVIDENCE_DOCS=/absolute/path/docs.json` supplies operator-owned
-documentation snapshots to verification. The file is an array of
-`{ "url": "https://official.example/docs", "version": "v1", "retrievedAt": "2026-09-19", "text": "Relevant contract excerpt or attributed summary" }`.
-Use authoritative sources for the installed API/version. URLs must be HTTPS
-without credentials, queries, or fragments. The loader performs no network
-fetches. The file is capped at 64 KiB, six documents, and 6,000 bytes per
-text; each candidate remains a 2,048-byte excerpt. Snapshots are untrusted
-context, not instructions or proof that a finding is false. They include URL,
-version, retrieval date, and content hash. Keep snapshots outside the reviewed
-checkout and freeze their contents when comparing arms.
-
-Each packet permits four excerpts within 6,000 bytes plus a bounded coverage
-notice (under 900 bytes). Missing evidence never narrows review scope.
-Version 6 `jev-prefetch` log/telemetry rows distinguish `scope`, source-cache
-hits, parsed files, omitted files, candidate/selection hashes, coverage bytes,
-collection/API time, tokens, and estimated Jev cost. `injectedBytes` excludes
-`coverageBytes`; add both for the complete packet. Existing phase/session rows
-measure review and verification time, tool calls, turns, and model cost.
+Use a checkout or image containing this code. The public Action uses the published
+`latest` image; selecting this source branch does not rebuild that image.
+Local comparisons require the usual provider credential and configured model.
+Keep the revision, model, backend and other review settings fixed:
 
 ```sh
-JBOT_EXPLORATION_EVIDENCE=deterministic JBOT_VERIFICATION_EVIDENCE=deterministic npm run review:local -- --base origin/main
-JBOT_EXPLORATION_EVIDENCE=on JBOT_VERIFICATION_EVIDENCE=on npm run review:local -- --base origin/main
+export JBOT_SDK_ENGINE=opencode JBOT_RUN_STATS=1 JBOT_REVIEW_TELEMETRY=true
+export JBOT_REVIEW_EXPERIMENT=off
+npm run review:local -- --base origin/main
+
+JBOT_REVIEW_EXPERIMENT=diff-batches npm run review:local -- --base origin/main
+JBOT_REVIEW_EXPERIMENT=linked npm run review:local -- --base origin/main
+JBOT_REVIEW_EXPERIMENT=jev npm run review:local -- --base origin/main
 ```
 
-### Shared evidence reuse experiment
+To disable the experiments, set `JBOT_REVIEW_EXPERIMENT=off`. Explicit environment
+values override local `.env`; unknown values disable the experiments. Removed
+flags cannot reactivate them. Keep the TypeSafe key in the ignored `.env` or a
+hosted secret. Only `jev` sends bounded diff/source fragments to TypeSafe;
+`off`, `diff-batches` and `linked` make no Jev API call.
 
-All additional controls default off:
+The `jev` preset pins `jev-1.13.0`, scores at most 24 excerpts from 12 tracked
+source files, and bounds the complete JSON request to 30,000 bytes. Preparation
+shares a five-second deadline with no retries; missing credentials, timeout or
+invalid responses leave the existing context intact. At most four excerpts /
+6,000 bytes are injected, with omissions disclosed. Scores rank evidence; the
+existing reviewer and independent verifier still decide findings.
 
-| Environment variable       | Behavior                                                                                                                                                                                                                                      |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `JBOT_EVIDENCE_SHARED=1`   | Share guarded source reads between preparation and cited-source preload. Recheck tracked membership and file identity, size, mtime and ctime before reuse; deduplicate in-flight inventory/search/read requests.                              |
-| `JBOT_EVIDENCE_HANDOFF=1`  | Collect up to 64 successful OpenCode read locations for verification candidate selection. Reload current tracked source; carry no reviewer conclusions or tool-output text. Requires an active verification-evidence mode to inject excerpts. |
-| `JBOT_EVIDENCE_PREFETCH=1` | Prepare bounded source candidates in the background during backend startup/review, without injecting a packet or calling Jev. Requires shared reuse.                                                                                          |
-| `JBOT_EVIDENCE_CACHE_DIR`  | Persist source indexes and validated Jev responses outside the checkout, namespaced by workspace. Content/model/question changes invalidate reuse. Entries expire after 24 hours, with at most 256 entries of 256 KiB per workspace.          |
+`linked` attempts at most two distinct JS/TS reads per main session, including
+shards/retries. Each packet adds at most 7,000 bytes with a four-second preparation
+budget. Tracked-source checks, file freshness and ordinary deeper reads remain.
+Verification receives no linked packet in this preset. `diff-batches` supplies
+at most 4 KiB of command instructions, with eight paths and an estimated 8 KiB of
+output per batch; actual output can be larger, so truncation recovery remains.
+Neither preset narrows full-diff scope or caps exploration depth.
 
-Source caching does not intercept OpenCode's native tools. Handoff supports native
-`read`/`read_file` inputs and literal `cat path` / `sed -n 'N,Mp' path`
-shell reads, optionally preceded by `cd` and joined with `&&`. Substitution,
-pipes, redirects, globs and other commands are ignored. Only locations transfer;
-source is revalidated and read afresh, never replayed from shell output.
-Inventories and searches share only in-flight requests: completed search results
-are not reused across mutable working-tree snapshots. Provider prompt caching
-and exact shard-result caching remain separate mechanisms.
+`policy.configuration.reviewExperiment` records the selected preset and the
+resolved behavior participates in the cache fingerprint. Jev rows record actual
+selection/status/API usage; exploration rows record packets, preparation,
+fallbacks, tool calls/bytes/turns and diff headers. Compare these with main,
+verification and total elapsed time, retained findings, and cached/uncached
+input tokens. Counters show activity, not proof of saved reads or quality.
+Preserve the log and `.jbot-review/telemetry.jsonl` before the next run.
 
-Persistent index keys include parser version, path, source hash and truncation.
-Jev keys include the complete request (pinned model, state and questions).
-Cached responses pass the same schema checks as live responses; cache hits record
-zero newly billed tokens/cost. Version 6 rows retain all candidate `rawScores`
-for offline threshold analysis and mark `judgmentCacheHit` and `speculative`
-preparation. `selectedReadLocations` counts handed-off candidates actually selected.
-The reuse switches participate in the configuration fingerprint; cache paths are
-excluded. No source text, credentials or endpoint overrides enter these logs.
-The `evidence-cache` row records cumulative source reads/hits/bytes, in-flight
-sharing, disk activity, observed read locations, handoff candidates and
-prefetched files reused or unused by host preparation. These are snapshots:
-when `prefetchStatus` is `running`, counts are incomplete and must not be treated
-as final reuse/waste totals. Background preparation is not awaited solely for
-metrics, so it cannot extend a fast review. Tool rows additionally report `exactRepeat` and `unchangedResult` for successful
-OpenCode requests. Exploration rows total `exactRepeatCalls`,
-`unchangedRepeatCalls`, `changedRepeatCalls` and `unchangedRepeatDurationMs`.
-Identity includes the tool name and complete serialized input, including ranges
-and flags. Only salted digests are held in memory; no identities or raw results
-are logged. Different JSON key order or descriptions conservatively miss a repeat.
-These are observations, not cache hits or a freshness guarantee. Summed tool
-durations can overlap and do not measure model round trips or wall time saved. Documentation stays in frozen,
-versioned operator snapshots; there is no speculative network crawler.
-
-The experiment driver accepts `"reuse": true` in its plan to compare baseline
-verification preloading, shared reads, handoff, background prefetch, Jev selection
-and cold/warm persistent reuse. Cold/warm disk pairs run consecutively with a
-fresh cache per fixture and repetition. Provider prompt-cache state is uncontrolled.
-
-### Targeted retrieval and exploration checkpoints
-
-Three independent, default-off OpenCode experiments:
-
-- `JBOT_TARGETED_RETRIEVAL=1` exposes `review_context(path, line)`, batching the
-  enclosing definition, import-linked references, imported definitions and tests
-  into a source packet. It reuses guarded source reads and the evidence collector:
-  at most 64 files / 2 MiB inspected, four excerpts / 6,000 bytes selected,
-  plus a bounded omission notice, within four seconds. It calls no model.
-  Its source/index cache is shared across tool calls, separately from the runner;
-  runner handoff and persistent-cache settings do not apply to this tool.
-  Files are revalidated before reuse. Unsupported syntax and unresolved bindings
-  leave ordinary read/search tools available; this is not a complete call graph.
-- `JBOT_EXPLORATION_CHECKPOINTS=1` injects a short reassessment instruction after
-  eight model requests, 32 KiB of tool output, or two repeated successful result
-  bodies since the previous checkpoint, with at least two requests between
-  checkpoints. These experimental thresholds are soft: they do not remove tools,
-  cap dependency depth, skip changed hunks, or discard findings. Existing time
-  limits and the verification reserve still apply. Tool-less wrap-up is unchanged.
-- `JBOT_READ_EVIDENCE=1` appends a related source packet to an ordinary successful
-  source read, without requiring a separate retrieval call. It recognizes native
-  reads and the existing literal `cat`/`sed` grammar; other commands are unchanged.
-  Each session attempts at most two distinct JS/TS paths, with at most 7,000 added
-  text bytes and four seconds of preparation per attempt. Original tool output,
-  metadata, failures and access to deeper reads are preserved. Packets enter the
-  current tool result; earlier history and system prompts are unchanged. Preparation
-  failure leaves the original result intact. Counter fields `readEvidenceAttempts`,
-  `readEvidencePackets`, `readEvidenceBytes`, `readEvidenceFallbacks` and
-  `readEvidencePreparationMs` measure delivery and overhead, not reads saved.
-  Set `JBOT_READ_EVIDENCE=linked` to select at most two directly import-linked
-  files around the requested range, excluding the seed and paths previously
-  requested or delivered in that session. It uses the same budgets and preserves
-  every original read. Native ranges use OpenCode's 2,000-line default and cap;
-  byte truncation can shorten the actual output. Concurrent augmentation is serialized to avoid duplicate
-  delivery. Path suppression is an optimization, not a claim that an earlier
-  partial read supplied the whole file. Unresolved and deeper dependencies remain
-  available through ordinary tools.
-  Additional counters record delivered files, observed reads, later-turn requests
-  for delivered files, unclassified shell calls, excluded candidates and empty
-  packets. A subsequent request may legitimately seek lines outside a supplied
-  excerpt; unclassified shell calls prevent these counters from proving avoidance.
-  Same-turn completions are excluded from the subsequent-read counter because
-  they can belong to an already running tool batch.
-  `JBOT_READ_EVIDENCE_PHASE=review` restricts delivery to main review sessions;
-  `verification` restricts it to finding verification. The default `all` preserves
-  delivery in every eligible session. Phase selection uses host-registered session
-  labels, including forked verifiers; it does not change verification policy.
-
-Use the first two switches for the combined retrieval/checkpoint arm. Exploration rows include an `experiment`
-object with checkpoint counts by trigger, retrieval calls/fallbacks, candidates
-selected/collected and preparation milliseconds. Counts are per prompt, including
-continuations and pre-wrap-up work. Internal counter files contain no source text
-and live in the server's temporary data home, removed during teardown. These
-counters measure activity, not evidence usefulness or time saved. Other backends
-ignore these switches; the run configuration records the requested settings.
-
-Set `"retrieval": true` in a `scripts/jev-prefetch-experiment.ts` plan to compare
-current behavior, retrieval alone, and retrieval plus checkpoints using the same
-frozen cases and seeded run order. This comparison disables Jev preloading in all
-three arms and requires no TypeSafe key. Judge retained findings against the
-fixture contracts before interpreting latency, tool counts or token costs.
-Use `"readEvidence": true` instead for baseline versus automatic read evidence,
-with composite-tool prompting, checkpoints and Jev preloading disabled in both arms.
-Set `"readEvidence": "linked"` for a three-arm comparison that adds selective
-linked evidence to those same controls.
-Use `"experiment": "phases"` for baseline versus linked delivery to the main review,
-verifier, or both. Per-session packet counters make the routing observable.
-
-`JBOT_BATCH_DIFF_RECOVERY=1` is a separate, default-off prompt experiment for main
-review backends with repository tools. Missing small patches receive ready-to-run
-Git command batches, using immutable review revisions and literal path arguments.
-The plan is at most 4 KiB; each batch has at most eight path arguments and an
-estimated 8 KiB of diff output. Actual output can be larger, including path-limited
-renames, so normal truncation recovery still applies. Large, unknown and unplanned
-patches remain listed for ordinary retrieval. Full-diff scope is unchanged.
-Use `"experiment": "diff-batches"` for baseline versus this arm with source delivery
-and Jev preloading disabled. These switches do not cache model responses or verdicts.
-OpenCode tool rows count `diffFileHeaders`; session rows also count
-`multiFileDiffCalls`. These count returned diff headers, including repeated or
-partially truncated files, not unique files or proof of complete coverage. Diff
-classification recognizes the canonical Git options used by the batch plan.
-
-### Jev caller-evidence experiment
-
-`JBOT_JEV_PREFETCH=on` adds up to four caller source excerpts to the existing
-changed-symbol usage context. The existing reviewers, full diff, caller list,
-verification, and finding filters stay active. Jev ranking requires enhanced
-context (enabled by local review), `TYPESAFE_API_KEY`, and outbound access to
-TypeSafe. Set the key in the launch directory's ignored `.env` for local use;
-hosted runs use an environment secret. It is not a review-provider setting.
-
-Modes: `off` (default, no extra source reads or API call), `shadow` (collect,
-rank, and measure without injecting excerpts), `on` (inject the ranked
-excerpts), and `deterministic` (inject in collection order without an API call
-or TypeSafe key). An explicit `ReviewRunOptions.jevPrefetch` overrides the environment.
-Unknown environment values disable the experiment.
-The deterministic control shares candidate collection, request-budget trimming,
-one-excerpt-per-file selection, prompt wording, and the context byte cap with
-Jev. It takes the first fitting candidates, without a relevance threshold.
-Version 3 logs a candidate-pool hash for matching the two arms; deterministic
-rows report no model, scores, or token usage, and zero API cost.
-
-The experiment reuses exported-symbol discovery, so body-only changes with
-no changed export declaration may have no candidates. It samples at most 12
-tracked source files in round-robin symbol order, three occurrences per file,
-and scores at most 24 excerpts. Jev receives bounded diff fragments and source
-windows, not the whole repository. This sends those fragments to TypeSafe in
-both `shadow` and `on` modes. Ignored/untracked files, symlinks, and non-source
-files are excluded. No API key or provider response text is logged.
-
-Requests pin `jev-1.13.0`, use independent Noul relevance questions referencing
-explicit candidate indexes, and cap the complete JSON request at 30,000 bytes.
-The additive context is capped at 6,000 bytes with omitted locations disclosed.
-Collection and the API share a five-second deadline, also capped by remaining
-run time. No retries extend the critical path: missing credentials, timeouts,
-rate limits, or invalid responses leave the original context intact. Scores
-rank evidence; they are not bug probabilities or finding verdicts. Excerpts
-scoring below 0.5 are not injected, and at most one excerpt per file is kept.
-
-Version 2 supplies a complete source file when its numbered contents fit 2,048
-bytes; otherwise it supplies a bounded window around the match and labels it
-partial. Source clipped by the file-read limit is always partial. Reviewers are
-instructed to use supplied lines directly for caller checks, fetching more when
-missing dependencies or conflicting evidence require it. Omitted callers remain
-in scope; Jev's ranking cannot waive coverage or verification.
-
-```sh
-JBOT_JEV_PREFETCH=off JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
-JBOT_JEV_PREFETCH=shadow JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
-JBOT_JEV_PREFETCH=on JBOT_RUN_STATS=1 npm run review:local -- --base origin/main
-```
-
-Every eligible run logs one `Jev prefetch: {...}` row, also saved as
-`kind: "jev-prefetch"` when review telemetry is enabled. It reports mode,
-algorithm version, pinned model, status/fallback reason, candidate and selected
-counts, collection/API/total milliseconds, request hash and byte size,
-selected scores, complete-file selection count (`completeFileCandidates`),
-proposed/injected context bytes, and provider token usage.
-With telemetry enabled, final `Review timing` and `Review metrics` log rows
-also expose total elapsed time, terminal state, per-session tokens, observed
-tool calls, repeated reads/searches, output bytes, and available turn counts.
-`estimatedCostUsd` uses the published $0.042/M input-token rate (free output);
-it is an estimate, not billed spend. Version 5 `deterministicOverlap` counts
-selected excerpts also chosen by the actual deterministic selector with the same
-pool and budgets. Earlier versions used `baselineOverlap`, a first-N prefix
-comparison that must not be interpreted as overlap with the deterministic arm.
-Neither metric measures selection accuracy. Unknown usage after a failed request
-is absent, not zero.
-
-Preserve each run's log and `.jbot-review/telemetry.jsonl` before the next run.
-`performance:review` exposes these rows under `auxiliaryRuns[].jevPrefetch`;
-the run policy hash also distinguishes the modes. Compare the same diff and
-model/settings, alternating off/on across at least three repetitions. Include
-context-assembly overhead in wall time, compare reviewer input/cache/output
-tokens and the exploration rows' observed tool calls and turns. OpenCode's
-`JBOT_RUN_STATS=1` additionally reports server-wide steps and tokens. Incomplete
-or opaque sessions do not establish zero tool use. Inspect retained findings
-for precision and recall.
-Shadow measures ranking and overhead only; it cannot demonstrate faster reviews.
-The [evidence-reuse audit](docs/audits/2026-09-19-jev-evidence-reuse.md)
-records the version 2 comparison: fewer source reads and turns, without a
-reliable end-to-end speedup. The [real-PR comparison](docs/audits/2026-09-19-jev-real-pr-comparison.md)
-adds a deterministic control and five randomized repetitions per arm.
-The core quality benchmark remains recommended before adoption, and the full
-quality gate is required before enabling this by default.
-
-API and design references: [TypeSafe introduction](https://docs.typesafe.ai/introduction),
-[reranking](https://docs.typesafe.ai/cookbooks/rerank_typesafe),
-[API](https://docs.typesafe.ai/api), [model limits/pricing](https://docs.typesafe.ai/models),
-and [known limitations](https://docs.typesafe.ai/model-jaggedness/jev-1.13).
+The research driver `scripts/jev-prefetch-experiment.ts` retains historical
+ablation plans through explicit, per-run programmatic settings; they appear as
+`custom` in telemetry. Shared reads, handoff, persistent caches, background
+prefetch, broad packets, verifier delivery and checkpoints are research-only.
+No production environment switches or compatibility aliases enable those arms.
+Provider prompt caching is separate and remains provider-managed.
 
 ### Run telemetry
 

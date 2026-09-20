@@ -8,7 +8,6 @@ import { reviewRetrievalTool, installReviewRetrieval } from '../src/shared/revie
 import {
   explorationCheckpoint,
   readExplorationStats,
-  explorationExperiment,
   selectReadEvidence,
   readEvidenceSession,
 } from '../src/shared/exploration-policy.ts';
@@ -29,16 +28,7 @@ test('checkpoints react to new pressure and leave a two-request runway after a c
     explorationCheckpoint({ ...large, requests: 4, repeatedResults: 2 }, large),
     'repetition',
   );
-  assert.deepEqual(explorationExperiment({}), {
-    retrieval: false,
-    checkpoints: false,
-    readEvidence: false,
-    readEvidencePhase: 'all',
-    batchDiffRecovery: false,
-  });
   assert.equal(readExplorationStats({ checkpoints: 'secret' }), undefined);
-  assert.equal(explorationExperiment({ JBOT_READ_EVIDENCE: 'linked' }).readEvidence, 'linked');
-  assert.equal(explorationExperiment({ JBOT_READ_EVIDENCE_PHASE: 'bad' }).readEvidencePhase, 'all');
   for (const label of ['review', 'review-shard-2', 'review-retry', 'review-shard-2-retry'])
     assert.ok(readEvidenceSession('review', label));
   for (const label of [undefined, 'review-interactions', 'finding-verification'])
@@ -107,12 +97,6 @@ test('retrieval batches linked callers and imports, refreshes sources, and exclu
 });
 
 test('plugin checkpoint hooks preserve tool access, skip tool-less agents, and persist only counters', async (t) => {
-  const previous = process.env.JBOT_EXPLORATION_CHECKPOINTS;
-  process.env.JBOT_EXPLORATION_CHECKPOINTS = '1';
-  t.after(() => {
-    if (previous === undefined) delete process.env.JBOT_EXPLORATION_CHECKPOINTS;
-    else process.env.JBOT_EXPLORATION_CHECKPOINTS = previous;
-  });
   const directory = await mkdtemp(join(tmpdir(), 'checkpoint-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   let onContext: Parameters<
@@ -137,6 +121,7 @@ test('plugin checkpoint hooks preserve tool access, skip tool-less agents, and p
     },
     directory,
     directory,
+    { retrieval: false, checkpoints: true },
   );
   const event = () => ({
     sessionID: 'session',

@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { explorationExperiment, readExplorationStats } from './exploration-policy.ts';
+import { readExplorationStats } from './exploration-policy.ts';
 import type { OpenCodeClient } from '@opencode/client';
 import { parseModelName } from '@symma/protocol';
 import {
@@ -251,7 +251,7 @@ function registerSessionOptions(
   spec: CreateSessionSpec,
 ): void {
   const options = sessionModelOptions(runtime.modelOptions, spec.model, spec.tier ?? 'main');
-  const experiment = explorationExperiment(process.env);
+  const experiment = runtime.explorationExperiment;
   const label = experiment.readEvidence && experiment.readEvidencePhase !== 'all';
   if (!options && !label) return;
   const map = sessionOptionsByRuntime.get(runtime) ?? {};

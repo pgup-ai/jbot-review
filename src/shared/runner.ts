@@ -1,4 +1,4 @@
-import { explorationExperiment } from './exploration-policy.ts';
+import { reviewExperiment, type ReviewExperiment } from './review-experiment.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,7 +17,7 @@ import {
 } from './time-budget.ts';
 import { createCliProcessScope, onCliFatalSignal } from './cli-process.ts';
 import { collectChangesSinceContext } from './changes-since.ts';
-import { evidenceReuseOptions, EvidenceStore, evidenceMode } from './evidence.ts';
+import { EvidenceStore } from './evidence.ts';
 import { buildFindingSourceContext } from './finding-context.ts';
 
 import {
@@ -106,7 +106,6 @@ import {
   POOLSIDE_TELEMETRY_CAPABILITY,
 } from './poolside.ts';
 import { buildBlastRadiusBlock } from './blast-radius.ts';
-import type { JevPrefetchMode } from './jev-prefetch.ts';
 import {
   type DiffHunksOptions,
   buildDiffHunksBlockWithMetadata,
@@ -794,10 +793,7 @@ function missingOctokit(): Octokit {
 }
 
 export interface ReviewRunOptions {
-  explorationEvidence?: JevPrefetchMode;
-  verificationEvidence?: JevPrefetchMode;
-
-  jevPrefetch?: JevPrefetchMode;
+  experiment?: ReviewExperiment;
   enhancedContext?: boolean;
   /** Withhold credential env vars from the opencode child (default on); the env is composed per spawn, so concurrent runs never race it. */
   scrubSessionEnv?: boolean;
@@ -1551,8 +1547,8 @@ async function runReviewPipeline(params: {
   const evidence = new EvidenceStore(
     workspace,
     files,
-    process.env.JBOT_EVIDENCE_DOCS,
-    evidenceReuseOptions(process.env),
+    options.experiment.docsPath,
+    options.experiment.reuse,
   );
   const prepareEvidence = (
     scope: 'exploration' | 'verification',
@@ -1562,7 +1558,9 @@ async function runReviewPipeline(params: {
     evidence.prepare(
       scope,
       findings,
-      scope === 'exploration' ? options.explorationEvidence : options.verificationEvidence,
+      scope === 'exploration'
+        ? options.experiment.explorationEvidence
+        : options.experiment.verificationEvidence,
       {
         timeoutMs,
         apiKey: process.env.TYPESAFE_API_KEY,
@@ -1572,7 +1570,8 @@ async function runReviewPipeline(params: {
     );
   const blastRadiusBlock = options.enhancedContext
     ? await buildBlastRadiusBlock(workspace, files, undefined, {
-        mode: options.explorationEvidence === 'off' ? options.jevPrefetch : 'off',
+        mode:
+          options.experiment.explorationEvidence === 'off' ? options.experiment.jevPrefetch : 'off',
         apiKey: process.env.TYPESAFE_API_KEY,
         timeoutMs:
           options.timeBudgetMinutes > 0
@@ -2190,6 +2189,7 @@ async function runReviewPipeline(params: {
             : undefined,
           reviewerAgent: process.env.JBOT_REVIEWER_AGENT === '1',
           runStats: process.env.JBOT_RUN_STATS === '1',
+          explorationExperiment: options.experiment.exploration,
           additionalProviderKeys: auxNeedsOpencodeConfig
             ? [
                 {
@@ -2458,7 +2458,7 @@ async function runReviewPipeline(params: {
       embeddedFirstPrompt: options.embeddedFirstPrompt,
       diffFirst: options.sharedPrefixPrompt,
       batchDiffScope:
-        explorationExperiment(process.env).batchDiffRecovery && !mainRequiresCompleteEmbeddedDiff
+        options.experiment.exploration.batchDiffRecovery && !mainRequiresCompleteEmbeddedDiff
           ? diffScope
           : undefined,
     });
@@ -2497,7 +2497,7 @@ async function runReviewPipeline(params: {
             // old entry.
             config: JSON.stringify({
               engine: mainBackend.name,
-              explorationExperiment: explorationExperiment(process.env),
+              explorationExperiment: options.experiment.exploration,
               modelOptions: options.modelOptions,
               baseURL,
               ...(options.embeddedFirstPrompt ? { embeddedFirstPrompt: true } : {}),
@@ -3377,11 +3377,7 @@ export function normalizeOptions(
   // raise the useful pass ceiling.
   const maxPasses = 1 + COUNTED_LENS_KEYS.length;
   return {
-    explorationEvidence:
-      options?.explorationEvidence ?? evidenceMode(process.env.JBOT_EXPLORATION_EVIDENCE),
-    verificationEvidence:
-      options?.verificationEvidence ?? evidenceMode(process.env.JBOT_VERIFICATION_EVIDENCE),
-    jevPrefetch: options?.jevPrefetch ?? evidenceMode(process.env.JBOT_JEV_PREFETCH),
+    experiment: options?.experiment ?? reviewExperiment(),
     enhancedContext: options?.enhancedContext ?? false,
     scrubSessionEnv: options?.scrubSessionEnv ?? true,
     opencodeProxyEnv: options?.opencodeProxyEnv ?? {},

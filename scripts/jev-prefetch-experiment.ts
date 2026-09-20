@@ -1,3 +1,5 @@
+import { reviewExperiment, type ReviewExperiment } from '../src/shared/review-experiment.ts';
+import { evidenceMode } from '../src/shared/evidence.ts';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -274,37 +276,52 @@ for (const run of schedule) {
   console.log(
     `Starting ${run.id}/${schedule.length} ${run.caseId} ${run.arm} repetition ${run.repetition}`,
   );
+  const experiment: ReviewExperiment = {
+    ...reviewExperiment({}),
+    preset: 'custom',
+    jevPrefetch:
+      plan.experiment || plan.evidence || plan.reuse || plan.retrieval || plan.readEvidence
+        ? 'off'
+        : evidenceMode(run.arm),
+    explorationEvidence: evidenceMode(
+      plan.reuse ? arm.exploration : plan.evidence ? run.arm : 'off',
+    ),
+    verificationEvidence: evidenceMode(
+      plan.reuse ? arm.verification : plan.evidence ? run.arm : 'off',
+    ),
+    reuse: {
+      shared: !!arm.shared,
+      handoff: !!arm.handoff,
+      prefetch: !!arm.prefetch,
+      cacheDir: arm.persistent ? cacheDirectory : undefined,
+    },
+    docsPath: plan.docs ? resolve(plan.docs) : undefined,
+    exploration: {
+      retrieval: !!arm.retrieval,
+      checkpoints: !!arm.checkpoints,
+      readEvidence: arm.readEvidence ?? false,
+      readEvidencePhase: arm.readEvidencePhase ?? 'all',
+      batchDiffRecovery: !!arm.batchDiffRecovery,
+    },
+  };
+  const experimentPath = resolve(dir, 'experiment.json');
+  writeFileSync(experimentPath, JSON.stringify(experiment));
   const child = spawn(
     process.execPath,
     [
       '--import',
       fileURLToPath(import.meta.resolve('tsx')),
+      resolve(root, 'scripts/review-experiment-trial.ts'),
+      experimentPath,
       ...(c.findings
-        ? [resolve(root, 'scripts/jev-verification-trial.ts'), c.workspace, c.base, c.findings]
-        : [resolve(root, 'src/local/index.ts'), '--workspace', c.workspace, '--base', c.base]),
+        ? ['verification', c.workspace, c.base, resolve(c.findings)]
+        : ['review', '--workspace', c.workspace, '--base', c.base]),
     ],
     {
       cwd: dir,
       env: {
         ...env,
         ...config,
-        JBOT_JEV_PREFETCH:
-          plan.experiment || plan.evidence || plan.reuse || plan.retrieval || plan.readEvidence
-            ? 'off'
-            : run.arm,
-        JBOT_TARGETED_RETRIEVAL: arm.retrieval ? '1' : '0',
-        JBOT_EXPLORATION_CHECKPOINTS: arm.checkpoints ? '1' : '0',
-        JBOT_READ_EVIDENCE: arm.readEvidence === 'linked' ? 'linked' : arm.readEvidence ? '1' : '0',
-        JBOT_READ_EVIDENCE_PHASE: arm.readEvidencePhase ?? 'all',
-        JBOT_BATCH_DIFF_RECOVERY: arm.batchDiffRecovery ? '1' : '0',
-        JBOT_EXPLORATION_EVIDENCE: plan.reuse ? arm.exploration : plan.evidence ? run.arm : 'off',
-        JBOT_VERIFICATION_EVIDENCE: plan.reuse ? arm.verification : plan.evidence ? run.arm : 'off',
-        JBOT_EVIDENCE_SHARED: arm.shared ? '1' : '0',
-        JBOT_EVIDENCE_HANDOFF: arm.handoff ? '1' : '0',
-        JBOT_EVIDENCE_PREFETCH: arm.prefetch ? '1' : '0',
-        JBOT_EVIDENCE_CACHE_DIR: arm.persistent ? cacheDirectory : '',
-
-        JBOT_EVIDENCE_DOCS: plan.docs ?? '',
         JBOT_BENCHMARK_OUTPUT: output,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
