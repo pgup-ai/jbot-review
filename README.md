@@ -522,8 +522,7 @@ file counts distinguish whole files from files continued on other pages. A
 hunk counts as delivered only when every part completes. These counts establish
 delivery, not model comprehension. Shared maps and bounded caller/contract
 excerpts support cross-file checks; they cannot prove exhaustive dependency
-coverage. The
-opencode server engine keeps serving SDK providers directly — its ACP mode
+coverage. The opencode server engine keeps serving SDK providers directly — its ACP mode
 would drop per-session token usage, provider model listing, and Context7 MCP.
 
 Review metadata reports backend usage counters when they are available.
@@ -969,7 +968,8 @@ and precision against seeded defects.
 experiments. **`diff-batches` is the default**; set `off` to disable the batching
 hints. Complete diff paging and coverage accounting remain enabled in every
 preset. Batching has not established a reliable end-to-end speedup. The presets
-are mutually exclusive.
+are mutually exclusive. Batching hints require repository shell tools; Pi's
+single-path `git_diff` and tool-less backends do not receive them.
 
 | Value                    | Behavior                                                                            | Evidence / recommendation                                                                                                                               |
 | ------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
