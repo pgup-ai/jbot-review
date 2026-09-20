@@ -82,7 +82,7 @@ full quality gate. No existing result above meets that adoption standard.
 
 ## Consolidation validation
 
-The selector was introduced at `9dd4639`; the final source revision is `8a32322`.
+The selector was introduced at `9dd4639`; consolidation was validated at `8a32322`.
 Both repository self-review and de-slop skills were reapplied against
 `origin/main` at `2d8f923`. The pass removed the 13 environment readers and their
 configuration documentation. It also fixed optional retrieval setup aborting the
@@ -118,7 +118,7 @@ different batching fixture, uncontrolled provider cache, and local Docker work
 overlapping the checks. Raw reports, telemetry, manifests and the initial failed
 assertion remain in `.jbot-review/preset-consolidation*/`.
 
-Final source validation passed: all **1,099 tests**, typecheck, lint, formatting,
+Source validation at `8a32322` passed: all **1,099 tests**, typecheck, lint, formatting,
 bundle build and diff checks. A configured-secret scan of 301 tracked files and
 branch patch history found zero matches; `.env` is ignored, mode `0600`, with
 the preset set to `off`. No credential value appears in the committed evidence.
@@ -141,7 +141,39 @@ available to the driver.
 Final tracked delta versus `2fb93cc`: 30 files, +757/-602 lines (155 net). No untracked publication files.
 
 Residual limits: no independently blind core-corpus run, no repeated performance
-comparison at the final revision, and the container CLI limitation above. The
-research driver also remains intended for attended experiments: its per-review
-budget is not an outer startup/teardown watchdog. These results do not support
-enabling an experiment broadly in production.
+comparison at the final revision, and the container CLI limitation above. These results do not support enabling an experiment broadly in production.
+
+## PR feedback verification
+
+Revision `68eec87` preserves code evidence when optional docs are invalid, handles
+shared rejections after caller cancellation, and excludes tool-less backends from
+Git recovery batches. The driver now reuses the existing process runner for a
+15-minute outer deadline, records timeouts, and removes its temporary cache in
+`finally`. Documentation enablement is included in the policy fingerprint;
+snapshot content hashes remain frozen in the experiment manifest.
+
+All **1,100 tests**, typecheck, lint, formatting, build and diff checks passed.
+The new process-level cancellation regression failed before the fix and passed
+afterward. Seven live verifier trials with malformed optional docs all confirmed
+the seeded defect and refuted the false hypothesis; each logged the docs fallback
+and retained source evidence. Their temporary cache was removed. These are
+functional checks, not a new latency or quality comparison.
+
+Failure injection preserved all seven nonzero child results. A separate driver
+preload shortened only the outer 15-minute timer to 25 ms: it produced a timeout
+row, exited nonzero, and removed the cache. Raw plans, logs and summaries remain
+in `.jbot-review/pr-feedback/`. Self-review found no remaining P1/P2 issue in the
+updated diff. De-slop kept one new crash-regression case and folded other checks
+into existing tests; no TypeScript comment blocks were added.
+
+The [requested dogfood job](https://github.com/pgup-ai/jbot-review/actions/runs/35480207182/job/105999320323?pr=228)
+reviewed `2fb93cc`: the job succeeded, but the review was marked incomplete.
+The main pass took about 173 seconds, then waited another 427 seconds for a
+Cline auxiliary pass before abandoning it; late verification took about
+74 seconds. Total pipeline time was 680 seconds. Jev and evidence caching were
+disabled, so this run cannot measure their effect. Of its three unverified
+hypotheses, the optional-docs failure was reproduced and fixed; the pricing and
+Node `execFile` claims were contradicted by current official documentation.
+The later [native PR checks](https://github.com/pgup-ai/jbot-review/actions/runs/35482093055)
+passed both image jobs at `ff350a6`; the earlier local QEMU limitation remains
+recorded above. No defaults changed, and the advisory blind core-corpus gap remains.
