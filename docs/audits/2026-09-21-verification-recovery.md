@@ -1,51 +1,52 @@
-# Bounded OpenCode verification recovery
+# Native verification recovery
 
-Recovery uses the current verifier model and settings. There is no separate
-model configuration or automatic paid fallback. The native verifier keeps its
-tools; recovery forks its history, denies tools, and gets one attempt to finish
-incomplete verdicts. Completed judgments cannot be overwritten. Missing evidence
-must remain uncertain, and recovery failure preserves existing verdicts.
+OpenCode verification gets one recovery attempt using the same model, settings
+and native read-only agent. It forks the collected history and asks the model to
+reuse prior reads, answer only concrete unresolved questions, and return verdicts.
+Completed judgments cannot be overwritten. Insufficient evidence stays uncertain;
+a failed recovery preserves any completed verdicts.
 
-A five-minute verification budget reserves the last minute for recovery. Early
-format repair uses at most that minute too. Unbounded runs skip recovery.
-OpenCode free models also skip recovery and retain their investigation budget:
-MiMo Free and Muse Contributor Free reject jbot's tool-less request setup.
-Auth, usage-limit and provider errors do not trigger recovery. Pi and CLI
-verifiers are unchanged.
+A five-minute verification budget reserves its final minute for recovery. Early
+format repair uses at most that minute too. Recovery session setup shares that
+deadline. Unbounded runs skip recovery. There is no model-name exclusion, separate
+model flag, automatic paid fallback, or custom tool implementation. JSON repair
+and final formatting retain their existing tool-less behavior.
+
+Native tool access can spend more of the recovery budget investigating; the
+prompt is guidance, not a guarantee of zero further exploration. Authentication,
+quota and generic provider errors do not trigger recovery.
 
 ## Local evidence
 
-Tested with OpenCode CLI/SDK 2.0.5 at low effort. The fixture contains two seeded
-bugs (100x overcharge and owner/tenant confusion) and a false claim that an audit
-call is absent.
+The fixture contains two seeded bugs (100x overcharge and owner/tenant confusion)
+and a false claim that an audit call is absent. OpenCode CLI/SDK was 2.0.5,
+CommandCode 1.56.2 (the Docker version), and Cline 3.0.62.
 
-| Test                                                          | Result                                                                                                                                           |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| MiMo Free native verification                                 | 16.3s; both bugs confirmed and false claim refuted; no recovery                                                                                  |
-| MiMo Free tool-less request                                   | Rejected with `OpenCode's free tier can only be used from within OpenCode`                                                                       |
-| MiMo Go verification with a five-second injected wait timeout | 8.5s total; same-model recovery took 3.4s, returned two uncertain verdicts for missing evidence and refuted the false claim; zero recovery tools |
+| Model                                         | Test                                                                    | Result                                                                                                         |
+| --------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `opencode/mimo-v2.6-flash-free`               | Native verification interrupted by an injected five-second wait timeout | 14.0s total; recovery 8.9s; both bugs confirmed, false claim refuted                                           |
+| `opencode/muse-spark-1.3-contributor-free`    | Same interruption test                                                  | 18.1s total; recovery 13.0s; both bugs confirmed, false claim refuted                                          |
+| `cline/cline-free/muse-spark-1.3-contributor` | Existing tool-less verifier with supporting contract source supplied    | 17.0s; both bugs confirmed, false claim refuted                                                                |
+| `commandcode/meta/muse-spark-1.3-contributor` | Existing native-tool verifier                                           | Blocked before inference: environment credential rejected; existing local CLI login reached weekly usage limit |
 
-A full local pipeline rerun delivered both assigned hunks and found both seeded
-bugs, but MiMo Free returned unusable verification output. Both candidates
-remained unverified; no recovery or paid fallback was attempted. This reproduces
-the remaining production limitation rather than validating a fix for it.
+The OpenCode tests shortened the SDK wait against live sessions. Production code
+then interrupted them and forked their history for recovery. Both recovered with
+native reads (six for MiMo and ten for Muse) and no tool-less rejection. These are targeted recovery checks,
+not a comparison of ordinary review latency. CommandCode and Cline do not execute
+the new OpenCode recovery path; the Cline result is a compatibility check, and
+CommandCode remains unverified live.
 
-The timeout test shortened the SDK wait to five seconds against a live native
-session. Production code then interrupted that session and forked it for
-recovery. This tests the interruption/recovery path without waiting five minutes;
-it is not a production latency comparison. An explicit external cancellation
-returned `Step interrupted` and did not trigger recovery.
+Ordinary full local pipeline runs also completed: MiMo in 22.9s and Muse in
+30.4s. Both delivered 2/2 hunks, found and verified both seeded bugs, and needed
+no recovery. These runs validate the normal path; they do not establish severity
+calibration or a general speed improvement.
 
-Earlier experiments switched from MiMo Free to paid MiMo Go for recovery and
-succeeded, including a full local pipeline run. That model-switching design was
-removed; those results do not establish recovery support for MiMo Free.
+Earlier tool-less tests rejected MiMo Free and Muse Free requests. Switching to a
+paid recovery model worked but added configuration and changed billing. That
+design and the later free-model exclusion have both been removed.
 
-All 1,118 tests passed, along with typecheck, lint and build. The retained recovery
-tests cover history and permission handling, unchanged model identity, preserved
-judgments, timeout recovery, recovery failure, unsupported free models, unbounded
-runs and usage-limit errors. The model-selection test was removed with its code.
-
-The quality corpus was not run, as previously requested. These targeted checks
-do not establish general recall or precision. MiMo Free recovery remains unsolved.
-Local results are under `.jbot-review/mimo-verification/` in
-`same-model-normal`, `same-model-free-repair` and `same-paid-model-timeout`.
+All 1,119 tests passed, along with typecheck, lint and build. Four added tests
+cover recovery history/permissions, completed-judgment preservation, timeout
+interruption, fail-open behavior, and expiry during fork setup. The quality corpus
+was skipped as previously requested; these checks do not establish general recall
+or precision. Raw local results remain under `.jbot-review/mimo-verification/`.

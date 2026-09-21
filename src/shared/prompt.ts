@@ -1613,7 +1613,7 @@ Refuted, uncertain, and ordinary findings still need only verdict and reason.
 }`;
 
 export function buildVerificationRecoveryPrompt(findingCount: number): string {
-  return `Finish the verification using only evidence already collected in this conversation. Do not investigate or call tools. Return only the original verdicts JSON schema, with exactly one verdict for each index from 0 to ${findingCount - 1}.
+  return `Finish the verification from evidence already collected in this conversation. Reuse prior reads; use native read-only tools only to answer a concrete unresolved question needed for a verdict. Do not restart broad exploration. Return only the original verdicts JSON schema, with exactly one verdict for each index from 0 to ${findingCount - 1}.
 Preserve completed judgments and their evidence. Use uncertain when investigation is unfinished, evidence is insufficient, or no judgment was reached. Never promote a tentative claim merely to complete the response. Do not omit unresolved candidates or replace them with an empty list.`;
 }
 

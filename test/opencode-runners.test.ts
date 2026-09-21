@@ -13,7 +13,7 @@ import {
   runGuidelineComplianceCheck,
   runReview,
 } from '../src/shared/opencode.ts';
-import { DENY_ALL, permissionRules } from '../src/shared/opencode-config.ts';
+import { permissionRules } from '../src/shared/opencode-config.ts';
 import { CONTINUATION_NUDGE_PROMPT, NO_TOOLS_REVIEW_DIRECTIVE } from '../src/shared/prompt.ts';
 import type { Finding } from '../src/shared/types.ts';
 import {
@@ -217,21 +217,20 @@ describe('auxiliary runners on V2', () => {
 });
 
 describe('runFindingVerification on V2', () => {
-  it('recovers unusable output once in a tool-less fork without replacing completed judgments', async () => {
+  it('recovers unusable output once in a native read-only fork without replacing completed judgments', async () => {
     for (const first of [
       '{}',
       '{"verdicts":[{"index":0,"verdict":"refuted","reason":"already checked"}]}',
     ]) {
       const fake = fakeOpencodeServer((session) => ({
-        text:
-          session.agent === 'jbot-plain'
-            ? '{"verdicts":[{"index":0,"verdict":"uncertain","reason":"unfinished"},{"index":1,"verdict":"uncertain","reason":"unfinished"}]}'
-            : first,
+        text: session.forkedFrom
+          ? '{"verdicts":[{"index":0,"verdict":"uncertain","reason":"unfinished"},{"index":1,"verdict":"uncertain","reason":"unfinished"}]}'
+          : first,
       }));
       const rt = runtime(fake);
       const result = await runFindingVerification(
         rt,
-        'opencode-go/mimo-v2.6-flash',
+        'opencode/mimo-v2.6-flash-free',
         'ctx',
         [finding, finding],
         log,
@@ -243,8 +242,8 @@ describe('runFindingVerification on V2', () => {
       );
       const [main, repair] = [...fake.sessions.values()];
       assert.equal(repair.forkedFrom, main.id);
-      assert.equal(repair.agent, 'jbot-plain');
-      assert.deepEqual(repair.permissions, DENY_ALL);
+      assert.equal(repair.agent, main.agent);
+      assert.deepEqual(repair.permissions, permissionRules());
       assert.deepEqual(repair.model, main.model);
       assert.equal(fake.prompts.length, 2);
       assert.match(fake.prompts[1].body.text, /Use uncertain/);
@@ -253,7 +252,7 @@ describe('runFindingVerification on V2', () => {
 
   it('interrupts a timed-out verifier before recovering its collected evidence', async (t) => {
     const fake = fakeOpencodeServer((session) =>
-      session.agent === 'jbot-plain'
+      session.forkedFrom
         ? { text: '{"verdicts":[{"index":0,"verdict":"uncertain","reason":"unfinished"}]}' }
         : {
             hang: true,
@@ -270,7 +269,7 @@ describe('runFindingVerification on V2', () => {
     const rt = runtime(fake);
     const result = await runFindingVerification(
       rt,
-      'opencode-go/mimo-v2.6-flash',
+      'opencode/mimo-v2.6-flash-free',
       'ctx',
       [finding],
       log,
@@ -283,16 +282,16 @@ describe('runFindingVerification on V2', () => {
   });
 
   it('preserves partial verdicts on recovery failure and skips recovery without a deadline', async () => {
-    for (const mode of ['no-deadline', 'free', 'recovery']) {
+    for (const mode of ['no-deadline', 'recovery']) {
       const fake = fakeOpencodeServer((session) =>
-        session.agent === 'jbot-plain'
+        session.forkedFrom
           ? { error: 'recovery unavailable' }
           : { text: '{"verdicts":[{"index":0,"verdict":"refuted","reason":"checked"}]}' },
       );
       const rt = runtime(fake);
       const result = await runFindingVerification(
         rt,
-        mode === 'free' ? 'opencode/mimo-v2.6-flash-free' : 'opencode-go/mimo-v2.6-flash',
+        'opencode/mimo-v2.6-flash-free',
         'ctx',
         [finding, finding],
         log,
@@ -306,7 +305,7 @@ describe('runFindingVerification on V2', () => {
     await assert.rejects(
       runFindingVerification(
         runtime(denied),
-        'opencode-go/mimo-v2.6-flash',
+        'opencode/mimo-v2.6-flash-free',
         'ctx',
         [finding],
         log,

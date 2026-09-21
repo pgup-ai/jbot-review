@@ -2,7 +2,7 @@ import { parseModelName } from '@symma/protocol';
 import { modelSupportsAgenticTools } from './config.ts';
 import { isContext7QuotaError } from './context7.ts';
 import { appendGuidelineSweep, type GuidelineSweep } from './guideline-sweep.ts';
-import { PLAIN_AGENT, type OptionTier } from './opencode-config.ts';
+import type { OptionTier } from './opencode-config.ts';
 import { wrapUpReserveMs } from './time-budget.ts';
 import type { OpencodeRuntime } from './opencode-server.ts';
 import {
@@ -444,9 +444,7 @@ export async function runFindingVerification(
   // defeated verifier grounding on this (primary) backend — don't reintroduce one.
   const prompt = assembleFindingVerificationPrompt(prContext, findings, isSingleShotModel(model));
   const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
-  // OpenCode free endpoints reject the tool-less recovery request.
-  const canRecover = timeoutMs !== undefined && !/^opencode(?:-go)?\/.*-free$/.test(model);
-  const reserve = canRecover ? wrapUpReserveMs(timeoutMs) : 0;
+  const reserve = timeoutMs === undefined ? 0 : wrapUpReserveMs(timeoutMs);
   log('Creating finding-verification session');
   const sessionID = await createReviewSession(runtime, {
     model,
@@ -477,7 +475,7 @@ export async function runFindingVerification(
       throw error;
     failure = error;
   }
-  if (!canRecover || deadline === undefined || deadline - Date.now() < 1000) {
+  if (deadline === undefined || deadline - Date.now() < 1000) {
     if (failure) throw failure;
     return verdicts;
   }
@@ -491,7 +489,8 @@ export async function runFindingVerification(
       model,
       label: 'finding-verification-recovery',
       tier: modelOptions ? 'verify' : 'main',
-      agent: PLAIN_AGENT,
+      agent: agentForModel(isSingleShotModel(model), runtime.reviewerAgent),
+      deadline: recoveryDeadline,
       forkFrom: sessionID,
     });
     const remaining = recoveryDeadline - Date.now();
