@@ -63,6 +63,9 @@ const COMMANDCODE_MAX_TURNS = 1000;
 export const COMMANDCODE_MODEL_LIMITS: Record<string, { contextTokens: number }> = {
   'meta/muse-spark-1.3-contributor': { contextTokens: 1_048_576 },
   'meta/muse-spark-1.3': { contextTokens: 1_048_576 },
+  'gpt-5.6-luna': { contextTokens: 1_050_000 },
+  'qwen/qwen3.8-omni-flash': { contextTokens: 1_000_000 },
+  'z-ai/glm-5.3-flashx': { contextTokens: 1_000_000 },
   'deepseek/deepseek-v4-flash-fast': { contextTokens: 1_000_000 },
   'deepseek/deepseek-v4-flash': { contextTokens: 1_000_000 },
   'deepseek/deepseek-v4.1-flash': { contextTokens: 1_000_000 },

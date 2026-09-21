@@ -169,12 +169,21 @@ describe('waitForModels', () => {
       fetch: async () =>
         ++calls === 1
           ? new Response('booting', { status: 503 })
-          : new Response(JSON.stringify({ data: [{ providerID: 'openai', id: 'gpt-5' }] }), {
-              status: 200,
-              headers: { 'content-type': 'application/json' },
-            }),
+          : new Response(
+              JSON.stringify({
+                data: [
+                  { providerID: 'openai', id: 'gpt-5', limit: { context: 400000, output: 32768 } },
+                ],
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            ),
     });
-    await waitForModels(client, '/ws', ['openai/gpt-5'], 5_000);
+    assert.deepEqual(await waitForModels(client, '/ws', ['openai/gpt-5'], 5_000), {
+      'openai/gpt-5': { contextTokens: 400000, outputTokens: 32768 },
+    });
     assert.equal(calls, 2);
   });
 

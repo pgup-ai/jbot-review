@@ -2296,15 +2296,23 @@ async function runReviewPipeline(params: {
           : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
   const mainPromptBudget = reviewPromptBudget(
     mainBaseBackend.name,
-    (isClineProvider(providerID) ? CLINE_MODEL_LIMITS[modelID] : undefined) ??
-      (providerID === COMMANDCODE_PROVIDER_ID ? COMMANDCODE_MODEL_LIMITS[modelID] : undefined) ??
+    (mainBaseBackend.name === 'opencode'
+      ? opencodeRuntime?.modelLimits[`${providerID}/${modelID}`]
+      : undefined) ??
+      (isClineProvider(providerID) ? CLINE_MODEL_LIMITS[modelID] : undefined) ??
+      (providerID === COMMANDCODE_PROVIDER_ID
+        ? COMMANDCODE_MODEL_LIMITS[modelID.toLowerCase()]
+        : undefined) ??
       (await catalogModelLimits(providerID, modelID, piEngine.enabled).catch(() => undefined)),
   );
   const auxPromptBudget = reviewPromptBudget(
     auxBaseBackend.name,
-    (isClineProvider(auxProviderID) ? CLINE_MODEL_LIMITS[auxModelID] : undefined) ??
+    (auxBaseBackend.name === 'opencode'
+      ? opencodeRuntime?.modelLimits[`${auxProviderID}/${auxModelID}`]
+      : undefined) ??
+      (isClineProvider(auxProviderID) ? CLINE_MODEL_LIMITS[auxModelID] : undefined) ??
       (auxProviderID === COMMANDCODE_PROVIDER_ID
-        ? COMMANDCODE_MODEL_LIMITS[auxModelID]
+        ? COMMANDCODE_MODEL_LIMITS[auxModelID.toLowerCase()]
         : undefined) ??
       (await catalogModelLimits(auxProviderID, auxModelID, piEngine.enabled).catch(
         () => undefined,

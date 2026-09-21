@@ -217,3 +217,28 @@ classifier test. This does not alter model input or tool execution.
 Follow-up de-slop: one new comment kept for catalog provenance; assertions folded
 into two existing tests, no new standalone cases. Removed the dead retrieval
 plan field and branches. No new P1/P2 issue found in these follow-up changes.
+
+### Model-pool coverage
+
+Added CommandCode Luna (1,050,000), Qwen3.8 Omni Flash (1,000,000) and GLM 5.3
+FlashX (1,000,000) from the pinned CLI catalog. Both requested DeepSeek entries
+were already present. CommandCode lookups now accept canonical or lowercase IDs.
+The published CLI package has no importable catalog API; its entry point launches
+the CLI, so importing bundled internals would not simplify this integration.
+
+OpenCode budgets now reuse model limits returned by the existing SDK startup
+readiness call. A live local server returned 1,048,576 context tokens for both
+Muse Contributor routes and 1,000,000 for Go DeepSeek V4.1 Flash. No extra request
+or hardcoded OpenCode model table is needed. Metadata only applies to sessions
+served by that OpenCode runtime; other backends retain their own catalog lookup.
+
+Self-review/de-slop: no new comments, helpers, dependencies or standalone tests.
+The existing readiness test now asserts returned model limits as well as retry
+behavior. The existing capacity test covers the added CommandCode entries.
+The corpus benchmark was not rerun; the previously documented rollout gate
+remains outstanding.
+
+Validation: all 1,112 tests, typecheck, lint, formatting and build passed. The
+free OpenCode Muse Contributor Docker smoke completed in 19.9s including startup,
+used the SDK's 1,048,576-token limit, delivered its full diff and retained the
+seeded defect after verification. This is a smoke test, not a recall benchmark.
