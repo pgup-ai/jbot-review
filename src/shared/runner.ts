@@ -1,6 +1,7 @@
 import { budgetReviewBackend } from './prompt-budget.ts';
 import {
   buildShardPlans,
+  prioritizeAuxiliaryPlans,
   addReviewEvidence,
   targetedVerifierContext,
   targetedDiff,
@@ -13,7 +14,7 @@ import {
 import { catalogModelLimits } from './pi.ts';
 import { reviewExperiment, type ReviewExperiment } from './review-experiment.ts';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -206,6 +207,8 @@ import {
   runClineFindingVerification,
   runClineGuidelineComplianceCheck,
   runClineReview,
+  CLINE_MODEL_LIMITS,
+  isClineProvider,
   writeClineAuth,
 } from './cline.ts';
 import {
@@ -566,56 +569,72 @@ function createCommandCodeBackend(
   };
 }
 
-function createClineBackend(workspace: string, clineHome: string): ReviewBackend {
+function createClineBackend(
+  workspace: string,
+  clineHome: string,
+): ReviewBackend & { stop(): Promise<void> } {
+  const processes = createCliProcessScope();
   return {
     name: CLINE_PROVIDER_ID,
+    stop: processes.stop,
+    abortSessionsByLabel: (label) => processes.abort(label),
     observability: CLINE_TELEMETRY_CAPABILITY,
     runReview: (model, prContext, guidelines, log, options) =>
-      runClineReview(workspace, model, prContext, guidelines, log, {
-        ...options,
-        home: clineHome,
-      }),
+      processes.run(options?.label ?? 'review', () =>
+        runClineReview(workspace, model, prContext, guidelines, log, {
+          ...options,
+          home: clineHome,
+        }),
+      ),
     runAddressedPriorCommentsCheck: (model, prContext, log, timeoutMs, onTokenUsage) =>
-      runClineAddressedPriorCommentsCheck(
-        workspace,
-        model,
-        prContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        clineHome,
+      processes.run('addressed-prior-comments', () =>
+        runClineAddressedPriorCommentsCheck(
+          workspace,
+          model,
+          prContext,
+          log,
+          timeoutMs,
+          onTokenUsage,
+          clineHome,
+        ),
       ),
     runGuidelineComplianceCheck: (model, prContext, guidelines, log, timeoutMs, onTokenUsage) =>
-      runClineGuidelineComplianceCheck(
-        workspace,
-        model,
-        prContext,
-        guidelines,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        clineHome,
+      processes.run('guideline-compliance', () =>
+        runClineGuidelineComplianceCheck(
+          workspace,
+          model,
+          prContext,
+          guidelines,
+          log,
+          timeoutMs,
+          onTokenUsage,
+          clineHome,
+        ),
       ),
     runFindingVerification: (model, prContext, findings, log, timeoutMs, onTokenUsage) =>
-      runClineFindingVerification(
-        workspace,
-        model,
-        prContext,
-        findings,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        clineHome,
+      processes.run('finding-verification', () =>
+        runClineFindingVerification(
+          workspace,
+          model,
+          prContext,
+          findings,
+          log,
+          timeoutMs,
+          onTokenUsage,
+          clineHome,
+        ),
       ),
     runChangesSinceLastReview: (model, deltaContext, log, timeoutMs, onTokenUsage) =>
-      runClineChangesSinceLastReview(
-        workspace,
-        model,
-        deltaContext,
-        log,
-        timeoutMs,
-        onTokenUsage,
-        clineHome,
+      processes.run('changes-since-last-review', () =>
+        runClineChangesSinceLastReview(
+          workspace,
+          model,
+          deltaContext,
+          log,
+          timeoutMs,
+          onTokenUsage,
+          clineHome,
+        ),
       ),
   };
 }
@@ -1744,7 +1763,7 @@ async function runReviewPipeline(params: {
   const remoteAcp = routedAgents.length > 0 ? remoteAcpConfigFromEnv() : undefined;
   // A missing main endpoint is fatal; an auxiliary-only endpoint fails open.
   // Cap sessions at the companion's available capacity.
-  let sessionCap = options.maxConcurrentSessions || 3;
+  let sessionCap = options.maxConcurrentSessions ?? 3;
   let auxGatewayPreflightError: unknown;
   if (remoteAcp && routedAgents.length > 0) {
     const mainGatewayAgent =
@@ -1792,7 +1811,7 @@ async function runReviewPipeline(params: {
   let commandCodeBackend: ReturnType<typeof createCommandCodeBackend> | undefined;
   let cursorBackend: ReviewBackend | undefined;
   let codexBackend: ReviewBackend | undefined;
-  let clineBackend: ReviewBackend | undefined;
+  let clineBackend: ReturnType<typeof createClineBackend> | undefined;
   let grokBackend: ReviewBackend | undefined;
   const serializedBackends = new Map<ReviewBackend, Semaphore>();
   let kiloBackend: ReviewBackend | undefined;
@@ -1845,7 +1864,7 @@ async function runReviewPipeline(params: {
   // Multiple CLI homes can be live at once (e.g. main=codex, aux=commandcode), so
   // clean every one at every downstream failure/exit point.
   const cleanupCliHomes = async (): Promise<void> => {
-    await Promise.all([commandCodeBackend?.stop(), devinBackend?.stop()]);
+    await Promise.all([commandCodeBackend?.stop(), devinBackend?.stop(), clineBackend?.stop()]);
     // Independently: force only suppresses a missing path, so one failed
     // removal would otherwise leave the remaining credential homes on disk.
     for (const cleanup of [
@@ -2271,11 +2290,15 @@ async function runReviewPipeline(params: {
           : requireSdkBackend(opencodeBackend, 'opencode', 'aux');
   const mainPromptBudget = reviewPromptBudget(
     mainBaseBackend.name,
-    await catalogModelLimits(providerID, modelID, piEngine.enabled).catch(() => undefined),
+    (isClineProvider(providerID) ? CLINE_MODEL_LIMITS[modelID] : undefined) ??
+      (await catalogModelLimits(providerID, modelID, piEngine.enabled).catch(() => undefined)),
   );
   const auxPromptBudget = reviewPromptBudget(
     auxBaseBackend.name,
-    await catalogModelLimits(auxProviderID, auxModelID, piEngine.enabled).catch(() => undefined),
+    (isClineProvider(auxProviderID) ? CLINE_MODEL_LIMITS[auxModelID] : undefined) ??
+      (await catalogModelLimits(auxProviderID, auxModelID, piEngine.enabled).catch(
+        () => undefined,
+      )),
   );
   const mainBackend = budgetReviewBackend(
     limitReviewBackendSessions(
@@ -2757,7 +2780,7 @@ async function runReviewPipeline(params: {
         evidenceReserveBytes: REVIEW_EVIDENCE_BYTES,
       });
       await addReviewEvidence(plans, evidence, render, auxPromptBudget, log);
-      return plans;
+      return prioritizeAuxiliaryPlans(plans);
     };
 
     const changesSinceLastReview = trackAux(
@@ -2941,6 +2964,13 @@ async function runReviewPipeline(params: {
       });
       return { targets, verdicts };
     };
+    for (const session of [...lensPasses, guidelineComplianceCheck]) {
+      if (session.isSettled()) continue;
+      const queued = auxBackend.stopQueuedSessionsByLabel?.(session.label) ?? 0;
+      log(
+        `Main review complete: stopped ${queued} queued ${session.label} page(s); active pages may finish within the auxiliary grace.`,
+      );
+    }
     const overlapVerification =
       options.verifyOverlapGrace && verificationEnabled
         ? startOverlapVerification().catch(() => 'skipped' as const)
@@ -3168,8 +3198,10 @@ async function runReviewPipeline(params: {
       writeFileSync(
         join(dir, 'unverified-findings.json'),
         JSON.stringify(candidateDiagnostics(headSha, withheld), null, 2) + '\n',
-        { mode: 0o600 },
+        { mode: 0o644 },
       );
+      // Docker creates this artifact as root; the host uploader runs as the runner user.
+      chmodSync(join(dir, 'unverified-findings.json'), 0o644);
       if (
         /^[1-9]\d*$/.test(process.env.GITHUB_RUN_ID ?? '') &&
         process.env.GITHUB_REPOSITORY === `${owner}/${repo}`

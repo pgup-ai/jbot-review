@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { createCliProcessScope } from '../src/shared/cli-process.ts';
+import { setTimeout as delay } from 'node:timers/promises';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
@@ -224,6 +226,44 @@ describe('Cline CLI provider helpers', () => {
       formatClinePromptTimeoutMessage('finding-verification', 'cline/default', 1200_000),
       'cline finding-verification prompt timed out after 1200s (model=cline/default)',
     );
+  });
+
+  it('cancels a running Cline process before its deadline and reaps it', async (t) => {
+    const workspace = mkdtempSync(join(tmpdir(), 'cline-cancel-'));
+    const originalPath = process.env.PATH;
+    const scope = createCliProcessScope();
+    t.after(async () => {
+      await scope.stop();
+      process.env.PATH = originalPath;
+      rmSync(workspace, { recursive: true, force: true });
+    });
+    process.env.PATH = `${workspace}:${originalPath}`;
+    writeClineAuth('{"providers":{}}', workspace);
+    const ready = join(workspace, 'pid');
+    writeFileSync(
+      join(workspace, 'cline'),
+      `#!/usr/bin/env node\nrequire('fs').writeFileSync(${JSON.stringify(ready)}, String(process.pid));setInterval(() => {}, 1000);`,
+      { mode: 0o700 },
+    );
+    const result = scope.run('review-interactions', () =>
+      runClineReview(workspace, 'cline/default', 'context', '', () => {}, {
+        home: workspace,
+        timeoutMs: 10000,
+      }),
+    );
+    const rejected = assert.rejects(result, /aborted/);
+    let pid = 0;
+    for (let attempt = 0; attempt < 100 && !pid; attempt++) {
+      try {
+        pid = Number(readFileSync(ready, 'utf8'));
+      } catch {
+        await delay(10);
+      }
+    }
+    assert.ok(pid > 0);
+    assert.equal(scope.abort('review-interactions'), 1);
+    await rejected;
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
   });
 
   it('preserves the prompt outcome when temporary-home cleanup fails', async (t) => {

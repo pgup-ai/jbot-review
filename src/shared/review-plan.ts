@@ -3,7 +3,11 @@ import type { PrFile } from './github.ts';
 import type { EvidenceStore } from './evidence.ts';
 import { findingSourceLocations } from './finding-context.ts';
 import type { Finding } from './types.ts';
-import { buildDiffHunksBlockWithMetadata, diffHunksCoverage } from './diff-context.ts';
+import {
+  buildDiffHunksBlockWithMetadata,
+  diffHunksCoverage,
+  diffRiskScore,
+} from './diff-context.ts';
 import {
   buildDiffRecoveryBlock,
   buildReviewChangeMap,
@@ -60,7 +64,7 @@ export function measureReviewPrompt(prompt: string, budget: ReviewPromptBudget, 
 
 function inputCapacity(budget: ReviewPromptBudget): number {
   return Math.min(
-    96 * 1024,
+    120 * 1024,
     budget.transportBytes,
     budget.contextTokens - budget.outputTokens - budget.harnessTokens,
   );
@@ -81,6 +85,12 @@ export interface ShardPlan {
   diffCoverage: ReturnType<typeof diffHunksCoverage> & { pagedFiles?: number };
   units?: DiffUnit[];
   promptBytes?: number;
+}
+
+export function prioritizeAuxiliaryPlans(plans: ShardPlan[]): ShardPlan[] {
+  const score = (plan: ShardPlan) =>
+    Math.max(0, ...(plan.units ?? []).map((unit) => diffRiskScore(unit.file)));
+  return [...plans].sort((a, b) => score(b) - score(a));
 }
 
 function diffUnits(file: PrFile): DiffUnit[] {

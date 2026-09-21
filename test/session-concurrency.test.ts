@@ -172,7 +172,7 @@ describe('limitReviewBackendSessions', () => {
         provider,
       );
       const pending = backend.runReview('model', 'ctx', '', noLog, { label: 'abandoned' });
-      const rejected = assert.rejects(pending, /aborted while queued/);
+      const rejected = assert.rejects(pending, /stopped while queued/);
       await new Promise<void>((resolve) => setImmediate(resolve));
       assert.equal(backend.abortSessionsByLabel?.('abandoned', noLog), 1);
       await rejected;
@@ -181,6 +181,19 @@ describe('limitReviewBackendSessions', () => {
       await backend.runReview('model', 'ctx', '', noLog, { label: 'abandoned' });
       assert.equal(started, 1);
       assert.equal(provider.isBusy(), false);
+      assert.equal(global.isBusy(), false);
+      const hold = await global.acquire();
+      const closing = backend.runReview('model', 'ctx', '', noLog, { label: 'closing' });
+      const closed = assert.rejects(closing, /stopped while queued/);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(backend.stopQueuedSessionsByLabel?.('closing'), 1);
+      await closed;
+      hold();
+      await assert.rejects(
+        backend.runReview('model', 'ctx', '', noLog, { label: 'closing' }),
+        /stopped before dispatch/,
+      );
+      await backend.runFindingVerification('model', 'ctx', [], noLog);
       assert.equal(global.isBusy(), false);
     }
   });

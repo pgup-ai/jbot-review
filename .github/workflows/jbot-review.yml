@@ -204,9 +204,11 @@ jobs:
           context: .
           load: true # put :latest in the local daemon for `uses: ./`
           tags: ghcr.io/pgup-ai/jbot-review:latest
-          # Reuse the code-independent layers main published to :buildcache;
-          # only COPY dist/ rebuilds. No cache-to — PRs read, don't write.
-          cache-from: type=registry,ref=ghcr.io/pgup-ai/jbot-review:buildcache
+          # GitHub scopes PR caches to their merge ref; main's registry cache stays read-only.
+          cache-from: |
+            type=gha,scope=jbot-review
+            type=registry,ref=ghcr.io/pgup-ai/jbot-review:buildcache
+          cache-to: type=gha,scope=jbot-review,mode=min,ignore-error=true
       # issue_comment and workflow_dispatch carry no pull_request payload, so
       # resolve both values before any secret reaches the PR-built image.
       - id: pr

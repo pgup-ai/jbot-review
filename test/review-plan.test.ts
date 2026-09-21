@@ -9,6 +9,7 @@ import { Semaphore } from '../src/shared/opencode.ts';
 import { test } from 'node:test';
 import {
   buildShardPlans,
+  prioritizeAuxiliaryPlans,
   addReviewEvidence,
   targetedDiff,
   measureReviewPrompt,
@@ -16,7 +17,11 @@ import {
   reviewPromptBudget,
 } from '../src/shared/review-plan.ts';
 import { assembleReviewPrompt, UNTRUSTED_PR_CONTENT_NOTE } from '../src/shared/prompt.ts';
-import { buildClinePromptArg, CLINE_MAX_ARGV_BYTES } from '../src/shared/cline.ts';
+import {
+  buildClinePromptArg,
+  CLINE_MAX_ARGV_BYTES,
+  CLINE_MODEL_LIMITS,
+} from '../src/shared/cline.ts';
 import { runShardedReview } from '../src/shared/runner.ts';
 import { budgetReviewBackend } from '../src/shared/prompt-budget.ts';
 import {
@@ -67,6 +72,31 @@ test('one requested shard pages a huge hunk without losing late changes or excee
   const verification = targetedDiff(plans, [{ path: 'src/huge.ts', line: 0, body: '' }]);
   assert.ok(Buffer.byteLength(verification) <= 36 * 1024 + 2);
   assert.match(verification, /Hunks truncated for src\/huge.ts/);
+});
+
+test('uses known free-model capacity for fewer complete pages and ranks auxiliary risk', () => {
+  const files = [
+    {
+      filename: 'docs/notes.md',
+      patch: '@@ -0,0 +1,4000 @@\n' + '+docs text content\n'.repeat(4000),
+    },
+    { filename: 'src/api/orders.ts', patch: '@@ -1 +1 @@\n-old()\n+new()' },
+  ];
+  const small = buildShardPlans({ ...base, shards: [files] });
+  const larger = reviewPromptBudget(
+    'cline',
+    CLINE_MODEL_LIMITS['cline-free/muse-spark-1.3-contributor'],
+  );
+  const plans = buildShardPlans({ ...base, budget: larger, shards: [files] });
+  assert.ok(plans.length < small.length);
+  for (const plan of plans)
+    assert.ok(
+      Buffer.byteLength(buildClinePromptArg(renderPrompt(plan.context))) <= CLINE_MAX_ARGV_BYTES,
+    );
+  assert.equal(reviewDelivery(plans, new Set(plans.map((p) => p.label))).deliveredHunks, 2);
+  const ranked = prioritizeAuxiliaryPlans(small);
+  assert.ok(ranked[0].assignedFiles.includes('src/api/orders.ts'));
+  assert.deepEqual(new Set(ranked), new Set(small));
 });
 
 test('budgets instructions, guidelines, context and output separately from transport bytes', async () => {

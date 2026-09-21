@@ -22,7 +22,8 @@ import {
   sessionEnvDenyKeys,
   type TokenUsageRecorder,
 } from './opencode.ts';
-import { spawnWithTimeout, truncateForLog } from '@symma/protocol';
+import { truncateForLog } from '@symma/protocol';
+import { runCliProcess } from './cli-process.ts';
 import type { AddressedPriorComment, Finding, FindingVerdict, ReviewResult } from './types.ts';
 
 const CLINE_PROMPT_TIMEOUT_MS = 20 * 60_000;
@@ -31,6 +32,13 @@ const CLINE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 // Linux caps a single argv entry at 128 KiB; Cline's complete diff must fit too.
 const CLINE_GUIDELINE_BUDGET_BYTES = 24 * 1024;
 export const CLINE_MAX_ARGV_BYTES = 120 * 1024;
+
+// Model limits from the catalog bundled with pinned Cline 3.0.62 (@cline/llms 0.0.83).
+export const CLINE_MODEL_LIMITS: Record<string, { contextTokens: number; outputTokens: number }> = {
+  'cline-free/deepseek-v4.1-flash': { contextTokens: 1048576, outputTokens: 384000 },
+  'cline-free/muse-spark-1.3-contributor': { contextTokens: 1048576, outputTokens: 943718 },
+  'cline-free/solar-pro4': { contextTokens: 524288, outputTokens: 131072 },
+};
 
 export const CLINE_PROVIDER_ID = 'cline';
 export const CLINE_TELEMETRY_CAPABILITY = 'opaque' as const;
@@ -393,7 +401,7 @@ async function runClinePrompt(
     mkdirSync(dirname(providers), { recursive: true, mode: 0o700 });
     copyFileSync(clineProvidersPath(home ?? ''), providers);
     const args = buildClineCliArgs({ model, promptArg: fullPrompt });
-    const result = await spawnWithTimeout(CLINE_CLI_BIN, args, {
+    const result = await runCliProcess(CLINE_CLI_BIN, args, {
       cwd: workspace,
       env: clineEnvForHome(dir),
       timeoutMs,

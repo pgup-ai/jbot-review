@@ -51,7 +51,7 @@ export function computeEvidenceTimeoutMs(remainingMs: number | undefined): numbe
   return Math.max(0, Math.min(5000, (remainingMs ?? Infinity) - MIN_VERIFICATION_MS));
 }
 
-export const AUXILIARY_SETTLE_GRACE_MS = 5 * 60_000;
+export const AUXILIARY_SETTLE_GRACE_MS = 60_000;
 
 /** Keeps a wrap-up reply inside the deadline the caller's own timer enforces. */
 export const WRAP_UP_MARGIN_MS = 5_000;
