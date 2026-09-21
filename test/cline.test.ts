@@ -199,9 +199,8 @@ describe('Cline CLI provider helpers', () => {
   });
 
   it('drops @-mention ENOENT warnings from failure output so the real error survives the cap', () => {
-    // 3.0.60 (the image) says `statx`, 3.0.61 says `stat`; the mention regex
-    // swallows the import's closing quote and punctuation, which is what
-    // separates these from a genuinely missing file.
+    // Punctuation swallowed by Cline's mention regex distinguishes these from missing files;
+    // older CLI versions report either `statx` or `stat`.
     const warnings = Array.from(
       { length: 40 },
       (_, i) =>

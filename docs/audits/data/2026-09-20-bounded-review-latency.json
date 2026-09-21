@@ -1,0 +1,225 @@
+{
+  "model": "cline/cline-free/muse-spark-1.3-contributor",
+  "clineVersion": "3.0.62",
+  "repetitions": 1,
+  "rows": [
+    {
+      "arm": "baseline-cline",
+      "manifest": {
+        "runtime": "e4285ec96567acfcfb6ee810dcefe8d55f7aaa36",
+        "reviewedHead": "e4285ec96567acfcfb6ee810dcefe8d55f7aaa36",
+        "base": "origin/main",
+        "model": "cline/cline-free/muse-spark-1.3-contributor",
+        "concurrency": 5,
+        "reviewPasses": 2,
+        "timeBudgetMinutes": 30
+      },
+      "elapsedMs": 615317,
+      "phasesMs": {
+        "context-assembly": 4015,
+        "main-execution": 366419,
+        "grace-wait": 229213,
+        "filtering": 0,
+        "verification": 15661,
+        "posting": 1,
+        "teardown": 0
+      },
+      "mainInputBytes": 4005252,
+      "delivery": {
+        "expectedHunks": 385,
+        "deliveredHunks": 385,
+        "expectedTasks": 53,
+        "completedTasks": 53,
+        "incompleteTasks": 0
+      },
+      "sessionExecutions": 93,
+      "executionOutcomes": {
+        "completed": 93
+      },
+      "auxiliaryPlan": {
+        "pages": 38,
+        "jointGuidelines": true,
+        "promptBytes": 2842417
+      },
+      "findings": [
+        {
+          "id": "f1",
+          "session": "main-review",
+          "path": "src/shared/opencode-session.ts",
+          "line": 609,
+          "severity": "P3",
+          "disposition": "withheld-unverified"
+        },
+        {
+          "id": "f2",
+          "session": "main-review",
+          "path": "src/shared/prompt.ts",
+          "line": 1902,
+          "severity": "P3",
+          "disposition": "refuted"
+        },
+        {
+          "id": "f3",
+          "session": "main-review",
+          "path": "src/shared/review-read-locations.ts",
+          "line": 69,
+          "severity": "P2",
+          "disposition": "posted-inline"
+        },
+        {
+          "id": "f4",
+          "session": "main-review",
+          "path": "src/shared/review-plan.ts",
+          "line": 188,
+          "severity": "P3",
+          "disposition": "posted-inline"
+        },
+        {
+          "id": "f5",
+          "session": "review-interactions",
+          "path": "src/shared/evidence-cache.ts",
+          "line": 54,
+          "severity": "P2",
+          "disposition": "posted-inline"
+        },
+        {
+          "id": "f6",
+          "session": "review-interactions",
+          "path": "src/shared/runner.ts",
+          "line": 1047,
+          "severity": "P3",
+          "disposition": "withheld-unverified"
+        }
+      ],
+      "telemetrySha256": "710d7fe89d3780b1b94f305c9bf95f374deda5594d71f52962f4ed6243abd3db",
+      "resultSha256": "835e5e6f9a0438dd6c6b71bad5e8c6b90471df98e0f74ca93ce21257e3eba71d"
+    },
+    {
+      "arm": "treatment-cline",
+      "manifest": {
+        "runtime": "1c520a0cb4ad6cd0ec035fcba6c0fe551655566f",
+        "reviewedHead": "e4285ec96567acfcfb6ee810dcefe8d55f7aaa36",
+        "base": "origin/main",
+        "model": "cline/cline-free/muse-spark-1.3-contributor",
+        "concurrency": 5,
+        "reviewPasses": 2,
+        "timeBudgetMinutes": 30
+      },
+      "elapsedMs": 283679,
+      "phasesMs": {
+        "context-assembly": 2137,
+        "main-execution": 200317,
+        "grace-wait": 60002,
+        "filtering": 1,
+        "verification": 21211,
+        "posting": 1,
+        "teardown": 0
+      },
+      "mainInputBytes": 2269589,
+      "delivery": {
+        "expectedHunks": 385,
+        "deliveredHunks": 385,
+        "expectedTasks": 21,
+        "completedTasks": 21,
+        "incompleteTasks": 0
+      },
+      "sessionExecutions": 29,
+      "executionOutcomes": {
+        "aborted": 1,
+        "completed": 28
+      },
+      "auxiliaryPlan": {
+        "pages": 16,
+        "jointGuidelines": true,
+        "promptBytes": 1751117
+      },
+      "findings": [
+        {
+          "id": "f1",
+          "session": "main-review",
+          "path": "src/shared/jev-prefetch.ts",
+          "line": 17,
+          "severity": "P2",
+          "disposition": "posted-inline"
+        },
+        {
+          "id": "f2",
+          "session": "main-review",
+          "path": "src/shared/runner.ts",
+          "line": 1047,
+          "severity": "P3",
+          "disposition": "withheld-unverified"
+        },
+        {
+          "id": "f3",
+          "session": "review-interactions",
+          "path": "src/shared/backend-selection.ts",
+          "line": 73,
+          "severity": "P1",
+          "disposition": "rescued"
+        }
+      ],
+      "telemetrySha256": "f49d39aeef7857b4c60109d083b81649210e86f6eb19484a12eae4d9aff2e304",
+      "resultSha256": "c74c664f8e11ede4a25752e966f5bda910814d3450579f2db0121aa670664d1c"
+    }
+  ],
+  "invalidPreflight": "First baseline inherited PROVIDER=devin from .env and failed model lookup. Excluded from the valid pair; both valid arms explicitly clear PROVIDER.",
+  "limitations": [
+    "Different page sizes change model inputs; one sequential pair cannot establish unchanged recall or general latency.",
+    "Both arms contained false-positive candidates after verification. The performance change is not a precision fix.",
+    "Cline usage and tool telemetry is opaque; input byte counts are not billed tokens or costs."
+  ],
+  "finalDockerSmoke": {
+    "manifest": {
+      "runtime": "ac600a5637aabb46655f69dcceb60b9be52b4b6c",
+      "reviewedHead": "ac600a5637aabb46655f69dcceb60b9be52b4b6c",
+      "base": "origin/main",
+      "model": "cline/cline-free/muse-spark-1.3-contributor",
+      "cline": "3.0.62",
+      "container": "jbot-review:latency-fix",
+      "concurrency": 5,
+      "timeBudgetMinutes": 30
+    },
+    "elapsedMs": 593139,
+    "delivery": {
+      "expectedHunks": 398,
+      "deliveredHunks": 398,
+      "expectedTasks": 21,
+      "completedTasks": 21,
+      "incompleteTasks": 0
+    },
+    "sessionExecutions": 28,
+    "phaseMs": {
+      "context-assembly": 6629,
+      "main-execution": 488970,
+      "grace-wait": 60018,
+      "filtering": 6,
+      "verification": 37488,
+      "posting": 2,
+      "teardown": 0
+    },
+    "candidateCount": 1,
+    "publicationEligibleCount": 0,
+    "manualAdjudication": "Capability claim is false: roleTelemetry applies the model support guard. Verifier left it inconclusive; publication would withhold it.",
+    "nativeArtifactPermissionBefore": "EACCES for uid 1001 on root-owned 0600 file",
+    "nativeArtifactPermissionAfter": {
+      "mode": "644",
+      "ownerUid": 0,
+      "readerUid": 1001,
+      "candidates": 1
+    },
+    "telemetrySha256": "5d3969803b3a94b4fa25d96e59c3fd1c50c1a2d8ce96a6920e5f47841ad29906",
+    "resultSha256": "53474108dbbdac9af19e939bed5a18dd0719d6d349577388afcf13864465e417",
+    "note": "This smoke used a changed branch and Linux Docker; not comparable to the host same-input pair. Subsequent runtime edit only added three paid model catalog entries; the free Muse path was unchanged and budget checks were rerun."
+  },
+  "liveCancellation": {
+    "model": "cline/cline-free/muse-spark-1.3-contributor",
+    "aborted": 1,
+    "settledAfterAbortMs": 2007
+  },
+  "seededDefectProbe": {
+    "submitted": 201,
+    "before": 201,
+    "after": 100
+  }
+}
