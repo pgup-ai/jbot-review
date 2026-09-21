@@ -457,9 +457,10 @@ const EMBEDDED_ONLY_LENS_EXPLORATION_POLICY = `## Repository exploration policy
 No repository reads are available in this pass. Review every changed hunk in
 the embedded diff and the changed-symbol usage block, and establish expected
 behavior from PR intent and the retained guidelines. When a lens question
-depends on code outside the embedded evidence, report an "investigate" advisory
-that names the file or symbol to check instead of asserting the premise. Where
-these instructions or the lens below say to read, follow, grep, or inspect code,
+depends on code outside the embedded evidence, do not turn that missing context
+into a finding. Report a problem only when inspected evidence establishes its
+trigger and impact. A request to check an unseen caller or import is not a finding.
+Where these instructions or the lens below say to read, follow, grep, or inspect code,
 apply that to the embedded evidence only. Do not describe reads or commands you
 did not run, and do not report a violation merely because you did not execute a
 command.`;
@@ -601,10 +602,9 @@ Use no tools for this review: do not read files, search the repository, or run
 git or shell commands. Use only the evidence embedded below. Where later
 instructions mention exploring the repo, running the git diff command, or
 grepping for callers, those checks have NOT been performed unless their results
-are included. Missing context does not prove missing behavior. If the embedded evidence
-identifies a concrete potential failure whose premise needs unavailable code,
-report it as an "investigate" advisory and specify what must be checked. Do not
-assert the unverified premise as fact. When verifying an existing finding,
+are included. Report only problems whose trigger and impact are supported by
+supplied code. Do not emit requests to check unseen callers, imports, defaults
+or guards: missing context does not prove missing behavior. When verifying an existing finding,
 return "uncertain" instead of guessing. Respond with the
 required JSON computed directly from the embedded context.`;
 
@@ -1524,8 +1524,8 @@ that each finding is WRONG. Your job is to try to refute it.
   internal semantics, so do not "confirm" such a finding from priors; verify it
   against the library's documentation if a docs lookup succeeds, otherwise
   return "uncertain" (a failed or out-of-credit lookup does not count as
-  confirmation). Uncertain findings are posted as advisory (non-blocking),
-  so use this rather than guessing.
+  confirmation). Uncertain findings remain in run diagnostics, withheld from PR comments.
+  Use this verdict rather than guessing.
 
 ## Output
 
@@ -1586,8 +1586,8 @@ that each finding is WRONG. Your job is to try to refute it.
   context — environment- or data-dependent state, unchanged code the excerpts do not
   show, or how a third-party library/framework behaves internally. A diff shows
   a CHANGE, not the whole system, so do not "confirm" such a finding from
-  priors. Uncertain findings are posted as advisory (non-blocking), so use this
-  rather than guessing.
+  priors. Uncertain findings remain in run diagnostics, withheld from PR comments.
+  Use this verdict rather than guessing.
 
 ## Output
 

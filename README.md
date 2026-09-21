@@ -975,13 +975,13 @@ Batching has not established a reliable end-to-end speedup. The presets
 are mutually exclusive. Batching hints require repository shell tools; Pi,
 CommandCode and tool-less backends do not receive them.
 
-| Value                    | Behavior                                                                                                       | Evidence / recommendation                                                                                                                               |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `off`                    | Complete paged review without batching hints                                                                   | Rollback for the batching default.                                                                                                                      |
-| `diff-batches` (default) | Bounded batched reads for supporting diffs in other tasks, when needed                                         | Historical omitted-diff trials reduced tool-output bytes 44.1% with flat latency; that does not establish a speedup for the new complete-page workflow. |
-| `adaptive`               | Batching plus completed-auxiliary reuse for routine documentation follow-ups and collapsed unverified concerns | Opt-in experiment; full main review and verification remain enabled.                                                                                    |
-| `linked`                 | Append up to two unseen import-linked source excerpts to eligible main-review reads                            | Main-only trials had mixed quality and latency; keep experimental. OpenCode only.                                                                       |
-| `jev`                    | Jev ranks caller excerpts from changed exported symbols                                                        | Some historical-PR cost savings, inconsistent latency and weak known-bug recall; keep experimental. Requires enhanced context and `TYPESAFE_API_KEY`.   |
+| Value                    | Behavior                                                                            | Evidence / recommendation                                                                                                                               |
+| ------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `off`                    | Complete paged review without batching hints                                        | Rollback for the batching default.                                                                                                                      |
+| `diff-batches` (default) | Bounded batched reads for supporting diffs in other tasks, when needed              | Historical omitted-diff trials reduced tool-output bytes 44.1% with flat latency; that does not establish a speedup for the new complete-page workflow. |
+| `adaptive`               | Batching plus completed-auxiliary reuse for routine documentation follow-ups        | Opt-in experiment; full main review and verification remain enabled.                                                                                    |
+| `linked`                 | Append up to two unseen import-linked source excerpts to eligible main-review reads | Main-only trials had mixed quality and latency; keep experimental. OpenCode only.                                                                       |
+| `jev`                    | Jev ranks caller excerpts from changed exported symbols                             | Some historical-PR cost savings, inconsistent latency and weak known-bug recall; keep experimental. Requires enhanced context and `TYPESAFE_API_KEY`.   |
 
 The [production decision and proof](docs/audits/2026-09-19-experiment-presets.md)
 compares historical benefits, quality failures and sample limits. The
@@ -1006,10 +1006,15 @@ model, settings, instructions and PR intent, and every subsequent change is to a
 README, changelog or Markdown audit. Code, configuration, guidelines, unknown
 history and explicit same-head reruns run auxiliaries normally. Logs record each
 decision and the reused commit. Setting `dynamic-fanout: false` also forces normal
-auxiliary scheduling. Local mode has no prior GitHub review state, so it exercises
-only the reporting portion of this preset. Clean follow-ups that do not post a new review keep the older completion baseline. See the
+auxiliary scheduling. Local mode has no prior GitHub review state, so it cannot exercise auxiliary reuse. Clean follow-ups that do not post a new review keep the older completion baseline. See the
 [paired follow-up experiment](docs/audits/2026-09-20-adaptive-auxiliary-review.md)
 for measured savings and the rejected verifier-retrieval trial.
+
+Every preset withholds uncertain, investigation-only and low-confidence candidates
+from inline, file-level and review-body findings. Their full details remain in
+run logs and local output; the PR receives only a count and a verification-limit
+notice. They still prevent automatic approval and an all-clear result. This rule
+adds no model call, repository scan or configuration flag.
 
 Local comparisons require the usual provider credential and configured model.
 Keep the revision, model, backend and other review settings fixed:

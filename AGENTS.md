@@ -59,7 +59,8 @@ cleanup pass and `jbot-review-pr-self-review` before opening or updating a PR.
 3. **Auxiliary sessions fail open.** Lens passes, the addressed check, the
    guideline pass, and finding verification must never fail the run or drop
    findings when they break. A broken precision filter must not become a
-   recall hole.
+   recall hole. Unresolved candidates remain in run diagnostics and local output;
+   preserving a candidate does not require publishing it as a PR comment.
 4. **Every injected context block has a hard byte budget** and lists what it
    omitted (diff hunks, guidelines, prior threads). No unbounded prompt
    fragments.

@@ -546,7 +546,7 @@ describe('FINDING_VERIFICATION_PROMPT', () => {
   });
 
   it('routes uncertain verdicts to advisory severity, not silence', () => {
-    assert.match(FINDING_VERIFICATION_PROMPT, /posted as advisory/);
+    assert.match(FINDING_VERIFICATION_PROMPT, /withheld from PR comments/);
   });
 
   it('abstains on unverifiable third-party framework-internal premises', () => {
@@ -632,7 +632,7 @@ describe('assembleFindingVerificationPrompt', () => {
     // preserves the adversarial refute-by-default + framework-abstention discipline
     assert.match(prompt, /each finding is WRONG/);
     assert.match(prompt, /library\/framework behaves internally/);
-    assert.match(prompt, /posted as advisory/);
+    assert.match(prompt, /withheld from PR comments/);
     // still lists findings and ends with the recency reminder
     assert.match(prompt, /### Finding 0/);
     assert.ok(prompt.endsWith(VERIFICATION_OUTPUT_REMINDER));

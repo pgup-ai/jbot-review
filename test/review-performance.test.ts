@@ -63,6 +63,7 @@ describe('review performance aggregation', () => {
       },
       { kind: 'session', session: 'review-shard-1-retry' },
       { kind: 'finding', disposition: 'posted-advisory' },
+      { kind: 'finding', disposition: 'withheld-unverified' },
     ]);
 
     assert.equal(report.phaseTime['run:filtering'].p50, 25);
@@ -84,7 +85,9 @@ describe('review performance aggregation', () => {
     assert.equal(report.auxiliaryRuns[0].promptUsage[1].promptBytes, undefined);
     assert.equal(report.retryRepairRate.numerator, 2);
     assert.equal(report.retryRepairRate.rate, null);
-    assert.equal(report.retainedFindings, 1);
+    assert.equal(report.retainedFindings, 2);
+    assert.equal(report.publishedFindings, 1);
+    assert.equal(report.withheldFindings, 1);
     assert.equal(report.backendCohorts.pi.toolCalls, 1);
   });
 

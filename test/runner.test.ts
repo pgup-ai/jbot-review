@@ -186,7 +186,7 @@ describe('buildBody', () => {
     assert.doesNotMatch(body, /low-value verification narrative/);
   });
 
-  it('preserves uncertain findings in a collapsed advisory section with reusable pass provenance', () => {
+  it('withholds unresolved claims from the review body while preserving coverage provenance', () => {
     const uncertain: Finding = {
       ...finding,
       title: 'Unverified concern: Caller may be missing',
@@ -203,7 +203,7 @@ describe('buildBody', () => {
       '',
       '',
       [uncertain],
-      [],
+      [uncertain],
       'model',
       'owner',
       'repo',
@@ -212,13 +212,13 @@ describe('buildBody', () => {
       undefined,
       undefined,
       [],
-      { advisorySummary: true, auxiliaryBaselines: [baseline] },
+      { auxiliaryBaselines: [baseline] },
     );
-    assert.match(body, /<summary>1 concern needs more evidence<\/summary>/);
-    assert.match(body, /Caller may be missing/);
-    assert.match(body, /The caller was not supplied/);
-    assert.match(body, /<!-- jbot-review:finding -->/);
-    assert.doesNotMatch(body, /Long hypothesis/);
+    assert.match(body, /1 candidate withheld from PR comments/);
+    assert.doesNotMatch(
+      body,
+      /Caller may be missing|The caller was not supplied|Long hypothesis|<!-- jbot-review:finding -->/,
+    );
     assert.match(body, /\| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 1 \|/);
     assert.match(body, /Review state:\*\* Unverified concerns remain/);
     assert.deepEqual(auxiliaryBaselines(body), [baseline]);

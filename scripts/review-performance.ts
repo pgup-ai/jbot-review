@@ -113,6 +113,7 @@ export function aggregatePerformance(rows: Row[]) {
     'posted-inline',
     'posted-file-level',
     'posted-advisory',
+    'withheld-unverified',
     'rescued',
     'orphaned',
     'anchor-missed',
@@ -291,6 +292,10 @@ export function aggregatePerformance(rows: Row[]) {
     cacheReadTokens: sessions.reduce((sum, row) => sum + (number(row, 'cacheReadTokens') ?? 0), 0),
     retryRepairRate: guardedRate(retryRepairAttemptCount, explorations.length),
     retainedFindings: findings.filter((row) => retained.has(String(row.disposition))).length,
+    publishedFindings: findings.filter(
+      (row) => retained.has(String(row.disposition)) && row.disposition !== 'withheld-unverified',
+    ).length,
+    withheldFindings: findings.filter((row) => row.disposition === 'withheld-unverified').length,
     backendCohorts: cohorts,
     modelCohorts,
     findingCohorts,

@@ -16,7 +16,7 @@ export type FindingDisposition =
   | 'severity-filtered'
   | 'posted-inline'
   | 'posted-file-level'
-  | 'posted-advisory'
+  | 'withheld-unverified'
   | 'orphaned'
   | 'rescued'
   | 'anchor-missed';
@@ -185,7 +185,7 @@ export interface OutcomeTelemetryRow extends PriorThreadOutcome {
 
 export interface FindingRouting {
   inline: Finding[];
-  advisory?: Finding[];
+  withheld?: Finding[];
   fileLevel: Finding[];
   orphaned: Finding[];
   rescued: Finding[];
@@ -360,7 +360,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
   const stageSeverity = new Map<TelemetryStage, Map<string, Severity>>();
   const routing = {
     inline: new Set<string>(),
-    advisory: new Set<string>(),
+    withheld: new Set<string>(),
     fileLevel: new Set<string>(),
     orphaned: new Set<string>(),
     rescued: new Set<string>(),
@@ -413,7 +413,7 @@ export function createTelemetryRecorder(enabled: boolean): TelemetryRecorder {
     route(routes) {
       const missed = idsOf(routes.anchorMissed);
       for (const id of idsOf(routes.inline)) routing.inline.add(id);
-      for (const id of idsOf(routes.advisory ?? [])) routing.advisory.add(id);
+      for (const id of idsOf(routes.withheld ?? [])) routing.withheld.add(id);
       for (const id of missed) routing.anchorMissed.add(id);
       for (const f of routes.fileLevel) {
         if (!f.id) continue;
@@ -561,7 +561,7 @@ function deriveRow(
   stageSeverity: Map<TelemetryStage, Map<string, Severity>>,
   routing: {
     inline: Set<string>;
-    advisory: Set<string>;
+    withheld: Set<string>;
     fileLevel: Set<string>;
     orphaned: Set<string>;
     rescued: Set<string>;
@@ -583,7 +583,7 @@ function deriveRow(
   const last = present[present.length - 1];
   let disposition: FindingDisposition;
   if (last === 'filtered') {
-    if (routing.advisory.has(id)) disposition = 'posted-advisory';
+    if (routing.withheld.has(id)) disposition = 'withheld-unverified';
     else if (routing.rescued.has(id)) disposition = 'rescued';
     else if (routing.inline.has(id)) disposition = 'posted-inline';
     else if (routing.anchorMissed.has(id)) disposition = 'anchor-missed';

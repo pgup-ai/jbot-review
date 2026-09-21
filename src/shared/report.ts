@@ -1,6 +1,6 @@
 import type { Finding, Severity } from './types.ts';
-import { SEVERITY_RANK } from './filter.ts';
-import { formatFindingLabel, formatFindingLocation, formatFindingCommentBody } from './github.ts';
+import { SEVERITY_RANK, isUnresolvedFinding } from './filter.ts';
+import { formatFindingLabel, formatFindingLocation } from './github.ts';
 
 /**
  * Pure review-body layout helpers. `runner.ts` wires these into the posted
@@ -19,37 +19,6 @@ function findingLine(finding: Finding): string {
  */
 export const ORPHANED_FINDINGS_HEADING = '### Findings (outside the diff)';
 export const ADVISORY_FINDINGS_HEADING = '### Unverified concerns';
-
-export function isAdvisoryFinding(
-  finding: Pick<Finding, 'kind' | 'verificationUncertain'>,
-): boolean {
-  return finding.verificationUncertain === true || finding.kind === 'investigate';
-}
-
-export function renderAdvisorySection(findings: Finding[]): string[] {
-  if (!findings.length) return [];
-  return [
-    ADVISORY_FINDINGS_HEADING,
-    '',
-    '<details>',
-    `<summary>${findings.length} ${findings.length === 1 ? 'concern needs' : 'concerns need'} more evidence</summary>`,
-    '',
-    'These are investigation leads, not confirmed bugs.',
-    '',
-    ...findings.map((finding) => {
-      const reason = finding.body.split('\n\n')[0].replace(/\s+/g, ' ').trim();
-      const body = formatFindingCommentBody({
-        ...finding,
-        verificationUncertain: true,
-        title: finding.title.replace(/^Unverified concern: /, ''),
-        body: reason.length > 300 ? `${reason.slice(0, 297)}...` : reason,
-      });
-      return `- \`${formatFindingLocation(finding)}\` — ${body.replace(/\n/g, '\n  ')}`;
-    }),
-    '',
-    '</details>',
-  ];
-}
 
 export function renderOrphanedSection(orphaned: Finding[]): string[] {
   if (orphaned.length === 0) return [];
@@ -420,14 +389,15 @@ export function formatIncompleteCoverage(sessions: readonly IncompleteSession[])
 }
 
 export function getMergeGuidance(
-  findings: Pick<Finding, 'severity' | 'kind' | 'verificationUncertain'>[],
+  findings: Pick<Finding, 'severity' | 'kind' | 'confidence' | 'verificationUncertain'>[],
   incomplete: boolean,
 ): {
   state: string;
   mergeGuidance: string;
 } {
   const hasBlockingFinding = findings.some(
-    (finding) => !isAdvisoryFinding(finding) && SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2,
+    (finding) =>
+      !isUnresolvedFinding(finding) && SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2,
   );
   if (hasBlockingFinding) {
     return {
@@ -443,11 +413,11 @@ export function getMergeGuidance(
     };
   }
 
-  if (findings.some(isAdvisoryFinding)) {
+  if (findings.some(isUnresolvedFinding)) {
     return {
       state: 'Unverified concerns remain',
       mergeGuidance:
-        'Verification was inconclusive; review the unverified concerns before relying on this result.',
+        'Some candidates could not be substantiated. Do not treat this review as an all-clear result.',
     };
   }
 
@@ -465,9 +435,9 @@ export function getMergeGuidance(
 }
 
 export function buildSeverityTable(
-  findings: Pick<Finding, 'severity' | 'kind' | 'verificationUncertain'>[],
+  findings: Pick<Finding, 'severity' | 'kind' | 'confidence' | 'verificationUncertain'>[],
 ): string[] {
-  const graded = findings.filter((finding) => !isAdvisoryFinding(finding));
+  const graded = findings.filter((finding) => !isUnresolvedFinding(finding));
   const counts = countBySeverity(graded);
   const unverified = findings.length - graded.length;
   return [

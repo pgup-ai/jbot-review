@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   anchorFindings,
   applyFindingVerdicts,
+  filterFindings,
   mergeVerdictsByLocation,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
@@ -728,18 +729,51 @@ describe('anchorFindings', () => {
 
   it('splits findings into inline, file-level, and orphaned buckets', () => {
     const fallback = finding({ path: 'a.ts', line: 99 });
+    const unresolved = [
+      finding({ path: 'a.ts', line: 1, verificationUncertain: true }),
+      finding({ path: 'a.ts', line: 0, kind: 'investigate' }),
+      finding({ path: 'outside.ts', line: 99, confidence: 'low' }),
+    ];
     const out = anchorFindings(
       [
         finding({ path: 'a.ts', line: 1 }),
         finding({ path: 'a.ts', line: 0 }),
         fallback,
         finding({ path: 'outside.ts', line: 99 }),
+        ...unresolved,
       ],
       addable,
       true,
     );
     assert.deepEqual([out.inline.length, out.fileLevel.length, out.orphaned.length], [1, 2, 1]);
     assert.equal(fallback.line, 0);
+    assert.deepEqual(out.withheld, unresolved);
+    assert.equal(out.withheld[2].line, 99);
+    const bounded = anchorFindings(
+      filterFindings(
+        [
+          ...unresolved,
+          finding({ path: 'a.ts', line: 2, severity: 'P1', confidence: 'high' }),
+          finding({ path: 'a.ts', line: 1, severity: 'P2', confidence: 'high' }),
+        ],
+        { minSeverity: 'P1', maxFindings: 1 },
+      ),
+      addable,
+      true,
+    );
+    assert.equal(bounded.inline.length, 1);
+    assert.equal(bounded.inline[0].severity, 'P1');
+    assert.deepEqual(bounded.withheld, unresolved);
+
+    assert.equal(
+      isPrCleanAfterRun(
+        out.inline.length + out.fileLevel.length + out.orphaned.length + out.withheld.length,
+        0,
+        true,
+        true,
+      ),
+      false,
+    );
     assert.deepEqual(out.anchorMissed, [fallback], 'a model-declared line 0 is not an anchor miss');
   });
 

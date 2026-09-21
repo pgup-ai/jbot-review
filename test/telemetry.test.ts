@@ -444,9 +444,9 @@ describe('createTelemetryRecorder finding dispositions', () => {
       orphaned: [],
       rescued: [],
       anchorMissed: [],
-      advisory: [f],
+      withheld: [f],
     });
-    assert.equal(rec.findingRows()[0].disposition, 'posted-advisory');
+    assert.equal(rec.findingRows()[0].disposition, 'withheld-unverified');
   });
 
   it('detects the stage each dropped finding fell out at', () => {

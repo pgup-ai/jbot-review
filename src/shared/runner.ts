@@ -39,14 +39,15 @@ import {
 } from './auxiliary-reuse.ts';
 
 import {
-  SEVERITY_RANK,
   applyFindingVerdicts,
+  filterFindings,
   anchorFindings,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
   mergeVerdictsByLocation,
   resolveFindingAnchors,
   isNoiseFile,
+  isUnresolvedFinding,
   isPrCleanAfterRun,
   openFindingThreadIds,
   selectFindingIndexes,
@@ -310,8 +311,6 @@ import {
   formatSummaryMarkdown,
   ORPHANED_FINDINGS_HEADING,
   ADVISORY_FINDINGS_HEADING,
-  isAdvisoryFinding,
-  renderAdvisorySection,
   reviewCoverageSessions,
   renderOrphanedSection,
 } from './report.ts';
@@ -2910,7 +2909,7 @@ async function runReviewPipeline(params: {
       );
       if (timeoutMs === 0) {
         log(
-          'Skipping finding verification: time budget exhausted; posting findings unverified (fail-open).',
+          'Skipping finding verification: time budget exhausted; retaining candidates without publishing them (fail-open).',
         );
         recordCoverage({
           session,
@@ -3154,19 +3153,18 @@ async function runReviewPipeline(params: {
       `Review ${coverageNotice ? 'incomplete' : 'complete'}: ${findings.length} main + ${lensFindingLists.flat().length} lens + ${complianceFindings.length} compliance finding(s), ${filteredFindings.length} after filters, ${verifiedAddressedPriorComments.length} addressed prior comment(s)`,
     );
 
-    const advisories =
-      options.experiment.preset === 'adaptive' ? filteredFindings.filter(isAdvisoryFinding) : [];
-    const { inline, fileLevel, orphaned, anchorMissed } = anchorFindings(
-      filteredFindings.filter((finding) => !advisories.includes(finding)),
+    const { inline, fileLevel, orphaned, anchorMissed, withheld } = anchorFindings(
+      filteredFindings,
       addable,
       !!headSha,
     );
+    if (withheld.length > 0) log(`Unpublished review candidates: ${JSON.stringify(withheld)}`);
     // Re-anchoring runs before dedupe/verify/filter, so some of it did not
     // survive; telemetry's rescued set must stay a subset of what was posted.
     const reanchoredIds = new Set(reanchored.map((f) => f.id));
     telemetry.route({
       inline,
-      advisory: advisories,
+      withheld,
       fileLevel,
       orphaned,
       // Ids exist only while telemetry is on, and an undefined id matches every
@@ -3212,7 +3210,7 @@ async function runReviewPipeline(params: {
         engineByModel,
         mainReasoningEffort,
         incompleteSessions,
-        { advisorySummary: options.experiment.preset === 'adaptive', auxiliaryBaselines },
+        { auxiliaryBaselines },
       );
       log(
         `Dry run enabled; would post verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
@@ -3224,8 +3222,6 @@ async function runReviewPipeline(params: {
       if (fileLevel.length > 0) {
         log(`Dry run file-level comments:\n${fileLevel.map(formatInlineFinding).join('\n\n')}`);
       }
-      if (advisories.length > 0)
-        log(`Dry run advisory details:\n${advisories.map(formatInlineFinding).join('\n\n')}`);
       if (verifiedAddressedPriorComments.length > 0) {
         log(
           `Dry run addressed prior comments:\n${verifiedAddressedPriorComments
@@ -3263,7 +3259,7 @@ async function runReviewPipeline(params: {
         engineByModel,
         mainReasoningEffort,
         incompleteSessions,
-        { advisorySummary: options.experiment.preset === 'adaptive', auxiliaryBaselines },
+        { auxiliaryBaselines },
       );
     const postCurrentReviewIfNeeded = async (): Promise<void> => {
       if (!shouldPostComment) {
@@ -3878,7 +3874,7 @@ async function verifyFindings(params: {
   }
   if (params.timeoutMs === 0) {
     params.log(
-      'Skipping finding verification: time budget exhausted; posting findings unverified (fail-open).',
+      'Skipping finding verification: time budget exhausted; retaining candidates without publishing them (fail-open).',
     );
     params.onCoverage?.({
       session,
@@ -4029,15 +4025,6 @@ function logVerdictOutcomes(
       }`,
     );
   }
-}
-
-function filterFindings(findings: Finding[], options: NormalizedReviewRunOptions): Finding[] {
-  const maxRank = SEVERITY_RANK[options.minSeverity];
-  const filtered = findings.filter((finding) => SEVERITY_RANK[finding.severity] <= maxRank);
-  if (options.maxFindings <= 0) return filtered;
-  return [...filtered]
-    .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
-    .slice(0, options.maxFindings);
 }
 
 function formatInlineFinding(finding: Finding): string {
@@ -4942,7 +4929,7 @@ export function buildBody(
   engineByModel?: Record<string, string>,
   reasoningEffort?: string,
   incompleteSessions: readonly IncompleteSession[] = [],
-  experiment?: { advisorySummary: boolean; auxiliaryBaselines: AuxiliaryBaseline[] },
+  experiment?: { auxiliaryBaselines: AuxiliaryBaseline[] },
 ): string {
   const total = all.length;
   const lines = ['## J-Bot Code Review', ''];
@@ -4960,7 +4947,7 @@ export function buildBody(
   // renders nothing rather than a filler placeholder. The "Changes since last
   // review" block above is independent and still renders on re-reviews.
   const renderedSummary =
-    !all.some(isAdvisoryFinding) && summary.trim()
+    !all.some(isUnresolvedFinding) && summary.trim()
       ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: true })
       : '';
   if (total > 0 && renderedSummary.trim()) {
@@ -4980,10 +4967,16 @@ export function buildBody(
   } else {
     lines.push('### Findings Summary', '', ...buildSeverityTable(all), '');
   }
-  const orphanedSection = renderOrphanedSection(orphaned);
+  const orphanedSection = renderOrphanedSection(
+    orphaned.filter((finding) => !isUnresolvedFinding(finding)),
+  );
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
-  if (experiment?.advisorySummary)
-    lines.push(...renderAdvisorySection(all.filter(isAdvisoryFinding)));
+  const unpublishedCount = all.filter(isUnresolvedFinding).length;
+  if (unpublishedCount > 0)
+    lines.push(
+      `**Verification limits:** ${unpublishedCount} candidate${unpublishedCount === 1 ? '' : 's'} withheld from PR comments. Details are retained in the run logs.`,
+      '',
+    );
   lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));
   lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
   return withReviewCoverage(
