@@ -51,8 +51,6 @@ export function computeEvidenceTimeoutMs(remainingMs: number | undefined): numbe
   return Math.max(0, Math.min(5000, (remainingMs ?? Infinity) - MIN_VERIFICATION_MS));
 }
 
-export const AUXILIARY_SETTLE_GRACE_MS = 60_000;
-
 /** Keeps a wrap-up reply inside the deadline the caller's own timer enforces. */
 export const WRAP_UP_MARGIN_MS = 5_000;
 
@@ -72,17 +70,8 @@ export function computeAuxiliaryGraceMs(
   elapsedMs: number,
   verificationEnabled = true,
 ): number {
-  if (timeBudgetMinutes <= 0) return AUXILIARY_SETTLE_GRACE_MS;
-  return Math.max(
-    0,
-    Math.min(
-      AUXILIARY_SETTLE_GRACE_MS,
-      timeBudgetMinutes * 60_000 -
-        elapsedMs -
-        POSTING_RESERVE_MS -
-        (verificationEnabled ? MAX_VERIFICATION_MS : 0),
-    ),
-  );
+  const deadline = computeRunDeadline(timeBudgetMinutes, 0, verificationEnabled);
+  return deadline === undefined ? Infinity : Math.max(0, deadline - elapsedMs);
 }
 
 /**

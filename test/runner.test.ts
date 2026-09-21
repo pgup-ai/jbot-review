@@ -1347,8 +1347,10 @@ describe('settleWithinGrace', () => {
   });
 
   it('returns the real value when it lands inside the grace', async () => {
-    const done = Promise.resolve([1]);
-    assert.deepEqual(await settleWithinGrace(session(done), [], () => {}, 1000), [1]);
+    for (const grace of [1000, Infinity]) {
+      const done = new Promise<number[]>((resolve) => setTimeout(() => resolve([1]), 5));
+      assert.deepEqual(await settleWithinGrace(session(done), [], () => {}, grace), [1]);
+    }
   });
 
   it('falls back rather than throwing when the session rejects', async () => {
@@ -1371,12 +1373,13 @@ describe('settleWithinGrace', () => {
   });
 });
 
-it('caps auxiliary grace at one minute while reserving verification and posting time', () => {
-  assert.equal(computeAuxiliaryGraceMs(30, 90_000), 60_000);
-  assert.equal(computeAuxiliaryGraceMs(10, 120_000), 60_000);
-  assert.equal(computeAuxiliaryGraceMs(5, 0), 0);
-  assert.equal(computeAuxiliaryGraceMs(5, 0, false), 60_000);
-  assert.equal(computeAuxiliaryGraceMs(0, 9_000_000), 60_000);
+it('lets auxiliary work use the finder deadline without spending verification and posting reserves', () => {
+  assert.equal(computeAuxiliaryGraceMs(30, 90_000), 1_380_000);
+  assert.equal(computeAuxiliaryGraceMs(10, 120_000), 165_000);
+  assert.equal(computeAuxiliaryGraceMs(5, 0), 135_000);
+  assert.equal(computeAuxiliaryGraceMs(5, 0, false), 270_000);
+  assert.equal(computeAuxiliaryGraceMs(30, 1_500_000), 0);
+  assert.equal(computeAuxiliaryGraceMs(0, 9_000_000), Infinity);
 });
 
 it('does not let optional bookkeeping delay posting, but keeps settled results', async () => {

@@ -47,18 +47,23 @@ export const OPENCODE_TELEMETRY_CAPABILITY = 'observable' as const;
 /** V2 tool ids → the names the shared telemetry classifier knows. */
 const TOOL_CLASS_ALIASES: Record<string, string> = { shell: 'bash', execute: 'bash' };
 
-// Rotate paged passes so one cannot starve the others; main and verification retain priority.
-export type SemaphorePriority = 'high' | 'normal' | 'low';
+export type SemaphorePriority = 'verification' | 'high' | 'normal' | 'low';
 
 export class Semaphore {
   private queues: Record<SemaphorePriority, Array<{ grant: () => void; group?: string }>> = {
+    verification: [],
     high: [],
     normal: [],
     low: [],
   };
   private active = 0;
+  private auxiliaryActive = 0;
+  private lastGranted: SemaphorePriority = 'normal';
 
-  constructor(private readonly limit: number) {}
+  constructor(
+    private readonly limit: number,
+    private readonly reviewScheduling = false,
+  ) {}
 
   async acquire(
     priority: SemaphorePriority = 'normal',
@@ -67,45 +72,64 @@ export class Semaphore {
   ): Promise<() => void> {
     signal?.throwIfAborted();
     if (this.limit === 0) return () => undefined;
-    if (this.active < this.limit) {
-      this.active += 1;
-    } else {
-      const queue = this.queues[priority];
-      await new Promise<void>((resolve, reject) => {
-        const grant = () => {
-          signal?.removeEventListener('abort', abort);
-          resolve();
-        };
-        const abort = () => {
-          queue.splice(queue.indexOf(waiter), 1);
-          reject(signal?.reason);
-        };
-        const waiter = { grant, group };
-        queue.push(waiter);
-        signal?.addEventListener('abort', abort, { once: true });
-      });
-    }
+    const auxiliary = priority === 'normal' || priority === 'low';
+    const queue = this.queues[priority];
+    await new Promise<void>((resolve, reject) => {
+      const grant = () => {
+        signal?.removeEventListener('abort', abort);
+        this.active++;
+        if (auxiliary) this.auxiliaryActive++;
+        this.lastGranted = priority;
+        resolve();
+      };
+      const abort = () => {
+        queue.splice(queue.indexOf(waiter), 1);
+        reject(signal?.reason);
+      };
+      const waiter = { grant, group };
+      queue.push(waiter);
+      signal?.addEventListener('abort', abort, { once: true });
+      this.drain();
+    });
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      const queue = [this.queues.high, this.queues.normal, this.queues.low].find((q) => q.length);
-      const next = queue?.shift();
-      if (next) {
-        if (next.group && queue) {
-          const sameGroup = queue.filter((waiter) => waiter.group === next.group);
-          queue.splice(
-            0,
-            queue.length,
-            ...queue.filter((waiter) => waiter.group !== next.group),
-            ...sameGroup,
-          );
-        }
-        next.grant();
-      } else {
-        this.active -= 1;
-      }
+      this.active--;
+      if (auxiliary) this.auxiliaryActive--;
+      this.drain();
     };
+  }
+
+  private drain(): void {
+    while (this.active < this.limit) {
+      const { verification, high, normal, low } = this.queues;
+      // One slot stays available to main/verification; a serial provider cannot reserve one.
+      const auxiliaryRoom =
+        !this.reviewScheduling || this.auxiliaryActive < Math.max(1, this.limit - 1);
+      const auxiliaryTurn =
+        this.reviewScheduling &&
+        this.auxiliaryActive === 0 &&
+        (this.limit > 1 || this.lastGranted !== 'normal');
+      const ordered = auxiliaryTurn
+        ? [verification, normal, high, low]
+        : [verification, high, normal, low];
+      const queue = ordered.find(
+        (q) => q.length && (auxiliaryRoom || q === verification || q === high),
+      );
+      const next = queue?.shift();
+      if (!next || !queue) break;
+      if (next.group) {
+        const sameGroup = queue.filter((waiter) => waiter.group === next.group);
+        queue.splice(
+          0,
+          queue.length,
+          ...queue.filter((waiter) => waiter.group !== next.group),
+          ...sameGroup,
+        );
+      }
+      next.grant();
+    }
   }
 
   isBusy(): boolean {

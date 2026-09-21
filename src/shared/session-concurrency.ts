@@ -71,7 +71,6 @@ export interface ReviewBackend {
     timeoutMs?: number,
     onTokenUsage?: TokenUsageRecorder,
   ): Promise<string>;
-  stopQueuedSessionsByLabel?(label: string): number;
   /**
    * TASK-076: best-effort abort of this backend's in-flight sessions for a
    * prompt label, called when the settle grace abandons an auxiliary result.
@@ -102,7 +101,7 @@ export function createProviderSessionLimiters(
   const limiters = new Map<string, { limit: number; slots: SessionSlots }>();
   for (const providerID of new Set(providerIDs)) {
     const limit = concurrencyFor(providerID);
-    if (limit !== undefined) limiters.set(providerID, { limit, slots: new Semaphore(limit) });
+    if (limit !== undefined) limiters.set(providerID, { limit, slots: new Semaphore(limit, true) });
   }
   return {
     configured: [...limiters].map(([providerID, { limit }]) => ({ providerID, limit })),
@@ -118,16 +117,6 @@ export function limitReviewBackendSessions(
   telemetry?: { phases: PhaseTelemetryTracker; tools: ToolTelemetryAccumulator },
 ): ReviewBackend {
   const pending = new Map<AbortController, string>();
-  const closedLabels = new Set<string>();
-  const stopQueued = (label: string) => {
-    let count = 0;
-    for (const [controller, session] of pending) {
-      if (session !== label || controller.signal.aborted) continue;
-      controller.abort(new Error(`${label} stopped while queued`));
-      count++;
-    }
-    return count;
-  };
   const rolePriority = role === 'main' ? 'high' : 'normal';
   const withSlots = async <T>(
     session: string,
@@ -135,7 +124,6 @@ export function limitReviewBackendSessions(
     priority: SemaphorePriority = rolePriority,
     budget?: { timeoutMs: number; deadlineAt?: number; log: (message: string) => void },
   ): Promise<T> => {
-    if (closedLabels.has(session)) throw new Error(`${session} stopped before dispatch`);
     const controller = new AbortController();
     pending.set(controller, session);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -245,12 +233,15 @@ export function limitReviewBackendSessions(
     observability: backend.observability,
     canReadWorkspace: backend.canReadWorkspace,
     supportsGuidelineSweep: backend.supportsGuidelineSweep,
-    stopQueuedSessionsByLabel: (label) => {
-      closedLabels.add(label);
-      return stopQueued(label);
+    abortSessionsByLabel: (label, log) => {
+      let queued = 0;
+      for (const [controller, session] of pending) {
+        if (session !== label || controller.signal.aborted) continue;
+        controller.abort(new Error(`${label} stopped while queued`));
+        queued++;
+      }
+      return queued + (backend.abortSessionsByLabel?.(label, log) ?? 0);
     },
-    abortSessionsByLabel: (label, log) =>
-      stopQueued(label) + (backend.abortSessionsByLabel?.(label, log) ?? 0),
     // Queued sessions have no turn to wrap up; they settle at grace expiry as before.
     ...(backend.finalizeSessionsByLabel
       ? { finalizeSessionsByLabel: backend.finalizeSessionsByLabel.bind(backend) }
@@ -292,10 +283,12 @@ export function limitReviewBackendSessions(
       ),
     runGuidelineComplianceCheck: (...args) =>
       withSlots('guideline-compliance', () => backend.runGuidelineComplianceCheck(...args)),
-    // The one auxiliary call the posting path awaits: never queue it behind
-    // recall sessions still holding slots past the settle grace.
     runFindingVerification: (...args) =>
-      withSlots('finding-verification', () => backend.runFindingVerification(...args), 'high'),
+      withSlots(
+        'finding-verification',
+        () => backend.runFindingVerification(...args),
+        'verification',
+      ),
     runChangesSinceLastReview: (...args) =>
       withSlots(
         'changes-since-last-review',

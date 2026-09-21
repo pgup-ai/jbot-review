@@ -24,7 +24,6 @@ import {
   computeVerificationTimeoutMs,
   computeEvidenceTimeoutMs,
   computeAuxiliaryGraceMs,
-  AUXILIARY_SETTLE_GRACE_MS,
   sharedPrefixLaunchDelayMs,
   wrapUpReserveMs,
 } from './time-budget.ts';
@@ -1792,8 +1791,10 @@ async function runReviewPipeline(params: {
       `ACP gateway: routing ${routedAgents.join(', ')} to ${remoteAcp.endpoint} via ${remoteAcp.gateway}`,
     );
   }
-  const sessionSlots = new Semaphore(sessionCap);
-  log(`Model session concurrency capped at ${sessionCap}.`);
+  const sessionSlots = new Semaphore(sessionCap, true);
+  log(
+    `Model session concurrency capped at ${sessionCap}; auxiliary work leaves ${sessionCap > 1 ? 1 : 0} slot for main review and verification.`,
+  );
   const providerLimiters = createProviderSessionLimiters(
     [providerID, auxProviderID],
     providerSessionConcurrency,
@@ -2050,7 +2051,7 @@ async function runReviewPipeline(params: {
     );
     grokBackend = createGrokBackend(runtime);
     // Grok mutates shared auth state, so its sessions cannot overlap.
-    serializedBackends.set(grokBackend, new Semaphore(1));
+    serializedBackends.set(grokBackend, new Semaphore(1, true));
   }
 
   if (!remoteAcp && (mainCliBackend === KILO_PROVIDER_ID || auxCliBackend === KILO_PROVIDER_ID)) {
@@ -2964,13 +2965,6 @@ async function runReviewPipeline(params: {
       });
       return { targets, verdicts };
     };
-    for (const session of [...lensPasses, guidelineComplianceCheck]) {
-      if (session.isSettled()) continue;
-      const queued = auxBackend.stopQueuedSessionsByLabel?.(session.label) ?? 0;
-      log(
-        `Main review complete: stopped ${queued} queued ${session.label} page(s); active pages may finish within the auxiliary grace.`,
-      );
-    }
     const overlapVerification =
       options.verifyOverlapGrace && verificationEnabled
         ? startOverlapVerification().catch(() => 'skipped' as const)
@@ -2992,6 +2986,10 @@ async function runReviewPipeline(params: {
       Date.now() - runStartedAt,
       verificationEnabled,
     );
+    if (auxiliaryWaitLabels.length > 0)
+      log(
+        `Auxiliary finder budget remaining: ${Number.isFinite(auxiliaryGraceMs) ? `${Math.round(auxiliaryGraceMs / 1000)}s` : 'unlimited'}; queued pages remain eligible.`,
+      );
     const graceDone = phases.start({ phase: 'grace-wait', scope: 'run' });
     const wrapUpAuxSession = (label: string, graceMs: number) => ({
       reserveMs: wrapUpReserveMs(graceMs),
@@ -3856,13 +3854,13 @@ export function settleWithinGrace<T>(
   session: AuxiliarySession<T>,
   fallback: T | (() => T),
   log: (msg: string) => void,
-  graceMs = AUXILIARY_SETTLE_GRACE_MS,
+  graceMs = Infinity,
   onAbandon?: () => void,
   /** Asks the backend to wrap up reserveMs before the grace ends; finalize returns the sessions signalled. */
   wrapUp?: { reserveMs: number; finalize: (budgetMs: number) => number },
 ): Promise<T> {
   const value = () => (typeof fallback === 'function' ? (fallback as () => T)() : fallback);
-  if (session.isSettled()) return session.promise.catch(value);
+  if (session.isSettled() || !Number.isFinite(graceMs)) return session.promise.catch(value);
   const settle = (error: unknown): T => {
     // Only the grace expiring is worth a line; a session that failed on its own
     // already logged why.
