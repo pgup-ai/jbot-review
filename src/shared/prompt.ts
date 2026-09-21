@@ -1497,15 +1497,7 @@ const VERIFICATION_CLAIM_CHECK = `- Compare the finding's claimed identifiers, o
   descriptions; do not repair them into a different bug.
 - To confirm, give a concrete input or state, quote the decisive source expression
   verbatim, and explain the incorrect result. A request to check whether a premise
-  holds is not confirmation.
-- To confirm an investigation or low-confidence candidate, add "finding" with only
-  a factual title, reassessed severity, non-investigate kind, and a verbatim
-  evidence quote from the supplied source. The existing "reason" becomes its
-  published body: explain the demonstrated trigger and impact there, without
-  repeating it in another field. Code preserves the original path and line.
-  Example: "finding": {"title":"Refund uses the pre-tax amount","severity":"P2","kind":"bug","evidence":"return invoice.subtotal;"}.
-  Without these fields the candidate stays unresolved. Do not substitute a
-  different issue. Ordinary findings need only the verdict and reason.`;
+  holds is not confirmation.`;
 
 export const FINDING_VERIFICATION_PROMPT = `You are a skeptical staff engineer double-checking proposed code-review
 findings before they are posted to a pull request. Your default position is
@@ -1628,6 +1620,32 @@ fences. One verdict per finding, keyed by its "index" from the list below:
 - "reason": one or two sentences citing the decisive supplied code (path:line).
 - Every listed finding receives exactly one verdict.`;
 
+const CANDIDATE_CONFIRMATION_PROMPT = `## Confirming tentative candidates
+
+Findings marked "Tentative candidate" require this extended confirmation shape.
+For each such candidate you confirm, "finding" is REQUIRED: supply a factual
+title, reassessed severity, non-investigate kind, and a verbatim evidence quote
+from the supplied source. "reason" becomes the published body: explain the
+proven trigger and impact there. Code preserves the original path and line.
+Do not substitute a different issue. Without these fields it stays unresolved.
+Refuted, uncertain, and ordinary findings still need only verdict and reason.
+
+{
+  "verdicts": [
+    {
+      "index": 0,
+      "verdict": "confirmed",
+      "reason": "For an invoice with tax, the public refund route returns only the subtotal, under-refunding the customer (src/billing/invoice.ts:42).",
+      "finding": {
+        "title": "Refund omits the paid tax",
+        "severity": "P2",
+        "kind": "bug",
+        "evidence": "return invoice.subtotal;"
+      }
+    }
+  ]
+}`;
+
 export const VERIFICATION_OUTPUT_REMINDER = `## Final output reminder
 
 Respond now with one raw JSON object with the single top-level key
@@ -1726,8 +1744,9 @@ export function formatFindingsForVerification(findings: VerifiableFinding[]): st
         `### Finding ${index}`,
         `Location: ${location}`,
         `Severity: ${finding.severity}`,
-        ...(finding.kind ? [`Kind: ${finding.kind}`] : []),
-        ...(finding.confidence ? [`Confidence: ${finding.confidence}`] : []),
+        ...(finding.kind === 'investigate' || finding.confidence === 'low'
+          ? ['Tentative candidate: confirmation requires an evidence-backed finding.']
+          : []),
         `Title: ${finding.title}`,
         `Claim: ${finding.body}`,
         // The finding's load-bearing premise: no such line in the diff → the
@@ -1748,6 +1767,9 @@ export function assembleFindingVerificationPrompt(
     singleShot ? FINDING_VERIFICATION_SINGLE_SHOT_PROMPT : FINDING_VERIFICATION_PROMPT,
     prContext,
     formatFindingsForVerification(findings),
+    ...(findings.some((finding) => finding.kind === 'investigate' || finding.confidence === 'low')
+      ? [CANDIDATE_CONFIRMATION_PROMPT]
+      : []),
     VERIFICATION_OUTPUT_REMINDER,
   ].join('\n\n');
 }

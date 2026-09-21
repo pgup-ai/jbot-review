@@ -601,6 +601,14 @@ describe('assembleFindingVerificationPrompt', () => {
     assert.match(prompt, /### Finding 0/);
     assert.match(prompt, /### Finding 1/);
     assert.ok(prompt.indexOf('PR_CONTEXT_SENTINEL') < prompt.indexOf('### Finding 0'));
+    assert.doesNotMatch(prompt, /Tentative candidate|Confirming tentative candidates/);
+    const tentative = assembleFindingVerificationPrompt('CTX', [
+      { ...findings[0], kind: 'investigate', confidence: 'low' },
+    ]);
+    assert.match(tentative, /Tentative candidate/);
+    assert.match(tentative, /"finding" is REQUIRED/);
+    assert.match(tentative, /"finding": \{/);
+    assert.ok(tentative.endsWith(VERIFICATION_OUTPUT_REMINDER));
   });
 
   it('renders line-0 findings as file-level locations', () => {
