@@ -25,6 +25,7 @@ import {
   formatReviewedWith,
   normalizeOptions,
   startLensPasses,
+  startGuidelineComplianceCheck,
   renderReviewMetadataBlock,
   settleWithinGrace,
   takeSettledAuxiliary,
@@ -1626,6 +1627,50 @@ it('dispatches each auxiliary page with its planned guidelines', async () => {
   assert.ok(rows.includes('guideline-compliance:completed'));
 });
 
+it('retains and clamps denied guideline candidates without claiming completed coverage', async () => {
+  const finding: Finding = { path: 'a.ts', line: 1, severity: 'P2', title: 'Bug', body: 'Defect' };
+  const collected: Finding[] = [];
+  const coverage: string[] = [];
+  const result = await startGuidelineComplianceCheck({
+    backend: {
+      runGuidelineComplianceCheck: async (_model: string, context: string) => {
+        if (context === 'a.ts')
+          throw new IncompleteReviewError('permission denied', [
+            finding,
+            { ...finding, path: 'b.ts' },
+          ]);
+        return [];
+      },
+    } as unknown as ReviewBackend,
+    model: 'fake/model',
+    prContext: '',
+    guidelinesForPrompt: 'rules',
+    hasGuidelines: true,
+    enabled: true,
+    plans: () =>
+      ['a.ts', 'b.ts'].map((path) => ({
+        label: path,
+        context: path,
+        baseContext: path,
+        assignedFiles: [path],
+        diffCoverage: {
+          assignedFiles: 1,
+          completeFiles: 1,
+          truncatedFiles: 0,
+          omittedFiles: 0,
+          bytes: 1,
+        },
+      })),
+    onFindings: (findings) => collected.push(...findings),
+    onCoverage: (row) => coverage.push(`${row.session}:${row.state}`),
+    log: () => {},
+  });
+  assert.deepEqual(result, [finding]);
+  assert.deepEqual(collected, [finding]);
+  assert.ok(coverage.includes('guideline-compliance-page-1:failed'));
+  assert.ok(coverage.includes('guideline-compliance:partial'));
+});
+
 it('staggers shared-prefix launches so the first prefill lands before the next request', () => {
   assert.equal(sharedPrefixLaunchDelayMs(0, false), 0);
   assert.equal(sharedPrefixLaunchDelayMs(1, false), SHARED_PREFIX_STAGGER_MS);
@@ -1665,7 +1710,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   assert.match(body, /Review incomplete/);
   assert.match(body, /Review interactions/);
   assert.match(body, /Main review completed/);
-  assert.match(body, /Findings from completed passes are included/);
+  assert.match(body, /including any recovered from incomplete passes/);
   assert.doesNotMatch(body, /unverified concerns/);
   assert.doesNotMatch(body, /✅|Good to go|No new findings were found/);
   const blocked = buildBody(
@@ -1684,7 +1729,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   );
   assert.match(blocked, /Needs changes before approval/);
   assert.match(blocked, /Review incomplete/);
-  assert.match(blocked, /incomplete verification are marked as unverified concerns/);
+  assert.match(blocked, /Candidates with incomplete verification remain in run diagnostics/);
   assert.match(blocked, /Address the P0\/P1\/P2 findings/);
   const uncertain = buildBody(
     '',

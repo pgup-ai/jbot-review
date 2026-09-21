@@ -151,3 +151,16 @@ rejection of prose; the live smoke did not induce a permission failure. No new
 standalone tests were added. The one new comment explains why repair is skipped.
 The core benchmark was not rerun for this fix; the branch's full-corpus default
 rollout gate and documented filesystem-isolation concerns remain outstanding.
+
+### Follow-up review
+
+The incomplete-review footer now includes recovered candidates and explains that
+unverified candidates stay in diagnostics. Pi's prompt explicitly permits the
+canonical diff file outside the checkout. A separate guideline test verifies
+candidate retention, assigned-file clamping and failed coverage.
+
+All 1,112 tests, typecheck, lint and build passed. Free-model Pi verification
+recovered the removed guard from the 66 KB diff and confirmed the seeded defect
+in 8.6s. The core corpus was not rerun. The latest dogfood artifact's one withheld
+candidate correctly identifies the still-outstanding full-corpus rollout gate.
+Cline remains tool-less; its CLI's global auto-approval was not enabled.

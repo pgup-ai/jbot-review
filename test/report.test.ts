@@ -406,7 +406,7 @@ test('incomplete-coverage notice groups page failures without hiding missing pas
   );
   assert.match(notice, /Guideline compliance:\*\* timed out; 26 pages incomplete/);
   assert.match(notice, /Finding verification:\*\* failed/);
-  assert.match(notice, /marked as unverified concerns/);
+  assert.match(notice, /Candidates with incomplete verification remain in run diagnostics/);
   assert.equal(formatIncompleteCoverage([]), '');
 });
 

@@ -4779,7 +4779,7 @@ function startChangesSinceLastReviewSummary(params: {
     });
 }
 
-function startGuidelineComplianceCheck(params: {
+export function startGuidelineComplianceCheck(params: {
   backend: ReviewBackend;
   model: string;
   prContext: string;
