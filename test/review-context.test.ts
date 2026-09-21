@@ -9,6 +9,7 @@ import {
   buildReviewContext,
   buildReviewScopeContext,
   discoverGuidelineDocs,
+  applicableGuidelines,
   discoverGuidelines,
   formatContextBudget,
   formatDiffScope,
@@ -916,6 +917,15 @@ describe('formatFinderGuidelines', () => {
       assert.match(finder, /findme-ts/, 'glob-matching rule outranks a non-matching one');
       assert.match(finder, /findme-always/, 'alwaysApply rule is never demoted');
       assert.doesNotMatch(finder, /findme-python/, 'non-matching rule is first out under the cap');
+
+      const applicable = applicableGuidelines(discovered, ['src/index.ts']);
+      const selected = formatGuidelines(applicable);
+      assert.doesNotMatch(selected, /findme-python/);
+      for (const rule of ['ts', 'always', 'huge', 'broken', 'bomb'])
+        assert.ok(selected.includes(`findme-${rule}`));
+      assert.equal(applicableGuidelines(discovered, []).docs.length, discovered.docs.length);
+      assert.equal(applicable.referenced, discovered.referenced);
+      assert.equal(applicable.budgetExhausted, discovered.budgetExhausted);
 
       // Demoted, never dropped: with budget to spare it still renders.
       const roomy = formatFinderGuidelines(discovered, { forFiles: ['src/index.ts'] });

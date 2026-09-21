@@ -1570,6 +1570,42 @@ it('records a lens that wrapped up on its own deadline as partial coverage', asy
   assert.deepEqual(rows, ['review-interactions:partial', 'guideline-compliance:partial']);
 });
 
+it('dispatches each auxiliary page with its planned guidelines', async () => {
+  const delivered: string[] = [];
+  const rows: string[] = [];
+  const backend = {
+    name: 'fake',
+    runReview: async (_model, _context, guidelines) => {
+      delivered.push(guidelines);
+      return { summary: '', findings: [] };
+    },
+  } as unknown as ReviewBackend;
+  await Promise.all(
+    startLensPasses({
+      backend,
+      model: 'fake/model',
+      lensPrContext: 'CTX',
+      guidelinesForPrompt: '',
+      guidelineCompliance: 'oversized full bundle',
+      lensKeys: ['interactions'],
+      log: () => {},
+      plans: () =>
+        ['part one', 'part two'].map((guidelines) => ({
+          label: guidelines,
+          context: 'complete diff',
+          baseContext: '',
+          assignedFiles: [],
+          guidelines,
+          diffCoverage: { totalFiles: 0, completeFiles: 0, truncatedFiles: 0, omittedFiles: 0 },
+        })),
+      onCoverage: (row) => rows.push(`${row.session}:${row.state}`),
+    }),
+  );
+  assert.deepEqual(delivered, ['part one', 'part two']);
+  assert.ok(rows.includes('review-interactions:completed'));
+  assert.ok(rows.includes('guideline-compliance:completed'));
+});
+
 it('staggers shared-prefix launches so the first prefill lands before the next request', () => {
   assert.equal(sharedPrefixLaunchDelayMs(0, false), 0);
   assert.equal(sharedPrefixLaunchDelayMs(1, false), SHARED_PREFIX_STAGGER_MS);

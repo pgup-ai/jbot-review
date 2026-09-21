@@ -1,6 +1,7 @@
 import { budgetReviewBackend } from './prompt-budget.ts';
 import {
   buildShardPlans,
+  buildAuxiliaryPlans,
   prioritizeAuxiliaryPlans,
   addReviewEvidence,
   targetedVerifierContext,
@@ -248,6 +249,7 @@ import {
   buildReviewContext,
   buildReviewScopeContext,
   discoverGuidelineDocs,
+  applicableGuidelines,
   formatGuidelines,
   formatFinderGuidelines,
   formatDiffScope,
@@ -1491,14 +1493,18 @@ async function runReviewPipeline(params: {
     commandCodeEffortContext,
   );
 
-  const discoveredGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
+  const loadedGuidelines = await discoverGuidelineDocs(workspace, changedFiles);
+  const discoveredGuidelines = applicableGuidelines(loadedGuidelines, changedFiles);
+  log(
+    `Guideline scope: ${discoveredGuidelines.docs.length}/${loadedGuidelines.docs.length} documents apply to the full PR; ${loadedGuidelines.docs.length - discoveredGuidelines.docs.length} explicitly scoped documents excluded.`,
+  );
   const guidelines = formatGuidelines(discoveredGuidelines);
   const finderGuidelines = formatFinderGuidelines(discoveredGuidelines, {
     forFiles: changedFiles,
   });
   if (guidelines) {
     log(
-      `Guidelines loaded (${guidelines.length} bytes; finder slice ${finderGuidelines.length} bytes).`,
+      `Guidelines loaded (${Buffer.byteLength(guidelines)} bytes; finder slice ${Buffer.byteLength(finderGuidelines)} bytes).`,
     );
   }
 
@@ -2756,11 +2762,11 @@ async function runReviewPipeline(params: {
       lens: true,
     });
     const prepareAuxPlans = async (lens?: string, lensRules = lensGuidelines) => {
-      const render = (context: string) =>
+      const render = (context: string, rules = lens ? lensRules : guidelines) =>
         lens
           ? assembleReviewPrompt(
               context,
-              lensRules,
+              rules,
               lens,
               options.evidenceQuotes,
               options.embeddedFirstPrompt,
@@ -2769,8 +2775,8 @@ async function runReviewPipeline(params: {
                 contextFirst: options.sharedPrefixPrompt,
               },
             )
-          : assembleGuidelineCompliancePrompt(context, guidelines);
-      const plans = buildShardPlans({
+          : assembleGuidelineCompliancePrompt(context, rules);
+      const plans = buildAuxiliaryPlans({
         coreContext: lens
           ? joinContext(UNTRUSTED_PR_CONTENT_NOTE, ...lensContextBlocks)
           : mainCoreContext,
@@ -2778,6 +2784,8 @@ async function runReviewPipeline(params: {
         shards,
         budget: auxPromptBudget,
         renderPrompt: render,
+        guidelines: lens ? lensRules : guidelines,
+        guidelineLabels: discoveredGuidelines.docs.map((doc) => doc.label),
         evidenceReserveBytes: REVIEW_EVIDENCE_BYTES,
       });
       await addReviewEvidence(plans, evidence, render, auxPromptBudget, log);
@@ -3736,7 +3744,7 @@ export function startLensPasses(params: {
           const plans: Array<Pick<ShardPlan, 'context'> & Partial<ShardPlan>> =
             await (params.plans?.(lens, guidelines) ?? [{ context: params.lensPrContext }]);
           params.log(
-            `Auxiliary delivery (${key}): ${JSON.stringify({ pages: plans.length, jointGuidelines: !!jointGuidelines, promptBytes: plans.reduce((sum, plan) => sum + (plan.promptBytes ?? 0), 0) })}.`,
+            `Auxiliary delivery (${key}): ${JSON.stringify({ pages: plans.length, jointGuidelines: !!jointGuidelines, guidelineParts: new Set(plans.map((plan) => plan.guidelines ?? guidelines)).size, promptBytes: plans.reduce((sum, plan) => sum + (plan.promptBytes ?? 0), 0) })}.`,
           );
           const results = await Promise.all(
             plans.map(async (plan, page) => {
@@ -3746,7 +3754,7 @@ export function startLensPasses(params: {
                 const result = await params.backend.runReview(
                   params.model,
                   plan.context,
-                  guidelines,
+                  plan.guidelines ?? guidelines,
                   params.log,
                   {
                     lensAddendum: lens,
@@ -4806,7 +4814,7 @@ function startGuidelineComplianceCheck(params: {
             const findings = await params.backend.runGuidelineComplianceCheck(
               params.model,
               plan.context,
-              params.guidelinesForPrompt,
+              plan.guidelines ?? params.guidelinesForPrompt,
               params.log,
               params.timeoutMs,
               params.onTokenUsage,

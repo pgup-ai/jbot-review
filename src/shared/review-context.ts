@@ -356,6 +356,23 @@ export interface DiscoveredGuidelines {
   budgetExhausted: boolean;
 }
 
+export function applicableGuidelines(
+  discovered: DiscoveredGuidelines,
+  changedFiles: string[],
+): DiscoveredGuidelines {
+  return {
+    ...discovered,
+    docs: discovered.docs.filter(
+      (doc) =>
+        !changedFiles.length ||
+        !doc.globs?.length ||
+        // Unknown glob syntax must not silently remove a repository contract.
+        doc.globs.some((glob) => expandBraces(glob).some((part) => /[{}[\]!?\\]/.test(part))) ||
+        doc.globs.some((glob) => changedFiles.some((file) => globMatches(glob, file))),
+    ),
+  };
+}
+
 const GIT_DIFF_COMMAND = `git ${GIT_DIFF_ARGS.join(' ')}`;
 
 /**
