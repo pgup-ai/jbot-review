@@ -1487,6 +1487,13 @@ export function assembleGuidelineCompliancePrompt(prContext: string, guidelines:
   return parts.join('\n\n');
 }
 
+const VERIFICATION_CLAIM_CHECK = `- Compare the finding's claimed identifiers, operators and conditions against the
+  actual current source, not quotations in the finding. Refute materially incorrect
+  descriptions; do not repair them into a different bug.
+- To confirm, give a concrete input or state, quote the decisive source expression
+  verbatim, and explain the incorrect result. A request to check whether a premise
+  holds is not confirmation.`;
+
 export const FINDING_VERIFICATION_PROMPT = `You are a skeptical staff engineer double-checking proposed code-review
 findings before they are posted to a pull request. Your default position is
 that each finding is WRONG. Your job is to try to refute it.
@@ -1505,6 +1512,7 @@ that each finding is WRONG. Your job is to try to refute it.
   it from priors; see the "uncertain" verdict.
 - Check whether the PR itself already handles the concern elsewhere (a later
   hunk, a test, a validation layer).
+${VERIFICATION_CLAIM_CHECK}
 - For advisory suggestions, verify the alleged conflict and whether the proposed change offers a concrete benefit. Refute requests to check something the repository already answers.
 - Judge each finding independently. Do NOT widen scope: you are judging the
   listed findings, not re-reviewing the PR. Do not propose new findings.
@@ -1571,6 +1579,7 @@ that each finding is WRONG. Your job is to try to refute it.
   guard elsewhere, or a library's internal behavior — return "uncertain".
   Excerpts are bounded windows, not complete files or exhaustive search results:
   omitted or unavailable code is not evidence that a guard or registration is absent.
+${VERIFICATION_CLAIM_CHECK}
 - For advisory suggestions, verify the alleged conflict and whether the proposed change offers a concrete benefit. Refute requests to check something the repository already answers.
 - Judge each finding independently. Do NOT widen scope: you are judging the
   listed findings, not re-reviewing the PR. Do not propose new findings.

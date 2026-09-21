@@ -201,7 +201,7 @@ describe('buildBody', () => {
     };
     const body = buildBody(
       '',
-      '',
+      'Speculative summary must stay private',
       [uncertain],
       [uncertain],
       'model',
@@ -217,7 +217,7 @@ describe('buildBody', () => {
     assert.match(body, /1 candidate withheld from PR comments/);
     assert.doesNotMatch(
       body,
-      /Caller may be missing|The caller was not supplied|Long hypothesis|<!-- jbot-review:finding -->/,
+      /Caller may be missing|The caller was not supplied|Long hypothesis|Speculative summary must stay private|<!-- jbot-review:finding -->/,
     );
     assert.match(body, /\| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 1 \|/);
     assert.match(body, /Review state:\*\* Unverified concerns remain/);

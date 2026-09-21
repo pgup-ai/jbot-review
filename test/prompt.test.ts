@@ -545,8 +545,9 @@ describe('FINDING_VERIFICATION_PROMPT', () => {
     assert.match(FINDING_VERIFICATION_PROMPT, /Field constraints:/);
   });
 
-  it('routes uncertain verdicts to advisory severity, not silence', () => {
+  it('keeps uncertain verdicts in diagnostics and out of PR comments', () => {
     assert.match(FINDING_VERIFICATION_PROMPT, /withheld from PR comments/);
+    assert.match(FINDING_VERIFICATION_PROMPT, /quote the decisive source expression/);
   });
 
   it('abstains on unverifiable third-party framework-internal premises', () => {
@@ -633,6 +634,7 @@ describe('assembleFindingVerificationPrompt', () => {
     assert.match(prompt, /each finding is WRONG/);
     assert.match(prompt, /library\/framework behaves internally/);
     assert.match(prompt, /withheld from PR comments/);
+    assert.match(prompt, /quote the decisive source expression/);
     // still lists findings and ends with the recency reminder
     assert.match(prompt, /### Finding 0/);
     assert.ok(prompt.endsWith(VERIFICATION_OUTPUT_REMINDER));
