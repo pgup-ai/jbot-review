@@ -1,6 +1,7 @@
 import {
   commandCodeToolOutcome,
   parseCommandCodeUsage,
+  parseCommandCodeBenchmark,
   createCommandCodeProgress,
   type CommandCodeProgress,
 } from './commandcode-progress.ts';
@@ -11,10 +12,12 @@ import {
   mkdtempSync,
   mkdirSync,
   rmSync,
+  readFileSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { opendir } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
@@ -657,6 +660,13 @@ async function runCommandCodePrompt(
   const repairHome =
     runtime?.tools && repair ? mkdtempSync(join(runtime.home, 'repair-')) : undefined;
   const home = repairHome ?? runtime?.home;
+  let benchmarkDir: string | undefined;
+  try {
+    benchmarkDir = mkdtempSync(join(home ?? tmpdir(), 'benchmark-'));
+    args.push('--benchmark-output', join(benchmarkDir, 'metrics.json'));
+  } catch {
+    log(`CommandCode benchmark (${label}): unavailable`);
+  }
   const input =
     runtime?.tools && !repair
       ? withCommandCodeToolsDirective(prompt, workspace)
@@ -733,6 +743,23 @@ async function runCommandCodePrompt(
     complete = true;
     return { finalText: parsed.finalText, sessionId: parsed.sessionId };
   } finally {
+    if (benchmarkDir) {
+      try {
+        const path = join(benchmarkDir, 'metrics.json');
+        if (statSync(path).size <= 4 * 1024 * 1024) {
+          const benchmark = parseCommandCodeBenchmark(JSON.parse(readFileSync(path, 'utf8')));
+          if (benchmark) log(`CommandCode benchmark (${label}): ${JSON.stringify(benchmark)}`);
+        }
+      } catch {
+        log(`CommandCode benchmark (${label}): unavailable`);
+      } finally {
+        try {
+          rmSync(benchmarkDir, { recursive: true, force: true });
+        } catch {
+          log(`CommandCode benchmark (${label}): cleanup failed`);
+        }
+      }
+    }
     if (repairHome) rmSync(repairHome, { recursive: true, force: true });
     clearInterval(heartbeat);
     progress.finish();

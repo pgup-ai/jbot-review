@@ -739,6 +739,8 @@ const resume = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : 
 let input = '';
 process.stdin.on('data', chunk => input += chunk);
 process.stdin.on('end', async () => {
+  const benchmark = args[args.indexOf('--benchmark-output') + 1];
+  fs.writeFileSync(benchmark, JSON.stringify({wallTimeMs: 100, turnDetails: [{apiDurationMs: 80, toolDurationMs: 5, toolCalls: []}]}));
   if (model === 'abort') {
     console.log(JSON.stringify({type:'event',event:{type:'tool_completed',toolName:'read_file',result:'PRIVATE_CONTENT'}}));
     console.log(JSON.stringify({type:'event',event:{type:'run_end',result:{usage:{inputTokens:12,outputTokens:3,cacheReadTokens:0,cacheWriteTokens:0}}}}));
@@ -853,6 +855,7 @@ process.stdin.on('end', async () => {
     assert.match(lensCall.input, /Tool use disabled/);
     assert.doesNotMatch(lensCall.input, /targeted reads|Batch independent searches/);
     for (const call of calls) {
+      assert.equal(existsSync(call.args[call.args.indexOf('--benchmark-output') + 1]), false);
       if (call === lensCall) continue;
       if (!call.repair) assert.equal(call.cwd, realpathSync(join(home, 'launch')));
       else assert.ok(call.cwd.startsWith(realpathSync(home) + '/repair-'));

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { PromptTokenUsage } from './opencode.ts';
 import { isFiniteNumber, isRecord } from './text.ts';
 
@@ -34,6 +35,9 @@ export interface CommandCodeProgress {
   observedEvents: number;
   droppedFrames: number;
   toolOutcomes: Record<string, number>;
+  observedToolActiveMs: number;
+  maxConcurrentTools: number;
+  repeatedToolCalls: number;
   stopReason?: string;
   lastCompletedTool?: string;
   lastEventAgeMs?: number;
@@ -50,6 +54,12 @@ export function createCommandCodeProgress(now = Date.now) {
   let lastEventAt: number | undefined;
   let lastCompletedTool: string | undefined;
   const toolOutcomes: Record<string, number> = {};
+  const active = new Set<string>();
+  const seen = new Set<string>();
+  let activeSince = 0;
+  let observedToolActiveMs = 0;
+  let maxConcurrentTools = 0;
+  let repeatedToolCalls = 0;
   const frame = (line: string) => {
     if (!line.trim()) return;
     let parsed: unknown;
@@ -76,6 +86,27 @@ export function createCommandCodeProgress(now = Date.now) {
         stopReason = String(result.stopReason);
     }
     if (parsed.type !== 'event' || !isRecord(parsed.event)) return;
+    const event = parsed.event;
+    if (event.type === 'tool_queued' && TOOL_NAMES.includes(String(event.toolName))) {
+      const digest = createHash('sha256')
+        .update(JSON.stringify([event.toolName, event.input]))
+        .digest('hex');
+      if (seen.has(digest)) repeatedToolCalls++;
+      else if (seen.size < 4096) seen.add(digest);
+    }
+    if (typeof event.toolCallId === 'string') {
+      if (event.type === 'tool_running') {
+        if (active.size === 0) activeSince = now();
+        active.add(event.toolCallId);
+        maxConcurrentTools = Math.max(maxConcurrentTools, active.size);
+      } else if (
+        OUTCOMES.includes(String(event.type)) &&
+        active.delete(event.toolCallId) &&
+        active.size === 0
+      ) {
+        observedToolActiveMs += now() - activeSince;
+      }
+    }
     observedEvents++;
     lastEventAt = now();
     const outcome = commandCodeToolOutcome(parsed);
@@ -116,10 +147,34 @@ export function createCommandCodeProgress(now = Date.now) {
         observedEvents,
         droppedFrames,
         toolOutcomes: { ...toolOutcomes },
+        observedToolActiveMs: observedToolActiveMs + (active.size ? now() - activeSince : 0),
+        maxConcurrentTools,
+        repeatedToolCalls,
         ...(stopReason ? { stopReason } : {}),
         ...(lastCompletedTool ? { lastCompletedTool } : {}),
         ...(lastEventAt !== undefined ? { lastEventAgeMs: now() - lastEventAt } : {}),
       };
     },
   };
+}
+
+export function parseCommandCodeBenchmark(value: unknown) {
+  if (!isRecord(value) || !isFiniteNumber(value.wallTimeMs) || !Array.isArray(value.turnDetails))
+    return undefined;
+  const turns = [];
+  for (const turn of value.turnDetails) {
+    if (
+      !isRecord(turn) ||
+      !isFiniteNumber(turn.apiDurationMs) ||
+      !isFiniteNumber(turn.toolDurationMs) ||
+      !Array.isArray(turn.toolCalls)
+    )
+      return undefined;
+    turns.push({
+      apiMs: turn.apiDurationMs,
+      toolWorkMs: turn.toolDurationMs,
+      toolCalls: turn.toolCalls.length,
+    });
+  }
+  return { wallTimeMs: value.wallTimeMs, turns };
 }
