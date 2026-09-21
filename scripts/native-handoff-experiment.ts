@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   COMMANDCODE_MODEL_LIMITS,
   runCommandCodeFindingVerification,
@@ -20,16 +20,18 @@ import {
 } from '../src/shared/commandcode.ts';
 import { buildFindingSourceContext, readTrackedSource } from '../src/shared/finding-context.ts';
 import { GIT_DIFF_ARGS } from '../src/shared/git.ts';
+import { buildJevPrefetch, type JevPrefetchStats } from '../src/shared/jev-prefetch.ts';
 import {
   assembleFindingVerificationPrompt,
   assembleReviewPrompt,
   withCommandCodeToolsDirective,
+  evidenceTask,
 } from '../src/shared/prompt.ts';
 import { measureReviewPrompt, reviewPromptBudget } from '../src/shared/review-plan.ts';
 import type { Finding } from '../src/shared/types.ts';
 import {
   investigationOverlap,
-  nativeEvidenceHandoff,
+  nativeEvidenceCandidates,
   nativeInvestigationTrace,
 } from './native-investigation-evidence.ts';
 
@@ -61,6 +63,7 @@ const assertSnapshot = () => {
 assertSnapshot();
 const key = process.env.COMMANDCODE_ACCESS_KEY?.split(',')[0].trim();
 if (!key) throw new Error('COMMANDCODE_ACCESS_KEY is required');
+if (!process.env.TYPESAFE_API_KEY) throw new Error('TYPESAFE_API_KEY is required for the Jev arm');
 const context = execFileSync('git', ['-C', workspace, ...GIT_DIFF_ARGS, `${plan.base}...${head}`], {
   encoding: 'utf8',
 });
@@ -110,20 +113,12 @@ async function readTrace() {
       throw new Error('Transcript exceeds experiment limit');
     transcript += readFileSync(path, 'utf8') + '\n';
   }
-  for (const line of transcript.split('\n').filter(Boolean)) {
-    const entry = JSON.parse(line);
-    if (entry.type !== 'message' || entry.message?.role !== 'assistant') continue;
-    for (const block of entry.message.content ?? []) {
-      if (block.type !== 'tool_use' || block.name !== 'read_file') continue;
-      const raw = block.input?.file_path ?? block.input?.path;
-      if (typeof raw !== 'string') continue;
-      const path = relative(workspace, resolve(workspace, raw));
-      if (!tracked.has(path) || sources.has(path)) continue;
-      const source = await readTrackedSource(workspace, path, AbortSignal.timeout(4000), {
-        tracked,
-      });
-      if (source && !source.truncated) sources.set(path, source.text);
-    }
+  for (const path of nativeInvestigationTrace(transcript, workspace, sources).paths) {
+    if (!tracked.has(path) || sources.has(path)) continue;
+    const source = await readTrackedSource(workspace, path, AbortSignal.timeout(4000), {
+      tracked,
+    });
+    if (source && !source.truncated) sources.set(path, source.text);
   }
   return nativeInvestigationTrace(transcript, workspace, sources);
 }
@@ -160,8 +155,8 @@ try {
   if (!findings.length) throw new Error('No candidates to verify');
   const preparedAt = Date.now();
   const verifierContext = context + '\n\n' + (await buildFindingSourceContext(workspace, findings));
-  const handoff = nativeEvidenceHandoff(reviewTrace, findings, sources, head);
-  if (!handoff.context) throw new Error('No supported relevant native reads to hand off');
+  const handoff = nativeEvidenceCandidates(reviewTrace, findings, sources, head);
+  if (!handoff.candidates.length) throw new Error('No supported relevant native reads to hand off');
   save('handoff', {
     ...handoff,
     findings,
@@ -169,15 +164,43 @@ try {
     sourceContextBytes: Buffer.byteLength(verifierContext) - Buffer.byteLength(context),
   });
   for (let pair = 0; pair < plan.repetitions; pair++) {
-    for (const arm of pair % 2 ? ['handoff', 'control'] : ['control', 'handoff']) {
+    const arms = ['control', 'handoff', 'jev'];
+    const offset = pair % arms.length;
+    for (const arm of [...arms.slice(offset), ...arms.slice(0, offset)]) {
       assertSnapshot();
       logs = [];
       usage = [];
       started = Date.now();
-      const input =
-        arm === 'handoff' ? verifierContext + '\n\n' + handoff.context : verifierContext;
+      const selectionStats: JevPrefetchStats[] = [];
+      let selected: string[] = [];
+      const prepare = (mode: 'on' | 'deterministic') =>
+        buildJevPrefetch(workspace, [], [], {
+          mode,
+          apiKey: process.env.TYPESAFE_API_KEY,
+          timeoutMs: 5000,
+          log,
+          prepared: {
+            candidates: handoff.candidates,
+            task: evidenceTask(findings),
+            scope: 'verification',
+            cacheHits: 0,
+            parsedFiles: 0,
+            omittedFiles: handoff.omitted.length,
+            elapsedMs: 0,
+          },
+          onStats: (stats) => selectionStats.push(stats),
+          onSelection: (candidates) => {
+            selected = candidates.map((c) => `${c.path}:${c.line}`);
+          },
+        });
+      let packet = arm === 'control' ? '' : await prepare(arm === 'jev' ? 'on' : 'deterministic');
+      const fallback = arm === 'jev' && !packet;
+      if (fallback) packet = await prepare('deterministic');
+      const selectionMs = Date.now() - started;
+      const input = [verifierContext, packet].filter(Boolean).join('\n\n');
       checkBudget(assembleFindingVerificationPrompt(input, findings));
       try {
+        const verificationStarted = Date.now();
         const verdicts = await runCommandCodeFindingVerification(
           workspace,
           plan.model,
@@ -190,6 +213,7 @@ try {
           plan.effort,
         );
         const elapsedMs = Date.now() - started;
+        const verificationMs = Date.now() - verificationStarted;
         assertSnapshot();
         const trace = await readTrace();
         const overlap = investigationOverlap(reviewTrace, trace);
@@ -197,18 +221,25 @@ try {
           pair,
           arm,
           elapsedMs,
+          verificationMs,
+          selectionMs,
+          selectionStats,
+          selected,
+          fallback,
           verdicts,
           usage,
           logs,
           trace,
           overlap,
-          handoffBytes: arm === 'handoff' ? Buffer.byteLength(handoff.context) : 0,
+          handoffBytes: Buffer.byteLength(packet),
         });
         console.log(
           JSON.stringify({
             pair,
             arm,
             elapsedMs,
+            selectionMs,
+            fallback,
             verdicts: verdicts?.map((v) => v.verdict),
             overlap,
           }),

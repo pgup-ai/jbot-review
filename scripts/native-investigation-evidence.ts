@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { relative, resolve } from 'node:path';
 import { indexEvidenceSource, resolveEvidenceImport } from '../src/shared/evidence.ts';
 import { findingSourceLocations } from '../src/shared/finding-context.ts';
-import { formatJevPrefetch, type JevCandidate } from '../src/shared/prompt.ts';
+import type { JevCandidate } from '../src/shared/prompt.ts';
 import { isRecord } from '../src/shared/text.ts';
 import type { Finding } from '../src/shared/types.ts';
 
@@ -38,23 +38,11 @@ export function nativeInvestigationTrace(
     }
   }
   const reads: { path: string; lines: number[] }[] = [];
+  const searchReads: { path: string; lines: number[] }[] = [];
+  const paths = new Set<string>();
   const searches: string[] = [];
   let unsupportedReads = 0;
   for (const [id, call] of calls) {
-    if (['grep', 'glob'].includes(call.name) && results.has(id)) {
-      const input = Object.fromEntries(
-        Object.entries(call.input).sort(([a], [b]) => a.localeCompare(b)),
-      );
-      searches.push(
-        createHash('sha256')
-          .update(JSON.stringify([call.name, input]))
-          .digest('hex'),
-      );
-    }
-    if (call.name !== 'read_file') continue;
-    const raw = call.input.file_path ?? call.input.path;
-    const path = typeof raw === 'string' ? relative(workspace, resolve(workspace, raw)) : '';
-    const source = sources.get(path);
     const result = results.get(id);
     const text =
       typeof result === 'string'
@@ -65,6 +53,37 @@ export function nativeInvestigationTrace(
               .map((b) => b.text)
               .join('\n')
           : '';
+    if (['grep', 'glob'].includes(call.name) && results.has(id)) {
+      const input = Object.fromEntries(
+        Object.entries(call.input).sort(([a], [b]) => a.localeCompare(b)),
+      );
+      searches.push(
+        createHash('sha256')
+          .update(JSON.stringify([call.name, input]))
+          .digest('hex'),
+      );
+    }
+    if (call.name === 'grep' && results.has(id)) {
+      const matches = new Map<string, Set<number>>();
+      for (const match of text.matchAll(/^(.+?)([:-])(\d+)\2(.*)$/gm)) {
+        const path = relative(workspace, resolve(workspace, match[1]));
+        if (!path || path === '..' || path.startsWith('../')) continue;
+        paths.add(path);
+        const source = sources.get(path)?.split('\n');
+        const line = Number(match[3]);
+        if (source?.[line - 1] !== match[4]) continue;
+        const lines = matches.get(path) ?? new Set<number>();
+        lines.add(line);
+        matches.set(path, lines);
+      }
+      for (const [path, lines] of matches)
+        searchReads.push({ path, lines: [...lines].sort((a, b) => a - b) });
+    }
+    if (call.name !== 'read_file') continue;
+    const raw = call.input.file_path ?? call.input.path;
+    const path = typeof raw === 'string' ? relative(workspace, resolve(workspace, raw)) : '';
+    if (path && path !== '..' && !path.startsWith('../')) paths.add(path);
+    const source = sources.get(path);
     const lines = source?.replace(/\n$/, '').split('\n');
     const numbered = [...text.matchAll(/^(\d+): (.*)$/gm)];
     if (
@@ -82,13 +101,17 @@ export function nativeInvestigationTrace(
       lines: [...new Set(numbered.map((m) => Number(m[1])))].sort((a, b) => a - b),
     });
   }
-  return { reads, searches, unsupportedReads };
+  return { reads, searchReads, paths: [...paths], searches, unsupportedReads };
 }
 
 type Trace = ReturnType<typeof nativeInvestigationTrace>;
 
 export function investigationOverlap(review: Trace, verification: Trace) {
-  const previous = new Set(review.reads.flatMap((r) => r.lines.map((line) => `${r.path}:${line}`)));
+  const previous = new Set(
+    [...review.reads, ...review.searchReads].flatMap((r) =>
+      r.lines.map((line) => `${r.path}:${line}`),
+    ),
+  );
   const current = new Set(
     verification.reads.flatMap((r) => r.lines.map((line) => `${r.path}:${line}`)),
   );
@@ -108,19 +131,20 @@ export function investigationOverlap(review: Trace, verification: Trace) {
   };
 }
 
-export function nativeEvidenceHandoff(
+export function nativeEvidenceCandidates(
   review: Trace,
   findings: Finding[],
   sources: Map<string, string>,
   revision: string,
 ) {
   const observed = new Map<string, Set<number>>();
-  for (const read of review.reads) {
+  for (const read of [...review.reads, ...review.searchReads]) {
     const lines = observed.get(read.path) ?? new Set<number>();
     read.lines.forEach((line) => lines.add(line));
     observed.set(read.path, lines);
   }
-  const relevant = new Set(findingSourceLocations(findings).locations.map((r) => r.path));
+  const references = findingSourceLocations(findings).locations;
+  const relevant = new Set(references.map((r) => r.path));
   for (const path of relevant) {
     if (!observed.has(path)) continue;
     const text = sources.get(path)!;
@@ -138,6 +162,18 @@ export function nativeEvidenceHandoff(
     const source = sources.get(path)!;
     const lines = source.replace(/\n$/, '').split('\n');
     const numbers = [...observedLines].sort((a, b) => a - b);
+    const focus = references.find((ref) => ref.path === path)?.line ?? numbers[0];
+    let bytes = numbers.reduce(
+      (total, line) => total + Buffer.byteLength(`${line}: ${lines[line - 1]}\n`),
+      0,
+    );
+    while (numbers.length > 1 && bytes > 2048) {
+      const line =
+        Math.abs(numbers[0] - focus) > Math.abs(numbers.at(-1)! - focus)
+          ? numbers.shift()!
+          : numbers.pop()!;
+      bytes -= Buffer.byteLength(`${line}: ${lines[line - 1]}\n`);
+    }
     const text = numbers.map((line) => `${line}: ${lines[line - 1]}`).join('\n');
     candidates.push({
       path,
@@ -149,17 +185,11 @@ export function nativeEvidenceHandoff(
       text,
     });
   }
-  const selected = candidates
-    .filter((c) => relevant.has(c.path) && Buffer.byteLength(c.text) <= 2048)
-    .slice(0, 8);
-  let omitted = candidates.filter((c) => !selected.includes(c));
-  while (selected.length && Buffer.byteLength(formatJevPrefetch(selected, omitted)) > 16 * 1024) {
-    selected.pop();
-    omitted = candidates.filter((c) => !selected.includes(c));
-  }
+  const eligible = candidates.filter(
+    (c) => relevant.has(c.path) && Buffer.byteLength(c.text) <= 2048,
+  );
   return {
-    context: formatJevPrefetch(selected, omitted),
-    selected: selected.map((c) => c.path),
-    omitted: omitted.map((c) => c.path),
+    candidates: eligible,
+    omitted: candidates.filter((c) => !eligible.includes(c)).map((c) => c.path),
   };
 }

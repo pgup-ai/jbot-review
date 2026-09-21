@@ -73,6 +73,11 @@ guarantee that a model will avoid redundant reads.
 
 ## Reproduction and limits
 
+This report describes the original two-arm driver at `c3aecbe`. The current
+driver runs three arms, also requires `TYPESAFE_API_KEY`, and uses different
+packing limits. See the [Jev comparison](2026-09-21-jev-handoff.md) for the updated
+protocol and broader results.
+
 `scripts/native-handoff-experiment.ts` takes a local JSON plan with `workspace`,
 `base`, `head`, `model`, `effort`, `repetitions`, `timeoutMs`, `output`, and
 `additionalCandidates` (an array of ordinary Finding objects, or `[]`). Point it
