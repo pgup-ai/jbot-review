@@ -53,12 +53,15 @@ credentials are excluded. Model runs did not change the reviewed checkouts.
 
 ## Self-review
 
-- Typecheck, lint, 1,112 tests, build and diff whitespace checks pass.
+- Typecheck, lint, 1,111 tests, build and diff whitespace checks pass.
 - Existing recovery tests now check native settings isolation and repair-home cleanup.
 - Native Pi event telemetry is covered without replacing tool execution.
 - De-slop: removed redundant native-tool descriptions and obsolete experiment arms;
-  no new tool abstraction. Two modified comment blocks were reviewed and kept.
-  Two renamed/reworked test cases preserve changed contracts; no new standalone cases.
+  removed the leftover retrieval metadata wrapper and duplicate tool-list assertion.
+  Of the two modified comment blocks, one was shortened and one deleted.
+  Of the two reworked test cases, the native-event telemetry test was retained;
+  the prompt-wording test was deleted. Repair isolation and explicit opt-out
+  behavior remain tested. No new standalone test cases were added.
 
 The full live quality corpus and blind adjudication have **not** been run. Because
 CommandCode tools become enabled by default, the repository's full-corpus gate

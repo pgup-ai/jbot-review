@@ -1196,9 +1196,9 @@ describe('normalizeOptions defaults', () => {
     assert.equal(normalizeOptions(undefined).shardCachePath, '');
   });
 
-  it('keeps embedded-first prompts on and CommandCode investigation opt-in', () => {
+  it('enables embedded-first prompts and native CommandCode tools with explicit opt-outs', () => {
     assert.equal(normalizeOptions(undefined).commandCodeTools, true);
-    assert.equal(normalizeOptions({ commandCodeTools: true }).commandCodeTools, true);
+    assert.equal(normalizeOptions({ commandCodeTools: false }).commandCodeTools, false);
     assert.equal(normalizeOptions(undefined).embeddedFirstPrompt, true);
     assert.equal(normalizeOptions({ embeddedFirstPrompt: false }).embeddedFirstPrompt, false);
   });

@@ -163,31 +163,28 @@ export async function installReviewRetrieval(
           try {
             let paths: string[] = [];
             let stats: JevPrefetchStats | undefined;
-            const packet = {
-              content: await store.prepare('verification', [], 'deterministic', {
-                timeoutMs: 4000,
-                locations: [ref],
-                log: () => {},
-                onStats: (row) => {
-                  stats = row;
-                },
-                selectCandidates: (candidates) => {
-                  const selected =
-                    options.readEvidence === 'linked'
-                      ? selectReadEvidence(candidates, ref.path, state.knownPaths)
-                      : candidates;
-                  state.stats.readEvidenceExcludedCandidates += candidates.length - selected.length;
-                  return selected;
-                },
-                onSelection: (selected) => {
-                  paths = selected.map((c) => c.path);
-                },
-              }),
-              metadata: { jbotRetrieval: { selected: paths.length, paths } },
-            };
-            const text = '\n\n' + packet.content;
+            const content = await store.prepare('verification', [], 'deterministic', {
+              timeoutMs: 4000,
+              locations: [ref],
+              log: () => {},
+              onStats: (row) => {
+                stats = row;
+              },
+              selectCandidates: (candidates) => {
+                const selected =
+                  options.readEvidence === 'linked'
+                    ? selectReadEvidence(candidates, ref.path, state.knownPaths)
+                    : candidates;
+                state.stats.readEvidenceExcludedCandidates += candidates.length - selected.length;
+                return selected;
+              },
+              onSelection: (selected) => {
+                paths = selected.map((c) => c.path);
+              },
+            });
+            const text = '\n\n' + content;
             const bytes = Buffer.byteLength(text);
-            if (packet.metadata?.jbotRetrieval.selected && bytes <= 7000) {
+            if (paths.length && bytes <= 7000) {
               event.result = {
                 ...originalResult,
                 content:
@@ -197,7 +194,7 @@ export async function installReviewRetrieval(
               };
               state.stats.readEvidencePackets++;
               state.stats.readEvidenceBytes += bytes;
-              for (const path of packet.metadata.jbotRetrieval.paths) {
+              for (const path of paths) {
                 state.deliveredPaths.set(path, state.progress.requests);
                 state.knownPaths.add(path);
               }

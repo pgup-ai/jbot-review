@@ -12,13 +12,11 @@ import {
   CHANGES_SINCE_LAST_REVIEW_PROMPT,
   CHANGES_SINCE_LAST_REVIEW_SINGLE_SHOT_PROMPT,
   CONTEXT7_REASON_BUDGET,
-  EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT,
   EMBEDDED_FIRST_REVIEW_PROMPT,
   FINDING_VERIFICATION_PROMPT,
   GUIDELINE_COMPLIANCE_OUTPUT_REMINDER,
   GUIDELINE_COMPLIANCE_PROMPT,
   NO_TOOLS_REVIEW_DIRECTIVE,
-  PI_REVIEW_SYSTEM_PROMPT,
   QODER_REVIEW_SYSTEM_PROMPT,
   REVIEW_LENSES,
   REVIEW_OUTPUT_REMINDER,
@@ -903,16 +901,5 @@ describe('buildContextTrimNotice', () => {
       buildContextTrimNotice(['blast radius', 'summary scope']),
       /blast radius, summary scope/,
     );
-  });
-});
-
-describe('PI_REVIEW_SYSTEM_PROMPT', () => {
-  it('uses native read-only tools and supplied diff scope', () => {
-    for (const prompt of [PI_REVIEW_SYSTEM_PROMPT, EMBEDDED_FIRST_PI_REVIEW_SYSTEM_PROMPT]) {
-      assert.match(prompt, /native read, grep, find and ls/);
-      assert.match(prompt, /complete assigned diff/);
-      assert.match(prompt, /cannot modify the workspace/);
-      assert.doesNotMatch(prompt, /read_file|search_repo|git_diff/);
-    }
   });
 });

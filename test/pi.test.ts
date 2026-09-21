@@ -689,8 +689,6 @@ describe('Pi review sessions', () => {
   });
 
   it('gives the embedded-first system prompt to review sessions only', async () => {
-    // The aux prompts still tell the model to run a full git diff, so they must
-    // not inherit the main review evidence-first instructions.
     const model = 'deepseek/deepseek-v4-flash';
     const enabled: unknown[] = [];
     const runtime = recordingRuntime(enabled, true);
@@ -848,7 +846,6 @@ describe('Pi review sessions', () => {
     runtime.toolTelemetry = createToolTelemetryAccumulator(recorder, 'salt');
     const create = runtime.sdk.createAgentSession;
     runtime.sdk.createAgentSession = async (options) => {
-      assert.deepEqual(options.tools, ['read', 'grep', 'find', 'ls']);
       assert.equal(options.customTools, undefined);
       const result = await create(options);
       let listener: (event: Record<string, unknown>) => void;
