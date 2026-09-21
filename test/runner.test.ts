@@ -1710,7 +1710,8 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   assert.match(body, /Review incomplete/);
   assert.match(body, /Review interactions/);
   assert.match(body, /Main review completed/);
-  assert.match(body, /including any recovered from incomplete passes/);
+  assert.match(body, /any recovered auxiliary findings were retained/);
+  assert.doesNotMatch(body, /retained for verification/);
   assert.doesNotMatch(body, /unverified concerns/);
   assert.doesNotMatch(body, /✅|Good to go|No new findings were found/);
   const blocked = buildBody(

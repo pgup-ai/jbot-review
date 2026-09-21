@@ -384,7 +384,7 @@ export function formatIncompleteCoverage(sessions: readonly IncompleteSession[])
     '',
     ...list,
     '',
-    `Available findings were retained for verification, including any recovered from incomplete passes.${verificationFailed ? ' Candidates with incomplete verification remain in run diagnostics.' : ''}`,
+    `Findings from completed passes and any recovered auxiliary findings were retained.${verificationFailed ? ' Candidates with incomplete verification remain in run diagnostics.' : ''}`,
   ].join('\n');
 }
 
