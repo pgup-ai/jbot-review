@@ -2221,7 +2221,6 @@ async function runReviewPipeline(params: {
           proxyEnv: options.opencodeProxyEnv,
           transcriptDir: process.env.JBOT_TRANSCRIPT_DIR?.trim() || undefined,
           verifyFork: process.env.JBOT_VERIFY_FORK === '1',
-          verificationRecoveryModel: process.env.JBOT_VERIFY_RECOVERY_MODEL,
           onSourceRead: evidence.reuse.handoff
             ? (tool, input) => evidence.observe(tool, input)
             : undefined,

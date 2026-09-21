@@ -443,9 +443,10 @@ export async function runFindingVerification(
   // An earlier field-subset projection here silently dropped `evidence` and
   // defeated verifier grounding on this (primary) backend — don't reintroduce one.
   const prompt = assembleFindingVerificationPrompt(prContext, findings, isSingleShotModel(model));
-  const recoveryModel = timeoutMs === undefined ? undefined : runtime.verificationRecoveryModel;
   const deadline = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
-  const reserve = recoveryModel ? wrapUpReserveMs(timeoutMs!) : 0;
+  // OpenCode free endpoints reject the tool-less recovery request.
+  const canRecover = timeoutMs !== undefined && !/^opencode(?:-go)?\/.*-free$/.test(model);
+  const reserve = canRecover ? wrapUpReserveMs(timeoutMs) : 0;
   log('Creating finding-verification session');
   const sessionID = await createReviewSession(runtime, {
     model,
@@ -476,26 +477,27 @@ export async function runFindingVerification(
       throw error;
     failure = error;
   }
-  if (!recoveryModel || deadline! - Date.now() < 1000) {
+  if (!canRecover || deadline === undefined || deadline - Date.now() < 1000) {
     if (failure) throw failure;
     return verdicts;
   }
   const started = Date.now();
-  const recoveryDeadline = Math.min(deadline!, started + (reserve || 60_000));
+  const recoveryDeadline = Math.min(deadline, started + (reserve || 60_000));
   log(
-    `Finding verification recovery: model=${recoveryModel} reason=${failure ? 'interrupted' : 'unusable-output'} remainingMs=${recoveryDeadline - started}`,
+    `Finding verification recovery: model=${model} reason=${failure ? 'interrupted' : 'unusable-output'} remainingMs=${recoveryDeadline - started}`,
   );
   try {
     const recoverySession = await createReviewSession(runtime, {
-      model: recoveryModel,
+      model,
       label: 'finding-verification-recovery',
+      tier: modelOptions ? 'verify' : 'main',
       agent: PLAIN_AGENT,
       forkFrom: sessionID,
     });
     const remaining = recoveryDeadline - Date.now();
     if (remaining <= 0) throw new Error('Finding verification recovery budget exhausted.');
     const raw = await promptInSession(runtime, recoverySession, {
-      model: recoveryModel,
+      model,
       text: buildVerificationRecoveryPrompt(findings.length),
       label: 'finding-verification-recovery',
       log,

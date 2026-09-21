@@ -637,17 +637,15 @@ Native tools own search syntax, read limits and continuation behavior; J-Bot
 records their completion/error counts and session token usage. JSON repairs use a
 fresh temporary home with tools denied, leaving other sessions unaffected.
 
-OpenCode verification can reserve time for one tool-less recovery attempt with
-`JBOT_VERIFY_RECOVERY_MODEL=opencode-go/mimo-v2.6-flash`. Leave it unset to keep
-the existing behavior. The recovery model must be an available non-free
-`opencode/` or `opencode-go/` model; it uses the configured OpenCode credential
-and may incur charges. Free models reject jbot's tool-less request setup.
-Recovery forks the verification session to retain collected evidence, disables
-all tools, and returns unresolved candidates as uncertain. Completed verdicts
-are preserved. It runs only after a timeout or incomplete/unusable verdict
-output, once, within the original verification deadline. A five-minute budget
-reserves its last minute for recovery; unbounded runs do not enable recovery.
-Logs identify the recovery model, reason, time used and verdict count.
+OpenCode verification reserves time for one tool-less recovery attempt using
+its current model and settings. Recovery forks the verification session to retain
+collected evidence, disables all tools, and asks for unresolved candidates as
+uncertain. Completed verdicts are preserved. It runs only after a timeout or
+incomplete verdict output, within the original deadline. A five-minute budget
+reserves its last minute. Unbounded runs and OpenCode free models skip recovery;
+those endpoints reject tool-less requests, so they retain their full investigation
+budget. Recovery failures preserve completed verdicts. Logs report the model,
+reason, time used and verdict count. There is no automatic switch to a paid model.
 
 CommandCode verification receives packed source evidence from earlier native
 review reads by default. Only successfully observed, tracked source is eligible;

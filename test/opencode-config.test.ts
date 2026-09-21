@@ -9,7 +9,6 @@ import {
   WRAPUP_AGENT,
   buildConfig,
   modelOptionsByModel,
-  verificationRecoveryModel,
   permissionRules,
   providerKeyVariables,
   sessionEnvironment,
@@ -171,27 +170,5 @@ describe('sessionEnvironment', () => {
       HTTPS_PROXY: 'http://proxy.local:3128',
       https_proxy: 'http://proxy.local:3128',
     });
-  });
-});
-
-describe('verificationRecoveryModel', () => {
-  it('requires an explicit non-free OpenCode model and existing OpenCode credentials', () => {
-    const models = [
-      { providerID: 'opencode', modelID: 'mimo-v2.6-flash-free', apiKey: 'key', promptCache: true },
-    ];
-    assert.equal(
-      verificationRecoveryModel('opencode-go/mimo-v2.6-flash', models),
-      'opencode-go/mimo-v2.6-flash',
-    );
-    for (const model of [
-      undefined,
-      '',
-      'opencode/mimo-v2.6-flash-free',
-      'opencode-go/mimo-v2.6-flash-free',
-      'commandcode/model',
-      'mimo-v2.6-flash',
-    ])
-      assert.equal(verificationRecoveryModel(model, models), undefined);
-    assert.equal(verificationRecoveryModel('opencode-go/mimo-v2.6-flash', []), undefined);
   });
 });
