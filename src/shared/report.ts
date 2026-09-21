@@ -20,7 +20,9 @@ function findingLine(finding: Finding): string {
 export const ORPHANED_FINDINGS_HEADING = '### Findings (outside the diff)';
 export const ADVISORY_FINDINGS_HEADING = '### Unverified concerns';
 
-export function isAdvisoryFinding(finding: Finding): boolean {
+export function isAdvisoryFinding(
+  finding: Pick<Finding, 'kind' | 'verificationUncertain'>,
+): boolean {
   return finding.verificationUncertain === true || finding.kind === 'investigate';
 }
 
@@ -38,6 +40,7 @@ export function renderAdvisorySection(findings: Finding[]): string[] {
       const reason = finding.body.split('\n\n')[0].replace(/\s+/g, ' ').trim();
       const body = formatFindingCommentBody({
         ...finding,
+        verificationUncertain: true,
         title: finding.title.replace(/^Unverified concern: /, ''),
         body: reason.length > 300 ? `${reason.slice(0, 297)}...` : reason,
       });
@@ -368,6 +371,10 @@ export interface IncompleteSession {
   reason: string;
 }
 
+export function reviewCoverageSessions(sessions: IncompleteSession[]): IncompleteSession[] {
+  return sessions.filter(({ label }) => label !== 'changes-since-last-review');
+}
+
 /** Footer-safe reason: the raw error may carry provider text and stays in the log. */
 export function describeIncompleteReason(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -413,14 +420,14 @@ export function formatIncompleteCoverage(sessions: readonly IncompleteSession[])
 }
 
 export function getMergeGuidance(
-  findings: Pick<Finding, 'severity' | 'verificationUncertain'>[],
+  findings: Pick<Finding, 'severity' | 'kind' | 'verificationUncertain'>[],
   incomplete: boolean,
 ): {
   state: string;
   mergeGuidance: string;
 } {
   const hasBlockingFinding = findings.some(
-    (finding) => SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2,
+    (finding) => !isAdvisoryFinding(finding) && SEVERITY_RANK[finding.severity] <= SEVERITY_RANK.P2,
   );
   if (hasBlockingFinding) {
     return {
@@ -436,7 +443,7 @@ export function getMergeGuidance(
     };
   }
 
-  if (findings.some((finding) => finding.verificationUncertain)) {
+  if (findings.some(isAdvisoryFinding)) {
     return {
       state: 'Unverified concerns remain',
       mergeGuidance:
@@ -458,9 +465,9 @@ export function getMergeGuidance(
 }
 
 export function buildSeverityTable(
-  findings: Pick<Finding, 'severity' | 'verificationUncertain'>[],
+  findings: Pick<Finding, 'severity' | 'kind' | 'verificationUncertain'>[],
 ): string[] {
-  const graded = findings.filter((finding) => !finding.verificationUncertain);
+  const graded = findings.filter((finding) => !isAdvisoryFinding(finding));
   const counts = countBySeverity(graded);
   const unverified = findings.length - graded.length;
   return [

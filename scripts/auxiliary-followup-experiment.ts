@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -16,7 +17,7 @@ import { reviewExperiment } from '../src/shared/review-experiment.ts';
 import type { Octokit } from '../src/shared/github.ts';
 import type { ReviewRunOptions } from '../src/shared/runner.ts';
 
-process.loadEnvFile();
+if (existsSync('.env')) process.loadEnvFile();
 const root = process.cwd();
 const control = process.argv[2];
 const output = process.argv[3];

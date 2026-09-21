@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import {
   buildFindingSourceContext,
   findingSourceLocations,
+  readTrackedSource,
 } from '../src/shared/finding-context.ts';
 import {
   formatFindingSources,
@@ -66,6 +67,10 @@ test('source context reads tracked worktree helpers but excludes untracked files
     await execFileAsync('git', ['add', 'src/helper.ts', 'src/alias.ts', 'src/large.ts'], {
       cwd: workspace,
     });
+    assert.deepEqual(
+      await readTrackedSource(workspace, 'src/large.ts', AbortSignal.timeout(1500)),
+      { text: 'x'.repeat(256 * 1024), truncated: true },
+    );
     await writeFile(
       join(workspace, 'src/helper.ts'),
       'export function validate() {\n  markFailed();\n}\n',

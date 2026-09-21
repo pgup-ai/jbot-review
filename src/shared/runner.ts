@@ -312,6 +312,7 @@ import {
   ADVISORY_FINDINGS_HEADING,
   isAdvisoryFinding,
   renderAdvisorySection,
+  reviewCoverageSessions,
   renderOrphanedSection,
 } from './report.ts';
 import { formatFileList, formatUsageCost, isFiniteNumber } from './text.ts';
@@ -1042,6 +1043,7 @@ async function runReviewPipeline(params: {
   // into a loud failure instead of a silent one.
   const octokit = params.octokit ?? missingOctokit();
   const options = normalizeOptions(params.options);
+  log(`Review experiment preset: ${options.experiment.preset}.`);
   // Trust boundary in code (invariant #2): a local diff must never reach the
   // posting paths, so local mode is only usable as a dry run.
   if (localDiff && !options.dryRun) {
@@ -3126,7 +3128,7 @@ async function runReviewPipeline(params: {
     log(`Evidence cache: ${JSON.stringify(evidence.stats())}`);
     const finalFilteringDone = phases.start({ phase: 'filtering', scope: 'run' });
     const filteredFindings = filterFindings(verifiedFindings, options);
-    const incompleteSessions: IncompleteSession[] = [
+    const incompleteSessions = reviewCoverageSessions([
       ...[...auxCoverage]
         .filter(([, row]) => !row.complete)
         .map(([label, row]) => ({ label, reason: describeIncompleteReason(row.error) })),
@@ -3134,7 +3136,7 @@ async function runReviewPipeline(params: {
       ...[...partialSessions]
         .filter((label) => auxCoverage.get(label)?.complete !== false)
         .map((label) => ({ label, reason: PARTIAL_COVERAGE_REASON })),
-    ];
+    ]);
     const coverageNotice = formatIncompleteCoverage(incompleteSessions);
     const auxiliaryBaselines: AuxiliaryBaseline[] =
       options.experiment.preset === 'adaptive' && headSha && baseSha
@@ -4943,13 +4945,6 @@ export function buildBody(
   experiment?: { advisorySummary: boolean; auxiliaryBaselines: AuxiliaryBaseline[] },
 ): string {
   const total = all.length;
-  const displayed = experiment?.advisorySummary
-    ? all.map((finding) =>
-        isAdvisoryFinding(finding)
-          ? { ...finding, severity: 'P3' as const, verificationUncertain: true }
-          : finding,
-      )
-    : all;
   const lines = ['## J-Bot Code Review', ''];
   const coverageNotice = formatIncompleteCoverage(incompleteSessions);
   if (coverageNotice) lines.push(coverageNotice, '');
@@ -4965,13 +4960,13 @@ export function buildBody(
   // renders nothing rather than a filler placeholder. The "Changes since last
   // review" block above is independent and still renders on re-reviews.
   const renderedSummary =
-    !displayed.some((finding) => finding.verificationUncertain) && summary.trim()
+    !all.some(isAdvisoryFinding) && summary.trim()
       ? formatSummaryMarkdown(summary, { suppressNoFindingVerdicts: true })
       : '';
   if (total > 0 && renderedSummary.trim()) {
     lines.push(renderedSummary, '');
   }
-  const guidance = getMergeGuidance(displayed, Boolean(coverageNotice));
+  const guidance = getMergeGuidance(all, Boolean(coverageNotice));
   lines.push(`**Review state:** ${guidance.state}`, '');
   lines.push(`**Merge guidance:** ${guidance.mergeGuidance}`, '');
   if (headSha) {
@@ -4983,12 +4978,12 @@ export function buildBody(
   if (total === 0) {
     lines.push(coverageNotice ? '_No findings from completed passes._' : '✅ _No new findings._');
   } else {
-    lines.push('### Findings Summary', '', ...buildSeverityTable(displayed), '');
+    lines.push('### Findings Summary', '', ...buildSeverityTable(all), '');
   }
   const orphanedSection = renderOrphanedSection(orphaned);
   if (orphanedSection.length > 0) lines.push(...orphanedSection);
   if (experiment?.advisorySummary)
-    lines.push(...renderAdvisorySection(displayed.filter(isAdvisoryFinding)));
+    lines.push(...renderAdvisorySection(all.filter(isAdvisoryFinding)));
   lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));
   lines.push('', `<sup>${formatReviewedWith(model, tokenUsage, engineByModel)}</sup>`);
   return withReviewCoverage(

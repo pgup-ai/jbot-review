@@ -212,3 +212,55 @@ in this follow-up. A hosted run of the new preset and the full-corpus release
 gate remain unvalidated.
 
 Net line delta versus `1d8013b`: +2233 / -44 across runtime, tests, the reproduction driver and audit data. No untracked files remain.
+
+## Hosted follow-up at `428977f`
+
+The [next hosted run](https://github.com/pgup-ai/jbot-review/actions/runs/35545046767/job/106169340778)
+used `diff-batches`, so adaptive reuse and collapsed advisories were disabled.
+This code-changing commit would also invalidate an adaptive baseline. The main
+model was CommandCode DeepSeek V4 Flash Fast at low effort; auxiliaries and
+verification used Cline Muse. Both had repository tools disabled. This differs
+from the Cline-only fixture cohort and is not a paired timing comparison.
+
+| Measurement                              |                             Observed |
+| ---------------------------------------- | -----------------------------------: |
+| Main delivery                            | 311/311 hunks; 45/45 pages completed |
+| Interaction pages                        |                      36/36 completed |
+| Main duration                            |                               302.7s |
+| Post-main auxiliary waiting              |                               257.7s |
+| Total duration                           |                               619.6s |
+| Interaction execution, median / maximum  |                       24.5s / 115.0s |
+| Interaction queue wait, median / maximum |                      326.3s / 514.9s |
+| Retained main / interaction findings     |                               13 / 5 |
+| Retained verification status             |   17 uncertain; 1 investigation lead |
+
+Full hunk delivery was preserved, but each tool-less reviewer and verifier still
+received bounded evidence. Several comments speculated about missing imports,
+callers or defaults that exist in the repository. The main reviewer produced
+most retained concerns; skipping interactions alone would not fix this noise.
+The earlier caller-evidence replay did not establish a precision improvement.
+
+The only failed task was the optional changes-since-last-review summary: its
+106,792-byte assembled prompt exceeded its budget before a model call. It
+incorrectly made the posted review say coverage was incomplete, although all
+review pages completed. Optional summary failures now remain in logs and
+telemetry without invalidating review coverage. Actual incomplete review and
+verification sessions still affect the report.
+
+Feedback fixes preserve a bounded excerpt for a newline-free source file over
+256 KiB, allow the experiment driver to start without a local `.env`, and keep
+investigation leads out of blocking guidance and graded severity counts in every
+preset. Reporting now uses advisory status directly instead of rewriting its
+display severity to P3. The resolved experiment preset is logged at startup.
+These fixes do not establish better model precision or enable adaptive reuse.
+
+The follow-up self-review traced report counts, approval and completion markers,
+source bounds and experiment startup. No new comment blocks or test cases were
+added; regression assertions extend three existing cases. The display-only
+severity mapping was removed. The no-`.env` startup smoke and a report replay of
+the 18 hosted findings passed. The required full-corpus release gate remains
+unmet; no new model-quality benchmark is claimed for these fixes.
+
+Self-review found no further P1/P2 issue in this follow-up. Formatting, typecheck,
+lint, all 1,114 tests, build and diff checks passed. Net delta versus `428977f`:
++101 / -24 across eight files, with no untracked files.

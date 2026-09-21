@@ -65,8 +65,9 @@ export async function readTrackedSource(
       if (buffer.subarray(0, bytesRead).includes(0)) return undefined;
       const text = buffer.toString('utf8', 0, bytesRead);
       const truncated = stat.size > BigInt(bytesRead);
+      const lastNewline = text.lastIndexOf('\n');
       const source = {
-        text: truncated ? text.slice(0, Math.max(0, text.lastIndexOf('\n'))) : text,
+        text: truncated && lastNewline >= 0 ? text.slice(0, lastNewline) : text,
         truncated,
       };
       if (cache) {

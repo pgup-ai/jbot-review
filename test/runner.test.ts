@@ -1630,7 +1630,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
         line: 1,
         title: 'Unverified concern',
         body: 'Claim',
-        severity: 'P3',
+        severity: 'P1',
         verificationUncertain: true,
       },
       {
@@ -1642,6 +1642,14 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
         verificationUncertain: true,
       },
       { path: 'c.ts', line: 1, title: 'Minor bug', body: 'Evidence', severity: 'P3' },
+      {
+        path: 'd.ts',
+        line: 1,
+        title: 'Needs a caller check',
+        body: 'Hypothesis',
+        severity: 'P2',
+        kind: 'investigate',
+      },
     ],
     [],
     'model',
@@ -1650,7 +1658,7 @@ it('marks incomplete review bodies without claiming an all-clear result', () => 
   );
   assert.doesNotMatch(uncertain, /Definitely broken/);
   assert.match(uncertain, /\| Total \| P0 \| P1 \| P2 \| P3 \| nit \| Unverified \|/);
-  assert.match(uncertain, /\| 3 \| 0 \| 0 \| 0 \| 1 \| 0 \| 2 \|/);
+  assert.match(uncertain, /\| 4 \| 0 \| 0 \| 0 \| 1 \| 0 \| 3 \|/);
   assert.match(uncertain, /Unverified concerns remain/);
   assert.doesNotMatch(uncertain, /Mergeable with non-blocking comments/);
 });

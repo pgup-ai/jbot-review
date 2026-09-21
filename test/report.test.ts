@@ -8,6 +8,7 @@ import {
   isMainReviewLabel,
   PARTIAL_COVERAGE_REASON,
   renderOrphanedSection,
+  reviewCoverageSessions,
   condenseSummary,
   formatSummaryMarkdown,
 } from '../src/shared/report.ts';
@@ -344,7 +345,8 @@ test('formatSummaryMarkdown preserves existing links, bare URLs, and code spans'
 });
 
 test('incomplete-coverage notice groups page failures without hiding missing passes', () => {
-  const notice = formatIncompleteCoverage([
+  const sessions = reviewCoverageSessions([
+    { label: 'changes-since-last-review', reason: 'failed' },
     ...Array.from({ length: 15 }, (_, index) => ({
       label: `review-interactions-page-${index + 1}`,
       reason: 'failed',
@@ -359,6 +361,12 @@ test('incomplete-coverage notice groups page failures without hiding missing pas
     { label: 'review-shard-2', reason: PARTIAL_COVERAGE_REASON },
     { label: 'review-shard-3-retry', reason: PARTIAL_COVERAGE_REASON },
   ]);
+  const notice = formatIncompleteCoverage(sessions);
+  assert.ok(sessions.every(({ label }) => label !== 'changes-since-last-review'));
+  assert.deepEqual(
+    reviewCoverageSessions([{ label: 'changes-since-last-review', reason: 'failed' }]),
+    [],
+  );
   assert.match(
     notice,
     /Review interactions:\*\* cut off 300s after the main review; 15 pages incomplete/,
