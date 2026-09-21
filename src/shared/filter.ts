@@ -275,22 +275,27 @@ function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
   const confirmed = verdict.finding;
   if (
     !confirmed ||
-    confirmed.path !== finding.path ||
-    confirmed.line !== finding.line ||
     !confirmed.kind ||
     confirmed.kind === 'investigate' ||
-    !confirmed.confidence ||
-    confirmed.confidence === 'low' ||
     !confirmed.title.trim() ||
-    !confirmed.body.trim() ||
     !confirmed.evidence?.trim() ||
     !verdict.reason?.trim()
   )
     return unverifiedFinding(
       finding,
-      'The verifier returned confirmed without a complete, evidence-backed finding at the candidate location.',
+      'The verifier returned confirmed without an evidence-backed finding and explanation.',
     );
-  return { ...confirmed, id: finding.id };
+  return {
+    ...finding,
+    title: confirmed.title,
+    severity: confirmed.severity,
+    kind: confirmed.kind,
+    evidence: confirmed.evidence,
+    body: verdict.reason,
+    confidence: 'medium',
+    verificationUncertain: undefined,
+    verificationUnavailable: undefined,
+  };
 }
 
 function unverifiedFinding(finding: Finding, reason?: string, unavailable = false): Finding {

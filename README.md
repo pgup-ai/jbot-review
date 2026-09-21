@@ -1016,8 +1016,9 @@ run logs and local output; the PR receives only a count and a verification-limit
 notice. They still prevent automatic approval and an all-clear result. This rule
 adds no model pass, repository scan or configuration flag. Concrete investigation
 candidates still enter the existing verification batches. Confirmation promotes
-one only when the verifier supplies a complete finding at the same location with
-an evidence quote present in the supplied source. Uncertainty and provider/budget
+one only when the verifier supplies a factual title, classification, severity,
+trigger/impact explanation and an evidence quote present in the supplied source.
+Code preserves the candidate location. Uncertainty and provider/budget
 failures remain withheld, with different diagnostic labels.
 
 The dogfood workflow uploads `unverified-findings.json` alongside telemetry. Its

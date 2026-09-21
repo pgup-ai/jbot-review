@@ -112,6 +112,6 @@ export interface FindingVerdict {
   index: number;
   verdict: VerificationVerdict;
   reason?: string;
-  finding?: Finding;
+  finding?: Pick<Finding, 'title' | 'severity' | 'kind' | 'evidence'>;
   unavailable?: boolean;
 }

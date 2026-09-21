@@ -1498,13 +1498,14 @@ const VERIFICATION_CLAIM_CHECK = `- Compare the finding's claimed identifiers, o
 - To confirm, give a concrete input or state, quote the decisive source expression
   verbatim, and explain the incorrect result. A request to check whether a premise
   holds is not confirmation.
-- When confirming an investigation or low-confidence candidate, include a complete
-  "finding" object: path and line unchanged, a factual title and body explaining
-  the demonstrated trigger and impact, reassessed severity, a non-investigate
-  kind, medium or high confidence, and a verbatim "evidence" quote from the supplied
-  source. Without this object the candidate stays unresolved. Do not turn the
-  candidate into a different issue. Ordinary findings need only the verdict.
-  Example: {"path":"src/billing/invoice.ts","line":42,"severity":"P2","kind":"bug","confidence":"high","title":"Refund uses the pre-tax amount","body":"A taxed checkout reaches refund(), which subtracts the pre-tax amount and under-refunds the customer.","evidence":"return invoice.subtotal;"}`;
+- To confirm an investigation or low-confidence candidate, add "finding" with only
+  a factual title, reassessed severity, non-investigate kind, and a verbatim
+  evidence quote from the supplied source. The existing "reason" becomes its
+  published body: explain the demonstrated trigger and impact there, without
+  repeating it in another field. Code preserves the original path and line.
+  Example: "finding": {"title":"Refund uses the pre-tax amount","severity":"P2","kind":"bug","evidence":"return invoice.subtotal;"}.
+  Without these fields the candidate stays unresolved. Do not substitute a
+  different issue. Ordinary findings need only the verdict and reason.`;
 
 export const FINDING_VERIFICATION_PROMPT = `You are a skeptical staff engineer double-checking proposed code-review
 findings before they are posted to a pull request. Your default position is

@@ -313,13 +313,15 @@ describe('applyFindingVerdicts', () => {
       kind: 'bug' as const,
       confidence: 'high' as const,
       severity: 'P1' as const,
+      path: 'cannot-relocate.ts',
+      line: 999,
       body: 'A demonstrated trigger loses jobs.',
       evidence: 'return jobs.slice(0, 100);',
     };
     for (const replacement of [
       confirmed,
       undefined,
-      { ...confirmed, path: 'elsewhere.ts' },
+      { ...confirmed, kind: 'investigate' as const },
       { ...confirmed, evidence: '' },
     ]) {
       const verdicts = [
@@ -344,7 +346,9 @@ describe('applyFindingVerdicts', () => {
         assert.equal(routed.inline.length, promoted ? 1 : 0);
         if (promoted) {
           assert.equal(result.findings[0].severity, 'P1');
-          assert.equal(result.findings[0].body, confirmed.body);
+          assert.equal(result.findings[0].body, verdicts[0].reason);
+          assert.equal(result.findings[0].path, candidate.path);
+          assert.equal(result.findings[0].line, candidate.line);
           assert.equal(result.findings[0].id, candidate.id);
         }
       }

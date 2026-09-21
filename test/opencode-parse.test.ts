@@ -265,7 +265,12 @@ describe('parseFindingVerdicts', () => {
       1,
       noLog,
     );
-    assert.deepEqual(promoted?.[0].finding, correction);
+    assert.deepEqual(promoted?.[0].finding, {
+      title: correction.title,
+      severity: correction.severity,
+      kind: correction.kind,
+      evidence: correction.evidence,
+    });
     assert.equal(promoted?.[0].unavailable, undefined);
     const verdicts = parseFindingVerdicts(raw, 3, noLog);
 
