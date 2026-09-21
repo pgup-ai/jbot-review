@@ -1015,6 +1015,8 @@ from inline, file-level and review-body findings. Their full details remain in
 run logs and local output; the PR receives only a count and a verification-limit
 notice. They still prevent automatic approval and an all-clear result. This rule
 adds no model call, repository scan or configuration flag.
+See the [publication-policy audit](docs/audits/2026-09-20-publication-policy.md)
+for routing replays, live comparisons and the remaining precision limits.
 
 Local comparisons require the usual provider credential and configured model.
 Keep the revision, model, backend and other review settings fixed:
