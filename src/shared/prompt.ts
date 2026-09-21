@@ -457,9 +457,11 @@ const EMBEDDED_ONLY_LENS_EXPLORATION_POLICY = `## Repository exploration policy
 No repository reads are available in this pass. Review every changed hunk in
 the embedded diff and the changed-symbol usage block, and establish expected
 behavior from PR intent and the retained guidelines. When a lens question
-depends on code outside the embedded evidence, do not turn that missing context
-into a finding. Report a problem only when inspected evidence establishes its
-trigger and impact. A request to check an unseen caller or import is not a finding.
+depends on code outside the embedded evidence, retain an internal "investigate"
+candidate only if you can quote a suspicious change, describe a plausible trigger
+and impact, and name the specific missing fact. Include up to two known path:line
+citations for verification; never invent locations. Missing context alone and
+generic requests to check imports or callers are not candidates.
 Where these instructions or the lens below say to read, follow, grep, or inspect code,
 apply that to the embedded evidence only. Do not describe reads or commands you
 did not run, and do not report a violation merely because you did not execute a
@@ -602,9 +604,12 @@ Use no tools for this review: do not read files, search the repository, or run
 git or shell commands. Use only the evidence embedded below. Where later
 instructions mention exploring the repo, running the git diff command, or
 grepping for callers, those checks have NOT been performed unless their results
-are included. Report only problems whose trigger and impact are supported by
-supplied code. Do not emit requests to check unseen callers, imports, defaults
-or guards: missing context does not prove missing behavior. When verifying an existing finding,
+are included. A concrete suspicious change with plausible impact and one specific
+unanswered premise may be retained as an internal "investigate" candidate. Quote
+the change, state the possible trigger and missing fact, and cite up to two known
+path:line locations for verification. Do not invent locations or emit generic
+requests to check callers or imports. Missing context does not prove missing
+behavior. When verifying an existing finding,
 return "uncertain" instead of guessing. Respond with the
 required JSON computed directly from the embedded context.`;
 
@@ -1492,7 +1497,14 @@ const VERIFICATION_CLAIM_CHECK = `- Compare the finding's claimed identifiers, o
   descriptions; do not repair them into a different bug.
 - To confirm, give a concrete input or state, quote the decisive source expression
   verbatim, and explain the incorrect result. A request to check whether a premise
-  holds is not confirmation.`;
+  holds is not confirmation.
+- When confirming an investigation or low-confidence candidate, include a complete
+  "finding" object: path and line unchanged, a factual title and body explaining
+  the demonstrated trigger and impact, reassessed severity, a non-investigate
+  kind, medium or high confidence, and a verbatim "evidence" quote from the supplied
+  source. Without this object the candidate stays unresolved. Do not turn the
+  candidate into a different issue. Ordinary findings need only the verdict.
+  Example: {"path":"src/billing/invoice.ts","line":42,"severity":"P2","kind":"bug","confidence":"high","title":"Refund uses the pre-tax amount","body":"A taxed checkout reaches refund(), which subtracts the pre-tax amount and under-refunds the customer.","evidence":"return invoice.subtotal;"}`;
 
 export const FINDING_VERIFICATION_PROMPT = `You are a skeptical staff engineer double-checking proposed code-review
 findings before they are posted to a pull request. Your default position is
@@ -1630,6 +1642,8 @@ export interface VerifiableFinding {
   body: string;
   /** F12: the verbatim line the finding hangs on, when the model quoted one. */
   evidence?: string;
+  kind?: Finding['kind'];
+  confidence?: Finding['confidence'];
 }
 
 export interface FindingSource {
@@ -1711,6 +1725,8 @@ export function formatFindingsForVerification(findings: VerifiableFinding[]): st
         `### Finding ${index}`,
         `Location: ${location}`,
         `Severity: ${finding.severity}`,
+        ...(finding.kind ? [`Kind: ${finding.kind}`] : []),
+        ...(finding.confidence ? [`Confidence: ${finding.confidence}`] : []),
         `Title: ${finding.title}`,
         `Claim: ${finding.body}`,
         // The finding's load-bearing premise: no such line in the diff → the
@@ -1865,10 +1881,14 @@ export function boundedPromptContext(value: string, maxBytes: number, label: str
   return truncateUtf8WithNotice(value, Math.max(0, maxBytes - noticeBytes), label, bytes);
 }
 
-export function formatUnverifiedFinding(finding: Pick<Finding, 'title' | 'body'>, reason?: string) {
+export function formatUnverifiedFinding(
+  finding: Pick<Finding, 'title' | 'body'>,
+  reason?: string,
+  unavailable = false,
+) {
   return {
     title: `Unverified concern: ${finding.title}`,
-    body: `**Not confirmed by verification.** ${reason || 'The available evidence did not establish or refute this concern.'}\n\nOriginal reviewer hypothesis (unverified):\n\n${finding.body
+    body: `**${unavailable ? 'Verification not completed' : 'Verification inconclusive'}.** ${reason || 'The available evidence did not establish or refute this concern.'}\n\nOriginal reviewer hypothesis (unverified):\n\n${finding.body
       .split('\n')
       .map((line) => `> ${line}`)
       .join('\n')}`,

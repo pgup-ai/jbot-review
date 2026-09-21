@@ -212,9 +212,14 @@ describe('buildBody', () => {
       undefined,
       undefined,
       [],
-      { auxiliaryBaselines: [baseline] },
+      {
+        auxiliaryBaselines: [baseline],
+        diagnosticsUrl: 'https://github.com/owner/repo/actions/runs/123#artifacts',
+      },
     );
     assert.match(body, /1 candidate withheld from PR comments/);
+    assert.ok(body.includes('https://github.com/owner/repo/actions/runs/123#artifacts'));
+    assert.match(body, /unverified-findings.json/);
     assert.doesNotMatch(
       body,
       /Caller may be missing|The caller was not supplied|Long hypothesis|Speculative summary must stay private|<!-- jbot-review:finding -->/,
@@ -1705,10 +1710,11 @@ it('sizes verifier batches before optional evidence and rejects only oversized r
     assert.deepEqual(invoked.flat(), targets.slice(0, 6));
     assert.deepEqual(prepared, invoked);
     assert.deepEqual(
-      verdicts.map((v) => v.index),
+      verdicts.filter((v) => !v.unavailable).map((v) => v.index),
       [0, 1, 2, 3, 4, 5],
     );
     assert.deepEqual(coverage, ['failed']);
+    assert.equal(verdicts.find((v) => v.index === 6)?.unavailable, true);
     assert.equal(
       logs.some((message) => /Optional verification evidence omitted/.test(message)),
       evidenceBytes === 100000,
@@ -1749,7 +1755,7 @@ it('verifies every batch and preserves successful verdicts when another batch fa
     });
     assert.deepEqual(sizes, [10, 10, 3]);
     assert.deepEqual(
-      verdicts.map((v) => v.index),
+      verdicts.filter((v) => !v.unavailable).map((v) => v.index),
       findings
         .map((_, i) => i)
         .slice(firstBatch === 'failed' ? 10 : firstBatch === 'partial' ? 9 : 0),
@@ -1767,5 +1773,44 @@ it('verifies every batch and preserves successful verdicts when another batch fa
         .map((f) => f.line),
     );
     assert.ok(retained.every((f) => f.verificationUncertain && f.confidence === 'low'));
+    assert.ok(retained.every((f) => f.verificationUnavailable));
+  }
+});
+
+it('rejects invented confirmation quotes without another verification call', async () => {
+  const candidate: Finding = {
+    path: 'batch.ts',
+    line: 1,
+    severity: 'P3',
+    kind: 'investigate',
+    confidence: 'low',
+    title: 'Possible loss',
+    body: 'Does the caller pass more than 100 jobs?',
+  };
+  for (const evidence of ['return jobs.slice(0, 100);', 'invented source']) {
+    let calls = 0;
+    const verdicts = await requestFindingVerdicts({
+      workspace: '/unused',
+      model: 'test/model',
+      prContext: 'invented source',
+      targets: [candidate],
+      log: () => {},
+      sourceContext: async () => '1: return jobs.slice(0, 100);',
+      backend: {
+        async runFindingVerification() {
+          calls++;
+          return [
+            {
+              index: 0,
+              verdict: 'confirmed',
+              reason: '201 jobs become 100.',
+              finding: { ...candidate, kind: 'bug', confidence: 'high', severity: 'P1', evidence },
+            },
+          ];
+        },
+      },
+    });
+    assert.equal(calls, 1);
+    assert.equal(verdicts[0].verdict, evidence === 'invented source' ? 'uncertain' : 'confirmed');
   }
 });

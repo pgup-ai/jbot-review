@@ -40,6 +40,7 @@ import {
 
 import {
   applyFindingVerdicts,
+  checkConfirmationEvidence,
   filterFindings,
   anchorFindings,
   dedupeFindings,
@@ -309,6 +310,7 @@ import {
   isMainReviewLabel,
   PARTIAL_COVERAGE_REASON,
   formatSummaryMarkdown,
+  candidateDiagnostics,
   ORPHANED_FINDINGS_HEADING,
   ADVISORY_FINDINGS_HEADING,
   reviewCoverageSessions,
@@ -3159,6 +3161,23 @@ async function runReviewPipeline(params: {
       !!headSha,
     );
     if (withheld.length > 0) log(`Unpublished review candidates: ${JSON.stringify(withheld)}`);
+    let diagnosticsUrl: string | undefined;
+    try {
+      const dir = telemetryDirectory ?? join(workspace, '.jbot-review');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, 'unverified-findings.json'),
+        JSON.stringify(candidateDiagnostics(headSha, withheld), null, 2) + '\n',
+        { mode: 0o600 },
+      );
+      if (
+        /^[1-9]\d*$/.test(process.env.GITHUB_RUN_ID ?? '') &&
+        process.env.GITHUB_REPOSITORY === `${owner}/${repo}`
+      )
+        diagnosticsUrl = `${process.env.GITHUB_SERVER_URL ?? 'https://github.com'}/${owner}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}#artifacts`;
+    } catch (error) {
+      log(`Candidate artifact unavailable; details remain in logs: ${String(error)}`);
+    }
     // Re-anchoring runs before dedupe/verify/filter, so some of it did not
     // survive; telemetry's rescued set must stay a subset of what was posted.
     const reanchoredIds = new Set(reanchored.map((f) => f.id));
@@ -3210,7 +3229,7 @@ async function runReviewPipeline(params: {
         engineByModel,
         mainReasoningEffort,
         incompleteSessions,
-        { auxiliaryBaselines },
+        { auxiliaryBaselines, diagnosticsUrl },
       );
       log(
         `Dry run enabled; would post verdict=${verdict} inline=${inline.length} file-level=${fileLevel.length} orphaned=${orphaned.length}`,
@@ -3259,7 +3278,7 @@ async function runReviewPipeline(params: {
         engineByModel,
         mainReasoningEffort,
         incompleteSessions,
-        { auxiliaryBaselines },
+        { auxiliaryBaselines, diagnosticsUrl },
       );
     const postCurrentReviewIfNeeded = async (): Promise<void> => {
       if (!shouldPostComment) {
@@ -3920,8 +3939,9 @@ export async function requestFindingVerdicts(params: {
     let targets = params.targets.slice(offset, offset + size);
     try {
       let context: string;
+      let sourceContext: string;
       for (;;) {
-        const sourceContext = await (params.sourceContext?.(targets) ??
+        sourceContext = await (params.sourceContext?.(targets) ??
           buildFindingSourceContext(params.workspace, targets));
         context = [params.contextForTargets?.(targets) ?? params.prContext, sourceContext]
           .filter(Boolean)
@@ -3981,11 +4001,23 @@ export async function requestFindingVerdicts(params: {
         params.modelOptions,
       );
       if (!batch) throw new Error('Finding verification output unusable.');
-      verdicts.push(...batch.map((verdict) => ({ ...verdict, index: verdict.index + offset })));
+      verdicts.push(
+        ...batch.map((verdict) => ({
+          ...checkConfirmationEvidence(verdict, sourceContext),
+          index: verdict.index + offset,
+        })),
+      );
       if (batch.length < targets.length)
         failure ??= new Error('Finding verification returned incomplete verdicts.');
     } catch (error) {
       failure ??= error instanceof Error ? error : new Error(String(error));
+      for (let index = offset; index < offset + size; index++)
+        verdicts.push({
+          index,
+          verdict: 'uncertain',
+          unavailable: true,
+          reason: `Verification did not complete: ${error instanceof Error ? error.message : String(error)}`,
+        });
       params.log(
         `(finding verification batch failed; keeping its findings unverified: ${error instanceof Error ? error.message : String(error)})`,
       );
@@ -4929,7 +4961,7 @@ export function buildBody(
   engineByModel?: Record<string, string>,
   reasoningEffort?: string,
   incompleteSessions: readonly IncompleteSession[] = [],
-  experiment?: { auxiliaryBaselines: AuxiliaryBaseline[] },
+  experiment?: { auxiliaryBaselines: AuxiliaryBaseline[]; diagnosticsUrl?: string },
 ): string {
   const total = all.length;
   const lines = ['## J-Bot Code Review', ''];
@@ -4974,7 +5006,7 @@ export function buildBody(
   const unpublishedCount = all.filter(isUnresolvedFinding).length;
   if (unpublishedCount > 0)
     lines.push(
-      `**Verification limits:** ${unpublishedCount} candidate${unpublishedCount === 1 ? '' : 's'} withheld from PR comments. Details are retained in the run logs.`,
+      `**Verification limits:** ${unpublishedCount} candidate${unpublishedCount === 1 ? '' : 's'} withheld from PR comments. ${experiment?.diagnosticsUrl ? `[Inspect candidates and verification outcomes](${experiment.diagnosticsUrl}) in the run artifacts (\`unverified-findings.json\`).` : 'Details are retained in the run logs and unverified-findings.json.'}`,
       '',
     );
   lines.push(...renderReviewMetadataBlock(model, tokenUsage, reasoningEffort));

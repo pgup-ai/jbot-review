@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   ORPHANED_FINDINGS_HEADING,
+  candidateDiagnostics,
   describeIncompleteReason,
   formatIncompleteCoverage,
   isMainReviewLabel,
@@ -28,6 +29,20 @@ function f(overrides: Partial<Finding> = {}): Finding {
 }
 
 test('renderOrphanedSection heads with the marker the prior-comment filter keys on', () => {
+  const candidates = [
+    f({ kind: 'investigate' }),
+    f({ verificationUncertain: true }),
+    f({ verificationUncertain: true, verificationUnavailable: true }),
+  ];
+  const diagnostics = candidateDiagnostics('a'.repeat(40), [f(), ...candidates]);
+  assert.equal(diagnostics.headSha, 'a'.repeat(40));
+  assert.deepEqual(
+    diagnostics.candidates.map((c) => c.status),
+    ['not-verified', 'inconclusive', 'not-completed'],
+  );
+  assert.equal(diagnostics.candidates.length, 3);
+  assert.equal(diagnostics.candidates[0].body, candidates[0].body);
+
   // The flat prior-comments block excludes jbot review bodies EXCEPT the ones
   // carrying this section — inline findings live on as threads, but
   // outside-the-diff findings exist only in the review body, and dropping
@@ -35,6 +50,7 @@ test('renderOrphanedSection heads with the marker the prior-comment filter keys 
   assert.equal(
     renderOrphanedSection([{ path: 'a.ts', line: 0, severity: 'P2', title: 't', body: 'b' }])[0],
     ORPHANED_FINDINGS_HEADING,
+    candidateDiagnostics,
   );
 });
 

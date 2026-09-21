@@ -455,3 +455,18 @@ function countBySeverity(findings: Pick<Finding, 'severity'>[]): Record<Severity
   }
   return counts;
 }
+
+export function candidateDiagnostics(headSha: string | undefined, findings: Finding[]) {
+  return {
+    schemaVersion: 1,
+    headSha,
+    candidates: findings.filter(isUnresolvedFinding).map((finding) => ({
+      status: finding.verificationUnavailable
+        ? 'not-completed'
+        : finding.verificationUncertain
+          ? 'inconclusive'
+          : 'not-verified',
+      ...finding,
+    })),
+  };
+}

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import {
   aggregateArenaUsage,
+  buildArenaReview,
   arenaArtifactName,
   classifyJbotArenaFailure,
   emptyArenaUsage,
@@ -303,6 +304,25 @@ describe('arena telemetry aggregation', () => {
 describe('J-Bot arena output', () => {
   it('validates status-specific review/failure invariants', () => {
     assert.deepEqual(validateJbotArenaOutput(completedOutput()), completedOutput());
+    const candidate = {
+      path: 'a.ts',
+      line: 1,
+      severity: 'P3' as const,
+      kind: 'investigate' as const,
+      title: 'Unproven claim',
+      body: 'Sensitive hypothesis details',
+    };
+    const output = buildArenaReview({ summary: 'Speculative summary', findings: [candidate] });
+    assert.deepEqual(output.findings, []);
+    assert.match(output.summary, /1 unresolved candidate/);
+    assert.doesNotMatch(
+      JSON.stringify(output),
+      /Unproven claim|Sensitive hypothesis|Speculative summary/,
+    );
+    assert.deepEqual(buildArenaReview({ summary: 'Clean', findings: [] }), {
+      summary: 'Clean',
+      findings: [],
+    });
     assert.throws(
       () => validateJbotArenaOutput({ ...completedOutput(), status: 'skipped' }),
       /Skipped arena output/,

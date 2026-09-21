@@ -1014,7 +1014,18 @@ Every preset withholds uncertain, investigation-only and low-confidence candidat
 from inline, file-level and review-body findings. Their full details remain in
 run logs and local output; the PR receives only a count and a verification-limit
 notice. They still prevent automatic approval and an all-clear result. This rule
-adds no model call, repository scan or configuration flag.
+adds no model pass, repository scan or configuration flag. Concrete investigation
+candidates still enter the existing verification batches. Confirmation promotes
+one only when the verifier supplies a complete finding at the same location with
+an evidence quote present in the supplied source. Uncertainty and provider/budget
+failures remain withheld, with different diagnostic labels.
+
+The dogfood workflow uploads `unverified-findings.json` alongside telemetry. Its
+head-pinned candidates distinguish `inconclusive`, `not-completed`, and
+`not-verified`; the PR notice links to the run artifacts. Other deployments retain
+the same file beside telemetry and log the candidates. Source evidence uses the
+existing two cited locations per candidate, 20-location batch cap, 16 KiB excerpt
+budget and 1.5-second read deadline. No second verification round is added.
 See the [publication-policy audit](docs/audits/2026-09-20-publication-policy.md)
 for routing replays, live comparisons and the remaining precision limits.
 

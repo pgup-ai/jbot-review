@@ -241,26 +241,67 @@ export function mergeVerdictsByLocation(
     const verdict = verdictByIdentity.get(identity) ?? {
       verdict: 'uncertain',
       reason: 'Finding verification did not return a verdict.',
+      unavailable: true,
     };
-    if (verdict.verdict === 'confirmed') return [finding];
+    if (verdict.verdict === 'confirmed') return [confirmedFinding(finding, verdict)];
     if (verdict.verdict === 'refuted') {
       dropped.push({ finding, reason: verdict.reason });
       return [];
     }
     demoted.push({ finding, reason: verdict.reason });
-    return [unverifiedFinding(finding, verdict.reason)];
+    return [unverifiedFinding(finding, verdict.reason, verdict.unavailable)];
   });
   return { findings: result, dropped, demoted, lateUnverified };
 }
 
-function unverifiedFinding(finding: Finding, reason?: string): Finding {
+export function checkConfirmationEvidence(
+  verdict: FindingVerdict,
+  sourceContext: string,
+): FindingVerdict {
+  if (
+    !verdict.finding ||
+    (verdict.finding.evidence && sourceContext.includes(verdict.finding.evidence))
+  )
+    return verdict;
+  return {
+    index: verdict.index,
+    verdict: 'uncertain',
+    reason: 'The proposed confirmation did not quote evidence present in the supplied source.',
+  };
+}
+
+function confirmedFinding(finding: Finding, verdict: FindingVerdict): Finding {
+  if (!isUnresolvedFinding(finding)) return finding;
+  const confirmed = verdict.finding;
+  if (
+    !confirmed ||
+    confirmed.path !== finding.path ||
+    confirmed.line !== finding.line ||
+    !confirmed.kind ||
+    confirmed.kind === 'investigate' ||
+    !confirmed.confidence ||
+    confirmed.confidence === 'low' ||
+    !confirmed.title.trim() ||
+    !confirmed.body.trim() ||
+    !confirmed.evidence?.trim() ||
+    !verdict.reason?.trim()
+  )
+    return unverifiedFinding(
+      finding,
+      'The verifier returned confirmed without a complete, evidence-backed finding at the candidate location.',
+    );
+  return { ...confirmed, id: finding.id };
+}
+
+function unverifiedFinding(finding: Finding, reason?: string, unavailable = false): Finding {
   return {
     ...finding,
-    ...formatUnverifiedFinding(finding, reason),
+    ...formatUnverifiedFinding(finding, reason, unavailable),
     severity: finding.severity === 'nit' ? 'nit' : 'P3',
     kind: 'investigate',
     confidence: 'low',
     verificationUncertain: true,
+    verificationUnavailable: unavailable || undefined,
   };
 }
 
@@ -272,20 +313,25 @@ export function applyFindingVerdicts(
 ): VerdictApplication {
   const verdictByPosition = new Map(verdicts.map((verdict) => [verdict.index, verdict]));
   const dropped: VerdictApplication['dropped'] = [];
-  const demotedByIndex = new Map<number, string | undefined>();
+  const demotedByIndex = new Map<number, Pick<FindingVerdict, 'reason' | 'unavailable'>>();
+  const confirmedByIndex = new Map<number, Finding>();
   const droppedIndexes = new Set<number>();
 
   selectedIndexes.forEach((findingIndex, position) => {
     const verdict = verdictByPosition.get(position) ?? {
       verdict: 'uncertain',
       reason: 'Finding verification did not return a verdict.',
+      unavailable: true,
     };
-    if (verdict.verdict === 'confirmed') return;
+    if (verdict.verdict === 'confirmed') {
+      confirmedByIndex.set(findingIndex, confirmedFinding(findings[findingIndex], verdict));
+      return;
+    }
     if (verdict.verdict === 'refuted') {
       droppedIndexes.add(findingIndex);
       dropped.push({ finding: findings[findingIndex], reason: verdict.reason });
     } else {
-      demotedByIndex.set(findingIndex, verdict.reason);
+      demotedByIndex.set(findingIndex, verdict);
     }
   });
 
@@ -293,10 +339,11 @@ export function applyFindingVerdicts(
   const result = findings.flatMap((finding, index) => {
     if (droppedIndexes.has(index)) return [];
     if (demotedByIndex.has(index)) {
-      demoted.push({ finding, reason: demotedByIndex.get(index) });
-      return [unverifiedFinding(finding, demotedByIndex.get(index))];
+      const verdict = demotedByIndex.get(index)!;
+      demoted.push({ finding, reason: verdict.reason });
+      return [unverifiedFinding(finding, verdict.reason, verdict.unavailable)];
     }
-    return [finding];
+    return [confirmedByIndex.get(index) ?? finding];
   });
 
   return { findings: result, dropped, demoted };

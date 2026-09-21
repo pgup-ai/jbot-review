@@ -1,4 +1,5 @@
 import { Octokit as CoreOctokit } from '@octokit/core';
+import { isUnresolvedFinding } from '../shared/filter.ts';
 import { paginateRest } from '@octokit/plugin-paginate-rest';
 import { restEndpointMethods } from '@octokit/plugin-rest-endpoint-methods';
 import type { Octokit } from '../shared/github.ts';
@@ -34,14 +35,17 @@ export function jobUpdateForReview(
   review: ReviewOutcome,
 ): JobUpdate {
   const findingsBySeverity: Partial<Record<Severity, number>> = {};
-  for (const f of review.findings)
+  for (const f of review.findings.filter((finding) => !isUnresolvedFinding(finding)))
     findingsBySeverity[f.severity] = (findingsBySeverity[f.severity] ?? 0) + 1;
   return {
     claimToken,
     status: 'success',
     durationMs,
     findingsBySeverity,
-    coverage: review.incompleteSessions.length > 0 ? 'incomplete' : 'complete',
+    coverage:
+      review.incompleteSessions.length > 0 || review.findings.some(isUnresolvedFinding)
+        ? 'incomplete'
+        : 'complete',
   };
 }
 

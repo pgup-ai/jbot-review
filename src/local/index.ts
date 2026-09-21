@@ -83,6 +83,7 @@ import {
   type LocalPaths,
 } from './args.ts';
 import {
+  buildArenaReview,
   aggregateArenaUsage,
   classifyJbotArenaFailure,
   emptyArenaUsage,
@@ -798,10 +799,7 @@ async function review(
       resolvedModelOptions: arenaRunState?.resolvedModelOptions ?? null,
       reviewMs: reviewDurationMs,
       usage: aggregateArenaUsage(finalizedReview.telemetry),
-      review: {
-        summary: finalizedReview.summary,
-        findings: finalizedReview.findings.map(({ id: _id, ...finding }) => finding),
-      },
+      review: buildArenaReview(finalizedReview),
       failure: null,
     });
   }

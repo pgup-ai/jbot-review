@@ -75,6 +75,9 @@ describe('NO_TOOLS_REVIEW_DIRECTIVE', () => {
       /Use no tools for this review/,
       /do not read files, search the repository, or run\s+git or shell commands/,
       /those checks have NOT been performed unless their results/,
+      /internal "investigate" candidate/,
+      /one specific\s+unanswered premise/,
+      /Do not invent locations/,
     ]) {
       assert.match(NO_TOOLS_REVIEW_DIRECTIVE, rule);
     }

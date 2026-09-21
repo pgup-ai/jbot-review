@@ -51,4 +51,10 @@ test('a terminal update names incomplete coverage so the control plane cannot pa
   assert.equal(partial.status, 'success');
   assert.equal(partial.coverage, 'incomplete');
   assert.deepEqual(partial.findingsBySeverity, {});
+  const unresolved = jobUpdateForReview('fence', 1_000, {
+    findings: [{ ...finding, kind: 'investigate' }],
+    incompleteSessions: [],
+  });
+  assert.deepEqual(unresolved.findingsBySeverity, {});
+  assert.equal(unresolved.coverage, 'incomplete');
 });

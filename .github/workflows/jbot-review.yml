@@ -333,7 +333,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: jbot-review-telemetry-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .jbot-review/telemetry.jsonl
+          path: |
+            .jbot-review/telemetry.jsonl
+            .jbot-review/unverified-findings.json
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 14
       - name: Save shard cache

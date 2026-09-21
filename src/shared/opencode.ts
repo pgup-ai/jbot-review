@@ -669,6 +669,7 @@ export function parseFindingVerdicts(
         index: v.index,
         verdict: v.verdict as FindingVerdict['verdict'],
         reason: typeof v.reason === 'string' ? v.reason : undefined,
+        ...(v.verdict === 'confirmed' && v.finding ? { finding: sanitizeFinding(v.finding) } : {}),
       });
     }
   }
