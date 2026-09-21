@@ -33,11 +33,14 @@ const CLINE_REPAIR_RESPONSE_BUDGET_BYTES = 20_000;
 const CLINE_GUIDELINE_BUDGET_BYTES = 24 * 1024;
 export const CLINE_MAX_ARGV_BYTES = 120 * 1024;
 
-// Model limits from the catalog bundled with pinned Cline 3.0.62 (@cline/llms 0.0.83).
+// Free models use Cline 3.0.62's bundled catalog; paid IDs use its live catalog (2026-09-20).
 export const CLINE_MODEL_LIMITS: Record<string, { contextTokens: number; outputTokens: number }> = {
   'cline-free/deepseek-v4.1-flash': { contextTokens: 1048576, outputTokens: 384000 },
   'cline-free/muse-spark-1.3-contributor': { contextTokens: 1048576, outputTokens: 943718 },
   'cline-free/solar-pro4': { contextTokens: 524288, outputTokens: 131072 },
+  'deepseek/deepseek-v4-flash': { contextTokens: 1048576, outputTokens: 384000 },
+  'deepseek/deepseek-v4.1-flash': { contextTokens: 1048576, outputTokens: 384000 },
+  'meta/muse-spark-1.3-contributor': { contextTokens: 1048576, outputTokens: 943718 },
 };
 
 export const CLINE_PROVIDER_ID = 'cline';

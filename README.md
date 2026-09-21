@@ -511,7 +511,8 @@ bound on text tokens, reserving output and harness headroom (including backend
 tool directives). PR metadata and prior-review context shrink with an omission
 notice when needed to preserve room for the mandatory diff. Known SDK models use
 the installed offline catalog limits; Cline's free Muse, DeepSeek v4.1 Flash and
-Solar Pro 4 use limits from the pinned CLI catalog. Unknown CLI models log an
+Solar Pro 4 use limits from the pinned CLI catalog. Paid Muse Contributor and
+DeepSeek v4/v4.1 Flash use verified live-catalog limits. Unknown CLI models log an
 unknown model limit and use a conservative 128,000-token policy ceiling. This is not an exact
 provider tokenizer or a guarantee about a CLI's hidden prompt. Cline still has
 a final 120 KiB argv check, with 2 KiB reserved for its wrapper. No task contains

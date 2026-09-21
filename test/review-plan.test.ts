@@ -88,6 +88,13 @@ test('uses known free-model capacity for fewer complete pages and ranks auxiliar
     CLINE_MODEL_LIMITS['cline-free/muse-spark-1.3-contributor'],
   );
   const plans = buildShardPlans({ ...base, budget: larger, shards: [files] });
+  for (const limits of Object.values(CLINE_MODEL_LIMITS))
+    assert.ok(
+      plans.every(
+        (plan) =>
+          measureReviewPrompt(renderPrompt(plan.context), reviewPromptBudget('cline', limits)).fits,
+      ),
+    );
   assert.ok(plans.length < small.length);
   for (const plan of plans)
     assert.ok(
