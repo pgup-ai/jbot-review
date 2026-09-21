@@ -486,3 +486,43 @@ test('large auxiliary guidelines preserve every rule and hunk within the assembl
     );
   }
 });
+
+test('auxiliary planning frees guideline space for a long changed line without dropping it', () => {
+  const guidelines = `### a.md\n${'rule '.repeat(4000)}\n\n### b.md\n${'rule '.repeat(4000)}`;
+  const patch = `@@ -0,0 +1 @@\n+${'x'.repeat(30000)}`;
+  const shards = [[{ filename: 'src/long.ts', patch }]];
+  const renderPrompt = (context: string, rules: string) => assembleReviewPrompt(context, rules);
+  assert.throws(
+    () =>
+      buildShardPlans({
+        ...base,
+        shards,
+        evidenceReserveBytes: 8192,
+        renderPrompt: (context) => renderPrompt(context, guidelines),
+      }),
+    /one diff line/,
+  );
+  const options = {
+    ...base,
+    shards,
+    guidelines,
+    guidelineLabels: ['a.md', 'b.md'],
+    renderPrompt,
+    evidenceReserveBytes: 8192,
+  };
+  const plans = buildAuxiliaryPlans(options);
+  assert.equal(plans.length, 2);
+  assert.equal(plans.map((plan) => plan.guidelines).join(''), guidelines);
+  for (const plan of plans) {
+    assert.equal(plan.units![0].file.patch, patch);
+    assert.ok(measureReviewPrompt(renderPrompt(plan.context, plan.guidelines!), budget, 8192).fits);
+  }
+  assert.throws(
+    () =>
+      buildAuxiliaryPlans({
+        ...options,
+        shards: [[{ filename: 'src/long.ts', patch: `@@ -0,0 +1 @@\n+${'x'.repeat(200000)}` }]],
+      }),
+    /one diff line/,
+  );
+});

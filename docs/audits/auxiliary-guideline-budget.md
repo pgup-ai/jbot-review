@@ -70,3 +70,27 @@ limits and omission notices remain in place.
   model runs do not establish broad recall/precision equivalence.
 - The original production runs have not been rerun with this branch. Production
   validation must inspect their new coverage logs after release.
+
+## PR #229 dogfood and review follow-up
+
+[Run 35622739763](https://github.com/pgup-ai/jbot-review/actions/runs/35622739763/job/106409549120)
+reviewed `b0e5517`: all 26 hunks in 8 files were delivered, and main, interactions,
+and compliance completed. Pipeline time was 129.4 seconds, including 122.2 seconds
+for main and 42.0 seconds for the concurrent auxiliary pass. Both finders returned
+zero candidates; verification was skipped and `unverified-findings.json` was empty.
+The bundle was only 25,165 bytes, so this run did not exercise guideline splitting.
+Successful completion did not establish correctness: other reviewers found valid
+scope-matching and auxiliary-planning edge cases.
+
+Follow-up fixes preserve extglob guidance, correctly match supported `?` wildcards,
+apply the existing main-page ownership clamp to auxiliary findings, and retry with
+smaller guideline parts when a long changed line needs more capacity. Moving the
+planner and reinjecting explicitly out-of-scope documents were declined.
+
+A local free Muse Spark run with 98,241 bytes of root guidance and a 30 KB changed
+line completed all four auxiliary pages under concurrency 3, with no incomplete
+sessions. It retained the seeded defect (including duplicate reports); model
+sessions reported $0. All 1,125 tests, typecheck, lint, formatting, and build passed.
+The advisory quality corpus remains unrun. Self-review found no further actionable
+issues; de-slop added no comment blocks and kept one distinct long-line regression
+test, folding scope and ownership assertions into existing cases.

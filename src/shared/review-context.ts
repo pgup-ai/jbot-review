@@ -367,7 +367,7 @@ export function applicableGuidelines(
         !changedFiles.length ||
         !doc.globs?.length ||
         // Unknown glob syntax must not silently remove a repository contract.
-        doc.globs.some((glob) => expandBraces(glob).some((part) => /[{}[\]!?\\]/.test(part))) ||
+        doc.globs.some((glob) => expandBraces(glob).some((part) => /[{}[\]!()|\\]/.test(part))) ||
         doc.globs.some((glob) => changedFiles.some((file) => globMatches(glob, file))),
     ),
   };

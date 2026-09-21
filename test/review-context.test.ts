@@ -909,6 +909,17 @@ describe('formatFinderGuidelines', () => {
         '---\nglobs: "' + '{a,b}'.repeat(25) + '"\n---\nfindme-bomb',
       );
 
+      for (const [name, glob] of [
+        ['extglob', '@(src|test)/**/*.ts'],
+        ['plus', '+(src|test)/**/*.ts'],
+        ['optional', '?(src|test)/**/*.ts'],
+        ['question', 'src/?.ts'],
+      ]) {
+        await writeFile(
+          join(repo, '.cursor', 'rules', `${name}.mdc`),
+          `---\nglobs: "${glob}"\n---\nfindme-${name}`,
+        );
+      }
       const discovered = await discoverGuidelineDocs(repo, ['src/index.ts']);
       const finder = formatFinderGuidelines(discovered, {
         capBytes: 720,
@@ -921,8 +932,13 @@ describe('formatFinderGuidelines', () => {
       const applicable = applicableGuidelines(discovered, ['src/index.ts']);
       const selected = formatGuidelines(applicable);
       assert.doesNotMatch(selected, /findme-python/);
-      for (const rule of ['ts', 'always', 'huge', 'broken', 'bomb'])
+      for (const rule of ['ts', 'always', 'huge', 'broken', 'bomb', 'extglob', 'plus', 'optional'])
         assert.ok(selected.includes(`findme-${rule}`));
+      assert.doesNotMatch(selected, /findme-question/);
+      assert.match(
+        formatGuidelines(applicableGuidelines(discovered, ['src/a.ts'])),
+        /findme-question/,
+      );
       assert.equal(applicableGuidelines(discovered, []).docs.length, discovered.docs.length);
       assert.equal(applicable.referenced, discovered.referenced);
       assert.equal(applicable.budgetExhausted, discovered.budgetExhausted);

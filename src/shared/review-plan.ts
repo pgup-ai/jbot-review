@@ -104,8 +104,9 @@ function diffUnits(file: PrFile): DiffUnit[] {
 function splitUnit(unit: DiffUnit): [DiffUnit, DiffUnit] {
   const lines = unit.file.patch!.split('\n');
   const header = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/.exec(lines[0]);
-  if (!header || lines.length < 3)
-    throw new Error(
+  if (!header) throw new Error(`Incomplete diff delivery: invalid hunk in ${unit.file.filename}.`);
+  if (lines.length < 3)
+    throw new PromptCapacityError(
       `Incomplete diff delivery: one diff line in ${unit.file.filename} exceeds the assembled prompt budget.`,
     );
   const body = lines.slice(1);
@@ -134,7 +135,7 @@ function splitUnit(unit: DiffUnit): [DiffUnit, DiffUnit] {
   }) as [DiffUnit, DiffUnit];
 }
 
-class PromptOverheadError extends Error {}
+class PromptCapacityError extends Error {}
 
 export function buildShardPlans(params: {
   coreContext: string;
@@ -226,7 +227,7 @@ export function buildShardPlans(params: {
     'PR metadata and prior-review context',
   );
   if (!fits([], params.minimumDiffBytes))
-    throw new PromptOverheadError(
+    throw new PromptCapacityError(
       'Incomplete diff delivery: instructions, guidelines and shared context exhaust the assembled prompt budget before any diff can be delivered.',
     );
   const pages: DiffUnit[][] = [];
@@ -286,7 +287,7 @@ export function buildAuxiliaryPlans(
         renderPrompt: (context) => params.renderPrompt(context, guidelines),
       }).map((page) => ({ ...page, guidelines }));
     } catch (error) {
-      if (!(error instanceof PromptOverheadError)) throw error;
+      if (!(error instanceof PromptCapacityError)) throw error;
       // Keep internal section headings attached to their labelled source fragment.
       const boundaries = [...guidelines.matchAll(/\n\n(?=### ([^\n]+)\n)/g)]
         .filter(

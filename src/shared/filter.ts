@@ -25,6 +25,18 @@ export function isNoiseFile(filename: string): boolean {
   return false;
 }
 
+export function clampFindingsToFiles(
+  findings: Finding[],
+  assignedFiles: string[] | undefined,
+  changedFiles: ReadonlySet<string>,
+): Finding[] {
+  if (!assignedFiles) return findings;
+  const assigned = new Set(assignedFiles);
+  return findings.filter(
+    (finding) => assigned.has(finding.path) || !changedFiles.has(finding.path),
+  );
+}
+
 export function isUnresolvedFinding(
   finding: Pick<Finding, 'kind' | 'confidence' | 'verificationUncertain'>,
 ): boolean {

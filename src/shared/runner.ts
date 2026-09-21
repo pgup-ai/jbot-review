@@ -43,6 +43,7 @@ import {
   applyFindingVerdicts,
   checkConfirmationEvidence,
   filterFindings,
+  clampFindingsToFiles,
   anchorFindings,
   dedupeFindings,
   demoteLowConfidenceBlockingFindings,
@@ -3746,6 +3747,7 @@ export function startLensPasses(params: {
           params.log(
             `Auxiliary delivery (${key}): ${JSON.stringify({ pages: plans.length, jointGuidelines: !!jointGuidelines, guidelineParts: new Set(plans.map((plan) => plan.guidelines ?? guidelines)).size, promptBytes: plans.reduce((sum, plan) => sum + (plan.promptBytes ?? 0), 0) })}.`,
           );
+          const changed = new Set(plans.flatMap((plan) => plan.assignedFiles ?? []));
           const results = await Promise.all(
             plans.map(async (plan, page) => {
               try {
@@ -3767,7 +3769,8 @@ export function startLensPasses(params: {
                     contextFirst: params.contextFirst,
                   },
                 );
-                params.onFindings?.(`review-${key}`, result.findings);
+                const findings = clampFindingsToFiles(result.findings, plan.assignedFiles, changed);
+                params.onFindings?.(`review-${key}`, findings);
                 if (plans.length > 1)
                   cover({
                     session: `review-${key}-page-${page + 1}`,
@@ -3775,7 +3778,7 @@ export function startLensPasses(params: {
                     promptBytes: plan.promptBytes,
                     diff: plan.diffCoverage,
                   });
-                return result;
+                return { ...result, findings };
               } catch (error) {
                 params.log(
                   `review-${key}-page-${page + 1} failed: ${truncateForLog(error instanceof Error ? error.message : String(error), 1000)}`,
@@ -4478,10 +4481,7 @@ export async function runShardedReview(params: {
     // Anchoring clamp: findings in another shard's changed file are that
     // shard's to report. Findings outside the changed set (orphaned notes)
     // pass through and dedupe by path:line.
-    const assigned = new Set(plan.assignedFiles);
-    const kept = result.findings.filter(
-      (finding) => assigned.has(finding.path) || !changed.has(finding.path),
-    );
+    const kept = clampFindingsToFiles(result.findings, plan.assignedFiles, changed);
     const clamped = result.findings.length - kept.length;
     if (clamped > 0) {
       log(`${plan.label}: dropped ${clamped} finding(s) anchored outside its assigned files.`);
@@ -4808,6 +4808,7 @@ function startGuidelineComplianceCheck(params: {
     .then(async () => {
       const plans: Array<Pick<ShardPlan, 'context'> & Partial<ShardPlan>> =
         await (params.plans?.() ?? [{ context: params.prContext }]);
+      const changed = new Set(plans.flatMap((plan) => plan.assignedFiles ?? []));
       const results = await Promise.all(
         plans.map(async (plan, page) => {
           try {
@@ -4819,7 +4820,8 @@ function startGuidelineComplianceCheck(params: {
               params.timeoutMs,
               params.onTokenUsage,
             );
-            params.onFindings?.(findings);
+            const kept = clampFindingsToFiles(findings, plan.assignedFiles, changed);
+            params.onFindings?.(kept);
             if (plans.length > 1)
               params.onCoverage?.({
                 session: `${session}-page-${page + 1}`,
@@ -4827,7 +4829,7 @@ function startGuidelineComplianceCheck(params: {
                 promptBytes: plan.promptBytes,
                 diff: plan.diffCoverage,
               });
-            return findings;
+            return kept;
           } catch (error) {
             partial = true;
             params.log(
